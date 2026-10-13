@@ -435,16 +435,35 @@ export function partUnitAncestors(c: PoolClient, tenantId: string, unitId: strin
   return loadUnitAncestors(c, tenantId, unitId);
 }
 
-/** §32 will link requests to a part (`work_requests.campaign_part_id`). That table does not exist until DW-5c lands,
- *  so today every part has none; DW-5c replaces this one function. It is the single seam for both the detail read's
- *  `requests` counts and the `part_has_links` check. */
+/** DW-5c (FRONTEND-BFF-CONTRACT §32.1): requests link to a part through `work_requests.campaign_part_id`. This is the single
+ *  seam for both the detail read's `requests` counts and the `part_has_links` check; DW-5a stubbed it, DW-5c made it real.
+ *  `open`, `delivered` and `declined` are counted per part; a CANCELLED request counts in none of the three (the shape has
+ *  no bucket for it) but still blocks the part's delete (`countRequestsOnPart`). */
 export async function requestCountsByPart(
-  _c: PoolClient, partIds: string[],
+  c: PoolClient, partIds: string[],
 ): Promise<Map<string, { open: number; delivered: number; declined: number }>> {
-  return new Map(partIds.map((id) => [id, { open: 0, delivered: 0, declined: 0 }]));
+  const out = new Map(partIds.map((id) => [id, { open: 0, delivered: 0, declined: 0 }]));
+  if (partIds.length === 0) return out;
+  const { rows } = await c.query<{ campaign_part_id: string; status: "open" | "delivered" | "declined"; n: number }>(
+    `SELECT campaign_part_id, status, count(*)::int AS n
+       FROM work_requests
+      WHERE campaign_part_id = ANY($1::uuid[]) AND deleted_at IS NULL AND status IN ('open', 'delivered', 'declined')
+      GROUP BY campaign_part_id, status`,
+    [partIds],
+  );
+  for (const r of rows) {
+    const bucket = out.get(r.campaign_part_id);
+    if (bucket) bucket[r.status] = r.n;
+  }
+  return out;
 }
-export async function countRequestsOnPart(_c: PoolClient, _partId: string): Promise<number> {
-  return 0;
+/** Every request on the part, whatever its status (cancelled included): any request at all blocks the part's delete. */
+export async function countRequestsOnPart(c: PoolClient, partId: string): Promise<number> {
+  const { rows } = await c.query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM work_requests WHERE campaign_part_id = $1 AND deleted_at IS NULL`,
+    [partId],
+  );
+  return rows[0].n;
 }
 
 /** Department campaigns (SEO, social) pointing at the part. Runs under BOTH module scopes (the caller declares

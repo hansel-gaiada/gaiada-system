@@ -37,6 +37,9 @@ import { scrubText } from "./scrub";
 import { lockChangeRequest } from "./webdev-cr-lock";
 import { notifyBestEffort, resolveClientRecipients } from "./client-notify";
 import { createPmTaskInTx, normalizePmTaskInput } from "../modules/pm/pm.controller";
+// DW-5c (FRONTEND-BFF-CONTRACT §32.6): an engineering request is a change request, so its ask follows the change request
+// through triage-decline, verify and unverify. The hook is called INSIDE each transaction; the notification goes out after commit.
+import { notifyWorkRequestSync, syncWorkRequestFromChangeRequest } from "./work-requests.service";
 import {
   CR_AMENDMENT_COLUMNS, CR_AMENDMENT_JOIN, UUID_RE, assertAmendable, assertAmendmentSigned, defaultAmendTarget,
   insertAmendmentDraft, isDeadContractStatus,
@@ -460,10 +463,13 @@ export class WebdevChangeRequestsController {
         await emitEvent(c, tenantId, "webdev_change_request", id, "webdev.change_request.updated", {
           status: "declined", route: null, kind, actorId: req.principal.userId,
         });
+        // DW-5c §32.6: a request between departments that this change request carries is declined with it.
+        const workRequest = await syncWorkRequestFromChangeRequest(c, id);
         const clientRecipients = await dispositionClientRecipients(c, cr);
         return {
           outcome: "declined" as const, kind,
           recipients: recipientsFor(cr.requested_by, clientRecipients),
+          workRequest,
         };
       }
 
@@ -682,6 +688,7 @@ export class WebdevChangeRequestsController {
       await writeActivity(tenantId, req.principal.userId, "declined", "webdev_change_request", id, {
         kind: result.kind, reason,
       });
+      await notifyWorkRequestSync(req.principal.userId, result.workRequest);
       // Best-effort, AFTER commit: a notify() failure must never roll back a recorded decision
       // (client-notify.ts:63–68).
       await notifyBestEffort(tenantId, req.principal.userId, result.recipients, "webdev.change_request.declined", {
@@ -808,7 +815,9 @@ export class WebdevChangeRequestsController {
         await emitEvent(c, tenantId, "webdev_change_request", id, "webdev.change_request.updated", {
           status: "in_progress", verified: false, reason, actorId: req.principal.userId,
         });
-        return { outcome: "unverified" as const, kind: cr.kind };
+        // DW-5c §32.6: the ask this change request carries is reopened (`open`, `closed_*` cleared).
+        const workRequest = await syncWorkRequestFromChangeRequest(c, id);
+        return { outcome: "unverified" as const, kind: cr.kind, workRequest };
       }
 
       // ---- verify ----
@@ -837,10 +846,13 @@ export class WebdevChangeRequestsController {
         status: "verified", verified: true, verifiedOnVersion: onVersion, kind: cr.kind,
         actorId: req.principal.userId,
       });
+      // DW-5c §32.6: `verified` is the one finished state, so the ask this change request carries is delivered.
+      const workRequest = await syncWorkRequestFromChangeRequest(c, id);
       const clientRecipients = await dispositionClientRecipients(c, cr);
       return {
         outcome: "verified" as const, kind: cr.kind,
         recipients: recipientsFor(cr.requested_by, clientRecipients),
+        workRequest,
       };
     });
 
@@ -863,6 +875,7 @@ export class WebdevChangeRequestsController {
       await writeActivity(tenantId, req.principal.userId, "unverified", "webdev_change_request", id, {
         kind: result.kind, reason,
       });
+      await notifyWorkRequestSync(req.principal.userId, result.workRequest);
       // No client notification, deliberately. Un-verifying is an internal correction; telling a client
       // "your fix is unconfirmed again" before anyone has looked at it converts a bookkeeping fix into
       // an alarm. They are told when it is verified AGAIN, which is the state they care about.
@@ -872,6 +885,7 @@ export class WebdevChangeRequestsController {
     await writeActivity(tenantId, req.principal.userId, "verified", "webdev_change_request", id, {
       kind: result.kind, verifiedOnVersion: onVersion,
     });
+    await notifyWorkRequestSync(req.principal.userId, result.workRequest);
     // Best-effort AFTER commit, same rule as triage: a notify failure must never roll back a recorded
     // verification.
     await notifyBestEffort(tenantId, req.principal.userId, result.recipients, "webdev.change_request.verified", {
