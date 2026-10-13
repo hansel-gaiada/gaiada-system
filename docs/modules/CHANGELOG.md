@@ -11,6 +11,16 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.132.0` - DW-3d2: Your numbers says when a comparison is not real (2026-10-13) - PROTOTYPED
+
+- **What.** The Overview's Your numbers block reads the comparison-honesty signals DW-4m added to the report document (`header.comparison.noFacts`, `header.comparison.precedesFactHistory`, `ReportKpi.previous`). Pure rules in `lib/overviewNumbers.ts`; the block only renders the one note.
+  - A delta shows only when the KPI carries `previous` and a `delta`; a KPI without `previous` (a sealed pre-DW-4m document) shows none, because absent means "not known".
+  - `comparison.noFacts`: no delta, no compared range, and the note "No records in the previous period to compare with."
+  - `comparison.precedesFactHistory`: deltas stay, and the note says "Compared with a period that starts before records began on <date>."
+  - The existing current-period rule stays (partial period note, no deltas). One note, the most important first: current-period partial, then `noFacts`, then comparison `precedesFactHistory`. `YourNumbers.partialHistory` became `note`.
+- **Tests.** vitest for each rule in `overviewNumbers.test.ts` and `yourNumbers.test.tsx`; the workspace-shell e2e asserts the semester's comparison note (the demo carries the new fields).
+- **Pilot only.** No backend, API, Cerbos or migration change.
+
 ### platform-nest `0.124.0` - DW-4g: a department head's Team progress, and proof a head cannot waive (2026-10-13) - PROTOTYPED
 
 Contract: `docs/FRONTEND-BFF-CONTRACT.md` §38. Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.4 and §5.6 (DW-D15).

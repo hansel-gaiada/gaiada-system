@@ -6,14 +6,16 @@ import {
 } from "./overviewNumbers";
 
 const kpi = (metricKey: string, value: number, extra: Partial<ReportKpi> = {}): ReportKpi => ({
-  metricKey, label: metricKey, unit: "count", value, appraisalSafe: true, direction: "up_good", ...extra,
+  metricKey, label: metricKey, unit: "count", value, appraisalSafe: true, direction: "up_good", previous: { value: 0 }, ...extra,
 });
-const doc = (kpis: ReportKpi[], warnings?: ReportDocument["header"]["warnings"]): ReportDocument => ({
+const doc = (
+  kpis: ReportKpi[], warnings?: ReportDocument["header"]["warnings"], comparison: Partial<NonNullable<ReportDocument["header"]["comparison"]>> = {},
+): ReportDocument => ({
   header: {
     tenantId: "co-a", grain: "person", scopeRef: "u-1", scopeName: "Made", periodKind: "month",
     periodStart: "2026-10-01", periodEnd: "2026-10-31", dayCount: 31, periodLabel: "October 2026",
     generatedAt: "2026-10-13T08:00:00Z", sealed: false,
-    comparison: { periodStart: "2026-09-01", periodEnd: "2026-09-30", dayCount: 30 },
+    comparison: { periodStart: "2026-09-01", periodEnd: "2026-09-30", dayCount: 30, ...comparison },
     ...(warnings ? { warnings } : {}),
   },
   kpis,
@@ -142,8 +144,8 @@ describe("buildYourNumbers: the period starts before the facts do", () => {
 
   it("says the numbers cover only part of the period, and from when records begin", () => {
     const m = buildYourNumbers(doc(FULL, { precedesFactHistory: history }));
-    expect(m.partialHistory).toMatch(/cover only part of this period/);
-    expect(m.partialHistory).toContain("1 May 2026");
+    expect(m.note).toMatch(/cover only part of this period/);
+    expect(m.note).toContain("1 May 2026");
   });
 
   it("still shows the values, but no change and no comparison range: the earlier period has no records to compare with", () => {
@@ -154,13 +156,63 @@ describe("buildYourNumbers: the period starts before the facts do", () => {
   });
 
   it("says nothing of the sort when the warning is absent", () => {
-    expect(buildYourNumbers(doc(FULL)).partialHistory).toBeNull();
-    expect(buildYourNumbers(doc(FULL, {})).partialHistory).toBeNull();
+    expect(buildYourNumbers(doc(FULL)).note).toBeNull();
+    expect(buildYourNumbers(doc(FULL, {})).note).toBeNull();
   });
 
   it("deliberately ignores the other warnings: a current period always ends in the future, and the rest are not set for this read", () => {
     const m = buildYourNumbers(doc(FULL, { endsInFuture: true, partialPeriod: true, adHoc: true, spansMembershipChange: true }));
-    expect(m.partialHistory).toBeNull();
+    expect(m.note).toBeNull();
     expect(tile(m, "tasks-done").delta).not.toBeNull();
+  });
+});
+
+describe("buildYourNumbers: comparison honesty (DW-3d2, DW-4m)", () => {
+  const cmpHistory = { firstFactDate: "2026-05-01", affectedDays: 10 };
+  const history = { firstFactDate: "2026-05-01", affectedDays: 120 };
+  const withoutPrevious = (kpis: ReportKpi[]) => kpis.map(({ previous: _p, ...k }) => k as ReportKpi);
+
+  it("shows a delta when the KPI carries previous and a delta", () => {
+    expect(tile(buildYourNumbers(doc(FULL)), "tasks-done").delta).toMatchObject({ change: 3 });
+  });
+
+  it("shows no delta for a KPI without previous (a sealed pre-DW-4m document), and no note", () => {
+    const m = buildYourNumbers(doc(withoutPrevious(FULL)));
+    expect(m.tiles.every((t) => t.delta === null)).toBe(true);
+    expect(m.tiles.map((t) => t.value)).toEqual(["12", "80%", "12.5 h", "9 of 10"]);
+    expect(m.note).toBeNull();
+  });
+
+  it("shows no delta for a ratio whose delta is absent, and keeps the other deltas", () => {
+    const onTime = kpi("delivery.on_time_rate", 0.8, { unit: "percent", numerator: 8, denominator: 10, previous: { value: 0, numerator: 0, denominator: 0 } });
+    const m = buildYourNumbers(doc([FULL[0], onTime]));
+    expect(tile(m, "on-time")).toMatchObject({ value: "80%", delta: null });
+    expect(tile(m, "tasks-done").delta).not.toBeNull();
+  });
+
+  it("noFacts: no KPI shows a delta, the range is not named, and the note says the previous period has no records", () => {
+    const m = buildYourNumbers(doc(FULL, undefined, { noFacts: true, precedesFactHistory: cmpHistory }));
+    expect(m.tiles.every((t) => t.delta === null)).toBe(true);
+    expect(m.comparison).toBeNull();
+    expect(m.note).toBe("No records in the previous period to compare with.");
+  });
+
+  it("comparison precedesFactHistory: deltas stay and the note gives the date", () => {
+    const m = buildYourNumbers(doc(FULL, undefined, { precedesFactHistory: cmpHistory }));
+    expect(m.tiles.every((t) => t.delta !== null)).toBe(true);
+    expect(m.comparison).toMatch(/^vs /);
+    expect(m.note).toBe("Compared with a period that starts before records began on 1 May 2026.");
+  });
+
+  it("the current period's partial warning wins over both comparison notes", () => {
+    const m = buildYourNumbers(doc(FULL, { precedesFactHistory: history }, { noFacts: true, precedesFactHistory: cmpHistory }));
+    expect(m.note).toMatch(/cover only part of this period/);
+    expect(m.tiles.every((t) => t.delta === null)).toBe(true);
+    const p = buildYourNumbers(doc(FULL, { precedesFactHistory: history }, { precedesFactHistory: cmpHistory }));
+    expect(p.note).toMatch(/cover only part of this period/);
+  });
+
+  it("says nothing when the comparison is clean", () => {
+    expect(buildYourNumbers(doc(FULL)).note).toBeNull();
   });
 });

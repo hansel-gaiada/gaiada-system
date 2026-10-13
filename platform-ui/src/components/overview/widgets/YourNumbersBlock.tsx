@@ -23,7 +23,7 @@ export function YourNumbersBlock({ model, reportHref }: { model: YourNumbers; re
         ))}
       </ul>
 
-      {model.partialHistory && <p className="ov-block__note" role="note">{model.partialHistory}</p>}
+      {model.note && <p className="ov-block__note" role="note">{model.note}</p>}
 
       <Link href={reportHref} className="ov-nums__link">Open my report</Link>
     </section>

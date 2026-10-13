@@ -64,8 +64,9 @@ export interface YourNumbers {
   /** "vs 1 Sep – 30 Sep", or null when there is nothing honest to compare with. */
   comparison: string | null;
   tiles: NumberTile[];
-  /** Set when the period starts before the facts do; the block says so in words. */
-  partialHistory: string | null;
+  /** One quiet note, the most important first: the period itself starts before the facts do, else the previous
+   *  period has no records, else the previous period starts before they do. Null when there is nothing to say. */
+  note: string | null;
 }
 
 const fmtCount = (n: number) => n.toLocaleString("en-US");
@@ -94,6 +95,9 @@ const TILES: readonly { key: NumberTile["key"]; label: string; metricKey: string
 ];
 
 function deltaOf(kpi: ReportKpi, shape: Shape): TileDelta | null {
+  // DW-4m: a delta is real only beside the baseline it was measured against. A KPI without `previous` is a
+  // sealed pre-DW-4m document: absent means "not known", never "the baseline is fine".
+  if (kpi.previous === undefined) return null;
   if (kpi.delta === undefined || !Number.isFinite(kpi.delta)) return null;
   const direction = kpi.direction;
   if (shape === "hours") {
@@ -138,18 +142,27 @@ function tileOf(spec: (typeof TILES)[number], kpi: ReportKpi | undefined): Numbe
  *  and say nothing a reader does not know ("so far"). */
 export function buildYourNumbers(doc: ReportDocument): YourNumbers {
   const history = doc.header.warnings?.precedesFactHistory;
+  const comparison = doc.header.comparison;
+  const noBaseline = Boolean(history) || comparison?.noFacts === true;
   const tiles = TILES.map((spec) => {
     const tile = tileOf(spec, doc.kpis.find((k) => k.metricKey === spec.metricKey));
-    // The comparison period ends before this one starts, so it lies wholly before the facts too: its zeros are
-    // missing records, not a quiet period, and a change against them would be a made-up rise.
-    return history ? { ...tile, delta: null } : tile;
+    // The comparison period ends before this one starts, so a current period that begins before the facts has
+    // a comparison wholly before them too: its zeros are missing records, not a quiet period, and a change
+    // against them would be a made-up rise. The same holds when the document says the comparison has no facts.
+    return noBaseline ? { ...tile, delta: null } : tile;
   });
+  let note: string | null = null;
+  if (history) {
+    note = `These numbers cover only part of this period: records begin on ${formatDay(history.firstFactDate)}, so there is no earlier period to compare with.`;
+  } else if (comparison?.noFacts) {
+    note = "No records in the previous period to compare with.";
+  } else if (comparison?.precedesFactHistory) {
+    note = `Compared with a period that starts before records began on ${formatDay(comparison.precedesFactHistory.firstFactDate)}.`;
+  }
   return {
     periodLabel: doc.header.periodLabel,
-    comparison: history ? null : comparisonLabel(doc.header.comparison),
+    comparison: noBaseline ? null : comparisonLabel(comparison),
     tiles,
-    partialHistory: history
-      ? `These numbers cover only part of this period: records begin on ${formatDay(history.firstFactDate)}, so there is no earlier period to compare with.`
-      : null,
+    note,
   };
 }

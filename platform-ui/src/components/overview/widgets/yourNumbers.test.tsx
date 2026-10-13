@@ -15,7 +15,7 @@ const person = meFixture([member()]);
 const getReport = vi.mocked(reports.getReportDocument);
 
 const kpi = (metricKey: string, value: number, extra: Partial<ReportKpi> = {}): ReportKpi => ({
-  metricKey, label: metricKey, unit: "count", value, appraisalSafe: true, direction: "up_good", ...extra,
+  metricKey, label: metricKey, unit: "count", value, appraisalSafe: true, direction: "up_good", previous: { value: 0 }, ...extra,
 });
 const FULL: ReportKpi[] = [
   kpi("delivery.tasks_completed", 12, { delta: 3 }),
@@ -23,12 +23,14 @@ const FULL: ReportKpi[] = [
   kpi("effort.minutes_logged", 750, { unit: "minutes", delta: -90, appraisalSafe: false }),
   kpi("discipline.checkin_compliance", 0.9, { unit: "percent", numerator: 9, denominator: 10, delta: 0.1 }),
 ];
-const doc = (kpis: ReportKpi[], warnings?: ReportDocument["header"]["warnings"]): ReportDocument => ({
+const doc = (
+  kpis: ReportKpi[], warnings?: ReportDocument["header"]["warnings"], comparison: Partial<NonNullable<ReportDocument["header"]["comparison"]>> = {},
+): ReportDocument => ({
   header: {
     tenantId: "co-a", grain: "person", scopeRef: "u-1", scopeName: "Made", periodKind: "month",
     periodStart: "2026-10-01", periodEnd: "2026-10-31", dayCount: 31, periodLabel: "October 2026",
     generatedAt: "2026-10-13T08:00:00Z", sealed: false,
-    comparison: { periodStart: "2026-09-01", periodEnd: "2026-09-30", dayCount: 30 },
+    comparison: { periodStart: "2026-09-01", periodEnd: "2026-09-30", dayCount: 30, ...comparison },
     ...(warnings ? { warnings } : {}),
   },
   kpis, series: [], distributions: [], tables: [], highlights: [], narrative: { source: "deterministic", text: "" },
@@ -113,6 +115,20 @@ describe("Your numbers (the widget)", () => {
     expect(values()).toEqual(["12", "80%", "12.5 h", "9 of 10"]);
     expect(container.querySelectorAll(".rc-delta")).toHaveLength(0);
     expect(screen.queryByText(/ · vs /)).not.toBeInTheDocument();
+  });
+
+  it("says the previous period has no records, with no change shown (DW-3d2)", async () => {
+    getReport.mockResolvedValue(doc(FULL, undefined, { noFacts: true, precedesFactHistory: { firstFactDate: "2026-05-01", affectedDays: 30 } }));
+    const { container } = render(await YourNumbers(props()));
+    expect(screen.getByText("No records in the previous period to compare with.")).toBeInTheDocument();
+    expect(container.querySelectorAll(".rc-delta")).toHaveLength(0);
+  });
+
+  it("keeps the changes and says the previous period starts before records began (DW-3d2)", async () => {
+    getReport.mockResolvedValue(doc(FULL, undefined, { precedesFactHistory: { firstFactDate: "2026-05-01", affectedDays: 10 } }));
+    const { container } = render(await YourNumbers(props()));
+    expect(screen.getByText("Compared with a period that starts before records began on 1 May 2026.")).toBeInTheDocument();
+    expect(container.querySelectorAll(".rc-delta")).toHaveLength(4);
   });
 
   it("throws when the read fails, and the frame's boundary says Unavailable, never 0 or No data", async () => {

@@ -516,6 +516,16 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     else await expect(note).toHaveCount(0);
     await expect(numbers.getByRole("listitem")).toHaveCount(4);
     await expect(numbers.getByText("Unavailable")).toHaveCount(0);
+
+    // DW-3d2: the semester's previous period (Jan - Jun) starts before the demo records do, so in the second half
+    // of 2026 the block says the comparison is partial. The demo carries the DW-4m flags.
+    await press(page.getByRole("group", { name: "Period" }).getByRole("button", { name: "Semester" }));
+    await expect(page).toHaveURL(/\/departments\/dept-1\?period=semester$/);
+    await expect(page.getByRole("group", { name: "Period" }).getByRole("button", { name: "Semester" })).toHaveAttribute("aria-pressed", "true");
+    const compared = page.locator("#main-content").getByText("Compared with a period that starts before records began on 1 May 2026.");
+    const nowUtc = new Date();
+    if (nowUtc.getUTCFullYear() === 2026 && nowUtc.getUTCMonth() >= 6) await expect(compared).toBeVisible();
+    await expect(page.locator("#main-content").getByText("Unavailable")).toHaveCount(0);
   });
 
   // DW-3j: the You band's My activity. Either the 16-week map with Today so far (the demo backend has the series),
