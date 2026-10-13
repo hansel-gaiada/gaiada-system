@@ -1,7 +1,7 @@
 "use client";
 import { useActionState, useState } from "react";
 import { portalSubmitChangeRequest, type PortalActionResult } from "@/lib/portalActions";
-import type { PortalProjectOption } from "@/lib/portal";
+import { wholeAccountValue, type PortalClientChoice, type PortalProjectOption } from "@/lib/portal";
 
 // MI-04 — the client's "ask for something" form (webdev maintenance intake).
 //
@@ -14,10 +14,12 @@ import type { PortalProjectOption } from "@/lib/portal";
 // back to signers-only.
 //
 // ── THE PROJECT SELECTOR (the design doc's "subtle AC") ───────────────────────────────────────────
-// `allowClientWide` is resolved server-side from the caller's OWN portal scope
-// (`PortalProfile.access.wholeClient`), never guessed from the project list. A project-scoped contact
-// gets no "all projects" option and must name one of `projects` — the backend 4xx's a mismatch, but
-// this is the honest UX rather than leaning on that refusal.
+// `wideClients` is resolved server-side from the caller's OWN portal scope, PER CLIENT
+// (`PortalProfile.access.wideClientIds`, PV4-13), never guessed from the project list. A "whole account" option is
+// offered for each client the caller reaches client-wide; for a client where they are limited to some projects there
+// is none, and they must name one of `projects` (a contact client-wide on A and project-scoped on B can ask for A's
+// whole account, or for one of their projects on either). The backend 400's a mismatch, but this is the honest UX
+// rather than leaning on that refusal. The option's value is `client:<id>`, which the action sends as `clientId`.
 const KINDS: Array<{ value: string; label: string }> = [
   { value: "feature", label: "Feature request" },
   { value: "design", label: "Design change" },
@@ -25,10 +27,12 @@ const KINDS: Array<{ value: string; label: string }> = [
   { value: "bug", label: "Something isn't working" },
 ];
 
-export function PortalChangeRequestForm({ allowClientWide, projects }: {
-  allowClientWide: boolean;
+export function PortalChangeRequestForm({ wideClients, projects }: {
+  /** The clients the caller reaches client-wide: each gets a "whole account" option. Empty = project-scoped only. */
+  wideClients: PortalClientChoice[];
   projects: PortalProjectOption[];
 }) {
+  const allowClientWide = wideClients.length > 0;
   const [state, formAction, pending] = useActionState<PortalActionResult | null, FormData>(
     portalSubmitChangeRequest,
     null,
@@ -72,13 +76,18 @@ export function PortalChangeRequestForm({ allowClientWide, projects }: {
           <div className="cp-field">
             <label className="cp-field__label" htmlFor="cr-project">Which project is this for?</label>
             <select
-              id="cr-project" className="cp-select" name="projectId" defaultValue=""
+              id="cr-project" className="cp-select" name="projectId"
+              defaultValue={allowClientWide ? wholeAccountValue(wideClients[0].id) : ""}
               disabled={pending} required={!allowClientWide}
             >
-              {/* Client-wide contacts ONLY: an "all projects" option that submits with no projectId at
-                  all. A project-scoped contact never sees this — they must name one of their own
-                  projects (§5.1's project rule). */}
-              {allowClientWide && <option value="">Your whole account</option>}
+              {/* One option per client the caller reaches CLIENT-WIDE: a request with no project, naming that client.
+                  A client where they are only project-scoped gets none — they must name one of their own projects
+                  (§5.1's project rule). With a single client-wide client the label stays "Your whole account". */}
+              {wideClients.map((c) => (
+                <option key={c.id} value={wholeAccountValue(c.id)}>
+                  {wideClients.length === 1 ? "Your whole account" : `Whole account: ${c.name}`}
+                </option>
+              ))}
               {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>

@@ -3,13 +3,13 @@ import { groupThreads, portalDate, threadTitle, type PortalThread } from "@/lib/
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { PortalStatus } from "./PortalBits";
 
-// PV4-08 — the Conversation list: General pinned on top (only when the server says the caller may use it), then one
-// group per project. Presentational and server-safe: the grouping rule lives in `groupThreads` (lib/portal.ts).
+// PV4-08 — the Conversation list: General pinned on top (only for a client in `generalClientIds`, the server's per-client
+// answer, PV4-13), then one group per project. Presentational and server-safe: the grouping rule lives in `groupThreads` (lib/portal.ts).
 //
 // `unreadCount` is the server's count of the OTHER side's messages newer than the caller's read marker; the badge is
 // a text count ("2 new"), never colour alone.
-export function PortalThreadList({ threads, canUseGeneral }: { threads: PortalThread[]; canUseGeneral: boolean }) {
-  const { general, projects } = groupThreads(threads, canUseGeneral);
+export function PortalThreadList({ threads, generalClientIds }: { threads: PortalThread[]; generalClientIds: readonly string[] }) {
+  const { general, projects } = groupThreads(threads, generalClientIds);
   const multiClient = new Set(threads.map((t) => t.clientId)).size > 1;
   if (general.length === 0 && projects.length === 0) {
     return <EmptyNote>No conversations yet. Start one above and our team will reply here.</EmptyNote>;

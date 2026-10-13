@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError, type Me } from "./platform";
 import { getActivePortalCompany } from "./portal-company";
-import { attachmentProblem, CONVERSATION_BODY_MAX, describeSocialReviewError } from "./portal";
+import { attachmentProblem, CONVERSATION_BODY_MAX, describeSocialReviewError, parseWholeAccount } from "./portal";
 
 // Client-portal WRITE actions: the client signs their gates and contracts, records a payment against
 // their own invoice, updates their own profile, and asks for a change to their company record.
@@ -259,7 +259,11 @@ export async function portalSubmitChangeRequest(_prev: PortalActionResult | null
   const kind = String(formData.get("kind") ?? "");
   const title = String(formData.get("title") ?? "").trim();
   const body = String(formData.get("body") ?? "").trim();
-  const projectId = String(formData.get("projectId") ?? "").trim();
+  // The selector's value is a project id, or `client:<id>` for a "whole account" request on that client (PV4-13: a
+  // client-wide request names its client; the server refuses one on a client where the caller is project-scoped).
+  const selected = String(formData.get("projectId") ?? "").trim();
+  const wholeAccountClientId = parseWholeAccount(selected);
+  const projectId = wholeAccountClientId ? "" : selected;
   // Bug detail (BFF contract §16f). The form only renders these for `kind==='bug'`, so for every
   // other kind they are simply absent from the FormData and resolve to "" -> undefined. No severity:
   // it is not on the intake contract at all — a client cannot rank their own bug (see the migration
@@ -279,6 +283,7 @@ export async function portalSubmitChangeRequest(_prev: PortalActionResult | null
         method: "POST",
         body: JSON.stringify({
           kind, title, body: body || undefined, projectId: projectId || undefined,
+          clientId: wholeAccountClientId ?? undefined,
           reproSteps: reproSteps || undefined,
           environment: environment || undefined,
           seenOnVersion: seenOnVersion || undefined,

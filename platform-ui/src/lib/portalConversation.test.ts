@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  attachmentProblem, CONVERSATION_MAX_BYTES, groupThreads, threadTitle,
+  attachmentProblem, CONVERSATION_MAX_BYTES, generalClientChoices, groupThreads, threadTitle,
   type PortalThread,
 } from "./portal";
 
@@ -21,19 +21,19 @@ describe("groupThreads", () => {
   ];
 
   it("groups threads by project, most recently active project first, newest thread first inside it", () => {
-    const { projects } = groupThreads(threads, true);
+    const { projects } = groupThreads(threads, ["c1"]);
     expect(projects.map((g) => g.title)).toEqual(["Brand refresh", "Website relaunch"]);
     expect(projects[1].threads.map((x) => x.id)).toEqual(["a1", "a2"]);
   });
 
-  it("pins the client-wide thread as General when the caller canUseGeneral", () => {
-    const { general, projects } = groupThreads(threads, true);
+  it("pins the client-wide thread as General when the caller is client-wide on that client", () => {
+    const { general, projects } = groupThreads(threads, ["c1"]);
     expect(general.map((x) => x.id)).toEqual(["g"]);
     expect(projects.flatMap((p) => p.threads).map((x) => x.id)).not.toContain("g");
   });
 
   it("shows NO General for a caller who may not use it, even if a client-wide row arrives (PV4-Q1)", () => {
-    const { general, projects } = groupThreads(threads, false);
+    const { general, projects } = groupThreads(threads, []);
     expect(general).toEqual([]);
     expect(projects.flatMap((p) => p.threads).map((x) => x.id)).toEqual(["b1", "a1", "a2"]);
   });
@@ -43,7 +43,36 @@ describe("groupThreads", () => {
       t({ id: "g1", general: true, projectId: null, projectName: null, clientId: "c1", clientName: "Northwind" }),
       t({ id: "g2", general: true, projectId: null, projectName: null, clientId: "c2", clientName: "Contoso" }),
     ];
-    expect(groupThreads(two, true).general).toHaveLength(2);
+    expect(groupThreads(two, ["c1", "c2"]).general).toHaveLength(2);
+  });
+
+  it("PER CLIENT (PV4-13): General is shown only for the clients in generalClientIds, even if another client's arrives", () => {
+    const two = [
+      t({ id: "g1", general: true, projectId: null, projectName: null, clientId: "c1", clientName: "Northwind" }),
+      t({ id: "g2", general: true, projectId: null, projectName: null, clientId: "c2", clientName: "Contoso" }),
+      t({ id: "p2", projectId: "pc2", projectName: "Contoso site", clientId: "c2", clientName: "Contoso" }),
+    ];
+    const { general, projects } = groupThreads(two, ["c1"]);
+    expect(general.map((x) => x.id)).toEqual(["g1"]);
+    // c2's General is dropped, not demoted into a project group; c2's project thread is still listed.
+    expect(projects.flatMap((p) => p.threads).map((x) => x.id)).toEqual(["p2"]);
+  });
+});
+
+describe("generalClientChoices (PV4-13)", () => {
+  const clients = [{ id: "c1", name: "Northwind" }, { id: "c2", name: "Contoso" }];
+
+  it("offers exactly the clients in generalClientIds, named from the profile", () => {
+    expect(generalClientChoices(["c1"], clients)).toEqual([{ id: "c1", name: "Northwind" }]);
+    expect(generalClientChoices(["c2", "c1"], clients).map((c) => c.id)).toEqual(["c2", "c1"]);
+  });
+
+  it("offers nothing when the caller is client-wide on no client, and never a client outside the list", () => {
+    expect(generalClientChoices([], clients)).toEqual([]);
+  });
+
+  it("keeps a client the profile does not name, with a neutral label, so the choice still exists", () => {
+    expect(generalClientChoices(["c9"], clients)).toEqual([{ id: "c9", name: "Your account" }]);
   });
 });
 
