@@ -7017,7 +7017,7 @@ Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.2 (DW-6f) and §14.1 
 - **CI summary.** `failing` covers any completed run whose conclusion is not `success`, `skipped` or `neutral` (so `startup_failure`, `stale` and a completed run with no conclusion count as failing as well as the four the contract names). `running` is any entry not `completed`. The summary is `summarizeCi` in `github-pull-requests.ts`; the read answers it per pull request next to the per-workflow `runs`.
 - **UI.** `lib/pmPullRequests-data.ts` (`getTaskPullRequests`, a `ReadResult`) and `components/pm/PullRequests.tsx`, mounted in `TaskDetailView`. A refused read (403, not expected: same authorisation as the task) shows "You don't have access to pull requests." The demo backend answers `linkable: false`, so the section stays out of demo mode.
 
-## 35. Asset versions and review rounds (DW-6h, 2026-10-13) — `platform-nest/src/core/creative.controller.ts`, `core/creative-reviews.ts` (new) — **STATUS: CONTRACT (nothing built)**
+## 35. Asset versions and review rounds (DW-6h, 2026-10-13) — `platform-nest/src/core/creative.controller.ts`, `core/creative-reviews.ts` (new) — **STATUS: BACKEND BUILT, PROTOTYPED (HTTP suite `core/creative-reviews.test.ts` and Cerbos matrix `rbac/cerbos-creative-asset.test.ts` on the Linux CI gate; the UI, §35.6, is not built)**
 
 Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.2 (DW-6h) and §14.3 (Creatives: "review with versions"). Creatives deliver assets to other departments (DW-5, §32). This section gives an asset a version history and gives review explicit rounds, so delivery and review happen in the ERP even when the design work happens elsewhere. It applies to the Asset Library's `creative_assets` (migration `0031`). It does not apply to the agency module's campaign-bound `agency_creative_assets`, which keeps its own review.
 
@@ -7159,6 +7159,34 @@ The deploy restarts Cerbos and then probes it.
   - withdraw: the opener or a manager only.
 - **Cerbos restart:** the policy count rises by one, and Cerbos is probed after a restart on the gate.
 - **UI vitest:** the chip mapping, the version badge, and actions hidden by capability.
+
+### 35.8 As built (backend, DW-6h, 2026-10-13)
+
+**Where it is.**
+- Migrations `202610140730_creative_asset_versions_reviews.sql` (the schema, with a DO-block self-assertion) and `202610140740_iam_creative_asset_permissions.sql` (the permission seed, 22 role rows, with a DO-block self-assertion that includes owner ≡ company_admin and the self-scoped marker).
+- Routes in `core/creative.controller.ts`; rules, parsing and SQL in `core/creative-reviews.ts`.
+- The Cerbos kind: `cerbos/policies/resource_creative_asset.yaml`, two `perm_creative_asset_*` derived roles, `requesterIds` and `reviewRequestedBy` in `cerbos.ts` (type and allow-list), 4 catalog keys (107 kinds, 460 pairs, 445 grantable), 1 permission group (`creative_asset_reviews`), bundles regenerated. Recorded in `docs/PERMISSION-CONTRACT.md` §37. Policy files: 106 → 107 resource policies (108 → 109 files with `derived_roles.yaml` and `_variables.yaml`).
+- **The deploy must restart Cerbos** (test and live sidecar) and probe it; nothing hot-reloads.
+
+**Tests.** `core/creative-reviews.test.ts` (22 HTTP tests over real Postgres and Cerbos: every §35.7 bullet for versions and rounds, and the matrix over the real routes) and `rbac/cerbos-creative-asset.test.ts` (12 static pins that always run, plus 32 live cases that need `CERBOS_URL`). The UI vitest belongs to the UI ticket.
+
+**Deviations and clarifications, each with its reason.**
+1. **A version number is never reused.** `version_no` is the group's highest number over EVERY row, deleted ones included, plus one. Deleting v3 and saving again gives v4, not a second v3, so a round that reviewed "version 3" keeps naming the same bytes. The unique index stays partial on live rows, as specified.
+2. **`versionGroupId` is the group key, never null.** Rows answer `COALESCE(version_group_id, id)`, so a first version reports its own id. The UI uses it as the comment thread's `entityId` (§35.6). Rows and the save answer also carry `supersedesId`.
+3. **The inherited department** is the department of the group's latest live version.
+4. **`requesterIds` covers the whole group**: the `requested_by` of every work request that is not deleted and that any version of the group was delivered against. A round reviews the group, so the person who asked for v1 may decide on v2. Request status is not filtered (a delivered request is the normal case).
+5. **`unitAncestors` comes from the version the action is about**: the round's version for a decision or a withdrawal, the named version for `read` and `request_review`. An asset with no department feeds `[]`, so no lead matches.
+6. **The self-approval DENY has the invoice `approve` shape** (`has() && != "" && reviewRequestedBy == principal.id`, on `roles: ["user"]`). It fires whenever the opener is known, for every role, platform_admin included. It does not fail closed on an unfed attribute, because the handler always feeds it from the NOT NULL `requested_by` of the round, and a fail-closed form would make the platform_admin scope-level sweep in `authz-permissions.controller.test.ts` (which sends no round) report `decide_review` as unreachable.
+7. **The bot DENY covers `decide_review` only**, as the §35.4 table says. A bot or automation principal may read, request and withdraw within its role.
+8. **Deleting the version under an open round closes that round as `withdrawn`** (`decided_by` = the deleter), in the delete's transaction under the group lock. Without this, a round left open on a deleted version would block every later round on the group (one open round per group). The delete route's authorisation is unchanged (`file` · `delete`).
+9. **`POST /creative/assets` now authorises before it validates.** Its gate is unchanged (`file` · `create`); only the order changed, so a caller without `create` gets 403 rather than a 400 for a bad body (§35.5's rule; the existing suite still passes).
+10. **Extra error tokens**, each at the start of `message` and repeated in `reason`: 404 `review_not_found` (an unknown or malformed `:round`), 409 `version_conflict` (the unique index refused a concurrent save; the lock makes it unreachable in practice), and the 400s `version_of_invalid`, `versions_invalid`, `note_invalid`, `decision_invalid`, `comment_invalid`, `comment_required` and `body_invalid`, each with its `field`. `?departmentId=` keeps §33's helper and its messages.
+11. **Reads of a deleted version.** `GET …/:id/versions` and `GET …/:id/reviews` answer 404 `asset_not_found` for a deleted `:id`. A decision or a withdrawal resolves the group through any version id, deleted or not. A missing `:id` on a review route is checked against `creative_asset` · `read` first, so a 404 is never an existence answer for a caller who may not read.
+12. **The schema adds guards the contract implies**: a version-shape CHECK (a first version has no group and supersedes nothing; a later one has both), the round lifecycle CHECKs (an open round has no decision; a closed one has `decided_at`; approved, changes_requested and withdrawn name a decider; changes_requested has a non-blank comment), a lowercase-hex CHECK on `content_sha256`, and the house `origin_site` column.
+13. **The hash.** `content_sha256` is taken from `storage().get(graded_key)`, as `GET …/content` serves the bytes, after a pre-check (deleted, latest) so a refusal never costs a storage read; the transaction re-checks under the group lock. A storage failure is a 500.
+14. **Activity and notifications.** Activity on `creative_asset` with the group key as the entity: `review_requested`, `review_approved`, `review_changes_requested`, `review_withdrawn` and `review_superseded`; the save's `graded` activity carries `versionOf` and `versionNo`. Notifications through `notifyBestEffort` (never the actor): `creative_review.requested` to the department's lead-seat holders and the requesters, `creative_review.decided` to the opener. A withdrawal and a supersession notify nobody.
+15. **`GET /creative/assets/:id` is unchanged** (no version fields); the version history is `GET …/:id/versions`.
+16. **A failed save removes the bytes it stored**, best effort, so a 404 or 409 on `versionOf` leaves no orphan in storage.
 
 ## 36. Figma links on tasks, requests and campaign parts (DW-6k, 2026-10-13) — `platform-nest/src/core/figma/` (new) — **STATUS: CONTRACT (nothing built; live proof waits for Figma API access, DW-11)**
 
