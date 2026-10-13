@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
+import { guardAdminRoute } from "@/lib/adminGuard";
 import { getMe, PlatformError } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getAudit, type AuditEntry, type AuditFilters } from "@/lib/adminData";
@@ -43,6 +44,7 @@ export default async function AdminAuditPage({ searchParams }: { searchParams: S
 
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
+  guardAdminRoute("/admin/audit", me, tenant); // DW-D20
   if (!tenant) {
     return (
       <>

@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
+import { getActiveTenant } from "@/lib/tenant";
+import { guardAdminRoute } from "@/lib/adminGuard";
 import { getRollups, type RollupRow } from "@/lib/entities";
-import { PlatformError } from "@/lib/platform";
+import { getMe, PlatformError } from "@/lib/platform";
 import { groupRollups } from "@/lib/rollups";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, KpiTile, HairlineTable } from "@/components/ui";
@@ -12,6 +14,8 @@ import { currentAxisValue, wholeGroupOption, type ScopeAxisConfig } from "@/lib/
 export default async function RollupsPage({ searchParams }: { searchParams: Promise<{ period?: string; entity?: string }> }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
+  const me = await getMe(userId);
+  guardAdminRoute("/rollups", me, await getActiveTenant(me)); // DW-D20
   const sp = await searchParams;
   const periodParam = sp.period;
 
