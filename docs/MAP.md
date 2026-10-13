@@ -370,6 +370,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/ai-visibility`
 - `/departments/[deptId]/analytics`
 - `/departments/[deptId]/assets`
+- `/departments/[deptId]/assets/[assetId]`
 - `/departments/[deptId]/audit`
 - `/departments/[deptId]/ball`
 - `/departments/[deptId]/board`

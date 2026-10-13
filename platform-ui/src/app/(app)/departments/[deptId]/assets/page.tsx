@@ -8,7 +8,8 @@ import { activeCompany } from "@/lib/companyContext";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { AssetLibrary } from "@/components/creative/AssetLibrary";
-import { listCreativeAssets } from "@/lib/creative";
+import { readCreativeAssets } from "@/lib/creativeReviews-data";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
 
 type Params = Promise<{ deptId: string }>;
 
@@ -37,11 +38,19 @@ export default async function AssetLibraryPage({ params }: { params: Params }) {
     );
   }
 
-  const assets = await listCreativeAssets(userId, tenant);
+  // DW-6h §35.6: this department's library (and the units under it), each asset's LATEST version (the default).
+  const assets = await readCreativeAssets(userId, tenant, { departmentId: deptId });
+  if (assets.kind !== "ok") {
+    return (
+      <Card title="Saved assets & training set">
+        <ReadRefusal subject="the Asset Library" kind={assets.kind} reason={assets.kind === "unavailable" ? assets.reason : undefined} inline />
+      </Card>
+    );
+  }
 
   return (
     <Card title="Saved assets & training set">
-      <AssetLibrary assets={assets} />
+      <AssetLibrary assets={assets.data} deptId={deptId} />
     </Card>
   );
 }

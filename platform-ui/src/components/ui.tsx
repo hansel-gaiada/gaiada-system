@@ -69,6 +69,9 @@ const STATUS_FAMILY: Record<string, StatusFamily> = {
   done: "ok", completed: "ok", "closed won": "ok", configured: "ok",
   // DW-5c: a request's own lifecycle. "open" is in flight (below); "cancelled" is idle (below).
   delivered: "ok",
+  // DW-6h: an asset review round. "approved" is above; "in review" is in flight (the default family, listed for the
+  // record); "changes requested" asks for rework, so it takes the attention family.
+  "in review": "progress", "changes requested": "critical",
   // bronze — in-flight/neutral states
   open: "progress", pending: "progress", review: "progress", todo: "progress", "in progress": "progress",
   proposal: "progress", negotiation: "progress", discovery: "progress",
