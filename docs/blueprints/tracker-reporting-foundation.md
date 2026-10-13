@@ -1735,6 +1735,10 @@ This entry is the contract DW-4m builds to.
 - **Nothing else changes.** Highlights do not read `delta`. The deterministic and AI narratives already skip
   a KPI without one. KPI tiles already hide the delta chip when it is absent. Appraisal `auto_inputs` read
   `value` and its parts, never `delta`.
+- **A custom range and the calendar period it equals** carry the same `value`, `numerator` and `denominator`,
+  but their `previous` and `delta` may differ, because their comparison windows differ by definition (§6.1: a
+  custom range compares with the equal-length window before it). The TR-29 reconciliation compares the
+  period's own numbers only.
 - **Sealed documents are the record.** A document sealed before DW-4m keeps its stored shape: absent fields
   read as "not known", never as "baseline fine". No backfill and no re-seal.
 - **Demo.** `demoReports.ts` emits the same fields with the same rules.

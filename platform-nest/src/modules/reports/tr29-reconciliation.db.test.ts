@@ -418,6 +418,14 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("TR-29 program reconciliation gate
 
   // ═══════════════════════════ JOB 3 — range additivity through the API ═══════════════════════════
 
+  // The PERIOD'S OWN numbers (value and its parts) are what must agree. The comparison fields
+  // (`delta`, and `previous` since DW-4m) describe each kind's baseline, and those differ by
+  // definition (§6.1): a custom range compares with the equal-length window before it, a calendar
+  // month with the previous month. March's custom baseline (29 Jan to 28 Feb) holds 22 working days,
+  // February holds 20, so the calendar metrics' previous denominators differ. Before DW-4m the
+  // arrays matched only because both previous values were 0 and `previous` was not exposed.
+  const ownNumbers = (kpis: Array<Record<string, unknown>>) => kpis.map(({ delta: _delta, previous: _previous, ...own }) => own);
+
   describe("job 3 — a custom range spanning exactly one calendar month/week equals that period's SEALED document, across all four grains", () => {
     it("both baselines (month + week) are already sealed from the shared beforeAll", () => {
       expect(monthPeriodId).toBeTruthy();
@@ -444,7 +452,7 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("TR-29 program reconciliation gate
         // must still agree numerically because nothing changed the underlying facts between the
         // seal and this read within this describe block (job 2 already proved the sealed side is
         // immune to LATER edits; this proves the two paths agree on the SAME facts).
-        expect(customDoc.json().kpis).toEqual(sealedDoc.json().kpis);
+        expect(ownNumbers(customDoc.json().kpis)).toEqual(ownNumbers(sealedDoc.json().kpis));
       });
 
       it(`${grain} grain: custom 2026-03-09..2026-03-15 (7 days) == sealed week`, async () => {
@@ -453,7 +461,7 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("TR-29 program reconciliation gate
         expect(sealedWeekDoc.statusCode).toBe(200);
         expect(customWeekDoc.statusCode).toBe(200);
         expect(sealedWeekDoc.json().header.sealed).toBe(true);
-        expect(customWeekDoc.json().kpis).toEqual(sealedWeekDoc.json().kpis);
+        expect(ownNumbers(customWeekDoc.json().kpis)).toEqual(ownNumbers(sealedWeekDoc.json().kpis));
       });
     }
   });
