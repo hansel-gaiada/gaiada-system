@@ -272,11 +272,20 @@ describe.skipIf(!TEST_URL)("PV5-04b — invoice numbers: service line, code, mon
     });
 
     it("a PRE-ASSIGNED code is the one the number carries", async () => {
-      // (support, spa) has no code yet: pre-assign a known one, then issue under it.
-      expect((await pre({ serviceLineKey: "support", businessType: "spa", code: "PR3" })).statusCode).toBe(200);
-      const r = await issue(await approved(clientSpa, { serviceLineKey: "support" }));
+      // Its own client and pair: (support, spa) is coded by no other test, and the client is not shared with the concurrent test.
+      const client = await createClient(N, "PV5-04b Pre-assign Spa Client");
+      await profile(client, "spa");
+      // Generated codes are random, so a hard-coded "PR3" could collide with one (a 409 code_taken, seen once on CI). Pick a
+      // chosen code that is free right now; the pre-assign refuses a taken one, so the 200 below still proves the chosen code.
+      const used = new Set((await rows(`SELECT code FROM billing_number_codes WHERE tenant_id = $1`, [N])).map((r) => r.code as string));
+      const chosen = ["PR3", "PR4", "PR5", "PR6", "PR7", "PR8", "PR9"].find((c) => !used.has(c))!;
+      expect(chosen).toBeTruthy();
+      const made = await pre({ serviceLineKey: "support", businessType: "spa", code: chosen });
+      expect(made.statusCode, made.body).toBe(200);
+      expect(made.json()).toMatchObject({ code: chosen, alreadyAssigned: false });
+      const r = await issue(await approved(client, { serviceLineKey: "support" }));
       expect(r.statusCode, r.body).toBe(200);
-      expect(parts(r.json().invoiceNo).code).toBe("PR3");
+      expect(parts(r.json().invoiceNo).code).toBe(chosen);
     });
 
     it("a refused issue (not approved) writes no code and takes no number", async () => {
