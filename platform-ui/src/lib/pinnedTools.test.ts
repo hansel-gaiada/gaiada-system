@@ -33,6 +33,15 @@ describe("parsePinnedTools", () => {
   it("keeps an explicit empty list", () => {
     expect(parsePinnedTools({ w: [] })).toEqual({ w: [] });
   });
+
+  it("drops a forged __proto__, constructor or prototype key and leaves the result a plain object", () => {
+    // As the cookie arrives: JSON.parse makes "__proto__" an own key.
+    const raw = JSON.parse('{"__proto__":["a"],"constructor":["b"],"prototype":["c"],"w":["d"]}');
+    const out = parsePinnedTools(raw);
+    expect(out).toEqual({ w: ["d"] });
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+    expect(Object.keys(out)).toEqual(["w"]);
+  });
 });
 
 describe("pinnedToolsFor", () => {
