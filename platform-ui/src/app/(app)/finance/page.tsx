@@ -11,6 +11,7 @@ import {
 } from "@/lib/finance";
 import { Card, KpiTile, HairlineTable, StatusBadge, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { pilotFrame } from "@/components/overview/pilot";
 
 // Finance & Accounting overview.
 //
@@ -61,13 +62,24 @@ function Verdict({ value, label }: { value: { clean: boolean } | null; label: st
   );
 }
 
-export default async function FinanceOverviewPage() {
+export default async function FinanceOverviewPage({ searchParams }: { searchParams: Promise<{ period?: string }> }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
   if (!tenant) return <EmptyNote>Select a company from the top bar.</EmptyNote>;
 
+  // DW-3a: on the pilot switch the Overview frames this page body, which stays below its bands until the
+  // Overview's own blocks replace it. The body is its own server component (it has several early returns),
+  // so it is read once either way.
+  const frame = await pilotFrame(me, tenant, { slug: "finance" }, searchParams);
+  const body = <FinanceOverviewBody userId={userId} tenant={tenant} framed={!!frame} />;
+  return frame ? frame(body) : body;
+}
+
+async function FinanceOverviewBody({ userId, tenant, framed }: { userId: string; tenant: string; framed: boolean }) {
+  // Inside the Overview the page's own title steps down, so the page keeps one h1 (the Overview's greeting).
+  const Title = framed ? "h3" : "h1";
   const periods = await listPeriods(userId, tenant);
 
   // Department rows in the sidebar are deliberately ungated (see components/shell/nav.ts) — the
@@ -126,7 +138,7 @@ export default async function FinanceOverviewPage() {
             reader announced the page as "Aug 2026 Open"; browser history and bookmarks got the same.
             The period is CONTEXT for these figures, so it sits on the context line with the as-at
             date, where every sibling tab already puts its scope. */}
-        <h1 className="fin-page__title">Overview</h1>
+        <Title className="fin-page__title">Overview</Title>
         <p className="fin-page__asof">
           {current ? current.name : "No current period"}{" "}
           {current && (

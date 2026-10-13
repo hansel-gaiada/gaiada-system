@@ -90,3 +90,20 @@ export async function loginAsPersona(
   await page.getByRole("button", { name: /sign in/i }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
+
+/**
+ * DW-3a: the one DEMO_MODE login that is PLACED in a department. `webdev@gaiada.com` resolves to `u-dev`
+ * (src/lib/demoIdentity.ts), the person `src/lib/org.ts` seats in Web Dev > Frontend, with a plain `member`
+ * grant in the demo agency. So the workspace shell homes them in Web Dev and the department Overview can be
+ * driven as a real employee. It is NOT a PersonaKey: the personas above mirror the real-backend seed
+ * (`platform-nest/src/seed/personas.ts`), and no seeded persona is a placed Web Dev employee, so a key here
+ * would silently log in as nobody against a real backend. DEMO_MODE only.
+ */
+export const DEMO_PLACED_WEBDEV_EMAIL = "webdev@gaiada.com";
+
+export async function loginAsPlacedWebDev(page: Page): Promise<void> {
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(DEMO_PLACED_WEBDEV_EMAIL);
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
+}

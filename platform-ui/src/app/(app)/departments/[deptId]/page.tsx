@@ -13,6 +13,7 @@ import { activeCompany } from "@/lib/companyContext";
 import { gmAccessFor, canReadGmMoney, isGmDept, parseGmPeriodKind } from "@/lib/gm";
 import { GmCockpit } from "@/components/departments/gm/GmCockpit";
 import { GmAccessDenied } from "@/components/departments/gm/GmAccessDenied";
+import { pilotFrame } from "@/components/overview/pilot";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ServicedBlock } from "@/components/departments/ServicedBlock";
@@ -79,6 +80,11 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
     );
   }
 
+  // DW-3a: on the pilot switch the Overview frames this Home body, which stays below its bands until the
+  // Overview's own blocks replace it. After the GM branch on purpose: the GM's company Overview is DW-3i, so
+  // its cockpit stays as it is until then. The body is built once, below, and passed through `frame`.
+  const frame = await pilotFrame(me, tenant, { deptId }, searchParams);
+
   const { sscope } = await searchParams;
   const servicedScope = sscope ?? "all";
   const [serviced, allProjects, feed, members, mySeats] = await Promise.all([
@@ -135,7 +141,7 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
     source: row.source,
   }));
 
-  return (
+  const body = (
     <>
       <KpiStrip
         active={kpis.active}
@@ -208,4 +214,5 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
       <ServicedBlock envelope={serviced} scope={servicedScope} buildHref={buildServicedHref} />
     </>
   );
+  return frame ? frame(body) : body;
 }

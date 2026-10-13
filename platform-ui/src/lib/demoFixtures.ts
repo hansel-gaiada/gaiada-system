@@ -46,6 +46,7 @@ const DEMO_USER_IC_ID = "gede-ic";  // IC (Individual Contributor) tier — memb
 // (search_staff HAS search.manage) — that half is still only provable with the existing `member`
 // identity, once it can reach dept-3 at all (see the login-mapping + org-structure note below).
 const DEMO_USER_SEARCH_STAFF_ID = "seo-staff";
+const DEMO_USER_WEBDEV_ID = "u-dev";  // DW-3a: a member PLACED in Web Dev > Frontend (lib/org.ts), so a department Overview is drivable
 const DEMO_USER_MANAGER_ID = "dept-manager";  // manager tier — drives the GM console's narrowed view (GM-02b)
 // External-client tier. `client` is the ONLY role: `isClientOnly` keys off "holds no staff role", so
 // adding any second role here would silently turn this identity back into staff and stop exercising
@@ -145,6 +146,22 @@ const ME_IC = {
   name: "Gede Kusuma",
   email: "gede@gaiada.com",
   title: "Frontend Developer",
+  assurance: "high",
+  companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
+  roles: [
+    { role: "member", scopeType: "company", scopeId: "co-agency" },
+  ],
+};
+
+// DW-3a: Made Putra, the person `lib/org.ts` places in Web Dev > Frontend (`assigneeId: "u-dev"`), signed in
+// as a plain `member` of the agency, the same grant the user directory below gives them (`gr-3`). It is
+// the one demo login with a department placement, so `resolveMyWorkspaces` homes them in Web Dev.
+// ONE role, `member`, like ME_IC: a second grant would stop this exercising an ordinary employee.
+const ME_WEBDEV = {
+  userId: DEMO_USER_WEBDEV_ID,
+  name: "Made Putra",
+  email: "webdev@gaiada.com",
+  title: "Web Developer",
   assurance: "high",
   companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
   roles: [
@@ -2183,6 +2200,7 @@ function getCurrentDemoIdentity(userId: string) {
   if (userId === DEMO_USER_SEARCH_STAFF_ID) return ME_SEARCH_STAFF;
   if (userId === DEMO_USER_MANAGER_ID) return ME_MANAGER;
   if (userId === DEMO_USER_IC_ID) return ME_IC;
+  if (userId === DEMO_USER_WEBDEV_ID) return ME_WEBDEV;
   if (userId === DEMO_USER_CLIENT_ID) return ME_CLIENT;
   if (userId === DEMO_USER_CLIENT_ADMIN_ID) return ME_CLIENT_ADMIN;
   if (userId === DEMO_USER_CLIENT_VIEWER_ID) return ME_CLIENT_VIEWER;

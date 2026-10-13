@@ -9,7 +9,9 @@ import { titleWithRecurrenceGlyph, isDoneStatus, taskUrgency, openDependencies }
 import { getMyWorkQueue, projectQueueForCompany } from "@/lib/queue";
 import { toolkitFor, visibleGroups } from "@/lib/deptToolkits";
 import { activeCompany } from "@/lib/companyContext";
+import { isGmDept } from "@/lib/gm";
 import { PageHeader } from "@/components/PageHeader";
+import { HideOnOverview } from "@/components/overview/HideOnOverview";
 import { DeptTabs } from "@/components/shell/DeptTabs";
 import { DeptShellFrame } from "@/components/departments/DeptShellFrame";
 import { MyWorkRail, type RailTaskItem, type RailWaitingItem, type RailBallItem } from "@/components/departments/MyWorkRail";
@@ -135,13 +137,17 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
 
   return (
     <>
-      <PageHeader
-        eyebrow="Department workspace"
-        title={dept.name}
-        subtitle={toolkit.mission}
-        breadcrumbs={[{ label: "Organization", href: "/organization" }, { label: "Departments", href: "/departments" }, { label: dept.name }]}
-        actions={canEditOrg ? <Link href={`/companies/${tenant}/org`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit structure</Link> : undefined}
-      />
+      {/* DW-3a: in the workspace shell the Overview draws its own header, so this one steps aside on that
+          page only. The GM keeps it: its page is still the cockpit until DW-3i. */}
+      <HideOnOverview overviewPath={`/departments/${encodeURIComponent(deptId)}`} enabled={!isGmDept(dept.name)}>
+        <PageHeader
+          eyebrow="Department workspace"
+          title={dept.name}
+          subtitle={toolkit.mission}
+          breadcrumbs={[{ label: "Organization", href: "/organization" }, { label: "Departments", href: "/departments" }, { label: dept.name }]}
+          actions={canEditOrg ? <Link href={`/companies/${tenant}/org`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit structure</Link> : undefined}
+        />
+      </HideOnOverview>
       <DeptTabs groups={groups} deptId={deptId} />
       <DeptShellFrame groups={groups} deptId={deptId} rail={<MyWorkRail today={today} waiting={waiting} ball={ball} />}>
         {children}

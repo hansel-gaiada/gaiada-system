@@ -1,0 +1,62 @@
+/* DW-3a/3b: the Overview's frame (WorkspaceOverview.tsx). Tokens only (src/styles/tokens.test.ts). */
+
+.ov { display: flex; flex-direction: column; gap: var(--space-24); }
+
+/* ---- Header: who and when on the left, the period and the quick actions on the right ---- */
+.ov-head { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--space-24); flex-wrap: wrap; }
+.ov-head__greeting { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 28px; letter-spacing: -0.015em; line-height: 1.06; color: var(--text-primary); }
+.ov-head__line { margin: var(--space-8) 0 0; font: 400 13px var(--font-body); color: var(--ink-muted); }
+.ov-head__controls { display: flex; align-items: center; gap: var(--space-12); flex-wrap: wrap; }
+.ov-actions { display: flex; align-items: center; gap: var(--space-8); flex-wrap: wrap; }
+
+/* ---- Period selector: one segmented control ---- */
+.ov-period { display: inline-flex; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm); overflow: hidden; }
+.ov-period__item { display: inline-flex; }
+.ov-period__item + .ov-period__item { border-left: 0.5px solid var(--erp-hairline); }
+.ov-period__btn { height: 32px; padding: 0 var(--space-12); border: 0; background: transparent; color: var(--ink-muted); font: 600 13px var(--font-body); cursor: pointer; }
+.ov-period__btn:hover { background: var(--tint-hover); color: var(--text-primary); }
+.ov-period__btn[aria-pressed="true"] { background: var(--tint-hover); color: var(--text-primary); box-shadow: inset 0 -2px 0 var(--accent); }
+.ov-period__btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* A period the backend cannot report yet: drawn, quiet, not clickable. */
+.ov-period__btn[aria-disabled="true"] { color: var(--ink-subtle); cursor: not-allowed; }
+.ov-period__btn[aria-disabled="true"]:hover { background: transparent; color: var(--ink-subtle); }
+
+/* ---- Bands: a quiet label, then the blocks ---- */
+.ov-band { display: flex; flex-direction: column; gap: var(--space-12); }
+.ov-band__label { margin: 0; padding-bottom: var(--space-8); border-bottom: 0.5px solid var(--erp-hairline); font: 600 12px var(--font-body); letter-spacing: 0.06em; color: var(--ink-muted); }
+.ov-band__grid { display: grid; gap: var(--space-16); grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); align-items: start; }
+
+/* ---- A block's loading and unavailable states (the block itself is its widget's own) ---- */
+.ov-block { display: flex; flex-direction: column; gap: var(--space-12); padding: var(--space-20); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); background: var(--surface-card-solid); }
+.ov-block__title { margin: 0; font: 600 14px var(--font-body); color: var(--text-primary); }
+.ov-block__note { margin: 0; font: 400 13px var(--font-body); color: var(--ink-muted); }
+
+/* ---- The Now band's blocks (DW-3c): the controls and sub-parts of Needs you and Today ---- */
+.ov-block__sub { margin: 0; font: 600 12px var(--font-body); letter-spacing: 0.04em; color: var(--ink-muted); }
+.ov-block__more { align-self: flex-start; }
+.ov-today__part { display: flex; flex-direction: column; gap: var(--space-8); }
+.ov-today__list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-8); }
+.ov-today__item { font: 400 14px/1.4 var(--font-body); color: var(--text-primary); }
+.ov-today__link { color: inherit; text-decoration: none; }
+.ov-today__link:hover { text-decoration: underline; }
+.ov-today__meta { font: 400 12px var(--font-body); color: var(--ink-subtle); }
+
+/* ---- Today's page body, kept under the bands until the blocks replace it ---- */
+.ov-legacy { min-width: 0; }
+
+/* ---- Nothing built yet ---- */
+.ov-empty { margin: 0; padding: var(--space-20); border: 0.5px dashed var(--erp-hairline); border-radius: var(--radius-md); font: 400 14px/1.5 var(--font-body); color: var(--ink-muted); }
+
+.ov-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+@media (max-width: 760px) {
+  .ov-head { align-items: flex-start; }
+  .ov-head__controls { width: 100%; }
+  /* Six periods do not fit a phone's width in a row: let the control scroll inside itself. */
+  .ov-period { max-width: 100%; overflow-x: auto; }
+}
+
+/* Touch input: the 44px floor, like the rest of the shell. */
+@media (pointer: coarse) {
+  .ov-period__btn { height: 44px; }
+}

@@ -1,4 +1,5 @@
 import { PageHeader } from "@/components/PageHeader";
+import { HideOnOverview } from "@/components/overview/HideOnOverview";
 import { SectionTabs } from "@/components/shell/SectionTabs";
 import { isModuleOnForActiveCompany } from "@/lib/modules";
 import { ITModuleGate } from "@/components/it/ITModuleGate";
@@ -26,12 +27,16 @@ export default async function ITConsoleLayout({ children }: { children: React.Re
   const moduleOn = await isModuleOnForActiveCompany("it");
   return (
     <>
-      <PageHeader
-        eyebrow="Department workspace"
-        title="IT"
-        subtitle="Device estate, topology and automation for the company."
-        breadcrumbs={[{ label: "Organization", href: "/organization" }, { label: "Departments", href: "/departments" }, { label: "IT" }]}
-      />
+      {/* DW-3a: the pilot's Overview draws its own header. With the module off the page body is not the
+          Overview, so the header stays. */}
+      <HideOnOverview overviewPath="/it" enabled={moduleOn}>
+        <PageHeader
+          eyebrow="Department workspace"
+          title="IT"
+          subtitle="Device estate, topology and automation for the company."
+          breadcrumbs={[{ label: "Organization", href: "/organization" }, { label: "Departments", href: "/departments" }, { label: "IT" }]}
+        />
+      </HideOnOverview>
       {/* The tab strip renders ALWAYS now: Accounts is reachable with the `it` module off (see
           ITModuleGate for why), so hiding the strip would hide the one tool that still works. The gate
           moved inside, per-tool. */}

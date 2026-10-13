@@ -58,4 +58,14 @@ describe("demoIdentityFor — dev-login identity tiers", () => {
       expect(demoIdentityFor(e)).toBe("demo-hansel");
     }
   });
+
+  it("DW-3a: webdev resolves to u-dev, the person placed in Web Dev, and wins over the IC and client tests", () => {
+    expect(demoIdentityFor("webdev@gaiada.com")).toBe("u-dev");
+    expect(demoIdentityFor("WebDev@Gaiada.com")).toBe("u-dev");
+    // Placed BEFORE the "ic" test: a webdev address that happens to contain "ic" is still u-dev.
+    expect(demoIdentityFor("webdev-ic@gaiada.com")).toBe("u-dev");
+    // And no existing address changes: gede is still the IC tier, ordinary staff are still demo-hansel.
+    expect(demoIdentityFor("gede@gaiada.com")).toBe("gede-ic");
+    expect(demoIdentityFor("made@gaiada.com")).toBe("demo-hansel");
+  });
 });
