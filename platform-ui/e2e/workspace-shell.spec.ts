@@ -74,6 +74,9 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
   test("home is the Office of the GM; the switcher lists their workspace first, then the departments", async ({ page, context }) => {
     await signIn(page, context, "superadmin");
     await page.goto("/");
+    // `/` sits under `(app)/loading.tsx`, so Next streams the home redirect and the browser reloads at the
+    // Overview after `/` has loaded. Wait for that reload, or the switcher is opened on a page about to go.
+    await expect(page).toHaveURL(/\/departments\/dept-5$/);
 
     await expect(menu(page, "Office of the GM")).toBeVisible();
     await expect(page.getByRole("button", { name: "Office of the GM, Gaia Digital Agency. Switch workspace" })).toBeVisible();
@@ -320,6 +323,7 @@ test.describe("manager (manager@gaiada.com)", () => {
   test("home is the Office of the GM through narrowed GM access; no Admin", async ({ page, context }) => {
     await signIn(page, context, "manager");
     await page.goto("/");
+    await expect(page).toHaveURL(/\/departments\/dept-5$/);
 
     await expect(menu(page, "Office of the GM")).toBeVisible();
     const { mine } = await openSwitcher(page);
