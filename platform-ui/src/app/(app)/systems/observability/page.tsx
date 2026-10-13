@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
+import { getMe } from "@/lib/platform";
+import { guardAdminRoute } from "@/lib/adminGuard";
 import { getObservability } from "@/lib/observability-data";
 import { hostRowFromEstateHost } from "@/lib/observability";
 import { PageHeader } from "@/components/PageHeader";
@@ -21,6 +23,7 @@ export const dynamic = "force-dynamic";
 export default async function ObservabilityPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
+  guardAdminRoute("/systems/observability", await getMe(userId), null); // DW-D20
   const snap = await getObservability(userId);
 
   // null = 403/404. "You may not see this" is NOT "the estate is unmonitored", so it gets its own

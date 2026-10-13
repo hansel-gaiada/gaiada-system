@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
+import { guardAdminRoute } from "@/lib/adminGuard";
 import { getMe } from "@/lib/platform";
 import { isPlatformOperator } from "@/lib/companyContext";
 import { getSystemStatus, getSystemConfig, getEgressAudit, getGatewayDetail } from "@/lib/admin";
@@ -48,8 +49,9 @@ export default async function GatewaySystemPage({
   const decision = sp.decision ?? "";
   const capability = sp.capability ?? "";
 
-  const [me, status, config, detail, audit] = await Promise.all([
-    getMe(userId),
+  const me = await getMe(userId);
+  guardAdminRoute("/systems/gateway", me, null); // DW-D20: before any read is issued
+  const [status, config, detail, audit] = await Promise.all([
     getSystemStatus(userId, "gateway"),
     getSystemConfig(userId, "gateway"),
     getGatewayDetail(userId),

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
+import { guardAdminRoute } from "@/lib/adminGuard";
 import { getMe, PlatformError } from "@/lib/platform";
 import { listMailLog, entityHref, type MailLogFilters } from "@/lib/mail";
 import { parseSinceParam } from "@/lib/mailFilters";
@@ -60,7 +61,8 @@ function filterErrorCard(message: string) {
 export default async function AdminMailPage({ searchParams }: { searchParams: SP }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
-  await getMe(userId); // resolves the session; the read below is what actually gates access
+  // DW-D20: not an administrator, not a page. The read below stays the real gate.
+  guardAdminRoute("/admin/mail", await getMe(userId), null);
 
   const sp = await searchParams;
   const stream = one(sp.stream);

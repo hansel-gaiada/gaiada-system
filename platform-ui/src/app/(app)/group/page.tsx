@@ -15,7 +15,7 @@ const MUTED = { margin: 0, font: "400 13px/1.5 var(--font-body)", color: "var(--
 // note until F9 eliminations exist.
 export default async function GroupReportPage({ searchParams }: { searchParams: Promise<{ periodKind?: string }> }) {
   const periodKind = parseGroupPeriod((await searchParams).periodKind);
-  const load = await loadGroup(periodKind);
+  const load = await loadGroup(periodKind, "/group");
   if (load.kind !== "ok") return <GroupNotice title="Group report" load={load} />;
 
   const { report } = load;
