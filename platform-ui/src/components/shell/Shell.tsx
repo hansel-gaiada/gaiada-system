@@ -5,16 +5,21 @@ import { DEFAULT_PREFS } from "@/lib/prefs";
 import { can, canViewAllCompanies, isUnrestricted } from "@/lib/rbac";
 import { navFor } from "./nav";
 import { Sidebar } from "./Sidebar";
+import { WorkspaceShellSidebar } from "./WorkspaceShellSidebar";
 import { TopBar } from "./TopBar";
 import { SpecialAccessBanner } from "./SpecialAccessBanner";
 import { AssistantFab } from "./AssistantFab";
 import { CommandPalette } from "./CommandPalette";
 import { activeCompany } from "@/lib/companyContext";
 import { buildNavEntries, buildDeptEntries } from "@/lib/palette";
+import type { ShellModel } from "@/lib/shellModel";
 import "./shell.css";
 
-export function Shell({ me, tenantId, moduleLabel, prefs = DEFAULT_PREFS, departments = [], children }: {
-  me: Me; tenantId: string | null; moduleLabel: string; prefs?: Prefs; departments?: { id: string; name: string }[]; children: ReactNode;
+export function Shell({ me, tenantId, moduleLabel, prefs = DEFAULT_PREFS, departments = [], workspaceModel = null, children }: {
+  me: Me; tenantId: string | null; moduleLabel: string; prefs?: Prefs; departments?: { id: string; name: string }[];
+  /** DW-2a: present only on the pilot switch (`prefs.shell === "workspaces"`) when the model built. */
+  workspaceModel?: ShellModel | null;
+  children: ReactNode;
 }) {
   const special = canViewAllCompanies(me);
 
@@ -26,8 +31,13 @@ export function Shell({ me, tenantId, moduleLabel, prefs = DEFAULT_PREFS, depart
   return (
     <div className="erp-app" data-density={prefs.density} data-width={prefs.width}>
       <a href="#main-content" className="skip-link">Skip to content</a>
-      <Sidebar me={me} tenantId={tenantId} departments={departments} />
-      <TopBar me={me} tenantId={tenantId} moduleLabel={moduleLabel} theme={prefs.theme} />
+      {/* The rest of the frame stays as it is; the top bar, assistant and palette change in later DW-2 tickets. */}
+      {workspaceModel ? (
+        <WorkspaceShellSidebar me={me} tenantId={tenantId} model={workspaceModel} />
+      ) : (
+        <Sidebar me={me} tenantId={tenantId} departments={departments} />
+      )}
+      <TopBar me={me} tenantId={tenantId} moduleLabel={moduleLabel} theme={prefs.theme} shell={prefs.shell} />
       <main id="main-content" className="erp-main erp-scroll" tabIndex={-1}>
         {special && <SpecialAccessBanner unrestricted={isUnrestricted(me)} />}
         <div className="erp-main__inner">{children}</div>
