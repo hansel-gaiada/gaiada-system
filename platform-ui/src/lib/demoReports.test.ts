@@ -154,7 +154,8 @@ describe("demoReports — DW-4a calendar periods (golden table, twin of report-c
       call("/api/co-agency/reports/document", { grain: "person", scopeRef: "demo-hansel", periodKind, start })!.json as ReportDocument;
     const q = get("quarter", "2026-08-17").header;
     expect([q.periodStart, q.periodEnd, q.dayCount, q.periodLabel]).toEqual(["2026-07-01", "2026-09-30", 92, "Q3 2026"]);
-    expect(q.comparison).toEqual({ periodStart: "2026-04-01", periodEnd: "2026-06-30", dayCount: 91 });
+    // DW-4m: Q2 starts before the demo's first fact date (2026-05-01), so its flag is set; April has 30 days.
+    expect(q.comparison).toEqual({ periodStart: "2026-04-01", periodEnd: "2026-06-30", dayCount: 91, precedesFactHistory: { firstFactDate: "2026-05-01", affectedDays: 30 } });
     const s = get("semester", "2026-12-31").header;
     expect([s.periodStart, s.periodEnd, s.periodLabel]).toEqual(["2026-07-01", "2026-12-31", "Semester 2 2026"]);
     const y = get("year", "2028-07-01").header;
@@ -215,5 +216,52 @@ describe("demoReports — overview?grain=person&unit= (DW-4b, BFF §37)", () => 
     const body = unitCall(base).json as Record<string, unknown> & { scopes: Array<Record<string, unknown>> };
     expect(body).not.toHaveProperty("unit");
     for (const s of body.scopes) expect(s).not.toHaveProperty("activity");
+  });
+});
+
+// DW-4m — a comparison says when its baseline is not real (same rules as platform-nest's buildKpis).
+describe("demoReports — DW-4m comparison honesty (previous, omitted delta, comparison flags)", () => {
+  const get = (periodKind: string, start: string, grain = "person", scopeRef = "demo-hansel") =>
+    call("/api/co-agency/reports/document", { grain, scopeRef, periodKind, start })!.json as ReportDocument;
+
+  it("every KPI carries previous; a ratio carries the previous parts; a real baseline keeps its delta", () => {
+    const doc = get("month", "2026-07-01"); // comparison = June, after the demo's first fact date
+    expect(doc.header.comparison?.noFacts).toBeUndefined();
+    expect(doc.header.comparison?.precedesFactHistory).toBeUndefined();
+    for (const k of doc.kpis) expect(k.previous, k.metricKey).toBeDefined();
+    const onTime = doc.kpis.find((k) => k.metricKey === "delivery.on_time_rate")!;
+    expect(onTime.previous?.numerator).toBeDefined();
+    expect(onTime.previous?.denominator).toBeGreaterThan(0);
+    expect(onTime.delta).toBe(0.04);
+    const completed = doc.kpis.find((k) => k.metricKey === "delivery.tasks_completed")!;
+    expect(completed.previous).toEqual({ value: completed.value - completed.delta! });
+  });
+
+  it("a comparison wholly before the first fact date (April vs 2026-05-01): noFacts, no KPI has a delta, previous is zero", () => {
+    const doc = get("month", "2026-05-15"); // May, compared with April
+    expect(doc.header.comparison).toEqual({
+      periodStart: "2026-04-01", periodEnd: "2026-04-30", dayCount: 30,
+      precedesFactHistory: { firstFactDate: "2026-05-01", affectedDays: 30 }, noFacts: true,
+    });
+    for (const k of doc.kpis) {
+      expect("delta" in k, k.metricKey).toBe(false);
+      expect(k.previous?.value, k.metricKey).toBe(0);
+    }
+    const onTime = doc.kpis.find((k) => k.metricKey === "delivery.on_time_rate")!;
+    expect(onTime.previous).toEqual({ value: 0, numerator: 0, denominator: 0 });
+    expect(doc.kpis.find((k) => k.metricKey === "evidence.source_diversity")!.previous).toEqual({ value: 0 });
+  });
+
+  it("a comparison that straddles the first fact date: precedesFactHistory only, the deltas are kept", () => {
+    const doc = get("quarter", "2026-08-17"); // Q3, compared with Q2 (starts 2026-04-01)
+    expect(doc.header.comparison?.precedesFactHistory).toEqual({ firstFactDate: "2026-05-01", affectedDays: 30 });
+    expect(doc.header.comparison?.noFacts).toBeUndefined();
+    expect(doc.kpis.find((k) => k.metricKey === "delivery.tasks_completed")!.delta).toBeDefined();
+  });
+
+  it("the overview listing's headline KPIs carry no previous, as the real listing does", () => {
+    const res = call("/api/co-agency/reports/overview", { grain: "project", periodKind: "month", start: "2026-07-01" });
+    const scopes = (res!.json as { scopes: { kpis: { previous?: unknown }[] }[] }).scopes;
+    for (const s of scopes) for (const k of s.kpis) expect("previous" in k).toBe(false);
   });
 });

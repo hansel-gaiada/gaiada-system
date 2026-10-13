@@ -105,7 +105,43 @@ export function resolveDemoPeriod(periodKind: ReportPeriodKind, start: string, e
   };
 }
 
-function buildKpis(grain: ReportGrain, days: string[]): ReportKpi[] {
+/** DW-4m: the comparison window's own honesty flags, by the backend's arithmetic (`factHistoryGap` /
+ *  `computeComparisonFlags` in document-builder.ts) against this demo's one `FACT_HISTORY_START`:
+ *  `precedesFactHistory` when the window starts before it, `noFacts` only when the WHOLE window does. */
+function comparisonFlags(start: string, end: string, dayCount: number): { precedesFactHistory?: { firstFactDate: string; affectedDays: number }; noFacts?: true } {
+  if (start >= FACT_HISTORY_START) return {};
+  const lastBefore = addDaysIso(FACT_HISTORY_START, -1);
+  const affectedDays = dayCountOf(start, end < lastBefore ? end : lastBefore);
+  const precedesFactHistory = { firstFactDate: FACT_HISTORY_START, affectedDays };
+  return affectedDays === dayCount ? { precedesFactHistory, noFacts: true } : { precedesFactHistory };
+}
+
+/** DW-4m: adds `previous` (the comparison window's parts) and applies the backend's omission rule.
+ *  `delta` is left out, never 0, when the comparison has no records or a ratio has a 0 denominator on
+ *  either side. The demo's deltas are fixed numbers, so the previous value is `value - delta` and a
+ *  ratio's previous parts are a plausible 90% of today's denominator. */
+function withBaseline(k: ReportKpi, noFacts: boolean): ReportKpi {
+  const { delta, ...rest } = k;
+  const isRatio = k.numerator !== undefined && k.denominator !== undefined;
+  let previous: NonNullable<ReportKpi["previous"]>;
+  if (noFacts) {
+    previous = isRatio ? { value: 0, numerator: 0, denominator: 0 } : { value: 0 };
+  } else {
+    const value = k.value - (delta ?? 0);
+    if (isRatio) {
+      const denominator = Math.round((k.denominator ?? 0) * 0.9);
+      previous = { value, numerator: Math.round(value * denominator), denominator };
+    } else {
+      previous = { value };
+    }
+  }
+  const unmeasured = isRatio && (k.denominator === 0 || previous.denominator === 0);
+  const out: ReportKpi = { ...rest, previous };
+  if (delta !== undefined && !noFacts && !unmeasured) out.delta = delta;
+  return out;
+}
+
+function buildKpis(grain: ReportGrain, days: string[], comparisonNoFacts = false): ReportKpi[] {
   const n = days.length;
   const completed = 8 * n + (n % 5);
   const onTimeDenom = Math.max(1, Math.round(completed * 0.7));
@@ -131,7 +167,7 @@ function buildKpis(grain: ReportGrain, days: string[]): ReportKpi[] {
     // someone on it rewards whoever assigns the billable work, not how well they did it.
     kpis.push({ metricKey: "effort.billable_share", label: "Billable share", unit: "percent", value: 0.64, numerator: Math.round(completed * 0.64), denominator: completed, appraisalSafe: false });
   }
-  return kpis;
+  return kpis.map((k) => withBaseline(k, comparisonNoFacts));
 }
 
 function buildDocument(tenantId: string, grain: ReportGrain, scopeRef: string, periodKind: ReportPeriodKind, start: string, end: string, servedTenantId?: string): ReportDocument {
@@ -241,6 +277,7 @@ function buildDocument(tenantId: string, grain: ReportGrain, scopeRef: string, p
   // DW-4a: a calendar kind compares to the preceding period of the same kind over its own day
   // count (as the backend does); a custom range to the equal-length window right before it.
   const prev = previousPeriodRange(periodKind, start, end, dayCount);
+  const cmpFlags = comparisonFlags(prev.start, prev.end, prev.dayCount);
 
   const header: ReportDocument["header"] = {
     tenantId, grain, scopeRef, scopeName: scopeName(grain, scopeRef, tenantId),
@@ -249,12 +286,12 @@ function buildDocument(tenantId: string, grain: ReportGrain, scopeRef: string, p
     generatedAt: new Date().toISOString(),
     sealed,
     ...(sealed ? { periodId: `demo-period-${grain}-${scopeRef}`, revision: 2 } : {}),
-    comparison: { periodStart: prev.start, periodEnd: prev.end, dayCount: prev.dayCount },
+    comparison: { periodStart: prev.start, periodEnd: prev.end, dayCount: prev.dayCount, ...cmpFlags },
     ...(servedTenantId ? { providerView: { servedTenantId, servedTenantName: COMPANY_NAMES[servedTenantId] ?? servedTenantId } } : {}),
     ...(Object.keys(warnings).length > 0 ? { warnings } : {}),
   };
 
-  const kpis = buildKpis(grain, days);
+  const kpis = buildKpis(grain, days, cmpFlags.noFacts === true);
   const highlights: ReportDocument["highlights"] = [
     { kind: "achievement", text: `${scopeName(grain, scopeRef, tenantId)} completed ${kpis[0].value.toLocaleString()} tasks this period, up from last period.` },
   ];
@@ -300,6 +337,13 @@ const DEMO_ROSTERS: Record<string, string[]> = {
   "dept-1": ["u-dev", "u-pm"],
   "dept-3": ["gede-ic", "seo-staff"],
 };
+/** The overview listing's headline KPI: no `previous` (DW-4m: the real listing has no comparison). */
+function headlineKpi(k: ReportKpi): ReportKpi {
+  const out = { ...k };
+  delete out.previous;
+  return out;
+}
+
 /** Roster members with NO fact rows in the demo range: `activity: false`, `kpis: []`, never zeros. */
 const DEMO_QUIET = new Set(["u-pm", "seo-staff"]);
 
@@ -442,7 +486,7 @@ export function reportsDemo(method: string, p: string, params: URLSearchParams, 
       const scopes = (DEMO_ROSTERS[unit] ?? [])
         .map((scopeRef) => {
           const activity = !DEMO_QUIET.has(scopeRef);
-          const kpis = activity ? buildDocument(tenantId, "person", scopeRef, range.periodKind, range.start, range.end).kpis.slice(0, 3) : [];
+          const kpis = activity ? buildDocument(tenantId, "person", scopeRef, range.periodKind, range.start, range.end).kpis.slice(0, 3).map(headlineKpi) : [];
           return { scopeRef, scopeName: scopeName("person", scopeRef, tenantId), kpis, activity };
         })
         .sort((a, b) => a.scopeName.localeCompare(b.scopeName));
@@ -462,7 +506,7 @@ export function reportsDemo(method: string, p: string, params: URLSearchParams, 
     if (led) names = Object.fromEntries(Object.entries(names).filter(([id]) => led.includes(id)));
     const scopes = Object.entries(names).map(([scopeRef, name]) => {
       const doc = buildDocument(tenantId, grain, scopeRef, range.periodKind, range.start, range.end);
-      return { scopeRef, scopeName: name, kpis: doc.kpis.slice(0, 3) };
+      return { scopeRef, scopeName: name, kpis: doc.kpis.slice(0, 3).map(headlineKpi) };
     });
     return ok({ periodKind: range.periodKind, start: range.start, end: range.end, scopes });
   }
