@@ -6,6 +6,7 @@ import {
 } from "@/lib/clientCentre";
 import { FieldControl } from "./FieldControl";
 import { Breadcrumb } from "./Breadcrumb";
+import { DiscoveryFillButton } from "./DiscoveryFillButton";
 
 // CMC's `renderGeneral`, titled "Business details" (CC-D9; CMC called it "Company settings", which
 // collides with the ERP's own companies): client name (READ-ONLY, CC-D5) + business type select, the
@@ -39,6 +40,7 @@ export function CompanySettingsView({
       </p>
 
       <h2 className="cc-sec-h">Business</h2>
+      <DiscoveryFillButton isPortal={isPortal} canEdit={canEdit} />
       <div className="cc-form">
         <label className="cc-field" htmlFor="cc-company-name">
           <span className="cc-field__label">

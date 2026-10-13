@@ -26,6 +26,7 @@ import type { PoolClient } from "pg";
 import { newId, withGlobal, withTenants } from "../db";
 import { config } from "../config";
 import { emitEvent } from "../events/outbox.service";
+import { fillProfileFromAnswers } from "../modules/clients/centre/centre-discovery.service";
 import { createPmTaskInTx, normalizePmTaskInput } from "../modules/pm/pm.controller";
 import {
   isPositionResolvableRole,
@@ -628,6 +629,8 @@ export async function convertAgencyLead(input: ConvertLeadInput): Promise<Conver
       `INSERT INTO clients (id, tenant_id, name, contact, origin_site) VALUES ($1, $2, $3, $4, $5)`,
       [clientId, tenantId, row.org_name, JSON.stringify(contactBlob), config.originSite],
     );
+    // PV6-04 (CC-D6): the discovery answers fill the new client's empty Business profile keys.
+    await fillProfileFromAnswers(c, { tenantId, clientId, actorId: actorUserId, answers });
     if (contactUserId) {
       // capability='signer' — NOT the column default ('viewer') — deliberately: the hard build gate
       // can only ever be satisfied by a REAL client signature (never pre-seeded, see below), and
