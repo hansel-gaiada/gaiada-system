@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { can } from "@/lib/rbac";
+import { can, leadsAnyUnitWith } from "@/lib/rbac";
 import { listAppraisals, getAppraisal, isForbidden } from "@/lib/appraisals-data";
 import { PageHeader } from "@/components/PageHeader";
 import { ReportAccessDenied } from "@/components/reports/ReportAccessDenied";
@@ -34,7 +34,7 @@ export default async function AppraisalsConsolePage() {
     );
   }
 
-  const canSeeConsole = can(me, "appraisal.score", tenant) || can(me, "appraisal.read", tenant) || can(me, "appraisal.cycle.admin", tenant);
+  const canSeeConsole = can(me, "appraisal.score", tenant) || can(me, "appraisal.read", tenant) || leadsAnyUnitWith(me, "appraisal.read", tenant) || can(me, "appraisal.cycle.admin", tenant);
   if (!canSeeConsole) {
     return (
       <>
