@@ -7012,9 +7012,153 @@ Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.2 (DW-6f) and §14.1 
 
 - **Migration** `202610140720_github_pull_requests.sql`. `pm_task_id` is a plain FK to `pm_tasks(id)` with `ON DELETE SET NULL`, not the tenant-scoped composite the other pm_* tables use: a composite `SET NULL` would also null the `NOT NULL` `tenant_id`. The link is resolved inside the org tenant under RLS before the id is written.
 - **`linkTaskKey` is split.** `extractTaskKeys` and `candidateTaskKeys` (title, then branch) are pure and unit-tested without a database; `resolveTaskKey` and `linkTaskKey(client, tenantId, { title, headRef })` do the lookup in the org tenant. `task_key` stores the matched key as written (`web-12`); the task's own key on the read comes from the task.
+- **The same run's late events.** A run's events share one start time, and GitHub does not promise their order. So besides "at or after", a stored `completed` entry is never replaced by a not-completed event of the SAME run id. A re-run, which has a new run id, still replaces it. Pinned in the DB suite.
 - **Handler notes.** The delivery's `note` carries `pr_store=applied|stale|skipped(...)|failed(...)`, `link=<key>|none` and `ci_store=<rows updated>`. A failure in the new part is caught, logged and named in the note; the existing writes are already done.
 - **CI summary.** `failing` covers any completed run whose conclusion is not `success`, `skipped` or `neutral` (so `startup_failure`, `stale` and a completed run with no conclusion count as failing as well as the four the contract names). `running` is any entry not `completed`. The summary is `summarizeCi` in `github-pull-requests.ts`; the read answers it per pull request next to the per-workflow `runs`.
 - **UI.** `lib/pmPullRequests-data.ts` (`getTaskPullRequests`, a `ReadResult`) and `components/pm/PullRequests.tsx`, mounted in `TaskDetailView`. A refused read (403, not expected: same authorisation as the task) shows "You don't have access to pull requests." The demo backend answers `linkable: false`, so the section stays out of demo mode.
+
+## 35. Asset versions and review rounds (DW-6h, 2026-10-13) — `platform-nest/src/core/creative.controller.ts`, `core/creative-reviews.ts` (new) — **STATUS: CONTRACT (nothing built)**
+
+Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.2 (DW-6h) and §14.3 (Creatives: "review with versions"). Creatives deliver assets to other departments (DW-5, §32). This section gives an asset a version history and gives review explicit rounds, so delivery and review happen in the ERP even when the design work happens elsewhere. It applies to the Asset Library's `creative_assets` (migration `0031`). It does not apply to the agency module's campaign-bound `agency_creative_assets`, which keeps its own review.
+
+### 35.1 What exists
+
+- `creative_assets` has `department_id` (an org-node id), the graded file (`graded_key`), an optional original, the grade parameters, and a soft delete.
+- It has no versions and no review.
+- Every route authorises as the generic `file` kind (`creative.controller.ts`), and `GET /creative/assets` ignores the department.
+- DW-5 links delivered assets to requests (`work_request_assets`, §32.1).
+- The generic comments (`/api/:t/comments`) accept any `entityType`.
+
+### 35.2 Versions (one migration, timestamp-named after main's newest)
+
+**`creative_assets` gains:**
+- `version_group_id uuid NULL → creative_assets(id)`. `NULL` on a group's first version; later versions carry the first version's id.
+- `version_no int NOT NULL DEFAULT 1`.
+- `supersedes_id uuid NULL → creative_assets(id)`, the version it replaces.
+
+**The group key** is `COALESCE(version_group_id, id)`.
+- Existing rows are each a group of one at version 1.
+- No backfill `UPDATE` is needed, so the RLS zero-row trap of a backfill does not arise.
+
+**Indexes:**
+- unique `(tenant_id, COALESCE(version_group_id, id), version_no) WHERE deleted_at IS NULL`;
+- index `(tenant_id, COALESCE(version_group_id, id))`.
+
+**Rules:**
+- **A new version** is saved through today's `POST /api/:t/creative/assets` with an optional `versionOf: <assetId>`.
+  - The server resolves that asset's group in the tenant: 404 `asset_not_found` if missing, 409 `asset_deleted` if deleted.
+  - It locks the group's first row (`SELECT … FOR UPDATE`) and takes `version_no = max + 1`. It sets `version_group_id` to the group key, `supersedes_id` to the current latest, and `department_id` from the group unless the body sets one.
+  - The unique index is the second wall against two concurrent saves.
+- **The latest version** is the live row with the highest `version_no` in its group. Deleting the latest makes the previous one latest again.
+- **The original row is never edited.** A version's file never changes after it is saved. New bytes always make a new version, so a review can name exactly what it saw (§35.3).
+
+### 35.3 Review rounds
+
+**`creative_asset_reviews`** (new). RLS is ENABLE plus FORCE, with the standard `tenant_isolation` policy.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid PK` | |
+| `tenant_id` | `uuid NOT NULL → companies` | |
+| `group_id` | `uuid NOT NULL → creative_assets(id)` | The group key |
+| `asset_id` | `uuid NOT NULL → creative_assets(id)` | The version under review |
+| `round` | `int NOT NULL` | 1, 2, 3… per group |
+| `status` | `text NOT NULL CHECK (status IN ('open','approved','changes_requested','withdrawn','superseded'))` | |
+| `content_sha256` | `text NOT NULL` | The SHA-256 of the version's graded file when the round opened |
+| `requested_by` | `uuid NOT NULL → users` | |
+| `requested_at` | `timestamptz NOT NULL DEFAULT now()` | |
+| `note` | `text NOT NULL DEFAULT ''` | Up to 2,000 characters (CHECK) |
+| `decided_by` | `uuid NULL → users` | |
+| `decided_at` | `timestamptz NULL` | |
+| `decision_comment` | `text NULL` | Up to 4,000 characters (CHECK); required for `changes_requested` |
+
+- `UNIQUE (tenant_id, group_id, round)`.
+- A partial unique index on `(tenant_id, group_id) WHERE status = 'open'`: one open round per asset at a time.
+
+**Lifecycle:**
+- **Open.** A round opens on the **latest** version only. The round number is the group's highest + 1.
+- **Close.** An open round closes as `approved`, `changes_requested` (with a comment), or `withdrawn` by the person who opened it or a manager.
+- **A new version supersedes it.** Saving a new version while a round is open closes that round as `superseded`, in the same transaction. The next round then reviews the new version.
+- **History is kept.** Decided rounds never reopen.
+
+### 35.4 Authorization: a new Cerbos kind `creative_asset` (review actions only)
+
+**The existing routes keep the `file` kind and their gates unchanged.** Moving them would be an access change, which this section does not make. The new kind gates only the new review actions.
+
+**It is six artifacts plus the pinned count literals:**
+- the policy;
+- the `cerbos.ts` type and attribute allow-list;
+- the permission catalog;
+- the permission groups;
+- the seeding migration with its self-assertion;
+- both role-bundle resolvers.
+
+The deploy restarts Cerbos and then probes it.
+
+| Action | Who | Notes |
+|---|---|---|
+| `read` | company_admin, manager, member, viewer (`inTenant && notLow`) | Versions, rounds |
+| `request_review` | company_admin, manager, member (`inTenant && notLow`) | |
+| `decide_review` | company_admin, manager. **Its own rule** for `org_unit_lead` over the asset's department (`unitAncestors` of `department_id`, from `org_unit_closure`). **Its own rule** for a requester of a request the asset was delivered against (`request.principal.id in request.resource.attr.requesterIds`, from `work_request_assets` → `work_requests.requested_by`) | **`EFFECT_DENY` when `request.principal.id == request.resource.attr.reviewRequestedBy`**: nobody approves a review they opened. Also `EFFECT_DENY` for `principal.attr.kind in ['automation','bot']` |
+| `withdraw_review` | company_admin, manager. **Its own rule** for `reviewRequestedBy == principal.id` | |
+
+- Resource attributes sent: `tenantId`, `module`, `unitAncestors`, `requesterIds`, `reviewRequestedBy`. Each is added to the `resourcePayload()` allow-list.
+- Every attribute-dependent rule stands alone, never mixed with a scope role.
+- Catalog entries: `core.creative_asset.read|request_review|decide_review|withdraw_review`, plus the generic permission arm, which does not mirror the lead, requester or self-approval rules.
+
+### 35.5 Routes
+
+| Method | Path | Body or query | Answer | Authz |
+|---|---|---|---|---|
+| GET | `/api/:t/creative/assets` | `?departmentId=` (§33's helper, on the asset's own `department_id`, node or subtree); `?versions=latest` (default) or `all` | Today's rows, each plus `versionNo`, `versionGroupId`, `versionCount`, `isLatest`, `review: { round, status } \| null` (the group's latest round) | `file` · `read` (unchanged) |
+| POST | `/api/:t/creative/assets` | today's body, plus optional `versionOf` | Today's row, plus the version fields | `file` · `create` (unchanged) |
+| GET | `/api/:t/creative/assets/:id/versions` | | The group's live versions, newest first, each with the same fields | `file` · `read` |
+| GET | `/api/:t/creative/assets/:id/reviews` | | The group's rounds, newest first | `creative_asset` · `read` |
+| POST | `/api/:t/creative/assets/:id/reviews` | `{ note? }` | 201, the round | `creative_asset` · `request_review`. 409 `not_latest_version`, 409 `review_open`, 409 `asset_deleted` |
+| POST | `/api/:t/creative/assets/:id/reviews/:round/decision` | `{ decision: "approved" \| "changes_requested", comment? }` | 200, the round | `creative_asset` · `decide_review`. 409 `review_not_open`; 400 `{ field: "comment" }` when `changes_requested` has none |
+| POST | `/api/:t/creative/assets/:id/reviews/:round/withdraw` | | 200, the round | `creative_asset` · `withdraw_review`. 409 `review_not_open` |
+
+- Authorise first, then validate the body.
+- Error tokens go at the start of `message` (the error filter turns it into `{ error }`).
+- Writes record activity (`writeActivity`) and notify. Opening a round notifies the asset's department lead and the requesters of linked requests. A decision notifies whoever opened the round.
+
+### 35.6 UI
+
+- **The Asset Library** shows each asset's latest version, with a "v3" badge when there is more than one and a review chip: In review, Approved or Changes requested. The department filter uses `?departmentId=`.
+- **The asset detail**:
+  - the version history (thumbnail, number, who and when);
+  - the rounds, each with its decision and comment;
+  - the asset's thread, using generic comments with `entityType: "creative_asset"` and `entityId` set to the group key, so one thread follows every version;
+  - actions, each shown only to those allowed: Upload new version, Request review, Approve, Request changes, Withdraw.
+- **Uploading a new version** works from the Library's upload, and from Image Studio's save as "a new version of …".
+- **DW-5's request page** shows each delivered asset's latest review status. Delivery is not blocked by review in v1.
+- **Client review of library assets is not in v1.** Clients review posts through the social flow.
+
+### 35.7 Tests (the Linux CI gate: Postgres and Cerbos)
+
+- **Versions:**
+  - `versionOf` appends version 2 and then 3;
+  - two concurrent saves never share a number;
+  - a deleted latest makes the previous one latest;
+  - an asset from another tenant answers 404;
+  - `versions=latest` and `versions=all`, and `versionCount`;
+  - `departmentId` with a subtree.
+- **Rounds:**
+  - only the latest version may open one;
+  - one open round at a time;
+  - a new version supersedes the open round;
+  - the round number increments;
+  - `changes_requested` needs a comment;
+  - decided rounds never reopen.
+- **Cerbos matrix:**
+  - a member may request but not decide;
+  - a lead decides only for its own department's assets;
+  - a requester of a linked request may decide;
+  - **the person who opened a round cannot decide it, whatever their role**;
+  - a bot cannot decide;
+  - withdraw: the opener or a manager only.
+- **Cerbos restart:** the policy count rises by one, and Cerbos is probed after a restart on the gate.
+- **UI vitest:** the chip mapping, the version badge, and actions hidden by capability.
 
 ## 37. A unit's roster on the person-grain report overview (DW-4b, 2026-10-13) — `platform-nest/src/modules/reports/reports.controller.ts` (`getOverview`), `person-scope.ts` — **STATUS: BUILT, PROTOTYPED (DB suite tr25-person-axis.db.test.ts on the Linux CI gate)**
 
