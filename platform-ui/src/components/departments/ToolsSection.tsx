@@ -52,10 +52,12 @@ export function ToolsSection({
                   type="submit"
                   className="dept-tools-row__pin"
                   aria-pressed={isPinned}
-                  aria-label={isPinned ? `Unpin ${t.label} from the Overview` : `Pin ${t.label} to the Overview`}
+                  aria-label={`Pin ${t.label} to the Overview`}
                   disabled={!isPinned && full}
                 >
-                  {isPinned ? "Pinned" : "Pin"}
+                  {/* A toggle keeps ONE name; aria-pressed carries the state (WAI-ARIA APG). The tick is for the eye
+                      only, so the visible word stays inside the accessible name (WCAG 2.5.3). */}
+                  {isPinned && <span aria-hidden="true">✓ </span>}Pin
                 </button>
               </form>
             </li>

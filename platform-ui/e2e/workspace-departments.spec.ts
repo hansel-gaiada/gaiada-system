@@ -228,7 +228,7 @@ test.describe("Tools & connections (superadmin, DW-6c)", () => {
     await page.goto(WEB_DEV_CONNECTIONS);
     const tools = toolsCard(page);
 
-    const unpin = tools.getByRole("button", { name: "Unpin Figma from the Overview" });
+    const unpin = tools.getByRole("button", { name: "Pin Figma to the Overview" });
     await expect(unpin).toHaveAttribute("aria-pressed", "true");
     await hydrated(unpin);
     await unpin.click();
@@ -242,10 +242,10 @@ test.describe("Tools & connections (superadmin, DW-6c)", () => {
     const pin = toolsCard(page).getByRole("button", { name: "Pin Figma to the Overview" });
     await hydrated(pin);
     await pin.click();
-    await expect(toolsCard(page).getByRole("button", { name: "Unpin Figma from the Overview" })).toHaveAttribute("aria-pressed", "true");
+    await expect(toolsCard(page).getByRole("button", { name: "Pin Figma to the Overview" })).toHaveAttribute("aria-pressed", "true");
 
     await page.reload();
-    await expect(toolsCard(page).getByRole("button", { name: "Unpin Figma from the Overview" })).toHaveAttribute("aria-pressed", "true");
+    await expect(toolsCard(page).getByRole("button", { name: "Pin Figma to the Overview" })).toHaveAttribute("aria-pressed", "true");
     await expect(toolsCard(page).locator('button[aria-pressed="true"]')).toHaveCount(6);
   });
 

@@ -34,15 +34,16 @@ describe("ToolsSection", () => {
   it("shows the effective pins: with nothing stored the first six read as pinned", () => {
     const { container } = render(<ToolsSection workspace={web} pins={{}} seat={undefined} seatsUnavailable={false} toggleAction={toggle} />);
     for (const li of rows(container)) expect(pinButton(li)).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Unpin Figma from the Overview" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pin Figma to the Overview" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("marks a stored pin set with aria-pressed and names each button for what it does", () => {
+  it("marks a stored pin set with aria-pressed, and each toggle keeps one name whatever its state", () => {
     const { container } = render(<ToolsSection workspace={web} pins={{ "web-dev": ["claude", "github"] }} seat={undefined} seatsUnavailable={false} toggleAction={toggle} />);
     const state = Object.fromEntries(rows(container).map((li) => [li.dataset.tool, pinButton(li).getAttribute("aria-pressed")]));
     expect(state).toEqual({ "claude-code": "false", claude: "true", "claude-design": "false", github: "true", figma: "false", vscode: "false" });
     expect(screen.getByRole("button", { name: "Pin Figma to the Overview" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Unpin GitHub from the Overview" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Pin GitHub to the Overview" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: /^Unpin/ })).toBeNull();
   });
 
   it("is a real button inside a form, so it posts without JavaScript", () => {
