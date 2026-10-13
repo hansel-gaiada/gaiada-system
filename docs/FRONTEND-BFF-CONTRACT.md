@@ -6458,3 +6458,281 @@ Every item: `{id, kind, title, date, fileId, ready}`. `id` is the source row (co
 **MCP tool.** `documents.list` (core, read, `verified`): `GET /api/:tenantId/clients/:clientId/documents`, args `{tenantId, clientId}`. It lists and links; it never returns file bytes. There is no write counterpart. Golden case: `client-documents.db.test.ts`. Counted in `docs/modules/CAPABILITY-INVENTORY.md`.
 
 **Known limit.** Portal scope comes from `resolvePortalScope`, which flattens a contact's project scope across their clients (on the board under "Before real clients use the portal"). This list is built only from the shared predicates and does not work around it, so the kernel fix covers it too.
+
+## 31. Campaign parts — shared campaigns gain departments (DW-5a, 2026-10-13) — `platform-nest/src/modules/agency/` — **STATUS: CONTRACT (nothing built)**
+
+Plan: `docs/plans/2026-10-13-department-workspaces.md` §7.1 and §7.3, ruling DW-D13 (campaigns are multi-department). One campaign (today's `agency_campaigns`, owned by the Office of the GM or a lead department) gains **parts**: one per taking-part department, each with an owner, a status, an optional budget allocation, and the work linked to it (the department's own SEO or Social campaigns, and the requests of §32). The plan's trap 6 says a part's money is ruled here, never in the UI: see §31.3.
+
+### 31.1 Data model (one migration, timestamp-named after main's newest)
+
+- **`agency_campaigns` gains**
+  - `lead_unit_id text NULL`: the lead department's org-node id (the `projects.department_id` convention: free text, no FK). `NULL` means the Office of the GM, or the company, leads.
+  - `starts_on date NULL` and `ends_on date NULL`, with `CHECK (ends_on IS NULL OR starts_on IS NULL OR ends_on >= starts_on)`.
+- **`agency_campaign_parts`** (new):
+  - Columns: `id uuid PK`, `tenant_id uuid NOT NULL → companies`, `campaign_id uuid NOT NULL → agency_campaigns`, and `unit_id text NOT NULL` (a **department** node id of this tenant's org tree).
+  - Owner and status: `owner_id uuid NULL → users`, and `status text NOT NULL DEFAULT 'planned' CHECK (status IN ('planned','active','blocked','done','cancelled'))`.
+  - Work fields: `brief text NOT NULL DEFAULT ''` (≤ 4,000 characters, also a CHECK) and `due_on date NULL`.
+  - Money: `budget_minor bigint NULL CHECK (budget_minor IS NULL OR budget_minor >= 0)`.
+  - Bookkeeping: `created_by uuid NULL → users`, `origin_site text NOT NULL`, `created_at`, `updated_at` and `deleted_at`.
+  - `UNIQUE (campaign_id, unit_id) WHERE deleted_at IS NULL`: one part per department per campaign.
+  - Index `(tenant_id, unit_id) WHERE deleted_at IS NULL`.
+  - RLS: ENABLE plus FORCE, with the standard `tenant_isolation` policy on `app_current_tenants()`.
+- **The department's own campaigns link to a part:**
+  - `search_campaigns.agency_part_id uuid NULL → agency_campaign_parts(id)` and `social_campaigns.agency_part_id uuid NULL → agency_campaign_parts(id)`, each indexed `WHERE agency_part_id IS NOT NULL`.
+  - A department campaign belongs to at most one part, and a part may have many.
+  - The column is simply `NULL` where the agency module is off.
+- **Requests (§32) link to a part** through `work_requests.campaign_part_id`.
+- A part has **no currency column**. Its allocation is in the campaign's currency (§31.3).
+- The campaign's client is its project's `client_id` (`agency_campaigns.project_id` is NOT NULL today). There is no new client column.
+
+### 31.2 Authorization: new Cerbos kind `agency_campaign_part` (module `agency`)
+
+A new kind is six artifacts, plus the pinned count literals (policy, `cerbos.ts` type and attribute allow-list, permission catalog, permission groups, the seeding migration with its DO-block self-assertion, and both role-bundle resolvers). Budget it as an IAM change, and restart and then probe Cerbos on the gate.
+
+| Action | Who | Notes |
+|---|---|---|
+| `read` | company_admin, manager, member, viewer (`inTenant && notLow`) | Mirrors `agency_campaign` `read` |
+| `create`, `delete` | company_admin, manager | Adding or removing a department from a campaign |
+| `allocate` | company_admin, manager | Any write that sets or changes `budgetMinor`. Kept apart from `update` so that a part's owner or head can never move money |
+| `update` | company_admin, manager; **its own rule** for the part's owner (`request.resource.attr.ownerId == request.principal.id`); **its own rule** for `org_unit_lead` (`unitAncestors` of the part's `unit_id`, from `org_unit_closure`, the HIER-2 shape) | Status, owner, brief, due date and links. Each attribute-dependent rule stands alone, never mixed with a scope role (the HIER-2 authoring rule) |
+
+- Permission catalog: `agency.campaign_part.read|create|update|delete|allocate`, plus the generic permission arm (`inTenant && notLow && inRoot`). The arm does not mirror the owner or lead rules.
+- Resource attributes sent: `tenantId`, `module`, `ownerId`, `unitAncestors`. `ownerId` and `unitAncestors` must be added to the `resourcePayload()` allow-list.
+- **`PATCH /campaigns/:id`** (below) uses the existing kind `agency_campaign` `update`, which company_admin and manager already hold.
+
+### 31.3 Money rules (trap 6, decided here)
+
+1. **The campaign budget is the one spend authority.** It is `agency_campaigns.budget_minor` plus `currency`. A part never has a currency of its own.
+2. **A part's `budget_minor` is an allocation from it.** `NULL` means no allocation. Values are integers ≥ 0, and all arithmetic is `bigint` in SQL, never a float.
+3. **An allocation needs a campaign budget.** Setting any part's `budgetMinor` while the campaign's `budget_minor` or `currency` is `NULL` answers **409 `campaign_has_no_budget`**.
+4. **Allocations never exceed the budget.** The sum of `budget_minor` over the campaign's parts that are neither `cancelled` nor deleted must stay ≤ the campaign's `budget_minor`.
+   - It is checked in the same transaction as the write, after `SELECT … FROM agency_campaigns WHERE id = $1 FOR UPDATE`. That lock serialises concurrent allocations on one campaign.
+   - A refusal is **409 `allocation_exceeds_budget`** with `{budgetMinor, allocatedMinor, requestedMinor}`.
+5. **The campaign budget cannot drop below its allocations.** `PATCH /campaigns/:id` takes the same lock.
+   - Lowering `budgetMinor` below the allocated sum, or clearing it while allocations exist, answers **409 `budget_below_allocations`**.
+   - Changing `currency` while any allocation exists answers **409 `currency_locked_by_allocations`**.
+6. **Cancelling a part releases its allocation.** A cancelled part's allocation leaves the sum. Moving the part out of `cancelled` checks rule 4 again.
+7. **The server does the sums.** Reads return `allocatedMinor` and `unallocatedMinor`, computed in SQL. The UI never adds money.
+8. **Spend is not rolled up.** A linked SEO campaign keeps its own `budget_minor` and `currency`, which may differ. A read lists it beside its part, but it is never added into the shared campaign's figures.
+
+### 31.4 Routes (`api/:tenantId/modules/agency`, `AuthGuard` + `ModuleEnabledGuard("agency")`)
+
+**Shared rules for every write in §31.4:**
+- **Unit ids** are validated against this tenant's `company_org_structure` blob. The node must exist and be of kind `department`, or the answer is **400 `unit_invalid`**.
+- **Owners** must be active members of this tenant, or the answer is **400 `owner_invalid`**.
+- **Never from the body:** `tenantId`, `campaignId` and `status` defaults are never read from the body.
+
+**Reads**
+- `GET campaigns`: today's rows gain `leadUnitId`, `startsOn`, `endsOn`, `clientId` (from the project) and `partCount`.
+  - **`?unitId=<dept>`** returns only the campaigns where that department has a live part or leads.
+  - Each such row carries `part: {id, status, ownerId, ownerName, dueOn} | null`: `null` when the department only leads.
+  - This feeds the Campaigns › Shared tab and the Overview's Campaigns block (DW-3f).
+- `GET campaigns/:campaignId` (new; today the UI finds a campaign by listing them all):
+  - **The campaign:** `{id, name, status, projectId, clientId, leadUnitId, leadUnitName, startsOn, endsOn}`.
+  - **The money:** `money: {budgetMinor, currency, allocatedMinor, unallocatedMinor}`, where `unallocatedMinor` is `null` when there is no budget.
+  - **Each part:** `parts: [{id, unitId, unitName, unitMissing, ownerId, ownerName, status, brief, dueOn, budgetMinor, links, requests}]`.
+    - `links` is `{searchCampaigns: [{id, name, status, budgetMinor, currency}], socialCampaigns: [{id, name, status}]}`.
+    - `requests` is `{open, delivered, declined}`, counted from §32.
+  - **404 `campaign_not_found`** when the campaign is absent or in another tenant (RLS).
+  - **Unit names come from the org blob.** A unit that has since left the tree reads `unitName: null` and `unitMissing: true`, never a stale name.
+
+**Writes**
+- **`PATCH campaigns/:campaignId`** takes `{name?, status?, budgetMinor?, currency?, leadUnitId?, startsOn?, endsOn?}`.
+  - Gate: `agency_campaign` `update`.
+  - Money rule 5 applies. `status` takes today's values (`active|paused|completed`).
+- **`POST campaigns/:campaignId/parts`** takes `{unitId, ownerId?, brief?, dueOn?, budgetMinor?}` and answers **201 `{id}`**.
+  - Gate: `agency_campaign_part` `create`, plus `allocate` when `budgetMinor` is present.
+  - A live part for the same unit answers **409 `part_exists`**.
+- **`PATCH campaigns/:campaignId/parts/:partId`** takes `{status?, ownerId?, brief?, dueOn?, budgetMinor?}`.
+  - Gate: `update` for the non-money fields, and `allocate` when `budgetMinor` is present. Both are checked when both kinds of field are sent.
+  - A part from another campaign answers **404 `part_not_found`**.
+- **`DELETE campaigns/:campaignId/parts/:partId`** is a soft delete, gated by `delete`.
+  - It answers **409 `part_has_links`** while any department campaign or request (§32) points at the part. Cancelling is the normal path.
+- **`POST campaigns/:campaignId/parts/:partId/links`** takes `{kind: 'search_campaign' | 'social_campaign', refId}`.
+  - Gate: part `update`, plus `read` on the child: `resource_search_campaign`, or `social_engagement` for a social campaign.
+  - The child must be live in this tenant, or the answer is **400 `link_target_invalid`**.
+  - A child already linked to another part answers **409 `already_linked`**.
+  - When that module is off for the tenant, the answer is **409 `link_kind_unavailable`**.
+- **`DELETE campaigns/:campaignId/parts/:partId/links/:kind/:refId`** removes a link. Gate: part `update`.
+
+### 31.5 Side effects
+
+- **Activity:** `writeActivity` on every write, with entity types `agency_campaign` and `agency_campaign_part`.
+- **Outbox events** (in the write's own transaction, ids only): `agency.campaign.updated`, `agency.campaign_part.created`, `agency.campaign_part.updated`, `agency.campaign_part.deleted`.
+- **Notifications:** `notify(…, "campaign_part.assigned", {title: "<Department> has a part in <campaign>", entityType: "agency_campaign_part", entityId, href: "/agency/<campaignId>"})`.
+  - It goes to the owner when a part is created with one, and to the new owner when the owner changes.
+  - It is best-effort and never fails the write.
+- No MCP tools and no new rollup metrics in DW-5a.
+
+### 31.6 Proofs required before DW-5a is ticked (Linux CI gate, real Postgres and Cerbos)
+
+- **Money:** rules 3 to 6, each refused with its code. Two concurrent allocations on one campaign, which together exceed the budget, leave exactly one committed. Lowering the budget or changing the currency under allocations is refused.
+- **Access:** a member reads but cannot create, allocate or delete. A part's owner updates status and brief, but `budgetMinor` answers 403. A manager does everything. Another tenant's campaign or part answers 404. A seeded `org_unit_lead` grant on the part's unit may update, and one on a sibling unit may not.
+- **Org:** a division or unknown node id answers 400 `unit_invalid`. A unit removed from the tree reads as `unitMissing`.
+- **Links:** linking another tenant's SEO campaign is 400. Linking a campaign that is already linked is 409. Deleting a part that has links is 409.
+- **IAM:** the new kind's catalog, groups, bundles and the four count literals are green, and the policy is probed after a Cerbos restart.
+
+---
+
+## 32. Requests between departments (DW-5c, 2026-10-13) — `platform-nest/src/core/work-requests.{controller,service}.ts` — **STATUS: CONTRACT (nothing built)**
+
+Plan: §7.2 and §7.3, ruling DW-D14 (Creatives supplies the assets, and Web Dev handles anything that needs a software engineer). **A request is the ask; the work stays where each receiver already works.** That is why there is no second queue:
+
+- **An asset request (`kind: 'assets'`) is a PM task.** The task is owned by the receiving department (`assignee {kind: 'department', refId: <unit>}`), in that department's intake project (§32.1). It therefore appears on the receiver's board through today's `belongs()`. Once someone is made responsible for it, it appears in that person's Needs you through today's PM-task leg of the queue.
+- **An engineering request (`kind: 'engineering'`) is a Web Dev change request** with `source = 'internal'` (the MI-05 intake). It lands in Web Dev › Requests beside client maintenance and goes through today's triage (`pm_task`, `mini_run`).
+- **One thin row, `work_requests`, carries the ask:** who asked, from which department, to which department, by when, for which campaign part, and the request form. It also carries the ask's own lifecycle (`open`, `delivered`, `declined`, `cancelled`). Progress inside that lifecycle is read live from the work item and is never copied.
+
+### 32.1 Data model (one migration)
+
+- **`work_requests`**:
+  - Identity: `id uuid PK`, `tenant_id uuid NOT NULL → companies`, `kind text NOT NULL CHECK (kind IN ('assets','engineering'))`.
+  - Routing:
+    - `to_unit_id text NOT NULL`: the receiving department node.
+    - `from_unit_id text NULL`: the requester's department, derived by the server (§32.3). `NULL` means the requester sits in no department, for example an owner.
+    - `requested_by uuid NOT NULL → users`.
+  - The ask: `title text NOT NULL` (1 to 200 characters), `brief text NOT NULL DEFAULT ''` (≤ 10,000 characters, PAN and national ids scrubbed like change requests, plain text), `needed_by date NULL`, `campaign_part_id uuid NULL → agency_campaign_parts`, and `form jsonb NOT NULL DEFAULT '{}'` (§32.4).
+  - Lifecycle: `status text NOT NULL DEFAULT 'open' CHECK (status IN ('open','delivered','declined','cancelled'))`, `closed_by uuid NULL → users`, `closed_at timestamptz NULL`, `decline_reason text NULL` (≤ 2,000 characters).
+  - The work item: `pm_task_id uuid NULL → pm_tasks` and `change_request_id uuid NULL → webdev_change_requests`.
+    - `CHECK ((kind = 'assets' AND pm_task_id IS NOT NULL AND change_request_id IS NULL) OR (kind = 'engineering' AND change_request_id IS NOT NULL AND pm_task_id IS NULL))`.
+    - `UNIQUE (pm_task_id)` and `UNIQUE (change_request_id)`.
+  - Bookkeeping: `origin_site text NOT NULL`, `created_at`, `updated_at`, `deleted_at`.
+  - Indexes `(tenant_id, to_unit_id, status)`, `(tenant_id, from_unit_id, status)` and `(tenant_id, requested_by)`.
+  - RLS: ENABLE plus FORCE, with `tenant_isolation`.
+- **`work_request_assets`** links delivered assets:
+  - Columns: `request_id uuid → work_requests`, `asset_id uuid → creative_assets`, `tenant_id`, `added_by uuid → users`, `added_at`. PK `(request_id, asset_id)`.
+  - RLS as above. An asset may serve more than one request.
+- **`work_request_intakes`** holds each receiving department's requests project:
+  - Columns: `tenant_id`, `unit_id text`, `project_id uuid → projects`, `created_at`. PK `(tenant_id, unit_id)`. RLS as above.
+  - The service creates the project lazily on the department's first asset request, as an internal project: `is_internal = true`, `department_id = unit_id`, named `"<Department> · Requests"`, with no client.
+  - It uses `INSERT … ON CONFLICT DO NOTHING` and then a re-select, so two concurrent first requests create one project.
+  - The table leaves `projects` untouched and is the future home of per-department request settings (SLA, accepted kinds).
+
+### 32.2 Authorization: new Cerbos kind `work_request` (core)
+
+Six artifacts, as in §31.2.
+
+| Action | Who | Notes |
+|---|---|---|
+| `read` | company_admin, manager, member, viewer (`inTenant && notLow`) | Same reach as `pm_task` `read`: every member already reads every PM task |
+| `create` | company_admin, manager, member | Any workspace can ask (§7.2). Viewers cannot |
+| `cancel` | company_admin, manager; **its own rule** for the requester (`request.resource.attr.requestedBy == request.principal.id`) | Only while `open` (409 otherwise) |
+| `deliver` | company_admin, manager; **its own rule** for `org_unit_lead` over `to_unit_id` (`unitAncestors`); **its own rule** for the work's assignees (`request.principal.id in request.resource.attr.assigneeIds`: the PM task's responsible person and any person assignees) | Assets only |
+| `decline` | company_admin, manager; **its own rule** for `org_unit_lead` over `to_unit_id` | Assets only. Engineering requests are declined by Web Dev triage (§32.6) |
+
+- `EFFECT_DENY` on `create`, `cancel`, `deliver` and `decline` when `principal.attr.kind in ['automation','bot']`, after the PV-4 precedent. Agents may triage later, under the separate AI plan.
+- Resource attributes sent: `tenantId`, `requestedBy`, `assigneeIds`, `unitAncestors`. All of them are new entries in the `resourcePayload()` allow-list.
+- Catalog: `core.work_request.read|create|cancel|deliver|decline`, plus the generic permission arm. The arm does not mirror the requester, assignee or lead rules.
+- **The deliberate widening:**
+  - `webdev_change_request` `create` stays manager-only. This route writes the change-request row itself (`source = 'internal'`), so any member can ask Web Dev, but only through this envelope.
+  - Likewise, the asset task is created by the service with a department assignee, which a member could not do through `POST pm/tasks` (that needs `manage`).
+  - Both bypasses are confined to this service and covered by §32.7.
+
+### 32.3 Server-derived fields (never read from the body)
+
+- **`requested_by`** is the principal.
+- **`from_unit_id`** is the requester's open primary membership in this tenant (`org_unit_memberships`, `is_primary` and `valid_to` NULL or ≥ today).
+  - It is walked up the org blob to its **department** ancestor, so a person in a division counts for that division's department.
+  - It is `NULL` when there is no membership.
+- **`status`**, `closed_*`, `pm_task_id`, `change_request_id` and `tenant_id` are server-derived as well.
+- **`to_unit_id`** must be a department node in this tenant's org blob, or the answer is **400 `to_unit_invalid`**. Same company only in v1: a group company that has no Creatives of its own cannot ask another company's Creatives yet (§32.8).
+
+### 32.4 The request form (`form`, validated per kind; unknown keys refused)
+
+- **`assets`** takes:
+  - `deliverables`: 1 to 10 items of `{format: 'image'|'video'|'copy'|'document'|'other', size: string ≤ 60 (for example "1080×1350"), quantity: 1..50}`;
+  - `channel?: string ≤ 60`;
+  - `references?`: 0 to 10 `http(s)` URLs, each ≤ 500 characters;
+  - `notes?: string ≤ 2,000`.
+- **`engineering`** takes `kind: 'content'|'design'|'feature'|'bug'` (the change-request kinds, required) and `affectedUrl?` (an `http(s)` URL ≤ 500 characters).
+- Any failure answers **400 `form_invalid`** with `{field}`. The form is shown back verbatim as data and never interpreted.
+
+### 32.5 Routes (`api/:tenantId/requests`, `AuthGuard`)
+
+**Writes**
+- **`POST requests`** takes `{kind, toUnitId, title, brief?, neededBy?, campaignPartId?, form}` and answers **201 `{id, work: {type: 'pm_task'|'change_request', id}}`**. Gate: `create`. Everything happens in one transaction.
+  - **`assets`:** the service ensures the intake project, then creates the PM task through the PM module's exported `normalizePmTaskInput` and `createPmTaskInTx`:
+    - title = the request title;
+    - description = the brief, plus a plain-text summary of the form and a "Requested by <name> (<department>)" line;
+    - `dueDate` = `neededBy`; priority `normal`;
+    - assignee `{kind: 'department', refId: toUnitId, refName}`.
+  - **`engineering`:** the service inserts the change request: `source 'internal'`, `kind` = `form.kind`, `title`, `body` = the brief, `affected_url` from the form, `requested_by` = the principal, and status `new`. It emits `webdev.change_request.created` as the internal-create route does.
+  - **Then** it inserts the `work_requests` row.
+  - **Module checks:** when the receiving module is off for the tenant (`pm` for assets, `webdev` for engineering), the answer is **409 `request_kind_unavailable`**.
+  - **Campaign part:** `campaignPartId` must be a live, not-cancelled part in this tenant, or the answer is **400 `campaign_part_invalid`**.
+- **`POST requests/:id/deliver`** takes `{assetIds: uuid[1..20]}`. Gate: `deliver`. Assets only, or **409 `wrong_kind_for_action`**.
+  - Each asset must be a live `creative_assets` row in this tenant, or the answer is **400 `asset_invalid`**.
+  - It links the assets, idempotently.
+  - On an `open` request it sets `delivered`, `closed_by` and `closed_at`, and moves the PM task to its project's done status: the project's status-registry done row when the status set is materialized, else `'done'`, the same rule as the PM reads.
+  - On an already `delivered` request it only adds assets ("deliver more").
+  - Any other status answers **409 `request_not_open`**.
+- **`POST requests/:id/decline`** takes `{reason}` (1 to 2,000 characters). Gate: `decline`. Assets only. `open` only.
+  - It sets `declined` and closes the PM task as above, so a declined ask leaves the board.
+- **`POST requests/:id/cancel`** takes no body. Gate: `cancel`. `open` only.
+  - **Assets:** it closes the PM task as above.
+  - **Engineering:** cancelling is allowed only while the change request is `new`. Otherwise the answer is **409 `already_in_progress`**, because Web Dev has accepted the work. The change request is set `declined` with `declined_reason = 'Cancelled by the requester'`.
+
+**Reads.** Every read is gated by `read`. Unit names come from the org blob; a unit gone from the tree reads `null`, with `unitMissing: true`.
+- **`GET requests?box=incoming|sent|mine&unitId=&status=open|closed|all&kind=`:**
+  - `incoming` and `sent` need `unitId`, a department node (400 otherwise). They filter `to_unit_id` and `from_unit_id` respectively. `mine` filters `requested_by`.
+  - The default `status` is `open`.
+  - Order: `incoming` lists the oldest first (the oldest waiting is the one to act on); `sent` and `mine` list the newest first. At most 200 rows.
+  - Row shape:
+    - the ask: `{id, kind, title, status, neededBy, createdAt, closedAt}`;
+    - routing: `fromUnit: {id, name} | null`, `toUnit: {id, name}`, `requestedBy: {id, name}`;
+    - the campaign: `campaign: {id, name, partId} | null`;
+    - the work item, live: `work`.
+      - For a PM task: `{type: 'pm_task', id, projectId, status, isDone, responsibleName}`.
+      - For a change request: `{type: 'change_request', id, status, route}`.
+      - A work item that has been deleted reads `work: null`, which the UI shows as "work removed".
+    - `assetCount`.
+- **`GET requests/summary?unitId=`** returns `{incoming: {open, oldestOpenAt}, sent: {open}}`.
+  - It feeds the Overview's Requests block (DW-3f) and the "requests waiting" pulse tiles.
+  - It is an honest reader: it answers with numbers or fails. The UI shows a failure as "unavailable", never 0.
+- **`GET requests/:id`** returns the row above, plus `brief`, `form` and `declineReason`, plus `assets: [{id, name, contentType, href}]`.
+  - `href` is the existing creative-asset content route.
+  - Another tenant's request answers **404 `request_not_found`**.
+
+### 32.6 Keeping the ask and the work in step (no stored copy of progress)
+
+- **Assets:** progress is read live from the PM task. If the receiver finishes the task without delivering, the ask stays `open` and the read shows `isDone: true`. The UI then offers Deliver; the server does not auto-deliver an empty request.
+- **Engineering:** the change-request routes call `syncWorkRequestFromChangeRequest(c, changeRequestId)` inside their own transactions: triage, verify and unverify.
+  - Triage `decline` sets the ask to `declined` (with the triage reason).
+  - `verify` (status `verified`) sets it to `delivered`. Note that nothing in the codebase writes `done` on a change request (see the comment above `verify` in `webdev-change-requests.controller.ts`), so `verified` is the only "finished" state.
+  - `unverify` (`verified` back to `in_progress`) reopens the ask: `open`, with `closed_*` cleared.
+  - Every other change-request status leaves the ask `open`; the read shows it live.
+  - A change request that came from no `work_requests` row is untouched.
+
+### 32.7 Side effects
+
+- **Activity:** `writeActivity` on every write, with entity type `work_request`.
+- **Outbox events** (in the write's transaction, ids only, never text): `work_request.created`, `work_request.delivered`, `work_request.declined`, `work_request.cancelled`.
+- **Notifications:** best-effort, and a failed notification never fails the write. Types are deliberately not `mention`-shaped, so they never double into Needs you. Assigned work reaches Needs you through the PM task.
+  - **`request.received`** goes to the receiving department's heads, the active holders of a `positions.is_lead = true` seat on `to_unit_id` (migration 0109). It links to `/departments/<toUnit>/requests`. With no head, nobody is notified, and the board still shows the request.
+  - **`request.delivered`** and **`request.declined`** go to the requester and link to `/requests/<id>`.
+  - **`request.cancelled`** goes to the PM task's responsible person, if any.
+
+### 32.8 Known limits (each on the board, none hidden)
+
+- **Same company only.** Routing through the group's service assignments (ORG-13) is a later ticket.
+- **Deleting a linked PM task** from the board leaves the ask `open` with `work: null`. The receiver should decline instead. A guard on PM delete is a follow-up.
+- **No attachments on the request itself.** References are links (`form.references`). File attachments come with DW-8h.
+- **Asset versions and review rounds** are DW-6h. Delivery here links finished library assets.
+
+### 32.9 Proofs required before DW-5c is ticked (Linux CI gate)
+
+- **Creation:**
+  - A member creates both kinds; a viewer gets 403, and a bot or automation principal gets 403.
+  - The asset task appears in the receiver department's tasks (`assignee.kind = 'department'`) and in the intake project.
+  - Two concurrent first requests to one department make one intake project.
+  - The engineering request appears in `GET webdev/change-requests` with `source 'internal'`.
+- **The lifecycle:**
+  - The assignee delivers. A member who is neither assignee nor head gets 403.
+  - A seeded `org_unit_lead` on the receiving unit declines; one on a sibling unit gets 403.
+  - The requester cancels only while `open`; another member gets 403.
+  - An engineering cancel after triage answers 409.
+  - Triage decline, verify and unverify move the ask through `syncWorkRequestFromChangeRequest`.
+- **Isolation and derivation:**
+  - Another tenant's request, part, asset or unit answers 404 or 400 as listed.
+  - `from_unit_id` resolves a division member to their department, and is `NULL` for an unplaced owner.
+- **Notifications:** recipients exactly as in §32.7, and none goes to the actor.
+- **IAM:** the new kind's six artifacts and the count literals are green, and the policy is probed after a Cerbos restart.
