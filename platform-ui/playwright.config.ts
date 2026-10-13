@@ -29,7 +29,7 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ".auth/user.json" },
       dependencies: ["setup"],
-      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, WEBDESK_STUB_SPECS],
+      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, /workspace-shell\.spec\.ts/, WEBDESK_STUB_SPECS],
     },
     {
       // CP-17 client portal. Its OWN project with NO stored session, because every test here signs in as
@@ -100,6 +100,15 @@ export default defineConfig({
       fullyParallel: false,
       use: { ...devices["Desktop Chrome"] },
       testMatch: /gm-console\.spec\.ts/,
+    },
+    {
+      // DW-2g: the department workspace shell, per persona. Self-contained: each test signs in as one demo
+      // identity and plants the `gaiada_prefs` pilot cookie itself, so NO stored session (a stale shared
+      // staff session would test the wrong persona, same reasoning as the projects above). Not in the smoke
+      // project: that one selects by FILE (smoke.spec.ts) as well as by tag.
+      name: "workspace-shell",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /workspace-shell\.spec\.ts/,
     },
     {
       // P3-12 CI build-gate smoke check. Self-contained (does its own login),
