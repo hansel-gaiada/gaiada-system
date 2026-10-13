@@ -67,6 +67,12 @@ describe("ResultsView states", () => {
     expect(dir("c")).toHaveTextContent("No change on the previous period");
   });
 
+  it("a percentage changes by points, not by a percent (uptime 99.5% -> 100% is 'Up 0.5 points')", () => {
+    const { container } = view(results([card({ kpis: [kpi({ key: "uptime", unit: "percent", value: 100, previous: 99.5 })] })]));
+    expect(container.querySelector('[data-kpi="uptime"] .cc-kpi__value')).toHaveTextContent("100%");
+    expect(container.querySelector('[data-kpi="uptime"] .cc-kpi__change')).toHaveTextContent("Up 0.5 points on the previous period");
+  });
+
   it("no previous period reads 'Not enough data to compare' (not a change against 0)", () => {
     view(results([card({ kpis: [kpi({ key: "x", value: 40, previous: null })] })]));
     expect(screen.getByText(NOT_ENOUGH_DATA)).toBeInTheDocument();

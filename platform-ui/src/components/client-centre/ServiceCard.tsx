@@ -30,6 +30,13 @@ export function formatKpiValue(value: number, unit: ResultsKpi["unit"]): string 
   }
 }
 
+/** A change between two periods. For a percentage it is a difference in percentage POINTS (uptime 99.5% → 100% is
+ *  "up 0.5 points", not "up 0.5%", which would read as a relative change). */
+export function formatKpiDelta(delta: number, unit: ResultsKpi["unit"]): string {
+  if (unit === "percent") return `${trim(delta)} ${delta === 1 ? "point" : "points"}`;
+  return formatKpiValue(delta, unit);
+}
+
 function KpiRow({ k }: { k: ResultsKpi }) {
   const change = kpiChange(k);
   const met = targetMet(k);
@@ -46,8 +53,8 @@ function KpiRow({ k }: { k: ResultsKpi }) {
         {k.value !== null && (
           <span className="cc-kpi__meta cc-kpi__change" data-direction={change.direction}>
             {change.direction === "none" && NOT_ENOUGH_DATA}
-            {change.direction === "up" && `Up ${formatKpiValue(change.delta, k.unit)} on the previous period`}
-            {change.direction === "down" && `Down ${formatKpiValue(Math.abs(change.delta), k.unit)} on the previous period`}
+            {change.direction === "up" && `Up ${formatKpiDelta(change.delta, k.unit)} on the previous period`}
+            {change.direction === "down" && `Down ${formatKpiDelta(Math.abs(change.delta), k.unit)} on the previous period`}
             {change.direction === "flat" && "No change on the previous period"}
           </span>
         )}
