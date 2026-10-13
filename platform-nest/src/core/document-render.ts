@@ -164,14 +164,15 @@ export class DocumentRenderError extends Error {
 
 /** Turns a print path into PDF bytes. The default is the report-renderer sidecar; tests install a stand-in that plays
  *  Chromium's part (fetches the payload through the real internal route and lays it out). */
-export type PrintPathRenderer = (printPath: string) => Promise<Buffer>;
+export type PrintPathRenderer = (printPath: string, footerText?: string) => Promise<Buffer>;
 
-const sidecarRenderer: PrintPathRenderer = (printPath) =>
+const sidecarRenderer: PrintPathRenderer = (printPath, footerText) =>
   renderPrintPathViaSidecar(printPath, {
     rendererUrl: config.reportRenderer.url,
     rendererToken: config.reportRenderer.token,
     platformUiInternalUrl: config.reportRenderer.platformUiInternalUrl,
     timeoutMs: config.reportRenderer.timeoutMs,
+    footerText,
   });
 
 let renderer: PrintPathRenderer = sidecarRenderer;
@@ -180,6 +181,15 @@ export function setDocumentRendererForTest(r: PrintPathRenderer | null): void {
   renderer = r ?? sidecarRenderer;
 }
 const usingSidecar = (): boolean => renderer === sidecarRenderer;
+
+/** The PDF footer: the issuer's legal name and the document number (invoice number, or the contract reference). */
+export function documentFooterText(payload: DocumentPrintPayload): string {
+  const parts =
+    payload.kind === "invoice"
+      ? [payload.issuer.legalName, payload.invoice.invoiceNo]
+      : [payload.parties.issuerLegalName, payload.contract.reference];
+  return parts.filter((x): x is string => typeof x === "string" && x.trim() !== "").join(" - ");
+}
 
 /** Is there anything to render with? (Checked before any work, so a box with no renderer records one clear reason.) */
 export function documentRendererConfigured(): boolean {
@@ -207,7 +217,7 @@ export async function renderDocumentPdf(payload: DocumentPrintPayload): Promise<
   try {
     let bytes: Buffer;
     try {
-      bytes = await renderer(path);
+      bytes = await renderer(path, documentFooterText(payload));
     } catch (e) {
       if (e instanceof PdfRendererNotConfiguredError) throw new DocumentRenderError("renderer_not_configured", e.message);
       throw new DocumentRenderError("render_failed", `the renderer failed: ${(e as Error).message}`);

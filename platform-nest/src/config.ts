@@ -805,6 +805,17 @@ const configBase = {
     /** The whole dispatch (token mint + ledger + GitHub call + the 404 probe) may not hold decide() longer than this. */
     dispatchDeadlineMs: positiveIntFromEnv("WEBDESK_REBUILD_DISPATCH_DEADLINE_MS", 30_000),
   },
+  // M6-P6i — the DNS checklist of a delivered site (modules/webdev/domain-dns.ts). `WEBDEV_DNS_TARGETS` is the operator's map of
+  // each delivery host's DOCUMENTED DNS target, keyed by the registry's opaque `host_ref` label:
+  //   {"<host_ref>": [{"type":"A","value":"<ipv4>"}, {"type":"AAAA","value":"<ipv6>"}]}   or   {"<host_ref>": [{"type":"CNAME","value":"<name>"}]}
+  // NO DEFAULT AND NO ADDRESS IN THE REPO (it is public): a host_ref with no entry makes the console say "ask the operator for the
+  // target", never a guess. A malformed entry is dropped and logged, so a typo can only remove a target. No DNS credential and no DNS
+  // API token exists anywhere (O-12, WSK-D43/D61): the only network act is a read-only resolver lookup (domain-dns-lookup.ts).
+  webdevDns: {
+    targetsJson: process.env.WEBDEV_DNS_TARGETS ?? "",
+    /** One resolver query's own deadline (two tries each). */
+    timeoutMs: positiveIntFromEnv("WEBDEV_DNS_TIMEOUT_MS", 3_000),
+  },
   // WSK-61 — a scheduled publish going live rebuilds staging (scheduled-rebuilds.service.ts).
   webdeskSchedule: {
     /** Past a schedule's effective instant + this, a schedule Zone B does not show settles as superseded. */

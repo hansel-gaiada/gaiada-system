@@ -9,27 +9,35 @@
   gap: 0;
   border: 0.5px solid var(--erp-hairline);
   background: var(--surface-card-solid);
-  height: calc(100vh - 230px);
+  /* DW-2h — the page title block is the shell's PageHeader now (one line), not the old breadcrumb + eyebrow
+     + title stack, so the workspace takes the height that stack used to hold. */
+  height: calc(100vh - 190px);
   min-height: 480px;
 }
-/* ASST-19 — the collapsible right rail (blueprint §8's "context inspector" family; only the
-   memory drawer exists so far). A third grid column, added only while it's open. */
-.asst-workspace--with-memory { grid-template-columns: 280px 1fr 300px; }
+/* DW-2h — the Details panel (Memory, Roster, Capabilities as tabs) is a third grid column, added only while
+   it is open: closed by default, so the conversation has the full width. */
+.asst-workspace--with-details { grid-template-columns: 280px 1fr 340px; }
 /* 2026-08-07 — the LEFT rail (ThreadRail) collapses to a narrow icon strip to maximise the
    conversation column (owner complaint: the sidebar had no collapse affordance at all). Page
    variant only — the drawer already hides `.asst-rail` outright, see below. Compound selector so
-   this wins over `.asst-workspace--with-memory` regardless of class order. */
+   this wins over `.asst-workspace--with-details` regardless of class order. */
 .asst-workspace--rail-collapsed { grid-template-columns: 46px 1fr; }
-.asst-workspace--rail-collapsed.asst-workspace--with-memory { grid-template-columns: 46px 1fr 300px; }
+.asst-workspace--rail-collapsed.asst-workspace--with-details { grid-template-columns: 46px 1fr 340px; }
 
 .asst-main__toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 8px 14px 0; flex-wrap: wrap; }
 /* ASST-22 — the page-context pin + the drawer's promotion link share the toolbar row with the
-   brain picker / capabilities / memory toggles; `flex-wrap` above keeps a narrow drawer from
+   brain picker / Details toggle; `flex-wrap` above keeps a narrow drawer from
    clipping any of them rather than overflowing. */
+/* DW-2h — the chip group: the department label ("Web Dev · Board") beside the pinned-entity button. */
+.asst-context { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-right: auto; min-width: 0; }
+.asst-origin-chip {
+  border: 0.5px solid var(--erp-hairline); padding: 4px 10px; font: 700 10px var(--font-body);
+  letter-spacing: 0.04em; color: var(--ink-subtle); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .asst-context-chip {
   border: 0.5px solid var(--erp-accent); background: transparent; cursor: pointer;
   padding: 4px 10px; font: 700 10px var(--font-body); letter-spacing: 0.04em; color: var(--erp-accent);
-  margin-right: auto; transition: background 0.2s var(--erp-ease), color 0.2s var(--erp-ease), border-color 0.2s var(--erp-ease);
+  transition: background 0.2s var(--erp-ease), color 0.2s var(--erp-ease), border-color 0.2s var(--erp-ease);
 }
 .asst-context-chip:hover, .asst-context-chip:focus-visible { background: var(--tint-active); }
 .asst-context-chip--unavailable { cursor: default; border-color: var(--erp-hairline); color: var(--ink-faint); }
@@ -39,19 +47,24 @@
   padding: 6px 4px; text-decoration: none; transition: color 0.2s var(--erp-ease);
 }
 .asst-promote-link:hover, .asst-promote-link:focus-visible { color: var(--erp-accent); }
+/* DW-2h — the full page's "Close", in the PageHeader's action slot: same quiet control as the drawer's. */
+.asst-close-link {
+  border: 0.5px solid var(--erp-hairline); padding: 5px 12px; font: 700 11px var(--font-body); letter-spacing: 0.01em;
+  color: var(--ink-subtle); text-decoration: none; transition: color 0.2s var(--erp-ease), border-color 0.2s var(--erp-ease);
+}
+.asst-close-link:hover, .asst-close-link:focus-visible { color: var(--text-primary); border-color: var(--erp-accent); }
 
 /* ASST-22 — `@drawer` mount: same component tree as the full page (composition, not a second
    engine — see AssistantWorkspace's header), just a single-thread-focused layout that fits a
    narrow slide-over: no viewport-height assumption (the drawer chrome owns the scroll box, not
    this component) and no thread rail (a multi-thread list is what "Open in full page" is for —
    aivory's own floating mount has no rail either, for the same reason). */
-.asst-workspace--drawer { grid-template-columns: 1fr; height: 100%; min-height: 0; border: 0; }
+.asst-workspace--drawer { grid-template-columns: 1fr; height: 100%; min-height: 0; border: 0; position: relative; }
 .asst-workspace--drawer .asst-rail { display: none; }
-.asst-workspace--drawer.asst-workspace--with-memory { grid-template-columns: 1fr 220px; }
-@media (max-width: 560px) {
-  .asst-workspace--drawer.asst-workspace--with-memory { grid-template-columns: 1fr; }
-  .asst-workspace--drawer .asst-mem, .asst-workspace--drawer .asst-cap { display: none; }
-}
+/* DW-2h — in the narrow drawer the Details panel is a sheet over the conversation at every width (it used to
+   be squeezed into 220px, or hidden altogether on a phone). */
+.asst-workspace--drawer.asst-workspace--with-details { grid-template-columns: 1fr; }
+.asst-workspace--drawer .asst-details { position: absolute; inset: 0; z-index: 2; border-left: none; }
 /* ASST-16 — the per-thread brain picker, same toolbar row as the memory toggle. */
 .asst-brain-picker { display: flex; align-items: center; gap: 6px; }
 .asst-brain-picker__label {
@@ -67,20 +80,12 @@
 .asst-brain-picker__select:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; border-color: var(--erp-accent); }
 .asst-brain-picker__select:disabled { cursor: not-allowed; opacity: 0.6; }
 .asst-brain-picker__error { font: 400 11px var(--font-body); color: var(--status-danger-fg); }
-.asst-cap-toggle {
+.asst-details-toggle {
   border: 0.5px solid var(--erp-hairline); background: transparent; cursor: pointer;
   padding: 6px 12px; font: 700 10px var(--font-body); letter-spacing: 0.01em;
   color: var(--ink-subtle); transition: color 0.2s var(--erp-ease), border-color 0.2s var(--erp-ease);
 }
-.asst-cap-toggle:hover, .asst-cap-toggle:focus-visible, .asst-cap-toggle[aria-expanded="true"] {
-  color: var(--text-primary); border-color: var(--erp-accent);
-}
-.asst-memory-toggle {
-  border: 0.5px solid var(--erp-hairline); background: transparent; cursor: pointer;
-  padding: 6px 12px; font: 700 10px var(--font-body); letter-spacing: 0.01em;
-  color: var(--ink-subtle); transition: color 0.2s var(--erp-ease), border-color 0.2s var(--erp-ease);
-}
-.asst-memory-toggle:hover, .asst-memory-toggle:focus-visible, .asst-memory-toggle[aria-expanded="true"] {
+.asst-details-toggle:hover, .asst-details-toggle:focus-visible, .asst-details-toggle[aria-expanded="true"] {
   color: var(--text-primary); border-color: var(--erp-accent);
 }
 
@@ -125,6 +130,14 @@
 .asst-rail__title-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .asst-rail__chip { flex-shrink: 0; font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--ink-subtle); }
 .asst-rail__rename-input { flex: 1; border: none; border-bottom: 0.5px solid var(--erp-accent); background: transparent; outline: none; padding: 8px 6px; font: 400 13px var(--font-body); color: var(--text-primary); }
+/* DW-2h — the pin leads the row: always visible, and its state shows (filled star in the accent colour). */
+.asst-rail__pin {
+  border: none; background: transparent; cursor: pointer; width: 26px; height: 26px; padding: 0; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 13px;
+  color: var(--ink-faint); transition: color 0.2s var(--erp-ease), background 0.2s var(--erp-ease);
+}
+.asst-rail__pin:hover, .asst-rail__pin:focus-visible { color: var(--text-primary); background: var(--wash); }
+.asst-rail__pin--on { color: var(--erp-accent); }
 .asst-rail__row-actions { display: flex; gap: 2px; flex-shrink: 0; }
 .asst-rail__icon-btn {
   border: none; background: transparent; cursor: pointer; width: 26px; height: 26px; padding: 0;
@@ -202,11 +215,25 @@
 
 .asst-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
-/* ---- Memory panel (ASST-19) -------------------------------------------------------------------- */
-.asst-mem { display: flex; flex-direction: column; min-height: 0; border-left: 0.5px solid var(--erp-hairline); background: var(--surface-page); }
-.asst-mem__head { display: flex; align-items: center; justify-content: space-between; padding: 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
-.asst-mem__close { border: none; background: transparent; cursor: pointer; width: 26px; height: 26px; font-size: 16px; line-height: 1; color: var(--ink-faint); transition: color 0.2s var(--erp-ease); }
-.asst-mem__close:hover, .asst-mem__close:focus-visible { color: var(--text-primary); }
+/* ---- Details panel (DW-2h) — Memory, Roster and Capabilities as three tabs of one panel -------------- */
+.asst-details { display: flex; flex-direction: column; min-height: 0; border-left: 0.5px solid var(--erp-hairline); background: var(--surface-page); }
+.asst-details__head { display: flex; align-items: center; justify-content: space-between; padding: 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.asst-details__title { margin: 0; font: 700 13px var(--font-body); letter-spacing: 0.01em; color: var(--text-primary); }
+.asst-details__close { border: none; background: transparent; cursor: pointer; width: 26px; height: 26px; font-size: 16px; line-height: 1; color: var(--ink-subtle); transition: color 0.2s var(--erp-ease); }
+.asst-details__close:hover, .asst-details__close:focus-visible { color: var(--text-primary); }
+.asst-details__tabs { display: flex; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.asst-details__tab {
+  flex: 1; border: none; border-bottom: 2px solid transparent; background: transparent; cursor: pointer;
+  padding: 10px 6px; font: 700 11px var(--font-body); letter-spacing: 0.01em; color: var(--ink-subtle);
+  transition: color 0.2s var(--erp-ease), border-color 0.2s var(--erp-ease);
+}
+.asst-details__tab:hover, .asst-details__tab:focus-visible { color: var(--text-primary); }
+.asst-details__tab:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: -2px; }
+.asst-details__tab[aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--erp-accent); }
+.asst-details__body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* ---- Memory panel (ASST-19) — a tab body now; the Details panel supplies the chrome -------------------- */
+.asst-mem { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 
 .asst-mem__propose { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
 .asst-mem__propose-input {
@@ -260,12 +287,9 @@
 .asst-roster__transcript { margin-top: 6px; padding: 6px 8px; background: var(--wash); font: 400 11.5px/1.5 var(--font-body); color: var(--text-primary); }
 .asst-roster__transcript ol { margin: 0; padding-left: 18px; }
 
-/* ---- Capabilities panel (ASST-18) — same chrome as the memory panel above ----------------------- */
-.asst-cap { display: flex; flex-direction: column; min-height: 0; border-left: 0.5px solid var(--erp-hairline); background: var(--surface-page); }
-.asst-cap__head { display: flex; align-items: center; justify-content: space-between; padding: 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
-.asst-cap__close { border: none; background: transparent; cursor: pointer; width: 26px; height: 26px; font-size: 16px; line-height: 1; color: var(--ink-faint); transition: color 0.2s var(--erp-ease); }
-.asst-cap__close:hover, .asst-cap__close:focus-visible { color: var(--text-primary); }
-.asst-cap__hint { margin: 0; padding: 0 14px 10px; font: 400 11.5px/1.5 var(--font-body); color: var(--ink-faint); border-bottom: 0.5px solid var(--erp-hairline-soft); padding-bottom: 12px; }
+/* ---- Capabilities panel (ASST-18) — a tab body, like the memory panel above ---------------------- */
+.asst-cap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.asst-cap__hint { margin: 0; padding: 12px 14px 10px; font: 400 11.5px/1.5 var(--font-body); color: var(--ink-faint); border-bottom: 0.5px solid var(--erp-hairline-soft); padding-bottom: 12px; }
 .asst-cap__body { flex: 1; overflow-y: auto; padding: 10px 0 14px; min-height: 0; }
 .asst-cap__error { margin: 0; padding: 8px 14px; font: 600 12px var(--font-body); color: var(--status-danger-fg); }
 .asst-cap__empty { padding: 10px 14px 16px; font: 400 12.5px/1.5 var(--font-body); color: var(--ink-faint); }
@@ -376,9 +400,13 @@
 .asst-composer__mode-hint { font: 400 11px var(--font-body); color: var(--ink-subtle); }
 
 @media (max-width: 860px) {
-  .asst-workspace, .asst-workspace--with-memory { grid-template-columns: 1fr; grid-template-rows: 220px 1fr; height: calc(100vh - 200px); }
+  .asst-workspace, .asst-workspace--with-details { grid-template-columns: 1fr; grid-template-rows: 220px 1fr; height: calc(100vh - 170px); }
   .asst-rail { border-right: none; border-bottom: 0.5px solid var(--erp-hairline); }
-  .asst-mem, .asst-cap { border-left: none; border-top: 0.5px solid var(--erp-hairline); max-height: 320px; }
+  /* The drawer has no rail to stack: it keeps its single column at the drawer's own height. */
+  .asst-workspace--drawer, .asst-workspace--drawer.asst-workspace--with-details { grid-template-rows: 1fr; height: 100%; }
+  /* DW-2h — on a phone the Details panel is a full-width sheet over everything (above the shell, below the
+     drawer), not a block stacked under the conversation. */
+  .asst-workspace--with-details:not(.asst-workspace--drawer) > .asst-details { position: fixed; inset: 0; z-index: 110; border-left: none; }
   /* Same override the rules above already apply to columns — mobile stacks in rows regardless of
      the collapsed preference, but a collapsed rail should still shrink its OWN row rather than
      keep the full 220px it doesn't need. */

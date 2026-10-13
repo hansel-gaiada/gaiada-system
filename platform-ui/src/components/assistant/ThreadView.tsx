@@ -11,7 +11,7 @@ import { useTypewriter } from "./useAssistantStream";
 // typewriter-smoothed live text overlaid; every other row renders straight from the last server
 // fetch. That is what makes "refresh restores the exact transcript" true without a second code path.
 export function ThreadView({
-  messages, streamState, streamingMessageId, loading, threadId, onSuggestionPick, onOpenCapabilities,
+  messages, streamState, streamingMessageId, loading, threadId, onSuggestionPick, onOpenCapabilities, suggestionPrompts,
 }: {
   messages: AssistantMessage[];
   streamState: StreamState;
@@ -27,9 +27,11 @@ export function ThreadView({
    *  never silently drops the tile row just because a caller (a test, most likely) forgot to wire
    *  it — the real app always supplies it. */
   onSuggestionPick?: (prompt: string) => void;
-  /** Opens the SAME right-rail Capabilities panel the toolbar button does — the empty state's
-   *  explicit escape hatch to the full tool catalogue (see `EmptyStateSuggestions`'s header). */
+  /** Opens the Details panel on its Capabilities tab — the empty state's explicit escape hatch to the
+   *  full tool catalogue (see `EmptyStateSuggestions`'s header). */
   onOpenCapabilities?: () => void;
+  /** DW-2h — the department's starter prompts for the empty state; `null`/absent shows today's suggestions. */
+  suggestionPrompts?: readonly { label: string; prompt: string }[] | null;
 }) {
   const displayText = useTypewriter(streamState.text);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -46,8 +48,8 @@ export function ThreadView({
     // 2026-08-07 owner fix — this used to render the FULL raw tool catalogue (`CapabilityCards`,
     // dozens of dot-namespaced names + developer-facing prose) as the first thing anyone saw in a
     // brand-new chat. It now leads with a short, human-readable set of things a person actually
-    // wants to do (`EmptyStateSuggestions`) — the catalogue itself moved to the toolbar's existing
-    // "Capabilities" button/panel (this view's own "See everything I can do" tile opens the SAME
+    // wants to do (`EmptyStateSuggestions`) — the catalogue itself moved to the Details panel's
+    // Capabilities tab (this view's own "See everything I can do" tile opens the SAME
     // panel), never deleted. VER-03's heading-order fix (a real `<h2>` here, not a styled `<p>`) no
     // longer even needs the reasoning it originally had: `EmptyStateSuggestions` renders no
     // headings of its own, so there is nothing to order against — the `<h2>` below is simply this
@@ -59,6 +61,7 @@ export function ThreadView({
         <EmptyStateSuggestions
           onPick={onSuggestionPick ?? (() => {})}
           onOpenCapabilities={onOpenCapabilities ?? (() => {})}
+          prompts={suggestionPrompts}
         />
       </div>
     );

@@ -21,6 +21,7 @@ import { newId, withTenants } from "../db";
 import { buildApp } from "../main";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole, createClient } from "../testing/fixtures";
+import { markInvoicesLegacy } from "../testing/invoice-fixtures";
 import { createIssuedInvoice, ensureBillingSetup } from "../seed/billing-setup";
 import { setRedis, closeRedis } from "../events/redis";
 import { setStorageForTest, localStorage as diskStorage } from "./storage";
@@ -308,6 +309,7 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("PV5-07 — invoice PDFs and seale
         `INSERT INTO invoices (id, tenant_id, client_id, status, currency, lines, total, origin_site) VALUES ($1, $2, $3, 'void', 'IDR', '[]', 0, 'test')`,
         [id, A, clientA],
       );
+      await markInvoicesLegacy([id]); // PV5-F1: visible only because it is a pre-PV-5 (legacy) row
       const listed = await app.inject({ method: "GET", url: `/api/${A}/portal/invoices`, headers: asUser(contact) });
       const row = listed.json().find((r: { id: string }) => r.id === id);
       expect(row).toBeTruthy();

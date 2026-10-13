@@ -232,6 +232,73 @@ export class LifecycleService {
   // Environment
   // ---------------------------------------------------------------------------
 
+  /**
+   * site.setDomain (M6-P6i): set, or clear (`domain: null`), the public domain of ONE environment of a site. HIGH,
+   * always WS4: `environments.domain` is the CORS allow-list source of every browser-facing route (forms, consent,
+   * draft preview), so this decides which sites may call the tenant's public endpoints from a browser.
+   *
+   * One UPDATE inside the shared envelope (the audit row first, carrying the approval, then this write, then the replay
+   * record). Refusals are decided inside the effect, so each rolls the audit row back and leaves the approval unclaimed:
+   *   - the tenant is archived, or the site is unknown / another tenant's (404), or archived (409);
+   *   - the environment is not THIS site's (404: the env id must belong to the site named in the route, so an approval
+   *     for one site can never move another's domain), or is archived (409);
+   *   - the value is already the environment's domain (409 `domain-unchanged`: a no-op must not spend an approval);
+   *   - another live environment of the SAME tenant already holds the domain (409 `domain-in-use`; two environments on one
+   *     host would make the Origin -> site match ambiguous). A domain held by ANOTHER tenant is not visible here (RLS)
+   *     and is not refused: see README.md, "site.setDomain", for that known gap.
+   * The answer names the previous domain, so a rollback is "set it back" (or clear it) with no other bookkeeping.
+   */
+  async setSiteDomain(input: {
+    tenantSlug: string;
+    siteId: string;
+    envId: string;
+    domain: string | null;
+    actor: string;
+    idempotencyKey: string;
+    ws4ApprovalId: string | null;
+  }) {
+    // Any status: a retry of the same command (same Idempotency-Key) after the tenant was archived is answered from the record.
+    const tenant = await this.resolveTenant(input.tenantSlug);
+    const args = { tenantSlug: input.tenantSlug, siteId: input.siteId, envId: input.envId, domain: input.domain };
+
+    return this.envelope.run<{ environment: { id: string; name: string; domain: string | null; previousDomain: string | null; status: string } }>({
+      command: "site.setDomain",
+      scope: { kind: "tenant", tenantId: tenant.id },
+      scopeKey: `${input.tenantSlug}:site.setDomain:${input.idempotencyKey}`,
+      requestHash: this.auditHash.hashArgs(args),
+      actor: input.actor,
+      auditArgs: args,
+      ws4ApprovalId: input.ws4ApprovalId,
+      effect: async (client) => {
+        if (tenant.status !== "active") throw new NotFoundException("tenant not found");
+        const site = await client.query<{ status: string }>(`SELECT status FROM sites WHERE id = $1 AND tenant_id = $2`, [input.siteId, tenant.id]);
+        if (!site.rows[0]) throw new NotFoundException("site not found for this tenant");
+        if (site.rows[0].status !== "active") throw new ConflictException("site is archived: an archived site accepts no domain change");
+        const env = await client.query<{ id: string; name: string; domain: string | null; status: string }>(
+          `SELECT id, name, domain, status FROM environments WHERE id = $1 AND site_id = $2 AND tenant_id = $3 FOR UPDATE`,
+          [input.envId, input.siteId, tenant.id],
+        );
+        const row = env.rows[0];
+        if (!row) throw new NotFoundException("environment not found for this site");
+        if (row.status === "archived") throw new ConflictException("environment is archived: an archived environment accepts no domain change");
+        const previous = row.domain === null || row.domain === "" ? null : row.domain;
+        if (previous === input.domain) throw new ConflictException("domain-unchanged: the environment already has this domain");
+        if (input.domain !== null) {
+          const clash = await client.query(
+            `SELECT 1 FROM environments WHERE tenant_id = $1 AND id <> $2 AND status <> 'archived' AND lower(btrim(domain, ' /')) = $3 LIMIT 1`,
+            [tenant.id, input.envId, input.domain],
+          );
+          if (clash.rows[0]) throw new ConflictException("domain-in-use: another environment of this tenant already has this domain");
+        }
+        const { rows } = await client.query<{ id: string; name: string; domain: string | null; status: string }>(
+          `UPDATE environments SET domain = $2 WHERE id = $1 AND tenant_id = $3 RETURNING id, name, domain, status`,
+          [input.envId, input.domain, tenant.id],
+        );
+        return { result: { environment: { ...rows[0], previousDomain: previous } } };
+      },
+    });
+  }
+
   async provisionEnvironment(input: {
     tenantSlug: string;
     siteId: string;

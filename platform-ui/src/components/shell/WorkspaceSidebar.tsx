@@ -43,6 +43,9 @@ export function WorkspaceSidebar({ tenantId, company, companies, newItems }: {
   const title = view.kind === "workspace" ? view.ws.label : view.kind === "company" ? "Company" : "Admin";
   const companyHref = model.company[0]?.tabs[0]?.href ?? null;
   const adminHref = model.admin[0]?.tabs[0]?.href ?? null;
+  // DW-2f: the current workspace's own create actions lead "+ New"; a later item with the same href is dropped.
+  const createItems = view.kind === "workspace" ? view.ws.creates : [];
+  const menuItems = [...createItems, ...newItems.filter((it) => !createItems.some((c) => c.href === it.href))];
 
   return (
     <aside className="erp-side ws-side" id="app-nav">
@@ -80,7 +83,7 @@ export function WorkspaceSidebar({ tenantId, company, companies, newItems }: {
         {companyHref && <FootLink href={companyHref} label="Company" icon="sitemap" />}
         {adminHref && <FootLink href={adminHref} label="Admin" icon="settings" />}
         <div className="erp-side__new">
-          <NewMenu items={newItems} />
+          <NewMenu items={menuItems} />
         </div>
       </div>
     </aside>

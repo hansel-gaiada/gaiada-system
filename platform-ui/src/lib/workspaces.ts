@@ -140,7 +140,11 @@ export interface Workspace {
   overview: readonly OverviewWidget[];
   pulse: readonly PulseTile[];
   quickActions: readonly QuickAction[];
+  /** The keys of this workspace's own create actions, from its quickActions, in order. "+ New" lists them first (DW-2f). */
+  creates: readonly string[];
   kpis: readonly DeptKpi[];
+  /** Starter prompts the AI Assistant's empty state offers when opened from this workspace (DW-2h). 3 to 4; a suggestion only fills the composer. */
+  assistantPrompts: readonly { label: string; prompt: string }[];
   /** Route prefixes OUTSIDE `/departments/{dept}` that belong to this workspace (`areaFor`, DW-1c). */
   ownedRoutes: readonly string[];
 }
@@ -309,6 +313,7 @@ const WEB_DEV: Workspace = {
     { key: "runs-waiting-approval", label: "Runs waiting approval", ticket: "DW-3e" },
     { key: "deliverables-due", label: "Deliverables due", ticket: "DW-3e" },
   ],
+  creates: ["new-briefing"],
   quickActions: [
     { key: "new-briefing", label: "New briefing", href: deptPath("prd") },
     { key: "triage-requests", label: "Triage requests", href: deptPath("requests") },
@@ -319,6 +324,12 @@ const WEB_DEV: Workspace = {
     { key: "requests-within-sla", label: "Requests answered within the SLA" },
     { key: "client-site-uptime", label: "Client site uptime" },
     { key: "reopened-work-rate", label: "Reopened work rate" },
+  ],
+  assistantPrompts: [
+    { label: "Summarise this week's requests", prompt: "Summarise this week's requests to the Web Dev team and what is still open." },
+    { label: "What is blocked on the board?", prompt: "Which tasks on the Web Dev board are blocked, and what are they waiting for?" },
+    { label: "Which client sites had downtime?", prompt: "Which client sites had downtime this week, and for how long?" },
+    { label: "Draft a client update", prompt: "Draft a short update for the client about " },
   ],
   ownedRoutes: ["/pipeline", "/monitoring"],
 };
@@ -361,6 +372,7 @@ const SEO: Workspace = {
     { key: "client-reports-waiting", label: "Client reports waiting", ticket: "DW-3e" },
     { key: "budgets-off-pace", label: "Budgets off pace", ticket: "DW-3e" },
   ],
+  creates: ["new-content-brief"],
   quickActions: [
     { key: "run-site-audit", label: "Run a site audit", href: deptPath("audit") },
     { key: "new-content-brief", label: "New content brief", href: deptPath("briefs") },
@@ -371,6 +383,12 @@ const SEO: Workspace = {
     { key: "client-reports-on-time", label: "Client reports delivered on time" },
     { key: "ad-budgets-on-pace", label: "Ad budgets on pace" },
     { key: "client-retention", label: "Client retention" },
+  ],
+  assistantPrompts: [
+    { label: "Which keywords dropped?", prompt: "Which tracked keywords dropped this week, and by how much?" },
+    { label: "Which pages lost traffic?", prompt: "Which pages lost the most search traffic this month?" },
+    { label: "Draft an article brief", prompt: "Draft a content brief for an article about " },
+    { label: "What technical issues are open?", prompt: "Which technical SEO issues are still open across our sites?" },
   ],
   ownedRoutes: [],
 };
@@ -407,6 +425,7 @@ const SOCIAL_MEDIA: Workspace = {
     // Needs the inbox sync backend first (SMM-15).
     { key: "unanswered-inbox", label: "Unanswered inbox", ticket: "DW-3e after SMM-15" },
   ],
+  creates: ["compose-post"],
   quickActions: [
     { key: "compose-post", label: "Compose a post", href: deptPath("composer") },
     ...ASK_ACTIONS,
@@ -415,6 +434,12 @@ const SOCIAL_MEDIA: Workspace = {
     { key: "posts-on-schedule", label: "Posts published on schedule" },
     { key: "client-approval-turnaround", label: "Client approval turnaround" },
     { key: "engagement-growth", label: "Engagement growth across clients" },
+  ],
+  assistantPrompts: [
+    { label: "What posts go out this week?", prompt: "What is scheduled to post this week, and on which accounts?" },
+    { label: "Which posts did best?", prompt: "Which posts performed best last month, and why?" },
+    { label: "Draft caption ideas", prompt: "Draft three caption ideas for a post about " },
+    { label: "What is waiting for approval?", prompt: "Which posts are waiting for approval right now?" },
   ],
   ownedRoutes: [],
 };
@@ -449,6 +474,7 @@ const CREATIVES: Workspace = {
     { key: "due-this-week", label: "Due this week", ticket: "DW-3e" },
     { key: "delivered-this-period", label: "Delivered this period", ticket: "DW-3e" },
   ],
+  creates: ["upload-to-library"],
   quickActions: [
     { key: "open-image-studio", label: "Open Image Studio", href: deptPath("studio") },
     { key: "upload-to-library", label: "Upload to library", href: deptPath("assets") },
@@ -458,6 +484,12 @@ const CREATIVES: Workspace = {
     { key: "asset-requests-on-time", label: "Asset requests delivered on time" },
     { key: "revision-rounds", label: "Revision rounds per asset" },
     { key: "assets-delivered", label: "Assets delivered" },
+  ],
+  assistantPrompts: [
+    { label: "What is due this week?", prompt: "Which design requests are due this week?" },
+    { label: "Which files await review?", prompt: "Which creative files are waiting for review?" },
+    { label: "Draft a creative brief", prompt: "Draft a creative brief for " },
+    { label: "Which requests lack a brief?", prompt: "Which creative requests still have no brief?" },
   ],
   ownedRoutes: [],
 };
@@ -497,6 +529,7 @@ const OFFICE_OF_THE_GM: Workspace = {
     { key: "project-health", label: "Project health", ticket: "DW-3i" },
     { key: "utilization", label: "Utilization", ticket: "DW-3i" },
   ],
+  creates: [],
   quickActions: [
     { key: "business-review", label: "Business review", href: deptPath("review") },
     { key: "decisions", label: "Decisions", href: deptPath("decisions") },
@@ -506,6 +539,12 @@ const OFFICE_OF_THE_GM: Workspace = {
     { key: "margin", label: "Margin" },
     { key: "utilization", label: "Utilization" },
     { key: "departments-in-good-condition", label: "Departments in good condition" },
+  ],
+  assistantPrompts: [
+    { label: "Summarise this week", prompt: "Give me a summary of what happened across the company this week." },
+    { label: "What needs my approval?", prompt: "What approvals are waiting on me?" },
+    { label: "Which projects are at risk?", prompt: "Which projects are at risk of missing their dates?" },
+    { label: "What changed since Friday?", prompt: "What changed across departments since last Friday?" },
   ],
   // The company-grain report is the Office of the GM's (§5.1).
   ownedRoutes: ["/reports/company"],
@@ -580,6 +619,7 @@ const HR: Workspace = {
     { key: "open-cases", label: "Open cases", ticket: "DW-7e" },
     { key: "payroll-status", label: "Payroll status", ticket: "DW-7e" },
   ],
+  creates: ["new-hire"],
   quickActions: [
     { key: "approve-leave", label: "Approve leave", href: "/hr/leave", gate: HR_ON },
     { key: "new-hire", label: "New hire", href: "/hr/onboarding", gate: HR_ON },
@@ -590,6 +630,12 @@ const HR: Workspace = {
     { key: "payroll-on-time", label: "Payroll published on time" },
     { key: "time-to-hire", label: "Time to hire" },
     { key: "mandatory-learning", label: "Mandatory learning complete" },
+  ],
+  assistantPrompts: [
+    { label: "Who is away this week?", prompt: "Who is on leave this week?" },
+    { label: "Which appraisals are open?", prompt: "Which appraisals are still open, and who owns them?" },
+    { label: "Which onboarding tasks are late?", prompt: "Which onboarding tasks are overdue?" },
+    { label: "Draft a staff reminder", prompt: "Draft a short reminder to staff about " },
   ],
   // Appraisal cycle administration lives in HR › Talent (§5.3), so its pages are HR's.
   ownedRoutes: ["/hr", "/appraisals/cycles"],
@@ -658,6 +704,7 @@ const FINANCE: Workspace = {
     { key: "close-progress", label: "Close progress", ticket: "DW-7e" },
     { key: "integrity-findings", label: "Integrity findings", ticket: "DW-7e" },
   ],
+  creates: ["record-journal"],
   quickActions: [
     { key: "confirm-payments", label: "Confirm payments", href: "/finance/receivables" },
     { key: "record-journal", label: "Record a journal", href: "/finance/journals" },
@@ -667,6 +714,12 @@ const FINANCE: Workspace = {
     { key: "close-on-time", label: "Period closed on time" },
     { key: "overdue-receivables-share", label: "Overdue receivables share" },
     { key: "payments-confirmed-1d", label: "Client payments confirmed within 1 day" },
+  ],
+  assistantPrompts: [
+    { label: "Which invoices are overdue?", prompt: "Which invoices are overdue, and for how long?" },
+    { label: "What is waiting for approval?", prompt: "Which bills or expenses are waiting for approval?" },
+    { label: "Summarise this month's spend", prompt: "Summarise this month's spending by category." },
+    { label: "Which clients owe us?", prompt: "Which clients have unpaid balances?" },
   ],
   // `/billing` is the old path of `/invoices` and redirects there.
   ownedRoutes: ["/finance", "/invoices", "/billing"],
@@ -711,11 +764,18 @@ const IT: Workspace = {
     { key: "account-requests", label: "Account requests", ticket: "DW-7e" },
     { key: "failing-workflows", label: "Failing workflows", ticket: "DW-7e" },
   ],
+  creates: ["register-device"],
   quickActions: [{ key: "register-device", label: "Register a device", href: "/it/devices", gate: IT_ON }, ...ASK_ACTIONS],
   kpis: [
     { key: "uptime", label: "Device and network uptime" },
     { key: "requests-within-sla", label: "Account and device requests resolved within the SLA" },
     { key: "open-threat-alerts", label: "Open threat alerts" },
+  ],
+  assistantPrompts: [
+    { label: "Which access requests are open?", prompt: "Which access requests are waiting for a decision?" },
+    { label: "Which systems had problems?", prompt: "Which systems had problems this week?" },
+    { label: "Draft a maintenance notice", prompt: "Draft a notice to staff about planned maintenance on " },
+    { label: "Which devices need replacing?", prompt: "Which devices are due for replacement?" },
   ],
   ownedRoutes: ["/it"],
 };
@@ -739,11 +799,18 @@ const GENERIC: Workspace = {
     { key: "due-soon", label: "Due soon", ticket: "DW-3e" },
     { key: "blocked", label: "Blocked", ticket: "DW-3e" },
   ],
+  creates: ["new-task"],
   quickActions: [{ key: "new-task", label: "New task", href: "/tasks/new" }],
   kpis: [
     { key: "projects-on-time", label: "Projects on time" },
     { key: "overdue-tasks", label: "Overdue tasks" },
     { key: "check-in-compliance", label: "Check-in compliance" },
+  ],
+  assistantPrompts: [
+    { label: "Summarise this week's tasks", prompt: "Summarise this week's tasks for my team." },
+    { label: "What is overdue or blocked?", prompt: "Which tasks are overdue or blocked right now?" },
+    { label: "Draft a task", prompt: "Draft a task for my team about " },
+    { label: "Who has capacity?", prompt: "Who on my team has capacity this week?" },
   ],
   ownedRoutes: [],
 };

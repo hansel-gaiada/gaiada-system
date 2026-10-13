@@ -1,26 +1,66 @@
 # Site CI/CD for a WebDesk-generated repo (kind: static). Source of truth: webdesk/templates/ in the
-# gaiada monorepo; edit there, not in the published template repo.
+# gaiada monorepo; edit there, not in the published template repo. Design: docs/plans/2026-10-11-webdesk-m6-plan.md §6.3
+# (M6-P6f); the transport and the per-site secret's shape: webdesk/templates/_deploy/README.md.
 #
-# verify: skipped entirely when this repo IS a template (name starts with "template-", or a
-#   .template marker file exists). Otherwise requires CONTRACT.lock, then installs and builds.
-# deploy: default branch only, after verify. Gated by the org secret WEBDESK_DEPLOY_GRANT, which the
-#   ERP grants only to registered repos that have a lock. The real target is defined by M6-P6.
+# ONE workflow, two triggers, two jobs.
+#   push to the default branch  -> deploys STAGING.   Any other branch, tag or pull request: builds and verifies, deploys nothing.
+#   workflow_dispatch           -> the ERP's chokepoint (WSK-60: inputs approval_id, kind, published_at). kind publish/rebuild
+#                                  rebuilds STAGING; PRODUCTION only for environment=production + kind=promote + an approval id
+#                                  (.webdesk/deploy/plan.sh refuses everything else, loudly).
+#
+# build:  verifies (skipped entirely when this repo IS a template: name starts with "template-", or a .template marker exists),
+#         builds the site, writes the build stamp webdesk-build.json (buildId = run id, attempt and commit), makes the manifest
+#         and uploads both. It holds NO deploy credential: only the content read key, and never the per-site secret.
+# deploy: needs build. Holds the per-site secret, runs NO package manager (only apt-get for lftp, before the secret is read).
+#         Gate 1: the org secret WEBDESK_DEPLOY_GRANT (the ERP grants it only to registered repos that have a lock, M6-P4g).
+#         Gate 2: the per-site secret WEBDESK_DEPLOY_<SLUG>_<ENV>_<REPOID>, derived here from the repo's name, the environment and
+#         github.repository_id (the same name the ERP records and shows the org owner); absent => a named failure.
 name: site
 
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      approval_id:
+        description: "The ERP approval that authorised this run (WSK-60). A dispatch without one is refused."
+        required: true
+        type: string
+      kind:
+        description: "publish or rebuild (staging), or promote (production)"
+        required: true
+        type: string
+      published_at:
+        description: "ISO-8601 time of the publish this run must include (kind=publish only)"
+        required: false
+        type: string
+        default: ""
+      environment:
+        description: "staging (the default) or production. Production only with kind=promote."
+        required: false
+        type: string
+        default: staging
 
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
-  verify:
+  build:
     runs-on: ubuntu-latest
     outputs:
       is_template: ${{ steps.tpl.outputs.template }}
+      deploy: ${{ steps.plan.outputs.deploy }}
+      environment: ${{ steps.plan.outputs.environment }}
+      build_id: ${{ steps.stamp.outputs.build_id }}
+      manifest_sha256: ${{ steps.manifest.outputs.sha256 }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
       - name: Detect template repo
         id: tpl
         run: |
@@ -38,22 +78,87 @@ jobs:
             echo "::error::CONTRACT.lock is missing. This repo has not been filled by code.scaffold; nothing here may build or deploy without the lock."
             exit 1
           fi
+      - name: Plan (which trigger deploys what)
+        id: plan
+        env:
+          PLAN_EVENT: ${{ github.event_name }}
+          PLAN_REF: ${{ github.ref }}
+          PLAN_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PLAN_IS_TEMPLATE: ${{ steps.tpl.outputs.template }}
+          PLAN_IN_APPROVAL_ID: ${{ inputs.approval_id }}
+          PLAN_IN_KIND: ${{ inputs.kind }}
+          PLAN_IN_PUBLISHED_AT: ${{ inputs.published_at }}
+          PLAN_IN_ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          bash .webdesk/deploy/plan.sh > "$RUNNER_TEMP/plan.out" || { cat "$RUNNER_TEMP/plan.out"; exit 1; }
+          cat "$RUNNER_TEMP/plan.out"
+          grep -E '^(deploy|environment|reason)=' "$RUNNER_TEMP/plan.out" >> "$GITHUB_OUTPUT"
+      - name: Test the secret-name derivation against the shared fixture
+        if: steps.tpl.outputs.template != 'true'
+        run: bash .webdesk/deploy/test-secret-name.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         if: steps.tpl.outputs.template != 'true'
         with:
           node-version: 24
           cache: npm
+      - name: Note when the build began (the stamp's pulledAt)
+        id: clock
+        if: steps.tpl.outputs.template != 'true'
+        run: echo "pulled_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - name: Install
         if: steps.tpl.outputs.template != 'true'
         run: npm ci || npm install
       - name: Build
         if: steps.tpl.outputs.template != 'true'
+        env:
+          # The content read key is the only credential the build job holds (WSK-66 key.mint, pasted once by the operator).
+          WEBDESK_HOST: ${{ secrets.WEBDESK_HOST || vars.WEBDESK_HOST }}
+          WEBDESK_API_KEY: ${{ secrets.WEBDESK_API_KEY }}
         run: npm run build
+      - name: Stage the artifact and write the build stamp
+        id: stamp
+        if: steps.plan.outputs.deploy == 'true'
+        env:
+          STAMP_COMMIT: ${{ github.sha }}
+          STAMP_KIND: static
+          STAMP_ENVIRONMENT: ${{ steps.plan.outputs.environment }}
+          STAMP_PULLED_AT: ${{ steps.clock.outputs.pulled_at }}
+          STAMP_TRIGGER: ${{ github.event_name }}
+          STAMP_RUN_ID: ${{ github.run_id }}
+          STAMP_RUN_ATTEMPT: ${{ github.run_attempt }}
+          STAMP_APPROVAL_ID: ${{ inputs.approval_id }}
+          STAMP_PUBLISHED_AT: ${{ inputs.published_at }}
+        run: |
+          [ -d dist ] || { echo "::error::the build produced no dist/ directory"; exit 1; }
+          build_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA:0:12}"
+          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
+          mkdir -p webdesk-out/site
+          cp -a dist/. webdesk-out/site/
+          STAMP_BUILD_ID="$build_id" bash .webdesk/deploy/write-stamp.sh webdesk-out/site
+      - name: Make the manifest
+        id: manifest
+        if: steps.plan.outputs.deploy == 'true'
+        run: |
+          bash .webdesk/deploy/make-manifest.sh webdesk-out/site > webdesk-out/manifest.tsv
+          echo "sha256=$(sha256sum webdesk-out/manifest.tsv | cut -c1-64)" >> "$GITHUB_OUTPUT"
+          echo "manifest: $(wc -l < webdesk-out/manifest.tsv) files"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: steps.plan.outputs.deploy == 'true'
+        with:
+          name: webdesk-site
+          path: webdesk-out
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
 
   deploy:
-    needs: verify
-    if: needs.verify.outputs.is_template != 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    needs: build
+    if: needs.build.outputs.deploy == 'true'
     runs-on: ubuntu-latest
+    # One deploy at a time per site and environment; a second one waits (it never cancels a deploy that is mid-upload).
+    concurrency:
+      group: webdesk-deploy-${{ github.repository }}-${{ needs.build.outputs.environment }}
+      cancel-in-progress: false
     steps:
       - name: Require deploy grant
         env:
@@ -63,5 +168,42 @@ jobs:
             echo "::error::this repo has not been granted deploy access (no webdev_sites row or no CONTRACT.lock) — see M6-P4g"
             exit 1
           fi
-      - name: Deploy (placeholder)
-        run: echo "Deploy target is defined by M6-P6; nothing is deployed from this template."
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: .webdesk/deploy
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: webdesk-site
+          path: artifact
+      - name: Install lftp (before any secret is read)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends lftp
+      - name: Deploy (SFTP or FTPS, verified, stamp read back)
+        env:
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          REPO_ID: ${{ github.repository_id }}
+          DEPLOY_ENVIRONMENT: ${{ needs.build.outputs.environment }}
+          DEPLOY_SITE_KIND: static
+          DEPLOY_ARTIFACT_DIR: artifact/site
+          DEPLOY_MANIFEST: artifact/manifest.tsv
+          DEPLOY_MANIFEST_SHA256: ${{ needs.build.outputs.manifest_sha256 }}
+          DEPLOY_BUILD_ID: ${{ needs.build.outputs.build_id }}
+          DEPLOY_MIN_FILES: ${{ vars.WEBDESK_DEPLOY_MIN_FILES || '2' }}
+          DEPLOY_MIN_PAGES: ${{ vars.WEBDESK_DEPLOY_MIN_PAGES || '1' }}
+        run: |
+          set +x
+          name="$(bash .webdesk/deploy/secret-name.sh "$REPO_NAME" "$DEPLOY_ENVIRONMENT" "$REPO_ID")"
+          # GitHub expressions have no upper() or replace(), so the secret is read through toJSON(secrets) and selected by name here.
+          secret="$(printf '%s' "$ALL_SECRETS" | jq -r --arg n "$name" 'to_entries[] | select((.key | ascii_upcase) == $n) | .value')"
+          unset ALL_SECRETS
+          if [ -z "$secret" ]; then
+            echo "::error::the per-site deploy secret $name does not exist yet or is not granted to this repo; see the console's pending list"
+            exit 1
+          fi
+          echo "per-site deploy secret $name found"
+          masked="$(printf '%s' "$secret" | jq -c . 2>/dev/null || true)"
+          [ -z "$masked" ] || printf '::add-mask::%s\n' "$masked"
+          export DEPLOY_SECRET_JSON="$secret"
+          unset secret
+          bash .webdesk/deploy/deploy-from-secret.sh

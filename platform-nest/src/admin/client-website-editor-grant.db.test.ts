@@ -84,7 +84,7 @@ describe.skipIf(!TEST_URL)("WSK-49f: client-scoped grants in the choke point and
       await addContact(co, clientA, revoked, { status: "revoked" });
       await expect(withTenants([co], (c) => grantClientWebsiteEditor(c, spec(revoked)))).rejects.toThrow(/target_not_a_contact_of_client/);
       const scoped = await createUser("scoped@w49f-db.test");
-      const proj = await createProject(co, "w49f scoped");
+      const proj = await createProject(co, "w49f scoped", undefined, clientA);
       await addContact(co, clientA, scoped, { projectId: proj });
       await expect(withTenants([co], (c) => grantClientWebsiteEditor(c, spec(scoped)))).rejects.toThrow(/target_not_a_contact_of_client/);
       const gone = await createUser("deleted@w49f-db.test");
@@ -197,7 +197,7 @@ describe.skipIf(!TEST_URL)("WSK-49f: client-scoped grants in the choke point and
         const u = await createUser(`${email}@w49f-db.test`);
         let projectId: string | null = null;
         if ((opts as { projectId?: string }).projectId) {
-          projectId = await createProject(co, "w49f scoped 2");
+          projectId = await createProject(co, "w49f scoped 2", undefined, clientA);
         }
         await addContact(co, clientA, u, { ...(opts as object), projectId });
         await grantRole(u, editorRole, "client", clientA);

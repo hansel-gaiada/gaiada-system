@@ -212,7 +212,7 @@ test.describe("client portal", () => {
     await expect(page).toHaveURL(/\/portal\/approvals\/run-demo-1$/);
     await page.goBack();
 
-    // Submit a new one. `demo-client`'s profile is client-wide (`access.wholeClient: true`), so "Your
+    // Submit a new one. `demo-client`'s profile is client-wide (`access.wideClientIds: [the client]`), so "Your
     // whole account" is offered — the project-SCOPED half of this rule (no such option, and a required
     // project) is pinned as a unit test instead (`lib/portal.test.ts`), per the task brief's "do not
     // invent a second client identity" constraint.

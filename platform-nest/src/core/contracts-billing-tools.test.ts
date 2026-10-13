@@ -441,6 +441,38 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
       expect(await contractStatus(sent)).toBe("void");
     });
 
+    it("PV5-F1: an explicit value:null clears a DRAFT's value; an absent key leaves it; a sent contract refuses; authz comes first", async () => {
+      const contractValue = async (id: string) =>
+        (await adminPool().query<{ value: string | null; currency: string }>(`SELECT value::text AS value, currency FROM contracts WHERE id = $1`, [id])).rows[0]!;
+      const patch = (id: string, payload: Record<string, unknown>, who = admin) =>
+        app.inject({ method: "PATCH", url: `/api/${tenant}/contracts/${id}`, headers: asUser(who), payload });
+
+      const id = await draftViaTool(clientA, "PV5F1-CLEAR-1", { value: 1500, currency: "USD" });
+      expect(Number((await contractValue(id)).value)).toBe(1500);
+      // Absent key: unchanged.
+      expect((await patch(id, { title: "Renamed" })).statusCode).toBe(200);
+      expect(Number((await contractValue(id)).value)).toBe(1500);
+      // Explicit null: cleared; the currency is left as it was.
+      const cleared = await patch(id, { value: null });
+      expect(cleared.statusCode, cleared.body).toBe(200);
+      expect(await contractValue(id)).toEqual({ value: null, currency: "USD" });
+      // A number sets it again.
+      expect((await patch(id, { value: 20 })).statusCode).toBe(200);
+      expect(Number((await contractValue(id)).value)).toBe(20);
+
+      // A sent contract cannot have its value cleared (not even while voiding it), and is untouched.
+      const sent = await draftViaTool(clientA, "PV5F1-CLEAR-2", { value: 99 });
+      expect((await callTool("contracts.send", { tenantId: tenant, contractId: sent }, ADMIN)).statusCode).toBe(200);
+      expect((await patch(sent, { value: null })).statusCode).toBe(400);
+      expect((await patch(sent, { value: null, status: "void" })).statusCode).toBe(400);
+      expect(Number((await contractValue(sent)).value)).toBe(99);
+      expect(await contractStatus(sent)).toBe("sent");
+
+      // Authorization runs before validation: a caller with no right gets 403 and nothing changes.
+      expect((await patch(id, { value: null }, outsider)).statusCode).toBe(403);
+      expect(Number((await contractValue(id)).value)).toBe(20);
+    });
+
     it("🔴 decide: a caller with no right to decide gets 403 for an empty body; an admin gets the 400", async () => {
       const p = await insertPayment(invoiceA, clientA, 5, recorder);
       const denied = await app.inject({ method: "POST", url: `/api/${tenant}/invoice-payments/${p}/decide`, headers: asUser(outsider), payload: {} });

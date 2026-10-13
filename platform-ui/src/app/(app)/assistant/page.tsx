@@ -1,13 +1,13 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getPrefs } from "@/lib/prefs";
-import { listThreads } from "@/lib/assistant-data";
+import { listThreads, resolveOrigin, withRequestedThread } from "@/lib/assistant-data";
 import { AssistantWorkspace } from "@/components/assistant/AssistantWorkspace";
 import { EmptyNote } from "@/components/systems/EmptyNote";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { Eyebrow } from "@/components/ui";
+import { PageHeader } from "@/components/PageHeader";
 
 // ASST-07 — the `/assistant` workspace. Owner-only end to end (ASST-02's Cerbos policy has no
 // admin/company_admin/group_executive bypass), so this page needs no `can()` capability check —
@@ -22,7 +22,11 @@ import { Eyebrow } from "@/components/ui";
 // re-fetch — see AssistantWorkspace) purely so THIS read exists for the next real page load. A
 // request for a thread that doesn't exist in the caller's OWN list is ignored, never trusted
 // blindly — the owner-only fetch a moment later is still the real check.
-type SP = Promise<{ thread?: string }>;
+//
+// DW-2h — `?from=<path>` is the page the person opened the assistant from (the drawer's "Open in full
+// page" carries it over). It names the department in the chip, picks that department's starter prompts,
+// and is where "Close" goes back to. A full page opened without it shows no department and no Close.
+type SP = Promise<{ thread?: string; from?: string }>;
 
 export default async function AssistantPage({ searchParams }: { searchParams: SP }) {
   const userId = await getSessionUserId();
@@ -33,26 +37,32 @@ export default async function AssistantPage({ searchParams }: { searchParams: SP
     return <EmptyNote>Select a company to open the assistant.</EmptyNote>;
   }
 
-  const { thread: requestedThreadId } = await searchParams;
-  const [initial, prefs] = await Promise.all([
+  const { thread: requestedThreadId, from } = await searchParams;
+  const [initial, prefs, origin] = await Promise.all([
     listThreads(userId, tenant).catch(() => ({ items: [], total: 0 })),
     getPrefs(),
+    resolveOrigin(me, tenant, from),
   ]);
-  const initialActiveThreadId = requestedThreadId && initial.items.some((t) => t.id === requestedThreadId)
+  const items = await withRequestedThread(userId, tenant, initial.items, requestedThreadId);
+  const initialActiveThreadId = requestedThreadId && items.some((t) => t.id === requestedThreadId)
     ? requestedThreadId
     : null;
 
   return (
     <div className="asst-page">
-      <div style={{ marginBottom: 18 }}>
-        <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Assistant" }]} />
-        <Eyebrow style={{ color: "var(--erp-accent)", marginBottom: 6, display: "block" }}>Intelligence</Eyebrow>
-        <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 28, letterSpacing: "-0.015em", lineHeight: 1.06 }}>Assistant</h1>
-      </div>
+      <PageHeader
+        title="AI Assistant"
+        actions={origin ? (
+          <Link href={origin.path} className="asst-close-link" aria-label="Close the assistant and go back to the page you came from">
+            Close ✕
+          </Link>
+        ) : undefined}
+      />
       <AssistantWorkspace
-        initialThreads={initial.items}
+        initialThreads={items}
         initialActiveThreadId={initialActiveThreadId}
         initialRailCollapsed={prefs.assistantRailCollapsed}
+        origin={origin}
       />
     </div>
   );

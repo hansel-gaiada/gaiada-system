@@ -32,6 +32,7 @@ import { config } from "../../config";
 import { emitEvent } from "../../events/outbox.service";
 import { PROVISIONED_PLACEHOLDER_DOMAIN_SUFFIX } from "./provision-completion";
 import { DeliveryRefusal, deliveryStateOf, vaultRecordRefusal, type BindingInput, type DeliveryState } from "./delivery-binding";
+import { PropertyDomainConflict, linkPropertyForSite, type PropertyLinkResult } from "./site-property-link";
 
 export const SITE_ENVIRONMENTS = new Set(["production", "staging", "preview", "development"]);
 export const SITE_HOST_KINDS = new Set(["our-box", "client-cpanel", "shared-hosting", "external", "unknown"]);
@@ -271,13 +272,19 @@ export async function patchWebdevSiteVaultRef(
  *  Race safety: the row is locked (`FOR UPDATE`) and then claimed by an UPDATE that repeats the claimable
  *  predicate in its WHERE, so two concurrent claims cannot both win — the loser blocks on the lock, re-reads
  *  the winner's real domain and answers 409. The `ux_webdev_sites_tenant_domain` unique index is the backstop
- *  for the real domain already belonging to another live row (409). Both RLS walls are set (`modules`). */
+ *  for the real domain already belonging to another live row (409). Both RLS walls are set (`modules`).
+ *
+ *  M6-P6i — the claim also CREATES OR LINKS the domain's `search_properties` row, in the SAME transaction (site-property-link.ts
+ *  holds the rule): unverified for a client's site, verified (under the internal sentinel) only for an internal one and only
+ *  once the D36 sentinel exists; an existing property is linked and left as it is; one that belongs to another client refuses
+ *  the claim (409 `property_domain_conflict`). The answer carries it as `property`, so a caller sees at once whether MON-01 may
+ *  probe the domain. The `search` module scope is declared alongside `webdev` for that reason. */
 export async function claimProvisionedSiteDomain(
   tenantId: string,
   siteId: string,
   rawDomain: string,
   actorId: string | null,
-): Promise<WebdevSiteDto> {
+): Promise<WebdevSiteDto & { property: PropertyLinkResult }> {
   const domain = normalizeSiteDomain(rawDomain);
   if (domain === "invalid" || domain.endsWith(".invalid")) {
     // RFC 2606: `.invalid` never resolves. It is the placeholder's own namespace, so accepting it would
@@ -308,12 +315,14 @@ export async function claimProvisionedSiteDomain(
         await emitEvent(c, tenantId, "webdev_site", claimed.id, "webdev.site.domain_claimed", {
           domain: claimed.domain, previousDomain: cur.rows[0].domain, actorId,
         });
-        return claimed;
+        const property = await linkPropertyForSite(c, tenantId, { id: claimed.id, domain: claimed.domain, clientId: claimed.client_id });
+        return { row: claimed, property };
       },
-      { modules: ["webdev"] },
+      { modules: ["webdev", "search"] },
     );
-    return toDto(row);
+    return { ...toDto(row.row), property: row.property };
   } catch (err) {
+    if (err instanceof PropertyDomainConflict) throw new ConflictException("property_domain_conflict");
     // ux_webdev_sites_tenant_domain: another live row in this tenant already holds this domain.
     if (pgCode(err) === "23505") throw new ConflictException("a site with this domain already exists");
     if (pgCode(err) === "23514" || pgCode(err) === "23502") throw new BadRequestException("site payload failed a database constraint");
@@ -418,7 +427,7 @@ export async function createProductionFromStaging(
   stagingId: string,
   rawDomain: string,
   actorId: string | null,
-): Promise<DeliverySiteDto> {
+): Promise<DeliverySiteDto & { property: PropertyLinkResult }> {
   let domain: string;
   try {
     domain = normalizeSiteDomain(rawDomain);
@@ -477,17 +486,23 @@ export async function createProductionFromStaging(
         await emitEvent(c, tenantId, "webdev_site", row.id, "webdev.site.created", {
           domain: row.domain, environment: "production", origin: "provisioned", promotedFromSiteId: staging.id, actorId,
         });
+        // M6-P6i: the production domain gets its search property and consent gate too (same rule as the claim; see the header).
+        const property = await linkPropertyForSite(c, tenantId, { id: row.id, domain: row.domain, clientId: row.client_id });
         return {
           ...toDto(row),
           deliveryState: deliveryStateOf({
             origin: row.origin, hostKind: row.host_kind, hostRef: row.host_ref, access: row.access, vaultRef: row.vault_ref,
             vaultRecord: null,
           }),
+          property,
         };
       },
-      { modules: ["webdev"] },
+      { modules: ["webdev", "search"] },
     );
   } catch (err) {
+    if (err instanceof PropertyDomainConflict) {
+      throw new DeliveryRefusal("property_domain_conflict", "the domain already has a search property that belongs to another client");
+    }
     if (pgCode(err) === "23505") {
       // The indexes are the backstop for a race the FOR UPDATE could not see (a different staging row, a concurrent domain claim).
       if (pgConstraint(err) === "ux_webdev_sites_tenant_domain") {

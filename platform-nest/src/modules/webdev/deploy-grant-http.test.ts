@@ -88,7 +88,8 @@ describe.skipIf(!TEST_URL)("M6-P4g · deploy-grant routes (HTTP, isolated app, r
     const lock = JSON.stringify({ blockLibraryVersion: "", contentHash, contractVersion: "1.0.0", snapshotId, vocabularyVersion: "1.1.0" }, null, 2) + "\n";
     const commit = gh.pushHumanCommit({ "CONTRACT.lock": lock });
     gh.addOrgSecret(GRANT);
-    const siteSecret = siteDeploySecretName({ id, slug, environment: "staging" });
+    // M6-P6f: the per-site name ends in the repository id (the fake repo's), which a site's own workflow knows as github.repository_id
+    const siteSecret = siteDeploySecretName({ slug, environment: "staging", repositoryId: gh.repoId });
     if (opts.siteSecret !== false) gh.addOrgSecret(siteSecret);
     if (opts.committed !== false) {
       await db.query(
@@ -168,7 +169,7 @@ describe.skipIf(!TEST_URL)("M6-P4g · deploy-grant routes (HTTP, isolated app, r
     const got = await app.inject({ method: "GET", url: `/api/${tenant}/modules/webdev/provisioned-sites/${s.id}`, headers: asUser(manager) });
     expect(got.statusCode).toBe(200);
     expect(got.json().deployGrant).toMatchObject({
-      state: "granted", secretNames: [GRANT, s.siteSecret], siteSecretName: s.siteSecret, pendingNames: [], repositoryId: gh.repoId, error: null,
+      state: "granted", secretNames: [GRANT, s.siteSecret], siteSecretName: s.siteSecret, siteSecretNote: null, pendingNames: [], repositoryId: gh.repoId, error: null,
     });
 
     const short = await revoke(s.id, manager, { reason: "no" });

@@ -33,7 +33,7 @@ import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/s
 import { createCompany, createUser, addMembership, createRole, grantRole } from "../../testing/fixtures";
 import { EditorialUnavailableError, WebdeskControlClient, WebdeskControlTransportError } from "./webdesk-control-client";
 import { setWebdeskApprovedCommandDepsForTests, NOT_CONFIGURED_EDITORIAL_SIGNER } from "./webdesk-approved-command";
-import { WebdeskProblem, setStagingStaleMarkerForTests, webdeskZoneB } from "./webdesk-content.service";
+import { WebdeskProblem, setIndexNowTakedownNotifierForTests, setStagingStaleMarkerForTests, webdeskZoneB } from "./webdesk-content.service";
 import { webdevModule } from "./index";
 import { FakeZoneB, GAIADA_SITE, GAIADA_SLUG, OTHER_SITE, OTHER_SLUG, makeTestSigner, problem, type FakeItem } from "./webdesk-content-testkit";
 
@@ -647,7 +647,55 @@ describe.skipIf(!live)("WSK-59 · the content BFF", () => {
     beforeEach(async () => {
       await adminPool().query(`DELETE FROM webdev_site_staging_marks WHERE tenant_id = $1`, [A]);
     });
-    afterEach(() => setStagingStaleMarkerForTests(null));
+    afterEach(() => {
+      setStagingStaleMarkerForTests(null);
+      setIndexNowTakedownNotifierForTests(null);
+    });
+
+    describe("M5-P5a2: an unpublish of live content pings IndexNow, fire-and-forget", () => {
+      const tick = () => new Promise<void>((r) => setImmediate(r));
+
+      it("unpublishing a live item calls the notifier once: (unpublish, the pre-read publishedVersion, a req: ref from the Idempotency-Key)", async () => {
+        const n = vi.fn(async (_tenantId: string, _a: unknown) => "queued");
+        setIndexNowTakedownNotifierForTests(n);
+        const r = await call("POST", `${site()}/items/${live1.itemId}/unpublish`, publisherA, { expectedPublishedVersion: 1 }, { "idempotency-key": "idem-p5a2-unpublish-1" });
+        expect(r.statusCode).toBe(200);
+        expect(n).toHaveBeenCalledTimes(1);
+        const ref = "req:" + createHash("sha256").update("idem-p5a2-unpublish-1").digest("hex").slice(0, 16);
+        expect(n.mock.calls[0]).toEqual([A, { tenantSlug: GAIADA_SLUG, siteId: GAIADA_SITE, transition: "unpublish", ref, items: [{ itemId: live1.itemId, version: 1 }] }]);
+      });
+
+      it("a draft-only delete, a refused unpublish and an update never call it", async () => {
+        const n = vi.fn(async (_tenantId: string, _a: unknown) => "queued");
+        setIndexNowTakedownNotifierForTests(n);
+        expect((await call("POST", `${site()}/items/${item.itemId}/delete`, publisherA, { baseVersion: 1 })).statusCode).toBe(200);
+        const fresh = zb.seedItem({ siteId: GAIADA_SITE, slug: "service.p5a2-draft", collectionKey: "service" });
+        expect((await call("POST", `${site()}/items/${fresh.itemId}/unpublish`, publisherA, { expectedPublishedVersion: 1 })).statusCode).toBe(409);
+        expect((await call("PUT", `${site()}/items/${fresh.itemId}`, publisherA, { baseVersion: 1, fields: { h1: "edit" } })).statusCode).toBe(200);
+        await tick();
+        expect(n).not.toHaveBeenCalled();
+      });
+
+      it("a notifier that REJECTS (or throws synchronously) changes nothing the editor sees: 200, ledger 'succeeded', staging marked, a warning with the error name only", async () => {
+        setIndexNowTakedownNotifierForTests(async () => {
+          throw new TypeError("secret-url-https://x.example/page");
+        });
+        const warn = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => {});
+        try {
+          const r = await call("POST", `${site()}/items/${live1.itemId}/unpublish`, publisherA, { expectedPublishedVersion: 1 });
+          expect(r.statusCode).toBe(200);
+          expect(r.json().item).toMatchObject({ publishState: "unpublished", publishedVersion: null });
+          await tick();
+          expect((await ledger("webdesk.content.unpublish")).map((row) => row.metadata.outcome)).toEqual(["attempted", "succeeded"]);
+          const logged = warn.mock.calls.map((c) => String(c[0]));
+          expect(logged.some((m) => m.includes("IndexNow unpublish ping failed") && m.includes(live1.itemId) && m.includes("TypeError"))).toBe(true);
+          expect(logged.join("\n")).not.toContain("secret-url");
+        } finally {
+          warn.mockRestore();
+        }
+        expect(await stagingStale()).toBe(true);
+      });
+    });
 
     it("unpublishing a live item marks staging stale, under the site id the build-status route reads", async () => {
       expect(await stagingStale()).toBe(false);

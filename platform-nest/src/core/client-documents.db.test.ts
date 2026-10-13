@@ -203,7 +203,7 @@ describe.skipIf(!TEST_URL)("PV5-08 · Documents (portal list, staff list, parity
         [id, co, clientId, status],
       );
     await rawInvoice(f.iDraftInv, clientA, "draft");
-    await rawInvoice(f.iUnissuedVoid, clientA, "void"); // visible in the portal's invoice list, but never issued: no document
+    await rawInvoice(f.iUnissuedVoid, clientA, "void"); // never issued: hidden from the portal's invoice list (PV5-F1) and has no document
 
     // ── Receipts ──────────────────────────────────────────────────────────────────────────
     await payment(f.payShown, f.iIssued, clientA, f.proofShown, "slip.pdf");

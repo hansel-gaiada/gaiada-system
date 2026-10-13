@@ -23,6 +23,10 @@
 // Same shape as the key route: `promote` gate first, then the wall, then `controlRequestSiteArchive` files ONE
 // WSK-66 approval (202 `{approvalId}`); the archive itself is sent at decide() by a DIFFERENT authorised user.
 //
+// ── M6-P6i: `POST sites/:siteId/domain` FILES A site.setDomain APPROVAL ─────────────────────────────
+// Same shape as the archive and key routes: `promote` gate first, then the wall, then `controlRequestSiteDomain` files ONE
+// WSK-66 approval (202 `{approvalId}`); the one WS4 command is sent at decide() by a DIFFERENT authorised user.
+//
 // ── M6-P4c: `POST contract/regenerate` IS REAL ───────────────────────────────────────────────────────
 // WebDesk `contract.regenerate` (MEDIUM) for one of this company's tenants or all of them, through the same
 // channel and wall (`controlRegenerateContract`). Gate: `operate`, like the other MEDIUM control writes.
@@ -82,7 +86,7 @@ import { ModuleEnabledGuard } from "../module-enabled.guard";
 // control channel (the wall, typed errors and ledger rows live in the service). `POST sites/:siteId/keys` FILES a
 // key.mint approval (WSK-66 mints at decide()). Everything else stays 501.
 import { WebdeskProblemFilter } from "./webdesk-content.controller";
-import { controlApplySchema, controlListSites, controlProvisionSite, controlRegenerateContract, controlRequestKeyMint, controlRequestSiteArchive, idempotencyKeyOf } from "./webdesk-content.service";
+import { controlApplySchema, controlListSites, controlProvisionSite, controlRegenerateContract, controlRequestKeyMint, controlRequestSiteArchive, controlRequestSiteDomain, idempotencyKeyOf } from "./webdesk-content.service";
 
 /** The one honest answer every route below gives. A typed `error` token (this estate's error
  *  envelope, `http-error.filter.ts`), not prose alone, so a caller (the hub, a future console) can
@@ -193,12 +197,16 @@ export class WebdeskControlController {
     return NOT_WIRED;
   }
 
+  /** M6-P6i: FILES ONE site.setDomain approval and answers 202 `{approvalId}`. Nothing changes until a DIFFERENT authorised
+   *  user approves it (WSK-66 sends the one WS4 command at decide()). Replaces the always-501 stub. Body
+   *  `{tenantSlug, envId, domain}`, `domain` a bare host name the company has claimed on its registry, or `null` to clear. */
   @Post("sites/:siteId/domain")
-  @HttpCode(501)
-  async setDomain(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Body() body: unknown) {
+  @HttpCode(202)
+  async setDomain(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("siteId") siteId: string, @Body() body: unknown,
+  ): Promise<{ approvalId: string; alreadyPending?: true }> {
     await authorize(req.principal, siteResource(tenantId), "promote");
-    requireObjectBody(body);
-    return NOT_WIRED;
+    return controlRequestSiteDomain(req.principal, tenantId, siteId, body);
   }
 
   /** Files ONE key.mint approval and answers 202 `{approvalId}`; nothing is minted until a DIFFERENT

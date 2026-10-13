@@ -8,8 +8,8 @@
 //
 // Pure and client-safe, like the registry it reads. Gates mirror the server; they are not security.
 import type { Me } from "@/lib/platform";
-import { ADMIN_ROWS, COMPANY_ROWS, sidebarRows, type WorkspaceKind } from "@/lib/workspaces";
-import { concreteRows, homeArea, type ConcreteRow, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
+import { ADMIN_ROWS, COMPANY_ROWS, hrefFor, isPlanned, sidebarRows, type WorkspaceKind } from "@/lib/workspaces";
+import { concreteRows, gateAllows, homeArea, type ConcreteRow, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
 import type { Area } from "@/lib/areas";
 
 export interface ShellRows {
@@ -31,6 +31,8 @@ export interface ShellWorkspace {
   mine: boolean;
   home: boolean;
   lead: boolean;
+  /** The workspace's own create actions, planned and gated ones dropped, made concrete (DW-2f). */
+  creates: { label: string; href: string }[];
   rows: ShellRows;
 }
 
@@ -60,6 +62,12 @@ export function buildShellModel(input: { me: Me; tenantId: string | null; worksp
     seen.add(dedupe);
     const ctx = { me, tenantId, unitPath: ref.unitPath, deptId: ref.deptId };
     const raw = sidebarRows(ref.workspace);
+    const creates = ref.workspace.creates.flatMap((key) => {
+      const action = ref.workspace.quickActions.find((a) => a.key === key);
+      if (!action || isPlanned(action) || !gateAllows(action.gate, ctx)) return [];
+      const href = hrefFor(action.href, { deptId: ref.deptId, companyId: tenantId });
+      return href ? [{ label: action.label, href }] : [];
+    });
     out.push({
       id: idOf(ref),
       key: ref.workspace.key,
@@ -69,6 +77,7 @@ export function buildShellModel(input: { me: Me; tenantId: string | null; worksp
       mine,
       home: !!homeRef && homeRef.workspace.key === ref.workspace.key && homeRef.deptId === ref.deptId,
       lead: ref.lead,
+      creates,
       rows: {
         top: concreteRows(raw.top, ctx),
         work: concreteRows(raw.work, ctx),
