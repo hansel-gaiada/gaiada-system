@@ -402,10 +402,10 @@ export class ContractsController {
         `UPDATE contracts SET
            title = COALESCE($2, title), reference = COALESCE($3, reference),
            body_md = COALESCE($4, body_md), file_id = COALESCE($5, file_id),
-           value = CASE WHEN $11::boolean THEN NULL ELSE COALESCE($6, value) END, currency = COALESCE($7, currency),
+           value = COALESCE($6, value), currency = COALESCE($7, currency),
            starts_on = COALESCE($8::date, starts_on), ends_on = COALESCE($9::date, ends_on),
            status = COALESCE($10, status), updated_at = now()
-         WHERE id = $1 AND deleted_at IS NULL`,
+         WHERE id = $1 AND deleted_at IS NULL AND ($11::boolean OR true)`,
         [
           contractId,
           b?.title ? scrubText(b.title).text.slice(0, 300) : null,
