@@ -51,6 +51,10 @@
 .dept-shell--full {
   display: block;
 }
+/* DW-2b: the workspace shell shows no My-work rail, so the main column is the whole page. */
+.dept-shell--solo {
+  display: block;
+}
 .erp-main__inner:has(.dept-shell--full) {
   max-width: none;
 }

@@ -1,6 +1,7 @@
 "use client";
 import { usePathname } from "next/navigation";
 import { type DeptGroup, tabHref } from "@/lib/deptToolkits";
+import { useWorkspaceShell } from "@/components/shell/WorkspaceShellContext";
 
 // Console-body shell (P1-01, docs/superpowers/plans/
 // 2026-07-23-pm-console-ux-design-spec.md §1). Owns the choice between the
@@ -27,6 +28,7 @@ export function DeptShellFrame({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const shell = useWorkspaceShell();
 
   let active: { href: string; len: number; fullBleed?: boolean } | null = null;
   for (const g of groups) {
@@ -44,6 +46,16 @@ export function DeptShellFrame({
 
   if (isFullBleed) {
     return <div className="dept-shell dept-shell--full">{children}</div>;
+  }
+
+  // DW-2b: no My-work rail inside a workspace (DW-D4: "Needs you" moves to the Overview in DW-3). One
+  // column, and the page keeps its normal width (only the full-bleed tabs above widen it).
+  if (shell) {
+    return (
+      <div className="dept-shell dept-shell--solo">
+        <div className="dept-shell__main">{children}</div>
+      </div>
+    );
   }
 
   return (

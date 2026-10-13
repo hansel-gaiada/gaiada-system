@@ -6,6 +6,8 @@ import { can, canViewAllCompanies, isUnrestricted } from "@/lib/rbac";
 import { navFor } from "./nav";
 import { Sidebar } from "./Sidebar";
 import { WorkspaceShellSidebar } from "./WorkspaceShellSidebar";
+import { WorkspaceShellProvider } from "./WorkspaceShellContext";
+import { WorkspaceTabStrip } from "./WorkspaceTabStrip";
 import { TopBar } from "./TopBar";
 import { SpecialAccessBanner } from "./SpecialAccessBanner";
 import { AssistantFab } from "./AssistantFab";
@@ -28,25 +30,37 @@ export function Shell({ me, tenantId, moduleLabel, prefs = DEFAULT_PREFS, depart
   // records, fetched client-side from CommandPalette itself). Both builders are pure/client-safe.
   const paletteEntries = [...buildNavEntries(navFor(me, tenantId, departments)), ...buildDeptEntries(departments, activeCompany(me, tenantId)?.vertical, (t) => !t.requires || can(me, t.requires, tenantId))];
 
-  return (
-    <div className="erp-app" data-density={prefs.density} data-width={prefs.width}>
-      <a href="#main-content" className="skip-link">Skip to content</a>
+  // Everything below the skip link. In the workspace shell it sits inside the provider, which renders no
+  // DOM, so `.erp-app`'s grid still sees these as its direct children.
+  const frame = (
+    <>
       {/* The rest of the frame stays as it is; the top bar, assistant and palette change in later DW-2 tickets. */}
       {workspaceModel ? (
-        <WorkspaceShellSidebar me={me} tenantId={tenantId} model={workspaceModel} />
+        <WorkspaceShellSidebar me={me} tenantId={tenantId} />
       ) : (
         <Sidebar me={me} tenantId={tenantId} departments={departments} />
       )}
       <TopBar me={me} tenantId={tenantId} moduleLabel={moduleLabel} theme={prefs.theme} shell={prefs.shell} />
       <main id="main-content" className="erp-main erp-scroll" tabIndex={-1}>
         {special && <SpecialAccessBanner unrestricted={isUnrestricted(me)} />}
-        <div className="erp-main__inner">{children}</div>
+        <div className="erp-main__inner">
+          {/* DW-2b: the workspace shell's one tab strip; draws nothing in the classic shell. */}
+          {workspaceModel && <WorkspaceTabStrip />}
+          {children}
+        </div>
       </main>
       {/* ASST-22 — reachable from every app page `Shell` renders, not just `/assistant` itself. */}
       <AssistantFab tenantId={tenantId} />
       {/* Command palette (§4) — additive, mounted once per shell render; renders nothing until
           opened (Cmd/Ctrl-K or the TopBar's visible trigger). */}
       <CommandPalette entries={paletteEntries} />
+    </>
+  );
+
+  return (
+    <div className="erp-app" data-density={prefs.density} data-width={prefs.width}>
+      <a href="#main-content" className="skip-link">Skip to content</a>
+      {workspaceModel ? <WorkspaceShellProvider model={workspaceModel}>{frame}</WorkspaceShellProvider> : frame}
     </div>
   );
 }
