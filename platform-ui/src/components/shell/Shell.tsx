@@ -9,6 +9,7 @@ import { WorkspaceShellSidebar } from "./WorkspaceShellSidebar";
 import { WorkspaceShellProvider } from "./WorkspaceShellContext";
 import { WorkspaceTabStrip } from "./WorkspaceTabStrip";
 import { TopBar } from "./TopBar";
+import { WorkspaceTopBar } from "./WorkspaceTopBar";
 import { SpecialAccessBanner } from "./SpecialAccessBanner";
 import { AssistantFab } from "./AssistantFab";
 import { CommandPalette } from "./CommandPalette";
@@ -34,25 +35,32 @@ export function Shell({ me, tenantId, moduleLabel, prefs = DEFAULT_PREFS, depart
   // DOM, so `.erp-app`'s grid still sees these as its direct children.
   const frame = (
     <>
-      {/* The rest of the frame stays as it is; the top bar, assistant and palette change in later DW-2 tickets. */}
+      {/* The palette's entries change in a later DW-2 ticket. */}
       {workspaceModel ? (
         <WorkspaceShellSidebar me={me} tenantId={tenantId} />
       ) : (
         <Sidebar me={me} tenantId={tenantId} departments={departments} />
       )}
-      <TopBar me={me} tenantId={tenantId} moduleLabel={moduleLabel} theme={prefs.theme} shell={prefs.shell} />
+      {/* DW-2c: the workspace shell has its own top bar, and shows the access notice as a chip in it
+          instead of the strip below. */}
+      {workspaceModel ? (
+        <WorkspaceTopBar me={me} tenantId={tenantId} theme={prefs.theme} shell={prefs.shell} special={special} unrestricted={isUnrestricted(me)} />
+      ) : (
+        <TopBar me={me} tenantId={tenantId} moduleLabel={moduleLabel} theme={prefs.theme} shell={prefs.shell} />
+      )}
       <main id="main-content" className="erp-main erp-scroll" tabIndex={-1}>
-        {special && <SpecialAccessBanner unrestricted={isUnrestricted(me)} />}
+        {special && !workspaceModel && <SpecialAccessBanner unrestricted={isUnrestricted(me)} />}
         <div className="erp-main__inner">
           {/* DW-2b: the workspace shell's one tab strip; draws nothing in the classic shell. */}
           {workspaceModel && <WorkspaceTabStrip />}
           {children}
         </div>
       </main>
-      {/* ASST-22 — reachable from every app page `Shell` renders, not just `/assistant` itself. */}
-      <AssistantFab tenantId={tenantId} />
+      {/* ASST-22 — reachable from every app page `Shell` renders, not just `/assistant` itself. The
+          workspace shell has no button: its sidebar's AI Assistant row opens the same drawer (DW-2d). */}
+      {!workspaceModel && <AssistantFab tenantId={tenantId} />}
       {/* Command palette (§4) — additive, mounted once per shell render; renders nothing until
-          opened (Cmd/Ctrl-K or the TopBar's visible trigger). */}
+          opened (Cmd/Ctrl-K or the top bar's visible trigger). */}
       <CommandPalette entries={paletteEntries} />
     </>
   );

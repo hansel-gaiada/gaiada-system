@@ -12,8 +12,8 @@ const entries: PaletteEntry[] = [
   { id: "nav:/agency", label: "Agency", href: "/agency", section: "Business", icon: "sales" },
 ];
 
-function renderPalette() {
-  return render(<CommandPalette entries={entries} />);
+function renderPalette(opts: { entries?: PaletteEntry[] } = {}) {
+  return render(<CommandPalette entries={opts.entries ?? entries} />);
 }
 
 beforeEach(() => {
@@ -129,3 +129,61 @@ describe("CommandPalette", () => {
     trigger.remove();
   });
 });
+
+// DW-2c: the workspace top bar's one search field hands its text over, and Enter always lands somewhere.
+describe("CommandPalette — search field handover (DW-2c)", () => {
+  it("opens with the text a trigger passes in the event's detail, already filtering", async () => {
+    renderPalette();
+    window.dispatchEvent(new CustomEvent("gaiada:palette:open", { detail: { query: "client" } }));
+    await waitFor(() => screen.getByRole("dialog"));
+    expect(screen.getByRole("combobox")).toHaveValue("client");
+    expect(screen.getByText("Clients")).toBeTruthy();
+    expect(screen.queryByText("Dashboard")).toBeNull();
+  });
+
+  it("opens empty when the event carries no text, and again empty after a close", async () => {
+    renderPalette();
+    window.dispatchEvent(new CustomEvent("gaiada:palette:open", { detail: { query: "client" } }));
+    await waitFor(() => screen.getByRole("dialog"));
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
+    window.dispatchEvent(new Event("gaiada:palette:open"));
+    await waitFor(() => screen.getByRole("dialog"));
+    expect(screen.getByRole("combobox")).toHaveValue("");
+  });
+
+  it("tells the trigger when it closes, before it returns focus", async () => {
+    const order: string[] = [];
+    const trigger = document.createElement("input");
+    trigger.addEventListener("focus", () => order.push("focus"));
+    document.body.appendChild(trigger);
+    trigger.focus();
+    order.length = 0;
+    renderPalette();
+    window.dispatchEvent(new CustomEvent("gaiada:palette:open", { detail: { onClose: () => order.push("closed") } }));
+    await waitFor(() => screen.getByRole("dialog"));
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
+    expect(order).toEqual(["closed", "focus"]);
+    trigger.remove();
+  });
+
+  it("Enter with nothing highlighted goes to /search?q= with the text, encoded", async () => {
+    renderPalette();
+    window.dispatchEvent(new CustomEvent("gaiada:palette:open", { detail: { query: "zzz & co" } }));
+    await waitFor(() => screen.getByRole("dialog"));
+    const input = screen.getByRole("combobox");
+    expect(input).not.toHaveAttribute("aria-activedescendant");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(push).toHaveBeenCalledWith("/search?q=zzz%20%26%20co");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("Enter with nothing highlighted and nothing typed does nothing", async () => {
+    renderPalette({ entries: [] });
+    window.dispatchEvent(new Event("gaiada:palette:open"));
+    await waitFor(() => screen.getByRole("dialog"));
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+    expect(push).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+});
+

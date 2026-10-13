@@ -4,6 +4,8 @@ import Link from "next/link";
 import { logout } from "@/app/(app)/account/actions";
 import { setShellLayoutAction } from "@/lib/prefsActions";
 import type { ShellLayout } from "@/lib/shellLayout";
+import type { Theme } from "@/lib/prefs";
+import { ThemeToggle } from "./ThemeToggle";
 
 // The sidebar user-card, upgraded to a menu button: opens a small popover with
 // "Account settings" and "Sign out". Closes on outside-click or Escape.
@@ -13,8 +15,10 @@ import type { ShellLayout } from "@/lib/shellLayout";
 // `clientView` (PV2-06) adds a "Client view" link to /portal for staff who are also client contacts.
 // `shellLayout` (DW-2a) adds the pilot switch between the classic shell and the workspace shell; the
 // action stores the choice and revalidates the layout, so the next render draws the other sidebar.
-export function UserMenu({ name, secondary, initials, compact = false, clientView = false, shellLayout }: {
-  name: string; secondary: string; initials: string; compact?: boolean; clientView?: boolean; shellLayout?: ShellLayout;
+// `theme` (DW-2c) puts the Theme control (the same ThemeToggle, same cookie) first in the menu; the
+// workspace top bar has no separate theme button. Without it the menu is exactly as it was.
+export function UserMenu({ name, secondary, initials, compact = false, clientView = false, shellLayout, theme }: {
+  name: string; secondary: string; initials: string; compact?: boolean; clientView?: boolean; shellLayout?: ShellLayout; theme?: Theme;
 }) {
   const [open, setOpen] = useState(false);
   const [switching, startSwitch] = useTransition();
@@ -37,9 +41,15 @@ export function UserMenu({ name, secondary, initials, compact = false, clientVie
   }, [open]);
 
   return (
-    <div className={`erp-usermenu${compact ? " erp-usermenu--top" : ""}`} ref={ref}>
+    <div className={`erp-usermenu${compact ? " erp-usermenu--top" : ""}${theme ? " erp-usermenu--theme" : ""}`} ref={ref}>
       {open && (
         <div className="erp-usermenu__pop" role="menu" aria-label="Account menu">
+          {theme && (
+            <div className="erp-usermenu__theme" role="group" aria-label="Theme">
+              <span className="erp-usermenu__theme-label" aria-hidden="true">Theme</span>
+              <ThemeToggle theme={theme} />
+            </div>
+          )}
           <Link href="/account" role="menuitem" className="erp-usermenu__item" onClick={() => setOpen(false)}>
             Account settings
           </Link>
