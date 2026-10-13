@@ -1,4 +1,4 @@
-// PV4-11 — migration 202610132130_pv4_conversation_messages_permanent.sql, proven against a REAL Postgres.
+// PV4-11 — migration 202610132145_pv4_conversation_messages_permanent.sql, proven against a REAL Postgres.
 // Ruling PV-D34 (owner, 2026-10-13): a conversation message is permanent; a correction is a new message.
 // Plan: docs/plans/2026-10-12-pv4-conversation-tickets.md (PV4-11).
 //

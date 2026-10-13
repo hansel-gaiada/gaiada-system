@@ -1,4 +1,4 @@
--- 202610132140_pv4_conversation_permission_descriptions.sql — PV4-11 follow-through for owner ruling PV-D34
+-- 202610132150_pv4_conversation_permission_descriptions.sql — PV4-11 follow-through for owner ruling PV-D34
 -- (2026-10-13: conversation messages are permanent; no edit, no retract).
 --
 -- 202610130120 seeded two permission descriptions that promise what PV-D34 removed: `core.conversation.manage`
@@ -21,9 +21,9 @@ BEGIN
   IF (SELECT count(*) FROM permissions
        WHERE key IN ('core.conversation.manage', 'portal.converse')
          AND description ILIKE '%retract%' AND description NOT ILIKE '%nothing retracts them%') <> 0 THEN
-    RAISE EXCEPTION '202610132140: a conversation permission description still offers edit or retract';
+    RAISE EXCEPTION '202610132150: a conversation permission description still offers edit or retract';
   END IF;
   IF (SELECT count(*) FROM permissions WHERE key IN ('core.conversation.manage', 'portal.converse')) <> 2 THEN
-    RAISE EXCEPTION '202610132140: expected both conversation permission rows to exist';
+    RAISE EXCEPTION '202610132150: expected both conversation permission rows to exist';
   END IF;
 END $$;
