@@ -130,12 +130,15 @@ export class ClientContactsController {
     if (!clientRow.rows[0]) throw new NotFoundException("client not found");
     if (projectId) {
       const p = await withTenants([tenantId], (c) =>
-        c.query(`SELECT 1 FROM projects WHERE id = $1 AND deleted_at IS NULL`, [projectId]),
+        c.query(`SELECT 1 FROM projects WHERE id = $1 AND client_id = $2 AND deleted_at IS NULL`, [projectId, clientId]),
       );
       // Resolved through the SAME tenant-scoped connection, so a project id from another tenant matches
       // zero rows rather than being accepted by an FK check (FK checks run as the table owner, OUTSIDE
       // RLS — the hazard 0072's header documents).
-      if (!p.rowCount) throw new NotFoundException("project not found in this tenant");
+      // PV4-13: the project must also belong to THIS client. A contact row naming another client's project
+      // would be read by the portal scope kernel as a reach into that project; the composite FK
+      // fk_client_contacts_project_client_tenant now refuses it too, but the answer here is a 404, not a 500.
+      if (!p.rowCount) throw new NotFoundException("project not found for this client");
     }
 
     // The platform user row is global (users has no tenant), so find-or-create outside withTenants.
