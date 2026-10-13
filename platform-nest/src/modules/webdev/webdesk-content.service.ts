@@ -55,6 +55,13 @@
 // Scheduled takedowns (`content.schedule` with `unpublishAt`) take effect inside Zone B later and are not
 // marked here.
 //
+// IndexNow (M5-P5a2): an unpublish of live content (and only that: a delete never pings, for the reason above)
+// also asks the search module to ping IndexNow, FIRE-AND-FORGET after the write succeeded: never awaited, every
+// rejection caught and logged (item id + error name only), so the editor's answer neither waits on IndexNow's
+// network nor fails because of it. A replayed request carries the same Idempotency-Key, hence the same ledger
+// ref (`req:<hash>`), and the search ledger turns the repeat into a no-op. A scheduled takedown pings from
+// scheduled-rebuilds.service.ts instead.
+//
 // ── DEGRADED, NEVER EMPTY ────────────────────────────────────────────────────────────────────────
 // A failed read is a typed 503, never `[]` (an empty list is a claim). A write with no signer or no
 // channel is a typed 503, never a silent failure: writes are refused BEFORE any ledger row, because
@@ -92,6 +99,7 @@ import {
   type WebdeskBffEditorialCommand,
 } from "./webdesk-approved-command";
 import { commandArgsAsZoneBSeesThem, computeCommandHash } from "./webdesk-ws4-assertion";
+import { notifyWebdeskTransition, type WebdeskTransitionArgs } from "../search/indexnow-webdesk";
 import { noteStagingStale } from "./site-builds.service";
 import { checkWebdeskEnvironmentDomain } from "./webdesk-domain";
 import { previewPageState, previewUrlFor, stagingOriginOf } from "./webdesk-preview";
@@ -104,6 +112,14 @@ let markStagingStale: (tenantId: string, siteId: string) => Promise<void> = note
 /** Tests: replace the stale-staging marker (null restores the real one). */
 export function setStagingStaleMarkerForTests(fn: ((tenantId: string, siteId: string) => Promise<void>) | null): void {
   markStagingStale = fn ?? noteStagingStale;
+}
+
+/** What an unpublish of live content calls to ping IndexNow (M5-P5a2). Swappable so a test can observe or break it. */
+let notifyTakedown: (tenantId: string, a: WebdeskTransitionArgs) => Promise<unknown> = (tenantId, a) => notifyWebdeskTransition(tenantId, a);
+
+/** Tests: replace the IndexNow takedown notifier (null restores the real one). */
+export function setIndexNowTakedownNotifierForTests(fn: ((tenantId: string, a: WebdeskTransitionArgs) => Promise<unknown>) | null): void {
+  notifyTakedown = fn ?? ((tenantId, a) => notifyWebdeskTransition(tenantId, a));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1277,7 +1293,32 @@ export class WebdeskContentService {
     if ((action === "unpublish" || action === "delete") && attrs.publishedVersion !== null) {
       await this.noteTakedown(gate.tenantId, site.siteId, spec.command);
     }
+    // A delete never pings (Zone B refuses to delete a live item, so a delete never takes a page down).
+    if (action === "unpublish" && attrs.publishedVersion !== null) {
+      this.pingUnpublish(gate.tenantId, site, itemId, attrs.publishedVersion, spec.idempotencyKey);
+    }
     return result;
+  }
+
+  /**
+   * M5-P5a2, FIRE-AND-FORGET (never awaited, never throws): ask IndexNow to re-crawl the page that just came down.
+   * The ledger ref is derived from the request's Idempotency-Key, so a replay of the same request is absorbed.
+   */
+  private pingUnpublish(tenantId: string, site: SiteRef, itemId: string, version: number, idempotencyKey: string): void {
+    if (!UUID_RE.test(itemId)) return;
+    try {
+      void notifyTakedown(tenantId, {
+        tenantSlug: site.tenantSlug,
+        siteId: site.siteId,
+        transition: "unpublish",
+        ref: `req:${createHash("sha256").update(idempotencyKey).digest("hex").slice(0, 16)}`,
+        items: [{ itemId, version }],
+      }).catch((err: unknown) => {
+        logger.warn(`IndexNow unpublish ping failed for item ${itemId} (${(err as Error)?.name ?? "error"})`);
+      });
+    } catch (err) {
+      logger.warn(`IndexNow unpublish ping failed for item ${itemId} (${(err as Error)?.name ?? "error"})`); // a synchronous throw from a swapped notifier
+    }
   }
 
   /** WSK-60, best-effort (see the header): the takedown already happened in Zone B, so a failed mark is logged, never thrown. */

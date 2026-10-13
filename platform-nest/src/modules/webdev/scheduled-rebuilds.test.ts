@@ -15,6 +15,7 @@ import * as http from "node:http";
 import type { AddressInfo } from "node:net";
 import * as path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { Logger } from "@nestjs/common";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../config";
 import { buildApp } from "../../main";
@@ -34,7 +35,7 @@ import {
   type EditorialAssertionSigner,
 } from "./webdesk-approved-command";
 import { getBuildStatus, sweepSiteBuilds } from "./site-builds.service";
-import { scheduleSettleIdleForTests, settleScheduledRebuilds, sweepScheduledRebuilds } from "./scheduled-rebuilds.service";
+import { scheduleSettleIdleForTests, setScheduleIndexNowNotifierForTests, settleScheduledRebuilds, sweepScheduledRebuilds } from "./scheduled-rebuilds.service";
 
 vi.mock("../../core/github/credential-store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../core/github/credential-store")>();
@@ -274,6 +275,7 @@ describe.skipIf(!live)("WSK-61 — a scheduled publish going live dispatches ONE
     await scheduleSettleIdleForTests(T);
     global.fetch = realFetch;
     setWebdeskApprovedCommandDepsForTests(null);
+    setScheduleIndexNowNotifierForTests(null);
   });
 
   afterAll(async () => {
@@ -610,6 +612,102 @@ describe.skipIf(!live)("WSK-61 — a scheduled publish going live dispatches ONE
     }, 30_000);
   });
 
+  // ─────────────────────────────────────────────────────────────────────────────────────────────
+  describe("M5-P5a2: a settled schedule pings IndexNow (best-effort, at-least-once, only the items in the wanted state)", () => {
+    const notifier = () => vi.fn(async (_tenantId: string, _a: unknown) => "queued");
+
+    it("a publish that settles calls the notifier ONCE with (publish, the approval id, only the at-version items); the rebuild is unaffected", async () => {
+      const a = randomUUID(), b = randomUUID();
+      const id = await schedule([{ itemId: a, version: 2 }, { itemId: b, version: 5 }], { publishAt: ago(60_000) });
+      config.webdeskSchedule.supersedeGraceMs = 1_000;
+      zb.items.set(a, liveByTime(2));
+      zb.items.set(b, published(4)); // still at its old version: not pinged
+      const n = notifier();
+      setScheduleIndexNowNotifierForTests(n);
+      expect(await settleScheduledRebuilds(T)).toMatchObject({ dispatched: 1 });
+      expect(n).toHaveBeenCalledTimes(1);
+      expect(n.mock.calls[0]).toEqual([T, { tenantSlug: TENANT_SLUG, siteId: SITE, transition: "publish", ref: id, items: [{ itemId: a, version: 2 }] }]);
+      expect(dispatches(gh)).toHaveLength(1);
+    });
+
+    it("a takedown calls it with (unpublish, the approval id, only the items that are down)", async () => {
+      const a = randomUUID(), b = randomUUID();
+      const id = await schedule([{ itemId: a, version: 3 }, { itemId: b, version: 1 }], { unpublishAt: ago(60_000) });
+      config.webdeskSchedule.supersedeGraceMs = 1_000;
+      zb.items.set(a, unpublished());
+      zb.items.set(b, published(1)); // the takedown was moved for this one: still live
+      const n = notifier();
+      setScheduleIndexNowNotifierForTests(n);
+      expect(await settleScheduledRebuilds(T)).toMatchObject({ staleMarked: 1 });
+      expect(n).toHaveBeenCalledTimes(1);
+      expect(n.mock.calls[0]).toEqual([T, { tenantSlug: TENANT_SLUG, siteId: SITE, transition: "unpublish", ref: id, items: [{ itemId: a, version: 3 }] }]);
+    });
+
+    it("a superseded settle (nothing live / nothing down), a waiting one and a settled schedule never call it", async () => {
+      const n = notifier();
+      setScheduleIndexNowNotifierForTests(n);
+      config.webdeskSchedule.supersedeGraceMs = 1_000;
+      const a = randomUUID(), c = randomUUID();
+      await schedule([{ itemId: a, version: 2 }], { publishAt: ago(60_000) });
+      zb.items.set(a, unpublished());
+      expect(await settleScheduledRebuilds(T)).toMatchObject({ superseded: 1 });
+      await schedule([{ itemId: c, version: 2 }], { unpublishAt: ago(60_000) });
+      zb.items.set(c, published(2));
+      expect(await settleScheduledRebuilds(T)).toMatchObject({ superseded: 1 });
+      expect(n).not.toHaveBeenCalled();
+      // waiting: Zone B unreadable
+      config.webdeskSchedule.supersedeGraceMs = 15 * 60_000;
+      const d = randomUUID();
+      await schedule([{ itemId: d, version: 1 }], { publishAt: ago(60_000) });
+      zb.items.set(d, 500);
+      expect(await settleScheduledRebuilds(T)).toMatchObject({ waiting: 1 });
+      expect(n).not.toHaveBeenCalled();
+    });
+
+    it("a settled schedule is pinged once (ref = the approval id) and a later sweep does not even read it again", async () => {
+      const a = randomUUID(), b = randomUUID();
+      const id = await schedule([{ itemId: a, version: 2 }, { itemId: b, version: 5 }], { publishAt: ago(60_000) });
+      zb.items.set(a, liveByTime(2));
+      zb.items.set(b, published(5));
+      const n = notifier();
+      setScheduleIndexNowNotifierForTests(n);
+      await settleScheduledRebuilds(T);
+      await sweepScheduledRebuilds(); // settled by the first: not even read again
+      expect(n).toHaveBeenCalledTimes(1);
+      expect((n.mock.calls[0][1] as { ref: string }).ref).toBe(id);
+    });
+
+    it("a notifier that THROWS (or rejects) leaves the settle outcome, counters, rebuild and firing rows exactly as without it", async () => {
+      const run = async (broken: boolean) => {
+        const a = randomUUID(), b = randomUUID();
+        const pub = await schedule([{ itemId: a, version: 2 }], { publishAt: ago(60_000) });
+        zb.items.set(a, liveByTime(2));
+        const down = await schedule([{ itemId: b, version: 1 }], { unpublishAt: ago(60_000) });
+        zb.items.set(b, unpublished());
+        setScheduleIndexNowNotifierForTests(broken ? async () => { throw new Error("indexnow exploded"); } : notifier());
+        const warn = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => {});
+        try {
+          const r = await settleScheduledRebuilds(T);
+          const logged = warn.mock.calls.map((c) => String(c[0]));
+          return { r, builds: (await builds(pub)).map((x) => x.state), pub: await firings(pub), down: await firings(down), logged };
+        } finally {
+          warn.mockRestore();
+        }
+      };
+      const ok = await run(false);
+      await adminPool().query(`UPDATE automation_approvals SET deleted_at = now() WHERE workflow_id = 'content.schedule' AND deleted_at IS NULL`);
+      gh.calls.length = 0;
+      const bad = await run(true);
+      expect(bad.r).toEqual(ok.r);
+      expect(bad.r).toMatchObject({ dispatched: 1, staleMarked: 1, waiting: 0 });
+      expect(bad.builds).toEqual(ok.builds);
+      expect(bad.pub.map((f) => f.outcome)).toEqual(ok.pub.map((f) => f.outcome));
+      expect(bad.down.map((f) => f.outcome)).toEqual(["stale_marked"]);
+      expect(dispatches(gh)).toHaveLength(1);
+      expect(bad.logged.filter((m) => m.includes("IndexNow") && m.includes("ping failed"))).toHaveLength(2);
+      expect(bad.logged.join("\n")).not.toContain("exploded"); // the error NAME only, never its message
+    });
+  });
   // ─────────────────────────────────────────────────────────────────────────────────────────────
   describe("the third wall: webdev_schedule_firings reads ZERO rows without tenant + webdev scope", () => {
     it("superuser sees the row; no GUC → 0; tenant without the webdev scope → 0; tenant + scope → 1", async () => {
