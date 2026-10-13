@@ -11,6 +11,30 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.113.0` - M5-P5a2: IndexNow on unpublish and on a scheduled publish/takedown (2026-10-13) - PROTOTYPED
+
+- **The gap it closes:** P5a (0.100.0) pinged IndexNow only for an approved immediate `content.publish`. Its own header listed the rest as a follow-up.
+- **Two new callers**, both through the new `notifyWebdeskTransition` in `search/indexnow-webdesk.ts`:
+  - **An editor's unpublish of a live item** (`webdesk-content.service.ts`). This also covers the MCP tool `webdesk.content.unpublish`, which re-drives the same route.
+    - The ping is fire-and-forget. The editor's answer never waits on IndexNow and never fails because of it.
+    - The ledger ref is `req:` plus 16 hex of sha256 of the Idempotency-Key, so a replayed request sends nothing.
+  - **A `content.schedule` approval whose publish went live or whose takedown came down** (`settlePublish` / `settleUnpublish` in `scheduled-rebuilds.service.ts`).
+    - The ref is the approval id.
+    - The ping is awaited but best-effort. It never changes the settle outcome or its counters.
+    - It runs before the settle row, so it is at-least-once. The ledger's uniqueness on (property, engine, url, `transition:v<version>:<ref>`) absorbs a repeat.
+    - The publish ping does not wait for the staging rebuild: production serves the content by time either way.
+- **The state is re-read, never believed.** WebDesk is read again first.
+  - A publish pings only the items production serves at their approved version.
+  - An unpublish pings only the items production no longer serves.
+  - The rule is `liveVersionNow`, restated from webdev's `liveVersionOf` because search cannot import webdev. A parity test pins the two together.
+  - The approved-publish hook now uses the same rule. It also accepts a scheduled item already past its `publishAt`, and refuses one past its `unpublishAt`.
+- **A delete never pings:** Zone B refuses to delete a live item (`409 item-is-live`).
+- **Off means off:** with `SEARCH_INDEXNOW_ENABLED` unset there is no DB read, no WebDesk read and no request.
+- **No migration, route, policy or flag change.**
+- **Tests:**
+  - Unit: `indexnow-webdesk.test.ts` (`liveVersionNow`, `pageForItem` in both modes, `notifyWebdeskTransition` refusals) and `scheduled-rebuilds.unit.test.ts` (an 18-row parity table).
+  - DB, run in GitHub Actions: `scheduled-rebuilds.test.ts` +5 and `webdesk-content.test.ts` +3. They cover who is pinged, who never is, and that a broken notifier changes nothing.
+
 ### webdesk `0.27.0` - M6-P6e: the site deploy transport, SFTP or explicit-TLS FTPS, with its container harness (2026-10-13) - DEV-VERIFIED (script and harness, on sumopod; not wired into any template yet)
 
 - **New, in `webdesk/templates/_deploy/`:** `deploy.sh` (modes `deploy` and `rollback`), `make-manifest.sh` (the build job's manifest generator) and a README. M6-P6f wires it into the three templates' deploy jobs; nothing calls it yet, and nothing was run against Hostinger or `delphi`/`helios`.
