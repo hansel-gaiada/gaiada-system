@@ -388,7 +388,7 @@
 .cc-service__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .cc-service__title { margin: 0; font: 600 15px/1.3 var(--font-display); color: var(--ink-strong); }
 .cc-service__status, .cc-service__since { font: 500 12px/1.3 var(--font-body); color: var(--ink-muted); }
-.cc-service__status { padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-strong); }
+.cc-service__status { padding: 2px 8px; border: 1px solid var(--line); border-radius: var(--radius-pill); color: var(--ink-strong); }
 .cc-service__items { margin: 0; padding-left: 18px; font: 400 13.5px/1.5 var(--font-body); color: var(--ink-strong); }
 .cc-service__items span { color: var(--ink-muted); }
 .cc-service__kpis { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }

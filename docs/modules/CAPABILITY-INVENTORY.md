@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **266** capabilities across **16** owners
-- **142** writes · 124 reads
-- Writes by impact: **high 26** · medium 41 · low 75
+- **269** capabilities across **16** owners
+- **143** writes · 126 reads
+- Writes by impact: **high 26** · medium 41 · low 76
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -64,7 +64,10 @@ unfalsifiable after.
 | agency | `agency.pendingApprovals` | `GET` | `/api/:tenantId/modules/agency/approvals/pending` | read | — |
 | assistant | `orchestrator.ask` | `POST` | `/api/:tenantId/assistant/ask` | write | `low` |
 | automation-console | `automation.listWorkflows` | `GET` | `/api/admin/automation/workflows` | read | — |
+| clients | `clients.getBusinessProfile` | `GET` | `/api/:tenantId/clients/:clientId/centre` | read | — |
+| clients | `clients.getBusinessResults` | `GET` | `/api/:tenantId/clients/:clientId/centre/results` | read | — |
 | clients | `clients.listClients` | `GET` | `/api/:tenantId/clients` | read | — |
+| clients | `clients.updateBusinessProfile` | `PATCH` | `/api/:tenantId/clients/:clientId/centre` | write | `low` |
 | core | `agency_intake.convert` | `POST` | `/api/:tenantId/agency/leads/:leadId/convert` | write | `medium` |
 | core | `agency_intake.createFromWebSubmission` | `POST` | `/api/:tenantId/agency/leads/from-web-submission` | write | `medium` |
 | core | `agency_intake.decline` | `POST` | `/api/:tenantId/agency/leads/:leadId/decline` | write | `low` |
