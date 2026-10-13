@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, within } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { WorkspaceSidebar, type SidebarCompany } from "./WorkspaceSidebar";
 import { WorkspaceShellProvider } from "./WorkspaceShellContext";
@@ -9,6 +10,12 @@ import { agencyTree, me, member } from "@/lib/workspaceFixtures";
 const nav = vi.hoisted(() => ({ pathname: "/" }));
 vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname, useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }));
 vi.mock("@/lib/tenant", () => ({ switchTenant: vi.fn() }));
+// Records the props every link was given: next/link consumes `prefetch` and renders nothing for it.
+const linkCalls = vi.hoisted(() => [] as Record<string, unknown>[]);
+vi.mock("next/link", async (importOriginal) => {
+  const Real = (await importOriginal<typeof import("next/link")>()).default;
+  return { default: (props: ComponentProps<typeof Real>) => { linkCalls.push(props as unknown as Record<string, unknown>); return <Real {...props} />; } };
+});
 
 // A placed Web Dev employee in an agency company with Web Dev, SEO and the GM in its org tree.
 const employee = me([member()]);
@@ -25,7 +32,7 @@ function renderAt(pathname: string, companies: SidebarCompany[] = []) {
   // read only when the sidebar renders.
   const ui = () => (
     <WorkspaceShellProvider model={model}>
-      <WorkspaceSidebar company={COMPANY} companies={companies} newItems={[{ label: "Task", href: "/tasks/new" }]} />
+      <WorkspaceSidebar tenantId="co-a" company={COMPANY} companies={companies} newItems={[{ label: "Task", href: "/tasks/new" }]} />
     </WorkspaceShellProvider>
   );
   const out = render(ui());
@@ -37,6 +44,7 @@ const menu = () => screen.getByRole("navigation");
 
 beforeEach(() => {
   window.sessionStorage.clear();
+  linkCalls.length = 0;
 });
 
 describe("WorkspaceSidebar", () => {
@@ -55,10 +63,42 @@ describe("WorkspaceSidebar", () => {
     expect(screen.queryByRole("link", { name: /Back to/ })).toBeNull();
   });
 
-  it("links the AI Assistant row to its page for now (DW-2d makes it the drawer)", () => {
-    renderAt("/departments/d-web");
-    expect(within(menu()).getByRole("link", { name: "AI Assistant" })).toHaveAttribute("href", "/assistant");
-    expect(within(menu()).getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
+  // DW-2d: the row opens today's assistant drawer over the current page, as the floating button did.
+  describe("the AI Assistant row (DW-2d)", () => {
+    const row = () => within(menu()).getByRole("link", { name: "AI Assistant" });
+
+    it("links to the drawer's route with no page context on a page with no record", () => {
+      renderAt("/departments/d-web");
+      expect(row()).toHaveAttribute("href", "/assistant");
+      expect(within(menu()).getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
+    });
+
+    it("carries the page context of the record it was opened from", () => {
+      const { goTo } = renderAt("/tasks/t-4");
+      expect(row()).toHaveAttribute("href", `/assistant?ctx=${encodeURIComponent("erp:task:t-4")}`);
+      goTo("/people/p-9");
+      expect(row()).toHaveAttribute("href", `/assistant?ctx=${encodeURIComponent("erp:person:co-a:p-9")}`);
+    });
+
+    it("has the FAB's id, so the drawer's focus return lands on it, and is not prefetched", () => {
+      renderAt("/tasks/t-4");
+      expect(row()).toHaveAttribute("id", "asst-fab-trigger");
+      // next/link renders `prefetch={false}` as no prefetch at all; the prop itself is what the mock below sees.
+      const mine = linkCalls.filter((p) => p.id === "asst-fab-trigger");
+      expect(mine.length).toBeGreaterThan(0);
+      for (const p of mine) expect(p.prefetch).toBe(false);
+      // No other row is opted out of prefetching or takes the id.
+      const rows = linkCalls.filter((p) => String(p.className).includes("ws-row") && p.id !== "asst-fab-trigger");
+      expect(rows.length).toBeGreaterThan(0);
+      for (const p of rows) { expect(p.prefetch).toBeUndefined(); expect(p.id).toBeUndefined(); }
+      expect(document.querySelectorAll("#asst-fab-trigger")).toHaveLength(1);
+    });
+
+    it("is simply the active row on /assistant, linking to the page", () => {
+      renderAt("/assistant");
+      expect(row()).toHaveAttribute("href", "/assistant");
+      expect(row()).toHaveAttribute("aria-current", "page");
+    });
   });
 
   it("shows another department's rows as a visit, with the way back", () => {
