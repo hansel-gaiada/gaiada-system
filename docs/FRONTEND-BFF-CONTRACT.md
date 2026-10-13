@@ -6458,3 +6458,72 @@ Every item: `{id, kind, title, date, fileId, ready}`. `id` is the source row (co
 **MCP tool.** `documents.list` (core, read, `verified`): `GET /api/:tenantId/clients/:clientId/documents`, args `{tenantId, clientId}`. It lists and links; it never returns file bytes. There is no write counterpart. Golden case: `client-documents.db.test.ts`. Counted in `docs/modules/CAPABILITY-INVENTORY.md`.
 
 **Known limit.** Portal scope comes from `resolvePortalScope`, which flattens a contact's project scope across their clients (on the board under "Before real clients use the portal"). This list is built only from the shared predicates and does not work around it, so the kernel fix covers it too.
+
+## 33. Department filters: a department's clients, deliverables and projects (DW-6d, DW-6g, 2026-10-13) — `platform-nest/src/core/department-filter.ts` (new), `modules/clients/clients.controller.ts`, `core/client-work.controller.ts`, `core/core.controller.ts` — **STATUS: CONTRACT (nothing built)**
+
+Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.2 (DW-6d, DW-6g). Every agency workspace has a Clients row (§4), and Web Dev's Build row has a Deliverables tab. Both need "this department's" rows. There is no department column on `clients` or `deliverables`, so this section defines the one link they have and one query parameter that uses it. No migration, no new Cerbos kind.
+
+### 33.1 What "the department's" means
+
+- **Projects are the link.** A department owns a project through `projects.department_id`: an org-node id, free text, no FK (migration `0029`). It is the only department link a client or a deliverable has.
+- **The node and everything under it.** `departmentId=<node>` matches a project whose `department_id` is that node or any node under it in the company's org tree:
+  - `p.department_id = $node OR p.department_id IN (SELECT descendant_id FROM org_unit_closure WHERE tenant_id = $tenant AND ancestor_id = $node)`;
+  - `org_unit_closure` (migration `0101`) is rebuilt on every org-tree save and includes the node itself at depth 0;
+  - the extra equality keeps the node's own projects for a company whose closure has not been rebuilt yet.
+- **One company only.**
+  - Node ids are unique only per company, and every query runs under `withTenants([tenantId])`, so a node id from another company matches nothing.
+  - Clients a department serves for another group company through a service assignment are not listed. This is a default the owner may overrule (plan §4.2), and DW-5 takes the same line for requests (§32.8).
+- **Which projects count.**
+  - A deleted project (`deleted_at IS NOT NULL`) does not count.
+  - The project's status does not matter. A client whose projects with the department are all finished is still one of its clients.
+- **Clients with no project are invisible here.** A client served only through an engagement or a site, with no project, is not one of any department's clients. The department's Clients page says so (§33.4).
+
+### 33.2 The parameter
+
+- `departmentId` is optional on the three lists in §33.3.
+- It is parsed **after** `authorize`, so a denial stays a denial, whatever the query string.
+- **Absent or empty:** no filter. The list is exactly what it is today.
+- **Present:** trimmed, then 1 to 200 characters with no control characters. Anything else answers **400** `{ error, field: "departmentId" }`.
+- **An id that names no node** returns an empty list, never a 400 or a 404. That is the same as `?clientId=` for a client with no rows.
+- **It is a filter, not a boundary** (the rule in `core/client-filter.ts`).
+  - It narrows what is displayed. The caller could already read every row unfiltered, and each list's authorisation is unchanged.
+  - Do not merge it with portal scope, or with any authorisation helper.
+- **One helper,** `core/department-filter.ts`:
+  - `parseDepartmentFilter(raw)` returns `{ kind: "all" }` or `{ kind: "unit", nodeId }`, and throws the 400.
+  - `departmentFilterSql(filter, column, tenantParam, nextParam)` returns `{ sql, params }`, shaped like `clientFilterSql`.
+  - Every list uses it. Nobody writes the closure subquery by hand.
+
+### 33.3 The lists
+
+| Method | Path | Change | Authorisation (unchanged) |
+|---|---|---|---|
+| GET | `/api/:t/clients?departmentId=` | Clients with at least one project matching §33.1: `EXISTS (SELECT 1 FROM projects p WHERE p.client_id = cl.id AND p.deleted_at IS NULL AND <filter on p.department_id>)`. Same row shape. | `client` · `read`; module `clients` |
+| GET | `/api/:t/deliverables?departmentId=` | Combines with `projectId` and `clientId` (AND). Matches on the deliverable's **project** (`dp.department_id`), the way `clientId` already does; a deliverable whose project is missing never matches. Same row shape. | `deliverable` · `read` |
+| GET | `/api/:t/projects?departmentId=` | Combines with `clientId` (AND). Same row shape. | `project` · `read` |
+
+MCP hub tools are unchanged by this section.
+
+### 33.4 UI
+
+- **Readers.** In `lib/entities.ts`, `listClients`, `listDeliverables` and `listProjects` take an optional `departmentId`. For the new pages they are read as `ReadResult`, so a failed read says "unavailable", never "no clients".
+- **DW-6d: the Clients row.** The page is `/departments/[deptId]/clients`. It needs an `AREA_RULES` entry if `areaFor` does not already cover it.
+  - It shows the department's clients, with name, status and business type, each linking to `/clients/[id]`.
+  - It also shows how many of the department's projects each client has. That count comes from one `listProjects({ departmentId })` read, never one read per client.
+  - An empty list reads "No clients with projects in this department yet", with one line saying the list comes from the department's projects.
+  - The registry's `CLIENTS_ROW` and its tab drop the `DW-6d` ticket. The row keeps its gate (`agencyRow: clients`).
+- **DW-6g: Web Dev › Build › Deliverables.**
+  - The placeholder is replaced by `listDeliverables({ departmentId })`: name, project (linked), client, status and due date, ordered as the list already is.
+  - An empty list says no deliverables are recorded on the department's projects, and links to `/deliverables/new`.
+- **Not in this section.** The department console's owned-projects reader (`getOwnedProjectsPm` in `lib/departments.ts`) still matches exactly, in the browser. Switching it to `?departmentId=` would also widen DW-3f's Projects block to the units under the department, so that switch is DW-3's call.
+
+### 33.5 Tests (the Linux CI gate: Postgres and Cerbos)
+
+- **Unit:** `parseDepartmentFilter`. Absent, empty and whitespace mean all; 200 characters is accepted; 201 characters and a control character answer 400.
+- **HTTP suite:** one company with a department node, a division under it and a second department. Projects sit at the department, at the division, at the other department, and one is deleted. Each project has a client and a deliverable. The suite checks:
+  - `?departmentId=<department>` lists the clients and deliverables of the department's and the division's projects. It lists nothing from the other department, nothing whose only project is deleted, and nothing with no project.
+  - `?departmentId=<division>` lists only the division's.
+  - The same node id used in a second company matches nothing of the first.
+  - Absent gives the same rows as today.
+  - It combines with `clientId` and `projectId`.
+  - A caller refused `read` gets 403 even with a malformed `departmentId`.
+- **The closure is built by the real org save path** (`putOrg`), not inserted by hand, so the suite proves the tree the product writes.

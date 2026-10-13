@@ -481,7 +481,7 @@ Written when DW-6 started, from a survey of main (`2e222711`). Pilot users only,
     attach to it. It also builds on `GET /deliverables?projectId=&clientId=`. Today's tab is a
     placeholder that reads nothing.
   - *Adds:* `?departmentId=` on the same join (contract §33), and a tab that lists the department's
-    deliverables with status, due date, client and file count.
+    deliverables with project, client, status and due date.
   - *Gap:* produced artefacts that are not deliverable rows, such as PRDs and site builds, stay on
     their own tabs.
 - **6f · Pull requests and CI on tasks.**
@@ -513,7 +513,8 @@ Written when DW-6 started, from a survey of main (`2e222711`). Pilot users only,
     (`files.url`). No Figma code exists.
   - *Adds:* contract §36, then:
     - a `figma` provider;
-    - `figma_links` on tasks, requests and campaign parts;
+    - `figma_links` on PM tasks, requests (`work_requests.id`, §32) and campaign parts
+      (`agency_campaign_parts.id`, §31), the ids DW-5 defines;
     - a server-side read for the thumbnail, last change and open comments. Thumbnails are signed
       and short-lived, so they are proxied, never stored.
     - exports into the Asset Library as versions, which needs 6h.
