@@ -12,12 +12,11 @@ import { SidebarToggle } from "./SidebarToggle";
 import { SidebarState } from "./sidebarState";
 import { Eyebrow } from "@/components/ui";
 
-export async function Sidebar({ me, tenantId, departments = [] }: { me: Me; tenantId?: string | null; departments?: { id: string; name: string }[] }) {
-  const initials = me.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
-  const collapsed = (await getSidebarState()) === "collapsed";
-  // RBAC-gated global create menu. Moved here from TopBar with the button:
-  // the design puts it at the sidebar floor. Identical item list.
-  const newItems = [
+// RBAC-gated global create menu. Moved here from TopBar with the button:
+// the design puts it at the sidebar floor. Identical item list. Shared with the
+// workspace sidebar (DW-2a), which keeps this list until DW-2f makes it workspace-aware.
+export function newMenuItems(me: Me, tenantId?: string | null): { label: string; href: string }[] {
+  return [
     { label: "Project", href: "/projects/new" },
     { label: "Task", href: "/tasks/new" },
     { label: "Campaign", href: "/agency/new" },
@@ -25,6 +24,12 @@ export async function Sidebar({ me, tenantId, departments = [] }: { me: Me; tena
     ...(can(me, "company.manage", tenantId) ? [{ label: "Company", href: "/companies/new" }, { label: "Invoice", href: "/invoices/new" }] : []),
     ...(can(me, "admin.access", tenantId) ? [{ label: "Employee", href: "/people/new" }] : []),
   ];
+}
+
+export async function Sidebar({ me, tenantId, departments = [] }: { me: Me; tenantId?: string | null; departments?: { id: string; name: string }[] }) {
+  const initials = me.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  const collapsed = (await getSidebarState()) === "collapsed";
+  const newItems = newMenuItems(me, tenantId);
   return (
     <SidebarState initial={collapsed}>
       <aside className="erp-side" id="app-nav">

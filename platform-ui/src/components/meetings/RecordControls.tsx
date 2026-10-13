@@ -1,5 +1,5 @@
 "use client";
-import { useActionState, useState } from "react";
+import { useActionState, useId, useState } from "react";
 import { startRecordingAction, registerAndUploadAudioAction, type MeetingResult } from "@/lib/meetingsActions";
 import { LiveRecorder } from "./LiveRecorder";
 import "@/components/departments/departments.css";
@@ -21,6 +21,7 @@ export function RecordControls({ clientId, projectId }: { clientId?: string; pro
   const [fileName, setFileName] = useState("");
   const [showUpload, setShowUpload] = useState(false);
   const [withVideo, setWithVideo] = useState(false);
+  const fileInputId = useId();
 
   return (
     <div style={{ display: "grid", gap: 18 }}>
@@ -131,7 +132,9 @@ export function RecordControls({ clientId, projectId }: { clientId?: string; pro
             placeholder="Meeting title (optional)"
             style={{ padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 10, font: "400 14px var(--font-body)" }}
           />
+          <label htmlFor={fileInputId} style={{ font: "500 13px var(--font-body)" }}>Audio or video file</label>
           <input
+            id={fileInputId}
             type="file"
             name="file"
             accept="audio/*,video/*,.m4a,.mp3,.mp4,.wav,.webm,.ogg,.flac,.aac,.mov,.mkv,.3gp,.m4v"

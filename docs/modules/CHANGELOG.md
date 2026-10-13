@@ -11,6 +11,77 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.113.0` - M5-P5a2: IndexNow on unpublish and on a scheduled publish/takedown (2026-10-13) - PROTOTYPED
+
+- **The gap it closes:** P5a (0.100.0) pinged IndexNow only for an approved immediate `content.publish`. Its own header listed the rest as a follow-up.
+- **Two new callers**, both through the new `notifyWebdeskTransition` in `search/indexnow-webdesk.ts`:
+  - **An editor's unpublish of a live item** (`webdesk-content.service.ts`). This also covers the MCP tool `webdesk.content.unpublish`, which re-drives the same route.
+    - The ping is fire-and-forget. The editor's answer never waits on IndexNow and never fails because of it.
+    - The ledger ref is `req:` plus 16 hex of sha256 of the Idempotency-Key, so a replayed request sends nothing.
+  - **A `content.schedule` approval whose publish went live or whose takedown came down** (`settlePublish` / `settleUnpublish` in `scheduled-rebuilds.service.ts`).
+    - The ref is the approval id.
+    - The ping is awaited but best-effort. It never changes the settle outcome or its counters.
+    - It runs before the settle row, so it is at-least-once. The ledger's uniqueness on (property, engine, url, `transition:v<version>:<ref>`) absorbs a repeat.
+    - The publish ping does not wait for the staging rebuild: production serves the content by time either way.
+- **The state is re-read, never believed.** WebDesk is read again first.
+  - A publish pings only the items production serves at their approved version.
+  - An unpublish pings only the items production no longer serves.
+  - The rule is `liveVersionNow`, restated from webdev's `liveVersionOf` because search cannot import webdev. A parity test pins the two together.
+  - The approved-publish hook now uses the same rule. It also accepts a scheduled item already past its `publishAt`, and refuses one past its `unpublishAt`.
+- **A delete never pings:** Zone B refuses to delete a live item (`409 item-is-live`).
+- **Off means off:** with `SEARCH_INDEXNOW_ENABLED` unset there is no DB read, no WebDesk read and no request.
+- **No migration, route, policy or flag change.**
+- **Tests:**
+  - Unit: `indexnow-webdesk.test.ts` (`liveVersionNow`, `pageForItem` in both modes, `notifyWebdeskTransition` refusals) and `scheduled-rebuilds.unit.test.ts` (an 18-row parity table).
+  - DB, run in GitHub Actions: `scheduled-rebuilds.test.ts` +5 and `webdesk-content.test.ts` +3. They cover who is pinged, who never is, and that a broken notifier changes nothing.
+
+### platform-ui `0.112.0` - DW-2e: ⌘K built from the workspace registry (2026-10-13) - PROTOTYPED
+
+- **What:** inside the workspace shell only (the pilot switch, `prefs.shell` = `workspaces`), plan §2.6 rule 3:
+  - `buildWorkspaceEntries(model)` (`lib/palette.ts`, pure): one entry per concrete tab of every workspace in the shell model (the person's own first), then the Company and Admin rows. Department tabs read `Web Dev · Board`; a row whose only tab has the row's label shows it once; Overview, AI Assistant, Performance and You are listed once from the home workspace (the first when home is Company), labelled plainly. A department-specific tab of those blocks (another href) is kept under its workspace's name.
+  - `Shell` passes `workspacePaletteEntries(model, today)`: the registry's entries, then today's nav and department entries, de-duplicated by href with the registry winning. Nothing findable today stops being findable until the classic nav retires (DW-9d).
+- **Not changed:** the classic shell's entries, the palette's look, live-record search and keyboard handling, `lib/workspaces.ts`, `nav.ts`, every gate, server read and URL.
+- **Tests:** `paletteFindability.test.ts` (new): six personas (placed Web Dev employee, operator-root owner, customer-root owner, HR staff without an HR node, generic-pack member, platform_admin) each find every `navFor` href and every model tab, with no placeholder, unique ids and no duplicate href; plus label and section unit tests. CI run: 38350097661 (green; an earlier run 38349388091 failed only on the Shell test's palette mock, fixed).
+
+### platform-ui `0.111.0` - DW-2c and DW-2d: the workspace top bar, and the AI Assistant row opens the drawer (2026-10-13) - PROTOTYPED
+
+- **What:** inside the workspace shell only (the pilot switch, `prefs.shell` = `workspaces`), plan §2.5 and DW-D9:
+  - DW-2c, the top bar (`WorkspaceTopBar`): `[☰ phone] [Search pages, people, records…  ⌘K]  [chip] [bell] [avatar]`.
+    - One search field. Clicking or focusing it opens the command palette, and a character typed before the palette took focus is handed over (`gaiada:palette:open` now accepts `detail: { query, onClose }`). It stays a real `<form action="/search" method="get" role="search">` with a named `q` input, so it works without JS. At phone width it collapses to an icon link that opens the palette.
+    - Enter in the palette with no entry highlighted goes to `/search?q=<text>` (it did nothing before; this also holds in the classic shell).
+    - The bell is a disclosure button: the newest five unread notifications (title and age, from the same `listNotifications` read the count uses), "Open inbox", Escape and an outside click close it. No unread says "Nothing new". A read that throws shows no count and "Couldn't load notifications". The classic bell cannot say that (it turns a failure into 0); a 403/404 still reads as empty in both, because `listNotifications` absorbs those.
+    - The avatar menu holds Theme (the same `ThemeToggle`, same cookie), Account, Client view, the layout switch and Sign out; `UserMenu` takes a `theme` prop for it.
+    - Removed here: the "My Workspace" label, the date, the separate theme and palette buttons, and the full-width access strip, which is a small "Unrestricted" chip whose tooltip and accessible description carry the strip's whole sentence (including "logged and reported").
+  - DW-2d: the sidebar's AI Assistant row opens today's assistant drawer over the current page. It links to `assistantDrawerHref(pathname, tenantId)` with `prefetch={false}` and `id="asst-fab-trigger"` (so the drawer's focus return works); on `/assistant` it is the active row. The floating button is not drawn in this shell. `WorkspaceSidebar` takes a `tenantId` prop from its server half.
+- **Where:** `components/shell/WorkspaceTopBar.tsx`, `TopBarSearch.tsx`, `NotificationBell.tsx`, `SpecialAccessChip.tsx`, `workspace-topbar.css` (new; existing tokens only); `Shell.tsx`, `UserMenu.tsx`, `CommandPalette.tsx`, `WorkspaceSidebar.tsx`, `WorkspaceShellSidebar.tsx`.
+- **Not changed:** the classic shell's top bar, strip and floating button, and the `e2e/app.spec.ts` search test (only the palette's Enter fallback above reaches the classic shell), the palette's entries (DW-2e), + New (DW-2f), the assistant page and drawer, the model and routing, `lib/workspaces.ts`, `nav.ts`, every gate, every URL, every server read.
+- **Tests:** `TopBarSearch.test.tsx`, `NotificationBell.test.tsx`, `WorkspaceTopBar.test.tsx`, `Shell.test.tsx` (new); `CommandPalette.test.tsx`, `UserMenu.test.tsx`, `WorkspaceSidebar.test.tsx` extended. CI run 38348301648 green (platform-ui and every other job; run on 5dd2b227, the head before this docs commit).
+
+### platform-ui `0.110.0` - DW-2b: one tab strip drawn by the workspace shell (2026-10-13) - PROTOTYPED
+
+- **What:** inside the workspace shell only (the pilot switch, `prefs.shell` = `workspaces`), plan §2.4 and §2.6 rule 1:
+  - One tab strip at the top of the main column, drawn from the active sidebar row's tabs when the row has more than one (`.sec-tabs`/`.sec-tab`, `aria-current="page"` on the page's tab, `nav` named "<row> sections"). It scrolls inside itself at phone width.
+  - A console strip hides itself only when every one of its tab hrefs is a tab of the current view's rows, so no page loses its way in: HR, Finance, IT, IT > Network, Me and the department console (both levels) hide; Admin's strip stays (its seven pages are not registry tabs, Settings is the one `/admin` tab).
+  - No breadcrumb on a tool page (the pathname is a tab href of the view); a record below a tool keeps it.
+  - No My-work rail in the department console: the frame is one column (the full-bleed tabs still widen the page).
+  - One source of truth for the area: `WorkspaceShellProvider` / `useWorkspaceShell()` (null in the classic shell) holds the area, the view, the rows and the active row and tab. The sidebar now reads it; the `gaiada.shell.lastArea` logic moved with it unchanged.
+- **Where:** `components/shell/WorkspaceShellContext.tsx`, `WorkspaceTabStrip.tsx`; `Shell.tsx` (provider around the frame, strip in `.erp-main__inner`); `SectionTabs.tsx`, `components/finance/FinanceTabs.tsx`, `DeptTabs.tsx`, `components/Breadcrumbs.tsx` (now a client component, same markup), `components/departments/DeptShellFrame.tsx`; `shell.css` and `departments.css` (existing tokens only).
+- **Not changed:** the classic shell (every page renders as before), `lib/workspaces.ts`, `nav.ts`, every gate, every URL, every server read. The department layout still reads the My-work rail's data on the server even though the workspace shell does not draw it; a later ticket can skip those reads.
+- **Tests:** `WorkspaceShellContext.test.tsx`, `WorkspaceTabStrip.test.tsx`, `consoleStrips.test.tsx` (covering rule from the real registry, HR hidden and Admin kept), `Breadcrumbs.test.tsx`; `WorkspaceSidebar.test.tsx` keeps every assertion (wrapped in the provider). CI run 38345297693 green (platform-ui: typecheck, 406 test files / 7218 tests, `next build`, smoke; every other job green).
+
+### platform-ui `0.109.0` - DW-2a: the new workspace sidebar, behind the per-person pilot switch (2026-10-13) - PROTOTYPED
+
+- **What:** the department workspace sidebar of `docs/plans/2026-10-13-department-workspaces.md` §2.2–2.3, drawn only when the person's pilot switch (`prefs.shell`, DW-1d) is `workspaces`.
+  - A switcher card (the workspace over the active company) lists the person's own workspaces, then every department (ungated, GM-01), then "Switch company" (today's `TenantSwitcher`) for someone with more than one company.
+  - Overview and AI Assistant, then Work, Performance and You, each row linking to its first tab; the row holding the page is `aria-current="page"`. No badges or counts.
+  - Visiting another department says "Visiting <name>" with "Back to <home>"; the Company and Admin areas draw their own rows with the same way back.
+  - Footer: Company, Admin (only with admin rows) and today's + New list (`newMenuItems`, shared with the classic sidebar).
+  - The collapsed rail shows the same rows as icons with tooltips, and the phone drawer the same rows with labels (`id="app-nav"` kept for `NavToggle`).
+- **Where:** `lib/shellModel.ts` (pure, serialisable: `buildShellModel`, `workspaceForArea`, `activeLocation`); `components/shell/WorkspaceShellSidebar.tsx` (server half) and `WorkspaceSidebar.tsx` (client: area from `usePathname()` + `areaFor`/`resolveArea`, the last area kept in `sessionStorage`); `workspace-sidebar.css` on the existing tokens; `app/(app)/layout.tsx` and `Shell.tsx` wiring.
+- **The pilot switch is visible:** the account menu offers "Try the new layout" / "Back to the classic layout" (`setShellLayoutAction`), in both shells.
+- **Not changed:** the classic shell (everyone's default) renders exactly as before and makes no extra server call; the top bar, the floating assistant button, the palette, `nav.ts`, the server, Cerbos and every URL. A model that cannot be built falls back to the classic sidebar.
+- **Tests:** `lib/shellModel.test.ts`, `components/shell/WorkspaceSidebar.test.tsx`, `UserMenu.test.tsx` (switch item); fixtures shared in `lib/workspaceFixtures.ts`. CI run 38339729938 green (platform-ui: typecheck, 402 test files, `next build`, smoke; every other job green).
+
 ### webdesk `0.27.0` - M6-P6e: the site deploy transport, SFTP or explicit-TLS FTPS, with its container harness (2026-10-13) - DEV-VERIFIED (script and harness, on sumopod; not wired into any template yet)
 
 - **New, in `webdesk/templates/_deploy/`:** `deploy.sh` (modes `deploy` and `rollback`), `make-manifest.sh` (the build job's manifest generator) and a README. M6-P6f wires it into the three templates' deploy jobs; nothing calls it yet, and nothing was run against Hostinger or `delphi`/`helios`.

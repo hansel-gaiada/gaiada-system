@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon, type IconName } from "./icons";
+import { useWorkspaceShell } from "./WorkspaceShellContext";
 
 export interface SectionTab { key: string; label: string; href: string; icon: IconName }
 
@@ -9,8 +10,14 @@ export interface SectionTab { key: string; label: string; href: string; icon: Ic
 // workspaces, IT, HR, Settings). Active tab = the one whose href is the deepest
 // prefix of the current path, so a sub-route (…/devices/abc) still lights its
 // parent tab (Devices). Pure client component — resolves active from pathname.
+//
+// DW-2b: inside the workspace shell it hides itself when the shell's sidebar rows already offer every one
+// of its tabs (the shell draws one strip instead). A strip with a tab the registry lacks stays, so no page
+// loses its way in (plan §2.6 rule 1). The classic shell always draws it.
 export function SectionTabs({ tabs }: { tabs: SectionTab[] }) {
   const pathname = usePathname();
+  const shell = useWorkspaceShell();
+  if (shell?.covers(tabs.map((t) => t.href))) return null;
   let active: SectionTab | null = null;
   for (const t of tabs) {
     const match = pathname === t.href || pathname.startsWith(`${t.href}/`);

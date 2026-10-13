@@ -122,6 +122,10 @@
 .sec-tab:hover { color: var(--text-primary); border-color: var(--accent-fg); background: var(--tint-hover); }
 .sec-tab--active, .sec-tab--active:hover { color: var(--ink-on-accent-fill); background: var(--accent-fill); border-color: var(--accent-fill); font-weight: 600; }
 .sec-tab svg { opacity: 0.8; }
+/* DW-2b: the workspace shell's strip sits at the top of the main column. At phone width it scrolls inside
+   itself instead of wrapping into rows, so the page never scrolls sideways. */
+.ws-tabs { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: thin; }
+.ws-tabs .sec-tab { flex: none; white-space: nowrap; }
 /* Secondary sub-tab strip (department consoles, two-level IA). Visibly
    subordinate to the primary group strip: lighter, pill-shaped, tighter. When a
    primary strip is directly followed by a sub-strip, drop its bottom margin so

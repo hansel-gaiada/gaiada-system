@@ -43,12 +43,24 @@
 // rebuilds. A takedown marks stale once any item is down (all down: at once; some: after the grace); all
 // still live after the grace → `superseded`. Effective instants older than SCHEDULE_SWEEP_WINDOW_MS are
 // settled `expired` without a read.
+//
+// ── IndexNow (M5-P5a2) ───────────────────────────────────────────────────────────────────────────
+// A schedule going live (or coming down) is also what search engines must hear about. settlePublish pings
+// IndexNow (transition `publish`, ref = the schedule's approval id, only the items read live at their approved
+// version) and settleUnpublish pings (transition `unpublish`, only the items read down), via the search module's
+// `notifyWebdeskTransition`, which re-reads the items itself and does nothing unless the tenant has IndexNow on.
+// The ping is BEST-EFFORT and AT-LEAST-ONCE: it runs after the "did it take effect" read and BEFORE the settle
+// row / the rebuild, so a crash, a `waiting` outcome or a failed settle re-pings on the next tick, and the search
+// ledger's uniqueness on (property, engine, url, `transition:v<version>:<approvalId>`) turns every repeat into a
+// no-op that sends nothing. A failing ping is logged and never changes the settle outcome or the counters; the
+// publish ping does not depend on the staging rebuild succeeding (production serves the content by time either way).
 import { Logger } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { config } from "../../config";
 import { withGlobal, withTenants } from "../../db";
 import { assemblePrincipal } from "../../rbac/principal";
 import { isModuleEnabled } from "../registry";
+import { notifyWebdeskTransition, type WebdeskTransitionArgs } from "../search/indexnow-webdesk";
 import { getWebdeskCommandControlClient, webdeskCommandHashFor } from "./webdesk-approved-command";
 import type { WebdeskControlClient, WebdeskControlResponse } from "./webdesk-control-client";
 import { startSiteRebuild } from "./site-builds.service";
@@ -182,6 +194,23 @@ export function liveVersionOf(item: Record<string, unknown>, now: number): numbe
   return null;
 }
 
+/** What a settled transition calls to ping IndexNow (M5-P5a2). Swappable so a test can observe or break it. */
+let notifyIndexNow: (tenantId: string, a: WebdeskTransitionArgs) => Promise<unknown> = (tenantId, a) => notifyWebdeskTransition(tenantId, a);
+
+/** Tests: replace the IndexNow notifier (null restores the real one). */
+export function setScheduleIndexNowNotifierForTests(fn: ((tenantId: string, a: WebdeskTransitionArgs) => Promise<unknown>) | null): void {
+  notifyIndexNow = fn ?? ((tenantId, a) => notifyWebdeskTransition(tenantId, a));
+}
+
+/** Best-effort, awaited: never throws, never touches the settle outcome. Logs ids and the error name only. */
+async function pingIndexNow(tenantId: string, s: Schedule, transition: Transition, items: Schedule["items"]): Promise<void> {
+  try {
+    await notifyIndexNow(tenantId, { tenantSlug: s.tenantSlug, siteId: s.siteId, transition, ref: s.approvalId, items });
+  } catch (err) {
+    logger.warn(`schedule ${s.approvalId}: IndexNow ${transition} ping failed (${(err as Error)?.name ?? "error"}); the next tick retries`);
+  }
+}
+
 /** Each item's live version (null = not live, incl. a 404), or null for the whole read when any read
  *  failed: the settle then waits for the next tick rather than guessing. Reads only. */
 async function readLiveVersions(client: WebdeskControlClient, s: Schedule, now: number): Promise<Array<number | null> | null> {
@@ -253,6 +282,8 @@ async function settlePublish(
     out.superseded++;
     return;
   }
+  // M5-P5a2: production already serves these by time, whatever the staging rebuild does next.
+  await pingIndexNow(tenantId, s, "publish", s.items.filter((it, i) => live[i] === it.version));
   // As the DECIDER, at "linked" assurance (a verified identity, no fresh login: the honest value for a
   // deferred effect). null when the user is no longer active → a typed failed build, nothing dispatched.
   const decider = decidedBy ? await assemblePrincipal(decidedBy, "linked") : null;
@@ -315,6 +346,8 @@ async function settleUnpublish(
     out.superseded++;
     return;
   }
+  // M5-P5a2: BEFORE the settle row, deliberately (at-least-once; the search ledger absorbs a repeat).
+  await pingIndexNow(tenantId, s, "unpublish", s.items.filter((_, i) => live[i] === null));
   // The settle row and the mark in ONE transaction: only the INSERT that wins marks, so a mark that a
   // later rebuild cleared is never set again by a replayed event or a second sweep.
   const marked = await inWebdev(tenantId, async (c) => {

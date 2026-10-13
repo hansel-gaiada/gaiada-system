@@ -1684,15 +1684,55 @@ Four layers, and only the third is per-client:
    `pay`, `update_profile` (and later `request_change`, `approve_post`, `edit_company_profile`, and PV4-02's `converse`, the Conversation write
    action, §29). **Cerbos does not see rows**, so `read` means "may ask the portal", never
    "may see any client's data".
-3. **`src/core/portal-scope.ts`** — `client_id = ANY(:callerClientIds)` plus the project restriction,
-   applied as a SQL predicate on **every** portal query. This is what stops client A reading client B
-   inside the same tenant. Ownership resolves through `client_contacts` UNIONed with the legacy
-   `clients.portal_user_id`; the union is load-bearing (the invite flow never writes that column).
+3. **`src/core/portal-scope.ts`** (who the caller is) + **`src/core/portal-visibility.ts`** (which rows
+   they reach) — applied as a SQL predicate on **every** portal query. This is what stops client A
+   reading client B inside the same tenant. Ownership resolves through `client_contacts` UNIONed with the
+   legacy `clients.portal_user_id`; the union is load-bearing (the invite flow never writes that column).
 4. **Per-route** — the addressed entity belongs to a run/invoice/contract inside that scoped set.
 
-`capability` (`signer` | `viewer`) gates signing only: a viewer may still give feedback and record a
-payment. Not-yours and does-not-exist both answer **404**, deliberately indistinguishable, so no route
-becomes an existence oracle for another client's ids.
+**Scope is PER CLIENT (portal scope kernel, BUILT 2026-10-13; go-live blocker "Portal scope kernel per
+client").** One person can be a contact of several clients with a different reach and capability on
+each (client-wide `signer` on A, `viewer` limited to one project on B). `PortalScope` is therefore:
+
+| Field | Meaning |
+|---|---|
+| `clientIds` | every client the caller is an active contact of |
+| `wideClientIds` | the clients they reach CLIENT-WIDE (a `project_id IS NULL` row, or the legacy column) |
+| `projectIds` | the explicit project ids of their project-scoped rows; **never null** (no "null = everything") |
+| `signerClientIds` | the clients on which their capability is `signer` or `admin` (`admin` implies signer) |
+
+- **Reach.** A row is in reach when `row.client_id ∈ clientIds` AND (`row.client_id ∈ wideClientIds` OR
+  `row.project ∈ projectIds` [OR the row has no project, for contracts and change requests only]). So a
+  contact who is client-wide on A sees all of A, and on B sees only their project's rows, plus B's
+  project-less contracts and change requests (a master agreement covers their project too). B's
+  project-less runs, General conversation thread and client-wide meeting minutes are NOT reachable
+  (PV4-Q1 / PV-D33): 404. Every predicate takes the three arrays (`scopeAt(n)` + `...scopeValues(scope)`);
+  a predicate without `wide` throws, and `portal-visibility.test.ts` fails the build if a portal file
+  builds one.
+- **Signing.** Checked against the TARGET's own client, after the target has passed the read predicate:
+  `requireSignerFor(scope, target.client_id)`. A signer of A who is a viewer of B is refused (**403**
+  "view-only") on B's contracts, signature gate decisions and scope sign-offs. There is no global
+  `canSign` on the scope any more.
+- **Payload flags.** Contract detail `canSign` / `viewOnly` use the contract's own client.
+  `overview.viewOnly` is true only when the caller can sign for NONE of their clients.
+  `profile.access.canSign` / `wholeClient` are display summaries ("on at least one client") and gain
+  `signerClientIds` / `wideClientIds` (additive). `GET /portal/conversation` keeps `canUseGeneral` (true
+  when the caller is client-wide on at least one client) and gains `generalClientIds` (additive): the
+  clients whose General thread they may use. Posting to General (`POST /portal/conversation` with no
+  `projectId`) needs that client in `generalClientIds`; naming one of their clients where they are only
+  project-scoped is 404. UI follow-up: the "General" entry and the change-request "client-wide" option
+  should be offered per client from these lists, not from the booleans.
+- **Live stream.** `GET /portal/stream` subscribers stay keyed by `clientIds`; frames are content-free
+  hints, so a project-scoped contact may receive a hint for a sibling project and refetch the same
+  (scoped) data. Over-delivery only, never data.
+- **Shared test fixture.** `platform-nest/src/testing/portal-fixtures.ts` → `createMultiClientContact`
+  builds exactly that contact (A client-wide signer; B viewer on B1, with B2 and a General thread). Drive
+  any new portal read or signing route with it; `portal-scope-per-client.db.test.ts` is the reference.
+
+`capability` (`signer` | `viewer` | `admin`) gates signing only, per client: a viewer may still give
+feedback, converse, request a change and record a payment. Not-yours and does-not-exist both answer
+**404**, deliberately indistinguishable, so no route becomes an existence oracle for another client's
+ids. The one 403 is the explicit view-only signing refusal, on a target the caller can already read.
 
 ### 16a. Workspace reads — `src/core/portal-workspace.controller.ts`
 
@@ -5126,9 +5166,9 @@ both the GET's `canEdit` and the PATCH's authorization gate call — an active, 
 (`project_id IS NULL`) `client_contacts` row with `capability = 'signer'` for that exact client, OR
 the legacy `clients.portal_user_id` whole-client signer. A **project-scoped** signer reads fine
 (`canEdit:false`) but is refused the PATCH with a plain-English 403. This is narrower than
-`portal-scope.ts`'s own `canSign` (a per-caller union across every client/project the caller
-touches) — CC-D4 asks the sharper per-CLIENT question, so it is its own query, never a reuse of
-`canSign`.
+`portal-scope.ts`'s per-client `signerClientIds` (which also counts a project-scoped signer row of the
+client) — CC-D4 needs a CLIENT-WIDE signer row, so it is its own query, never a reuse of
+`signerClientIds`.
 
 ### Validation (`src/modules/clients/centre/validation.ts`) — one function, both routes
 

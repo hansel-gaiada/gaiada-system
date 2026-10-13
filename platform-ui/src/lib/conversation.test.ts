@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, MAX_BODY_CHARS, THREAD_POLL_MS,
   attachmentsError, bodyError, conversationErrorText, draftedByNames, newClientMessages, pendingDrafts, sortThreads,
-  splitLinks, threadScope, threadTitle, type StaffDraft, type StaffMessage,
+  threadScope, threadTitle, type StaffDraft, type StaffMessage,
 } from "./conversation";
 
 const thread = (over: Partial<Parameters<typeof sortThreads>[0][number]> & { id?: string }) => ({
@@ -52,23 +52,6 @@ describe("composer limits", () => {
     expect(attachmentsError([f(MAX_ATTACHMENT_BYTES), f(1)])).toMatch(/10 MB/);
   });
   it("polls every 20 seconds", () => { expect(THREAD_POLL_MS).toBe(20_000); });
-});
-
-describe("splitLinks: plain text in, data out", () => {
-  it("makes http and https links and leaves the rest as text", () => {
-    expect(splitLinks("See https://example.com/a?b=1, then reply.")).toEqual([
-      { type: "text", value: "See " },
-      { type: "link", value: "https://example.com/a?b=1", href: "https://example.com/a?b=1" },
-      { type: "text", value: ", then reply." },
-    ]);
-  });
-  it("never makes a link from a javascript: or data: URL", () => {
-    expect(splitLinks("javascript:alert(1) data:text/html,<b>x</b>")).toEqual([{ type: "text", value: "javascript:alert(1) data:text/html,<b>x</b>" }]);
-  });
-  it("keeps markup characters as text parts", () => {
-    const parts = splitLinks('<img src=x onerror="alert(1)">');
-    expect(parts).toEqual([{ type: "text", value: '<img src=x onerror="alert(1)">' }]);
-  });
 });
 
 const msg = (over: Partial<StaffMessage>): StaffMessage => ({

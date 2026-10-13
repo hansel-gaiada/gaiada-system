@@ -32,8 +32,8 @@ import { withMailContext, withTenants } from "../db";
 import { AuthGuard } from "../auth/guards";
 import { authorize } from "../core/http";
 import { isElevated } from "../admin/elevated";
-import { resolvePortalScope } from "../core/portal-scope";
-import { gateClientVisible, runInPortalScope } from "../core/portal-visibility";
+import { resolvePortalScope, scopeValues } from "../core/portal-scope";
+import { gateClientVisible, runInPortalScope, scopeAt } from "../core/portal-visibility";
 import { storage } from "../core/storage";
 import { MAIL_THREAD_ENTITY_KINDS, authorizeThreadParent } from "./thread-authz";
 import type { StoredAttachment } from "./inbound/intake";
@@ -268,8 +268,8 @@ export class MailThreadController {
         // gate), so a client reads a gate's thread in exactly the cases they could act on that gate.
         const g = await c.query<{ id: string }>(
           `SELECT g.id FROM pipeline_gates g JOIN pipeline_runs r ON g.run_id = r.id
-            WHERE g.id = $1 AND ${runInPortalScope("r", { clients: 2, projects: 3 })} AND ${gateClientVisible("g")}`,
-          [gateId, scope.clientIds, scope.projectIds],
+            WHERE g.id = $1 AND ${runInPortalScope("r", scopeAt(2))} AND ${gateClientVisible("g")}`,
+          [gateId, ...scopeValues(scope)],
         );
         return g.rows.length > 0;
       });
@@ -287,8 +287,8 @@ export class MailThreadController {
         // only; this branch used to add `OR r.project_id IS NULL`, which let a project-scoped contact
         // read a thread on a run the portal's run list and run page never show them.
         `SELECT r.id FROM pipeline_runs r
-          WHERE r.id = $1 AND ${runInPortalScope("r", { clients: 2, projects: 3 })}`,
-        [runId, scope.clientIds, scope.projectIds],
+          WHERE r.id = $1 AND ${runInPortalScope("r", scopeAt(2))}`,
+        [runId, ...scopeValues(scope)],
       );
       return r.rows.length > 0;
     });

@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { formatBytes, linkifyText, type PortalMessage, type PortalThread } from "@/lib/portal";
+import { formatBytes, type PortalMessage, type PortalThread } from "@/lib/portal";
+import { linkify } from "@/lib/linkify";
 import { PortalReplyForm } from "./PortalReplyForm";
 
 // PV4-08 — one conversation: the messages, oldest first, then the reply box (or, on a closed thread, a plain line).
@@ -14,7 +15,7 @@ import { PortalReplyForm } from "./PortalReplyForm";
 // announces nothing.
 //
 // ── TEXT ONLY ─────────────────────────────────────────────────────────────────────────────────────
-// A body is rendered as React text nodes plus <a> for http(s) URLs (`linkifyText`). There is no
+// A body is rendered as React text nodes plus <a> for http(s) URLs (`linkify`). There is no
 // dangerouslySetInnerHTML and no Markdown, so `<img onerror=...>` in a message shows as those characters.
 //
 // ── MESSAGES ARE PERMANENT (PV-D34) ───────────────────────────────────────────────────────────────
@@ -37,10 +38,10 @@ function Stamp({ iso, local }: { iso: string; local: boolean }) {
 function Body({ text }: { text: string }) {
   return (
     <p className="cp-msg__body">
-      {linkifyText(text).map((p, i) =>
-        p.kind === "link"
-          ? <a key={i} href={p.href} target="_blank" rel="noopener noreferrer nofollow">{p.text}</a>
-          : <span key={i}>{p.text}</span>,
+      {linkify(text).map((p, i) =>
+        p.type === "link"
+          ? <a key={i} href={p.href} target="_blank" rel="noopener noreferrer nofollow">{p.value}</a>
+          : <span key={i}>{p.value}</span>,
       )}
     </p>
   );

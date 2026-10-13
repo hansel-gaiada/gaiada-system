@@ -2,35 +2,9 @@ import { describe, it, expect } from "vitest";
 import type { Me } from "./platform";
 import { navFor } from "@/components/shell/nav";
 import { sidebarRows, workspaceBySlug, type Gate } from "./workspaces";
-import { concreteRows, gateAllows, homeArea, resolveMyWorkspaces, type OrgTreeNode } from "./workspaceAccess";
+import { concreteRows, gateAllows, homeArea, resolveMyWorkspaces } from "./workspaceAccess";
 import { areaFor, resolveArea } from "./areas";
-
-type Company = Me["companies"][number];
-const AGENCY: Company = { id: "co-a", name: "Agency", type: null, vertical: "agency", rootCompanyId: "co-root" };
-const ROOT: Company = { id: "co-root", name: "Holding", type: null, vertical: "holding", rootCompanyId: "co-root" };
-const HOTEL: Company = { id: "co-h", name: "Hotel", type: null, vertical: "hospitality", rootCompanyId: "co-root" };
-
-function me(roles: Me["roles"], companies: Company[] = [AGENCY], extra: Partial<Me> = {}): Me {
-  return { userId: "u-1", name: "U", email: "u@x.test", title: null, assurance: "high", companies, roles, ...extra };
-}
-const member = (co = "co-a") => ({ role: "member", scopeType: "company", scopeId: co });
-const lead = (unit: string) => ({ role: "org_unit_lead", scopeType: "org_unit", scopeId: unit });
-
-const node = (id: string, name: string, kind: string, children: OrgTreeNode[] = [], assigneeId?: string): OrgTreeNode =>
-  ({ id, name, kind, children, ...(assigneeId ? { assigneeId } : {}) });
-const person = (id: string, userId: string) => node(id, userId, "person", [], userId);
-
-/** An agency company: GM, Web Dev (with a Frontend division), SEO. HR, IT and Finance are not in the tree. */
-function agencyTree(placements: { web?: string[]; frontend?: string[]; seo?: string[] } = {}): OrgTreeNode {
-  return node("root", "Agency", "company", [
-    node("d-web", "Web Dev", "department", [
-      node("dv-fe", "Frontend", "division", (placements.frontend ?? []).map((u, i) => person(`p-fe-${i}`, u))),
-      ...(placements.web ?? []).map((u, i) => person(`p-web-${i}`, u)),
-    ]),
-    node("d-seo", "SEO", "department", (placements.seo ?? []).map((u, i) => person(`p-seo-${i}`, u))),
-    node("d-gm", "GM", "department"),
-  ]);
-}
+import { AGENCY, HOTEL, ROOT, agencyTree, lead, me, member, node, person } from "./workspaceFixtures";
 
 const navHrefs = (m: Me, tenant: string) => navFor(m, tenant).flatMap((g) => g.items.map((i) => i.href));
 const navGroups = (m: Me, tenant: string) => navFor(m, tenant).map((g) => g.label);
@@ -59,6 +33,8 @@ describe("gateAllows mirrors nav.ts (gates unchanged, plan §2.6 rule 4)", () =>
   it.each([
     ["the root owner in the root", me([{ role: "owner", scopeType: "company", scopeId: "co-root" }], [ROOT, AGENCY]), "co-root"],
     ["the root owner in a child", me([{ role: "owner", scopeType: "company", scopeId: "co-root" }], [ROOT, AGENCY]), "co-a"],
+    // PV-D31: only the owner of the OPERATOR root gets Platform.
+    ["the operator root's owner", me([{ role: "owner", scopeType: "company", scopeId: "co-root" }], [{ ...ROOT, isOperatorRoot: true }, AGENCY]), "co-root"],
     ["platform_admin in the root", me([{ role: "platform_admin", scopeType: "global", scopeId: null }], [ROOT, AGENCY]), "co-root"],
     ["a member", me([member()]), "co-a"],
   ] as [string, Me, string][])("shows Group, Platform and Settings exactly where nav.ts does: %s", (_name, m, tenant) => {

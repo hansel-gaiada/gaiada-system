@@ -27,16 +27,9 @@ const PAGES = [
 // Pre-existing shell contrast findings owned by shell.css, excluded by exact selector exactly as a11y-axe-client-hub.spec.ts does.
 const SHELL_CONTRAST_EXCLUSIONS = [".erp-side__tagline", ".erp-side__grouplabel", ".erp-company .type-eyebrow"];
 
-// PRE-EXISTING, not PV4-09: the meeting page's Workbench card (AudioUploadForm.tsx / RecordControls.tsx) renders an
-// unlabelled `<input type="file">` (axe `label`, critical). It is not on the minutes editor this sweep is about, so it
-// is excluded on the meeting page ONLY, by exact selector, and reported to the lead as a follow-up. Everything else on
-// that page, the minutes editor included, is still swept.
-const MEETING_PAGE_EXCLUSIONS = ['input[type="file"]'];
-
 async function runAxe(page: Page) {
   let builder = new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]);
   for (const selector of SHELL_CONTRAST_EXCLUSIONS) builder = builder.exclude(selector);
-  if (page.url().includes("/meetings/")) for (const selector of MEETING_PAGE_EXCLUSIONS) builder = builder.exclude(selector);
   return builder.analyze();
 }
 
