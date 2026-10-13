@@ -23,6 +23,25 @@ local stack). None of these mean "production-done".
 - **Tests:** `site-build-targets.unit.test.ts` (50) and `site-build-stamp.test.ts` (21) pass locally; `site-builds-promote.test.ts` (HTTP + Cerbos + Postgres, fake GitHub and fake stamp fetch) and `site-builds-kind-promote.db.test.ts` (the CHECK) need the Linux gate, as do the updated `webdesk-control-http.test.ts`, `webdesk-content.test.ts` and `site-builds-dispatch.test.ts` (unchanged, must still pass). `webdesk-registry.test.ts` updated. `CAPABILITY-INVENTORY.md` regenerated (webdev 34 → 35).
 - **Docs:** `docs/FRONTEND-BFF-CONTRACT.md` (Site promote; `builds`; build-status), `docs/plans/2026-10-11-webdesk-m6-plan.md` (the P6h row), design v2 §14 WSK-D65 (target source amended in place).
 
+### webdesk `0.29.1` - M6-P6j: `webdesk/deploy` retired; control-plane transport error text rewritten (2026-10-13) - PROTOTYPED (unit-tested locally; the DB-backed `webdesk/api` specs need the server gate)
+
+- **`webdesk/deploy` is retired (WSK-D29, WSK-D79).** The ssh+rsync driver, its host config (hardcoded `delphi`/`helios`), the HTTP front and the live probe script are removed. `src/index.ts` keeps `deploy()`, `probe()` and `getDriver()`, all rejecting with `DeployRetiredError`, whose message names the replacement (the site's own CI, `webdesk/templates/_deploy/deploy.sh`, WSK-D79). Nothing in the repo imported the package; CI still typechecks and tests it. The README is a retirement notice.
+- **The release-transport and frontend-deploy "not yet available" errors** (`webdesk/api`, HSR-6) no longer tell an operator to configure a host: they say the control plane deploys nothing and point at `POST sites/:id/delivery-binding` and `infra/runbooks/webdesk-staging-rebuild.md`. Error codes and the "not yet implemented" phrase the specs pin are unchanged.
+- **Unchanged on purpose:** `delphi`/`helios` stay valid per-site delivery targets (WSK-D79), reached by the site's own CI; the proof site's `webdesk-rebuild.yml` path (WSK-D56) is untouched.
+- **Docs:** `docs/plans/2026-10-11-webdesk-m6-plan.md` (the P6j row), `webdesk/deploy/README.md`, `webdesk/api/README.md`, `docs/blueprints/webdesk-design-v2.md` and `vendor-exit-register.md` (the two "rsync driver exists" mentions).
+
+### mcp-hub `0.15.3` - M6-P6j: `webdesk.deploy.probeReachability` answers "retired" (2026-10-13) - PROTOTYPED (unit-tested locally)
+
+- The tool stays registered (callers and personas still name it) but no longer probes: it makes no network call and answers `{ retired: true, reachable: null, detail: "retired: the control plane no longer reaches delivery hosts; delivery is per site via the site's CI (WSK-D79)", replacement }`. Its description starts with `RETIRED`. The `WEBDESK_DEPLOY_URL` and `WEBDESK_DEPLOY_SERVICE_TOKEN` config is removed. Test: a stubbed `fetch` is asserted never called. The suite is 440 tests (407 passed, 33 skipped); the tool count is unchanged.
+
+### platform-nest `0.114.2` - M6-P6j: seat text no longer names `delphi` as the staging target (2026-10-13) - PROTOTYPED
+
+- `dept-webdev`'s seat note reads "R0 on staging". No tool, route or capability changed, so the capability inventory needed no regeneration.
+
+### platform-ui `0.114.1` - M6-P6j: the site registry's frontend-deployment note (2026-10-13) - PROTOTYPED (unit-tested locally)
+
+- The fixed per-row note no longer cites WSK-D26 and `delphi`/`helios`/`Hostinger` as the routing rule; it says a site's own CI delivers it (WSK-D79) and no deploy state reaches the ERP yet. The host labels in `webdeskPortfolio.ts` and the demo fixtures stay: they describe per-site hosts, which D79 keeps.
+
 ### platform-ui `0.114.0` - DW-2h: the AI Assistant page made calmer and aware of the department (2026-10-13) - PROTOTYPED
 
 - **What (for everyone, both shells; owner ruling 2026-10-13):** the assistant page and drawer, plan §6.

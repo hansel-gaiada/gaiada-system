@@ -639,8 +639,8 @@ Levers, in size order:
    and answers "why would this site adopt" with a number instead of an argument.
 3. **Build hygiene** — path filters so docs-only pushes do not rebuild, concurrency cancellation for
    superseded runs, dependency caching, and consolidating the ERP's 4 shards.
-4. **Move builds off Actions entirely** — WebDesk's own pipeline (`webdesk/deploy`'s rsync driver
-   exists). Only worth it after 1–3.
+4. **Move builds off Actions entirely** — WebDesk's own pipeline (the `webdesk/deploy` rsync
+   driver this named was retired by M6-P6j; delivery is per site, WSK-D79). Only worth it after 1–3.
 
 ---
 
