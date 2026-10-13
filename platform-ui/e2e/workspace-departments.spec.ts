@@ -242,8 +242,8 @@ test.describe("Tools & connections (superadmin, DW-6c)", () => {
     // The Overview's Today block follows the pins: Figma is gone from it, GitHub is still there.
     await page.goto("/departments/dept-1");
     const today = page.getByRole("region", { name: "Today", exact: true });
-    await expect(today.getByRole("link", { name: /^GitHub/ })).toBeVisible();
-    await expect(today.getByRole("link", { name: /^Figma/ })).toHaveCount(0);
+    await expect(today.getByRole("link", { name: /^GitHub/ })).toBeVisible();
+    await expect(today.getByRole("link", { name: /^Figma/ })).toHaveCount(0);
 
     await page.goto(WEB_DEV_CONNECTIONS);
     const pin = toolsCard(page).getByRole("button", { name: "Pin Figma to the Overview" });
@@ -257,7 +257,7 @@ test.describe("Tools & connections (superadmin, DW-6c)", () => {
 
     // And Figma is back on the Overview.
     await page.goto("/departments/dept-1");
-    await expect(page.getByRole("region", { name: "Today", exact: true }).getByRole("link", { name: /^Figma/ })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Today", exact: true }).getByRole("link", { name: /^Figma/ })).toBeVisible();
   });
 
   test("without the pilot cookie the same URL is the classic page: no Tools section", async ({ page, context }) => {
