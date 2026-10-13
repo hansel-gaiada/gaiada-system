@@ -98,7 +98,7 @@ function RowGroup({ label, rows, active }: { label?: string; rows: ConcreteRow[]
   );
 }
 
-/** A row links to its first tab; the shell's tab strip (WorkspaceTabStrip) shows the rest.
+/** A row links to its first tab; the shell's tab strip (WorkspaceTabStrip) shows the rest. */
 function RowLink({ row, active }: { row: ConcreteRow; active: boolean }) {
   const { tip, triggerProps } = useRailTooltip(row.label);
   return (
