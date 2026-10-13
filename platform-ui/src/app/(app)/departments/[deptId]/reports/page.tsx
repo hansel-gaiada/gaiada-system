@@ -47,7 +47,7 @@ export default async function DepartmentSeoReportsPage({ params, searchParams }:
   const selectedPreview = selectedReportId ? await previewReport(userId, tenant, selectedReportId) : null;
 
   return (
-    <Card title="Reports">
+    <Card title="Client reports">
       {engagements.length === 0 ? (
         <TeachState
           glyph="▤"

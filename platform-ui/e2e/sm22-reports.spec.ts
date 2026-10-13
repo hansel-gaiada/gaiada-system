@@ -17,7 +17,7 @@ test("Reports tab: engagement picker, report list, preview banner, and full life
   await switchToAgency(page);
   await page.goto("/departments/dept-3/reports?engagementId=sm-eng-1");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/seo/i);
-  await expect(page.getByRole("heading", { name: "Reports" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Client reports" })).toBeVisible();
 
   // The delivered report (sm-report-1) should be listed.
   await expect(page.getByRole("button", { name: /2026-06.*monthly/i })).toBeVisible();
