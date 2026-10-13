@@ -11,6 +11,19 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.119.0` - PV5-14: a simulated second factor for the dev stage (PV-D40) (2026-10-13) - PROTOTYPED
+
+- **Why:** live Keycloak emits no `amr` (live tokens checked 2026-10-13: `sid` present, no `amr`), so no one ever reached high assurance and every high-assurance finance action was refused. The owner ruled (PV-D40) to keep the rules and simulate the factor while live holds mock data.
+- **Flag `MFA_SIMULATION_ENABLED`** (default off; compose passthrough `${MFA_SIMULATION_ENABLED:-0}`). Off: both routes 404 and behaviour is byte-identical to before.
+- **`GET /api/auth/step-up`** and **`POST /api/auth/step-up/simulate`** (`{confirm:true}`): an interactive OIDC staff session (kind `employee`, a staff grant, an active membership) is raised from `linked` to `high` for 15 minutes, bound to its IdP session (`sid`, hashed with the user id, in Redis; another session of the same user stays `linked`), with `assuranceSource: "simulated"`. Refused: no OIDC session (agent, OBO, D14 re-drive, dev header) 403 `step_up_interactive_only`; automation/bot 403; non-staff 403; a real `amr` 409; no `sid` 409; Redis down 503 (fails closed). Each use writes an `auth.step_up_simulated` activity row and logs `[auth:mfa-simulated]`.
+- **A 403 that only assurance would lift** carries `reason: "assurance_required"` while the flag is on (one extra Cerbos call, only for a `linked` employee with no agent or delegation).
+- **PV-D29 lifted:** `set_bank_details` is back under PV-D26's unconditional high-assurance rule (`resource_finance_config.yaml`), now met by the simulated factor. **Deploy order:** set `MFA_SIMULATION_ENABLED=1` on gda-aicenter before or with this release, or bank details become unsettable again; restart Cerbos and probe (owner at `linked` denied, at `high` allowed).
+- **Linux:** sumopod gate `pv514` (nest 130/131, the one failure the capability inventory, regenerated at merge; ui green after a mock-reset fix); teeth each red: flag ignored (2 failed), session binding dropped (3 failed), bot/client refusal dropped (3 failed).
+
+### platform-ui `0.118.0` - PV5-14: "Simulate second factor (dev stage)" (2026-10-13) - PROTOTYPED
+
+- A refusal with `assurance_required` shows "This action needs a second factor" and, only when the server offers it, a "Simulate second factor (dev stage)" button (`SecondFactorPrompt`; `/step-up` shows it to signed-in staff); while active, the top bars show "Second factor simulated until HH:MM" (`SimulatedFactorBadge`, from `/api/me`'s `assuranceSource`/`assuranceExpiresAt`). Wired into the tax codes and the billing profile's bank details. Nothing calls it real MFA.
+
 ### platform-nest `0.118.1` - PV-6 follow-up: a website nothing probes says "Uptime monitoring: Not set up" (2026-10-13) - PROTOTYPED
 
 - Found in the PV6-06 live drive: all 81 live website cards carried four null probe figures, so clients would read "Not measured yet" four times on every site. A site with no matched monitor (or a company without the `monitoring` module) now gets no figures and the item "Uptime monitoring: Not set up"; a matched monitor with no checks yet still reads null. `results/website.ts`; the no-monitoring test now pins `kpis: []` and the item.

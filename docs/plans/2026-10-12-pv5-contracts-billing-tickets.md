@@ -718,7 +718,7 @@ the MCP hub registration, golden cases and the capability inventory.
 
 ### PV5-14: simulated second factor for the dev stage (PV-D40)
 
-**Owner:** senior-be (opus: the assurance boundary) + senior-fe for the UI. **Added 2026-10-13.**
+**Owner:** senior-be (opus: the assurance boundary) + senior-fe for the UI. **Added 2026-10-13. PROTOTYPED 2026-10-13** (branch `pv5/14-mfa-sim`; see CHANGELOG platform-nest 0.119.0).
 
 **Why:** live Keycloak emits no `amr`, so `assuranceFor` (`PN/src/auth/oidc.ts:142`) never yields `high` and every
 high-assurance action is unreachable for everyone (finding in "Follow-ups found during PV-5"). The owner ruled
