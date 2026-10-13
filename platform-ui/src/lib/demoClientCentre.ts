@@ -367,6 +367,13 @@ export function clientCentreDemo(method: string, p: string, userId: string, body
   if (p.match(/^\/api\/[^/]+\/clients\/centre$/) && m === "GET") {
     return ok(Object.keys(CLIENT_META).map((clientId) => toListItem(clientId, STORE[clientId] ?? emptyCentre())));
   }
+  // PV6-04: no demo client was converted from a lead, so there are never discovery answers to fill from.
+  const discM = p.match(/^\/api\/[^/]+\/clients\/([^/]+)\/centre\/(discovery|fill-from-discovery)$/);
+  if (discM) {
+    if (!(discM[1] in CLIENT_META)) return err(404, "client not found");
+    if (discM[2] === "discovery" && m === "GET") return ok({ available: false, fillable: [] });
+    if (discM[2] === "fill-from-discovery" && m === "POST") return err(404, "no discovery answers for this client");
+  }
   const staffM = p.match(/^\/api\/[^/]+\/clients\/([^/]+)\/centre$/);
   if (staffM) {
     const clientId = staffM[1];

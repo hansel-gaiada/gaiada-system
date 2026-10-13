@@ -102,6 +102,7 @@ import { ItController } from "./modules/it/it.controller";
 import { FinanceController } from "./modules/finance/finance.controller";
 import { ClientsController } from "./modules/clients/clients.controller";
 import { ClientsCentreController } from "./modules/clients/centre/clients-centre.controller";
+import { CentreDiscoveryController } from "./modules/clients/centre/centre-discovery.controller";
 import { PortalCentreController } from "./core/portal-centre.controller";
 import { HrController } from "./modules/hr/hr.controller";
 // PV6-02: Client Centre Services & results (staff route under `clients`, portal route in core).
@@ -208,7 +209,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, BillingProfileController, BillingProfileAgentController, BillingNumberingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalDocumentsController, ClientDocumentsController, PortalProfileController, PortalCentreController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, PortalConversationController, ConversationController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, AgencyPrivacyController, GithubReposController, GithubWebhookController, ContractsController, ClientContactsController, ClientInviteAcceptController, ClientWebsiteAccessController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
     CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, AgentsController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
-    AgencyController, PmController, ItController, FinanceController, ClientsController, ClientsCentreController, HrController, LoansController,
+    AgencyController, PmController, ItController, FinanceController, ClientsController, ClientsCentreController, CentreDiscoveryController, HrController, LoansController,
     HrPolicyController, RecruitmentController, PayrollController, HrLifecycleController,
     LmsCatalogueController, LmsLearnController,
     CentreResultsController, PortalCentreResultsController,
