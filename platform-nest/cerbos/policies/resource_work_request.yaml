@@ -1,0 +1,130 @@
+# DW-5c (docs/FRONTEND-BFF-CONTRACT.md §32.2; plan docs/plans/2026-10-13-department-workspaces.md §7.2 and §7.3, ruling
+# DW-D14) — authz for the NEW `work_request` resource kind (core, no module): one REQUEST between departments (a
+# department asks another for assets, or asks Web Dev for engineering work). Five actions:
+#   read     — see requests. Same reach as `pm_task` read: every member already reads every PM task, and an asset
+#              request IS a PM task (company_admin, manager, member, viewer).
+#   create   — ask a department for something. Any workspace can ask (plan §7.2): company_admin, manager, member.
+#              Viewers cannot.
+#   cancel   — withdraw an ask. company_admin and manager; and the REQUESTER on their own ask (its own rule).
+#              Only while the request is `open` (the handler answers 409 otherwise).
+#   deliver  — hand over finished assets (asset requests only). company_admin and manager; an `org_unit_lead` over the
+#              receiving department (its own rule); and the work's ASSIGNEES (its own rule: the PM task's
+#              responsible person and any person assignee).
+#   decline  — refuse an asset request. company_admin and manager; an `org_unit_lead` over the receiving department
+#              (its own rule). Engineering requests are declined by Web Dev triage (§32.6), not here.
+# Restart `gaiada-test-cerbos` after editing this file; the bind-mount does not hot-reload.
+#
+# ── EVERY ATTRIBUTE-DEPENDENT RULE STANDS ALONE (the HIER-2 authoring rule) ──────────────────────
+# `cancel`, `deliver` and `decline` are each reachable by more than one kind of authority, so each is several rules,
+# never one:
+#   1. company_admin / manager  — scope-only roles, unconditional beyond `inTenant && notLow`.
+#   2. the REQUESTER (cancel)   — `resource.attr.requestedBy == principal.id`, on `member`. Self-scoped: the bundle
+#                                 marks member·cancel `selfScoped`.
+#   3. the ASSIGNEES (deliver)  — `principal.id in resource.attr.assigneeIds`, on `member`. Self-scoped too.
+#   4. org_unit_lead (deliver, decline) — `resource.attr.unitAncestors` (the request's `to_unit_id` expanded through
+#                                 `org_unit_closure`, the HIER-2 shape) contains the grant's unit. Its own rule per
+#                                 action, NEVER mixed with a scope role.
+# All three attributes are fed by the HANDLER (work-requests.controller.ts) from the request row and its PM task:
+# `requestedBy` from `work_requests.requested_by`, `assigneeIds` from the task's responsible person and person
+# assignees, `unitAncestors` from `loadUnitAncestors(to_unit_id)`. None is ever read from a request body. An unfed
+# resource fails closed: `requestedBy` "" never equals a principal id, `assigneeIds` [] contains nobody and
+# `unitAncestors` [] contains nothing.
+#
+# ── NO AUTOMATION OR BOT PRINCIPAL ASKS, CANCELS, DELIVERS OR DECLINES (after the PV-4 precedent) ──
+# Agents may triage later, under the separate AI plan. `read` stays allowed. The DENY is shaped exactly like
+# resource_conversation.yaml's: `roles: ["user"]`, which every principal carries, so under deny-overrides it beats
+# every ALLOW below, the platform_admin wildcard and the perm mirrors included. It reads `principal.attr.kind`
+# (users.kind, sent by principalPayload()); `has()` makes a raw caller that omits the attribute evaluate to false.
+#
+# ── THE PERMISSION ARM COVERS `read` AND `create` ONLY ───────────────────────────────────────────
+# `cancel` (requester rule: self-scoped, permission-arm-hazard-scan Pattern B), `deliver` (assignee rule: self-scoped;
+# lead rule: attribute-dependent) and `decline` (lead rule: attribute-dependent, fails
+# iam-04-reg1-mirror-reach-invariant) are exactly the shapes a flat `perms` mirror cannot express: a mirror would let
+# any holder of the key act on EVERY request, not just their own or their unit's. Same call as
+# resource_agency_campaign_part.yaml makes for `update` and resource_time_entry.yaml for its self-scoped actions.
+# Consequence: the permission-native `owner` role (zero role-arm rules) holds all five keys in its bundle but reaches
+# only `read` and `create` through Cerbos, unless it also holds company_admin or manager.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: work_request
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["cancel", "deliver", "decline"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # The REQUESTER withdraws THEIR OWN ask, and nothing else. Its own rule: it is self-scoped, and
+    # role-permission-bundles.json marks member·cancel `selfScoped`. The `has()` guard and the `!= ""` test make a call
+    # that never fed `requestedBy` deny.
+    - actions: ["cancel"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.requestedBy) && request.resource.attr.requestedBy != "" &&
+            request.resource.attr.requestedBy == request.principal.id
+
+    # The work's ASSIGNEES deliver it (the PM task's responsible person and any person assignee; the handler feeds the
+    # list). Its own rule, on `member`, self-scoped. An unfed list is empty and contains nobody.
+    - actions: ["deliver"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.assigneeIds) &&
+            request.principal.id in request.resource.attr.assigneeIds
+
+    # Department head over the RECEIVING department — OWN rule per action, never mixed (HIER-2 §1.4). Containment is the
+    # derived role's: the grant's scopeId must be in resource.attr.unitAncestors (the request's `to_unit_id` and every
+    # ancestor of it).
+    - actions: ["deliver"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["decline"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ══════════ automation and bot principals never ask, cancel, deliver or decline ══════════════
+    # Same `roles: ["user"]` DENY shape as resource_conversation.yaml, so it beats the platform_admin wildcard and
+    # every ALLOW (the perm mirrors too) under deny-overrides. `read` is deliberately NOT listed.
+    - actions: ["create", "cancel", "deliver", "decline"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot"]
+
+    # =========== permission-matching arm: read / create ONLY (see the header) ===========================
+    # Generic global-or-company mirror per action. The platform_admin wildcard is deliberately NOT mirrored
+    # (IAM-04c: the tier bypass never enters the permission catalog).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_work_request_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_work_request_create"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
