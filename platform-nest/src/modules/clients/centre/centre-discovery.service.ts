@@ -39,7 +39,7 @@ export interface DiscoveryFillResult {
 
 /** Write the empty-key part of the plan for `answers` and record it, all on `c` (the caller's
  *  transaction): the profile row, the `client.centre_updated` event and one `via: "discovery"` activity
- *  naming the changes and any refused value. Writes nothing when there is nothing to fill or name. */
+ *  naming the changes and any refused value. Writes nothing when there is nothing to fill. */
 export async function fillProfileFromAnswers(
   c: PoolClient,
   args: { tenantId: string; clientId: string; actorId: string | null; answers: Record<string, unknown> },
@@ -56,7 +56,9 @@ export async function fillProfileFromAnswers(
     await emitEvent(c, tenantId, "client", clientId, "client.centre_updated", { changes: result.changes.map((ch) => ch.path) });
   }
   const refused = plan.skipped.filter((s) => s.reason !== "already filled");
-  if (filled.length > 0 || refused.length > 0) {
+  // Only a run that wrote something is logged: a repeat run (nothing left to fill) must stay silent even
+  // though a refused value is refused again.
+  if (filled.length > 0) {
     await c.query(
       `INSERT INTO activities (id, tenant_id, actor_id, verb, target_entity_type, target_entity_id, metadata, origin_site)
        VALUES ($1, $2, $3, 'updated', 'client', $4, $5, $6)`,
