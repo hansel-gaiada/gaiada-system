@@ -36,7 +36,9 @@
 -- Read it from the deploy log. It prints the count only, never a row, an id or a name.
 -- ZERO-ROW TRAP: client_contacts and projects are FORCE RLS and the migration owner is NOBYPASSRLS, so a bare count would
 -- read ZERO rows and report a reassuring 0 on a table that has violations. The count therefore runs per company with
--- app.current_tenant_ids set (the 0051/0108 idiom, as in 202610131820_pv5_enforce_contract_content_fixed.sql).
+-- app.current_tenant_ids set (the 0051/0108 idiom, as in 202610131820_pv5_enforce_contract_content_fixed.sql). The count
+-- also filters `cc.tenant_id = co.id` itself, so a session that does bypass RLS (a superuser) counts each row once, not once
+-- per company.
 --
 -- ── ROLLOUT ───────────────────────────────────────────────────────────────────────────────────────────
 -- Ships WITH the PV4-13 code (the invite route now answers 404 for a project of another client instead of reaching
@@ -55,7 +57,8 @@ BEGIN
 
     SELECT count(*) INTO n
       FROM client_contacts cc
-     WHERE cc.project_id IS NOT NULL
+     WHERE cc.tenant_id = co.id
+       AND cc.project_id IS NOT NULL
        AND NOT EXISTS (
              SELECT 1 FROM projects p
               WHERE p.id = cc.project_id AND p.client_id = cc.client_id AND p.tenant_id = cc.tenant_id);
