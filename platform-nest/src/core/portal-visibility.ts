@@ -25,9 +25,12 @@
 // ── PARAMETERS ARE POSITIONAL AND THE CALLER OWNS THEM ─────────────────────────────────────────────
 // Every portal query passes its params as a positional array, and the scope arrays sit at different
 // indexes in different queries (`$1/$2` in a list, `$2/$3` behind an id). So no builder assumes an
-// index: the caller names them (`{ clients: 2, projects: 3 }`). The NULL handling of `projects` is the
-// load-bearing part — `projectIds === null` means "every project of these clients" (portal-scope.ts),
-// and it is expressed in SQL as `($n::uuid[] IS NULL OR …)` so no TypeScript `?? []` can invert it.
+// index: the caller names them (`scopeAt(2)` = `{ clients: 2, wide: 3, projects: 4 }`, bound with
+// `...scopeValues(scope)` from portal-scope.ts). The reach is PER CLIENT (portal scope kernel per client,
+// 2026-10-13): a row is in reach when its client is one of the caller's clients AND (that client is one the
+// caller reaches client-wide, `wide`, OR the row's project is one of the caller's explicit `projects`). There
+// is no "NULL means every project" any more: the old flattened form let a contact who was client-wide on one
+// client see every project of every OTHER client they were a project-scoped contact of.
 //
 // ── ALIASES ────────────────────────────────────────────────────────────────────────────────────────
 // `alias` is the table alias the caller's FROM clause uses ("k" for `contracts k`). An empty string
@@ -38,10 +41,18 @@
 // fails OPEN. Everything here is the portal's isolation boundary and fails CLOSED. Do not merge them.
 
 /** Positional parameter indexes for the caller's scope, as passed to `pg`: `clients` binds
- *  `PortalScope.clientIds` (uuid[]), `projects` binds `PortalScope.projectIds` (uuid[] | null). */
+ *  `PortalScope.clientIds`, `wide` binds `PortalScope.wideClientIds`, `projects` binds
+ *  `PortalScope.projectIds` (all uuid[], never null). `wide` is REQUIRED: a project-scoped predicate
+ *  without it cannot tell which of the caller's clients they reach client-wide. */
 export interface PortalScopeParams {
   clients: number;
+  wide: number;
   projects: number;
+}
+
+/** The conventional layout: the three scope arrays at `$n`, `$n+1`, `$n+2`, in `scopeValues(scope)` order. */
+export function scopeAt(n: number): PortalScopeParams {
+  return { clients: n, wide: n + 1, projects: n + 2 };
 }
 
 /** Entities whose portal reach is the client only (no project restriction applies to them). */
@@ -67,13 +78,18 @@ export function inCallerClients(alias: string, clients: number): string {
   return `${col(alias, "client_id")} = ANY(${ph(clients)}::uuid[])`;
 }
 
-/** The project half of layer 3 for a row's project column. `allowNullProject` admits rows with no
- *  project to a project-scoped contact (a master agreement, a client-wide change request). */
-function inCallerProjects(column: string, projects: number, allowNullProject: boolean): string {
-  const p = ph(projects);
+/** The project half of layer 3, PER CLIENT: the row's client (`clientAlias.client_id`) is one the caller
+ *  reaches client-wide, or the row's project is one of the caller's explicit projects. `allowNullProject`
+ *  admits rows with no project to a project-scoped contact of that client (a master agreement, a
+ *  client-wide change request). Always AND-ed with `inCallerClients` on the same client column, which is
+ *  what confines the NULL-project arm to the caller's own clients. */
+function inCallerProjects(clientAlias: string, column: string, params: PortalScopeParams, allowNullProject: boolean): string {
+  const w = ph(params.wide);
+  const p = ph(params.projects);
+  const wideArm = `${col(clientAlias, "client_id")} = ANY(${w}::uuid[])`;
   return allowNullProject
-    ? `(${p}::uuid[] IS NULL OR ${column} = ANY(${p}::uuid[]) OR ${column} IS NULL)`
-    : `(${p}::uuid[] IS NULL OR ${column} = ANY(${p}::uuid[]))`;
+    ? `(${wideArm} OR ${column} = ANY(${p}::uuid[]) OR ${column} IS NULL)`
+    : `(${wideArm} OR ${column} = ANY(${p}::uuid[]))`;
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -88,7 +104,7 @@ export function projectClientVisible(alias: string): string {
 /** Layer 3 only for a project: one of the caller's clients, and one of their projects when the contact
  *  is project-scoped. No row-state. */
 export function projectReach(alias: string, params: PortalScopeParams): string {
-  return `${inCallerClients(alias, params.clients)} AND ${inCallerProjects(col(alias, "id"), params.projects, false)}`;
+  return `${inCallerClients(alias, params.clients)} AND ${inCallerProjects(alias, col(alias, "id"), params, false)}`;
 }
 
 /** The full portal predicate for a project. */
@@ -96,10 +112,11 @@ export function projectInPortalScope(alias: string, params: PortalScopeParams): 
   return `${projectReach(alias, params)} AND ${projectClientVisible(alias)}`;
 }
 
-/** SQL predicate restricting `projects p` to the caller's scope. Binds $1 = clientIds uuid[],
- *  $2 = projectIds uuid[] | null. This is the exact text PortalWorkspaceController has always used,
+/** SQL predicate restricting `projects p` to the caller's scope. Binds $1 = clientIds, $2 = wideClientIds,
+ *  $3 = projectIds (all uuid[]; `scopeAt(1)`, so pass `...scopeValues(scope)` first and any further params
+ *  from $4). This is the exact text PortalWorkspaceController has always used,
  *  moved here and exported (its old comment already said "exported"; it was module-private). */
-export const PROJECT_SCOPE = projectInPortalScope("p", { clients: 1, projects: 2 });
+export const PROJECT_SCOPE = projectInPortalScope("p", scopeAt(1));
 
 /** A milestone is visible unless soft-deleted; its reach is its project's (join to a project admitted
  *  by PROJECT_SCOPE / projectInPortalScope). */
@@ -125,7 +142,7 @@ export function runClientVisible(alias: string): string {
 /** The full portal predicate for a run. A run with no project is visible to a client-wide contact only
  *  (no NULL-project admission for project-scoped contacts, unlike contracts). */
 export function runInPortalScope(alias: string, params: PortalScopeParams): string {
-  return `${inCallerClients(alias, params.clients)} AND ${runClientVisible(alias)} AND ${inCallerProjects(col(alias, "project_id"), params.projects, false)}`;
+  return `${inCallerClients(alias, params.clients)} AND ${runClientVisible(alias)} AND ${inCallerProjects(alias, col(alias, "project_id"), params, false)}`;
 }
 
 /** A run's stages are visible except the internal `report` track. */
@@ -151,7 +168,7 @@ export function contractClientVisible(alias: string): string {
 /** The full portal predicate for a contract. A contract with no project is admitted for a
  *  project-scoped contact: a master agreement covers the whole relationship, including their project. */
 export function contractInPortalScope(alias: string, params: PortalScopeParams): string {
-  return `${inCallerClients(alias, params.clients)} AND ${contractClientVisible(alias)} AND ${inCallerProjects(col(alias, "project_id"), params.projects, true)}`;
+  return `${inCallerClients(alias, params.clients)} AND ${contractClientVisible(alias)} AND ${inCallerProjects(alias, col(alias, "project_id"), params, true)}`;
 }
 
 /** An invoice is visible unless soft-deleted, still a `draft` (a number the agency has not committed to),
@@ -200,7 +217,7 @@ export function changeRequestClientVisible(alias: string): string {
 /** The full portal predicate for a change request: the caller's clients, and for a project-scoped
  *  contact, their projects OR a client-wide request with no project. */
 export function changeRequestInPortalScope(alias: string, params: PortalScopeParams): string {
-  return `${inCallerClients(alias, params.clients)} AND ${inCallerProjects(col(alias, "project_id"), params.projects, true)} AND ${changeRequestClientVisible(alias)}`;
+  return `${inCallerClients(alias, params.clients)} AND ${inCallerProjects(alias, col(alias, "project_id"), params, true)} AND ${changeRequestClientVisible(alias)}`;
 }
 
 /** A social post review is always visible to its client: the table has no soft-delete and no internal
@@ -341,7 +358,7 @@ export function conversationThreadClientVisible(alias: string): string {
  *  false`, the same shape as runs. Changing it to `true` would show a project-scoped contact the whole
  *  client-wide thread, history included. */
 export function conversationThreadInPortalScope(alias: string, params: PortalScopeParams): string {
-  return `${inCallerClients(alias, params.clients)} AND ${conversationThreadClientVisible(alias)} AND ${inCallerProjects(col(alias, "project_id"), params.projects, false)}`;
+  return `${inCallerClients(alias, params.clients)} AND ${conversationThreadClientVisible(alias)} AND ${inCallerProjects(alias, col(alias, "project_id"), params, false)}`;
 }
 
 /** A message is always visible once its thread is: the table has no visibility state. Returned as `TRUE` after validating the
@@ -406,7 +423,7 @@ export function meetingMinutesClientVisible(minutesAlias: string, meetingAlias: 
  *  projects may be someone outside the client's organisation. Same shape as runs and conversation threads
  *  (`allowNullProject = false`). Changing it to `true` would show a project-scoped contact every client-wide meeting's minutes. */
 export function meetingMinutesInPortalScope(minutesAlias: string, meetingAlias: string, params: PortalScopeParams): string {
-  return `${inCallerClients(meetingAlias, params.clients)} AND ${meetingMinutesClientVisible(minutesAlias, meetingAlias)} AND ${inCallerProjects(col(meetingAlias, "project_id"), params.projects, false)}`;
+  return `${inCallerClients(meetingAlias, params.clients)} AND ${meetingMinutesClientVisible(minutesAlias, meetingAlias)} AND ${inCallerProjects(meetingAlias, col(meetingAlias, "project_id"), params, false)}`;
 }
 
 /** Staff `clientVisible` for minutes: the meeting has a client AND the minutes are shared on a live meeting. `m` must be the

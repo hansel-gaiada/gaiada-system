@@ -22,9 +22,9 @@ import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { lockPipelineRun } from "./pipeline-lock";
 import { notifyBestEffort, notifyScopeSignedBothSides, resolveClientRecipients } from "./client-notify";
-import { requireSigner, resolvePortalScope } from "./portal-scope";
+import { requireSignerFor, resolvePortalScope, scopeValues } from "./portal-scope";
 // PV3-02: every row-visibility predicate below comes from portal-visibility.ts.
-import { gateClientVisible, inCallerClients, runInPortalScope, runStageClientVisible } from "./portal-visibility";
+import { gateClientVisible, inCallerClients, runInPortalScope, runStageClientVisible, scopeAt } from "./portal-visibility";
 
 const CLIENT_DECISIONS = new Set(["signed", "approved", "changes_requested"]);
 const REQUIRED_SCOPE_PARTIES = ["provider", "client"] as const;
@@ -75,12 +75,12 @@ export class PortalController {
   async listRuns(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
     await authorize(req.principal, { kind: "portal", tenantId }, "read");
     return withTenants([tenantId], async (c) => {
-      const { clientIds, projectIds } = await resolvePortalScope(c, req.principal);
+      const scope = await resolvePortalScope(c, req.principal);
       const runs = await c.query<{ id: string; title: string; status: string }>(
         `SELECT id, title, status, created_at FROM pipeline_runs
-         WHERE ${runInPortalScope("", { clients: 1, projects: 2 })}
+         WHERE ${runInPortalScope("", scopeAt(1))}
          ORDER BY created_at DESC LIMIT 100`,
-        [clientIds, projectIds],
+        scopeValues(scope),
       );
       // C3: blockage needs each run's stages + client gates, but fetched in TWO batched queries rather
       // than two per run. The loop this replaces issued 2N+1 round trips — 201 for a full page — and
@@ -135,11 +135,11 @@ export class PortalController {
   async getRun(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("runId") runId: string) {
     await authorize(req.principal, { kind: "portal", tenantId }, "read");
     return withTenants([tenantId], async (c) => {
-      const { clientIds, projectIds } = await resolvePortalScope(c, req.principal);
+      const scope = await resolvePortalScope(c, req.principal);
       const run = await c.query<{ id: string; title: string; status: string }>(
         `SELECT id, title, status, created_at FROM pipeline_runs
-          WHERE id = $1 AND ${runInPortalScope("", { clients: 2, projects: 3 })}`,
-        [runId, clientIds, projectIds],
+          WHERE id = $1 AND ${runInPortalScope("", scopeAt(2))}`,
+        [runId, ...scopeValues(scope)],
       );
       if (!run.rows[0]) throw new NotFoundException("run not found"); // also the isolation boundary
       // Client-safe stages: hide the internal report track.
@@ -179,14 +179,12 @@ export class PortalController {
     await authorize(req.principal, { kind: "portal", tenantId }, "decide");
     const decided = await withTenants([tenantId], async (c) => {
       const scope = await resolvePortalScope(c, req.principal);
-      const { clientIds } = scope;
       // CP-1 — CLOSES A GAP 0072 OPENED AND NEVER ENFORCED. `client_contacts.capability` exists
       // precisely so "contacts who WATCH but must not SIGN" is expressible (0072's own words), and
       // nothing ever read it: every invited stakeholder could countersign. A `viewer` may still send
       // FEEDBACK — that is the whole point of inviting them — so the gate is on the SIGNING decisions
       // only, not on the route. `changes_requested` stays open to viewers for the same reason.
       const isSignature = decision === "signed" || decision === "approved";
-      if (isSignature) requireSigner(scope);
       // WD-29 (DEF-2): this is the CLIENT-side twin of PipelineController.decideGate and it is where
       // BOTH of DEF-2's triggering decisions actually land in production — `prd_sign` and
       // `customer_feedback` are client gates, decided here through the portal. Locking only the
@@ -197,18 +195,22 @@ export class PortalController {
       // ownership-checked UPDATE unchanged (its `status = 'pending'` predicate stays authoritative and
       // is now evaluated under the lock).
       // CP-1 — SECOND GAP CLOSED HERE: `projectIds` was resolved on this path and then never applied.
-      // `listRuns`/`getRun` both carry the `($n IS NULL OR project_id = ANY($n))` predicate, so a
+      // `listRuns`/`getRun` both carry the run's project-scope predicate (runInPortalScope), so a
       // project-scoped contact could not SEE a run outside their project — but they could DECIDE a gate
       // on it, because this query filtered on the client only. Reachable with one addressable id and no
       // listing step, which is exactly the shape of an IDOR. Same predicate as the read paths, so a
       // project-less run stays invisible to a project-scoped contact on all three routes alike.
-      const owner = await c.query<{ run_id: string }>(
-        `SELECT g.run_id FROM pipeline_gates g JOIN pipeline_runs r ON g.run_id = r.id
-         WHERE g.id = $1 AND ${runInPortalScope("r", { clients: 2, projects: 3 })}
+      const owner = await c.query<{ run_id: string; client_id: string }>(
+        `SELECT g.run_id, r.client_id FROM pipeline_gates g JOIN pipeline_runs r ON g.run_id = r.id
+         WHERE g.id = $1 AND ${runInPortalScope("r", scopeAt(2))}
            AND ${gateClientVisible("g")}`,
-        [id, clientIds, scope.projectIds],
+        [id, ...scopeValues(scope)],
       );
       if (!owner.rows[0]) return null;
+      // Portal scope per client (2026-10-13): signing is checked against THE RUN'S OWN client, after the
+      // gate has passed the read predicate (out of scope = 404, never 403). A signer of another client the
+      // caller also represents grants nothing here.
+      if (isSignature) requireSignerFor(scope, owner.rows[0].client_id);
       await lockPipelineRun(c, owner.rows[0].run_id);
       // The gate must be a CLIENT-side gate on a run this client owns, and still pending. Also returns
       // the run's owner_id/created_by (r is already joined for the ownership check) — D-3's "a client
@@ -221,7 +223,7 @@ export class PortalController {
          WHERE g.id = $1 AND g.run_id = r.id AND ${inCallerClients("r", 5)}
            AND ${gateClientVisible("g")} AND g.status = 'pending'
          RETURNING g.run_id, g.kind, r.owner_id, r.created_by`,
-        [id, decision, note ?? null, req.principal.userId, clientIds],
+        [id, decision, note ?? null, req.principal.userId, [owner.rows[0].client_id]],
       );
       if (res.rowCount === 0) return null;
       const row = res.rows[0];
@@ -257,10 +259,6 @@ export class PortalController {
     await authorize(req.principal, { kind: "portal", tenantId }, "sign");
     const result = await withTenants([tenantId], async (c) => {
       const scope = await resolvePortalScope(c, req.principal);
-      const { clientIds } = scope;
-      // CP-1: this route is named `sign` and signs a legal agreement, so the capability gate is
-      // unconditional here (unlike decideGate, where a viewer's feedback is legitimate).
-      requireSigner(scope);
       // WD-29 (DEF-2): the client-side scope sign-off — the second of the two events whose near-
       // simultaneous arrival with `prd_sign` produced the duplicate design stages. Same per-run lock
       // as every other transition, taken before the party set is read.
@@ -269,10 +267,14 @@ export class PortalController {
       // (a project-scoped contact could sign the scope of a run on another of their client's projects).
       const run = await c.query<{ project_id: string | null; owner_id: string | null; created_by: string | null; client_id: string | null }>(
         `SELECT project_id, owner_id, created_by, client_id FROM pipeline_runs
-          WHERE id = $1 AND ${runInPortalScope("", { clients: 2, projects: 3 })}`,
-        [runId, clientIds, scope.projectIds],
+          WHERE id = $1 AND ${runInPortalScope("", scopeAt(2))}`,
+        [runId, ...scopeValues(scope)],
       );
       if (!run.rows[0]) throw new NotFoundException("run not found");
+      // CP-1: this route is named `sign` and signs a legal agreement, so the capability gate is
+      // unconditional here (unlike decideGate, where a viewer's feedback is legitimate). Portal scope per
+      // client (2026-10-13): checked against THE RUN'S OWN client, after the read predicate admitted it.
+      requireSignerFor(scope, run.rows[0].client_id);
       // The client always signs the 'client' party. ON CONFLICT keeps it idempotent.
       const ins = await c.query(
         `INSERT INTO scope_signoffs (id, tenant_id, run_id, gate_id, party, signer, signer_name, signature_ref, origin_site)

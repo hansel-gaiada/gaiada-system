@@ -9,6 +9,8 @@ import { NewMenu } from "./NewMenu";
 import { TenantSwitcher } from "./TenantSwitcher";
 import { Eyebrow } from "@/components/ui";
 import { overviewHref, type ShellModel, type ShellWorkspace } from "@/lib/shellModel";
+import { assistantDrawerHref } from "@/lib/assistantContext";
+import { ASSISTANT_ROW } from "@/lib/workspaces";
 import type { ConcreteRow } from "@/lib/workspaceAccess";
 import { useWorkspaceShell } from "./WorkspaceShellContext";
 import "./workspace-sidebar.css";
@@ -22,7 +24,9 @@ import "./workspace-sidebar.css";
 
 export interface SidebarCompany { id: string; name: string; badge?: string | null }
 
-export function WorkspaceSidebar({ company, companies, newItems }: {
+export function WorkspaceSidebar({ tenantId, company, companies, newItems }: {
+  /** The active company, for the page context the Assistant drawer opens with (DW-2d). */
+  tenantId: string | null;
   company: SidebarCompany | null;
   /** Every company the person may switch to; empty when there is only one. */
   companies: SidebarCompany[];
@@ -31,7 +35,7 @@ export function WorkspaceSidebar({ company, companies, newItems }: {
   const shell = useWorkspaceShell();
   // Only the workspace shell draws this, inside its provider. Outside it there is nothing to draw.
   if (!shell) return null;
-  const { model, view, rows, active } = shell;
+  const { model, view, rows, active, pathname } = shell;
 
   const visiting = view.kind === "workspace" && !view.ws.mine;
   const atHome = view.kind === "workspace" ? view.ws.home : view.kind === "company" && model.home.kind === "company";
@@ -62,13 +66,13 @@ export function WorkspaceSidebar({ company, companies, newItems }: {
         )}
         {view.kind === "workspace" ? (
           <>
-            <RowGroup rows={view.ws.rows.top} active={active} />
-            <RowGroup label="Work" rows={view.ws.rows.work} active={active} />
-            <RowGroup label="Performance" rows={view.ws.rows.performance} active={active} />
-            <RowGroup label="You" rows={view.ws.rows.you} active={active} />
+            <RowGroup rows={view.ws.rows.top} active={active} pathname={pathname} tenantId={tenantId} />
+            <RowGroup label="Work" rows={view.ws.rows.work} active={active} pathname={pathname} tenantId={tenantId} />
+            <RowGroup label="Performance" rows={view.ws.rows.performance} active={active} pathname={pathname} tenantId={tenantId} />
+            <RowGroup label="You" rows={view.ws.rows.you} active={active} pathname={pathname} tenantId={tenantId} />
           </>
         ) : (
-          <RowGroup label={title} rows={rows} active={active} />
+          <RowGroup label={title} rows={rows} active={active} pathname={pathname} tenantId={tenantId} />
         )}
       </nav>
 
@@ -85,26 +89,37 @@ export function WorkspaceSidebar({ company, companies, newItems }: {
 
 // ── Rows ──────────────────────────────────────────────────────────────────────────────────────────
 
-function RowGroup({ label, rows, active }: { label?: string; rows: ConcreteRow[]; active: { rowKey: string } | null }) {
+function RowGroup({ label, rows, active, pathname, tenantId }: {
+  label?: string; rows: ConcreteRow[]; active: { rowKey: string } | null; pathname: string; tenantId: string | null;
+}) {
   const id = useId();
   if (rows.length === 0) return null;
   return (
     <div className="ws-side__group" {...(label ? { role: "group", "aria-labelledby": id } : {})}>
       {label && <div className="ws-side__label" id={id}>{label}</div>}
       {rows.map((row) => (
-        <RowLink key={row.key} row={row} active={active?.rowKey === row.key} />
+        <RowLink key={row.key} row={row} active={active?.rowKey === row.key} pathname={pathname} tenantId={tenantId} />
       ))}
     </div>
   );
 }
 
-/** A row links to its first tab; the shell's tab strip (WorkspaceTabStrip) shows the rest. */
-function RowLink({ row, active }: { row: ConcreteRow; active: boolean }) {
+/** A row links to its first tab; the shell's tab strip (WorkspaceTabStrip) shows the rest.
+ *
+ *  DW-2d: the AI Assistant row opens today's assistant DRAWER over the current page, the way the floating
+ *  button did, so it links to `assistantDrawerHref` (the page context rides in the URL) with the button's
+ *  `id` (the drawer returns focus to it when it closes; the button is not drawn in this shell, so the id
+ *  stays unique) and no prefetch, for the button's reason: a prefetched payload can be the full page
+ *  instead of the drawer, so the click must fetch the intercepted route itself. On /assistant it is just
+ *  the active row, linking to the page. */
+function RowLink({ row, active, pathname, tenantId }: { row: ConcreteRow; active: boolean; pathname: string; tenantId: string | null }) {
   const { tip, triggerProps } = useRailTooltip(row.label);
+  const assistant = row.key === ASSISTANT_ROW.key;
   return (
     <>
       <Link
-        href={row.tabs[0].href}
+        href={assistant && pathname !== row.tabs[0].href ? assistantDrawerHref(pathname, tenantId) : row.tabs[0].href}
+        {...(assistant ? { id: "asst-fab-trigger", prefetch: false } : {})}
         className={`erp-navbtn ws-row${active ? " erp-navbtn--active ws-row--active" : ""}`}
         aria-current={active ? "page" : undefined}
         {...triggerProps}

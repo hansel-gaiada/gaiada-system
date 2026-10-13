@@ -21,6 +21,10 @@ import "./command-palette.css";
 // trigger button elsewhere in the shell (TopBar's visible affordance) can dispatch without needing
 // React context across the server/client boundary — the same "attribute/event on a shared ancestor"
 // idiom NavToggle already uses for the mobile drawer.
+//
+// DW-2c: the event may carry `detail: { query?, onClose? }`. The workspace top bar's one search field
+// hands over what was typed before the palette took focus (`query`), and asks to be told when the palette
+// closes (`onClose`), because the palette then returns focus to that field and a focus must not reopen it.
 interface PaletteOption { id: string; label: string; sublabel?: string; href?: string }
 interface PaletteGroup { label: string; options: PaletteOption[] }
 
@@ -29,6 +33,9 @@ interface LiveSearchGroup { key: string; label: string; hits: LiveSearchHit[] }
 
 const DEBOUNCE_MS = 220;
 const STATIC_LIMIT = 8;
+
+/** What a trigger may pass in `gaiada:palette:open`'s `detail`. */
+export interface PaletteOpenDetail { query?: string; onClose?: () => void }
 
 export function CommandPalette({ entries }: { entries: PaletteEntry[] }) {
   const router = useRouter();
@@ -39,6 +46,7 @@ export function CommandPalette({ entries }: { entries: PaletteEntry[] }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef<(() => void) | null>(null);
   const listboxId = useId();
 
   useEffect(() => {
@@ -49,8 +57,11 @@ export function CommandPalette({ entries }: { entries: PaletteEntry[] }) {
         setOpen(true);
       }
     }
-    function onOpenEvent() {
+    function onOpenEvent(e: Event) {
+      const detail = (e as CustomEvent<PaletteOpenDetail | undefined>).detail;
       triggerRef.current = document.activeElement as HTMLElement | null;
+      onCloseRef.current = typeof detail?.onClose === "function" ? detail.onClose : null;
+      if (typeof detail?.query === "string" && detail.query !== "") setQuery(detail.query);
       setOpen(true);
     }
     document.addEventListener("keydown", onKeyDown);
@@ -70,6 +81,8 @@ export function CommandPalette({ entries }: { entries: PaletteEntry[] }) {
     setLiveGroups([]);
     setActiveId(null);
     const trigger = triggerRef.current;
+    onCloseRef.current?.();
+    onCloseRef.current = null;
     if (trigger && document.contains(trigger)) trigger.focus();
   }, [open]);
 
@@ -143,10 +156,20 @@ export function CommandPalette({ entries }: { entries: PaletteEntry[] }) {
     router.push(opt.href);
   }
 
+  // Enter with nothing highlighted (no entry matches, and no live hit yet) searches the whole ERP instead
+  // of doing nothing: the same `/search?q=` the zero-JS form lands on (DW-2c).
+  function submit() {
+    if (flatOptions.some((o) => o.id === activeId)) { commit(activeId); return; }
+    const text = query.trim();
+    if (!text) return;
+    close();
+    router.push(`/search?q=${encodeURIComponent(text)}`);
+  }
+
   function onInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
     else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
-    else if (e.key === "Enter") { e.preventDefault(); commit(activeId); }
+    else if (e.key === "Enter") { e.preventDefault(); submit(); }
     else if (e.key === "Escape") { e.preventDefault(); close(); }
     else if (e.key === "Tab") { e.preventDefault(); } // single-field dialog — nothing else to tab to
   }

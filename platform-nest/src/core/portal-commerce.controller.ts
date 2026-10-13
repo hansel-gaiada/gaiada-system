@@ -35,11 +35,11 @@ import { sha256Hex } from "./content-hash";
 import { clientIpOf, hashForEvidence, userAgentOf } from "./evidence";
 import { scrubText, isScrubbableText } from "./scrub";
 import { notifyBestEffort } from "./client-notify";
-import { requireSigner, resolvePortalScope, type PortalScope } from "./portal-scope";
+import { canSignFor, requireSignerFor, resolvePortalScope, scopeValues, type PortalScope } from "./portal-scope";
 // PV3-02: every row-visibility predicate below comes from portal-visibility.ts.
 import {
   changeRequestInPortalScope, contractInPortalScope, conversationAttachmentClientVisible, conversationThreadInPortalScope, deliverableClientVisible,
-  invoiceInPortalScope, invoicePaymentClientVisible, projectInPortalScope,
+  invoiceInPortalScope, invoicePaymentClientVisible, projectInPortalScope, scopeAt, type PortalScopeParams,
 } from "./portal-visibility";
 import type { PoolClient } from "pg";
 import { claimHeadroom, hasCurrencyPrecision } from "../modules/invoice/issue";
@@ -111,7 +111,7 @@ function dispositionHeader(filename: string): string {
 // reads null, exactly like a row that is not there.
 const AMENDMENT_COLUMNS = `
   k.kind, am.id AS "amendsId", am.reference AS "amendsReference", wcr.id AS "changeRequestId"`;
-const amendmentJoins = (params: { clients: number; projects: number }) => `
+const amendmentJoins = (params: PortalScopeParams) => `
   LEFT JOIN contracts am ON am.id = k.amends_id AND ${contractInPortalScope("am", params)}
   LEFT JOIN webdev_change_requests wcr ON wcr.id = k.change_request_id AND ${changeRequestInPortalScope("wcr", params)}`;
 
@@ -351,10 +351,10 @@ export class PortalCommerceController {
                 ${AMENDMENT_COLUMNS},
                 ${CONTRACT_SIGNED_COPY_FILE_ID("k")} AS "signedCopyFileId"
            FROM contracts k LEFT JOIN projects p ON p.id = k.project_id
-           ${amendmentJoins({ clients: 1, projects: 2 })}
-          WHERE ${contractInPortalScope("k", { clients: 1, projects: 2 })}
+           ${amendmentJoins(scopeAt(1))}
+          WHERE ${contractInPortalScope("k", scopeAt(1))}
           ORDER BY k.created_at DESC LIMIT 200`,
-        [scope.clientIds, scope.projectIds],
+        scopeValues(scope),
       );
       return rows.rows;
     });
@@ -391,9 +391,11 @@ export class PortalCommerceController {
         // 403s. Kept as ONE expression in ONE place for that reason.
         // PV5-06: a certified-tier contract is signed through a provider, never by typed name, so it is never
         // offered to the typed-name form (the POST refuses it the same way).
-        canSign: scope.canSign && k.status === "sent" && k.signatureTier !== "certified"
+        // Portal scope per client (2026-10-13): the capability is the caller's on THIS CONTRACT'S client, the
+        // same `requireSignerFor(scope, k.clientId)` the POST enforces. A signer of another client reads false.
+        canSign: canSignFor(scope, k.clientId) && k.status === "sent" && k.signatureTier !== "certified"
           && !signatures.rows.some((s: Record<string, unknown>) => s.party === "client"),
-        viewOnly: !scope.canSign,
+        viewOnly: !canSignFor(scope, k.clientId),
         signatures: signatures.rows,
         document: doc.rows[0] ?? null,
       };
@@ -419,19 +421,22 @@ export class PortalCommerceController {
     // a 400 about the body instead of a 403, and a denial test with a thin body silently stopped testing
     // authorization.
     await authorize(req.principal, { kind: "portal", tenantId }, "sign");
-    // An explicit attestation is what makes a typed name a signature rather than a form field. Refused
-    // server-side so the record can never contain a signature the signer did not affirm.
-    if (b.agree !== true) throw new BadRequestException("you must confirm you agree to the terms");
     const signerName = (b.signerName ?? "").trim();
-    if (signerName.length < 2) throw new BadRequestException("signerName required");
     // PV5-06: the client signs WHAT THEY SAW. `contentSha256` is the hash the GET handed them; it is only an
     // echo, compared below against the hash the server fixed at send. It is never stored and never trusted.
     const echoed = typeof b.contentSha256 === "string" ? b.contentSha256.trim().toLowerCase() : "";
 
     const out = await withTenants([tenantId], async (c) => {
       const scope = await resolvePortalScope(c, req.principal);
-      requireSigner(scope);
+      // Portal scope per client (2026-10-13): reach first (a contract outside the caller's scope is 404,
+      // never 403), then the capability on THIS CONTRACT'S client, then the body. A signer of another client
+      // the caller also represents grants nothing here.
       const k = await this.ownedContract(c, scope, contractId);
+      requireSignerFor(scope, k.clientId);
+      // An explicit attestation is what makes a typed name a signature rather than a form field. Refused
+      // server-side so the record can never contain a signature the signer did not affirm.
+      if (b.agree !== true) throw new BadRequestException("you must confirm you agree to the terms");
+      if (signerName.length < 2) throw new BadRequestException("signerName required");
       // ORDER MATTERS, and it was wrong the first time. The already-signed check must come BEFORE the
       // status check, because signing is what FLIPS the status to `signed` — so a double-submit (a
       // double-tapped button on a phone, a retried request) hit `status !== 'sent'` and answered
@@ -628,9 +633,9 @@ export class PortalCommerceController {
               ${AMENDMENT_COLUMNS},
               ${CONTRACT_SIGNED_COPY_FILE_ID("k")} AS "signedCopyFileId"
          FROM contracts k
-         ${amendmentJoins({ clients: 2, projects: 3 })}
-        WHERE k.id = $1 AND ${contractInPortalScope("k", { clients: 2, projects: 3 })}`,
-      [contractId, scope.clientIds, scope.projectIds],
+         ${amendmentJoins(scopeAt(2))}
+        WHERE k.id = $1 AND ${contractInPortalScope("k", scopeAt(2))}`,
+      [contractId, ...scopeValues(scope)],
     );
     if (!r.rows[0]) throw new NotFoundException("contract not found");
     return r.rows[0];
@@ -647,11 +652,11 @@ export class PortalCommerceController {
       // PV3-02c: the project must itself be visible (not soft-deleted), as on every deliverable list.
       deliverable: `SELECT 1 FROM deliverables d JOIN projects p ON p.id = d.project_id
                      WHERE d.id = $1 AND ${deliverableClientVisible("d")}
-                       AND ${projectInPortalScope("p", { clients: 2, projects: 3 })}`,
+                       AND ${projectInPortalScope("p", scopeAt(2))}`,
       project: `SELECT 1 FROM projects p WHERE p.id = $1
-                  AND ${projectInPortalScope("p", { clients: 2, projects: 3 })}`,
+                  AND ${projectInPortalScope("p", scopeAt(2))}`,
       contract: `SELECT 1 FROM contracts k WHERE k.id = $1
-                   AND ${contractInPortalScope("k", { clients: 2, projects: 3 })}`,
+                   AND ${contractInPortalScope("k", scopeAt(2))}`,
       // Their own receipt, reached THROUGH its invoice (PV3-02c): the invoice must be one the portal
       // shows (not deleted, not a draft) and one of the caller's clients, so a payment on a deleted
       // invoice has no receipt. Scoped on the invoice's client, NOT on recorded_by: a colleague at the
@@ -664,16 +669,16 @@ export class PortalCommerceController {
       // client-wide-thread admission, PV4-Q1). A message retracted under the retired 15-minute window (PV-D34) keeps its files withdrawn.
       conversation: `SELECT 1 FROM conversation_messages m JOIN conversation_threads t ON t.id = m.thread_id
                       WHERE m.id = $1 AND ${conversationAttachmentClientVisible("m")}
-                        AND ${conversationThreadInPortalScope("t", { clients: 2, projects: 3 })}`,
+                        AND ${conversationThreadInPortalScope("t", scopeAt(2))}`,
       // PV5-07: only an ISSUED invoice (the invoice of record) has a downloadable document, and only in scope.
       invoice: `SELECT 1 FROM invoices i WHERE i.id = $1 AND i.issued_at IS NOT NULL
                   AND ${invoiceInPortalScope("i", { clients: 2 })}`,
     }[kind];
-    // A receipt has no project reach, so its query binds only $1/$2. Passing an unreferenced $3 makes
+    // A receipt has no project reach, so its query binds only $1/$2. Passing an unreferenced $3/$4 makes
     // Postgres refuse the statement ("could not determine data type of parameter $3"), which 500s the
     // download for EVERY caller: no test had exercised the receipt route before PV3-02c.
     const clientOnly = kind === "invoice_payment" || kind === "invoice";
-    const r = await c.query(q, clientOnly ? [id, scope.clientIds] : [id, scope.clientIds, scope.projectIds]);
+    const r = await c.query(q, clientOnly ? [id, scope.clientIds] : [id, ...scopeValues(scope)]);
     return r.rows.length > 0;
   }
 

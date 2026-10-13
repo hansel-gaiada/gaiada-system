@@ -64,6 +64,20 @@ local stack). None of these mean "production-done".
 - **Tests:** `test/site-set-domain-unit.spec.ts` (no services: the domain rule, the controller, the WS4 hash binding, the real forms guard and the preview origin rule against every lookalike; 85 tests) and `test/site-set-domain.spec.ts` (real Postgres, Redis, the real policy decision point; the gate, the value, single use, replay, CORS on the real consent preflight, the 404 and 409 refusals, and the rollback). `test/control-command-registry.spec.ts` updated.
 - **Docs:** `webdesk/api/README.md` command table and a "site.setDomain" section.
 
+### platform-ui `0.111.0` - DW-2c and DW-2d: the workspace top bar, and the AI Assistant row opens the drawer (2026-10-13) - PROTOTYPED
+
+- **What:** inside the workspace shell only (the pilot switch, `prefs.shell` = `workspaces`), plan §2.5 and DW-D9:
+  - DW-2c, the top bar (`WorkspaceTopBar`): `[☰ phone] [Search pages, people, records…  ⌘K]  [chip] [bell] [avatar]`.
+    - One search field. Clicking or focusing it opens the command palette, and a character typed before the palette took focus is handed over (`gaiada:palette:open` now accepts `detail: { query, onClose }`). It stays a real `<form action="/search" method="get" role="search">` with a named `q` input, so it works without JS. At phone width it collapses to an icon link that opens the palette.
+    - Enter in the palette with no entry highlighted goes to `/search?q=<text>` (it did nothing before; this also holds in the classic shell).
+    - The bell is a disclosure button: the newest five unread notifications (title and age, from the same `listNotifications` read the count uses), "Open inbox", Escape and an outside click close it. No unread says "Nothing new". A read that throws shows no count and "Couldn't load notifications". The classic bell cannot say that (it turns a failure into 0); a 403/404 still reads as empty in both, because `listNotifications` absorbs those.
+    - The avatar menu holds Theme (the same `ThemeToggle`, same cookie), Account, Client view, the layout switch and Sign out; `UserMenu` takes a `theme` prop for it.
+    - Removed here: the "My Workspace" label, the date, the separate theme and palette buttons, and the full-width access strip, which is a small "Unrestricted" chip whose tooltip and accessible description carry the strip's whole sentence (including "logged and reported").
+  - DW-2d: the sidebar's AI Assistant row opens today's assistant drawer over the current page. It links to `assistantDrawerHref(pathname, tenantId)` with `prefetch={false}` and `id="asst-fab-trigger"` (so the drawer's focus return works); on `/assistant` it is the active row. The floating button is not drawn in this shell. `WorkspaceSidebar` takes a `tenantId` prop from its server half.
+- **Where:** `components/shell/WorkspaceTopBar.tsx`, `TopBarSearch.tsx`, `NotificationBell.tsx`, `SpecialAccessChip.tsx`, `workspace-topbar.css` (new; existing tokens only); `Shell.tsx`, `UserMenu.tsx`, `CommandPalette.tsx`, `WorkspaceSidebar.tsx`, `WorkspaceShellSidebar.tsx`.
+- **Not changed:** the classic shell's top bar, strip and floating button, and the `e2e/app.spec.ts` search test (only the palette's Enter fallback above reaches the classic shell), the palette's entries (DW-2e), + New (DW-2f), the assistant page and drawer, the model and routing, `lib/workspaces.ts`, `nav.ts`, every gate, every URL, every server read.
+- **Tests:** `TopBarSearch.test.tsx`, `NotificationBell.test.tsx`, `WorkspaceTopBar.test.tsx`, `Shell.test.tsx` (new); `CommandPalette.test.tsx`, `UserMenu.test.tsx`, `WorkspaceSidebar.test.tsx` extended. CI run 38348301648 green (platform-ui and every other job; run on 5dd2b227, the head before this docs commit).
+
 ### platform-ui `0.110.0` - DW-2b: one tab strip drawn by the workspace shell (2026-10-13) - PROTOTYPED
 
 - **What:** inside the workspace shell only (the pilot switch, `prefs.shell` = `workspaces`), plan §2.4 and §2.6 rule 1:
