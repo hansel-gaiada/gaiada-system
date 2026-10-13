@@ -360,11 +360,15 @@ export class ContractsController {
     @Param("tenantId") tenantId: string,
     @Param("contractId") contractId: string,
     @Body() b: {
-      title?: string; reference?: string; bodyMd?: string; fileId?: string; value?: number;
+      title?: string; reference?: string; bodyMd?: string; fileId?: string; value?: number | null;
       currency?: string; startsOn?: string; endsOn?: string; status?: string;
     },
   ) {
     await authorize(req.principal, { kind: "contract", id: contractId, tenantId }, "update");
+    // PV5-F1: an EXPLICIT `value: null` clears a draft's value (every other field COALESCEs, so a null could never
+    // clear it). An absent key leaves it unchanged. `currency` is NOT NULL and is left as it is: clearing the value
+    // does not reset the currency, and a body that also names a currency still sets it.
+    const clearValue = b != null && Object.prototype.hasOwnProperty.call(b, "value") && b.value === null;
     // PV3-06: an agent or n8n call (anything that arrives through the hub's OBO envelope, which is what sets
     // `currentVia()`; a staff browser session never does) may edit a draft but never change its status. The
     // `contracts.updateDraft` tool is LOW impact and its schema omits `status`, but the hub does not enforce
@@ -386,6 +390,9 @@ export class ContractsController {
           `a ${cur.rows[0].status} contract cannot be edited — issue a new version with supersedesId instead`,
         );
       }
+      if (clearValue && cur.rows[0].status !== "draft") {
+        throw new BadRequestException("a value can only be cleared on a draft contract");
+      }
       if (b?.status && b.status !== "void" && b.status !== "draft") {
         // `send` and `countersign` have their own routes precisely so the transitions that matter are
         // not reachable by poking this field.
@@ -395,7 +402,7 @@ export class ContractsController {
         `UPDATE contracts SET
            title = COALESCE($2, title), reference = COALESCE($3, reference),
            body_md = COALESCE($4, body_md), file_id = COALESCE($5, file_id),
-           value = COALESCE($6, value), currency = COALESCE($7, currency),
+           value = CASE WHEN $11::boolean THEN NULL ELSE COALESCE($6, value) END, currency = COALESCE($7, currency),
            starts_on = COALESCE($8::date, starts_on), ends_on = COALESCE($9::date, ends_on),
            status = COALESCE($10, status), updated_at = now()
          WHERE id = $1 AND deleted_at IS NULL`,
@@ -405,7 +412,7 @@ export class ContractsController {
           b?.reference ? scrubText(b.reference).text.slice(0, 100) : null,
           b?.bodyMd ?? null, b?.fileId ?? null, b?.value ?? null,
           b?.currency ?? null, b?.startsOn ?? null, b?.endsOn ?? null,
-          voiding ? "void" : null,
+          voiding ? "void" : null, clearValue,
         ],
       );
       if (res.rowCount === 0) throw new NotFoundException("contract not found");

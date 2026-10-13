@@ -103,7 +103,7 @@ const SITES: Site[] = [
   // maker/checker step before it is sent) is hidden as well as a `draft`. `old` is the NEW literal shape; it
   // was `... AND i.status <> 'draft'`.
   { site: "workspace finance invoices (not draft, not approved — PV3-02d)",
-    old: `i.client_id = ANY($1::uuid[]) AND i.deleted_at IS NULL AND i.status NOT IN ('draft','approved')`,
+    old: `i.client_id = ANY($1::uuid[]) AND i.deleted_at IS NULL AND i.status NOT IN ('draft','approved') AND (i.status <> 'void' OR i.issued_at IS NOT NULL OR i.pre_pv5_legacy)`,
     now: invoiceInPortalScope("i", { clients: 1 }) },
   { site: "workspace finance payments lateral (detail context)",
     old: `pp.invoice_id = inv.id AND pp.deleted_at IS NULL`,
@@ -133,7 +133,7 @@ const SITES: Site[] = [
   // (`JOIN invoices pi ON pi.id = pp.invoice_id`), so a payment on a deleted or draft invoice is absent.
   // `old` is the NEW literal shape; it was `pp.client_id = ANY($1) AND pp.deleted_at IS NULL AND pp.status = 'confirmed'`.
   { site: "workspace timeline payments (timeline context, through a visible invoice — PV3-02c)",
-    old: `pp.deleted_at IS NULL AND pp.status = 'confirmed' AND pi.client_id = ANY($1::uuid[]) AND pi.deleted_at IS NULL AND pi.status NOT IN ('draft','approved')`,
+    old: `pp.deleted_at IS NULL AND pp.status = 'confirmed' AND pi.client_id = ANY($1::uuid[]) AND pi.deleted_at IS NULL AND pi.status NOT IN ('draft','approved') AND (pi.status <> 'void' OR pi.issued_at IS NOT NULL OR pi.pre_pv5_legacy)`,
     now: `${invoicePaymentClientVisible("pp", "timeline")} AND ${invoiceInPortalScope("pi", { clients: 1 })}` },
 
   // ── portal.controller.ts ──
@@ -174,7 +174,7 @@ const SITES: Site[] = [
     old: `pp.invoice_id = $1 AND pp.deleted_at IS NULL`,
     now: `pp.invoice_id = $1 AND ${invoicePaymentClientVisible("pp", "detail")}` },
   { site: "commerce ownedInvoice",
-    old: `i.id = $1 AND i.client_id = ANY($2::uuid[]) AND i.deleted_at IS NULL AND i.status NOT IN ('draft','approved')`,
+    old: `i.id = $1 AND i.client_id = ANY($2::uuid[]) AND i.deleted_at IS NULL AND i.status NOT IN ('draft','approved') AND (i.status <> 'void' OR i.issued_at IS NOT NULL OR i.pre_pv5_legacy)`,
     now: `i.id = $1 AND ${invoiceInPortalScope("i", { clients: 2 })}` },
   { site: "commerce ownedContract / ownsEntity.contract",
     old: `k.id = $1 AND k.client_id = ANY($2::uuid[]) AND k.deleted_at IS NULL AND k.status <> 'draft'
@@ -194,7 +194,7 @@ const SITES: Site[] = [
   // pp.invoice_id`), so a payment on a deleted or draft invoice has no receipt. `old` is the NEW literal shape.
   { site: "commerce ownsEntity.invoice_payment (receipt download, through a visible invoice — PV3-02c)",
     old: `pp.id = $1 AND pp.deleted_at IS NULL
-                          AND i.client_id = ANY($2::uuid[]) AND i.deleted_at IS NULL AND i.status NOT IN ('draft','approved')`,
+                          AND i.client_id = ANY($2::uuid[]) AND i.deleted_at IS NULL AND i.status NOT IN ('draft','approved') AND (i.status <> 'void' OR i.issued_at IS NOT NULL OR i.pre_pv5_legacy)`,
     now: `pp.id = $1 AND ${invoicePaymentClientVisible("pp", "detail")} AND ${invoiceInPortalScope("i", { clients: 2 })}` },
 
   // ── mail/thread.controller.ts (MAIL-33 portal mail threads, PV3-02b) ──
@@ -303,7 +303,7 @@ describe("PV3-02 builder contract", () => {
       `k.client_id = ANY($7::uuid[]) AND k.deleted_at IS NULL AND k.status <> 'draft' AND (k.client_id = ANY($8::uuid[]) OR k.project_id = ANY($9::uuid[]) OR k.project_id IS NULL)`,
     );
     expect(scopeAt(2)).toEqual({ clients: 2, wide: 3, projects: 4 });
-    expect(invoiceInPortalScope("x", { clients: 4 })).toBe(`x.client_id = ANY($4::uuid[]) AND x.deleted_at IS NULL AND x.status NOT IN ('draft','approved')`);
+    expect(invoiceInPortalScope("x", { clients: 4 })).toBe(`x.client_id = ANY($4::uuid[]) AND x.deleted_at IS NULL AND x.status NOT IN ('draft','approved') AND (x.status <> 'void' OR x.issued_at IS NOT NULL OR x.pre_pv5_legacy)`);
   });
 
   it("row-state builders bind NO parameters (so the staff side can reuse them, PV3-07)", () => {
@@ -320,7 +320,7 @@ describe("PV3-02 builder contract", () => {
     expect(runStageClientVisible("s")).toBe(`s.track <> 'report'`);
     expect(gateClientVisible("g")).toBe(`g.actor_side = 'client' AND g.deleted_at IS NULL`);
     expect(contractClientVisible("k")).toBe(`k.deleted_at IS NULL AND k.status <> 'draft'`);
-    expect(invoiceClientVisible("i")).toBe(`i.deleted_at IS NULL AND i.status NOT IN ('draft','approved')`);
+    expect(invoiceClientVisible("i")).toBe(`i.deleted_at IS NULL AND i.status NOT IN ('draft','approved') AND (i.status <> 'void' OR i.issued_at IS NOT NULL OR i.pre_pv5_legacy)`);
     expect(invoicePaymentClientVisible("pp", "detail")).toBe(`pp.deleted_at IS NULL`);
     expect(invoicePaymentClientVisible("pp", "timeline")).toBe(`pp.deleted_at IS NULL AND pp.status = 'confirmed'`);
     expect(postReviewClientVisible("r")).toBe(`TRUE`);
