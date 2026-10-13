@@ -398,8 +398,8 @@ test.describe("search_staff (seo-staff@gaiada.com)", () => {
 
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
 // DW-3a/3b/3c: the Overview's frame and its Now band. A placed employee (webdev@gaiada.com = u-dev, Web Dev >
-// Frontend) lands on their department's Overview from `/`. Needs you and Today are built; every other block is
-// still planned, so under them is today's page body (nothing is removed, plan §2.6 rule 1); never an invented
+// Frontend) lands on their department's Overview from `/`. Needs you, Today and Your numbers are built; every other
+// block is still planned, so under them is today's page body (nothing is removed, plan §2.6 rule 1); never an invented
 // number.
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
 test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.com)", () => {
@@ -432,13 +432,14 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     const actions = page.getByRole("navigation", { name: "Quick actions" });
     await expect(actions.getByRole("link", { name: "New briefing" })).toHaveAttribute("href", "/departments/dept-1/prd");
 
-    // Only the Now band is built, so today's department Home stays below it, under its own label, and the
-    // "being built" line is not needed.
+    // Only the Now and You bands are built, so today's department Home stays below them, under its own label, and
+    // the "being built" line is not needed.
     await expect(page.getByRole("heading", { level: 2, name: "Now", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "You", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "More from Web Dev" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Project health" })).toBeVisible();
     await expect(page.getByText(/Overview is being built/)).toHaveCount(0);
-    for (const band of ["You", "Work", "Growth"]) await expect(page.getByRole("heading", { level: 2, name: band, exact: true })).toHaveCount(0);
+    for (const band of ["Work", "Growth"]) await expect(page.getByRole("heading", { level: 2, name: band, exact: true })).toHaveCount(0);
   });
 
   // DW-3c: what `/` showed before it redirected (the queue, the check-in) is on the Overview, so a pilot user
@@ -478,6 +479,42 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     await expect(today.getByRole("heading", { level: 4, name: "Tools" })).toBeVisible();
     await expect(today.getByRole("link", { name: /^GitHub/ })).toBeVisible();
     await expect(today.getByRole("link", { name: /^Claude Code/ })).toBeVisible();
+  });
+
+  // DW-3d: the You band's Your numbers. The demo backend's person document carries tasks completed and the
+  // on-time rate but not hours logged or check-in compliance, so those two tiles are honestly "No data" here; the
+  // test accepts a figure or "No data" for every tile and never a bare 0 for a ratio.
+  test("the You band has Your numbers: four tiles, and a quiet note when the period starts before the records", async ({ page, context }) => {
+    await signInWebDev(page, context);
+    await page.goto("/departments/dept-1");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
+
+    const numbers = page.getByRole("region", { name: "Your numbers", exact: true });
+    await expect(numbers).toBeVisible();
+    await expect(numbers.getByRole("heading", { level: 3, name: "Your numbers" })).toBeVisible();
+    await expect(numbers.getByText("Unavailable")).toHaveCount(0);
+    const tiles = numbers.getByRole("listitem");
+    await expect(tiles).toHaveCount(4);
+    const figure = /^(No data|\d[\d,.]*( h|%| of \d[\d,.]*)?)$/;
+    for (const [i, label] of ["Tasks done", "On time", "Hours logged", "Check-ins"].entries()) {
+      await expect(tiles.nth(i).locator(".ov-nums__label")).toHaveText(label);
+      await expect(tiles.nth(i).locator(".ov-nums__value")).toHaveText(figure);
+    }
+    // A month starts after the records do: no partial-history note, and the report link carries the period.
+    await expect(numbers.getByText(/cover only part of this period/)).toHaveCount(0);
+    await expect(numbers.getByRole("link", { name: "Open my report" })).toHaveAttribute("href", /^\/reports\/person\?periodKind=month&start=\d{4}-\d{2}-\d{2}$/);
+
+    // The year re-renders the block. The demo records begin on 1 May 2026, so a year that starts before it says
+    // the numbers are partial, and one that does not says nothing.
+    await press(page.getByRole("group", { name: "Period" }).getByRole("button", { name: "Year" }));
+    await expect(page).toHaveURL(/\/departments\/dept-1\?period=year$/);
+    await expect(page.getByRole("group", { name: "Period" }).getByRole("button", { name: "Year" })).toHaveAttribute("aria-pressed", "true");
+    await expect(numbers.getByRole("link", { name: "Open my report" })).toHaveAttribute("href", /periodKind=year&start=/);
+    const note = numbers.getByText(/cover only part of this period: records begin on 1 May 2026/);
+    if (new Date().getUTCFullYear() <= 2026) await expect(note).toBeVisible();
+    else await expect(note).toHaveCount(0);
+    await expect(numbers.getByRole("listitem")).toHaveCount(4);
+    await expect(numbers.getByText("Unavailable")).toHaveCount(0);
   });
 
   test("the department's own header is not doubled on the Overview, and stays on its other pages", async ({ page, context }) => {

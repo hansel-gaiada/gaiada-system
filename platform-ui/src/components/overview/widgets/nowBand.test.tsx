@@ -59,19 +59,22 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("the Now band is registered (DW-3c)", () => {
-  it("hosts Needs you and Today, and still no other block", () => {
-    expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual(["needs-you", "today"]);
-    for (const key of ["pulse", "projects", "your-numbers", "my-activity", "learning", "appraisal", "condition", "decisions"]) {
+  it("hosts Needs you, Today and Your numbers (DW-3d), and still no other block", () => {
+    expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual(["needs-you", "today", "your-numbers"]);
+    for (const key of ["pulse", "projects", "my-activity", "learning", "appraisal", "condition", "decisions"]) {
       expect(hasOverviewWidget(key), key).toBe(false);
     }
   });
 
-  it("draws the Now band, and only it, in every department workspace", () => {
+  it("draws the Now band in every workspace and the You band (Your numbers) in every department's, and no other", () => {
     const ctx = { me: person, tenantId: "co-a", unitPath: ["d-web"] };
     for (const ws of WORKSPACES) {
       const bands = selectBands(ws.overview, ctx, (key) => hasOverviewWidget(key));
-      expect(bands.map((b) => b.band), ws.key).toEqual(["now"]);
-      expect(bands[0].widgets.map((w) => w.key), ws.key).toEqual(ws.overview[0].key === "decisions" ? ["today"] : ["needs-you", "today"]);
+      const company = ws.overview[0].key === "decisions";
+      // The company frame has no Your numbers (it is the department's block); every department workspace does.
+      expect(bands.map((b) => b.band), ws.key).toEqual(company ? ["now"] : ["now", "you"]);
+      expect(bands[0].widgets.map((w) => w.key), ws.key).toEqual(company ? ["today"] : ["needs-you", "today"]);
+      if (!company) expect(bands[1].widgets.map((w) => w.key), ws.key).toEqual(["your-numbers"]);
     }
   });
 

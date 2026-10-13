@@ -14,6 +14,7 @@ import type { DeptLauncher } from "@/lib/deptToolkits";
 import type { OverviewPeriod } from "@/lib/overview";
 import { NeedsYou } from "./NeedsYou";
 import { Today } from "./Today";
+import { YourNumbers } from "./YourNumbers";
 
 export interface OverviewWidgetProps {
   me: Me;
@@ -33,6 +34,7 @@ export type OverviewWidgetComponent = (props: OverviewWidgetProps) => ReactNode 
 export const OVERVIEW_WIDGETS: Readonly<Record<string, OverviewWidgetComponent>> = {
   "needs-you": NeedsYou,
   today: Today,
+  "your-numbers": YourNumbers,
 };
 
 export function hasOverviewWidget(key: string, widgets: Readonly<Record<string, OverviewWidgetComponent>> = OVERVIEW_WIDGETS): boolean {

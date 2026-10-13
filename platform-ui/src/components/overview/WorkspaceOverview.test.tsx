@@ -78,8 +78,8 @@ describe("WorkspaceOverview: with no block to draw", () => {
     expect(screen.getByText(/The Company Overview is being built/)).toBeInTheDocument();
   });
 
-  it("hosts the Now band's two blocks and no other (DW-3c)", () => {
-    expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual(["needs-you", "today"]);
+  it("hosts the Now band's two blocks and Your numbers, and no other (DW-3c, DW-3d)", () => {
+    expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual(["needs-you", "today", "your-numbers"]);
     expect(hasOverviewWidget("needs-you")).toBe(true);
     expect(hasOverviewWidget("pulse")).toBe(false);
   });
