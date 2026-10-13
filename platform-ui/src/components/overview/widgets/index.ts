@@ -9,13 +9,14 @@
 // read would then look like "nothing to do" (plan §3.3, §3.7).
 import type { ReactNode } from "react";
 import type { Me } from "@/lib/platform";
-import type { OverviewWidget } from "@/lib/workspaces";
+import type { OverviewWidget, PulseTile } from "@/lib/workspaces";
 import type { DeptLauncher } from "@/lib/deptToolkits";
 import type { OverviewPeriod } from "@/lib/overview";
 import { NeedsYou } from "./NeedsYou";
 import { Today } from "./Today";
 import { YourNumbers } from "./YourNumbers";
 import { MyActivity } from "./MyActivity";
+import { Pulse } from "./Pulse";
 
 export interface OverviewWidgetProps {
   me: Me;
@@ -27,6 +28,8 @@ export interface OverviewWidgetProps {
   /** The workspace's tool set (`Workspace.tools`); empty for Company. */
   tools: readonly DeptLauncher[];
   widget: OverviewWidget;
+  /** The workspace's built Pulse tiles (DW-3e); empty for Company and for a workspace with none built. */
+  pulse?: readonly PulseTile[];
 }
 
 export type OverviewWidgetComponent = (props: OverviewWidgetProps) => ReactNode | Promise<ReactNode>;
@@ -37,6 +40,7 @@ export const OVERVIEW_WIDGETS: Readonly<Record<string, OverviewWidgetComponent>>
   today: Today,
   "your-numbers": YourNumbers,
   "my-activity": MyActivity,
+  pulse: Pulse,
 };
 
 export function hasOverviewWidget(key: string, widgets: Readonly<Record<string, OverviewWidgetComponent>> = OVERVIEW_WIDGETS): boolean {

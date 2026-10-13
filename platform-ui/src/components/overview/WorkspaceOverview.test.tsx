@@ -78,10 +78,11 @@ describe("WorkspaceOverview: with no block to draw", () => {
     expect(screen.getByText(/The Company Overview is being built/)).toBeInTheDocument();
   });
 
-  it("hosts the Now band's two blocks, Your numbers and My activity, and no other (DW-3c, DW-3d, DW-3j)", () => {
-    expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual(["my-activity", "needs-you", "today", "your-numbers"]);
+  it("hosts the Now band's two blocks, Your numbers, My activity and Pulse, and no other (DW-3c, DW-3d, DW-3j, DW-3e)", () => {
+    expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual(["my-activity", "needs-you", "pulse", "today", "your-numbers"]);
     expect(hasOverviewWidget("needs-you")).toBe(true);
-    expect(hasOverviewWidget("pulse")).toBe(false);
+    expect(hasOverviewWidget("pulse")).toBe(true);
+    expect(hasOverviewWidget("projects")).toBe(false);
   });
 });
 
@@ -155,6 +156,26 @@ describe("WorkspaceOverview: the bands and the host", () => {
     expect(screen.queryByText(/should stay hidden/)).not.toBeInTheDocument();
     expect(screen.queryByText("No component yet")).not.toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Now" })).getByText("five items")).toBeInTheDocument();
+  });
+
+  it("places the Pulse only for a workspace with a built tile, and hands it those tiles (DW-3e)", () => {
+    const seen: string[][] = [];
+    const spy: OverviewWidgetComponent = (props) => {
+      seen.push((props.pulse ?? []).map((t) => t.key));
+      return <p>pulse drawn</p>;
+    };
+    const one = (s: OverviewSubject): OverviewSubject => ({ ...s, widgets: [{ key: "pulse", band: "department", label: "Pulse" }] });
+    const first = draw({ subject: one(webDev), widgets: { pulse: spy } });
+    expect(seen[0]).toEqual(["requests-waiting", "sites-with-a-problem", "runs-waiting-approval"]);
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Web Dev");
+
+    first.unmount();
+
+    // SEO has no built tile: no Pulse and so no Department band over nothing.
+    const seoPlaced = resolveMyWorkspaces({ me: made, tenantId: "co-a", root: agencyTree({ seo: ["u-1"] }) });
+    draw({ subject: one(subjectOfRef(seoPlaced.mine[0])), widgets: { pulse: spy } });
+    expect(seen).toHaveLength(1);
+    expect(screen.queryAllByRole("heading", { level: 2 })).toHaveLength(0);
   });
 
   it("gives a widget its inputs", () => {

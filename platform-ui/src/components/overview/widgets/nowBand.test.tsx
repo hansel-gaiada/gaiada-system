@@ -59,22 +59,23 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("the Now band is registered (DW-3c)", () => {
-  it("hosts Needs you, Today, Your numbers (DW-3d) and My activity (DW-3j), and still no other block", () => {
-    expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual(["my-activity", "needs-you", "today", "your-numbers"]);
-    for (const key of ["pulse", "projects", "learning", "appraisal", "condition", "decisions"]) {
+  it("hosts Needs you, Today, Your numbers (DW-3d), My activity (DW-3j) and Pulse (DW-3e), and still no other block", () => {
+    expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual(["my-activity", "needs-you", "pulse", "today", "your-numbers"]);
+    for (const key of ["projects", "learning", "appraisal", "condition", "decisions"]) {
       expect(hasOverviewWidget(key), key).toBe(false);
     }
   });
 
-  it("draws the Now band in every workspace and the You band (Your numbers, My activity) in every department's, and no other", () => {
+  it("draws the Now band in every workspace, the You band (Your numbers, My activity) in every department's, and Pulse in the Department band (DW-3e), and no other", () => {
     const ctx = { me: person, tenantId: "co-a", unitPath: ["d-web"] };
     for (const ws of WORKSPACES) {
       const bands = selectBands(ws.overview, ctx, (key) => hasOverviewWidget(key));
       const company = ws.overview[0].key === "decisions";
       // The company frame has no Your numbers (it is the department's block); every department workspace does.
-      expect(bands.map((b) => b.band), ws.key).toEqual(company ? ["now"] : ["now", "you"]);
+      expect(bands.map((b) => b.band), ws.key).toEqual(company ? ["now"] : ["now", "you", "department"]);
       expect(bands[0].widgets.map((w) => w.key), ws.key).toEqual(company ? ["today"] : ["needs-you", "today"]);
       if (!company) expect(bands[1].widgets.map((w) => w.key), ws.key).toEqual(["your-numbers", "my-activity"]);
+      if (!company) expect(bands[2].widgets.map((w) => w.key), ws.key).toEqual(["pulse"]);
     }
   });
 

@@ -97,7 +97,16 @@ export interface PulseTile {
   key: string;
   label: string;
   ticket?: string;
+  /** A built tile names the honest reader that feeds it (`lib/overviewPulse.ts`) and the page that lists
+   *  the items it counts (`{dept}` as in every href here). A tile with a `ticket` has neither (DW-3e). */
+  source?: PulseSource;
+  href?: string;
 }
+
+/** The readers a Pulse tile can draw from: one per tile, each with its own failure semantics. */
+export type PulseSource =
+  | "change-requests-new" | "pipeline-gates-pending" | "monitoring-problem-sites"
+  | "social-posts-scheduled" | "social-posts-failed" | "it-account-requests";
 
 export interface QuickAction {
   key: string;
@@ -207,7 +216,7 @@ const DEPARTMENT_OVERVIEW: readonly OverviewWidget[] = [
   { key: "your-numbers", band: "you", label: "Your numbers" },
   { key: "my-activity", band: "you", label: "My activity" },
   { key: "condition", band: "department", label: "Department condition", ticket: "DW-3k" },
-  { key: "pulse", band: "department", label: "Pulse", ticket: "DW-3e" },
+  { key: "pulse", band: "department", label: "Pulse" },
   { key: "projects", band: "work", label: "Projects", ticket: "DW-3f" },
   { key: "campaigns", band: "work", label: "Campaigns", gate: AGENCY_ONLY, ticket: "DW-3f" },
   { key: "requests", band: "work", label: "Requests", gate: AGENCY_ONLY, ticket: "DW-3f" },
@@ -325,9 +334,10 @@ const WEB_DEV: Workspace = {
   connections: [CONN.github, CONN.figma, CONN.drive, CONN.claudeSeats],
   overview: DEPARTMENT_OVERVIEW,
   pulse: [
-    { key: "requests-waiting", label: "Requests waiting", ticket: "DW-3e" },
-    { key: "sites-with-a-problem", label: "Sites with a problem", ticket: "DW-3e" },
-    { key: "runs-waiting-approval", label: "Runs waiting approval", ticket: "DW-3e" },
+    { key: "requests-waiting", label: "Requests waiting", source: "change-requests-new", href: deptPath("requests") },
+    { key: "sites-with-a-problem", label: "Sites with a problem", source: "monitoring-problem-sites", href: "/monitoring" },
+    { key: "runs-waiting-approval", label: "Runs waiting approval", source: "pipeline-gates-pending", href: "/pipeline" },
+    // No honest reader yet: a deliverable has no due date to count against.
     { key: "deliverables-due", label: "Deliverables due", ticket: "DW-3e" },
   ],
   creates: ["new-briefing"],
@@ -385,6 +395,7 @@ const SEO: Workspace = {
   connections: [CONN.googleAccounts, CONN.drive, CONN.claudeSeats],
   overview: DEPARTMENT_OVERVIEW,
   pulse: [
+    // None built: the SEO readers degrade a refusal to an empty list, so a number from them could read 0 for "denied".
     { key: "ranking-drops", label: "Ranking drops", ticket: "DW-3e" },
     { key: "critical-audit-findings", label: "Critical audit findings", ticket: "DW-3e" },
     { key: "client-reports-waiting", label: "Client reports waiting", ticket: "DW-3e" },
@@ -437,9 +448,10 @@ const SOCIAL_MEDIA: Workspace = {
   connections: [CONN.socialAccounts, CONN.drive, CONN.claudeSeats],
   overview: DEPARTMENT_OVERVIEW,
   pulse: [
-    { key: "posts-scheduled", label: "Posts scheduled", ticket: "DW-3e" },
+    { key: "posts-scheduled", label: "Posts scheduled", source: "social-posts-scheduled", href: deptPath("calendar") },
+    // No honest reader yet: client review is read one variant at a time, not as a list.
     { key: "waiting-client-review", label: "Waiting client review", ticket: "DW-3e" },
-    { key: "failed-posts", label: "Failed posts", ticket: "DW-3e" },
+    { key: "failed-posts", label: "Failed posts", source: "social-posts-failed", href: deptPath("calendar") },
     // Needs the inbox sync backend first (SMM-15).
     { key: "unanswered-inbox", label: "Unanswered inbox", ticket: "DW-3e after SMM-15" },
   ],
@@ -488,6 +500,7 @@ const CREATIVES: Workspace = {
   connections: [CONN.figma, CONN.drive, CONN.claudeSeats],
   overview: DEPARTMENT_OVERVIEW,
   pulse: [
+    // None built: no honest reader yet (the Creatives readers degrade a refusal to an empty list).
     { key: "asset-requests-waiting", label: "Asset requests waiting", ticket: "DW-3e" },
     { key: "in-review", label: "In review", ticket: "DW-3e" },
     { key: "due-this-week", label: "Due this week", ticket: "DW-3e" },
@@ -781,7 +794,7 @@ const IT: Workspace = {
   pulse: [
     { key: "devices-offline", label: "Devices offline", ticket: "DW-7e" },
     { key: "threat-alerts", label: "Threat alerts", ticket: "DW-7e" },
-    { key: "account-requests", label: "Account requests", ticket: "DW-7e" },
+    { key: "account-requests", label: "Account requests", source: "it-account-requests", href: "/it/accounts" },
     { key: "failing-workflows", label: "Failing workflows", ticket: "DW-7e" },
   ],
   creates: ["register-device"],
@@ -815,6 +828,7 @@ const GENERIC: Workspace = {
   connections: [CONN.drive],
   overview: DEPARTMENT_OVERVIEW,
   pulse: [
+    // None built: the generic tiles read through degrading project readers, so they stay hidden.
     { key: "active-projects", label: "Active projects", ticket: "DW-3e" },
     { key: "due-soon", label: "Due soon", ticket: "DW-3e" },
     { key: "blocked", label: "Blocked", ticket: "DW-3e" },

@@ -58,6 +58,8 @@ export function periodHref(pathname: string, currentSearch: string, period: Over
 export interface OverviewSubject {
   /** The workspace's name, or "Company". */
   label: string;
+  /** The registry key of the workspace (`Workspace.key`, "generic" for a generic department); null for Company. */
+  workspaceKey: string | null;
   widgets: readonly OverviewWidget[];
   quickActions: readonly QuickAction[];
   /** The tools the Today block shows: the person's pinned tools of this workspace (DW-6c), or its first six
@@ -76,13 +78,13 @@ export interface OverviewSubject {
 export function subjectOfRef(ref: WorkspaceRef, pins: Readonly<Record<string, string[]>> = {}, all?: MyWorkspaces): OverviewSubject {
   const { workspace, deptId, unitPath } = ref;
   return {
-    label: workspace.label, widgets: workspace.overview, quickActions: workspace.quickActions, tools: pinnedToolsFor(pins, workspace), deptId, unitPath,
+    label: workspace.label, workspaceKey: workspace.key, widgets: workspace.overview, quickActions: workspace.quickActions, tools: pinnedToolsFor(pins, workspace), deptId, unitPath,
     ...(all ? { workspaces: workspaceKeysOf(all) } : {}),
   };
 }
 
 /** The company-level Overview at `/` for someone whose home is the Company area. DW-3i fills it. */
-export const COMPANY_SUBJECT: OverviewSubject = { label: "Company", widgets: COMPANY_OVERVIEW, quickActions: [], tools: [], deptId: null, unitPath: [] };
+export const COMPANY_SUBJECT: OverviewSubject = { label: "Company", workspaceKey: null, widgets: COMPANY_OVERVIEW, quickActions: [], tools: [], deptId: null, unitPath: [] };
 
 /** The workspace a page belongs to, from its URL: a department by its org node id, or a functional one by
  *  its slug. The person's own come first, so `mine` wins over the same workspace listed under `all`. */

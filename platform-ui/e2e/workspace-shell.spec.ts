@@ -398,7 +398,7 @@ test.describe("search_staff (seo-staff@gaiada.com)", () => {
 
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
 // DW-3a/3b/3c: the Overview's frame and its Now band. A placed employee (webdev@gaiada.com = u-dev, Web Dev >
-// Frontend) lands on their department's Overview from `/`. Needs you, Today, Your numbers and My activity are built; every other
+// Frontend) lands on their department's Overview from `/`. Needs you, Today, Your numbers, My activity and Pulse are built; every other
 // block is still planned, so under them is today's page body (nothing is removed, plan §2.6 rule 1); never an invented
 // number.
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -432,10 +432,11 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     const actions = page.getByRole("navigation", { name: "Quick actions" });
     await expect(actions.getByRole("link", { name: "New briefing" })).toHaveAttribute("href", "/departments/dept-1/prd");
 
-    // Only the Now and You bands are built, so today's department Home stays below them, under its own label, and
-    // the "being built" line is not needed.
+    // Only the Now, You and Department (Pulse) bands are built, so today's department Home stays below them, under
+    // its own label, and the "being built" line is not needed.
     await expect(page.getByRole("heading", { level: 2, name: "Now", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { level: 2, name: "You", exact: true })).toBeVisible();
+    await expect(page.locator("#main-content").getByRole("heading", { level: 2, name: "Web Dev", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "More from Web Dev" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Project health" })).toBeVisible();
     await expect(page.getByText(/Overview is being built/)).toHaveCount(0);
@@ -546,6 +547,30 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
       await expect(cells.first()).toHaveAttribute("title", /^\d+ things? on \d{2} [A-Z][a-z]{2} \d{4}$/);
     }
     await expect(activity.getByText(/score|rating/i)).toHaveCount(0);
+  });
+
+  // DW-3e: the Department band's Pulse. Web Dev's three built tiles, each a count or, in words, why there is none
+  // ("Unavailable" for a failed read, "No access" for a refused one); never an empty tile. Which of the three the
+  // demo backend answers is not asserted. Looked up inside the page (`#main-content`).
+  test("the Department band has Pulse: Web Dev's three tiles, each a count, Unavailable or No access", async ({ page, context }) => {
+    await signInWebDev(page, context);
+    await page.goto("/departments/dept-1");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
+
+    const main = page.locator("#main-content");
+    const pulse = main.getByRole("region", { name: "Pulse", exact: true });
+    await expect(pulse).toBeVisible();
+    // The block itself may be the boundary's "Unavailable" only if every tile failed; then it has no tiles.
+    const tiles = pulse.getByRole("listitem");
+    if (await tiles.count()) {
+      await expect(tiles).toHaveCount(3);
+      await expect(tiles.locator(".ov-nums__label")).toHaveText(["Requests waiting", "Sites with a problem", "Runs waiting approval"]);
+      for (const value of await tiles.locator(".ov-nums__value").all()) await expect(value).toHaveText(/^(\d+|Unavailable|No access)$/);
+    } else {
+      await expect(pulse.getByText("Unavailable")).toBeVisible();
+    }
+    // A planned tile is never drawn.
+    await expect(pulse.getByText("Deliverables due")).toHaveCount(0);
   });
 
   test("the department's own header is not doubled on the Overview, and stays on its other pages", async ({ page, context }) => {
