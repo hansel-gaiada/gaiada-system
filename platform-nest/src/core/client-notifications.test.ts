@@ -80,8 +80,9 @@ describe.skipIf(!TEST_URL)("client-facing pipeline notifications (D-3)", () => {
     await addMembership(co, admin);
     await grantRole(admin, await createRole("company_admin"), "company", co);
     clientRow = await createClient(co, "Acme Inc");
-    projectA = await createProject(co, "Acme Website");
-    projectB = await createProject(co, "Acme Rebrand");
+    // PV4-13: a contact scoped to a project needs the project to belong to the contact's client (composite FK).
+    projectA = await createProject(co, "Acme Website", undefined, clientRow);
+    projectB = await createProject(co, "Acme Rebrand", undefined, clientRow);
     app = await buildApp();
   });
   afterAll(async () => {

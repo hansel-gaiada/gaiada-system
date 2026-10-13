@@ -46,7 +46,7 @@ import { grantClientWebsiteEditor, revokeClientWebsiteEditor, CLIENT_WEBSITE_EDI
 import { authorize } from "./http";
 import { currentApproval, currentVia } from "./request-context";
 import { resolvePortalScope } from "./portal-scope";
-import { clientContactInPortalScope } from "./portal-visibility";
+import { clientContactClientVisible, inCallerClients } from "./portal-visibility";
 
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
@@ -150,9 +150,10 @@ async function listAccess(tenantId: string, clientId: string, surface: Surface, 
     }
     const client = await c.query(`SELECT 1 FROM clients WHERE id = $1 AND deleted_at IS NULL`, [clientId]);
     if (!client.rowCount) throw new NotFoundException("client not found");
-    // The contact rule is the portal People one (portal-visibility.ts: not soft-deleted, not `revoked`), so an
-    // `invited` contact is listed and staff can grant ahead of acceptance. This list is narrower than People in
-    // one way only: client-wide contacts (`project_id IS NULL`, WSK-D60), because website access is per client.
+    // The row-state rule is the portal People one (portal-visibility.ts: not soft-deleted, not `revoked`), so an
+    // `invited` contact is listed and staff can grant ahead of acceptance. This list is only the client-wide
+    // contacts (`project_id IS NULL`, WSK-D60), because website access is per client. Those are exactly the
+    // contacts every contact of the client sees in People (PV-D36), so no project arm is needed here.
     const { rows } = await c.query(
       `SELECT cc.id AS "contactId", cc.user_id AS "userId", u.name, u.email, cc.capability, cc.status,
               (cc.capability = 'admin') AS "isAdmin",
@@ -160,7 +161,7 @@ async function listAccess(tenantId: string, clientId: string, surface: Surface, 
                        WHERE ur.user_id = cc.user_id AND r.company_id IS NULL AND r.name = $3
                          AND ur.scope_type = 'client' AND ur.scope_id = cc.client_id::text) AS "websiteEditor"
          FROM client_contacts cc JOIN users u ON u.id = cc.user_id
-        WHERE ${clientContactInPortalScope("cc", { clients: 1 })} AND cc.tenant_id = $2
+        WHERE ${inCallerClients("cc", 1)} AND ${clientContactClientVisible("cc")} AND cc.tenant_id = $2
           AND cc.project_id IS NULL
         ORDER BY u.name, u.email`,
       [[clientId], tenantId, CLIENT_WEBSITE_EDITOR_ROLE],

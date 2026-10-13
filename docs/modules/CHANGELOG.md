@@ -23,6 +23,17 @@ local stack). None of these mean "production-done".
 - **Tests:** `site-build-targets.unit.test.ts` (50) and `site-build-stamp.test.ts` (21) pass locally; `site-builds-promote.test.ts` (HTTP + Cerbos + Postgres, fake GitHub and fake stamp fetch) and `site-builds-kind-promote.db.test.ts` (the CHECK) need the Linux gate, as do the updated `webdesk-control-http.test.ts`, `webdesk-content.test.ts` and `site-builds-dispatch.test.ts` (unchanged, must still pass). `webdesk-registry.test.ts` updated. `CAPABILITY-INVENTORY.md` regenerated (webdev 34 → 35).
 - **Docs:** `docs/FRONTEND-BFF-CONTRACT.md` (Site promote; `builds`; build-status), `docs/plans/2026-10-11-webdesk-m6-plan.md` (the P6h row), design v2 §14 WSK-D65 (target source amended in place).
 
+### platform-ui `0.114.0` - DW-2h: the AI Assistant page made calmer and aware of the department (2026-10-13) - PROTOTYPED
+
+- **What (for everyone, both shells; owner ruling 2026-10-13):** the assistant page and drawer, plan §6.
+  - One **Details** control opens one panel with Memory, Roster and Capabilities as tabs, closed by default, so the conversation gets the full width; "See everything I can do" opens it on Capabilities.
+  - Thread search: the rail still filters what is loaded, and on a miss asks the server's list with `q` (debounced; an older query's answer is never shown), so an older thread is findable. The pin leads each row (same PATCH; pins already live on the server).
+  - The chip names the department and page the assistant was opened from ("Web Dev · Board"): the drawer link carries `from=<path>` (validated by `safeFromPath`: same-origin, never `/assistant`), and the department comes from `myWorkspaces`. The empty state suggests that department's prompts, now registry data (`Workspace.assistantPrompts`, 3-4 each); they only pre-fill the composer.
+  - "Open in full page" keeps the same thread, even one older than the loaded page, and the full page's Close goes back to where the person came from.
+  - The page uses the shell's header and tokens.
+- **Not changed:** which model answers, routing, the brain picker, agents, memory semantics, every backend endpoint (no migration).
+- **Tests:** `DetailsPanel`, `ThreadRail`, `EmptyStateSuggestions`, `PageContextChip`, `AssistantWorkspace`, `assistantContext`, `assistantOrigin` (the department root is the Overview by position: the PM board is also called "Overview"), registry prompts. CI run 38357306035 green (on `28398963`).
+
 ### webdesk `0.29.0` - M6-P6f: the templates' deploy jobs, per kind (2026-10-13) - PROTOTYPED (scripts and harness driven on sumopod; no workflow has ever run on GitHub)
 
 - **One `site.yml` per kind, two triggers, two jobs.** A push to the default branch deploys staging; any other branch, tag or pull request builds and deploys nothing. The ERP's `workflow_dispatch` (inputs `approval_id` and `kind` required, `published_at`, and a new optional `environment`) rebuilds staging, or deploys production only for `environment=production` + `kind=promote` + an approval id: `plan.sh` refuses everything else with a named error, never a quiet downgrade.

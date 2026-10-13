@@ -15,7 +15,8 @@
 // empty list and looks like it worked. That silent-empty failure is the single most likely bug in
 // this file, so there is exactly one helper and nothing calls withTenants directly.
 import {
-  BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Post, Query, Req, UseGuards,
+  BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch,
+  Post, Query, Req, UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import type { PoolClient } from "pg";
@@ -112,6 +113,36 @@ async function applyLineTaxes(
     }
   });
 }
+
+/** `finance_tax_codes.kind` (202608241025). */
+const TAX_CODE_KINDS = ["ppn_output", "ppn_input", "pph21", "pph23", "pph42", "pph_badan", "exempt"];
+
+/**
+ * PV5-F2: the statutory Indonesian OUTPUT VAT (PPN Keluaran) rows, as reference data. One code, `PPN`, with two
+ * effective-dated rows (design decision 8: a rate change is a new row, so a 2024 supply keeps its full-base 11% and
+ * a 2025 supply is taxed at the 12% statutory rate on 11/12 of the base). The invoice or entry names the code and
+ * `finance_tax_compute()` picks the row by the document date, so nobody has to know which regime applies.
+ *   - 11% on the full base for supplies from 2022-04-01 (UU HPP) to 2024-12-31;
+ *   - 12% x 11/12 of the base (an effective 11%) from 2025-01-01.
+ * Nothing before 2022-04-01 is created: the 10% regime is not modelled, and a date with no row is refused (400/409
+ * naming the date) rather than taxed at a wrong rate. F7 models no input-VAT rate (input VAT is the tax a vendor
+ * charged, recorded as a document total), so no `ppn_input` rows are created.
+ */
+export const STANDARD_PPN_CODES: ReadonlyArray<{
+  code: string; name: string; kind: string; rate: string; baseMultiplier: string; effectiveFrom: string; effectiveTo: string | null;
+}> = [
+  { code: "PPN", name: "PPN 11% on the full base (to 2024-12-31)", kind: "ppn_output", rate: "11", baseMultiplier: "1",
+    effectiveFrom: "2022-04-01", effectiveTo: "2024-12-31" },
+  { code: "PPN", name: "PPN 12% on 11/12 of the base (from 2025-01-01)", kind: "ppn_output", rate: "12",
+    baseMultiplier: "0.9166666667", effectiveFrom: "2025-01-01", effectiveTo: null },
+];
+
+const TAX_CODE_COLUMNS = `t.id, t.code, t.name, t.kind, t.rate::float8 AS rate, t.base_multiplier::float8 AS "baseMultiplier",
+       to_char(t.effective_from, 'YYYY-MM-DD') AS "effectiveFrom", to_char(t.effective_to, 'YYYY-MM-DD') AS "effectiveTo",
+       t.notes, a.code AS "accountCode",
+       (EXISTS (SELECT 1 FROM finance_ar_invoice_lines l WHERE l.tenant_id = t.tenant_id AND l.tax_code = t.code)
+        OR EXISTS (SELECT 1 FROM finance_ap_bill_lines l WHERE l.tenant_id = t.tenant_id AND l.tax_code = t.code)
+        OR EXISTS (SELECT 1 FROM invoices i WHERE i.tenant_id = t.tenant_id AND i.tax_code = t.code AND i.deleted_at IS NULL)) AS "inUse"`;
 
 function requiredIsoDate(value: string | undefined, field: string): string {
   const d = isoDate(value, field);
@@ -885,6 +916,218 @@ export class FinanceController {
       c.query(`SELECT problem, detail FROM finance_tax_return_drift($1)`, [tenantId]),
     );
     return { problems: rows.rows, clean: rows.rows.length === 0 };
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // TAX CODES (PV5-F2) — the setup screen's API.
+  //
+  // Since PV5-04 a taxed invoice or a taxed manual AR/AP entry must name a `finance_tax_codes` code, and the table had
+  // no writer: a company could not set one up. These handlers are that writer, under the permission that already
+  // governs tax codes (`finance_tax`: `read` lists, `configure` writes; controller tier, high assurance; no new action).
+  //
+  // A RATE IS NEVER EDITED IN PLACE (F7's rule). A rate change is a NEW effective-dated row after END-DATING the old
+  // one, so a return for an old period still reproduces. So there is no route that changes a code's rate, base
+  // multiplier, kind, code or start date, on a used or an unused row: PATCH takes a name and notes only and refuses the
+  // rest, DELETE refuses a row any document uses, and a new row that overlaps an existing row of the same code is a 409.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  @Get(":tenantId/finance/tax/codes")
+  async listTaxCodes(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "finance_tax", tenantId, module: "finance" }, "read");
+    const r = await withFinance(tenantId, (c) =>
+      c.query(
+        `SELECT ${TAX_CODE_COLUMNS}
+           FROM finance_tax_codes t LEFT JOIN finance_accounts a ON a.id = t.account_id AND a.tenant_id = t.tenant_id
+          WHERE t.tenant_id = $1
+          ORDER BY t.code, t.effective_from DESC`,
+        [tenantId],
+      ),
+    );
+    return r.rows;
+  }
+
+  /**
+   * Add the statutory PPN output rows (STANDARD_PPN_CODES) this company does not have yet. Idempotent: a row that
+   * already exists (same code and start date), or whose dates overlap an existing `PPN` row, is skipped and reported,
+   * never duplicated and never changed.
+   */
+  @Post(":tenantId/finance/tax/codes/standard-ppn")
+  @HttpCode(200)
+  async addStandardPpnCodes(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "finance_tax", tenantId, module: "finance" }, "configure");
+    return withFinance(tenantId, async (c) => {
+      // Serialised per company, so two clicks at once cannot both pass the overlap check.
+      await c.query(`SELECT pg_advisory_xact_lock(hashtext('finance_tax_codes:' || $1::text))`, [tenantId]);
+      const created: string[] = [];
+      const skipped: string[] = [];
+      for (const t of STANDARD_PPN_CODES) {
+        const label = `${t.code} from ${t.effectiveFrom}`;
+        const ins = await c.query(
+          `INSERT INTO finance_tax_codes
+             (tenant_id, code, name, kind, rate, base_multiplier, account_id, effective_from, effective_to)
+           SELECT $1::uuid, $2::text, $3::text, $4::text, $5::numeric, $6::numeric,
+                  (SELECT id FROM finance_accounts WHERE tenant_id = $1::uuid AND code = '2140' AND deleted_at IS NULL
+                      AND status = 'active' LIMIT 1),
+                  $7::date, $8::date
+            WHERE NOT EXISTS (
+              SELECT 1 FROM finance_tax_codes x
+               WHERE x.tenant_id = $1::uuid AND x.code = $2::text
+                 AND daterange(x.effective_from, x.effective_to, '[]') && daterange($7::date, $8::date, '[]'))
+           ON CONFLICT (tenant_id, code, effective_from) DO NOTHING`,
+          [tenantId, t.code, t.name, t.kind, t.rate, t.baseMultiplier, t.effectiveFrom, t.effectiveTo],
+        );
+        (ins.rowCount === 1 ? created : skipped).push(label);
+      }
+      return { created, skipped };
+    });
+  }
+
+  @Post(":tenantId/finance/tax/codes")
+  @HttpCode(201)
+  async createTaxCode(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() b: {
+      code?: string; name?: string; kind?: string; rate?: number | string; baseMultiplier?: number | string;
+      effectiveFrom?: string; effectiveTo?: string | null; accountCode?: string | null; notes?: string | null;
+    },
+  ) {
+    await authorize(req.principal, { kind: "finance_tax", tenantId, module: "finance" }, "configure");
+    const code = (b?.code ?? "").trim();
+    if (!/^[A-Za-z0-9_.-]{1,32}$/.test(code)) throw new BadRequestException("code must be 1-32 letters, digits, '.', '_' or '-'");
+    const name = (b?.name ?? "").trim();
+    if (!name || name.length > 200) throw new BadRequestException("name is required (up to 200 characters)");
+    if (!b?.kind || !TAX_CODE_KINDS.includes(b.kind)) throw new BadRequestException(`kind must be one of ${TAX_CODE_KINDS.join(", ")}`);
+    const rate = Number(b.rate);
+    if (b.rate === undefined || b.rate === null || b.rate === "" || !Number.isFinite(rate) || rate < 0 || rate > 100) {
+      throw new BadRequestException("rate must be a percentage between 0 and 100");
+    }
+    const mult = b.baseMultiplier === undefined || b.baseMultiplier === null || b.baseMultiplier === "" ? 1 : Number(b.baseMultiplier);
+    if (!Number.isFinite(mult) || mult <= 0 || mult > 1) throw new BadRequestException("baseMultiplier must be above 0 and at most 1 (1 = the full base)");
+    const from = requiredIsoDate(b.effectiveFrom, "effectiveFrom");
+    const to = isoDate(b.effectiveTo ?? undefined, "effectiveTo");
+    if (to && to < from) throw new BadRequestException("effectiveTo cannot be before effectiveFrom");
+    const notes = typeof b.notes === "string" && b.notes.trim() ? b.notes.trim().slice(0, 1000) : null;
+    const accountCode = typeof b.accountCode === "string" && b.accountCode.trim() ? b.accountCode.trim() : null;
+
+    return withFinance(tenantId, async (c) => {
+      await c.query(`SELECT pg_advisory_xact_lock(hashtext('finance_tax_codes:' || $1::text))`, [tenantId]);
+      let accountId: string | null = null;
+      if (accountCode) {
+        const a = await c.query<{ id: string }>(
+          `SELECT id FROM finance_accounts WHERE tenant_id = $1 AND code = $2 AND deleted_at IS NULL AND status = 'active' LIMIT 1`,
+          [tenantId, accountCode],
+        );
+        if (!a.rows[0]) throw new BadRequestException(`account ${accountCode} is not a live account in this company's chart`);
+        accountId = a.rows[0].id;
+      }
+      const clash = await c.query<{ from: string; to: string | null }>(
+        `SELECT to_char(effective_from, 'YYYY-MM-DD') AS "from", to_char(effective_to, 'YYYY-MM-DD') AS "to"
+           FROM finance_tax_codes
+          WHERE tenant_id = $1 AND code = $2
+            AND daterange(effective_from, effective_to, '[]') && daterange($3::date, $4::date, '[]')
+          ORDER BY effective_from LIMIT 1`,
+        [tenantId, code, from, to],
+      );
+      if (clash.rows[0]) {
+        const x = clash.rows[0];
+        throw new ConflictException({
+          message: `tax code ${code} already has a row in force from ${x.from}${x.to ? ` to ${x.to}` : " with no end date"}, which overlaps these dates; a rate change is a new row, so end-date the current row first, then add the new one starting the day after`,
+          reason: "tax_code_overlaps",
+        });
+      }
+      const r = await c.query<{ id: string }>(
+        `INSERT INTO finance_tax_codes (tenant_id, code, name, kind, rate, base_multiplier, account_id, effective_from, effective_to, notes)
+         VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, $8::date, $9::date, $10) RETURNING id`,
+        [tenantId, code, name, b.kind, String(rate), String(mult), accountId, from, to, notes],
+      );
+      return { id: r.rows[0].id };
+    });
+  }
+
+  /** End-date a code row (the way a rate stops applying). It can only SHORTEN a row, never extend one. */
+  @Post(":tenantId/finance/tax/codes/:codeId/end")
+  @HttpCode(200)
+  async endTaxCode(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("codeId") codeId: string,
+    @Body() b: { effectiveTo?: string },
+  ) {
+    await authorize(req.principal, { kind: "finance_tax", tenantId, module: "finance" }, "configure");
+    const to = requiredIsoDate(b?.effectiveTo, "effectiveTo");
+    return withFinance(tenantId, async (c) => {
+      const cur = await c.query<{ code: string; from: string; to: string | null }>(
+        `SELECT code, to_char(effective_from, 'YYYY-MM-DD') AS "from", to_char(effective_to, 'YYYY-MM-DD') AS "to"
+           FROM finance_tax_codes WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+        [codeId, tenantId],
+      );
+      const row = cur.rows[0];
+      if (!row) throw new NotFoundException("no such tax code in this company");
+      if (to < row.from) throw new BadRequestException(`effectiveTo cannot be before the row's start (${row.from})`);
+      if (row.to && to > row.to) {
+        throw new ConflictException({
+          message: `this row already ends on ${row.to}; an end date can only be brought forward, never pushed back`,
+          reason: "tax_code_cannot_extend",
+        });
+      }
+      await c.query(`UPDATE finance_tax_codes SET effective_to = $3::date WHERE id = $1 AND tenant_id = $2`, [codeId, tenantId, to]);
+      return { id: codeId, code: row.code, effectiveTo: to };
+    });
+  }
+
+  /**
+   * Name and notes only. Anything that would change what the code computes (code, kind, rate, base multiplier, start
+   * date) is refused: end-date the row and add a new one.
+   */
+  @Patch(":tenantId/finance/tax/codes/:codeId")
+  async editTaxCode(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("codeId") codeId: string,
+    @Body() b: Record<string, unknown>,
+  ) {
+    await authorize(req.principal, { kind: "finance_tax", tenantId, module: "finance" }, "configure");
+    const frozen = ["code", "kind", "rate", "baseMultiplier", "effectiveFrom", "effectiveTo", "accountCode"].filter((k) => b?.[k] !== undefined);
+    if (frozen.length > 0) {
+      throw new ConflictException({
+        message: `${frozen.join(", ")} cannot be edited in place: a rate change is a new effective-dated row, so end-date this row (POST .../end) and add a new one, and returns for old periods still reproduce`,
+        reason: "tax_code_immutable",
+      });
+    }
+    const name = typeof b?.name === "string" ? b.name.trim() : undefined;
+    if (name !== undefined && (!name || name.length > 200)) throw new BadRequestException("name must be 1-200 characters");
+    const notes = typeof b?.notes === "string" ? b.notes.trim().slice(0, 1000) : undefined;
+    if (name === undefined && notes === undefined) throw new BadRequestException("nothing to change: send name or notes");
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `UPDATE finance_tax_codes SET name = COALESCE($3, name), notes = COALESCE($4, notes) WHERE id = $1 AND tenant_id = $2`,
+        [codeId, tenantId, name ?? null, notes ?? null],
+      );
+      if (r.rowCount === 0) throw new NotFoundException("no such tax code in this company");
+      return { id: codeId };
+    });
+  }
+
+  /** Remove a row that was added by mistake. A row any invoice, bill or draft refers to is not removable: end-date it. */
+  @Delete(":tenantId/finance/tax/codes/:codeId")
+  async deleteTaxCode(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("codeId") codeId: string) {
+    await authorize(req.principal, { kind: "finance_tax", tenantId, module: "finance" }, "configure");
+    return withFinance(tenantId, async (c) => {
+      const cur = await c.query<{ inUse: boolean }>(
+        `SELECT ${TAX_CODE_COLUMNS} FROM finance_tax_codes t LEFT JOIN finance_accounts a ON a.id = t.account_id AND a.tenant_id = t.tenant_id
+          WHERE t.id = $1 AND t.tenant_id = $2 FOR UPDATE OF t`,
+        [codeId, tenantId],
+      );
+      if (!cur.rows[0]) throw new NotFoundException("no such tax code in this company");
+      if (cur.rows[0].inUse) {
+        throw new ConflictException({
+          message: "a document uses this tax code, so the row cannot be removed; end-date it instead (POST .../end)",
+          reason: "tax_code_in_use",
+        });
+      }
+      await c.query(`DELETE FROM finance_tax_codes WHERE id = $1 AND tenant_id = $2`, [codeId, tenantId]);
+      return { id: codeId, deleted: true };
+    });
   }
 
   // ── The close ─────────────────────────────────────────────────────────────────────────────────

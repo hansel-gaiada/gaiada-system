@@ -2,7 +2,7 @@
 // the estate carrying Chromium; platform-ui's Next standalone image stays browser-free by design.
 //
 // POST /render {url} + `Authorization: Bearer RENDERER_TOKEN` -> chromium renders `url` and
-// returns print-grade PDF bytes. `url` MUST be same-origin with PLATFORM_UI_INTERNAL_URL (see
+// returns print-grade PDF bytes. Optional `footerText` (string) is the footer's left-hand text; escaped and capped. `url` MUST be same-origin with PLATFORM_UI_INTERNAL_URL (see
 // auth.ts) — this service fetches whatever it is handed, so that check is the only thing standing
 // between a leaked token and an SSRF proxy against the internal network. Internal network only;
 // no tenant credentials ever reach it (TR-21 supplies a one-shot, doc-scoped, single-use jobToken
@@ -18,12 +18,30 @@ const PLATFORM_UI_INTERNAL_URL = process.env.PLATFORM_UI_INTERNAL_URL ?? "";
 
 // Lift the in-repo working precedent's print technique (docs/blueprints/render-pdf.js): force
 // exact colors, page numbers in the footer via headerTemplate/footerTemplate.
-const footerTemplate = `
+/** Default footer text when the caller sends none: neutral, no company name (PV-D13). */
+export const DEFAULT_FOOTER_TEXT = "Report";
+export const MAX_FOOTER_TEXT = 120;
+
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+/** Footer text from the request: a string, control characters dropped, capped, HTML-escaped. Anything else -> default. */
+export function normalizeFooterText(v: unknown): string {
+  if (typeof v !== "string") return DEFAULT_FOOTER_TEXT;
+  // eslint-disable-next-line no-control-regex
+  const cleaned = v.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, MAX_FOOTER_TEXT);
+  return cleaned ? cleaned : DEFAULT_FOOTER_TEXT;
+}
+
+export function buildFooterTemplate(text: unknown): string {
+  return `
   <div style="width:100%; font-size:8px; color:#444; padding:0 12mm;
        display:flex; justify-content:space-between;">
-    <span>GAIADA — Report</span>
+    <span>${escapeHtml(normalizeFooterText(text))}</span>
     <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
   </div>`;
+}
 
 let browser: Browser | undefined;
 async function getBrowser(): Promise<Browser> {
@@ -43,7 +61,7 @@ app.post("/render", async (req, res) => {
     return res.status(401).json({ error: "unauthorized" });
   }
 
-  const { url } = req.body ?? {};
+  const { url, footerText } = req.body ?? {};
   if (typeof url !== "string" || !url) {
     return res.status(400).json({ error: "url (string) is required" });
   }
@@ -75,7 +93,7 @@ app.post("/render", async (req, res) => {
       printBackground: true,
       displayHeaderFooter: true,
       headerTemplate: "<div></div>",
-      footerTemplate,
+      footerTemplate: buildFooterTemplate(footerText),
       margin: { top: "13mm", bottom: "16mm", left: "12mm", right: "12mm" },
     });
     res.setHeader("Content-Type", "application/pdf");

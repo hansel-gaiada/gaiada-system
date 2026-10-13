@@ -296,3 +296,26 @@ describe("a workspace's own create actions (DW-2f)", () => {
     }
   });
 });
+
+// DW-2h: the assistant's empty state suggests prompts for the department it was opened from.
+describe("assistant prompts (DW-2h)", () => {
+  it.each(ALL.map((w) => [w.key, w] as const))("%s has 3 to 4 starter prompts, each with a label and a prompt", (_key, ws) => {
+    expect(ws.assistantPrompts.length).toBeGreaterThanOrEqual(3);
+    expect(ws.assistantPrompts.length).toBeLessThanOrEqual(4);
+    for (const p of ws.assistantPrompts) {
+      expect(p.label.trim()).not.toBe("");
+      expect(p.prompt.trim()).not.toBe("");
+    }
+    expect(new Set(ws.assistantPrompts.map((p) => p.label)).size).toBe(ws.assistantPrompts.length);
+  });
+
+  it("covers every workspace, and keeps the plan's own examples", () => {
+    expect(ALL.map((w) => w.key).sort()).toEqual(["creatives", "finance", "generic", "gm", "hr", "it", "seo", "social-media", "web-dev"]);
+    expect(workspaceBySlug("web-dev")!.assistantPrompts.map((p) => p.label)).toContain("Summarise this week's requests");
+    expect(workspaceBySlug("seo")!.assistantPrompts.map((p) => p.label)).toContain("Which keywords dropped?");
+  });
+
+  it("the generic workspace's prompts come with every department that has no workspace of its own", () => {
+    expect(workspaceFor("agency", "Brand Studio").assistantPrompts).toEqual(GENERIC_WORKSPACE.assistantPrompts);
+  });
+});

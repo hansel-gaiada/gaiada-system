@@ -28,6 +28,7 @@ import { createCompany, createUser, addMembership, createRole, grantRole } from 
 import { createMultiClientContact, type MultiClientContact } from "../testing/portal-fixtures";
 import { FIXTURE_TERMS, FIXTURE_TERMS_SHA256 } from "../testing/contract-fixtures";
 import { newId, withTenants } from "../db";
+import { markInvoicesLegacy } from "../testing/invoice-fixtures";
 import { setStorageForTest, localStorage as localStorageBackend, type StorageBackend } from "./storage";
 
 const svc = { authorization: "Bearer svc-token" };
@@ -193,6 +194,7 @@ describe.skipIf(!TEST_URL)("portal scope per client — a contact of two clients
       await file(f.fileB1, f.dB1);
       await file(f.fileB2, f.dB2);
     });
+    await markInvoicesLegacy([f.iA, f.iB]); // PV5-F1: a void invoice is visible only if issued or pre-PV-5 legacy
     app = await buildApp();
   }, 120_000);
 

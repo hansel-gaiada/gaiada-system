@@ -12,12 +12,16 @@ import { resolveCitationAction } from "@/lib/assistantActions";
 // (`resolveCitationAction`, ASST-18's "a chip that 404s is worse than no chip" bar) rather than
 // trusting the `href` the drawer route resolved moments ago blindly — a real, if rare, window
 // exists between that server render and the click (the entity gets renamed or deleted mid-session).
-export function PageContextChip({ context }: { context: PinnedPageContext }) {
+//
+// DW-2h — the chip also says WHERE the person came from: the department and page ("Web Dev · Board"), a plain
+// label beside the pin (it is not a link: the way back is the drawer's close or the full page's Close). Either
+// half can be missing: a record page pins an entity but belongs to no department; a department page has no entity.
+export function PageContextChip({ context, originLabel }: { context?: PinnedPageContext | null; originLabel?: string | null }) {
   const router = useRouter();
   const [state, setState] = useState<"idle" | "resolving" | "unavailable">("idle");
 
   async function handleClick() {
-    if (state === "resolving") return;
+    if (!context || state === "resolving") return;
     setState("resolving");
     const r = await resolveCitationAction(context.ref);
     if (!r.ok || !r.resolved) {
@@ -30,14 +34,24 @@ export function PageContextChip({ context }: { context: PinnedPageContext }) {
 
   const unavailable = state === "unavailable";
   return (
-    <button
-      type="button"
-      className={`asst-context-chip${unavailable ? " asst-context-chip--unavailable" : ""}`}
-      disabled={unavailable || state === "resolving"}
-      title={unavailable ? "This page is no longer available" : `Pinned context — ${context.ref}`}
-      onClick={handleClick}
-    >
-      {unavailable ? "Context unavailable" : `Pinned: ${context.label}`}
-    </button>
+    <div className="asst-context">
+      {originLabel && (
+        <span className="asst-origin-chip">
+          <span className="asst-sr-only">Opened from </span>
+          <span>{originLabel}</span>
+        </span>
+      )}
+      {context && (
+        <button
+          type="button"
+          className={`asst-context-chip${unavailable ? " asst-context-chip--unavailable" : ""}`}
+          disabled={unavailable || state === "resolving"}
+          title={unavailable ? "This page is no longer available" : `Pinned context — ${context.ref}`}
+          onClick={handleClick}
+        >
+          {unavailable ? "Context unavailable" : `Pinned: ${context.label}`}
+        </button>
+      )}
+    </div>
   );
 }

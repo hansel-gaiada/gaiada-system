@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AssistantMessage, AssistantThread, PinnedPageContext } from "@/lib/assistant";
 import { isPendingMessage, hasPendingProposalDecision, deriveThreadTitle } from "@/lib/assistant";
-import { pageContextPrefix } from "@/lib/assistantContext";
+import { assistantFullPageHref, pageContextPrefix } from "@/lib/assistantContext";
+import { originLabel as originChipLabel, type AssistantOrigin } from "@/lib/assistantOrigin";
 import {
   createThreadAction, deleteThreadAction, refreshThreadAction, refreshThreadsAction,
   renameThreadAction, sendMessageAction, setThreadPinnedAction, setThreadStatusAction, stopStreamAction,
@@ -12,9 +13,8 @@ import { setAssistantRailCollapsedAction } from "@/lib/prefsActions";
 import { ThreadRail } from "./ThreadRail";
 import { ThreadView } from "./ThreadView";
 import { Composer } from "./Composer";
-import { MemoryPanel } from "./MemoryPanel";
-import { CapabilitiesPanel } from "./CapabilitiesPanel";
-import { RosterPanel } from "./RosterPanel";
+import { DetailsPanel, DETAILS_PANEL_ID, type DetailsTab } from "./DetailsPanel";
+import { replaceLocation } from "./navigate";
 import { BrainPicker } from "./BrainPicker";
 import { PageContextChip } from "./PageContextChip";
 import { useAssistantStream } from "./useAssistantStream";
@@ -57,7 +57,7 @@ function setUrlThreadParam(id: string | null): void {
 }
 
 export function AssistantWorkspace({
-  initialThreads, initialActiveThreadId, variant = "page", pageContext = null, initialRailCollapsed = false,
+  initialThreads, initialActiveThreadId, variant = "page", pageContext = null, initialRailCollapsed = false, origin = null,
 }: {
   initialThreads: AssistantThread[];
   initialActiveThreadId: string | null;
@@ -74,6 +74,10 @@ export function AssistantWorkspace({
    *  never renders `ThreadRail` at all (see `assistant-drawer.css`), so a collapse preference has
    *  nothing to apply to there — the drawer route simply doesn't pass this prop. */
   initialRailCollapsed?: boolean;
+  /** DW-2h — the page (and department) the assistant was opened from, resolved on the server from `?from=`.
+   *  Names the department in the chip, supplies that department's starter prompts, and rides on "Open in full
+   *  page". `null` on a full page opened with no origin: no department, today's generic suggestions. */
+  origin?: AssistantOrigin | null;
 }) {
   const [threads, setThreads] = useState<AssistantThread[]>(initialThreads);
   // ASST-22 — the full page falls back to the most-recent thread (`initialThreads[0]`, per
@@ -107,19 +111,21 @@ export function AssistantWorkspace({
   const [sending, setSending] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
-  // ASST-19 — the right-rail memory drawer (blueprint §8's collapsible "context inspector" family;
-  // memory is the first panel built into it). Owned here, not inside MemoryPanel itself, because
-  // the grid-column layout it drives (`.asst-workspace--with-memory`) lives on this component's
-  // own root element.
-  const [memoryOpen, setMemoryOpen] = useState(false);
-  // ASST-18 — the capabilities panel occupies the SAME right-rail slot as memory, one at a time
-  // (opening one closes the other) — a third simultaneous grid column would need its own layout
-  // math the design doesn't call for; blueprint §8 lists both as members of one collapsible
-  // "context inspector" family, not two independent panes.
-  const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
-  // ASST-21 — the roster panel (registry + episodic history + hand-off/run-watch) joins the SAME
-  // one-at-a-time right-rail slot as memory/capabilities (blueprint §8's context-inspector family).
-  const [rosterOpen, setRosterOpen] = useState(false);
+  // DW-2h — ONE Details panel (Memory, Roster and Capabilities as tabs) in place of three separate right-rail
+  // panels (ASST-19/18/21, one at a time). Closed by default so the conversation has the full width. Owned
+  // here, not inside the panel, because the grid column it adds (`.asst-workspace--with-details`) lives on this
+  // component's own root element, and because several entry points ("See everything I can do") open it on a tab.
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsTab, setDetailsTab] = useState<DetailsTab>("memory");
+  const detailsToggleRef = useRef<HTMLButtonElement>(null);
+  function openDetails(tab: DetailsTab) {
+    setDetailsTab(tab);
+    setDetailsOpen(true);
+  }
+  function closeDetails() {
+    setDetailsOpen(false);
+    detailsToggleRef.current?.focus();
+  }
   // 2026-08-07 — the left rail's collapse state (owner complaint: no collapse affordance existed
   // at all). Only meaningful in "page" variant (the drawer never renders `ThreadRail`) — seeded
   // from the persisted cookie value, kept in sync with it on every toggle via
@@ -137,11 +143,7 @@ export function AssistantWorkspace({
   // hand a prompt up through this rather than sending it directly — see `Composer`'s `prefill` prop
   // header for why. `seq` forces the effect to re-apply even when the SAME tile is clicked twice.
   const [composerPrefill, setComposerPrefill] = useState<{ text: string; seq: number } | null>(null);
-  function openCapabilitiesPanel() {
-    setCapabilitiesOpen(true);
-    setMemoryOpen(false);
-    setRosterOpen(false);
-  }
+  const openCapabilitiesPanel = () => openDetails("capabilities");
 
   const stream = useAssistantStream();
   const stateRef = useRef(stream.state);
@@ -169,7 +171,9 @@ export function AssistantWorkspace({
       return;
     }
     setMessages(r.messages);
-    setThreads((prev) => prev.map((t) => (t.id === id ? r.thread : t)));
+    // A thread the rail's server search found is not in the loaded list yet: add it, so the picker and the
+    // row actions have it.
+    setThreads((prev) => (prev.some((t) => t.id === id) ? prev.map((t) => (t.id === id ? r.thread : t)) : [r.thread, ...prev]));
   }, [toast]);
 
   useEffect(() => {
@@ -317,6 +321,12 @@ export function AssistantWorkspace({
     if (r.ok) setThreads(r.items);
   }
 
+  // DW-2h — the rail's fallback for a title the loaded list does not hold: the server's own list, `q` search.
+  const searchServer = useCallback(async (q: string) => {
+    const r = await refreshThreadsAction({ q });
+    return r.ok ? r.items : null;
+  }, []);
+
   // ASST-16 — the active thread, for the brain picker. `patchActiveThread` is BrainPicker's own
   // optimistic-update/rollback channel (same shape as handleRename/handleTogglePin above, just
   // generalized to an arbitrary partial patch since the picker needs to set two fields at once —
@@ -400,12 +410,12 @@ export function AssistantWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream.state.status, streamingMessageId, activeThreadId]);
 
-  const rightRailOpen = memoryOpen || capabilitiesOpen || rosterOpen;
   const railCollapsedActive = variant === "page" && railCollapsed;
+  const originLabel = origin ? originChipLabel(origin) : null;
 
   return (
     <div
-      className={`asst-workspace${variant === "drawer" ? " asst-workspace--drawer" : ""}${rightRailOpen ? " asst-workspace--with-memory" : ""}${railCollapsedActive ? " asst-workspace--rail-collapsed" : ""}`}
+      className={`asst-workspace${variant === "drawer" ? " asst-workspace--drawer" : ""}${detailsOpen ? " asst-workspace--with-details" : ""}${railCollapsedActive ? " asst-workspace--rail-collapsed" : ""}`}
     >
       <ThreadRail
         threads={threads}
@@ -419,10 +429,11 @@ export function AssistantWorkspace({
         onTogglePin={handleTogglePin}
         onToggleArchive={handleToggleArchive}
         onDelete={handleDelete}
+        searchServer={searchServer}
       />
       <div className="asst-main">
         <div className="asst-main__toolbar">
-          {pageContext && <PageContextChip context={pageContext} />}
+          {(pageContext || originLabel) && <PageContextChip context={pageContext} originLabel={originLabel} />}
           <BrainPicker
             thread={activeThread}
             disabled={stream.state.status === "streaming"}
@@ -438,48 +449,32 @@ export function AssistantWorkspace({
             // thread — same id, and its full history loads straight from the backend (never from
             // anything this component holds in memory), so "history intact" holds even though this
             // component itself unmounts on the hard navigation.
-            <a className="asst-promote-link" href={`/assistant?thread=${encodeURIComponent(activeThreadId)}`}>
+            //
+            // DW-2h — the SAME thread (`activeThreadId`) and the same way back (`from`). A plain left click
+            // REPLACES the drawer's history entry instead of pushing one, so the full page's Back (and its
+            // Close) return to the page the person came from; a push would leave Back on a drawer URL that
+            // reloads as another full page. Modified clicks (new tab) keep the plain link.
+            <a
+              className="asst-promote-link"
+              href={assistantFullPageHref(activeThreadId, origin?.path ?? null)}
+              onClick={(e) => {
+                if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                e.preventDefault();
+                replaceLocation(assistantFullPageHref(activeThreadId, origin?.path ?? null));
+              }}
+            >
               Open in full page ↗
             </a>
           )}
           <button
+            ref={detailsToggleRef}
             type="button"
-            className="asst-cap-toggle"
-            aria-expanded={capabilitiesOpen}
-            aria-controls="asst-capabilities-panel"
-            onClick={() => {
-              setCapabilitiesOpen((v) => !v);
-              setMemoryOpen(false);
-              setRosterOpen(false);
-            }}
+            className="asst-details-toggle"
+            aria-expanded={detailsOpen}
+            aria-controls={DETAILS_PANEL_ID}
+            onClick={() => (detailsOpen ? closeDetails() : openDetails(detailsTab))}
           >
-            Capabilities
-          </button>
-          <button
-            type="button"
-            className="asst-memory-toggle"
-            aria-expanded={memoryOpen}
-            aria-controls="asst-memory-panel"
-            onClick={() => {
-              setMemoryOpen((v) => !v);
-              setCapabilitiesOpen(false);
-              setRosterOpen(false);
-            }}
-          >
-            Memory
-          </button>
-          <button
-            type="button"
-            className="asst-memory-toggle"
-            aria-expanded={rosterOpen}
-            aria-controls="asst-roster-panel"
-            onClick={() => {
-              setRosterOpen((v) => !v);
-              setMemoryOpen(false);
-              setCapabilitiesOpen(false);
-            }}
-          >
-            Agents
+            Details
           </button>
         </div>
         <ThreadView
@@ -490,6 +485,7 @@ export function AssistantWorkspace({
           threadId={activeThreadId ?? ""}
           onSuggestionPick={(promptText) => setComposerPrefill({ text: promptText, seq: Date.now() })}
           onOpenCapabilities={openCapabilitiesPanel}
+          suggestionPrompts={origin?.prompts ?? null}
         />
         <Composer
           canSend={canSend}
@@ -499,9 +495,9 @@ export function AssistantWorkspace({
           prefill={composerPrefill}
         />
       </div>
-      {capabilitiesOpen && <CapabilitiesPanel onClose={() => setCapabilitiesOpen(false)} />}
-      {memoryOpen && <MemoryPanel activeThreadId={activeThreadId} onClose={() => setMemoryOpen(false)} />}
-      {rosterOpen && <RosterPanel activeThreadId={activeThreadId} onClose={() => setRosterOpen(false)} />}
+      {detailsOpen && (
+        <DetailsPanel tab={detailsTab} onTab={setDetailsTab} onClose={closeDetails} activeThreadId={activeThreadId} />
+      )}
       {toastMsg && <Toast message={toastMsg} />}
     </div>
   );
