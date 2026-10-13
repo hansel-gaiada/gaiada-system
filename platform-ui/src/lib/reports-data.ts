@@ -55,14 +55,19 @@ export function getGroupReport(rootId: string, userId: string, params: GroupRepo
   return platformFetch<GroupReport>(`/api/${rootId}/reports/group?${qs}`, userId);
 }
 
-export interface ReportOverviewScope { scopeRef: string; scopeName: string; kpis: ReportKpi[] }
-export interface ReportOverview { periodKind: ReportPeriodKind; start: string; end: string; scopes: ReportOverviewScope[] }
+/** `activity` exists only on a roster read (`unit` set, BFF §37): `false` means no fact rows in the
+ *  range, and `kpis` is then `[]` (never zeros). Without `unit` the field is absent. */
+export interface ReportOverviewScope { scopeRef: string; scopeName: string; kpis: ReportKpi[]; activity?: boolean }
+/** `unit` is echoed only when the request carried one. */
+export interface ReportOverview { periodKind: ReportPeriodKind; start: string; end: string; unit?: string; scopes: ReportOverviewScope[] }
 
 export interface ReportOverviewParams {
   grain: ReportGrain;
   periodKind: ReportPeriodKind;
   start: string;
   end: string;
+  /** Person grain only (BFF §37): the org node id of a unit, whose WHOLE roster is returned. */
+  unit?: string;
 }
 
 /** Console-landing listing (§6.2 `GET /api/:t/reports/overview`) — used here purely as a SCOPE
@@ -70,7 +75,7 @@ export interface ReportOverviewParams {
  *  grain never needs it (scopeRef is always the tenant); person grain defaults to self and doesn't
  *  need a picker either, so only project/department pages call this. */
 export function getReportOverview(tenantId: string, userId: string, params: ReportOverviewParams): Promise<ReportOverview> {
-  const qs = buildQuery({ grain: params.grain, periodKind: params.periodKind, start: params.start, end: params.end });
+  const qs = buildQuery({ grain: params.grain, periodKind: params.periodKind, start: params.start, end: params.end, unit: params.unit });
   return platformFetch<ReportOverview>(`/api/${tenantId}/reports/overview?${qs}`, userId);
 }
 

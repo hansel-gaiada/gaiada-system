@@ -59,6 +59,7 @@ const PERFORMANCE: AreaRule[] = [
   rule("/assistant", "performance"),
   rule("/reports/person", "performance"),
   rule("/reports/department", "performance"),
+  rule("/reports/team", "performance"),
   rule("/reports/project", "performance"),
   rule("/appraisals", "performance"),
   rule("/appraisals/mine", "performance"),

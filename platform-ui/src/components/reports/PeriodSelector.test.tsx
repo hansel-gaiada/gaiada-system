@@ -4,13 +4,32 @@ import { PeriodSelector, type PeriodSelectorValue } from "./PeriodSelector";
 
 const BASE: PeriodSelectorValue = { kind: "month", start: "2026-07-01", end: "2026-07-30" };
 
-describe("PeriodSelector — Daily/Weekly/Monthly/Custom (§7 amendment)", () => {
+describe("PeriodSelector — Daily/Weekly/Monthly/Quarterly/Semester/Yearly/Custom (§7 amendment, DW-4b)", () => {
   it("clicking Daily/Weekly re-anchors the kind without opening the custom popover", () => {
     const onChange = vi.fn();
     render(<PeriodSelector value={BASE} onChange={onChange} todayIso="2026-07-30" />);
     fireEvent.click(screen.getByRole("button", { name: "Weekly" }));
     expect(onChange).toHaveBeenCalledWith({ kind: "week", start: "2026-07-30", end: "2026-07-30" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("offers the six calendar kinds in registry order, then Custom; the active kind is aria-pressed", () => {
+    render(<PeriodSelector value={BASE} onChange={vi.fn()} todayIso="2026-07-30" />);
+    const names = screen.getAllByRole("button").map((b) => b.textContent);
+    expect(names).toEqual(["Daily", "Weekly", "Monthly", "Quarterly", "Semester", "Yearly", "Custom range"]);
+    expect(screen.getByRole("button", { name: "Monthly" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Quarterly" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("selecting Quarterly, Semester or Yearly emits that kind anchored on today", () => {
+    const onChange = vi.fn();
+    render(<PeriodSelector value={BASE} onChange={onChange} todayIso="2026-07-30" />);
+    fireEvent.click(screen.getByRole("button", { name: "Quarterly" }));
+    expect(onChange).toHaveBeenLastCalledWith({ kind: "quarter", start: "2026-07-30", end: "2026-07-30" });
+    fireEvent.click(screen.getByRole("button", { name: "Semester" }));
+    expect(onChange).toHaveBeenLastCalledWith({ kind: "semester", start: "2026-07-30", end: "2026-07-30" });
+    fireEvent.click(screen.getByRole("button", { name: "Yearly" }));
+    expect(onChange).toHaveBeenLastCalledWith({ kind: "year", start: "2026-07-30", end: "2026-07-30" });
   });
 
   it("opens the custom-range popover with preset rows", () => {

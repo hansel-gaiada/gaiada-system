@@ -861,7 +861,8 @@ export const PERFORMANCE_ROWS: readonly WorkspaceRow[] = [
     key: "reports", label: "Reports", icon: "chart",
     tabs: [
       { key: "mine", label: "Mine", href: "/reports/person", icon: "pulse", blurb: "Your own report for the period." },
-      { key: "team", label: "Team", href: "/reports/team", icon: "pulse", gate: { kind: "unitCap", cap: "reports.department.view" }, ticket: "DW-4b" },
+      { key: "team", label: "Team", href: "/reports/team?unit={dept}", icon: "pulse", gate: { kind: "unitCap", cap: "reports.department.view" },
+        blurb: "Your people's reports for the period." },
       { key: "department", label: "Department", href: "/reports/department", icon: "pulse", gate: { kind: "unitCap", cap: "reports.department.view" },
         blurb: "The department's report for the period. The server narrows it to the units you may read." },
     ],

@@ -200,6 +200,10 @@ describe("gates are carried as data, unchanged (plan §2.6 rule 4)", () => {
     expect(learning.tabs.find((t) => t.key === "add")!.gate).toEqual({ kind: "unitCap", cap: "lms.authoring" });
     expect(learning.tabs.find((t) => t.key === "team")!.gate).toEqual({ kind: "unitCap", cap: "lms.progress.view" });
     expect(learning.tabs.find((t) => t.key === "mine")!.gate).toBeUndefined();
+    const reportsTeam = PERFORMANCE_ROWS.find((r) => r.key === "reports")!.tabs.find((t) => t.key === "team")!;
+    expect(reportsTeam.gate).toEqual({ kind: "unitCap", cap: "reports.department.view" });
+    expect(reportsTeam.href).toBe("/reports/team?unit={dept}");
+    expect(reportsTeam.ticket).toBeUndefined(); // DW-4b built it: /reports/team
     const team = PERFORMANCE_ROWS.find((r) => r.key === "appraisals")!.tabs.find((t) => t.key === "team")!;
     expect(gateMentions(team.gate, (g) => g.kind === "cap" && g.cap === "appraisal.score")).toBe(true);
     expect(gateMentions(team.gate, (g) => g.kind === "unitCap" && g.cap === "appraisal.read")).toBe(true);

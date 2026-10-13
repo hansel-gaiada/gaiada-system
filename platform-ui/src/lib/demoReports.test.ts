@@ -167,3 +167,53 @@ describe("demoReports — DW-4a calendar periods (golden table, twin of report-c
     expect((res!.json as { error: string }).error).toBe("periodKind must be one of day, week, month, quarter, semester, year, custom");
   });
 });
+
+describe("demoReports — overview?grain=person&unit= (DW-4b, BFF §37)", () => {
+  const base = { grain: "person", periodKind: "month", start: "2026-07-01" };
+  type Scope = { scopeRef: string; scopeName: string; kpis: unknown[]; activity?: boolean };
+  const unitCall = (query: Record<string, string>, userId = "demo-hansel") => call("/api/co-agency/reports/overview", query, userId)!;
+
+  it("lists the unit's whole roster by name, a quiet member as activity:false with kpis []", () => {
+    const res = unitCall({ ...base, unit: "dept-1" });
+    expect(res.status).toBe(200);
+    const body = res.json as { unit: string; scopes: Scope[] };
+    expect(body.unit).toBe("dept-1");
+    expect(body.scopes.map((s) => s.scopeName)).toEqual(["Dewi Santoso", "Made Putra"]);
+    const quiet = body.scopes.find((s) => s.scopeRef === "u-pm")!;
+    expect(quiet.activity).toBe(false);
+    expect(quiet.kpis).toEqual([]);
+    const active = body.scopes.find((s) => s.scopeRef === "u-dev")!;
+    expect(active.activity).toBe(true);
+    expect(active.kpis.length).toBe(3);
+  });
+
+  it("a real unit nobody is placed in answers an empty roster, not a 404", () => {
+    const res = unitCall({ ...base, unit: "dept-5" });
+    expect(res.status).toBe(200);
+    expect((res.json as { scopes: Scope[] }).scopes).toEqual([]);
+  });
+
+  it("validates in the server's order: grain, then range, then 403 before 404", () => {
+    expect(unitCall({ ...base, grain: "department", unit: "dept-1" }).status).toBe(400);
+    expect((unitCall({ ...base, grain: "department", unit: "dept-1" }).json as { field: string }).field).toBe("unit");
+    expect(unitCall({ grain: "person", periodKind: "bogus", start: "2026-07-01", unit: "dept-1" }).status).toBe(400);
+    expect(unitCall({ ...base, unit: "dept-1" }, "gede-ic").status).toBe(403); // a plain member
+    expect(unitCall({ ...base, unit: "dept-1" }, "dept-manager").status).toBe(403); // leads dept-3 only
+    expect(unitCall({ ...base, unit: "dept-nope" }, "dept-manager").status).toBe(403); // no existence leak
+    const missing = unitCall({ ...base, unit: "dept-nope" });
+    expect(missing.status).toBe(404);
+    expect(missing.json).toMatchObject({ error: "unit_not_found", field: "unit" });
+  });
+
+  it("a unit lead reads their own unit's roster", () => {
+    const res = unitCall({ ...base, unit: "dept-3" }, "dept-manager");
+    expect(res.status).toBe(200);
+    expect((res.json as { scopes: Scope[] }).scopes.map((s) => s.scopeRef).sort()).toEqual(["gede-ic", "seo-staff"]);
+  });
+
+  it("without `unit` the person overview is unchanged: no `unit`, no `activity`", () => {
+    const body = unitCall(base).json as Record<string, unknown> & { scopes: Array<Record<string, unknown>> };
+    expect(body).not.toHaveProperty("unit");
+    for (const s of body.scopes) expect(s).not.toHaveProperty("activity");
+  });
+});

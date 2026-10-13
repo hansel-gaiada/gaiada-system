@@ -291,6 +291,18 @@ const LED_UNITS: Record<string, string[]> = {
 
 const GROUP_OWNER_ID = "demo-owner";
 
+/** DW-4b (BFF §37) — the demo roster of a unit: the demo people who sit in it, keyed by the
+ *  department node id (`dept-N`, the same ids the workspace `{dept}` resolves to). Built from the
+ *  existing `PERSON_NAMES` only, so no person appears that the other demo reports do not know. A
+ *  department with no entry (dept-2, dept-4, dept-5) is a real unit with nobody placed, so the Team
+ *  page's "Nobody is placed in this department." state is reachable. */
+const DEMO_ROSTERS: Record<string, string[]> = {
+  "dept-1": ["u-dev", "u-pm"],
+  "dept-3": ["gede-ic", "seo-staff"],
+};
+/** Roster members with NO fact rows in the demo range: `activity: false`, `kpis: []`, never zeros. */
+const DEMO_QUIET = new Set(["u-pm", "seo-staff"]);
+
 function isAuthorized(userId: string, grain: ReportGrain, scopeRef: string): boolean {
   const elevated = userId === "demo-hansel";
   if (grain === "person") return elevated || scopeRef === userId;
@@ -415,8 +427,27 @@ export function reportsDemo(method: string, p: string, params: URLSearchParams, 
       return err(400, "grain must be one of person, project, department, company", "grain");
     }
     const grain = grainRaw as ReportGrain;
+    // DW-4b (§37): same validation order as the server — unit-vs-grain, range, authorization (a plain
+    // member is refused; a led caller must lead the unit, before any existence check), then 404.
+    const unit = params.get("unit");
+    if (unit !== null && grain !== "person") return err(400, "unit is only valid with grain=person", "unit");
     const range = validateRange(params.get("periodKind") ?? "", params.get("start"), params.get("end"));
     if ("status" in range) return range;
+    if (unit !== null) {
+      const elevated = userId === "demo-hansel";
+      const led = LED_UNITS[userId];
+      if (!elevated && !led) return err(403, "forbidden");
+      if (!elevated && !led!.includes(unit)) return err(403, "forbidden");
+      if (!(unit in DEPARTMENT_NAMES)) return err(404, "unit_not_found", "unit");
+      const scopes = (DEMO_ROSTERS[unit] ?? [])
+        .map((scopeRef) => {
+          const activity = !DEMO_QUIET.has(scopeRef);
+          const kpis = activity ? buildDocument(tenantId, "person", scopeRef, range.periodKind, range.start, range.end).kpis.slice(0, 3) : [];
+          return { scopeRef, scopeName: scopeName("person", scopeRef, tenantId), kpis, activity };
+        })
+        .sort((a, b) => a.scopeName.localeCompare(b.scopeName));
+      return ok({ periodKind: range.periodKind, start: range.start, end: range.end, unit, scopes });
+    }
     // §6.2: overview has no single scopeRef, so it's evaluated against the grain generally — a
     // plain member is correctly denied for department/company (mirrors the real controller's own
     // comment: "a plain self/member principal is correctly denied by Cerbos... which this call
