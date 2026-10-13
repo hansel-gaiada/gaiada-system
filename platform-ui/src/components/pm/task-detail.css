@@ -269,3 +269,21 @@
   .pm-drawer { width: 100vw; }
   .pm-drawer .pm-detail { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* DW-6f — the Pull requests section: one row per pull request (link + title, then state, branch and the CI chip). The
+   CI chip always carries its WORD, so the hue is never the only signal. Tokens are the urgency set the task page already
+   uses (failing reads like overdue, running like almost late, passing like in time). */
+.pm-pr { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.pm-pr__row { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pm-pr__link { font: 400 13px/1.45 var(--font-body); color: var(--pm-text); text-decoration: none; overflow-wrap: anywhere; }
+.pm-pr__link:hover, .pm-pr__link:focus-visible { text-decoration: underline; }
+.pm-pr__ref { font-weight: 700; }
+.pm-pr__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 400 12px var(--font-body); color: var(--pm-text-dim); }
+.pm-pr__state { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-dim); }
+.pm-pr__state--open { color: var(--pm-urgency-on-track-fg); }
+.pm-pr__state--merged { color: var(--pm-accent); }
+.pm-pr__branch { font: 400 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--pm-text-dim); overflow-wrap: anywhere; }
+.pm-pr__ci { display: inline-flex; align-items: center; padding: 1px 8px; border: 0.5px solid currentColor; border-radius: var(--pm-radius-pill); font: 700 10px var(--font-body); letter-spacing: 0.03em; }
+.pm-pr__ci--passing { color: var(--pm-urgency-on-track-fg); }
+.pm-pr__ci--running { color: var(--pm-urgency-due-soon-fg); }
+.pm-pr__ci--failing { color: var(--pm-urgency-overdue-fg); }

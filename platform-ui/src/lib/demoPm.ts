@@ -599,6 +599,11 @@ export function pmDemo(method: string, p: string, search: URLSearchParams, body?
   const assignHistMatch = p.match(/^\/api\/[^/]+\/pm\/tasks\/([^/]+)\/assignment-history$/);
   if (assignHistMatch) return ok(assignmentHistoryFor(assignHistMatch[1]));
 
+  // Pull requests on a task (DW-6f) — the demo has no GitHub organisation, so nothing is linkable and the section stays out.
+  if (/^\/api\/[^/]+\/pm\/tasks\/[^/]+\/pull-requests$/.test(p)) {
+    return ok({ taskKey: null, linkable: false, repoLinked: false, pullRequests: [] });
+  }
+
   // Task followers (P3-09) — self-scoped, member-level.
   const followersMatch = p.match(/^\/api\/[^/]+\/pm\/tasks\/([^/]+)\/followers$/);
   if (followersMatch) return ok(followersFor(followersMatch[1]));
