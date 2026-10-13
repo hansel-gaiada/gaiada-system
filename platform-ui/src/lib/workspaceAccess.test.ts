@@ -163,11 +163,11 @@ describe("concreteRows", () => {
   };
 
   // Plan §0: a Web Dev employee goes from 38 rows to 19. The 19 count the Company door and not
-  // Approvals, which stays ungated as today until DW-8 rules on it; so 19 here, and 16 while
-  // Campaigns, Clients and My tasks are not built.
-  it("gives a Web Dev employee 16 rows today and 19 once the planned rows land", () => {
+  // Approvals, which stays ungated as today until DW-8 rules on it; so 19 here, and 17 while
+  // Clients and My tasks are not built (Campaigns landed with DW-5b).
+  it("gives a Web Dev employee 17 rows today and 19 once the planned rows land", () => {
     expect(rowsFor(employee).map((r) => r.key)).toEqual([
-      "overview", "assistant", "pm", "build", "run", "website", "requests", "tools",
+      "overview", "assistant", "pm", "build", "run", "website", "requests", "campaigns", "tools",
       "reports", "analytics", "appraisals", "learning", "inbox", "calendar", "approvals", "me",
     ]);
     expect(rowsFor(employee, true)).toHaveLength(19);
