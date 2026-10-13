@@ -156,8 +156,5 @@ resourcePolicy:
       condition:
         match:
           expr: >-
-            (!has(request.principal.attr.assurance) ||
-              request.principal.attr.assurance != "high") &&
-            !request.principal.attr.grants.exists(g,
-              (g.role == "owner" || g.role == "finance_manager") &&
-              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
+            !has(request.principal.attr.assurance) ||
+            request.principal.attr.assurance != "high"
