@@ -29,7 +29,7 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ".auth/user.json" },
       dependencies: ["setup"],
-      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, /workspace-shell\.spec\.ts/, WEBDESK_STUB_SPECS],
+      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, /workspace-shell\.spec\.ts/, /workspace-departments\.spec\.ts/, WEBDESK_STUB_SPECS],
     },
     {
       // CP-17 client portal. Its OWN project with NO stored session, because every test here signs in as
@@ -109,6 +109,14 @@ export default defineConfig({
       name: "workspace-shell",
       use: { ...devices["Desktop Chrome"] },
       testMatch: /workspace-shell\.spec\.ts/,
+    },
+    {
+      // DW-6a/6b/6e: the department workspaces' Work menus against the registry, per agency department. Same
+      // reasoning as `workspace-shell` above: it signs in as the superadmin and plants the pilot cookie itself, so
+      // NO stored session.
+      name: "workspace-departments",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /workspace-departments\.spec\.ts/,
     },
     {
       // P3-12 CI build-gate smoke check. Self-contained (does its own login),

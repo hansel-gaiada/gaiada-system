@@ -269,7 +269,7 @@ const SEO: DeptToolkit = {
       tabs: [
         { key: "engagements", label: "Engagements", path: "engagements", icon: "wallet", blurb: "Client engagements, their tool scope, and provider budgets." },
         { key: "ledger", label: "Cost Ledger", path: "ledger", icon: "wallet", blurb: "Cost-to-serve at standard rates, per provider call." },
-        { key: "reports", label: "Reports", path: "reports", icon: "box", blurb: "Monthly client reports — draft, approve, deliver." },
+        { key: "reports", label: "Client reports", path: "reports", icon: "box", blurb: "Monthly client reports — draft, approve, deliver." },
       ],
     },
     {
