@@ -11,6 +11,32 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.123.0` - DW-6d and DW-6g: `?departmentId=` on the clients, deliverables and projects lists (2026-10-13) - PROTOTYPED
+
+- **What.** BFF contract §33. `GET /api/:t/clients`, `/deliverables` and `/projects` take an optional `departmentId` (an org-node id). The rule for each list:
+  - **Clients:** a client with a live project owned by that node or any node under it.
+  - **Deliverables:** matched through the deliverable's project.
+  - **Projects:** a project owned by that node or any node under it.
+  - **The subtree** comes from `org_unit_closure`, plus an equality on the node itself, so a company whose closure was never rebuilt still matches the node's own projects.
+- **One helper,** `core/department-filter.ts` (`parseDepartmentFilter`, `departmentFilterSql`). It narrows what is displayed and is not a boundary: each list's authorisation, RLS and row shape are unchanged.
+- **Parsing.** The parameter is parsed after `authorize`. Absent or blank means today's list. More than 200 characters, a control character or a repeated parameter answers 400 `{ error, field: "departmentId" }`.
+- **Deleted projects.** With the filter, a deliverable on a deleted project is left out. The unfiltered list is unchanged.
+- **No migration and no Cerbos change.**
+- **Proof.** `department-filter.test.ts` (7 tests) and `department-filter.api.test.ts` (18 tests; real Postgres and Cerbos), which:
+  - builds the tree through the real org save route;
+  - covers the department and its division, the other department, a deleted project, a second company with the same node ids, a company with no closure, the combinations, the 400s, and a 403 before any 400.
+  - Branch CI 38411361984 on `8c5c13c9` is green, and the suite ran in shard 4.
+
+### platform-ui `0.130.0` - DW-6d and DW-6g: a department's Clients page and Web Dev's Deliverables tab (2026-10-13) - PROTOTYPED
+
+- **6d, Clients.** `/departments/[deptId]/clients` lists the department's clients: name, business type (from the Client Centre profiles, as `/clients` reads them), status, and how many of the department's projects each has. The counts come from one `projects?departmentId=` read.
+  - The empty state explains that the list comes from the department's projects. A client served only through an engagement or a site is not listed, and the page says so.
+  - A refused or failed read says so, never "no clients".
+  - The registry's Clients row (`CLIENTS_ROW`) drops its DW-6d ticket, so agency workspaces now show it. A Web Dev employee has 18 rows today.
+- **6g, Deliverables.** Web Dev › Build › Deliverables replaces its placeholder with the department's deliverables: name, project (linked), client, status and due date. The names come from one department-scoped read each.
+- **Readers.** `listClients`, `listDeliverables` and `listProjects` take an optional `departmentId`. The new `readClients` and `readDepartmentDeliverables` keep a refusal distinct from "none" (`ReadResult`).
+- **Proof.** Page-helper tests for both pages (10 and 7), the registry tests updated for the concrete row, and branch CI green (platform-ui 464 files, 8047 tests). The landing sha's own runs are on the board.
+
 ### platform-ui `0.129.0` - DW-4f: "Department courses" shows the department's own courses (2026-10-13) - PROTOTYPED
 
 Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.4 and §5.6.
