@@ -632,7 +632,8 @@ const FINANCE: Workspace = {
     { key: "tax", label: "Tax", icon: "inventory", tabs: [{ key: "tax", label: "Tax", href: "/finance/tax", icon: "inventory" }] },
     {
       // Settings (tax identity, what is fixed for this company) is not placed by the plan's table; it
-      // sits with the close so the page keeps a home. DW-7b may move it.
+      // sits with the close so the page keeps a home. DW-7b may move it. The billing profile (PV5-09: the
+      // issuer on every invoice and the account clients pay into) is a page under Settings today.
       key: "close", label: "Close", icon: "check",
       tabs: [
         { key: "close", label: "Period close", href: "/finance/close", icon: "check" },
@@ -640,6 +641,7 @@ const FINANCE: Workspace = {
         { key: "ownership", label: "Ownership", href: "/finance/ownership", icon: "sitemap" },
         { key: "cutover", label: "Cutover", href: "/finance/cutover", icon: "clock" },
         { key: "settings", label: "Settings", href: "/finance/settings", icon: "settings" },
+        { key: "billing-profile", label: "Billing profile", href: "/finance/settings/billing-profile", icon: "wallet" },
       ],
     },
   ],
