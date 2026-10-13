@@ -6470,11 +6470,11 @@ Every item: `{id, kind, title, date, fileId, ready}`. `id` is the source row (co
 **Request.** `GET /api/:t/reports/overview?grain=person&unit=<orgNodeId>&periodKind&start[&end]`. `unit` is optional. Without it, the endpoint is unchanged and its scopes carry no `activity` field.
 
 **Validation and authorization, in this order:**
-1. `unit` with any grain other than `person` → 400 `{message: "unit is only valid with grain=person", field: "unit"}`.
+1. `unit` with any grain other than `person` → 400 `{error: "unit is only valid with grain=person", field: "unit"}` on the wire (thrown as `{message, field}`; the shared error filter renders `message` as `error`, as for every report 400).
 2. The range, as for every report read (§6.2 of the reporting blueprint).
 3. Cerbos `read_person` on `report_document`, as today. A plain member is refused (403).
 4. A caller narrowed to their led units (`requiresUnitNarrowing`) must lead `unit`: `assertUnitInLedScope` as of today, else 403 "outside your reporting line". This runs before the existence check, so a narrowed caller learns nothing about units outside their line.
-5. `unit` is not a node of the company's org structure → 404 `{message: "unit_not_found", field: "unit"}`.
+5. `unit` is not a node of the company's org structure → 404 `{error: "unit_not_found", field: "unit"}` on the wire.
 
 **Roster.** Every user whose primary `org_unit_memberships` row is valid TODAY (in `REPORTS_TZ`) on a node in `unit`'s subtree (`collectUnitSubtree`). Today, not the range end: the same rule as the TR-25 narrowing, so choosing a past range can never widen who a head sees. Someone who left the unit mid-range is not listed, and their numbers stay in the department's report.
 

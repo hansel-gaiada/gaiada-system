@@ -596,7 +596,7 @@ describe.skipIf(!TEST_URL)("⚡ TR-25 person-axis boundary (live PG + RLS + Cerb
     it("(c) a company-wide caller asking for a unit that is not in the structure gets 404 unit_not_found", async () => {
       const r = await unitOverview(admin, "d-nope");
       expect(r.statusCode).toBe(404);
-      expect(r.json()).toMatchObject({ message: "unit_not_found", field: "unit" });
+      expect(r.json()).toMatchObject({ error: "unit_not_found", field: "unit" });
       // ...and is not narrowed for a real unit outside any lead's line
       const seo = await unitOverview(admin, "d-seo");
       expect(seo.statusCode).toBe(200);
@@ -607,7 +607,7 @@ describe.skipIf(!TEST_URL)("⚡ TR-25 person-axis boundary (live PG + RLS + Cerb
       for (const u of [webLead, admin]) {
         const r = await unitOverview(u, "d-web", "department");
         expect(r.statusCode).toBe(400);
-        expect(r.json()).toMatchObject({ message: "unit is only valid with grain=person", field: "unit" });
+        expect(r.json()).toMatchObject({ error: "unit is only valid with grain=person", field: "unit" });
       }
     });
 
