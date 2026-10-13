@@ -66,19 +66,20 @@ export async function resolveAutomationApprovalDeciders(tenantId: string, module
 
 /**
  * WSK-66 — the decider set for an `origin='webdesk'` row (a WebDesk `content.publish` /
- * `content.schedule` / `key.mint` / `site.archive` / `site.setDomain` request, executed in-band at decide()). Two Cerbos gates stack at
+ * `content.schedule` / `key.mint` / `site.archive` / `site.setDomain` / `site.promote` request, executed in-band at decide()). Two Cerbos gates stack at
  * decide time, and this mirrors their INTERSECTION:
  *   1. `resource_automation_approval.yaml` · `decide` — company_admin (webdesk rows carry no
  *      `module`, so the hr-only module_manager arm never applies): the base query above.
  *   2. the execution gate the decider must ALSO pass —
  *      `resource_webdesk_content_item.yaml` · `publish`/`schedule` (company_admin or a webdev
  *      module_manager, approvalId required, maker ≠ checker unless R4), or
- *      `resource_webdev_provisioned_site.yaml` · `promote` for `key.mint` / `site.archive` / `site.setDomain` (company_admin, manager,
- *      module_manager). company_admin is in every one of those, so (1) ∩ (2) = (1) on ROLES.
+ *      `resource_webdev_provisioned_site.yaml` · `promote` for `key.mint` / `site.archive` / `site.setDomain` / `site.promote` (company_admin,
+ *      manager, module_manager; `site.promote` ALSO needs `github_repo · deploy` on the GitHub org tenant, M6-P6h). company_admin is in
+ *      every one of those (in its own company), so (1) ∩ (2) = (1) on ROLES.
  * What (2) adds is the maker ≠ checker rule: the requester is dropped from the set unless the
  * caller says self-approval is allowed, which is true ONLY for a single-item `content.publish`
  * (WSK-D46 R4; `webdesk-approved-command.ts` computes it from the stored items). `key.mint` and
- * `site.archive` / `site.setDomain` keep the requester out too (the executor enforces requester ≠ decider for them in code).
+ * `site.archive` / `site.setDomain` / `site.promote` keep the requester out too (the executor enforces requester ≠ decider for them in code).
  *
  * Same status as the rest of this file: a NOTIFICATION mirror. Cerbos decides at decide() time.
  * A webdev_manager publisher is NOT in this set because the generic `decide` gate refuses them

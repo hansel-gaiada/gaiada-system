@@ -769,9 +769,13 @@ export const webdevModule: ModuleContract = {
     {
       name: "webdesk.site.promote",
       description:
-        "Promote a WebDesk site's staging release to production — irreversible-adjacent, public. "
-        + "HIGH write — ALWAYS WS4, every principal class incl. an attended human (§07 C-05 rule) + "
-        + "§03 Layer-4 assertion. STUB: 501 webdesk_control_plane_not_wired.",
+        "Request a PRODUCTION deploy of a provisioned WebDesk site from its default branch: files ONE site.promote approval "
+        + "(HIGH, WS4) and returns {approvalId} (a pending request for the same site is returned, with alreadyPending:true, "
+        + "instead of a second one). The repo, branch and production URL come from the site registry, never from the caller. "
+        + "Refused with a typed 409 when it could not start: no production registry row, no public domain, the production "
+        + "deploy secret not granted, or a promote already in flight. Nothing deploys until a DIFFERENT authorised user who "
+        + "also holds github_repo deploy approves it; the site's own CI then deploys production, and the console reads it "
+        + "live only once the production site's build stamp names the approval. HIGH write — ALWAYS WS4, every principal class (§07).",
       minAssurance: "low",
       write: true,
       impact: "high",
@@ -779,8 +783,8 @@ export const webdevModule: ModuleContract = {
       pathTemplate: "/api/:tenantId/modules/webdev/control/sites/:siteId/promote",
       inputSchema: {
         type: "object",
-        properties: { tenantId: { type: "string" }, siteId: { type: "string" } },
-        required: ["tenantId", "siteId"],
+        properties: { tenantId: { type: "string" }, siteId: { type: "string" }, tenantSlug: { type: "string" } },
+        required: ["tenantId", "siteId", "tenantSlug"],
       },
     },
     {

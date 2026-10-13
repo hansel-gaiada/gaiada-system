@@ -130,6 +130,20 @@ export interface PpnSummary {
   inputVatUncreditable: string;
   netPayable: string;
 }
+/**
+ * One row of `finance_tax_codes` (PV5-F2). A code is effective-dated: a rate change is a NEW row, never an edit, so a
+ * return for an old period still reproduces. `inUse` is true when any invoice, bill or draft names the code.
+ */
+export interface TaxCode {
+  id: string; code: string; name: string;
+  kind: "ppn_output" | "ppn_input" | "pph21" | "pph23" | "pph42" | "pph_badan" | "exempt";
+  /** Statutory rate, in percent. */
+  rate: number;
+  /** The fraction of the base the rate applies to (11/12 = 0.9166666667 for PPN since 2025). */
+  baseMultiplier: number;
+  effectiveFrom: string; effectiveTo: string | null;
+  notes: string | null; accountCode: string | null; inUse: boolean;
+}
 export interface EfakturException {
   kind: "AR_MISSING_EFAKTUR" | "AP_INPUT_VAT_LOST";
   documentNo: string; counterparty: string; docDate: string; taxAmount: string; detail: string;
@@ -314,6 +328,13 @@ export const getEfakturExceptions = (u: string, t: string, from: string, to: str
     platformFetch<EfakturException[]>(`/api/${t}/finance/tax/efaktur-exceptions${qs({ from, to })}`, u),
     [] as EfakturException[],
   );
+
+/**
+ * The company's tax codes. A VERDICT-style reader: unavailability is `null`, never an empty list, because "no tax codes"
+ * is a claim (it is what makes the page offer the standard PPN codes) and a refused read must not make it.
+ */
+export const listTaxCodes = (u: string, t: string) =>
+  financeVerdict(platformFetch<TaxCode[]>(`/api/${t}/finance/tax/codes`, u));
 
 // ── The close ───────────────────────────────────────────────────────────────────────────────────
 export const getCloseReadiness = (u: string, t: string, periodId: string) =>

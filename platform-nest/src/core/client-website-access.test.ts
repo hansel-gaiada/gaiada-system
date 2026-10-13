@@ -538,7 +538,8 @@ describe.skipIf(!TEST_URL)("WSK-49f: client_website_editor grant path (staff + c
 
     it("a project-scoped ADMIN row confers nothing (admin is client-wide)", async () => {
       const u = await createUser("pscoped-admin@w49f.test");
-      const p = (await adminPool().query<{ id: string }>(`SELECT id FROM projects WHERE tenant_id = $1 LIMIT 1`, [co])).rows[0].id;
+      // PV4-13: the project must belong to clientA (composite FK), so pick one of clientA's, not any in the tenant.
+      const p = (await adminPool().query<{ id: string }>(`SELECT id FROM projects WHERE tenant_id = $1 AND client_id = $2 LIMIT 1`, [co, clientA])).rows[0].id;
       await addContact(co, clientA, u, { capability: "admin", projectId: p });
       await grantRole(u, clientRole, "company", co);
       const r = await app.inject({ method: "PUT", url: url.portalEditor(clientA, cid["target-a@w49f.test"]), headers: asUser(u) });

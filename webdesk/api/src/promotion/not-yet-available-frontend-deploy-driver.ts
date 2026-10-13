@@ -1,7 +1,6 @@
 // WSK-25 — copies ../control/release/not-yet-available-release-transport.ts's shape exactly: a
 // documented, typed error, never a stack trace, never a fabricated success. Default binding for
-// FRONTEND_DEPLOY_DRIVER in every environment until a real delphi/helios/Hostinger adapter exists
-// (WSK-26'/29). The command that calls this (promotion-command.service.ts's `promote()`) treats
+// FRONTEND_DEPLOY_DRIVER in every environment: the control plane deploys nothing (WSK-D29/D79). The command that calls this (promotion-command.service.ts's `promote()`) treats
 // this error as an EXPECTED, non-fatal outcome for the frontend sub-steps only — the content half
 // of the promotion has already committed by the time this runs, and this failure does not roll
 // that back (see that file's header for why "content promoted, frontend pending" is a distinct,
@@ -13,11 +12,12 @@ export class FrontendDeployNotAvailableError extends Error {
   readonly code = "FRONTEND_DEPLOY_NOT_AVAILABLE";
   constructor(step: string) {
     super(
-      `frontend-deploy driver for step '${step}' is not yet implemented — the delphi/helios/Hostinger ` +
-        `adapters are WSK-26'/29's build (design WSK-D26). Both hosts are OBSERVE-ONLY by owner ruling and ` +
-        `unreachable from this dev machine, so this could not be built or verified live. The content half of ` +
-        `this promotion (snapshot, migrate, content import) already committed before this step ran; only the ` +
-        `box-side frontend effect is missing.`,
+      `frontend-deploy driver for step '${step}' is not yet implemented here, and no host should be configured ` +
+        `for it: the control plane holds no SSH key and deploys nothing (WSK-D29). Delivery is per site and runs ` +
+        `in the site's own CI (WSK-D79): bind the site's delivery with POST sites/:id/delivery-binding (M6-P6g) ` +
+        `and follow infra/runbooks/webdesk-staging-rebuild.md. The content half of this promotion (snapshot, ` +
+        `migrate, content import) already committed before this step ran; only the box-side frontend effect is ` +
+        `missing, by design.`,
     );
   }
 }

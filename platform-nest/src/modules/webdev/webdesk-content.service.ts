@@ -100,7 +100,7 @@ import {
 } from "./webdesk-approved-command";
 import { commandArgsAsZoneBSeesThem, computeCommandHash } from "./webdesk-ws4-assertion";
 import { notifyWebdeskTransition, type WebdeskTransitionArgs } from "../search/indexnow-webdesk";
-import { noteStagingStale } from "./site-builds.service";
+import { noteStagingStale, promoteInFlight, resolveSiteBuildTarget } from "./site-builds.service";
 import { checkWebdeskEnvironmentDomain } from "./webdesk-domain";
 import { previewPageState, previewUrlFor, stagingOriginOf } from "./webdesk-preview";
 
@@ -2022,6 +2022,86 @@ export async function controlRequestSiteArchive(
     siteId,
     args: {},
     summary: { title: `Archive site "${site.name}" of ${b.tenantSlug} (irreversible: it stops serving content and accepts no writes)` },
+  });
+}
+
+/**
+ * `POST control/sites/:siteId/promote` body `{tenantSlug}` (M6-P6h): FILES one site.promote approval (HIGH, WS4) and answers
+ * `{approvalId}`. It never deploys. WSK-66's executor sends the ONE production dispatch at decide(), as the DECIDER (a
+ * DIFFERENT user who also holds `github_repo · deploy`), so a production deploy always takes a second person.
+ *
+ * What is checked here, in this order, so a request that could only fail never becomes an approval:
+ *   1. the body (closed: `tenantSlug` only): 400 `invalid_request`;
+ *   2. the site is one of THIS company's WebDesk sites (the wall, 404 `site-not-found`) and active (409 `site-archived`);
+ *   3. one open request per WebDesk tenant (= per provisioned site and repo): filing again returns the pending request's id
+ *      with `alreadyPending: true`;
+ *   4. the production target resolves from the registry (409 problem `promote-not-ready`, `reason` = the typed token:
+ *      `production_not_registered`, `site_url_unknown`, `production_secret_not_granted`, `rebuild_target_incomplete`, …);
+ *   5. no promote of this site is still in flight (409 `promote-in-flight`: GitHub keeps one WAITING run per concurrency
+ *      group, so a second promote could silently replace the first's run).
+ * Steps 4 and 5 are re-checked at execution (the grant can be revoked, a promote can start, between filing and deciding).
+ * The controller has already authorized `promote` on `webdev_provisioned_site`; the filer authorizes it again.
+ */
+export async function controlRequestSitePromote(
+  principal: Principal,
+  tenantId: string,
+  siteIdParam: string,
+  rawBody: unknown,
+): Promise<{ approvalId: string; alreadyPending?: true }> {
+  const b = strictBody(rawBody, ["tenantSlug"]);
+  if (typeof b.tenantSlug !== "string" || b.tenantSlug === "") throw invalidRequest("tenantSlug is a required string");
+  const tenantSlug = b.tenantSlug;
+
+  const { site } = await webdeskZoneB.resolveEditableSite(tenantId, tenantSlug, siteIdParam);
+  if (site.status !== undefined && site.status !== "active") {
+    throw new WebdeskProblem(409, {
+      type: "https://webdesk.gaiada.online/errors/site-archived",
+      title: "Site archived",
+      status: 409,
+      detail: "This site is archived: an archived site is not promoted.",
+    });
+  }
+  const siteId = site.siteId.toLowerCase();
+
+  const open = await withTenants([tenantId], async (c) => {
+    const r = await c.query<{ id: string }>(
+      `SELECT id FROM automation_approvals
+        WHERE tenant_id = $1 AND origin = 'webdesk' AND workflow_id = 'site.promote'
+          AND status = 'pending' AND deleted_at IS NULL
+          AND tool_args->>'tenantSlug' = $2
+        ORDER BY created_at DESC LIMIT 1`,
+      [tenantId, tenantSlug],
+    );
+    return r.rows[0] ?? null;
+  });
+  if (open) return { approvalId: open.id, alreadyPending: true };
+
+  const target = await resolveSiteBuildTarget(tenantId, tenantSlug, siteId, "production");
+  if (!target.ok) {
+    throw new WebdeskProblem(409, {
+      type: "https://webdesk.gaiada.online/errors/promote-not-ready",
+      title: "Not ready to promote",
+      status: 409,
+      reason: target.reason,
+      detail: target.detail,
+    });
+  }
+  if (await promoteInFlight(tenantId, tenantSlug)) {
+    throw new WebdeskProblem(409, {
+      type: "https://webdesk.gaiada.online/errors/promote-in-flight",
+      title: "A promote is in flight",
+      status: 409,
+      reason: "promote_in_flight",
+      detail: "A production promote of this site is still being deployed. Wait for it to go live (or time out as unverified) before filing another.",
+    });
+  }
+
+  return fileWebdeskCommandApproval(principal, tenantId, {
+    command: "site.promote",
+    tenantSlug,
+    siteId,
+    args: {},
+    summary: { title: `Promote ${tenantSlug} (site "${site.name}") to production at ${target.target.siteUrl}, from ${target.target.repo}@${target.target.ref}` },
   });
 }
 

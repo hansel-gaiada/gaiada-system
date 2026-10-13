@@ -20,9 +20,9 @@ export interface ReleaseTransportResult {
 
 /**
  * THE SEAM the ticket asks for: "define the seam and leave the transport unimplemented behind an
- * interface." Under WSK-D26 the real deploy targets are `delphi` (staging), `helios`
- * (production), and Hostinger (WordPress) — those adapters are WSK-25/26'/29's build, not this
- * ticket's. `releases/releases-command.service.ts` never talks to a box directly; it only ever
+ * interface." RETIRED AS A DEPLOY PATH (M6-P6j, WSK-D29/D79): no control-plane adapter will be built.
+ * Delivery is per site, run by the site's own CI over SFTP (webdesk/templates/_deploy/); `delphi`,
+ * `helios` and Hostinger are per-site targets reached that way. `releases/releases-command.service.ts` never talks to a box directly; it only ever
  * calls this interface, bound in `control.module.ts` to `NotYetAvailableReleaseTransport` by
  * default.
  */

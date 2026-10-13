@@ -299,6 +299,13 @@ async function settlePublish(
     decider,
     decidedBy,
   });
+  if (r.notApplicable) {
+    // M6-P6h: a wp site's theme reads /v1 live: the schedule took effect with no build to run. Settled ONCE (`refused`, the
+    // outcome for "nothing is dispatched for it, ever"), with the typed reason in `detail`, so the sweep stops re-reading it.
+    await recordFiring(tenantId, s, "publish", "refused", effectiveAt, `${detail};rebuild_not_applicable`);
+    out.refused++;
+    return;
+  }
   if (!r.buildId) {
     // The ledger could not be written: nothing was dispatched and nothing is recorded; next tick retries.
     out.waiting++;

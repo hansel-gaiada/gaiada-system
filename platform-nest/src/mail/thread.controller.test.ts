@@ -120,7 +120,7 @@ describe.skipIf(!TEST_URL)("mail thread reads — parent-entity authorization (A
     // `clients.portal_user_id`, which `resolvePortalScope` unions in — the shortest real ownership path.
     const clientA = await createClient(coA, "Client One", clientContactA);
     await createClient(coA, "Client Two", clientContactB);
-    const projectA = await createProject(coA, "Project One", adminA);
+    const projectA = await createProject(coA, "Project One", adminA, clientA);
 
     runA = newId();
     approvalA = newId();

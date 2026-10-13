@@ -27,6 +27,12 @@
 // Same shape as the archive and key routes: `promote` gate first, then the wall, then `controlRequestSiteDomain` files ONE
 // WSK-66 approval (202 `{approvalId}`); the one WS4 command is sent at decide() by a DIFFERENT authorised user.
 //
+// ── M6-P6h: `POST sites/:siteId/promote` FILES A site.promote APPROVAL ─────────────────────────────
+// Same shape as the archive, key and domain routes: `promote` gate first, then the wall, then `controlRequestSitePromote`
+// files ONE WSK-66 approval (202 `{approvalId}`); the production dispatch is sent at decide() by a DIFFERENT authorised user
+// who also holds `github_repo · deploy`. A promote that could not start (no production row, no granted production secret,
+// one already in flight) is refused here with a typed 409 and files nothing.
+//
 // ── M6-P4c: `POST contract/regenerate` IS REAL ───────────────────────────────────────────────────────
 // WebDesk `contract.regenerate` (MEDIUM) for one of this company's tenants or all of them, through the same
 // channel and wall (`controlRegenerateContract`). Gate: `operate`, like the other MEDIUM control writes.
@@ -86,7 +92,10 @@ import { ModuleEnabledGuard } from "../module-enabled.guard";
 // control channel (the wall, typed errors and ledger rows live in the service). `POST sites/:siteId/keys` FILES a
 // key.mint approval (WSK-66 mints at decide()). Everything else stays 501.
 import { WebdeskProblemFilter } from "./webdesk-content.controller";
-import { controlApplySchema, controlListSites, controlProvisionSite, controlRegenerateContract, controlRequestKeyMint, controlRequestSiteArchive, controlRequestSiteDomain, idempotencyKeyOf } from "./webdesk-content.service";
+import {
+  controlApplySchema, controlListSites, controlProvisionSite, controlRegenerateContract, controlRequestKeyMint, controlRequestSiteArchive,
+  controlRequestSiteDomain, controlRequestSitePromote, idempotencyKeyOf,
+} from "./webdesk-content.service";
 
 /** The one honest answer every route below gives. A typed `error` token (this estate's error
  *  envelope, `http-error.filter.ts`), not prose alone, so a caller (the hub, a future console) can
@@ -183,11 +192,16 @@ export class WebdeskControlController {
   }
 
   // ── HIGH writes (§07: ALWAYS WS4, every principal class; Cerbos gate: `promote`) ───────────────
+  /** M6-P6h: FILES ONE site.promote approval and answers 202 `{approvalId}`. Nothing deploys until a DIFFERENT authorised user
+   *  who also holds `github_repo · deploy` approves it (WSK-66 sends the one production dispatch at decide()). Replaces the
+   *  always-501 stub. Body `{tenantSlug}`; the target (repo, branch, production URL) is the registry's, never the caller's. */
   @Post("sites/:siteId/promote")
-  @HttpCode(501)
-  async promoteSite(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+  @HttpCode(202)
+  async promoteSite(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("siteId") siteId: string, @Body() body: unknown,
+  ): Promise<{ approvalId: string; alreadyPending?: true }> {
     await authorize(req.principal, siteResource(tenantId), "promote");
-    return NOT_WIRED;
+    return controlRequestSitePromote(req.principal, tenantId, siteId, body);
   }
 
   @Post("sites/:siteId/rollback")

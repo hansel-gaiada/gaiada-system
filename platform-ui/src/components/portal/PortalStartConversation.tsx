@@ -6,17 +6,19 @@ import { PortalComposerFields } from "./PortalComposerFields";
 
 // PV4-08 — "Start a conversation": pick where it belongs, give it a subject, write the first message.
 //
-// WHERE: a project (a new thread on it) or, for a client-wide contact only, "General" (the client's one running
-// thread; the first message creates it). `canUseGeneral` is the server's answer, never guessed from the project list.
-// A contact of several clients picks the client for General (`clients`); with one client there is nothing to pick.
+// WHERE: a project (a new thread on it) or "General" (a client's one running thread; the first message creates it).
+// General is PER CLIENT (PV4-13): `generalClients` is the clients where the caller is client-wide, the server's answer
+// (`generalClientIds`), never guessed from the project list. A client where they are limited to some projects has no
+// General, so it is never offered: a contact client-wide on A and project-scoped on B can start General for A only.
+// With several General clients they pick one (it is sent as `clientId`); with exactly one it is sent without a choice.
 // Viewers may start one (PV-D24): this form never reads the signing capability.
-export function PortalStartConversation({ projects, canUseGeneral, clients, defaultProjectId }: {
+export function PortalStartConversation({ projects, generalClients, defaultProjectId }: {
   projects: Array<{ id: string; name: string }>;
-  canUseGeneral: boolean;
-  /** The caller's clients, only needed when there is more than one (it names the client for General). */
-  clients: Array<{ id: string; name: string }>;
+  /** The clients whose General thread the caller may use. Empty = General is not offered. */
+  generalClients: Array<{ id: string; name: string }>;
   defaultProjectId?: string;
 }) {
+  const canUseGeneral = generalClients.length > 0;
   const router = useRouter();
   const [state, formAction, pending] = useActionState<PortalActionResult | null, FormData>(portalStartConversation, null);
 
@@ -46,14 +48,16 @@ export function PortalStartConversation({ projects, canUseGeneral, clients, defa
             {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </div>
-        {canUseGeneral && clients.length > 1 && (
+        {generalClients.length > 1 && (
           <div className="cp-field">
             <label className="cp-field__label" htmlFor="cv-start-client">Which of your companies? (for General)</label>
-            <select id="cv-start-client" className="cp-select" name="clientId" defaultValue={clients[0].id} disabled={pending}>
-              {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            <select id="cv-start-client" className="cp-select" name="clientId" defaultValue={generalClients[0].id} disabled={pending}>
+              {generalClients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
         )}
+        {/* One General client: name it explicitly rather than lean on the server's "your only client-wide client". */}
+        {generalClients.length === 1 && <input type="hidden" name="clientId" value={generalClients[0].id} />}
         <div className="cp-field">
           <label className="cp-field__label" htmlFor="cv-start-subject">Subject (optional)</label>
           <input id="cv-start-subject" className="cp-input" name="subject" type="text" maxLength={200} disabled={pending} />

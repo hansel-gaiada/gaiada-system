@@ -29,11 +29,10 @@ export function backendEnvState(site: SiteConsoleRow): { label: string; asOf: st
 /** The FRONTEND half of the same split. Unlike backend env, there is genuinely NO data source for
  *  this yet anywhere in the stack: no field on `ProvisionedSite`, no fact kind in
  *  `webdev_zoneb_event_log`'s CHECK-enumerated vocabulary names a deploy target, and the routing
- *  rule itself (WSK-D26: delphi staging / helios production / Hostinger for WP) is blocked on an
- *  owner ruling plus host reachability (design §03a) — it cannot even be executed yet, only
- *  planned. Rendering anything per-row here would be fabricating a value the backend has never
+ *  rule itself (WSK-D79: delivery targets are chosen per site, and each site's own CI delivers)
+ *  reports no state back to the ERP yet. Rendering anything per-row here would be fabricating a value the backend has never
  *  sent; the honest answer is the same fixed sentence on every row until a real bridge fact exists. */
-const FRONTEND_DEPLOYMENT_NOTE = "Not reported — WSK-D26 (delphi/helios/Hostinger) has no deploy state reaching the ERP yet.";
+const FRONTEND_DEPLOYMENT_NOTE = "Not reported — a site's own CI delivers it (WSK-D79) and no deploy state reaches the ERP yet.";
 
 function contractCell(slug: string, pins: ContractPinStatus[], pinsAvailable: boolean) {
   if (!pinsAvailable) return <span style={{ color: "var(--erp-ink-50)" }}>—</span>;

@@ -771,6 +771,9 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
         // An admin implies signer (owner ruling 2026-10-11), as the real scope resolver's canSign does.
         canSign: grantCap === "signer" || grantCap === "admin",
         wholeClient: (mine?.projectId ?? null) === null,
+        // PER CLIENT (2026-10-13): the demo has one client, so these are all-or-nothing.
+        signerClientIds: grantCap === "signer" || grantCap === "admin" ? [CLIENT_ID] : [],
+        wideClientIds: (mine?.projectId ?? null) === null ? [CLIENT_ID] : [],
         grants: [{ capability: grantCap, clientId: CLIENT_ID, clientName: "Northwind Traders", projectId: mine?.projectId ?? null, projectName: null }],
       },
     });
@@ -844,7 +847,8 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
       const rows = CONV.threads.filter((t) => (pid ? t.projectId === pid : true))
         .map((t) => convThreadView(t, true))
         .sort((a, b) => String(b.lastMessageAt).localeCompare(String(a.lastMessageAt)));
-      return ok({ threads: rows, canUseGeneral: true });
+      // PER CLIENT (2026-10-13): the demo has one client and its identities are client-wide on it.
+      return ok({ threads: rows, canUseGeneral: true, generalClientIds: [CLIENT_ID] });
     }
     if (m === "POST") {
       const checked = convCheckNew(parsed);

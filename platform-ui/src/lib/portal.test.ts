@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  changeRequestFormProps, changeRequestKindLabel, clientStatus, contractSigningState, isPastDue, money, overallProgress, portalDate,
+  changeRequestFormProps, parseWholeAccount, wholeAccountValue, changeRequestKindLabel, clientStatus, contractSigningState, isPastDue, money, overallProgress, portalDate,
   projectRange, projectUrgencyTier, relativeDays, splitTimeline, statusTone,
   type PortalContractDetail, type PortalProject, type PortalProjectOption, type PortalTimelineEvent,
 } from "./portal";
@@ -320,24 +320,36 @@ describe("changeRequestKindLabel", () => {
 // project-scoped) are covered here as PURE data, without logging in as a second client identity (the
 // task brief is explicit that a second identity must not be invented; `demo-client` alone drives the
 // live/e2e path and is client-wide, per demoPortal.ts's `profile` fixture).
-describe("changeRequestFormProps (§5.1 project rule + the viewer/signer ruling)", () => {
+describe("changeRequestFormProps (§5.1 project rule + the viewer/signer ruling, per client since PV4-13)", () => {
   const projects: PortalProjectOption[] = [
     { id: "p-1", name: "Website relaunch" },
     { id: "p-2", name: "Brand refresh" },
   ];
+  const clients = [{ id: "c-a", name: "Northwind" }, { id: "c-b", name: "Contoso" }];
 
-  it("a CLIENT-WIDE contact's form allows the all-projects option", () => {
-    const r = changeRequestFormProps({ access: { wholeClient: true } }, projects);
-    expect(r.allowClientWide).toBe(true);
+  it("a CLIENT-WIDE contact's form allows a whole-account option for that client", () => {
+    const r = changeRequestFormProps({ clients: [clients[0]], access: { wholeClient: true, wideClientIds: ["c-a"] } }, projects);
+    expect(r.wideClients).toEqual([{ id: "c-a", name: "Northwind" }]);
     expect(r.projects).toEqual(projects);
   });
 
-  it("a PROJECT-SCOPED contact's form gets NO all-projects option — they must name one of `projects`", () => {
-    const r = changeRequestFormProps({ access: { wholeClient: false } }, projects);
-    expect(r.allowClientWide).toBe(false);
+  it("a PROJECT-SCOPED contact's form gets NO whole-account option — they must name one of `projects`", () => {
+    const r = changeRequestFormProps({ clients, access: { wholeClient: false, wideClientIds: [] } }, projects);
+    expect(r.wideClients).toEqual([]);
     // The project list itself is untouched — scoping to "must name one" is the caller's job (the
-    // form component renders no blank/all option when `allowClientWide` is false), not a filter here.
+    // form component renders no whole-account option when `wideClients` is empty), not a filter here.
     expect(r.projects).toEqual(projects);
+  });
+
+  it("PER CLIENT: client-wide on A and project-scoped on B is offered A's whole account and NEVER B's", () => {
+    const r = changeRequestFormProps({ clients, access: { wholeClient: true, wideClientIds: ["c-a"] } }, projects);
+    expect(r.wideClients.map((c) => c.id)).toEqual(["c-a"]);
+    expect(r.wideClients.map((c) => c.id)).not.toContain("c-b");
+  });
+
+  it("an older server without wideClientIds falls back to every client for a wholeClient contact, and to none otherwise", () => {
+    expect(changeRequestFormProps({ clients, access: { wholeClient: true } }, projects).wideClients.map((c) => c.id)).toEqual(["c-a", "c-b"]);
+    expect(changeRequestFormProps({ clients, access: { wholeClient: false } }, projects).wideClients).toEqual([]);
   });
 
   it("§5.1 ruling, pinned at the UI layer: signing capability has ZERO influence on the form's shape", () => {
@@ -346,15 +358,22 @@ describe("changeRequestFormProps (§5.1 project rule + the viewer/signer ruling)
     // the whole point: submitting a change request is a viewer-permitted act (design doc §5.1,
     // test-pinned on the backend in webdev-change-requests-portal.controller.ts), so nothing at this
     // layer may gate on signing capability either.
-    const viewerProfile = { access: { wholeClient: true, canSign: false } };
-    const signerProfile = { access: { wholeClient: true, canSign: true } };
+    const viewerProfile = { clients, access: { wholeClient: true, wideClientIds: ["c-a"], canSign: false } };
+    const signerProfile = { clients, access: { wholeClient: true, wideClientIds: ["c-a"], canSign: true } };
     expect(changeRequestFormProps(viewerProfile, projects)).toEqual(changeRequestFormProps(signerProfile, projects));
   });
 
-  it("an empty project list still allows submission for a client-wide contact (the all-projects option alone)", () => {
-    const r = changeRequestFormProps({ access: { wholeClient: true } }, []);
-    expect(r.allowClientWide).toBe(true);
+  it("an empty project list still allows submission for a client-wide contact (the whole-account option alone)", () => {
+    const r = changeRequestFormProps({ clients, access: { wholeClient: true, wideClientIds: ["c-a"] } }, []);
+    expect(r.wideClients).toHaveLength(1);
     expect(r.projects).toEqual([]);
+  });
+
+  it("a whole-account selector value round-trips to its client and never reads a project id as one", () => {
+    expect(parseWholeAccount(wholeAccountValue("c-a"))).toBe("c-a");
+    expect(parseWholeAccount("0191e2a0-aaaa-7000-8000-000000000001")).toBeNull();
+    expect(parseWholeAccount("")).toBeNull();
+    expect(parseWholeAccount("client:")).toBeNull();
   });
 });
 

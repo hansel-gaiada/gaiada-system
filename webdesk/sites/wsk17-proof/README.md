@@ -14,10 +14,10 @@ the 2026-08-26 owner rule.
 
 `gaiada.com` is WordPress on Hostinger and stays there under WSK-D26 — it is not this ticket's
 target. This site's tenant (`wsk17-proof`) is the D26-finding's suggested substitute: a fresh,
-non-WP tenant, the kind of site that *would* deploy to `delphi` (staging) once the observe-only
-ruling and reachability blockers on that host (design §03a) are lifted — neither of which this
-ticket attempts to clear. **This ticket proves the BUILD chain only; it does not deploy anywhere.**
-`delphi`/`helios` were never touched, reached, or assumed reachable.
+non-WP tenant, the kind of site whose own CI could deliver to a per-site target (WSK-D79; at the time, `delphi`
+staging, once the observe-only ruling and reachability blockers on that host were lifted). **This
+ticket proves the BUILD chain only; it does not deploy anywhere.** `delphi`/`helios` were never
+touched, reached, or assumed reachable.
 
 ## What was actually observed (this run's real output, not a description of intent)
 

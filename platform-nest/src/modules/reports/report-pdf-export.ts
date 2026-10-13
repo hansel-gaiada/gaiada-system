@@ -147,6 +147,8 @@ export interface RenderPdfViaSidecarOptions {
   rendererToken: string;
   platformUiInternalUrl: string;
   timeoutMs?: number;
+  /** Left-hand footer text for the PDF (PV5-F1). Omitted: the renderer's neutral default. The renderer escapes and caps it. */
+  footerText?: string;
 }
 
 /** `POST {rendererUrl}/render {url}` + `Authorization: Bearer {rendererToken}` (§6.3, TR-19's own
@@ -177,7 +179,7 @@ export async function renderPrintPathViaSidecar(printPath: string, opts: RenderP
       method: "POST",
       signal: ac.signal,
       headers: { "content-type": "application/json", authorization: `Bearer ${opts.rendererToken}` },
-      body: JSON.stringify({ url: printUrl }),
+      body: JSON.stringify(opts.footerText ? { url: printUrl, footerText: opts.footerText } : { url: printUrl }),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");

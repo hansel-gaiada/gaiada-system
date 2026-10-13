@@ -12,6 +12,8 @@
 //   3. The timeline's payments and the receipt download reached a payment by its own client_id and never
 //      looked at the parent invoice. Teeth: put the old `invoicePaymentInPortalScope(...)` back in either
 //      place and a payment on a deleted invoice shows / downloads again.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
@@ -23,6 +25,7 @@ import { createCompany, createUser, addMembership, createRole, grantRole, create
 import { newId, withTenants } from "../db";
 import { setStorageForTest, localStorage as localStorageBackend, type StorageBackend } from "./storage";
 import { createIssuedInvoice, ensureBillingSetup } from "../seed/billing-setup";
+import { markInvoicesLegacy } from "../testing/invoice-fixtures";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -77,6 +80,25 @@ describe.skipIf(!TEST_URL)("PV3-02c — portal isolation fixes", () => {
         [id, co, clientA, opts.dayOffset, opts.status, opts.deleted ? new Date() : null, site()],
       ),
     );
+    return id;
+  }
+
+  // PV5-F1: a `void` invoice in each of its three histories. A flagged-legacy row can only exist if the guard
+  // trigger is stepped over (as the migration does), so it is inserted on a connection with triggers off
+  // (testing/invoice-fixtures.ts).
+  async function addVoid(kind: "unissued" | "issued" | "legacy", dayOffset: number, createdAt: Date | null = null): Promise<string> {
+    if (kind === "issued") {
+      const inv = await addInvoice({ status: "sent", dayOffset });
+      await withTenants([co], (c) => c.query(`UPDATE invoices SET status = 'void' WHERE id = $1`, [inv]));
+      return inv;
+    }
+    const id = newId();
+    await adminPool().query(
+      `INSERT INTO invoices (id, tenant_id, client_id, period_start, period_end, status, currency, lines, total, origin_site, created_at)
+       VALUES ($1, $2, $3, current_date - $4::int - 30, current_date - $4::int - 1, 'void', 'IDR', '[]', 1000, $5, COALESCE($6::timestamptz, now()))`,
+      [id, co, clientA, dayOffset, site(), createdAt],
+    );
+    if (kind === "legacy") await markInvoicesLegacy([id]);
     return id;
   }
 
@@ -249,12 +271,63 @@ describe.skipIf(!TEST_URL)("PV3-02c — portal isolation fixes", () => {
     });
   });
 
+  // ── 4b. a void invoice is shown only if it was ever issued (PV5-F1) ──────────────────────────────────
+  // Teeth: drop the `(status <> 'void' OR issued_at IS NOT NULL OR pre_pv5_legacy)` arm from `invoiceClientVisible`
+  // (portal-visibility.ts) and the unissued void appears in the list and its detail answers 200.
+  describe("a void invoice that was never issued is hidden from the client", () => {
+    it("an unissued void is absent and 404; an issued-then-voided and a pre-PV-5 void still show", async () => {
+      const unissued = await addVoid("unissued", 200);
+      const issued = await addVoid("issued", 210);
+      const legacy = await addVoid("legacy", 220);
+
+      const list = await app.inject({ method: "GET", url: `/api/${co}/portal/invoices`, headers: asUser(signerA) });
+      expect(list.statusCode).toBe(200);
+      const ids = (list.json() as Array<{ id: string }>).map((r) => r.id);
+      expect(ids).not.toContain(unissued);
+      expect(ids).toContain(issued);
+      expect(ids).toContain(legacy);
+
+      const detail = (id: string) => app.inject({ method: "GET", url: `/api/${co}/portal/invoices/${id}`, headers: asUser(signerA) });
+      expect((await detail(unissued)).statusCode).toBe(404);
+      expect((await detail(issued)).statusCode).toBe(200);
+      expect((await detail(legacy)).statusCode).toBe(200);
+    });
+  });
+
+  // The migration's cutoff is the ledger's applied_at for 1850, never a filename stamp (PV5-F1). The migration is a
+  // re-runnable DO block, so the test runs its real SQL against fixtures dated either side of that instant.
+  // Teeth: hard-code a future literal cutoff in the migration and the "after" row is flagged, hence visible.
+  describe("migration 202610132215 flags only voids created BEFORE the 1850 apply time", () => {
+    it("a void created before the cutoff is flagged (visible); one created after stays unflagged (hidden)", async () => {
+      const ledger = await adminPool().query<{ applied_at: Date }>(
+        `SELECT applied_at FROM schema_migrations WHERE name = '202610131850_pv5_enforce_invoice_issued.sql'`,
+      );
+      expect(ledger.rowCount).toBe(1);
+      const cutoff = ledger.rows[0]!.applied_at.getTime();
+      const before = await addVoid("unissued", 300, new Date(cutoff - 24 * 3600_000));
+      const after = await addVoid("unissued", 310, new Date(cutoff + 3600_000));
+
+      const sql = readFileSync(join(__dirname, "../../migrations/202610132215_pv5_legacy_flag_unissued_void_invoices.sql"), "utf8");
+      await adminPool().query(sql);
+
+      const flag = async (id: string) =>
+        (await adminPool().query<{ pre_pv5_legacy: boolean }>(`SELECT pre_pv5_legacy FROM invoices WHERE id = $1`, [id])).rows[0]!.pre_pv5_legacy;
+      expect(await flag(before)).toBe(true);
+      expect(await flag(after)).toBe(false);
+
+      const list = await app.inject({ method: "GET", url: `/api/${co}/portal/invoices`, headers: asUser(signerA) });
+      const ids = (list.json() as Array<{ id: string }>).map((r) => r.id);
+      expect(ids).toContain(before);
+      expect(ids).not.toContain(after);
+    });
+  });
+
   // ── 3. a payment is reached through a visible invoice ─────────────────────────────────────────────
   describe("timeline payments and receipts follow the invoice", () => {
     it("a confirmed payment on a deleted invoice is absent from the timeline and its receipt is 404", async () => {
       const liveInv = await addInvoice({ status: "sent", dayOffset: 0 });
-      // `void` (never issued): visible to the client and still deletable, so it carries the deleted-invoice case.
-      const goneInv = await addInvoice({ status: "void", dayOffset: 40 });
+      // A pre-PV-5 `void` (flagged legacy): visible to the client and still deletable, so it carries the deleted-invoice case.
+      const goneInv = await addVoid("legacy", 40);
       const draftInv = await addInvoice({ status: "draft", dayOffset: 80 });
       const livePay = await addPayment(liveInv);
       const gonePay = await addPayment(goneInv);

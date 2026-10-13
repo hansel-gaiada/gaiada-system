@@ -601,8 +601,8 @@ jobs:
   # webdesk/blocks (WSK-16): no database, no external service. Its own `npm run build` already IS the
   # gate (vendor-drift check against ../delivery/vocabulary + the unit suite + `astro check`).
   #
-  # webdesk/deploy (WSK-29): the Zone A frontend-deploy driver seam. Every test injects a fake
-  # exec/driver (no test spawns a process).
+  # webdesk/deploy (WSK-29, RETIRED by M6-P6j): a fail-closed stub. deploy()/probe() reject and name
+  # the replacement (the site's own CI, WSK-D79); its tests spawn no process and open no connection.
   webdesk-light:
     needs: plan
     if: needs.plan.outputs.any_webdesk_light == 'true'

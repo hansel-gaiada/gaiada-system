@@ -46,6 +46,7 @@ async function send<T>(path: string, body: unknown): Promise<FinanceActionResult
     });
     revalidatePath("/finance/ownership");
     revalidatePath("/finance/settings");
+    revalidatePath("/finance/tax");
     revalidatePath("/finance/journals");
     revalidatePath("/finance");
     return { ok: true, result };
@@ -68,6 +69,24 @@ export async function updateFinanceSettings(input: {
   presentationCurrency?: string;
 }): Promise<FinanceActionResult> {
   return send("/finance/settings", input);
+}
+
+// ── Tax codes (PV5-F2) ──────────────────────────────────────────────────────────────────────────
+// A rate is never edited in place: a change is `endTaxCode` on the old row and `addTaxCode` for the new one.
+export async function addTaxCode(input: {
+  code: string; name: string; kind: string; rate: number | string; baseMultiplier?: number | string;
+  effectiveFrom: string; effectiveTo?: string | null; accountCode?: string | null; notes?: string | null;
+}): Promise<FinanceActionResult<{ id: string }>> {
+  return send("/finance/tax/codes", input);
+}
+
+export async function endTaxCode(codeId: string, effectiveTo: string): Promise<FinanceActionResult> {
+  return send(`/finance/tax/codes/${encodeURIComponent(codeId)}/end`, { effectiveTo });
+}
+
+/** Idempotent: creates the statutory PPN rows the company lacks and reports what it created and what it skipped. */
+export async function addStandardPpnCodes(): Promise<FinanceActionResult<{ created: string[]; skipped: string[] }>> {
+  return send("/finance/tax/codes/standard-ppn", {});
 }
 
 // ── Cap table ───────────────────────────────────────────────────────────────────────────────────
