@@ -6591,7 +6591,7 @@ Deviations from §31, each deliberate:
 4. **None of the five keys is `sensitive`.** `allocate` moves money but only within the campaign's own budget, and flagging it would route every department-head grant of `manager` through the sensitive-grant override path (PERMISSION-CONTRACT §12.2). Flip it additively if the owner wants it.
 5. **Error carrier.** The contract's codes travel in `reason` (the `{error}` reshape keeps `error` as the prose message). The `{budgetMinor, allocatedMinor, requestedMinor}` figures of `allocation_exceeds_budget` travel in a new additive `detail` object, which `http-error.filter.ts` now forwards; it has the same only-when-set rule as `field`, `reason` and `existing`. `allocatedMinor` is the sum over the campaign's OTHER live, non-cancelled parts and `requestedMinor` is the part's new allocation.
 6. **`GET campaigns/:campaignId` adds `linkAccess`** (`{searchCampaigns, socialCampaigns}`, each `ok | module_off | forbidden`). A link list is empty both when nothing is linked and when the caller may not read that kind of campaign or the module is off; the extra key keeps an empty list from reading as "nothing linked". The detail read needs `agency_campaign` `read` AND `agency_campaign_part` `read`; the list read needs the part `read` only when `?unitId=` is sent.
-7. **`requests` counts and the request half of `part_has_links` are stubs.** `work_requests` does not exist until DW-5c, so `requests` is `{open: 0, delivered: 0, declined: 0}` and no request ever blocks a delete. The seam is two functions in the service (`requestCountsByPart`, `countRequestsOnPart`) that DW-5c replaces.
+7. **`requests` counts and the request half of `part_has_links` were stubs; DW-5c replaced the seam (2026-10-14).** The two functions in the service (`requestCountsByPart`, `countRequestsOnPart`) now read `work_requests` (§32.1): `requests` is the real `{open, delivered, declined}` per part (a cancelled request counts in none of the three), and ANY request on a part, cancelled included, blocks the part's delete with 409 `part_has_links`. The DW-5a controller is unchanged. Proof: `src/core/work-requests.test.ts`, "campaign part requests".
 8. **Linking a campaign that is already linked answers 409 `already_linked` even when it is linked to the SAME part** (one reading of "already linked"; no idempotent 201).
 9. **`PATCH` part returns `{id}`, `DELETE` part and links return `{id}` / `{id, kind, refId}`** with 200; `PATCH campaigns/:id` returns `{id, money}`. `POST links` answers 201.
 10. **Extra refusals the contract implies but does not name:** 400 `budget_invalid`, `date_invalid`, `dates_invalid`, `currency_invalid`, `brief_too_long`, `status_invalid`, `name_invalid`, `link_kind_invalid`, `nothing_to_update`; 404 `link_not_found` (unlinking something not linked); 409 `part_changed` (the part's owner moved between the authorization read and the locked write).
@@ -6599,7 +6599,7 @@ Deviations from §31, each deliberate:
 
 ---
 
-## 32. Requests between departments (DW-5c, 2026-10-13) — `platform-nest/src/core/work-requests.{controller,service}.ts` — **STATUS: CONTRACT (nothing built)**
+## 32. Requests between departments (DW-5c, 2026-10-13) — `platform-nest/src/core/work-requests.{controller,service}.ts` — **STATUS: BUILT, PROTOTYPED (HTTP suite work-requests.test.ts written; needs the Linux CI gate)**
 
 Plan: §7.2 and §7.3, ruling DW-D14 (Creatives supplies the assets, and Web Dev handles anything that needs a software engineer). **A request is the ask; the work stays where each receiver already works.** That is why there is no second queue:
 
@@ -6761,3 +6761,35 @@ Six artifacts, as in §31.2.
   - `from_unit_id` resolves a division member to their department, and is `NULL` for an unplaced owner.
 - **Notifications:** recipients exactly as in §32.7, and none goes to the actor.
 - **IAM:** the new kind's six artifacts and the count literals are green, and the policy is probed after a Cerbos restart.
+
+### 32.10 Built (DW-5c, 2026-10-14)
+
+Files: `migrations/202610140600_work_requests.sql` (schema), `migrations/202610140610_iam_work_request_permissions.sql` (IAM seed),
+`src/core/work-requests.service.ts` (form validator, status rules, org walk, intake project, sync, reads and SQL helpers),
+`src/core/work-requests.controller.ts` (the routes of §32.5), `src/modules/pm/pm.controller.ts` (one new export, `closePmTaskInTx`),
+`src/core/webdev-change-requests.controller.ts` (the three sync hooks of §32.6 and nothing else),
+`src/modules/agency/agency-campaign-parts.service.ts` (the DW-5a seam), `src/app.module.ts` (registration),
+`cerbos/policies/resource_work_request.yaml` and `perm_work_request_{read,create}` in `derived_roles.yaml`, `src/rbac/cerbos.ts` (`requestedBy`, `assigneeIds`),
+`src/rbac/permission-catalog.json`, `permission-groups.json`, `role-permission-bundles.json` (regenerated), the four pinned count literals
+(106 kinds / 456 pairs / 441 grantable / 102 non-exempt kinds), `docs/PERMISSION-CONTRACT.md` §36, `docs/modules/CAPABILITY-INVENTORY.md`.
+Proof files: `work-requests.service.test.ts` (39 pure unit tests, run locally), `cerbos-work-request.test.ts` (static pin plus a live matrix),
+`work-requests.test.ts` (the HTTP suite for every bullet of §32.9, including the concurrent first-request race; DB and Cerbos, Linux gate only).
+
+Deviations from §32, each deliberate:
+
+1. **The asset task's department assignee is set after `normalizePmTaskInput`.** PM's `validAssignee` accepts an assignee only when it names a responsible person, which a department with nobody on it yet cannot. The service therefore normalizes everything else through PM's own function, then sets `assignee = {kind: 'department', refId, refName, responsibleId: null, responsibleName: null}` and calls `createPmTaskInTx`. A null `responsibleId` is read as "nobody yet" by PM's dual-write (no responsible row, no drift), its assignment ledger (`responsible_id` is a uuid column, so `""` would be a 500) and Needs you; setting someone responsible later is an ordinary PM assignee patch.
+2. **`closePmTaskInTx` (new PM export) is the one "move a task to its project's done status" helper**, reused by deliver, decline and cancel. It uses the project's effective status set: the materialized registry's first `is_done` row by position, else the synthesized `done`. It sets progress 100, emits `pm.task.updated` (`wasDone`/`isDoneNow`) and promotes dependents exactly as `patchTask` does. It never throws for an ordinary state: a task already done, deleted, or in a project whose registry has no done row is reported and left, and the ask still moves.
+3. **The permission arm covers `read` and `create` only.** `cancel`, `deliver` and `decline` have no mirror (the requester and assignee rules are self-scoped; the head rules are attribute-dependent). Verified by experiment: adding a `decline` mirror fails `iam-04-reg1-mirror-reach-invariant` (`work_request.decline` held by `org_unit_lead` is narrower than the mirror). Same call as DW-5a's `update`. `owner` therefore holds all five keys and reaches only `read` and `create` through Cerbos unless it also holds `company_admin` or `manager`. None of the five keys is `sensitive`.
+4. **The intake FK is DEFERRABLE INITIALLY DEFERRED** (tenant-scoped composite `(project_id, tenant_id)`), so the service can insert the intake row first and create the project only when it won the insert. A loser creates nothing and re-selects. If the intake's project was later deleted, the answer is 409 `intake_project_unavailable`.
+5. **Two lifecycle CHECKs on `work_requests`** (a closed ask carries `closed_at`, an open one does not; a declined one carries its reason). `change_request_id` and `campaign_part_id` are plain FKs (their parents have no `(id, tenant_id)` unique); `pm_task_id` is the tenant-scoped composite.
+6. **Error carrier.** The contract's codes travel in `reason` and figures in `detail` (the DW-5a shape). Codes beyond the ones §32 names: 400 `body_invalid`, `kind_invalid`, `title_invalid`, `brief_invalid`, `brief_too_long`, `date_invalid`, `reason_invalid`, `box_invalid`, `status_invalid`, `unit_invalid` (a box filter or summary that does not name a department); 400 `asset_invalid` also covers a malformed `assetIds` list (field `assetIds`; `detail.invalid` lists unknown ids); 404 `request_not_found`; 409 `request_not_open` (`detail.status`), `intake_project_unavailable`. `form_invalid` carries `field` as `form.<key>` or `form.deliverables[<i>].<key>`.
+7. **Authorization runs before body validation** on every write; `requestedBy`, `assigneeIds` and `unitAncestors` are read from the request row and its task, never from the body. When the request is absent (or another tenant's), a caller who may not even read requests is answered 403 first, so the 404 is never an existence oracle for an outsider.
+8. **Text is scrubbed like change requests** (`scrubText`: PAN, national ids and e-mail addresses) in the title, the brief, `form.notes` and the decline reason, and NULs are stripped (plain text). References and URLs are not scrubbed.
+9. **Unit objects always carry `unitMissing`** (`{id, name, unitMissing}`), not only when the unit has left the tree. `GET requests/summary` requires `unitId` and answers 400 `unit_invalid` without a department.
+10. **Events and notifications beyond the letter of §32.7.** A reopen (unverify) emits `work_request.reopened`, a fifth event type, so the outbox shows the move. "Deliver more" emits `work_request.delivered` with `more: true` and notifies the requester again (`request.delivered`, "More assets were delivered"). The change-request routes' own notifications to the requester (`webdev.change_request.declined` and `.verified`, with a portal href) still fire for an internal request, so a requester gets that one AND `request.declined` / `request.delivered`. Left as it was: "do not change any other change-request behaviour".
+11. **`closed_by` is the person who delivered, declined or cancelled** (for an engineering request, the triager or verifier); the ask has no separate `created_by`, since `requested_by` is the principal.
+
+Surprises the board should know:
+
+- **An engineering request has no project, so Web Dev's `pm_task` triage route cannot convert it** (400 "names no project"). Only `mini_run` works for a request from this route, and `content` and `bug` default to `pm_task`, so triage must pick `mini_run` explicitly (the suite does). Whether engineering requests should name a project is a decision for the board; nothing here guesses one.
+- `campaignPartId` is context for the ask, not a routing rule: the part's department is not required to match `toUnitId`.

@@ -1292,6 +1292,51 @@ export async function createPmTaskInTx(
   return { id, status };
 }
 
+/** DW-5c (FRONTEND-BFF-CONTRACT §32.5) — move ONE pm_task to its project's DONE status, on an already-open
+ *  tenant-scoped connection, so a request that is delivered, declined or cancelled leaves the receiver's board.
+ *
+ *  The done status is the one PM itself reads: the project's effective status set (the materialized registry's
+ *  first `is_done` row by position, else the synthesized default ladder's `done`), never a literal id. Same
+ *  flag-driven coupling as `patchTask`: progress 100, no block reason, a `pm.task.updated` event carrying
+ *  `wasDone`/`isDoneNow`, and the dependents this task was the last open blocker of are promoted exactly as
+ *  `patchTask` promotes them (each with its own `pm.task.dependencyCleared` event). It deliberately does NOT spawn a
+ *  recurrence (a request's task is never recurring) and does NOT send the dependency-cleared notification.
+ *
+ *  Returns what happened and never throws for an ordinary state: a task that is already done, was deleted since, or
+ *  sits in a project whose registry has NO done row is reported, not failed, because the ask's own lifecycle must
+ *  still move (the caller decides what to do with the answer). MUST run inside `withTenants([tenantId], ...)`: the
+ *  row lock, the UPDATE and the outbox events commit or roll back with the caller's own writes. */
+export async function closePmTaskInTx(
+  c: PoolClient,
+  tenantId: string,
+  actorUserId: string | null,
+  taskId: string,
+): Promise<{ outcome: "closed" | "already_done" | "gone" | "no_done_status"; status: string | null }> {
+  const cur = await c.query<{ projectId: string; status: string }>(
+    `SELECT project_id AS "projectId", status FROM pm_tasks WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+    [taskId],
+  );
+  const task = cur.rows[0];
+  if (!task) return { outcome: "gone", status: null };
+  const statuses = await effectiveStatuses(c, task.projectId);
+  if (statuses.find((s) => s.id === task.status)?.isDone ?? false) return { outcome: "already_done", status: task.status };
+  const done = [...statuses].sort((a, z) => a.position - z.position).find((s) => s.isDone);
+  if (!done) return { outcome: "no_done_status", status: task.status };
+  await c.query(
+    `UPDATE pm_tasks SET status = $2, progress = 100, block_reason = NULL, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`,
+    [taskId, done.id],
+  );
+  await emitEvent(c, tenantId, "pm_task", taskId, "pm.task.updated", {
+    status: done.id, statusChanged: true, wasDone: false, isDoneNow: true, actorId: actorUserId,
+  });
+  for (const dep of await promoteClearedDependents(c, taskId)) {
+    await emitEvent(c, tenantId, "pm_task", dep.id, "pm.task.dependencyCleared", {
+      fromStatus: dep.fromStatus, toStatus: dep.toStatus, closedTaskId: taskId, actorExternal: "pm:dependency-engine",
+    });
+  }
+  return { outcome: "closed", status: done.id };
+}
+
 // ---------------- P4-E2 helpers ----------------
 
 /** Who may read whose productivity series. See `getProductivity`'s header for the full reasoning;
