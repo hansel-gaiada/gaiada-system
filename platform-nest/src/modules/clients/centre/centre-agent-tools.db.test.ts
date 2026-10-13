@@ -94,8 +94,9 @@ describe.skipIf(!TEST_URL)("PV6-05 · clients.*Business* agent tools drive the r
       payload: { profile: { legal: "Should Not Land" } },
     });
     expect(r.statusCode).toBe(403);
-    // authorize() names the denial reason in the message; the hub reads this as the typed reason.
-    expect(r.json().message).toMatch(/^not authorized: /);
+    // authorize() throws `not authorized: <reason>`; the HTTP filter returns it as `error`, which the hub reads
+    // as the typed reason.
+    expect(r.json().error).toMatch(/^not authorized: /);
   });
 
   it("getBusinessResults is a GET on the results route and returns the results golden shape", async () => {
