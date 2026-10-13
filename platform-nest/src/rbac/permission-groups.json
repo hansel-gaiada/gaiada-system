@@ -6,9 +6,9 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 166,
-      "grantablePermissionsInCatalog": 441,
-      "permissionsCoveredByGroups": 402,
+      "groups": 167,
+      "grantablePermissionsInCatalog": 445,
+      "permissionsCoveredByGroups": 406,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
       "sensitiveGroups": 114
@@ -1916,6 +1916,19 @@
         "core.work_request.cancel",
         "core.work_request.deliver",
         "core.work_request.decline"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "creative_asset_reviews",
+      "name": "Asset reviews",
+      "domain": "core",
+      "description": "Review rounds on Asset Library assets. DW-6h: any member can ask for a review of an asset's latest version (request_review); a department head over the asset's department and the requester of a request the asset was delivered against approve or request changes (decide_review); whoever opened a round can withdraw it (withdraw_review). Nobody decides a round they opened, and agents and automation never decide.",
+      "permissions": [
+        "core.creative_asset.read",
+        "core.creative_asset.request_review",
+        "core.creative_asset.decide_review",
+        "core.creative_asset.withdraw_review"
       ],
       "sensitive": false
     }

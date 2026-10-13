@@ -144,8 +144,9 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // PV4-05 (2026-10-12): +1 pair, NO new kind (meeting_recording: share_minutes). On top of M5-V3-f: 445 -> 446, kinds 104 unchanged.
     // DW-5a (2026-10-13): +5 pairs / +1 kind: `agency_campaign_part` (read/create/update/delete/allocate, NEW kind). 446 -> 451, kinds 104 -> 105.
     // DW-5c (2026-10-13): +5 pairs / +1 kind: `work_request` (read/create/cancel/deliver/decline, NEW core kind). 451 -> 456, kinds 105 -> 106.
-    expect(catalog.length).toBe(456);
-    expect(catalogKindSet.size).toBe(106);
+    // DW-6h (2026-10-13): +4 pairs / +1 kind: `creative_asset` (read/request_review/decide_review/withdraw_review, NEW core kind: the review rounds of an Asset Library asset). 456 -> 460, kinds 106 -> 107.
+    expect(catalog.length).toBe(460);
+    expect(catalogKindSet.size).toBe(107);
   });
 
   it("(a-forward) every catalog kind is backed by a real resourcePolicy file", () => {

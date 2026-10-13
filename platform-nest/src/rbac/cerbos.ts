@@ -122,6 +122,17 @@ export interface Resource {
    *  (`principal.id in assigneeIds`). Omitted -> [] -> the rule contains nobody, so an unfed resource confers
    *  nothing (the same fail-closed convention as `unitAncestors` and `panelistUserIds`). */
   assigneeIds?: string[];
+  /** DW-6h (docs/FRONTEND-BFF-CONTRACT.md §35.4) -- the REQUESTERS of an Asset Library asset: the `requested_by` of every
+   *  live work request (`work_requests`) any version of the asset's group was delivered against (`work_request_assets`).
+   *  Backs `creative_asset`'s `decide_review` requester rule (`principal.id in requesterIds`). Resolved BY THE HANDLER
+   *  (creative-reviews.ts), never from a body. Omitted -> [] -> the rule contains nobody (fail closed). */
+  requesterIds?: string[];
+  /** DW-6h -- who OPENED the review round being acted on (`creative_asset_reviews.requested_by`). Backs the opener's
+   *  `withdraw_review` rule AND the maker/checker `decide_review` DENY (nobody decides a round they opened). Read from
+   *  the round row (NOT NULL), never from a body. Omitted -> "" -> the opener's withdraw rule denies (fail closed), and
+   *  the self-approval DENY's `has() && != ""` guard stays false (the invoice `approve` convention: fail-open for a
+   *  DENY, fail-closed for an ALLOW); the handler always feeds it on a decision. */
+  reviewRequestedBy?: string;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -245,6 +256,11 @@ function resourcePayload(r: Resource) {
       // "" never equals a principal id, and [] contains nobody.
       requestedBy: r.requestedBy ?? "",
       assigneeIds: r.assigneeIds ?? [],
+      // DW-6h. Listed here or they never reach resource_creative_asset.yaml (this is an allow-list; the handler builds the
+      // Resource through an object spread, where TypeScript's excess-property check does not fire). Both fail closed for
+      // their ALLOW rules: [] contains nobody, and "" equals no principal id.
+      requesterIds: r.requesterIds ?? [],
+      reviewRequestedBy: r.reviewRequestedBy ?? "",
     },
   };
 }

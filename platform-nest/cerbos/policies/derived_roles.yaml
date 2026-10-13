@@ -675,6 +675,27 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.work_request.create" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_creative_asset_* — DW-6h (2026-10-13, docs/FRONTEND-BFF-CONTRACT.md §35.4). One generic global-or-company
+    # mirror for read and request_review. NO decide_review / withdraw_review mirror, on purpose: decide_review is
+    # reachable by an org_unit_lead rule (attribute-dependent) and a requester rule (self-scoped), and withdraw_review by
+    # the opener rule (self-scoped), as well as by company_admin/manager, and a flat `perms` mirror cannot tell those
+    # apart (permission-arm-hazard-scan Pattern B, iam-04-reg1-mirror-reach-invariant). Same call as work_request.
+    - name: perm_creative_asset_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.creative_asset.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_creative_asset_request_review
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.creative_asset.request_review" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_agency_creative_asset_* — IAM-04-ROLLOUT-B12
     - name: perm_agency_creative_asset_read
       parentRoles: ["user"]

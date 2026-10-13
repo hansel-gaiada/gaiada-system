@@ -146,8 +146,13 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
     // DW-5c (2026-10-14) added `core.work_request.deliver` and `core.work_request.decline`: a department head
     // delivers and declines the asks routed to their own department (FRONTEND-BFF-CONTRACT §32.2). Both are
     // unit-bounded like the rest; `cancel` (the requester's) and `create` are not in this bundle.
+    //
+    // DW-6h (2026-10-13) added `core.creative_asset.decide_review`: a department head approves or requests changes on
+    // review rounds of their own department's Asset Library assets (FRONTEND-BFF-CONTRACT §35.4). Unit-bounded like the
+    // rest; `request_review`, `withdraw_review` and `read` are not in this bundle.
     expect(keys).toEqual([
       "agency.campaign_part.update",
+      "core.creative_asset.decide_review",
       "core.position.assign", "core.position.read", "core.position.unassign",
       "core.role_grant.create", "core.role_grant.read", "core.role_grant.revoke",
       "core.work_request.decline", "core.work_request.deliver",
@@ -169,6 +174,8 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
     expect(keys).not.toContain("core.work_request.cancel");
     expect(keys).not.toContain("core.work_request.create");
     expect(keys).not.toContain("core.work_request.read");
+    expect(keys).not.toContain("core.creative_asset.request_review");
+    expect(keys).not.toContain("core.creative_asset.withdraw_review");
   });
 
   it("ACCEPTANCE: a legitimate client@company grant is completely unaffected", async () => {

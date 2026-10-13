@@ -102,8 +102,9 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // PV4-05 (2026-10-12): +1 grantable / +1 total on the EXISTING meeting_recording kind (`share_minutes`, uiGrantable true). On top of M5-V3-f: 445 -> 446 / 430 -> 431.
     // DW-5a (2026-10-13): +5 grantable / +5 total on the NEW agency_campaign_part kind (all uiGrantable TRUE). 446 -> 451 / 431 -> 436.
     // DW-5c (2026-10-13): +5 grantable / +5 total on the NEW work_request kind (all uiGrantable TRUE). 451 -> 456 / 436 -> 441.
-    expect(permissions.length).toBe(456);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(441);
+    // DW-6h (2026-10-13): +4 grantable / +4 total on the NEW creative_asset kind (all uiGrantable TRUE). 456 -> 460 / 441 -> 445.
+    expect(permissions.length).toBe(460);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(445);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 
