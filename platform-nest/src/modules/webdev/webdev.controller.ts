@@ -9,9 +9,10 @@
 //   POST   /api/:tenantId/modules/webdev/provisioned-sites/:id/deploy-grant -> 200 grant | 404 | 409 | 429 | 502 | 503
 //   DELETE /api/:tenantId/modules/webdev/provisioned-sites/:id/deploy-grant -> 200 revoke | 404 | 409 | 422 | 429 | 502 | 503
 //        (M6-P4g: the deploy gate is the org secret grant; deploy-grant.ts)
-//   POST /api/:tenantId/modules/webdev/sites/:id/domain                 -> 200 registry site | 400 | 404 | 409 (M6-P4c2)
+//   POST /api/:tenantId/modules/webdev/sites/:id/domain                 -> 200 registry site + property | 400 | 404 | 409 (M6-P4c2; M6-P6i adds `property`)
 //   POST /api/:tenantId/modules/webdev/sites/:id/delivery-binding       -> 200 registry site + deliveryState | 400 | 404 | 409 | 422 (M6-P6g)
 //   POST /api/:tenantId/modules/webdev/sites/:id/production             -> 201 registry site + deliveryState | 400 | 404 | 409 (M6-P6g)
+//   GET  /api/:tenantId/modules/webdev/sites/:id/dns                    -> 200 DNS checklist + read-only check | 404 (M6-P6i)
 //
 // This controller is DELIBERATELY THIN. It validates route/body input, resolves the principal,
 // authorizes, builds the driver, and maps a typed outcome onto a status code. Every decision that
@@ -69,6 +70,8 @@ import {
   patchWebdevSiteVaultRef, type DeliverySiteDto, type WebdevSiteDto,
 } from "./site-registry.service";
 import { DeliveryRefusal, parseBindingBody } from "./delivery-binding";
+import { readSiteDns, type SiteDnsDto } from "./domain-dns.service";
+import type { PropertyLinkResult } from "./site-property-link";
 import { readDeliveryForProvisioned, type SiteDeliveryDto } from "./delivery-binding.service";
 import { ScaffoldRefusal } from "./scaffold-commit";
 import { commitScaffoldForSite, readScaffoldCommit, type ScaffoldCommitDto, type ScaffoldCommitResponse } from "./scaffold-commit.service";
@@ -422,6 +425,21 @@ export class WebdevController {
     return site;
   }
 
+  /** M6-P6i — the DNS checklist the console shows for one registry row: the records to create (type, name, target), derived from
+   *  where the site is delivered, and a READ-ONLY resolver check that says `pending` or `pointing`. Writes nothing, calls no DNS
+   *  API, holds no DNS credential (O-12): the owner changes the records for our domains and the client for theirs. With no documented
+   *  target for the row's host the answer is `target_unknown` and tells the person to ask the operator. Authorization is the registry's
+   *  `webdev_site · read`, like the row itself. */
+  @Get("sites/:id/dns")
+  async getSiteDns(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+  ): Promise<SiteDnsDto> {
+    await authorize(req.principal, { kind: "webdev_site", tenantId, id, module: "webdev" }, "read");
+    return readSiteDns(tenantId, id);
+  }
+
   /** THE `vault_ref` pointer write. Accepts EXACTLY `{ vaultRef }` — any other top-level key in the
    *  body is a 400, which is what proves this endpoint cannot become a backdoor write path for any
    *  other column, present or future (including a future accidental credential column — the
@@ -465,7 +483,7 @@ export class WebdevController {
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
     @Body() body: Record<string, unknown>,
-  ): Promise<WebdevSiteDto> {
+  ): Promise<WebdevSiteDto & { property: PropertyLinkResult }> {
     await authorize(req.principal, { kind: "webdev_site", tenantId, id, module: "webdev" }, "update");
     const keys = Object.keys(body ?? {});
     if (keys.length !== 1 || keys[0] !== "domain") {
@@ -476,7 +494,7 @@ export class WebdevController {
     if (typeof body.domain !== "string") throw new BadRequestException("domain must be a string");
     const site = await claimProvisionedSiteDomain(tenantId, id, body.domain, req.principal.userId);
     await writeActivity(tenantId, req.principal.userId, "updated", "webdev_site", site.id, {
-      domainClaimed: true, domain: site.domain,
+      domainClaimed: true, domain: site.domain, propertyState: site.property.state, propertyVerified: site.property.verified,
     });
     return site;
   }
@@ -519,7 +537,7 @@ export class WebdevController {
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
     @Body() body: unknown,
-  ): Promise<DeliverySiteDto> {
+  ): Promise<DeliverySiteDto & { property: PropertyLinkResult }> {
     await authorize(req.principal, { kind: "webdev_site", tenantId, id, module: "webdev" }, "create");
     try {
       const rec = typeof body === "object" && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
@@ -529,7 +547,7 @@ export class WebdevController {
       }
       const site = await createProductionFromStaging(tenantId, id, rec.domain, req.principal.userId);
       await writeActivity(tenantId, req.principal.userId, "created", "webdev_site", site.id, {
-        domain: site.domain, environment: site.environment, promotedFromSiteId: id,
+        domain: site.domain, environment: site.environment, promotedFromSiteId: id, propertyState: site.property.state, propertyVerified: site.property.verified,
       });
       return site;
     } catch (err) {

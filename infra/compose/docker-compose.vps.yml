@@ -658,6 +658,11 @@ services:
       WEBDESK_REBUILD_TARGETS: ${WEBDESK_REBUILD_TARGETS:-}
       WEBDESK_REBUILD_POLL_INTERVAL_MS: ${WEBDESK_REBUILD_POLL_INTERVAL_MS:-}
       WEBDESK_REBUILD_POLL_WINDOW_MS: ${WEBDESK_REBUILD_POLL_WINDOW_MS:-}
+      # M6-P6i -- the DNS checklist of a delivered site. WEBDEV_DNS_TARGETS is ONE-LINE JSON mapping a delivery host's opaque host_ref
+      # label to its documented DNS target (shape: platform-nest/src/config.ts, webdevDns). EMPTY ON PURPOSE: a host_ref with no entry
+      # makes the console say "ask the operator for the target". No DNS credential or API token exists; the only network act is a
+      # read-only resolver lookup.
+      WEBDEV_DNS_TARGETS: ${WEBDEV_DNS_TARGETS:-}
       # WSK-61 — how long past a schedule's effective time to wait for Zone B to show it (default 15 min when
       # empty). A value outside [60000, 86400000] REFUSES BOOT (config.ts readScheduleSupersedeGraceMs).
       WEBDESK_SCHEDULE_SUPERSEDE_GRACE_MS: ${WEBDESK_SCHEDULE_SUPERSEDE_GRACE_MS:-}

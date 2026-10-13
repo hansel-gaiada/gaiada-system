@@ -78,7 +78,7 @@ export interface FakeCall {
   hadWs4: boolean;
 }
 
-const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "schema.apply", "site.provision", "key.mint", "site.archive", "media.uploadToken", "media.update", "media.delete", "forms.define", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
+const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "schema.apply", "site.provision", "key.mint", "site.archive", "site.setDomain", "media.uploadToken", "media.update", "media.delete", "forms.define", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
 const EDITORIAL = new Set(["content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "media.uploadToken", "media.update", "media.delete", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
 
 /** WSK-43b: one library asset as the fake holds it (the real row is `media_assets`, migration 0014). */
@@ -122,6 +122,9 @@ export class FakeZoneB {
   readonly tenants: Array<{ companyRef: string; slug: string; status: string; siteId: string; env?: { production: string; staging: string } }> = [];
   /** site.archive: the site ids this fake has archived (tenant.list reports their `status`; a second archive is 409). Cleared by reset(). */
   readonly archivedSites = new Set<string>();
+  /** site.setDomain: environment id -> the domain this fake has set (null = cleared). Overrides the defaults `tenant.list` reports
+   *  (production null, staging `stagingDomain`). Cleared by reset(). */
+  readonly envDomains = new Map<string, string | null>();
   /** Every plaintext `key.mint` returned, in order (so a test can scan storage and logs for it). */
   readonly mintedKeys: string[] = [];
   /** Every preview token `content.previewToken` returned, in order (WSK-46: a test scans logs and the ledger for them). */
@@ -156,6 +159,13 @@ export class FakeZoneB {
     return t.env;
   }
 
+  /** The domain `tenant.list` reports for one environment: what `site.setDomain` set, else the fixture's default. */
+  private domainOf(t: FakeZoneB["tenants"][number], name: "production" | "staging"): string | null {
+    const id = this.envOf(t)[name];
+    if (this.envDomains.has(id)) return this.envDomains.get(id) ?? null;
+    return name === "staging" ? this.stagingDomain : null;
+  }
+
   get writes(): FakeCall[] {
     return this.calls.filter((c) => WRITES.has(c.command));
   }
@@ -168,6 +178,7 @@ export class FakeZoneB {
     this.mintedUploadTokens.length = 0;
     this.mintKeys.clear();
     this.archivedSites.clear();
+    this.envDomains.clear();
     this.forms.clear();
     this.media.clear();
     this.items.clear();
@@ -298,8 +309,8 @@ export class FakeZoneB {
             siteId: t.siteId, name: "Main", kind: "astro", status: this.archivedSites.has(t.siteId) ? "archived" : "active",
             // `environments.domain` is nullable in WebDesk (a site with no hostname yet): one of each.
             environments: [
-              { envId: this.envOf(t).production, name: "production", domain: null, status: "pending" },
-              { envId: this.envOf(t).staging, name: "staging", domain: this.stagingDomain, status: "active" },
+              { envId: this.envOf(t).production, name: "production", domain: this.domainOf(t, "production"), status: "pending" },
+              { envId: this.envOf(t).staging, name: "staging", domain: this.domainOf(t, "staging"), status: "active" },
             ],
           }],
         })),
@@ -558,6 +569,22 @@ export class FakeZoneB {
         if (this.archivedSites.has(String(p.siteId))) return problem(409, "conflict", { detail: "site is already archived" });
         this.archivedSites.add(String(p.siteId));
         return ok({ site: { id: p.siteId, name: "Main", status: "archived" }, replayed: false }, 201);
+      }
+      case "site.setDomain": {
+        // WebDesk lifecycle.service#setSiteDomain: the env must be THIS site's (404); an archived site is a 409; a no-op is a 409
+        // (nothing is claimed); another live environment of the same tenant already holding the domain is a 409.
+        const t = this.tenants.find((x) => x.slug === p.tenantSlug && x.siteId === p.siteId)!;
+        const names = { [this.envOf(t).production]: "production", [this.envOf(t).staging]: "staging" } as Record<string, "production" | "staging">;
+        const name = names[String(b.envId)];
+        if (!name) return problem(404, "not-found", { detail: "environment not found for this site" });
+        if (this.archivedSites.has(String(p.siteId))) return problem(409, "conflict", { detail: "site is archived: an archived site accepts no domain change" });
+        const previous = this.domainOf(t, name);
+        const next = b.domain === null ? null : String(b.domain);
+        if (previous === next) return problem(409, "conflict", { detail: "domain-unchanged: the environment already has this domain" });
+        const other = name === "production" ? "staging" : "production";
+        if (next !== null && this.domainOf(t, other) === next) return problem(409, "conflict", { detail: "domain-in-use: another environment of this tenant already has this domain" });
+        this.envDomains.set(String(b.envId), next);
+        return ok({ environment: { id: b.envId, name, domain: next, previousDomain: previous, status: "active" }, replayed: false }, 201);
       }
       case "content.publish": {
         // WSK-66's in-band publish (WS4 + editorial `apr`); the fake only needs to flip the state.

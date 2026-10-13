@@ -182,10 +182,22 @@ describe.skipIf(!TEST_URL)("WSK-31 · WebdeskControlController (HTTP, isolated a
       expect(allowed.statusCode).toBe(400);
       expect(allowed.json()).toMatchObject({ reason: "invalid_request" });
     });
+    // M6-P6i: `sites/:siteId/domain` FILES a site.setDomain approval now (webdesk-site-set-domain.test.ts covers it end to end);
+    // here it keeps only the gate-first pairing: member 403, admin past the gate into body validation.
+    it("POST sites/s1/domain: member DENIED; admin passes the gate and a body without tenantSlug is a typed 400 (not 501, not 500)", async () => {
+      const denied = await app.inject({
+        method: "POST", url: `/api/${tenant}/modules/webdev/control/sites/s1/domain`, headers: asUser(member), payload: { domain: "example.com" },
+      });
+      expect(denied.statusCode).toBe(403);
+      const allowed = await app.inject({
+        method: "POST", url: `/api/${tenant}/modules/webdev/control/sites/s1/domain`, headers: asUser(admin), payload: { domain: "example.com" },
+      });
+      expect(allowed.statusCode).toBe(400);
+      expect(allowed.json()).toMatchObject({ reason: "invalid_request" });
+    });
     for (const [path, body] of [
       ["sites/s1/promote", {}],
       ["sites/s1/rollback", {}],
-      ["sites/s1/domain", { domain: "example.com" }],
       ["keys/k1/rotate", {}],
       ["keys/k1/revoke", {}],
     ] as const) {

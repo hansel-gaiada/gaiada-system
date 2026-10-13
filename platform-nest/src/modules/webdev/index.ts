@@ -802,8 +802,12 @@ export const webdevModule: ModuleContract = {
     {
       name: "webdesk.site.setDomain",
       description:
-        "Set a WebDesk site's custom domain (DNS/TLS-adjacent, irreversible-adjacent). HIGH write — "
-        + "ALWAYS WS4, every principal class (§07). STUB: 501 webdesk_control_plane_not_wired.",
+        "Request a change of one WebDesk environment's public domain (the CORS allow-list source: which sites a browser may call WebDesk from): "
+        + "files ONE site.setDomain approval (HIGH, WS4) and returns {approvalId} (a pending request for the same site, environment and "
+        + "domain is returned, with alreadyPending:true, instead of a second one). `domain` is a bare lowercase host name the company has "
+        + "CLAIMED on its site registry for that environment, or null to clear it. Nothing changes until a DIFFERENT authorised user "
+        + "approves it. Reversible: file it again with the previous domain, or null. No DNS is touched and no DNS credential is held. "
+        + "HIGH write — ALWAYS WS4, every principal class (§07).",
       minAssurance: "low",
       write: true,
       impact: "high",
@@ -811,8 +815,11 @@ export const webdevModule: ModuleContract = {
       pathTemplate: "/api/:tenantId/modules/webdev/control/sites/:siteId/domain",
       inputSchema: {
         type: "object",
-        properties: { tenantId: { type: "string" }, siteId: { type: "string" }, domain: { type: "string" } },
-        required: ["tenantId", "siteId", "domain"],
+        properties: {
+          tenantId: { type: "string" }, siteId: { type: "string" }, tenantSlug: { type: "string" },
+          envId: { type: "string" }, domain: { type: ["string", "null"] },
+        },
+        required: ["tenantId", "siteId", "tenantSlug", "envId", "domain"],
       },
     },
     {
