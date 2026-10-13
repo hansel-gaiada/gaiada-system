@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
+import { guardAdminRoute } from "@/lib/adminGuard";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { listAssignments, SERVICE_ASSIGNMENTS_ENABLED } from "@/lib/serviceAssignments";
@@ -30,6 +31,7 @@ export default async function AdminServicesPage() {
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
+  guardAdminRoute("/admin/services", me, tenant); // DW-D20
 
   if (!tenant) {
     return (

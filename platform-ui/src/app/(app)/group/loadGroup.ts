@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe, type Me } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
+import { guardAdminRoute } from "@/lib/adminGuard";
 import { activeCompany, isRootCompany, type MeCompany } from "@/lib/companyContext";
 import { getGroupReport, isForbidden, isNotFound } from "@/lib/reports-data";
 import type { GroupReport } from "@/lib/groupReport";
@@ -26,11 +27,12 @@ export function parseGroupPeriod(raw: string | undefined): Exclude<ReportPeriodK
   return (GROUP_PERIOD_KINDS as readonly string[]).includes(raw ?? "") ? (raw as Exclude<ReportPeriodKind, "custom">) : "month";
 }
 
-export async function loadGroup(periodKind: Exclude<ReportPeriodKind, "custom">): Promise<GroupLoad> {
+export async function loadGroup(periodKind: Exclude<ReportPeriodKind, "custom">, route: "/group" | "/group/reports"): Promise<GroupLoad> {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
+  guardAdminRoute(route, me, tenant); // DW-D20: only a root owner or platform_admin may open the Group pages
   const active = activeCompany(me, tenant);
   if (!active) return { kind: "no_company" };
   if (!isRootCompany(active)) return { kind: "not_root", me, active };

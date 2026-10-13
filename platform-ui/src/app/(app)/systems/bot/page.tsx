@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
+import { guardAdminRoute } from "@/lib/adminGuard";
 import { getMe, platformFetch, PlatformError } from "@/lib/platform";
 import { isPlatformOperator } from "@/lib/companyContext";
 import { getSystemStatus, getSystemConfig } from "@/lib/admin";
@@ -38,6 +39,7 @@ export default async function BotSystemPage() {
   if (!userId) redirect("/login");
 
   const me = await getMe(userId);
+  guardAdminRoute("/systems/bot", me, null); // DW-D20
   // PV-D18: the owner of the root gets the full controls too; the server gate decides for real.
   const elevated = isPlatformOperator(me);
 

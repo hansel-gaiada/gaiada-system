@@ -1,4 +1,9 @@
+import { notFound, redirect } from "next/navigation";
 import { SectionTabs } from "@/components/shell/SectionTabs";
+import { getSessionUserId } from "@/lib/session-server";
+import { getMe } from "@/lib/platform";
+import { getActiveTenant } from "@/lib/tenant";
+import { adminRouteAllowed } from "@/lib/adminAccess";
 import "@/components/admin/admin.css";
 
 // Settings (formerly "Admin"). Its sub-sections are in-page tabs here rather than
@@ -18,10 +23,18 @@ const TABS = [
   { key: "about", label: "About", href: "/admin/about", icon: "pulse" as const },
 ];
 
-export default function SettingsLayout({ children }: { children: React.ReactNode }) {
+// DW-D20: offer only the tabs the person may open, so nobody is shown a link to a 404. A tab the access
+// table does not know (undefined) is offered. Each page guards itself; a layout gets no pathname.
+export default async function SettingsLayout({ children }: { children: React.ReactNode }) {
+  const userId = await getSessionUserId();
+  if (!userId) redirect("/login");
+  const me = await getMe(userId);
+  const tenant = await getActiveTenant(me);
+  const tabs = TABS.filter((t) => adminRouteAllowed(t.href, me, tenant) !== false);
+  if (tabs.length === 0) notFound();
   return (
     <div className="admin-shell--full">
-      <SectionTabs tabs={TABS} />
+      <SectionTabs tabs={tabs} />
       {children}
     </div>
   );

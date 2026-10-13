@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
+import { guardAdminRoute } from "@/lib/adminGuard";
 import { getMe, PlatformError } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { listComplianceGates, type ComplianceGate } from "@/lib/adminData";
@@ -18,6 +19,7 @@ export default async function AdminCompliancePage() {
 
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
+  guardAdminRoute("/admin/compliance", me, tenant); // DW-D20
 
   if (!tenant) {
     return (

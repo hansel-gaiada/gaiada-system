@@ -12,7 +12,7 @@ const MUTED = { margin: 0, font: "400 13px/1.5 var(--font-body)", color: "var(--
 // The group report is fetched (for one day, the cheapest range) rather than reading `me.companies`:
 // the BFF is what refuses a non-owner here, and it also says which companies have `reports` on.
 export default async function GroupCompanyReportsPage() {
-  const load = await loadGroup("day");
+  const load = await loadGroup("day", "/group/reports");
   if (load.kind !== "ok") return <GroupNotice title="Company reports" load={load} />;
 
   const { report, active } = load;
