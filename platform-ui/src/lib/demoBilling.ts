@@ -101,13 +101,26 @@ const INVOICE_UPDATE = new Set(["demo-hansel", "demo-owner"]);
 const contractVisible = (k: { clientId: string | null; status: string }): boolean => k.clientId != null && k.status !== "draft";
 const paymentVisible = (x: { clientId: string | null; invoiceStatus: string }): boolean => x.clientId != null && x.invoiceStatus !== "draft";
 
+/** A stand-in SHA-256 for a demo contract: 64 hex characters derived from its id. Not a real digest, and nothing checks it. */
+const demoHash = (id: string): string => {
+  let hex = "";
+  for (let i = 0; hex.length < 64; i++) hex += (id.charCodeAt(i % id.length) * 7 + i * 13).toString(16).padStart(2, "0");
+  return hex.slice(0, 64);
+};
+
 /** The contract as the list serves it: no `signatures`, plus the derived flags. */
 function row(k: DemoContract, userId: string) {
   const { signatures, ...rest } = k;
   const clientSigned = signatures.some((s) => s.party === "client");
   const providerSigned = signatures.some((s) => s.party === "provider");
+  // PV5-06: sending FIXES the content (the hash and the tier); a draft has neither. PV5-07: the sealed signed copy
+  // exists only for dk-5 here, so every other signed contract (including one signed in a session) reads "being prepared".
+  const fixed = k.sentAt != null;
   return {
     ...rest, supersedesId: null, createdBy: "demo-hansel", clientSigned, providerSigned,
+    signatureTier: fixed ? "attested" : null, contentSha256: fixed ? demoHash(k.id) : null,
+    contentFixedAt: fixed ? k.sentAt : null, certifiedRequested: false,
+    signedCopyFileId: k.id === "dk-5" ? "f-signed-dk5" : null,
     termEnded: Boolean(k.endsOn && k.endsOn < dayOnly(0)),
     clientVisible: contractVisible(k),
     // PV3-01: one decision per caller, true only for a sent row still waiting on us.
@@ -240,6 +253,15 @@ export function billingDemo(method: string, p: string, params: URLSearchParams, 
     if (!k.fileId && !k.bodyMd) return err(400, "attach a document or write the terms before sending");
     k.status = "sent"; k.sentAt = new Date().toISOString();
     return ok({ ok: true, status: "sent", notified: 2 });
+  }
+
+  // PV5-06/PV-D25: certified signing is parked, so marking a draft certified is refused and writes nothing.
+  if ((hit = p.match(/^\/api\/[^/]+\/contracts\/([^/]+)\/mark-certified$/)) && m === "POST") {
+    if (!CONTRACT_WRITE.has(userId)) return deny("mark_certified", "contract");
+    const k = s.contracts.find((x) => x.id === hit![1]);
+    if (!k) return err(404, "contract not found");
+    if (k.status !== "draft") return err(400, "only a draft can be marked certified");
+    return { status: 409, json: { error: "no certified signing provider is set up", reason: "no_certified_provider" } };
   }
 
   if ((hit = p.match(/^\/api\/[^/]+\/contracts\/([^/]+)\/countersign$/)) && m === "POST") {

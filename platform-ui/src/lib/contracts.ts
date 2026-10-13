@@ -9,6 +9,8 @@
 // here decides who may do what; it only decides what to OFFER from what the backend already said about a
 // row (`canCountersign`) and from the row's own state.
 
+import type { SignatureTier } from "./billingView";
+
 export type ContractStatus = "draft" | "sent" | "signed" | "declined" | "expired" | "void";
 
 export interface Contract {
@@ -42,6 +44,16 @@ export interface Contract {
   /** PV3-07: whether the client sees this row, computed by the backend from the portal's own rules. Declared so
    *  the types merge cleanly; this page does not render it (PV3-09 does). */
   clientVisible?: boolean;
+  /** PV5-06: the tier chosen when the contract was SENT (null while draft), the SHA-256 fixed then, when, and whether staff
+   *  marked the draft certified. All optional: an older server omits them, and a contract sent before PV5-06 has a null
+   *  hash. A missing field claims nothing (the row says "not recorded", never invents a tier). */
+  signatureTier?: SignatureTier | null;
+  contentSha256?: string | null;
+  contentFixedAt?: string | null;
+  certifiedRequested?: boolean;
+  /** PV5-07: the sealed signed copy (the contract, its evidence page and the company seal), once rendered. Absent and
+   *  null read alike: a signed contract says "being prepared", any other says nothing (lib/billingView.ts). */
+  signedCopyFileId?: string | null;
 }
 
 export interface ContractSignature {
@@ -50,6 +62,8 @@ export interface ContractSignature {
   signerName: string;
   signerTitle: string | null;
   signedAt: string;
+  /** PV5-06: the hash this signature was made over. */
+  contentSha256?: string | null;
 }
 
 export interface ContractDetail extends Contract {
@@ -129,6 +143,24 @@ export interface ContractActions {
   countersign: boolean;
   /** Void from any state but void itself, behind a confirm. */
   void: boolean;
+  /** PV5-09: "Mark certified", a draft only. Shown, but DISABLED with its reason while certified signing is not set up
+   *  (PV-D25 parks PV5-11): the button names a thing that exists, and says why it cannot be used yet. */
+  markCertified: { shown: boolean; enabled: boolean; reason: string | null };
+}
+
+/** PV-D25: certified signing (through a certified provider) is parked until counsel sets a threshold or a client asks for
+ *  it (PV5-11). Until then `POST …/mark-certified` answers 409 `no_certified_provider` and writes nothing, so the button is
+ *  offered disabled. Flip this when PV5-11 lands; the 409 below stays handled either way, because the server is the
+ *  authority and this constant is only the UI's guess about it. */
+export const CERTIFIED_SIGNING_AVAILABLE: boolean = false;
+export const CERTIFIED_UNAVAILABLE_REASON = "Certified signing isn't set up yet. Every contract is signed by typed name and sealed by our company for now.";
+
+/** The mark-certified route's refusals, in words. Branch on `reason`, never on the message. */
+export function markCertifiedErrorText(status: number | null, reason: string | undefined, message: string): string {
+  if (status === 409 && reason === "no_certified_provider") return CERTIFIED_UNAVAILABLE_REASON;
+  if (status === 403) return "Only company administrators can mark a contract certified.";
+  if (status === 400) return "Only a draft can be marked certified. A sent contract's tier is already fixed.";
+  return message;
 }
 
 export const SEND_BLOCKED_REASON = "Write the terms or attach a PDF before sending. A contract with nothing to read cannot be signed.";
@@ -147,6 +179,11 @@ export function contractActions(c: Contract): ContractActions {
     // `=== true`, not truthiness: an older backend that omits the field must read as "not offered".
     countersign: c.canCountersign === true,
     void: c.status !== "void",
+    markCertified: {
+      shown: isDraft && c.certifiedRequested !== true,
+      enabled: isDraft && CERTIFIED_SIGNING_AVAILABLE,
+      reason: isDraft && !CERTIFIED_SIGNING_AVAILABLE ? CERTIFIED_UNAVAILABLE_REASON : null,
+    },
   };
 }
 

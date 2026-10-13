@@ -1,8 +1,10 @@
 "use client";
 import { useActionState, useState } from "react";
 import {
-  countersignContractAction, sendContractAction, voidContractAction, type BillingActionState,
+  countersignContractAction, markCertifiedAction, sendContractAction, voidContractAction, type BillingActionState,
 } from "@/lib/contractsActions";
+import { contractDocumentState, DOCUMENT_PREPARING_TEXT, tierLabel } from "@/lib/billingView";
+import { CopyHash } from "@/components/billing/CopyHash";
 import { awaitingText, contractActions, signatureLine, type Contract, type ContractSignature } from "@/lib/contracts";
 import { formatDate, money } from "@/lib/format";
 import { StatusBadge } from "@/components/ui";
@@ -21,6 +23,13 @@ import "./billing.css";
 //   - Countersign: ONLY when the backend said `canCountersign`. No role is read in the browser; a company
 //     admin never sees the button, and a stale page cannot offer it for a row that is no longer waiting on us.
 //   - Void: any state but void, behind a confirm.
+//   - Mark certified (PV5-09): a draft only, and DISABLED WITH ITS REASON while certified signing is parked (PV-D25),
+//     the same pattern as Send. The server answers 409 `no_certified_provider` if it is ever called.
+//
+// PV5-09 also shows what the contract IS: its signing tier, the content fingerprint (the SHA-256 fixed when it was sent, in
+// short form with a copy button) and, once both parties have signed, the sealed signed copy (or "being prepared": the
+// file is rendered after the commit, and an older server omits the field). Every one of these is the backend's field:
+// a missing one says "not recorded", never a guess.
 //
 // A refusal the server gives (a 403, a 400) is shown in words under the row, never swallowed.
 
@@ -51,8 +60,11 @@ export function ContractRow({
   const [sendState, sendAction, sending] = useActionState<BillingActionState | null, FormData>(sendContractAction, null);
   const [voidState, voidAction, voiding] = useActionState<BillingActionState | null, FormData>(voidContractAction, null);
   const [signState, signAction, signing] = useActionState<BillingActionState | null, FormData>(countersignContractAction, null);
+  const [certState, certAction, certifying] = useActionState<BillingActionState | null, FormData>(markCertifiedAction, null);
   const waiting = awaitingText(contract);
   const sendReasonId = `send-reason-${contract.id}`;
+  const certReasonId = `cert-reason-${contract.id}`;
+  const signedCopy = contractDocumentState(contract);
   const dates = [contract.startsOn, contract.endsOn].filter(Boolean).map((d) => formatDate(d)).join(" to ");
 
   return (
@@ -80,6 +92,32 @@ export function ContractRow({
       </p>
 
       {contract.declineReason && <p className="bl-contract__meta">Declined: {contract.declineReason}</p>}
+
+      <div className="bl-contract__facts">
+        <p className="bl-contract__meta">
+          <span className="bl-contract__k">Signing</span>{" "}
+          {contract.certifiedRequested === true && contract.status === "draft"
+            ? "Marked certified. It will be signed through a certified provider once it is sent."
+            : contract.signatureTier || contract.status === "draft"
+              ? tierLabel(contract.signatureTier)
+              : "The tier was not recorded for this contract."}
+        </p>
+        {contract.contentSha256 ? (
+          <p className="bl-contract__meta"><CopyHash hash={contract.contentSha256} /></p>
+        ) : contract.sentAt ? (
+          <p className="bl-contract__meta">
+            <span className="bl-contract__k">Content fingerprint</span> Not recorded. This contract was sent before the content was fixed at send.
+          </p>
+        ) : null}
+        {contract.status === "signed" && (
+          <p className="bl-contract__meta">
+            <span className="bl-contract__k">Signed copy</span>{" "}
+            {signedCopy.kind === "link"
+              ? <FileLink fileId={signedCopy.fileId} label="Sealed signed copy" />
+              : DOCUMENT_PREPARING_TEXT}
+          </p>
+        )}
+      </div>
 
       {contract.status === "sent" && (
         <>
@@ -117,6 +155,20 @@ export function ContractRow({
           </form>
         )}
         {a.send.reason && <span className="bl-reason" id={sendReasonId}>{a.send.reason}</span>}
+        {a.markCertified.shown && (
+          <form action={certAction}>
+            <input type="hidden" name="clientId" value={clientId} />
+            <input type="hidden" name="contractId" value={contract.id} />
+            <button
+              type="submit" className="lux-btn lux-btn--ghost lux-btn--sm"
+              disabled={!a.markCertified.enabled || certifying}
+              aria-describedby={a.markCertified.reason ? certReasonId : undefined}
+            >
+              {certifying ? "Marking…" : "Mark certified"}
+            </button>
+          </form>
+        )}
+        {a.markCertified.shown && a.markCertified.reason && <span className="bl-reason" id={certReasonId}>{a.markCertified.reason}</span>}
         {a.countersign && (
           <button type="button" className="lux-btn lux-btn--solid lux-btn--sm" onClick={() => setPanel(panel === "sign" ? null : "sign")} aria-expanded={panel === "sign"}>
             Countersign
@@ -140,6 +192,7 @@ export function ContractRow({
 
       <Msg state={sendState} />
       <Msg state={voidState} />
+      <Msg state={certState} />
 
       {panel === "edit" && a.edit && (
         <ContractForm clientId={clientId} projects={projects} contract={contract} onDone={() => setPanel(null)} />

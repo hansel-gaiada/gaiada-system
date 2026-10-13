@@ -29,6 +29,7 @@ import { getMe, platformFetch, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
 import {
   MAX_CONTRACT_FILE_BYTES, countersignErrorText, decideErrorText, validateContractForm, paymentDecisionState,
+  markCertifiedErrorText,
 } from "./contracts";
 
 export interface BillingActionState {
@@ -212,6 +213,29 @@ export async function countersignContractAction(_prev: BillingActionState | null
         : r.complete ? "Countersigned. Both parties have signed, so the contract is now Signed." : "Countersigned. The contract becomes Signed once the client has signed too.",
     };
   } catch (e) { return fail(e, countersignErrorText); }
+}
+
+// PV5-09 (PV-D25): "Mark certified". Certified signing is parked (PV5-11), so the screen offers the button DISABLED with its
+// reason and this action is not reachable from it yet; it exists so the day the provider lands, flipping
+// `CERTIFIED_SIGNING_AVAILABLE` is the whole change. While no provider is set up the API answers 409
+// `no_certified_provider` and writes nothing, and that answer is put in words here rather than shown raw. The
+// authority is the server either way: nothing here decides that a contract IS certified.
+export async function markCertifiedAction(_prev: BillingActionState | null, formData: FormData): Promise<BillingActionState> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  const clientId = str(formData, "clientId");
+  const contractId = str(formData, "contractId");
+  if (!clientId || !contractId) return { ok: false, error: "Missing contract." };
+  try {
+    await platformFetch(`/api/${c.tenant}/contracts/${encodeURIComponent(contractId)}/mark-certified`, c.userId, {
+      method: "POST", body: JSON.stringify({ certified: true }),
+    });
+    refresh(clientId);
+    return { ok: true, id: contractId, notice: "Marked certified. It will be signed through a certified provider once it is sent." };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: markCertifiedErrorText(e.status, e.reason, e.message) };
+    throw e;
+  }
 }
 
 export async function decidePaymentAction(_prev: BillingActionState | null, formData: FormData): Promise<BillingActionState> {

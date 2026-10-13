@@ -1,0 +1,88 @@
+/* PV5-09 — the contracts-and-billing screens that are not the client portal's: the issue blocker list, the void
+   confirm, the masked account number, the content fingerprint and the billing profile. Tokens only (styles/tokens.test.ts
+   fails the build on a colour, radius or shadow literal in components/**.css), and the ink tokens for every label: no
+   `opacity` on text (the go-live contrast item), because a faded label fails AA in one theme or the other. The
+   portal's own pages take their classes from portal.css (`cp-`); this file is the staff side (`bs-`). */
+
+/* ── lists of things that are missing ─────────────────────────────────────────────────────────────── */
+.bs-blockers {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--status-warning);
+  border-radius: var(--radius-md);
+  background: var(--surface-page);
+}
+.bs-blockers__lead { margin: 0; font: 600 13px/1.45 var(--font-body); color: var(--ink-strong); }
+.bs-blockers ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.bs-blockers li { font: 400 13px/1.5 var(--font-body); color: var(--ink-body); }
+.bs-blockers a { margin-left: 6px; color: var(--accent-fg); text-decoration: underline; text-underline-offset: 2px; }
+
+/* ── a quiet sentence under a control ─────────────────────────────────────────────────────────────── */
+.bs-note { margin: 0; font: 400 12px/1.5 var(--font-body); color: var(--ink-muted); max-width: 52ch; }
+.bs-note--right { text-align: right; margin-left: auto; }
+.bs-error { margin: 0; font: 500 13px/1.5 var(--font-body); color: var(--status-danger-fg); }
+.bs-ok { margin: 0; font: 500 13px/1.5 var(--font-body); color: var(--status-ok-fg); }
+.bs-link { color: var(--accent-fg); text-decoration: underline; text-underline-offset: 2px; }
+.bs-pending { font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); }
+
+/* ── the void confirm ─────────────────────────────────────────────────────────────────────────────── */
+.bs-void { display: grid; gap: 10px; }
+.bs-void__panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--status-danger);
+  border-radius: var(--radius-md);
+  background: var(--surface-page);
+}
+.bs-void__panel p { margin: 0; font: 400 13px/1.55 var(--font-body); color: var(--ink-body); }
+.bs-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+/* ── fields (the billing profile, the void reason) ────────────────────────────────────────────────── */
+.bs-form { display: grid; gap: 14px; }
+.bs-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.bs-field { display: grid; gap: 4px; min-width: 0; }
+.bs-field--wide { grid-column: 1 / -1; }
+.bs-field__label { font: 600 12px/1.4 var(--font-body); color: var(--ink-strong); }
+.bs-field__hint { font: 400 12px/1.5 var(--font-body); color: var(--ink-muted); }
+.bs-field input,
+.bs-field select,
+.bs-field textarea {
+  font: 400 14px/1.4 var(--font-body);
+  color: var(--ink-strong);
+  background: var(--surface-page);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  min-width: 0;
+}
+.bs-field textarea { min-height: 72px; resize: vertical; }
+.bs-field input:focus-visible,
+.bs-field select:focus-visible,
+.bs-field textarea:focus-visible { outline: 2px solid var(--accent-fg); outline-offset: 2px; }
+
+/* ── the bank block: a section of its own ─────────────────────────────────────────────────────────── */
+.bs-bank { display: grid; gap: 14px; }
+.bs-bank__title { margin: 0; font: 600 16px/1.3 var(--font-body); color: var(--ink-strong); }
+.bs-bank__current { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; align-items: baseline; }
+.bs-bank__current dt { font: 600 12px/1.5 var(--font-body); color: var(--ink-subtle); }
+.bs-bank__current dd { margin: 0; font: 400 14px/1.5 var(--font-body); color: var(--ink-body); }
+
+/* ── a masked value and its Show button; a fingerprint and its Copy button ────────────────────────── */
+.bs-masked { display: inline-flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.bs-masked__value { font: 500 14px/1.5 var(--font-mono, monospace); color: var(--ink-strong); letter-spacing: 0.02em; }
+.bs-chipbtn {
+  font: 600 12px/1.4 var(--font-body);
+  color: var(--accent-fg);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.bs-chipbtn:focus-visible { outline: 2px solid var(--accent-fg); outline-offset: 2px; }
+.bs-fingerprint { display: inline-flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.bs-fingerprint__label { font: 600 12px/1.4 var(--font-body); color: var(--ink-subtle); }
+.bs-fingerprint code { font: 500 12px/1.4 var(--font-mono, monospace); color: var(--ink-strong); }
+.bs-fingerprint__status { font: 500 12px/1.4 var(--font-body); color: var(--ink-muted); min-width: 4ch; }

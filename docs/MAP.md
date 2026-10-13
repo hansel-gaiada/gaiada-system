@@ -447,6 +447,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/finance/receivables`
 - `/finance/reports`
 - `/finance/settings`
+- `/finance/settings/billing-profile`
 - `/finance/tax`
 - `/finance/treasury`
 - `/group`

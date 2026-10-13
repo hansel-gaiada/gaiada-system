@@ -40,6 +40,10 @@ const PAGES = [
   "/portal/contracts",
   "/portal/invoices",
   "/portal/invoices/inv-2026-014",
+  // PV5-09: the taxed invoice whose PDF is still being prepared, and a signed contract with its sealed copy.
+  "/portal/invoices/inv-2026-021",
+  "/portal/contracts/ctr-msa-2026",
+  "/portal/contracts/ctr-sow-brand",
   "/portal/profile",
 ];
 

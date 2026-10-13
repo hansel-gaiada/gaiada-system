@@ -34,6 +34,8 @@
 .bl-contract__meta { margin: 0; font: 400 12px/1.5 var(--font-body); color: var(--ink-muted); }
 .bl-contract__sigs { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; font: 400 12px/1.5 var(--font-body); color: var(--ink-body); }
 .bl-contract__waiting { margin: 0; font: 500 12px/1.5 var(--font-body); color: var(--status-warning-fg); }
+.bl-contract__facts { display: grid; gap: 4px; }
+.bl-contract__k { font: 600 12px/1.5 var(--font-body); color: var(--ink-subtle); margin-right: 4px; }
 .bl-contract__actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .bl-filelink { color: var(--erp-accent); text-decoration: underline; text-underline-offset: 2px; }
 .bl-reason { font: 400 12px/1.4 var(--font-body); color: var(--ink-muted); max-width: 46ch; }
