@@ -11,7 +11,7 @@ import { platformFetch } from "./platform";
 import { readResult, type ReadResult } from "./readResult";
 import {
   normalizeRequestDetail, normalizeRequestRow, normalizeSummary, assigneeIdsOf,
-  type RequestDetail, type RequestRow, type RequestSummary, type StatusFilter,
+  type RequestDetail, type RequestKind, type RequestRow, type RequestSummary, type StatusFilter,
 } from "./requests";
 import type { CreativeAsset } from "./creative";
 
@@ -20,9 +20,12 @@ const base = (t: string) => `/api/${t}/requests`;
 export type RequestBox = { box: "mine" } | { box: "sent" | "incoming"; unitId: string };
 
 /** `GET requests?box=&unitId=&status=` (at most 200 rows; `mine` and `sent` newest first, `incoming` oldest first). */
-export const readRequests = (u: string, t: string, which: RequestBox, status: StatusFilter): Promise<ReadResult<RequestRow[]>> => {
+export const readRequests = (
+  u: string, t: string, which: RequestBox, status: StatusFilter, opts: { kind?: RequestKind } = {},
+): Promise<ReadResult<RequestRow[]>> => {
   const q = new URLSearchParams({ box: which.box, status });
   if (which.box !== "mine") q.set("unitId", which.unitId);
+  if (opts.kind) q.set("kind", opts.kind);
   return readResult(
     platformFetch<unknown>(`${base(t)}?${q.toString()}`, u).then((raw) => {
       // A 200 that is not a list is a broken read, not "no requests".

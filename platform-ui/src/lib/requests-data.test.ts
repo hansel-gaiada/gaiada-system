@@ -61,6 +61,18 @@ describe("readRequests", () => {
     expect(String(f.mock.calls[1][0])).toBe("http://p.test/api/t1/requests?box=sent&status=all&unitId=d+1");
   });
 
+  it("passes the kind filter for an incoming box (DW-5d / DW-5e)", async () => {
+    const f = reply(200, []);
+    vi.stubGlobal("fetch", f);
+    await readRequests("u", "t1", { box: "incoming", unitId: "d1" }, "open", { kind: "assets" });
+    expect(String(f.mock.calls[0][0])).toBe("http://p.test/api/t1/requests?box=incoming&status=open&unitId=d1&kind=assets");
+  });
+
+  it("an incoming read that fails is unavailable, never an empty list (Web Dev's origin column)", async () => {
+    vi.stubGlobal("fetch", reply(500, { error: "down" }));
+    expect(await readRequests("u", "t1", { box: "incoming", unitId: "d1" }, "all", { kind: "engineering" })).toEqual({ kind: "unavailable", reason: "down" });
+  });
+
   it("drops a row it cannot read rather than showing a blank", async () => {
     vi.stubGlobal("fetch", reply(200, [row(), { nonsense: true }]));
     const r = await readRequests("u", "t1", { box: "mine" }, "open");

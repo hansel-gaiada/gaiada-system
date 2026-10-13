@@ -153,12 +153,16 @@ describe("Requests › Sent in the shell (DW-5h)", () => {
     ]);
   });
 
-  it("gives Creatives a Requests row with Sent only: Incoming and Delivered are DW-5d's", () => {
-    expect(requests("d-cre")?.tabs.map((t) => t.key)).toEqual(["sent"]);
+  it("gives Creatives a Requests row of Incoming, Delivered and Sent (DW-5d built)", () => {
+    expect(requests("d-cre")?.tabs.map((t) => [t.key, t.href])).toEqual([
+      ["incoming", "/departments/d-cre/requests"],
+      ["delivered", "/departments/d-cre/requests/delivered"],
+      ["sent", "/departments/d-cre/requests/sent"],
+    ]);
     const reg = workspaceBySlug("creatives")!;
     const row = reg.work.find((r) => r.key === "requests")!;
     expect(isPlanned(row)).toBe(false);
-    expect(row.tabs.filter(isPlanned).map((t) => [t.key, t.ticket])).toEqual([["incoming", "DW-5d"], ["delivered", "DW-5d"]]);
+    expect(row.tabs.filter(isPlanned)).toEqual([]);
   });
 
   it("gives HR, Finance and IT no Requests row: they are not agency craft departments", () => {

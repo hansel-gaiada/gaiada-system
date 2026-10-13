@@ -259,7 +259,25 @@ function TriageDrawer({
   );
 }
 
-export function ChangeRequestsPanel({ rows, canTriage, actions }: { rows: ChangeRequestRow[]; canTriage: boolean; actions: ChangeRequestsPanelActions }) {
+/** DW-5e: where each change request came from, when it came from a request between departments. `unavailable` means the
+ *  read of those requests failed, which the column says out loud (never a blank). Omit it and there is no Origin column. */
+export type ChangeRequestOrigins =
+  | { state: "ok"; byChangeRequest: Record<string, { requestId: string; from: string; person: string }> }
+  | { state: "unavailable" };
+
+function OriginCell({ origins, id }: { origins: ChangeRequestOrigins; id: string }) {
+  if (origins.state === "unavailable") return <span>Unavailable</span>;
+  const o = origins.byChangeRequest[id];
+  if (!o) return <span>{"\u2014"}</span>;
+  return (
+    <span>
+      From {o.from} · {o.person}{" "}
+      <Link href={`/requests/${encodeURIComponent(o.requestId)}`}>Open request</Link>
+    </span>
+  );
+}
+
+export function ChangeRequestsPanel({ rows, canTriage, actions, origins }: { rows: ChangeRequestRow[]; canTriage: boolean; actions: ChangeRequestsPanelActions; origins?: ChangeRequestOrigins }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ChangeRequestDetail | null>(null);
   const [, startTransition] = useTransition();
@@ -292,8 +310,8 @@ export function ChangeRequestsPanel({ rows, canTriage, actions }: { rows: Change
       <Card title="Triage queue">
         <HairlineTable
           key={refreshKey}
-          columns={[{ label: "Request" }, { label: "Kind" }, { label: "Client" }, { label: "Status" }, { label: "Price" }, { label: "Amendment" }, { label: "Submitted", align: "right" }]}
-          tcols="2fr 0.8fr 1.2fr 1fr 1.1fr 1.2fr 1fr"
+          columns={[{ label: "Request" }, { label: "Kind" }, { label: "Client" }, { label: "Status" }, { label: "Price" }, { label: "Amendment" }, ...(origins ? [{ label: "Origin" }] : []), { label: "Submitted", align: "right" }]}
+          tcols={origins ? "2fr 0.8fr 1.2fr 1fr 1.1fr 1.2fr 1.6fr 1fr" : "2fr 0.8fr 1.2fr 1fr 1.1fr 1.2fr 1fr"}
           rows={queue.map((r) => [
             <button key="t" type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={() => select(r.id)} style={{ padding: 0, font: "inherit", textAlign: "left" }}>
               {r.title}
@@ -308,6 +326,7 @@ export function ChangeRequestsPanel({ rows, canTriage, actions }: { rows: Change
                   ? <Link key="a" href={`/clients/${r.clientId}/billing`}>{amendmentText(r)}</Link>
                   : <span key="a">{amendmentText(r)}</span>)
               : "\u2014",
+            ...(origins ? [<OriginCell key="o" origins={origins} id={r.id} />] : []),
             formatDateTime(r.createdAt),
           ])}
         />
