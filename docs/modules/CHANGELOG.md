@@ -11,6 +11,16 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.115.0` - DW-2g: the workspace shell's e2e per persona (2026-10-13) - PROTOTYPED
+
+- **`e2e/workspace-shell.spec.ts` + a `workspace-shell` Playwright project** (also ignored by the `chromium` project): 16 tests that sign in per demo persona with `loginAsPersona`, plant the `gaiada_prefs` pilot cookie (`shell: "workspaces"`) and drive the shell from roles and accessible names. No app code and no existing spec changed (`nav.ts`, `nav.test.ts` and the classic specs stay as they are until DW-9d).
+- **Personas, derived from the demo fixtures** (nobody in the demo is placed in the org tree, so home comes from GM access): superadmin (Office of the GM, own, Admin shown), manager (Office of the GM through narrowed GM access, no Admin), member and search_staff (no workspace of their own, home is Company, no Admin), client_contact (never in the staff shell, even with the cookie). Covers the switcher order (own, then departments, GM not twice), the Work / Performance / You groups and the one current row, the tab strip and no doubled console strips, "Visiting ..." and Back, the footer Company and Admin links, the top bar (search opens the palette and finds a page, bell pop-over, avatar menu with Theme and the way back to classic), the AI Assistant row opening the drawer with the page's context and Escape returning focus to the row, "+ New" leading with the workspace's own create action, the phone drawer, and classic untouched without the cookie.
+- **`qa/e2e-gate.sh`**: the sumopod runner (fresh clone of a pushed branch, DEMO_MODE production build, N runs of one spec, optional smoke, container and run dir removed on exit, refuses to start above load 4).
+- **Not tagged `@smoke`**: the smoke project selects by file (`testMatch: smoke.spec.ts`) as well as by tag, so a tag in this spec would not be picked up.
+- **sumopod (Linux, Playwright 1.62.1 image, `next start` production build, DEMO_MODE)**: sha `54678e77`, `workspace-shell` 16/16 passed on both runs (21.5 s, 22.1 s), smoke project 1/1. Earlier shas of the same branch failed on test-side expectations only (fixed): `dcc6a6cb` 11/16, `a21a27c8` 15/16.
+- **Observation, not changed**: a member who types `/admin` is redirected (DEMO_MODE) to `/admin/users` and the shell draws an "Admin menu" with no rows and only "Back to Company"; the test pins that no Admin row is offered.
+- **CI**: see the run id in the DW-2g report (GitHub Actions on `dw/2g`).
+
 ### ai-agents `0.16.0` - M6-P6m: the scaffolded fullstack pages are statically exportable (2026-10-13) - DEV-VERIFIED
 
 - **M6-P6m (WSK-D83, O-6 option A).** `next-page-composer.ts` no longer emits `force-dynamic`, which `output: "export"` refuses (the template's build job failed on every scaffolded fullstack site).
