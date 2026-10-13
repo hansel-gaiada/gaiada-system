@@ -1,6 +1,6 @@
 # PV-6: the client's Business area re-cut (tickets)
 
-**Status: PLANNED.** Nothing here is built.
+**Status: PROTOTYPED (2026-10-13).** PV6-01 to PV6-05 are built, reviewed and gated on sumopod with every tooth seen red, and CI is green on the merged tree (platform-nest and platform-ui `0.116.0`). PV6-06 (release and the live drive) is open.
 
 - **Parent plan:** `docs/plans/2026-10-10-three-perspectives.md` §2.3 (the division test), §3.4, §8
   (PV-6 row), §9 (traps 1, 8, 9). The Client Centre itself: `docs/plans/2026-09-29-client-centre.md`.
