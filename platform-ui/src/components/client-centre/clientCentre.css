@@ -280,7 +280,7 @@
   background: var(--surface-sunken);
 }
 
-/* ── Department toggles (Company settings) ───────────────────────────────────────────────────────── */
+/* ── Business area toggles (Business details) ───────────────────────────────────────────────────────── */
 .cc-toggles {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
