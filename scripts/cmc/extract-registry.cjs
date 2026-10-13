@@ -1,3 +1,4 @@
+// SUPERSEDED (PV6-01): this produced registry v1 from the CMC snapshot. v2 (Business areas, no leaf pages) is made by scripts/cmc/registry-v2.mjs and maintained by hand; do not re-run this over the registry.
 // Extracts the Client Centre registry from the CMC snapshot (docs/plans/2026-09-29-client-centre.md).
 // Usage: node scripts/cmc/extract-registry.cjs cmc/origin/index.html <out.json>
 // The input is GITIGNORED (it embeds real client profiles); the output is data-only.

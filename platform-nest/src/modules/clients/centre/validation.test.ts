@@ -7,7 +7,7 @@ import { applyCentrePatch, looksLikeCredential, bodyByteLength, MAX_BODY_BYTES, 
 import type { ProfileState } from "./validation";
 
 function emptyState(businessType = "other"): ProfileState {
-  return { businessType, profile: {}, connections: {}, departments: {}, customConnections: {} };
+  return { businessType, profile: {}, connections: {}, areas: {}, customConnections: {} };
 }
 
 describe("Client Centre validation — applyCentrePatch", () => {
@@ -65,26 +65,47 @@ describe("Client Centre validation — applyCentrePatch", () => {
     expect(bad).toMatchObject({ error: expect.stringContaining("businessType") });
   });
 
-  it("departments accepts a registry department id and 'ix', rejects anything else", () => {
-    const ok = applyCentrePatch(emptyState(), { departments: { rs: false, ix: true } });
+  it("areas accepts a registry business-area id and 'ix', rejects anything else naming it", () => {
+    const ok = applyCentrePatch(emptyState(), { areas: { rs: false, ix: true } });
     if ("error" in ok) throw new Error(ok.error);
-    expect(ok.state.departments).toMatchObject({ rs: false, ix: true });
+    expect(ok.state.areas).toMatchObject({ rs: false, ix: true });
+    expect(ok.changes.map((c) => c.path)).toEqual(["areas.rs", "areas.ix"]);
 
-    const bad = applyCentrePatch(emptyState(), { departments: { nope: true } });
-    expect(bad).toMatchObject({ error: expect.stringContaining("nope") });
+    const bad = applyCentrePatch(emptyState(), { areas: { nope: true } });
+    expect(bad).toEqual({ error: "unknown business area: nope" });
   });
 
-  it("departments: null reverts to default (deletes the override key)", () => {
+  it("areas: only a top-level area is toggled, a sub-area id is refused (it follows its parent)", () => {
+    expect(applyCentrePatch(emptyState(), { areas: { mk_web: false } })).toEqual({ error: "unknown business area: mk_web" });
+  });
+
+  it("areas: null reverts to default (deletes the override key)", () => {
     const current = emptyState();
-    current.departments.rs = false;
-    const r = applyCentrePatch(current, { departments: { rs: null } });
+    current.areas.rs = false;
+    const r = applyCentrePatch(current, { areas: { rs: null } });
     if ("error" in r) throw new Error(r.error);
-    expect(r.state.departments.rs).toBeUndefined();
+    expect(r.state.areas.rs).toBeUndefined();
+    expect(r.changes).toEqual([{ path: "areas.rs", before: false, after: null }]);
   });
 
-  it("departments rejects a non-boolean, non-null value", () => {
-    const r = applyCentrePatch(emptyState(), { departments: { rs: "yes" as unknown as boolean } });
+  it("areas rejects a non-boolean, non-null value", () => {
+    const r = applyCentrePatch(emptyState(), { areas: { rs: "yes" as unknown as boolean } });
     expect(r).toMatchObject({ error: expect.stringContaining("rs") });
+  });
+
+  it("the old wire key `departments` is a 400 naming the key (PV6-01: the field was renamed, not aliased)", () => {
+    const r = applyCentrePatch(emptyState(), { departments: { rs: false } } as never);
+    expect(r).toEqual({ error: "unknown field: departments" });
+  });
+
+  it("the industry area `ix` takes a custom connection (before PV6-01 this was 400 `unknown section: ix`)", () => {
+    const r = applyCentrePatch(emptyState("hotel"), { customConnections: { ix: [{ id: "xixtool1", name: "Night audit export" }] } });
+    if ("error" in r) throw new Error(r.error);
+    expect(r.state.customConnections.ix).toEqual([{ id: "xixtool1", name: "Night audit export" }]);
+    // and that custom id is then editable through `connections`, like any other
+    const r2 = applyCentrePatch(r.state, { connections: { xixtool1: { tool: "CSV" } } });
+    if ("error" in r2) throw new Error(r2.error);
+    expect(r2.state.connections.xixtool1).toEqual({ tool: "CSV" });
   });
 
   it("connections: a registry key may be created and edited; null deletes the whole entry", () => {

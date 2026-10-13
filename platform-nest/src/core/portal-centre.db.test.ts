@@ -177,12 +177,16 @@ describe.skipIf(!TEST_URL)("Client Centre · portal routes (portal-centre.contro
     expect(b.revision).toBe(1);
 
     const notif = await withTenants([co], (c) =>
-      c.query<{ n: string }>(
-        `SELECT count(*) AS n FROM notifications WHERE user_id = $1 AND type = 'client.centre_updated'`,
+      c.query<{ payload: { title: string; href: string } }>(
+        `SELECT payload FROM notifications WHERE user_id = $1 AND type = 'client.centre_updated' ORDER BY created_at DESC LIMIT 1`,
         [ownerUser],
       ),
     );
-    expect(Number(notif.rows[0].n)).toBeGreaterThan(0);
+    expect(notif.rows.length).toBeGreaterThan(0);
+    // PV6-01 (finding 5): the link lands on the hub's Business tab (it used to land on the Overview), and
+    // the wording is the glossary's "business profile".
+    expect(notif.rows[0].payload.href).toBe(`/clients/${clientA}/profile`);
+    expect(notif.rows[0].payload.title).toMatch(/updated their business profile$/);
   });
 
   it("writes exactly one activity row with via:'portal'", async () => {

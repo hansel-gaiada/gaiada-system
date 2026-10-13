@@ -38,7 +38,7 @@ interface StoredCentre {
   businessType: string;
   profile: Record<string, string>;
   connections: Record<string, ConnectionEntry>;
-  departments: Record<string, boolean>;
+  areas: Record<string, boolean>;
   customConnections: Record<string, CustomConnection[]>;
   revision: number;
   updatedAt: string | null;
@@ -61,7 +61,7 @@ const CALLER_NAME: Record<string, string> = {
 };
 
 function emptyCentre(): StoredCentre {
-  return { businessType: "other", profile: {}, connections: {}, departments: {}, customConnections: {}, revision: 0, updatedAt: null, updatedBy: null };
+  return { businessType: "other", profile: {}, connections: {}, areas: {}, customConnections: {}, revision: 0, updatedAt: null, updatedBy: null };
 }
 
 const STORE: Record<string, StoredCentre> = {
@@ -79,7 +79,7 @@ const STORE: Record<string, StoredCentre> = {
       ga4: { tool: "Google Analytics (GA4)", account: "GA4-NW-001", status: "Connected", method: "API", owner: "Dana Whitfield", creds: "1Password → Marketing vault" },
       xero: { tool: "Xero", account: "", status: "Not connected", method: "Manual" },
     },
-    departments: {},
+    areas: {},
     customConnections: {},
     revision: 3,
     updatedAt: "2026-09-20T14:05:00Z",
@@ -102,7 +102,7 @@ const STORE: Record<string, StoredCentre> = {
       ga4: { status: "Not connected" },
       x1custom1: { tool: "Looker Studio dashboard", account: "cedar-reporting", status: "Connected", method: "Manual" },
     },
-    departments: { hr: false },
+    areas: { hr: false },
     customConnections: { mk_analytics: [{ id: "x1custom1", name: "Looker Studio dashboard" }] },
     revision: 7,
     updatedAt: "2026-09-24T09:30:00Z",
@@ -124,7 +124,7 @@ const STORE: Record<string, StoredCentre> = {
       channel_mgr: { tool: "SiteMinder", account: "harbour-sm", status: "Needs attention", method: "Zapier / n8n", notes: "Airbnb feed dropped rates twice this month." },
       ota: { status: "Not connected" },
     },
-    departments: {},
+    areas: {},
     customConnections: {},
     revision: 2,
     updatedAt: "2026-09-22T11:15:00Z",
@@ -140,7 +140,7 @@ const STORE: Record<string, StoredCentre> = {
 STORE["cl-4"] = {
   businessType: "hotel",
   profile: { legal: "Viceroy", trading: "Viceroy", industry: "Hospitality", city: "Ubud", country: "Indonesia", currency: "IDR", languages: "Indonesian, English" },
-  connections: {}, departments: {}, customConnections: {},
+  connections: {}, areas: {}, customConnections: {},
   revision: 1, updatedAt: "2026-10-11T08:00:00Z", updatedBy: { id: "demo-hansel", name: "Clement Hansel" },
 };
 
@@ -173,7 +173,7 @@ function toListItem(clientId: string, s: StoredCentre) {
   let connIds = new Set<string>();
   let connTotal = 0;
   for (const sec of sections) {
-    const def = settingsDef(registry, sec);
+    const def = settingsDef(registry, s.businessType, sec);
     for (const id of connectionIdsFor(sec.id, def, s.customConnections)) connIds.add(id);
   }
   connTotal = connIds.size;
@@ -198,7 +198,7 @@ function toProfile(clientId: string, s: StoredCentre, canEdit: boolean): CentreP
     businessType: s.businessType,
     profile: { ...s.profile },
     connections: s.connections,
-    departments: s.departments,
+    areas: s.areas,
     customConnections: s.customConnections,
     revision: s.revision,
     updatedAt: s.updatedAt,
@@ -224,14 +224,15 @@ function looksLikeSecret(v: string): boolean {
 
 const KNOWN_FIELD_KEYS = new Set(Object.keys(registry.fields));
 const KNOWN_CONNECTION_KEYS = new Set(Object.keys(registry.connections));
-const KNOWN_DEPARTMENT_IDS = new Set([
-  ...registry.departments.map((d) => d.id),
+const KNOWN_AREA_IDS = new Set([
+  ...registry.areas.map((d) => d.id),
   "ix",
 ]);
+const KNOWN_TOP_KEYS = new Set(["businessType", "profile", "connections", "areas", "customConnections"]);
 const CONNECTION_SUBKEYS = new Set(["tool", "account", "url", "owner", "creds", "method", "status", "notes"]);
 const VALID_CONNECTION_METHODS = new Set(registry.connectionMethods);
 const VALID_CONNECTION_STATUSES = new Set(registry.connectionStatuses);
-const VALID_SECTION_IDS = new Set(Object.keys(registry.sectionSettings));
+const VALID_SECTION_IDS = new Set([...Object.keys(registry.sectionSettings), "ix"]);
 
 /** Every custom id ALREADY in `customConnections` before this patch applies — mirrors the real
  *  `validation.ts::existingCustomIds`. A `connections.<id>` edit is only valid for an id that is
@@ -252,6 +253,11 @@ function existingCustomIds(s: StoredCentre): Set<string> {
  *  against `current`, not this same patch's own `customConnections`). Returns the first violation,
  *  or null if the patch is clean. */
 function validatePatch(patch: CentrePatch, current: StoredCentre): { error: string; field: string } | null {
+  // The real validator refuses any top-level key it does not know, naming it (so the retired `departments`
+  // key is a 400 here too).
+  for (const key of Object.keys(patch)) {
+    if (!KNOWN_TOP_KEYS.has(key)) return { error: `unknown field: ${key}`, field: key };
+  }
   if (patch.businessType && !registry.businessTypes.some((t) => t.id === patch.businessType)) {
     return { error: `unknown business type: ${patch.businessType}`, field: "businessType" };
   }
@@ -282,9 +288,9 @@ function validatePatch(patch: CentrePatch, current: StoredCentre): { error: stri
       }
     }
   }
-  if (patch.departments) {
-    for (const k of Object.keys(patch.departments)) {
-      if (!KNOWN_DEPARTMENT_IDS.has(k)) return { error: `unknown department: ${k}`, field: `departments.${k}` };
+  if (patch.areas) {
+    for (const k of Object.keys(patch.areas)) {
+      if (!KNOWN_AREA_IDS.has(k)) return { error: `unknown business area: ${k}`, field: `areas.${k}` };
     }
   }
   if (patch.customConnections) {
@@ -304,7 +310,7 @@ function applyPatch(s: StoredCentre, patch: CentrePatch, byUserId: string): Stor
     businessType: patch.businessType ?? s.businessType,
     profile: { ...s.profile },
     connections: Object.fromEntries(Object.entries(s.connections).map(([k, v]) => [k, { ...v }])),
-    departments: { ...s.departments },
+    areas: { ...s.areas },
     customConnections: Object.fromEntries(Object.entries(s.customConnections).map(([k, v]) => [k, [...v]])),
     revision: s.revision + 1,
     updatedAt: new Date().toISOString(),
@@ -331,10 +337,10 @@ function applyPatch(s: StoredCentre, patch: CentrePatch, byUserId: string): Stor
       else next.connections[k] = merged;
     }
   }
-  if (patch.departments) {
-    for (const [k, v] of Object.entries(patch.departments)) {
-      if (v === null) delete next.departments[k];
-      else next.departments[k] = v;
+  if (patch.areas) {
+    for (const [k, v] of Object.entries(patch.areas)) {
+      if (v === null) delete next.areas[k];
+      else next.areas[k] = v;
     }
   }
   if (patch.customConnections) {

@@ -27,7 +27,9 @@ export interface ProfileState {
   businessType: string;
   profile: Record<string, string>;
   connections: Record<string, ConnectionEntry>;
-  departments: Record<string, boolean>;
+  /** Business area toggles (an explicit on/off per area; absent = the business type's default). The
+   *  database column behind it is still named `departments` (store.ts maps it). */
+  areas: Record<string, boolean>;
   customConnections: Record<string, CustomConnectionRef[]>;
 }
 
@@ -36,7 +38,7 @@ export interface CentrePatch {
   businessType?: string;
   profile?: Record<string, string | null>;
   connections?: Record<string, Partial<ConnectionEntry> | null>;
-  departments?: Record<string, boolean | null>;
+  areas?: Record<string, boolean | null>;
   customConnections?: Record<string, CustomConnectionRef[]>;
 }
 
@@ -57,14 +59,18 @@ export const MAX_BODY_BYTES = 256 * 1024;
 const CONNECTION_ENTRY_KEYS = ["tool", "account", "url", "owner", "creds", "method", "status", "notes"] as const;
 const CUSTOM_CONNECTION_ID_RE = /^x[a-z0-9]{4,40}$/;
 
-const TOP_LEVEL_DEPARTMENT_IDS = new Set<string>((registry.departments as Array<{ id: string }>).map((d) => d.id));
-const VALID_DEPARTMENT_IDS = new Set<string>([...TOP_LEVEL_DEPARTMENT_IDS, "ix"]);
+// Only a TOP-LEVEL area is ever toggled (a sub-area follows its parent); `ix` is the industry area.
+const TOP_LEVEL_AREA_IDS = new Set<string>((registry.areas as Array<{ id: string }>).map((d) => d.id));
+const VALID_AREA_IDS = new Set<string>([...TOP_LEVEL_AREA_IDS, "ix"]);
 export const VALID_BUSINESS_TYPES = new Set<string>((registry.businessTypes as Array<{ id: string }>).map((b) => b.id));
 const VALID_FIELD_KEYS = new Set<string>(Object.keys(registry.fields as Record<string, unknown>));
 const VALID_REGISTRY_CONNECTION_KEYS = new Set<string>(Object.keys(registry.connections as Record<string, unknown>));
 const VALID_CONNECTION_METHODS = new Set<string>(registry.connectionMethods as string[]);
 const VALID_CONNECTION_STATUSES = new Set<string>(registry.connectionStatuses as string[]);
-const VALID_SECTION_IDS = new Set<string>(Object.keys(registry.sectionSettings as Record<string, unknown>));
+// A custom connection hangs off an area or sub-area. `ix` has no `sectionSettings` entry (its settings live
+// under `industryModules[bt]`), so it is listed here explicitly: before PV6-01 a custom connection on the
+// industry area was refused with 400 `unknown section: ix`.
+const VALID_SECTION_IDS = new Set<string>([...Object.keys(registry.sectionSettings as Record<string, unknown>), "ix"]);
 
 // ── Credential-value scanner (CMC-SEC-1 follow-up 3) ────────────────────────────────────────────
 // Applied to EVERY string value the patch carries, including inside `creds`/`notes` — `creds` is
@@ -133,7 +139,7 @@ export function applyCentrePatch(current: ProfileState, patch: unknown): { error
     return { error: "body must be an object" };
   }
   const p = patch as CentrePatch;
-  const KNOWN_TOP_KEYS = new Set(["businessType", "profile", "connections", "departments", "customConnections"]);
+  const KNOWN_TOP_KEYS = new Set(["businessType", "profile", "connections", "areas", "customConnections"]);
   for (const key of Object.keys(p)) {
     if (!KNOWN_TOP_KEYS.has(key)) return { error: `unknown field: ${key}` };
   }
@@ -142,7 +148,7 @@ export function applyCentrePatch(current: ProfileState, patch: unknown): { error
     businessType: current.businessType,
     profile: { ...current.profile },
     connections: Object.fromEntries(Object.entries(current.connections).map(([k, v]) => [k, { ...v }])),
-    departments: { ...current.departments },
+    areas: { ...current.areas },
     customConnections: Object.fromEntries(Object.entries(current.customConnections).map(([k, v]) => [k, [...v]])),
   };
   const changes: PatchChange[] = [];
@@ -222,20 +228,20 @@ export function applyCentrePatch(current: ProfileState, patch: unknown): { error
       }
     }
 
-    if (p.departments) {
-      for (const [key, rawValue] of Object.entries(p.departments)) {
-        if (!VALID_DEPARTMENT_IDS.has(key)) throw new PatchError(`unknown department: ${key}`);
-        const before = key in state.departments ? state.departments[key] : null;
+    if (p.areas) {
+      for (const [key, rawValue] of Object.entries(p.areas)) {
+        if (!VALID_AREA_IDS.has(key)) throw new PatchError(`unknown business area: ${key}`);
+        const before = key in state.areas ? state.areas[key] : null;
         if (rawValue === null) {
-          if (key in state.departments) {
-            delete state.departments[key];
-            recordChange(changes, `departments.${key}`, before, null);
+          if (key in state.areas) {
+            delete state.areas[key];
+            recordChange(changes, `areas.${key}`, before, null);
           }
           continue;
         }
-        if (typeof rawValue !== "boolean") throw new PatchError(`departments.${key} must be a boolean or null`);
-        state.departments[key] = rawValue;
-        recordChange(changes, `departments.${key}`, before, rawValue);
+        if (typeof rawValue !== "boolean") throw new PatchError(`areas.${key} must be a boolean or null`);
+        state.areas[key] = rawValue;
+        recordChange(changes, `areas.${key}`, before, rawValue);
       }
     }
 

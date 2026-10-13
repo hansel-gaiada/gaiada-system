@@ -14,6 +14,7 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { ClientNoteForm } from "@/components/forms/ClientWorkForms";
 import { formatDateTime } from "@/lib/format";
+import { registry, centreChangeLabel, isAreaTogglePath } from "@/lib/clientCentre";
 
 // CC-D10 — the client hub's Notes & history tab; PV3-05 — now the hub's INTERNAL area.
 //
@@ -133,9 +134,18 @@ function changesOf(h: ClientHistoryEntry): Change[] {
   const raw = (h.metadata?.changes ?? []) as Array<{ field?: string; path?: string; before: unknown; after: unknown }>;
   return raw.map((c) => ({
     field: c.field ?? c.path ?? "?",
-    before: c.before === null || c.before === undefined ? null : String(c.before),
-    after: c.after === null || c.after === undefined ? null : String(c.after),
+    before: plain(c.before),
+    after: plain(c.after),
   }));
+}
+
+/** A change value as text. A connection entry is an object and a custom-connection list is an array; both
+ *  used to print as "[object Object]". */
+function plain(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (Array.isArray(v)) return v.map((x) => (x && typeof x === "object" ? String((x as { name?: unknown }).name ?? "") : String(x))).join(", ");
+  if (typeof v === "object") return Object.entries(v as Record<string, unknown>).map(([k, x]) => `${k}: ${String(x)}`).join(", ");
+  return String(v);
 }
 
 function describe(h: ClientHistoryEntry): string {
@@ -162,10 +172,13 @@ function fieldLabel(field: string): string {
     const k = field.slice("contact.".length) as ClientContactKey;
     return CLIENT_CONTACT_LABELS[k] ?? k;
   }
-  return field;
+  // Business profile edits record a path (PV6-01): the field's label, the connection's name, "Business area <name>".
+  return centreChangeLabel(registry, field);
 }
 
 function show(field: string, v: string | null, names: Map<string, string> | null): string {
+  // A Business area toggle reads "on" / "off"; a cleared override is back to the business type's default.
+  if (isAreaTogglePath(field)) return v === "true" ? "on" : v === "false" ? "off" : "(default)";
   if (v === null || v === "") return "(empty)";
   // `names === null` means the directory read was refused (shown above the list): the id is the honest
   // value then, NOT "a former staff member", which would be a confident wrong answer.

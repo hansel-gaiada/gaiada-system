@@ -12,7 +12,7 @@ import { allSections, connectionIdsFor, settingsDef, GENERAL_FIELD_KEYS } from "
 export const DEFAULT_BUSINESS_TYPE = "other";
 
 export function emptyProfileState(businessType = DEFAULT_BUSINESS_TYPE): ProfileState {
-  return { businessType, profile: {}, connections: {}, departments: {}, customConnections: {} };
+  return { businessType, profile: {}, connections: {}, areas: {}, customConnections: {} };
 }
 
 export interface ProfileRow {
@@ -41,7 +41,7 @@ export async function loadProfileRow(c: PoolClient, tenantId: string, clientId: 
       businessType: row.business_type,
       profile: row.profile ?? {},
       connections: (row.connections ?? {}) as ProfileState["connections"],
-      departments: row.departments ?? {},
+      areas: row.departments ?? {}, // the column keeps its name `departments`; see saveProfileRow
       customConnections: (row.custom_connections ?? {}) as ProfileState["customConnections"],
     },
     revision: row.revision,
@@ -49,6 +49,12 @@ export async function loadProfileRow(c: PoolClient, tenantId: string, clientId: 
     updatedById: row.updated_by,
   };
 }
+
+// ── Column name vs wire name (PV6-01) ───────────────────────────────────────────────────────────────
+// `ProfileState.areas` / `CentreProfileDTO.areas` are the Business areas toggles. The database column is
+// STILL called `departments` and stays so: renaming a live column buys nothing and turns a deploy rollback
+// into an outage (the old image would read a column that no longer exists). This file is the only place
+// that maps the two names.
 
 /** Upsert the row with `state`, bumping `revision` by 1. Caller has already decided there IS a
  *  change (CC's "a no-op PATCH still returns 200 but writes nothing" rule lives one level up) — this
@@ -77,7 +83,7 @@ export async function saveProfileRow(
      RETURNING revision, updated_at`,
     [
       newId(), tenantId, clientId, state.businessType, JSON.stringify(state.profile),
-      JSON.stringify(state.connections), JSON.stringify(state.departments),
+      JSON.stringify(state.connections), JSON.stringify(state.areas),
       JSON.stringify(state.customConnections), updatedBy, config.originSite,
     ],
   );
@@ -91,7 +97,7 @@ export interface CentreProfileDTO {
   businessType: string;
   profile: Record<string, string>;
   connections: ProfileState["connections"];
-  departments: Record<string, boolean>;
+  areas: Record<string, boolean>;
   customConnections: ProfileState["customConnections"];
   revision: number;
   updatedAt: string | null;
@@ -117,7 +123,7 @@ export function toCentreProfileDTO(
     businessType: s.businessType,
     profile: s.profile,
     connections: s.connections,
-    departments: s.departments,
+    areas: s.areas,
     customConnections: s.customConnections,
     revision: row?.revision ?? 0,
     updatedAt: row?.updatedAt ?? null,
@@ -143,7 +149,7 @@ export function fieldsFilledSummary(state: ProfileState): { filled: number; tota
 export function connectionsConnectedSummary(state: ProfileState): { connected: number; total: number } {
   const ids = new Set<string>();
   for (const section of allSections(state.businessType)) {
-    for (const id of connectionIdsFor(section.id, settingsDef(section), state.customConnections)) ids.add(id);
+    for (const id of connectionIdsFor(section.id, settingsDef(section, state.businessType), state.customConnections)) ids.add(id);
   }
   const connected = [...ids].filter((id) => state.connections[id]?.status === "Connected").length;
   return { connected, total: ids.size };

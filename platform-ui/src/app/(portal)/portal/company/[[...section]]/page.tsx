@@ -4,6 +4,7 @@ import { getMe } from "@/lib/platform";
 import { getActivePortalCompany } from "@/lib/portal-company";
 import { listPortalCentres, getPortalCentre } from "@/lib/clientCentre-data";
 import { patchPortalCentreAction } from "@/lib/clientCentreActions";
+import { legacySectionRedirect } from "@/lib/clientCentre";
 import { getActivePortalClient, switchPortalClient } from "@/lib/portalCentreClient";
 import { ClientCentreShell } from "@/components/client-centre/ClientCentreShell";
 import { PortalPageHead } from "@/components/portal/PortalBits";
@@ -24,6 +25,9 @@ export default async function PortalCompanyPage({
   const me = await getMe(userId);
   const tenant = (await getActivePortalCompany(me))?.id ?? null;
   const { section } = await params;
+  // PV6-01: an old `<area>/settings` or leaf-page link (a bookmark) lands on the area's Setup.
+  const legacy = legacySectionRedirect("/portal/company", section);
+  if (legacy) redirect(legacy);
 
   if (!tenant) {
     return (<><PortalPageHead eyebrow="Your business" title="Business" /><EmptyNote>No client account is linked to your sign-in, so there is nothing to show here. Overview explains why.</EmptyNote></>);

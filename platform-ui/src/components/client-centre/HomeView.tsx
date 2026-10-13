@@ -1,18 +1,19 @@
 import Link from "next/link";
 import {
   registry,
-  activeDepts,
+  activeAreas,
   businessTypeLabel,
   sectionHref,
+  sectionStats,
   type CentreProfile,
 } from "@/lib/clientCentre";
 import { Breadcrumb } from "./Breadcrumb";
 
-// CMC's Home: description lede, 4 overview facts, department cards with "N areas" — read-only (the
-// description itself is edited on Business details, not here).
-export function HomeView({ clientId, basePath, profile }: { clientId: string; basePath: string; profile: CentreProfile }) {
+// Home: description lede, 4 overview facts, and one card per Business area with how much of it is set up —
+// read-only (the description itself is edited on Business details, not here).
+export function HomeView({ basePath, profile }: { basePath: string; profile: CentreProfile }) {
   const p = profile.profile;
-  const depts = activeDepts(registry, profile.businessType, profile.departments);
+  const areas = activeAreas(registry, profile.businessType, profile.areas);
   const website = p.website?.trim();
   const websiteLabel = website?.replace(/^https?:\/\//, "");
   const location = [p.city, p.country].filter(Boolean).join(", ") || "—";
@@ -41,22 +42,25 @@ export function HomeView({ clientId, basePath, profile }: { clientId: string; ba
         <div className="cc-overview__item"><span>Contact</span><b>{contact}</b></div>
       </div>
 
-      <h2 className="cc-sec-h">Departments</h2>
-      <div className="cc-dept-grid">
-        {depts.map((d) => (
-          <Link key={d.id} href={sectionHref(basePath, { kind: "section", sectionId: d.id, sub: "overview" })} className="cc-dept-card">
-            {registry.icons[d.id] && (
-              <span className="cc-dept-card__icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: registry.icons[d.id] }} />
-            )}
-            <span>
-              <b>{d.name}</b>
-              <small>{d.pages.length} areas</small>
-            </span>
-          </Link>
-        ))}
+      <h2 className="cc-sec-h">Business areas</h2>
+      <div className="cc-area-grid">
+        {areas.map((a) => {
+          const st = sectionStats(registry, profile.businessType, a, profile);
+          return (
+            <Link key={a.id} href={sectionHref(basePath, { kind: "section", sectionId: a.id, part: "setup" })} className="cc-area-card">
+              {registry.icons[a.id] && (
+                <span className="cc-area-card__icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: registry.icons[a.id] }} />
+              )}
+              <span>
+                <b>{a.name}</b>
+                <small>{st.fieldsFilled} of {st.fieldsTotal} fields · {st.connectionsConnected} of {st.connectionsTotal} connected</small>
+              </span>
+            </Link>
+          );
+        })}
       </div>
       <p style={{ marginTop: 14, color: "var(--ink-subtle)", fontSize: 13.5 }}>
-        Turn departments on or off for this business in Business details.
+        Turn business areas on or off for this business in Business details.
       </p>
     </div>
   );

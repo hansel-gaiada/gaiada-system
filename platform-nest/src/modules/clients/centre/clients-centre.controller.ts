@@ -43,7 +43,7 @@ export class ClientsCentreController {
       return clients.rows.map((cl) => {
         const p = byClient.get(cl.id);
         const state = p
-          ? { businessType: p.business_type, profile: p.profile ?? {}, connections: p.connections ?? {}, departments: {}, customConnections: p.custom_connections ?? {} }
+          ? { businessType: p.business_type, profile: p.profile ?? {}, connections: p.connections ?? {}, areas: {}, customConnections: p.custom_connections ?? {} }
           : emptyProfileState();
         return {
           clientId: cl.id,

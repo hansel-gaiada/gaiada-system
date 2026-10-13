@@ -22,6 +22,7 @@ describe.skipIf(!TEST_URL)("Client Centre · staff routes (clients-centre.contro
   let outsider: string;   // member of a DIFFERENT tenant entirely
   let clientA: string;
   let clientB: string;
+  let clientHotel: string;
 
   beforeAll(async () => {
     await initTestDb();
@@ -44,6 +45,7 @@ describe.skipIf(!TEST_URL)("Client Centre · staff routes (clients-centre.contro
 
     clientA = await createClient(co, "Alpha Co");
     clientB = await createClient(co, "Beta Co");
+    clientHotel = await createClient(co, "Gamma Hotel Co");
 
     app = await buildApp();
   }, 120_000);
@@ -75,12 +77,79 @@ describe.skipIf(!TEST_URL)("Client Centre · staff routes (clients-centre.contro
     }>;
     const a = rows.find((x) => x.clientId === clientA);
     // `total`s are registry-derived, not zero: 23 Company-settings fields, 98 distinct connection
-    // ids reachable across all 28 sections for the "other" business type (no industry module).
+    // ids reachable across all 28 sections for the "other" business type (no industry area).
     expect(a).toMatchObject({
       businessType: "other",
       fieldsFilled: { filled: 0, total: 23 },
       connectionsConnected: { connected: 0, total: 98 },
     });
+  });
+
+  // ── PV6-01: the industry area (`ix`) is reachable ─────────────────────────────────────────────────
+  it("a hotel's list totals count the industry area's own connections (103; `other` stays 98)", async () => {
+    await app.inject({
+      method: "PATCH", url: `/api/${co}/clients/${clientHotel}/centre`, headers: asUser(admin),
+      payload: { businessType: "hotel" },
+    });
+    const r = await app.inject({ method: "GET", url: `/api/${co}/clients/centre`, headers: asUser(admin) });
+    const rows = r.json() as Array<{ clientId: string; connectionsConnected: { total: number } }>;
+    expect(rows.find((x) => x.clientId === clientHotel)?.connectionsConnected.total).toBe(103);
+    expect(rows.find((x) => x.clientId === clientB)?.connectionsConnected.total).toBe(98);
+  });
+
+  it("a hotel saves an industry-only field and an `ix` custom connection (the latter was 400 `unknown section: ix`)", async () => {
+    const r = await app.inject({
+      method: "PATCH", url: `/api/${co}/clients/${clientHotel}/centre`, headers: asUser(admin),
+      payload: { profile: { rooms: "42" }, customConnections: { ix: [{ id: "xixtool1", name: "Night audit export" }] } },
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().profile.rooms).toBe("42");
+    expect(r.json().customConnections.ix).toEqual([{ id: "xixtool1", name: "Night audit export" }]);
+    const r2 = await app.inject({
+      method: "PATCH", url: `/api/${co}/clients/${clientHotel}/centre`, headers: asUser(admin),
+      payload: { connections: { xixtool1: { tool: "CSV", status: "Connected" } }, areas: { ix: false } },
+    });
+    expect(r2.statusCode).toBe(200);
+    expect(r2.json().areas).toEqual({ ix: false });
+  });
+
+  it("the old wire key `departments` in a PATCH is a 400 naming the key", async () => {
+    const r = await app.inject({
+      method: "PATCH", url: `/api/${co}/clients/${clientB}/centre`, headers: asUser(admin),
+      payload: { departments: { rs: false } },
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toContain("departments");
+  });
+
+  it("an unknown area is a 400 in the glossary's words", async () => {
+    const r = await app.inject({
+      method: "PATCH", url: `/api/${co}/clients/${clientB}/centre`, headers: asUser(admin),
+      payload: { areas: { nope: true } },
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toBe("unknown business area: nope");
+  });
+
+  it("areas round-trips through the database column that is still called `departments`", async () => {
+    const r = await app.inject({
+      method: "PATCH", url: `/api/${co}/clients/${clientB}/centre`, headers: asUser(admin),
+      payload: { areas: { hr: false } },
+    });
+    expect(r.statusCode).toBe(200);
+    const col = await withTenants([co], (c) =>
+      c.query<{ departments: Record<string, boolean> }>(`SELECT departments FROM client_centre_profiles WHERE client_id = $1`, [clientB]),
+    );
+    expect(col.rows[0].departments).toEqual({ hr: false });
+    const g = await app.inject({ method: "GET", url: `/api/${co}/clients/${clientB}/centre`, headers: asUser(admin) });
+    expect(g.json().areas).toEqual({ hr: false });
+    // the activity change path is `areas.<id>`
+    const act = await withTenants([co], (c) =>
+      c.query<{ metadata: { changes: Array<{ path: string }> } }>(
+        `SELECT metadata FROM activities WHERE target_entity_type = 'client' AND target_entity_id = $1 ORDER BY occurred_at DESC LIMIT 1`, [clientB],
+      ),
+    );
+    expect(act.rows[0].metadata.changes.map((x) => x.path)).toEqual(["areas.hr"]);
   });
 
   // ── read/update authz ──────────────────────────────────────────────────────────────────────────
@@ -120,13 +189,14 @@ describe.skipIf(!TEST_URL)("Client Centre · staff routes (clients-centre.contro
   it("company_admin PATCH updates the profile, increments revision, and returns the merged shape", async () => {
     const r = await app.inject({
       method: "PATCH", url: `/api/${co}/clients/${clientA}/centre`, headers: asUser(admin),
-      payload: { businessType: "hotel", profile: { legal: "Alpha Pte Ltd", city: "Bali" }, departments: { rs: false } },
+      payload: { businessType: "hotel", profile: { legal: "Alpha Pte Ltd", city: "Bali" }, areas: { rs: false } },
     });
     expect(r.statusCode).toBe(200);
     const b = r.json();
     expect(b.businessType).toBe("hotel");
     expect(b.profile).toMatchObject({ legal: "Alpha Pte Ltd", city: "Bali" });
-    expect(b.departments).toMatchObject({ rs: false });
+    expect(b.areas).toMatchObject({ rs: false });
+    expect(b.departments).toBeUndefined(); // PV6-01: the wire field is `areas`; the column keeps its old name
     expect(b.revision).toBe(1);
     expect(b.updatedBy).toMatchObject({ id: admin });
   });

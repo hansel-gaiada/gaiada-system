@@ -1,6 +1,6 @@
 {
-  "_comment": "GENERATED from cmc/origin/index.html (Company Management Centre, 2026-09-19) by the client-centre registry extractor. Data only: every field, connection, department, industry module and settings map CMC ships, title-cased exactly as CMC renders it. Do not hand-edit without bumping `version`.",
-  "version": 1,
+  "_comment": "Client Centre registry v2 (PV6-01). Derived once from the CMC snapshot (v1, 2026-09-19 extract) by scripts/cmc/registry-v2.mjs and maintained by hand from here on. Data only: every field, connection, business area, industry area and settings map. Pages inside an area are gone; an area has Setup (its fields), Connections and, from PV6-03, Services & results. Bump `version` on any structural change.",
+  "version": 2,
   "fieldGroups": [
     "Identity",
     "Offering",
@@ -1430,7 +1430,7 @@
       "label": "Other"
     }
   ],
-  "defaultOffDepartments": {
+  "defaultOffAreas": {
     "hotel": [],
     "restaurant": [],
     "hospital": [],
@@ -1497,809 +1497,126 @@
       ]
     }
   ],
-  "departments": [
+  "areas": [
     {
       "id": "rs",
-      "name": "Reservations",
-      "pages": [
-        {
-          "name": "Booking Calendar & Availability"
-        },
-        {
-          "name": "Online Booking Engine"
-        },
-        {
-          "name": "Third-Party Platforms & OTAs"
-        },
-        {
-          "name": "Rates, Packages & Deposits"
-        },
-        {
-          "name": "Booking Policies (Cancellation, No-Show)"
-        },
-        {
-          "name": "Confirmations & Reminders"
-        },
-        {
-          "name": "Group & Event Bookings"
-        },
-        {
-          "name": "Waitlist & Overbooking"
-        },
-        {
-          "name": "Guest / Customer Profiles"
-        },
-        {
-          "name": "Reservation Reports"
-        }
-      ]
+      "name": "Reservations"
     },
     {
       "id": "mk",
       "name": "Marketing",
-      "pages": [
+      "subAreas": [
         {
           "id": "mk_strat",
-          "name": "Strategy & Planning",
-          "pages": [
-            {
-              "name": "Market & Customer Research"
-            },
-            {
-              "name": "Competitor Analysis"
-            },
-            {
-              "name": "Brand Strategy & Positioning"
-            },
-            {
-              "name": "Customer Journey Mapping"
-            },
-            {
-              "name": "Marketing Plan & Budget"
-            },
-            {
-              "name": "Channel Mix & Media Planning"
-            },
-            {
-              "name": "Go-To-Market Plans for Launches"
-            }
-          ]
+          "name": "Strategy & Planning"
         },
         {
           "id": "mk_brand",
-          "name": "Brand & Creative",
-          "pages": [
-            {
-              "name": "Brand Identity (Logo, Palette, Type, Guidelines)"
-            },
-            {
-              "name": "Copywriting & Tone of Voice"
-            },
-            {
-              "name": "Graphic Design"
-            },
-            {
-              "name": "Illustration & Animation"
-            },
-            {
-              "name": "Print & Collateral"
-            },
-            {
-              "name": "Brand Asset Library"
-            }
-          ]
+          "name": "Brand & Creative"
         },
         {
           "id": "mk_web",
-          "name": "Web Design & Development",
-          "pages": [
-            {
-              "name": "Domain & Hosting"
-            },
-            {
-              "name": "UX & Website Design"
-            },
-            {
-              "name": "Website Build & Maintenance"
-            },
-            {
-              "name": "Landing Pages"
-            },
-            {
-              "name": "Conversion Rate Optimisation"
-            },
-            {
-              "name": "Accessibility & Page Speed"
-            },
-            {
-              "name": "Website Analytics"
-            }
-          ]
+          "name": "Web Design & Development"
         },
         {
           "id": "se",
-          "name": "SEO, AEO & GEO",
-          "pages": [
-            {
-              "name": "Keyword & Topic Strategy"
-            },
-            {
-              "name": "Technical SEO"
-            },
-            {
-              "name": "On-Page & Content Optimisation"
-            },
-            {
-              "name": "Local SEO & Google Business Profile"
-            },
-            {
-              "name": "Link Building & Digital PR"
-            },
-            {
-              "name": "Schema & Structured Data"
-            },
-            {
-              "name": "AEO: Answer Engines & Featured Snippets"
-            },
-            {
-              "name": "GEO: Generative Engines (ChatGPT, Gemini, Perplexity)"
-            },
-            {
-              "name": "LLMs.txt & AI Crawler Access"
-            },
-            {
-              "name": "Rankings & Visibility Tracking"
-            },
-            {
-              "name": "Competitor Benchmarking"
-            },
-            {
-              "name": "Reporting"
-            }
-          ]
+          "name": "SEO, AEO & GEO"
         },
         {
           "id": "mk_content",
-          "name": "Content Marketing",
-          "pages": [
-            {
-              "name": "Content Strategy & Editorial Calendar"
-            },
-            {
-              "name": "Blog Posts & Articles"
-            },
-            {
-              "name": "Whitepapers, Ebooks, Guides, Case Studies"
-            },
-            {
-              "name": "Newsletter"
-            },
-            {
-              "name": "Webinars & Podcasts"
-            },
-            {
-              "name": "Content Distribution & Syndication"
-            }
-          ]
+          "name": "Content Marketing"
         },
         {
           "id": "mk_social",
-          "name": "Social Media",
-          "pages": [
-            {
-              "name": "Channel Strategy & Profile Setup"
-            },
-            {
-              "name": "Content Creation & Scheduling"
-            },
-            {
-              "name": "Community Management"
-            },
-            {
-              "name": "Social Listening & Monitoring"
-            },
-            {
-              "name": "User-Generated Content"
-            },
-            {
-              "name": "Social Reporting"
-            }
-          ]
+          "name": "Social Media"
         },
         {
           "id": "mk_paid",
-          "name": "Paid Media & PPC",
-          "pages": [
-            {
-              "name": "Search Ads (Google, Bing)"
-            },
-            {
-              "name": "Social Ads (Meta, TikTok, LinkedIn)"
-            },
-            {
-              "name": "Display & Programmatic"
-            },
-            {
-              "name": "Video Ads (YouTube, CTV)"
-            },
-            {
-              "name": "Shopping & Marketplace Ads"
-            },
-            {
-              "name": "Retargeting"
-            },
-            {
-              "name": "Ad Creative Production & Testing"
-            },
-            {
-              "name": "Budget Pacing & Bid Management"
-            }
-          ]
+          "name": "Paid Media & PPC"
         },
         {
           "id": "mk_email",
-          "name": "Email & Marketing Automation",
-          "pages": [
-            {
-              "name": "Email Platform & Deliverability"
-            },
-            {
-              "name": "List Building & Lead Magnets"
-            },
-            {
-              "name": "Automated Sequences (Welcome, Nurture, Onboarding, Win-Back)"
-            },
-            {
-              "name": "Segmentation & Personalisation"
-            },
-            {
-              "name": "SMS / WhatsApp Marketing"
-            },
-            {
-              "name": "Push Notifications & In-App Messaging"
-            }
-          ]
+          "name": "Email & Marketing Automation"
         },
         {
           "id": "mk_infl",
-          "name": "Influencer & Affiliate",
-          "pages": [
-            {
-              "name": "Influencer & Creator Partnerships"
-            },
-            {
-              "name": "Affiliate Program"
-            },
-            {
-              "name": "Ambassador Program"
-            },
-            {
-              "name": "Sponsorships"
-            }
-          ]
+          "name": "Influencer & Affiliate"
         },
         {
           "id": "mk_pr",
-          "name": "PR & Communications",
-          "pages": [
-            {
-              "name": "Press Releases & Media Relations"
-            },
-            {
-              "name": "Thought Leadership & Bylined Articles"
-            },
-            {
-              "name": "Awards Submissions"
-            },
-            {
-              "name": "Crisis Communications Plan"
-            },
-            {
-              "name": "Speaking Engagements"
-            },
-            {
-              "name": "Analyst Relations"
-            }
-          ]
+          "name": "PR & Communications"
         },
         {
           "id": "mk_video",
-          "name": "Video & Photography",
-          "pages": [
-            {
-              "name": "Photography"
-            },
-            {
-              "name": "Video Production"
-            },
-            {
-              "name": "Editing & Post-Production"
-            },
-            {
-              "name": "Motion Graphics"
-            },
-            {
-              "name": "Short-Form & Reels"
-            },
-            {
-              "name": "Drone & 360"
-            }
-          ]
+          "name": "Video & Photography"
         },
         {
           "id": "mk_events",
-          "name": "Events & Experiential",
-          "pages": [
-            {
-              "name": "Trade Shows & Conferences"
-            },
-            {
-              "name": "Hosted Events, Meetups & Workshops"
-            },
-            {
-              "name": "Virtual Events & Webinars"
-            },
-            {
-              "name": "Product Launch Events"
-            },
-            {
-              "name": "Merchandise & Swag"
-            }
-          ]
+          "name": "Events & Experiential"
         },
         {
           "id": "mk_cust",
-          "name": "Customer Marketing & Loyalty",
-          "pages": [
-            {
-              "name": "Reviews & Ratings Management"
-            },
-            {
-              "name": "Testimonials & Case Studies"
-            },
-            {
-              "name": "Referral & Loyalty Programs"
-            },
-            {
-              "name": "Customer Community"
-            },
-            {
-              "name": "Customer Advocacy Program"
-            },
-            {
-              "name": "Onboarding & Education Content"
-            }
-          ]
+          "name": "Customer Marketing & Loyalty"
         },
         {
           "id": "mk_partner",
-          "name": "Partnerships & Channels",
-          "pages": [
-            {
-              "name": "Co-Marketing with Partners"
-            },
-            {
-              "name": "Marketplace & App-Store Listings"
-            },
-            {
-              "name": "Reseller / Channel Programs"
-            },
-            {
-              "name": "Integrations Marketing"
-            }
-          ]
+          "name": "Partnerships & Channels"
         },
         {
           "id": "mk_product",
-          "name": "Product Marketing",
-          "pages": [
-            {
-              "name": "Launch Planning & Messaging"
-            },
-            {
-              "name": "Feature Announcements & Release Notes"
-            },
-            {
-              "name": "Competitive Intelligence"
-            },
-            {
-              "name": "Pricing & Comparison Pages"
-            },
-            {
-              "name": "Win / Loss Analysis"
-            }
-          ]
+          "name": "Product Marketing"
         },
         {
           "id": "mk_analytics",
-          "name": "Analytics & Reporting",
-          "pages": [
-            {
-              "name": "Tracking Setup (Tags, Pixels, Conversion Events)"
-            },
-            {
-              "name": "Attribution Modelling"
-            },
-            {
-              "name": "Dashboards & Regular Reporting"
-            },
-            {
-              "name": "A/B & Multivariate Testing"
-            },
-            {
-              "name": "Customer Data Platform"
-            },
-            {
-              "name": "Marketing Mix Modelling"
-            }
-          ]
+          "name": "Analytics & Reporting"
         },
         {
           "id": "mk_tech",
-          "name": "Marketing Technology",
-          "pages": [
-            {
-              "name": "CMS"
-            },
-            {
-              "name": "Social Scheduling Tool"
-            },
-            {
-              "name": "Design Tools"
-            },
-            {
-              "name": "Analytics & SEO Tools"
-            },
-            {
-              "name": "Project & Digital Asset Management"
-            },
-            {
-              "name": "Survey & Feedback Tools"
-            },
-            {
-              "name": "Chatbot / Live Chat"
-            },
-            {
-              "name": "AI Tools"
-            }
-          ]
+          "name": "Marketing Technology"
         },
         {
           "id": "mk_compliance",
-          "name": "Compliance",
-          "pages": [
-            {
-              "name": "Privacy Compliance (GDPR, CCPA, Cookie Consent)"
-            },
-            {
-              "name": "Email / SMS Consent & Anti-Spam"
-            },
-            {
-              "name": "Trademark & Brand Protection"
-            },
-            {
-              "name": "Advertising Disclosures (Influencers, Affiliates)"
-            },
-            {
-              "name": "Agency & Freelancer Contracts"
-            },
-            {
-              "name": "Brand & Content Approval Workflow"
-            }
-          ]
+          "name": "Compliance"
         },
         {
           "id": "mk_team",
-          "name": "Team & Resourcing",
-          "pages": [
-            {
-              "name": "In-House Marketing Team"
-            },
-            {
-              "name": "Agencies & Freelancers"
-            },
-            {
-              "name": "Training & Skills Development"
-            }
-          ]
+          "name": "Team & Resourcing"
         }
       ]
     },
     {
       "id": "fi",
-      "name": "Accounting",
-      "pages": [
-        {
-          "name": "Bank Accounts & Cards"
-        },
-        {
-          "name": "Bookkeeping"
-        },
-        {
-          "name": "Accounting Software"
-        },
-        {
-          "name": "Financial Reporting"
-        },
-        {
-          "name": "Payables & Receivables"
-        },
-        {
-          "name": "Invoicing & Payments"
-        },
-        {
-          "name": "Payroll"
-        },
-        {
-          "name": "Tax & Compliance"
-        },
-        {
-          "name": "Budgeting & Forecasting"
-        },
-        {
-          "name": "Cash Flow"
-        },
-        {
-          "name": "Audits & Year-End"
-        },
-        {
-          "name": "Expense Management"
-        },
-        {
-          "name": "Fundraising & Cap Table"
-        },
-        {
-          "name": "Insurance"
-        },
-        {
-          "name": "Financial Controls"
-        },
-        {
-          "name": "Advisors (CFO, Accountant, Tax)"
-        }
-      ]
+      "name": "Accounting"
     },
     {
       "id": "hr",
-      "name": "Human Resources",
-      "pages": [
-        {
-          "name": "Recruiting"
-        },
-        {
-          "name": "Employer Branding & Careers"
-        },
-        {
-          "name": "Contracts & Offer Letters"
-        },
-        {
-          "name": "Onboarding & Offboarding"
-        },
-        {
-          "name": "HR Information System"
-        },
-        {
-          "name": "Payroll & Benefits"
-        },
-        {
-          "name": "Compensation"
-        },
-        {
-          "name": "Handbook & Policies"
-        },
-        {
-          "name": "Labor Law Compliance"
-        },
-        {
-          "name": "Performance & Goals"
-        },
-        {
-          "name": "Learning & Development"
-        },
-        {
-          "name": "Engagement & Culture"
-        },
-        {
-          "name": "Diversity & Inclusion"
-        },
-        {
-          "name": "Health & Safety"
-        },
-        {
-          "name": "Grievance & Disciplinary"
-        },
-        {
-          "name": "Rostering & Shift Scheduling"
-        },
-        {
-          "name": "HR Analytics"
-        },
-        {
-          "name": "Contractors & Freelancers"
-        }
-      ]
+      "name": "Human Resources"
     },
     {
       "id": "lg",
-      "name": "Legal & Corporate",
-      "pages": [
-        {
-          "name": "Registration & Licenses"
-        },
-        {
-          "name": "Corporate Governance"
-        },
-        {
-          "name": "Contract Templates"
-        },
-        {
-          "name": "Intellectual Property"
-        },
-        {
-          "name": "Terms & Privacy Policy"
-        },
-        {
-          "name": "Regulatory Compliance"
-        },
-        {
-          "name": "Legal Counsel"
-        }
-      ]
+      "name": "Legal & Corporate"
     },
     {
       "id": "sa",
-      "name": "Sales",
-      "pages": [
-        {
-          "name": "Strategy & Pipeline"
-        },
-        {
-          "name": "Team, Quotas & Commissions"
-        },
-        {
-          "name": "CRM"
-        },
-        {
-          "name": "Outbound Tooling"
-        },
-        {
-          "name": "Training & Playbooks"
-        },
-        {
-          "name": "Negotiation & E-Signature"
-        }
-      ]
+      "name": "Sales"
     },
     {
       "id": "cs",
-      "name": "Communication",
-      "pages": [
-        {
-          "name": "Email"
-        },
-        {
-          "name": "WhatsApp"
-        },
-        {
-          "name": "SMS"
-        },
-        {
-          "name": "Phone & Voice"
-        },
-        {
-          "name": "Live Chat"
-        },
-        {
-          "name": "Social Messaging (Instagram, Messenger)"
-        },
-        {
-          "name": "Helpdesk & Ticketing"
-        },
-        {
-          "name": "Shared Inboxes"
-        },
-        {
-          "name": "Knowledge Base"
-        },
-        {
-          "name": "Service Levels"
-        },
-        {
-          "name": "Feedback (NPS, CSAT)"
-        }
-      ]
+      "name": "Communication"
     },
     {
       "id": "it",
-      "name": "IT & Security",
-      "pages": [
-        {
-          "name": "Devices & Productivity Suite"
-        },
-        {
-          "name": "Identity & Access"
-        },
-        {
-          "name": "Cybersecurity"
-        },
-        {
-          "name": "Software & SaaS Management"
-        },
-        {
-          "name": "Storage & File Sharing"
-        },
-        {
-          "name": "IT Support"
-        }
-      ]
+      "name": "IT & Security"
     },
     {
       "id": "op",
-      "name": "Operations",
-      "pages": [
-        {
-          "name": "Locations & Facilities"
-        },
-        {
-          "name": "Maintenance & Repairs"
-        },
-        {
-          "name": "Suppliers & Procurement"
-        },
-        {
-          "name": "Inventory & Stock"
-        },
-        {
-          "name": "Health, Safety & Hygiene"
-        },
-        {
-          "name": "Utilities & Services"
-        },
-        {
-          "name": "Internal Communication"
-        },
-        {
-          "name": "Project Management & Docs"
-        },
-        {
-          "name": "Standard Operating Procedures"
-        },
-        {
-          "name": "Business Continuity & Risk"
-        }
-      ]
+      "name": "Operations"
     }
   ],
   "industryModules": {
     "hotel": {
       "id": "ix",
       "name": "Hotel Operations",
-      "pages": [
-        {
-          "name": "Front Desk & Check-In"
-        },
-        {
-          "name": "Rooms & Housekeeping"
-        },
-        {
-          "name": "Rates & Revenue Management"
-        },
-        {
-          "name": "Food & Beverage"
-        },
-        {
-          "name": "Guest Experience & Reviews"
-        },
-        {
-          "name": "Concierge & Activities"
-        },
-        {
-          "name": "Maintenance & Engineering"
-        },
-        {
-          "name": "Security"
-        }
-      ],
       "settings": {
         "fields": [
           "rooms",
@@ -2328,35 +1645,6 @@
     "restaurant": {
       "id": "ix",
       "name": "Restaurant Operations",
-      "pages": [
-        {
-          "name": "Tables & Floor Plan"
-        },
-        {
-          "name": "Menu & Pricing"
-        },
-        {
-          "name": "Kitchen & Production"
-        },
-        {
-          "name": "POS & Payments"
-        },
-        {
-          "name": "Delivery & Takeaway Platforms"
-        },
-        {
-          "name": "Suppliers & Food Inventory"
-        },
-        {
-          "name": "Food Safety & Hygiene"
-        },
-        {
-          "name": "Reviews & Guest Feedback"
-        },
-        {
-          "name": "Events & Private Dining"
-        }
-      ],
       "settings": {
         "fields": [
           "seats",
@@ -2384,38 +1672,6 @@
     "hospital": {
       "id": "ix",
       "name": "Clinical Operations",
-      "pages": [
-        {
-          "name": "Appointments & Scheduling"
-        },
-        {
-          "name": "Patient Records (EHR / EMR)"
-        },
-        {
-          "name": "Clinical Staff & Credentials"
-        },
-        {
-          "name": "Billing & Insurance Claims"
-        },
-        {
-          "name": "Pharmacy & Medical Supplies"
-        },
-        {
-          "name": "Laboratory & Diagnostics"
-        },
-        {
-          "name": "Telehealth"
-        },
-        {
-          "name": "Compliance & Accreditation"
-        },
-        {
-          "name": "Patient Experience & Feedback"
-        },
-        {
-          "name": "Emergency & Referrals"
-        }
-      ],
       "settings": {
         "fields": [
           "beds",
@@ -2444,32 +1700,6 @@
     "spa": {
       "id": "ix",
       "name": "Spa & Wellness Operations",
-      "pages": [
-        {
-          "name": "Treatment Menu & Pricing"
-        },
-        {
-          "name": "Therapists & Rosters"
-        },
-        {
-          "name": "Rooms & Facilities"
-        },
-        {
-          "name": "Products & Retail"
-        },
-        {
-          "name": "Memberships & Packages"
-        },
-        {
-          "name": "Gift Cards & Vouchers"
-        },
-        {
-          "name": "Hygiene & Compliance"
-        },
-        {
-          "name": "Guest Experience & Reviews"
-        }
-      ],
       "settings": {
         "fields": [
           "treatment_rooms",
@@ -2496,38 +1726,6 @@
     "agency": {
       "id": "ix",
       "name": "Agency Operations",
-      "pages": [
-        {
-          "name": "Clients & Accounts"
-        },
-        {
-          "name": "Client Onboarding"
-        },
-        {
-          "name": "Projects & Delivery"
-        },
-        {
-          "name": "Proposals & Contracts"
-        },
-        {
-          "name": "Time Tracking & Utilisation"
-        },
-        {
-          "name": "Client Billing & Retainers"
-        },
-        {
-          "name": "Client Reporting"
-        },
-        {
-          "name": "Tools & Subscriptions"
-        },
-        {
-          "name": "Freelancer Network"
-        },
-        {
-          "name": "Portfolio & Case Studies"
-        }
-      ],
       "settings": {
         "fields": [
           "clients",
@@ -2554,29 +1752,6 @@
     "services": {
       "id": "ix",
       "name": "Client Services",
-      "pages": [
-        {
-          "name": "Clients & Engagements"
-        },
-        {
-          "name": "Client Onboarding"
-        },
-        {
-          "name": "Proposals & Contracts"
-        },
-        {
-          "name": "Scheduling & Appointments"
-        },
-        {
-          "name": "Time & Billing"
-        },
-        {
-          "name": "Deliverables & Reporting"
-        },
-        {
-          "name": "Referrals & Partnerships"
-        }
-      ],
       "settings": {
         "fields": [
           "clients",
@@ -2598,32 +1773,6 @@
     "retail": {
       "id": "ix",
       "name": "Store Operations",
-      "pages": [
-        {
-          "name": "Store & POS"
-        },
-        {
-          "name": "Inventory & Stock"
-        },
-        {
-          "name": "Suppliers & Purchasing"
-        },
-        {
-          "name": "Pricing & Promotions"
-        },
-        {
-          "name": "Visual Merchandising"
-        },
-        {
-          "name": "Shipping & Fulfilment"
-        },
-        {
-          "name": "Returns & Exchanges"
-        },
-        {
-          "name": "Loss Prevention"
-        }
-      ],
       "settings": {
         "fields": [
           "stores",
@@ -2647,35 +1796,6 @@
     "ecommerce": {
       "id": "ix",
       "name": "E-Commerce Operations",
-      "pages": [
-        {
-          "name": "Storefront & Platform"
-        },
-        {
-          "name": "Product Catalogue"
-        },
-        {
-          "name": "Inventory & Warehouse"
-        },
-        {
-          "name": "Orders & Fulfilment"
-        },
-        {
-          "name": "Shipping & Carriers"
-        },
-        {
-          "name": "Returns"
-        },
-        {
-          "name": "Payments & Fraud"
-        },
-        {
-          "name": "Marketplaces"
-        },
-        {
-          "name": "Customer Reviews"
-        }
-      ],
       "settings": {
         "fields": [
           "platform",
@@ -2702,32 +1822,6 @@
     "saas": {
       "id": "ix",
       "name": "SaaS Operations",
-      "pages": [
-        {
-          "name": "Subscriptions & Billing"
-        },
-        {
-          "name": "Onboarding & Activation"
-        },
-        {
-          "name": "Customer Success"
-        },
-        {
-          "name": "Usage Analytics"
-        },
-        {
-          "name": "Uptime & Status"
-        },
-        {
-          "name": "Security & Compliance"
-        },
-        {
-          "name": "Integrations & API Partners"
-        },
-        {
-          "name": "Churn & Retention"
-        }
-      ],
       "settings": {
         "fields": [
           "plans",

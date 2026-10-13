@@ -2242,7 +2242,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const pipeline = pipelineDemo(method, p, url.searchParams, body);
   if (pipeline) return pipeline;
 
-  // Client Centre (CC-D1) — CMC's layout/categorisation as native ERP pages, staff (`/clients/centre`)
+  // Client Centre (CC-D1, re-cut as Business areas by PV6-01) — the client's own business profile, staff (`/clients/centre`)
   // and portal (`/portal/centre`) — stateful store (lib/demoClientCentre.ts). Placed here, before the
   // generic `ok([])`/`ok({})` fallbacks further down, so a PATCH's validation 400 and the real
   // CentreProfile shape are both exercised rather than swallowed by a catch-all.
