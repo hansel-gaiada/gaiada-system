@@ -73,10 +73,14 @@ import {
   PERSON_SCOPE_MODULES,
   assertPersonInLedScope,
   assertUnitInLedScope,
+  collectUnitSubtree,
   loadLedUnitScope,
+  loadOrgStructure,
   loadUnitByUser,
+  loadUnitRoster,
   requiresUnitNarrowing,
   todayIsoInTz,
+  unitExistsInStructure,
 } from "./person-scope";
 import { loadUnitAncestors } from "../../core/org-unit-closure";
 
@@ -372,11 +376,18 @@ export class ReportsController {
     @Query("periodKind") periodKindRaw?: string,
     @Query("start") start?: string,
     @Query("end") end?: string,
+    @Query("unit") unit?: string,
   ) {
     const grain = resolveGrain(grainRaw);
+    // DW-4b (BFF §37): validation order is unit-vs-grain, range, Cerbos, led-scope, existence.
+    if (unit !== undefined && grain !== "person") {
+      throw new BadRequestException({ message: "unit is only valid with grain=person", field: "unit" });
+    }
     const { periodKind, start: s, end: e } = resolveRange(periodKindRaw, start, end);
 
     await authorize(req.principal, { kind: "report_document", tenantId, module: "reports" }, `read_${grain}`);
+
+    if (unit !== undefined) return this.getUnitRosterOverview(req.principal, tenantId, unit, periodKind, s, e);
 
     if (grain === "company") {
       const doc = await buildReportDocument({ tenantId, grain, scopeRef: tenantId, periodKind, start: s, end: e });
@@ -432,6 +443,75 @@ export class ReportsController {
         kpis: buildHeadlineKpis(grain, scopeRef, rows),
       })),
     };
+  }
+
+  /**
+   * DW-4b (BFF §37) — `overview?grain=person&unit=<orgNodeId>`: the unit's WHOLE roster, not only the
+   * people with fact rows, so a quiet team member cannot silently drop off a head's Team report.
+   * Roster = primary memberships valid TODAY (`REPORTS_TZ`, never the range end — the TR-25 rule)
+   * on a node in the unit's subtree. `activity` says whether the person has fact rows in the range;
+   * `kpis` is `[]` without activity (never zero-filled) and otherwise the same `buildHeadlineKpis`
+   * over the same rows as the no-`unit` call. Order: led-scope 403 BEFORE the 404, so a narrowed
+   * caller learns nothing about units outside their line; the TR-25 narrowing filter then runs over
+   * the roster as a second guard.
+   */
+  private async getUnitRosterOverview(
+    principal: Principal,
+    tenantId: string,
+    unit: string,
+    periodKind: ReportPeriodKind,
+    s: string,
+    e: string,
+  ) {
+    const asOf = todayIsoInTz(config.reportsTz);
+    const narrowed = requiresUnitNarrowing(principal, tenantId);
+    const roster = await withTenants(
+      [tenantId],
+      async (c) => {
+        await assertUnitInLedScope(c, tenantId, principal, unit, asOf);
+        const structure = await loadOrgStructure(c, tenantId);
+        if (!unit || !unitExistsInStructure(structure, unit)) {
+          throw new NotFoundException({ message: "unit_not_found", field: "unit" });
+        }
+        let ids = await loadUnitRoster(c, tenantId, collectUnitSubtree(structure, unit), asOf);
+        if (narrowed) {
+          const scope = await loadLedUnitScope(c, tenantId, principal.userId, asOf, principal);
+          if (scope.size === 0) return [];
+          const unitByUser = await loadUnitByUser(c, tenantId, ids, asOf);
+          ids = ids.filter((id) => {
+            const u = unitByUser.get(id);
+            return !!u && scope.has(u);
+          });
+        }
+        return ids;
+      },
+      { modules: PERSON_SCOPE_MODULES },
+    );
+
+    const rows = await computeReportRangeRows(tenantId, s, e);
+    // "Fact rows in the range" = a person-grain row of a FACT-BACKED metric. NOT "any person-grain
+    // row": the calendar metrics (check-in compliance, logging coverage) emit a row for every
+    // employed, expected person, so keying on them would mark a person with no facts as active and
+    // zero-fill their KPIs. `delivery.tasks_completed` is emitted by `computeOwnFactRollups` for
+    // exactly the users with `report_work_facts` rows (all 13 fact-backed metrics are, together).
+    const withFacts = new Set(
+      rows
+        .filter((r) => r.metricKey === "delivery.tasks_completed" && rowGrainShape(r.dimensions ?? {}) === "person")
+        .map((r) => String((r.dimensions ?? {}).userId)),
+    );
+    const names = await resolveScopeNamesBulk(tenantId, "person", roster);
+    const scopes = roster
+      .map((scopeRef) => {
+        const activity = withFacts.has(scopeRef);
+        return {
+          scopeRef,
+          scopeName: names.get(scopeRef) ?? scopeRef,
+          kpis: activity ? buildHeadlineKpis("person", scopeRef, rows) : [],
+          activity,
+        };
+      })
+      .sort((a, b) => a.scopeName.localeCompare(b.scopeName));
+    return { periodKind, start: s, end: e, unit, scopes };
   }
 
   /** Raw governed-metric series (power users/MCP, §6.2). Calendar periods and custom ranges both

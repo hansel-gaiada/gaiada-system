@@ -252,6 +252,25 @@ export function collectUnitSubtree(structure: unknown, unitNodeId: string): stri
   return [...new Set(found)];
 }
 
+/**
+ * PURE. Is `nodeId` a node of the org tree at all? `collectUnitSubtree` cannot answer this — it
+ * returns `[nodeId]` for an unknown id by design (fail-closed narrowing) — so the DW-4b unit roster
+ * (BFF §37) asks here to tell "unit_not_found" (404) from an existing unit. Any node kind counts,
+ * the same tolerance `collectUnitSubtree`'s `locate` has; an absent/unreadable tree answers false.
+ */
+export function unitExistsInStructure(structure: unknown, nodeId: string): boolean {
+  const root = unwrapOrgRoot(structure);
+  if (!root) return false;
+  const locate = (node: UnitTreeNode): boolean => {
+    if (node.id === nodeId) return true;
+    for (const child of node.children ?? []) {
+      if (child && typeof child === "object" && locate(child)) return true;
+    }
+    return false;
+  };
+  return locate(root);
+}
+
 // ═══════════════════════════════ I/O EDGE — resolving the boundary ═══════════════════════════════
 
 /** A caller's own primary unit(s) as of `asOf`. Plural because `org_unit_memberships` only
@@ -272,7 +291,7 @@ async function ownPrimaryUnits(c: PoolClient, tenantId: string, userId: string, 
 /** The tenant's org tree, or `null`. Read under the caller's existing transaction (so RLS/the third
  *  wall still bound it) — `company_org_structure` is FORCE-RLS'd, so a missing tenant GUC yields
  *  zero rows and `collectUnitSubtree` degrades to exact-unit equality. */
-async function loadOrgStructure(c: PoolClient, tenantId: string): Promise<unknown> {
+export async function loadOrgStructure(c: PoolClient, tenantId: string): Promise<unknown> {
   const { rows } = await c.query<{ structure: unknown }>(
     `SELECT structure FROM company_org_structure WHERE tenant_id = $1`,
     [tenantId],
@@ -408,6 +427,28 @@ export async function loadUnitByUser(
   );
   for (const r of rows) if (!map.has(r.user_id)) map.set(r.user_id, r.unit_node_id);
   return map;
+}
+
+/**
+ * DW-4b (BFF §37) — the roster of a unit: every user whose PRIMARY membership is valid on `asOf` on
+ * one of `unitNodeIds` (the unit's subtree from `collectUnitSubtree`). Same predicate as
+ * `loadUnitByUser`; DISTINCT so a user is listed once. Callers pass TODAY (never the range end), so
+ * choosing a past range cannot widen who a head sees.
+ */
+export async function loadUnitRoster(
+  c: PoolClient,
+  tenantId: string,
+  unitNodeIds: string[],
+  asOf: string,
+): Promise<string[]> {
+  if (unitNodeIds.length === 0) return [];
+  const { rows } = await c.query<{ user_id: string }>(
+    `SELECT DISTINCT user_id FROM org_unit_memberships
+      WHERE tenant_id = $1 AND is_primary AND unit_node_id = ANY($2::text[])
+        AND valid_from <= $3::date AND (valid_to IS NULL OR valid_to >= $3::date)`,
+    [tenantId, unitNodeIds, asOf],
+  );
+  return rows.map((r) => r.user_id);
 }
 
 /** PURE. Filter an already-computed set of per-person rows to the caller's line. Used for LISTING

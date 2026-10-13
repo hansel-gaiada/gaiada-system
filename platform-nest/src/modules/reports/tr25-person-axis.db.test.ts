@@ -533,4 +533,95 @@ describe.skipIf(!TEST_URL)("⚡ TR-25 person-axis boundary (live PG + RLS + Cerb
       expect(mine.json().appraisals).toEqual([]);
     });
   });
+
+  // ═══════════════ DW-4b (BFF §37): a unit's WHOLE roster on the person-grain overview ═══════════
+  describe("DW-4b — overview?grain=person&unit=<orgNodeId> lists the unit's whole roster", () => {
+    type Scope = { scopeRef: string; scopeName: string; kpis: unknown[]; activity?: boolean };
+    const unitOverview = (u: string, unit: string, grain = "person") =>
+      get(asUser(u), `/reports/overview?grain=${grain}&unit=${unit}&${RANGE}`);
+
+    beforeAll(async () => {
+      // fran has fact rows in July; ben (same unit, quiet) has NONE. Direct fact rows rather than a
+      // recompute: the point is the roster/activity contract, not the fact job (fact-job.db.test.ts).
+      await withTenants(
+        [co],
+        (c) =>
+          c.query(
+            `INSERT INTO report_work_facts (id, tenant_id, fact_date, user_id, unit_node_id, department_node_id, tasks_completed, tasks_completed_on_time, minutes_logged, origin_site)
+             VALUES ($1,$2,'2026-07-10',$3,'dv-frontend','d-web',2,1,90,$4)`,
+            [newId(), co, fran, config.originSite],
+          ),
+        { modules: ["reports", "pm", "hr"] },
+      );
+    });
+
+    it("(a) a head of d-web gets EVERY primary member of the subtree; a quiet member is activity:false with kpis []", async () => {
+      const r = await unitOverview(webLead, "d-web");
+      expect(r.statusCode).toBe(200);
+      const body = r.json() as { unit: string; scopes: Scope[] };
+      expect(body.unit).toBe("d-web");
+      const refs = body.scopes.map((x) => x.scopeRef);
+      for (const u of [webLead, fran, ben, admin, hrReader, hrOps]) expect(refs).toContain(u);
+      expect(refs).not.toContain(cora);
+      expect(refs).not.toContain(seoLead);
+      expect(new Set(refs).size).toBe(refs.length);
+
+      const names = body.scopes.map((x) => x.scopeName);
+      expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)));
+
+      const quiet = body.scopes.find((x) => x.scopeRef === ben)!;
+      expect(quiet.activity).toBe(false);
+      expect(quiet.kpis).toEqual([]);
+
+      const active = body.scopes.find((x) => x.scopeRef === fran)!;
+      expect(active.activity).toBe(true);
+      expect(active.kpis.length).toBeGreaterThan(0);
+      // byte-identical to the same person's entry WITHOUT `unit` (same builder, same rows)
+      const plain = await get(asUser(webLead), `/reports/overview?grain=person&${RANGE}`);
+      const plainFran = (plain.json().scopes as Scope[]).find((x) => x.scopeRef === fran)!;
+      expect(active.kpis).toEqual(plainFran.kpis);
+    });
+
+    it("(a2) a DIVISION is a unit too: dv-backend lists only ben", async () => {
+      const r = await unitOverview(webLead, "dv-backend");
+      expect(r.statusCode).toBe(200);
+      expect((r.json().scopes as Scope[]).map((x) => x.scopeRef)).toEqual([ben]);
+    });
+
+    it("(b) a head asking for a unit outside their line is 403 — and so is an unknown id (no existence leak)", async () => {
+      expect((await unitOverview(webLead, "d-seo")).statusCode).toBe(403);
+      expect((await unitOverview(webLead, "d-nope")).statusCode).toBe(403);
+    });
+
+    it("(c) a company-wide caller asking for a unit that is not in the structure gets 404 unit_not_found", async () => {
+      const r = await unitOverview(admin, "d-nope");
+      expect(r.statusCode).toBe(404);
+      expect(r.json()).toMatchObject({ message: "unit_not_found", field: "unit" });
+      // ...and is not narrowed for a real unit outside any lead's line
+      const seo = await unitOverview(admin, "d-seo");
+      expect(seo.statusCode).toBe(200);
+      expect((seo.json().scopes as Scope[]).map((x) => x.scopeRef).sort()).toEqual([cora, seoLead].sort());
+    });
+
+    it("(d) `unit` with any grain other than person is 400, before authorization", async () => {
+      for (const u of [webLead, admin]) {
+        const r = await unitOverview(u, "d-web", "department");
+        expect(r.statusCode).toBe(400);
+        expect(r.json()).toMatchObject({ message: "unit is only valid with grain=person", field: "unit" });
+      }
+    });
+
+    it("(e) WITHOUT `unit` the response is unchanged: no `activity`, no `unit`", async () => {
+      for (const u of [webLead, admin]) {
+        const r = await get(asUser(u), `/reports/overview?grain=person&${RANGE}`);
+        expect(r.statusCode).toBe(200);
+        expect(r.json()).not.toHaveProperty("unit");
+        for (const sc of r.json().scopes as Array<Record<string, unknown>>) expect(sc).not.toHaveProperty("activity");
+      }
+    });
+
+    it("(f) a plain member is refused (Cerbos read_person)", async () => {
+      expect((await unitOverview(fran, "dv-frontend")).statusCode).toBe(403);
+    });
+  });
 });

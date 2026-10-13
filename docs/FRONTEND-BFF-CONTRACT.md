@@ -6463,7 +6463,7 @@ Every item: `{id, kind, title, date, fileId, ready}`. `id` is the source row (co
 
 **Known limit.** Portal scope comes from `resolvePortalScope`, which flattens a contact's project scope across their clients (on the board under "Before real clients use the portal"). This list is built only from the shared predicates and does not work around it, so the kernel fix covers it too.
 
-## 37. A unit's roster on the person-grain report overview (DW-4b, 2026-10-13) — `platform-nest/src/modules/reports/reports.controller.ts` (`getOverview`), `person-scope.ts` — **STATUS: PLANNED (contract first)**
+## 37. A unit's roster on the person-grain report overview (DW-4b, 2026-10-13) — `platform-nest/src/modules/reports/reports.controller.ts` (`getOverview`), `person-scope.ts` — **STATUS: BUILT, PROTOTYPED (DB suite tr25-person-axis.db.test.ts on the Linux CI gate)**
 
 **Why.** A head's Team report must list everyone in their unit. `GET /reports/overview?grain=person` lists only people who have fact rows in the range, so a quiet team member would silently drop off the page. An empty or short list is a claim; this one would be false. Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.1 and §5.6.
 
