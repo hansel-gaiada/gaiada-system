@@ -56,6 +56,7 @@ const TYPE_LABEL: Record<QueueItemType, string> = {
   gate: "Pipeline gate",
   task: "Task",
   mention: "Mention",
+  conversation: "Conversation",
 };
 
 function ageDays(createdAt: string, todayIso: string): number | null {
@@ -105,7 +106,7 @@ export default async function GmDecisionsPage({ params }: { params: Params }) {
   // Decisions first, then everything else — the tier weights already rank approvals/gates above
   // tasks/mentions, so `rankByUrgency`'s order is kept as-is rather than re-sorted here.
   const decisions = items.filter((i) => i.type === "approval" || i.type === "gate");
-  const rest = items.filter((i) => i.type === "task" || i.type === "mention");
+  const rest = items.filter((i) => i.type === "task" || i.type === "mention" || i.type === "conversation");
 
   const withAge = decisions.map((i) => ({ item: i, days: ageDays(i.createdAt, today) }));
   const stale = withAge.filter((r) => r.days !== null && r.days >= STALE_DAYS).length;

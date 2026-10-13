@@ -8,13 +8,15 @@ import type { StaffDraft, StaffMessage, StaffThread, ThreadSnapshot } from "./co
 export async function listThreads(
   userId: string,
   tenant: string,
-  opts: { clientId?: string; projectId?: string; status?: "open" | "closed"; awaitingReply?: boolean } = {},
+  opts: { clientId?: string; projectId?: string; status?: "open" | "closed"; awaitingReply?: boolean; mine?: boolean } = {},
 ): Promise<StaffThread[]> {
   const q = new URLSearchParams();
   if (opts.clientId) q.set("clientId", opts.clientId);
   if (opts.projectId) q.set("projectId", opts.projectId);
   if (opts.status) q.set("status", opts.status);
   if (opts.awaitingReply !== undefined) q.set("awaitingReply", String(opts.awaitingReply));
+  // DW-5g: only threads where the caller is a staff recipient (BFF §29b `mine`).
+  if (opts.mine !== undefined) q.set("mine", String(opts.mine));
   const qs = q.toString();
   const r = await platformFetch<{ threads: StaffThread[] }>(`/api/${tenant}/conversation${qs ? `?${qs}` : ""}`, userId);
   return r.threads ?? [];

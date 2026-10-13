@@ -50,6 +50,20 @@ export function staffThreadHref(clientId: string, threadId: string): string {
   return `/clients/${clientId}/work/conversation/${threadId}`;
 }
 
+/** THE staff-recipient rule as one SQL fragment: a subquery of user ids, `thread` authors (live staff messages) UNION the
+ *  project's owner UNION the client's account manager. The arguments are SQL expressions (a bind parameter or a column of
+ *  the enclosing query) so the notify path and the staff list's `mine` filter (DW-5g) share ONE definition. */
+export function staffRecipientIdsSql(x: { thread: string; project: string; client: string }): string {
+  return `SELECT m.author_id FROM conversation_messages m
+           WHERE m.thread_id = ${x.thread} AND m.author_side = 'staff' AND m.retracted_at IS NULL
+          UNION
+          SELECT p.owner_id FROM projects p
+           WHERE p.id = ${x.project} AND p.deleted_at IS NULL AND p.owner_id IS NOT NULL
+          UNION
+          SELECT cl.owner_user_id FROM clients cl
+           WHERE cl.id = ${x.client} AND cl.deleted_at IS NULL AND cl.owner_user_id IS NOT NULL`;
+}
+
 /** Staff who should hear about activity on a thread. See the file header for the rule. The actor is excluded here (and
  *  `notify()` also skips self); an inactive or soft-deleted user is dropped. Ordered by id so the result is deterministic. */
 export async function resolveStaffRecipients(
@@ -62,14 +76,7 @@ export async function resolveStaffRecipients(
       WHERE u.status = 'active' AND u.deleted_at IS NULL
         AND ($4::uuid IS NULL OR u.id <> $4::uuid)
         AND u.id IN (
-          SELECT m.author_id FROM conversation_messages m
-           WHERE m.thread_id = $1 AND m.author_side = 'staff' AND m.retracted_at IS NULL
-          UNION
-          SELECT p.owner_id FROM projects p
-           WHERE p.id = $2::uuid AND p.deleted_at IS NULL AND p.owner_id IS NOT NULL
-          UNION
-          SELECT cl.owner_user_id FROM clients cl
-           WHERE cl.id = $3 AND cl.deleted_at IS NULL AND cl.owner_user_id IS NOT NULL
+          ${staffRecipientIdsSql({ thread: "$1", project: "$2::uuid", client: "$3" })}
         )
       ORDER BY u.id`,
     [params.threadId, params.projectId, params.clientId, params.actorId],

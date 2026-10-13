@@ -46,7 +46,7 @@ import {
   createProjectThread, findOrCreateGeneralThread,
   insertMessage, isUuid, markRead, prepareAttachments, readMessages, unreadCountSql, validateBody, validateSubject,
 } from "./conversation-core";
-import { notifyDraftCreated, notifyStaffPosted } from "./conversation-notify";
+import { notifyDraftCreated, notifyStaffPosted, staffRecipientIdsSql } from "./conversation-notify";
 
 const THREAD_STATUSES = new Set(["open", "closed"]);
 const MAX_IDEMPOTENCY_KEY = 200;
@@ -86,11 +86,11 @@ const DRAFT_COLUMNS = `
 const ALL = "all";
 const noFilter = (v: string | undefined): string | undefined => (v === ALL ? undefined : v);
 
-function boolQuery(v: unknown): boolean | null {
+function boolQuery(v: unknown, name = "awaitingReply"): boolean | null {
   if (v === undefined || v === null || v === "" || v === ALL) return null;
   if (v === "true" || v === "1") return true;
   if (v === "false" || v === "0") return false;
-  throw new BadRequestException("awaitingReply must be true or false");
+  throw new BadRequestException(`${name} must be true or false`);
 }
 
 @Controller("api")
@@ -99,7 +99,8 @@ export class ConversationController {
   // ── Reads ─────────────────────────────────────────────────────────────────────────────────────
 
   /** Threads in the tenant, newest activity first. Filters: `clientId`, `projectId`, `awaitingReply`,
-   *  `status`. `unreadCount` = client messages newer than the caller's read marker. */
+   *  `status`, `mine` (DW-5g: the caller is a staff recipient of the thread, the SAME rule the notices use,
+   *  `staffRecipientIdsSql`; a filter inside the already-authorized list). `unreadCount` = client messages newer than the caller's read marker. */
   @Get(":tenantId/conversation")
   async list(
     @Req() req: FastifyRequest,
@@ -108,6 +109,7 @@ export class ConversationController {
     @Query("projectId") projectId?: string,
     @Query("awaitingReply") awaitingReply?: string,
     @Query("status") status?: string,
+    @Query("mine") mine?: string,
   ) {
     await authorize(req.principal, { kind: "conversation", tenantId }, "read");
     clientId = noFilter(clientId);
@@ -117,6 +119,7 @@ export class ConversationController {
     if (projectId && !isUuid(projectId)) throw new BadRequestException("projectId must be a uuid");
     if (status && !THREAD_STATUSES.has(status)) throw new BadRequestException("status must be open|closed");
     const awaiting = boolQuery(awaitingReply);
+    const mineOnly = boolQuery(mine, "mine");
     return withTenants([tenantId], async (c) => {
       const rows = await c.query(
         `SELECT ${THREAD_COLUMNS}, ${unreadCountSql("t", "r", "client")} AS "unreadCount"
@@ -130,9 +133,10 @@ export class ConversationController {
             AND ($3::uuid IS NULL OR t.project_id = $3::uuid)
             AND ($4::text IS NULL OR t.status = $4::text)
             AND ($5::boolean IS NULL OR (COALESCE(lm.author_side = 'client', false) AND t.status = 'open') = $5::boolean)
+            AND ($6::boolean IS NULL OR ($1::uuid IN (${staffRecipientIdsSql({ thread: "t.id", project: "t.project_id", client: "t.client_id" })})) = $6::boolean)
           ORDER BY t.last_message_at DESC, t.id DESC
           LIMIT 200`,
-        [req.principal.userId, clientId || null, projectId || null, status || null, awaiting],
+        [req.principal.userId, clientId || null, projectId || null, status || null, awaiting, mineOnly],
       );
       return { threads: rows.rows };
     });
