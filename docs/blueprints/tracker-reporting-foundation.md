@@ -783,7 +783,12 @@ export interface ReportHeader {
   // ([start − dayCount, start − 1]) — "previous period" is otherwise ambiguous for an arbitrary span.
   // For a calendar kind it is the preceding period OF THE SAME KIND over its own day count
   // (Q1 2027 -> Q4 2026; Semester 1 2027 -> Semester 2 2026; Year 2027 -> Year 2026).
-  comparison?: { periodStart: string; periodEnd: string; dayCount: number };
+  comparison?: {
+    periodStart: string; periodEnd: string; dayCount: number;
+    // DW-4m: the comparison window's own honesty flags (§15, DW-4m entry).
+    precedesFactHistory?: { firstFactDate: string; affectedDays: number };
+    noFacts?: true;            // the whole comparison window precedes fact history: no KPI carries a delta
+  };
   providerView?: { servedTenantId: string; servedTenantName: string }; // shared-service slice
   // Honesty flags — set at build time, rendered by the viewer AND carried onto every export (§6.3).
   // A user-chosen range will straddle these constantly; silence here would be a lie of omission.
@@ -806,7 +811,10 @@ export interface ReportKpi {
   value: number;               // for ratios: numerator/denominator, computed at build
   numerator?: number;          // ALWAYS present for ratio metrics (invariant 2)
   denominator?: number;
-  delta?: number;              // vs comparison period, same unit (percent-point for ratios)
+  delta?: number;              // vs comparison period, same unit (percent-point for ratios). ABSENT when the
+                               //   baseline is not real (DW-4m): comparison.noFacts, or a ratio with a 0
+                               //   denominator on either side
+  previous?: { value: number; numerator?: number; denominator?: number }; // DW-4m: the comparison window's parts
   direction?: "up_good" | "down_good" | "neutral";
   appraisalSafe: boolean;
   // §5.4 class markers for the two non-additive metrics. The viewer and the XLSX exporter MUST
@@ -1696,6 +1704,41 @@ File paths are repo-relative to `gaiada-system/`.
 ---
 
 ## 15. Amendment log
+
+**2026-10-13 (DW-4m, contract first) · a comparison says when its baseline is not real.**
+Found by the DW-3 session while building the Overview's "Your numbers" (DW-3d), which reads the person
+document's deltas. Two cases produce a delta against nothing, and the document cannot say so:
+1. The current period starts after the tenant's first fact, but the comparison period starts before it
+   (May 2026 against April, when facts begin on 1 May). No warning is set, because `precedesFactHistory`
+   describes only the current window. Every additive KPI then "grew" from an empty baseline.
+2. A ratio whose comparison denominator is 0 has `value` 0 (`kpiValueParts`), so the delta is the whole
+   current ratio, against "nothing measured". The document carries no previous parts, so no reader can tell.
+The same is true the other way round: a current denominator of 0 reads as a fall to 0%.
+
+This entry is the contract DW-4m builds to.
+
+- **`ReportHeader.comparison` gains two fields**, computed exactly as the current window's warning is:
+  - `precedesFactHistory?: { firstFactDate: string; affectedDays: number }` when the comparison window starts
+    before the tenant's first fact date;
+  - `noFacts?: true` when the whole comparison window lies before it (`affectedDays === comparison.dayCount`).
+- **`ReportKpi` gains `previous?: { value: number; numerator?: number; denominator?: number }`**: the
+  comparison window's value and, for a ratio, its parts. Present on every KPI of a document read that has a
+  `comparison`. Never on the overview listing (`buildHeadlineKpis`), which has no comparison.
+- **When `delta` is left out** (absent, never 0):
+  - every KPI, when `comparison.noFacts`;
+  - a ratio KPI (`numerator` and `denominator` present) whose current or previous denominator is 0;
+  - `evidence.source_diversity`, when `comparison.noFacts`.
+  Otherwise `delta = value − previous.value`, as today.
+- **A partly empty baseline keeps its delta.** When `comparison.precedesFactHistory` is set without
+  `noFacts`, readers must say so beside the delta ("compared with a period that starts before records
+  began on <date>"). The report pages' warnings banner and the Overview read the same field.
+- **Nothing else changes.** Highlights do not read `delta`. The deterministic and AI narratives already skip
+  a KPI without one. KPI tiles already hide the delta chip when it is absent. Appraisal `auto_inputs` read
+  `value` and its parts, never `delta`.
+- **Sealed documents are the record.** A document sealed before DW-4m keeps its stored shape: absent fields
+  read as "not known", never as "baseline fine". No backfill and no re-seal.
+- **Demo.** `demoReports.ts` emits the same fields with the same rules.
+- **MCP.** `reports.getDocument`'s description says that a missing `delta` means "no real baseline".
 
 **2026-10-13 (DW-4a, contract first) · quarter, semester and year become calendar period kinds.**
 The 2026-07-30 amendment deferred "quarterly/annual as real calendar kinds" because presets covered
