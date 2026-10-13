@@ -11,6 +11,23 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.122.0` - DW-4m: a report comparison says when its baseline is not real (2026-10-13) - PROTOTYPED
+
+Contract: `docs/blueprints/tracker-reporting-foundation.md` §15, the DW-4m entry (with §6.1). Found by the DW-3 session (DW-3d).
+- **`header.comparison`** gains `precedesFactHistory` (the comparison window starts before the tenant's first fact) and `noFacts` (the whole window does). One shared pure `factHistoryGap` now computes both this and the current window's `warnings.precedesFactHistory`, so the two can never disagree; `computeComparisonFlags` is exported.
+- **`ReportKpi.previous`** carries the comparison window's value and, for a ratio, its parts, on every KPI of a document read. The overview listing is unchanged.
+- **`delta` is left out (never 0)** when the comparison window has no facts, or when a ratio's denominator is 0 on either side. Highlights never read it; the narratives already skip a KPI without it; CSV and XLSX export an empty cell. `buildKpis` takes a required `comparisonNoFacts`.
+- **TR-29 job 3** now compares the period's own numbers: a custom March and the sealed March agree on values and parts, but their baselines differ by definition (29 Jan to 28 Feb holds 22 working days, February 20), which `previous` now shows. Recorded in the contract.
+- **MCP.** `reports.getDocument`'s description says a KPI without `delta` had no real baseline.
+- Sealed documents keep their stored shape; absent fields read as "not known". No migration, no Cerbos change.
+- **Tests.** `document-builder.test.ts` (five omission cases, the comparison flags, the listing unchanged), `document-builder.db.test.ts` (a straddling and a wholly-before comparison window on live Postgres).
+
+### platform-ui `0.125.0` - DW-4l and DW-4m: ratio KPIs and comparisons read honestly on the report pages (2026-10-13) - PROTOTYPED
+
+- **DW-4l, Team report.** `/reports/team` printed a ratio's bare value, so an active person with no task due in the period read "0%" on time (seen live on 1.0.0-alpha.377). A ratio whose denominator is 0 now reads "—"; a measured 0% still reads 0%. New pure `lib/teamReport.ts`, tested.
+- **DW-4l, `DeltaChip`.** It printed a ratio's delta as the raw fraction with "pp" ("0.04pp" for four points; found by the DW-3 session). It now reads whole points, the Overview's rule (`lib/overviewNumbers.ts`); minutes read whole; a delta that rounds to nothing reads flat. A caller's own `magnitude` is shown as given. `DeltaChip.test.tsx` is new.
+- **DW-4m, warnings banner.** It says "No comparison: the previous period (…) has no records." or "Compared with a period that starts before records began on …; the change is against a partly empty baseline.", and now shows when only a comparison flag is set. `lib/reports.ts` mirrors the new fields; the demo emits them with the same rules.
+
 ### platform-nest `0.121.0` - DW-5a, DW-5c and DW-5g: campaign parts, requests between departments, and client replies in Needs you (2026-10-13) - PROTOTYPED
 
 Contracts: `docs/FRONTEND-BFF-CONTRACT.md` §31 (campaign parts) and §32 (requests between departments). Plan: `docs/plans/2026-10-13-department-workspaces.md` §7.3. Rulings: DW-D13 and DW-D14.
