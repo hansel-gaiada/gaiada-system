@@ -251,14 +251,13 @@ const SHARED_CAMPAIGNS: WorkspaceTab = {
   blurb: "Shared campaigns this department has a part in, with our part's status.",
 };
 
-/** The department's clients. Needs a department filter on the BFF first (DW-6d). */
+/** The department's clients: the clients with a live project the department (or a unit under it) owns (§33, DW-6d). */
 const CLIENTS_ROW: WorkspaceRow = {
   key: "clients",
   label: "Clients",
   icon: "finance",
   gate: { kind: "agencyRow", row: "clients" },
-  ticket: "DW-6d",
-  tabs: [{ key: "clients", label: "Clients", href: deptPath("clients"), icon: "finance", ticket: "DW-6d" }],
+  tabs: [{ key: "clients", label: "Clients", href: deptPath("clients"), icon: "finance" }],
 };
 
 /** "Ask Creatives for assets" and "Ask Web Dev" (§7.2): every agency workspace, and only where the company HAS the

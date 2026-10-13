@@ -157,8 +157,15 @@ export const updateApprovalRetryCount = (u: string, companyId: string, autoRetry
 // CC-1: `clientId` may be a uuid or the reserved `"internal"` (projects with no client). Omitted is
 // unchanged — every project. Filtering server-side matters beyond tidiness: the client page used to
 // fetch every project in the tenant and narrow in the browser, which stops being a filter at volume.
-export const listProjects = (u: string, t: string, clientId?: string) =>
-  platformFetch<Project[]>(`/api/${t}/projects${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`, u);
+// DW-6d (contract §33): `departmentId` is an org-node id; the BFF returns the projects owned by that node or any
+// node under it, ANDed with `clientId`. Omitted is unchanged.
+export const listProjects = (u: string, t: string, clientId?: string, departmentId?: string) => {
+  const q = new URLSearchParams();
+  if (clientId) q.set("clientId", clientId);
+  if (departmentId) q.set("departmentId", departmentId);
+  const qs = q.toString();
+  return platformFetch<Project[]>(`/api/${t}/projects${qs ? `?${qs}` : ""}`, u);
+};
 export const getProject = (u: string, t: string, id: string) => platformFetch<ProjectDetail>(`/api/${t}/projects/${id}`, u);
 
 // ---- Tasks (list endpoints exist; detail endpoint may not, derive as fallback) ----
@@ -234,8 +241,17 @@ export interface Deliverable {
 }
 export interface TimeEntry { id: string; user_id: string; project_id: string; task_id: string | null; minutes: number; billable: boolean; entry_date: string; notes: string }
 
-export const listClients = (u: string, t: string) =>
-  skipUnavailable(platformFetch<Client[]>(`/api/${t}/clients`, u), [] as Client[]);
+// DW-6d (contract §33): `departmentId` narrows to the clients with a live project owned by that org node or any node
+// under it. Omitted is unchanged. Like every reader here, this folds a 403/404 into [] — a page that must tell "none"
+// from "refused" reads `readClients` below instead.
+function clientsPath(t: string, departmentId?: string): string {
+  return `/api/${t}/clients${departmentId ? `?departmentId=${encodeURIComponent(departmentId)}` : ""}`;
+}
+export const listClients = (u: string, t: string, departmentId?: string) =>
+  skipUnavailable(platformFetch<Client[]>(clientsPath(t, departmentId), u), [] as Client[]);
+/** `listClients` with a refusal kept distinct from "none" (the department Clients page, DW-6d). */
+export const readClients = (u: string, t: string, departmentId?: string): Promise<ReadResult<Client[]>> =>
+  readResult(platformFetch<Client[]>(clientsPath(t, departmentId), u));
 export async function getClient(u: string, t: string, id: string): Promise<Client | null> {
   const list = await listClients(u, t);
   return list.find((c) => c.id === id) ?? null;
@@ -266,17 +282,23 @@ export const deleteClientNote = (u: string, t: string, id: string, noteId: strin
 export const deleteClient = (u: string, t: string, id: string) =>
   platformFetch<{ ok: true }>(`/api/${t}/clients/${id}`, u, { method: "DELETE" });
 
-function deliverablesPath(t: string, projectId?: string, clientId?: string): string {
+function deliverablesPath(t: string, projectId?: string, clientId?: string, departmentId?: string): string {
   const q = new URLSearchParams();
   if (projectId) q.set("projectId", projectId);
+  // DW-6g (contract §33): the BFF matches on the deliverable's PROJECT (the node or any node under it).
+  if (departmentId) q.set("departmentId", departmentId);
   // PV3-05: the backend has filtered on `clientId` all along (client-work.controller.ts); this reader
   // never sent it, so the client hub fetched the whole tenant and narrowed in the browser.
   if (clientId) q.set("clientId", clientId);
   const qs = q.toString();
   return `/api/${t}/deliverables${qs ? `?${qs}` : ""}`;
 }
-export const listDeliverables = (u: string, t: string, projectId?: string, clientId?: string) =>
-  skipUnavailable(platformFetch<Deliverable[]>(deliverablesPath(t, projectId, clientId), u), [] as Deliverable[]);
+export const listDeliverables = (u: string, t: string, projectId?: string, clientId?: string, departmentId?: string) =>
+  skipUnavailable(platformFetch<Deliverable[]>(deliverablesPath(t, projectId, clientId, departmentId), u), [] as Deliverable[]);
+/** One department's deliverables (on the projects the node or any node under it owns), in the list's own order, with a
+ *  refusal kept distinct from "none" (the department Deliverables page, DW-6g). */
+export const readDepartmentDeliverables = (u: string, t: string, departmentId: string): Promise<ReadResult<Deliverable[]>> =>
+  readResult(platformFetch<Deliverable[]>(deliverablesPath(t, undefined, undefined, departmentId), u));
 /** One client's deliverables, server-filtered, with a refusal kept distinct from "none" (the client
  *  hub's Projects area). `listDeliverables` above folds 403/404 into [] and stays for its old callers. */
 export const listClientDeliverables = (u: string, t: string, clientId: string): Promise<ReadResult<Deliverable[]>> =>
