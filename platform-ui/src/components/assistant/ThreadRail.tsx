@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { groupThreads, filterThreads, threadTitle, type AssistantThread } from "@/lib/assistant";
 
 // ASST-07 — the left rail. Lifted from aivory's `components/sidebar/` (ConversationHistory +
@@ -12,8 +12,16 @@ import { groupThreads, filterThreads, threadTitle, type AssistantThread } from "
 // why: the rail loads the owner's full set — max 200, the backend's own cap — in one page, so a
 // per-keystroke round trip buys nothing here that a local substring filter doesn't already give for
 // free, and it avoids a whole class of "stale results while typing" races).
+//
+// DW-2h — ONE fallback on top of that: when the loaded list has no title match, ask the server's own
+// list (`q`, already there) so a thread older than the loaded page is still findable. The local filter
+// still answers first and for every keystroke; the server is asked only on a miss, after a pause, and
+// only the answer to the CURRENT query is ever shown (each pending ask is dropped when the query moves).
+export const SERVER_SEARCH_DEBOUNCE_MS = 300;
+
 export function ThreadRail({
   threads, activeThreadId, busy, collapsed = false, onToggleCollapsed, onSelect, onNew, onRename, onTogglePin, onToggleArchive, onDelete,
+  searchServer,
 }: {
   threads: AssistantThread[];
   activeThreadId: string | null;
@@ -31,13 +39,52 @@ export function ThreadRail({
   onTogglePin: (id: string, pinned: boolean) => void;
   onToggleArchive: (id: string, archived: boolean) => void;
   onDelete: (id: string) => void;
+  /** Asks the server's list for threads whose title matches `q`; `null` when it could not answer. Must be
+   *  a stable function (it is an effect dependency). Without it the rail only filters what is loaded. */
+  searchServer?: (q: string) => Promise<AssistantThread[] | null>;
 }) {
   const [query, setQuery] = useState("");
+  const [remote, setRemote] = useState<{ q: string; items: AssistantThread[] } | null>(null);
+  const [searching, setSearching] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  const visible = useMemo(() => filterThreads(threads, query), [threads, query]);
+  const trimmed = query.trim();
+  const local = useMemo(() => filterThreads(threads, query), [threads, query]);
+  const localMiss = trimmed !== "" && local.length === 0;
+
+  useEffect(() => {
+    if (!localMiss || !searchServer) {
+      setRemote(null);
+      setSearching(false);
+      return;
+    }
+    let dropped = false;
+    setSearching(true);
+    const timer = setTimeout(() => {
+      searchServer(trimmed)
+        .catch(() => null)
+        .then((items) => {
+          if (dropped) return; // the query moved on: never show an older query's answer
+          setSearching(false);
+          setRemote(items ? { q: trimmed, items } : null);
+        });
+    }, SERVER_SEARCH_DEBOUNCE_MS);
+    return () => {
+      dropped = true;
+      clearTimeout(timer);
+    };
+  }, [localMiss, trimmed, searchServer]);
+
+  // A row found by the server is not in `threads`, so the caller's optimistic updates never reach it:
+  // mirror them onto the answer here, so a pin or rename on a found row shows at once.
+  function patchRemote(id: string, patch: Partial<AssistantThread> | null) {
+    setRemote((r) => (r ? { ...r, items: patch ? r.items.map((t) => (t.id === id ? { ...t, ...patch } : t)) : r.items.filter((t) => t.id !== id) } : r));
+  }
+
+  const remoteItems = remote && remote.q === trimmed ? remote.items : null;
+  const visible = localMiss ? (remoteItems ?? []) : local;
   const grouped = useMemo(() => groupThreads(visible), [visible]);
 
   function startRename(t: AssistantThread) {
@@ -48,7 +95,7 @@ export function ThreadRail({
     const id = editingId;
     const title = editValue.trim();
     setEditingId(null);
-    if (id && title) onRename(id, title);
+    if (id && title) { patchRemote(id, { title }); onRename(id, title); }
   }
 
   function renderRow(t: AssistantThread) {
@@ -56,6 +103,18 @@ export function ThreadRail({
     const archived = t.status === "archived";
     return (
       <li key={t.id} className={`asst-rail__row${active ? " asst-rail__row--active" : ""}`}>
+        {/* DW-2h — the pin leads the row, so it is the first thing a keyboard or pointer reaches and its
+            state is visible at a glance (filled and accent-coloured when pinned), not buried among the
+            row actions. Still the same PATCH (`onTogglePin`). */}
+        <button
+          type="button"
+          className={`asst-rail__pin${t.pinned ? " asst-rail__pin--on" : ""}`}
+          aria-label={t.pinned ? `Unpin "${threadTitle(t)}"` : `Pin "${threadTitle(t)}"`}
+          title={t.pinned ? "Unpin" : "Pin"}
+          onClick={() => { patchRemote(t.id, { pinned: !t.pinned }); onTogglePin(t.id, !t.pinned); }}
+        >
+          <span aria-hidden="true">{t.pinned ? "★" : "☆"}</span>
+        </button>
         {editingId === t.id ? (
           <input
             className="asst-rail__rename-input"
@@ -84,15 +143,6 @@ export function ThreadRail({
           <button
             type="button"
             className="asst-rail__icon-btn"
-            aria-label={t.pinned ? `Unpin "${threadTitle(t)}"` : `Pin "${threadTitle(t)}"`}
-            title={t.pinned ? "Unpin" : "Pin"}
-            onClick={() => onTogglePin(t.id, !t.pinned)}
-          >
-            <span aria-hidden="true">{t.pinned ? "★" : "☆"}</span>
-          </button>
-          <button
-            type="button"
-            className="asst-rail__icon-btn"
             aria-label={`Rename "${threadTitle(t)}"`}
             title="Rename"
             onClick={() => startRename(t)}
@@ -104,7 +154,7 @@ export function ThreadRail({
             className="asst-rail__icon-btn"
             aria-label={archived ? `Unarchive "${threadTitle(t)}"` : `Archive "${threadTitle(t)}"`}
             title={archived ? "Unarchive" : "Archive"}
-            onClick={() => onToggleArchive(t.id, !archived)}
+            onClick={() => { patchRemote(t.id, { status: archived ? "active" : "archived" }); onToggleArchive(t.id, !archived); }}
           >
             <span aria-hidden="true">{archived ? "↩" : "⬇"}</span>
           </button>
@@ -112,7 +162,7 @@ export function ThreadRail({
             <button
               type="button"
               className="asst-rail__icon-btn asst-rail__icon-btn--danger"
-              onClick={() => { onDelete(t.id); setConfirmDeleteId(null); }}
+              onClick={() => { patchRemote(t.id, null); onDelete(t.id); setConfirmDeleteId(null); }}
               onBlur={() => setConfirmDeleteId(null)}
             >
               Confirm delete
@@ -190,7 +240,9 @@ export function ThreadRail({
               </section>
             ))}
             {visible.length === 0 && (
-              <p className="asst-rail__empty">{query ? "No sessions match your search." : "No sessions yet — start one above."}</p>
+              <p className="asst-rail__empty" role={searching ? "status" : undefined}>
+                {searching ? "Searching older sessions…" : query ? "No sessions match your search." : "No sessions yet — start one above."}
+              </p>
             )}
           </div>
         </div>

@@ -70,16 +70,42 @@ export function derivePageContextRef(pathname: string | null | undefined, tenant
   return null;
 }
 
+/** The page a drawer or full page was opened from, as a path we are willing to send the person back to:
+ *  same-origin and absolute, never a protocol-relative or backslash trick, and never the assistant itself
+ *  (a "close" that lands on /assistant would loop). Anything else is `null`, so a forged `?from=` can
+ *  neither redirect off-site nor skip the fallback. */
+export function safeFromPath(raw: string | null | undefined): string | null {
+  if (!raw || raw.length > 512) return null;
+  if (!raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return null;
+  for (const ch of raw) {
+    const c = ch.charCodeAt(0);
+    if (c < 0x20 || c === 0x7f) return null;
+  }
+  if (raw === "/assistant" || raw.startsWith("/assistant/") || raw.startsWith("/assistant?")) return null;
+  return raw;
+}
+
 /** The FAB's own `href` for the current page — `/assistant` (the intercepted route's target) with
- *  the derived ref (if any) carried as `?ctx=`. This is the ONLY channel the drawer route has for
+ *  the derived ref (if any) carried as `?ctx=`, and the page's own path as `&from=` (DW-2h). This is the ONLY
+ *  channel the drawer route has for
  *  learning what page it was opened from: it is a parallel-route slot that renders alongside
  *  whatever page is already mounted (`(app)/layout.tsx`'s `children` never re-renders on this
  *  navigation), so `usePathname()` read INSIDE the drawer would report `/assistant` itself, not the
  *  page the user was actually on. Capturing it here, at the trigger, is what makes that fact not
- *  matter. */
+ *  matter. `from` is the origin PATH (the department and the way back are read from it); `ctx` stays
+ *  the pinned entity, derived exactly as before. */
 export function assistantDrawerHref(pathname: string | null | undefined, tenantId: string | null): string {
   const ctx = derivePageContextRef(pathname, tenantId);
-  return ctx ? `/assistant?ctx=${encodeURIComponent(ctx.ref)}` : "/assistant";
+  const from = safeFromPath(pathname);
+  const qs: string[] = [];
+  if (ctx) qs.push(`ctx=${encodeURIComponent(ctx.ref)}`);
+  if (from) qs.push(`from=${encodeURIComponent(from)}`);
+  return qs.length ? `/assistant?${qs.join("&")}` : "/assistant";
+}
+
+/** "Open in full page": the SAME thread (by id) and the same way back. */
+export function assistantFullPageHref(threadId: string, from: string | null): string {
+  return `/assistant?thread=${encodeURIComponent(threadId)}${from ? `&from=${encodeURIComponent(from)}` : ""}`;
 }
 
 /** The one-time preamble prepended to the FIRST outgoing message of a thread opened with a page

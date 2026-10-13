@@ -22,7 +22,10 @@ import {
 // `confirmMemoryAction` is called for THREE different user intents here: confirming a proposal,
 // editing an already-confirmed row's text, and toggling pin. All three are the same backend call
 // with different fields set; see assistantActions.ts's confirmMemoryAction header.
-export function MemoryPanel({ activeThreadId, onClose }: { activeThreadId: string | null; onClose: () => void }) {
+//
+// DW-2h — this is the Memory TAB of the Details panel (`DetailsPanel`), which owns the title row and the close
+// button, so the panel renders only its body.
+export function MemoryPanel({ activeThreadId }: { activeThreadId: string | null }) {
   const [items, setItems] = useState<AssistantMemory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -205,13 +208,7 @@ export function MemoryPanel({ activeThreadId, onClose }: { activeThreadId: strin
   }
 
   return (
-    <aside id="asst-memory-panel" className="asst-mem" aria-label="Assistant memory">
-      <div className="asst-mem__head">
-        <p className="type-eyebrow" style={{ color: "var(--erp-accent)" }}>Memory</p>
-        <button type="button" className="asst-mem__close" aria-label="Close memory panel" onClick={onClose}>
-          <span aria-hidden="true">&times;</span>
-        </button>
-      </div>
+    <div id="asst-memory-panel" className="asst-mem">
 
       <form className="asst-mem__propose" onSubmit={handlePropose}>
         <label htmlFor="asst-mem-draft" className="asst-sr-only">Add a memory</label>
@@ -264,6 +261,6 @@ export function MemoryPanel({ activeThreadId, onClose }: { activeThreadId: strin
           </>
         )}
       </div>
-    </aside>
+    </div>
   );
 }
