@@ -100,8 +100,9 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // PV5-02 (2026-10-12): +4 grantable / +4 total on 3 EXISTING kinds (invoice: issue, void_issued; contract: mark_certified; finance_config: set_bank_details). On top of PV4-02: 439 -> 443 / 424 -> 428. uiGrantable true for the first three, FALSE for set_bank_details.
     // M5-V3-f (2026-10-12): +2 grantable / +2 total on the EXISTING resource_search_property kind (read_visitors, view_replay), both uiGrantable TRUE. 443 -> 445 / 428 -> 430.
     // PV4-05 (2026-10-12): +1 grantable / +1 total on the EXISTING meeting_recording kind (`share_minutes`, uiGrantable true). On top of M5-V3-f: 445 -> 446 / 430 -> 431.
-    expect(permissions.length).toBe(446);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(431);
+    // DW-5a (2026-10-13): +5 grantable / +5 total on the NEW agency_campaign_part kind (all uiGrantable TRUE). 446 -> 451 / 431 -> 436.
+    expect(permissions.length).toBe(451);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(436);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 
