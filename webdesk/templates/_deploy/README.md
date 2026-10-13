@@ -239,9 +239,12 @@ is absent, and runs `deploy-from-secret.sh`. Per kind:
   (exit 2, before any connection) a manifest that is not the one the build job pinned, a tree that differs from its manifest, and any
   path outside the theme. Only the theme directory is swapped; `wp-config.php`, `uploads/`, other plugins and themes are never touched.
 - **fullstack:** the static export of `apps/web` (`WEBDESK_STATIC_EXPORT=1`, `apps/web/out`) deploys like static. `deploy-api` fails
-  with "the fullstack API deploy to a Node host is M6-P6l, not built yet" and uploads nothing. A scaffolded page that renders per
-  request (`export const dynamic = "force-dynamic"`, which `code.scaffold`'s item and listing pages do today) cannot be exported:
-  `next build` fails and so does the build job, until the composer emits statically exportable pages.
+  with "the fullstack API deploy to a Node host is M6-P6l, not built yet" and uploads nothing. A scaffolded site's item and listing
+  pages render at build time (M6-P6m, WSK-D83): they read content through the SDK during `next build` (`WEBDESK_HOST` /
+  `WEBDESK_API_KEY` / `WEBDESK_TENANT_SLUG` are set in the build job), item pages use `generateStaticParams()` with
+  `dynamicParams = false`, and a content change reaches the site by a rebuild. A build with no `WEBDESK_HOST` fails loudly ("WEBDESK_HOST
+  is not set"). An empty collection builds: its item page gets one placeholder param that renders the 404. Hand-written pages that
+  render per request (`force-dynamic`, cookies, headers) still cannot be exported.
 
 Limits, said plainly: a push while a deploy runs waits, and GitHub keeps at most one waiting run per group (a newer waiting run
 replaces an older waiting one, so two approved dispatches in quick succession can lose the first; the ERP sees that as `unverified`).

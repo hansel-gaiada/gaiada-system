@@ -11,6 +11,15 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### ai-agents `0.16.0` - M6-P6m: the scaffolded fullstack pages are statically exportable (2026-10-13) - DEV-VERIFIED
+
+- **M6-P6m (WSK-D83, O-6 option A).** `next-page-composer.ts` no longer emits `force-dynamic`, which `output: "export"` refuses (the template's build job failed on every scaffolded fullstack site).
+  - Item and listing pages read content through the SDK at build time. Item pages get `generateStaticParams()` (paged through every cursor, slugs validated) and `dynamicParams = false`, and keep the 404 path. Listing pages are `force-static` and also page through every cursor.
+  - Empty collection: Next 15.5 with export fails on `generateStaticParams()` returning `[]`, so one placeholder param (`_none`) is returned and renders the 404.
+  - No `WEBDESK_HOST`: the build fails loudly ("WEBDESK_HOST is not set"), like a scaffolded astro build.
+- `webdesk/templates/qa/build-templates.sh` step 15 is now a real failing step: the scaffolded site exports with `WEBDESK_STATIC_EXPORT=1` from fixture content served by a local HTTPS stub (`qa/content-stub.mjs`); step 8 builds against the same stub.
+- Verified: ai-agents tsc clean and vitest green locally; the Linux gate result is in the M6 plan P6m row's report.
+
 ### platform-ui `0.114.0` - DW-2h: the AI Assistant page made calmer and aware of the department (2026-10-13) - PROTOTYPED
 
 - **What (for everyone, both shells; owner ruling 2026-10-13):** the assistant page and drawer, plan §6.

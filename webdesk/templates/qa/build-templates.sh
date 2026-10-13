@@ -14,7 +14,8 @@
 #   5  scaffolder: one fullstack site (dry-run, the acme fixture) laid over the template
 #   6  scaffolded site: npm install
 #   7  scaffolded site: typecheck (tsc --noEmit)
-#   8  scaffolded site: next build
+#   8  scaffolded site: next build                       (its item/listing pages read content at build time: WEBDESK_HOST points at
+#        the local HTTPS content stub, qa/content-stub.mjs, since the SDK module throws without a host)
 #   9  scaffolded site: vitest run (offline tests only; the conformance probe self-skips with no WEBDESK_* env)
 #   4b, 8b  Tailwind 4 really emitted utilities: a class used in a page (`.p-8`) is in the built CSS (a v4 build with a
 #        wrong PostCSS/CSS setup succeeds and silently emits NO utilities)
@@ -24,13 +25,15 @@
 #   12 each template's .webdesk/deploy/ copy equals webdesk/templates/_deploy/ (sync-deploy-scripts.mjs --check)
 #   13 each site.yml keeps the credential shape (check-workflows.mjs); actionlint itself is run separately (see README)
 #   14 fullstack: WEBDESK_STATIC_EXPORT=1 makes apps/web write a static site (out/index.html, out/404.html)
-#   15 INFORMATIONAL: the same export of the SCAFFOLDED site (its item/listing pages are force-dynamic today, so it is expected to
-#        fail; the line says so, and says it again if that ever changes)
+#   15 (M6-P6m) scaffolded site: WEBDESK_STATIC_EXPORT=1 exports it from fixture content served by the stub: out/index.html, the
+#        listing page, a case-study item page per fixture slug (with its title), and the item page of an EMPTY collection builds
+#        (its one placeholder renders the 404); the stub's request log proves the build really read through the SDK
 set -uo pipefail
 
 SRC="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+STUB_PID=""
+trap '[ -n "$STUB_PID" ] && kill "$STUB_PID" 2>/dev/null; rm -rf "$WORK"' EXIT
 export CI=1 NEXT_TELEMETRY_DISABLED=1 npm_config_fund=false npm_config_update_notifier=false
 
 FAILED=0
@@ -51,6 +54,32 @@ css_has_utility() { # css_has_utility <apps/web dir> <class>: the built CSS is T
 copy_tree() { # copy_tree <from> <to>: no node_modules/.next/dist/.git
   mkdir -p "$2"; (cd "$1" && tar --exclude=node_modules --exclude=.next --exclude=dist --exclude=.git -cf - .) | (cd "$2" && tar -xf -)
 }
+
+# The scaffolded site reads content at build time through `https://$WEBDESK_HOST/v1/t/<tenant>/...`. Serve fixture content from a local
+# HTTPS stub (throwaway self-signed cert, trusted via NODE_EXTRA_CA_CERTS). Only the build steps get these variables (with_stub):
+# the offline vitest run (step 9) must still see no WEBDESK_* env.
+STUB_PORT=18443
+with_stub() { env WEBDESK_HOST="localhost:$STUB_PORT" WEBDESK_API_KEY=gate-fixture-key NODE_EXTRA_CA_CERTS="$WORK/stub.crt" "$@"; }
+start_stub() {
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost" \n    -keyout "$WORK/stub.key" -out "$WORK/stub.crt" >"$WORK/openssl.log" 2>&1 || { cat "$WORK/openssl.log"; return 1; }
+  : > "$WORK/stub-requests.log"
+  node "$SRC/webdesk/templates/qa/content-stub.mjs" "$STUB_PORT" "$WORK/stub.crt" "$WORK/stub.key" "$WORK/stub-requests.log" >"$WORK/stub.out" 2>&1 &
+  STUB_PID=$!
+  for _ in $(seq 1 50); do grep -q listening "$WORK/stub.out" 2>/dev/null && return 0; sleep 0.1; done
+  cat "$WORK/stub.out"; return 1
+}
+check_export() { # check_export <apps/web dir>: the static export holds the fixture content
+  local out="$1/out" f
+  for f in index.html case-studies/index.html case-studies/alpha/index.html case-studies/beta/index.html articles/index.html; do
+    [ -f "$out/$f" ] || { echo "missing out/$f"; return 1; }
+  done
+  grep -q "Alpha case study" "$out/case-studies/alpha/index.html" || { echo "out/case-studies/alpha/index.html lacks the fixture title"; return 1; }
+  grep -q "Beta case study" "$out/case-studies/index.html" || { echo "out/case-studies/index.html does not list the fixture items"; return 1; }
+  [ -f "$out/articles/_none/index.html" ] || { echo "empty collection: no placeholder page out/articles/_none/index.html"; return 1; }
+  grep -q "GET /v1/t/[^/]*/caseStudy" "$WORK/stub-requests.log" || { echo "the stub saw no content request: the build did not read through the SDK"; return 1; }
+}
+
+export_and_check() { with_stub env WEBDESK_STATIC_EXPORT=1 npm run build && check_export "$PWD"; }
 
 echo "node $(node -v), npm $(npm -v), source $SRC"
 
@@ -80,16 +109,11 @@ if step "5a ai-agents: npm install (scaffolder deps)" "$WORK/repo/ai-agents" npm
         npx tsx ../webdesk/templates/qa/scaffold-fullstack-site.mts "$WORK/site"; then
   step "6  scaffolded site: npm install" "$WORK/site" npm install --no-audit
   step "7  scaffolded site: typecheck" "$WORK/site" npm run typecheck
-  step "8  scaffolded site: next build" "$WORK/site/apps/web" npm run build
+  start_stub || { echo "FAIL  could not start the content stub"; FAILED=1; }
+  step "8  scaffolded site: next build (content from the local stub)" "$WORK/site/apps/web" with_stub npm run build
   step "8b scaffolded site: built CSS has the .p-8 utility (Tailwind 4)" "$WORK/site" css_has_utility apps/web p-8
   step "9  scaffolded site: vitest run (offline)" "$WORK/site/apps/web" npm test
-  # 15 (informational, never fails the run): can the scaffolded site be exported statically? Its collection pages say
-  # `export const dynamic = "force-dynamic"`, which `output: "export"` refuses.
-  if (cd "$WORK/site/apps/web" && WEBDESK_STATIC_EXPORT=1 npm run build) >"$WORK/export15.log" 2>&1 && [ -f "$WORK/site/apps/web/out/index.html" ]; then
-    echo "INFO  15 scaffolded site: the static export WORKS (out/index.html written)"
-  else
-    echo "INFO  15 scaffolded site: the static export FAILS, as expected while the composer emits force-dynamic pages: $(grep -iE 'force-dynamic|error' "$WORK/export15.log" | head -2 | paste -sd' ' - | cut -c1-260)"
-  fi
+  step "15 scaffolded site: static export (WEBDESK_STATIC_EXPORT=1) holds the fixture content" "$WORK/site/apps/web" export_and_check
   ( cd "$WORK/site" && echo "--- audit scaffolded site (omit dev)" && npm audit --omit=dev 2>&1 | tail -4 ) || true
 else
   FAILED=1
