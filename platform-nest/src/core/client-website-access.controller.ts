@@ -208,7 +208,7 @@ export class ClientWebsiteAccessController {
   /** Assign the `admin` client-contact capability. STAFF ONLY (`manage_admin` has no client arm).
    *
    *  `admin` REPLACES `signer`/`viewer` in the single capability column and IMPLIES signer (owner ruling
-   *  2026-10-11): every place that tests for a signer also accepts an admin (portal-scope `canSign`,
+   *  2026-10-11): every place that tests for a signer also accepts an admin (portal-scope `signerClientIds`,
    *  client-notify's signature recipients, canEditCentre). Promoting a signer therefore keeps their signing
    *  and needs no confirmation; the previous capability is recorded in the audit row. */
   @Put(":tenantId/clients/:clientId/contacts/:contactId/admin")

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  attachmentProblem, CONVERSATION_MAX_BYTES, groupThreads, linkifyText, threadTitle,
+  attachmentProblem, CONVERSATION_MAX_BYTES, groupThreads, threadTitle,
   type PortalThread,
 } from "./portal";
 
@@ -71,22 +71,5 @@ describe("attachmentProblem (client-side, before sending)", () => {
   });
   it("refuses an empty file by name", () => {
     expect(attachmentProblem([f("notes.txt", 0)])).toMatch(/notes\.txt is empty/);
-  });
-});
-
-describe("linkifyText", () => {
-  it("makes http(s) URLs links and leaves everything else as text, trailing punctuation outside", () => {
-    expect(linkifyText("See https://example.com/a?b=1, then reply.")).toEqual([
-      { kind: "text", text: "See " },
-      { kind: "link", text: "https://example.com/a?b=1", href: "https://example.com/a?b=1" },
-      { kind: "text", text: ", then reply." },
-    ]);
-  });
-  it("never links a non-http scheme", () => {
-    expect(linkifyText("javascript:alert(1) and ftp://x.test")).toEqual([{ kind: "text", text: "javascript:alert(1) and ftp://x.test" }]);
-  });
-  it("returns markup-looking text as plain text parts", () => {
-    const parts = linkifyText('<img src=x onerror="alert(1)">');
-    expect(parts).toEqual([{ kind: "text", text: '<img src=x onerror="alert(1)">' }]);
   });
 });

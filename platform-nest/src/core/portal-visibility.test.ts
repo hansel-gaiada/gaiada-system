@@ -12,11 +12,15 @@
 //      from portal-scope.ts — must contain none of the old inline row-visibility literals. They live in
 //      portal-visibility.ts and nowhere else. The importer set is DISCOVERED, so a portal controller
 //      written next month is covered without anyone remembering this ticket.
+//   4. PER CLIENT (portal scope kernel, 2026-10-13). The project arm of every predicate is per client
+//      (`client in $wide OR project in $projects`), never the flattened `($n IS NULL OR …)`; every scoped
+//      builder REQUIRES `wide`; and no portal-facing file may build a scope predicate without it, read the
+//      removed global `canSign`, or treat `projectIds === null` as "client-wide".
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import {
-  NEVER_CLIENT_VISIBLE, NEVER_CLIENT_VISIBLE_REASONS, PROJECT_SCOPE,
+  NEVER_CLIENT_VISIBLE, NEVER_CLIENT_VISIBLE_REASONS, PROJECT_SCOPE, scopeAt,
   changeRequestClientVisible, changeRequestInPortalScope, clientContactClientVisible, clientContactInPortalScope,
   contractClientVisible, contractInPortalScope, deliverableClientVisible, gateClientVisible, inCallerClients,
   invoiceClientVisible, invoiceInPortalScope, invoicePaymentClientVisible, invoicePaymentInPortalScope,
@@ -58,8 +62,24 @@ function conjuncts(sql: string): string[] {
 // 1. Equivalence: old inline predicate (copied from origin/main 39ce3081) vs the builder composition
 // ════════════════════════════════════════════════════════════════════════════════════════════════════
 
-const S12 = { clients: 1, projects: 2 };
-const S23 = { clients: 2, projects: 3 };
+// `wide` sits at projects + 1 in these two layouts, which is what lets `perClient` below rewrite an old
+// literal mechanically.
+const S12 = { clients: 1, projects: 2, wide: 3 };
+const S23 = { clients: 2, projects: 3, wide: 4 };
+/** PROJECT_SCOPE's composition on the S12 layout (PROJECT_SCOPE itself is `scopeAt(1)`, pinned below). */
+const PS12 = projectInPortalScope("p", S12);
+
+/** THE ONE INTENDED CHANGE of the portal scope kernel fix (2026-10-13), applied mechanically to every old
+ *  literal: the flattened project arm `($P::uuid[] IS NULL OR <a>.<col> = ANY($P::uuid[])…` becomes the
+ *  per-client arm `(<a>.client_id = ANY($(P+1)::uuid[]) OR <a>.<col> = ANY($P::uuid[])…`. Everything else
+ *  in every old literal must still be there, conjunct for conjunct. */
+function perClient(old: string): string {
+  return old.replace(
+    /\(\$(\d+)::uuid\[\] IS NULL OR ((?:([a-z_]+)\.)?(?:id|project_id)) = ANY\(\$\1::uuid\[\]\)/g,
+    (_m, p: string, column: string, alias: string | undefined) =>
+      `(${alias ? `${alias}.` : ""}client_id = ANY($${Number(p) + 1}::uuid[]) OR ${column} = ANY($${p}::uuid[])`,
+  );
+}
 
 interface Site { site: string; old: string; now: string }
 
@@ -67,13 +87,13 @@ const SITES: Site[] = [
   // ── portal-workspace.controller.ts ──
   { site: "workspace PROJECT_SCOPE (overview, projects, project detail, milestones, timeline, deliverables)",
     old: `p.client_id = ANY($1::uuid[]) AND ($2::uuid[] IS NULL OR p.id = ANY($2::uuid[])) AND p.deleted_at IS NULL`,
-    now: PROJECT_SCOPE },
+    now: PS12 },
   { site: "workspace overview next milestone",
     old: `p.client_id = ANY($1::uuid[]) AND ($2::uuid[] IS NULL OR p.id = ANY($2::uuid[])) AND p.deleted_at IS NULL AND m.deleted_at IS NULL AND m.status <> 'done' AND m.due_date IS NOT NULL`,
-    now: `${PROJECT_SCOPE} AND ${milestoneClientVisible("m")} AND m.status <> 'done' AND m.due_date IS NOT NULL` },
+    now: `${PS12} AND ${milestoneClientVisible("m")} AND m.status <> 'done' AND m.due_date IS NOT NULL` },
   { site: "workspace overview deliverable counts / deliverables list",
     old: `p.client_id = ANY($1::uuid[]) AND ($2::uuid[] IS NULL OR p.id = ANY($2::uuid[])) AND p.deleted_at IS NULL AND d.deleted_at IS NULL`,
-    now: `${PROJECT_SCOPE} AND ${deliverableClientVisible("d")}` },
+    now: `${PS12} AND ${deliverableClientVisible("d")}` },
   { site: "workspace needsYou gates",
     old: `r.client_id = ANY($1::uuid[]) AND r.deleted_at IS NULL
             AND g.actor_side = 'client' AND g.status = 'pending' AND g.deleted_at IS NULL
@@ -221,24 +241,29 @@ const SITES: Site[] = [
 
 describe("PV3-02 equivalence — every switched call site keeps its exact conjunct set", () => {
   it.each(SITES)("$site", ({ old, now }) => {
-    expect(conjuncts(now)).toEqual(conjuncts(old));
+    expect(conjuncts(now)).toEqual(conjuncts(perClient(old)));
   });
 
-  it("PROJECT_SCOPE is character-for-character the old module-private constant", () => {
+  it("perClient really rewrites: every SITES literal that had the flattened arm loses it", () => {
+    for (const { old } of SITES) expect(perClient(old)).not.toMatch(/::uuid\[\] IS NULL OR/);
+    expect(SITES.filter(({ old }) => /::uuid\[\] IS NULL OR/.test(old)).length).toBeGreaterThan(15);
+  });
+
+  it("PROJECT_SCOPE is the old module-private constant with ONLY the project arm made per client (scopeAt(1))", () => {
     expect(PROJECT_SCOPE).toBe(
-      `p.client_id = ANY($1::uuid[]) AND ($2::uuid[] IS NULL OR p.id = ANY($2::uuid[])) AND p.deleted_at IS NULL`,
+      `p.client_id = ANY($1::uuid[]) AND (p.client_id = ANY($2::uuid[]) OR p.id = ANY($3::uuid[])) AND p.deleted_at IS NULL`,
     );
   });
 
   it("PV3-02b: the mail thread run branch differs from its old shape in exactly one conjunct (the NULL-project arm)", () => {
-    const old = `r.id = $1 AND r.deleted_at IS NULL AND r.client_id = ANY($2::uuid[])
-            AND ($3::uuid[] IS NULL OR r.project_id = ANY($3::uuid[]) OR r.project_id IS NULL)`;
+    const old = perClient(`r.id = $1 AND r.deleted_at IS NULL AND r.client_id = ANY($2::uuid[])
+            AND ($3::uuid[] IS NULL OR r.project_id = ANY($3::uuid[]) OR r.project_id IS NULL)`);
     const now = `r.id = $1 AND ${runInPortalScope("r", S23)}`;
     expect(conjuncts(old).filter((c) => !conjuncts(now).includes(c))).toEqual([
-      `($3::uuid[] IS NULL OR r.project_id = ANY($3::uuid[]) OR r.project_id IS NULL)`,
+      `(r.client_id = ANY($4::uuid[]) OR r.project_id = ANY($3::uuid[]) OR r.project_id IS NULL)`,
     ]);
     expect(conjuncts(now).filter((c) => !conjuncts(old).includes(c))).toEqual([
-      `($3::uuid[] IS NULL OR r.project_id = ANY($3::uuid[]))`,
+      `(r.client_id = ANY($4::uuid[]) OR r.project_id = ANY($3::uuid[]))`,
     ]);
   });
 
@@ -250,8 +275,8 @@ describe("PV3-02 equivalence — every switched call site keeps its exact conjun
   });
 
   it("needsYou contracts: the ONLY added conjunct is `status <> 'draft'`, implied by `status = 'sent'`", () => {
-    const old = `k.client_id = ANY($1::uuid[]) AND k.deleted_at IS NULL AND k.status = 'sent'
-            AND ($2::uuid[] IS NULL OR k.project_id = ANY($2::uuid[]) OR k.project_id IS NULL)`;
+    const old = perClient(`k.client_id = ANY($1::uuid[]) AND k.deleted_at IS NULL AND k.status = 'sent'
+            AND ($2::uuid[] IS NULL OR k.project_id = ANY($2::uuid[]) OR k.project_id IS NULL)`);
     const now = `${contractInPortalScope("k", S12)} AND k.status = 'sent'`;
     const added = conjuncts(now).filter((c) => !conjuncts(old).includes(c));
     const dropped = conjuncts(old).filter((c) => !conjuncts(now).includes(c));
@@ -274,9 +299,10 @@ describe("PV3-02 equivalence — every switched call site keeps its exact conjun
 
 describe("PV3-02 builder contract", () => {
   it("binds whatever indexes the caller names, never a fixed $1/$2", () => {
-    expect(contractInPortalScope("k", { clients: 7, projects: 9 })).toBe(
-      `k.client_id = ANY($7::uuid[]) AND k.deleted_at IS NULL AND k.status <> 'draft' AND ($9::uuid[] IS NULL OR k.project_id = ANY($9::uuid[]) OR k.project_id IS NULL)`,
+    expect(contractInPortalScope("k", { clients: 7, wide: 8, projects: 9 })).toBe(
+      `k.client_id = ANY($7::uuid[]) AND k.deleted_at IS NULL AND k.status <> 'draft' AND (k.client_id = ANY($8::uuid[]) OR k.project_id = ANY($9::uuid[]) OR k.project_id IS NULL)`,
     );
+    expect(scopeAt(2)).toEqual({ clients: 2, wide: 3, projects: 4 });
     expect(invoiceInPortalScope("x", { clients: 4 })).toBe(`x.client_id = ANY($4::uuid[]) AND x.deleted_at IS NULL AND x.status NOT IN ('draft','approved')`);
   });
 
@@ -315,7 +341,8 @@ describe("PV3-02 builder contract", () => {
     expect(() => postReviewClientVisible("1x")).toThrow(/invalid table alias/);
     expect(() => inCallerClients("k", 0)).toThrow(/invalid parameter index/);
     expect(() => inCallerClients("k", 1.5)).toThrow(/invalid parameter index/);
-    expect(() => runInPortalScope("r", { clients: 1, projects: -2 })).toThrow(/invalid parameter index/);
+    expect(() => runInPortalScope("r", { clients: 1, wide: 3, projects: -2 })).toThrow(/invalid parameter index/);
+    expect(() => runInPortalScope("r", { clients: 1, wide: 0, projects: 2 })).toThrow(/invalid parameter index/);
     expect(() => invoicePaymentClientVisible("pp", "ledger" as never)).toThrow(/unknown invoice payment context/);
   });
 
@@ -343,7 +370,7 @@ describe("PV3-02 builder contract", () => {
 describe("PV4-03 conversation predicates", () => {
   it("a thread is reached by client AND project, with NO client-wide-thread admission for a project-scoped contact (PV4-Q1)", () => {
     expect(conversationThreadInPortalScope("t", S23)).toBe(
-      `t.client_id = ANY($2::uuid[]) AND t.deleted_at IS NULL AND ($3::uuid[] IS NULL OR t.project_id = ANY($3::uuid[]))`,
+      `t.client_id = ANY($2::uuid[]) AND t.deleted_at IS NULL AND (t.client_id = ANY($4::uuid[]) OR t.project_id = ANY($3::uuid[]))`,
     );
     // The contract/change-request shape admits project_id IS NULL; the thread shape must not.
     expect(conversationThreadInPortalScope("t", S12)).not.toContain("project_id IS NULL");
@@ -373,7 +400,7 @@ describe("PV4-03 conversation predicates", () => {
 describe("PV4-05 meeting minutes predicates", () => {
   it("minutes are reached by the MEETING's client and project (decision 8: no copy), only once shared, with NO project-less admission (PV4-Q1)", () => {
     expect(meetingMinutesInPortalScope("mm", "m", S12)).toBe(
-      `m.client_id = ANY($1::uuid[]) AND mm.status = 'shared' AND m.deleted_at IS NULL AND ($2::uuid[] IS NULL OR m.project_id = ANY($2::uuid[]))`,
+      `m.client_id = ANY($1::uuid[]) AND mm.status = 'shared' AND m.deleted_at IS NULL AND (m.client_id = ANY($3::uuid[]) OR m.project_id = ANY($2::uuid[]))`,
     );
     // The contract/change-request shape admits project_id IS NULL; the minutes shape must not (same as runs and threads).
     expect(meetingMinutesInPortalScope("mm", "m", S12)).not.toContain("project_id IS NULL");
@@ -384,7 +411,7 @@ describe("PV4-05 meeting minutes predicates", () => {
 
   it("binds whatever indexes the caller names, and the row-state half binds none (so the staff side can reuse it)", () => {
     expect(meetingMinutesInPortalScope("a", "b", S23)).toContain("b.client_id = ANY($2::uuid[])");
-    expect(meetingMinutesInPortalScope("a", "b", S23)).toContain("($3::uuid[] IS NULL OR b.project_id = ANY($3::uuid[]))");
+    expect(meetingMinutesInPortalScope("a", "b", S23)).toContain("(b.client_id = ANY($4::uuid[]) OR b.project_id = ANY($3::uuid[]))");
     expect(meetingMinutesClientVisible("mm", "m")).not.toMatch(/\$\d/);
     expect(meetingMinutesClientVisible("mm", "m")).toBe(`mm.status = 'shared' AND m.deleted_at IS NULL`);
   });
@@ -423,7 +450,7 @@ function walk(dir: string, out: string[] = []): string[] {
 
 /** A file is portal-facing when it imports the portal's caller resolver or its signing gate. */
 const PORTAL_SCOPE_IMPORT = /import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*["'][^"']*\/portal-scope["']/g;
-const RESOLVER_NAMES = ["resolvePortalScope", "callerClientIds", "requireSigner"];
+const RESOLVER_NAMES = ["resolvePortalScope", "callerClientIds", "requireSignerFor", "canSignFor", "scopeValues"];
 
 function importsPortalScope(src: string): boolean {
   for (const m of src.matchAll(PORTAL_SCOPE_IMPORT)) {
@@ -441,8 +468,8 @@ const FORBIDDEN: Array<{ name: string; re: RegExp }> = [
   { name: "client-side gate", re: /actor_side\s*=\s*'client'/ },
   { name: "hidden report stage", re: /track\s*<>\s*'report'/ },
   { name: "revoked-contact exclusion", re: /status\s*<>\s*'revoked'/ },
-  // The project-scope NULL handling — the body of PROJECT_SCOPE and every run/contract/request copy of it.
-  { name: "project-scope `$n::uuid[] IS NULL OR`", re: /\$\d+::uuid\[\]\s+IS\s+NULL\s+OR/ },
+  // The per-client project arm — the body of PROJECT_SCOPE and every run/contract/request copy of it.
+  { name: "project-scope `client_id = ANY($n::uuid[]) OR`", re: /client_id\s*=\s*ANY\(\$\d+::uuid\[\]\)\s+OR/ },
 ];
 
 /** Comment lines are prose, not SQL (SQL comments inside template strings are `--`, which stay scanned). */
@@ -508,5 +535,98 @@ describe("PV3-02 guard — portal-facing files carry no inline row-visibility li
       expect(importers, `${f} no longer imports portal-scope; remove it from NOT_YET_SWITCHED`).toContain(f);
       expect(hits(join(NEST_ROOT, f)), `${f} carries no literal any more; remove it from NOT_YET_SWITCHED`).not.toEqual([]);
     }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// 4. Per client (portal scope kernel, 2026-10-13)
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// The flaw this closes: a contact who was client-wide on client A and limited to one project on client B
+// saw every project of B (the old `($n IS NULL OR …)` arm was fed a NULL as soon as ANY row was client-wide),
+// and a signer on A could sign B's agreements (one global `canSign`). The HTTP proof is
+// `portal-scope-per-client.db.test.ts`; these are the static halves that run on every machine.
+
+describe("portal scope per client — the predicates", () => {
+  const scoped = [
+    ["project", projectInPortalScope("x", scopeAt(1))],
+    ["projectReach", projectReach("x", scopeAt(1))],
+    ["run", runInPortalScope("x", scopeAt(1))],
+    ["contract", contractInPortalScope("x", scopeAt(1))],
+    ["change request", changeRequestInPortalScope("x", scopeAt(1))],
+    ["conversation thread", conversationThreadInPortalScope("x", scopeAt(1))],
+    ["meeting minutes", meetingMinutesInPortalScope("mm", "x", scopeAt(1))],
+  ] as const;
+
+  it.each(scoped)("%s: the project arm is per client (the row's own client in $wide) and AND-ed with the caller's clients", (_n, sql) => {
+    expect(sql).toContain("x.client_id = ANY($1::uuid[])");
+    expect(sql).toMatch(/\(x\.client_id = ANY\(\$2::uuid\[\]\) OR x\.(?:id|project_id) = ANY\(\$3::uuid\[\]\)/);
+    expect(sql).not.toMatch(/::uuid\[\]\s+IS\s+NULL/);
+  });
+
+  it("allowNullProject is unchanged: contracts and change requests admit a project-less row, runs, threads, minutes and projects do not", () => {
+    const admits = Object.fromEntries(scoped.map(([n, sql]) => [n, /project_id IS NULL\)/.test(sql)]));
+    expect(admits).toEqual({
+      project: false, projectReach: false, run: false, contract: true, "change request": true,
+      "conversation thread": false, "meeting minutes": false,
+    });
+  });
+
+  it("every scoped builder refuses a params object without `wide` (it cannot tell which clients are client-wide)", () => {
+    const noWide = { clients: 1, projects: 2 } as never;
+    expect(() => projectInPortalScope("p", noWide)).toThrow(/invalid parameter index/);
+    expect(() => runInPortalScope("r", noWide)).toThrow(/invalid parameter index/);
+    expect(() => contractInPortalScope("k", noWide)).toThrow(/invalid parameter index/);
+    expect(() => changeRequestInPortalScope("w", noWide)).toThrow(/invalid parameter index/);
+    expect(() => conversationThreadInPortalScope("t", noWide)).toThrow(/invalid parameter index/);
+    expect(() => meetingMinutesInPortalScope("mm", "m", noWide)).toThrow(/invalid parameter index/);
+  });
+});
+
+describe("portal scope per client — the guard over every portal-facing file", () => {
+  const files = walk(SRC).filter((f) => !f.endsWith(`${sep}portal-visibility.ts`) && !f.endsWith(`${sep}portal-scope.ts`));
+  const importers = files.filter((f) => importsPortalScope(readFileSync(f, "utf8")));
+
+  /** The shapes the flattened kernel used. Each is a way to build or read scope WITHOUT the per-client
+   *  split, so none may appear in the code of any portal-facing file. */
+  const DEAD: Array<{ name: string; re: RegExp }> = [
+    // A scope-params literal with no `wide` (`{ clients: 2, projects: 3 }`): the builders would throw at
+    // runtime, but a literal typed loosely enough to dodge tsc must still fail here.
+    { name: "scope params without `wide`", re: /\{\s*clients:\s*\d+\s*,\s*projects:\s*\d+\s*\}/ },
+    { name: "flattened `projectIds === null` / `!== null`", re: /projectIds\s*[!=]==?\s*null/ },
+    { name: "the removed global `.canSign` scope flag", re: /scope\.canSign\b/ },
+    { name: "the removed `requireSigner(scope)`", re: /\brequireSigner\s*\(/ },
+    { name: "the flattened project arm `$n::uuid[] IS NULL OR`", re: /\$\d+::uuid\[\]\s+IS\s+NULL\s+OR/ },
+  ];
+
+  it("the scan is not vacuous: every switched portal controller is found", () => {
+    for (const f of SWITCHED) expect(importers.map(rel)).toContain(f);
+  });
+
+  it("the dead shapes are live detectors", () => {
+    expect(`x({ clients: 2, projects: 3 })`).toMatch(DEAD[0].re);
+    expect(`canUseGeneral: scope.projectIds === null`).toMatch(DEAD[1].re);
+    expect(`viewOnly: !scope.canSign`).toMatch(DEAD[2].re);
+    expect(`requireSigner(scope);`).toMatch(DEAD[3].re);
+    expect(`($2::uuid[] IS NULL OR p.id = ANY($2::uuid[]))`).toMatch(DEAD[4].re);
+    expect(`requireSignerFor(scope, k.clientId);`).not.toMatch(DEAD[3].re);
+  });
+
+  it("no portal-facing file builds a scope predicate without `wide`, reads a flattened flag, or uses the old signing gate", () => {
+    const offenders = importers
+      .map((f) => ({ file: rel(f), shapes: DEAD.filter((d) => d.re.test(codeOnly(readFileSync(f, "utf8")))).map((d) => d.name) }))
+      .filter((o) => o.shapes.length > 0);
+    expect(offenders).toEqual([]);
+  });
+
+  it("portal-visibility.ts itself no longer carries the flattened arm", () => {
+    expect(codeOnly(readFileSync(join(SRC, "core", "portal-visibility.ts"), "utf8"))).not.toMatch(DEAD[4].re);
+  });
+
+  it("a file that lays scope params out with scopeAt(n) binds them with scopeValues(scope)", () => {
+    const offenders = importers
+      .filter((f) => { const code = codeOnly(readFileSync(f, "utf8")); return /\bscopeAt\(/.test(code) && !/\bscopeValues\(/.test(code); })
+      .map(rel);
+    expect(offenders).toEqual([]);
   });
 });

@@ -37,7 +37,7 @@
 // a publish in itself. See the `approve_post` block in `cerbos/policies/resource_portal.yaml`.
 // Verified live while seeding: `maya@ubudyoga.test`, a viewer, approved this exact row (200 — then
 // reset to pending). A viewer IS refused on gates, scope sign-offs and contract signatures
-// (`requireSigner` in `portal-scope.ts`), and Ubud's SENT AGREEMENT from the portal-workspace half is
+// (`requireSignerFor` in `portal-scope.ts`), and Ubud's SENT AGREEMENT from the portal-workspace half is
 // the row that demonstrates that. Do not "fix" the review path to match — that reverts a decision.
 //
 // Idempotent like every seed here: create-or-skip keyed on natural names, so re-running enriches

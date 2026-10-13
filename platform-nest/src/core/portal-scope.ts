@@ -25,17 +25,36 @@
 import { ForbiddenException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 
-/** The caller's resolved reach inside one tenant. `projectIds === null` means "every project of these
- *  clients" — NOT "no projects". Getting that inversion wrong fails OPEN, which is why every consumer
- *  passes it to SQL as `($n::uuid[] IS NULL OR project_id = ANY($n::uuid[]))` rather than branching in
- *  TypeScript, where an accidental `?? []` would silently widen or narrow. */
+/** The caller's resolved reach inside one tenant, PER CLIENT.
+ *
+ *  ⚠ PER CLIENT, NEVER FLATTENED (portal scope kernel per client, 2026-10-13). A contact can be a contact
+ *  of several clients with a different reach and capability on each: client-wide `signer` on A and a
+ *  `viewer` limited to one project on B. The scope used to be flattened across all of them (any client-wide
+ *  row made `projectIds` null for EVERY client, and any signer row made `canSign` true for EVERY client), so
+ *  that contact saw every project of B and could sign B's agreements. Every field below is therefore either
+ *  a set of CLIENTS the caller holds a property on, or a set of explicit project ids; there is no global
+ *  boolean and no "null means everything" any more.
+ *
+ *  How a query uses it: `inCallerClients` (row's client in `clientIds`) AND the project arm
+ *  `(row's client in wideClientIds OR row's project in projectIds [OR row has no project])`, both built by
+ *  portal-visibility.ts. Bind the three arrays with `scopeValues(scope)` at the indexes `scopeAt(n)` names. */
 export interface PortalScope {
+  /** Every client the caller is an active portal contact of. */
   clientIds: string[];
-  projectIds: string[] | null;
-  /** Whether this caller may SIGN (contracts, scope agreements) or only watch. A contact is a
-   *  `signer` on some rows and a `viewer` on others (D-1 makes contacts per-project), so this is the
-   *  union: true if ANY active row grants signing. Per-object narrowing is the route's job. */
-  canSign: boolean;
+  /** The clients the caller reaches CLIENT-WIDE: an active `client_contacts` row with `project_id IS NULL`,
+   *  or the legacy `clients.portal_user_id` column. Always a subset of `clientIds`. */
+  wideClientIds: string[];
+  /** The explicit project ids of the caller's project-scoped rows. Never null: an empty array means "no
+   *  project-scoped grants", NOT "every project". Client-wide reach lives in `wideClientIds` only. */
+  projectIds: string[];
+  /** The clients on which the caller may SIGN (contracts, scope agreements, signature gates): an active row
+   *  with capability `signer` or `admin` (WSK-49f: `admin` implies signer), or the legacy column. A signing
+   *  route resolves its target's `client_id` and calls `requireSignerFor(scope, thatClient)`.
+   *
+   *  NOTE: a signer row that is PROJECT-scoped still makes the caller a signer for that client; the route's
+   *  read predicate already confines them to their project's objects (and the client's project-less ones,
+   *  for contracts), which is the existing per-object rule. There is deliberately no global `canSign`. */
+  signerClientIds: string[];
 }
 
 export interface PortalPrincipal {
@@ -73,42 +92,67 @@ export async function callerClientIds(c: PoolClient, principal: PortalPrincipal)
   return ids;
 }
 
-/** The caller's full scope for one tenant: clients, project restriction, and signing capability.
+/** The caller's full scope for one tenant: clients, per-client reach, and per-client signing.
  *
- *  One query for the contact rows, so adding `canSign` costs nothing over the previous two-query
- *  shape. The `clients.portal_user_id` legacy branch is UNIONed in as a client-wide signer, which is
- *  what it has always meant (it predates the capability column entirely). */
+ *  One query for the contact rows. The `clients.portal_user_id` legacy branch is UNIONed in as a
+ *  client-wide signer, which is what it has always meant (it predates the capability column entirely). */
 export async function resolvePortalScope(c: PoolClient, principal: PortalPrincipal): Promise<PortalScope> {
   const clientIds = await callerClientIds(c, principal);
-  const r = await c.query<{ project_id: string | null; capability: string }>(
-    `SELECT cc.project_id, cc.capability
+  const r = await c.query<{ client_id: string; project_id: string | null; capability: string }>(
+    `SELECT cc.client_id, cc.project_id, cc.capability
        FROM client_contacts cc
       WHERE cc.user_id = $1 AND cc.status = 'active' AND cc.deleted_at IS NULL
         AND cc.client_id = ANY($2::uuid[])
       UNION ALL
-     SELECT NULL::uuid AS project_id, 'signer' AS capability
-       FROM clients cl WHERE cl.portal_user_id = $1 AND cl.deleted_at IS NULL AND NOT cl.is_internal`,
+     SELECT cl.id AS client_id, NULL::uuid AS project_id, 'signer' AS capability
+       FROM clients cl WHERE cl.portal_user_id = $1 AND cl.deleted_at IS NULL AND NOT cl.is_internal
+        AND cl.id = ANY($2::uuid[])`,
     [principal.userId, clientIds],
   );
-  // Any client-wide grant (project_id IS NULL, or the legacy whole-client scheme) => unrestricted.
-  // A client-wide row WIDENS access and must win over any narrower row — otherwise adding a
-  // project-scoped row to someone who already had client-wide access would silently take access away.
-  const projectIds = r.rows.some((row) => row.project_id === null)
-    ? null
-    : r.rows.map((row) => row.project_id as string);
-  return {
-    clientIds,
-    projectIds,
+  // A client-wide row (project_id IS NULL, or the legacy whole-client scheme) widens access to THAT client
+  // only, and wins over any narrower row of the same client (adding a project-scoped row to someone who is
+  // already client-wide must not take access away). It says nothing about the caller's OTHER clients.
+  const wide = new Set<string>();
+  const projects = new Set<string>();
+  const signers = new Set<string>();
+  for (const row of r.rows) {
+    if (row.project_id === null) wide.add(row.client_id);
+    else projects.add(row.project_id);
     // WSK-49f (owner ruling 2026-10-11): `admin` IMPLIES signer. The capability column is single-valued, so
     // promoting a signer to admin must not silently take signing away from them.
-    canSign: r.rows.some((row) => row.capability === "signer" || row.capability === "admin"),
+    if (row.capability === "signer" || row.capability === "admin") signers.add(row.client_id);
+  }
+  return {
+    clientIds,
+    wideClientIds: clientIds.filter((id) => wide.has(id)),
+    projectIds: [...projects],
+    signerClientIds: clientIds.filter((id) => signers.has(id)),
   };
 }
 
-/** Refuse a write the caller's capability does not cover. Separate from the scope resolution so a
- *  READ route can never accidentally acquire a signing gate, and a SIGN route can never forget one. */
-export function requireSigner(scope: PortalScope): void {
-  if (!scope.canSign) {
+/** The three scope arrays, in the order `scopeAt(n)` binds them: `[clientIds, wideClientIds, projectIds]`.
+ *  Spread it into a query's params at position n: `[id, ...scopeValues(scope)]` with `scopeAt(2)`. */
+export function scopeValues(scope: PortalScope): [string[], string[], string[]] {
+  return [scope.clientIds, scope.wideClientIds, scope.projectIds];
+}
+
+/** May the caller sign on behalf of this client? Per client: being a signer of another client grants
+ *  nothing here. `clientId` must be the TARGET's own `client_id`, read from the row, never the body. */
+export function canSignFor(scope: PortalScope, clientId: string | null | undefined): boolean {
+  return !!clientId && scope.signerClientIds.includes(clientId);
+}
+
+/** Does the caller reach this client client-wide (every project of it, and its client-wide threads)? */
+export function isWideFor(scope: PortalScope, clientId: string | null | undefined): boolean {
+  return !!clientId && scope.wideClientIds.includes(clientId);
+}
+
+/** Refuse a signing write the caller's capability ON THIS CLIENT does not cover. Call it only AFTER the
+ *  target has passed the read predicate (an object outside the caller's scope is 404, never 403), with the
+ *  target's own `client_id`. Separate from the scope resolution so a READ route can never accidentally
+ *  acquire a signing gate, and a SIGN route can never forget one. */
+export function requireSignerFor(scope: PortalScope, clientId: string | null | undefined): void {
+  if (!canSignFor(scope, clientId)) {
     throw new ForbiddenException("your access is view-only — ask your account manager to grant signing");
   }
 }

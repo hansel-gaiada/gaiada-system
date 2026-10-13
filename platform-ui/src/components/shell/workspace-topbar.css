@@ -1,0 +1,53 @@
+/* DW-2c: the workspace shell's top bar (WorkspaceTopBar.tsx). Layered on the shared `.erp-top` rules in
+   shell.css, so the classic bar is untouched. Tokens only (src/styles/tokens.test.ts). */
+
+/* ---- Search: one field, with the palette's ⌘K hint ---- */
+.erp-top--ws .erp-top__search { margin-left: 0; flex: 1 1 auto; max-width: 560px; }
+.erp-top--ws .erp-top__search kbd { flex: 0 0 auto; font: 600 10px var(--font-body); letter-spacing: 0.04em; color: var(--erp-ink-50); border: 0.5px solid var(--erp-hairline); padding: 1px 5px; border-radius: var(--radius-sm); }
+.erp-top--ws .erp-top__search input { min-width: 0; }
+/* The phone's version of the field: an icon that opens the palette. */
+.erp-top__searchbtn { display: none; align-items: center; justify-content: center; width: 40px; height: 36px; margin-left: auto; color: var(--ink-muted); }
+.erp-top__searchbtn:hover { color: var(--text-primary); }
+.erp-top--ws .erp-top__actions { gap: 12px; }
+
+/* ---- Access chip: the strip's sentence, as a tooltip ---- */
+.erp-top__chipwrap { position: relative; display: inline-flex; }
+.erp-top__chip { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: var(--radius-pill); border: 0.5px solid color-mix(in srgb, var(--status-critical) 40%, transparent); background-color: var(--surface-page); background-image: linear-gradient(var(--status-critical-bg), var(--status-critical-bg)); color: var(--erp-accent); font: 700 11px var(--font-body); letter-spacing: 0.01em; white-space: nowrap; cursor: default; }
+.erp-top__chiptip { display: none; position: absolute; top: calc(100% + 8px); right: 0; z-index: 60; width: 260px; padding: 9px 12px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--elev-overlay); font: 400 12.5px var(--font-body); line-height: 1.4; color: var(--text-primary); }
+.erp-top__chipwrap:hover .erp-top__chiptip, .erp-top__chip:focus + .erp-top__chiptip { display: block; }
+
+/* ---- Bell: a disclosure button and its pop-over ---- */
+.erp-bell { position: relative; display: inline-flex; }
+.erp-bell .erp-top__bell { width: 36px; height: 36px; padding: 0; border: none; background: transparent; cursor: pointer; }
+.erp-bell__pop { position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; width: 300px; max-width: calc(100vw - 28px); background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--elev-overlay); overflow: hidden; }
+.erp-bell__list { list-style: none; margin: 0; padding: 0; }
+.erp-bell__item { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.erp-bell__title { min-width: 0; font: 400 13px var(--font-body); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.erp-bell__age { flex: 0 0 auto; font: 400 11px var(--font-body); color: var(--ink-subtle); }
+.erp-bell__note { margin: 0; padding: 14px; font: 400 13px var(--font-body); color: var(--ink-muted); border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.erp-bell__all { display: block; padding: 11px 14px; font: 600 13px var(--font-body); color: var(--accent-fg); text-decoration: none; }
+.erp-bell__all:hover { background: var(--tint-hover); }
+
+/* ---- Avatar menu: the Theme row ---- */
+.erp-usermenu--theme.erp-usermenu--top .erp-usermenu__pop { width: 264px; }
+.erp-usermenu__theme { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.erp-usermenu__theme-label { font: 400 13px var(--font-body); color: var(--text-primary); }
+
+/* ---- Phone ---- */
+@media (max-width: 760px) {
+  .erp-top--ws { gap: 8px; padding: 0 12px; }
+  .erp-top--ws .erp-top__search { display: none; }
+  .erp-top__searchbtn { display: inline-flex; }
+  .erp-top--ws .erp-top__actions { margin-left: 0; gap: 8px; }
+  /* A narrower pop-over would clip at the screen's edge. */
+  .erp-usermenu--theme.erp-usermenu--top .erp-usermenu__pop { width: min(264px, calc(100vw - 24px)); }
+}
+
+/* Touch input: the 44px floor, keyed on pointer type like the rest of shell.css. */
+@media (pointer: coarse) {
+  .erp-top__searchbtn { width: 44px; height: 44px; }
+  .erp-bell .erp-top__bell { width: 44px; height: 44px; }
+  .erp-top__chip { min-height: 44px; }
+  .erp-bell__all, .erp-bell__item { min-height: 44px; box-sizing: border-box; }
+  .erp-bell__all { display: flex; align-items: center; }
+}

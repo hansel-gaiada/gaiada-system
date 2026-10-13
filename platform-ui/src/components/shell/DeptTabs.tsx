@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon } from "./icons";
+import { useWorkspaceShell } from "./WorkspaceShellContext";
 import { type DeptGroup, tabHref } from "@/lib/deptToolkits";
 
 // Two-level department-console navigation (2026-07-23 IA redesign). Renders a
@@ -11,8 +12,13 @@ import { type DeptGroup, tabHref } from "@/lib/deptToolkits";
 // current path (so `…/board/abc` still lights Board → Work), and the active
 // group is whichever group owns that tab. Pure client component — all pathname
 // logic lives here so the server layout only passes serialisable data.
+//
+// DW-2b: inside the workspace shell both levels hide together when the shell's rows offer every tab of
+// every group; otherwise both stay (a half strip would strand the pages it dropped). Classic: always drawn.
 export function DeptTabs({ groups, deptId }: { groups: DeptGroup[]; deptId: string }) {
   const pathname = usePathname();
+  const shell = useWorkspaceShell();
+  if (shell?.covers(groups.flatMap((g) => g.tabs.map((t) => tabHref(deptId, t))))) return null;
 
   let active: { groupKey: string; href: string; len: number } | null = null;
   for (const g of groups) {

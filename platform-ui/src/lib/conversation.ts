@@ -3,7 +3,7 @@
 // all import it (same split as lib/webdevChangeRequests.ts).
 //
 // Backend contract: docs/FRONTEND-BFF-CONTRACT.md §29 / §29b. Rules this file encodes:
-//   - bodies are PLAIN TEXT, 1..10,000 characters (design decision 7). `splitLinks` is the only "rich" step and it
+//   - bodies are PLAIN TEXT, 1..10,000 characters (design decision 7). `linkify` (lib/linkify.ts) is the only "rich" step and it
 //     returns data, never markup: the renderer turns each part into a React text node or an <a>.
 //   - at most 5 attachments and 10 MB in total per message (§29, lead decision).
 //   - messages are PERMANENT (PV-D34): no edit, no retract, and so no `edited`, `retracted` or `editableUntil` field.
@@ -148,37 +148,6 @@ export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-// ── plain text with clickable links ──────────────────────────────────────────────────────────────
-
-export type BodyPart = { type: "text"; value: string } | { type: "link"; value: string; href: string };
-
-const URL_RE = /https?:\/\/[^\s<>"']+/gi;
-const TRAILING = /[.,;:!?)\]}]+$/;
-
-/** Split a plain-text body into text and http(s) links. Returns DATA: the renderer builds React nodes from it,
- *  so a body that contains markup stays literal text. A link is only ever `http:` or `https:` and must parse. */
-export function splitLinks(text: string): BodyPart[] {
-  const parts: BodyPart[] = [];
-  let last = 0;
-  for (const m of text.matchAll(URL_RE)) {
-    const start = m.index ?? 0;
-    let url = m[0];
-    const trail = url.match(TRAILING)?.[0] ?? "";
-    if (trail) url = url.slice(0, url.length - trail.length);
-    let href: string | null = null;
-    try {
-      const u = new URL(url);
-      if (u.protocol === "http:" || u.protocol === "https:") href = u.toString();
-    } catch { /* not a URL: stays text */ }
-    if (!href) continue;
-    if (start > last) parts.push({ type: "text", value: text.slice(last, start) });
-    parts.push({ type: "link", value: url, href });
-    last = start + url.length;
-  }
-  if (last < text.length) parts.push({ type: "text", value: text.slice(last) });
-  return parts;
 }
 
 // ── drafts ───────────────────────────────────────────────────────────────────────────────────────

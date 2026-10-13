@@ -1,0 +1,93 @@
+/* DW-2a: the department workspace sidebar (WorkspaceSidebar.tsx), drawn only on the pilot switch.
+   It is still an `.erp-side`, so the grid area, the phone drawer, the collapsed rail and the rail
+   tooltips all come from shell.css unchanged; this file only restyles what is inside the panel.
+   Tokens only (src/styles/tokens.test.ts): no colour, radius or shadow literals, no uppercase. */
+
+/* A narrower column on the sunken surface, as in the approved draft. Desktop only: below 1025px
+   shell.css's 208px column applies, below 761px the drawer, and the collapsed rail's rule
+   (html[data-sidebar] .erp-app) outranks this one. */
+@media (min-width: 1025px) {
+  .erp-app:has(> .ws-side) { grid-template-columns: 222px 1fr; }
+}
+.erp-side.ws-side::before { background: var(--surface-sunken); }
+
+.ws-side .erp-side__head { padding: 16px 16px 10px; border-bottom: none; }
+.ws-side .erp-side__mark { width: 26px; height: 26px; }
+.ws-side .erp-side__wordmark { font-size: 16px; }
+
+/* ---- The switcher card ---- */
+.ws-switch { position: relative; padding: 0 10px 6px; }
+.ws-switch__btn {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px;
+  width: 100%; padding: 8px 10px; text-align: left; cursor: pointer;
+  background: var(--surface-raised); color: var(--text-primary);
+  border: 1px solid var(--line); border-radius: var(--radius-md);
+  transition: border-color 0.18s var(--erp-ease);
+}
+.ws-switch__btn:hover { border-color: var(--accent-fg); }
+.ws-switch__btn > svg { color: var(--ink-muted); transform: rotate(90deg); transition: transform 0.18s var(--erp-ease); }
+.ws-switch__btn[aria-expanded="true"] > svg { transform: rotate(-90deg); }
+.ws-switch__text { display: flex; flex-direction: column; min-width: 0; }
+.ws-switch__ws, .ws-switch__co { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-switch__ws { font: 700 14.5px var(--font-display); line-height: 1.2; color: var(--text-primary); }
+.ws-switch__co { font: 400 11.5px var(--font-body); color: var(--ink-muted); }
+
+.ws-switch__pop {
+  position: absolute; top: calc(100% - 2px); left: 10px; right: 10px; z-index: 50;
+  max-height: min(70vh, 480px); overflow-y: auto; padding: 6px;
+  background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--radius-md);
+  box-shadow: var(--elev-overlay);
+}
+.ws-switch__label { margin: 0; padding: 8px 8px 4px; font: 600 11px var(--font-body); letter-spacing: 0.04em; color: var(--ink-subtle); }
+.ws-switch__list { list-style: none; margin: 0; padding: 0; }
+.ws-switch__item {
+  display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: var(--radius-sm);
+  font: 400 13px var(--font-body); color: var(--text-primary); text-decoration: none;
+}
+.ws-switch__item:hover { background: var(--tint-hover); }
+.ws-switch__item[aria-current="true"] { background: var(--tint-active); font-weight: 600; }
+.ws-switch__item > span:first-child { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-switch__tag { font: 500 11px var(--font-body); color: var(--ink-subtle); }
+.ws-switch__company { margin-top: 4px; padding: 0 8px 6px; border-top: 1px solid var(--line-soft); }
+.ws-switch__company .erp-company__select { max-width: 100%; }
+
+/* ---- Rows ---- */
+.ws-side__nav { padding: 4px 10px 10px; }
+.ws-side__group + .ws-side__group { margin-top: 2px; }
+.ws-side__label { padding: 12px 10px 3px; font: 600 11px var(--font-body); letter-spacing: 0.04em; color: var(--ink-subtle); }
+.ws-side .ws-row { gap: 9px; padding: 6px 10px; color: var(--ink-body); font-size: 13px; }
+.ws-side .ws-row > svg { flex: none; color: var(--ink-muted); }
+.ws-side .ws-row > span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The active row: a soft gold fill, not shell.css's bordered pill. */
+.ws-side .erp-navbtn--active { border-color: transparent; background: color-mix(in srgb, var(--accent-fill) 34%, transparent); color: var(--text-primary); font-weight: 600; }
+.ws-side .erp-navbtn--active > svg { color: var(--text-primary); }
+.ws-side .erp-navbtn--active:hover { background: color-mix(in srgb, var(--accent-fill) 44%, transparent); }
+
+/* ---- Visiting another department, and the way back ---- */
+.ws-side__context { padding: 2px 0 4px; }
+.ws-side__visiting { margin: 0; padding: 4px 10px 0; font: 400 12px var(--font-body); color: var(--ink-subtle); }
+.ws-side .ws-side__back { gap: 7px; padding: 4px 10px; color: var(--accent-fg); font-size: 12.5px; }
+.ws-side__back > svg { transform: rotate(180deg); }
+
+/* ---- Footer: Company, Admin, + New ---- */
+.ws-side__foot { flex-shrink: 0; display: grid; gap: 2px; padding: 8px 10px 0; border-top: 1px solid var(--glass-divider); }
+.ws-side__foot .erp-side__new { padding: 6px 0 12px; }
+.ws-side .erp-side__new .erp-new__btn { height: 36px; font-size: 13px; }
+
+/* ---- The collapsed rail: the same rows as flat icons (shell.css centres them and hides labels) ---- */
+@media (min-width: 761px) {
+  html[data-sidebar="collapsed"] .ws-switch,
+  html[data-sidebar="collapsed"] .ws-side__label,
+  html[data-sidebar="collapsed"] .ws-side__visiting { display: none; }
+  html[data-sidebar="collapsed"] .ws-side .erp-side__head { padding: 16px 0 10px; }
+  html[data-sidebar="collapsed"] .ws-side__foot { padding: 8px 6px 0; }
+  html[data-sidebar="collapsed"] .ws-side .ws-row,
+  html[data-sidebar="collapsed"] .ws-side .ws-side__back { justify-content: center; gap: 0; padding: 9px 0; }
+  /* "+ New" keeps only its glyph; the text stays in the accessibility tree. */
+  html[data-sidebar="collapsed"] .ws-side .erp-new__btn { font-size: 0; gap: 0; justify-content: center; padding: 0; }
+  html[data-sidebar="collapsed"] .ws-side .erp-side__new .erp-new__menu { right: auto; min-width: 180px; }
+}
+
+@media (pointer: coarse) {
+  .ws-switch__btn, .ws-switch__item { min-height: 44px; }
+}

@@ -12,10 +12,9 @@
 // Every active contact may READ the profile. Only an ACTIVE, CLIENT-WIDE (`project_id IS NULL`,
 // never project-scoped) contact with capability `signer` for THAT SPECIFIC client — or the legacy
 // `clients.portal_user_id` whole-client signer — may EDIT it. This is narrower than
-// `portal-scope.ts`'s own `canSign` (which is a per-CALLER union across every client and project the
-// caller touches, useful for "should the Sign button render anywhere") — CC-D4 asks the sharper,
-// per-CLIENT question "may THIS caller edit THIS company's profile", so it is its own query
-// (`canEditCentre` below), not a reuse of `resolvePortalScope`'s `canSign` field. Both the GET's
+// `portal-scope.ts`'s per-client `signerClientIds` (which also counts a PROJECT-scoped signer row of the
+// client) — CC-D4 asks the sharper question "may THIS caller edit THIS company's profile", which needs a
+// CLIENT-WIDE signer row, so it is its own query (`canEditCentre` below). Both the GET's
 // `canEdit` and the PATCH's gate call the SAME function, so they can never disagree.
 import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, Patch, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";

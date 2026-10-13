@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useWorkspaceShell } from "@/components/shell/WorkspaceShellContext";
 
 // The finance workspace's tab strip.
 //
@@ -47,12 +48,18 @@ export const FINANCE_TABS: FinanceTab[] = [
   { segment: "settings", label: "Settings" },
 ];
 
+// DW-2b: hidden inside the workspace shell when its rows offer every tab below (they do today); the
+// shell draws one strip instead. Classic shell: always drawn.
+const tabHref = (t: FinanceTab) => (t.segment ? `/finance/${t.segment}` : "/finance");
+
 export function FinanceTabs() {
   const pathname = usePathname() ?? "";
+  const shell = useWorkspaceShell();
+  if (shell?.covers(FINANCE_TABS.map(tabHref))) return null;
   return (
     <nav aria-label="Finance sections" className="sec-tabs">
       {FINANCE_TABS.map((t) => {
-        const href = t.segment ? `/finance/${t.segment}` : "/finance";
+        const href = tabHref(t);
         // Exact match for the index, prefix for the rest. Without the special case "Overview" would
         // light on every tab (every path starts with /finance); with only exact matching, a journal
         // DETAIL route would light nothing.

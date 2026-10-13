@@ -12,9 +12,9 @@
 //   4. answer 404, never 403, for anything outside that scope — not-yours and does-not-exist must be
 //      indistinguishable, or this controller becomes an existence oracle for other clients' ids.
 //
-// ── PV-D24: NO `requireSigner` ANYWHERE IN THIS FILE ──────────────────────────────────────────────
+// ── PV-D24: NO `requireSignerFor` ANYWHERE IN THIS FILE ───────────────────────────────────────────
 // Every contact who can see a project takes part in its conversation, signers and viewers alike.
-// Talking is not signing (the `request_change` precedent). Do not import or call `requireSigner` here.
+// Talking is not signing (the `request_change` precedent). Do not import or call `requireSignerFor` here.
 //
 // ── DRAFTS NEVER REACH THIS FILE ──────────────────────────────────────────────────────────────────
 // Agent drafts live in their own staff-only table (design decision 3). This file and conversation-core.ts
@@ -35,8 +35,8 @@ import { withTenants } from "../db";
 import { authorize, writeActivity } from "./http";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
-import { resolvePortalScope, type PortalScope } from "./portal-scope";
-import { conversationThreadInPortalScope, projectInPortalScope } from "./portal-visibility";
+import { resolvePortalScope, scopeValues, type PortalScope } from "./portal-scope";
+import { conversationThreadInPortalScope, projectInPortalScope, scopeAt } from "./portal-visibility";
 import {
   createProjectThread, findOrCreateGeneralThread,
   insertMessage, isUuid, markRead, prepareAttachments, readMessages, unreadCountSql, validateBody, validateSubject,
@@ -78,18 +78,22 @@ export class PortalConversationController {
            FROM conversation_threads t
            JOIN clients cl ON cl.id = t.client_id
            LEFT JOIN projects p ON p.id = t.project_id
-           LEFT JOIN conversation_reads r ON r.thread_id = t.id AND r.user_id = $3
-          WHERE ${conversationThreadInPortalScope("t", { clients: 1, projects: 2 })}
-            AND ($4::uuid IS NULL OR t.project_id = $4::uuid)
+           LEFT JOIN conversation_reads r ON r.thread_id = t.id AND r.user_id = $4
+          WHERE ${conversationThreadInPortalScope("t", scopeAt(1))}
+            AND ($5::uuid IS NULL OR t.project_id = $5::uuid)
           ORDER BY t.last_message_at DESC, t.id DESC
           LIMIT 200`,
-        [scope.clientIds, scope.projectIds, req.principal.userId, projectId || null],
+        [...scopeValues(scope), req.principal.userId, projectId || null],
       );
       return {
         threads: rows.rows,
         // Whether this caller may post to (and so lazily create) a client-wide thread: only a client-wide
         // contact may (PV4-Q1). The UI shows the "General" entry from this, not by guessing.
-        canUseGeneral: scope.projectIds === null,
+        // Portal scope per client (2026-10-13): it is PER CLIENT. `generalClientIds` names the clients whose
+        // General thread the caller may use (those they reach client-wide); `canUseGeneral` is true when there
+        // is at least one. A contact limited to some projects of a client never gets that client's General.
+        canUseGeneral: scope.wideClientIds.length > 0,
+        generalClientIds: scope.wideClientIds,
       };
     });
   }
@@ -110,8 +114,9 @@ export class PortalConversationController {
   /** Start a conversation.
    *  - With `projectId` (one of the caller's projects): opens a NEW thread on that project.
    *  - Without: posts to the client's ONE general thread, creating it on first use. Only a client-wide
-   *    contact may (PV4-Q1); for anyone else the general thread does not exist (404). A caller who is a
-   *    client-wide contact of several clients names which with `clientId`, validated against their scope. */
+   *    contact OF THAT CLIENT may (PV4-Q1, per client since 2026-10-13); for anyone else the general thread
+   *    does not exist (404). A caller who is a client-wide contact of several clients names which with
+   *    `clientId`, validated against `wideClientIds`. */
   @Post(":tenantId/portal/conversation")
   @HttpCode(201)
   async open(
@@ -139,8 +144,8 @@ export class PortalConversationController {
       if (typeof b.projectId === "string" && b.projectId) {
         // The project must be one the caller may see; its client is read from THAT row, never the body.
         const p = await c.query<{ client_id: string }>(
-          `SELECT p.client_id FROM projects p WHERE p.id = $1 AND ${projectInPortalScope("p", { clients: 2, projects: 3 })}`,
-          [b.projectId, scope.clientIds, scope.projectIds],
+          `SELECT p.client_id FROM projects p WHERE p.id = $1 AND ${projectInPortalScope("p", scopeAt(2))}`,
+          [b.projectId, ...scopeValues(scope)],
         );
         if (!p.rows[0]) throw new NotFoundException("project not found");
         clientId = p.rows[0].client_id;
@@ -148,8 +153,7 @@ export class PortalConversationController {
         threadId = await createProjectThread(c, tenantId, clientId, projectId, subject, userId, "client");
         created = true;
       } else {
-        if (scope.projectIds !== null) throw new NotFoundException("conversation not found");
-        clientId = this.pickOwnClient(scope, b.clientId);
+        clientId = this.pickGeneralClient(scope, b.clientId);
         const g = await findOrCreateGeneralThread(c, tenantId, clientId, userId, "client");
         threadId = g.id;
         created = g.created;
@@ -205,13 +209,22 @@ export class PortalConversationController {
   // Ownership — every helper applies the thread predicate; none takes an id on trust
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
 
-  /** A client-wide caller's own client for the general thread: the only one, or the one they name. */
-  private pickOwnClient(scope: PortalScope, bodyClientId: unknown): string {
-    if (scope.clientIds.length === 1) return scope.clientIds[0];
-    if (typeof bodyClientId !== "string" || !scope.clientIds.includes(bodyClientId)) {
-      throw new BadRequestException("select which of your accounts this conversation is for");
+  /** The client whose GENERAL thread the caller posts to. Per client (2026-10-13): it must be a client the
+   *  caller reaches CLIENT-WIDE (`wideClientIds`), because the general thread does not exist for a contact
+   *  limited to some of that client's projects (PV4-Q1).
+   *   - Named one of the caller's clients that they are NOT client-wide on: 404, exactly as if the thread
+   *     did not exist (no oracle, and no way to reach it through a sibling grant on another client).
+   *   - Client-wide on none: 404.
+   *   - Otherwise: the one they name, or their only client-wide client; several and no valid choice is 400. */
+  private pickGeneralClient(scope: PortalScope, bodyClientId: unknown): string {
+    const named = typeof bodyClientId === "string" && scope.clientIds.includes(bodyClientId) ? bodyClientId : null;
+    if (named !== null) {
+      if (!scope.wideClientIds.includes(named)) throw new NotFoundException("conversation not found");
+      return named;
     }
-    return bodyClientId;
+    if (scope.wideClientIds.length === 0) throw new NotFoundException("conversation not found");
+    if (scope.wideClientIds.length === 1) return scope.wideClientIds[0];
+    throw new BadRequestException("select which of your accounts this conversation is for");
   }
 
   private async ownedThread(c: PoolClient, scope: PortalScope, threadId: string, forUpdate = false): Promise<ThreadRow> {
@@ -219,9 +232,9 @@ export class PortalConversationController {
     const r = await c.query<ThreadRow>(
       `SELECT t.id, t.client_id AS "clientId", t.project_id AS "projectId", t.status
          FROM conversation_threads t
-        WHERE t.id = $1 AND ${conversationThreadInPortalScope("t", { clients: 2, projects: 3 })}
+        WHERE t.id = $1 AND ${conversationThreadInPortalScope("t", scopeAt(2))}
         ${forUpdate ? "FOR UPDATE" : ""}`,
-      [threadId, scope.clientIds, scope.projectIds],
+      [threadId, ...scopeValues(scope)],
     );
     if (!r.rows[0]) throw new NotFoundException("conversation not found");
     return r.rows[0];
@@ -234,8 +247,8 @@ export class PortalConversationController {
          FROM conversation_threads t
          JOIN clients cl ON cl.id = t.client_id
          LEFT JOIN projects p ON p.id = t.project_id
-        WHERE t.id = $1 AND ${conversationThreadInPortalScope("t", { clients: 2, projects: 3 })}`,
-      [threadId, scope.clientIds, scope.projectIds],
+        WHERE t.id = $1 AND ${conversationThreadInPortalScope("t", scopeAt(2))}`,
+      [threadId, ...scopeValues(scope)],
     );
     if (!r.rows[0]) throw new NotFoundException("conversation not found");
     return r.rows[0];

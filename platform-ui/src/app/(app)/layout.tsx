@@ -6,6 +6,8 @@ import { getPrefs } from "@/lib/prefs";
 import { listDepartmentBriefs, type DeptBrief } from "@/lib/departments";
 import { Shell } from "@/components/shell/Shell";
 import { isClientOnly } from "@/lib/rbac";
+import { myWorkspaces } from "@/lib/workspaces-data";
+import { buildShellModel, type ShellModel } from "@/lib/shellModel";
 
 // `drawer` is the parallel slot the intercepted task route renders into (see @drawer/). It sits
 // OUTSIDE <Shell>'s scroll container so the slide-over is positioned against the viewport rather
@@ -32,9 +34,19 @@ export default async function AppLayout({ children, drawer }: { children: React.
   const departments: DeptBrief[] = tenantId
     ? await listDepartmentBriefs(userId, tenantId).catch(() => [] as DeptBrief[])
     : [];
+  // DW-2a: only the pilot switch reads the person's workspaces, so the classic shell makes no extra call.
+  // A model that cannot be built leaves the classic sidebar, never a broken page.
+  let workspaceModel: ShellModel | null = null;
+  if (prefs.shell === "workspaces") {
+    try {
+      workspaceModel = buildShellModel({ me, tenantId, workspaces: await myWorkspaces(me, tenantId) });
+    } catch {
+      workspaceModel = null;
+    }
+  }
   return (
     <>
-      <Shell me={me} tenantId={tenantId} moduleLabel="My Workspace" prefs={prefs} departments={departments}>
+      <Shell me={me} tenantId={tenantId} moduleLabel="My Workspace" prefs={prefs} departments={departments} workspaceModel={workspaceModel}>
         {children}
       </Shell>
       {drawer}

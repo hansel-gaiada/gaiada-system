@@ -1,7 +1,11 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { logout } from "@/app/(app)/account/actions";
+import { setShellLayoutAction } from "@/lib/prefsActions";
+import type { ShellLayout } from "@/lib/shellLayout";
+import type { Theme } from "@/lib/prefs";
+import { ThemeToggle } from "./ThemeToggle";
 
 // The sidebar user-card, upgraded to a menu button: opens a small popover with
 // "Account settings" and "Sign out". Closes on outside-click or Escape.
@@ -9,8 +13,15 @@ import { logout } from "@/app/(app)/account/actions";
 // with the popover opening DOWNWARD. The default (sidebar floor) opens upward
 // and shows name + role. Same component, same menu items, same actions.
 // `clientView` (PV2-06) adds a "Client view" link to /portal for staff who are also client contacts.
-export function UserMenu({ name, secondary, initials, compact = false, clientView = false }: { name: string; secondary: string; initials: string; compact?: boolean; clientView?: boolean }) {
+// `shellLayout` (DW-2a) adds the pilot switch between the classic shell and the workspace shell; the
+// action stores the choice and revalidates the layout, so the next render draws the other sidebar.
+// `theme` (DW-2c) puts the Theme control (the same ThemeToggle, same cookie) first in the menu; the
+// workspace top bar has no separate theme button. Without it the menu is exactly as it was.
+export function UserMenu({ name, secondary, initials, compact = false, clientView = false, shellLayout, theme }: {
+  name: string; secondary: string; initials: string; compact?: boolean; clientView?: boolean; shellLayout?: ShellLayout; theme?: Theme;
+}) {
   const [open, setOpen] = useState(false);
+  const [switching, startSwitch] = useTransition();
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -30,9 +41,15 @@ export function UserMenu({ name, secondary, initials, compact = false, clientVie
   }, [open]);
 
   return (
-    <div className={`erp-usermenu${compact ? " erp-usermenu--top" : ""}`} ref={ref}>
+    <div className={`erp-usermenu${compact ? " erp-usermenu--top" : ""}${theme ? " erp-usermenu--theme" : ""}`} ref={ref}>
       {open && (
         <div className="erp-usermenu__pop" role="menu" aria-label="Account menu">
+          {theme && (
+            <div className="erp-usermenu__theme" role="group" aria-label="Theme">
+              <span className="erp-usermenu__theme-label" aria-hidden="true">Theme</span>
+              <ThemeToggle theme={theme} />
+            </div>
+          )}
           <Link href="/account" role="menuitem" className="erp-usermenu__item" onClick={() => setOpen(false)}>
             Account settings
           </Link>
@@ -40,6 +57,23 @@ export function UserMenu({ name, secondary, initials, compact = false, clientVie
             <Link href="/portal" role="menuitem" className="erp-usermenu__item" onClick={() => setOpen(false)}>
               Client view
             </Link>
+          )}
+          {shellLayout && (
+            <button
+              type="button"
+              role="menuitem"
+              className="erp-usermenu__item"
+              disabled={switching}
+              onClick={() => {
+                const next: ShellLayout = shellLayout === "classic" ? "workspaces" : "classic";
+                startSwitch(async () => {
+                  await setShellLayoutAction(next);
+                  setOpen(false);
+                });
+              }}
+            >
+              {shellLayout === "classic" ? "Try the new layout" : "Back to the classic layout"}
+            </button>
           )}
           <form action={logout}>
             <button type="submit" role="menuitem" className="erp-usermenu__item erp-usermenu__item--danger">

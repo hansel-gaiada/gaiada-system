@@ -1,5 +1,5 @@
 "use client";
-import { useActionState, useCallback, useEffect, useRef, useState } from "react";
+import { useActionState, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AudioUploadResult } from "@/lib/meetingsActions";
 import type { RecordingStatus } from "@/lib/meetings";
@@ -35,6 +35,7 @@ export function AudioUploadForm({
   const [uploadState, uploadFormAction, uploadPending] = useActionState<AudioUploadResult | null, FormData>(uploadAction, null);
   const [retryState, retryFormAction, retryPending] = useActionState<AudioUploadResult | null, FormData>(retryAction, null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputId = useId();
   const [fileName, setFileName] = useState<string>("");
 
   const poll = useCallback(async () => {
@@ -114,7 +115,9 @@ export function AudioUploadForm({
           onSubmit={() => setLiveStatus("transcribing")}
         >
           <input type="hidden" name="id" value={recordingId} />
+          <label htmlFor={fileInputId} style={{ font: "500 13px var(--font-body)" }}>Audio or video file</label>
           <input
+            id={fileInputId}
             ref={fileInputRef}
             type="file"
             name="file"
