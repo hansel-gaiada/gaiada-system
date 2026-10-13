@@ -22,19 +22,23 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
 import { newId } from "../db";
+import { KeycloakUserExistsError } from "./keycloak-admin";
 import { buildApp } from "../main";
 import { resetModules } from "../modules/registry";
 import { resetCoreRollupProviders } from "../rollups/engine";
 import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole, createClient, createProject } from "../testing/fixtures";
 
-// The revoke tests below need to SEE whether the IdP disable is attempted, which an unconfigured Keycloak
-// cannot show (it throws before any call). So the two Keycloak admin calls the revoke handler makes are
-// wrapped: with no hook installed they run the REAL implementation (every other test in this file keeps its
-// fail-closed, KeycloakNotConfiguredError behaviour), and the "last-contact" describe installs hooks.
+// The revoke/accept tests below need to SEE which Keycloak admin calls the handlers make, which an unconfigured
+// Keycloak cannot show (it throws before any call). So the Keycloak admin calls are wrapped: with no hook
+// installed they run the REAL implementation (every other test in this file keeps its fail-closed,
+// KeycloakNotConfiguredError behaviour), and the describes at the bottom install hooks.
 const kc = vi.hoisted(() => ({
   find: null as null | ((email: string) => Promise<{ id: string } | null>),
+  create: null as null | ((input: { email: string; password: string }) => Promise<string>),
   disable: null as null | ((id: string) => Promise<void>),
+  enable: null as null | ((id: string) => Promise<void>),
+  setPassword: null as null | ((id: string, password: string) => Promise<void>),
 }));
 vi.mock("./keycloak-admin", async (importOriginal) => {
   const orig = await importOriginal<typeof import("./keycloak-admin")>();
@@ -42,8 +46,14 @@ vi.mock("./keycloak-admin", async (importOriginal) => {
     ...orig,
     findUserByEmail: (...a: Parameters<typeof orig.findUserByEmail>) =>
       kc.find ? (kc.find(a[0]) as ReturnType<typeof orig.findUserByEmail>) : orig.findUserByEmail(...a),
+    createUser: (...a: Parameters<typeof orig.createUser>) =>
+      kc.create ? kc.create(a[0]) : orig.createUser(...a),
     disableUser: (...a: Parameters<typeof orig.disableUser>) =>
       kc.disable ? kc.disable(a[0]) : orig.disableUser(...a),
+    enableUser: (...a: Parameters<typeof orig.enableUser>) =>
+      kc.enable ? kc.enable(a[0]) : orig.enableUser(...a),
+    setPassword: (...a: Parameters<typeof orig.setPassword>) =>
+      kc.setPassword ? kc.setPassword(a[0], a[1]) : orig.setPassword(...a),
   };
 });
 
@@ -467,6 +477,115 @@ describe.skipIf(!TEST_URL)("client-contacts HTTP surface (W0-4)", () => {
       expect(body.idpDisabled).toBe(true);
       expect(body.idpError).toBeNull();
       expect(disableCalls).toEqual(["kc-multi-contact-user"]);
+    });
+  });
+
+  // ---- accept: an invite token must never set a credential on an account that is already in use ----
+  //
+  // Account takeover found 2026-10-13. Any manager can invite ANY email as a contact of their own client and
+  // is handed the raw token (no email transport), so accepting it on an EXISTING Keycloak user used to
+  // enable that account and set the password from the request body: the manager then signs in as that person
+  // (the platform admin, say). The rule now: a person who already holds live access (an active company
+  // membership, or another active client contact in any tenant) keeps their Keycloak account untouched; only a
+  // dormant portal-only identity is still re-enabled and given the password.
+  describe("accept leaves an in-use Keycloak account alone", () => {
+    const calls = { enable: [] as string[], setPassword: [] as Array<[string, string]>, create: [] as string[] };
+    const ATTACKER_PASSWORD = "attacker-chosen-password-1";
+
+    // Invite `email` to `clientId` as `manager`, then accept the token with the attacker's password.
+    async function inviteAndAccept(email: string) {
+      const invite = await app.inject({
+        method: "POST",
+        url: `/api/${co}/clients/${clientId}/contacts`,
+        headers: asUser(manager),
+        payload: { email },
+      });
+      expect(invite.statusCode).toBe(201);
+      const contactId = invite.json().contact.id as string;
+      const accept = await app.inject({
+        method: "POST",
+        url: `/api/invites/accept`,
+        payload: { token: invite.json().invite.token, password: ATTACKER_PASSWORD },
+      });
+      return { contactId, accept };
+    }
+    async function activationPayload(contactId: string) {
+      const r = await adminPool().query(
+        `SELECT payload FROM outbox_events WHERE entity_id = $1 AND event_type = 'client_contact.activated'`,
+        [contactId],
+      );
+      return r.rows[0]?.payload as Record<string, unknown> | undefined;
+    }
+
+    beforeAll(() => {
+      // Every email "already exists" in Keycloak except the one test that wants a brand-new user.
+      kc.create = async (input) => {
+        calls.create.push(input.email);
+        if (input.email === "brand-new-contact@cc.test") return "kc-brand-new";
+        throw new KeycloakUserExistsError(input.email);
+      };
+      kc.find = async (email) => ({ id: `kc-${email}` });
+      kc.enable = async (id) => { calls.enable.push(id); };
+      kc.setPassword = async (id, password) => { calls.setPassword.push([id, password]); };
+    });
+    afterAll(() => {
+      kc.create = null;
+      kc.find = null;
+      kc.enable = null;
+      kc.setPassword = null;
+    });
+
+    it("STAFF (an active membership) invited as a contact: Keycloak untouched, contact activated, existingAccount true", async () => {
+      // `member@cc.test` is an active member of `co`; a manager of the same company invites that address.
+      const { contactId, accept } = await inviteAndAccept("member@cc.test");
+      expect(accept.statusCode).toBe(200);
+      const body = accept.json();
+      expect(body).toMatchObject({ ok: true, email: "member@cc.test", status: "active", portalPath: "/portal", existingAccount: true });
+      expect(calls.enable).toEqual([]);
+      expect(calls.setPassword).toEqual([]);
+
+      const row = await adminPool().query(`SELECT status FROM client_contacts WHERE id = $1`, [contactId]);
+      expect(row.rows[0].status).toBe("active");
+      const payload = await activationPayload(contactId);
+      expect(payload?.accountPath).toBe("existing_kept");
+      expect(JSON.stringify(payload)).not.toContain(ATTACKER_PASSWORD);
+    });
+
+    it("a user with another ACTIVE contact in ANOTHER company: Keycloak untouched, existingAccount true", async () => {
+      const elsewhere = await createUser("contact-elsewhere@cc.test");
+      await adminPool().query(
+        `INSERT INTO client_contacts (id, tenant_id, client_id, user_id, project_id, capability, status, origin_site, activated_at)
+         VALUES ($1, $2, $3, $4, NULL, 'viewer', 'active', $5, now())`,
+        [newId(), other, otherClientId, elsewhere, config.originSite],
+      );
+      const { contactId, accept } = await inviteAndAccept("contact-elsewhere@cc.test");
+      expect(accept.statusCode).toBe(200);
+      expect(accept.json()).toMatchObject({ ok: true, status: "active", existingAccount: true });
+      expect(calls.enable).toEqual([]);
+      expect(calls.setPassword).toEqual([]);
+      expect((await activationPayload(contactId))?.accountPath).toBe("existing_kept");
+    });
+
+    it("a DORMANT portal-only identity (no membership, no other active contact): re-enabled and given the password, as before", async () => {
+      await createUser("dormant-portal@cc.test");
+      const { contactId, accept } = await inviteAndAccept("dormant-portal@cc.test");
+      expect(accept.statusCode).toBe(200);
+      expect(accept.json()).toMatchObject({ ok: true, status: "active", existingAccount: false });
+      expect(calls.enable).toEqual(["kc-dormant-portal@cc.test"]);
+      expect(calls.setPassword).toEqual([["kc-dormant-portal@cc.test", ATTACKER_PASSWORD]]);
+      const payload = await activationPayload(contactId);
+      expect(payload?.accountPath).toBe("dormant_adopted");
+      expect(JSON.stringify(payload)).not.toContain(ATTACKER_PASSWORD);
+    });
+
+    it("a brand-new user: created with the chosen password, nothing adopted, existingAccount false", async () => {
+      const before = { enable: calls.enable.length, setPassword: calls.setPassword.length };
+      const { contactId, accept } = await inviteAndAccept("brand-new-contact@cc.test");
+      expect(accept.statusCode).toBe(200);
+      expect(accept.json()).toMatchObject({ ok: true, status: "active", existingAccount: false });
+      expect(calls.enable.length).toBe(before.enable);
+      expect(calls.setPassword.length).toBe(before.setPassword);
+      expect((await activationPayload(contactId))?.accountPath).toBe("created");
     });
   });
 });

@@ -12,6 +12,24 @@ import { MIN_PASSWORD_LENGTH, type AcceptResult } from "@/lib/invites";
 export function AcceptInviteForm({ token, clientName }: { token: string; clientName?: string | null }) {
   const [state, action, pending] = useActionState<AcceptResult | null, FormData>(acceptInviteAction, null);
 
+  if (state?.ok && state.existingAccount) {
+    // The platform did not touch this person's login: whatever they typed on the form was ignored, so say
+    // nothing that implies a new password exists.
+    return (
+      <div style={{ display: "grid", gap: 14 }}>
+        <p style={{ margin: 0, font: "600 15px var(--font-body)", color: "var(--ink)" }}>
+          ✓ Your portal access is ready
+        </p>
+        <p style={{ margin: 0, font: "400 14px/1.6 var(--font-body)", color: "var(--ink-muted)" }}>
+          You already have an account. Sign in with it to open your portal.
+        </p>
+        <Link href="/login" className="btn btn-primary" style={{ justifySelf: "start", fontSize: 14, textDecoration: "none" }}>
+          Sign in
+        </Link>
+      </div>
+    );
+  }
+
   if (state?.ok) {
     return (
       <div style={{ display: "grid", gap: 14 }}>
@@ -69,7 +87,8 @@ export function AcceptInviteForm({ token, clientName }: { token: string; clientN
               style={{ padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 10, font: "400 14px var(--font-body)" }}
             />
             <span style={{ font: "400 12px var(--font-body)", color: "var(--ink-subtle)" }}>
-              At least {MIN_PASSWORD_LENGTH} characters.
+              At least {MIN_PASSWORD_LENGTH} characters. If you already have an account with us, it keeps its
+              current password and you sign in with that.
             </span>
           </label>
           <label style={{ display: "grid", gap: 6 }}>

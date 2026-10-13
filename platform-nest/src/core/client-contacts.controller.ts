@@ -89,6 +89,26 @@ const SELECT_CONTACT = `
     FROM client_contacts cc JOIN users u ON u.id = cc.user_id
    WHERE cc.deleted_at IS NULL`;
 
+/** Run `fn` in its own transaction with `app.principal_user_id` set (transaction-local) to `userId`, so the
+ *  `principal_lookup` policies (company_memberships 0001/0004, client_contacts 0072 §7b) admit exactly that one
+ *  user's rows across ALL tenants. `client_contacts` and `company_memberships` are FORCE RLS: a bare `withGlobal`
+ *  connection sets neither GUC and reads ZERO rows, not an error. Never a session-level SET: it would leak to the
+ *  next request on this pooled connection. Same shape as `assemblePrincipal()` and step-up's `staffCompanies()`. */
+async function withPrincipalLookup<T>(userId: string, fn: (c: PoolClient) => Promise<T>): Promise<T> {
+  return withGlobal(async (c) => {
+    await c.query("BEGIN");
+    try {
+      await c.query("SELECT set_config('app.principal_user_id', $1, true)", [userId]);
+      const r = await fn(c);
+      await c.query("COMMIT");
+      return r;
+    } catch (e) {
+      try { await c.query("ROLLBACK"); } catch { /* connection already gone; keep the original error */ }
+      throw e;
+    }
+  });
+}
+
 @Controller("api")
 @UseGuards(AuthGuard)
 export class ClientContactsController {
@@ -269,24 +289,13 @@ export class ClientContactsController {
     // for everyone. `stillElsewhere` was always empty and EVERY revoke disabled the person's Keycloak account,
     // even when they held an active contact on another client (the owner's own account is one such person).
     // The sanctioned cross-tenant read is the `principal_lookup` policy (0072 §7b): it admits exactly the rows
-    // of the ONE user named in `app.principal_user_id`, across all tenants. The GUC is transaction-local
-    // (`set_config(..., true)`), hence the explicit BEGIN/COMMIT, exactly as `assemblePrincipal()` does it. Never
-    // a session-level SET: it would leak to the next request on this pooled connection.
-    const stillElsewhere = await withGlobal(async (c) => {
-      await c.query("BEGIN");
-      try {
-        await c.query("SELECT set_config('app.principal_user_id', $1, true)", [contact.user_id]);
-        const r = await c.query(
-          `SELECT 1 FROM client_contacts WHERE user_id = $1 AND status = 'active' AND deleted_at IS NULL LIMIT 1`,
-          [contact.user_id],
-        );
-        await c.query("COMMIT");
-        return r;
-      } catch (e) {
-        try { await c.query("ROLLBACK"); } catch { /* connection already gone; keep the original error */ }
-        throw e;
-      }
-    });
+    // of the ONE user named in `app.principal_user_id`, across all tenants (see `withPrincipalLookup`).
+    const stillElsewhere = await withPrincipalLookup(contact.user_id, (c) =>
+      c.query(
+        `SELECT 1 FROM client_contacts WHERE user_id = $1 AND status = 'active' AND deleted_at IS NULL LIMIT 1`,
+        [contact.user_id],
+      ),
+    );
     // Only disable the account if this was their LAST active contact row anywhere. The same person may
     // be a stakeholder on another client or project; revoking one engagement must not lock them out of
     // the others.
@@ -368,18 +377,54 @@ export class ClientInviteAcceptController {
     // emailVerified:true is set inside kcCreateUser and is load-bearing: `provisionUser()` refuses to
     // link a first login to this pre-existing users row unless the IdP says the address is verified.
     // Consuming a token delivered to that address is what makes the flag honest.
+    //
+    // `accountPath` records which branch ran (it goes into the activation event; NEVER a password):
+    //   created           no Keycloak user existed: made one with the chosen password
+    //   existing_kept     a Keycloak user existed AND holds live access of its own: Keycloak untouched
+    //   dormant_adopted   a Keycloak user existed but holds no access anywhere: re-enabled, password set
     let kcUserId: string;
+    let accountPath: "created" | "existing_kept" | "dormant_adopted" = "created";
     try {
       kcUserId = await kcCreateUser({ email: invite.email, password });
     } catch (e) {
       if (e instanceof KeycloakUserExistsError) {
-        // ADOPT rather than fail: the same human may already have an account (staff, or a contact of
-        // another client). Re-enable it and set the password they just chose.
         const existing = await kcFindUserByEmail(invite.email);
         if (!existing) throw e;
         kcUserId = existing.id;
-        await kcEnableUser(kcUserId);
-        await kcSetPassword(kcUserId, password);
+        // ⚠ ACCOUNT TAKEOVER, closed here (2026-10-13). This branch used to ADOPT unconditionally:
+        // `kcEnableUser` + `kcSetPassword(<the password from THIS request>)`. But the invite route lets any
+        // company manager invite ANY email (`users` are global), and the raw token is handed back to that
+        // same manager (there is no email transport), so a manager could invite e.g. the platform admin's
+        // address, accept the token themselves with a password of their choosing, and sign in as that person
+        // (and it re-enabled accounts IT had disabled). Holding the token proves control of an invitation, not
+        // of the mailbox, so it must never be allowed to set a credential on an account that is already in use.
+        //
+        // The rule: if the person ALREADY has live access of their own (any active company membership, i.e.
+        // staff, or any OTHER active client contact in any tenant) the Keycloak account is left strictly alone:
+        // no enable, no password; they sign in with what they have, and the body's password is ignored. Only a
+        // DORMANT portal-only identity (no membership, no other active contact, e.g. every earlier engagement
+        // revoked) is still re-enabled and given the new password: the accept then grants nothing beyond the
+        // inviter's own client, so there is nothing to take over. Read under `principal_lookup` (both tables are
+        // FORCE RLS; a bare `withGlobal` would see zero rows and treat everyone as dormant, the same trap as revoke).
+        const access = await withPrincipalLookup(cc.user_id, async (c) => {
+          const m = await c.query(
+            `SELECT 1 FROM company_memberships WHERE user_id = $1 AND status = 'active' AND deleted_at IS NULL LIMIT 1`,
+            [cc.user_id],
+          );
+          const o = await c.query(
+            `SELECT 1 FROM client_contacts
+              WHERE user_id = $1 AND id <> $2 AND status = 'active' AND deleted_at IS NULL LIMIT 1`,
+            [cc.user_id, cc.id],
+          );
+          return { staff: !!m.rowCount, otherContact: !!o.rowCount };
+        });
+        if (access.staff || access.otherContact) {
+          accountPath = "existing_kept";
+        } else {
+          accountPath = "dormant_adopted";
+          await kcEnableUser(kcUserId);
+          await kcSetPassword(kcUserId, password);
+        }
       } else {
         throw e;
       }
@@ -394,6 +439,7 @@ export class ClientInviteAcceptController {
       await emitEvent(c, invite.tenantId, "client_contact", cc.id, "client_contact.activated", {
         clientId: cc.client_id,
         actorExternal: "client-invite-accept",
+        accountPath,
       });
     });
 
@@ -432,6 +478,8 @@ export class ClientInviteAcceptController {
       href: "/portal",
     });
 
-    return { ok: true, email: invite.email, status: "active", portalPath: "/portal" };
+    // `existingAccount` tells the page NOT to talk about a new password: the person signs in with the account
+    // they already have (their body password, if any, was ignored).
+    return { ok: true, email: invite.email, status: "active", portalPath: "/portal", existingAccount: accountPath === "existing_kept" };
   }
 }

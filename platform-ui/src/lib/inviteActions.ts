@@ -55,9 +55,9 @@ export async function acceptInviteAction(
     return { ok: false, error: "We could not reach the server. Please try again in a moment.", retryable: true };
   }
 
-  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; email?: string; error?: string; code?: string };
+  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; email?: string; existingAccount?: boolean; error?: string; code?: string };
 
-  if (res.ok && body.ok) return { ok: true, email: String(body.email ?? "") };
+  if (res.ok && body.ok) return { ok: true, email: String(body.email ?? ""), existingAccount: body.existingAccount === true };
 
   // The token is SINGLE-USE and is spent even by a failed attempt, so `retryable` here means "the
   // password form is worth showing again", not "this link still works". Only a 400 from the password

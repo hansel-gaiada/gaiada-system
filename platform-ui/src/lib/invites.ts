@@ -4,7 +4,9 @@
 // async functions. A plain `export const` in that file compiles under `tsc` and passes vitest, then
 // fails the webpack pass of `next build` — which is why this split exists and should not be undone.
 export type AcceptResult =
-  | { ok: true; email: string }
+  // `existingAccount`: the person already had an account in use, so the platform left it untouched and ignored the
+  // password typed on the form. The page must NOT imply a new password was set.
+  | { ok: true; email: string; existingAccount: boolean }
   | { ok: false; error: string; retryable: boolean };
 
 /** Kept in step with the platform's own check (10) rather than being stricter here: a client bounced
