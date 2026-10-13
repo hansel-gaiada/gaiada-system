@@ -7032,7 +7032,7 @@ Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.2 (DW-6f) and §14.1 
 
 **MCP.** No tool lists the overview today; none is added.
 
-## 38. A department head's Team progress, and their access to Learning (DW-4g, 2026-10-13) — `platform-nest/src/modules/lms/lms-learn.controller.ts` (`compliance`) — **STATUS: PLANNED (contract first)**
+## 38. A department head's Team progress, and their access to Learning (DW-4g, 2026-10-13) — `platform-nest/src/modules/lms/lms-learn.controller.ts` (`compliance`) — **STATUS: BUILT, PROTOTYPED (lms-l1-acceptance.test.ts on the Linux CI gate)**
 
 **Why.** DW-D15 (owner): a head gets `org_unit_lead` on their own department, derived from their lead position, so they can add learning material and see their team's progress, but never waive mandatory training. Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.4 and §5.6.
 

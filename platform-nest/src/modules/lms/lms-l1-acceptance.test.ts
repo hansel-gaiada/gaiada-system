@@ -535,4 +535,142 @@ describe.skipIf(!RUN)("LMS L1 — the learning catalogue, driven end-to-end over
     const hrOnly = await withTenants([A], (c) => c.query<{ n: string }>(`SELECT count(*)::text AS n FROM lms_courses`), { modules: ["hr"] });
     expect(hrOnly.rows[0].n).toBe("0");
   });
+
+  // ══════════════════════════════════════ 9 · DW-4g — A HEAD'S TEAM PROGRESS (BFF §38) ══════════
+  // The department head reads their OWN unit's progress through `compliance?unit=`, and still cannot
+  // waive. Fixtures are this block's own (a fresh path, fresh people) so the counts below do not
+  // depend on what cases 4-8 left behind. The org tree is written in the REAL stored shape
+  // (`{root: ...}`, what sanitizeStructure() writes) — `unitExistsInStructure` reads it.
+  describe("9 · DW-4g — compliance?unit= for a department head", () => {
+    let webMate: string;   // placed in d-web, enrolled
+    let seoMate: string;   // placed in d-seo, enrolled on the SAME path
+    let leaver: string;    // was in d-web, left in 2021 — NOT on the roster today, but enrolled
+    let g4PathId: string;
+    let g4EnrollmentId: string;
+
+    const place = (userId: string, unit: string, from: string, to: string | null) =>
+      withTenants(
+        [A],
+        (c) => c.query(
+          `INSERT INTO org_unit_memberships (id, tenant_id, user_id, unit_node_id, is_primary, valid_from, valid_to, source, origin_site)
+           VALUES (gen_random_uuid(), $1, $2, $3, true, $4::date, $5::date, 'manual', $6)`,
+          [A, userId, unit, from, to, config.originSite],
+        ),
+        { modules: ["lms"] },
+      );
+
+    beforeAll(async () => {
+      webMate = await createUser("webmate@a.test", "Web Mate");
+      seoMate = await createUser("seomate@a.test", "SEO Mate");
+      leaver = await createUser("leaver@a.test", "Former Web Dev");
+      for (const u of [webMate, seoMate, leaver]) await addMembership(A, u);
+
+      await withTenants(
+        [A],
+        (c) => c.query(
+          `INSERT INTO company_org_structure (tenant_id, structure, origin_site) VALUES ($1, $2, $3)
+           ON CONFLICT (tenant_id) DO UPDATE SET structure = EXCLUDED.structure`,
+          [A, JSON.stringify({
+            root: {
+              id: "d-corp", kind: "company", name: "Gaia Digital Agency",
+              children: [
+                { id: "d-web", kind: "department", name: "Web Dev", children: [] },
+                { id: "d-seo", kind: "department", name: "SEO", children: [] },
+              ],
+            },
+          }), config.originSite],
+        ),
+        { modules: ["lms"] },
+      );
+      await place(webLead, "d-web", "2020-01-01", null);
+      await place(webMate, "d-web", "2020-01-01", null);
+      await place(seoLead, "d-seo", "2020-01-01", null);
+      await place(seoMate, "d-seo", "2020-01-01", null);
+      await place(leaver, "d-web", "2020-01-01", "2021-01-01");
+
+      const p = await call("POST", `${base()}/paths`, admin, {
+        pathKey: "dw4g-track", title: "DW-4g Track", track: "department", unitNodeId: "d-web",
+      });
+      expect(p.statusCode).toBe(201);
+      g4PathId = p.json().id;
+      expect((await call("POST", `${base()}/paths/${g4PathId}/courses`, admin, {
+        courses: [{ courseKey: "fe-fundamentals" }],
+      })).statusCode).toBe(200);
+      expect((await call("POST", `${base()}/paths/${g4PathId}/publish`, admin)).statusCode).toBe(200);
+
+      // The SAME path to an in-unit learner, an out-of-unit learner, and somebody who has left.
+      for (const u of [webMate, seoMate, leaver]) {
+        const e = await call("POST", `${base()}/enrollments`, admin, { subjectUserId: u, pathId: g4PathId });
+        expect(e.statusCode).toBe(201);
+        if (u === webMate) g4EnrollmentId = e.json().id;
+      }
+    });
+
+    const row = (body: { paths: Array<{ pathKey: string }> }) =>
+      body.paths.find((r) => r.pathKey === "dw4g-track") as unknown as
+        { assigned: number; completed: number; outstanding: number; waived: number };
+
+    it("9a · the Web Dev head CANNOT waive, and the enrolment is left exactly as it was", async () => {
+      const w = await call("POST", `${base()}/enrollments/${g4EnrollmentId}/waive`, webLead, { reason: "my team is busy" });
+      expect(w.statusCode).toBe(403);
+      const after = await withTenants(
+        [A],
+        (c) => c.query<{ status: string; waived_reason: string | null }>(
+          `SELECT status, waived_reason FROM lms_enrollments WHERE id = $1`, [g4EnrollmentId],
+        ),
+        { modules: ["lms"] },
+      );
+      expect(after.rows[0]).toEqual({ status: "assigned", waived_reason: null });
+    });
+
+    it("9b · compliance?unit=d-web as the Web Dev head: 200, the roster size, and ONLY their learners' enrolments", async () => {
+      const r = await call("GET", `${base()}/compliance?unit=d-web`, webLead);
+      expect(r.statusCode).toBe(200);
+      const body = r.json();
+      expect(body.unit).toBe("d-web");
+      // webLead + webMate. The leaver's membership closed in 2021 and seoMate sits in d-seo.
+      expect(body.learners).toBe(2);
+      expect(row(body)).toMatchObject({ assigned: 1, completed: 0, outstanding: 1, waived: 0 });
+
+      // The company-wide answer for the same path counts all three — so the unit filter is real.
+      const all = await call("GET", `${base()}/compliance`, admin);
+      const wide = all.json().find((x: { pathKey: string }) => x.pathKey === "dw4g-track");
+      expect(wide.assigned).toBe(3);
+    });
+
+    it("9c · compliance?unit=d-seo as the Web Dev head is refused (403)", async () => {
+      expect((await call("GET", `${base()}/compliance?unit=d-seo`, webLead)).statusCode).toBe(403);
+    });
+
+    it("9d · an unknown unit is 403 for the head — nothing is revealed about whether it exists", async () => {
+      expect((await call("GET", `${base()}/compliance?unit=no-such-unit`, webLead)).statusCode).toBe(403);
+      // An empty `unit` is refused the same way, never read as "everything".
+      expect((await call("GET", `${base()}/compliance?unit=`, webLead)).statusCode).toBe(403);
+    });
+
+    it("9e · a company-wide caller asking for an unknown unit gets 404 unit_not_found", async () => {
+      const r = await call("GET", `${base()}/compliance?unit=no-such-unit`, admin);
+      expect(r.statusCode).toBe(404);
+      expect(r.json()).toMatchObject({ error: "unit_not_found", field: "unit" });
+    });
+
+    it("9f · without ?unit the Web Dev head is still refused (unchanged)", async () => {
+      expect((await call("GET", `${base()}/compliance`, webLead)).statusCode).toBe(403);
+    });
+
+    it("9g · without ?unit the company admin still gets the old ARRAY shape (regression guard)", async () => {
+      const r = await call("GET", `${base()}/compliance`, admin);
+      expect(r.statusCode).toBe(200);
+      expect(Array.isArray(r.json())).toBe(true);
+      expect(r.json()[0]).toHaveProperty("pathKey");
+      expect(r.json()[0]).not.toHaveProperty("learners");
+    });
+
+    it("9h · a company-wide caller can read a unit's progress too, with the same shape", async () => {
+      const r = await call("GET", `${base()}/compliance?unit=d-web`, admin);
+      expect(r.statusCode).toBe(200);
+      expect(r.json().learners).toBe(2);
+      expect(row(r.json()).assigned).toBe(1);
+    });
+  });
 });

@@ -25,6 +25,9 @@ import {
 } from "./lab-dispatch";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { loadUnitAncestors } from "../../core/org-unit-closure";
+import {
+  collectUnitSubtree, loadOrgStructure, loadUnitRoster, todayIsoInTz, unitExistsInStructure,
+} from "../reports/person-scope";
 import type { Principal } from "../../rbac/principal";
 
 /**
@@ -772,7 +775,14 @@ export class LmsLearnController {
    * everybody's scores across a dashboard.
    */
   @Get("compliance")
-  async compliance(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+  async compliance(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("unit") unit?: string,
+  ) {
+    // DW-4g (BFF §38): `?unit=<orgNodeId>` is the department head's read. Without it, this is
+    // byte-for-byte the company-wide answer it always was — the one authorize() below carries NO
+    // unit attributes, so `org_unit_lead` can never match it and a head is refused here (unchanged).
+    if (unit !== undefined) return this.unitCompliance(req, tenantId, unit);
+
     await authorize(req.principal, { kind: "lms_enrollment", tenantId, module: "lms" }, "read");
     const rows = await withTenants(
       [tenantId],
@@ -792,5 +802,59 @@ export class LmsLearnController {
       { modules: ["lms"] },
     );
     return rows.rows;
+  }
+
+  /**
+   * DW-4g (BFF §38) — the compliance aggregate for ONE unit's roster. Order is the contract's:
+   *   1. resolve `unitAncestors` for `unit` from the closure (server-side, never client-supplied);
+   *   2. Cerbos `lms_enrollment` read WITH that ancestry — a head of the unit or an enclosing one
+   *      passes (the `org_unit_lead` rule), anybody else without a company-wide grant is 403. An id
+   *      with no closure rows has NO ancestors, so a head is refused (403) before anything reveals
+   *      whether the unit exists: an empty list is never read as "everything";
+   *   3. only then, a company-wide caller asking for an id that is not in the org tree gets 404.
+   * Learners are the unit's roster (primary memberships valid TODAY in REPORTS_TZ, subtree-wide —
+   * the same rule as BFF §37), and every count covers only THEIR enrolments. `learners` is the
+   * roster size, so "0 assigned" can never be read as "nobody here".
+   */
+  private async unitCompliance(req: FastifyRequest, tenantId: string, unit: unknown) {
+    const unitId = typeof unit === "string" ? unit : "";
+    const unitAncestors = unitId
+      ? await withTenants([tenantId], (c) => loadUnitAncestors(c, tenantId, unitId), { modules: ["lms"] })
+      : [];
+    await authorize(
+      req.principal,
+      { kind: "lms_enrollment", tenantId, module: "lms", unitAncestors },
+      "read",
+    );
+
+    const asOf = todayIsoInTz(config.reportsTz);
+    const out = await withTenants(
+      [tenantId],
+      async (c) => {
+        const structure = await loadOrgStructure(c, tenantId);
+        if (!unitId || !unitExistsInStructure(structure, unitId)) {
+          throw new NotFoundException({ message: "unit_not_found", field: "unit" });
+        }
+        const learners = await loadUnitRoster(c, tenantId, collectUnitSubtree(structure, unitId), asOf);
+        const rows = await c.query(
+          `SELECT p.path_key AS "pathKey", p.title, p.is_mandatory AS "isMandatory",
+                  count(e.id)::int AS "assigned",
+                  count(e.id) FILTER (WHERE e.status = 'completed')::int AS "completed",
+                  count(e.id) FILTER (WHERE e.status IN ('assigned','in_progress'))::int AS "outstanding",
+                  count(e.id) FILTER (WHERE e.status IN ('assigned','in_progress')
+                                        AND e.due_on IS NOT NULL AND e.due_on < CURRENT_DATE)::int AS "overdue",
+                  count(e.id) FILTER (WHERE e.status = 'waived')::int AS "waived"
+           FROM lms_paths p
+           LEFT JOIN lms_enrollments e ON e.path_id = p.id AND e.subject_user_id = ANY($1::uuid[])
+           WHERE p.deleted_at IS NULL AND p.status = 'published'
+           GROUP BY p.id, p.path_key, p.title, p.is_mandatory
+           ORDER BY p.is_mandatory DESC, p.title`,
+          [learners],
+        );
+        return { unit: unitId, learners: learners.length, paths: rows.rows };
+      },
+      { modules: ["lms"] },
+    );
+    return out;
   }
 }
