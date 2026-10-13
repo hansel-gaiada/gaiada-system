@@ -8,6 +8,8 @@
 import { revalidatePath } from "next/cache";
 import { getPrefs, writePrefs, type Theme, type OfficeZoom } from "./prefs";
 import { parseShellLayout, type ShellLayout } from "./shellLayout";
+import { MAX_PINNED_TOOLS, pinnedToolsFor } from "./pinnedTools";
+import { GENERIC_WORKSPACE, workspaceBySlug } from "./workspaces";
 
 /** Fire-and-forget from `AssistantWorkspace`'s toggle click — the client already holds the
  *  authoritative UI state the instant it clicks (same "optimistic, not awaited for correctness" shape
@@ -46,5 +48,24 @@ export async function setOfficeZoomAction(officeZoom: OfficeZoom): Promise<void>
 export async function setShellLayoutAction(shell: ShellLayout): Promise<void> {
   const current = await getPrefs();
   await writePrefs({ ...current, shell: parseShellLayout(shell) });
+  revalidatePath("/", "layout");
+}
+
+/** DW-6c: pin or unpin one tool of a workspace for the Overview's Today card (`lib/pinnedTools.ts`).
+ *  Both arguments come from the browser. The workspace is re-resolved by key here, and a tool key that
+ *  is not one of ITS tools is refused silently, with no write. The toggle starts from the EFFECTIVE pins
+ *  (so unpinning one of the default six stores the other five), pinning a seventh is refused, and the
+ *  list is stored in registry order. Works as a plain form post, so the page needs no JavaScript. */
+export async function togglePinnedToolAction(workspaceKey: string, toolKey: string): Promise<void> {
+  if (typeof workspaceKey !== "string" || typeof toolKey !== "string") return;
+  const ws = workspaceKey === GENERIC_WORKSPACE.key ? GENERIC_WORKSPACE : workspaceBySlug(workspaceKey);
+  if (!ws || !ws.tools.some((t) => t.key === toolKey)) return;
+  const current = await getPrefs();
+  const effective = pinnedToolsFor(current.pinnedTools, ws).map((t) => t.key);
+  const isPinned = effective.includes(toolKey);
+  if (!isPinned && effective.length >= MAX_PINNED_TOOLS) return;
+  const next = isPinned ? effective.filter((k) => k !== toolKey) : [...effective, toolKey];
+  const ordered = ws.tools.map((t) => t.key).filter((k) => next.includes(k));
+  await writePrefs({ ...current, pinnedTools: { ...current.pinnedTools, [ws.key]: ordered } });
   revalidatePath("/", "layout");
 }

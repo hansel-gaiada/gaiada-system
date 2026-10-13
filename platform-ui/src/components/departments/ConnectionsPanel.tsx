@@ -227,14 +227,11 @@ function SeatRowView({
   );
 }
 
-export function ConnectionsPanel({
-  github, drive, seat, actions,
-}: {
-  github?: ConnectionRow;
-  drive?: ConnectionRow;
-  seat?: SeatRow;
-  actions: ConnectionsPanelActions;
-}) {
+export type ConnectionsPanelPart = "github" | "drive" | "seat";
+
+/** What the rows ARE: account mappings, not sign-ins. Exported so the pilot's Connections section can
+ *  say it once above its per-kind blocks instead of once per block. */
+export function AccountMappingNote() {
   return (
     <>
       {/* ── SAY WHAT THESE ROWS ARE (2026-09-03) ─────────────────────────────────────────────────
@@ -251,7 +248,27 @@ export function ConnectionsPanel({
         service so work can be attributed to you. No credential is stored and nothing acts on your
         behalf — signing in to GitHub or Drive from the ERP is not built yet.
       </p>
+    </>
+  );
+}
+
+/** `only` (DW-6c) renders a subset of the rows, with no note: the pilot's Connections page draws one
+ *  block per kind and says the note once. Left off, it renders exactly what it always did. */
+export function ConnectionsPanel({
+  github, drive, seat, actions, only,
+}: {
+  github?: ConnectionRow;
+  drive?: ConnectionRow;
+  seat?: SeatRow;
+  actions: ConnectionsPanelActions;
+  only?: readonly ConnectionsPanelPart[];
+}) {
+  const show = (part: ConnectionsPanelPart) => !only || only.includes(part);
+  return (
+    <>
+      {!only && <AccountMappingNote />}
       <ul className="dept-conn-list">
+      {show("github") && (
       <ProviderRow
         label="GitHub"
         placeholder="GitHub username"
@@ -260,6 +277,8 @@ export function ConnectionsPanel({
         onUpdate={actions.update}
         onRevoke={actions.revoke}
       />
+      )}
+      {show("drive") && (
       <ProviderRow
         label="Google Drive"
         placeholder="you@company.com"
@@ -268,7 +287,10 @@ export function ConnectionsPanel({
         onUpdate={actions.update}
         onRevoke={actions.revoke}
       />
+      )}
+      {show("seat") && (
       <SeatRowView seat={seat} onMap={actions.mapSeat} onUpdate={actions.updateSeat} onUnmap={actions.unmapSeat} />
+      )}
       </ul>
     </>
   );

@@ -732,3 +732,18 @@ a.dept-proj__name:hover { opacity: 0.6; }
 .dept-proj__group .lux-table__head { padding-top: 10px; }
 .dept-proj__group .lux-table__row { align-items: center; padding-top: 12px; padding-bottom: 12px; min-height: 0; }
 .dept-proj__group .lux-table__row:last-child { border-bottom: 0; }
+
+/* DW-6c: the pilot's Tools & connections page. */
+.dept-tools-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.dept-tools-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.dept-tools-row:last-child { border-bottom: none; }
+.dept-tools-row__text { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.dept-tools-row__label { font: 700 13px var(--font-body); color: var(--text-primary); }
+.dept-tools-row__desc, .dept-tools-row__seat { font: 400 12px var(--font-body); color: var(--ink-muted); }
+.dept-tools-row__pin { font: 600 12px var(--font-body); padding: 6px 12px; border: 0.5px solid var(--erp-hairline); background: var(--surface-card-solid); color: var(--text-primary); cursor: pointer; }
+.dept-tools-row__pin[aria-pressed="true"] { border-color: var(--erp-accent); color: var(--erp-accent); }
+.dept-tools-row__pin:disabled { opacity: 0.5; cursor: not-allowed; }
+.dept-conn-block { padding: 14px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.dept-conn-block:first-of-type { padding-top: 0; }
+.dept-conn-block:last-of-type { border-bottom: none; }
+.dept-conn-block__title { margin: 0 0 8px; font: 700 14px var(--font-body); color: var(--text-primary); }
