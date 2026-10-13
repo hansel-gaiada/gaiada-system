@@ -7,6 +7,7 @@ import { newId, withTenants } from "../../db";
 import type { PoolClient } from "pg";
 import { config } from "../../config";
 import { authorize, writeActivity } from "../../core/http";
+import { departmentFilterSql, parseDepartmentFilter } from "../../core/department-filter";
 import { validateCustomFields } from "../../core/custom-fields";
 import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
@@ -61,10 +62,21 @@ const NOTE_TARGET = "client";
 @UseGuards(AuthGuard, ModuleEnabledGuard("clients"))
 export class ClientsController {
   @Get(":tenantId/clients")
-  async listClients(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+  async listClients(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("departmentId") departmentId?: string) {
     await authorize(req.principal, { kind: "client", tenantId }, "read");
+    // DW-6d (contract §33): `?departmentId=<org node id>` narrows to the clients that have a LIVE project owned
+    // by that node or any node under it. A filter, not a boundary; parsed AFTER authorize so a denial is a
+    // denial. Absent leaves the query exactly as it was.
+    const dept = parseDepartmentFilter(departmentId);
+    const df = departmentFilterSql(dept, "p.department_id", 1, 2);
+    const deptClause = dept.kind === "all"
+      ? ""
+      : ` AND EXISTS (SELECT 1 FROM projects p WHERE p.client_id = cl.id AND p.deleted_at IS NULL AND ${df.sql})`;
     const rows = await withTenants([tenantId], (c) =>
-      c.query(`SELECT ${CLIENT_COLUMNS} ${CLIENT_FROM} WHERE cl.deleted_at IS NULL ORDER BY cl.created_at DESC`),
+      c.query(
+        `SELECT ${CLIENT_COLUMNS} ${CLIENT_FROM} WHERE cl.deleted_at IS NULL${deptClause} ORDER BY cl.created_at DESC`,
+        dept.kind === "all" ? [] : [tenantId, ...df.params],
+      ),
     );
     return rows.rows;
   }
