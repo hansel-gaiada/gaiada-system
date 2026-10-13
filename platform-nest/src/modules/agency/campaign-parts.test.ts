@@ -491,7 +491,7 @@ describe.skipIf(!TEST_URL)("DW-5a campaign parts (HTTP, real Postgres + Cerbos)"
       const d = await detail(c);
       const seo = d.parts.find((x: any) => x.id === p);
       expect(seo.links.searchCampaigns).toEqual([{ id: searchCampaignA, name: "Acme SEM", status: "draft", budgetMinor: 5000, currency: "EUR" }]);
-      expect(d.parts.find((x: any) => x.id === p2).links.socialCampaigns).toEqual([{ id: socialCampaignA, name: "Acme social", status: "draft" }]);
+      expect(d.parts.find((x: any) => x.id === p2).links.socialCampaigns).toEqual([{ id: socialCampaignA, name: "Acme social", status: "planned" }]);
       expect(d.money).toEqual({ budgetMinor: 1000, currency: "USD", allocatedMinor: 100, unallocatedMinor: 900 });
       expect(d.linkAccess).toEqual({ searchCampaigns: "ok", socialCampaigns: "ok" });
       expect(seo.requests).toEqual({ open: 0, delivered: 0, declined: 0 });
