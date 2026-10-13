@@ -42,6 +42,7 @@ import { effectiveStatuses } from "../pm/pm.controller";
 import { reportRollups } from "./report-rollups";
 import { recomputeFactSlice, REPORT_JOB_MODULES } from "./fact-job";
 import { REPORT_METRICS, formatPeriodRange, inclusiveDayCount, type ReportMetricDef } from "./metrics";
+import { mondayOnOrBefore, resolveCalendarRange, previousPeriodRange, formatPeriodLabel } from "./report-calendar";
 import type { RollupRow } from "../contract";
 import type {
   ReportDocument,
@@ -64,110 +65,9 @@ import type {
 export const MAX_CUSTOM_RANGE_DAYS = 400;
 
 // ═══════════════════════════════ PURE — calendar range resolution ═══════════════════════════════
-
-function toUtcDate(iso: string): Date {
-  return new Date(`${iso}T00:00:00.000Z`);
-}
-function fromUtcDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-/** Monday on or before `dateIso` (ISO week, matching platform-ui/src/lib/reports.ts's
- *  `bucketKeyFor` week convention — the two must agree on what "the week" means). */
-export function mondayOnOrBefore(dateIso: string): string {
-  const d = toUtcDate(dateIso);
-  const dow = (d.getUTCDay() + 6) % 7; // 0 = Monday
-  d.setUTCDate(d.getUTCDate() - dow);
-  return fromUtcDate(d);
-}
-
-/** Resolves a `day`/`week`/`month` periodKind + a caller-given `start` into the actual [start,
- *  end] calendar range (§6.2: "For non-custom kinds, `end` is ignored and derived from `start`").
- *  NOT used for `custom` — the controller passes the caller's own [start, end] through untouched
- *  for that kind. Pure: no clock, no DB. */
-export function resolveCalendarRange(periodKind: "day" | "week" | "month", start: string): { start: string; end: string } {
-  if (periodKind === "day") return { start, end: start };
-  if (periodKind === "week") {
-    const s = mondayOnOrBefore(start);
-    return { start: s, end: addDaysIso(s, 6) };
-  }
-  // month
-  const monthStart = `${start.slice(0, 7)}-01`;
-  const d = toUtcDate(monthStart);
-  d.setUTCMonth(d.getUTCMonth() + 1);
-  d.setUTCDate(0); // last day of the ORIGINAL month
-  return { start: monthStart, end: fromUtcDate(d) };
-}
-
-/** The comparison baseline (§6.1 header comment): for `custom` it is the immediately preceding
- *  EQUAL-LENGTH window; for a calendar kind it is the immediately preceding period OF THE SAME
- *  KIND (previous day / ISO week / calendar month) REGARDLESS of that period's own length — which
- *  is what makes "comparison deltas correct across month boundaries" hold (Feb has fewer days than
- *  Jan; both sides recompute Sigma-n/Sigma-d over their OWN actual day count, per §5.4, so an
- *  unequal comparison window is correct, not a bug). */
-export function previousPeriodRange(
-  periodKind: ReportPeriodKind,
-  start: string,
-  end: string,
-  dayCount: number,
-): { start: string; end: string; dayCount: number } {
-  if (periodKind === "day") {
-    const p = addDaysIso(start, -1);
-    return { start: p, end: p, dayCount: 1 };
-  }
-  if (periodKind === "week") {
-    return { start: addDaysIso(start, -7), end: addDaysIso(end, -7), dayCount: 7 };
-  }
-  if (periodKind === "month") {
-    const d = toUtcDate(start);
-    d.setUTCDate(1);
-    d.setUTCMonth(d.getUTCMonth() - 1);
-    const s = fromUtcDate(d);
-    const e2 = new Date(d);
-    e2.setUTCMonth(e2.getUTCMonth() + 1);
-    e2.setUTCDate(0);
-    const e = fromUtcDate(e2);
-    return { start: s, end: e, dayCount: inclusiveDayCount(s, e) };
-  }
-  // custom: immediately preceding equal-length window ([start - dayCount, start - 1])
-  return { start: addDaysIso(start, -dayCount), end: addDaysIso(start, -1), dayCount };
-}
-
-const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-function shortDate(iso: string): string {
-  const d = toUtcDate(iso);
-  return `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
-}
-
-/** ISO 8601 week number (Mon-start, week 1 = the week containing the year's first Thursday) —
- *  standard algorithm, used only for the `periodLabel` display string. */
-function isoWeekNumber(dateIso: string): { week: number; year: number } {
-  const d = toUtcDate(dateIso);
-  const target = new Date(d.getTime());
-  const dayNr = (d.getUTCDay() + 6) % 7;
-  target.setUTCDate(target.getUTCDate() - dayNr + 3); // nearest Thursday
-  const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
-  const firstDayNr = (firstThursday.getUTCDay() + 6) % 7;
-  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNr + 3);
-  const week = 1 + Math.round((target.getTime() - firstThursday.getTime()) / (7 * 86_400_000));
-  return { week, year: target.getUTCFullYear() };
-}
-
-/** §6.1's display examples verbatim: "16 Jul 2026" | "Week 29 2026" | "July 2026" |
- *  "16 Jul - 3 Aug 2026" (en dash in the doc; a plain hyphen here to stay ASCII-safe over JSON). */
-export function formatPeriodLabel(periodKind: ReportPeriodKind, start: string, end: string): string {
-  if (periodKind === "day") return shortDate(start);
-  if (periodKind === "week") {
-    const { week, year } = isoWeekNumber(start);
-    return `Week ${week} ${year}`;
-  }
-  if (periodKind === "month") {
-    const d = toUtcDate(start);
-    return `${["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][d.getUTCMonth()]} ${d.getUTCFullYear()}`;
-  }
-  return `${shortDate(start)} - ${shortDate(end)}`;
-}
+// DW-4a: the calendar math lives in ./report-calendar (one resolver for reports, periods and
+// check-ins). Re-exported here so every existing importer keeps compiling.
+export { mondayOnOrBefore, resolveCalendarRange, previousPeriodRange, formatPeriodLabel };
 
 // ═══════════════════════════════ PURE — scope matching over RollupRow[] ═══════════════════════
 
@@ -463,7 +363,7 @@ export interface HeaderWarningInputs {
 }
 
 /** Pure given already-gathered inputs. `partialPeriod` reads as "this calendar bucket has not
- *  fully elapsed yet" for day/week/month (end >= today), and as "this custom range does not align
+ *  fully elapsed yet" for week/month/quarter/semester/year (end >= today; a day never warns), and as "this custom range does not align
  *  to a whole ISO week or calendar month" for `custom` — a judgment call documented here because
  *  §6.1's own comment ("range cuts across an incomplete week/month") is compatible with either
  *  reading and no ticket has pinned one; recorded so a future ticket can correct it deliberately

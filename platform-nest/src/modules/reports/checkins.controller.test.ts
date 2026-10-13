@@ -173,14 +173,22 @@ describe("TR-09 resolveCheckinPeriod", () => {
     expect(resolveCheckinPeriod("month", "2026-02-10", undefined)).toEqual({ from: "2026-02-01", to: "2026-02-28" });
   });
 
+  it("quarter, semester and year: first through last day of the period containing start (DW-4a)", () => {
+    expect(resolveCheckinPeriod("quarter", "2026-08-17", undefined)).toEqual({ from: "2026-07-01", to: "2026-09-30" });
+    expect(resolveCheckinPeriod("semester", "2026-03-03", undefined)).toEqual({ from: "2026-01-01", to: "2026-06-30" });
+    expect(resolveCheckinPeriod("year", "2028-07-01", undefined)).toEqual({ from: "2028-01-01", to: "2028-12-31" });
+  });
+
   it("custom: requires end, end>=start", () => {
     expect(resolveCheckinPeriod("custom", "2026-07-01", "2026-07-10")).toEqual({ from: "2026-07-01", to: "2026-07-10" });
     expect(() => resolveCheckinPeriod("custom", "2026-07-10", undefined)).toThrow();
     expect(() => resolveCheckinPeriod("custom", "2026-07-10", "2026-07-01")).toThrow();
   });
 
-  it("an unknown periodKind is rejected", () => {
-    expect(() => resolveCheckinPeriod("quarter", "2026-07-01", undefined)).toThrow();
+  it("an unknown periodKind is rejected (the message lists all seven kinds)", () => {
+    expect(() => resolveCheckinPeriod("decade", "2026-07-01", undefined)).toThrow(
+      "periodKind must be one of day, week, month, quarter, semester, year, custom",
+    );
   });
 });
 

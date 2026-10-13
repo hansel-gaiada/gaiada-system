@@ -759,7 +759,8 @@ loses nothing. Computation declares `{modules:['reports','hr']}` — the HR thir
 
 ```ts
 export type ReportGrain = "person" | "project" | "department" | "company";
-export type ReportPeriodKind = "day" | "week" | "month" | "custom";
+// DW-4a (2026-10-13): quarter, semester and year are calendar kinds like month (§15, DW-4a entry).
+export type ReportPeriodKind = "day" | "week" | "month" | "quarter" | "semester" | "year" | "custom";
 export type ReportUnit = "count" | "minutes" | "percent" | "score" | "text";
 
 export interface ReportHeader {
@@ -771,7 +772,8 @@ export interface ReportHeader {
   periodStart: string;         // ISO date (inclusive)
   periodEnd: string;           // ISO date (inclusive)
   dayCount: number;            // inclusive days in range — the denominator for every per-day ratio (§5.4)
-  periodLabel: string;         // display: "16 Jul 2026" | "Week 29 2026" | "July 2026" | "16 Jul – 3 Aug 2026"
+  periodLabel: string;         // display: "16 Jul 2026" | "Week 29 2026" | "July 2026" | "Q3 2026" |
+                               //   "Semester 2 2026" | "Year 2026" | "16 Jul – 3 Aug 2026"
   customLabel?: string;        // pinned custom ranges only (report_periods.label)
   generatedAt: string;         // ISO datetime
   sealed: boolean;
@@ -779,6 +781,8 @@ export interface ReportHeader {
   revision?: number;           // present when sealed
   // Comparison baseline. For a custom range this is the IMMEDIATELY PRECEDING EQUAL-LENGTH window
   // ([start − dayCount, start − 1]) — "previous period" is otherwise ambiguous for an arbitrary span.
+  // For a calendar kind it is the preceding period OF THE SAME KIND over its own day count
+  // (Q1 2027 -> Q4 2026; Semester 1 2027 -> Semester 2 2026; Year 2027 -> Year 2026).
   comparison?: { periodStart: string; periodEnd: string; dayCount: number };
   providerView?: { servedTenantId: string; servedTenantName: string }; // shared-service slice
   // Honesty flags — set at build time, rendered by the viewer AND carried onto every export (§6.3).
@@ -884,6 +888,11 @@ included) · AI narrative prompt (§9.1) · MCP `reports.getDocument` (returns t
 is a trivial DoS on the fact scan, and 400 days covers "a year plus a comparison tail" which is the
 real ceiling of a management pack. For non-custom kinds, `end` is ignored and derived from `start`.
 `start`/`end` are interpreted in `REPORTS_TZ` (OQ-1), never in the caller's local zone.
+**Calendar kinds (DW-4a, 2026-10-13):** `day`, `week` (ISO, Monday start), `month`, `quarter`
+(Jan–Mar, Apr–Jun, Jul–Sep, Oct–Dec), `semester` (Jan–Jun, Jul–Dec) and `year` (Jan–Dec). `start`
+may be any date inside the period; the server snaps it to the period's first day. Every calendar
+kind is at most 366 days, so none needs the custom ceiling. One resolver serves reports, periods
+and check-ins (§15, DW-4a entry).
 
 **Check-ins — `checkins.controller.ts`:**
 
@@ -901,7 +910,7 @@ real ceiling of a management pack. For non-custom kinds, `end` is ignored and de
 | Method + path | Purpose | Authz |
 |---|---|---|
 | `GET/POST /api/:t/appraisals/cycles` · `GET/PATCH …/:id` | cycle CRUD (weights, role weights, open/close) | HR-appraisal |
-| `POST /api/:t/appraisals/cycles/:id/generate` | generate per-subject appraisals: freeze weights + `auto_inputs` from SEALED **calendar** periods covering the cycle range (409 if unsealed; **422 if any covering period is `period_kind='custom'`** — never a silent skip, §0057 rule 2) | HR-appraisal |
+| `POST /api/:t/appraisals/cycles/:id/generate` | generate per-subject appraisals: freeze weights + `auto_inputs` from SEALED **calendar** periods covering the cycle range (409 if unsealed; **422 if any covering period is `period_kind='custom'`** — never a silent skip, §0057 rule 2). The covering periods are **months** (as built, `appraisal-engine.ts`); a sealed quarter, semester or year neither satisfies nor blocks a cycle (DW-4a) | HR-appraisal |
 | `GET /api/:t/appraisals?cycleId&subjectId` · `GET …/:id` | pack read: appraisal + pinned sealed person-doc(s) | matrix (self/manager/HR/exec) |
 | `PATCH /api/:t/appraisals/:id` | manager scores + notes + commentary (draft only) | manager-of-subject |
 | `POST /api/:t/appraisals/:id/submit` | validates: commentary ≥50, per-axis note when \|manager−auto\| > 1 band → status `submitted`, notify subject | manager-of-subject |
@@ -1687,6 +1696,66 @@ File paths are repo-relative to `gaiada-system/`.
 ---
 
 ## 15. Amendment log
+
+**2026-10-13 (DW-4a, contract first) · quarter, semester and year become calendar period kinds.**
+The 2026-07-30 amendment deferred "quarterly/annual as real calendar kinds" because presets covered
+v1. The department-workspaces plan (`docs/plans/2026-10-13-department-workspaces.md` §5.1, DW-Q3)
+needs them as real report periods: every workspace's Reports row and the Overview's period selector
+offer Daily, Weekly, Monthly, Quarterly, Semester and Yearly. This entry is the contract DW-4a
+builds to.
+
+- **The kinds.** `ReportPeriodKind` gains `quarter`, `semester` and `year`. They are calendar
+  periods, the same class as `month`; no fiscal-year offset exists or is assumed.
+
+  | Kind | Periods | `periodLabel` | Day count |
+  |---|---|---|---|
+  | `quarter` | Q1 Jan 1–Mar 31, Q2 Apr 1–Jun 30, Q3 Jul 1–Sep 30, Q4 Oct 1–Dec 31 | `Q3 2026` | 90–92 |
+  | `semester` | Semester 1 Jan 1–Jun 30, Semester 2 Jul 1–Dec 31 | `Semester 2 2026` | 181–184 |
+  | `year` | Jan 1–Dec 31 | `Year 2026` | 365–366 |
+
+- **Range resolution.** `start` may be any date inside the period. The server snaps it to the
+  period's first day and derives `end`, exactly as for `month` (`end` is ignored).
+- **One resolver.** The calendar math (snap, end, previous period, label, the period starts in a
+  window) lives in ONE pure module in the reports module. `document-builder.ts`,
+  `report-periods.ts` and `checkins.controller.ts`'s `resolveCheckinPeriod` all use it. Today the
+  check-in resolver is a second copy of the week and month math; it is replaced, not extended.
+- **Comparison.** The preceding period of the same kind, over its own day count: Q1 2027 → Q4 2026,
+  Semester 1 2027 → Semester 2 2026, Year 2027 → Year 2026. Unequal lengths are correct, as for
+  months (§5.4: both sides divide by their own day count).
+- **Warnings.** Unchanged rules, applied to the new kinds: `partialPeriod` while the period has not
+  fully elapsed (`end >= today`), `endsInFuture` when `end > today`, and `precedesFactHistory` when
+  the period starts before the tenant's first fact. A year that began before facts existed must say
+  so; it never reads as a quiet year.
+- **Cost.** Every calendar kind is at most 366 days, under the 400-day ceiling. A year read with its
+  comparison costs the same as a 366-day custom range, which is allowed today. No new worst case.
+  Series stay daily (§6.1); the chart kit already buckets a long range by month.
+- **Endpoints (§6.2).** `periodKind` accepts the three kinds on `document`, `overview`, `export`,
+  `checkins/compliance` and the group report, and the 400 message lists all seven kinds.
+  `GET /reports/periods?kind=quarter|semester|year` vivifies those rows like `month`, one per
+  period start (0067's `report_periods_calendar_uq` already covers every non-custom kind).
+- **Sealing.** A quarter, semester or year period can be sealed, amended and re-sealed like a month:
+  it is the sign-off of that period's report. Its document is built from facts at seal time; it is
+  NOT assembled from its sealed months. So after a month is amended, a sealed quarter that covers it
+  can differ until the quarter is amended too. Each period's seal is independent.
+- **Appraisals unchanged.** A cycle still freezes `auto_inputs` from sealed **months**. A sealed
+  quarter, semester or year neither satisfies nor blocks a cycle, so there is never a second,
+  conflicting source of appraisal inputs.
+- **No new schedule.** The weekly and monthly n8n seal flows are unchanged. A scheduled quarterly or
+  yearly seal is a separate ticket if the owner wants one; until then those periods are sealed by a
+  person or stay open (an open period always computes live, §0057).
+- **Schema.** One migration widens `report_periods.period_kind`'s CHECK to the seven kinds. The
+  constraint is found by its column set, never by text match (the 0083 lesson), and dropped and
+  re-added under its canonical name. `report_documents` has no kind column; nothing else changes.
+- **MCP (§9.2).** The `periodKind`/`kind` enums of the reports document, periods and check-in
+  compliance tools gain the three kinds, and their descriptions name them.
+- **UI.** `platform-ui/src/lib/reports.ts` stays the source of truth for the type, and
+  `report-document.ts` mirrors it. The demo backend (`demoReports.ts`, `demoCheckins.ts`) resolves
+  the new kinds with the same math. Both sides pin the same golden table: snapped range, label,
+  comparison and day count for mid-period dates, year boundaries and the 2028 leap year. The
+  workspace registry's `REPORT_PERIODS` drops its `DW-4a` tickets in the change that ships the
+  backend, so no page offers a kind the server refuses (plan §13 trap 4).
+- **Not in DW-4a.** The report pages' period selector gains the three kinds in DW-4b. The group
+  report's own kind list (`GROUP_PERIOD_KINDS`) stays day/week/month until someone asks.
 
 **2026-07-31 (TR-25 landed — ⚡ THE AUTHZ GATE) · §8 REWRITTEN to match the code; a live over-broad
 person-grain read CLOSED; the HR tier split; one 403-that-was-a-500 fixed.** 89 new tests

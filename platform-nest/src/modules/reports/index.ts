@@ -120,7 +120,7 @@ export const reportsModule: ModuleContract = {
     {
       name: "reports.getDocument",
       description:
-        "Fetch a person/project/department/company work report (ReportDocument JSON) for a day, week, month, or an arbitrary custom date range. For periodKind='custom', 'end' is the actual boundary and the range is computed live (unsealed, not appraisal-admissible); max span 400 days. HUB-FRONTING NOTE: all five fields are required on every call (see this file's header) — for periodKind day/week/month, pass end equal to start; the server derives the real range from start alone and ignores end in that case.",
+        "Fetch a person/project/department/company work report (ReportDocument JSON) for a day, week, month, quarter, semester, year, or an arbitrary custom date range. For periodKind='custom', 'end' is the actual boundary and the range is computed live (unsealed, not appraisal-admissible); max span 400 days. HUB-FRONTING NOTE: all five fields are required on every call (see this file's header) — for every periodKind except custom (day, week, month, quarter, semester, year), pass end equal to start; the server derives the real range from start alone and ignores end in that case.",
       minAssurance: "low",
       method: "GET",
       pathTemplate: "/api/:tenantId/reports/document?grain=:grain&scopeRef=:scopeRef&periodKind=:periodKind&start=:start&end=:end",
@@ -130,12 +130,12 @@ export const reportsModule: ModuleContract = {
           tenantId: { type: "string" },
           grain: { type: "string", enum: ["person", "project", "department", "company"] },
           scopeRef: { type: "string", description: "The person/project/department id, or the tenantId itself for grain=company." },
-          periodKind: { type: "string", enum: ["day", "week", "month", "custom"] },
+          periodKind: { type: "string", enum: ["day", "week", "month", "quarter", "semester", "year", "custom"] },
           start: { type: "string", description: "ISO date (YYYY-MM-DD), inclusive." },
           end: {
             type: "string",
             description:
-              "ISO date (YYYY-MM-DD), inclusive. The real boundary when periodKind='custom' (max 400-day span; over that: 422 range_too_large). For day/week/month, pass the same value as start — the server ignores it for those kinds.",
+              "ISO date (YYYY-MM-DD), inclusive. The real boundary when periodKind='custom' (max 400-day span; over that: 422 range_too_large). For every kind except custom (day, week, month, quarter, semester, year), pass the same value as start — the server ignores it for those kinds.",
           },
         },
         required: ["tenantId", "grain", "scopeRef", "periodKind", "start", "end"],
@@ -144,7 +144,7 @@ export const reportsModule: ModuleContract = {
     {
       name: "reports.listPeriods",
       description:
-        "List report periods and their seal status/revisions in an inclusive [from, to] window (kind: day|week|month|custom — 'custom' rows are pinned ad-hoc ranges and are never appraisal-admissible). HUB-FRONTING NOTE: kind/from/to are all required on every call (see this file's header) — the underlying endpoint treats 'kind' as an optional cross-kind filter, but this tool always filters to exactly one kind.",
+        "List report periods and their seal status/revisions in an inclusive [from, to] window (kind: day|week|month|quarter|semester|year|custom — 'custom' rows are pinned ad-hoc ranges and are never appraisal-admissible). HUB-FRONTING NOTE: kind/from/to are all required on every call (see this file's header) — the underlying endpoint treats 'kind' as an optional cross-kind filter, but this tool always filters to exactly one kind.",
       minAssurance: "low",
       method: "GET",
       pathTemplate: "/api/:tenantId/reports/periods?kind=:kind&from=:from&to=:to",
@@ -152,7 +152,7 @@ export const reportsModule: ModuleContract = {
         type: "object",
         properties: {
           tenantId: { type: "string" },
-          kind: { type: "string", enum: ["day", "week", "month", "custom"] },
+          kind: { type: "string", enum: ["day", "week", "month", "quarter", "semester", "year", "custom"] },
           from: { type: "string", description: "ISO date (YYYY-MM-DD), inclusive." },
           to: { type: "string", description: "ISO date (YYYY-MM-DD), inclusive." },
         },
@@ -181,7 +181,7 @@ export const reportsModule: ModuleContract = {
     {
       name: "reports.getCompliance",
       description:
-        "Check-in compliance grid for a unit over a day/week/month period or a custom date range (expected/submitted/missed/excused). Self ⊆ scope (TR-39): a caller with no broader lead/exec/HR grant sees only their OWN row, regardless of the 'unit' value passed — 'unit' is never trusted from the caller for that path. minAssurance is deliberately 'verified' and therefore DORMANT today (see this file's header) — no current mcp-hub principal-minting path can reach it; this registers the tool ready for when one does, same as pm.runTracker. HUB-FRONTING NOTE: unit/periodKind/start/end are all required on every call (see this file's header) — the underlying endpoint treats 'unit' and 'periodKind' as optional (a broad-tier caller passing no unit sees the whole tenant); pass end equal to start outside a custom range.",
+        "Check-in compliance grid for a unit over a day/week/month/quarter/semester/year period or a custom date range (expected/submitted/missed/excused). Self ⊆ scope (TR-39): a caller with no broader lead/exec/HR grant sees only their OWN row, regardless of the 'unit' value passed — 'unit' is never trusted from the caller for that path. minAssurance is deliberately 'verified' and therefore DORMANT today (see this file's header) — no current mcp-hub principal-minting path can reach it; this registers the tool ready for when one does, same as pm.runTracker. HUB-FRONTING NOTE: unit/periodKind/start/end are all required on every call (see this file's header) — the underlying endpoint treats 'unit' and 'periodKind' as optional (a broad-tier caller passing no unit sees the whole tenant); pass end equal to start outside a custom range.",
       minAssurance: "verified",
       method: "GET",
       pathTemplate: "/api/:tenantId/checkins/compliance?unit=:unit&periodKind=:periodKind&start=:start&end=:end",
@@ -190,7 +190,7 @@ export const reportsModule: ModuleContract = {
         properties: {
           tenantId: { type: "string" },
           unit: { type: "string", description: "Org unit node id to filter to. Ignored for a self-only caller (own-row only, TR-39)." },
-          periodKind: { type: "string", enum: ["day", "week", "month", "custom"] },
+          periodKind: { type: "string", enum: ["day", "week", "month", "quarter", "semester", "year", "custom"] },
           start: { type: "string", description: "ISO date (YYYY-MM-DD), inclusive." },
           end: { type: "string", description: "ISO date (YYYY-MM-DD), inclusive. The real boundary when periodKind='custom'; otherwise pass the same value as start." },
         },

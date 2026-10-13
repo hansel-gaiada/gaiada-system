@@ -25,6 +25,7 @@ import { addMembership, createCompany, createProject, createRole, createUser, gr
 import { syncMetricDefinitions } from "../../rollups/engine";
 import { recomputeFactSlice, recomputeFactWindow } from "./fact-job";
 import { formatPeriodRange } from "./metrics";
+import { listPeriods } from "./report-periods";
 import { computeSealHash, CUSTOM_SEAL_REJECT_MESSAGE, type SealedDocumentEntry } from "./report-seal";
 import type { ReportDocument } from "./report-document";
 
@@ -144,6 +145,27 @@ describe.skipIf(!TEST_URL)("TR-15 seal/amend/pin (live PG + RLS + Cerbos)", () =
     const r2 = await getPeriods("month", "2026-07-01", "2026-07-01");
     const list2 = r2.json().periods as Array<{ id: string }>;
     expect(list2[0].id).toBe(list1[0].id); // same id -> no duplicate row on re-list
+  });
+
+  it("DW-4a: listPeriods vivifies quarter rows (one per quarter start in range), idempotently on re-list", async () => {
+    const q1 = await listPeriods(co, "quarter", "2026-02-10", "2026-08-01");
+    expect(q1.map((p) => [p.periodKind, p.periodStart, p.periodEnd, p.status])).toEqual([
+      ["quarter", "2026-01-01", "2026-03-31", "open"],
+      ["quarter", "2026-04-01", "2026-06-30", "open"],
+      ["quarter", "2026-07-01", "2026-09-30", "open"],
+    ]);
+    const q2 = await listPeriods(co, "quarter", "2026-02-10", "2026-08-01");
+    expect(q2.map((p) => p.id)).toEqual(q1.map((p) => p.id)); // stable ids -> no duplicate rows
+
+    // the same through the endpoint (kind validation + vivify), for semester and year
+    const sem = (await getPeriods("semester", "2026-03-03", "2026-12-31")).json().periods as Array<{ periodStart: string; periodEnd: string }>;
+    expect(sem.map((p) => [p.periodStart, p.periodEnd])).toEqual([
+      ["2026-01-01", "2026-06-30"],
+      ["2026-07-01", "2026-12-31"],
+    ]);
+    const yr = (await getPeriods("year", "2026-06-15", "2026-06-15")).json().periods as Array<{ periodStart: string; periodEnd: string }>;
+    expect(yr.map((p) => [p.periodStart, p.periodEnd])).toEqual([["2026-01-01", "2026-12-31"]]);
+    expect((await getPeriods("decade", "2026-01-01", "2026-01-31")).statusCode).toBe(400);
   });
 
   it("a plain member CAN view periods (broader tier than seal/amend/pin)", async () => {
