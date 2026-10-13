@@ -11,6 +11,7 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReportAccessDenied } from "@/components/reports/ReportAccessDenied";
 import { ReportRangeError } from "@/components/reports/ReportRangeError";
 import { ReportPeriodBar } from "@/components/reports/ReportPeriodBar";
+import { formatTeamKpi, NO_DATA } from "@/lib/teamReport";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -24,13 +25,6 @@ function teamHref(periodKind: string, start: string, end: string, unit: string):
 function personHref(periodKind: string, start: string, end: string, scopeRef: string): string {
   const qs = new URLSearchParams({ periodKind, start, end, scopeRef });
   return `/reports/person?${qs.toString()}`;
-}
-
-// Mirrors `KpiTiles`' own (private) `formatValue` and the department page's copy of it.
-function formatKpiValue(unit: string, value: number): string {
-  if (unit === "percent") return `${Math.round(value * 100)}%`;
-  if (unit === "minutes") return `${Math.round(value).toLocaleString()}m`;
-  return value.toLocaleString();
 }
 
 const TITLE = "Team Reports";
@@ -125,9 +119,9 @@ export default async function TeamReportPage({
         kpiColumns.length === 0
           ? [NO_ACTIVITY]
           : kpiColumns.map((col, i) => {
-              if (idle) return i === 0 ? NO_ACTIVITY : "—";
-              const k = s.kpis.find((x) => x.metricKey === col.metricKey);
-              return k ? formatKpiValue(k.unit, k.value) : "—";
+              if (idle) return i === 0 ? NO_ACTIVITY : NO_DATA;
+              // A ratio with nothing to measure (denominator 0) reads "—", never "0%" (DW-4l).
+              return formatTeamKpi(s.kpis.find((x) => x.metricKey === col.metricKey));
             });
       return [
         s.scopeName,
