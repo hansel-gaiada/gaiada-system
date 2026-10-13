@@ -11,6 +11,34 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.125.0` - DW-6f: pull requests and CI status on PM tasks (2026-10-13) - PROTOTYPED
+
+- **What.** BFF contract §34. A pull request appears on the PM task its work is for, with its CI status. Code is written outside the ERP, and its result comes back to the task (plan §14.1, launch and return).
+  - **Table.** `github_pull_requests` (migration `202610140720`), with RLS forced and one row per (tenant, repo, number).
+  - **The existing GitHub App webhook handlers fill it.**
+    - `pull_request` upserts the row, applied only when GitHub's `updated_at` is at or after the stored one.
+    - `workflow_run` keeps one CI entry per workflow name on each pull request it belongs to. It is matched by `pull_requests[]`, else by `head_sha`.
+    - An older run never replaces a newer one, and a late event of the same run never undoes its "completed".
+    - A failure in the new part never fails the delivery's existing writes.
+  - **The link.** A task key (`<short_code>-<seq>`, such as `WEB-12`), found in the title and then in the branch, links a pull request to at most one task. v1 covers the company that owns the GitHub organisation only, so the link and the read stay in one tenant.
+  - **The read.** `GET /api/:t/pm/tasks/:taskId/pull-requests` is authorised exactly like the task (`pm_task` · `read`). It returns `taskKey`, `linkable`, `repoLinked` and the pull requests, open first, each with a CI summary computed on read (passing, failing, running or none).
+  - **No new Cerbos kind.**
+- **Proof.**
+  - `github-pull-requests.test.ts` (31 unit tests: key extraction and the CI summary).
+  - `github-pull-requests.db.test.ts` (35 tests on real Postgres and Cerbos: upserts, ordering guards, re-linking on edit, CI matching, late events, the read's 403 and 404, `linkable`, a replayed delivery).
+  - The App's subscription was checked read-only on the live ERP: 715 `pull_request` and 15,334 `workflow_run` deliveries, the latest on 2026-10-13.
+
+### platform-ui `0.133.0` - DW-6f: a Pull requests section on the PM task page (2026-10-13) - PROTOTYPED
+
+- **What.** `components/pm/PullRequests.tsx` in `TaskDetailView`, read through `lib/pmPullRequests-data.ts` (a `ReadResult`). It is the same in both layouts.
+- **Each pull request shows** its `repo#number` and title (opening GitHub), its state (Open, Draft, Merged or Closed), the branch, and a CI chip whose tooltip lists each workflow.
+- **With none:**
+  - one quiet line teaches the convention ("Put WEB-12 in a branch name or pull request title") only when the project has a linked repository;
+  - otherwise, nothing;
+  - a failed read says "Pull requests unavailable".
+- **Proof.** `PullRequests.test.tsx` (13 tests).
+- **Docs.** BFF contracts §35 (DW-6h, asset versions and review rounds) and §36 (DW-6k, Figma links) are added as contracts only; nothing is built.
+
 ### platform-ui `0.132.0` - DW-3d2: Your numbers says when a comparison is not real (2026-10-13) - PROTOTYPED
 
 - **What.** The Overview's Your numbers block reads the comparison-honesty signals DW-4m added to the report document (`header.comparison.noFacts`, `header.comparison.precedesFactHistory`, `ReportKpi.previous`). Pure rules in `lib/overviewNumbers.ts`; the block only renders the one note.
