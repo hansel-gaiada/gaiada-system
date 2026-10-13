@@ -35,7 +35,7 @@ import { createCompany, createUser, addMembership, createRole, grantRole, create
 // KeycloakNotConfiguredError behaviour), and the describes at the bottom install hooks.
 const kc = vi.hoisted(() => ({
   find: null as null | ((email: string) => Promise<{ id: string } | null>),
-  create: null as null | ((input: { email: string; password: string }) => Promise<string>),
+  create: null as null | ((input: { email: string; password?: string | null }) => Promise<string>),
   disable: null as null | ((id: string) => Promise<void>),
   enable: null as null | ((id: string) => Promise<void>),
   setPassword: null as null | ((id: string, password: string) => Promise<void>),
