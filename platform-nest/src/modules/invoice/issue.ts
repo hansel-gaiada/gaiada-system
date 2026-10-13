@@ -673,21 +673,33 @@ export async function resolveReceiptDate(
  * (`finance_ar_record_receipt`: DR bank, CR AR), then its allocation to the AR invoice (`finance_ar_allocate`). The
  * invoice becomes `paid` exactly when the AR invoice does, in the same transaction. `c` must be withBilling, and the
  * caller has already moved the payment row to `confirmed` in this transaction.
+ *
+ * PV5-10: `receiptAccount: "gateway_clearing"` books the receipt into the profile's GATEWAY CLEARING account instead
+ * (`gateway_clearing_account_code`: DR clearing, CR AR). The money is at the payment provider, not in our bank yet; the
+ * provider's payout (clearing -> bank) and its fee are journals Finance posts by hand in v1 (BFF §30c). ONE posting
+ * path for both: only the debit account differs.
  */
 export async function postConfirmedPayment(
   c: PoolClient,
   tenantId: string,
-  p: { paymentId: string; invoiceId: string; amount: string; currency: string; paidOn: string; reference: string | null; actorId: string },
+  p: {
+    paymentId: string; invoiceId: string; amount: string; currency: string; paidOn: string; reference: string | null; actorId: string;
+    /** Which billing-profile account receives the money: the bank (default) or the payment gateway's clearing account. */
+    receiptAccount?: "bank" | "gateway_clearing";
+  },
 ): Promise<{ invoicePaid: boolean; receiptId: string }> {
+  const clearing = p.receiptAccount === "gateway_clearing";
   const inv = await c.query<{ arInvoiceId: string; currency: string; prefix: string | null; bankAccountId: string | null; bankCode: string | null }>(
     `SELECT i.ar_invoice_id AS "arInvoiceId", i.currency, bp.invoice_prefix AS prefix,
-            bp.bank_ledger_account_code AS "bankCode",
+            CASE WHEN $2::boolean THEN bp.gateway_clearing_account_code ELSE bp.bank_ledger_account_code END AS "bankCode",
             (SELECT fa.id FROM finance_accounts fa
-              WHERE fa.tenant_id = i.tenant_id AND fa.code = bp.bank_ledger_account_code AND fa.deleted_at IS NULL
-                AND fa.status = 'active' AND fa.is_postable AND NOT fa.is_control LIMIT 1) AS "bankAccountId"
+              WHERE fa.tenant_id = i.tenant_id
+                AND fa.code = CASE WHEN $2::boolean THEN bp.gateway_clearing_account_code ELSE bp.bank_ledger_account_code END
+                AND fa.deleted_at IS NULL AND fa.status = 'active' AND fa.is_postable AND NOT fa.is_control
+              ORDER BY fa.id LIMIT 1) AS "bankAccountId"
        FROM invoices i LEFT JOIN company_billing_profiles bp ON bp.tenant_id = i.tenant_id
       WHERE i.id = $1 FOR UPDATE OF i`,
-    [p.invoiceId],
+    [p.invoiceId, clearing],
   );
   const row = inv.rows[0];
   if (!row?.arInvoiceId) throw new ConflictException({ message: "this invoice is not issued", reason: "not_issued" });
@@ -696,8 +708,10 @@ export async function postConfirmedPayment(
   }
   if (!row.bankAccountId) {
     throw new ConflictException({
-      message: `the billing profile's receipt account ${row.bankCode ?? "(not set)"} is not a live, postable account; set it before confirming`,
-      reason: "no_receipt_account",
+      message: clearing
+        ? `the billing profile's gateway clearing account ${row.bankCode ?? "(not set)"} is not a live, postable account; set it in the billing profile`
+        : `the billing profile's receipt account ${row.bankCode ?? "(not set)"} is not a live, postable account; set it before confirming`,
+      reason: clearing ? "no_clearing_account" : "no_receipt_account",
     });
   }
 

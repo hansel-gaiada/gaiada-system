@@ -21,8 +21,8 @@
 // Contract signing mirrors `scope_signoffs`: one row per party, UNIQUE, idempotent on re-sign, and the
 // contract flips to `signed` only on the transition where BOTH parties are present.
 import {
-  BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException,
-  Param, Post, Req, Res, UseGuards,
+  BadGatewayException, BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException,
+  Param, Post, Req, Res, ServiceUnavailableException, UseGuards,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { newId, withTenants } from "../db";
@@ -44,6 +44,14 @@ import {
 import type { PoolClient } from "pg";
 import { claimHeadroom, hasCurrencyPrecision } from "../modules/invoice/issue";
 import { CONTRACT_SIGNED_COPY_FILE_ID, INVOICE_PDF_FILE_ID } from "./document-read-fields";
+// PV5-10: online payment through the provider's hosted checkout. The decision and the checkout rows live in
+// src/payments/; this controller only admits the invoice through the portal scope first.
+import { providerForTenant } from "../payments/registry";
+import {
+  decideOnlinePayment, loadOnlinePaymentFacts, retireStaleCheckout, reusableCheckout, storeCheckout,
+  type CheckoutView,
+} from "../payments/checkout";
+import { ProviderRequestError, ProviderUnavailableError } from "../payments/provider";
 
 const PAYMENT_METHODS = new Set(["bank_transfer", "card", "cash", "other"]);
 /** Proof receipts are photos of a transfer slip or a small PDF. 10 MB is generous for both and well
@@ -99,6 +107,24 @@ const PORTAL_INVOICE_RECORD_COLUMNS = `
          - COALESCE((SELECT sum(pp.amount) FROM invoice_payments pp
                       WHERE pp.invoice_id = i.id AND pp.status = 'pending' AND pp.deleted_at IS NULL), 0) > 0) AS payable,
   (i.status = 'sent' AND COALESCE(i.due_date, i.period_end) < current_date) AS overdue`;
+
+/** PV5-10: where the provider sends the payer back to, when the ERP's public base URL is known (MAIL_LINK_BASE_URL, the
+ *  one public-base setting the platform has). Otherwise null, and the provider dashboard's Finish URL applies
+ *  (infra/runbooks/midtrans-payments.md). The page only says "we're confirming your payment"; the payment itself comes
+ *  from the verified, re-fetched notice alone. */
+function portalReturnUrl(invoiceId: string): string | null {
+  const base = config.mail.linkBaseUrl;
+  let host: string;
+  try {
+    const u = new URL(base);
+    if (u.protocol !== "https:") return null;
+    host = u.hostname;
+  } catch {
+    return null;
+  }
+  if (host.endsWith(".invalid")) return null;
+  return `${base}/portal/invoices/${encodeURIComponent(invoiceId)}?checkout=finished`;
+}
 
 function dispositionHeader(filename: string): string {
   const ascii = filename.replace(/[\r\n"\\]/g, "_").replace(/[^\x20-\x7e]/g, "_");
@@ -210,14 +236,98 @@ export class PortalCommerceController {
           return rest;
         });
       }
+      // PV5-10: whether "Pay online" is offered, decided here so the UI never guesses (the checkout route uses the same
+      // decision). Off unless the provider is configured for THIS company.
+      const decision = providerForTenant(tenantId)
+        ? decideOnlinePayment(true, await loadOnlinePaymentFacts(c, invoiceId))
+        : decideOnlinePayment(false, null);
       return {
         ...visible,
         taxLines,
         payments: payments.rows,
         paid: Math.round(paid * 100) / 100,
         balance: Math.round((inv.total - paid) * 100) / 100,
+        onlinePayment: decision.available
+          ? { available: true }
+          : { available: false, reason: decision.reason, message: decision.message },
       };
     }, { modules: ["finance"] });
+  }
+
+  /** PV5-10 — start (or resume) paying an invoice online through the provider's hosted checkout.
+   *
+   *  Any ACTIVE contact in the portal scope may pay (action `pay`, the same as a manual claim: paying is not signing).
+   *  Order: authorize (403) -> provider configured for this company (404 otherwise: the route does not exist here) ->
+   *  the invoice through the portal scope predicates (404 out of scope, never 403) -> the one decision
+   *  (`decideOnlinePayment`, 409 with `reason` when refused) -> reuse the open checkout or create one at the provider
+   *  (OUTSIDE any transaction) -> store it (the open-per-invoice unique index settles a race). Answers the hosted URL.
+   *  The body is ignored: the amount is the invoice's, never the caller's. */
+  @Post(":tenantId/portal/invoices/:invoiceId/checkout")
+  @HttpCode(200)
+  async startCheckout(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("invoiceId") invoiceId: string,
+  ): Promise<CheckoutView> {
+    await authorize(req.principal, { kind: "portal", tenantId }, "pay");
+    const gw = providerForTenant(tenantId);
+    if (!gw) throw new NotFoundException("online payment is not available");
+
+    const refuse = (d: { reason: string; message: string }) => new ConflictException({ message: d.message, reason: d.reason });
+    type Plan = { reuse: CheckoutView } | { create: { amount: string; currency: string; clientId: string } };
+    const plan = await withTenants([tenantId], async (c): Promise<Plan> => {
+      const scope = await resolvePortalScope(c, req.principal);
+      const inv = await this.ownedInvoice(c, scope, invoiceId);
+      const d = decideOnlinePayment(true, await loadOnlinePaymentFacts(c, invoiceId));
+      if (!d.available) throw refuse(d);
+      const open = await reusableCheckout(c, invoiceId, gw.provider.name, d.amount);
+      return open ? { reuse: open } : { create: { amount: d.amount, currency: d.currency, clientId: inv.clientId } };
+    }, { modules: ["finance"] });
+    if ("reuse" in plan) return plan.reuse;
+
+    const orderId = gw.provider.mintOrderId();
+    let created;
+    try {
+      created = await gw.provider.createCheckout({
+        orderId, amount: plan.create.amount, currency: plan.create.currency,
+        finishUrl: portalReturnUrl(invoiceId), expiryMinutes: config.payments.checkoutExpiryMinutes,
+      });
+    } catch (e) {
+      if (e instanceof ProviderUnavailableError) {
+        throw new ServiceUnavailableException({ message: "online payment is unavailable right now; please try again in a few minutes", reason: "provider_unavailable" });
+      }
+      if (e instanceof ProviderRequestError) {
+        console.error(`[payments] checkout refused by ${gw.provider.name} for invoice ${invoiceId}: ${e.message}`);
+        throw new BadGatewayException({ message: "the payment provider could not open a checkout; please pay by bank transfer or try again later", reason: "provider_refused" });
+      }
+      throw e;
+    }
+
+    const view = await withTenants([tenantId], async (c) => {
+      // Re-admit and re-decide: the amount must still be exactly what the provider was asked to collect.
+      const scope = await resolvePortalScope(c, req.principal);
+      await this.ownedInvoice(c, scope, invoiceId);
+      const d = decideOnlinePayment(true, await loadOnlinePaymentFacts(c, invoiceId));
+      if (!d.available) throw refuse(d);
+      const same = await c.query<{ same: boolean }>(`SELECT $1::numeric = $2::numeric AS same`, [d.amount, plan.create.amount]);
+      if (!same.rows[0]?.same) {
+        throw new ConflictException({ message: "the amount due changed while the checkout was being opened; please try again", reason: "amount_changed" });
+      }
+      await retireStaleCheckout(c, invoiceId, gw.provider.name, d.amount);
+      return storeCheckout(c, {
+        id: newId(), tenantId, invoiceId, clientId: plan.create.clientId, amount: plan.create.amount,
+        currency: plan.create.currency, provider: gw.provider.name, providerCheckoutId: created.providerCheckoutId,
+        checkoutUrl: created.checkoutUrl, expiryMinutes: config.payments.checkoutExpiryMinutes,
+        createdBy: req.principal.userId ?? null, originSite: config.originSite,
+      });
+    }, { modules: ["finance"] });
+
+    if (!view.reused) {
+      await writeActivity(tenantId, req.principal.userId, "checkout_started", "invoice", invoiceId, {
+        provider: gw.provider.name, amount: view.amount, currency: view.currency,
+      });
+    }
+    return view;
   }
 
   /** Record a payment against one of the caller's invoices.

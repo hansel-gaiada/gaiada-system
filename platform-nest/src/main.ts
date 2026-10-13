@@ -160,6 +160,9 @@ import { startIndexNowRetryLoop } from "./modules/search/indexnow-service";
 import { registerIndexNowEventHandlers } from "./modules/search/indexnow-webdesk";
 import { registerAmendmentEventHandlers } from "./core/amendment-signed-handler";
 import { registerDocumentJobHandlers, startDocumentJobSweep } from "./core/document-jobs";
+// PV5-10: online payment (hosted checkout). Off unless MIDTRANS_SERVER_KEY is set; see src/payments/registry.ts.
+import { configuredProviders, describePaymentsConfig } from "./payments/registry";
+import { PROVIDER_EVENT_STREAM, registerPaymentEventHandlers, startPaymentEventSweep } from "./payments/process";
 // MAIL-04 (design §7.7/§7.8) — the mail sender worker. Only started when MAIL_ENABLED=1 (the
 // master gate): starting it unconditionally would still send nothing today (resolveAdapter falls
 // back to dev-log when disabled, provider.ts), but not starting it at all is the honest "module is
@@ -544,6 +547,20 @@ async function bootstrap(): Promise<void> {
   registerCoreRollupProvider(coreTaskRollups);
   registerCoreRollupProvider(clientWorkRollups);
   await syncMetricDefinitions();
+  // PV5-10: one line says whether online payment is on. A half-configured money path (a key with no merchant company, an
+  // unknown environment, a company id that is not in this database) REFUSES BOOT: failing at request time would happen
+  // after a client was already sent to pay.
+  {
+    const paymentsLine = describePaymentsConfig();
+    for (const gw of configuredProviders()) {
+      const co = await getPool().query(`SELECT 1 FROM companies WHERE id = $1`, [gw.tenantId]);
+      if (!co.rows[0]) {
+        throw new Error(`MIDTRANS_TENANT_ID ${gw.tenantId} is not a company in this database; online payment cannot file its notices`);
+      }
+    }
+    // eslint-disable-next-line no-console
+    console.log(`[payments] ${paymentsLine}`);
+  }
   if (config.redisUrl) {
     startRelayLoop();
     // Entity types with at least one registered handler; extend as modules add eventHandlers.
@@ -577,6 +594,9 @@ async function bootstrap(): Promise<void> {
     // PV5-07: an issued invoice gets its PDF, a signed contract its sealed copy (core/document-jobs.ts). Core handlers on
     // `invoice.issued` and `contract.signed`; the `invoice` stream is added to the consumer list below in the same change.
     registerDocumentJobHandlers();
+    // PV5-10: a claimed payment notice is processed (status re-fetch, then the posting) off `payment.notice.received`
+    // (src/payments/process.ts). A core handler; the `provider_event` stream is added to the consumer list below.
+    registerPaymentEventHandlers();
     // P2-05: the position reconciler's outbox triggers. The HANDLERS are flag-gated (they also
     // re-check `positionSyncEnabled` internally, and every reconciler entry point returns null when
     // it is off) but the STREAMS below are listed unconditionally — an always-drained stream can
@@ -644,6 +664,9 @@ async function bootstrap(): Promise<void> {
       // PV5-07 — the stream `invoice.issued` is emitted on (modules/invoice/issue.ts). registerDocumentJobHandlers()
       // renders the invoice of record's PDF off it. Without this entry the handler would be registered and never invoked.
       "invoice",
+      // PV5-10 — the stream the payment webhook's claim emits `payment.notice.received` on. Without this entry the
+      // handler would be registered and never invoked (the retry sweep below would still process, a minute later).
+      PROVIDER_EVENT_STREAM,
       // P2-05 — see registerPositionEventHandlers' header for why these are unconditional.
       ...POSITION_STREAMS,
     ]);
@@ -707,6 +730,14 @@ async function bootstrap(): Promise<void> {
       // eslint-disable-next-line no-console
       console.log("work-activity consumer on: streams [pm_task, pm_project, meeting_recording, pipeline_run]");
     })();
+  }
+  // PV5-10: the payment-notice retry sweep. OUTSIDE the redisUrl gate on purpose: it is a plain Postgres loop, and a
+  // payment must still be recorded when Redis is off (the notice then waits for this sweep instead of the consumer).
+  // Only while a provider is switched on.
+  if (configuredProviders().length > 0) {
+    startPaymentEventSweep(config.payments.sweepIntervalMs);
+    // eslint-disable-next-line no-console
+    console.log(`[payments] notice retry sweep on: every ${config.payments.sweepIntervalMs}ms`);
   }
   // Knowledge (D9 RAG) corpus refresh: mirrors gaiada.com into the PUBLIC tier and every company's
   // ERP records into the INTERNAL tier, on an interval. Without this the vector store stays empty and

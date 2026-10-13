@@ -1651,6 +1651,28 @@ const configBase = {
     sealKeysDir: process.env.SEAL_KEYS_DIR ?? "",
     sweepIntervalMs: readIntervalMs(process.env.DOCUMENT_JOBS_SWEEP_INTERVAL_MS, 10 * 60_000, 60_000),
   },
+  // PV5-10 — online payment through a provider-hosted checkout (Midtrans Snap, ruling PV-D25). EVERYTHING is off unless
+  // the server key is set: no "Pay online" in the portal, the checkout route and the webhook answer 404, and boot logs
+  // one line saying so. `src/payments/registry.ts` reads these at CALL time (so tests can switch them), and
+  // `assertPaymentsConfig()` refuses to boot a half-configured money path (a key with no company to file it under, an
+  // unknown environment).
+  //   serverKey   : the Midtrans SERVER key (the secret; Basic auth user name and the notice-signature key). Never logged.
+  //   environment : sandbox | production. Blank = sandbox. Anything else refuses boot (a typo must not reach production
+  //                 hosts with a sandbox key, or the reverse).
+  //   tenantId    : the company that OWNS the Midtrans merchant account. Money paid lands in that legal entity's
+  //                 merchant balance, so only that company's invoices are offered online, and a notice is filed under
+  //                 it (the GitHub receiver's GITHUB_REPO_SYNC_TENANT_ID precedent). NO DEFAULT, EVER.
+  //   checkoutExpiryMinutes : how long a hosted checkout stays usable (default 24 h, at most 7 days).
+  //   sweepIntervalMs       : the retry sweep over notices still to process (default 30 s, floor 10 s).
+  payments: {
+    midtrans: {
+      serverKey: process.env.MIDTRANS_SERVER_KEY ?? "",
+      environment: (process.env.MIDTRANS_ENVIRONMENT ?? "").trim(),
+      tenantId: (process.env.MIDTRANS_TENANT_ID ?? "").trim(),
+    },
+    checkoutExpiryMinutes: numericEnv("PAYMENTS_CHECKOUT_EXPIRY_MINUTES", { default: 1440, min: 0, max: 10080 }),
+    sweepIntervalMs: readIntervalMs(process.env.PAYMENTS_SWEEP_INTERVAL_MS, 30_000, 10_000),
+  },
   // LMS L5 — the lab runner (`lab-runner/`), the sidecar that executes a learner's submission in a
   // capped, unprivileged, network-less container and returns a graded result. Same fail-soft shape
   // as reportRenderer above: url or token unset -> a lab attempt is REFUSED with a clear message

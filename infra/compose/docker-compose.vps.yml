@@ -884,6 +884,19 @@ services:
       SEAL_KEYS_DIR: /run/seal-keys
       # How often unfinished invoice PDFs / sealed copies are retried. Blank = 10 minutes (floor 1 minute).
       DOCUMENT_JOBS_SWEEP_INTERVAL_MS: ${DOCUMENT_JOBS_SWEEP_INTERVAL_MS:-}
+      # PV5-10 (PV-D25) — online payment through the Midtrans hosted checkout. OFF unless MIDTRANS_SERVER_KEY is set: no
+      # "Pay online" in the portal, the checkout route and POST /api/webhooks/payments/midtrans answer 404, boot logs one
+      # line. The key is the merchant SERVER key (a secret: the server .env only, never the repo). MIDTRANS_ENVIRONMENT
+      # is sandbox|production (blank = sandbox). MIDTRANS_TENANT_ID is the company that OWNS the merchant account (a key
+      # without it refuses boot). Each must be listed here: a value only in .env never reaches the container.
+      # Runbook: infra/runbooks/midtrans-payments.md.
+      MIDTRANS_SERVER_KEY: ${MIDTRANS_SERVER_KEY:-}
+      MIDTRANS_ENVIRONMENT: ${MIDTRANS_ENVIRONMENT:-}
+      MIDTRANS_TENANT_ID: ${MIDTRANS_TENANT_ID:-}
+      # How long a hosted checkout stays usable (minutes; blank = 1440) and how often unprocessed notices are retried
+      # (ms; blank = 30000, floor 10000).
+      PAYMENTS_CHECKOUT_EXPIRY_MINUTES: ${PAYMENTS_CHECKOUT_EXPIRY_MINUTES:-}
+      PAYMENTS_SWEEP_INTERVAL_MS: ${PAYMENTS_SWEEP_INTERVAL_MS:-}
       # LMS L5 — the lab runner (`lab-runner/`), which executes a learner's submission in a capped,
       # unprivileged, network-less container. It does NOT run on this box: it lives on SumoPod bound
       # to 127.0.0.1, and the only path to it is an SSH tunnel with a port-restricted key

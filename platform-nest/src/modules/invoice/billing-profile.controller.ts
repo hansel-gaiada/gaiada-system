@@ -2,6 +2,10 @@
 // (202610130400). One row per company: the issuer's legal name and address, the invoice number prefix, default payment
 // terms, the books' currency, the bank account clients pay into, and the two ledger account codes issuing and receipts
 // post to. NPWP and PKP are NOT here (finance_company_settings owns tax identity, one source each).
+// PV5-10 adds a third ledger code, `gatewayClearingAccountCode`: where an online (payment gateway) receipt is booked
+// (DR clearing, CR AR) until the provider pays out. Online payment is not offered while it is unset or does not resolve
+// to a live, postable, non-control account. It is a ledger code like the other two, so it is `update`, not
+// set_bank_details: it redirects no money (the provider pays into the merchant account whatever it says).
 //
 // ── AUTHORIZATION ─────────────────────────────────────────────────────────────────────────────────────
 //   GET  : `finance_config` read   (the accounting-vocabulary tier: finance_staff, finance_manager, company_admin).
@@ -35,6 +39,7 @@ interface ProfileBody {
   currencyCode?: string;
   bankLedgerAccountCode?: string | null;
   defaultRevenueAccountCode?: string | null;
+  gatewayClearingAccountCode?: string | null;
   signatureThreshold?: number | string | null;
   /** Present (an object, or null to clear) only when the caller means to change the bank block: needs set_bank_details. */
   bank?: BankBlock | null;
@@ -46,13 +51,14 @@ const SELECT_PROFILE = `
          bank_name AS "bankName", bank_account_name AS "bankAccountName", bank_account_no AS "bankAccountNo",
          bank_ledger_account_code AS "bankLedgerAccountCode",
          default_revenue_account_code AS "defaultRevenueAccountCode",
+         gateway_clearing_account_code AS "gatewayClearingAccountCode",
          signature_threshold::text AS "signatureThreshold", updated_by AS "updatedBy", updated_at AS "updatedAt"
     FROM company_billing_profiles WHERE tenant_id = $1`;
 
 type ProfileRow = {
   legalName: string; address: string; invoicePrefix: string; defaultPaymentTermsDays: number; currencyCode: string;
   bankName: string | null; bankAccountName: string | null; bankAccountNo: string | null;
-  bankLedgerAccountCode: string | null; defaultRevenueAccountCode: string | null;
+  bankLedgerAccountCode: string | null; defaultRevenueAccountCode: string | null; gatewayClearingAccountCode: string | null;
   signatureThreshold: string | null; updatedBy: string | null; updatedAt: string;
 };
 
@@ -67,6 +73,7 @@ function shape(r: ProfileRow) {
     bank: r.bankName ? { bankName: r.bankName, accountName: r.bankAccountName, accountNo: r.bankAccountNo } : null,
     bankLedgerAccountCode: r.bankLedgerAccountCode,
     defaultRevenueAccountCode: r.defaultRevenueAccountCode,
+    gatewayClearingAccountCode: r.gatewayClearingAccountCode,
     signatureThreshold: r.signatureThreshold,
     updatedBy: r.updatedBy,
     updatedAt: r.updatedAt,
@@ -122,7 +129,10 @@ export class BillingProfileController {
     }
     const currency = str(b.currencyCode);
     if (currency !== undefined && !/^[A-Z]{3}$/.test(currency)) throw new BadRequestException("currencyCode must be a 3-letter ISO code");
-    for (const [k, v] of [["bankLedgerAccountCode", b.bankLedgerAccountCode], ["defaultRevenueAccountCode", b.defaultRevenueAccountCode]] as const) {
+    for (const [k, v] of [
+      ["bankLedgerAccountCode", b.bankLedgerAccountCode], ["defaultRevenueAccountCode", b.defaultRevenueAccountCode],
+      ["gatewayClearingAccountCode", b.gatewayClearingAccountCode],
+    ] as const) {
       if (v != null && (typeof v !== "string" || !ACCOUNT_CODE.test(v.trim()))) throw new BadRequestException(`${k} must be an account code`);
     }
     let threshold: string | null | undefined;
@@ -165,12 +175,12 @@ export class BillingProfileController {
             `INSERT INTO company_billing_profiles
                (tenant_id, legal_name, address, invoice_prefix, default_payment_terms_days, currency_code,
                 bank_name, bank_account_name, bank_account_no, bank_ledger_account_code, default_revenue_account_code,
-                signature_threshold, updated_by)
-             VALUES ($1, $2, $3, $4, COALESCE($5::int, 30), COALESCE($6, 'IDR'), $7, $8, $9, $10, $11, $12::numeric, $13)`,
+                signature_threshold, updated_by, gateway_clearing_account_code)
+             VALUES ($1, $2, $3, $4, COALESCE($5::int, 30), COALESCE($6, 'IDR'), $7, $8, $9, $10, $11, $12::numeric, $13, $14)`,
             [tenantId, legalName, address, prefix, terms ?? null, currency ?? null,
              bank?.name ?? null, bank?.accountName ?? null, bank?.accountNo ?? null,
              b.bankLedgerAccountCode?.trim() ?? null, b.defaultRevenueAccountCode?.trim() ?? null,
-             threshold ?? null, actor],
+             threshold ?? null, actor, b.gatewayClearingAccountCode?.trim() ?? null],
           );
         } else {
           await c.query(
@@ -186,13 +196,15 @@ export class BillingProfileController {
                 bank_ledger_account_code = CASE WHEN $11::boolean THEN $12 ELSE bank_ledger_account_code END,
                 default_revenue_account_code = CASE WHEN $13::boolean THEN $14 ELSE default_revenue_account_code END,
                 signature_threshold = CASE WHEN $15::boolean THEN $16::numeric ELSE signature_threshold END,
+                gateway_clearing_account_code = CASE WHEN $18::boolean THEN $19 ELSE gateway_clearing_account_code END,
                 updated_by = $17, updated_at = now()
               WHERE tenant_id = $1`,
             [tenantId, legalName ?? null, address ?? null, prefix ?? null, terms ?? null, currency ?? null,
              touchesBank, bank?.name ?? null, bank?.accountName ?? null, bank?.accountNo ?? null,
              b.bankLedgerAccountCode !== undefined, b.bankLedgerAccountCode?.trim() ?? null,
              b.defaultRevenueAccountCode !== undefined, b.defaultRevenueAccountCode?.trim() ?? null,
-             threshold !== undefined, threshold ?? null, actor],
+             threshold !== undefined, threshold ?? null, actor,
+             b.gatewayClearingAccountCode !== undefined, b.gatewayClearingAccountCode?.trim() ?? null],
           );
         }
       } catch (e) {
