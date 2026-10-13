@@ -1,6 +1,7 @@
 // PV6-04 (CC-D6) — the DB half of "fill the Business profile from the discovery answers". The pure
 // planner is `discovery-map.ts`; this file reads the answers, applies the plan and records it. Used by
 // the lead conversion (inside its transaction) and by the staff routes (centre-discovery.controller.ts).
+import { Logger } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { newId } from "../../../db";
 import { config } from "../../../config";
@@ -68,4 +69,25 @@ export async function fillProfileFromAnswers(
     );
   }
   return { filled, skipped: plan.skipped };
+}
+
+const log = new Logger("CentreDiscovery");
+
+/** The conversion-time call: a profile prefill must never block a lead conversion. Runs the fill inside a
+ *  savepoint; any error rolls back to it (the aborted-transaction state included), is logged with the
+ *  client id only (never answer values), and the conversion carries on. */
+export async function fillProfileFromAnswersSafely(
+  c: PoolClient,
+  args: { tenantId: string; clientId: string; actorId: string | null; answers: Record<string, unknown> },
+): Promise<DiscoveryFillResult | null> {
+  await c.query("SAVEPOINT pv6_discovery_fill");
+  try {
+    const res = await fillProfileFromAnswers(c, args);
+    await c.query("RELEASE SAVEPOINT pv6_discovery_fill");
+    return res;
+  } catch (err) {
+    await c.query("ROLLBACK TO SAVEPOINT pv6_discovery_fill");
+    log.warn(`discovery prefill skipped for client ${args.clientId}: ${err instanceof Error ? err.constructor.name : "error"}`);
+    return null;
+  }
 }

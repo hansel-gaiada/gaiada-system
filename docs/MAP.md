@@ -237,7 +237,6 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/work-activity.controller.ts` |
 | `/api` | `platform-nest/src/mail/thread.controller.ts` |
 | `/api` | `platform-nest/src/modules/assistant/assistant.controller.ts` |
-| `/api` | `platform-nest/src/modules/clients/centre/centre-discovery.controller.ts` |
 | `/api` | `platform-nest/src/modules/clients/centre/clients-centre.controller.ts` |
 | `/api` | `platform-nest/src/modules/clients/clients.controller.ts` |
 | `/api` | `platform-nest/src/modules/finance/finance.controller.ts` |
