@@ -283,8 +283,13 @@ describe.skipIf(!TEST_URL)("DW-5c requests between departments (HTTP, real Postg
       const cr = (await q().query(`SELECT * FROM webdev_change_requests WHERE id = $1`, [work.id])).rows[0];
       expect(cr).toMatchObject({
         source: "internal", kind: "bug", title: "Broken contact form", body: "Submit does nothing", status: "new",
-        requested_by: memberSeo, client_id: null, project_id: null, affected_url: "https://site.test/contact", route: null,
+        requested_by: memberSeo, client_id: null, affected_url: "https://site.test/contact", route: null,
       });
+      // the receiving department's intake project serves BOTH kinds: the change request names it as its project
+      const webIntake = (await q().query(`SELECT project_id FROM work_request_intakes WHERE tenant_id = $1 AND unit_id = 'd-web'`, [A])).rows[0];
+      expect(cr.project_id).toBe(webIntake.project_id);
+      expect((await q().query(`SELECT name, department_id, is_internal FROM projects WHERE id = $1`, [webIntake.project_id])).rows[0])
+        .toEqual({ name: "Web Dev · Requests", department_id: "d-web", is_internal: true });
       const wr = await row(id);
       expect(wr).toMatchObject({ kind: "engineering", change_request_id: work.id, pm_task_id: null, status: "open", from_unit_id: "d-seo" });
       expect(wr.form).toEqual({ kind: "bug", affectedUrl: "https://site.test/contact" });
@@ -660,13 +665,30 @@ describe.skipIf(!TEST_URL)("DW-5c requests between departments (HTTP, real Postg
   describe("syncWorkRequestFromChangeRequest", () => {
     const crUrl = (crId: string, route: string) => `/api/${A}/webdev/change-requests/${crId}/${route}`;
 
-    it("triage DECLINE declines the ask with the triage reason; the requester is told", async () => {
+    // Notifications the requester got for this ask, by type, across the request's own id and its change request's id.
+    const typesFor = async (user: string, ids: string[], types: string[]) =>
+      (await q().query(`SELECT type FROM notifications WHERE user_id = $1 AND payload->>'entityId' = ANY($2::text[]) AND type = ANY($3::text[]) ORDER BY type`, [user, ids, types])).rows.map((r) => r.type as string);
+
+    it("an engineering request triaged with route pm_task (no project in the triage body) lands its task in the intake project", async () => {
+      const e = await mkEng({ toUnitId: "d-web", title: "Add a footer link" });
+      const t = await call("POST", crUrl(e.work.id, "triage"), manager, { action: "convert", route: "pm_task", priceImpact: "none" });
+      expect(t.statusCode, t.body).toBe(200);
+      const taskId = t.json().pmTaskId as string;
+      const intake = (await q().query(`SELECT project_id FROM work_request_intakes WHERE tenant_id = $1 AND unit_id = 'd-web'`, [A])).rows[0].project_id;
+      expect((await task(taskId)).project_id).toBe(intake);
+      expect((await row(e.id)).status).toBe("open");
+      const live = (await call("GET", `${base()}/${e.id}`, memberSeo)).json();
+      expect(live.work).toEqual({ type: "change_request", id: e.work.id, status: "in_progress", route: "pm_task" });
+    });
+
+    it("triage DECLINE declines the ask with the triage reason; the requester is told exactly ONCE (request.declined, not the portal notification too)", async () => {
       const e = await mkEng();
       const t = await call("POST", crUrl(e.work.id, "triage"), manager, { action: "decline", reason: "Out of scope for Web Dev" });
       expect(t.statusCode, t.body).toBe(200);
       expect(await row(e.id)).toMatchObject({ status: "declined", closed_by: manager, decline_reason: "Out of scope for Web Dev" });
       expect((await row(e.id)).closed_at).not.toBeNull();
       expect(await notifs("request.declined", e.id)).toEqual([memberSeo]);
+      expect(await typesFor(memberSeo, [e.id, e.work.id], ["request.declined", "webdev.change_request.declined"])).toEqual(["request.declined"]);
       expect((await events(e.id)).map((x) => x.event_type)).toEqual(["work_request.created", "work_request.declined"]);
     });
 
@@ -684,6 +706,8 @@ describe.skipIf(!TEST_URL)("DW-5c requests between departments (HTTP, real Postg
       expect(wr).toMatchObject({ status: "delivered", closed_by: admin });
       expect(wr.closed_at).not.toBeNull();
       expect(await notifs("request.delivered", e.id)).toEqual([memberSeo]);
+      // exactly ONE notification for the verify: request.delivered, and no portal `.verified` one beside it
+      expect(await typesFor(memberSeo, [e.id, e.work.id], ["request.delivered", "webdev.change_request.verified"])).toEqual(["request.delivered"]);
 
       const u = await call("POST", crUrl(e.work.id, "verify"), admin, { action: "unverify", reason: "It came back on the same build" });
       expect(u.statusCode, u.body).toBe(200);
