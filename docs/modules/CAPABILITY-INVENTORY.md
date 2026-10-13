@@ -39,22 +39,22 @@ unfalsifiable after.
 
 | Owner | Route families | Suites driving the real endpoint |
 |---|---|---|
-| agency | `agency` | 18 |
+| agency | `agency` | 20 |
 | assistant | `assistant` | 15 |
 | automation-console | `admin/automation` | 3 |
 | clients | `clients` | 18 |
-| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `positions` · `role-grants` | 63 |
+| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `positions` · `role-grants` | 65 |
 | finance | `finance` | 3 |
 | hr | `hr` | 11 |
 | invoice | `invoices` | 11 |
 | it | `it` | 4 |
 | knowledge | `knowledge` | 2 |
 | monitoring | `monitoring` | 3 |
-| pm | `pm` | 10 |
+| pm | `pm` | 11 |
 | reports | `checkins` · `reports` | 17 |
 | search | `search` | 28 |
 | social | `social` | 13 |
-| webdev | `webdev` | 35 |
+| webdev | `webdev` | 36 |
 
 ## Capabilities
 

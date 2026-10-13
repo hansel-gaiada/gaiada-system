@@ -169,11 +169,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610140010_reports_period_kinds_quarter_semester_year.sql`
+- Head: `202610140610_iam_work_request_permissions.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 289 (121 legacy `NNNN_`, 168 timestamped)
+- Applied files on disk: 293 (121 legacy `NNNN_`, 172 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -291,6 +291,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/webdev/control` | `platform-nest/src/modules/webdev/webdesk-control.controller.ts` |
 | `/api/:tenantId/reports` | `platform-nest/src/modules/reports/reports.controller.ts` |
 | `/api/:tenantId/reports/group` | `platform-nest/src/modules/reports/group-report.controller.ts` |
+| `/api/:tenantId/requests` | `platform-nest/src/core/work-requests.controller.ts` |
 | `/api/admin` | `platform-nest/src/admin/admin-systems.controller.ts` |
 | `/api/admin/bot` | `platform-nest/src/admin/bot-admin.controller.ts` |
 | `/api/admin/mail` | `platform-nest/src/mail/admin-mail.controller.ts` |
@@ -374,6 +375,8 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/board`
 - `/departments/[deptId]/briefs`
 - `/departments/[deptId]/calendar`
+- `/departments/[deptId]/campaigns`
+- `/departments/[deptId]/campaigns/social`
 - `/departments/[deptId]/charts`
 - `/departments/[deptId]/composer`
 - `/departments/[deptId]/composer/[postId]`
@@ -400,6 +403,8 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/reports`
 - `/departments/[deptId]/repositories`
 - `/departments/[deptId]/requests`
+- `/departments/[deptId]/requests/delivered`
+- `/departments/[deptId]/requests/sent`
 - `/departments/[deptId]/review`
 - `/departments/[deptId]/search-terms`
 - `/departments/[deptId]/sites`
@@ -565,6 +570,9 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/reports/person`
 - `/reports/project`
 - `/reports/team`
+- `/requests`
+- `/requests/[id]`
+- `/requests/new`
 - `/rollups`
 - `/search`
 - `/step-up`
@@ -599,6 +607,7 @@ Browser-facing route handlers (`route.ts`) — these exist only where the browse
 - `/api/admin/bot/session/events`
 - `/api/admin/bot/skills`
 - `/api/assistant/threads/[id]/stream`
+- `/api/creative-assets/[assetId]`
 - `/api/files/[fileId]`
 - `/api/meetings/[id]/audio`
 - `/api/meetings/[id]/status`
