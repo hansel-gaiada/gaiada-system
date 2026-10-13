@@ -630,3 +630,21 @@ Note: the `/v` and `/f` bodies in checks 7 and 8 use the all-zero visitor id, wh
 
 The ERP side degrades on its own: with `SEARCH_VISITORS_ENABLED` empty the visitor feature is off, and an empty `INSIGHTS_BASE_URL`
 reads as "not configured". Withdrawals and erasures that failed while the forget route was down stay queued in the ERP (V3-e) and are retried.
+
+### C8. The ERP half of V3-k against a real collector (rerunnable proof)
+
+`platform-nest/src/modules/search/visitor-collector.e2e.db.test.ts` drives the ERP's real visitor jobs against a real collector. It covers ingest, the withdrawal sweep, and the V3-h erase by email. It skips unless `INSIGHTS_E2E=1` and its env are set, so normal CI never runs it.
+
+**To rerun on sumopod (no host ports, nothing live touched):**
+1. **Bring up a throwaway copy of this project** (the V2-d recipe in C5): its own `name:`, a free /28, its own port, a signed collector image, and an `.env` with fresh keys. Write `.read-key`, `.forget-key` and `.website` (the `INSIGHTS_WEBSITES` uuid) as 0600 files, then `docker compose up -d`.
+2. **Run the gate:** `bash infra/sumopod/umami/qa/gate-v3k.sh <id> <patch> <base-sha> src/modules/search/visitor-collector.e2e.db.test.ts`, from a copy on the box, with the copy's directory in `QA=`.
+   - It clones the public repo at `<base-sha>` and applies `<patch>`.
+   - It starts throwaway postgres, redis and cerbos.
+   - It attaches the node test container to the collector's `internal` network.
+3. **Tear down** the copy with `docker compose down -v` and remove its directory.
+
+**First run, 2026-10-13: 4/4 PASSED** against the 368 collector, in 68 s:
+- a consented visitor becomes a profile;
+- a forged consent leaves no profile, and the collector forgets it;
+- a withdrawal clears the profile through the sweep;
+- an erase by email reports the collector forget as `delivered`.
