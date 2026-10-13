@@ -716,6 +716,40 @@ the MCP hub registration, golden cases and the capability inventory.
 - The Midtrans vendor-exit row re-checked.
 - PV5-11, when it unparks, gets its own sandbox drive, release and one real certified signature.
 
+### PV5-14: simulated second factor for the dev stage (PV-D40)
+
+**Owner:** senior-be (opus: the assurance boundary) + senior-fe for the UI. **Added 2026-10-13.**
+
+**Why:** live Keycloak emits no `amr`, so `assuranceFor` (`PN/src/auth/oidc.ts:142`) never yields `high` and every
+high-assurance action is unreachable for everyone (finding in "Follow-ups found during PV-5"). The owner ruled
+(PV-D40) to keep the rules and simulate the factor while live holds mock data.
+
+**Change:**
+- A server flag `MFA_SIMULATION_ENABLED` (default off; compose passthrough `${MFA_SIMULATION_ENABLED:-0}`, never a
+  `.env`-only value, see the compose-env trap).
+- `POST /api/auth/step-up/simulate`: an interactive STAFF session at `linked` assurance confirms "Simulate second
+  factor". Refused when the flag is off (404), for a portal (client) principal, for `automation`/`bot` principals,
+  and for any agent or D14 re-drive (an agent never inherits a human's step-up). On success it records a step-up
+  bound to the session id with a 15-minute TTL and writes an activity row `auth.step_up_simulated` (actor, time,
+  expiry). `GET /api/auth/step-up` returns `{active, expiresAt, simulated}`.
+- Principal assembly: while a valid simulated step-up exists for THIS session and the flag is on, assurance is
+  `high` and the principal carries `assuranceSource: "simulated"`; the server logs `[auth:mfa-simulated]` once per
+  step-up. A real `amr` still yields `high` as today. Flag off: nothing changes.
+- UI: a refusal that names assurance shows "This action needs a second factor" with a "Simulate second factor
+  (dev stage)" button (only when the server says simulation is on); while active, a header badge "Second factor
+  simulated until HH:MM". No text calls it real MFA.
+- Lift PV-D29's bypass and restore PV-D26's unconditional high-assurance rule on `set_bank_details` in the same
+  change, so bank details also go through the (simulated) step-up.
+
+**Tests:** flag off → the route 404s and assurance stays `linked`; flag on → a staff session reaches `high`, then
+falls back after expiry; a client, a bot and an agent re-drive are refused; the activity row is written; a
+Cerbos high-assurance action (e.g. `finance_tax` configure) is denied before and allowed after; another session of
+the same user is NOT stepped up. Teeth: ignore the flag, or the session binding, and a test fails.
+
+**Deploy:** set `MFA_SIMULATION_ENABLED=1` on gda-aicenter (dev stage only); Cerbos restart if any policy moves.
+**Before real client data:** the flag goes off and real MFA is enabled (board item under "Before real clients use
+the portal").
+
 ## Owner steps
 
 1. ~~Approve the provider picks~~ Done (PV-D25). **Register the company as a Midtrans merchant**

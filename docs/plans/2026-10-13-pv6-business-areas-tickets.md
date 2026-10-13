@@ -379,9 +379,9 @@ mock data; log in once per run, stop on the first failed login):
 
 | # | Question | Lead's default, used until ruled |
 |---|---|---|
-| PV6-Q1 | May a contact limited to some projects see Services & results? | No. Only client-wide contacts, as PV-D33 ruled for the client-wide thread |
-| PV6-Q2 | May clients see ad spend and budgets in Services & results? | No money figures in this phase. Spend belongs with Contracts & billing and the client reports (PV-7) |
-| PV6-Q3 | Three client areas share names with our own modules: Accounting, Human Resources, IT & Security. Rename them? | Keep. They name the client's own functions and appear only inside Business |
+| PV6-Q1 | May a contact limited to some projects see Services & results? | No. Only client-wide contacts, as PV-D33 ruled for the client-wide thread. **RULED PV-D37 (2026-10-13): as the default** |
+| PV6-Q2 | May clients see ad spend and budgets in Services & results? | No money figures in this phase. Spend belongs with Contracts & billing and the client reports (PV-7). **RULED PV-D38 (2026-10-13): as the default** |
+| PV6-Q3 | Three client areas share names with our own modules: Accounting, Human Resources, IT & Security. Rename them? | Keep. They name the client's own functions and appear only inside Business. **RULED PV-D39 (2026-10-13): keep** |
 
 ## Not in PV-6 (and where each goes)
 
