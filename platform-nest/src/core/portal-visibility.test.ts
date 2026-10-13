@@ -30,6 +30,7 @@ import {
   conversationThreadInPortalScope, staffConversationDraftClientVisible, staffConversationMessageClientVisible,
   staffConversationThreadClientVisible,
   meetingMinutesClientVisible, meetingMinutesInPortalScope, staffMeetingMinutesClientVisible,
+  callerClientWideFor,
 } from "./portal-visibility";
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -431,6 +432,36 @@ describe("PV4-05 meeting minutes predicates", () => {
   });
 });
 
+describe("PV6-02 · callerClientWideFor: client-wide for ONE client", () => {
+  const sql = norm(callerClientWideFor({ user: 2, client: 3 }));
+
+  it("binds exactly the two named parameters and nothing else", () => {
+    expect([...new Set(sql.match(/\$\d+/g))].sort()).toEqual(["$2", "$3"]);
+  });
+
+  it("requires an ACTIVE, undeleted, PROJECT-LESS contact row for that user and that client", () => {
+    expect(sql).toContain("cw.user_id = $2::uuid");
+    expect(sql).toContain("cw.client_id = $3::uuid");
+    expect(sql).toContain("cw.project_id IS NULL");
+    expect(sql).toContain("cw.status = 'active'");
+    expect(sql).toContain("cw.deleted_at IS NULL");
+  });
+
+  it("admits the legacy whole-client portal user, never the internal sentinel client", () => {
+    expect(sql).toContain("lg.portal_user_id = $2::uuid");
+    expect(sql).toContain("NOT lg.is_internal");
+  });
+
+  it("does not look at capability: a client-wide viewer is client-wide", () => {
+    expect(sql).not.toMatch(/capability/);
+  });
+
+  it("refuses a parameter index that is not a positive integer", () => {
+    expect(() => callerClientWideFor({ user: 0, client: 1 })).toThrow(/invalid parameter index/);
+    expect(() => callerClientWideFor({ user: 1, client: 1.5 })).toThrow(/invalid parameter index/);
+  });
+});
+
 // ════════════════════════════════════════════════════════════════════════════════════════════════════
 // 3. The guard: no inline row-visibility literal in any portal-facing production file
 // ════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -503,6 +534,8 @@ const SWITCHED = [
   "src/core/portal-conversation.controller.ts",
   // PV5-08: the Documents list, written on the builders from day one.
   "src/core/portal-documents.controller.ts",
+  // PV6-02: Services & results, written on callerClientWideFor from day one.
+  "src/core/portal-centre-results.controller.ts",
 ];
 
 describe("PV3-02 guard — portal-facing files carry no inline row-visibility literal", () => {

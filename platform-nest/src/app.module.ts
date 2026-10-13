@@ -104,6 +104,9 @@ import { ClientsController } from "./modules/clients/clients.controller";
 import { ClientsCentreController } from "./modules/clients/centre/clients-centre.controller";
 import { PortalCentreController } from "./core/portal-centre.controller";
 import { HrController } from "./modules/hr/hr.controller";
+// PV6-02: Client Centre Services & results (staff route under `clients`, portal route in core).
+import { CentreResultsController } from "./modules/clients/centre/centre-results.controller";
+import { PortalCentreResultsController } from "./core/portal-centre-results.controller";
 import { SocialController } from "./modules/social/social.controller";
 // SMM-23: report snapshot -> AI narrative -> approve -> render -> deliver lifecycle, on its OWN
 // controller class — same reason SearchReportsController gives below (three other seats hold
@@ -208,6 +211,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     AgencyController, PmController, ItController, FinanceController, ClientsController, ClientsCentreController, HrController, LoansController,
     HrPolicyController, RecruitmentController, PayrollController, HrLifecycleController,
     LmsCatalogueController, LmsLearnController,
+    CentreResultsController, PortalCentreResultsController,
     AssistantController, SearchController,
     SocialController,
     // SMM-23: report review/approve/preview/deliver lifecycle, on its OWN controller class — same

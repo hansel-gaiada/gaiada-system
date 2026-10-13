@@ -102,7 +102,9 @@ interface MonitorRow {
 //   · degraded counts AGAINST uptime (denominator only) — it is a failed check, not a soft pass.
 //   · an empty window is NULL, never 1 and never 0. The UI prints "—"; 100% would be a fabricated
 //     claim about a period that was never observed.
-const UPTIME_RATIO_SQL = `
+// PV6-02: exported so the client-facing Services & results read reuses THIS text rather than a copy. Pinned to
+// runner.ts uptimeRatio() by uptime-parity.test.ts, which keeps its own literal on purpose.
+export const UPTIME_RATIO_SQL = `
            CASE WHEN count(*) FILTER (WHERE r.status NOT IN ('maintenance','unknown')) = 0 THEN NULL
                 ELSE count(*) FILTER (WHERE r.status = 'up')::numeric
                      / count(*) FILTER (WHERE r.status NOT IN ('maintenance','unknown'))
