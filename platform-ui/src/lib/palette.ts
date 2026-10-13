@@ -10,6 +10,8 @@
 import type { NavGroup } from "@/components/shell/nav";
 import type { IconName } from "@/components/shell/icons";
 import { toolkitFor, deptTabs, tabHref, type DeptTab } from "./deptToolkits";
+import type { ConcreteRow } from "./workspaceAccess";
+import type { ShellModel } from "./shellModel";
 
 export interface PaletteEntry {
   id: string;
@@ -49,4 +51,63 @@ export function buildDeptEntries(
     }
   }
   return out;
+}
+
+/** The text for one tab of a row: the row's own label once when its only tab carries it, else the tab's. */
+function tabText(row: ConcreteRow, tab: ConcreteRow["tabs"][number]): string {
+  return tab.label === row.label ? row.label : tab.label;
+}
+
+/** Workspace shell (DW-2e, plan §2.6 rule 3) — every concrete tab of every workspace of the model, then the
+ *  Company and Admin rows. The model is already gated and concrete, so nothing here re-checks access.
+ *  Overview, AI Assistant, Performance and You are the same pages in every workspace: they are listed once,
+ *  from the home workspace (the first when home is Company), labelled plainly. A department-specific tab of
+ *  those blocks (a different href) is still offered, under its workspace's name. First href wins. */
+export function buildWorkspaceEntries(model: ShellModel): PaletteEntry[] {
+  const out: PaletteEntry[] = [];
+  const seen = new Set<string>();
+  const push = (href: string, label: string, section: string, icon: PaletteEntry["icon"]) => {
+    if (seen.has(href)) return;
+    seen.add(href);
+    out.push({ id: `ws:${href}`, label, href, section, icon });
+  };
+  const plain = (rows: ConcreteRow[], section: string) => {
+    for (const row of rows) for (const t of row.tabs) {
+      push(t.href, t.label === row.label ? row.label : `${row.label} · ${t.label}`, section, t.icon);
+    }
+  };
+  const sharedHome = model.workspaces.find((w) => w.home) ?? model.workspaces[0];
+  const sharedSection = (key: "top" | "performance" | "you", ws: string) => (key === "top" ? ws : key === "you" ? "You" : "Performance");
+
+  // The home workspace's shared blocks first, so they win their hrefs with the plain labels.
+  if (sharedHome) {
+    for (const key of ["top", "performance", "you"] as const) plain(sharedHome.rows[key], sharedSection(key, sharedHome.label));
+  }
+  for (const ws of model.workspaces) {
+    for (const row of ws.rows.work) for (const t of row.tabs) push(t.href, `${ws.label} · ${tabText(row, t)}`, ws.label, t.icon);
+    for (const key of ["top", "performance", "you"] as const) {
+      for (const row of ws.rows[key]) for (const t of row.tabs) push(t.href, `${ws.label} · ${tabText(row, t)}`, sharedSection(key, ws.label), t.icon);
+    }
+  }
+  plain(model.company, "Company");
+  plain(model.admin, "Admin");
+  return out;
+}
+
+/** Entries are unique by href; the first list wins a clash. */
+export function mergePaletteEntries(...lists: PaletteEntry[][]): PaletteEntry[] {
+  const seen = new Set<string>();
+  const out: PaletteEntry[] = [];
+  for (const list of lists) for (const e of list) {
+    if (seen.has(e.href)) continue;
+    seen.add(e.href);
+    out.push(e);
+  }
+  return out;
+}
+
+/** What the workspace shell hands the palette: the registry's entries, then today's nav and department
+ *  entries, so nothing findable before stops being findable until the classic nav retires (DW-9d). */
+export function workspacePaletteEntries(model: ShellModel, today: PaletteEntry[]): PaletteEntry[] {
+  return mergePaletteEntries(buildWorkspaceEntries(model), today);
 }
