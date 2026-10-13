@@ -113,6 +113,15 @@ export interface Resource {
    *  the SOURCE item's state. Omitted -> "" -> every rule that reads it (writer/translator update, SEO
    *  reviewer update, approve) denies. */
   reviewState?: string;
+  /** DW-5c (docs/FRONTEND-BFF-CONTRACT.md §32.2) -- the user who ASKED, for `work_request`'s `cancel` requester rule
+   *  (`requestedBy == principal.id`). Read by the handler from `work_requests.requested_by`, never from a body.
+   *  Omitted -> "" -> the rule's `has() && != ""` guard and the equality both fail closed. */
+  requestedBy?: string;
+  /** DW-5c -- the people doing the work behind a `work_request`: the PM task's responsible person and any person
+   *  assignee, resolved BY THE HANDLER from the task (never a body). Backs `deliver`'s assignee rule
+   *  (`principal.id in assigneeIds`). Omitted -> [] -> the rule contains nobody, so an unfed resource confers
+   *  nothing (the same fail-closed convention as `unitAncestors` and `panelistUserIds`). */
+  assigneeIds?: string[];
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -232,6 +241,10 @@ function resourcePayload(r: Resource) {
       // M5-W1a. Listed here or they never reach derived_roles.yaml / resource_webdesk_*.yaml (allow-list).
       siteId: r.siteId ?? "",
       reviewState: r.reviewState ?? "",
+      // DW-5c. Listed here or they never reach resource_work_request.yaml (this is an allow-list). Both fail closed:
+      // "" never equals a principal id, and [] contains nobody.
+      requestedBy: r.requestedBy ?? "",
+      assigneeIds: r.assigneeIds ?? [],
     },
   };
 }
