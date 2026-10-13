@@ -50,7 +50,7 @@ unfalsifiable after.
 | it | `it` | 4 |
 | knowledge | `knowledge` | 2 |
 | monitoring | `monitoring` | 3 |
-| pm | `pm` | 11 |
+| pm | `pm` | 12 |
 | reports | `checkins` · `reports` | 17 |
 | search | `search` | 28 |
 | social | `social` | 13 |

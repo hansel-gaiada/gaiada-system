@@ -16,6 +16,7 @@ import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { allocateTaskSeq, deriveUniqueShortCode, displayCode } from "../../core/project-short-codes";
+import { summarizeCi, type CiRun } from "../../core/github-pull-requests";
 import { isProjectStatus, unknownProjectStatusError } from "../../core/project-status";
 import { todayIso, addDaysIso } from "../../core/dept-resolution";
 import { clientFilterSql, parseClientFilter } from "../../core/client-filter";
@@ -1968,6 +1969,61 @@ export class PmController {
         [tenantId, taskId],
       );
       return r.rows;
+    });
+  }
+
+  // DW-6f (docs/FRONTEND-BFF-CONTRACT.md §34.6) — the pull requests linked to one task, with their CI status.
+  // Authorised EXACTLY like the task itself (the same authorize() call as getTask: `pm_task` · `read`); no new Cerbos kind.
+  // RLS is the second wall: a task id from another tenant finds nothing under this tenant's scope and answers 404.
+  // `linkable` is whether this tenant is the one that owns the GitHub organisation (the only company a pull request can be
+  // linked in, §34.2), so the UI never teaches the key convention where it cannot work. `repoLinked` is whether a live
+  // github_repos row points at the task's project. A server that cannot read answers 5xx; it never pretends "none".
+  @Get(":tenantId/pm/tasks/:taskId/pull-requests")
+  async getTaskPullRequests(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("taskId") taskId: string) {
+    await authorize(req.principal, { kind: "pm_task", tenantId, id: taskId }, "read");
+    return withTenants([tenantId], async (c) => {
+      const t = await c.query<{ projectId: string; shortCode: string | null; seq: number | null }>(
+        `SELECT t.project_id AS "projectId", p.short_code AS "shortCode", t.seq
+           FROM pm_tasks t JOIN projects p ON p.id = t.project_id
+          WHERE t.id = $1 AND t.deleted_at IS NULL`,
+        [taskId],
+      );
+      const task = t.rows[0];
+      if (!task) throw new NotFoundException("task not found");
+      const orgTenant = config.githubRepoSync.tenantId;
+      const linkable = !!orgTenant && orgTenant === tenantId;
+      const repo = await c.query(
+        `SELECT 1 FROM github_repos WHERE project_id = $1 AND deleted_at IS NULL LIMIT 1`,
+        [task.projectId],
+      );
+      interface PrRow {
+        repo: string; number: number; title: string; state: "open" | "closed"; merged: boolean; draft: boolean;
+        headRef: string; url: string; authorLogin: string | null; updatedAt: string; ci: Record<string, CiRun>;
+      }
+      const prs: PrRow[] = linkable
+        ? (await c.query<PrRow>(
+            `SELECT repo_full_name AS repo, number, title, state, merged, draft, head_ref AS "headRef", html_url AS url,
+                    author_login AS "authorLogin", COALESCE(gh_updated_at, updated_at) AS "updatedAt", ci
+               FROM github_pull_requests
+              WHERE tenant_id = $1 AND pm_task_id = $2
+              ORDER BY (state = 'open') DESC, COALESCE(gh_updated_at, updated_at) DESC, number DESC`,
+            [tenantId, taskId],
+          )).rows
+        : [];
+      return {
+        taskKey: displayCode(task.shortCode, task.seq),
+        linkable,
+        repoLinked: !!repo.rows[0],
+        pullRequests: prs.map(({ ci, ...pr }) => ({
+          ...pr,
+          ci: {
+            summary: summarizeCi(ci),
+            runs: Object.entries(ci ?? {})
+              .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+              .map(([name, r]) => ({ name, status: r.status ?? null, conclusion: r.conclusion ?? null, url: r.url ?? null, at: r.at ?? null })),
+          },
+        })),
+      };
     });
   }
 

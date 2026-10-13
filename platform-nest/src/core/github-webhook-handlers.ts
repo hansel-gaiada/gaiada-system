@@ -59,9 +59,10 @@
 // it. See individual handlers for exactly which columns each event touches.
 import type { PoolClient } from "pg";
 import { config } from "../config";
-import { withTenants } from "../db";
+import { newId, withTenants } from "../db";
 import { GITHUB_APPS } from "./github/apps";
 import { ingestWorkActivity } from "./work-activity-ingest.service";
+import { linkTaskKey } from "./github-pull-requests";
 
 const BOT_LOGIN = `${GITHUB_APPS.erp.slug}[bot]`; // "gaiada-erp[bot]" — §1
 const MAX_COMMITS_PER_PUSH = 300; // defensive cap; GitHub itself already truncates large pushes
@@ -319,7 +320,127 @@ async function handlePullRequest(tenantId: string, payload: Record<string, unkno
     },
   });
 
-  return { note: `pull_request ${fullName}#${pr.number} action=${action} merged=${merged}` };
+  // DW-6f (§34.4): store the pull request and link it to a task, AFTER today's writes and in the same delivery. A failure
+  // here never fails the writes above: it is caught, logged, and named in the note.
+  let storeNote: string;
+  try {
+    storeNote = await storePullRequest(tenantId, fullName, payload.pull_request as GhPullRequestPayload);
+  } catch (err) {
+    storeNote = failedPartNote("pr_store", err, `${fullName}#${pr.number}`);
+  }
+
+  return { note: `pull_request ${fullName}#${pr.number} action=${action} merged=${merged} ${storeNote}` };
+}
+
+// ── DW-6f: the pull_request row (docs/FRONTEND-BFF-CONTRACT.md §34.4, §34.5) ───────────────────────
+interface GhPullRequestPayload {
+  number: number; title?: string; state?: string; merged?: boolean; draft?: boolean;
+  head?: { ref?: string; sha?: string | null }; html_url?: string; user?: { login?: string } | null;
+  updated_at?: string | null;
+}
+
+/** A part's failure as a handler note, and a log line. The delivery's existing writes have already happened. */
+function failedPartNote(part: string, err: unknown, subject: string): string {
+  const message = err instanceof Error ? err.message : String(err);
+  // eslint-disable-next-line no-console
+  console.error(`[github-webhook] ${part} failed for ${subject}:`, message);
+  return `${part}=failed(${message.slice(0, 120)})`;
+}
+
+/** An ISO timestamp from a payload, or null when absent or unparseable (so a bad value can never reach a ::timestamptz cast). */
+function isoOrNull(v: unknown): string | null {
+  if (typeof v !== "string" || !v) return null;
+  const t = Date.parse(v);
+  return Number.isNaN(t) ? null : new Date(t).toISOString();
+}
+
+/**
+ * Upsert on (tenant_id, repo_full_name, number), applied only when the payload's `updated_at` is at or after the stored
+ * `gh_updated_at` (an out-of-order delivery never rolls a row back); then re-run the link on every applied event, so an
+ * edit that adds or removes a key changes it. The link has its own transaction: a failed lookup leaves the stored pull
+ * request in place rather than losing it.
+ */
+async function storePullRequest(tenantId: string, fullName: string, pr: GhPullRequestPayload): Promise<string> {
+  const state = pr.state === "open" || pr.state === "closed" ? pr.state : null;
+  const headRef = pr.head?.ref;
+  if (!state || typeof pr.title !== "string" || !headRef || !pr.html_url || !Number.isInteger(pr.number)) {
+    return "pr_store=skipped(missing fields)";
+  }
+  const ghUpdatedAt = isoOrNull(pr.updated_at);
+  const applied = await withTenants([tenantId], (client) =>
+    client.query<{ id: string }>(
+      `INSERT INTO github_pull_requests
+         (id, tenant_id, repo_full_name, number, title, state, merged, draft, head_ref, head_sha, html_url, author_login, gh_updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       ON CONFLICT (tenant_id, repo_full_name, number) DO UPDATE
+          SET title = EXCLUDED.title, state = EXCLUDED.state, merged = EXCLUDED.merged, draft = EXCLUDED.draft,
+              head_ref = EXCLUDED.head_ref, head_sha = EXCLUDED.head_sha, html_url = EXCLUDED.html_url,
+              author_login = EXCLUDED.author_login, gh_updated_at = EXCLUDED.gh_updated_at, updated_at = now()
+        WHERE github_pull_requests.gh_updated_at IS NULL
+           OR (EXCLUDED.gh_updated_at IS NOT NULL AND EXCLUDED.gh_updated_at >= github_pull_requests.gh_updated_at)
+       RETURNING id`,
+      [
+        newId(), tenantId, fullName, pr.number, pr.title, state, pr.merged === true, pr.draft === true,
+        headRef, pr.head?.sha ?? null, pr.html_url, pr.user?.login ?? null, ghUpdatedAt,
+      ],
+    ),
+  );
+  const id = applied.rows[0]?.id;
+  if (!id) return "pr_store=stale(ignored)";
+
+  let linkNote: string;
+  try {
+    linkNote = await withTenants([tenantId], async (client) => {
+      const link = await linkTaskKey(client, tenantId, { title: pr.title, headRef });
+      await client.query(
+        `UPDATE github_pull_requests SET pm_task_id = $2, task_key = $3, updated_at = now() WHERE id = $1`,
+        [id, link?.pmTaskId ?? null, link?.taskKey ?? null],
+      );
+      return link ? `link=${link.taskKey}` : "link=none";
+    });
+  } catch (err) {
+    linkNote = failedPartNote("pr_link", err, `${fullName}#${pr.number}`);
+  }
+  return `pr_store=applied ${linkNote}`;
+}
+
+// ── DW-6f: the CI entry on each pull request a workflow run belongs to (§34.4) ─────────────────────
+interface GhWorkflowRunPayload {
+  id: number; name?: string | null; status?: string | null; conclusion?: string | null; html_url?: string | null;
+  run_started_at?: string | null; created_at?: string | null; head_sha?: string | null;
+  pull_requests?: Array<{ number?: number }> | null;
+}
+
+/**
+ * Match the pull requests by `workflow_run.pull_requests[]` numbers for this repo, else by `head_sha`. Set
+ * `ci[<workflow name>] = { runId, status, conclusion, url, at }`, merged into the object with `||` (never `jsonb_set` on a
+ * missing path: it creates no ancestors), and replaced only when this run's start is at or after the stored `at`.
+ */
+async function storeWorkflowRunCi(tenantId: string, fullName: string, run: GhWorkflowRunPayload): Promise<string> {
+  const name = typeof run.name === "string" && run.name ? run.name : null;
+  if (!name || typeof run.id !== "number") return "ci_store=skipped(no workflow name)";
+  const numbers = (Array.isArray(run.pull_requests) ? run.pull_requests : [])
+    .map((p) => p?.number)
+    .filter((n): n is number => Number.isInteger(n));
+  const sha = typeof run.head_sha === "string" && run.head_sha ? run.head_sha : null;
+  if (!numbers.length && !sha) return "ci_store=skipped(no pull request or head_sha)";
+  const at = isoOrNull(run.run_started_at) ?? isoOrNull(run.created_at);
+
+  const matchSql = numbers.length ? `number = ANY($7::int[])` : `head_sha = $7`;
+  const r = await withTenants([tenantId], (client) =>
+    client.query(
+      `UPDATE github_pull_requests
+          SET ci = ci || jsonb_build_object($1::text, jsonb_build_object(
+                'runId', $2::bigint, 'status', $3::text, 'conclusion', $4::text, 'url', $5::text, 'at', $6::text)),
+              updated_at = now()
+        WHERE tenant_id = $8 AND repo_full_name = $9 AND ${matchSql}
+          AND (NOT (ci ? $1::text)
+               OR (ci -> $1::text ->> 'at') IS NULL
+               OR ($10::timestamptz IS NOT NULL AND $10::timestamptz >= (ci -> $1::text ->> 'at')::timestamptz))`,
+      [name, run.id, run.status ?? null, run.conclusion ?? null, run.html_url ?? null, at, numbers.length ? numbers : sha, tenantId, fullName, at],
+    ),
+  );
+  return `ci_store=${r.rowCount ?? 0}`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -356,7 +477,15 @@ async function handleWorkflowRun(tenantId: string, payload: Record<string, unkno
     occurredAt: runAt,
   });
 
-  return { note: `workflow_run ${fullName} id=${run.id} status=${run.status ?? "?"}` };
+  // DW-6f (§34.4): the CI entry on each pull request this run belongs to. Never fails the writes above.
+  let ciNote: string;
+  try {
+    ciNote = await storeWorkflowRunCi(tenantId, fullName, payload.workflow_run as GhWorkflowRunPayload);
+  } catch (err) {
+    ciNote = failedPartNote("ci_store", err, `${fullName}:run:${run.id}`);
+  }
+
+  return { note: `workflow_run ${fullName} id=${run.id} status=${run.status ?? "?"} ${ciNote}` };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
