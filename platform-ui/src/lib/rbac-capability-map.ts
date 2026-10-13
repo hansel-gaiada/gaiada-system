@@ -898,4 +898,13 @@ export const CAPABILITY_MAP = {
     ],
     semantics: "all",
   },
+
+  // ── DW-5c UI · requests between departments (contract §32.2) ─────────────────────────────────
+  "work_request.decide": {
+    // Deliver and decline are offered together to the same people (a manager or the receiving department's head), so
+    // `all`. The assignee rule of `deliver` and the requester rule of `cancel` are attribute-dependent and are decided by
+    // the page, not by this capability.
+    permissions: ["core.work_request.deliver", "core.work_request.decline"],
+    semantics: "all",
+  },
 } as const satisfies Record<Capability, CapabilityDef>;

@@ -313,6 +313,20 @@ const KNOWN_NON_DRIFT: RegisterEntry[] = [
     reason: "Same cause as monitoring.channel.manage above: resource_monitor_maintenance.yaml's `delete` rule names company_admin/manager/module_manager only.",
     decisionRef: "cerbos/policies/resource_monitor_maintenance.yaml (rules + \"PERMISSION ARM DEFERRED\" comment); cerbos/policies/derived_roles.yaml (no owner/group_executive entry)",
   },
+  // ── DW-5c UI (2026-10-14): the catalog bundles `core.work_request.deliver` and `.decline` for `owner`, but the enforcing
+  // policy's permission arm covers `read` and `create` only. `resource_work_request.yaml` names company_admin and manager
+  // (deliver, decline), the org_unit_lead on the receiving unit and the work's assignees (deliver); `owner` appears in none of
+  // those, and adding a `decline` permission-arm mirror was tried and fails `iam-04-reg1-mirror-reach-invariant` because the
+  // key held by org_unit_lead is narrower than the mirror (contract §32.10 deviation 3, same call as DW-5a's `update`).
+  // So a pure owner is refused by Cerbos, and widening `ROLE_CAPS.owner` would show a Deliver/Decline control that always 403s.
+  {
+    role: "owner",
+    capability: "work_request.decide",
+    direction: "under-claim",
+    reason:
+      "owner's bundle carries core.work_request.deliver and core.work_request.decline from the catalog seed, but resource_work_request.yaml's permission arm honours only read and create; a principal whose only grant is `owner` is denied on deliver and decline unless it also holds company_admin or manager.",
+    decisionRef: "docs/FRONTEND-BFF-CONTRACT.md §32.10 deviation 3; cerbos/policies/resource_work_request.yaml (rules + perm arm); same shape as the MON-20 entries above",
+  },
 ];
 
 const knownNonDriftKey = (role: string, capability: Capability) => `${role} ${capability}`;

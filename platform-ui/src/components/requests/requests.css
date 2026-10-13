@@ -1,0 +1,61 @@
+/* DW-5c UI — requests between departments: the lists, the form and the request page.
+   Prefix `req-`. Tokens only, so light and dark both work. */
+
+.req-stack { display: grid; gap: 14px; }
+
+.req-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.req-filter { display: inline-flex; gap: 4px; }
+.req-filter__item {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  font: 600 12px var(--font-body);
+  color: var(--ink-muted);
+  text-decoration: none;
+}
+.req-filter__item[aria-current="true"] { color: var(--text-primary); border-color: var(--line-strong); background: var(--surface-page); }
+.req-filter__item:hover { color: var(--text-primary); }
+.req-asks { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.req-note { margin: 0; font: 400 12px/1.5 var(--font-body); color: var(--ink-muted); }
+.req-empty { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); }
+.req-error { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--status-critical-fg); }
+.req-quiet { color: var(--ink-muted); }
+
+.req-title { font: 600 13px var(--font-body); color: var(--text-primary); }
+.req-sub { display: block; font: 400 12px var(--font-body); color: var(--ink-muted); }
+
+/* The request form. */
+.req-form { display: grid; gap: 18px; max-width: 760px; }
+.req-form__row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.req-form__to { margin: 0; font: 400 14px/1.5 var(--font-body); color: var(--ink-body); }
+.req-form__to strong { color: var(--text-primary); }
+.req-form__group { margin: 0; min-width: 0; display: grid; gap: 12px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-md); }
+.req-form__legend { margin: 0; font: 600 13px var(--font-display); color: var(--text-primary); }
+.req-deliverable {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) minmax(130px, 1.4fr) minmax(90px, 0.6fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+@media (max-width: 640px) { .req-deliverable { grid-template-columns: 1fr 1fr; } }
+.req-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* The request page. */
+.req-text {
+  margin: 0;
+  font: 400 13px/1.6 var(--font-body);
+  color: var(--ink-body);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.req-lines { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.req-lines li { font: 400 13px/1.5 var(--font-body); color: var(--text-primary); word-break: break-word; }
+.req-lines__label { font: 600 11px var(--font-body); letter-spacing: 0.02em; color: var(--ink-subtle); margin-right: 8px; }
+.req-assets { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.req-assets li { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; font: 400 13px var(--font-body); color: var(--text-primary); }
+
+/* The Deliver picker. */
+.req-pick { display: grid; gap: 6px; max-height: 280px; overflow: auto; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); }
+.req-pick__item { display: flex; gap: 10px; align-items: baseline; font: 400 13px var(--font-body); color: var(--text-primary); }
+.req-pick__meta { font: 400 12px var(--font-body); color: var(--ink-muted); }

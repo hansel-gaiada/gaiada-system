@@ -21,11 +21,13 @@ export async function pilotFrame(
 ): Promise<((legacy: ReactNode) => ReactNode) | null> {
   const prefs = await getPrefs();
   if (prefs.shell !== "workspaces") return null;
-  const ref = workspaceRefForPage(await myWorkspaces(me, tenantId), target);
+  const all = await myWorkspaces(me, tenantId);
+  const ref = workspaceRefForPage(all, target);
   if (!ref) return null;
   const { period } = await searchParams;
   // DW-6c: the Today block shows the tools this person pinned for this workspace (Tools & connections).
-  const subject = subjectOfRef(ref, prefs.pinnedTools);
+  // DW-5f: `all` gives the `hasWorkspace` gate the company's department workspaces.
+  const subject = subjectOfRef(ref, prefs.pinnedTools, all);
   const parsed = parseOverviewPeriod(period);
   return (legacy) => <WorkspaceOverview me={me} tenantId={tenantId} subject={subject} period={parsed} legacy={legacy} />;
 }

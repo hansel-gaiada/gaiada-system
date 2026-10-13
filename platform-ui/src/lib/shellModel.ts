@@ -9,7 +9,7 @@
 // Pure and client-safe, like the registry it reads. Gates mirror the server; they are not security.
 import type { Me } from "@/lib/platform";
 import { ADMIN_ROWS, COMPANY_ROWS, hrefFor, isPlanned, sidebarRows, type WorkspaceKind } from "@/lib/workspaces";
-import { concreteRows, gateAllows, homeArea, type ConcreteRow, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
+import { concreteRows, gateAllows, homeArea, workspaceKeysOf, type ConcreteRow, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
 import type { Area } from "@/lib/areas";
 
 export interface ShellRows {
@@ -52,6 +52,8 @@ const idOf = (ref: WorkspaceRef) => ref.deptId ?? `slug:${ref.workspace.key}`;
 export function buildShellModel(input: { me: Me; tenantId: string | null; workspaces: MyWorkspaces }): ShellModel {
   const { me, tenantId, workspaces } = input;
   const homeRef = workspaces.home.kind === "workspace" ? workspaces.home.ref : null;
+  // Which departments this company has, for the `hasWorkspace` gate (DW-5f: "Ask Creatives" needs a Creatives).
+  const departments = workspaceKeysOf(workspaces);
 
   const seen = new Set<string>();
   const out: ShellWorkspace[] = [];
@@ -60,7 +62,7 @@ export function buildShellModel(input: { me: Me; tenantId: string | null; worksp
     const dedupe = `${ref.workspace.key}:${ref.deptId ?? ""}`;
     if (seen.has(dedupe)) return;
     seen.add(dedupe);
-    const ctx = { me, tenantId, unitPath: ref.unitPath, deptId: ref.deptId };
+    const ctx = { me, tenantId, unitPath: ref.unitPath, deptId: ref.deptId, workspaces: departments };
     const raw = sidebarRows(ref.workspace);
     const creates = ref.workspace.creates.flatMap((key) => {
       const action = ref.workspace.quickActions.find((a) => a.key === key);
@@ -90,7 +92,7 @@ export function buildShellModel(input: { me: Me; tenantId: string | null; worksp
   for (const ref of workspaces.all) add(ref, false);
 
   // The Company and Admin areas belong to no department.
-  const flat = { me, tenantId, unitPath: [] as string[], deptId: null };
+  const flat = { me, tenantId, unitPath: [] as string[], deptId: null, workspaces: departments };
   const company = concreteRows(COMPANY_ROWS, flat);
   const admin = concreteRows(ADMIN_ROWS, flat);
 

@@ -8,7 +8,7 @@ import {
   COMPANY_OVERVIEW, OVERVIEW_BANDS, REPORT_PERIODS, hrefFor, isPlanned,
   type OverviewBand, type OverviewWidget, type QuickAction,
 } from "@/lib/workspaces";
-import { gateAllows, type GateContext, type HomeArea, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
+import { gateAllows, workspaceKeysOf, type GateContext, type HomeArea, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
 import type { ShellLayout } from "@/lib/shellLayout";
 import type { DeptLauncher } from "@/lib/deptToolkits";
 import { pinnedToolsFor } from "@/lib/pinnedTools";
@@ -67,12 +67,18 @@ export interface OverviewSubject {
   deptId: string | null;
   /** The unit and its ancestors, nearest first, for unit-scoped gates. */
   unitPath: readonly string[];
+  /** The registry keys of the workspaces this company has a department for, for the `hasWorkspace` gate (DW-5f). */
+  workspaces?: readonly string[];
 }
 
-/** `pins` is `Prefs.pinnedTools` (DW-6c); left out, the Today block shows the workspace's first six tools. */
-export function subjectOfRef(ref: WorkspaceRef, pins: Readonly<Record<string, string[]>> = {}): OverviewSubject {
+/** `pins` is `Prefs.pinnedTools` (DW-6c); left out, the Today block shows the workspace's first six tools. `all` (DW-5f)
+ *  gives the `hasWorkspace` gate the keys of the workspaces this company has a department for; left out, that gate hides. */
+export function subjectOfRef(ref: WorkspaceRef, pins: Readonly<Record<string, string[]>> = {}, all?: MyWorkspaces): OverviewSubject {
   const { workspace, deptId, unitPath } = ref;
-  return { label: workspace.label, widgets: workspace.overview, quickActions: workspace.quickActions, tools: pinnedToolsFor(pins, workspace), deptId, unitPath };
+  return {
+    label: workspace.label, widgets: workspace.overview, quickActions: workspace.quickActions, tools: pinnedToolsFor(pins, workspace), deptId, unitPath,
+    ...(all ? { workspaces: workspaceKeysOf(all) } : {}),
+  };
 }
 
 /** The company-level Overview at `/` for someone whose home is the Company area. DW-3i fills it. */

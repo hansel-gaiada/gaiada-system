@@ -45,6 +45,9 @@ export type Gate =
   | { kind: "pack"; pack: PackKey }
   /** The active company has the module on (`moduleOn`: unknown hides nothing). */
   | { kind: "module"; module: string }
+  /** The active company has a department whose workspace is this key (`workspaceKeysOf`, DW-5f): "Ask Creatives" only
+   *  where there is a Creatives to ask. Unlike `module`, unknown hides. */
+  | { kind: "hasWorkspace"; workspace: string }
   /** `isElevated(me)`: global `platform_admin`. */
   | { kind: "elevated" }
   /** `isPlatformOperator(me)` (PV-D18). */
@@ -249,11 +252,25 @@ const CLIENTS_ROW: WorkspaceRow = {
   tabs: [{ key: "clients", label: "Clients", href: deptPath("clients"), icon: "finance", ticket: "DW-6d" }],
 };
 
-/** "Ask Creatives for assets" and "Ask Web Dev" (§7.2): every agency workspace, once requests exist. */
+/** "Ask Creatives for assets" and "Ask Web Dev" (§7.2): every agency workspace, and only where the company HAS the
+ *  receiving department (DW-5f): a company with no Creatives is not offered a link to a page that can only say so. */
 const ASK_ACTIONS: readonly QuickAction[] = [
-  { key: "ask-creatives", label: "Ask Creatives for assets", href: "/requests/new?to=creatives", gate: AGENCY_ONLY, ticket: "DW-5f" },
-  { key: "ask-web-dev", label: "Ask Web Dev", href: "/requests/new?to=web-dev", gate: AGENCY_ONLY, ticket: "DW-5f" },
+  {
+    key: "ask-creatives", label: "Ask Creatives for assets", href: "/requests/new?to=creatives",
+    gate: { kind: "all", gates: [AGENCY_ONLY, { kind: "hasWorkspace", workspace: "creatives" }] },
+  },
+  {
+    key: "ask-web-dev", label: "Ask Web Dev", href: "/requests/new?to=web-dev",
+    gate: { kind: "all", gates: [AGENCY_ONLY, { kind: "hasWorkspace", workspace: "web-dev" }] },
+  },
 ];
+
+/** Requests › Sent: what this department's people have asked of others, with its status (DW-5h). Every agency
+ *  workspace has it, not only Web Dev (§7.3), so the requester tracks the ask where they work. */
+const SENT_REQUESTS: WorkspaceTab = {
+  key: "sent", label: "Sent", href: deptPath("requests/sent"), icon: "bell",
+  blurb: "Requests this department has sent to other departments, and where each one stands.",
+};
 
 // ── The agency pack's workspaces (plan §4) ────────────────────────────────────────────────────────
 
@@ -293,7 +310,7 @@ const WEB_DEV: Workspace = {
       tabs: [
         // Today's MI-05 triage (client maintenance). Internal engineering requests join it in DW-5e.
         fromToolkit("web-dev", "requests", { key: "incoming", label: "Incoming" }),
-        { key: "sent", label: "Sent", href: deptPath("requests/sent"), icon: "bell", ticket: "DW-5c" },
+        SENT_REQUESTS,
       ],
     },
     { key: "campaigns", label: "Campaigns", icon: "sales", gate: AGENCY_ONLY, tabs: [SHARED_CAMPAIGNS] },
@@ -352,6 +369,7 @@ const SEO: Workspace = {
       // Search Console & GA4 moves to the Analytics row (§4).
       tabs: ["audit", "keywords", "rankings", "briefs", "ai-visibility"].map((k) => fromToolkit("seo", k)),
     },
+    { key: "requests", label: "Requests", icon: "bell", gate: AGENCY_ONLY, tabs: [SENT_REQUESTS] },
     {
       key: "campaigns", label: "Campaigns", icon: "finance",
       tabs: [SHARED_CAMPAIGNS, ...["planner", "ads", "search-terms", "pacing"].map((k) => fromToolkit("seo", k))],
@@ -403,6 +421,7 @@ const SOCIAL_MEDIA: Workspace = {
     PM_ROW,
     // Publish › Analytics moves to the Analytics row (§4).
     { key: "publish", label: "Publish", icon: "gateway", tabs: ["calendar", "composer", "inbox"].map((k) => fromToolkit("social-media", k)) },
+    { key: "requests", label: "Requests", icon: "bell", gate: AGENCY_ONLY, tabs: [SENT_REQUESTS] },
     {
       key: "campaigns", label: "Campaigns", icon: "sales", gate: AGENCY_ONLY,
       tabs: [
@@ -452,10 +471,12 @@ const CREATIVES: Workspace = {
   work: [
     PM_ROW,
     {
-      key: "requests", label: "Requests", icon: "bell", ticket: "DW-5d",
+      key: "requests", label: "Requests", icon: "bell",
       tabs: [
+        // Incoming and Delivered are DW-5d's: only Sent is built, so only it is offered for now.
         { key: "incoming", label: "Incoming", href: deptPath("requests"), icon: "bell", ticket: "DW-5d", blurb: "Asset requests from every department." },
         { key: "delivered", label: "Delivered", href: deptPath("requests/delivered"), icon: "check", ticket: "DW-5d" },
+        SENT_REQUESTS,
       ],
     },
     { key: "studio", label: "Studio", icon: "box", tabs: [fromToolkit("creatives", "studio"), fromToolkit("creatives", "assets")] },
@@ -505,6 +526,7 @@ const OFFICE_OF_THE_GM: Workspace = {
     PM_ROW,
     { key: "command", label: "Command", icon: "chart", tabs: [fromToolkit("gm", "review"), fromToolkit("gm", "decisions")] },
     { key: "oversight", label: "Oversight", icon: "sitemap", tabs: ["depts", "money", "people"].map((k) => fromToolkit("gm", k)) },
+    { key: "requests", label: "Requests", icon: "bell", gate: AGENCY_ONLY, tabs: [SENT_REQUESTS] },
     {
       key: "campaigns", label: "Campaigns", icon: "sales", gate: { kind: "agencyRow", row: "agency" },
       tabs: [{ key: "all", label: "All campaigns", href: "/agency", icon: "sales", blurb: "Every campaign across the departments." }],
