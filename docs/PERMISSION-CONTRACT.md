@@ -1858,10 +1858,21 @@ that this **stays**, and added a bar: **PV-D26: the operator keeps access; high 
 
 | Where | Action | Effect |
 |---|---|---|
-| `resource_finance_config.yaml` | `set_bank_details` (our own account) | owner, finance_manager and platform_admin all need high assurance |
+| `resource_finance_config.yaml` | `set_bank_details` (our own account) | owner, finance_manager and platform_admin all need high assurance (PV-D26); **relaxed for an owner / finance_manager of the company by PV-D29 below** |
 | `resource_finance_ap.yaml` | `vendor_master` (**supplier** bank details; scope note: an AP change made by this ticket) | its ALLOW already required high, but the `*` wildcard bypassed it; platform_admin now needs high too |
 
 Every other AP rule is byte-identical. The notification to all owners is wired by PV5-04, not here.
+
+**PV-D29 (owner ruling, 2026-10-13): interim until MFA is enabled (`infra/runbooks/enable-mfa.md`); then restore PV-D26's unconditional
+high-assurance DENY.** Live Keycloak emits no `amr` claim (the platform logs `[oidc:amr-claim-missing]` on every login), so no web session
+ever reaches `assurance: high`, and PV-D26's DENY made our own bank details unsettable on live (and so no invoice issuable). The
+`set_bank_details` DENY is therefore narrowed in `resource_finance_config.yaml` only: it fires when the principal is below high **and**
+holds **no** `owner` / `finance_manager` grant at company scope on this tenant (the same grant expression as the ALLOW). Effect:
+an owner or finance_manager of the company can change the bank details at `linked` assurance (`low` is still refused by `notLow` in the
+ALLOW); `platform_admin` still needs high, which is unreachable today, so the operator cannot; bots and automation are refused by their own
+DENY; `company_admin` has no ALLOW at all. **`finance_ap` `vendor_master` is unchanged**: the ruling covers our own bank details only, and
+PV-D26's unconditional DENY stays there. To restore PV-D26 for `set_bank_details`, drop the grant clause from that DENY and flip the two
+`linked` owner / finance_manager expectations in `pv5-billing-actions-cerbos.test.ts`.
 
 **Proof.** `src/rbac/pv5-billing-actions-cerbos.test.ts` (live Cerbos; per action a member denied, a bot and an automation account denied, the right
 roles allowed, `company_admin` denied `set_bank_details`, a delegated bot call denied, and the PV-D26 assurance matrix for `set_bank_details` and `vendor_master`: owner, finance_manager and platform_admin each denied at `linked`, allowed at `high`), plus the static pins above and
