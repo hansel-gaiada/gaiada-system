@@ -831,7 +831,7 @@ export const ASSISTANT_ROW: WorkspaceRow = {
   tabs: [{ key: "assistant", label: "AI Assistant", href: "/assistant", icon: "assistant" }],
 };
 
-/** Tools & connections (§4.1): today's Connections page. The combined page with tools and pinning is DW-6c. */
+/** Tools & connections (§4.1): today's Connections page. For the pilot the combined page, with the tools and pinning, is built (DW-6c). */
 export const TOOLS_ROW: WorkspaceRow = {
   key: "tools",
   label: "Tools & connections",

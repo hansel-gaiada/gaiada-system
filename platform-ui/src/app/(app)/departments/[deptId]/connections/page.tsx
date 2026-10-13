@@ -13,7 +13,14 @@ import { listClients } from "@/lib/entities";
 import { listGoogleConnections, listProperties } from "@/lib/searchMarketing";
 import { Card } from "@/components/ui";
 import { TeachState } from "@/components/departments/TeachState";
-import { ConnectionsPanel } from "@/components/departments/ConnectionsPanel";
+import { ConnectionsPanel, AccountMappingNote } from "@/components/departments/ConnectionsPanel";
+import { ToolsSection } from "@/components/departments/ToolsSection";
+import { ConnectionBlocks, visibleConnections } from "@/components/departments/ConnectionBlocks";
+import { SocialAccountsBlock } from "@/components/departments/SocialAccountsBlock";
+import { getPrefs } from "@/lib/prefs";
+import { togglePinnedToolAction } from "@/lib/prefsActions";
+import { workspaceFor } from "@/lib/workspaces";
+import { listAccounts, type SocialAccount } from "@/lib/social";
 import { TeamConnectionsGrid, type TeamConnectionRow } from "@/components/departments/TeamConnectionsGrid";
 import { GoogleConnectionsPanel } from "@/components/search/GoogleConnectionsPanel";
 import { GithubOrgHealth } from "@/components/github/GithubOrgHealth";
@@ -129,6 +136,101 @@ export default async function DepartmentConnectionsPage({ params, searchParams }
   // says where it lives. `getGithubOrgStatus` carries its own refused / no_org / unavailable result,
   // and `GithubOrgHealth` renders each as itself — never as a silent all-clear.
   const orgStatus = usesRepos ? await getGithubOrgStatus(userId, tenant) : null;
+
+  // ── DW-6c: the pilot's page ───────────────────────────────────────────────────────────────────────
+  // Only a person on the workspace shell (`prefs.shell === "workspaces"`) gets the registry-driven page.
+  // Everyone else falls through to the unchanged classic page below, which this branch never touches.
+  const prefs = await getPrefs();
+  if (prefs.shell === "workspaces") {
+    const ws = workspaceFor(activeCompany(me, tenant)?.vertical, dept.name);
+    const kinds = new Set(visibleConnections(ws).map((k) => k.key));
+    // A failed read is "unavailable", never "none" (the guard: `forbidden` is a real denial, a throw an outage).
+    let socialAccounts: SocialAccount[] | null = null;
+    let socialForbidden = false;
+    if (kinds.has("social-accounts")) {
+      try {
+        const r = await listAccounts(userId, tenant);
+        socialAccounts = r.data;
+        socialForbidden = r.forbidden;
+      } catch {
+        socialAccounts = null;
+      }
+    }
+    const panelActions = { connect, update, revoke, mapSeat, updateSeat, unmapSeat };
+    const githubBlock = (
+      <>
+        <ConnectionsPanel github={github} actions={panelActions} only={["github"]} />
+        {orgStatus && (
+          <div style={{ marginTop: 12 }}>
+            <p className="dept-conn-note">
+              This is the org-wide GitHub App, separate from your own GitHub row above. Repository lists, linking and
+              provisioning authenticate through it, and it is managed from{" "}
+              <Link href={`/departments/${deptId}/repositories`}>Repositories</Link>.
+            </p>
+            <GithubOrgHealth result={orgStatus} />
+          </div>
+        )}
+      </>
+    );
+    const blocks = {
+      github: githubBlock,
+      drive: <ConnectionsPanel drive={drive} actions={panelActions} only={["drive"]} />,
+      "claude-seats": <ConnectionsPanel seat={seat} actions={panelActions} only={["seat"]} />,
+      "google-accounts": (
+        <GoogleConnectionsPanel
+          tenantId={tenant}
+          returnPath={`/departments/${deptId}/connections`}
+          connections={googleConnections}
+          clients={searchClients.map((c) => ({ id: c.id, name: c.name }))}
+          properties={searchProperties.map((p) => ({ id: p.id, domain: p.domain, clientId: p.clientId }))}
+          canManage={canManageGoogle}
+          oauthStatus={sp.googleOAuth}
+          oauthDetail={sp.googleOAuthDetail}
+        />
+      ),
+      "social-accounts": <SocialAccountsBlock accounts={socialAccounts} forbidden={socialForbidden} />,
+    };
+    return (
+      <>
+        <Card title="Tools">
+          <ToolsSection
+            workspace={ws}
+            pins={prefs.pinnedTools}
+            seat={seat}
+            seatsUnavailable={mySeats.unavailable}
+            toggleAction={togglePinnedToolAction}
+          />
+        </Card>
+        <Card title="Connections" style={{ marginTop: 16 }}>
+          {unavailable && (
+            <p className="dept-conn-banner">
+              The connections service isn&apos;t reachable yet — status shown below may be incomplete. It will populate once the backend is deployed.
+            </p>
+          )}
+          {(kinds.has("github") || kinds.has("drive") || kinds.has("claude-seats")) && <AccountMappingNote />}
+          <ConnectionBlocks workspace={ws} blocks={blocks} />
+        </Card>
+        {isAdmin && (
+          <Card title="Team status" style={{ marginTop: 16 }}>
+            {teamUnavailable && (
+              <p className="dept-conn-banner">
+                The connections service isn&apos;t reachable yet — the team grid below may be incomplete.
+              </p>
+            )}
+            {teamRows.length === 0 ? (
+              <TeachState
+                glyph="⌁"
+                title="No one placed yet"
+                body="Add people to this department in the org structure editor to see their connection status here."
+              />
+            ) : (
+              <TeamConnectionsGrid rows={teamRows} onMapSeat={adminMapSeat} />
+            )}
+          </Card>
+        )}
+      </>
+    );
+  }
 
   return (
     <>

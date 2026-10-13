@@ -201,6 +201,64 @@ test.describe("department workspaces (superadmin, pilot shell)", () => {
   }
 });
 
+// DW-6c: the pilot's Tools & connections page. Under DEMO_MODE the connection reads may be unavailable, so the
+// Connections blocks are asserted by heading, never by their state. The tool pins live in the gaiada_prefs cookie.
+test.describe("Tools & connections (superadmin, DW-6c)", () => {
+  const WEB_DEV_CONNECTIONS = "/departments/dept-1/connections";
+  const toolsCard = (page: Page) => page.locator("section.lux-card").filter({ has: page.getByRole("heading", { name: "Tools", exact: true }) });
+  const connectionsCard = (page: Page) => page.locator("section.lux-card").filter({ has: page.getByRole("heading", { name: "Connections", exact: true }) });
+
+  test("Web Dev: the sidebar row opens a Tools section in registry order and a Connections section with its blocks", async ({ page, context }) => {
+    await signInSuperadmin(page, context);
+    await page.goto("/departments/dept-1");
+    await workGroup(menu(page, "Web Dev")).getByRole("link", { name: "Tools & connections", exact: true }).click();
+    await expect(page).toHaveURL(/\/departments\/dept-1\/connections$/);
+
+    const tools = toolsCard(page);
+    await expect(tools).toBeVisible();
+    await expectSubsequence(tools.locator("li[data-tool] .dept-tools-row__label"), ["Claude Code", "Claude", "Claude Design", "GitHub", "Figma", "VS Code"]);
+
+    const connections = connectionsCard(page);
+    await expect(connections).toBeVisible();
+    await expectSubsequence(connections.getByRole("heading", { level: 4 }), ["GitHub", "Google Drive", "Claude seats"]);
+  });
+
+  test("a pin can be removed and put back, and each choice survives a reload", async ({ page, context }) => {
+    await signInSuperadmin(page, context);
+    await page.goto(WEB_DEV_CONNECTIONS);
+    const tools = toolsCard(page);
+
+    const unpin = tools.getByRole("button", { name: "Unpin Figma from the Overview" });
+    await expect(unpin).toHaveAttribute("aria-pressed", "true");
+    await hydrated(unpin);
+    await unpin.click();
+    await expect(tools.getByRole("button", { name: "Pin Figma to the Overview" })).toHaveAttribute("aria-pressed", "false");
+
+    await page.reload();
+    await expect(toolsCard(page).getByRole("button", { name: "Pin Figma to the Overview" })).toHaveAttribute("aria-pressed", "false");
+    // The other five stay pinned.
+    await expect(toolsCard(page).locator('button[aria-pressed="true"]')).toHaveCount(5);
+
+    const pin = toolsCard(page).getByRole("button", { name: "Pin Figma to the Overview" });
+    await hydrated(pin);
+    await pin.click();
+    await expect(toolsCard(page).getByRole("button", { name: "Unpin Figma from the Overview" })).toHaveAttribute("aria-pressed", "true");
+
+    await page.reload();
+    await expect(toolsCard(page).getByRole("button", { name: "Unpin Figma from the Overview" })).toHaveAttribute("aria-pressed", "true");
+    await expect(toolsCard(page).locator('button[aria-pressed="true"]')).toHaveCount(6);
+  });
+
+  test("without the pilot cookie the same URL is the classic page: no Tools section", async ({ page, context }) => {
+    await loginAsPersona(page, "superadmin");
+    await context.addCookies([tenantCookie(page.url())]);
+    await page.goto(WEB_DEV_CONNECTIONS);
+    await expect(page.getByRole("heading", { name: "My connections" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Tools", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /to the Overview$/ })).toHaveCount(0);
+  });
+});
+
 // 6e, the generic workspace (any department with no bespoke workspace): the demo data gives no such department in
 // the browser. Only the agency company has an org tree in demo mode (lib/org.ts `defaultStructure` seeds departments
 // for vertical "agency" only, so the hospitality company Viceroy has none, and the fixtures may not grow). The

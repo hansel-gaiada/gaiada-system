@@ -3,6 +3,7 @@ import "server-only";
 // Applied as data-attributes on the app shell so pure CSS does the rest.
 import { cookies } from "next/headers";
 import { DEFAULT_SHELL_LAYOUT, parseShellLayout, type ShellLayout } from "./shellLayout";
+import { parsePinnedTools } from "./pinnedTools";
 
 export type Density = "comfortable" | "compact";
 export type Width = "standard" | "wide";
@@ -29,6 +30,8 @@ export interface Prefs {
   officeZoom: OfficeZoom;
   /** DW-1d: today's shell or the department workspace shell (`lib/shellLayout.ts`). Classic by default. */
   shell: ShellLayout;
+  /** DW-6c: the tools pinned to the Overview, per workspace key (`lib/pinnedTools.ts`). No entry = the first six. */
+  pinnedTools: Record<string, string[]>;
 }
 
 // Width defaults to "wide" (no max-width): the suite is dominated by tables, boards and console
@@ -42,7 +45,7 @@ export interface Prefs {
 // 1.0.0-alpha.301 were INERT for every user on the default. The design draws a
 // centred column; "standard" is that. "wide" survives untouched as the opt-in
 // full-bleed mode for anyone who wants it.
-export const DEFAULT_PREFS: Prefs = { density: "comfortable", width: "standard", theme: "auto", assistantRailCollapsed: false, officeZoom: "fit", shell: DEFAULT_SHELL_LAYOUT };
+export const DEFAULT_PREFS: Prefs = { density: "comfortable", width: "standard", theme: "auto", assistantRailCollapsed: false, officeZoom: "fit", shell: DEFAULT_SHELL_LAYOUT, pinnedTools: {} };
 const COOKIE = "gaiada_prefs";
 
 const DENSITIES: Density[] = ["comfortable", "compact"];
@@ -65,6 +68,7 @@ export async function getPrefs(): Promise<Prefs> {
         : DEFAULT_PREFS.assistantRailCollapsed,
       officeZoom: OFFICE_ZOOMS.includes(parsed.officeZoom as OfficeZoom) ? (parsed.officeZoom as OfficeZoom) : DEFAULT_PREFS.officeZoom,
       shell: parseShellLayout(parsed.shell),
+      pinnedTools: parsePinnedTools(parsed.pinnedTools),
     };
   } catch {
     return DEFAULT_PREFS;
