@@ -179,7 +179,7 @@ export function contractInPortalScope(alias: string, params: PortalScopeParams):
  *  voided before it was issued never reached the client, so it must not appear in their list or documents. */
 export function invoiceClientVisible(alias: string): string {
   const status = col(alias, "status");
-  return `${col(alias, "deleted_at")} IS NULL AND ${status} NOT IN ('draft','approved')`;
+  return `${col(alias, "deleted_at")} IS NULL AND ${status} NOT IN ('draft','approved') AND (${status} <> 'void' OR ${col(alias, "issued_at")} IS NOT NULL OR ${col(alias, "pre_pv5_legacy")})`;
 }
 
 /** The full portal predicate for an invoice. Invoices carry no project, so reach is the client only. */
