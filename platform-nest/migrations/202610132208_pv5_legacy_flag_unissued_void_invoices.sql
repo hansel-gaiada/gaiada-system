@@ -10,11 +10,17 @@
 --   visibility unchanged.
 --
 -- WHAT IT FLAGS
---   Every `void` invoice with `issued_at IS NULL` that was created before PV-5 shipped its issue path (the instant
---   202610131850 is stamped, 2026-10-13 18:50 UTC). Voided invoices created after that instant, and issued ones, are
---   not flagged: the first are drafts the client was never sent, the second are visible through `issued_at`.
---   A row created before the cutoff and voided after it is flagged too (it existed in the pre-PV-5 world; the column
---   cannot tell when it was voided). That is the deliberate, conservative direction: it stays as visible as it was.
+--   Every `void` invoice with `issued_at IS NULL` that was created before PV-5's invoice rule was APPLIED, i.e. before the
+--   `applied_at` that the runner's ledger (`schema_migrations`) recorded for 202610131850_pv5_enforce_invoice_issued.sql.
+--   Voided invoices created after that instant are drafts the client was never sent, and issued ones are visible through
+--   `issued_at`: neither is flagged.
+--   WHY THE LEDGER AND NOT THE FILENAME: a filename stamp is not a real time in this repo (sessions pick future-ish minutes;
+--   1850 is stamped 18:50Z but was applied on live hours earlier). A literal cutoff taken from the stamp would lie in the
+--   future and flag every unissued void created since PV-5 went live as legacy, keeping the very bug this closes. So the
+--   cutoff is read from the ledger, and if 1850's row is missing this file refuses to run (never a literal fallback).
+--   On a fresh database (CI) 1850's applied_at is moments before this file, so nothing qualifies.
+--   A row created before the cutoff and voided after it is flagged too (the column cannot tell when it was voided): the
+--   conservative direction, it stays as visible as it was.
 --
 -- THE GUARD
 --   `trg_invoices_pv5_legacy_guard` refuses any change to the flag, by design, so the backfill disables it for the
@@ -30,7 +36,7 @@
 
 DO $$
 DECLARE
-  cutoff constant timestamptz := timestamptz '2026-10-13 18:50:00+00';
+  cutoff timestamptz;
   co RECORD;
   n_inv integer;
   total_inv integer := 0;
@@ -40,6 +46,11 @@ BEGIN
   IF to_regclass('public.invoices') IS NULL OR NOT EXISTS (
        SELECT 1 FROM information_schema.columns WHERE table_name = 'invoices' AND column_name = 'pre_pv5_legacy') THEN
     RAISE EXCEPTION 'PV5-F1: invoices.pre_pv5_legacy is missing; 202610131850 must run before this file';
+  END IF;
+
+  SELECT applied_at INTO cutoff FROM schema_migrations WHERE name = '202610131850_pv5_enforce_invoice_issued.sql';
+  IF cutoff IS NULL THEN
+    RAISE EXCEPTION 'PV5-F1: schema_migrations has no applied_at for 202610131850_pv5_enforce_invoice_issued.sql; it must run first';
   END IF;
 
   ALTER TABLE invoices DISABLE TRIGGER trg_invoices_pv5_legacy_guard;
@@ -61,7 +72,7 @@ BEGIN
 
   ALTER TABLE invoices ENABLE TRIGGER trg_invoices_pv5_legacy_guard;
 
-  RAISE NOTICE '[PV5-F1] pre-PV-5 unissued void invoices flagged legacy: % row(s)', total_inv;
+  RAISE NOTICE '[PV5-F1] pre-PV-5 unissued void invoices flagged legacy (cutoff %): % row(s)', cutoff, total_inv;
   IF left_over <> 0 THEN
     RAISE EXCEPTION 'PV5-F1: % pre-PV-5 unissued void invoice(s) were not flagged (RLS zero-row trap?)', left_over;
   END IF;

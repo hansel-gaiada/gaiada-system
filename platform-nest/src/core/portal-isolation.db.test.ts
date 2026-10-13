@@ -12,6 +12,8 @@
 //   3. The timeline's payments and the receipt download reached a payment by its own client_id and never
 //      looked at the parent invoice. Teeth: put the old `invoicePaymentInPortalScope(...)` back in either
 //      place and a payment on a deleted invoice shows / downloads again.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
@@ -83,7 +85,7 @@ describe.skipIf(!TEST_URL)("PV3-02c — portal isolation fixes", () => {
   // PV5-F1: a `void` invoice in each of its three histories. A flagged-legacy row can only exist if the guard
   // trigger is stepped over (as the migration does), so it is inserted on a connection with triggers off
   // (`session_replication_role = replica`, superuser, one transaction: no other test sees it).
-  async function addVoid(kind: "unissued" | "issued" | "legacy", dayOffset: number): Promise<string> {
+  async function addVoid(kind: "unissued" | "issued" | "legacy", dayOffset: number, createdAt: Date | null = null): Promise<string> {
     if (kind === "issued") {
       const inv = await addInvoice({ status: "sent", dayOffset });
       await withTenants([co], (c) => c.query(`UPDATE invoices SET status = 'void' WHERE id = $1`, [inv]));
@@ -95,9 +97,9 @@ describe.skipIf(!TEST_URL)("PV3-02c — portal isolation fixes", () => {
       await k.query("BEGIN");
       await k.query("SET LOCAL session_replication_role = replica");
       await k.query(
-        `INSERT INTO invoices (id, tenant_id, client_id, period_start, period_end, status, currency, lines, total, pre_pv5_legacy, origin_site)
-         VALUES ($1, $2, $3, current_date - $4::int - 30, current_date - $4::int - 1, 'void', 'IDR', '[]', 1000, $5, $6)`,
-        [id, co, clientA, dayOffset, kind === "legacy", site()],
+        `INSERT INTO invoices (id, tenant_id, client_id, period_start, period_end, status, currency, lines, total, pre_pv5_legacy, origin_site, created_at)
+         VALUES ($1, $2, $3, current_date - $4::int - 30, current_date - $4::int - 1, 'void', 'IDR', '[]', 1000, $5, $6, COALESCE($7::timestamptz, now()))`,
+        [id, co, clientA, dayOffset, kind === "legacy", site(), createdAt],
       );
       await k.query("COMMIT");
     } catch (e) {
@@ -298,6 +300,34 @@ describe.skipIf(!TEST_URL)("PV3-02c — portal isolation fixes", () => {
       expect((await detail(unissued)).statusCode).toBe(404);
       expect((await detail(issued)).statusCode).toBe(200);
       expect((await detail(legacy)).statusCode).toBe(200);
+    });
+  });
+
+  // The migration's cutoff is the ledger's applied_at for 1850, never a filename stamp (PV5-F1). The migration is a
+  // re-runnable DO block, so the test runs its real SQL against fixtures dated either side of that instant.
+  // Teeth: hard-code a future literal cutoff in the migration and the "after" row is flagged, hence visible.
+  describe("migration 202610132208 flags only voids created BEFORE the 1850 apply time", () => {
+    it("a void created before the cutoff is flagged (visible); one created after stays unflagged (hidden)", async () => {
+      const ledger = await adminPool().query<{ applied_at: Date }>(
+        `SELECT applied_at FROM schema_migrations WHERE name = '202610131850_pv5_enforce_invoice_issued.sql'`,
+      );
+      expect(ledger.rowCount).toBe(1);
+      const cutoff = ledger.rows[0]!.applied_at.getTime();
+      const before = await addVoid("unissued", 300, new Date(cutoff - 24 * 3600_000));
+      const after = await addVoid("unissued", 310, new Date(cutoff + 3600_000));
+
+      const sql = readFileSync(join(__dirname, "../../migrations/202610132208_pv5_legacy_flag_unissued_void_invoices.sql"), "utf8");
+      await adminPool().query(sql);
+
+      const flag = async (id: string) =>
+        (await adminPool().query<{ pre_pv5_legacy: boolean }>(`SELECT pre_pv5_legacy FROM invoices WHERE id = $1`, [id])).rows[0]!.pre_pv5_legacy;
+      expect(await flag(before)).toBe(true);
+      expect(await flag(after)).toBe(false);
+
+      const list = await app.inject({ method: "GET", url: `/api/${co}/portal/invoices`, headers: asUser(signerA) });
+      const ids = (list.json() as Array<{ id: string }>).map((r) => r.id);
+      expect(ids).toContain(before);
+      expect(ids).not.toContain(after);
     });
   });
 
