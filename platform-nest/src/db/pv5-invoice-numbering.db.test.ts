@@ -57,7 +57,7 @@ describe.skipIf(!TEST_URL)("PV5-04b — invoice numbering data model", () => {
       }
       await code(A, "design", "hotel"); // a row exists
       // The RLS zero-row trap: no tenant GUC set means nothing is visible, and nothing raises.
-      const rows = await withTenants([A, B], async (c) => {
+      const rows = await withTenants([A], async (c) => {
         await c.query(`SELECT set_config('app.current_tenant_ids', '', true)`);
         return (await c.query(`SELECT * FROM billing_number_codes`)).rows;
       });
