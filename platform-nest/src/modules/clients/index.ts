@@ -78,7 +78,7 @@ export const clientsModule: ModuleContract = {
           },
           areas: {
             type: "object",
-            description: "Business area id to true (in scope), false (out of scope), or null (unset).",
+            description: "Business area id (or ix, the industry area) to true (this business uses the area), false (switched off), or null (back to the business type's default).",
             additionalProperties: { type: ["boolean", "null"] },
           },
           customConnections: {
