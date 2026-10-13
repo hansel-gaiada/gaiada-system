@@ -117,10 +117,12 @@ export class WorkRequestsController {
         let work: { type: "pm_task" | "change_request"; id: string };
         let pmTaskId: string | null = null;
         let changeRequestId: string | null = null;
-        let intake: { projectId: string; created: boolean } | null = null;
+        // The receiving department's intake project serves BOTH kinds: the asset task lives in it, and the engineering
+        // change request names it as its `project_id`, so Web Dev's `pm_task` triage lands the task in
+        // "<Department> · Requests" with no extra input (§32.1).
+        const intake = await svc.ensureIntakeProject(c, tenantId, input.toUnitId, toName, config.originSite);
         if (input.kind === "assets") {
           const form = input.form as svc.AssetsForm;
-          intake = await svc.ensureIntakeProject(c, tenantId, input.toUnitId, toName, config.originSite);
           const n = normalizePmTaskInput({
             projectId: intake.projectId,
             title: input.title,
@@ -148,12 +150,12 @@ export class WorkRequestsController {
           await c.query(
             `INSERT INTO webdev_change_requests
                (id, tenant_id, client_id, project_id, source, kind, title, body, status, requested_by, origin_site, affected_url)
-             VALUES ($1, $2, NULL, NULL, 'internal', $3, $4, $5, 'new', $6, $7, $8)`,
-            [changeRequestId, tenantId, form.kind, input.title, input.brief || null, userId, config.originSite, form.affectedUrl ?? null],
+             VALUES ($1, $2, NULL, $9, 'internal', $3, $4, $5, 'new', $6, $7, $8)`,
+            [changeRequestId, tenantId, form.kind, input.title, input.brief || null, userId, config.originSite, form.affectedUrl ?? null, intake.projectId],
           );
           // The same event the internal-create route emits, so everything watching Web Dev intake sees this request too.
           await emitEvent(c, tenantId, "webdev_change_request", changeRequestId, "webdev.change_request.created", {
-            source: "internal", kind: form.kind, clientId: null, projectId: null, actorId: userId,
+            source: "internal", kind: form.kind, clientId: null, projectId: intake.projectId, actorId: userId,
           });
           work = { type: "change_request", id: changeRequestId };
         }

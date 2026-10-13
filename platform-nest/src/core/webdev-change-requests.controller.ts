@@ -468,7 +468,9 @@ export class WebdevChangeRequestsController {
         const clientRecipients = await dispositionClientRecipients(c, cr);
         return {
           outcome: "declined" as const, kind,
-          recipients: recipientsFor(cr.requested_by, clientRecipients),
+          // DW-5c: a staff requester of a request between departments hears this as `request.declined` (sent from
+          // `notifyWorkRequestSync`), so they are NOT also sent this portal-href notification. Client recipients are untouched.
+          recipients: recipientsFor(workRequest ? null : cr.requested_by, clientRecipients),
           workRequest,
         };
       }
@@ -851,7 +853,8 @@ export class WebdevChangeRequestsController {
       const clientRecipients = await dispositionClientRecipients(c, cr);
       return {
         outcome: "verified" as const, kind: cr.kind,
-        recipients: recipientsFor(cr.requested_by, clientRecipients),
+        // DW-5c: as for the decline above, the requester of a request between departments hears `request.delivered` instead.
+        recipients: recipientsFor(workRequest ? null : cr.requested_by, clientRecipients),
         workRequest,
       };
     });
