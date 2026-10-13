@@ -19,6 +19,10 @@
 --   future and flag every unissued void created since PV-5 went live as legacy, keeping the very bug this closes. So the
 --   cutoff is read from the ledger, and if 1850's row is missing this file refuses to run (never a literal fallback).
 --   On a fresh database (CI) 1850's applied_at is moments before this file, so nothing qualifies.
+--   LEDGER-LESS BUILDS: the sync-engine-go CI job applies every migration with `psql -f`, with no `schema_migrations`
+--   table at all. There 1850 ran moments earlier in the same batch, so `now()` is the right cutoff and the file says so
+--   in a NOTICE. If the table EXISTS but has no row for 1850, that is a real fault (the runner records every file) and
+--   the file refuses to run. The table is only touched through dynamic SQL after to_regclass() says it exists.
 --   A row created before the cutoff and voided after it is flagged too (the column cannot tell when it was voided): the
 --   conservative direction, it stays as visible as it was.
 --
@@ -48,9 +52,14 @@ BEGIN
     RAISE EXCEPTION 'PV5-F1: invoices.pre_pv5_legacy is missing; 202610131850 must run before this file';
   END IF;
 
-  SELECT applied_at INTO cutoff FROM schema_migrations WHERE name = '202610131850_pv5_enforce_invoice_issued.sql';
-  IF cutoff IS NULL THEN
-    RAISE EXCEPTION 'PV5-F1: schema_migrations has no applied_at for 202610131850_pv5_enforce_invoice_issued.sql; it must run first';
+  IF to_regclass('public.schema_migrations') IS NULL THEN
+    cutoff := now();
+    RAISE NOTICE '[PV5-F1] no schema_migrations ledger here (psql -f build); using now() as the cutoff';
+  ELSE
+    EXECUTE 'SELECT applied_at FROM schema_migrations WHERE name = $1' INTO cutoff USING '202610131850_pv5_enforce_invoice_issued.sql';
+    IF cutoff IS NULL THEN
+      RAISE EXCEPTION 'PV5-F1: schema_migrations has no applied_at for 202610131850_pv5_enforce_invoice_issued.sql; it must run first';
+    END IF;
   END IF;
 
   ALTER TABLE invoices DISABLE TRIGGER trg_invoices_pv5_legacy_guard;

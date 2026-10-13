@@ -25,6 +25,7 @@ import { createCompany, createUser, addMembership, createRole, grantRole, create
 import { newId, withTenants } from "../db";
 import { setStorageForTest, localStorage as localStorageBackend, type StorageBackend } from "./storage";
 import { createIssuedInvoice, ensureBillingSetup } from "../seed/billing-setup";
+import { markInvoicesLegacy } from "../testing/invoice-fixtures";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -84,7 +85,7 @@ describe.skipIf(!TEST_URL)("PV3-02c — portal isolation fixes", () => {
 
   // PV5-F1: a `void` invoice in each of its three histories. A flagged-legacy row can only exist if the guard
   // trigger is stepped over (as the migration does), so it is inserted on a connection with triggers off
-  // (`session_replication_role = replica`, superuser, one transaction: no other test sees it).
+  // (testing/invoice-fixtures.ts).
   async function addVoid(kind: "unissued" | "issued" | "legacy", dayOffset: number, createdAt: Date | null = null): Promise<string> {
     if (kind === "issued") {
       const inv = await addInvoice({ status: "sent", dayOffset });
@@ -92,22 +93,12 @@ describe.skipIf(!TEST_URL)("PV3-02c — portal isolation fixes", () => {
       return inv;
     }
     const id = newId();
-    const k = await adminPool().connect();
-    try {
-      await k.query("BEGIN");
-      await k.query("SET LOCAL session_replication_role = replica");
-      await k.query(
-        `INSERT INTO invoices (id, tenant_id, client_id, period_start, period_end, status, currency, lines, total, pre_pv5_legacy, origin_site, created_at)
-         VALUES ($1, $2, $3, current_date - $4::int - 30, current_date - $4::int - 1, 'void', 'IDR', '[]', 1000, $5, $6, COALESCE($7::timestamptz, now()))`,
-        [id, co, clientA, dayOffset, kind === "legacy", site(), createdAt],
-      );
-      await k.query("COMMIT");
-    } catch (e) {
-      await k.query("ROLLBACK").catch(() => undefined);
-      throw e;
-    } finally {
-      k.release();
-    }
+    await adminPool().query(
+      `INSERT INTO invoices (id, tenant_id, client_id, period_start, period_end, status, currency, lines, total, origin_site, created_at)
+       VALUES ($1, $2, $3, current_date - $4::int - 30, current_date - $4::int - 1, 'void', 'IDR', '[]', 1000, $5, COALESCE($6::timestamptz, now()))`,
+      [id, co, clientA, dayOffset, site(), createdAt],
+    );
+    if (kind === "legacy") await markInvoicesLegacy([id]);
     return id;
   }
 
