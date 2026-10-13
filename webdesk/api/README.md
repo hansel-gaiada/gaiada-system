@@ -610,6 +610,7 @@ stub bindings — same rule, same reasoning, as WSK-05's `api-keys.controller.ts
 | `tenant.archive` | `POST /control/v1/tenants/:slug/archive` | **high** | `webdesk:promote` | **yes** | no |
 | `site.provision` | `POST /control/v1/tenants/:slug/sites` | medium | `webdesk:operate` | no | no |
 | `site.archive` | `POST /control/v1/tenants/:slug/sites/:siteId/archive` | **high** | `webdesk:promote` | **yes** | no — see "site.archive" below |
+| `site.setDomain` | `POST /control/v1/tenants/:slug/sites/:siteId/domain` | **high** | `webdesk:promote` | **yes** | no — see "site.setDomain" below |
 | `environment.provision` | `POST /control/v1/tenants/:slug/sites/:siteId/environments` | medium | `webdesk:operate` | no | no |
 | `environment.archive` | `POST /control/v1/tenants/:slug/environments/:envId/archive` | **high** | `webdesk:promote` | **yes** | no |
 | `schema.propose` | `POST .../sites/:siteId/collections/:key/schema/propose` | read | `webdesk:read` | no | no — draft only, never persisted |
@@ -765,6 +766,41 @@ the approval stays unclaimed); another tenant's or an unknown site is `404`; a m
 | `GET /control/v1/tenants` | the site is still listed, with `status: "archived"` (new additive `sites[].status`) |
 
 Stored content, versions and audit rows are kept (archiving is not deletion). Other sites of the tenant are untouched.
+
+### site.setDomain (M6-P6i)
+
+`POST /control/v1/tenants/:slug/sites/:siteId/domain`, header `Idempotency-Key` required, HIGH, scope `webdesk:promote`, WS4
+assertion over `{tenantSlug, siteId, envId, domain}` required (route params first, then the body, as for every command; a
+clear carries `domain: null`). The body is closed: `{envId, domain}` and nothing else (a stray key is `400`, because the WS4 hash
+covers every key sent). It sets, or clears, ONE environment's `environments.domain`, in the shared command envelope (audit row
+first, carrying the approval; one `UPDATE`; durable replay record). Answers `201 {environment:{id,name,domain,previousDomain,status},
+replayed}`; `previousDomain` is what a rollback sets back.
+
+**Why it is HIGH:** `environments.domain` is the only CORS allow-list there is. The forms guard compares the request's `Origin` with
+`https://<domain>` and `http://<domain>` as whole strings, the consent repository compares the Origin's host with the column, and
+the draft-preview route compares `https://<domain>` exactly. So this command decides which sites may call the tenant's public
+endpoints from a browser, and it is the ERP's `webdesk.site.setDomain` approval (maker != checker, never self-approvable) that
+reaches it.
+
+**A lookalike is refused because the stored value is canonical** (`src/control/lifecycle/environment-domain.ts`): lowercase ASCII
+labels, two or more, 253 characters at most, no scheme, port, path, userinfo, wildcard, whitespace, trailing dot or Unicode label
+(an international name is stored as punycode, which is also what a browser sends), and not `.invalid`, `.local`, `.localhost` or
+`.internal`. The command REFUSES a non-canonical value (`400`) rather than cleaning it up, so what the approver saw and what the
+WS4 hash covers is exactly what is stored. Because every route matches the Origin as a whole string, `example.com.evil.test`,
+`exampIe.com`, `evil-example.com`, `sub.example.com`, `example.com:8443` and a Cyrillic look-alike all fail against `example.com`.
+
+Refusals decided inside the effect (each rolls the audit row back and leaves the approval unclaimed): another tenant's or an unknown
+site `404`; an `envId` that is not THIS site's `404` (an approval for one site can never move another's domain); an archived site or
+environment `409`; the value already being the environment's domain `409 domain-unchanged` (a no-op must not spend an approval);
+another live environment of the SAME tenant already holding the domain `409 domain-in-use`.
+
+**Known gap (reported, not built):** `environment.provision` still accepts a free-form `domain` without this check, and a domain
+held by a DIFFERENT tenant is invisible here (RLS), so two tenants can hold one domain. A global unique index on
+`lower(domain)` fixes the second, but it cannot be created until a duplicate-domain diagnostic has been run on the live database
+(the D35 sequence: diagnostic, migration, ledger), so it is not part of this change.
+
+**Rollback:** run `site.setDomain` again with `domain` set to the previous value (the earlier answer's `previousDomain`), or `null`
+to clear. Both are ordinary HIGH commands (a new approval, a new WS4 assertion).
 
 ### What could not be built as specified
 

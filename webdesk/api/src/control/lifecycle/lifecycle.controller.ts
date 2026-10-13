@@ -7,13 +7,14 @@
 // reachable through the public proxy vhost (webdesk/proxy/Caddyfile) until WSK-22 lands. Same
 // rule, same reasoning, as ../../api-keys/api-keys.controller.ts's own header comment (WSK-05).
 // ============================================================================================
-import { Body, Controller, Headers, Param, Post, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Headers, Param, Post, Req, UseGuards } from "@nestjs/common";
 import { LifecycleService } from "./lifecycle.service";
 import { ControlAuthGuard } from "../auth/control-auth.guard";
 import { CommandAuthorizationGuard } from "../policy/command-authorization.guard";
 import { Command } from "../command.decorator";
 import { requireControlContext, type ControlRequest } from "../auth/control-request";
 import { assertIdempotencyKey, assertNonEmptyString, assertSiteKind, assertSlug, assertEnvName, assertUuid, assertTenantLocales } from "../dto";
+import { assertNullableEnvironmentDomain } from "./environment-domain";
 
 @Controller("control/v1/tenants")
 @UseGuards(ControlAuthGuard, CommandAuthorizationGuard)
@@ -74,6 +75,32 @@ export class LifecycleController {
     assertUuid(siteId, "siteId");
     const idempotencyKey = assertIdempotencyKey(idempotencyKeyRaw);
     return this.lifecycle.archiveSite({ tenantSlug, siteId, actor: principal.subject, idempotencyKey, ws4ApprovalId });
+  }
+
+  /**
+   * M6-P6i: set (or clear, `domain: null`) ONE environment's public domain, which is the source of that site's CORS
+   * allow-list. HIGH, always WS4 (the guard refuses without an assertion bound to these exact params and body). The body
+   * is closed: `{envId, domain}` and nothing else, because the WS4 hash covers every key the caller sends.
+   */
+  @Post(":tenantSlug/sites/:siteId/domain")
+  @Command("site.setDomain")
+  async setSiteDomain(
+    @Req() req: ControlRequest,
+    @Param("tenantSlug") tenantSlug: string,
+    @Param("siteId") siteId: string,
+    @Headers("idempotency-key") idempotencyKeyRaw: string | undefined,
+    @Body() body: { envId?: unknown; domain?: unknown },
+  ) {
+    const { principal, ws4ApprovalId } = requireControlContext(req);
+    assertUuid(siteId, "siteId");
+    const idempotencyKey = assertIdempotencyKey(idempotencyKeyRaw);
+    const rec = body !== null && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+    const extra = Object.keys(rec).filter((k) => k !== "envId" && k !== "domain");
+    if (extra.length > 0) throw new BadRequestException(`site.setDomain takes exactly {envId, domain}; unknown field(s): ${extra.join(", ")}`);
+    if (!("domain" in rec)) throw new BadRequestException("domain is required (a bare host name, or null to clear it)");
+    const envId = assertUuid(rec.envId, "envId");
+    const domain = assertNullableEnvironmentDomain(rec.domain);
+    return this.lifecycle.setSiteDomain({ tenantSlug, siteId, envId, domain, actor: principal.subject, idempotencyKey, ws4ApprovalId });
   }
 
   @Post(":tenantSlug/sites/:siteId/environments")
