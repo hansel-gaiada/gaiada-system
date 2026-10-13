@@ -12,6 +12,8 @@ const MAX_KEY_LENGTH = 64;
 const MAX_WORKSPACES = 20;
 
 const isKey = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= MAX_KEY_LENGTH;
+// `JSON.parse` makes "__proto__" an OWN key, and assigning it onto `out` would hit the prototype setter.
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 /** Anything malformed reads as `{}`. Lists are deduplicated and capped at six; a key or tool key longer
  *  than 64 characters (or not a string) is dropped; at most 20 workspaces are kept. */
@@ -21,7 +23,7 @@ export function parsePinnedTools(raw: unknown): Record<string, string[]> {
   let n = 0;
   for (const [key, list] of Object.entries(raw as Record<string, unknown>)) {
     if (n >= MAX_WORKSPACES) break;
-    if (!isKey(key) || !Array.isArray(list)) continue;
+    if (!isKey(key) || UNSAFE_KEYS.has(key) || !Array.isArray(list)) continue;
     const tools: string[] = [];
     for (const t of list) {
       if (tools.length >= MAX_PINNED_TOOLS) break;
