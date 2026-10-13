@@ -121,10 +121,13 @@ export async function listPortalConversations(
   projectId?: string,
 ): Promise<PortalConversationList> {
   const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
-  return safe(
+  const r = await safe(
     platformFetch<PortalConversationList>(`/api/${tenant}/portal/conversation${qs}`, userId),
-    { threads: [], canUseGeneral: false },
+    { threads: [], canUseGeneral: false, generalClientIds: [] },
   );
+  // PER CLIENT (PV4-13): `generalClientIds` names the clients whose General the caller may use. A server that predates
+  // it offers none (General is then simply not shown), never "every client".
+  return { ...r, generalClientIds: r.generalClientIds ?? [] };
 }
 
 /** One thread with its messages, oldest first. Opening it marks it read on the server. 404 = not yours or absent. */

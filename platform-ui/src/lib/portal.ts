@@ -305,8 +305,15 @@ export interface PortalProfile {
     /** PV2-03: `client` = the client's own person; `provider` = our staff holding a contact row. */
     side?: "client" | "provider" }>;
   access: {
+    /** Display summary: the caller can sign on at least one of their clients. Authorizes nothing (§29b). */
     canSign: boolean;
+    /** Display summary: the caller is client-wide on at least one of their clients. Authorizes nothing. */
     wholeClient: boolean;
+    /** PER CLIENT (portal scope kernel, 2026-10-13): the clients the caller may sign for. Absent on an older server. */
+    signerClientIds?: string[];
+    /** PER CLIENT: the clients the caller reaches client-wide (every project, the General thread, client-wide
+     *  change requests). Absent on an older server. */
+    wideClientIds?: string[];
     grants: Array<{ capability: string; clientId: string; clientName: string | null; projectId: string | null; projectName: string | null }>;
   };
 }
@@ -658,24 +665,51 @@ export function changeRequestKindLabel(kind: string): string {
 
 export interface PortalProjectOption { id: string; name: string }
 
+/** A client the caller may be offered by name (the "whole account" and General choices). */
+export interface PortalClientChoice { id: string; name: string }
+
+/** The clients the caller reaches CLIENT-WIDE, with names, from `GET /portal/profile` (PV4-13). The server's
+ *  `access.wideClientIds` is the authority; a profile from an older server that lacks it falls back to "every client"
+ *  for a contact whose `wholeClient` summary is true (the only case where that was ever right: one client). A client
+ *  the profile does not name keeps a neutral label rather than being dropped, so the choice still exists. */
+export function wideClientChoices(
+  profile: { clients?: Array<{ id: string; name: string }>; access: { wholeClient: boolean; wideClientIds?: string[] } },
+): PortalClientChoice[] {
+  const names = new Map((profile.clients ?? []).map((c) => [c.id, c.name]));
+  const ids = profile.access.wideClientIds ?? (profile.access.wholeClient ? [...names.keys()] : []);
+  return ids.map((id) => ({ id, name: names.get(id) ?? "Your account" }));
+}
+
+/** The value of a "whole account" option in the change-request project selector: `client:<clientId>`. A real project
+ *  id is a bare uuid, so the two can never be confused. */
+export const WHOLE_ACCOUNT_PREFIX = "client:";
+export function wholeAccountValue(clientId: string): string { return `${WHOLE_ACCOUNT_PREFIX}${clientId}`; }
+/** The client named by a selector value, or null when it is a project id (or blank). */
+export function parseWholeAccount(value: string): string | null {
+  return value.startsWith(WHOLE_ACCOUNT_PREFIX) ? value.slice(WHOLE_ACCOUNT_PREFIX.length) || null : null;
+}
+
 /** What the "New request" form's project selector may offer — computed from the caller's OWN scope
  *  shape, never re-derived from the project list (a list of projects cannot say whether its owner is
- *  client-wide or project-scoped; only `PortalProfile.access.wholeClient` can).
+ *  client-wide or project-scoped; only the profile's `access` can).
  *
  *  Design doc §5.1/§5.2 rule, encoded here once so the page, the demo fixture and this file's own test
- *  all read it off the same function: a CLIENT-WIDE contact (`wholeClient: true`) additionally gets an
- *  "all projects" option; a PROJECT-SCOPED contact gets NO such option and must name one of `projects`.
+ *  all read it off the same function. PER CLIENT since 2026-10-13 (PV4-13): a "whole account" request is offered
+ *  for each client the caller reaches CLIENT-WIDE (`wideClients`, from `access.wideClientIds`), never for a client
+ *  where they are limited to some projects (the server answers 400 "select one of your projects"). A contact who is
+ *  client-wide on A and project-scoped on B is offered "whole account" for A and must name a project for B.
+ *  `projects` is every project the caller may name, whichever client it is on.
  *
- *  ⚠ Deliberately takes `wholeClient` and NOT `canSign`. The §5.1 ruling — test-pinned on the backend
+ *  ⚠ Deliberately takes the reach and NOT `canSign`. The §5.1 ruling — test-pinned on the backend
  *  in webdev-change-requests-portal.controller.ts — is that submitting is a VIEWER-permitted act;
  *  signing capability gates only the resulting mini-run's own gates, never this form. There is no
  *  parameter here for a future edit to accidentally start gating on, and `portal.test.ts` pins that a
  *  viewer-scoped and a signer-scoped profile produce the IDENTICAL result. */
 export function changeRequestFormProps(
-  profile: { access: Pick<PortalProfile["access"], "wholeClient"> },
+  profile: Parameters<typeof wideClientChoices>[0],
   projects: PortalProjectOption[],
-): { allowClientWide: boolean; projects: PortalProjectOption[] } {
-  return { allowClientWide: profile.access.wholeClient, projects };
+): { wideClients: PortalClientChoice[]; projects: PortalProjectOption[] } {
+  return { wideClients: wideClientChoices(profile), projects };
 }
 
 // ── PV4-08: Conversation and meeting notes (§29, §29c) ─────────────────────────────────────────────
@@ -720,7 +754,14 @@ export interface PortalMessage {
   attachments: PortalMessageAttachment[];
 }
 
-export interface PortalConversationList { threads: PortalThread[]; canUseGeneral: boolean }
+export interface PortalConversationList {
+  threads: PortalThread[];
+  /** True when the caller is client-wide on at least one client. A summary: use `generalClientIds` to decide WHERE. */
+  canUseGeneral: boolean;
+  /** PER CLIENT (2026-10-13): the clients whose General thread the caller may read and post to (those they reach
+   *  client-wide). General is offered for these clients only; for any other client of theirs it does not exist. */
+  generalClientIds: string[];
+}
 export interface PortalConversationDetail { thread: PortalThread; messages: PortalMessage[] }
 
 /** Shared meeting minutes (§29c). `bodyMd` is Markdown: render it with `ArtifactMarkdown`, never as HTML. */
@@ -768,13 +809,17 @@ export function formatBytes(n: number): string {
 export interface ThreadGroup { key: string; title: string; threads: PortalThread[] }
 
 /** The Conversation list's shape: General thread(s) pinned first, then one group per project (projects in the
- *  order of their most recent activity). General is offered ONLY when the server says `canUseGeneral`
- *  (PV4-Q1: a project-scoped contact never sees the client-wide thread); a stray general row is dropped rather
- *  than shown. A contact of several clients gets one General per client, named by `clientName`. */
-export function groupThreads(threads: PortalThread[], canUseGeneral: boolean): { general: PortalThread[]; projects: ThreadGroup[] } {
+ *  order of their most recent activity). PER CLIENT: a General thread is shown only for a client in
+ *  `generalClientIds` (PV4-Q1: a contact limited to some projects of a client never sees that client's client-wide
+ *  thread); a stray general row of any other client is dropped rather than shown. A contact of several clients gets
+ *  one General per client, named by `clientName`. */
+export function groupThreads(
+  threads: PortalThread[],
+  generalClientIds: readonly string[],
+): { general: PortalThread[]; projects: ThreadGroup[] } {
   const byRecent = (a: PortalThread, b: PortalThread) => String(b.lastMessageAt ?? b.createdAt).localeCompare(String(a.lastMessageAt ?? a.createdAt));
   const isGeneral = (t: PortalThread) => t.general || t.projectId === null;
-  const general = canUseGeneral ? threads.filter(isGeneral).sort(byRecent) : [];
+  const general = threads.filter((t) => isGeneral(t) && generalClientIds.includes(t.clientId)).sort(byRecent);
   const map = new Map<string, ThreadGroup>();
   for (const t of [...threads].sort(byRecent)) {
     if (isGeneral(t)) continue;
@@ -784,6 +829,16 @@ export function groupThreads(threads: PortalThread[], canUseGeneral: boolean): {
     map.set(key, g);
   }
   return { general, projects: [...map.values()] };
+}
+
+/** The clients a "start in General" may name: the ones in `generalClientIds`, with names from the profile. A client the
+ *  profile does not name keeps a neutral label (the server still resolves it). Empty = General is not offered at all. */
+export function generalClientChoices(
+  generalClientIds: readonly string[],
+  clients: ReadonlyArray<{ id: string; name: string }>,
+): PortalClientChoice[] {
+  const names = new Map(clients.map((c) => [c.id, c.name]));
+  return generalClientIds.map((id) => ({ id, name: names.get(id) ?? "Your account" }));
 }
 
 /** The name a thread goes by in a list: its subject, else "General" (with the client's name when the contact has
