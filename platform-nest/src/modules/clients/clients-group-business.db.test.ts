@@ -10,7 +10,10 @@
 //   * drop the same-root condition in group-company.ts                 -> the "another group" case fails;
 //   * drop `required: true` in the create path of the controller       -> the 400 cases fail;
 //   * drop assertMayTouchGroupCompany from PATCH                       -> every "403 and unchanged" case fails;
-//   * move the operator check below the target validation              -> the "403 before 400" cases fail.
+//   * move the operator check below the target validation              -> the "403 before 400" cases fail;
+//   * drop PV-D31's marker condition in admin/elevated.ts (`AND is_operator_root`)
+//                                                                      -> the "CUSTOMER root owner" case fails
+//     (that owner owns a real root and its tenant, so only the marker refuses them).
 //
 // Needs DATABASE_URL_TEST + a live Cerbos (skips silently otherwise: check the skip count).
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -40,6 +43,12 @@ describe.skipIf(!TEST_URL)("PV3-04 · client business type + group-company link"
   let childOwner: string;  // owns `co` only, not the root: NOT an operator
   let rootOwner: string;   // owner of the root: an operator
   let platformAdmin: string;
+  // PV-D31: a second, UNMARKED root (a future subscriber's organization) with a clients tenant under it,
+  // a same-root sibling to link to, and an owner of both the root and the tenant.
+  let customerRoot: string;
+  let customerCo: string;
+  let customerSibling: string;
+  let customerOwner: string;
 
   beforeAll(async () => {
     await initTestDb();
@@ -53,6 +62,12 @@ describe.skipIf(!TEST_URL)("PV3-04 · client business type + group-company link"
     retired = await createCompany("PV304 Retired", [], root);
     foreignRoot = await createCompany("PV304 Foreign Root");
     await withGlobal((c) => c.query(`UPDATE companies SET deleted_at = now() WHERE id = $1`, [retired]));
+    // PV-D31: the group's root is the OPERATOR root (the fresh test DB migrated with no root, so mark it
+    // here, as data). `foreignRoot` above and `customerRoot` below stay unmarked.
+    await withGlobal((c) => c.query(`UPDATE companies SET is_operator_root = true WHERE id = $1`, [root]));
+    customerRoot = await createCompany("PV304 Customer Root");
+    customerCo = await createCompany("PV304 Customer Agency", ["clients"], customerRoot);
+    customerSibling = await createCompany("PV304 Customer Sibling", [], customerRoot);
 
     member = await createUser("pv304-member@a.test");
     viewer = await createUser("pv304-viewer@a.test");
@@ -60,6 +75,9 @@ describe.skipIf(!TEST_URL)("PV3-04 · client business type + group-company link"
     childOwner = await createUser("pv304-child-owner@a.test");
     rootOwner = await createUser("pv304-root-owner@a.test");
     platformAdmin = await createUser("pv304-padmin@a.test");
+    customerOwner = await createUser("pv304-customer-owner@a.test");
+    await addMembership(customerRoot, customerOwner);
+    await addMembership(customerCo, customerOwner);
     for (const u of [member, viewer, companyAdmin, childOwner, rootOwner, platformAdmin]) await addMembership(co, u);
     await addMembership(root, rootOwner);
 
@@ -73,11 +91,15 @@ describe.skipIf(!TEST_URL)("PV3-04 · client business type + group-company link"
     await grantRole(rootOwner, ownerRole, "company", root);
     await grantRole(rootOwner, ownerRole, "company", co);
     await grantRole(platformAdmin, await createRole("platform_admin"), "global", null);
+    // The customer root's owner: the SAME shape as rootOwner, on the other root.
+    await grantRole(customerOwner, ownerRole, "company", customerRoot);
+    await grantRole(customerOwner, ownerRole, "company", customerCo);
     await withGlobal(async (c) => {
       await c.query(`UPDATE users SET home_company_id = $1 WHERE id = ANY($2::uuid[])`, [
         root, [rootOwner, platformAdmin, member, viewer, companyAdmin],
       ]);
       await c.query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [co, childOwner]);
+      await c.query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [customerRoot, customerOwner]);
     });
 
     app = await buildApp();
@@ -262,6 +284,34 @@ describe.skipIf(!TEST_URL)("PV3-04 · client business type + group-company link"
     const ch = await changesOf(id);
     expect(ch).toContainEqual({ field: "groupCompany", before: "PV304 Sibling", after: "PV304 Sibling Two" });
     expect(ch).toContainEqual({ field: "groupCompany", before: "PV304 Sibling Two", after: null });
+  });
+
+  it("🔴 PV-D31: the owner of a CUSTOMER root (unmarked) is refused the link, 403, on create and on PATCH", async () => {
+    const countIn = async (name: string) =>
+      Number((await withTenants([customerCo], (c) =>
+        c.query<{ n: string }>(`SELECT count(*)::text n FROM clients WHERE name = $1`, [name]))).rows[0].n);
+    // A VALID target (a live same-root sibling): without the marker condition this create is a 201.
+    const c = await app.inject({
+      method: "POST", url: `/api/${customerCo}/clients`, headers: asUser(customerOwner),
+      payload: { name: "Customer Link", businessType: "hotel", groupCompanyId: customerSibling },
+    });
+    expect(c.statusCode, c.body).toBe(403);
+    expect(await countIn("Customer Link")).toBe(0);
+    // Cerbos still lets them write the client itself: the refusal is the group-company gate alone.
+    const ok = await app.inject({
+      method: "POST", url: `/api/${customerCo}/clients`, headers: asUser(customerOwner),
+      payload: { name: "Customer Plain", businessType: "hotel" },
+    });
+    expect(ok.statusCode, ok.body).toBe(201);
+    const id = ok.json().id as string;
+    const p = await app.inject({
+      method: "PATCH", url: `/api/${customerCo}/clients/${id}`, headers: asUser(customerOwner),
+      payload: { groupCompanyId: customerSibling },
+    });
+    expect(p.statusCode, p.body).toBe(403);
+    const g = (await withTenants([customerCo], (cl) =>
+      cl.query<{ g: string | null }>(`SELECT group_company_id AS g FROM clients WHERE id = $1`, [id]))).rows[0].g;
+    expect(g).toBeNull();
   });
 
   it("🔴 an operator is still refused a company of ANOTHER group (400 group_company_other_root) and the row is unchanged", async () => {

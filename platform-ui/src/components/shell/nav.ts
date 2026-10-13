@@ -230,8 +230,9 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
         ] } as NavGroup]
       : []),
     // PV-D18: Platform replaces the old ungated Systems group. It is OUR infrastructure (bot,
-    // gateway, hub, automation, observability), so it shows to `platform_admin` and the root owner,
-    // in every company; the server already refuses everyone else. Business > Monitoring is the
+    // gateway, hub, automation, observability), so it shows to `platform_admin` and, since PV-D31,
+    // the owner of the OPERATOR root only (never a customer root's owner), in every company; the
+    // server already refuses everyone else. Business > Monitoring is the
     // CLIENT's sites, a different thing.
     ...(isPlatformOperator(me)
       ? [{ label: "Platform", icon: "server", items: [

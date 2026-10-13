@@ -40,6 +40,19 @@ build against.
 > need the two-person appointment (`owner` is in `ELEVATED_TIER`), so system power still has no
 > single-step path. Ruling: decision log of `docs/plans/2026-10-10-three-perspectives.md`.
 
+> **⚠ PV-D31 (2026-10-13): the owner arm above is limited to the OPERATOR root.** D21 ruled: only
+> owners of the operator's own root get the Platform area and system controls. The operator root is
+> named by ONE data marker, `companies.is_operator_root` (migration `202610132030`: at most one live
+> row by a partial unique index, only a root by a CHECK, and no API route writes it; never a
+> hard-coded id, PV-D13). `isPlatformOperator` now admits `platform_admin` at global scope (unchanged)
+> **or** the `owner` role on a root company that carries the marker; the owner of any other root (a
+> future customer root) gets 403 on every system surface listed above and on PV3-04's group-company
+> link. The migration marks the root automatically only when exactly one live root exists and RAISES
+> otherwise, so a multi-root estate needs a human decision first. **Unchanged:** the Group area
+> (PV-D11/PV-D19: every root's owner sees their own Group while that root is active), `isElevated`,
+> the owner permission bundle and Cerbos (this gate is code). `/api/me` gains
+> `companies[].isOperatorRoot` so the UI menu can mirror the gate.
+
 > **⚠ PV3-01 (2026-10-11): a company `owner` may countersign that company's contracts.** Cerbos
 > `contract` / `countersign` gains one rule (`resource_contract.yaml`): `roles: ["user"]`, allowed when
 > the principal holds `owner` at company scope ON the contract's tenant (plus `inTenant && notLow`),

@@ -7,10 +7,11 @@
 //   isElevated(req)          — `platform_admin` at GLOBAL scope. Unchanged. Still the gate for every
 //                              NON-system admin surface: company listing, IAM, view-all-companies,
 //                              the intelligence/assistant transcripts, the mail admin console.
-//   isPlatformOperator(req)  — isElevated, OR the owner of a ROOT company (PV-D18 + PV-D20). The gate
-//                              for the SYSTEM surfaces only: admin-systems.controller.ts (status,
-//                              config, gateway, hub, github, automation, about), every route of
-//                              bot-admin.controller.ts, and observability.controller.ts.
+//   isPlatformOperator(req)  — isElevated, OR the owner of the OPERATOR ROOT (PV-D18 + PV-D20, narrowed
+//                              by PV-D31). The gate for the SYSTEM surfaces only: admin-systems.controller.ts
+//                              (status, config, gateway, hub, github, automation, about), every route of
+//                              bot-admin.controller.ts, and observability.controller.ts. Also reused by
+//                              PV3-04's group-company link check (clients.controller.ts).
 //
 // ⚠ IAM-15 (D-7) REMOVED isElevated's SECOND ARM. It used to accept `group_executive` at global
 // scope too; that role no longer exists. The predicate is therefore STRICTLY NARROWER than it was,
@@ -33,12 +34,15 @@
 // power therefore still has no single-step path. What D-9 no longer buys is "the owner seat holds no
 // system power" — anyone reasoning about the pair as business-vs-platform should read this first.
 //
-// ⚠ SaaS NOTE ("internal now, SaaS later", owner ruling 2026-10-10). The owner arm admits the owner
-// of ANY root, and the system surfaces it opens are deployment-wide (our bot, our AI gateway, our
-// estate's Prometheus), not scoped to that owner's root. Today there is one root and it is ours, so
-// that is exactly PV-D18. The day a second, customer root exists, its owner passes this gate too.
-// That needs a ruling (e.g. an operator-root marker) BEFORE a customer root is created; it is
-// deliberately not invented here.
+// PV-D31 (D21, owner ruling 2026-10-13) NARROWS THE OWNER ARM TO THE OPERATOR ROOT. PV-D18 admitted
+// the owner of ANY root, and the system surfaces it opens are deployment-wide (our bot, our AI
+// gateway, our estate's Prometheus), not scoped to that owner's root. Under PV-D13 a subscriber's
+// organization is another root, so the day a customer root existed its owner would have reached our
+// whole deployment's consoles. Now only the owner of the root carrying `companies.is_operator_root`
+// (migration 202610132030; at most one live row, by a partial unique index; only a root, by a CHECK)
+// passes. The operator root is DATA, never a hard-coded id (PV-D13). platform_admin is unchanged.
+// Owners of every other root get false here — and therefore no Platform area and no group-company
+// link authority — while their GROUP area (PV-D11/PV-D19) is untouched: that is a different gate.
 import type { FastifyRequest } from "fastify";
 import { withGlobal } from "../db";
 
@@ -47,10 +51,14 @@ export function isElevated(req: FastifyRequest): boolean {
 }
 
 /**
- * PV-D18 — the system-surface gate: `platform_admin` at global scope, OR the owner of a ROOT company.
+ * PV-D18 + PV-D31 — the system-surface gate: `platform_admin` at global scope, OR the owner of the
+ * OPERATOR ROOT (the one root company with `is_operator_root = true`). An owner of any other root,
+ * a "customer" root, gets false (PV-D31 narrows PV-D18's "owner of ANY root" arm).
  *
  * "Owner of the root" (PV-D20) = a `user_roles` grant of `owner` scoped to a company whose id equals
- * its own `root_company_id`. Not the Finance ownership register.
+ * its own `root_company_id`. Not the Finance ownership register. The query below still checks
+ * root-ness itself even though the CHECK `companies_operator_root_is_root` guarantees it: the gate
+ * should not lean on one constraint nobody re-reads.
  *
  * ⚠ `principal.rootCompanies` IS NOT "THE ROOTS". Despite the name it is every company in the
  * principal's root TREE — the root AND all its descendants (assemblePrincipal's final SELECT returns
@@ -78,7 +86,7 @@ export async function isPlatformOperator(req: FastifyRequest): Promise<boolean> 
   const { rows } = await withGlobal((c) =>
     c.query<{ id: string }>(
       `SELECT id FROM companies
-        WHERE id = ANY($1::uuid[]) AND id = root_company_id AND deleted_at IS NULL
+        WHERE id = ANY($1::uuid[]) AND id = root_company_id AND is_operator_root AND deleted_at IS NULL
         LIMIT 1`,
       [ownedInTree],
     ),

@@ -54,8 +54,8 @@ export class CoreController {
     );
     const companyRows = req.principal.companies.length
       ? await withGlobal((c) =>
-          c.query<{ id: string; name: string; type: string; vertical: string; rootCompanyId: string | null }>(
-            `SELECT id, name, type, vertical, root_company_id AS "rootCompanyId"
+          c.query<{ id: string; name: string; type: string; vertical: string; rootCompanyId: string | null; isOperatorRoot: boolean }>(
+            `SELECT id, name, type, vertical, root_company_id AS "rootCompanyId", is_operator_root AS "isOperatorRoot"
                FROM companies WHERE deleted_at IS NULL AND id = ANY($1::uuid[])`,
             [req.principal.companies],
           ),
@@ -65,6 +65,9 @@ export class CoreController {
     // hidden, the root for the Group and Platform areas). `enabledModules` is the EFFECTIVE set the
     // module gate uses (`enabledModuleKeys`: the company's own modules plus active service
     // assignments), so the menu and the page gate can never disagree about a module.
+    // PV-D31: `isOperatorRoot` (ADDITIVE) marks the one root whose owners get the Platform area; the
+    // menu mirrors `isPlatformOperator` with it. Showing a menu row is not security: the server gate
+    // (admin/elevated.ts) is the authority.
     const companies = {
       rows: await Promise.all(
         companyRows.rows.map(async (co) => ({ ...co, enabledModules: await enabledModuleKeys(co.id) })),

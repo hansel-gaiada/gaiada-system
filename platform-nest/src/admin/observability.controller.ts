@@ -8,10 +8,10 @@
 //
 // WHY THIS DOES NOT BREAK THE TWO-PLANE RULE (docs/blueprints/monitoring-program.md §8.1). Plane A
 // is OUR infrastructure and must never become a tenant surface. So this endpoint is:
-//   * platform-operator only (`isPlatformOperator`: platform_admin, or the owner of a ROOT company
-//     per PV-D18/PV-D20), exactly like the other /api/admin system consoles. That ruling treats a
-//     root owner as an operator of the estate; it is safe for Plane A only while every root is
-//     ours (see elevated.ts's SaaS note),
+//   * platform-operator only (`isPlatformOperator`: platform_admin, or the owner of the OPERATOR
+//     ROOT per PV-D18/PV-D20 narrowed by PV-D31), exactly like the other /api/admin system consoles.
+//     PV-D31 is what keeps Plane A ours once a customer root exists: an owner of any other root is
+//     refused here,
 //   * NOT tenant-scoped and NOT company-filtered — there is nothing per-tenant here to filter,
 //   * read-only, and deliberately a SUMMARY. Grafana remains the analysis tool; this answers
 //     "is the estate healthy right now" without an SSH tunnel. We are not rebuilding Grafana.

@@ -5,8 +5,8 @@
 // and extra reads that a service doesn't expose degrade to an empty list.
 //
 // Access is the platform-operator gate (`isPlatformOperator`, ./elevated.ts): platform_admin at
-// global scope, or the owner of a ROOT company (PV-D18/PV-D20, 2026-10-11) — checked in code (these
-// are not tenant resources). Every route in this controller is a system surface, so every route
+// global scope, or the owner of the OPERATOR ROOT (PV-D18/PV-D20, 2026-10-11, narrowed to the operator
+// root by PV-D31, 2026-10-13) — checked in code (these are not tenant resources). Every route in this controller is a system surface, so every route
 // uses it; the automation READS also admit IT staff (isItOrPlatformOperator). Anyone else gets 403,
 // which the UI absorbs gracefully.
 import {
@@ -163,7 +163,7 @@ interface HubDetail {
 
 // The n8n workflow VIEWER (read-only canvas in the IT section) is reachable by IT staff too,
 // not just platform operators. Any it_admin/it_manager/it grant (any scope) qualifies.
-// PV-D18: the non-IT arm is the platform-operator gate (platform_admin or owner of the root), the
+// PV-D18/PV-D31: the non-IT arm is the platform-operator gate (platform_admin or owner of the operator root), the
 // same as every other system surface here. The IT arm is checked first because it is free; the
 // operator arm may cost one DB read (see isPlatformOperator).
 async function isItOrPlatformOperator(req: FastifyRequest): Promise<boolean> {

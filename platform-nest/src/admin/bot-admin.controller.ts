@@ -1,7 +1,7 @@
 // A4 (erp-whatsapp-and-agent-runtime-e2e.md §2.4): thin proxy from the ERP to the bot's own
 // ADMIN_TOKEN-gated /admin/* surface (session lifecycle, group registry, safe config). The UI
 // never talks to the bot directly — every call goes through here, gated by the same
-// isPlatformOperator predicate as admin-systems.controller.ts (PV-D18), using the platform-held bot admin token
+// isPlatformOperator predicate as admin-systems.controller.ts (PV-D18, PV-D31), using the platform-held bot admin token
 // (config.services.bot.token) as the outbound Bearer. Fail-soft, never fabricates: bot not
 // configured (no URL) -> 404 {error}; unreachable/non-2xx (other than a deliberate validation
 // 400) -> 502 {error}; the bot's own 400 {error,field?} is surfaced verbatim.
