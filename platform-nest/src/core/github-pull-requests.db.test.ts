@@ -341,6 +341,17 @@ describe.skipIf(!TEST_URL)("Pull requests and CI on PM tasks (DW-6f)", () => {
       expect((await prRow(36))!.ci.CI).toMatchObject({ runId: 801, status: "completed", conclusion: "success" });
     });
 
+    it("a late 'in progress' of the SAME run delivered after its 'completed' never undoes it", async () => {
+      await sendPr({ number: 37, title: "WEB-1 late event", updatedAt: "2026-10-13T10:00:00Z" });
+      await sendRun({ id: 811, name: "CI", status: "completed", conclusion: "failure", startedAt: "2026-10-13T10:10:00Z", prNumbers: [37] });
+      const late = await sendRun({ id: 811, name: "CI", status: "in_progress", conclusion: null, startedAt: "2026-10-13T10:10:00Z", prNumbers: [37] });
+      expect(late.note).toContain("ci_store=0");
+      expect((await prRow(37))!.ci.CI).toMatchObject({ runId: 811, status: "completed", conclusion: "failure" });
+      // A re-run (a NEW run id, same start or later) still replaces it.
+      await sendRun({ id: 812, name: "CI", status: "in_progress", conclusion: null, startedAt: "2026-10-13T10:30:00Z", prNumbers: [37] });
+      expect((await prRow(37))!.ci.CI).toMatchObject({ runId: 812, status: "in_progress" });
+    });
+
     it("a run for a pull request that is not stored yet writes nothing and fails nothing", async () => {
       const res = await sendRun({ id: 901, name: "CI", status: "completed", conclusion: "success", startedAt: "2026-10-13T10:10:00Z", prNumbers: [999] });
       expect(res.ok).toBe(true);

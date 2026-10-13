@@ -436,7 +436,13 @@ async function storeWorkflowRunCi(tenantId: string, fullName: string, run: GhWor
         WHERE tenant_id = $8 AND repo_full_name = $9 AND ${matchSql}
           AND (NOT (ci ? $1::text)
                OR (ci -> $1::text ->> 'at') IS NULL
-               OR ($10::timestamptz IS NOT NULL AND $10::timestamptz >= (ci -> $1::text ->> 'at')::timestamptz))`,
+               OR ($10::timestamptz IS NOT NULL AND $10::timestamptz >= (ci -> $1::text ->> 'at')::timestamptz))
+          -- A run's own events share one start time, and GitHub does not promise their order, so a late
+          -- "in progress" of the SAME run must never undo its "completed". Null-safe on purpose: a missing entry
+          -- must leave this whole clause TRUE, not NULL (a NULL here would silently skip the first write).
+          AND NOT ((ci -> $1::text ->> 'runId') IS NOT DISTINCT FROM ($2::bigint)::text
+                   AND (ci -> $1::text ->> 'status') IS NOT DISTINCT FROM 'completed'
+                   AND $3::text IS DISTINCT FROM 'completed')`,
       [name, run.id, run.status ?? null, run.conclusion ?? null, run.html_url ?? null, at, numbers.length ? numbers : sha, tenantId, fullName, at],
     ),
   );
