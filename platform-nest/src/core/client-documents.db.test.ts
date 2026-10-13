@@ -101,10 +101,10 @@ describe.skipIf(!TEST_URL)("PV5-08 · Documents (portal list, staff list, parity
     await adminPool().query(
       `INSERT INTO contracts (id, tenant_id, client_id, project_id, title, reference, version, status, file_id, body_md, value, currency,
                               sent_at, signed_at, content_sha256, content_fixed_at, signature_tier, created_by, origin_site)
-       VALUES ($1, $2, $3, $4, $5, $6, 1, $7, NULL, $8, 1000, 'IDR',
+       VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $13, $8, 1000, 'IDR',
                CASE WHEN $9 THEN now() - interval '3 days' END, CASE WHEN $7 = 'signed' THEN $10::timestamptz END,
                CASE WHEN $9 THEN $11 END, CASE WHEN $9 THEN now() - interval '3 days' END, CASE WHEN $9 THEN 'attested' END, $12, 'test')`,
-      [id, co, clientId, projectId, title, `PV508-${id.slice(-6)}`, status, body, sent, o.signedAt ?? new Date().toISOString(), hash, admin],
+      [id, co, clientId, projectId, title, `PV508-${id.slice(-6)}`, status, body, sent, o.signedAt ?? new Date().toISOString(), hash, admin, o.attached ?? null],
     );
     if (status === "signed") {
       for (const [party, who, name] of [["client", signer, "Sam Signer"], ["provider", admin, "Pat Provider"]] as const) {
@@ -115,7 +115,6 @@ describe.skipIf(!TEST_URL)("PV5-08 · Documents (portal list, staff list, parity
         );
       }
     }
-    if (o.attached) await adminPool().query(`UPDATE contracts SET file_id = $2 WHERE id = $1`, [id, o.attached]);
   }
 
   /** An invoice payment with a proof file. */
