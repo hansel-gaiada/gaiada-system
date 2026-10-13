@@ -70,6 +70,7 @@ import { config } from "../../config";
 import { check } from "../../rbac/cerbos";
 import type { Principal } from "../../rbac/principal";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
+import { isCalendarKind, resolveCalendarRange } from "./report-calendar";
 import {
   DEFAULT_WORK_CALENDAR,
   expectedCheckinUsers,
@@ -429,34 +430,25 @@ export function buildComplianceGrid(inputs: ComplianceGridInputs): ComplianceRow
 
 // ═══════════════════════════════ PURE CORE — period resolution ═══════════════════════════════
 
-/** `periodKind=day|week|month|custom` -> an inclusive [from, to]. Deliberately NOT the full
- *  §6.1 `ReportPeriodKind` machinery (that lives in TR-13's not-yet-built report-document.ts) —
- *  week/month here are plain ISO-week/calendar-month arithmetic, which is all the compliance grid
- *  needs. `custom` mirrors §6.2's own rule: `end` is required and the range is capped so an
- *  unbounded caller-chosen window can't turn this into a 400-row-per-day-times-N-days scan. */
+/** `periodKind=day|week|month|quarter|semester|year|custom` -> an inclusive [from, to]. Calendar
+ *  kinds delegate to `report-calendar.ts`'s `resolveCalendarRange` — the ONE resolver shared with
+ *  the report document and the periods list (DW-4a; this function used to carry its own copy of
+ *  the week and month math). `start` may be any date inside the period. `custom` mirrors §6.2's
+ *  own rule: `end` is required and the range is capped (by the caller) so an unbounded
+ *  caller-chosen window can't turn this into a 400-row-per-day-times-N-days scan. */
 export function resolveCheckinPeriod(periodKind: string | undefined, start: string | undefined, end: string | undefined): { from: string; to: string } {
   const kind = periodKind ?? "day";
   const s = assertDate(start, "start");
-  if (kind === "day") return { from: s, to: s };
-  if (kind === "week") {
-    const dow = new Date(`${s}T00:00:00.000Z`).getUTCDay() || 7; // Mon=1..Sun=7
-    const from = addDaysIso(s, -(dow - 1));
-    return { from, to: addDaysIso(from, 6) };
-  }
-  if (kind === "month") {
-    const [y, m] = s.split("-");
-    const from = `${y}-${m}-01`;
-    const nextMonth = new Date(`${y}-${m}-01T00:00:00.000Z`);
-    nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
-    const to = addDaysIso(nextMonth.toISOString().slice(0, 10), -1);
-    return { from, to };
+  if (isCalendarKind(kind)) {
+    const r = resolveCalendarRange(kind, s);
+    return { from: r.start, to: r.end };
   }
   if (kind === "custom") {
     const e = assertDate(end, "end");
     if (e < s) throw new BadRequestException("end must be on or after start");
     return { from: s, to: e };
   }
-  throw new BadRequestException("periodKind must be one of day, week, month, custom");
+  throw new BadRequestException("periodKind must be one of day, week, month, quarter, semester, year, custom");
 }
 
 function assertRangeWithinCeiling(from: string, to: string): void {

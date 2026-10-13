@@ -194,6 +194,22 @@ describe("computeHeaderWarnings", () => {
     expect(w?.partialPeriod).toBe(true); // the current month hasn't fully elapsed yet
   });
 
+  it("a quarter that has not fully elapsed warns partialPeriod and endsInFuture (DW-4a)", () => {
+    const w = computeHeaderWarnings({ periodKind: "quarter", start: "2026-07-01", end: "2026-09-30", today: "2026-08-17", firstFactDate: null });
+    expect(w?.partialPeriod).toBe(true);
+    expect(w?.endsInFuture).toBe(true);
+  });
+
+  it("a fully-elapsed year, semester or quarter warns nothing (DW-4a)", () => {
+    expect(computeHeaderWarnings({ periodKind: "year", start: "2025-01-01", end: "2025-12-31", today: "2026-08-17", firstFactDate: null })).toBeUndefined();
+    expect(computeHeaderWarnings({ periodKind: "semester", start: "2026-01-01", end: "2026-06-30", today: "2026-08-17", firstFactDate: null })).toBeUndefined();
+  });
+
+  it("a year that began before the first fact says so (DW-4a)", () => {
+    const w = computeHeaderWarnings({ periodKind: "year", start: "2025-01-01", end: "2025-12-31", today: "2026-08-17", firstFactDate: "2025-10-01" });
+    expect(w?.precedesFactHistory).toEqual({ firstFactDate: "2025-10-01", affectedDays: 273 }); // Jan 1..Sep 30
+  });
+
   it("always flags adHoc for a custom range", () => {
     const w = computeHeaderWarnings({ periodKind: "custom", start: "2026-07-01", end: "2026-07-31", today: "2026-08-15", firstFactDate: null });
     expect(w?.adHoc).toBe(true);
