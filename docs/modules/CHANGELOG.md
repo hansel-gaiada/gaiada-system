@@ -11,6 +11,10 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.118.1` - PV-6 follow-up: a website nothing probes says "Uptime monitoring: Not set up" (2026-10-13) - PROTOTYPED
+
+- Found in the PV6-06 live drive: all 81 live website cards carried four null probe figures, so clients would read "Not measured yet" four times on every site. A site with no matched monitor (or a company without the `monitoring` module) now gets no figures and the item "Uptime monitoring: Not set up"; a matched monitor with no checks yet still reads null. `results/website.ts`; the no-monitoring test now pins `kpis: []` and the item.
+
 ### platform-nest `0.118.0` - DW-4a: quarter, semester and year report periods (2026-10-13) - PROTOTYPED
 
 Contract: `docs/blueprints/tracker-reporting-foundation.md` §15, the DW-4a entry (with §6.1 and §6.2). Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.6.

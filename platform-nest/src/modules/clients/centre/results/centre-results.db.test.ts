@@ -378,10 +378,10 @@ describe.skipIf(!TEST_URL)("Client Centre · Services & results (PV6-02)", () =>
       expect(cardsOf(r, "website")).toHaveLength(1);
     });
 
-    it("website without the monitoring module: the card is there, every probe figure is null", async () => {
+    it("website without the monitoring module: the card is there, says monitoring is not set up, and carries no figures", async () => {
       const [card] = cardsOf(await compose(T2, client2), "website");
-      expect(card.items).toEqual([{ label: "partial.example", detail: null }]);
-      for (const k of card.kpis) expect(k.value, k.key).toBeNull();
+      expect(card.items).toEqual([{ label: "partial.example", detail: null }, { label: "Uptime monitoring", detail: "Not set up" }]);
+      expect(card.kpis).toEqual([]); // never four "Not measured yet" for a site nothing probes
     });
 
     it("a builder that throws is listed in unavailable and the other services still return", async () => {
