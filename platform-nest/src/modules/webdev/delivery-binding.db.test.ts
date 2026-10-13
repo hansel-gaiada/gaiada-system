@@ -105,8 +105,8 @@ describe.skipIf(!live)("M6-P6g — control_panel CHECK widening (HSR-4)", () => 
       await c.query(`ALTER TABLE search_properties DROP CONSTRAINT ${conname}`);
       await c.query(
         `ALTER TABLE search_properties ADD CONSTRAINT ${conname}
-           CHECK (control_panel IS NULL OR control_panel IN ('cpanel', 'plesk', 'directadmin', 'none', 'other'))`,
-      );
+           CHECK (control_panel IS NULL OR control_panel IN ('cpanel', 'plesk', 'directadmin', 'none', 'other')) NOT VALID`,
+      ); // NOT VALID: the shared test DB may already hold 'hpanel' rows from other suites; the old CHECK still refuses NEW ones
       await c.query("SAVEPOINT s");
       await expect(
         c.query(`INSERT INTO search_properties (id, tenant_id, client_id, domain, site_url, control_panel, origin_site)
@@ -140,8 +140,8 @@ describe.skipIf(!live)("M6-P6g — control_panel CHECK widening (HSR-4)", () => 
       await c.query(`ALTER TABLE search_properties DROP CONSTRAINT ${conname}`);
       await c.query(
         `ALTER TABLE search_properties ADD CONSTRAINT ${conname}
-           CHECK (control_panel IS NULL OR control_panel IN ('cpanel', 'plesk', 'directadmin', 'none', 'other', 'later-addition'))`,
-      );
+           CHECK (control_panel IS NULL OR control_panel IN ('cpanel', 'plesk', 'directadmin', 'none', 'other', 'later-addition')) NOT VALID`,
+      ); // NOT VALID, as above: simulate the older schema without re-validating rows other suites left
       await c.query(readFileSync(MIGRATION, "utf8"));
       const [after] = await controlPanelChecks(c);
       for (const v of [...EARLIER, "later-addition", "hpanel"]) expect(after.def, v).toContain(`'${v}'`);
