@@ -1,8 +1,10 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { UserMenu } from "./UserMenu";
+import { setShellLayoutAction } from "@/lib/prefsActions";
 
 vi.mock("@/app/(app)/account/actions", () => ({ logout: vi.fn() }));
+vi.mock("@/lib/prefsActions", () => ({ setShellLayoutAction: vi.fn(async () => {}) }));
 
 // PV2-06: "Client view" appears only when the caller is an active client contact somewhere
 // (TopBar computes `clientView` from `(me.clientOf ?? []).length > 0`).
@@ -33,5 +35,33 @@ describe("UserMenu — accessible name", () => {
   it("names the compact (avatar-only) trigger by the user, not their initials", () => {
     render(<UserMenu name="Clement Hansel" secondary="AI Manager" initials="CH" compact />);
     expect(screen.getByRole("button", { name: "Clement Hansel" })).toHaveAttribute("aria-haspopup", "menu");
+  });
+});
+
+// DW-2a: the visible pilot switch between the classic shell and the workspace shell.
+describe("UserMenu — the layout switch (DW-2a)", () => {
+  function open(shellLayout?: "classic" | "workspaces") {
+    const { container } = render(<UserMenu name="U" secondary="x" initials="U" compact shellLayout={shellLayout} />);
+    fireEvent.click(container.querySelector(".erp-usermenu__trigger") as HTMLElement);
+  }
+
+  it("offers the new layout from the classic one, and stores the choice", async () => {
+    vi.mocked(setShellLayoutAction).mockClear();
+    open("classic");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Try the new layout" }));
+    await waitFor(() => expect(setShellLayoutAction).toHaveBeenCalledWith("workspaces"));
+    expect(screen.queryByRole("menuitem", { name: "Back to the classic layout" })).toBeNull();
+  });
+
+  it("offers the way back from the new layout", async () => {
+    vi.mocked(setShellLayoutAction).mockClear();
+    open("workspaces");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Back to the classic layout" }));
+    await waitFor(() => expect(setShellLayoutAction).toHaveBeenCalledWith("classic"));
+  });
+
+  it("shows no switch when the caller passes no layout", () => {
+    open();
+    expect(screen.queryByRole("menuitem", { name: /layout/ })).toBeNull();
   });
 });

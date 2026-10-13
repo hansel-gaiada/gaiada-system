@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Me } from "@/lib/platform";
 import type { Theme } from "@/lib/prefs";
+import type { ShellLayout } from "@/lib/shellLayout";
 import { listNotifications } from "@/lib/entities";
 import { Icon } from "./icons";
 import { Eyebrow } from "@/components/ui";
@@ -9,7 +10,7 @@ import { NavToggle } from "./NavToggle";
 import { CommandPaletteTrigger } from "./CommandPaletteTrigger";
 import { ThemeToggle } from "./ThemeToggle";
 
-export async function TopBar({ me, tenantId, moduleLabel, theme }: { me: Me; tenantId: string | null; moduleLabel: string; theme: Theme }) {
+export async function TopBar({ me, tenantId, moduleLabel, theme, shell }: { me: Me; tenantId: string | null; moduleLabel: string; theme: Theme; shell?: ShellLayout }) {
   const dateLine = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
   const initials = me.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
@@ -40,7 +41,7 @@ export async function TopBar({ me, tenantId, moduleLabel, theme }: { me: Me; ten
         {/* The design puts the account control in the TOP BAR and the global
             create action at the SIDEBAR FLOOR — the reverse of where they
             used to sit. Both moved wholesale; neither lost an item. */}
-        <UserMenu name={me.name} secondary={me.title ?? me.email} initials={initials} compact clientView={(me.clientOf ?? []).length > 0} />
+        <UserMenu name={me.name} secondary={me.title ?? me.email} initials={initials} compact clientView={(me.clientOf ?? []).length > 0} shellLayout={shell} />
         <Link href="/notifications" className="erp-top__bell" aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}>
           <Icon name="bell" size={19} />
           {unread > 0 && <span className="erp-top__badge" aria-hidden="true">{unread > 9 ? "9+" : unread}</span>}

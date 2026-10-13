@@ -1,7 +1,9 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { logout } from "@/app/(app)/account/actions";
+import { setShellLayoutAction } from "@/lib/prefsActions";
+import type { ShellLayout } from "@/lib/shellLayout";
 
 // The sidebar user-card, upgraded to a menu button: opens a small popover with
 // "Account settings" and "Sign out". Closes on outside-click or Escape.
@@ -9,8 +11,13 @@ import { logout } from "@/app/(app)/account/actions";
 // with the popover opening DOWNWARD. The default (sidebar floor) opens upward
 // and shows name + role. Same component, same menu items, same actions.
 // `clientView` (PV2-06) adds a "Client view" link to /portal for staff who are also client contacts.
-export function UserMenu({ name, secondary, initials, compact = false, clientView = false }: { name: string; secondary: string; initials: string; compact?: boolean; clientView?: boolean }) {
+// `shellLayout` (DW-2a) adds the pilot switch between the classic shell and the workspace shell; the
+// action stores the choice and revalidates the layout, so the next render draws the other sidebar.
+export function UserMenu({ name, secondary, initials, compact = false, clientView = false, shellLayout }: {
+  name: string; secondary: string; initials: string; compact?: boolean; clientView?: boolean; shellLayout?: ShellLayout;
+}) {
   const [open, setOpen] = useState(false);
+  const [switching, startSwitch] = useTransition();
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -40,6 +47,23 @@ export function UserMenu({ name, secondary, initials, compact = false, clientVie
             <Link href="/portal" role="menuitem" className="erp-usermenu__item" onClick={() => setOpen(false)}>
               Client view
             </Link>
+          )}
+          {shellLayout && (
+            <button
+              type="button"
+              role="menuitem"
+              className="erp-usermenu__item"
+              disabled={switching}
+              onClick={() => {
+                const next: ShellLayout = shellLayout === "classic" ? "workspaces" : "classic";
+                startSwitch(async () => {
+                  await setShellLayoutAction(next);
+                  setOpen(false);
+                });
+              }}
+            >
+              {shellLayout === "classic" ? "Try the new layout" : "Back to the classic layout"}
+            </button>
           )}
           <form action={logout}>
             <button type="submit" role="menuitem" className="erp-usermenu__item erp-usermenu__item--danger">
