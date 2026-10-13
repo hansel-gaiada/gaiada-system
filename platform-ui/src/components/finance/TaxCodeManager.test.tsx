@@ -22,7 +22,10 @@ const ppn2022: TaxCode = {
   effectiveFrom: "2022-04-01", effectiveTo: "2024-12-31", notes: null, accountCode: "2140", inUse: true,
 };
 
-beforeEach(() => { Object.values(fa).forEach((f) => f.mockReset().mockResolvedValue({ ok: true })); });
+beforeEach(() => {
+  Object.values(fa).forEach((f) => f.mockReset().mockResolvedValue({ ok: true }));
+  Object.values(su).forEach((f) => f.mockReset().mockResolvedValue(null));
+});
 
 describe("TaxCodeManager", () => {
   it("a company with no codes is told taxed entries are refused, and can add the standard PPN codes", async () => {
