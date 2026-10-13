@@ -80,7 +80,7 @@ describe.skipIf(!TEST_URL)("DW-6h asset versions and review rounds (HTTP, real P
     (await q().query(`SELECT user_id FROM notifications WHERE type = $1 AND payload->>'entityId' = $2`, [type, entityId])).rows
       .map((r) => r.user_id as string).sort();
   const verbs = async (entityId: string) =>
-    (await q().query(`SELECT verb FROM activities WHERE target_entity_type = 'creative_asset' AND target_entity_id = $1 ORDER BY created_at, id`, [entityId])).rows
+    (await q().query(`SELECT verb FROM activities WHERE target_entity_type = 'creative_asset' AND target_entity_id = $1 ORDER BY occurred_at, id`, [entityId])).rows
       .map((r) => r.verb as string);
   const openRound = (asset: string, as: string, body: unknown = {}) => call("POST", `${assets()}/${asset}/reviews`, as, body);
   const decide = (asset: string, round: number, as: string, body: unknown) => call("POST", `${assets()}/${asset}/reviews/${round}/decision`, as, body);
