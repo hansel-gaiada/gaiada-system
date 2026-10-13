@@ -288,3 +288,11 @@ describe("the Overview, Performance and tools data", () => {
     });
   });
 });
+
+describe("a workspace's own create actions (DW-2f)", () => {
+  it("names only quickActions the workspace has", () => {
+    for (const ws of ALL) {
+      for (const key of ws.creates) expect(ws.quickActions.map((a) => a.key), `${ws.key} creates ${key}`).toContain(key);
+    }
+  });
+});

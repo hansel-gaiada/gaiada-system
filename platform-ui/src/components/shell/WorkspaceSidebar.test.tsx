@@ -101,6 +101,18 @@ describe("WorkspaceSidebar", () => {
     });
   });
 
+  it("lists the workspace's own create action first in + New, then the existing items (DW-2f)", () => {
+    renderAt("/departments/d-web/prd");
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
+    expect(within(screen.getByRole("menu")).getAllByRole("menuitem").map((a) => a.textContent)).toEqual(["New briefing", "Task"]);
+  });
+
+  it("lists only the existing items at the Company view (DW-2f)", () => {
+    renderAt("/organization");
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
+    expect(within(screen.getByRole("menu")).getAllByRole("menuitem").map((a) => a.textContent)).toEqual(["Task"]);
+  });
+
   it("shows another department's rows as a visit, with the way back", () => {
     renderAt("/departments/d-seo");
     expect(screen.getByText("Visiting SEO")).toBeInTheDocument();

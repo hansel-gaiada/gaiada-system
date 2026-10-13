@@ -64,6 +64,13 @@ local stack). None of these mean "production-done".
 - **Tests:** `test/site-set-domain-unit.spec.ts` (no services: the domain rule, the controller, the WS4 hash binding, the real forms guard and the preview origin rule against every lookalike; 85 tests) and `test/site-set-domain.spec.ts` (real Postgres, Redis, the real policy decision point; the gate, the value, single use, replay, CORS on the real consent preflight, the 404 and 409 refusals, and the rollback). `test/control-command-registry.spec.ts` updated.
 - **Docs:** `webdesk/api/README.md` command table and a "site.setDomain" section.
 
+### platform-ui `0.113.0` - DW-2f: a workspace-aware + New (2026-10-13) - PROTOTYPED
+
+- **What:** in the workspace shell (the pilot switch), "+ New" lists the current workspace's own create action first, then today's items: Web Dev "New briefing", SEO "New content brief", Social Media "Compose a post", Creatives "Upload to library", HR "New hire", Finance "Record a journal", IT "Register a device", the generic workspace "New task"; the Office of the GM has none. The registry gains `creates` (keys into each workspace's `quickActions`), and the shell model makes them concrete with the same gates as the rows. Visiting another department shows its action; the Company and Admin areas show today's items only.
+- **Also:** the palette's Enter-to-search test no longer races (it waits for the handed-over text before Enter), and the findability test's hand-built workspace gains the new field.
+- **Not changed:** the classic shell's + New (`newMenuItems`), `NewMenu`, every gate and URL.
+- **Tests:** `workspaces.test.ts` (every `creates` key is a quick action of its workspace), `shellModel.test.ts`, `WorkspaceSidebar.test.tsx`. CI run 38352631466 green (on `12de1f44`).
+
 ### platform-nest `0.113.0` - M5-P5a2: IndexNow on unpublish and on a scheduled publish/takedown (2026-10-13) - PROTOTYPED
 
 - **The gap it closes:** P5a (0.100.0) pinged IndexNow only for an approved immediate `content.publish`. Its own header listed the rest as a follow-up.
