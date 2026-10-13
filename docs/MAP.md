@@ -378,6 +378,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/campaigns`
 - `/departments/[deptId]/campaigns/social`
 - `/departments/[deptId]/charts`
+- `/departments/[deptId]/clients`
 - `/departments/[deptId]/composer`
 - `/departments/[deptId]/composer/[postId]`
 - `/departments/[deptId]/connections`
