@@ -11,6 +11,19 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.109.0` - DW-2a: the new workspace sidebar, behind the per-person pilot switch (2026-10-13) - PROTOTYPED
+
+- **What:** the department workspace sidebar of `docs/plans/2026-10-13-department-workspaces.md` §2.2–2.3, drawn only when the person's pilot switch (`prefs.shell`, DW-1d) is `workspaces`.
+  - A switcher card (the workspace over the active company) lists the person's own workspaces, then every department (ungated, GM-01), then "Switch company" (today's `TenantSwitcher`) for someone with more than one company.
+  - Overview and AI Assistant, then Work, Performance and You, each row linking to its first tab; the row holding the page is `aria-current="page"`. No badges or counts.
+  - Visiting another department says "Visiting <name>" with "Back to <home>"; the Company and Admin areas draw their own rows with the same way back.
+  - Footer: Company, Admin (only with admin rows) and today's + New list (`newMenuItems`, shared with the classic sidebar).
+  - The collapsed rail shows the same rows as icons with tooltips, and the phone drawer the same rows with labels (`id="app-nav"` kept for `NavToggle`).
+- **Where:** `lib/shellModel.ts` (pure, serialisable: `buildShellModel`, `workspaceForArea`, `activeLocation`); `components/shell/WorkspaceShellSidebar.tsx` (server half) and `WorkspaceSidebar.tsx` (client: area from `usePathname()` + `areaFor`/`resolveArea`, the last area kept in `sessionStorage`); `workspace-sidebar.css` on the existing tokens; `app/(app)/layout.tsx` and `Shell.tsx` wiring.
+- **The pilot switch is visible:** the account menu offers "Try the new layout" / "Back to the classic layout" (`setShellLayoutAction`), in both shells.
+- **Not changed:** the classic shell (everyone's default) renders exactly as before and makes no extra server call; the top bar, the floating assistant button, the palette, `nav.ts`, the server, Cerbos and every URL. A model that cannot be built falls back to the classic sidebar.
+- **Tests:** `lib/shellModel.test.ts`, `components/shell/WorkspaceSidebar.test.tsx`, `UserMenu.test.tsx` (switch item); fixtures shared in `lib/workspaceFixtures.ts`. CI run: PENDING.
+
 ### webdesk `0.27.0` - M6-P6e: the site deploy transport, SFTP or explicit-TLS FTPS, with its container harness (2026-10-13) - DEV-VERIFIED (script and harness, on sumopod; not wired into any template yet)
 
 - **New, in `webdesk/templates/_deploy/`:** `deploy.sh` (modes `deploy` and `rollback`), `make-manifest.sh` (the build job's manifest generator) and a README. M6-P6f wires it into the three templates' deploy jobs; nothing calls it yet, and nothing was run against Hostinger or `delphi`/`helios`.
