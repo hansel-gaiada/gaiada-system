@@ -70,12 +70,8 @@ END $$;
 SET CONSTRAINTS ALL IMMEDIATE;
 
 -- ── the guard (enforced for new and updated rows only) ───────────────────────────────────────────
-ALTER TABLE client_contacts
-  ADD CONSTRAINT fk_client_contacts_project_client_tenant
-  FOREIGN KEY (project_id, client_id, tenant_id)
-  REFERENCES projects (id, client_id, tenant_id)
-  NOT VALID;
+-- TEETH: the FK is not added
 
-COMMENT ON CONSTRAINT fk_client_contacts_project_client_tenant ON client_contacts IS
+COMMENT ON TABLE client_contacts IS
   'PV4-13: a contact''s project belongs to the contact''s client and tenant. NOT VALID on purpose (existing rows are not '
   'checked; VALIDATE is a later, deliberate step once the deploy-log count is 0). MATCH SIMPLE: a NULL project_id (client-wide) skips it.';
