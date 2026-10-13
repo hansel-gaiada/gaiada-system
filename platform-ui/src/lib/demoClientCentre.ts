@@ -17,7 +17,7 @@ import "server-only";
 //                                 read-only "ask your account manager" note are both demoable.
 // cl-3 (Lumen Studio) is listed with NO row at all — the plan's "a missing row synthesises an empty
 // profile" rule, exercised on the staff list (0/0 filled, never configured).
-import type { CentrePatch, CentreProfile, ConnectionEntry, CustomConnection } from "./clientCentre";
+import type { BusinessResults, CentrePatch, CentreProfile, ConnectionEntry, CustomConnection, ResultsKpi, ResultsServiceCard } from "./clientCentre";
 import {
   registry,
   allSections,
@@ -360,12 +360,83 @@ const PORTAL_SCOPE: Record<string, Array<{ clientId: string; canEdit: boolean }>
   ],
 };
 
+// ── PV6-03 · Services & results ───────────────────────────────────────────────────────────────────────
+// Every state the UI draws, so a DEMO_MODE page renders each one (the e2e + axe run drive these):
+//   cl-1 (Northwind Traders)  — all five services: figures up and down, flat, a null figure ("Not measured yet"),
+//                               no previous period ("Not enough data"), a target met and a target missed, a
+//                               website card with NO figures. Staff and the portal read the SAME payload.
+//   cl-harbour                — staff: one card and an `unavailable` service; the portal contact there is
+//                               project-scoped (canEdit=false), so the portal reads `visible: false`.
+//   everyone else             — no services (the empty area).
+const PERIOD = { from: "2026-09-01", to: "2026-09-30" };
+const kpi = (key: string, label: string, value: number | null, unit: ResultsKpi["unit"], previous: number | null, target: number | null = null): ResultsKpi => ({
+  key, label, value, unit, period: PERIOD, previous, target, asOf: value === null ? null : "2026-09-30",
+});
+
+function northwindServices(): ResultsServiceCard[] {
+  return [
+    {
+      service: "social", areaId: "mk_social", title: "Social media management", status: "active", since: "2026-03-01", clientVisible: true,
+      items: [{ label: "Instagram", detail: "@northwind.traders" }, { label: "LinkedIn", detail: "Northwind Traders" }],
+      kpis: [
+        kpi("followers", "Followers", 12400, "count", 11800, 15000),
+        kpi("engagement_rate", "Engagement rate", null, "percent", null),
+        kpi("reach", "Reach", 5200, "count", null, 4000),
+      ],
+    },
+    {
+      service: "search", areaId: "se", title: "Search engine optimisation", status: "active", since: "2026-02-01", clientVisible: true,
+      items: [{ label: "Tracked keywords", detail: "24" }],
+      kpis: [
+        kpi("avg_position", "Average ranking position", 4.2, "position", 4.2, 3),
+        kpi("organic_sessions", "Organic sessions", 8200, "count", 7900),
+        kpi("top10_share", "Keywords in the top 10", 62.5, "percent", 70, 60),
+      ],
+    },
+    {
+      service: "search_ads", areaId: "mk_paid", title: "Paid search", status: "paused", since: "2026-04-15", clientVisible: true,
+      items: [{ label: "Campaigns", detail: "3 running, 1 paused" }],
+      kpis: [
+        kpi("clicks", "Clicks", 3150, "count", 2900),
+        kpi("conversions", "Conversions", 0, "count", 12),
+        kpi("conversion_value", "Conversion value (USD)", 18450, "count", 21000),
+      ],
+    },
+    {
+      service: "analytics", areaId: "mk_analytics", title: "Site analytics", status: "setting_up", since: null, clientVisible: true,
+      items: [{ label: "Property", detail: "northwind.example" }],
+      kpis: [kpi("sessions", "Sessions", null, "count", null)],
+    },
+    {
+      service: "website", areaId: "mk_web", title: "Website", status: "active", since: "2026-01-10", clientVisible: true,
+      items: [{ label: "northwind.example", detail: "Built on WebDesk" }],
+      kpis: [],
+    },
+  ];
+}
+
+function resultsFor(clientId: string, portal: boolean, canEdit: boolean): BusinessResults {
+  const base = { clientId, generatedAt: "2026-10-13T09:00:00Z", unavailable: [] as BusinessResults["unavailable"] };
+  if (portal && !canEdit) return { ...base, visible: false, services: [] };
+  if (clientId === "cl-1") return { ...base, visible: true, services: northwindServices() };
+  if (clientId === "cl-harbour") {
+    return { ...base, visible: true, services: northwindServices().slice(0, 1), unavailable: ["analytics"] };
+  }
+  return { ...base, visible: true, services: [] };
+}
+
 export function clientCentreDemo(method: string, p: string, userId: string, body?: string): DemoResult | null {
   const m = method.toUpperCase();
 
   // ── Staff ──────────────────────────────────────────────────────────────────────────────────────
   if (p.match(/^\/api\/[^/]+\/clients\/centre$/) && m === "GET") {
     return ok(Object.keys(CLIENT_META).map((clientId) => toListItem(clientId, STORE[clientId] ?? emptyCentre())));
+  }
+  // PV6-03: Services & results, staff side.
+  const resM = p.match(/^\/api\/[^/]+\/clients\/([^/]+)\/centre\/results$/);
+  if (resM && m === "GET") {
+    if (!(resM[1] in CLIENT_META)) return err(404, "client not found");
+    return ok(resultsFor(resM[1], false, true));
   }
   // PV6-04: no demo client was converted from a lead, so there are never discovery answers to fill from.
   const discM = p.match(/^\/api\/[^/]+\/clients\/([^/]+)\/centre\/(discovery|fill-from-discovery)$/);
@@ -393,6 +464,12 @@ export function clientCentreDemo(method: string, p: string, userId: string, body
   if (p.match(/^\/api\/[^/]+\/portal\/centre$/) && m === "GET") {
     const scope = PORTAL_SCOPE[userId] ?? [];
     return ok(scope.map(({ clientId, canEdit }) => ({ clientId, clientName: CLIENT_META[clientId]?.name ?? clientId, canEdit })));
+  }
+  const portalResM = p.match(/^\/api\/[^/]+\/portal\/centre\/([^/]+)\/results$/);
+  if (portalResM && m === "GET") {
+    const scope = (PORTAL_SCOPE[userId] ?? []).find((x) => x.clientId === portalResM[1]);
+    if (!scope) return err(404, "not found");
+    return ok(resultsFor(portalResM[1], true, scope.canEdit));
   }
   const portalM = p.match(/^\/api\/[^/]+\/portal\/centre\/([^/]+)$/);
   if (portalM) {

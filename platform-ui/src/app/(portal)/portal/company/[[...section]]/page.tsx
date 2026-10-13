@@ -2,9 +2,11 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActivePortalCompany } from "@/lib/portal-company";
-import { listPortalCentres, getPortalCentre } from "@/lib/clientCentre-data";
+import { listPortalCentres, getPortalCentre, getPortalCentreResults } from "@/lib/clientCentre-data";
 import { patchPortalCentreAction } from "@/lib/clientCentreActions";
-import { legacySectionRedirect } from "@/lib/clientCentre";
+import { legacySectionRedirect, parseSectionRoute } from "@/lib/clientCentre";
+import { websiteEditorClients } from "@/lib/portalWebsiteAccess";
+import { PORTAL_WEBSITE_HREF } from "@/lib/portalNav";
 import { getActivePortalClient, switchPortalClient } from "@/lib/portalCentreClient";
 import { ClientCentreShell } from "@/components/client-centre/ClientCentreShell";
 import { PortalPageHead } from "@/components/portal/PortalBits";
@@ -54,6 +56,13 @@ export default async function PortalCompanyPage({
     );
   }
 
+  // PV6-03: ONE results read per render, and only where results are shown: Home (the per-area counts) and an
+  // area's results part. A website editor's website card links to the Website tab; everyone else reads it.
+  const route = parseSectionRoute(section);
+  const wantsResults = route.kind === "home" || (route.kind === "section" && route.part === "results");
+  const results = wantsResults ? await getPortalCentreResults(userId, tenant, clientId) : undefined;
+  const websiteHref = websiteEditorClients(me.roles, scope.map((s) => s.clientId)).includes(clientId) ? PORTAL_WEBSITE_HREF : null;
+
   return (
     <>
       <PortalPageHead eyebrow="Your business" title="Business" lead="How your business is set up — the details and connections our team uses to work on your account." />
@@ -63,6 +72,8 @@ export default async function PortalCompanyPage({
         segments={section ?? []}
         profile={profile}
         isPortal={true}
+        results={results}
+        websiteHref={websiteHref}
         patchAction={patchPortalCentreAction}
         switcherOptions={scope.map((s) => ({ clientId: s.clientId, clientName: s.clientName }))}
         onSwitchClient={switchPortalClient}

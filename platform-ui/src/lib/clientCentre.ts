@@ -284,10 +284,10 @@ export function sectionStats(
 //   `<areaId>/connections`   the area's Connections
 //   `<areaId>/settings`      OLD, redirects to `<areaId>`           (see `legacySectionRedirect`)
 //   `<areaId>/<n>`           OLD leaf page, redirects to `<areaId>`
-// PV6-03 adds `<areaId>/results` (Services & results); until then it is not linked and reads as Home.
+//   `<areaId>/results`       Services & results (PV6-03)
 
-/** The parts of an area page, in the order the strip shows them. PV6-03 adds "results". */
-export type SectionPart = "setup" | "connections";
+/** The parts of an area page, in the order the strip shows them. */
+export type SectionPart = "setup" | "connections" | "results";
 
 export type SectionRoute =
   | { kind: "home" }
@@ -296,6 +296,7 @@ export type SectionRoute =
 
 const COMPANY_SEGMENT = "company";
 const CONNECTIONS_SEGMENT = "connections";
+const RESULTS_SEGMENT = "results";
 const LEGACY_SETTINGS_SEGMENT = "settings";
 
 export function parseSectionRoute(segments: string[] | undefined): SectionRoute {
@@ -305,6 +306,7 @@ export function parseSectionRoute(segments: string[] | undefined): SectionRoute 
   const [sectionId, second] = segs;
   if (segs.length === 1) return { kind: "section", sectionId, part: "setup" };
   if (second === CONNECTIONS_SEGMENT && segs.length === 2) return { kind: "section", sectionId, part: "connections" };
+  if (second === RESULTS_SEGMENT && segs.length === 2) return { kind: "section", sectionId, part: "results" };
   return { kind: "home" };
 }
 
@@ -312,6 +314,7 @@ export function sectionHref(base: string, route: SectionRoute): string {
   if (route.kind === "home") return base;
   if (route.kind === "company") return `${base}/${COMPANY_SEGMENT}`;
   if (route.part === "setup") return `${base}/${route.sectionId}`;
+  if (route.part === "results") return `${base}/${route.sectionId}/${RESULTS_SEGMENT}`;
   return `${base}/${route.sectionId}/${CONNECTIONS_SEGMENT}`;
 }
 
@@ -507,4 +510,80 @@ export function centreChangeLabel(r: ClientCentreRegistry, path: string): string
 /** True for a change path whose value is an on/off toggle, so the History tab can say "on" and "off". */
 export function isAreaTogglePath(path: string): boolean {
   return path.startsWith("areas.") || path.startsWith("departments.");
+}
+
+// ── Services & results (PV6-03) ──────────────────────────────────────────────────────────────────────
+// The wire shape of `GET .../centre/results` (staff) and `GET .../portal/centre/:clientId/results`, mirrored from
+// `platform-nest/src/modules/clients/centre/results/types.ts` (BFF §25). Unknown is `null`, never 0.
+
+export type ServiceKey = "social" | "search" | "search_ads" | "analytics" | "website";
+
+export interface ResultsKpi {
+  key: string;
+  label: string;
+  value: number | null;
+  unit: "count" | "percent" | "position" | "ratio";
+  period: { from: string; to: string } | null;
+  previous: number | null;
+  target: number | null;
+  asOf: string | null;
+}
+
+export interface ResultsServiceCard {
+  service: ServiceKey;
+  areaId: string;
+  title: string;
+  status: "active" | "paused" | "setting_up" | "ended";
+  since: string | null;
+  items: { label: string; detail: string | null }[];
+  kpis: ResultsKpi[];
+  clientVisible: true;
+}
+
+export interface BusinessResults {
+  clientId: string;
+  generatedAt: string;
+  visible: boolean;
+  services: ResultsServiceCard[];
+  unavailable: ServiceKey[];
+}
+
+/** The cards that belong on a section's results part: its own, plus (for a top-level area) its sub-areas'. */
+export function cardsForSection(results: BusinessResults, section: RegistryArea | RegistrySection): ResultsServiceCard[] {
+  const ids = new Set<string>([section.id]);
+  for (const s of (section as RegistryArea).subAreas ?? []) ids.add(s.id);
+  return results.services.filter((c) => ids.has(c.areaId));
+}
+
+/** Services running (status "active") per top-level area id, from ONE results read. A card in a sub-area counts
+ *  for the area that owns it. */
+export function runningServicesByArea(r: ClientCentreRegistry, businessType: string, results: BusinessResults | null | undefined): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!results || !results.visible) return out;
+  for (const c of results.services) {
+    if (c.status !== "active") continue;
+    const owner = parentOf(r, businessType, c.areaId);
+    if (owner) out[owner.id] = (out[owner.id] ?? 0) + 1;
+  }
+  return out;
+}
+
+export type KpiChange =
+  | { direction: "up" | "down" | "flat"; delta: number }
+  | { direction: "none" };
+
+/** The change against the previous period. `none` ("not enough data") when either figure is unknown: a missing
+ *  `previous` is never read as 0, and an unmeasured `value` has no change to report. */
+export function kpiChange(k: Pick<ResultsKpi, "value" | "previous">): KpiChange {
+  if (k.value === null || k.previous === null) return { direction: "none" };
+  const delta = k.value - k.previous;
+  if (delta === 0) return { direction: "flat", delta: 0 };
+  return { direction: delta > 0 ? "up" : "down", delta };
+}
+
+/** Whether a measured figure meets its target; null when there is no target or no figure. For "position" a lower
+ *  figure is better (rank 3 beats rank 8). */
+export function targetMet(k: Pick<ResultsKpi, "value" | "target" | "unit">): boolean | null {
+  if (k.value === null || k.target === null) return null;
+  return k.unit === "position" ? k.value <= k.target : k.value >= k.target;
 }
