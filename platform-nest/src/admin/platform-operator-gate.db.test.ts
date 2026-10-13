@@ -1,6 +1,6 @@
 // PV1-05 — the Platform server gate (PV-D18 + PV-D20), narrowed by PV-D31 (D21, 2026-10-13).
 // `isPlatformOperator` (./elevated.ts) admits `platform_admin` at global scope OR the owner of the
-// OPERATOR ROOT (the root company with `companies.is_operator_root`, migration 202610132130), and it
+// OPERATOR ROOT (the root company with `companies.is_operator_root`, migration 202610132137), and it
 // guards the SYSTEM surfaces only: admin-systems.controller.ts, bot-admin.controller.ts,
 // observability.controller.ts.
 //

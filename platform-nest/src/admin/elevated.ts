@@ -39,7 +39,7 @@
 // gateway, our estate's Prometheus), not scoped to that owner's root. Under PV-D13 a subscriber's
 // organization is another root, so the day a customer root existed its owner would have reached our
 // whole deployment's consoles. Now only the owner of the root carrying `companies.is_operator_root`
-// (migration 202610132130; at most one live row, by a partial unique index; only a root, by a CHECK)
+// (migration 202610132137; at most one live row, by a partial unique index; only a root, by a CHECK)
 // passes. The operator root is DATA, never a hard-coded id (PV-D13). platform_admin is unchanged.
 // Owners of every other root get false here — and therefore no Platform area and no group-company
 // link authority — while their GROUP area (PV-D11/PV-D19) is untouched: that is a different gate.

@@ -42,7 +42,7 @@ build against.
 
 > **⚠ PV-D31 (2026-10-13): the owner arm above is limited to the OPERATOR root.** D21 ruled: only
 > owners of the operator's own root get the Platform area and system controls. The operator root is
-> named by ONE data marker, `companies.is_operator_root` (migration `202610132130`: at most one live
+> named by ONE data marker, `companies.is_operator_root` (migration `202610132137`: at most one live
 > row by a partial unique index, only a root by a CHECK, and no API route writes it; never a
 > hard-coded id, PV-D13). `isPlatformOperator` now admits `platform_admin` at global scope (unchanged)
 > **or** the `owner` role on a root company that carries the marker; the owner of any other root (a
