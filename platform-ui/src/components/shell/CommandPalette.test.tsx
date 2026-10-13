@@ -160,7 +160,7 @@ describe("CommandPalette — search field handover (DW-2c)", () => {
     order.length = 0;
     renderPalette();
     window.dispatchEvent(new CustomEvent("gaiada:palette:open", { detail: { onClose: () => order.push("closed") } }));
-    await waitFor(() => screen.getByRole("dialog"));
+    await waitFor(() => expect(screen.getByRole("combobox")).toHaveFocus());
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
     expect(order).toEqual(["closed", "focus"]);
     trigger.remove();

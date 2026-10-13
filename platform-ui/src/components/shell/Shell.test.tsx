@@ -9,7 +9,7 @@ import type { Me } from "@/lib/platform";
 // choice Shell makes between the classic and the workspace parts.
 vi.mock("next/navigation", () => ({ usePathname: () => "/", useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/lib/prefs", () => ({ DEFAULT_PREFS: { density: "comfortable", width: "standard", theme: "auto", shell: "classic" } }));
-vi.mock("@/lib/companyContext", () => ({ activeCompany: () => null }));
+vi.mock("@/lib/companyContext", async (orig) => ({ ...(await orig<typeof import("@/lib/companyContext")>()), activeCompany: () => null }));
 vi.mock("@/lib/palette", () => ({ buildNavEntries: () => [], buildDeptEntries: () => [] }));
 vi.mock("./nav", () => ({ navFor: () => [] }));
 vi.mock("./Sidebar", () => ({ Sidebar: () => <aside data-testid="classic-side" /> }));
