@@ -42,6 +42,8 @@ describe.skipIf(!TEST_URL)("client-contacts HTTP surface (W0-4)", () => {
   let projectA: string;
   let projectB: string;
   let otherProjectId: string;
+  let siblingClientId: string;
+  let siblingProjectId: string;
 
   beforeAll(async () => {
     await initTestDb();
@@ -68,9 +70,13 @@ describe.skipIf(!TEST_URL)("client-contacts HTTP surface (W0-4)", () => {
 
     clientId = await createClient(co, "Bali Beach Resort");
     otherClientId = await createClient(other, "Rival Client");
-    projectA = await createProject(co, "Website Rebuild");
-    projectB = await createProject(co, "SEO Retainer");
+    // PV4-13: a contact's project must belong to the client the contact is invited to.
+    projectA = await createProject(co, "Website Rebuild", undefined, clientId);
+    projectB = await createProject(co, "SEO Retainer", undefined, clientId);
     otherProjectId = await createProject(other, "Rival Project");
+    // A second client in the SAME tenant, with its own project (the cross-client case below).
+    siblingClientId = await createClient(co, "Sibling Client");
+    siblingProjectId = await createProject(co, "Sibling Project", undefined, siblingClientId);
 
     app = await buildApp();
   });
@@ -142,6 +148,26 @@ describe.skipIf(!TEST_URL)("client-contacts HTTP surface (W0-4)", () => {
     expect(r.statusCode).toBe(404);
     const rows = await adminPool().query(`SELECT 1 FROM client_contacts WHERE tenant_id = $1 AND project_id = $2`, [co, otherProjectId]);
     expect(rows.rowCount).toBe(0);
+  });
+
+  it("PV4-13: a project of ANOTHER client in the SAME tenant is refused as not-found (404), and nothing is created", async () => {
+    const r = await app.inject({
+      method: "POST",
+      url: `/api/${co}/clients/${clientId}/contacts`,
+      headers: asUser(manager),
+      payload: { email: "cross-client-project@bali-resort.test", projectId: siblingProjectId },
+    });
+    expect(r.statusCode).toBe(404);
+    const rows = await adminPool().query(`SELECT 1 FROM client_contacts WHERE tenant_id = $1 AND project_id = $2`, [co, siblingProjectId]);
+    expect(rows.rowCount).toBe(0);
+    // The same project is accepted for the client it belongs to (the 404 above is about ownership, not the id).
+    const ok = await app.inject({
+      method: "POST",
+      url: `/api/${co}/clients/${siblingClientId}/contacts`,
+      headers: asUser(manager),
+      payload: { email: "own-client-project@bali-resort.test", projectId: siblingProjectId },
+    });
+    expect(ok.statusCode).toBe(201);
   });
 
   // ---- re-invite adopts, never duplicates ----
