@@ -981,7 +981,7 @@ async function reconcileByReading(
  * could not be read. Reads only: a WS4 write is never resent. The previous value is not recoverable from a read, so a
  * reconciled success reports `previousDomain: null`.
  */
-async function reconcileSetDomainByReading(
+export async function reconcileSetDomainByReading(
   client: WebdeskControlClient,
   tenantId: string,
   a: Extract<ParsedArgs, { command: "site.setDomain" }>,
