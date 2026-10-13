@@ -39,7 +39,7 @@ import { takeProvisionLock } from "./provisioning.service";
 import { resolveProvisionedRepo } from "./provisioned-repo";
 import type { SnapshotFacts } from "./scaffold-commit";
 import {
-  DeployGrantRefusal, grantDeploySecrets, parseDeploySecretNames, parseRevokeReason, revokeDeploySecrets,
+  DeployGrantRefusal, SITE_SECRET_NOT_DERIVABLE, grantDeploySecrets, parseDeploySecretNames, parseRevokeReason, revokeDeploySecrets,
   type DeployGrantDeps, type DeployGrantResult, type DeployGrantRow, type DeployGrantState, type DeployGrantTx,
   type DeployRevokeResult, type GrantClaim, type RegistryFacts, type SecretOutcome,
 } from "./deploy-grant";
@@ -114,8 +114,11 @@ function toRow(r: DeployGrantDbRow): DeployGrantRow {
 export interface DeployGrantDto {
   state: DeployGrantState | null;
   secretNames: string[];
-  /** This site's per-site deploy secret (derived; the org owner creates it by hand with this exact name). */
+  /** This site's per-site deploy secret (derived; the org owner creates it by hand with this exact name). Null until a grant
+   *  has read the repo: the name ends in the repository's GitHub id. */
   siteSecretName: string | null;
+  /** Why `siteSecretName` is null (SITE_SECRET_NOT_DERIVABLE), else null: the console shows it instead of a made-up name. */
+  siteSecretNote: string | null;
   /** Names the owner has not created yet: the grant completes on the next run once they exist. */
   pendingNames: string[];
   snapshotId: string | null;
@@ -133,6 +136,7 @@ function toDto(r: DeployGrantDbRow): DeployGrantDto {
     state: r.deploy_grant_state,
     secretNames: r.deploy_grant_secret_names ?? [],
     siteSecretName: r.deploy_grant_site_secret_name,
+    siteSecretNote: r.deploy_grant_site_secret_name ? null : SITE_SECRET_NOT_DERIVABLE,
     pendingNames: r.deploy_grant_pending_names ?? [],
     snapshotId: r.deploy_grant_snapshot_id,
     repositoryId: repoIdOf(r.deploy_grant_repository_id),
@@ -440,6 +444,8 @@ export interface DeployGrantSummary {
   outcome: DeployGrantResult["outcome"] | "refused";
   state: DeployGrantState | null;
   siteSecretName: string | null;
+  /** Why `siteSecretName` is null (SITE_SECRET_NOT_DERIVABLE), else null. */
+  siteSecretNote: string | null;
   secrets: SecretOutcome[];
   /** Secret names the owner has not created yet. */
   pending: string[];
@@ -453,10 +459,10 @@ export interface DeployGrantSummary {
 export async function followScaffoldCommit(principal: Principal, tenantId: string, siteId: string): Promise<DeployGrantSummary> {
   try {
     const r = await grantDeployForSite(principal, tenantId, siteId, "scaffold");
-    return { outcome: r.outcome, state: r.state, siteSecretName: r.siteSecretName, secrets: r.secrets, pending: r.pending, error: r.error };
+    return { outcome: r.outcome, state: r.state, siteSecretName: r.siteSecretName, siteSecretNote: r.siteSecretNote, secrets: r.secrets, pending: r.pending, error: r.error };
   } catch (err) {
     const now = await readDeployGrant(tenantId, siteId).catch(() => null);
-    const base = { state: now?.state ?? null, siteSecretName: now?.siteSecretName ?? null, secrets: [], pending: now?.pendingNames ?? [] };
+    const base = { state: now?.state ?? null, siteSecretName: now?.siteSecretName ?? null, siteSecretNote: now ? now.siteSecretNote : SITE_SECRET_NOT_DERIVABLE, secrets: [], pending: now?.pendingNames ?? [] };
     if (err instanceof DeployGrantRefusal) return { outcome: "refused", ...base, error: err.rowToken };
     if (err instanceof ForbiddenException) return { outcome: "refused", ...base, error: "forbidden" };
     logger.error(`deploy grant after the scaffold commit of ${siteId} failed: ${err instanceof Error ? err.message : String(err)}`);

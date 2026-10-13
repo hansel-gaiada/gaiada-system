@@ -1,7 +1,8 @@
 # `_deploy`: the WebDesk site deploy transport (M6-P6e)
 
-**Status: IN PROGRESS.** Built and driven on `sumopod` against real daemons in containers (see "The harness"). It is
-**not wired into any template yet**: that is M6-P6f. Nothing here has run against Hostinger or `delphi`/`helios`.
+**Status: IN PROGRESS.** Built and driven on `sumopod` against real daemons in containers (see "The harness"). Wired into the
+three templates' `site.yml` by M6-P6f (see "The deploy job" below). Nothing here has run against Hostinger or `delphi`/`helios`,
+and no workflow run has ever executed on GitHub.
 
 The script a site repo's CI **deploy job** runs to put a build on a host over **SFTP or explicit-TLS FTPS**, as
 `docs/plans/2026-10-11-webdesk-m6-plan.md` §6.3 describes. The ERP never runs it and never holds its credential
@@ -11,7 +12,16 @@ The script a site repo's CI **deploy job** runs to put a build on a host over **
 |---|---|
 | `deploy.sh` | the transport: modes `deploy` (default) and `rollback` |
 | `make-manifest.sh` | the manifest generator the **build** job runs: `make-manifest.sh dist > manifest.tsv` |
+| `secret-name.sh` | the per-site secret's name, `WEBDESK_DEPLOY_<SLUG>_<ENV>_<REPOID>` (M6-P6f) |
+| `deploy-from-secret.sh` | the deploy job's one call: the per-site secret's JSON in, `deploy.sh` out; refuses what it should (M6-P6f) |
+| `plan.sh` | the build job's decision: which trigger deploys what, and where (M6-P6f) |
+| `write-stamp.sh` | writes the build stamp `webdesk-build.json`, with the `buildId` `deploy.sh` reads (M6-P6f) |
+| `secret-name.fixture.json`, `test-secret-name.sh` | ONE fixture for the name, tested here and in `platform-nest` (`deploy-grant.unit.test.ts`) |
+| `test-scripts.sh` | offline tests of `plan.sh`, `write-stamp.sh`, `deploy-from-secret.sh` (a stub `deploy.sh`; no host) |
 | `harness/` | the compose harness and the cases that prove it (run on `sumopod` only) |
+
+A site repo has no `_deploy/`: `node webdesk/templates/sync-deploy-scripts.mjs` copies the run-time scripts into each template's
+`.webdesk/deploy/` (and `--check`, part of `npm test` in `webdesk/`, fails on drift). The workflows call them from there.
 
 ## Why bash + lftp
 
@@ -51,9 +61,17 @@ Runner needs: `bash`, `lftp`, `openssh-client` (SFTP), `openssl` (FTPS pin), `cu
 | `DEPLOY_PARALLEL`, `DEPLOY_RATE_LIMIT` | parallel transfers (default 2); upload bytes per second per connection (0 = off) |
 | `DEPLOY_MODE=rollback`, `DEPLOY_ROLLBACK_TO` | roll back instead of deploying; optionally name the release (default: the newest older one) |
 
-Note the stamp: the WSK-60 stamp today carries `source`, `pulledAt`, `maxUpdatedAt`; this transport needs a **build id in it**
-(`buildId`), which the build job must write (M6-P6f). The script refuses an artifact whose own stamp does not already
+Note the stamp: the WSK-60 stamp carries `source`, `pulledAt`, `maxUpdatedAt`; this transport needs a **build id in it**
+(`buildId`), which the build job writes (`write-stamp.sh`, M6-P6f). The script refuses an artifact whose own stamp does not already
 carry the expected id.
+
+**Two inputs added by M6-P6f, for a deploy into a subdirectory of an existing docroot (wp):** `DEPLOY_DOCROOT_PARENT` (the directory
+that holds the docroot, when it is not `DEPLOY_REMOTE_BASE` itself; default: the base) and `DEPLOY_CREATE_BASE=yes` (create the base
+directory, its last component only, when it does not exist). With them `DEPLOY_DOCROOT` is the theme's name,
+`DEPLOY_DOCROOT_PARENT` is `<wp root>/wp-content/themes`, and `DEPLOY_REMOTE_BASE` (releases and the lock) is
+`<wp root>/wp-content/.webdesk-deploy`, a hidden directory WordPress never scans: WordPress also looks one directory below `themes/`
+for themes, so releases kept inside `themes/` would show up as installable themes. The swap is the same two renames, in two
+directories of one host.
 
 Exit codes: `0` ok, `2` refused before touching the host (configuration, pinning, a bad artifact), `3` lock held,
 `4` verification refused, `5` activation failed and was undone, `6` stamp mismatch and was undone, `7` the host
@@ -147,3 +165,86 @@ B's root is refused by the daemon; 5 an unpinned or wrong host key, a hijacking 
 plain-only server and a tampered artifact are each refused; 6 the canary credential is in no output and no daemon log; 7 two simultaneous deploys; 8 the
 last three releases kept and one rollback; 9 a docroot left missing by a kill between the two renames is restored by the next run. Test hooks (`DEPLOY_TEST_HOOK_AFTER_UPLOAD`, `DEPLOY_TEST_FAIL_ACTIVATION`) exist only for this harness: they
 need `DEPLOY_ALLOW_TEST_HOOKS=I-am-the-harness` and are refused on a GitHub runner.
+
+**M6-P6f cases** (`P6E_CASES=p6f bash run.sh`, a minute or two; `P6E_CASES=all` runs both sets): through `deploy-from-secret.sh`
+and the real `deploy.sh`, over SFTP and FTPS. F1 a static deploy driven only by the per-site secret JSON, the stamp read back, a
+manifest that is not the pinned one refused. F2 a **wp deploy on a fake WordPress tree** (core, `wp-config.php`, uploads, two plugins,
+two themes, one of them an old hand-installed `gaiada-webdesk`): a digest over every file outside the theme is unchanged after the
+deploy, a second deploy and a rollback (with a negative control proving the digest can fail), `themes/` holds only the two themes,
+and the old theme is parked as a release in `wp-content/.webdesk-deploy/releases`. F3 an artifact that also holds `wp-config.php`, a
+plugin, an upload or an `mu-plugin`, a manifest that is not the pinned one, or a file the manifest does not list, is refused before
+the host is touched. F4 a staging secret on a production run, plain ftp and a secret with no pinned identity are refused. F5 the
+canary credentials are in none of the captured outputs.
+
+## The per-site deploy secret (M6-P6f)
+
+One org Actions secret per site and environment, created BY HAND by an org owner from the vault record (WSK-D29: the ERP never
+writes it), visible to exactly one repository (M6-P4g grants it). Its **name** is derived, never chosen:
+
+    WEBDESK_DEPLOY_<SLUG>_<ENV>_<REPOID>      e.g. WEBDESK_DEPLOY_ACME_SITE_STAGING_123456789
+
+`<SLUG>` is the repo's name, `<ENV>` the environment (`staging`, `production`, `development`), each uppercased with every character
+outside `A-Z0-9` replaced by `_`; `<REPOID>` is the GitHub repository's numeric id (`github.repository_id`). The ERP shows the owner
+the exact name (`deployGrant.siteSecretName`, and the pending list); until the first grant has read the repo it shows no name and says
+why (`siteSecretNote`). The workflow derives the same name with `secret-name.sh`; both are tested against `secret-name.fixture.json`.
+
+Its **content** is one JSON object. Paste it MINIFIED on one line (GitHub warns that structured secrets can fail to be masked
+line by line; the deploy job also masks the whole compact JSON, the password and every line of the key):
+
+| Field | Type | Meaning |
+|---|---|---|
+| `version` | `1` | required |
+| `environment` | `"staging"`, `"production"` or `"development"` | required; must equal the environment of the run (a staging secret never deploys production) |
+| `transport` | `"sftp"` or `"ftps"` | required; plain ftp is refused |
+| `host` | string | required; maps to `DEPLOY_HOST` |
+| `port` | integer | optional; default 22 (sftp) or 21 (ftps); `DEPLOY_PORT` |
+| `user` | string | required; the per-site, docroot-locked principal; `DEPLOY_USER` |
+| `password` | string | one of `password` / `privateKey`; `DEPLOY_PASSWORD` |
+| `privateKey` | string | sftp only; the key's contents; `DEPLOY_SSH_KEY` |
+| `knownHosts` | string | **required for sftp**: the pinned host key line(s), `[host]:port` form for a non-22 port; `DEPLOY_SFTP_KNOWN_HOSTS` |
+| `certSha256` | string | ftps: the pinned leaf fingerprint (colons allowed); `DEPLOY_FTPS_CERT_SHA256` |
+| `caPem` | string | ftps: the pinned CA (or the self-signed server certificate) as PEM; `DEPLOY_FTPS_CA_PEM`. **One of `certSha256` / `caPem` is required for ftps** |
+| `checkHostname` | boolean | ftps, optional, default true; `DEPLOY_FTPS_CHECK_HOSTNAME` |
+| `remoteBase` | string | required. **static:** the parent of the docroot (it also holds `releases/` and the lock), `DEPLOY_REMOTE_BASE`. **wp:** the WordPress root (the directory that holds `wp-content/`) |
+| `docroot` | string | required for **static** (the docroot's name inside `remoteBase`, `DEPLOY_DOCROOT`); ignored for wp (the theme is the docroot) |
+| `siteUrl` | string | required; `https://` origin (a path is allowed, no query) the site is served from. The stamp is read from `<siteUrl>/webdesk-build.json` (static) or `<siteUrl>/wp-content/themes/<theme>/webdesk-build.json` (wp): `DEPLOY_STAMP_URL` |
+
+Any other field is refused (a typo is caught, not ignored), and so is a missing or mistyped one; the message names the FIELD, never
+a value. Example (a placeholder, not a credential):
+
+    {"version":1,"environment":"staging","transport":"sftp","host":"ssh.example.com","port":65002,"user":"u123_acme_stg","password":"...","knownHosts":"[ssh.example.com]:65002 ssh-ed25519 AAAA...","remoteBase":"/home/u123/domains/stg.acme.example","docroot":"public_html","siteUrl":"https://stg.acme.example"}
+
+## The deploy job (M6-P6f)
+
+`.github/workflows/site.yml` in each template. One workflow, two triggers, two jobs (fullstack has a third, `deploy-api`).
+
+| Trigger | Result |
+|---|---|
+| `push` to the default branch | deploys **staging** |
+| `push` to any other branch or tag, `pull_request` | builds and verifies, **deploys nothing** |
+| `workflow_dispatch` `kind=publish` or `rebuild` (the ERP's WSK-60 chokepoint: inputs `approval_id`, `kind`, `published_at`) | rebuilds **staging** |
+| `workflow_dispatch` `environment=production` + `kind=promote` + an `approval_id` | deploys **production** (P6h makes the ERP send it, behind a HIGH approval) |
+| any other dispatch (no approval id, production from a publish, a promote that does not say production, a non-default ref) | **refused**, never quietly downgraded |
+
+`build` holds no deploy credential (static and fullstack: only the content read key; wp: nothing). It builds, writes the stamp
+(`write-stamp.sh`: `buildId` = `<run id>-<attempt>-<sha12>`, plus the WSK-60 fields), makes the manifest and uploads both
+(`actions/upload-artifact`, hidden files included). `deploy` (`needs: build`, a `concurrency` group per repository and environment,
+`cancel-in-progress: false`) checks `WEBDESK_DEPLOY_GRANT`, installs `lftp` (the only package manager call, before any secret is
+read), downloads the artifact, derives the per-site secret's name, selects that secret out of `toJSON(secrets)` with `jq`, fails
+with **"the per-site deploy secret <name> does not exist yet or is not granted to this repo; see the console's pending list"** if it
+is absent, and runs `deploy-from-secret.sh`. Per kind:
+
+- **static:** the build's `dist/` (with the stamp at its root) is the docroot content.
+- **wp:** the artifact is the repo-relative tree `wp-content/themes/<theme>/…` and **nothing else**; `deploy-from-secret.sh` refuses
+  (exit 2, before any connection) a manifest that is not the one the build job pinned, a tree that differs from its manifest, and any
+  path outside the theme. Only the theme directory is swapped; `wp-config.php`, `uploads/`, other plugins and themes are never touched.
+- **fullstack:** the static export of `apps/web` (`WEBDESK_STATIC_EXPORT=1`, `apps/web/out`) deploys like static. `deploy-api` fails
+  with "the fullstack API deploy to a Node host is M6-P6l, not built yet" and uploads nothing. A scaffolded page that renders per
+  request (`export const dynamic = "force-dynamic"`, which `code.scaffold`'s item and listing pages do today) cannot be exported:
+  `next build` fails and so does the build job, until the composer emits statically exportable pages.
+
+Limits, said plainly: a push while a deploy runs waits, and GitHub keeps at most one waiting run per group (a newer waiting run
+replaces an older waiting one, so two approved dispatches in quick succession can lose the first; the ERP sees that as `unverified`).
+The template build reads content through the vendored SDK and does not enumerate it, so the stamp's `maxUpdatedAt`, `itemCount` and
+`sourceSha256` are `null` and its `pulledAt` is when the build began (see `write-stamp.sh`). Anyone who can push a workflow or the
+scripts to a repo that holds the secret can print it: the per-site principal, locked to one docroot, is what bounds that.

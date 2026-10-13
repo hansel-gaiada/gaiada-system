@@ -46,6 +46,14 @@ const APPROVED_EGRESS: Record<string, string> = {
   "webdesk-preview.ts":
     "the staging site's preview page: HEAD https://<staging environment domain>/preview/ (a public hostname from WebDesk's "
     + "own tenant.list, never from a request; no redirects, 5 s timeout, no credential, cached 5 min).",
+  // M6-P6i — the fifth far side, and the only one that is not HTTP at all: a READ-ONLY DNS lookup (A, AAAA, CNAME) of a registry
+  // row's own domain through node:dns/promises, so the console can say whether the domain points at its host yet (`pending` or
+  // `pointing`). No DNS provider API, no DNS credential, no record is ever written (O-12, WSK-D43/D61), and it connects to nothing it
+  // resolves, so a name in produces strings out: there is no address an answer can steer a request at. The domain is a value already
+  // validated and stored on the registry, never a request value. config.webdevDns only; off under vitest.
+  "domain-dns-lookup.ts":
+    "read-only resolver lookup of the registry row's own domain: node:dns/promises Resolver resolve4 / resolve6 / resolveCname "
+    + "(config.webdevDns timeout only). No DNS provider API, no credential, no write; connects to nothing it resolves; off under vitest.",
 };
 
 /** Namespaces that would indicate cross-contamination if this module referenced them. */
@@ -94,7 +102,12 @@ function networkLines(text: string): number[] {
     const code = line.replace(/\/\/.*$/, "").replace(/typeof\s+fetch/g, "");
     // `https?.request(` / `.get(` added with WSK-63b: an mTLS client cannot use fetch (undici takes no
     // node:https Agent), and a scanner that only knows `fetch` would have waved it through unseen.
-    if (/\b\w*[fF]etch\w*\s*\(/.test(code) || /\?\?\s*fetch\b/.test(code) || /\bhttps?\.(request|get)\s*\(/.test(code)) lines.push(i + 1);
+    // `resolver.resolve4(` / `resolve6(` / `resolveCname(` added with M6-P6i: a DNS lookup is outbound traffic too, and a scanner that
+    // only knows `fetch` and `http(s).request` would have waved a resolver through unseen. `new Resolver(` is matched for the same reason.
+    if (
+      /\b\w*[fF]etch\w*\s*\(/.test(code) || /\?\?\s*fetch\b/.test(code) || /\bhttps?\.(request|get)\s*\(/.test(code) ||
+      /\.resolve(?:4|6|Cname|Any|Txt|Mx|Ns|Srv)\s*\(/.test(code) || /\bnew\s+Resolver\s*\(/.test(code) || /\bdns(?:Promises)?\.(?:lookup|resolve\w*)\s*\(/.test(code)
+    ) lines.push(i + 1);
   });
   return lines;
 }

@@ -40,6 +40,11 @@ describe("buildShellModel: a placed Web Dev employee in an agency company", () =
     expect(web).toMatchObject({ key: "web-dev", label: "Web Dev", kind: "department", deptId: "d-web", home: true, lead: false });
   });
 
+  it("offers its own create action first, made concrete (DW-2f)", () => {
+    // The gate-free "prd" action, with {dept} filled from the fixture's department id d-web.
+    expect(web.creates).toEqual([{ label: "New briefing", href: "/departments/d-web/prd" }]);
+  });
+
   it("draws the four blocks of the Web Dev sidebar (plan §2.2)", () => {
     expect(keys(web.rows.top)).toEqual(["overview", "assistant"]);
     expect(keys(web.rows.work)).toEqual(["pm", "build", "run", "website", "requests", "tools"]);
@@ -92,6 +97,10 @@ describe("buildShellModel: an unplaced root owner", () => {
     expect(keys(model(operatorOwner, "co-root", agencyTree()).admin)).toEqual(["settings", "group", "platform"]);
   });
 
+  it("gives the Office of the GM no create action (DW-2f)", () => {
+    expect(mod.workspaces[0].creates).toEqual([]);
+  });
+
   it("lists the GM once, as theirs", () => {
     expect(mod.workspaces.filter((w) => w.key === "gm")).toHaveLength(1);
   });
@@ -114,6 +123,11 @@ describe("buildShellModel: HR staff with no HR node in the org tree", () => {
     // Analytics keeps HR's own tab and loses the {dept} Work tab.
     expect(hr.rows.performance.find((r) => r.key === "analytics")?.tabs.map((t) => t.href)).toEqual(["/hr/analytics"]);
     expectNothingPlanned(hr);
+  });
+
+  it("offers HR's New hire only if its gate allows it (gate: module hr, HR_ON)", () => {
+    // The agency fixture company has no enabledModules, so moduleOn("hr") is true and the action is offered.
+    expect(hr.creates).toEqual([{ label: "New hire", href: "/hr/onboarding" }]);
   });
 
   it("does not list HR a second time among the departments", () => {

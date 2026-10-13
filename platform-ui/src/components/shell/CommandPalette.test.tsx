@@ -167,14 +167,19 @@ describe("CommandPalette — search field handover (DW-2c)", () => {
   });
 
   it("Enter with nothing highlighted goes to /search?q= with the text, encoded", async () => {
-    renderPalette();
+    // No entries, so nothing can be highlighted whatever the timing; and Enter waits until the handed-over
+    // text is in the field (it flaked in another branch's CI when it pressed Enter on the dialog's first frame).
+    renderPalette({ entries: [] });
     window.dispatchEvent(new CustomEvent("gaiada:palette:open", { detail: { query: "zzz & co" } }));
-    await waitFor(() => screen.getByRole("dialog"));
-    const input = screen.getByRole("combobox");
+    const input = await waitFor(() => {
+      const el = screen.getByRole("combobox") as HTMLInputElement;
+      expect(el.value).toBe("zzz & co");
+      return el;
+    });
     expect(input).not.toHaveAttribute("aria-activedescendant");
     fireEvent.keyDown(input, { key: "Enter" });
     expect(push).toHaveBeenCalledWith("/search?q=zzz%20%26%20co");
-    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
   it("Enter with nothing highlighted and nothing typed does nothing", async () => {

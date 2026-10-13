@@ -6,8 +6,11 @@
   "scripts": {
     "migrate": "node migrations/migrate.mjs",
     "lint:migrations": "node scripts/lint-migration-rls.mjs",
-    "test": "npm run lint:migrations && npm run check:rls:selftest && npm run check:wp-template",
+    "test": "npm run lint:migrations && npm run check:rls:selftest && npm run check:wp-template && npm run check:deploy-copies && npm run check:workflows && npm run test:deploy-scripts",
     "check:wp-template": "node templates/check-wp-theme.mjs",
+    "check:deploy-copies": "node templates/sync-deploy-scripts.mjs --check",
+    "check:workflows": "node templates/check-workflows.mjs",
+    "test:deploy-scripts": "bash templates/_deploy/test-secret-name.sh && bash templates/_deploy/test-scripts.sh",
     "check:rls": "node scripts/check-rls-integrity.mjs",
     "check:rls:selftest": "node scripts/check-rls-integrity.mjs --selftest"
   },

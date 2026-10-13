@@ -12,8 +12,12 @@
 //      also through the REAL http client's 403 handling, never a generic error;
 //   5. a secret that does not exist, or is visible to all repos, is reported per name and never written through;
 //   6. the automatic trigger never undoes an operator's revoke;
-//   7. (M6-P6a amendment) the per-site secret's name is derived from the site alone, cannot collide across two sites,
-//      waits as `pending` until the owner creates it, and is only ever granted to its own site's repo.
+//   7. (M6-P6a amendment, M6-P6f naming) the per-site secret's name is derived from the resolved repo (its name, the
+//      environment and its GitHub id), cannot collide across two sites, matches the one fixture the site workflow's
+//      shell derivation is also tested against, waits as `pending` until the owner creates it, and is only ever granted
+//      to its own site's repo.
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 import { GithubApiError } from "../../core/github/errors";
 import { FakeGithub } from "../../core/github/git-data.testkit";
@@ -23,7 +27,8 @@ import type { GitCaller } from "../../core/github/git-data";
 import { getFileAtRef, isValidSecretName } from "../../core/github/org-secrets";
 import type { SnapshotFacts } from "./scaffold-commit";
 import {
-  DeployGrantRefusal, grantDeploySecrets, parseDeploySecretNames, parseRevokeReason, revokeDeploySecrets, siteDeploySecretName,
+  DeployGrantRefusal, SITE_SECRET_NOT_DERIVABLE, grantDeploySecrets, parseDeploySecretNames, parseRevokeReason, revokeDeploySecrets,
+  siteDeploySecretName,
   type DeployGrantDeps, type DeployGrantRow, type DeployGrantTx, type RegistryFacts,
 } from "./deploy-grant";
 import { classifyDeployGrantError } from "./deploy-grant.service";
@@ -38,8 +43,10 @@ const SITE = "33333333-3333-4333-8333-333333333333";
 const ACTOR = "44444444-4444-4444-8444-444444444444";
 const GRANT = "WEBDESK_DEPLOY_GRANT";
 const KEY = "WEBDESK_DEPLOY_KEY";
-/** This site's own per-site deploy secret (slug acme-site, environment staging). */
-const SITE_SECRET = siteDeploySecretName({ id: SITE, slug: "acme-site", environment: "staging" });
+/** The fake repo's GitHub id: the per-site name ends in it. */
+const REPO_ID = new FakeGithub("acme-org", "acme-site").repoId;
+/** This site's own per-site deploy secret (repo acme-site, environment staging, the fake repo's id). */
+const SITE_SECRET = siteDeploySecretName({ slug: "acme-site", environment: "staging", repositoryId: REPO_ID });
 
 const lockText = (over: Partial<Record<string, string>> = {}): string =>
   JSON.stringify(
@@ -502,33 +509,77 @@ describe("the revoke", () => {
   });
 });
 
-describe("the per-site secret's name (M6-P6a amendment)", () => {
-  const A = "0192f0aa-1111-7000-8000-00000000000a";
-  const B = "0192f0aa-1111-7000-8000-00000000000b";
+describe("the per-site secret's name (M6-P6a amendment; M6-P6f: it ends in the repository id)", () => {
+  // ONE fixture for both sides: the site workflow's secret-name.sh is run against the same file by test-secret-name.sh.
+  const FIXTURE = resolve(__dirname, "../../../../webdesk/templates/_deploy/secret-name.fixture.json");
+  const fixture = JSON.parse(readFileSync(FIXTURE, "utf8")) as {
+    cases: Array<{ slug: string; environment: string; repositoryId: number; name: string }>;
+    refusals: Array<{ why: string; slug: string; environment: string; repositoryId: unknown }>;
+  };
 
-  it("is WEBDESK_DEPLOY_<SLUG>_<ENV>_<H8>: uppercased, non-alphanumerics to _, 8 hex of the site id; deterministic", () => {
-    const n = siteDeploySecretName({ id: A, slug: "acme-site", environment: "staging" });
-    expect(n).toMatch(/^WEBDESK_DEPLOY_ACME_SITE_STAGING_[0-9A-F]{8}$/);
-    expect(siteDeploySecretName({ id: A.toUpperCase(), slug: "acme-site", environment: "staging" })).toBe(n);
-    expect(isValidSecretName(n)).toBe(true);
-    expect(isValidSecretName(siteDeploySecretName({ id: A, slug: "a".repeat(40), environment: "development" }))).toBe(true);
-    expect(siteDeploySecretName({ id: A, slug: "acme-site", environment: "production" })).not.toBe(n);
+  it("matches every case of the shared fixture, byte for byte", () => {
+    expect(fixture.cases.length).toBeGreaterThan(5);
+    for (const c of fixture.cases) {
+      expect(siteDeploySecretName({ slug: c.slug, environment: c.environment, repositoryId: c.repositoryId }), JSON.stringify(c)).toBe(c.name);
+      expect(isValidSecretName(c.name)).toBe(true);
+    }
   });
 
-  it("CANNOT COLLIDE across two sites in one company: slugs differing only by - vs _ map to one readable part, the hash keeps them apart", () => {
-    const dash = siteDeploySecretName({ id: A, slug: "a-b", environment: "staging" });
-    const under = siteDeploySecretName({ id: B, slug: "a_b", environment: "staging" });
-    expect(dash.replace(/_[0-9A-F]{8}$/, "")).toBe(under.replace(/_[0-9A-F]{8}$/, "")); // the readable part DOES collide
+  it("refuses every refusal of the shared fixture (what the shell derivation refuses)", () => {
+    expect(fixture.refusals.length).toBeGreaterThan(5);
+    for (const r of fixture.refusals) {
+      expect(() => siteDeploySecretName({ slug: r.slug, environment: r.environment, repositoryId: r.repositoryId as number }), r.why).toThrow();
+    }
+  });
+
+  it("is WEBDESK_DEPLOY_<SLUG>_<ENV>_<REPOID>: uppercased, non-alphanumerics to _, the GitHub repository id last; deterministic", () => {
+    const n = siteDeploySecretName({ slug: "acme-site", environment: "staging", repositoryId: 123 });
+    expect(n).toBe("WEBDESK_DEPLOY_ACME_SITE_STAGING_123");
+    expect(siteDeploySecretName({ slug: "acme-site", environment: "staging", repositoryId: 123 })).toBe(n);
+    expect(isValidSecretName(siteDeploySecretName({ slug: "a".repeat(100), environment: "development", repositoryId: 9007199254740991 }))).toBe(true);
+    expect(siteDeploySecretName({ slug: "acme-site", environment: "production", repositoryId: 123 })).not.toBe(n);
+  });
+
+  it("CANNOT COLLIDE across two sites: slugs differing only by - vs _ map to one readable part, the repository id keeps them apart", () => {
+    const dash = siteDeploySecretName({ slug: "a-b", environment: "staging", repositoryId: 11 });
+    const under = siteDeploySecretName({ slug: "a_b", environment: "staging", repositoryId: 12 });
+    expect(dash.replace(/_\d+$/, "")).toBe(under.replace(/_\d+$/, "")); // the readable part DOES collide
     expect(dash).not.toBe(under);
-    // the same slug in two companies (ux_wps_slug is per tenant; org secret names are org-wide)
-    expect(siteDeploySecretName({ id: A, slug: "acme", environment: "staging" })).not.toBe(siteDeploySecretName({ id: B, slug: "acme", environment: "staging" }));
+    // the same slug in two companies (ux_wps_slug is per tenant; org secret names are org-wide): two repos, two ids
+    expect(siteDeploySecretName({ slug: "acme", environment: "staging", repositoryId: 21 })).not.toBe(siteDeploySecretName({ slug: "acme", environment: "staging", repositoryId: 22 }));
     // a slug that ends like an environment
-    expect(siteDeploySecretName({ id: A, slug: "foo-staging", environment: "production" }))
-      .not.toBe(siteDeploySecretName({ id: B, slug: "foo", environment: "staging-production" }));
+    expect(siteDeploySecretName({ slug: "foo-staging", environment: "production", repositoryId: 31 }))
+      .not.toBe(siteDeploySecretName({ slug: "foo", environment: "staging-production", repositoryId: 32 }));
+  });
+
+  it("is derived from the RESOLVED repo (its name and id), because that is all the site's own workflow can see", async () => {
+    // the provisioned row's slug differs from the repo's name: the workflow sees github.event.repository.name
+    const h = harness({ row: { slug: "provisioned-slug" } });
+    const r = await grantDeploySecrets(h.deps, operator);
+    expect(r.siteSecretName).toBe(`WEBDESK_DEPLOY_ACME_SITE_STAGING_${REPO_ID}`);
+    expect(r.siteSecretName).toBe(SITE_SECRET);
+    expect(r.siteSecretNote).toBeNull();
+  });
+
+  it("before a grant has read the repo there is NO name: the answer says why instead of inventing one", async () => {
+    const h = harness({ row: { grantState: "revoked", grantSiteSecretName: null, grantRepositoryId: null, grantSecretNames: [] } });
+    const r = await grantDeploySecrets(h.deps, scaffold);
+    expect(r).toMatchObject({ outcome: "skipped_revoked", siteSecretName: null, siteSecretNote: SITE_SECRET_NOT_DERIVABLE });
+    expect(SITE_SECRET_NOT_DERIVABLE).toMatch(/not derivable yet/);
+  });
+
+  it("a repo recreated under a new id gets a NEW name at the next grant; the old name stays in the recorded list so a revoke sweeps it", async () => {
+    const h = harness();
+    await grantDeploySecrets(h.deps, operator);
+    h.gh.repoId = 777;
+    const next = siteDeploySecretName({ slug: "acme-site", environment: "staging", repositoryId: 777 });
+    const r = await grantDeploySecrets(h.deps, operator);
+    expect(r).toMatchObject({ outcome: "pending", siteSecretName: next, pending: [next], repositoryId: 777 });
+    expect(h.site.row!.grantSecretNames).toContain(SITE_SECRET);
   });
 
   it("is only ever granted to its OWN site's repo: another site's per-site name is never touched", async () => {
-    const other = siteDeploySecretName({ id: B, slug: "acme-site", environment: "staging" });
+    const other = siteDeploySecretName({ slug: "acme-site", environment: "staging", repositoryId: REPO_ID + 1 });
     const h = harness();
     h.gh.addOrgSecret(other);
     await grantDeploySecrets(h.deps, operator);

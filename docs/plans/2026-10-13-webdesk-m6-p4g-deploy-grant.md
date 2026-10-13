@@ -40,8 +40,16 @@ carries live client WordPress). So a grant covers:
 2. **one per-site secret**, named by ONE function, `siteDeploySecretName()` in `modules/webdev/deploy-grant.ts`:
 
    ```
-   WEBDESK_DEPLOY_<SLUG>_<ENV>_<H8>        e.g. WEBDESK_DEPLOY_ACME_SITE_STAGING_1A2B3C4D
+   WEBDESK_DEPLOY_<SLUG>_<ENV>_<REPOID>    e.g. WEBDESK_DEPLOY_ACME_SITE_STAGING_123456789
    ```
+
+   **Amended by M6-P6f (2026-10-13):** the last part was `<H8>` (8 hex of sha256(the provisioned site's id)); it is now the
+   GitHub repository's numeric id, `<REPOID>`. A site repo's own workflow must derive the name of its own secret and never
+   sees a provisioned site's id, while every workflow knows `github.repository_id`; a repository id is unique across GitHub,
+   so it keeps H8's anti-collision job. `<SLUG>` is taken from the resolved repo's name (the slug in the normal case, and all
+   the workflow can see). The ERP only learns the id at the grant's first read of the repo, so before then it shows no name
+   and says why (`siteSecretNote`). The text below describes the original H8 design; read `<H8>` as `<REPOID>` and "the
+   provisioned site's id" as "the repository's GitHub id".
 
    `<SLUG>` is the provisioned slug and `<ENV>` the registry row's `environment` (provisioned rows are `staging`), each
    uppercased with every non-alphanumeric character turned into `_`. **The readable part alone can collide**: slugs are

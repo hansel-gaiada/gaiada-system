@@ -101,6 +101,7 @@ import {
 import { commandArgsAsZoneBSeesThem, computeCommandHash } from "./webdesk-ws4-assertion";
 import { notifyWebdeskTransition, type WebdeskTransitionArgs } from "../search/indexnow-webdesk";
 import { noteStagingStale } from "./site-builds.service";
+import { checkWebdeskEnvironmentDomain } from "./webdesk-domain";
 import { previewPageState, previewUrlFor, stagingOriginOf } from "./webdesk-preview";
 
 const logger = new Logger("WebdeskContent");
@@ -2021,5 +2022,137 @@ export async function controlRequestSiteArchive(
     siteId,
     args: {},
     summary: { title: `Archive site "${site.name}" of ${b.tenantSlug} (irreversible: it stops serving content and accepts no writes)` },
+  });
+}
+
+/**
+ * `POST control/sites/:siteId/domain` body `{tenantSlug, envId, domain}` (M6-P6i): FILES one site.setDomain approval (HIGH,
+ * WS4) and answers `{approvalId}`. It never changes a domain. WSK-66's executor sends the one Zone B `site.setDomain` at
+ * decide(), as the DECIDER (never the requester), so changing which sites a browser may call WebDesk from takes a second
+ * person. `domain` is a canonical bare host (webdesk-domain.ts, the mirror of WebDesk's own rule), or `null` to clear it.
+ *
+ * What is checked here, in this order, so a request that could only fail never becomes an approval:
+ *   1. the body (closed, typed): 400 `invalid_request`;
+ *   2. the site is one of THIS company's (the wall, 404 `site-not-found`) and active (409 `site-archived`), and the
+ *      environment is one of THIS site's (404 `environment-not-found`), all read from the wall's own answer;
+ *   3. the value is a change (409 `domain-unchanged`: WebDesk would refuse a no-op, and it must not cost an approval);
+ *   4. a non-null domain is a domain THIS company has CLAIMED on its site registry, for the SAME environment (409
+ *      `domain-not-claimed` / `domain-environment-mismatch`), and a provisioned registry row linked to a different WebDesk
+ *      tenant is refused (409 `domain-site-mismatch`). That is the P4c2 claim, and it is what gives the domain its
+ *      `search_properties` row and its D35 key before a single browser is allowed to call WebDesk from it. A clear
+ *      (`null`) needs no claim: it only narrows who may call;
+ *   5. one open request per (site, environment): the same domain returns the pending id with `alreadyPending: true`; a
+ *      DIFFERENT domain is a 409 `domain-request-pending` (decide or withdraw the first; two live proposals for one
+ *      column would let the approval order decide the result).
+ * The controller has already authorized `promote` on `webdev_provisioned_site`; the filer authorizes it again.
+ */
+export async function controlRequestSiteDomain(
+  principal: Principal,
+  tenantId: string,
+  siteIdParam: string,
+  rawBody: unknown,
+): Promise<{ approvalId: string; alreadyPending?: true }> {
+  const b = strictBody(rawBody, ["tenantSlug", "envId", "domain"]);
+  if (typeof b.tenantSlug !== "string" || b.tenantSlug === "") throw invalidRequest("tenantSlug is a required string");
+  if (typeof b.envId !== "string" || !UUID_RE.test(b.envId)) throw invalidRequest("envId must be a uuid");
+  if (!("domain" in b)) throw invalidRequest("domain is required (a bare host name, or null to clear it)");
+  let domain: string | null = null;
+  if (b.domain !== null) {
+    const v = checkWebdeskEnvironmentDomain(b.domain);
+    if (!v.ok) throw invalidRequest(`domain: ${v.reason}`);
+    domain = v.domain;
+  }
+  const envId = b.envId.toLowerCase();
+
+  const { site } = await webdeskZoneB.resolveEditableSite(tenantId, b.tenantSlug, siteIdParam);
+  if (site.status !== undefined && site.status !== "active") {
+    throw new WebdeskProblem(409, {
+      type: "https://webdesk.gaiada.online/errors/site-archived",
+      title: "Site archived",
+      status: 409,
+      detail: "This site is archived: an archived site accepts no domain change.",
+    });
+  }
+  const env = site.environments.find(
+    (e): e is { envId: string; name?: unknown; domain?: unknown } => isPlainObject(e) && typeof e.envId === "string" && e.envId.toLowerCase() === envId,
+  );
+  if (!env) {
+    throw new WebdeskProblem(404, {
+      type: "https://webdesk.gaiada.online/errors/environment-not-found",
+      title: "Environment not found",
+      status: 404,
+      detail: "No such environment on this site.",
+    });
+  }
+  const envName = typeof env.name === "string" && env.name !== "" ? env.name : "environment";
+  const current = typeof env.domain === "string" && env.domain !== "" ? env.domain.toLowerCase() : null;
+  const siteId = site.siteId.toLowerCase();
+  const problem = (status: number, slug: string, title: string, detail: string) =>
+    new WebdeskProblem(status, { type: `https://webdesk.gaiada.online/errors/${slug}`, title, status, detail });
+
+  if (current === domain) {
+    throw problem(409, "domain-unchanged", "Domain unchanged", domain === null ? "This environment has no domain to clear." : "This environment already has that domain.");
+  }
+
+  if (domain !== null) {
+    const registry = await withTenants(
+      [tenantId],
+      async (c) => {
+        const r = await c.query<{ environment: string; webdesk_tenant_slug: string | null }>(
+          `SELECT s.environment, ps.webdesk_tenant_slug
+             FROM webdev_sites s
+             LEFT JOIN webdev_provisioned_sites ps ON ps.tenant_id = s.tenant_id AND ps.webdev_site_id = s.id
+            WHERE s.tenant_id = $1 AND s.domain = $2 AND s.deleted_at IS NULL
+            ORDER BY s.created_at, s.id
+            LIMIT 1`,
+          [tenantId, domain],
+        );
+        return r.rows[0] ?? null;
+      },
+      { modules: ["webdev"] },
+    );
+    if (!registry) {
+      throw problem(
+        409,
+        "domain-not-claimed",
+        "Domain not claimed",
+        "This domain is not on the company's site registry. Claim it first (POST sites/:id/domain on the registry row), which also gives it its search property and its consent gate.",
+      );
+    }
+    if (registry.environment !== envName) {
+      throw problem(409, "domain-environment-mismatch", "Domain belongs to another environment", `The registry holds this domain on a ${registry.environment} row, not a ${envName} one.`);
+    }
+    if (registry.webdesk_tenant_slug !== null && registry.webdesk_tenant_slug !== b.tenantSlug) {
+      throw problem(409, "domain-site-mismatch", "Domain belongs to another site", "The registry row that holds this domain is linked to a different WebDesk tenant.");
+    }
+  }
+
+  const open = await withTenants([tenantId], async (c) => {
+    const r = await c.query<{ id: string; domain: string | null }>(
+      `SELECT id, tool_args->>'domain' AS domain FROM automation_approvals
+        WHERE tenant_id = $1 AND origin = 'webdesk' AND workflow_id = 'site.setDomain'
+          AND status = 'pending' AND deleted_at IS NULL
+          AND tool_args->>'siteId' = $2 AND tool_args->>'envId' = $3
+        ORDER BY created_at DESC LIMIT 1`,
+      [tenantId, siteId, envId],
+    );
+    return r.rows[0] ?? null;
+  });
+  if (open) {
+    if ((open.domain ?? null) === domain) return { approvalId: open.id, alreadyPending: true };
+    throw problem(409, "domain-request-pending", "A domain change is already awaiting approval", "Decide or withdraw the pending request for this environment before filing another.");
+  }
+
+  return fileWebdeskCommandApproval(principal, tenantId, {
+    command: "site.setDomain",
+    tenantSlug: b.tenantSlug,
+    siteId,
+    args: { envId, domain },
+    summary: {
+      title:
+        domain === null
+          ? `Clear the ${envName} domain of site "${site.name}" of ${b.tenantSlug} (was ${current}): browsers on it will no longer be allowed to call this site's WebDesk endpoints`
+          : `Set the ${envName} domain of site "${site.name}" of ${b.tenantSlug} to ${domain} (${current === null ? "none set today" : `was ${current}`}): browsers on it will be allowed to call this site's WebDesk endpoints`,
+    },
   });
 }

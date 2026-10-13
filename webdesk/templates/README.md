@@ -22,7 +22,12 @@ canonical theme in `webdesk/wordpress/theme/gaiada-webdesk/` (only `vendor/gaiad
 differ). It runs as part of `npm test` in `webdesk/`.
 
 Every template carries `.github/workflows/site.yml`: `verify` is skipped in a template repo, and
-`deploy` needs the org secret `WEBDESK_DEPLOY_GRANT` (see M6-P4g, M6-P6).
+`build` builds and stamps the site and holds no deploy credential; `deploy` (a push to the default branch deploys staging, the ERP's
+`workflow_dispatch` rebuilds staging or, for an approved promote, deploys production) needs the org secret `WEBDESK_DEPLOY_GRANT` and
+the site's own per-site secret `WEBDESK_DEPLOY_<SLUG>_<ENV>_<REPOID>` (M6-P4g, M6-P6f; shape and rules in `_deploy/README.md`). The
+scripts the job runs live once in `_deploy/` and are copied into each template's `.webdesk/deploy/` by
+`node webdesk/templates/sync-deploy-scripts.mjs` (`--check` fails on drift, as does `check-workflows.mjs` on a workflow that loses its
+credential shape; both run in `npm test` in `webdesk/`).
 
 `qa/build-templates.sh` (M6-P4d2) proves, on Linux, that both templates and one scaffolded fullstack site install
 and build from a clean copy (no network beyond the npm registry, no secrets). Run it in a container:
