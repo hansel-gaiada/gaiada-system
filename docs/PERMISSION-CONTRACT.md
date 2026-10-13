@@ -1994,3 +1994,24 @@ authoring groups 163 -> **164**; covered by groups 391 -> **392**; sensitive gro
 pairs 1942 -> **1947** (platform_admin +1, company_admin +1, owner +1, manager +1, member +1). Tests moved: `cerbos-catalog-alignment`,
 `permission-groups-catalog-parity`, `ui-grantable-catalog`; `iam-215-boundary-pin` unchanged (no new kind). **Restart `gaiada-test-cerbos` and the live sidecar after
 deploying the policy files** (nothing hot-reloads).
+
+## 35. DW-5a — the `agency_campaign_part` kind (2026-10-14, PROTOTYPED)
+
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §31 (plan `docs/plans/2026-10-13-department-workspaces.md` §7.1, ruling DW-D13). Status: **PROTOTYPED** (policy, catalog, bundles and tests are in the repo; the live Cerbos probe after a restart is the deploy step).
+
+**A new kind, `agency_campaign_part` (module `agency`), with five actions.** `resource_agency_campaign_part.yaml`, keys `agency.campaign_part.{read,create,update,delete,allocate}`:
+
+| Action | Reach | What it is |
+|---|---|---|
+| `read` | `company_admin`, `manager`, `member`, `viewer` (`inTenant && notLow`) | see a campaign's parts |
+| `create`, `delete` | `company_admin`, `manager` | add or remove a department from a campaign |
+| `allocate` | `company_admin`, `manager` | any write that sets or changes a part's `budgetMinor`; apart from `update` so an owner or head can never move money |
+| `update` | `company_admin`, `manager`; **its own rule** for the part's owner (`member` + `variables.owns`); **its own rule** for `org_unit_lead` (the part's `unit_id` expanded through `org_unit_closure` into `unitAncestors`) | status, owner, brief, due date, links |
+
+Each attribute-dependent rule stands alone (the HIER-2 authoring rule): `org_unit_lead` is never mixed with a scope role, and the owner rule names `member` only. `ownerId` and `unitAncestors` are fed by the handler from the part row and are already in `cerbos.ts`'s `Resource` type and `resourcePayload()` allow-list, so `cerbos.ts` needed no change; an unfed resource fails closed.
+
+**The permission arm covers `read`, `create`, `delete` and `allocate`, and deliberately NOT `update`.** The owner rule (self-scoped) and the lead rule (attribute-dependent) are the shapes a flat `perms` mirror cannot express; a `perm_*update` rule fails `permission-arm-hazard-scan.test.ts` (Pattern B) and `iam-04-reg1-mirror-reach-invariant.test.ts`. This is `time_entry`'s call for its own update/delete. Consequence: the permission-native `owner` role holds the `update` key in its bundle (it mirrors `company_admin` exactly) but reaches `update` through Cerbos only if it also holds `company_admin` or `manager`.
+
+**Bundles and the marker.** `company_admin`, `owner`, `manager`, `platform_admin` hold all five; `member` holds `read` and `update` (a **self-scoped** pair, `selfScoped.member`); `viewer` holds `read`; `org_unit_lead` holds `update` (not self-scoped: it acts on other people's parts); no other role holds any. None of the five keys is `sensitive` (see FRONTEND-BFF-CONTRACT §31.7, deviation 4).
+
+**The six artifacts** (the `conversation` template, commit `46290cd3`): policy and four derived roles; `cerbos.ts` (no change); `permission-catalog.json` (+5 keys: 105 kinds, 451 pairs, 436 grantable, 15 relationship, 211 sensitive); `permission-groups.json` (+1 group, `agency_campaign_parts`); migration `202610140510_iam_agency_campaign_part_permissions.sql` (24 role rows, with a DO-block self-assertion including the owner-mirrors-company_admin invariant and the self-scoped marker); the bundle generator (no resolver change: the kind names only direct roles) and `role-permission-bundles.json` regenerated from a clean worktree. Pinned literals moved: `cerbos-catalog-alignment` 446 -> 451 and 104 -> 105 kinds, `permission-groups-catalog-parity` 431 -> 436, `ui-grantable-catalog` 446/431 -> 451/436, `iam-215-boundary-pin` 104 -> 105 kinds and 100 -> 101 non-exempt. Proof: `src/rbac/cerbos-agency-campaign-part.test.ts` (static pin always; live matrix needs `CERBOS_URL`). **Restart `gaiada-test-cerbos` and the live sidecar after deploying the policy files** (nothing hot-reloads).
