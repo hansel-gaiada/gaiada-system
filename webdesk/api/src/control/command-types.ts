@@ -18,6 +18,8 @@ export type CommandName =
   | "tenant.archive"
   | "site.provision"
   | "site.archive"
+  // M6-P6i -- sets (or clears) ONE environment's public domain: the source of that site's CORS allow-list.
+  | "site.setDomain"
   | "environment.provision"
   | "environment.archive"
   | "schema.propose"
@@ -117,6 +119,10 @@ export const COMMAND_REGISTRY: Readonly<Record<CommandName, CommandMeta>> = Obje
   "tenant.archive": { command: "tenant.archive", impactClass: "high", scope: "webdesk:promote", jobTracked: false },
   "site.provision": { command: "site.provision", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "site.archive": { command: "site.archive", impactClass: "high", scope: "webdesk:promote", jobTracked: false },
+  // M6-P6i: environments.domain is what every browser-facing route (forms, consent, draft preview) matches an Origin
+  // against, so changing it changes WHO may call this tenant's public endpoints from a browser: HIGH like the archives,
+  // always WS4 (design v2 section 07: setDomain is on the always-WS4 list), and reversible by another setDomain.
+  "site.setDomain": { command: "site.setDomain", impactClass: "high", scope: "webdesk:promote", jobTracked: false },
   "environment.provision": { command: "environment.provision", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "environment.archive": { command: "environment.archive", impactClass: "high", scope: "webdesk:promote", jobTracked: false },
   "schema.propose": { command: "schema.propose", impactClass: "read", scope: "webdesk:read", jobTracked: false },

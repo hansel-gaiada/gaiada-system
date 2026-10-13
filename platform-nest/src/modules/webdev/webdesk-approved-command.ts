@@ -1,5 +1,16 @@
-// WSK-66 — WebDesk HIGH commands (content.publish, content.schedule, key.mint, site.archive) filed as ONE WS4
-// approval and executed IN-BAND when a human approves it in the ERP's Approvals inbox.
+// WSK-66 — WebDesk HIGH commands (content.publish, content.schedule, key.mint, site.archive, site.setDomain) filed as ONE
+// WS4 approval and executed IN-BAND when a human approves it in the ERP's Approvals inbox.
+//
+// ── site.setDomain (M6-P6i: setting or clearing ONE WebDesk environment's public domain) ────────────
+// The sixth member of the union, the THIRD site-gated one (key.mint, site.archive): filed by a staff caller holding
+// `promote` on `webdev_provisioned_site`, decided by a DIFFERENT user (never self-approvable, enforced in code like
+// site.archive), executed at decide() with ONE WS4-asserted POST to Zone B's `site.setDomain` (HIGH, `webdesk:promote`;
+// no editorial assertion). It replaces the WSK-31 always-501 stub. WHY HIGH: `environments.domain` is the only CORS
+// allow-list WebDesk has (forms, consent, draft preview all match an Origin against it), so this decides which sites may
+// call the tenant's public endpoints from a browser. The WS4 hash is over {tenantSlug, siteId} + {envId, domain}, and a
+// clear carries `domain: null`. Unlike key.mint and site.archive it IS reconciled by reading after an ambiguous failure:
+// the outcome is a single column that `tenant.list` reports, so "the environment now has the requested domain" is a
+// decisive read, and it is never resent. Reversible: the rollback is another setDomain (to the previous value, or null).
 //
 // ── site.archive (owner ruling 2026-10-12: archiving a WebDesk site TAKES an approval) ───────────────
 // The fifth member of the union, modelled on key.mint: filed by a staff caller holding `promote` on
@@ -115,6 +126,7 @@ import { WorkflowDispatchError, authorizeDeploy } from "../../core/github/workfl
 import { rebuildTargetFor, startSiteRebuild } from "./site-builds.service";
 import { ClientPublishAuthority } from "../../core/github/workflow-dispatch";
 import { revokeDeployForSite } from "./deploy-grant.service";
+import { checkWebdeskEnvironmentDomain } from "./webdesk-domain";
 import { DeployGrantRefusal } from "./deploy-grant";
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -123,7 +135,7 @@ import { DeployGrantRefusal } from "./deploy-grant";
 
 /** The ONLY commands this executor runs. A closed union: a fourth command cannot ride it silently,
  *  because every table below is a `Record<WebdeskApprovedCommand, …>` and fails to compile without it. */
-export type WebdeskApprovedCommand = "content.publish" | "content.schedule" | "key.mint" | "content.rebuild" | "site.archive";
+export type WebdeskApprovedCommand = "content.publish" | "content.schedule" | "key.mint" | "content.rebuild" | "site.archive" | "site.setDomain";
 
 /** WSK-59: the editorial writes the BFF executes immediately (not through an approval). They sign through the
  *  SAME registered signer as the approved commands; only the command name differs (design §3.1).
@@ -160,6 +172,7 @@ const TOOL_NAME: Record<WebdeskApprovedCommand, string> = {
   "key.mint": "webdesk.key.mint",
   "content.rebuild": "webdesk.content.rebuild",
   "site.archive": "webdesk.site.archive",
+  "site.setDomain": "webdesk.site.setDomain",
 };
 
 function isApprovedCommand(value: unknown): value is WebdeskApprovedCommand {
@@ -234,7 +247,9 @@ type ParsedArgs =
     }
   | { command: "key.mint"; tenantSlug: string; siteId: string; envId: string; scope: "read" | "write" }
   | { command: "content.rebuild"; tenantSlug: string; siteId: string }
-  | { command: "site.archive"; tenantSlug: string; siteId: string };
+  | { command: "site.archive"; tenantSlug: string; siteId: string }
+  /** M6-P6i. `domain: null` clears the environment's domain (the rollback to "no domain"). */
+  | { command: "site.setDomain"; tenantSlug: string; siteId: string; envId: string; domain: string | null };
 
 interface ZoneBRequest {
   command: WebdeskApprovedCommand;
@@ -283,6 +298,17 @@ export type WebdeskApprovedCommandResult =
        *  WebDesk tenant (none: the site was never provisioned, so nothing was ever granted). A failed revoke does NOT make
        *  this result `failed`: the archive stands, and the provisioned site's row records the revoke's own outcome. */
       deployRevoke?: Array<{ provisionedSiteId: string; outcome: "revoked" | "not_granted" | "partial" | "failed"; error: string | null }>;
+    }
+  | {
+      /** M6-P6i: the environment's domain now is `domain` (null = cleared). `previousDomain` is what a rollback sets back. */
+      command: "site.setDomain";
+      executionStatus: "executed";
+      /** true when the answer was lost and the outcome was confirmed by READING the environment's domain (the previous value is then unknown: null). */
+      reconciled: boolean;
+      siteId: string;
+      envId: string;
+      domain: string | null;
+      previousDomain: string | null;
     }
   | { command: WebdeskApprovedCommand; executionStatus: "failed"; error: string };
 
@@ -391,6 +417,7 @@ const ARG_KEYS: Record<WebdeskApprovedCommand, ReadonlyArray<string>> = {
   "key.mint": ["envId", "scope"],
   "content.rebuild": [],
   "site.archive": [],
+  "site.setDomain": ["envId", "domain"],
 };
 
 class ArgsError extends Error {}
@@ -471,6 +498,18 @@ function parseCommandArgs(raw: unknown): ParsedArgs {
       if (extra.length) throw new ArgsError(`site.archive takes no ${extra.join(", ")}`);
       return { command, tenantSlug, siteId };
     }
+    case "site.setDomain": {
+      const extra = ["items", "note", "publishAt", "unpublishAt", "scope"].filter((k) => raw[k] !== undefined);
+      if (extra.length) throw new ArgsError(`site.setDomain takes no ${extra.join(", ")}`);
+      if (typeof raw.envId !== "string" || !UUID_RE.test(raw.envId)) throw new ArgsError("envId must be a uuid");
+      // A STORED row is re-validated here too (execution re-parses it), so a row edited after filing to a non-canonical value is refused.
+      if (raw.domain === undefined) throw new ArgsError("domain is required (a bare host name, or null to clear it)");
+      if (raw.domain !== null) {
+        const v = checkWebdeskEnvironmentDomain(raw.domain);
+        if (!v.ok) throw new ArgsError(`domain: ${v.reason}`);
+      }
+      return { command, tenantSlug, siteId, envId: raw.envId, domain: raw.domain as string | null };
+    }
   }
 }
 
@@ -508,6 +547,14 @@ function zoneBRequestFor(a: Exclude<ParsedArgs, { command: "content.rebuild" }>)
         params: { tenantSlug: a.tenantSlug, siteId: a.siteId },
         body: {},
       };
+    case "site.setDomain":
+      // WebDesk lifecycle.controller `POST :tenantSlug/sites/:siteId/domain`: the WS4 hash is over {tenantSlug, siteId} + {envId, domain}.
+      return {
+        command: a.command,
+        path: "/control/v1/tenants/:tenantSlug/sites/:siteId/domain",
+        params: { tenantSlug: a.tenantSlug, siteId: a.siteId },
+        body: { envId: a.envId, domain: a.domain },
+      };
   }
 }
 
@@ -527,18 +574,18 @@ function commandHashOf(a: ParsedArgs): string {
 }
 
 function itemCountOf(a: ParsedArgs): number {
-  return a.command === "key.mint" || a.command === "content.rebuild" || a.command === "site.archive" ? 0 : a.items.length;
+  return a.command === "key.mint" || a.command === "content.rebuild" || a.command === "site.archive" || a.command === "site.setDomain" ? 0 : a.items.length;
 }
 
-/** The two commands gated on the SITE kind (`webdev_provisioned_site` · `promote`) and never self-approvable: they carry
+/** The commands gated on the SITE kind (`webdev_provisioned_site` · `promote`) and never self-approvable: they carry
  *  no item, no editorial assertion and no staging rebuild. */
 function isSiteGated(command: WebdeskApprovedCommand): boolean {
-  return command === "key.mint" || command === "site.archive";
+  return command === "key.mint" || command === "site.archive" || command === "site.setDomain";
 }
 
 /** WSK-D46 R4: only a single-item, NON-scheduled publish may be approved by its own requester. A
  *  rebuild has no maker-checker arm (see the WSK-60 note in the header): its requester may decide it.
- *  A key mint and a site archive are NEVER self-approvable. */
+ *  A key mint, a site archive and a site setDomain are NEVER self-approvable. */
 function isSelfApprovable(a: ParsedArgs): boolean {
   return a.command === "content.rebuild" || (a.command === "content.publish" && a.items.length === 1);
 }
@@ -599,15 +646,17 @@ async function authorizeDecider(
     }
     return;
   }
-  if (a.command === "key.mint" || a.command === "site.archive") {
+  if (a.command === "key.mint" || a.command === "site.archive" || a.command === "site.setDomain") {
     // resource_webdev_provisioned_site.yaml's `promote` has no maker-checker arm and this ticket may
-    // not edit it, so the rule is enforced here. A key mint and a site archive are never self-approvable
-    // (R4 is publish-only).
+    // not edit it, so the rule is enforced here. A key mint, a site archive and a site setDomain are never
+    // self-approvable (R4 is publish-only).
     if (requestedBy && decider.userId === requestedBy) {
       throw new ForbiddenException(
         a.command === "key.mint"
           ? "not authorized: a key mint may not be approved by the principal who requested it"
-          : "not authorized: a site archive may not be approved by the principal who requested it",
+          : a.command === "site.archive"
+            ? "not authorized: a site archive may not be approved by the principal who requested it"
+            : "not authorized: a site domain change may not be approved by the principal who requested it",
       );
     }
     await authorize(decider, { kind: "webdev_provisioned_site", tenantId, module: "webdev", approvalId }, "promote");
@@ -927,6 +976,32 @@ async function reconcileByReading(
 }
 
 /**
+ * After an ambiguous `site.setDomain`: READ the environment's domain (`tenant.list?companyRef=`, the same read the wall uses)
+ * and decide whether the requested value holds. true = it does (executed, reconciled); false = it does not; null = the state
+ * could not be read. Reads only: a WS4 write is never resent. The previous value is not recoverable from a read, so a
+ * reconciled success reports `previousDomain: null`.
+ */
+export async function reconcileSetDomainByReading(
+  client: WebdeskControlClient,
+  tenantId: string,
+  a: Extract<ParsedArgs, { command: "site.setDomain" }>,
+): Promise<boolean | null> {
+  let res: WebdeskControlResponse;
+  try {
+    res = await client.send({ command: "tenant.list", method: "GET", path: "/control/v1/tenants", query: { companyRef: tenantId } });
+  } catch {
+    return null;
+  }
+  if (res.status !== 200 || !isPlainObject(res.json) || !Array.isArray(res.json.tenants)) return null;
+  const tenant = res.json.tenants.find((t): t is Record<string, unknown> => isPlainObject(t) && t.slug === a.tenantSlug);
+  const site = tenant && Array.isArray(tenant.sites) ? tenant.sites.find((s): s is Record<string, unknown> => isPlainObject(s) && s.siteId === a.siteId) : undefined;
+  const env = site && Array.isArray(site.environments) ? site.environments.find((e): e is Record<string, unknown> => isPlainObject(e) && e.envId === a.envId) : undefined;
+  if (!env) return null;
+  const current = typeof env.domain === "string" && env.domain !== "" ? env.domain : null;
+  return current === a.domain;
+}
+
+/**
  * Execute an APPROVED WebDesk command. Called from decide() right after the decide UPDATE flipped the
  * row to approved/pending, with that UPDATE's own RETURNING tool_args, and `requestedBy` = the row's
  * requested_by ("" when unknown, which fails closed in Cerbos).
@@ -1038,6 +1113,8 @@ export async function executeApprovedWebdeskCommand(
     itemCount: itemCountOf(a),
     requestedBy: requestedBy || null,
     ...(a.command === "content.publish" ? { selfPublish } : {}),
+    // A public host name (and the environment it belongs to), never a credential: what the ledger must say about a CORS change.
+    ...(a.command === "site.setDomain" ? { envId: a.envId, domain: a.domain } : {}),
     ...(clientDecider ? { clientEditor: true, clientId: clientDecider.clientId } : {}),
   };
   const verb = `webdesk.${a.command}`;
@@ -1082,6 +1159,20 @@ export async function executeApprovedWebdeskCommand(
         executionStatus: "failed",
         error: `${WEBDESK_EXEC_ERROR.ambiguous}: the archive may have committed and its answer was lost; check the site's status in WebDesk (Zone B's audit shows approval ${approvalId}), never resend`,
       };
+    } else if (a.command === "site.setDomain") {
+      // The outcome is one column, and tenant.list reports it: READ it (never resend). Equal to the requested value = it landed.
+      const holds = await reconcileSetDomainByReading(zoneB, tenantId, a);
+      outcome =
+        holds === true
+          ? successOf(a, null, approvalId, selfPublish, true)
+          : {
+              command: a.command,
+              executionStatus: "failed",
+              error:
+                holds === false
+                  ? `${WEBDESK_EXEC_ERROR.ambiguous}: the answer was lost and the environment does NOT have the requested domain; nothing was resent`
+                  : `${WEBDESK_EXEC_ERROR.ambiguous}: the answer was lost and the environment's domain could not be read; check it in WebDesk (Zone B's audit shows approval ${approvalId}), never resend`,
+            };
     } else {
       const holds = await reconcileByReading(zoneB, a);
       outcome =
@@ -1122,7 +1213,9 @@ export async function executeApprovedWebdeskCommand(
         ? { command: outcome.command, apiKeyId: outcome.apiKeyId, envId: outcome.envId, scope: outcome.scope }
         : outcome.command === "site.archive"
           ? { command: outcome.command, siteId: outcome.siteId, status: outcome.status }
-          : { command: outcome.command, reconciled: outcome.reconciled, selfPublish: outcome.selfPublish, items: outcome.items, rebuild: outcome.rebuild };
+          : outcome.command === "site.setDomain"
+            ? { command: outcome.command, reconciled: outcome.reconciled, siteId: outcome.siteId, envId: outcome.envId, domain: outcome.domain, previousDomain: outcome.previousDomain }
+            : { command: outcome.command, reconciled: outcome.reconciled, selfPublish: outcome.selfPublish, items: outcome.items, rebuild: outcome.rebuild };
     await finish(tenantId, approvalId, deciderId, { ok: true, result: stored });
     await writeActivity(tenantId, deciderId, verb, "automation_approval", approvalId, {
       ...activityBase,
@@ -1321,6 +1414,20 @@ function successOf(
   const j = res && isPlainObject(res.json) ? res.json : {};
   if (a.command === "site.archive") {
     return { command: a.command, executionStatus: "executed", siteId: a.siteId, status: "archived" };
+  }
+  if (a.command === "site.setDomain") {
+    const env = isPlainObject(j.environment) ? j.environment : {};
+    const echoed = typeof env.domain === "string" || env.domain === null ? (env.domain as string | null) : a.domain;
+    return {
+      command: a.command,
+      executionStatus: "executed",
+      reconciled,
+      siteId: a.siteId,
+      envId: a.envId,
+      // What Zone B reports it stored; our own request value when its 2xx carried no environment (an older Zone B) or on a reconcile.
+      domain: res ? echoed : a.domain,
+      previousDomain: typeof env.previousDomain === "string" ? env.previousDomain : null,
+    };
   }
   if (a.command === "key.mint") {
     return {

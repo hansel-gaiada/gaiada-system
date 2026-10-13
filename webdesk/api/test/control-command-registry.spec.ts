@@ -11,6 +11,8 @@ const EXPECTED: Record<CommandName, Omit<CommandMeta, "command">> = {
   "tenant.archive": { impactClass: "high", scope: "webdesk:promote", jobTracked: false },
   "site.provision": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "site.archive": { impactClass: "high", scope: "webdesk:promote", jobTracked: false },
+  // M6-P6i -- the environment's public domain is the CORS allow-list source: HIGH, always WS4, reversible by another setDomain.
+  "site.setDomain": { impactClass: "high", scope: "webdesk:promote", jobTracked: false },
   "environment.provision": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "environment.archive": { impactClass: "high", scope: "webdesk:promote", jobTracked: false },
   "schema.propose": { impactClass: "read", scope: "webdesk:read", jobTracked: false },

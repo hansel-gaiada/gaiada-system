@@ -54,6 +54,7 @@ import { readIssueReadiness } from "../modules/invoice/issue";
 import { NotFoundException } from "@nestjs/common";
 import { resolveXPricing } from "../modules/social/usage-ledger";
 import { EditorialScopeError, isEditorialRole, normaliseEditorialScope } from "../rbac/editorial-roles";
+import { checkWebdeskEnvironmentDomain } from "../modules/webdev/webdesk-domain";
 
 /** The result of a server-side precondition re-evaluation. `reason` is a TYPED token (snake_case,
  *  e.g. `run_blocked`, `stage_already_deployed`, `run_not_found`) — it is stored verbatim after the
@@ -874,7 +875,8 @@ export function registerWebdeskExecutableApprovals(): void {
       toolName,
       lockKey: (args) => webdeskLockKey(args, toolName),
       // WSK-59: the commands whose routes are now REAL carry a real (structural) precondition (schema.apply,
-      // site.provision; key.mint since 2026-10-11; site.archive since 2026-10-12); the other six stay honestly not-wired.
+      // site.provision; key.mint since 2026-10-11; site.archive since 2026-10-12; site.setDomain since M6-P6i); the other
+      // five (deploy.staging, site.promote, site.rollback, key.rotate, key.revoke) stay honestly not-wired.
       precondition: WEBDESK_STRUCTURAL_PRECONDITIONS[toolName] ?? webdeskNotWiredPrecondition,
     });
   }
@@ -980,11 +982,25 @@ async function webdeskSiteArchivePrecondition(_client: PoolClient, a: Record<str
   return { ok: true };
 }
 
+/** M6-P6i: `POST control/sites/:siteId/domain` stopped being a 501 stub. What it does on a re-drive is FILE a site.setDomain
+ *  approval as the original requester (it never changes a domain; WSK-66 sends the command at decide(), as a DIFFERENT user),
+ *  exactly like key.mint and site.archive above. Structural only: the wall, the claim check and the de-dup run in the route.
+ *  `domain` may be null (a clear) but must be PRESENT, and a present string must be canonical (webdesk-domain.ts). */
+async function webdeskSetDomainPrecondition(_client: PoolClient, a: Record<string, unknown>): Promise<PreconditionVerdict> {
+  if (!nonEmptyString(a.tenantSlug)) return { ok: false, reason: "tenant_slug_invalid" };
+  if (typeof a.siteId !== "string" || !UUID_RE_EXEC.test(a.siteId)) return { ok: false, reason: "site_id_invalid" };
+  if (typeof a.envId !== "string" || !UUID_RE_EXEC.test(a.envId)) return { ok: false, reason: "env_id_invalid" };
+  if (a.domain === undefined) return { ok: false, reason: "domain_required" };
+  if (a.domain !== null && !checkWebdeskEnvironmentDomain(a.domain).ok) return { ok: false, reason: "domain_invalid" };
+  return { ok: true };
+}
+
 const WEBDESK_STRUCTURAL_PRECONDITIONS: Record<string, (client: PoolClient, a: Record<string, unknown>) => Promise<PreconditionVerdict>> = {
   "webdesk.schema.apply": webdeskSchemaApplyPrecondition,
   "webdesk.site.provision": webdeskSiteProvisionPrecondition,
   "webdesk.key.mint": webdeskKeyMintPrecondition,
   "webdesk.site.archive": webdeskSiteArchivePrecondition,
+  "webdesk.site.setDomain": webdeskSetDomainPrecondition,
 };
 
 /** The two MEDIUM content tools that can suspend. Mirrored in `resource_mcp_tool.yaml`'s executable list. */

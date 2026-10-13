@@ -57,6 +57,8 @@ export const DELIVERY_REFUSALS = {
   not_a_provisioned_staging_row: 409,
   production_row_exists: 409,
   domain_taken: 409,
+  /** M6-P6i: the domain already has a `search_properties` row that belongs to another client (one domain, one owner). */
+  property_domain_conflict: 409,
   // the vault record (422): a record of another tenant is indistinguishable from one that does not exist, on purpose
   vault_ref_unknown: 422,
   vault_ref_wrong_provider: 422,
