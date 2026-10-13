@@ -153,15 +153,18 @@ describe.skipIf(!TEST_URL)("PV5-04b — invoice numbering data model", () => {
       const types = ["hotel", "restaurant", "hospital", "spa", "agency", "retail"];
       for (const k of keys) await line(co, k);
       const seen = new Map<string, string>();
+      let lookAlikes = 0;
       for (const k of keys) {
         for (const bt of types) {
           const c = await code(co, k, bt);
           expect(seen.has(c), `${c} reused for ${k}/${bt} and ${seen.get(c)}`).toBe(false);
           seen.set(c, `${k}/${bt}`);
-          // Not mnemonic: never the key's or the type's initials, in any case.
-          expect([k.slice(0, 3).toUpperCase(), bt.slice(0, 3).toUpperCase(), (k[0] + bt[0]).toUpperCase()]).not.toContain(c);
+          // Not mnemonic: a random 3-character code only matches the key's or the type's first three letters by chance
+          // (about 1 in 10,000 per pair), where a derived code would match for EVERY pair. So the count must stay tiny.
+          if ([k.slice(0, 3).toUpperCase(), bt.slice(0, 3).toUpperCase()].includes(c)) lookAlikes++;
         }
       }
+      expect(lookAlikes).toBeLessThanOrEqual(1);
       expect(seen.size).toBe(keys.length * types.length);
       // The same pair in ANOTHER company is that company's own code (not shared, no global table).
       expect((await withTenants([B], (c) => c.query(`SELECT 1 FROM billing_number_codes`))).rowCount).toBe(0);

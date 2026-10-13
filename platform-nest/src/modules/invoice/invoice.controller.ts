@@ -46,7 +46,7 @@ const INVOICE_SELECT = `
          i.issuer, i.ar_invoice_id AS "arInvoiceId", i.pre_pv5_legacy AS "legacyUnissued",
          -- PV5-07: the issued invoice's stored PDF. NULL = not issued, or issued and still being prepared.
          ${INVOICE_PDF_FILE_ID("i")} AS "pdfFileId",
-         -- PV5-04b (PV-D35): the line staff chose (NULL until chosen). STAFF-ONLY: this route needs invoice `read`, and the
+         -- PV5-04b (PV-D35): the line staff chose (NULL until chosen). STAFF-ONLY: this route needs invoice read, and the
          -- portal has its own routes, which never select either column.
          i.service_line_key AS "serviceLineKey", sl.name AS "serviceLineName"
   FROM invoices i LEFT JOIN clients cl ON cl.id = i.client_id
