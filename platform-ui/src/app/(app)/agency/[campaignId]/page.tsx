@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { listBriefs } from "@/lib/entities";
+import { getProject, listBriefs } from "@/lib/entities";
 import { can, isLeadOf, leadUnits, unitPathOf } from "@/lib/rbac";
 import { listDepartmentBriefs } from "@/lib/departments";
 import { readCampaignDetail, readClientNames, readOrgRoot, readPersonChoices } from "@/lib/campaigns-data";
@@ -70,7 +70,10 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
   const canManage = can(me, "agency.campaign.manage", tenant);
   // The org tree answers "is this person the head of that department": read it only when it can change the answer.
   const needHeads = !canManage && leadUnits(me).length > 0 && campaign.parts.length > 0;
-  const [clients, people, departments, root, briefs] = await Promise.all([
+  const [projectName, clients, people, departments, root, briefs] = await Promise.all([
+    // The project's NAME for the Project row (it showed the raw id). A failed read is not "no project": the link stays,
+    // worded "Open the project".
+    campaign.projectId ? getProject(userId, tenant, campaign.projectId).then((p) => p.name || null, () => null) : Promise.resolve(null),
     campaign.clientId ? readClientNames(userId, tenant) : Promise.resolve(null),
     readPersonChoices(userId, tenant),
     canManage ? listDepartmentBriefs(userId, tenant) : Promise.resolve([]),
@@ -91,7 +94,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
     { label: "Client", value: clientValue },
     {
       label: "Project",
-      value: campaign.projectId ? <Link href={`/projects/${campaign.projectId}`}>{campaign.projectId}</Link> : "—",
+      value: campaign.projectId ? <Link href={`/projects/${campaign.projectId}`}>{projectName ?? "Open the project"}</Link> : "—",
     },
     { label: "Lead department", value: leadText(campaign.leadUnitId, campaign.leadUnitName) },
     { label: "Dates", value: datesText(campaign.startsOn, campaign.endsOn) },

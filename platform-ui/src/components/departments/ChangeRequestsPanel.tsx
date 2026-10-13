@@ -269,11 +269,16 @@ function OriginCell({ origins, id }: { origins: ChangeRequestOrigins; id: string
   if (origins.state === "unavailable") return <span>Unavailable</span>;
   const o = origins.byChangeRequest[id];
   if (!o) return <span>{"\u2014"}</span>;
+  // One short link, the department, so the column stays narrow beside the My-work rail (it wrapped over five lines
+  // as "From <dept> · <person> Open request"). The person stays available: in the tooltip and in the link's name.
   return (
-    <span>
-      From {o.from} · {o.person}{" "}
-      <Link href={`/requests/${encodeURIComponent(o.requestId)}`}>Open request</Link>
-    </span>
+    <Link
+      href={`/requests/${encodeURIComponent(o.requestId)}`}
+      title={`Asked by ${o.person}. Open the request.`}
+      aria-label={`From ${o.from}, asked by ${o.person}. Open the request.`}
+    >
+      {o.from}
+    </Link>
   );
 }
 
@@ -311,7 +316,7 @@ export function ChangeRequestsPanel({ rows, canTriage, actions, origins }: { row
         <HairlineTable
           key={refreshKey}
           columns={[{ label: "Request" }, { label: "Kind" }, { label: "Client" }, { label: "Status" }, { label: "Price" }, { label: "Amendment" }, ...(origins ? [{ label: "Origin" }] : []), { label: "Submitted", align: "right" }]}
-          tcols={origins ? "2fr 0.8fr 1.2fr 1fr 1.1fr 1.2fr 1.6fr 1fr" : "2fr 0.8fr 1.2fr 1fr 1.1fr 1.2fr 1fr"}
+          tcols={origins ? "2fr 0.8fr 1.2fr 1fr 1.1fr 1.2fr 0.9fr 1fr" : "2fr 0.8fr 1.2fr 1fr 1.1fr 1.2fr 1fr"}
           rows={queue.map((r) => [
             <button key="t" type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={() => select(r.id)} style={{ padding: 0, font: "inherit", textAlign: "left" }}>
               {r.title}

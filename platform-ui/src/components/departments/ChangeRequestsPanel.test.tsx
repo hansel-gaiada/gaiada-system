@@ -358,8 +358,11 @@ describe("ChangeRequestsPanel — origin (DW-5e)", () => {
       />,
     );
     expect(screen.getByText("Origin")).toBeInTheDocument();
-    expect(screen.getByText(/From Marketing · Dana/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open request" })).toHaveAttribute("href", "/requests/req-9");
+    // One short link: the department is the visible text; the person is in the link's name and tooltip.
+    const link = screen.getByRole("link", { name: "From Marketing, asked by Dana. Open the request." });
+    expect(link).toHaveAttribute("href", "/requests/req-9");
+    expect(link).toHaveTextContent(/^Marketing$/);
+    expect(link).toHaveAttribute("title", "Asked by Dana. Open the request.");
   });
 
   it("says Unavailable on every row when the read failed, and still renders the queue", () => {
