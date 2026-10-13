@@ -398,7 +398,7 @@ test.describe("search_staff (seo-staff@gaiada.com)", () => {
 
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
 // DW-3a/3b/3c: the Overview's frame and its Now band. A placed employee (webdev@gaiada.com = u-dev, Web Dev >
-// Frontend) lands on their department's Overview from `/`. Needs you, Today and Your numbers are built; every other
+// Frontend) lands on their department's Overview from `/`. Needs you, Today, Your numbers and My activity are built; every other
 // block is still planned, so under them is today's page body (nothing is removed, plan §2.6 rule 1); never an invented
 // number.
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -515,6 +515,37 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     else await expect(note).toHaveCount(0);
     await expect(numbers.getByRole("listitem")).toHaveCount(4);
     await expect(numbers.getByText("Unavailable")).toHaveCount(0);
+  });
+
+  // DW-3j: the You band's My activity. Either the 16-week map with Today so far (the demo backend has the series),
+  // or the honest "isn't available here yet" line; never "Unavailable", and never a score. Looked up inside the page
+  // (`#main-content`): while it streams, React briefly holds a hidden copy of it outside.
+  test("the You band has My activity: the 16-week map and today so far, or the not-available line, and no score", async ({ page, context }) => {
+    await signInWebDev(page, context);
+    await page.goto("/departments/dept-1");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
+
+    const main = page.locator("#main-content");
+    const activity = main.getByRole("region", { name: "My activity", exact: true });
+    await expect(activity).toBeVisible();
+    await expect(activity.getByRole("heading", { level: 3, name: "My activity" })).toBeVisible();
+    await expect(activity.getByText("Unavailable")).toHaveCount(0);
+    if (await activity.getByText("Activity isn't available here yet").count()) {
+      await expect(activity.getByRole("link", { name: "Open my activity" })).toHaveCount(0);
+    } else {
+      await expect(activity.getByText("Counts project-management work for now")).toBeVisible();
+      await expect(activity.getByRole("img", { name: /^Activity calendar, / })).toBeVisible();
+      await expect(activity.getByRole("heading", { level: 4, name: "Today so far" })).toBeVisible();
+      await expect(activity.getByRole("link", { name: "Open my activity" })).toHaveAttribute("href", "/pm?view=productivity");
+      // At most 16 full weeks and this week so far (119 days), each with a count on a date, never a score. The demo
+      // backend's clock stands at 16 July 2026 and its series starts at the request's `from`, so under DEMO_MODE the
+      // map holds a few weeks, not 16 (the 16-week window itself is pinned in lib/overviewActivity.test.ts).
+      const cells = activity.locator(".prod-heatmap__cell[data-level]");
+      expect(await cells.count()).toBeGreaterThanOrEqual(1);
+      expect(await cells.count()).toBeLessThanOrEqual(17 * 7);
+      await expect(cells.first()).toHaveAttribute("title", /^\d+ things? on \d{2} [A-Z][a-z]{2} \d{4}$/);
+    }
+    await expect(activity.getByText(/score|rating/i)).toHaveCount(0);
   });
 
   test("the department's own header is not doubled on the Overview, and stays on its other pages", async ({ page, context }) => {

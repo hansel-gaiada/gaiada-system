@@ -15,6 +15,7 @@ import type { OverviewPeriod } from "@/lib/overview";
 import { NeedsYou } from "./NeedsYou";
 import { Today } from "./Today";
 import { YourNumbers } from "./YourNumbers";
+import { MyActivity } from "./MyActivity";
 
 export interface OverviewWidgetProps {
   me: Me;
@@ -35,6 +36,7 @@ export const OVERVIEW_WIDGETS: Readonly<Record<string, OverviewWidgetComponent>>
   "needs-you": NeedsYou,
   today: Today,
   "your-numbers": YourNumbers,
+  "my-activity": MyActivity,
 };
 
 export function hasOverviewWidget(key: string, widgets: Readonly<Record<string, OverviewWidgetComponent>> = OVERVIEW_WIDGETS): boolean {

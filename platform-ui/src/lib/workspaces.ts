@@ -205,7 +205,7 @@ const DEPARTMENT_OVERVIEW: readonly OverviewWidget[] = [
   { key: "needs-you", band: "now", label: "Needs you" },
   { key: "today", band: "now", label: "Today" },
   { key: "your-numbers", band: "you", label: "Your numbers" },
-  { key: "my-activity", band: "you", label: "My activity", ticket: "DW-3j" },
+  { key: "my-activity", band: "you", label: "My activity" },
   { key: "condition", band: "department", label: "Department condition", ticket: "DW-3k" },
   { key: "pulse", band: "department", label: "Pulse", ticket: "DW-3e" },
   { key: "projects", band: "work", label: "Projects", ticket: "DW-3f" },

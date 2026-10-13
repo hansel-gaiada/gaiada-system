@@ -64,7 +64,7 @@
    distinct from the pm tone ramp's CATEGORICAL use elsewhere (tags/board accents). Built with
    `color-mix()` against pm tokens only, never a literal — same idiom `--pm-line-soft` already
    uses in tokens/pm.css. Level buckets are relative to this person's own busiest day in range
-   (`levelFor` in Productivity.tsx), not a fixed absolute count, so the ramp is legible whether the
+   (`levelFor` in activityHeatmap.tsx), not a fixed absolute count, so the ramp is legible whether the
    range holds a handful of days or an entire year. */
 .prod-heatmap__cell[data-level="1"] { background: color-mix(in srgb, var(--pm-tone-5) 25%, var(--pm-surface-sunken)); }
 .prod-heatmap__cell[data-level="2"] { background: color-mix(in srgb, var(--pm-tone-5) 48%, var(--pm-surface-sunken)); }

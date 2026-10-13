@@ -8,6 +8,7 @@ import { StackedBars } from "@/components/reports/charts/StackedBars";
 import { KpiTiles } from "@/components/reports/charts/KpiTiles";
 import { PM_TERMS } from "@/lib/pmVocabulary";
 import "./productivity.css";
+import { HeatmapLegend, fmtDay, isoWeekday, levelFor, monthShort, type HeatLevel } from "./activityHeatmap";
 
 // Productivity view (plan §1.7, workstream E, tickets P4-E3/E4) — the second cross-project view
 // Repsona has that we didn't (§1.7's "we have every ingredient and zero assembly"). Consumes
@@ -144,26 +145,7 @@ function fmtRange(from: string, to: string): string {
 // Every day in `series` already carries an explicit `total` (the backend zero-fills — "a gap day
 // is 0, never an absent entry"), so there are no missing cells to pad around, only leading blanks
 // to line the first real day up under its true weekday row.
-interface DayCell { date: string; total: number; breakdown: ProductivityComponents; level: 0 | 1 | 2 | 3 | 4 }
-
-function isoWeekday(iso: string): number {
-  return (new Date(`${iso}T00:00:00Z`).getUTCDay() + 6) % 7; // 0 = Monday
-}
-function fmtDay(iso: string): string {
-  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
-}
-function monthShort(iso: string): string {
-  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", { month: "short", timeZone: "UTC" });
-}
-
-function levelFor(total: number, max: number): DayCell["level"] {
-  if (total <= 0 || max <= 0) return 0;
-  const pct = total / max;
-  if (pct > 0.75) return 4;
-  if (pct > 0.5) return 3;
-  if (pct > 0.25) return 2;
-  return 1;
-}
+interface DayCell { date: string; total: number; breakdown: ProductivityComponents; level: HeatLevel }
 
 function Heatmap({ series }: { series: ProductivityReport["series"] }) {
   if (series.length === 0) {
@@ -221,11 +203,7 @@ function Heatmap({ series }: { series: ProductivityReport["series"] }) {
           ))}
         </div>
       </div>
-      <div className="prod-heatmap__legend" aria-hidden>
-        <span>Less</span>
-        {[0, 1, 2, 3, 4].map((l) => <span key={l} className="prod-heatmap__swatch" data-level={l} />)}
-        <span>More</span>
-      </div>
+      <HeatmapLegend />
       {hover && (
         <div className="prod-heatmap__detail" role="status">
           <strong>{fmtDay(hover.date)}</strong> — {hover.total} total

@@ -130,7 +130,7 @@ describe("Your numbers (the widget)", () => {
 });
 
 describe("Your numbers is registered (DW-3d)", () => {
-  it("has a component, and no ticket, in every department workspace; My activity still does not render", () => {
+  it("has a component, and no ticket, in every department workspace; My activity follows it (DW-3j)", () => {
     expect(hasOverviewWidget("your-numbers")).toBe(true);
     expect(OVERVIEW_WIDGETS["your-numbers"]).toBe(YourNumbers);
     const ctx = { me: person, tenantId: "co-a", unitPath: ["d-web"] };
@@ -139,9 +139,9 @@ describe("Your numbers is registered (DW-3d)", () => {
       expect(numbers.ticket, ws.key).toBeUndefined();
       expect(isPlanned(numbers), ws.key).toBe(false);
       const activity = ws.overview.find((w) => w.key === "my-activity")!;
-      expect(isPlanned(activity), ws.key).toBe(true);
+      expect(isPlanned(activity), ws.key).toBe(false);
       const you = selectBands(ws.overview, ctx, (key) => hasOverviewWidget(key)).find((b) => b.band === "you");
-      expect(you?.widgets.map((w) => w.key), ws.key).toEqual(["your-numbers"]);
+      expect(you?.widgets.map((w) => w.key), ws.key).toEqual(["your-numbers", "my-activity"]);
     }
   });
 
