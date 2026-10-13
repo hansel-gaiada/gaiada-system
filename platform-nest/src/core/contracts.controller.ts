@@ -677,8 +677,8 @@ export class ContractsController {
    *
    *  PV5-04 (PV-D7): on an ISSUED invoice, confirming POSTS the money in the same transaction — an AR receipt into the
    *  billing profile's bank ledger account, allocated to the AR invoice (issue.ts postConfirmedPayment) — and the
-   *  invoice becomes `paid` exactly when the AR invoice does. A refusal from the ledger (closed period, overpayment, no
-   *  receipt account) rolls the confirmation back with it: a payment is confirmed AND booked, or neither. A rejected
+   *  invoice becomes `paid` exactly when the AR invoice does. A refusal from the ledger (overpayment, no receipt account, no open period at all after a closed
+   *  paid_on: PV5-F2 receipts a payment dated in a closed period in the next open one) rolls the confirmation back with it: a payment is confirmed AND booked, or neither. A rejected
    *  claim posts nothing. A LEGACY invoice (sent/paid before PV-5, `pre_pv5_legacy`) keeps the old derivation, in SQL
    *  numeric; any other unissued invoice cannot have a payment confirmed (409). */
   @Post(":tenantId/invoice-payments/:paymentId/decide")

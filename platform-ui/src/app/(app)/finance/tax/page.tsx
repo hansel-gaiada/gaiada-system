@@ -2,9 +2,10 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { getPpnSummary, getEfakturExceptions, listPeriods, money } from "@/lib/finance";
+import { getPpnSummary, getEfakturExceptions, listPeriods, listTaxCodes, money, type TaxCode } from "@/lib/finance";
 import { Card, KpiTile, HairlineTable, StatusBadge, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { TaxCodeManager } from "@/components/finance/TaxCodeManager";
 
 // Tax — the PPN position for a period, and the documents that put it at risk.
 //
@@ -34,8 +35,30 @@ export default async function FinanceTaxPage({
 
   const periods = await listPeriods(userId, tenant);
   if (periods == null) return <EmptyNote>You do not have finance access for this company.</EmptyNote>;
+  // PV5-F2: the tax codes are set up here, and a taxed invoice is refused without them, so this card does not wait on a
+  // fiscal calendar. `null` means the read was refused or unavailable, which is not the same claim as "no codes".
+  const codes = await listTaxCodes(userId, tenant);
+  const codesCard = codes == null ? (
+    <Card title="Tax codes" style={{ marginTop: 22 }}>
+      <EmptyNote>The tax codes could not be loaded for this company.</EmptyNote>
+    </Card>
+  ) : (
+    <div style={{ marginTop: 22 }}>
+      <TaxCodeManager codes={codes as TaxCode[]} />
+    </div>
+  );
+
   if (periods.length === 0) {
-    return <EmptyNote>This company has no fiscal calendar, so there is no period to report tax for.</EmptyNote>;
+    return (
+      <div className="fin-page">
+        <header className="fin-page__head">
+          <Eyebrow>Finance &amp; Accounting</Eyebrow>
+          <h1 className="fin-page__title">Tax</h1>
+        </header>
+        <EmptyNote>This company has no fiscal calendar, so there is no period to report tax for.</EmptyNote>
+        {codesCard}
+      </div>
+    );
   }
 
   // PPN is filed MONTHLY, so the natural window is one fiscal period — not the year to date. A
@@ -135,6 +158,8 @@ export default async function FinanceTaxPage({
           />
         )}
       </Card>
+
+      {codesCard}
 
       <Card title="Preparing and filing a return" style={{ marginTop: 22 }}>
         <p className="fin-muted">
