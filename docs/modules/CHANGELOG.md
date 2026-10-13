@@ -11,6 +11,21 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.124.0` - DW-4g: a department head's Team progress, and proof a head cannot waive (2026-10-13) - PROTOTYPED
+
+Contract: `docs/FRONTEND-BFF-CONTRACT.md` §38. Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.4 and §5.6 (DW-D15).
+- **Traced first.** The grant already exists: a lead position's role set carries `org_unit_lead` at `own_unit`, and the position reconciler materialises it (live on the agency, all 6 lead seats carry it). Authoring was already bounded to the head's own unit (`lms-l1-acceptance.test.ts` case 1). No grant path, no policy and no migration changed.
+- **`GET /api/:t/modules/lms/compliance?unit=<orgNodeId>`.** Loads the unit's ancestors server-side and authorizes `lms_enrollment` read with them, so the `org_unit_lead` rule can match. A head of that unit or an enclosing one passes; anyone else without a company-wide grant is refused (403), and an id with no ancestors is refused before anything reveals whether it exists. A company-wide caller asking for an id not in the tree gets 404 `unit_not_found`. Learners are the unit's roster today (the §37 rule, `loadUnitRoster`), and every count covers only their enrolments. Returns `{unit, learners, paths}`. Without `unit`, unchanged.
+- **Tests, live Postgres + Cerbos** (`lms-l1-acceptance.test.ts`, block 9): a head's waive is refused and the enrolment is untouched; a head's unit read counts only their 2 learners (a learner elsewhere and a former member are excluded; the company-wide read of the same path counts 3); another unit, an unknown unit and an empty `unit=` are refused for the head; a company-wide caller gets 404 for an unknown unit; without `unit` the head is still refused and the old array is unchanged.
+
+### platform-ui `0.131.0` - DW-4g: a head adds material and sees Team progress for their own department (2026-10-13) - PROTOTYPED
+
+- **`/learning/compliance?unit=`** opens through `canInUnit(lms.progress.view)` and reads the unit through a new honest reader (`getUnitCompliance`: ok, forbidden, not found, error; never an empty list for a failed read). It shows "N people in <dept>"; a department with nobody placed shows that, not empty tables. Without `unit`, unchanged.
+- **`/learning/authoring`** opens for a head through `canInUnit` on `?unit=` (or, without it, on any unit they lead). A head's create form is fixed to the department track and offers only the units they lead and the divisions beneath them.
+- **`/learning/authoring/[courseId]`** and the six course-editing actions (update, which also forks a draft; publish; retire; add module; add activity; remove activity) open for a head on a department course inside a unit they lead (`canWorkOnCourse`); a general-track course stays company-wide only. Path, enrolment, grading and waive guards are unchanged. Cerbos stays the authority.
+- **Registry.** The Learning row's Add material and Team progress open `?unit={dept}`; their gates stay `unitCap`.
+- **Tests.** `rbac-units.test.ts` (`leadsAnyUnitWith`, `canWorkOnCourse`: own department and its division yes, another department or a general-track course no, waive never offered), `lms-readers.test.ts`, `workspaces.test.ts`, two e2e cases in `e2e/lms-learning.spec.ts`. The demo serves `?unit=` with the same refusals.
+
 ### platform-nest `0.123.0` - DW-6d and DW-6g: `?departmentId=` on the clients, deliverables and projects lists (2026-10-13) - PROTOTYPED
 
 - **What.** BFF contract §33. `GET /api/:t/clients`, `/deliverables` and `/projects` take an optional `departmentId` (an org-node id). The rule for each list:
