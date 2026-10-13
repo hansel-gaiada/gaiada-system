@@ -66,6 +66,66 @@ created the secret. Until P6, every site therefore rests at `pending` with its p
 marker is already granted (so the template's "Require deploy grant" step passes). Authorization and the GitHub calls are
 unchanged: the same `GET` metadata, `PUT` and `DELETE …/repositories/{id}` per name.
 
+## Amendment from M6-P6h2 (2026-10-13): one per-site secret per registry environment
+
+M6-P6h added the production promote, and its target derivation needs the repo's PRODUCTION per-site secret among the granted
+names. The grant used to compute ONE per-site name, from the staging row's `environment`, so every promote was refused
+`production_secret_not_granted` and dispatched nothing. A grant now covers:
+
+1. the fixed list; and
+2. **one per-site secret per environment the site has in the registry**: ALWAYS the staging row's name, PLUS the production
+   name when the site has a **live production row**: the `webdev_sites` row with `promoted_from_site_id` = the staging row and
+   `deleted_at IS NULL`, created by M6-P6g's `POST sites/:id/production`. Both come from the same function
+   (`siteDeploySecretName`, slug = the resolved repo's name) and the same repository id: `WEBDESK_DEPLOY_<SLUG>_STAGING_<REPOID>`
+   and `WEBDESK_DEPLOY_<SLUG>_PRODUCTION_<REPOID>`. Neither is ever taken from a caller.
+
+Everything else about a name is unchanged: a 404 secret is `pending` (not an error); a secret not set to "selected repositories"
+is `not_selected`, an error that is never written through; a missing `organization_secrets` permission (O-3) stops the whole
+grant as `github_permission_missing: organization_secrets`; the claim commits before any GitHub write and the grant runs under
+the site lock; the names that landed are recorded even when a later one fails.
+
+**How the two names are recorded: no new column.** `deploy_grant_site_secret_name` stays the STAGING row's name (the name the
+claim records and the superseded check compares; its shape CHECK already fits both environments). The production name is
+derivable, so it needs no column of its own: once its `PUT` landed it is in `deploy_grant_secret_names`, and while the owner
+has not created the secret it is in `deploy_grant_pending_names`. The console and the answers say where each stands in an
+additive `siteSecrets: [{environment, name, status: granted|pending|not_granted}]` (the DTO derives it from the row, the repo
+name in `repo_url`, the recorded repository id and the live production row; `[]` while the name is not derivable).
+
+**One schema change, because of the state.** `wps_deploy_grant_links` said `granted` holds no pending name. A site granted at
+staging that then gets a production row, whose production secret the owner has not created yet, must list that name as pending,
+and demoting the site to `pending` instead would stop the STAGING rebuilds it already has (a build target needs the grant
+`granted`, M6-P6h). Migration `202610132340_webdev_deploy_grant_granted_with_pending.sql` therefore removes that one term from
+the constraint, rebuilt from the LIVE definition (`pg_get_constraintdef`) with before/after assertions; every other clause is
+kept. `granted` now means "a full grant landed (its time, at least one name)". Names added later wait in
+`deploy_grant_pending_names` until a grant run lands them, which clears the list; the state only moves on a claim, a full
+grant or a revoke. Nothing should read "pending names is empty" as a fact about `granted`: a build target asks about ONE name
+(`perSiteSecretGranted`), and the recorded names are exact (a name is recorded only when its PUT landed, and a revoke clears
+them). Consequence for P6h: a granted site whose production secret is still being created refuses the promote
+(`production_secret_not_granted`) and keeps rebuilding staging.
+
+**Revoke** removes the fixed list ∪ the recorded names ∪ the recorded staging name ∪ **every derivable per-site name**:
+staging and production, whether or not a production row exists now (a removed row, or a secret created by hand before the
+row, must not leave the repo able to read it). A name that was never created is a 404, which is nothing to revoke. This is
+the same function the archive path calls (M6-P4g2's `revokeDeployAfterArchive` goes through `revokeDeployForSite`), so the
+archive revokes both names with no change of its own.
+
+**Trigger.** `POST sites/:id/production` re-runs the grant best effort after the production row is created
+(`followProductionRow` in `deploy-grant.service.ts`, called by the controller; `:id` is the staging `webdev_sites` row, and
+the provisioned site is found through `webdev_provisioned_sites.webdev_site_id`). It is the AUTOMATIC path, so like the
+post-scaffold trigger it never re-grants a `revoked` site (`skipped_revoked`, no GitHub call). It never throws and never
+fails the request: the 201 carries an additive `deployGrant` summary (or `null` when the staging row belongs to no provisioned
+site), a refusal is data in `deployGrant.error` and is recorded on the row. It runs under the caller's own principal and needs
+the grant's two checks (`webdev_provisioned_site` provision + `github_repo` push on the org tenant), so a caller who holds only
+`webdev_site` create gets `outcome: "refused", error: "forbidden"`; the row is still created and the operator's
+`POST …/deploy-grant` is the retry. An already-granted site is not short-circuited once a production row exists (the held
+names no longer cover the names the site now needs), so the trigger lands the new name; one granted for BOTH names makes no
+GitHub call.
+
+**What the owner does:** create the org Actions secret `WEBDESK_DEPLOY_<SLUG>_PRODUCTION_<REPOID>` by hand (visibility
+"Selected repositories", this repo only), exactly as `deployGrant.siteSecrets` shows, then re-drive the grant
+(`POST …/provisioned-sites/:id/deploy-grant`). Until then a promote is refused `production_secret_not_granted`; nothing is
+dispatched.
+
 ## Conditions, checked fresh at every grant
 
 All are re-derived at grant time; none is trusted from the caller. Each failure is a typed token; the site's own facts
@@ -112,17 +172,19 @@ revoked ──[operator POST only]──> pending ──> granted
   approval, `basis: deploy-gate-grant / WSK-D29`, `secretName`). The names that landed are recorded even when a later
   name fails, so a partial grant is visible and a re-run completes it (GitHub's PUT is idempotent). All names granted:
   `granted`, `deploy_grant_granted_at`, error cleared, event `webdev.site.deploy_granted`.
-- `deploy_grant_site_secret_name` is the per-site name (amendment above); `deploy_grant_pending_names` the names not
-  created yet. `granted` means no name is pending.
+- `deploy_grant_site_secret_name` is the STAGING per-site name (amendments above; the production name is derived, see the
+  M6-P6h2 amendment); `deploy_grant_pending_names` the names not created yet. M6-P6h2: `granted` may list a pending name that
+  was added after the grant (a production secret not created yet); a first grant is `granted` only when no name is pending.
 - `deploy_grant_secret_names` is the set the repo is known to hold. It only grows until a revoke: a name removed from the
   configuration is NOT forgotten, so a revoke still removes it.
-- **revoke** (under the lock): one `DELETE` per secret in the fixed list ∪ recorded ∪ the per-site name (`deploy-gate-revoke / WSK-D29`, with the
-  reason). 404 means nothing to revoke. Then `revoked`, `deploy_grant_revoked_at`, `_revoked_by`, `_revoke_reason`, the
+- **revoke** (under the lock): one `DELETE` per secret in the fixed list ∪ recorded ∪ every derivable per-site name, staging and production
+  (M6-P6h2) (`deploy-gate-revoke / WSK-D29`, with the reason). 404 means nothing to revoke. Then `revoked`, `deploy_grant_revoked_at`, `_revoked_by`, `_revoke_reason`, the
   names cleared, event `webdev.site.deploy_revoked`. A 409 (the secret is visible to all repos) keeps the state and
   records `deploy_grant_secret_not_selected`, because "revoked" would then be false. A site the ERP never granted
   (`NULL`) is still swept defensively (the DELETEs run), but no state is recorded.
 - Schema invariants (`wps_deploy_grant_links`): a grant state only on a `committed` scaffold, with its claim facts;
-  `granted` with its time and at least one name; `revoked` with its time and reason. Repository id positive, head sha 40
+  `granted` with its time and at least one name (M6-P6h2, migration `202610132340`: no longer "and no pending name");
+  `revoked` with its time and reason. Repository id positive, head sha 40
   hex, names valid GitHub secret names.
 - **A failed re-check does not revoke.** A granted repo whose lock was later removed keeps its grant until an operator (or
   the archive path) revokes it; the template's own workflow also refuses without `CONTRACT.lock`. A scheduled re-check
@@ -143,6 +205,8 @@ revoked ──[operator POST only]──> pending ──> granted
 - No new approval. The company admin's GH-12 approval (D14, HIGH) covers this provisioning; the grant adds no decision
   (repo, snapshot and secret names are all facts the ERP re-derives) and only lets a provably registered, locked repo READ
   secrets it is meant to deploy with. It is reversible (`DELETE`).
+- A second automatic trigger (M6-P6h2): `POST sites/:id/production` re-runs the grant after the production row is created
+  (amendment above). Same rules: best effort, never throws, never re-grants a `revoked` site.
 - Resume paths: the scaffold job re-submitting the same tree (`already_committed`) re-runs the grant when it is not yet
   `granted` with the same names and snapshot; and the explicit route below. **The automatic path never re-grants a
   `revoked` site**: an operator's revoke is only undone by an operator's POST.
@@ -191,7 +255,8 @@ Today a bypass can only be made by an org owner in GitHub's UI, outside the ERP,
 501 stub). So there is nothing to hook into. What exists instead:
 
 - the explicit revoke route above, and `revokeDeployForSite()` (`deploy-grant.service.ts`), which **any future archive or
-  registry-removal path must call** before it soft-deletes the row;
+  registry-removal path must call** before it soft-deletes the row (M6-P4g2's `revokeDeployAfterArchive` does, for a WebDesk
+  site archive; since M6-P6h2 its revoke covers the production name too);
 - condition 5: a deleted registry row can never be (re-)granted.
 
 ## What the owner must do in GitHub for this to work live
@@ -205,7 +270,8 @@ Today a bypass can only be made by an org owner in GitHub's UI, outside the ERP,
    (comma-separated) in the platform's environment.
 3. Per site, when P6 lands: create the per-site secret named exactly as the site's `deployGrant.siteSecretName` (also in
    `pendingNames` and in the grant answer's `pending`), with "Selected repositories" = that site's repo only. Then
-   re-drive the grant (step 5); it completes from `pending` to `granted`.
+   re-drive the grant (step 5); it completes from `pending` to `granted`. Once the site has a production row (M6-P6h2), do
+   the same for the production name in `deployGrant.siteSecrets` (`environment: "production"`).
 4. Never set a deploy secret to "All repositories" or "Private repositories": that grants it to every repo and voids
    the gate. The ERP refuses to grant through such a secret and reports `deploy_grant_secret_not_selected`.
 5. Then re-drive each site already scaffolded: `POST …/provisioned-sites/:id/deploy-grant`.

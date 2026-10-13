@@ -16,6 +16,10 @@
 //      environment and its GitHub id), cannot collide across two sites, matches the one fixture the site workflow's
 //      shell derivation is also tested against, waits as `pending` until the owner creates it, and is only ever granted
 //      to its own site's repo.
+//   8. (M6-P6h2) the grant covers ONE per-site secret PER registry environment: the staging name always, the PRODUCTION name
+//      once the site has a live production row; a missing production secret waits as `pending` (a granted site stays granted, the name listed pending),
+//      a production secret that is not selected-repos is an error never written through, a revoke removes both names, and
+//      the automatic trigger after a production row never re-grants a revoked site.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect } from "vitest";
@@ -28,7 +32,7 @@ import { getFileAtRef, isValidSecretName } from "../../core/github/org-secrets";
 import type { SnapshotFacts } from "./scaffold-commit";
 import {
   DeployGrantRefusal, SITE_SECRET_NOT_DERIVABLE, grantDeploySecrets, parseDeploySecretNames, parseRevokeReason, revokeDeploySecrets,
-  siteDeploySecretName,
+  siteDeploySecretName, siteSecretRefs,
   type DeployGrantDeps, type DeployGrantRow, type DeployGrantTx, type RegistryFacts,
 } from "./deploy-grant";
 import { classifyDeployGrantError } from "./deploy-grant.service";
@@ -47,6 +51,10 @@ const KEY = "WEBDESK_DEPLOY_KEY";
 const REPO_ID = new FakeGithub("acme-org", "acme-site").repoId;
 /** This site's own per-site deploy secret (repo acme-site, environment staging, the fake repo's id). */
 const SITE_SECRET = siteDeploySecretName({ slug: "acme-site", environment: "staging", repositoryId: REPO_ID });
+/** The same site's PRODUCTION per-site secret (M6-P6h2): same repo name, same repository id, environment production. */
+const PROD_SECRET = siteDeploySecretName({ slug: "acme-site", environment: "production", repositoryId: REPO_ID });
+/** The live production row made from the staging row (`POST sites/:id/production`). */
+const PROD_ROW = { siteId: "ws-2", environment: "production" };
 
 const lockText = (over: Partial<Record<string, string>> = {}): string =>
   JSON.stringify(
@@ -65,7 +73,7 @@ function grantableRow(over: Partial<DeployGrantRow> = {}): DeployGrantRow {
 }
 
 const liveRegistry = (over: Partial<RegistryFacts> = {}): RegistryFacts => ({
-  id: "ws-1", deleted: false, origin: "provisioned", repoUrl: "https://github.com/acme-org/acme-site", environment: "staging", ...over,
+  id: "ws-1", deleted: false, origin: "provisioned", repoUrl: "https://github.com/acme-org/acme-site", environment: "staging", production: null, ...over,
 });
 
 /** The site row behind a lock: each `withLockedSite` works on a copy, kept only when the callback resolves. */
@@ -149,6 +157,8 @@ function harness(opts: {
   secrets?: Record<string, "all" | "private" | "selected">;
   /** false: the owner has not created this site's per-site secret yet. */
   siteSecret?: false | "all" | "private" | "selected";
+  /** M6-P6h2: the production per-site secret, when the owner has created it (default: not created). */
+  prodSecret?: "all" | "private" | "selected";
   git?: (gh: FakeGithub) => GitCaller;
 } = {}): Harness {
   const gh = new FakeGithub("acme-org", "acme-site");
@@ -158,6 +168,7 @@ function harness(opts: {
     : gh.pushHumanCommit({ "CONTRACT.lock": opts.lock ?? lockText(), "src/index.astro": "<h1>Home</h1>\n" });
   for (const [name, visibility] of Object.entries(opts.secrets ?? { [GRANT]: "selected" as const })) gh.addOrgSecret(name, visibility);
   if (opts.siteSecret !== false) gh.addOrgSecret(SITE_SECRET, opts.siteSecret ?? "selected");
+  if (opts.prodSecret) gh.addOrgSecret(PROD_SECRET, opts.prodSecret);
   const site = new MemSite(grantableRow(opts.row), opts.registry === undefined ? liveRegistry() : opts.registry);
   const ledger: Harness["ledger"] = [];
   const deps: DeployGrantDeps = {
@@ -452,14 +463,15 @@ describe("the revoke", () => {
     // KEY is dropped from the configuration later: a revoke still removes it, because the row recorded it.
     const r = await revokeDeploySecrets({ ...h.deps, secretNames: [GRANT] }, { siteId: SITE, reason: "client contract ended" });
     expect(r).toMatchObject({ outcome: "revoked", state: "revoked", repositoryId: h.gh.repoId });
-    expect(r.secrets.map((s) => s.name).sort()).toEqual([GRANT, KEY, SITE_SECRET].sort());
+    // the production per-site name is derivable even with no production row (M6-P6h2), so it is swept too (a 404 here)
+    expect(r.secrets.map((s) => s.name).sort()).toEqual([GRANT, KEY, SITE_SECRET, PROD_SECRET].sort());
     expect(h.gh.orgSecrets.get(SITE_SECRET)!.repos.size).toBe(0);
     expect(h.gh.orgSecrets.get(GRANT)!.repos.size).toBe(0);
     expect(h.gh.orgSecrets.get(KEY)!.repos.size).toBe(0);
     expect(h.site.row).toMatchObject({ grantState: "revoked", grantSecretNames: [] });
     expect(h.site.revokeReason).toBe("client contract ended");
     expect(h.site.events.at(-1)).toMatchObject({ type: "webdev.site.deploy_revoked", payload: { reason: "client contract ended" } });
-    expect(h.ledger.filter((l) => l.op === "revoke")).toHaveLength(3);
+    expect(h.ledger.filter((l) => l.op === "revoke")).toHaveLength(4);
   });
 
   it("the automatic path never undoes an operator's revoke; an operator's POST does", async () => {
@@ -478,8 +490,10 @@ describe("the revoke", () => {
     h.gh.orgSecrets.get(GRANT)!.repos.add(h.gh.repoId); // a bypass made by hand in GitHub's UI
     const r = await revokeDeploySecrets(h.deps, { siteId: SITE, reason: "sweep a manual grant" });
     expect(r).toMatchObject({ outcome: "not_granted", state: null });
-    // the per-site name is derived even with nothing recorded, so a hand-made one is swept as well
-    expect(r.secrets).toEqual([{ name: GRANT, result: "revoked" }, { name: KEY, result: "missing" }, { name: SITE_SECRET, result: "missing" }]);
+    // the per-site names (staging AND production) are derived even with nothing recorded, so a hand-made one is swept as well
+    expect(r.secrets).toEqual([
+      { name: GRANT, result: "revoked" }, { name: KEY, result: "missing" }, { name: SITE_SECRET, result: "missing" }, { name: PROD_SECRET, result: "missing" },
+    ]);
     expect(h.gh.orgSecrets.get(GRANT)!.repos.size).toBe(0);
     expect(h.site.row!.grantState).toBeNull();
   });
@@ -595,5 +609,168 @@ describe("the per-site secret's name (M6-P6a amendment; M6-P6f: it ends in the r
     };
     expect((await refusal(grantDeploySecrets(h.deps, operator))).code).toBe("deploy_grant_superseded");
     expect(writes(h.gh)).toBe(0);
+  });
+});
+
+describe("one per-site secret per registry environment (M6-P6h2)", () => {
+  const withProduction = (over: Parameters<typeof harness>[0] = {}): Harness =>
+    harness({ registry: liveRegistry({ production: PROD_ROW }), prodSecret: "selected", ...over });
+  const production = { siteId: SITE, trigger: "production" as const };
+
+  it("the names are derived with the same function and the same repository id, one per environment", () => {
+    expect(PROD_SECRET).toBe(`WEBDESK_DEPLOY_ACME_SITE_PRODUCTION_${REPO_ID}`);
+    expect(PROD_SECRET).not.toBe(SITE_SECRET);
+    expect(PROD_SECRET.endsWith(`_${REPO_ID}`) && SITE_SECRET.endsWith(`_${REPO_ID}`)).toBe(true);
+  });
+
+  it("STAGING ONLY (no production row): the production name is never read, never written, and is not listed", async () => {
+    const h = harness({ prodSecret: "selected" }); // the owner created it early; the site has no production row yet
+    const r = await grantDeploySecrets(h.deps, scaffold);
+    expect(r.secrets.map((x) => x.name)).toEqual([GRANT, SITE_SECRET]);
+    expect(r.siteSecrets).toEqual([{ environment: "staging", name: SITE_SECRET, status: "granted" }]);
+    expect(h.gh.calls.some((c) => c.path.includes(PROD_SECRET))).toBe(false);
+    expect(h.gh.orgSecrets.get(PROD_SECRET)!.repos.size).toBe(0);
+    expect(h.site.row!.grantSecretNames).toEqual([GRANT, SITE_SECRET]);
+  });
+
+  it("STAGING + PRODUCTION: both per-site secrets list the repo, both are recorded, and the row's own name stays the staging one", async () => {
+    const h = withProduction();
+    const r = await grantDeploySecrets(h.deps, scaffold);
+    expect(r).toMatchObject({
+      outcome: "granted", state: "granted", siteSecretName: SITE_SECRET, pending: [], error: null,
+      secrets: [{ name: GRANT, result: "granted" }, { name: SITE_SECRET, result: "granted" }, { name: PROD_SECRET, result: "granted" }],
+      siteSecrets: [{ environment: "staging", name: SITE_SECRET, status: "granted" }, { environment: "production", name: PROD_SECRET, status: "granted" }],
+    });
+    for (const n of [GRANT, SITE_SECRET, PROD_SECRET]) expect([...h.gh.orgSecrets.get(n)!.repos]).toEqual([REPO_ID]);
+    expect(h.site.row).toMatchObject({ grantState: "granted", grantSecretNames: [GRANT, SITE_SECRET, PROD_SECRET], grantSiteSecretName: SITE_SECRET, grantPendingNames: [] });
+    expect(h.ledger.map((l) => l.secretName)).toEqual([GRANT, SITE_SECRET, PROD_SECRET]);
+    // only ever this repo's id, and never a secret value
+    expect(h.gh.calls.filter((c) => c.path.includes("/actions/secrets/")).every((c) => c.method === "GET" || c.path.endsWith(`/repositories/${REPO_ID}`))).toBe(true);
+  });
+
+  it("PRODUCTION SECRET MISSING: pending for that name only; staging stays granted and recorded; creating it and re-running completes", async () => {
+    const h = harness({ registry: liveRegistry({ production: PROD_ROW }) }); // the owner has not created the production secret
+    const r = await grantDeploySecrets(h.deps, scaffold);
+    expect(r).toMatchObject({
+      outcome: "pending", state: "pending", pending: [PROD_SECRET], error: null,
+      secrets: [{ name: GRANT, result: "granted" }, { name: SITE_SECRET, result: "granted" }, { name: PROD_SECRET, result: "missing" }],
+      siteSecrets: [{ environment: "staging", name: SITE_SECRET, status: "granted" }, { environment: "production", name: PROD_SECRET, status: "pending" }],
+    });
+    expect(h.site.row).toMatchObject({ grantSecretNames: [GRANT, SITE_SECRET], grantPendingNames: [PROD_SECRET] });
+    expect(h.gh.count("PUT", PROD_SECRET)).toBe(0);
+
+    h.gh.addOrgSecret(PROD_SECRET);
+    const again = await grantDeploySecrets(h.deps, scaffold);
+    expect(again).toMatchObject({ outcome: "granted", state: "granted", pending: [] });
+    expect(h.site.row!.grantSecretNames).toEqual([GRANT, SITE_SECRET, PROD_SECRET]);
+  });
+
+  it("PRODUCTION SECRET NOT SELECTED-REPOS (visible to all): an error, never written through; staging is unaffected", async () => {
+    const h = withProduction({ prodSecret: "all" });
+    const r = await grantDeploySecrets(h.deps, operator);
+    expect(r).toMatchObject({
+      outcome: "partial", state: "pending", error: `deploy_grant_secret_not_selected: ${PROD_SECRET}`, pending: [],
+      secrets: [{ name: GRANT, result: "granted" }, { name: SITE_SECRET, result: "granted" }, { name: PROD_SECRET, result: "not_selected" }],
+    });
+    expect(h.gh.count("PUT", PROD_SECRET)).toBe(0);
+    expect(h.gh.orgSecrets.get(PROD_SECRET)!.repos.size).toBe(0);
+    expect(h.site.row!.grantSecretNames).toEqual([GRANT, SITE_SECRET]);
+  });
+
+  it("A GRANTED STAGING-ONLY SITE that gains a production row: the automatic trigger grants the production name; a missing one is listed pending and the state stays granted", async () => {
+    const h = harness();
+    await grantDeploySecrets(h.deps, scaffold);
+    expect(h.site.row).toMatchObject({ grantState: "granted", grantSecretNames: [GRANT, SITE_SECRET] });
+
+    // POST sites/:id/production created the row; the owner has not created its secret yet
+    h.site.registry = liveRegistry({ production: PROD_ROW });
+    const waiting = await grantDeploySecrets(h.deps, production);
+    expect(waiting).toMatchObject({ outcome: "pending", state: "granted", pending: [PROD_SECRET], error: null });
+    expect(h.site.row).toMatchObject({ grantState: "granted", grantSecretNames: [GRANT, SITE_SECRET], grantPendingNames: [PROD_SECRET] });
+
+    h.gh.addOrgSecret(PROD_SECRET);
+    expect(await grantDeploySecrets(h.deps, production)).toMatchObject({ outcome: "granted", state: "granted" });
+    expect(h.site.row!.grantSecretNames).toEqual([GRANT, SITE_SECRET, PROD_SECRET]);
+  });
+
+  it("the production trigger on a site already granted for BOTH names makes no GitHub call at all", async () => {
+    const h = withProduction();
+    await grantDeploySecrets(h.deps, scaffold);
+    const before = h.gh.calls.length;
+    expect(await grantDeploySecrets(h.deps, production)).toMatchObject({
+      outcome: "already_granted", state: "granted",
+      secrets: [{ name: GRANT, result: "granted" }, { name: SITE_SECRET, result: "granted" }, { name: PROD_SECRET, result: "granted" }],
+    });
+    expect(h.gh.calls.length).toBe(before);
+  });
+
+  it("the scaffold re-submit on a site granted staging-only that now HAS a production row is not short-circuited either", async () => {
+    const h = harness({ prodSecret: "selected" });
+    await grantDeploySecrets(h.deps, scaffold);
+    h.site.registry = liveRegistry({ production: PROD_ROW });
+    expect(await grantDeploySecrets(h.deps, scaffold)).toMatchObject({ outcome: "granted" });
+    expect(h.gh.orgSecrets.get(PROD_SECRET)!.repos.has(REPO_ID)).toBe(true);
+  });
+
+  it("A REVOKED SITE IS NOT RE-GRANTED by the production trigger (only an operator POST is), and no call is made", async () => {
+    const h = withProduction();
+    await grantDeploySecrets(h.deps, operator);
+    await revokeDeploySecrets(h.deps, { siteId: SITE, reason: "paused by the operator" });
+    const before = h.gh.calls.length;
+    expect(await grantDeploySecrets(h.deps, production)).toMatchObject({ outcome: "skipped_revoked", state: "revoked" });
+    expect(h.gh.calls.length).toBe(before);
+    for (const n of [GRANT, SITE_SECRET, PROD_SECRET]) expect(h.gh.orgSecrets.get(n)!.repos.size).toBe(0);
+    expect(await grantDeploySecrets(h.deps, operator)).toMatchObject({ outcome: "granted", state: "granted" });
+  });
+
+  it("REVOKE removes BOTH per-site names (and the fixed one), and the recorded list is cleared", async () => {
+    const h = withProduction();
+    await grantDeploySecrets(h.deps, operator);
+    const r = await revokeDeploySecrets(h.deps, { siteId: SITE, reason: "client contract ended" });
+    expect(r).toMatchObject({ outcome: "revoked", state: "revoked" });
+    expect(r.secrets).toEqual([
+      { name: GRANT, result: "revoked" }, { name: SITE_SECRET, result: "revoked" }, { name: PROD_SECRET, result: "revoked" },
+    ]);
+    for (const n of [GRANT, SITE_SECRET, PROD_SECRET]) expect(h.gh.orgSecrets.get(n)!.repos.size).toBe(0);
+    expect(h.site.row).toMatchObject({ grantState: "revoked", grantSecretNames: [] });
+    expect(h.ledger.filter((l) => l.op === "revoke").map((l) => l.secretName)).toEqual([GRANT, SITE_SECRET, PROD_SECRET]);
+    expect(h.site.events.at(-1)).toMatchObject({ type: "webdev.site.deploy_revoked", payload: { secretNames: [GRANT, SITE_SECRET, PROD_SECRET] } });
+  });
+
+  it("REVOKE also sweeps the production name when the production row is gone (every derivable name, not only the live ones)", async () => {
+    const h = withProduction();
+    await grantDeploySecrets(h.deps, operator);
+    h.site.registry = liveRegistry(); // the production row was removed since
+    const r = await revokeDeploySecrets(h.deps, { siteId: SITE, reason: "production row removed" });
+    expect(r.secrets.map((x) => x.name)).toContain(PROD_SECRET);
+    expect(h.gh.orgSecrets.get(PROD_SECRET)!.repos.size).toBe(0);
+    // and a hand-made production grant on a never-granted site is swept too
+    const bare = harness({ prodSecret: "selected" });
+    bare.gh.orgSecrets.get(PROD_SECRET)!.repos.add(bare.gh.repoId);
+    expect(await revokeDeploySecrets(bare.deps, { siteId: SITE, reason: "sweep a manual grant" })).toMatchObject({ outcome: "not_granted" });
+    expect(bare.gh.orgSecrets.get(PROD_SECRET)!.repos.size).toBe(0);
+  });
+
+  it("a production secret is only ever granted to its OWN site's repo: another site's production name is never touched", async () => {
+    const other = siteDeploySecretName({ slug: "acme-site", environment: "production", repositoryId: REPO_ID + 1 });
+    const h = withProduction();
+    h.gh.addOrgSecret(other);
+    await grantDeploySecrets(h.deps, operator);
+    expect(h.gh.calls.some((c) => c.path.includes(other))).toBe(false);
+    expect(h.gh.orgSecrets.get(other)!.repos.size).toBe(0);
+  });
+
+  it("siteSecretRefs: names only when the repo's name and id are known; granted, pending or not_granted from the row", () => {
+    const base = { repoName: "acme-site", repositoryId: 5, stagingEnvironment: "staging", hasProduction: true };
+    const s5 = siteDeploySecretName({ slug: "acme-site", environment: "staging", repositoryId: 5 });
+    const p5 = siteDeploySecretName({ slug: "acme-site", environment: "production", repositoryId: 5 });
+    expect(siteSecretRefs({ ...base, grantedNames: [s5], pendingNames: [p5] })).toEqual([
+      { environment: "staging", name: s5, status: "granted" }, { environment: "production", name: p5, status: "pending" },
+    ]);
+    expect(siteSecretRefs({ ...base, grantedNames: [], pendingNames: [] }).map((x) => x.status)).toEqual(["not_granted", "not_granted"]);
+    expect(siteSecretRefs({ ...base, hasProduction: false, grantedNames: [s5], pendingNames: [] })).toHaveLength(1);
+    expect(siteSecretRefs({ ...base, repositoryId: null, grantedNames: [], pendingNames: [] })).toEqual([]);
+    expect(siteSecretRefs({ ...base, repoName: null, grantedNames: [], pendingNames: [] })).toEqual([]);
+    expect(siteSecretRefs({ ...base, stagingEnvironment: null, grantedNames: [], pendingNames: [] })).toEqual([]);
   });
 });

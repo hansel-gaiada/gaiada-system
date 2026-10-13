@@ -158,6 +158,7 @@ describe.skipIf(!TEST_URL)("M6-P4g · deploy-grant routes (HTTP, isolated app, r
     expect(g.statusCode).toBe(200);
     expect(g.json()).toMatchObject({
       outcome: "granted", state: "granted", repo: `${ORG}/${s.slug}`, siteSecretName: s.siteSecret, pending: [],
+      siteSecrets: [{ environment: "staging", name: s.siteSecret, status: "granted" }],
       secrets: [{ name: GRANT, result: "granted" }, { name: s.siteSecret, result: "granted" }],
     });
     expect(gh.orgSecrets.get(GRANT)!.repos.has(gh.repoId)).toBe(true);
@@ -170,6 +171,7 @@ describe.skipIf(!TEST_URL)("M6-P4g · deploy-grant routes (HTTP, isolated app, r
     expect(got.statusCode).toBe(200);
     expect(got.json().deployGrant).toMatchObject({
       state: "granted", secretNames: [GRANT, s.siteSecret], siteSecretName: s.siteSecret, siteSecretNote: null, pendingNames: [], repositoryId: gh.repoId, error: null,
+      siteSecrets: [{ environment: "staging", name: s.siteSecret, status: "granted" }],
     });
 
     const short = await revoke(s.id, manager, { reason: "no" });

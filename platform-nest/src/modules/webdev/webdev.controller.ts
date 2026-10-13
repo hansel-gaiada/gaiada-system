@@ -11,7 +11,7 @@
 //        (M6-P4g: the deploy gate is the org secret grant; deploy-grant.ts)
 //   POST /api/:tenantId/modules/webdev/sites/:id/domain                 -> 200 registry site + property | 400 | 404 | 409 (M6-P4c2; M6-P6i adds `property`)
 //   POST /api/:tenantId/modules/webdev/sites/:id/delivery-binding       -> 200 registry site + deliveryState | 400 | 404 | 409 | 422 (M6-P6g)
-//   POST /api/:tenantId/modules/webdev/sites/:id/production             -> 201 registry site + deliveryState | 400 | 404 | 409 (M6-P6g)
+//   POST /api/:tenantId/modules/webdev/sites/:id/production             -> 201 registry site + deliveryState + deployGrant | 400 | 404 | 409 (M6-P6g; deployGrant M6-P6h2)
 //   GET  /api/:tenantId/modules/webdev/sites/:id/dns                    -> 200 DNS checklist + read-only check | 404 (M6-P6i)
 //
 // This controller is DELIBERATELY THIN. It validates route/body input, resolves the principal,
@@ -76,7 +76,7 @@ import { readDeliveryForProvisioned, type SiteDeliveryDto } from "./delivery-bin
 import { ScaffoldRefusal } from "./scaffold-commit";
 import { commitScaffoldForSite, readScaffoldCommit, type ScaffoldCommitDto, type ScaffoldCommitResponse } from "./scaffold-commit.service";
 import { DeployGrantRefusal, type DeployGrantResult, type DeployRevokeResult } from "./deploy-grant";
-import { grantDeployForSite, readDeployGrant, revokeDeployForSite, type DeployGrantDto } from "./deploy-grant.service";
+import { followProductionRow, grantDeployForSite, readDeployGrant, revokeDeployForSite, type DeployGrantDto, type DeployGrantSummary } from "./deploy-grant.service";
 import { readSiteBuildsForProvisioned, type SiteBuildsDto } from "./site-builds.service";
 
 const SITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -533,7 +533,9 @@ export class WebdevController {
   /** M6-P6g — create a provisioned site's PRODUCTION row from its STAGING row (`:id` is the staging row). Body EXACTLY
    *  `{domain}`. Once only: a second call, or a project that already has a production row, is `409 production_row_exists`;
    *  a domain another live row holds is `409 domain_taken`. The new row copies project, client, kind, repo and adoption and
-   *  starts unbound (`awaiting_deploy_credential`). Authorization is the registry's `webdev_site · create` (a new row). */
+   *  starts unbound (`awaiting_deploy_credential`). Authorization is the registry's `webdev_site · create` (a new row).
+   *  M6-P6h2: the answer carries an additive `deployGrant` (the deploy grant re-run for the new row's production per-site secret,
+   *  or null when the staging row is not a provisioned site's); it never fails the request. */
   @Post("sites/:id/production")
   @HttpCode(201)
   async createProduction(
@@ -541,7 +543,7 @@ export class WebdevController {
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
     @Body() body: unknown,
-  ): Promise<DeliverySiteDto & { property: PropertyLinkResult }> {
+  ): Promise<DeliverySiteDto & { property: PropertyLinkResult; deployGrant: DeployGrantSummary | null }> {
     await authorize(req.principal, { kind: "webdev_site", tenantId, id, module: "webdev" }, "create");
     try {
       const rec = typeof body === "object" && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
@@ -553,7 +555,10 @@ export class WebdevController {
       await writeActivity(tenantId, req.principal.userId, "created", "webdev_site", site.id, {
         domain: site.domain, environment: site.environment, promotedFromSiteId: id, propertyState: site.property.state, propertyVerified: site.property.verified,
       });
-      return site;
+      // M6-P6h2: the production row exists, so the repo's deploy grant also covers its PRODUCTION per-site secret. Best effort
+      // and never throwing (a refusal is data in `deployGrant.error`, recorded on the provisioned row), and the automatic path:
+      // it never re-grants a revoked site. null: the staging row belongs to no provisioned site, so there is no grant to extend.
+      return { ...site, deployGrant: await followProductionRow(req.principal, tenantId, id) };
     } catch (err) {
       throw deliveryHttpError(err);
     }

@@ -341,6 +341,36 @@ describe.skipIf(!live)("M6-P6h — registry targets, and a production promote be
       const n = await adminPool().query(`SELECT count(*)::int AS n FROM automation_approvals WHERE tenant_id = $1 AND workflow_id = 'site.promote' AND deleted_at IS NULL`, [A]);
       expect(n.rows[0].n).toBe(0);
     });
+
+    it("M6-P6h2: the row the production grant leaves. Production secret still pending (state granted, the name listed pending: the shape migration 202610132340 allows) → the promote is refused but the STAGING rebuild still dispatches; once the grant lands the name, the promote files and dispatches", async () => {
+      // What the grant leaves for a site granted at staging whose production row was just created and whose production secret the
+      // owner has not created yet: `granted`, the staging name recorded, the production name PENDING.
+      await setGrant(["WEBDESK_DEPLOY_GRANT", secretFor("staging")]);
+      await adminPool().query(`UPDATE webdev_provisioned_sites SET deploy_grant_pending_names = $2::text[] WHERE id = $1`, [provisionedId, [secretFor("production")]]);
+      const refused = await file(adminA);
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json()).toMatchObject({ reason: "production_secret_not_granted" });
+      expect(dispatches(gh)).toHaveLength(0);
+
+      // The staging rebuild is NOT stopped by the waiting production secret (the state stayed `granted`).
+      const approvalId = randomUUID();
+      const rebuilt = await startSiteRebuild({
+        tenantId: A, tenantSlug: SLUG, siteId: GAIADA_SITE, approvalId, kind: "rebuild", publishedAt: null, decider: await principal(adminA2),
+      });
+      expect(rebuilt).toMatchObject({ state: "rebuilding", failureReason: null });
+      expect(dispatches(gh)).toHaveLength(1);
+      expect(dispatches(gh)[0].body).toMatchObject({ inputs: { environment: "staging" } });
+
+      // The owner creates the production secret and a grant run lands the name: the row as the grant records it.
+      await setGrant(["WEBDESK_DEPLOY_GRANT", secretFor("staging"), secretFor("production")]);
+      gh.calls.length = 0;
+      const filed = await file(adminA);
+      expect(filed.statusCode).toBe(202);
+      const id = filed.json<{ approvalId: string }>().approvalId;
+      expect((await decide(id, adminA2)).statusCode).toBe(200);
+      expect(dispatches(gh)).toHaveLength(1);
+      expect(dispatches(gh)[0].body).toEqual({ ref: "main", inputs: { approval_id: id, kind: "promote", environment: "production" } });
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────────────────────────────────

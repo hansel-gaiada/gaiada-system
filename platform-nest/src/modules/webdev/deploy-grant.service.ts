@@ -39,10 +39,11 @@ import { takeProvisionLock } from "./provisioning.service";
 import { resolveProvisionedRepo } from "./provisioned-repo";
 import type { SnapshotFacts } from "./scaffold-commit";
 import {
-  DeployGrantRefusal, SITE_SECRET_NOT_DERIVABLE, grantDeploySecrets, parseDeploySecretNames, parseRevokeReason, revokeDeploySecrets,
+  DeployGrantRefusal, SITE_SECRET_NOT_DERIVABLE, grantDeploySecrets, parseDeploySecretNames, parseRevokeReason, revokeDeploySecrets, siteSecretRefs,
   type DeployGrantDeps, type DeployGrantResult, type DeployGrantRow, type DeployGrantState, type DeployGrantTx,
-  type DeployRevokeResult, type GrantClaim, type RegistryFacts, type SecretOutcome,
+  type DeployRevokeResult, type GrantClaim, type RegistryFacts, type SecretOutcome, type SiteSecretRef,
 } from "./deploy-grant";
+import { parseGithubRepoUrl } from "./site-build-targets";
 
 const logger = new Logger("DeployGrant");
 
@@ -119,6 +120,10 @@ export interface DeployGrantDto {
   siteSecretName: string | null;
   /** Why `siteSecretName` is null (SITE_SECRET_NOT_DERIVABLE), else null: the console shows it instead of a made-up name. */
   siteSecretNote: string | null;
+  /** M6-P6h2: EVERY environment's per-site secret, staging first and production once the site has a production row, each with
+   *  where it stands (`granted` | `pending` | `not_granted`). [] until the repo's name and GitHub id are known. `siteSecretName`
+   *  stays the staging row's. The owner creates each by hand with exactly this name. */
+  siteSecrets: SiteSecretRef[];
   /** Names the owner has not created yet: the grant completes on the next run once they exist. */
   pendingNames: string[];
   snapshotId: string | null;
@@ -131,12 +136,21 @@ export interface DeployGrantDto {
   revokeReason: string | null;
 }
 
-function toDto(r: DeployGrantDbRow): DeployGrantDto {
+function toDto(r: DeployGrantDbRow, registry: { environment: string; hasProduction: boolean } | null): DeployGrantDto {
   return {
     state: r.deploy_grant_state,
     secretNames: r.deploy_grant_secret_names ?? [],
     siteSecretName: r.deploy_grant_site_secret_name,
     siteSecretNote: r.deploy_grant_site_secret_name ? null : SITE_SECRET_NOT_DERIVABLE,
+    // The slug is the repo's name: the grant only ever recorded a repository id for the repo this row's `repo_url` names.
+    siteSecrets: siteSecretRefs({
+      repoName: parseGithubRepoUrl(r.repo_url)?.name ?? null,
+      repositoryId: repoIdOf(r.deploy_grant_repository_id),
+      stagingEnvironment: registry?.environment ?? null,
+      hasProduction: registry?.hasProduction ?? false,
+      grantedNames: r.deploy_grant_secret_names ?? [],
+      pendingNames: r.deploy_grant_pending_names ?? [],
+    }),
     pendingNames: r.deploy_grant_pending_names ?? [],
     snapshotId: r.deploy_grant_snapshot_id,
     repositoryId: repoIdOf(r.deploy_grant_repository_id),
@@ -150,15 +164,36 @@ function toDto(r: DeployGrantDbRow): DeployGrantDto {
 }
 
 export async function readDeployGrant(tenantId: string, siteId: string): Promise<DeployGrantDto | null> {
-  const r = await withTenants(
+  return withTenants(
     [tenantId],
-    (c) => c.query<DeployGrantDbRow>(`SELECT ${COLUMNS} FROM webdev_provisioned_sites WHERE id = $1`, [siteId]),
+    async (c) => {
+      const r = await c.query<DeployGrantDbRow>(`SELECT ${COLUMNS} FROM webdev_provisioned_sites WHERE id = $1`, [siteId]);
+      const row = r.rows[0];
+      if (!row) return null;
+      let registry: { environment: string; hasProduction: boolean } | null = null;
+      if (row.webdev_site_id) {
+        const s = await c.query<{ environment: string }>(`SELECT environment FROM webdev_sites WHERE id = $1 AND tenant_id = $2`, [row.webdev_site_id, tenantId]);
+        if (s.rows[0]) registry = { environment: s.rows[0].environment, hasProduction: (await liveProduction(c, tenantId, row.webdev_site_id)) !== null };
+      }
+      return toDto(row, registry);
+    },
     { modules: ["webdev"] },
   );
-  return r.rows[0] ? toDto(r.rows[0]) : null;
 }
 
 // ── the transaction port ─────────────────────────────────────────────────────────────────────────
+
+/** M6-P6h2: the live PRODUCTION row made from a staging row (M6-P6g's `POST sites/:id/production`: `promoted_from_site_id` = the
+ *  staging row, `deleted_at IS NULL`), or null. One per staging row (`ux_webdev_sites_one_production_per_staging`). */
+async function liveProduction(c: PoolClient, tenantId: string, stagingId: string): Promise<{ siteId: string; environment: string } | null> {
+  const r = await c.query<{ id: string; environment: string }>(
+    `SELECT id, environment FROM webdev_sites
+      WHERE tenant_id = $1 AND promoted_from_site_id = $2 AND deleted_at IS NULL
+      ORDER BY created_at, id LIMIT 1`,
+    [tenantId, stagingId],
+  );
+  return r.rows[0] ? { siteId: r.rows[0].id, environment: r.rows[0].environment } : null;
+}
 
 function txFor(c: PoolClient, tenantId: string, siteId: string): DeployGrantTx {
   const guarded = async (sql: string, params: unknown[], what: string): Promise<void> => {
@@ -179,7 +214,8 @@ function txFor(c: PoolClient, tenantId: string, siteId: string): DeployGrantTx {
         [webdevSiteId, tenantId],
       );
       const s = r.rows[0];
-      return s ? { id: s.id, deleted: s.deleted_at !== null, origin: s.origin, repoUrl: s.repo_url, environment: s.environment } : null;
+      if (!s) return null;
+      return { id: s.id, deleted: s.deleted_at !== null, origin: s.origin, repoUrl: s.repo_url, environment: s.environment, production: await liveProduction(c, tenantId, s.id) };
     },
 
     async claim(input: GrantClaim) {
@@ -211,6 +247,8 @@ function txFor(c: PoolClient, tenantId: string, siteId: string): DeployGrantTx {
 
     async recordPending(pending: string[], error: string | null) {
       await guarded(
+        // The state is NOT touched: a `granted` site that gained a name it does not hold yet (its production secret, a configured
+        // name) stays `granted` and lists the name as pending (M6-P6h2; migration 202610132340 lets wps_deploy_grant_links say so).
         `UPDATE webdev_provisioned_sites
             SET deploy_grant_pending_names = $2, deploy_grant_error = $3, deploy_grant_updated_at = now(), updated_at = now()
           WHERE id = $1 AND deploy_grant_state IS NOT NULL`,
@@ -405,7 +443,7 @@ export async function grantDeployForSite(
   principal: Principal,
   tenantId: string,
   siteId: string,
-  trigger: "scaffold" | "operator",
+  trigger: "scaffold" | "production" | "operator",
 ): Promise<DeployGrantResult> {
   const orgTenantId = await authorizeDeployGrant(principal, tenantId, siteId);
   const actorId = actorIdOf(principal);
@@ -439,17 +477,45 @@ export async function revokeDeployForSite(
   return revokeDeploySecrets(ports, { siteId, reason });
 }
 
-/** What the scaffold commit's answer carries about the grant that followed it. Never a secret value. */
+/** What an automatic trigger's answer carries about the grant that followed it. Never a secret value. */
 export interface DeployGrantSummary {
   outcome: DeployGrantResult["outcome"] | "refused";
   state: DeployGrantState | null;
   siteSecretName: string | null;
   /** Why `siteSecretName` is null (SITE_SECRET_NOT_DERIVABLE), else null. */
   siteSecretNote: string | null;
+  /** M6-P6h2: every environment's per-site secret and where it stands (see `DeployGrantResult.siteSecrets`). */
+  siteSecrets: SiteSecretRef[];
   secrets: SecretOutcome[];
   /** Secret names the owner has not created yet. */
   pending: string[];
   error: string | null;
+}
+
+/** The never-throwing wrapper both automatic triggers share: a refusal is recorded on the row and returned as data. */
+async function followGrant(
+  principal: Principal,
+  tenantId: string,
+  siteId: string,
+  trigger: "scaffold" | "production",
+): Promise<DeployGrantSummary> {
+  try {
+    const r = await grantDeployForSite(principal, tenantId, siteId, trigger);
+    return {
+      outcome: r.outcome, state: r.state, siteSecretName: r.siteSecretName, siteSecretNote: r.siteSecretNote, siteSecrets: r.siteSecrets,
+      secrets: r.secrets, pending: r.pending, error: r.error,
+    };
+  } catch (err) {
+    const now = await readDeployGrant(tenantId, siteId).catch(() => null);
+    const base = {
+      state: now?.state ?? null, siteSecretName: now?.siteSecretName ?? null, siteSecretNote: now ? now.siteSecretNote : SITE_SECRET_NOT_DERIVABLE,
+      siteSecrets: now?.siteSecrets ?? [], secrets: [], pending: now?.pendingNames ?? [],
+    };
+    if (err instanceof DeployGrantRefusal) return { outcome: "refused", ...base, error: err.rowToken };
+    if (err instanceof ForbiddenException) return { outcome: "refused", ...base, error: "forbidden" };
+    logger.error(`deploy grant (${trigger}) of ${siteId} failed: ${err instanceof Error ? err.message : String(err)}`);
+    return { outcome: "refused", ...base, error: "deploy_grant_failed" };
+  }
 }
 
 /**
@@ -457,15 +523,32 @@ export interface DeployGrantSummary {
  * is never turned into an error by the grant; a refusal is recorded on the row and returned as data.
  */
 export async function followScaffoldCommit(principal: Principal, tenantId: string, siteId: string): Promise<DeployGrantSummary> {
+  return followGrant(principal, tenantId, siteId, "scaffold");
+}
+
+/**
+ * M6-P6h2's trigger: called by `POST sites/:id/production` AFTER the production row is created (`stagingSiteId` is that route's
+ * `:id`, a `webdev_sites` row). The provisioned site that row belongs to (`webdev_provisioned_sites.webdev_site_id`) is granted
+ * again, so the new row's PRODUCTION per-site secret is added to its names (or listed pending until the owner creates it).
+ *
+ * Best effort and NEVER throws: the production row is already committed, and a grant that cannot run (a caller without the
+ * `provision` + `github_repo · push` pair is `forbidden`, O-3 not in effect, a missing secret) is recorded on the row and
+ * returned as data. It is the automatic path, so it NEVER re-grants a `revoked` site (only an operator's POST does). Returns
+ * null when the staging row belongs to no provisioned site (a hand-registered one has no grant to extend).
+ */
+export async function followProductionRow(principal: Principal, tenantId: string, stagingSiteId: string): Promise<DeployGrantSummary | null> {
+  let provisionedId: string | null;
   try {
-    const r = await grantDeployForSite(principal, tenantId, siteId, "scaffold");
-    return { outcome: r.outcome, state: r.state, siteSecretName: r.siteSecretName, siteSecretNote: r.siteSecretNote, secrets: r.secrets, pending: r.pending, error: r.error };
+    const r = await withTenants(
+      [tenantId],
+      (c) => c.query<{ id: string }>(`SELECT id FROM webdev_provisioned_sites WHERE tenant_id = $1 AND webdev_site_id = $2 ORDER BY created_at, id LIMIT 1`, [tenantId, stagingSiteId]),
+      { modules: ["webdev"] },
+    );
+    provisionedId = r.rows[0]?.id ?? null;
   } catch (err) {
-    const now = await readDeployGrant(tenantId, siteId).catch(() => null);
-    const base = { state: now?.state ?? null, siteSecretName: now?.siteSecretName ?? null, siteSecretNote: now ? now.siteSecretNote : SITE_SECRET_NOT_DERIVABLE, secrets: [], pending: now?.pendingNames ?? [] };
-    if (err instanceof DeployGrantRefusal) return { outcome: "refused", ...base, error: err.rowToken };
-    if (err instanceof ForbiddenException) return { outcome: "refused", ...base, error: "forbidden" };
-    logger.error(`deploy grant after the scaffold commit of ${siteId} failed: ${err instanceof Error ? err.message : String(err)}`);
-    return { outcome: "refused", ...base, error: "deploy_grant_failed" };
+    logger.error(`deploy grant after the production row of ${stagingSiteId}: lookup failed: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
   }
+  if (!provisionedId) return null;
+  return followGrant(principal, tenantId, provisionedId, "production");
 }
