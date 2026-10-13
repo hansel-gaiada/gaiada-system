@@ -62,7 +62,8 @@
     "vendor:webdesk-vocabulary": "node scripts/vendor-webdesk-vocabulary.mjs",
     "vendor:check": "node scripts/vendor-webdesk-vocabulary.mjs --check",
     "seed:hr-statutory-ratify": "node dist/seed/hr-statutory-ratify.js",
-    "provision:client-portal-logins": "node dist/admin/provision-client-portal-logins.js"
+    "provision:client-portal-logins": "node dist/admin/provision-client-portal-logins.js",
+    "seal:key": "node dist/ops/seal-key.js"
   },
   "dependencies": {
     "@fastify/multipart": "^8.3.1",
@@ -75,11 +76,15 @@
     "@opentelemetry/exporter-trace-otlp-http": "^0.220.0",
     "@opentelemetry/sdk-metrics": "^2.9.0",
     "@opentelemetry/sdk-node": "^0.220.0",
+    "@signpdf/placeholder-pdf-lib": "3.3.0",
+    "@signpdf/signpdf": "3.3.0",
+    "@signpdf/utils": "3.3.0",
     "dotenv": "^16.4.5",
     "exceljs": "^4.4.0",
     "ioredis": "^5.11.1",
     "jose": "^6.2.3",
     "nodemailer": "^6.9.16",
+    "pdf-lib": "1.17.1",
     "pg": "^8.13.1",
     "pino": "^10.3.1",
     "reflect-metadata": "^0.2.2",

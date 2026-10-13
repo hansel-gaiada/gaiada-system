@@ -18,6 +18,9 @@
   - PV-D26 (added 2026-10-12, after PV5-02): the platform administrator keeps access to bank details,
     ours and suppliers', but **everyone needs high assurance** (a fresh second factor) to change them,
     and every change to our bank details notifies all owners.
+  - PV-D29 (added 2026-10-13, interim): live has no MFA, so an owner or finance manager may change our bank
+    details without a second factor until `infra/runbooks/enable-mfa.md` is applied; then PV-D26 is restored in
+    full. Built as PV5-02b.
   - Also PV-D4 (the five areas, every URL kept), PV-D5 (money and legal effects land in Contracts &
     billing), PV-D10 (one client record per company), PV-D2 (Viceroy is a group client of Gaiada)
     and PV-D13 (no company names or ids in code).

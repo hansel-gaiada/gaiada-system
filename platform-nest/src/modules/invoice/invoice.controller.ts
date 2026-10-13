@@ -15,6 +15,7 @@ import { recordInvoiceRevision, snapshotInvoice } from "./invoice-revisions";
 import { clientFilterSql, parseClientFilter } from "../../core/client-filter";
 import { invoiceClientVisible, staffClientVisible } from "../../core/portal-visibility";
 import { issueInvoice, readIssueReadiness, voidIssuedInvoice, withBilling } from "./issue";
+import { INVOICE_PDF_FILE_ID } from "../../core/document-read-fields";
 
 // IAM-GAP-01: `approved` is a real status (migration 0107 widened the CHECK) but is DELIBERATELY
 // NOT in this set — the only way INTO 'approved' is the dedicated /approve endpoint below, which
@@ -41,7 +42,9 @@ const INVOICE_SELECT = `
          i.invoice_no AS "invoiceNo", i.issued_at AS "issuedAt", i.issued_by AS "issuedBy",
          to_char(i.issue_date, 'YYYY-MM-DD') AS "issueDate", to_char(i.due_date, 'YYYY-MM-DD') AS "dueDate",
          i.subtotal::float8 AS subtotal, i.tax_total::float8 AS "taxTotal", i.tax_code AS "taxCode",
-         i.issuer, i.ar_invoice_id AS "arInvoiceId", i.pre_pv5_legacy AS "legacyUnissued"
+         i.issuer, i.ar_invoice_id AS "arInvoiceId", i.pre_pv5_legacy AS "legacyUnissued",
+         -- PV5-07: the issued invoice's stored PDF. NULL = not issued, or issued and still being prepared.
+         ${INVOICE_PDF_FILE_ID("i")} AS "pdfFileId"
   FROM invoices i LEFT JOIN clients cl ON cl.id = i.client_id
   WHERE i.deleted_at IS NULL`;
 

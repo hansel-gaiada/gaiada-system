@@ -868,6 +868,12 @@ services:
       REPORT_RENDERER_URL: ${REPORT_RENDERER_URL:-http://report-renderer:3007}
       RENDERER_TOKEN: ${RENDERER_TOKEN:?}
       PLATFORM_UI_INTERNAL_URL: ${PLATFORM_UI_INTERNAL_URL:-http://platform-ui:3005}
+      # PV5-07 (PV-D25) — the company sealing keys. The PATH of the read-only mount below; the keys themselves are
+      # FILES (<companyId>/seal-key.pem + seal-key.pass), never env values. A company with no key: its signed copies
+      # stay "being prepared" and an owner is told once. infra/runbooks/company-seal-keys.md.
+      SEAL_KEYS_DIR: /run/seal-keys
+      # How often unfinished invoice PDFs / sealed copies are retried. Blank = 10 minutes (floor 1 minute).
+      DOCUMENT_JOBS_SWEEP_INTERVAL_MS: ${DOCUMENT_JOBS_SWEEP_INTERVAL_MS:-}
       # LMS L5 — the lab runner (`lab-runner/`), which executes a learner's submission in a capped,
       # unprivileged, network-less container. It does NOT run on this box: it lives on SumoPod bound
       # to 127.0.0.1, and the only path to it is an SSH tunnel with a port-restricted key
@@ -1114,6 +1120,11 @@ services:
       # WEBDESK_CONTROL_WS4_SIGNING_KID picks one. Absent dir -> empty mount -> v1 (kid unset) or 503 on WS4
       # calls (kid set). infra/runbooks/webdesk-ws4-keys.md.
       - ${WEBDESK_CONTROL_WS4_SIGNING_KEY_DIR:-/etc/gaiada/webdesk-ws4}:/run/webdesk-ws4:ro
+      # PV5-07 (PV-D25) — the company SEALING keys, FILE-MOUNTED read-only, same custody as the keys above: host dir
+      # outside the deploy-synced tree, 0700 dirs, 0400 root:root files, one <companyId>/ subdir per company. Never env
+      # vars (env_file mangles a multi-line PEM). Absent dir -> empty mount -> no company can seal (fail closed: the
+      # copies stay "being prepared"). Created by `node dist/ops/seal-key.js create` (infra/runbooks/company-seal-keys.md).
+      - ${SEAL_KEYS_HOST_DIR:-/etc/gaiada/seal-keys}:/run/seal-keys:ro
     # §11: the internal control vhost is NOT in public DNS; it is host nginx, reached via the
     # docker0 gateway (the same host-gateway idiom hostdata.yml uses for host.docker.internal).
     extra_hosts:

@@ -1624,6 +1624,15 @@ const configBase = {
     platformUiInternalUrl: process.env.PLATFORM_UI_INTERNAL_URL ?? "",
     timeoutMs: Number(process.env.REPORT_RENDERER_TIMEOUT_MS ?? 30000),
   },
+  // PV5-07 — issued-invoice PDFs and the company seal on a signed contract's copy (core/document-jobs.ts).
+  // `sealKeysDir` is the PATH of the read-only bind mount holding `<companyId>/seal-key.pem` + `seal-key.pass`
+  // (core/document-seal.ts). Only the path is configuration: the key and its passphrase are files, never env values
+  // (env_file mangles a multi-line PEM). Empty = no company can seal; signed copies stay "being prepared" and an owner
+  // is told once. `sweepIntervalMs` is how often the sweep retries documents still owed (default 10 min, floor 1 min).
+  documents: {
+    sealKeysDir: process.env.SEAL_KEYS_DIR ?? "",
+    sweepIntervalMs: readIntervalMs(process.env.DOCUMENT_JOBS_SWEEP_INTERVAL_MS, 10 * 60_000, 60_000),
+  },
   // LMS L5 — the lab runner (`lab-runner/`), the sidecar that executes a learner's submission in a
   // capped, unprivileged, network-less container and returns a graded result. Same fail-soft shape
   // as reportRenderer above: url or token unset -> a lab attempt is REFUSED with a clear message

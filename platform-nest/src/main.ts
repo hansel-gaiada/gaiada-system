@@ -159,6 +159,7 @@ import { startVisitorJobs } from "./modules/search/visitor-jobs";
 import { startIndexNowRetryLoop } from "./modules/search/indexnow-service";
 import { registerIndexNowEventHandlers } from "./modules/search/indexnow-webdesk";
 import { registerAmendmentEventHandlers } from "./core/amendment-signed-handler";
+import { registerDocumentJobHandlers, startDocumentJobSweep } from "./core/document-jobs";
 // MAIL-04 (design §7.7/§7.8) — the mail sender worker. Only started when MAIL_ENABLED=1 (the
 // master gate): starting it unconditionally would still send nothing today (resolveAdapter falls
 // back to dev-log when disabled, provider.ts), but not starting it at all is the honest "module is
@@ -573,6 +574,9 @@ async function bootstrap(): Promise<void> {
     // The `contract` stream is added to the consumer list below in the same change, or this handler would be
     // registered and never invoked.
     registerAmendmentEventHandlers();
+    // PV5-07: an issued invoice gets its PDF, a signed contract its sealed copy (core/document-jobs.ts). Core handlers on
+    // `invoice.issued` and `contract.signed`; the `invoice` stream is added to the consumer list below in the same change.
+    registerDocumentJobHandlers();
     // P2-05: the position reconciler's outbox triggers. The HANDLERS are flag-gated (they also
     // re-check `positionSyncEnabled` internally, and every reconciler entry point returns null when
     // it is off) but the STREAMS below are listed unconditionally — an always-drained stream can
@@ -637,9 +641,15 @@ async function bootstrap(): Promise<void> {
       // PV4-04 — the stream `contract.signed` is emitted on (core/contracts.controller.ts countersign, portal-commerce.controller.ts sign).
       // registerAmendmentEventHandlers() hangs the "amendment signed: the request can start" notice off it.
       "contract",
+      // PV5-07 — the stream `invoice.issued` is emitted on (modules/invoice/issue.ts). registerDocumentJobHandlers()
+      // renders the invoice of record's PDF off it. Without this entry the handler would be registered and never invoked.
+      "invoice",
       // P2-05 — see registerPositionEventHandlers' header for why these are unconditional.
       ...POSITION_STREAMS,
     ]);
+    // PV5-07: retries every document still owed (issued invoice without its PDF, signed contract without its sealed
+    // copy) on the backoff clock in document_jobs. Always on: with no renderer or no key it only records why, once.
+    startDocumentJobSweep(config.documents.sweepIntervalMs);
     // ORG-6 service-assignment reconciler (A7): outbox-driven, own consumer group. Only when the
     // release-train flag is on — dark by default so assignments stay dormant metadata.
     if (config.serviceAssignmentsEnabled) {
