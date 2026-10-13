@@ -530,7 +530,8 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     const compared = page.locator("#main-content").getByText("Compared with a period that starts before records began on 1 May 2026.");
     const nowUtc = new Date();
     if (nowUtc.getUTCFullYear() === 2026 && nowUtc.getUTCMonth() >= 6) await expect(compared).toBeVisible();
-    await expect(page.locator("#main-content").getByText("Unavailable")).toHaveCount(0);
+    // Scoped to the block: the Work band's Requests says Unavailable in the demo (DW-3f), and that is its own honest state.
+    await expect(numbers.getByText("Unavailable")).toHaveCount(0);
   });
 
   // DW-3j: the You band's My activity. Either the 16-week map with Today so far (the demo backend has the series),

@@ -78,11 +78,12 @@ describe("WorkspaceOverview: with no block to draw", () => {
     expect(screen.getByText(/The Company Overview is being built/)).toBeInTheDocument();
   });
 
-  it("hosts the Now band's two blocks, Your numbers, My activity and Pulse, and no other (DW-3c, DW-3d, DW-3j, DW-3e)", () => {
-    expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual(["my-activity", "needs-you", "pulse", "today", "your-numbers"]);
+  it("hosts the Now band's two blocks, Your numbers, My activity, Pulse and the Work blocks, and no other (DW-3c, DW-3d, DW-3j, DW-3e, DW-3f)", () => {
+    expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual(["campaigns", "my-activity", "needs-you", "projects", "pulse", "requests", "today", "your-numbers"]);
     expect(hasOverviewWidget("needs-you")).toBe(true);
     expect(hasOverviewWidget("pulse")).toBe(true);
-    expect(hasOverviewWidget("projects")).toBe(false);
+    expect(hasOverviewWidget("projects")).toBe(true);
+    expect(hasOverviewWidget("learning")).toBe(false);
   });
 });
 
@@ -214,5 +215,25 @@ describe("WorkspaceOverview: the bands and the host", () => {
     expect(screen.queryByText("four tiles")).not.toBeInTheDocument();
     expect(screen.getByText("five items")).toBeInTheDocument();
     expect(screen.getByText("two assigned")).toBeInTheDocument();
+  });
+});
+
+describe("WorkspaceOverview: the Work band (DW-3f)", () => {
+  const host: Record<string, OverviewWidgetComponent> = {
+    projects: () => <p>projects block</p>,
+    campaigns: () => <p>campaigns block</p>,
+    requests: () => <p>requests block</p>,
+  };
+
+  it("draws the Work band with its three blocks for a department that has a unit", () => {
+    draw({ widgets: host });
+    expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(["Work"]);
+    for (const t of ["projects block", "campaigns block", "requests block"]) expect(screen.getByText(t)).toBeInTheDocument();
+  });
+
+  it("drops the whole band, label and all, for a workspace with no unit to scope to", () => {
+    draw({ widgets: host, subject: { ...webDev, deptId: null } });
+    expect(screen.queryByRole("heading", { level: 2, name: "Work" })).not.toBeInTheDocument();
+    expect(screen.queryByText("projects block")).not.toBeInTheDocument();
   });
 });
