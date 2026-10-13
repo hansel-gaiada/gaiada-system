@@ -18,7 +18,7 @@ local stack). None of these mean "production-done".
   - Empty collection: Next 15.5 with export fails on `generateStaticParams()` returning `[]`, so one placeholder param (`_none`) is returned and renders the 404.
   - No `WEBDESK_HOST`: the build fails loudly ("WEBDESK_HOST is not set"), like a scaffolded astro build.
 - `webdesk/templates/qa/build-templates.sh` step 15 is now a real failing step: the scaffolded site exports with `WEBDESK_STATIC_EXPORT=1` from fixture content served by a local HTTPS stub (`qa/content-stub.mjs`); step 8 builds against the same stub.
-- Verified: ai-agents tsc clean and vitest green locally; the Linux gate result is in the M6 plan P6m row's report.
+- Verified on the Linux gate (sumopod, node:24-bookworm, commit 574bdb09): `build-templates.sh` all steps PASS incl. the new step 15 (out/index.html, listing, both fixture case-study pages, the empty-collection placeholder, the stub saw the SDK requests); ai-agents tsc clean, 46 files / 418 tests passed locally.
 
 ### platform-ui `0.114.0` - DW-2h: the AI Assistant page made calmer and aware of the department (2026-10-13) - PROTOTYPED
 
