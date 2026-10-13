@@ -11,6 +11,7 @@ import { authorize, writeActivity } from "./http";
 import { validateCustomFields } from "./custom-fields";
 import { AuthGuard } from "../auth/guards";
 import { clientFilterSql, parseClientFilter } from "./client-filter";
+import { departmentFilterSql, parseDepartmentFilter } from "./department-filter";
 import { staffDeliverableClientVisible } from "./portal-visibility";
 
 @Controller("api")
@@ -18,7 +19,7 @@ import { staffDeliverableClientVisible } from "./portal-visibility";
 export class ClientWorkController {
   // ---- Deliverables ----
   @Get(":tenantId/deliverables")
-  async listDeliverables(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("projectId") projectId?: string, @Query("clientId") clientId?: string) {
+  async listDeliverables(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("projectId") projectId?: string, @Query("clientId") clientId?: string, @Query("departmentId") departmentId?: string) {
     await authorize(req.principal, { kind: "deliverable", tenantId }, "read");
     // PV3-03 / CC-1: `?clientId=<uuid>|internal`, strict (a non-uuid is a 400, never every client).
     // Parsed AFTER authorize so a denial is a denial, not a validation error.
@@ -30,15 +31,24 @@ export class ClientWorkController {
     // the project belongs to that client, and `internal` = the project has no client (or, under the LEFT
     // JOIN, no project at all: also unreachable from any portal).
     const filter = clientFilterSql(parseClientFilter(clientId, true), "dp.client_id", 2);
+    // DW-6g (contract §33): `?departmentId=<org node id>` matches on the deliverable's PROJECT (`dp.department_id`,
+    // the node or any node under it), the way `clientId` does; a deliverable whose project is missing never
+    // matches. ANDed with projectId and clientId. A filter, not a boundary; parsed AFTER authorize.
+    // $1 = projectId, $2.. = the client facet's params, then the company and the node id.
+    const tenantParam = 2 + filter.params.length;
+    const dept = departmentFilterSql(parseDepartmentFilter(departmentId), "dp.department_id", tenantParam, tenantParam + 1);
+    const deptParams = dept.params.length ? [tenantId, ...dept.params] : [];
+    // A deleted project does not count (§33.1). The unfiltered list is unchanged, so this is added only here.
+    const deptSql = dept.params.length ? `(dp.deleted_at IS NULL AND ${dept.sql})` : dept.sql;
     // PV3-07: `clientVisible` travels through the PROJECT for the same reason.
     const rows = await withTenants([tenantId], (c) =>
       c.query(
         `SELECT d.id, d.project_id, d.client_id, d.name, d.status, d.due_date, d.custom_fields,
                 ${staffDeliverableClientVisible("d", "dp")} AS "clientVisible"
            FROM deliverables d LEFT JOIN projects dp ON dp.id = d.project_id
-         WHERE d.deleted_at IS NULL AND ($1::uuid IS NULL OR d.project_id = $1) AND ${filter.sql}
+         WHERE d.deleted_at IS NULL AND ($1::uuid IS NULL OR d.project_id = $1) AND ${filter.sql} AND ${deptSql}
          ORDER BY d.due_date NULLS LAST, d.created_at DESC`,
-        [projectId ?? null, ...filter.params],
+        [projectId ?? null, ...filter.params, ...deptParams],
       ),
     );
     return rows.rows;

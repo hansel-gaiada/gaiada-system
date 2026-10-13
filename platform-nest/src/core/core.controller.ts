@@ -10,6 +10,7 @@ import { config } from "../config";
 import { authorize, writeActivity, notify } from "./http";
 import { validateCustomFields } from "./custom-fields";
 import { clientFilterSql, parseClientFilter } from "./client-filter";
+import { departmentFilterSql, parseDepartmentFilter } from "./department-filter";
 import { projectClientVisible, staffClientVisible } from "./portal-visibility";
 import { recomputeRollups } from "../rollups/engine";
 import { AuthGuard } from "../auth/guards";
@@ -158,9 +159,16 @@ export class CoreController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Query("clientId") clientId?: string,
+    @Query("departmentId") departmentId?: string,
   ) {
     await authorize(req.principal, { kind: "project", tenantId }, "read");
     const filter = clientFilterSql(parseClientFilter(clientId), "client_id", 1);
+    // DW-6d (contract §33): `?departmentId=<org node id>` narrows to projects owned by that node or any node under
+    // it, ANDed with `clientId`. A filter, not a boundary; parsed AFTER authorize. $1.. = the client facet's
+    // params, then the company and the node id.
+    const tenantParam = 1 + filter.params.length;
+    const dept = departmentFilterSql(parseDepartmentFilter(departmentId), "department_id", tenantParam, tenantParam + 1);
+    const deptParams = dept.params.length ? [tenantId, ...dept.params] : [];
     const rows = await withTenants([tenantId], (c) =>
       // P4-H2: `start_date` was selected ONLY by the single-project detail read, so every LIST
       // consumer could show a project's target but never the start of its authored range — and the
@@ -171,8 +179,8 @@ export class CoreController {
       c.query(
         `SELECT id, name, status, client_id, is_internal, owner_id, start_date, due_date, custom_fields, department_id, short_code AS "shortCode",
                 ${staffClientVisible("", projectClientVisible(""))} AS "clientVisible"
-               FROM projects WHERE deleted_at IS NULL AND ${filter.sql} ORDER BY created_at DESC`,
-        filter.params,
+               FROM projects WHERE deleted_at IS NULL AND ${filter.sql} AND ${dept.sql} ORDER BY created_at DESC`,
+        [...filter.params, ...deptParams],
       ),
     );
     return rows.rows;
