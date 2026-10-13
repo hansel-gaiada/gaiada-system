@@ -2,11 +2,11 @@
 // imported by both server readers/actions and by client components that need the same shape
 // math (section trees, "Shared · N", completion counts, the patch builder).
 //
-// CMC's layout and categorisation, carried over as native ERP pages (CC-D1). The registry this
-// module reads (`clientCentreRegistry.json`) is a byte-identical copy of platform-nest's
-// `src/modules/clients/centre/registry.json` — see `clientCentre.test.ts`'s parity test — and is
-// ALREADY title-cased by the extraction script (`scripts/cmc/extract-registry.cjs`), so nothing
-// here re-implements CMC's `titleCase`/`titleCasePages`.
+// CMC's layout and categorisation, carried over as native ERP pages (CC-D1), re-cut as BUSINESS AREAS
+// by PV6-01: an area has a Setup part (its fields), a Connections part and, from PV6-03, Services &
+// results. The registry this module reads (`clientCentreRegistry.json`, v2) is a byte-identical copy of
+// platform-nest's `src/modules/clients/centre/registry.json` — see `clientCentre.test.ts`'s parity test —
+// and is ALREADY title-cased, so nothing here re-implements CMC's `titleCase`.
 import registryJson from "./clientCentreRegistry.json";
 
 // ── Registry shapes ──────────────────────────────────────────────────────────────────────────────
@@ -29,25 +29,21 @@ export interface RegistryGeneralFieldGroup {
   title: string;
   keys: string[];
 }
-/** A leaf page (a "Coming soon" placeholder) or a sub-section (has its own `pages` + settings). */
-export interface RegistryPage {
-  id?: string;
-  name: string;
-  pages?: RegistryPage[];
-}
-/** A department or a sub-section — both are "sections" once inside `pages`; both carry a settings
- *  definition. A department's `id` is always present; a sub-section is a `RegistryPage` with `id`
- *  and its own nested `pages`. */
+/** A Business area or a sub-area: the unit that owns a Setup (fields) and a Connections part. */
 export interface RegistrySection {
   id: string;
   name: string;
-  pages: RegistryPage[];
+}
+export interface RegistryArea extends RegistrySection {
+  /** Only Marketing has sub-areas (its 19 sub-sections; ids unchanged from registry v1). */
+  subAreas?: RegistrySection[];
 }
 export interface RegistrySectionSettings {
   fields: string[];
   connections: string[];
 }
-export interface RegistryIndustryModule extends RegistrySection {
+/** The business type's own area. Its id is always `ix`; its settings live here, not in `sectionSettings`. */
+export interface RegistryIndustryArea extends RegistrySection {
   settings: RegistrySectionSettings;
 }
 
@@ -59,16 +55,15 @@ export interface ClientCentreRegistry {
   connectionStatuses: string[];
   connectionMethods: string[];
   businessTypes: RegistryBusinessType[];
-  defaultOffDepartments: Record<string, string[]>;
+  defaultOffAreas: Record<string, string[]>;
   generalFields: RegistryGeneralFieldGroup[];
-  departments: RegistrySection[];
-  industryModules: Record<string, RegistryIndustryModule>;
+  areas: RegistryArea[];
+  industryModules: Record<string, RegistryIndustryArea>;
   sectionSettings: Record<string, RegistrySectionSettings>;
   icons: Record<string, string>;
 }
 
-// `registryJson` also carries a `_comment` key from the extraction script — not part of the typed
-// shape and never read here.
+// `registryJson` also carries a `_comment` key — not part of the typed shape and never read here.
 export const registry = registryJson as unknown as ClientCentreRegistry;
 
 export const CONN_STATUS_CONNECTED = "Connected";
@@ -97,7 +92,8 @@ export interface CentreProfile {
   businessType: string;
   profile: Record<string, string>;
   connections: Record<string, ConnectionEntry>;
-  departments: Record<string, boolean>;
+  /** Business area on/off overrides (absent = the business type's default). The database column is still named `departments`. */
+  areas: Record<string, boolean>;
   customConnections: Record<string, CustomConnection[]>;
   revision: number;
   updatedAt: string | null;
@@ -109,7 +105,7 @@ export interface CentrePatch {
   businessType?: string;
   profile?: Record<string, string | null>;
   connections?: Record<string, Partial<ConnectionEntry> | null>;
-  departments?: Record<string, boolean | null>;
+  areas?: Record<string, boolean | null>;
   customConnections?: Record<string, CustomConnection[]>;
 }
 
@@ -136,7 +132,7 @@ export interface CentreDraft {
   businessType: string;
   profile: Record<string, string>;
   connections: Record<string, ConnectionEntry>;
-  departments: Record<string, boolean>;
+  areas: Record<string, boolean>;
   customConnections: Record<string, CustomConnection[]>;
 }
 
@@ -145,86 +141,74 @@ export function draftFromProfile(p: CentreProfile): CentreDraft {
     businessType: p.businessType,
     profile: { ...p.profile },
     connections: Object.fromEntries(Object.entries(p.connections).map(([k, v]) => [k, { ...v }])),
-    departments: { ...p.departments },
+    areas: { ...p.areas },
     customConnections: Object.fromEntries(
       Object.entries(p.customConnections).map(([k, v]) => [k, v.map((c) => ({ ...c }))]),
     ),
   };
 }
 
-// ── Section tree ─────────────────────────────────────────────────────────────────────────────────
+// ── Business areas ───────────────────────────────────────────────────────────────────────────────
 
-/** True for a `RegistryPage` that is itself a sub-section (has its own `pages`), as opposed to a
- *  leaf "Coming soon" page. Same test as CMC's `isSub`. */
-export function isSub(p: RegistryPage): p is RegistrySection {
-  return !!p && Array.isArray(p.pages);
-}
-
-/** The industry module (if this business type has one) followed by the fixed departments — the
- *  same order CMC's `allDepts` renders the nav in. */
-export function allDepts(r: ClientCentreRegistry, businessType: string): RegistrySection[] {
+/** The industry area (if this business type has one) followed by the fixed Business areas. */
+export function allAreas(r: ClientCentreRegistry, businessType: string): RegistryArea[] {
   const ix = r.industryModules[businessType];
-  return ix ? [ix, ...r.departments] : r.departments;
+  return ix ? [{ id: ix.id, name: ix.name }, ...r.areas] : r.areas;
 }
 
-/** `departments[id]` present -> that boolean; absent -> on unless listed in
- *  `defaultOffDepartments[businessType]`. Only a TOP-LEVEL department id is ever toggled — a
- *  sub-section (e.g. `mk_strat`) always follows its parent's state, matching CMC. */
-export function deptEnabled(r: ClientCentreRegistry, businessType: string, overrides: Record<string, boolean>, deptId: string): boolean {
-  if (deptId in overrides) return !!overrides[deptId];
-  return !(r.defaultOffDepartments[businessType] ?? []).includes(deptId);
+/** `areas[id]` present -> that boolean; absent -> on unless listed in `defaultOffAreas[businessType]`.
+ *  Only a TOP-LEVEL area id is ever toggled — a sub-area (e.g. `mk_strat`) always follows its parent. */
+export function areaEnabled(r: ClientCentreRegistry, businessType: string, overrides: Record<string, boolean>, areaId: string): boolean {
+  if (areaId in overrides) return !!overrides[areaId];
+  return !(r.defaultOffAreas[businessType] ?? []).includes(areaId);
 }
 
-export function activeDepts(r: ClientCentreRegistry, businessType: string, overrides: Record<string, boolean>): RegistrySection[] {
-  return allDepts(r, businessType).filter((d) => deptEnabled(r, businessType, overrides, d.id));
+export function activeAreas(r: ClientCentreRegistry, businessType: string, overrides: Record<string, boolean>): RegistryArea[] {
+  return allAreas(r, businessType).filter((a) => areaEnabled(r, businessType, overrides, a.id));
 }
 
-export function findDept(r: ClientCentreRegistry, businessType: string, deptId: string): RegistrySection | undefined {
-  return allDepts(r, businessType).find((d) => d.id === deptId);
+export function findArea(r: ClientCentreRegistry, businessType: string, areaId: string): RegistryArea | undefined {
+  return allAreas(r, businessType).find((a) => a.id === areaId);
 }
 
-/** Every section reachable for this business type: each department, and every sub-section nested
- *  one level inside it (registry nesting never goes deeper than that). Section ids are unique
- *  across the whole registry (a sub-section like `se` is not prefixed by its parent's id), so a
- *  section can always be found by id alone regardless of nesting — the basis for the route model
- *  below. */
+/** Every section reachable for this business type: each area, and every sub-area nested one level inside
+ *  it (the registry never nests deeper). Section ids are unique across the whole registry (a sub-area like
+ *  `se` is not prefixed by its parent's id), so a section can always be found by id alone — the basis for
+ *  the route model below. */
 export function allSections(r: ClientCentreRegistry, businessType: string): RegistrySection[] {
   const out: RegistrySection[] = [];
-  for (const d of allDepts(r, businessType)) {
-    out.push(d);
-    for (const p of d.pages) if (isSub(p)) out.push(p);
+  for (const a of allAreas(r, businessType)) {
+    out.push({ id: a.id, name: a.name });
+    for (const s of a.subAreas ?? []) out.push(s);
   }
   return out;
 }
 
-/** Find any section (department or sub-section) by id, anywhere in the tree for this business type. */
+/** Find any section (area or sub-area) by id, anywhere in the tree for this business type. */
 export function findSection(r: ClientCentreRegistry, businessType: string, sectionId: string): RegistrySection | undefined {
   return allSections(r, businessType).find((s) => s.id === sectionId);
 }
 
-/** The department that owns a sub-section, for breadcrumbs (e.g. Marketing owning SEO). Returns
- *  the section itself if it is already a top-level department. */
-export function parentOf(r: ClientCentreRegistry, businessType: string, sectionId: string): RegistrySection | undefined {
-  for (const d of allDepts(r, businessType)) {
-    if (d.id === sectionId) return d;
-    if (d.pages.some((p) => isSub(p) && p.id === sectionId)) return d;
+/** The area that owns a section, for breadcrumbs (Marketing owning SEO). Returns the area itself when the
+ *  section is already a top-level area. */
+export function parentOf(r: ClientCentreRegistry, businessType: string, sectionId: string): RegistryArea | undefined {
+  for (const a of allAreas(r, businessType)) {
+    if (a.id === sectionId) return a;
+    if ((a.subAreas ?? []).some((s) => s.id === sectionId)) return a;
   }
   return undefined;
 }
 
-export function settingsDef(r: ClientCentreRegistry, section: RegistrySection): RegistrySectionSettings {
+/** A section's fields and connections. The industry area (`ix`) reads the business type's own
+ *  `industryModules[bt].settings` (PV6-01 finding 2: before this it fell through to the empty default and
+ *  showed "0 of 0"); every other section reads `sectionSettings[id]`. */
+export function settingsDef(r: ClientCentreRegistry, businessType: string, section: RegistrySection): RegistrySectionSettings {
+  if (section.id === "ix") return r.industryModules[businessType]?.settings ?? { fields: [], connections: [] };
   return r.sectionSettings[section.id] ?? { fields: [], connections: [] };
 }
 
-/** The display name of a leaf page or sub-section inside a `pages` array. */
-export function pageName(p: RegistryPage): string {
-  return p.name;
-}
-
 /** "Shared · N": which OTHER sections (by name) use this field/connection key, for this business
- *  type. `excludeSectionId` is the section currently being edited, matching CMC's `usedBy(...)
- *  .filter(n => n !== currentDept.name)` — done by id here rather than by name, since two
- *  differently-named sections can never collide but the exclusion intent is identical. */
+ *  type. `excludeSectionId` is the section currently being edited, excluded by id. */
 export function usedBy(
   r: ClientCentreRegistry,
   businessType: string,
@@ -234,7 +218,7 @@ export function usedBy(
 ): string[] {
   return allSections(r, businessType)
     .filter((s) => s.id !== excludeSectionId)
-    .filter((s) => (settingsDef(r, s)[kind] || []).includes(key))
+    .filter((s) => (settingsDef(r, businessType, s)[kind] || []).includes(key))
     .map((s) => s.name);
 }
 
@@ -264,42 +248,83 @@ export function connectionsConnectedCount(connections: Record<string, Connection
   return connectionIds.filter((id) => connections[id]?.status === CONN_STATUS_CONNECTED).length;
 }
 
+export interface SectionStats {
+  fieldsFilled: number;
+  fieldsTotal: number;
+  connectionsConnected: number;
+  connectionsTotal: number;
+}
+
+/** "N of M setup fields completed" and "N of M connections connected" for one area or sub-area. */
+export function sectionStats(
+  r: ClientCentreRegistry,
+  businessType: string,
+  section: RegistrySection,
+  state: { profile: Record<string, string>; connections: Record<string, ConnectionEntry>; customConnections: Record<string, CustomConnection[]> },
+): SectionStats {
+  const def = settingsDef(r, businessType, section);
+  const connIds = connectionIdsFor(section.id, def, state.customConnections);
+  return {
+    fieldsFilled: fieldsFilledCount(state.profile, def.fields),
+    fieldsTotal: def.fields.length,
+    connectionsConnected: connectionsConnectedCount(state.connections, connIds),
+    connectionsTotal: connIds.length,
+  };
+}
+
 // ── Route model ──────────────────────────────────────────────────────────────────────────────────
 // The catch-all segment (`[[...section]]`) under `/clients/[clientId]/profile` (staff) and
 // `/portal/company` (portal). Every section id is unique registry-wide (see `allSections` above),
-// so the route never needs to encode a parent — `["se", "settings"]` finds SEO directly even
+// so the route never needs to encode a parent — `["se", "connections"]` finds SEO directly even
 // though it nests under Marketing.
+//
+//   ``                       Home: the Business areas
+//   `company`                Business details
+//   `<areaId>`               the area's Setup (its fields)
+//   `<areaId>/connections`   the area's Connections
+//   `<areaId>/settings`      OLD, redirects to `<areaId>`           (see `legacySectionRedirect`)
+//   `<areaId>/<n>`           OLD leaf page, redirects to `<areaId>`
+// PV6-03 adds `<areaId>/results` (Services & results); until then it is not linked and reads as Home.
+
+/** The parts of an area page, in the order the strip shows them. PV6-03 adds "results". */
+export type SectionPart = "setup" | "connections";
 
 export type SectionRoute =
   | { kind: "home" }
   | { kind: "company" }
-  | { kind: "section"; sectionId: string; sub: "overview" }
-  | { kind: "section"; sectionId: string; sub: "settings" }
-  | { kind: "section"; sectionId: string; sub: "page"; pageIndex: number };
+  | { kind: "section"; sectionId: string; part: SectionPart };
 
 const COMPANY_SEGMENT = "company";
-const SETTINGS_SEGMENT = "settings";
+const CONNECTIONS_SEGMENT = "connections";
+const LEGACY_SETTINGS_SEGMENT = "settings";
 
 export function parseSectionRoute(segments: string[] | undefined): SectionRoute {
   const segs = segments ?? [];
   if (segs.length === 0) return { kind: "home" };
   if (segs[0] === COMPANY_SEGMENT && segs.length === 1) return { kind: "company" };
   const [sectionId, second] = segs;
-  if (segs.length === 1) return { kind: "section", sectionId, sub: "overview" };
-  if (second === SETTINGS_SEGMENT && segs.length === 2) return { kind: "section", sectionId, sub: "settings" };
-  const pageIndex = Number(second);
-  if (segs.length === 2 && Number.isInteger(pageIndex) && pageIndex >= 0) {
-    return { kind: "section", sectionId, sub: "page", pageIndex };
-  }
+  if (segs.length === 1) return { kind: "section", sectionId, part: "setup" };
+  if (second === CONNECTIONS_SEGMENT && segs.length === 2) return { kind: "section", sectionId, part: "connections" };
   return { kind: "home" };
 }
 
 export function sectionHref(base: string, route: SectionRoute): string {
   if (route.kind === "home") return base;
   if (route.kind === "company") return `${base}/${COMPANY_SEGMENT}`;
-  if (route.sub === "overview") return `${base}/${route.sectionId}`;
-  if (route.sub === "settings") return `${base}/${route.sectionId}/${SETTINGS_SEGMENT}`;
-  return `${base}/${route.sectionId}/${route.pageIndex}`;
+  if (route.part === "setup") return `${base}/${route.sectionId}`;
+  return `${base}/${route.sectionId}/${CONNECTIONS_SEGMENT}`;
+}
+
+/** Where a pre-PV6-01 URL should land, or `null` when the URL is not an old one. `<areaId>/settings` and
+ *  `<areaId>/<n>` (an old "Coming soon" leaf page) both go to the area's Setup. Bookmarks may still hold
+ *  them; no notification or link in the app does. */
+export function legacySectionRedirect(base: string, segments: string[] | undefined): string | null {
+  const segs = segments ?? [];
+  if (segs.length !== 2) return null;
+  const [sectionId, second] = segs;
+  const isLeaf = /^\d+$/.test(second);
+  if (second === LEGACY_SETTINGS_SEGMENT || isLeaf) return sectionHref(base, { kind: "section", sectionId, part: "setup" });
+  return null;
 }
 
 // ── Patch builder ────────────────────────────────────────────────────────────────────────────────
@@ -354,7 +379,7 @@ export function buildConnectionsPatch(
 
 /** `overrides` maps hold ONLY explicit choices (a key present but absent from the map means "back
  *  to default"), so a key removed between before/after is a real, meaningful `null` — not noise. */
-export function buildDepartmentsPatch(before: Record<string, boolean>, after: Record<string, boolean>): Record<string, boolean | null> {
+export function buildAreasPatch(before: Record<string, boolean>, after: Record<string, boolean>): Record<string, boolean | null> {
   const patch: Record<string, boolean | null> = {};
   const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
   for (const k of keys) {
@@ -392,8 +417,8 @@ export function buildCentrePatch(before: CentreDraft, after: CentreDraft): Centr
   if (Object.keys(profile).length) patch.profile = profile;
   const connections = buildConnectionsPatch(before.connections, after.connections);
   if (Object.keys(connections).length) patch.connections = connections;
-  const departments = buildDepartmentsPatch(before.departments, after.departments);
-  if (Object.keys(departments).length) patch.departments = departments;
+  const areas = buildAreasPatch(before.areas, after.areas);
+  if (Object.keys(areas).length) patch.areas = areas;
   const customConnections = buildCustomConnectionsPatch(before.customConnections, after.customConnections);
   if (Object.keys(customConnections).length) patch.customConnections = customConnections;
   return Object.keys(patch).length ? patch : null;
@@ -407,7 +432,7 @@ export function applyPatchToDraft(draft: CentreDraft, patch: CentrePatch): Centr
     businessType: patch.businessType ?? draft.businessType,
     profile: { ...draft.profile },
     connections: Object.fromEntries(Object.entries(draft.connections).map(([k, v]) => [k, { ...v }])),
-    departments: { ...draft.departments },
+    areas: { ...draft.areas },
     customConnections: Object.fromEntries(Object.entries(draft.customConnections).map(([k, v]) => [k, [...v]])),
   };
   if (patch.profile) {
@@ -428,10 +453,10 @@ export function applyPatchToDraft(draft: CentreDraft, patch: CentrePatch): Centr
       next.connections[k] = merged;
     }
   }
-  if (patch.departments) {
-    for (const [k, v] of Object.entries(patch.departments)) {
-      if (v === null) delete next.departments[k];
-      else next.departments[k] = v;
+  if (patch.areas) {
+    for (const [k, v] of Object.entries(patch.areas)) {
+      if (v === null) delete next.areas[k];
+      else next.areas[k] = v;
     }
   }
   if (patch.customConnections) {
@@ -444,4 +469,42 @@ export function applyPatchToDraft(draft: CentreDraft, patch: CentrePatch): Centr
 
 export function businessTypeLabel(r: ClientCentreRegistry, businessType: string): string {
   return r.businessTypes.find((t) => t.id === businessType)?.label ?? "Other";
+}
+
+// ── History labels (PV6-01 finding 4) ────────────────────────────────────────────────────────────
+// The hub's History tab used to print the raw change path (`departments.rs`). A change path is
+// `businessType`, `profile.<fieldKey>`, `connections.<connectionKey>`, `customConnections.<sectionId>` or
+// `areas.<areaId>` (rows written before PV6-01 say `departments.<areaId>`).
+
+/** The industry area's name is per business type; the History tab does not know the type, so it is named
+ *  generically. */
+const INDUSTRY_AREA_LABEL = "Industry area";
+
+function sectionNameById(r: ClientCentreRegistry, id: string): string | null {
+  if (id === "ix") return INDUSTRY_AREA_LABEL;
+  for (const a of r.areas) {
+    if (a.id === id) return a.name;
+    const sub = a.subAreas?.find((x) => x.id === id);
+    if (sub) return sub.name;
+  }
+  return null;
+}
+
+/** A human label for one change path. Unknown keys fall back to the key itself, never to nothing. */
+export function centreChangeLabel(r: ClientCentreRegistry, path: string): string {
+  if (path === "businessType") return "Business type";
+  const dot = path.indexOf(".");
+  if (dot < 0) return path;
+  const head = path.slice(0, dot);
+  const key = path.slice(dot + 1);
+  if (head === "profile") return r.fields[key]?.label ?? key;
+  if (head === "connections") return r.connections[key]?.name ?? "Custom connection";
+  if (head === "customConnections") return `Custom connections, ${sectionNameById(r, key) ?? key}`;
+  if (head === "areas" || head === "departments") return `Business area ${sectionNameById(r, key) ?? key}`;
+  return path;
+}
+
+/** True for a change path whose value is an on/off toggle, so the History tab can say "on" and "off". */
+export function isAreaTogglePath(path: string): boolean {
+  return path.startsWith("areas.") || path.startsWith("departments.");
 }

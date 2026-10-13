@@ -5129,9 +5129,11 @@ takes precedence if the two ever disagree.
 
 `src/modules/clients/centre/registry.json` (mirrored byte-for-byte at
 `platform-ui/src/lib/clientCentreRegistry.json`, parity-tested) is the single source for every
-field/connection/department id this feature validates against — see the plan doc's own "The
-registry" section for its shape. Nothing below hand-lists a field or department id; the validator
-(`validation.ts`) derives every allow-list from this file at import time.
+field/connection/business-area id this feature validates against — see the plan doc's own "The
+registry" section for its shape. Nothing below hand-lists a field or area id; the validator
+(`validation.ts`) derives every allow-list from this file at import time. **Registry v2 (PV6-01, 2026-10-13):**
+`areas` (was `departments`; Marketing has 19 `subAreas`), no leaf pages, `defaultOffAreas`, and the industry area `ix` carries its
+`settings`; made by `scripts/cmc/registry-v2.mjs` (idempotent, writes both copies).
 
 ### Data model
 
@@ -5149,15 +5151,29 @@ synthesise registry defaults and the first accepted PATCH inserts the row.
 
 | Method + path | Authz | Notes |
 |---|---|---|
-| `GET /api/:t/clients/centre` | `client` read | Staff, `ModuleEnabledGuard("clients")`. Every non-deleted client: `[{clientId, clientName, clientStatus, businessType, city, fieldsFilled: {filled,total}, connectionsConnected: {connected,total}, updatedAt}]` — `fieldsFilled` is against the registry's fixed Company-settings field keys (23); `connectionsConnected`'s `total` is the union of every connection id reachable across all sections for that client's business type (varies by business type + custom connections) — both computed by `sections.ts`, a byte-for-byte port of platform-ui's own `allSections`/`connectionIdsFor` so the two surfaces cannot disagree about what "N of M" means. Registered as a STATIC route — verified by test that it is never captured by the `:clientId` route below. |
+| `GET /api/:t/clients/centre` | `client` read | Staff, `ModuleEnabledGuard("clients")`. Every non-deleted client: `[{clientId, clientName, clientStatus, businessType, city, fieldsFilled: {filled,total}, connectionsConnected: {connected,total}, updatedAt}]` — `fieldsFilled` is against the registry's fixed Company-settings field keys (23); `connectionsConnected`'s `total` is the union of every connection id reachable across all sections for that client's business type (varies by business type + custom connections) — both computed by `sections.ts`, a port of platform-ui's own `allSections`/`connectionIdsFor`/`settingsDef` so the two surfaces cannot disagree about what "N of M" means. Registered as a STATIC route — verified by test that it is never captured by the `:clientId` route below. |
 | `GET /api/:t/clients/:clientId/centre` | `client` read | Staff. Returns `CentreProfile`; `canEdit` = would `client` **update** be allowed (checked via `rbac/cerbos`'s non-throwing `check()`, not authorize+catch). |
 | `PATCH /api/:t/clients/:clientId/centre` | `client` update | Staff. Returns the merged `CentreProfile`. |
 | `GET /api/:t/portal/centre` | `portal` read + portal scope | Client. The caller's own client(s): `[{clientId, clientName, canEdit}]`. |
 | `GET /api/:t/portal/centre/:clientId` | `portal` read + `clientId ∈ scope.clientIds` | Client. `CentreProfile`; a clientId outside scope is **404**, never 403 (no existence oracle — matches every other portal route). |
-| `PATCH /api/:t/portal/centre/:clientId` | `portal` **`edit_company_profile`** + scope + CC-D4 | Client. Returns `CentreProfile`; on a real change, best-effort notifies the client's project owners (`client.centre_updated`, href `/client-centre/<clientId>`, which the UI redirects to `/clients/<clientId>/profile` since CC-D8). |
+| `PATCH /api/:t/portal/centre/:clientId` | `portal` **`edit_company_profile`** + scope + CC-D4 | Client. Returns `CentreProfile`; on a real change, best-effort notifies the client's project owners (`client.centre_updated`, title "<client> updated their business profile", href `/clients/<clientId>/profile`, the hub's Business tab; before PV6-01 the href was `/client-centre/<clientId>`, which only redirected to the Overview). |
 
 `CentreProfile` / `CentrePatch` are exactly the shapes in the plan doc's "API contract" section —
 not repeated here to avoid the two copies drifting; that document is normative for the wire shape.
+
+#### PV6-01 wire change (2026-10-13): Business areas — **STATUS: PROTOTYPED**
+
+- `CentreProfile.departments` → **`areas`** and `CentrePatch.departments` → **`areas`** (`Record<areaId, boolean | null>`, an area id or `ix`;
+  a sub-area id is not toggleable). UI and backend merge in one push: the field is required on both sides, and a PATCH that still says
+  `departments` is a **400 `unknown field: departments`**. The error for a bad id is `unknown business area: <id>`.
+- Activity `changes[].path` and the `client.centre_updated` event payload say `areas.<id>` (rows written before PV6-01 say
+  `departments.<id>`; the History tab labels both "Business area <name>").
+- **The database column keeps its name `departments`**; `store.ts` is the only place that maps it. Renaming a live column would turn a
+  deploy rollback into an outage. No migration.
+- `customConnections` accepts the section id **`ix`** (the industry area; it was 400 `unknown section: ix`), and the list endpoint's
+  `connectionsConnected.total` now counts the industry area's own connections (a hotel is 103, `other` stays 98).
+- The registry's leaf pages are gone, so the UI has no "Coming soon" pages. UI routes: `/<areaId>` Setup, `/<areaId>/connections`
+  Connections; old `/<areaId>/settings` and `/<areaId>/<n>` redirect to `/<areaId>` on both the hub and the portal.
 
 ### CC-D4, enforced once, called from both routes
 
@@ -5174,10 +5190,10 @@ client) — CC-D4 needs a CLIENT-WIDE signer row, so it is its own query, never 
 
 `applyCentrePatch(current, patch)` is shared by the staff PATCH and the portal PATCH — the two
 surfaces cannot validate differently. Rules exactly as specced: unknown top-level/profile/
-connection/department/section keys are refused 400 naming the field; strings capped at 5,000
+connection/area/section keys are refused 400 naming the field; strings capped at 5,000
 characters, the whole body at 256KB; `null`/`""` deletes a profile key or a connection sub-key (an
 entry with every sub-key deleted is pruned, not persisted as `{}`); `null` on a whole connection or
-a department key deletes it; `customConnections[section]` REPLACES that section's list (not
+an `areas` key deletes it; `customConnections[section]` REPLACES that section's list (not
 merged); custom connection ids match `/^x[a-z0-9]{4,40}$/`, names are 1..120 chars; `method`/
 `status` must be one of the registry's own value lists; `businessType` must be a registry id.
 **Credential-looking values are refused anywhere a string appears — including inside `connections.*

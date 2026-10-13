@@ -154,8 +154,8 @@ export class PortalCentreController {
       });
       if (outcome.owners.length) {
         await notifyBestEffort(tenantId, req.principal.userId, outcome.owners, "client.centre_updated", {
-          title: `${outcome.clientName} updated their Client Centre profile`,
-          href: `/client-centre/${clientId}`,
+          title: `${outcome.clientName} updated their business profile`,
+          href: `/clients/${clientId}/profile`,
           entityType: "client",
           entityId: clientId,
           severity: "info",

@@ -5,10 +5,11 @@ import { getActiveTenant } from "@/lib/tenant";
 import { getClientCentre } from "@/lib/clientCentre-data";
 import { getClient } from "@/lib/entities";
 import { patchClientCentreAction } from "@/lib/clientCentreActions";
+import { legacySectionRedirect } from "@/lib/clientCentre";
 import { ClientCentreShell } from "@/components/client-centre/ClientCentreShell";
 
-// CC-D8 — the client hub's Profile tab: CMC's layout (business type, department tree, setup fields,
-// connections) for ONE client. It used to be its own workspace at `/client-centre/[clientId]`; that
+// CC-D8 — the client hub's Profile tab: the Business workspace (business type, Business areas tree, each area's
+// Setup and Connections) for ONE client. It used to be its own workspace at `/client-centre/[clientId]`; that
 // gave staff two pages per client, so it now lives under the hub and that route redirects here.
 //
 // The hub LAYOUT renders the client name, breadcrumbs and tab strip, so this page renders only the
@@ -19,7 +20,7 @@ import { ClientCentreShell } from "@/components/client-centre/ClientCentreShell"
 // ── THE AREA NOTE (PV3-09) ────────────────────────────────────────────────────────────────────────
 // "The client sees and edits this profile": true because this area IS the portal's own Business area. Both
 // routes serve one `CentreProfile` DTO from one store (`toCentreProfileDTO`), with no staff-only field in it
-// (checked 2026-10-12: clientName, status, businessType, profile, connections, departments, customConnections,
+// (checked 2026-10-12: clientName, status, businessType, profile, connections, areas, customConnections,
 // revision, updatedAt, updatedBy, canEdit, and the portal's PATCH writes the same rows). The portal hides the
 // INTERNAL sentinel client (`NOT is_internal` on its centre routes), so for that client the note would be
 // false: it is shown only when the clients list says `isInternal === false`, and is omitted for `true` and for
@@ -36,6 +37,9 @@ export default async function ClientProfilePage({
   const tenant = await getActiveTenant(me);
   if (!tenant) notFound();
   const { clientId, section } = await params;
+  // PV6-01: an old `<area>/settings` or leaf-page link (a bookmark) lands on the area's Setup.
+  const legacy = legacySectionRedirect(`/clients/${clientId}/profile`, section);
+  if (legacy) redirect(legacy);
 
   const [profile, client] = await Promise.all([
     getClientCentre(userId, tenant, clientId),

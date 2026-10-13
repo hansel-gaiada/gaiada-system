@@ -80,8 +80,9 @@ if (flags.mapping) {
 const report = { imported: 0, created: [], skipped: [], unknownKeys: [], secrets: [], badBusinessType: [] };
 const fieldKeys = new Set(Object.keys(registry.fields));
 const connKeys = new Set(Object.keys(registry.connections));
-const sectionIds = new Set(Object.keys(registry.sectionSettings));
-const deptIds = new Set([...registry.departments.map((d) => d.id), "ix"]);
+// v2 registry (PV6-01): `ix` (the industry area) takes custom connections like any other area.
+const sectionIds = new Set([...Object.keys(registry.sectionSettings), "ix"]);
+const areaIds = new Set([...registry.areas.map((d) => d.id), "ix"]);
 const btypes = new Set(registry.businessTypes.map((b) => b.id));
 const connSubKeys = new Set(["tool", "account", "url", "owner", "creds", "method", "status", "notes"]);
 const erpById = new Map(erp.map((c) => [c.id, c]));
@@ -143,9 +144,10 @@ for (const m of mapping) {
     }
     if (Object.keys(out).length) connections[k] = out;
   }
+  // The CMC source column is `depts` and the table column is still `departments` (PV6-01 keeps the column name).
   const departments = {};
   for (const [k, v] of Object.entries(row.depts ?? {})) {
-    if (!deptIds.has(k)) { report.unknownKeys.push(`${row.name}: depts.${k}`); continue; }
+    if (!areaIds.has(k)) { report.unknownKeys.push(`${row.name}: depts.${k}`); continue; }
     departments[k] = Boolean(v);
   }
   let businessType = row.business_type ?? "other";

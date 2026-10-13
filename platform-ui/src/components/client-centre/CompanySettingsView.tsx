@@ -1,7 +1,7 @@
 import {
   registry,
-  allDepts,
-  deptEnabled,
+  allAreas,
+  areaEnabled,
   type CentreDraft,
 } from "@/lib/clientCentre";
 import { FieldControl } from "./FieldControl";
@@ -9,7 +9,7 @@ import { Breadcrumb } from "./Breadcrumb";
 
 // CMC's `renderGeneral`, titled "Business details" (CC-D9; CMC called it "Company settings", which
 // collides with the ERP's own companies): client name (READ-ONLY, CC-D5) + business type select, the
-// shared general field groups and department toggles. CMC's "Delete company"/"New company" are not
+// shared general field groups and the Business area toggles. CMC's "Delete company"/"New company" are not
 // rebuilt (CC-D5); on the staff side this view sits inside the client hub, whose header has Delete.
 export function CompanySettingsView({
   clientName,
@@ -18,7 +18,7 @@ export function CompanySettingsView({
   isPortal,
   onFieldChange,
   onBusinessTypeChange,
-  onDeptToggle,
+  onAreaToggle,
 }: {
   clientName: string;
   draft: CentreDraft;
@@ -26,15 +26,15 @@ export function CompanySettingsView({
   isPortal: boolean;
   onFieldChange: (key: string, value: string) => void;
   onBusinessTypeChange: (businessType: string) => void;
-  onDeptToggle: (deptId: string, enabled: boolean) => void;
+  onAreaToggle: (areaId: string, enabled: boolean) => void;
 }) {
-  const depts = allDepts(registry, draft.businessType);
+  const areas = allAreas(registry, draft.businessType);
   return (
     <div className="cc-content">
       <Breadcrumb items={[clientName, "Business details"]} />
       <div className="cc-head-row"><h2>Business details</h2></div>
       <p className="cc-lede">
-        The basics every section shares. Each section&apos;s own settings page adds what that specialist
+        The basics every business area shares. Each area&apos;s Setup and Connections add what that specialist
         needs on top. Changes save automatically.
       </p>
 
@@ -95,20 +95,20 @@ export function CompanySettingsView({
         </p>
       )}
 
-      <h2 className="cc-sec-h">Departments</h2>
+      <h2 className="cc-sec-h">Business areas</h2>
       <p className="cc-lede" style={{ marginBottom: 12 }}>
-        Choose which departments this business uses. The first one is specific to your business type.
+        Choose which business areas this business uses. The first one is specific to your business type.
       </p>
       <div className="cc-toggles">
-        {depts.map((d) => (
-          <label className="cc-toggle" key={d.id}>
+        {areas.map((a) => (
+          <label className="cc-toggle" key={a.id}>
             <input
               type="checkbox"
-              checked={deptEnabled(registry, draft.businessType, draft.departments, d.id)}
+              checked={areaEnabled(registry, draft.businessType, draft.areas, a.id)}
               disabled={!canEdit}
-              onChange={(e) => onDeptToggle(d.id, e.target.checked)}
+              onChange={(e) => onAreaToggle(a.id, e.target.checked)}
             />
-            <span>{d.name}</span>
+            <span>{a.name}</span>
           </label>
         ))}
       </div>

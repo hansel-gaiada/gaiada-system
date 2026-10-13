@@ -185,7 +185,9 @@ What the Business area is (and is not):
   2. **Connections:** the CMC connection registry.
   3. **Services & results:** what we run for them in that area, and its KPIs.
 
-  An area where we sell nothing shows only Setup and Connections. The 103 placeholder pages go.
+  An area where we sell nothing shows only Setup and Connections. The placeholder pages go
+  (103 is the departments' direct children; the registry holds 278 "Coming soon" leaves in all,
+  counted by the PV-6 tickets, finding 1).
 
 ### 2.4 Two client channels, kept apart
 
@@ -628,7 +630,7 @@ sumopod. MAP is regenerated from a clean worktree.
 | 2 | **PV-3: Hub symmetry and staff Contracts & billing** (tickets: `2026-10-11-pv3-hub-symmetry-tickets.md`) | hub labels renamed with paths kept (§4.2); the new **Contracts & billing** area at `/clients/[id]/billing` (contract draft, send and countersign; payment confirm queue); backend-computed `clientVisible` markers; the client-filter facets from the client-centric design, slice 2; **`clients.group_company_id`**, so Viceroy shows as a group client (PV-D2); business type required on client create and edit, plus a review list (§3.3) | PV-D4 (ruled) |
 | 3 | **PV-4: Conversation** (tickets: `2026-10-12-pv4-conversation-tickets.md`) | threads and messages tables; the new Cerbos kind (six artifacts); portal and hub UI; SSE topic; notifications; MCP tool; the billing-landing rule enforced on price-changing change requests | D5, PV-2, PV-3 |
 | 4 | **PV-5: Contracts & billing depth** (tickets: `2026-10-12-pv5-contracts-billing-tickets.md`) | invoice of record (number, issue and due dates, tax, issuer legal details from company settings); **intercompany tagging** of invoices to group clients (F9-04); a client document library; signature tiers; gateway | D7, D8, D9; Finance |
-| 5 | **PV-6: Client Business re-cut** | Business areas with Setup · Connections · Services & results; service KPIs by `client_id`; placeholder leaves removed; reconcile with AD-3 (CC-D6) | D6 |
+| 5 | **PV-6: Client Business re-cut** (tickets: `2026-10-13-pv6-business-areas-tickets.md`) | Business areas with Setup · Connections · Services & results; service KPIs by `client_id`; placeholder leaves removed; reconcile with AD-3 (CC-D6) | D6 |
 | 6 | **PV-7: Performance surfaces** | the client grain; the agency client health board; the client Overview KPIs; client report publication; My performance for employees | PV-6, the reports program |
 | — | **PV-8: Viceroy HMS and F&B** | **DEFERRED** (PV-D3, §5.2) | owner reopens it |
 | — | **PV-9: Group tier** | the group dashboard with per-vertical cards; sum vs consolidated money | PV-1; a second company with books; F9 eliminations |

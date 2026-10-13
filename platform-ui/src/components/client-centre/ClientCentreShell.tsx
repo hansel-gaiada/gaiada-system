@@ -5,7 +5,7 @@ import {
   parseSectionRoute,
   findSection,
   parentOf,
-  activeDepts,
+  activeAreas,
   type CentreProfile,
   type CentrePatch,
   type ConnectionEntry,
@@ -14,14 +14,12 @@ import { useCentreAutosave, type CentreActionResult } from "./useCentreAutosave"
 import { SectionTree } from "./SectionTree";
 import { HomeView } from "./HomeView";
 import { CompanySettingsView } from "./CompanySettingsView";
-import { SectionOverviewView } from "./SectionOverviewView";
-import { SectionSettingsView } from "./SectionSettingsView";
-import { LeafPageView } from "./LeafPageView";
+import { AreaView } from "./AreaView";
 import "./clientCentre.css";
 
-// The CMC-style workspace, shared by the staff client hub's Profile tab (`/clients/[clientId]/profile`)
+// The Business workspace, shared by the staff client hub's Profile tab (`/clients/[clientId]/profile`)
 // and the portal's Business profile tab (`/portal/company`): a client switcher (portal, when there is more than one), the
-// in-page department tree, a breadcrumb, and the content area — all driven off ONE fetched
+// in-page Business areas tree, a breadcrumb, and the content area — all driven off ONE fetched
 // `CentreProfile` and its live-edited `CentreDraft` (see `useCentreAutosave`).
 //
 // Routing stays server-driven (the catch-all segment under the caller's page), not client-side
@@ -56,7 +54,7 @@ export function ClientCentreShell({
   const [treeOpenMobile, setTreeOpenMobile] = useState(false);
 
   const route = parseSectionRoute(segments);
-  const depts = activeDepts(registry, draft.businessType, draft.departments);
+  const areas = activeAreas(registry, draft.businessType, draft.areas);
   const canEdit = profile.canEdit;
   const readOnlyReason = isPortal
     ? "Your access is view-only. Ask your account manager if you need changes made here."
@@ -66,8 +64,8 @@ export function ClientCentreShell({
   const setProfileField = (key: string, value: string) =>
     update((d) => ({ ...d, profile: { ...d.profile, [key]: value } }), canEdit);
   const setBusinessType = (businessType: string) => update((d) => ({ ...d, businessType }), canEdit);
-  const setDeptToggle = (deptId: string, enabled: boolean) =>
-    update((d) => ({ ...d, departments: { ...d.departments, [deptId]: enabled } }), canEdit);
+  const setAreaToggle = (areaId: string, enabled: boolean) =>
+    update((d) => ({ ...d, areas: { ...d.areas, [areaId]: enabled } }), canEdit);
   const setConnection = (connId: string, patch: Partial<ConnectionEntry>) =>
     update(
       (d) => ({ ...d, connections: { ...d.connections, [connId]: { ...(d.connections[connId] ?? {}), ...patch } } }),
@@ -95,7 +93,7 @@ export function ClientCentreShell({
 
   let content: ReactNode;
   if (route.kind === "home") {
-    content = <HomeView clientId={clientId} basePath={basePath} profile={{ ...profile, businessType: draft.businessType, profile: draft.profile, departments: draft.departments }} />;
+    content = <HomeView basePath={basePath} profile={{ ...profile, ...draft }} />;
   } else if (route.kind === "company") {
     content = (
       <CompanySettingsView
@@ -105,45 +103,29 @@ export function ClientCentreShell({
         isPortal={isPortal}
         onFieldChange={setProfileField}
         onBusinessTypeChange={setBusinessType}
-        onDeptToggle={setDeptToggle}
+        onAreaToggle={setAreaToggle}
       />
     );
   } else {
     const section = findSection(registry, draft.businessType, route.sectionId);
     if (!section) {
-      content = <HomeView clientId={clientId} basePath={basePath} profile={profile} />;
+      content = <HomeView basePath={basePath} profile={{ ...profile, ...draft }} />;
     } else {
-      const parent = parentOf(registry, draft.businessType, section.id);
-      const crumbs = parent && parent.id !== section.id ? [profile.clientName, parent.name, section.name] : [profile.clientName, section.name];
-      if (route.sub === "overview") {
-        content = (
-          <SectionOverviewView
-            basePath={basePath}
-            section={section}
-            profile={{ ...profile, connections: draft.connections, customConnections: draft.customConnections, profile: draft.profile }}
-            crumbs={crumbs}
-          />
-        );
-      } else if (route.sub === "settings") {
-        content = (
-          <SectionSettingsView
-            clientName={profile.clientName}
-            section={section}
-            crumbs={crumbs}
-            draft={draft}
-            canEdit={canEdit}
-            onFieldChange={setProfileField}
-            onConnectionChange={setConnection}
-            onAddCustomConnection={(name) => addCustomConnection(section.id, name)}
-            onRemoveCustomConnection={(connId) => removeCustomConnection(section.id, connId)}
-          />
-        );
-      } else {
-        const page = section.pages[route.pageIndex];
-        content = page
-          ? <LeafPageView clientName={profile.clientName} page={page} crumbs={[...crumbs, page.name]} />
-          : <HomeView clientId={clientId} basePath={basePath} profile={profile} />;
-      }
+      content = (
+        <AreaView
+          basePath={basePath}
+          clientName={profile.clientName}
+          section={section}
+          parent={parentOf(registry, draft.businessType, section.id)}
+          part={route.part}
+          draft={draft}
+          canEdit={canEdit}
+          onFieldChange={setProfileField}
+          onConnectionChange={setConnection}
+          onAddCustomConnection={(name) => addCustomConnection(section.id, name)}
+          onRemoveCustomConnection={(connId) => removeCustomConnection(section.id, connId)}
+        />
+      );
     }
   }
 
@@ -174,15 +156,14 @@ export function ClientCentreShell({
           aria-controls="cc-tree-panel"
           onClick={() => setTreeOpenMobile((v) => !v)}
         >
-          {treeOpenMobile ? "Hide sections" : "Sections"}
+          {treeOpenMobile ? "Hide business areas" : "Business areas"}
         </button>
         <div id="cc-tree-panel" className={`cc-tree-panel${treeOpenMobile ? " cc-tree-panel--open" : ""}`}>
           <SectionTree
             registry={registry}
-            clientId={clientId}
             basePath={basePath}
             businessType={draft.businessType}
-            activeDepts={depts}
+            activeAreas={areas}
             currentSectionId={currentSectionId}
             onNavigate={() => setTreeOpenMobile(false)}
           />

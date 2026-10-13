@@ -65,8 +65,9 @@ export async function patchPortalCentreAction(clientId: string, patch: CentrePat
       method: "PATCH",
       body: JSON.stringify(patch),
     });
-    revalidatePath(`/portal/company/${clientId}`, "layout");
-    revalidatePath("/portal/company");
+    // The portal's Business tab has no client id in its URL (`/portal/company/[[...section]]`); the old
+    // `/portal/company/${clientId}` path never existed, so it revalidated nothing (PV6-01 finding 5).
+    revalidatePath("/portal/company", "layout");
     return { ok: true, profile };
   } catch (e) {
     return fail(e);
