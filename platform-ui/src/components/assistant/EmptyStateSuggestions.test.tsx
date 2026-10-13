@@ -31,3 +31,38 @@ describe("EmptyStateSuggestions", () => {
     expect(onPick).not.toHaveBeenCalled();
   });
 });
+
+// DW-2h — opened from a department, the tiles are that department's prompts (the registry's data).
+describe("EmptyStateSuggestions — department prompts", () => {
+  const prompts = [
+    { label: "Summarise this week's requests", prompt: "Summarise this week's requests to the team." },
+    { label: "What is blocked on the board?", prompt: "Which tasks are blocked?" },
+    { label: "Draft a client update", prompt: "Draft a short update for the client about " },
+  ];
+
+  it("shows the department's prompts instead of today's, and keeps the escape hatch", () => {
+    render(<EmptyStateSuggestions onPick={vi.fn()} onOpenCapabilities={vi.fn()} prompts={prompts} />);
+    expect(screen.getByRole("button", { name: "Summarise this week's requests" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button")).toHaveLength(prompts.length + 1);
+    expect(screen.queryByRole("button", { name: "Ask about your projects" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "See everything I can do" })).toBeInTheDocument();
+  });
+
+  it("a department tile only pre-fills: it hands its prompt to onPick and nothing else", () => {
+    const onPick = vi.fn();
+    const onOpenCapabilities = vi.fn();
+    render(<EmptyStateSuggestions onPick={onPick} onOpenCapabilities={onOpenCapabilities} prompts={prompts} />);
+    fireEvent.click(screen.getByRole("button", { name: "Draft a client update" }));
+    expect(onPick).toHaveBeenCalledWith("Draft a short update for the client about ");
+    expect(onOpenCapabilities).not.toHaveBeenCalled();
+  });
+
+  it("without a department (null, absent or empty) today's suggestions show", () => {
+    for (const p of [null, undefined, []] as const) {
+      const { unmount } = render(<EmptyStateSuggestions onPick={vi.fn()} onOpenCapabilities={vi.fn()} prompts={p} />);
+      expect(screen.getByRole("button", { name: "Ask about your projects" })).toBeInTheDocument();
+      expect(screen.getAllByRole("button")).toHaveLength(5);
+      unmount();
+    }
+  });
+});

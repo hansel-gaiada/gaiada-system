@@ -4,7 +4,7 @@ import { groupCapabilities, type AssistantCapability } from "@/lib/assistant";
 import { refreshCapabilitiesAction } from "@/lib/assistantActions";
 
 // ASST-18 — the full tool catalogue, rendered by the right-rail capabilities panel
-// (`CapabilitiesPanel`), reached from the toolbar's "Capabilities" button OR the empty state's own
+// (`CapabilitiesPanel`), reached from the Details panel's Capabilities tab OR the empty state's own
 // "See everything I can do" tile (`EmptyStateSuggestions`) — see ThreadView's 2026-08-07 note for
 // why the raw catalogue no longer renders inline in a brand-new chat. Calls
 // `refreshCapabilitiesAction` — the SAME server action, hitting the SAME

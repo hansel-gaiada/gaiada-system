@@ -173,9 +173,13 @@ export function contractInPortalScope(alias: string, params: PortalScopeParams):
 
 /** An invoice is visible unless soft-deleted, still a `draft` (a number the agency has not committed to),
  *  or `approved` (PV3-02d: the internal maker/checker step BEFORE the invoice is sent; the client must not
- *  see an invoice the agency has not yet issued). Visible: `sent`, `paid`, `void`. */
+ *  see an invoice the agency has not yet issued). Visible: `sent`, `paid`, `void`.
+ *  PV5-F1: a `void` invoice is visible only if the client was ever sent it, i.e. it was ISSUED (`issued_at`), or
+ *  it predates PV-5 (`pre_pv5_legacy`, set by migration alone; keeps those rows' visibility as it was). A draft
+ *  voided before it was issued never reached the client, so it must not appear in their list or documents. */
 export function invoiceClientVisible(alias: string): string {
-  return `${col(alias, "deleted_at")} IS NULL AND ${col(alias, "status")} NOT IN ('draft','approved')`;
+  const status = col(alias, "status");
+  return `${col(alias, "deleted_at")} IS NULL AND ${status} NOT IN ('draft','approved') AND (${status} <> 'void' OR ${col(alias, "issued_at")} IS NOT NULL OR ${col(alias, "pre_pv5_legacy")})`;
 }
 
 /** The full portal predicate for an invoice. Invoices carry no project, so reach is the client only. */
@@ -244,9 +248,18 @@ export function clientContactClientVisible(alias: string): string {
   return `${col(alias, "deleted_at")} IS NULL AND ${col(alias, "status")} <> 'revoked'`;
 }
 
-/** The full portal predicate for a client contact: contacts of the caller's clients. */
-export function clientContactInPortalScope(alias: string, params: PortalClientParams): string {
-  return `${inCallerClients(alias, params.clients)} AND ${clientContactClientVisible(alias)}`;
+/** The full portal predicate for a client contact, PER CLIENT (owner ruling PV-D36, 2026-10-13):
+ *  "A contact limited to some projects sees the client-wide contacts and the contacts on their own
+ *  projects, never contacts on projects outside their reach (nor those contacts' project ids); a
+ *  client-wide contact sees every contact of that client."
+ *
+ *  So, within the caller's clients: for a client the caller reaches client-wide (`wide`), every listed
+ *  contact; for any other of their clients, the client-wide contacts (`project_id IS NULL`) plus the
+ *  contacts whose project is one of the caller's own (`projects`). This is the same arm contracts and
+ *  change requests use (a project-less row is admitted to a project-scoped contact of that client).
+ *  A contact row outside the arm is not returned at all, so its `project_id` cannot leak either. */
+export function clientContactInPortalScope(alias: string, params: PortalScopeParams): string {
+  return `${inCallerClients(alias, params.clients)} AND ${clientContactClientVisible(alias)} AND ${inCallerProjects(alias, col(alias, "project_id"), params, true)}`;
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════

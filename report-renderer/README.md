@@ -6,7 +6,7 @@ that carries Chromium** — platform-ui's Next standalone image stays browser-fr
 
 ## What it does
 
-`POST /render {url}` (behind `Authorization: Bearer $RENDERER_TOKEN`) launches Chromium, navigates
+`POST /render {url, footerText?}` (behind `Authorization: Bearer $RENDERER_TOKEN`) launches Chromium, navigates
 to `url`, and returns print-grade PDF bytes (A4, exact background colors, page-numbered footer).
 `GET /health` is unauthenticated.
 
@@ -20,8 +20,13 @@ the URLs this service is handed. This service never sees a session cookie or ten
 
 **PV5-07 (2026-10-13)** also sends this sidecar `/print/invoices/{jobToken}` (an issued invoice's PDF, stored once)
 and `/print/contracts/{jobToken}` (a signed contract's evidence page, sealed afterwards by platform-nest). Same origin,
-same one-shot token, so **nothing here changed**: the same-origin rule already admits them. Known gap for a follow-up
-ticket: the fixed footer template says "Report" on those documents too.
+same one-shot token, so **nothing here changed**: the same-origin rule already admits them. The footer is no longer fixed (PV5-F1, below).
+
+**Footer text (PV5-F1).** The optional `footerText` (string) is the footer's left-hand text. It is control-character
+stripped, capped at 120 characters and HTML-escaped (it is interpolated into Chromium's footer template). Absent or
+not a string, the footer reads the neutral "Report"; the renderer holds no company name (PV-D13). platform-nest passes
+the issuer's legal name and the document number for invoices and contracts; report exports send none. The auth check
+and the same-origin guard run before the body's footer is looked at and are unchanged.
 
 ## Working precedent
 

@@ -67,17 +67,17 @@ describe("WorkspaceSidebar", () => {
   describe("the AI Assistant row (DW-2d)", () => {
     const row = () => within(menu()).getByRole("link", { name: "AI Assistant" });
 
-    it("links to the drawer's route with no page context on a page with no record", () => {
+    it("links to the drawer's route with no page context on a page with no record, carrying the page it was opened from (DW-2h)", () => {
       renderAt("/departments/d-web");
-      expect(row()).toHaveAttribute("href", "/assistant");
+      expect(row()).toHaveAttribute("href", `/assistant?from=${encodeURIComponent("/departments/d-web")}`);
       expect(within(menu()).getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
     });
 
     it("carries the page context of the record it was opened from", () => {
       const { goTo } = renderAt("/tasks/t-4");
-      expect(row()).toHaveAttribute("href", `/assistant?ctx=${encodeURIComponent("erp:task:t-4")}`);
+      expect(row()).toHaveAttribute("href", `/assistant?ctx=${encodeURIComponent("erp:task:t-4")}&from=${encodeURIComponent("/tasks/t-4")}`);
       goTo("/people/p-9");
-      expect(row()).toHaveAttribute("href", `/assistant?ctx=${encodeURIComponent("erp:person:co-a:p-9")}`);
+      expect(row()).toHaveAttribute("href", `/assistant?ctx=${encodeURIComponent("erp:person:co-a:p-9")}&from=${encodeURIComponent("/people/p-9")}`);
     });
 
     it("has the FAB's id, so the drawer's focus return lands on it, and is not prefetched", () => {

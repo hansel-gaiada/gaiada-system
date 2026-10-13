@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { listThreads, resolvePageContextRef } from "@/lib/assistant-data";
+import { listThreads, resolveOrigin, resolvePageContextRef, withRequestedThread } from "@/lib/assistant-data";
 import { AssistantDrawer } from "@/components/assistant/AssistantDrawer";
 import { AssistantWorkspace } from "@/components/assistant/AssistantWorkspace";
 
@@ -21,14 +21,17 @@ import { AssistantWorkspace } from "@/components/assistant/AssistantWorkspace";
 // (server-side, via the SAME citation-resolution endpoint the `@`-mention/citation chips already
 // use) rather than trusted as-is — an unresolvable ref (stale, deleted, malformed, forged) means the
 // drawer opens with NO pin, never a fake one.
-type SP = Promise<{ thread?: string; ctx?: string }>;
+//
+// DW-2h — `from` is the same hand-over for the page's PATH: it names the department in the chip, picks that
+// department's starter prompts, and rides on "Open in full page" so the full page can close back to it.
+type SP = Promise<{ thread?: string; ctx?: string; from?: string }>;
 
 export default async function AssistantDrawerPage({ searchParams }: { searchParams: SP }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
-  const { thread: requestedThreadId, ctx } = await searchParams;
+  const { thread: requestedThreadId, ctx, from } = await searchParams;
 
   if (!tenant) {
     return (
@@ -38,21 +41,24 @@ export default async function AssistantDrawerPage({ searchParams }: { searchPara
     );
   }
 
-  const [initial, pageContext] = await Promise.all([
+  const [initial, pageContext, origin] = await Promise.all([
     listThreads(userId, tenant).catch(() => ({ items: [], total: 0 })),
     ctx ? resolvePageContextRef(userId, tenant, ctx).catch(() => null) : Promise.resolve(null),
+    resolveOrigin(me, tenant, from),
   ]);
-  const initialActiveThreadId = requestedThreadId && initial.items.some((t) => t.id === requestedThreadId)
+  const items = await withRequestedThread(userId, tenant, initial.items, requestedThreadId);
+  const initialActiveThreadId = requestedThreadId && items.some((t) => t.id === requestedThreadId)
     ? requestedThreadId
     : null;
 
   return (
     <AssistantDrawer>
       <AssistantWorkspace
-        initialThreads={initial.items}
+        initialThreads={items}
         initialActiveThreadId={initialActiveThreadId}
         variant="drawer"
         pageContext={pageContext}
+        origin={origin}
       />
     </AssistantDrawer>
   );

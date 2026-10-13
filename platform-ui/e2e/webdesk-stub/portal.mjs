@@ -493,7 +493,7 @@ export function handlePortalConversation(S, { method, pathname, body, userId }) 
   const [, , id, messages] = pathname.match(CONV_RE);
   const conv = S.portal.conv;
   if (!id && method === "GET") {
-    return { status: 200, json: { threads: conv.threads.map((t) => threadView(S, t, true)), canUseGeneral: true } };
+    return { status: 200, json: { threads: conv.threads.map((t) => threadView(S, t, true)), canUseGeneral: true, generalClientIds: [CLIENT_ID] } };
   }
   const thread = conv.threads.find((t) => t.id === id);
   if (!thread) return { status: 404, json: { error: "conversation not found" } };

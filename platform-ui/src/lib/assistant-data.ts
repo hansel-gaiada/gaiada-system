@@ -4,11 +4,14 @@ import "server-only";
 // platform-ui/CLAUDE.md. Consumed by `app/(app)/assistant/page.tsx` for the initial server-rendered
 // load; everything after that (thread switch, rail refresh, mutations) goes through
 // `lib/assistantActions.ts` because it is triggered by client interaction, not a navigation.
-import { platformFetch, PlatformError } from "./platform";
+import { platformFetch, PlatformError, type Me } from "./platform";
 import type {
   ThreadDetailResult, ThreadListResult, MemoryListResult, CapabilitiesResult, ResolvedCitation, PinnedPageContext,
-  RosterResult, AssistantHandoff,
+  RosterResult, AssistantHandoff, AssistantThread,
 } from "./assistant";
+import { myWorkspaces } from "./workspaces-data";
+import { resolveAssistantOrigin, type AssistantOrigin } from "./assistantOrigin";
+import { safeFromPath } from "./assistantContext";
 
 export interface ListThreadsParams {
   q?: string;
@@ -99,4 +102,33 @@ export function getRoster(userId: string, tenantId: string): Promise<RosterResul
 // (see handoffs.ts's `refreshHandoff`) — owner-only, same Cerbos gate as every other thread action.
 export function listThreadHandoffs(userId: string, tenantId: string, threadId: string): Promise<AssistantHandoff[]> {
   return platformFetch<AssistantHandoff[]>(`/api/${tenantId}/assistant/threads/${threadId}/handoffs`, userId);
+}
+
+// DW-2h — the department the assistant was opened from. The drawer link carries the origin PATH
+// (`?from=`, `assistantDrawerHref`); the department's name and prompts come from the person's own
+// workspaces (`myWorkspaces`, memoised per request, so the shell's read is shared), never from a new API.
+// An org tree that cannot be read still yields the origin (the way back) with no department.
+export async function resolveOrigin(me: Me, tenantId: string, from: string | null | undefined): Promise<AssistantOrigin | null> {
+  const path = safeFromPath(from);
+  if (!path) return null;
+  try {
+    return resolveAssistantOrigin(path, (await myWorkspaces(me, tenantId)).all);
+  } catch {
+    return resolveAssistantOrigin(path, []);
+  }
+}
+
+// DW-2h — "Open in full page" must land on the SAME thread, however old it is: the list is capped at one
+// page (`THREAD_LIST_LIMIT`), so a thread found by the rail's server search is not in it. Fetch the requested
+// thread by id and put it in the list, so the page never falls back to a different thread.
+export async function withRequestedThread(
+  userId: string, tenantId: string, items: AssistantThread[], requestedId: string | undefined,
+): Promise<AssistantThread[]> {
+  if (!requestedId || items.some((t) => t.id === requestedId)) return items;
+  try {
+    const { thread } = await getThread(userId, tenantId, requestedId, { messageLimit: 1 });
+    return [thread, ...items];
+  } catch {
+    return items;
+  }
 }

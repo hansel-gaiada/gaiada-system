@@ -149,14 +149,18 @@ export async function createClient(tenantId: string, name: string, portalUserId?
   return id;
 }
 
-export async function createProject(tenantId: string, name: string, ownerId?: string): Promise<string> {
+/** `clientId` (PV4-13) puts the project under a client at insert time. A `client_contacts` row naming a project needs
+ *  the project to belong to the contact's client (fk_client_contacts_project_client_tenant), so a suite that scopes a
+ *  contact to a project must create that project WITH its client (or UPDATE projects SET client_id first). */
+export async function createProject(tenantId: string, name: string, ownerId?: string, clientId?: string): Promise<string> {
   const id = newId();
   await withTenants([tenantId], (c) =>
-    c.query(`INSERT INTO projects (id, tenant_id, name, owner_id, origin_site) VALUES ($1, $2, $3, $4, $5)`, [
+    c.query(`INSERT INTO projects (id, tenant_id, name, owner_id, client_id, origin_site) VALUES ($1, $2, $3, $4, $5, $6)`, [
       id,
       tenantId,
       name,
       ownerId ?? null,
+      clientId ?? null,
       site(),
     ]),
   );

@@ -22,7 +22,9 @@ import type { AgentRun } from "@/lib/admin";
 // long, so it is fetched only when the user opens that ONE row, not for every handoff on load.
 const POLL_MS = 4000;
 
-export function RosterPanel({ activeThreadId, onClose }: { activeThreadId: string | null; onClose: () => void }) {
+// DW-2h — the Roster tab of the Details panel (`DetailsPanel`): the panel renders only its body; the title row
+// and the close button belong to the Details panel.
+export function RosterPanel({ activeThreadId }: { activeThreadId: string | null }) {
   const [agents, setAgents] = useState<RosterAgent[]>([]);
   const [supervisorName, setSupervisorName] = useState<string | null>(null);
   const [runnerConfigured, setRunnerConfigured] = useState(true);
@@ -111,13 +113,7 @@ export function RosterPanel({ activeThreadId, onClose }: { activeThreadId: strin
   }
 
   return (
-    <aside id="asst-roster-panel" className="asst-mem" aria-label="Assistant agent roster">
-      <div className="asst-mem__head">
-        <p className="type-eyebrow" style={{ color: "var(--erp-accent)" }}>Agents</p>
-        <button type="button" className="asst-mem__close" aria-label="Close roster panel" onClick={onClose}>
-          <span aria-hidden="true">&times;</span>
-        </button>
-      </div>
+    <div id="asst-roster-panel" className="asst-mem">
 
       {error && <p className="asst-mem__error" role="alert">{error}</p>}
 
@@ -246,6 +242,6 @@ export function RosterPanel({ activeThreadId, onClose }: { activeThreadId: strin
           </>
         )}
       </div>
-    </aside>
+    </div>
   );
 }

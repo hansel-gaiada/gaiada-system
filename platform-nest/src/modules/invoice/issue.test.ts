@@ -15,6 +15,7 @@ import { newId, withTenants } from "../../db";
 import { buildApp } from "../../main";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole, createClient } from "../../testing/fixtures";
+import { markInvoicesLegacy } from "../../testing/invoice-fixtures";
 import { createIssuedInvoice, ensureBillingSetup } from "../../seed/billing-setup";
 
 const svc = { authorization: "Bearer svc-token" };
@@ -430,10 +431,11 @@ describe.skipIf(!TEST_URL)("PV5-04 — issue an invoice through the ledger", () 
 
     it("a client cannot claim a payment on a legacy-style unissued invoice (409)", async () => {
       const id = newId();
-      // A `void` (never issued) invoice is client-visible; a claim on it is refused like any unissued invoice.
+      // A pre-PV-5 invoice (`void`, never issued, flagged legacy: PV5-F1) is client-visible; a claim on it is refused like any unissued invoice.
       await withTenants([A], (c) => c.query(
         `INSERT INTO invoices (id, tenant_id, client_id, status, currency, lines, total, origin_site) VALUES ($1, $2, $3, 'void', 'IDR', '[]', 10, 'test')`,
         [id, A, clientA]));
+      await markInvoicesLegacy([id]);
       const r = await app.inject({ method: "POST", url: `/api/${A}/portal/invoices/${id}/payments`, headers: asUser(contact), payload: { amount: 10, paidOn: new Date().toISOString().slice(0, 10) } });
       expect([400, 409]).toContain(r.statusCode);
     });

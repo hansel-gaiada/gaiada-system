@@ -17,7 +17,7 @@ import { PortalPageHead, PortalStatus } from "@/components/portal/PortalBits";
 //
 // ── THE §5.1 RULING HOLDS HERE TOO ────────────────────────────────────────────────────────────────
 // Submitting is a viewer-permitted act (ratified, test-pinned on the backend). This page never reads
-// `profile.access.canSign` — only `access.wholeClient`, to size the project selector. See
+// `profile.access.canSign` — only `access.wideClientIds` (per client), to size the project selector. See
 // `changeRequestFormProps` in lib/portal.ts for where that's pinned.
 export default async function PortalRequestsPage() {
   const userId = await getSessionUserId();
@@ -57,7 +57,7 @@ export default async function PortalRequestsPage() {
         <div className="cp-stack">
           {formProps && (
             <Card title="New request">
-              <PortalChangeRequestForm allowClientWide={formProps.allowClientWide} projects={formProps.projects} />
+              <PortalChangeRequestForm wideClients={formProps.wideClients} projects={formProps.projects} />
             </Card>
           )}
 
