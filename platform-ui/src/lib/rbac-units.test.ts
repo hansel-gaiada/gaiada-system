@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { can, canInUnit, isLeadOf, leadUnits, leadsAnyUnitWith, unitPathOf } from "./rbac";
+import { can, canInUnit, isLeadOf, leadUnits, leadsAnyUnitWith, canWorkOnCourse, unitPathOf } from "./rbac";
 import type { Me } from "./platform";
 
 const companies = [
@@ -105,5 +105,47 @@ describe("leadsAnyUnitWith (DW-4g)", () => {
     expect(leadsAnyUnitWith(me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]), "lms.authoring", "co-a")).toBe(false);
     expect(leadsAnyUnitWith(me([lead("d-web")]), "lms.authoring", "co-z")).toBe(false);
     expect(leadsAnyUnitWith(me([lead("d-web")]), "lms.authoring", null)).toBe(false);
+  });
+});
+
+describe("canWorkOnCourse (DW-4g)", () => {
+  // d-web holds a division; d-seo is a sibling department.
+  const tree = {
+    id: "co-root", children: [
+      { id: "d-web", children: [{ id: "dv-frontend", children: [] }] },
+      { id: "d-seo", children: [] },
+    ],
+  };
+  const dept = (unitNodeId: string | null) => ({ track: "department", unitNodeId });
+  const head = me([lead("d-web")]);
+  const admin = me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]);
+
+  it("a company-wide author may work on any course, general track included", () => {
+    expect(canWorkOnCourse(admin, "lms.authoring", "co-a", tree, dept("d-seo"))).toBe(true);
+    expect(canWorkOnCourse(admin, "lms.publish", "co-a", tree, { track: "general", unitNodeId: null })).toBe(true);
+  });
+  it("the d-web head works on a d-web course and on a d-web DIVISION course, authoring and publishing", () => {
+    expect(canWorkOnCourse(head, "lms.authoring", "co-a", tree, dept("d-web"))).toBe(true);
+    expect(canWorkOnCourse(head, "lms.authoring", "co-a", tree, dept("dv-frontend"))).toBe(true);
+    expect(canWorkOnCourse(head, "lms.publish", "co-a", tree, dept("dv-frontend"))).toBe(true);
+  });
+  it("the d-web head does not work on a d-seo course, or on a unit missing from the tree", () => {
+    expect(canWorkOnCourse(head, "lms.authoring", "co-a", tree, dept("d-seo"))).toBe(false);
+    expect(canWorkOnCourse(head, "lms.authoring", "co-a", tree, dept("d-nope"))).toBe(false);
+  });
+  it("the d-web head does not work on a general-track course, even one carrying a unit id", () => {
+    expect(canWorkOnCourse(head, "lms.authoring", "co-a", tree, { track: "general", unitNodeId: null })).toBe(false);
+    expect(canWorkOnCourse(head, "lms.authoring", "co-a", tree, { track: "general", unitNodeId: "d-web" })).toBe(false);
+  });
+  it("a department course with no unit is company-wide only", () => {
+    expect(canWorkOnCourse(head, "lms.authoring", "co-a", tree, dept(null))).toBe(false);
+  });
+  it("a null tree leaves can() alone: a head gets nothing, a company-wide author still has it", () => {
+    expect(canWorkOnCourse(head, "lms.authoring", "co-a", null, dept("d-web"))).toBe(false);
+    expect(canWorkOnCourse(admin, "lms.authoring", "co-a", null, dept("d-web"))).toBe(true);
+  });
+  it("never offers waiving, and not in a company the person does not belong to", () => {
+    expect(canWorkOnCourse(head, "lms.waive", "co-a", tree, dept("d-web"))).toBe(false);
+    expect(canWorkOnCourse(head, "lms.authoring", "co-z", tree, dept("d-web"))).toBe(false);
   });
 });

@@ -71,6 +71,18 @@ function guard(me: Me, tenant: string, cap: "lms.authoring" | "lms.publish"): st
   return null;
 }
 
+/**
+ * DW-4g — the guard for COURSE-EDITING actions (update, publish, retire, add module, add activity, remove
+ * activity). A department head holds these rights only at their unit, which company-wide `can()` never
+ * counts, so they pass when they lead SOME unit here. Which course they may touch is Cerbos' call
+ * (`unitAncestors` of the course's own unit, resolved server-side); this only keeps the UI from refusing
+ * them before the server sees the request. NOT used for paths, enrolment, grading or waiving.
+ */
+function courseGuard(me: Me, tenant: string, cap: "lms.authoring" | "lms.publish"): string | null {
+  if (can(me, cap, tenant) || leadsAnyUnitWith(me, cap, tenant)) return null;
+  return guard(me, tenant, cap);
+}
+
 // ───────────────────────────────────────────────────────────────────── courses ────────────────
 export async function createCourse(formData: FormData): Promise<LmsResult> {
   const c = await ctx();
@@ -131,7 +143,7 @@ export async function createCourse(formData: FormData): Promise<LmsResult> {
 export async function updateCourse(formData: FormData): Promise<LmsResult> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };
-  const denied = guard(c.me, c.tenant, "lms.authoring");
+  const denied = courseGuard(c.me, c.tenant, "lms.authoring");
   if (denied) return { ok: false, error: denied };
 
   const courseId = String(formData.get("courseId") ?? "");
@@ -162,7 +174,7 @@ export async function updateCourse(formData: FormData): Promise<LmsResult> {
 export async function publishCourse(formData: FormData): Promise<LmsResult> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };
-  const denied = guard(c.me, c.tenant, "lms.publish");
+  const denied = courseGuard(c.me, c.tenant, "lms.publish");
   if (denied) return { ok: false, error: denied };
   const courseId = String(formData.get("courseId") ?? "");
   if (!courseId) return { ok: false, error: "No course selected." };
@@ -176,7 +188,7 @@ export async function retireCourse(formData: FormData): Promise<LmsResult> {
   if ("error" in c) return { ok: false, error: c.error };
   // Retiring is a PUBLISH-tier act, not an editing one: it withdraws material people may be
   // mid-way through. Existing enrolments keep working; no new ones can start.
-  const denied = guard(c.me, c.tenant, "lms.publish");
+  const denied = courseGuard(c.me, c.tenant, "lms.publish");
   if (denied) return { ok: false, error: denied };
   const courseId = String(formData.get("courseId") ?? "");
   if (!courseId) return { ok: false, error: "No course selected." };
@@ -189,7 +201,7 @@ export async function retireCourse(formData: FormData): Promise<LmsResult> {
 export async function addModule(formData: FormData): Promise<LmsResult> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };
-  const denied = guard(c.me, c.tenant, "lms.authoring");
+  const denied = courseGuard(c.me, c.tenant, "lms.authoring");
   if (denied) return { ok: false, error: denied };
   const courseId = String(formData.get("courseId") ?? "");
   const title = String(formData.get("title") ?? "").trim();
@@ -207,7 +219,7 @@ export async function addModule(formData: FormData): Promise<LmsResult> {
 export async function addActivity(formData: FormData): Promise<LmsResult> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };
-  const denied = guard(c.me, c.tenant, "lms.authoring");
+  const denied = courseGuard(c.me, c.tenant, "lms.authoring");
   if (denied) return { ok: false, error: denied };
 
   const moduleId = String(formData.get("moduleId") ?? "");
@@ -273,7 +285,7 @@ export async function addActivity(formData: FormData): Promise<LmsResult> {
 export async function deleteActivity(formData: FormData): Promise<LmsResult> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };
-  const denied = guard(c.me, c.tenant, "lms.authoring");
+  const denied = courseGuard(c.me, c.tenant, "lms.authoring");
   if (denied) return { ok: false, error: denied };
   const activityId = String(formData.get("activityId") ?? "");
   const courseId = String(formData.get("courseId") ?? "");

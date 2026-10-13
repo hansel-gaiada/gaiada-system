@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { can } from "@/lib/rbac";
+import { can, canWorkOnCourse, leadUnits } from "@/lib/rbac";
+import { readOrgRoot } from "@/lib/campaigns-data";
 import { getCourse, formatDuration, LEVEL_LABEL, type Activity } from "@/lib/lms";
 import { addModule, addActivity, deleteActivity, publishCourse, retireCourse } from "@/lib/lmsActions";
 import { Card, KpiTile, StatusBadge } from "@/components/ui";
@@ -30,12 +31,18 @@ export default async function AuthorCoursePage({ params }: { params: Promise<{ c
   const tenant = await getActiveTenant(me);
   if (!tenant) return <EmptyNote>Select a company from the top bar.</EmptyNote>;
   if (!(await isModuleOnForActiveCompany("lms"))) return <ModuleDisabled module="lms" label="Learning" />;
-  if (!can(me, "lms.authoring", tenant)) {
+  // DW-4g: read the course FIRST (the plain read is open to every member), then decide whether THIS person
+  // may work on it. A head holds authoring/publish only at their unit, so the answer depends on the
+  // course's own unit: a department course inside a unit they lead, never a general-track one. The org
+  // tree is read only when it can change the answer.
+  const { courseId } = await params;
+  const plain = await getCourse(userId, tenant, courseId);
+  const root = !can(me, "lms.authoring", tenant) && leadUnits(me).length > 0 ? await readOrgRoot(me, tenant) : null;
+  if (!canWorkOnCourse(me, "lms.authoring", tenant, root, plain)) {
     return <EmptyNote>Authoring training is for department heads, HR and company administrators.</EmptyNote>;
   }
-  const canPublish = can(me, "lms.publish", tenant);
+  const canPublish = canWorkOnCourse(me, "lms.publish", tenant, root, plain);
 
-  const { courseId } = await params;
   // ?includeAnswers=1 — this is the AUTHORING read, and the backend re-authorizes it for `update`.
   // An author editing a quiz must see what it grades against; a learner asking for the same thing
   // is refused rather than quietly redacted. If this call 403s, the person is not this course's

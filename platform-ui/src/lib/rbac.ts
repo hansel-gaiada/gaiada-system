@@ -942,6 +942,25 @@ export function leadsAnyUnitWith(me: Me, cap: Capability, companyId: string | nu
   return ROLE_CAPS.org_unit_lead.includes(cap) && leadUnits(me).length > 0;
 }
 
+/**
+ * DW-4g — may the UI offer `cap` (`lms.authoring` / `lms.publish`) ON THIS COURSE? A company-wide holder
+ * may on any course. A head may only on a DEPARTMENT-track course whose unit sits inside a unit they lead
+ * (`canInUnit` over the unit's path in the org tree, so a division below a led department counts). A
+ * general-track course has no unit and stays company-wide only. A tree that cannot be read (`root` null)
+ * leaves `can()` alone. A mirror only: Cerbos' `unitAncestors` containment decides on the server.
+ */
+export function canWorkOnCourse(
+  me: Me,
+  cap: Capability,
+  companyId: string | null | undefined,
+  root: UnitTree | null,
+  course: { track: string; unitNodeId: string | null | undefined },
+): boolean {
+  if (can(me, cap, companyId)) return true;
+  if (course.track !== "department" || !course.unitNodeId || !root) return false;
+  return canInUnit(me, cap, companyId, unitPathOf(root, course.unitNodeId));
+}
+
 /** `[nodeId, parent, ..., root.id]` (inclusive, nearest first), or `[]` when nodeId is not in the tree. */
 export function unitPathOf(root: UnitTree, nodeId: string): string[] {
   if (root.id === nodeId) return [root.id];
