@@ -4,6 +4,7 @@ import "server-only";
 // good training exemplars for the phase-2 AI. Degrades to [] when the endpoint isn't
 // deployed (or in DEMO_MODE), so the surface renders cleanly regardless.
 import { platformFetch, PlatformError } from "./platform";
+import { assetListPath, type AssetListOpts } from "./creativeReviews";
 
 export interface CreativeAsset {
   id: string;
@@ -19,16 +20,22 @@ export interface CreativeAsset {
   graded_byte_size: number;
   training_ready: boolean;
   created_at: string;
+  // DW-6h §35.5: the list's version fields. Optional so an older backend (no versions) still types.
+  versionNo?: number;
+  versionGroupId?: string;
+  supersedesId?: string | null;
+  versionCount?: number;
+  isLatest?: boolean;
+  review?: { round: number; status: string } | null;
 }
 
 export async function listCreativeAssets(
   userId: string,
   tenant: string,
-  opts: { trainingReady?: boolean } = {},
+  opts: AssetListOpts = {},
 ): Promise<CreativeAsset[]> {
-  const q = opts.trainingReady === undefined ? "" : `?trainingReady=${opts.trainingReady}`;
   try {
-    return await platformFetch<CreativeAsset[]>(`/api/${tenant}/creative/assets${q}`, userId);
+    return await platformFetch<CreativeAsset[]>(assetListPath(tenant, opts), userId);
   } catch (e) {
     if (e instanceof PlatformError && (e.status === 404 || e.status === 405)) return [];
     throw e;

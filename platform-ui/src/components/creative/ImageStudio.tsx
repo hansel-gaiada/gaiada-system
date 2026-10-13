@@ -31,7 +31,7 @@ const nextId = () => `img-${Date.now()}-${uid++}`;
 // engine bakes each look into a 3D LUT and applies it on the GPU); the ERP only
 // ever receives the finished asset. The manual sliders and the preset/Auto looks
 // edit the SAME Grade, so AI-and-manual are one workflow, not two.
-export function ImageStudio({ deptId }: { deptId?: string }) {
+export function ImageStudio({ deptId, versionOf }: { deptId?: string; versionOf?: { id: string; name: string } }) {
   const [items, setItems] = useState<Item[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [grades, setGrades] = useState<Record<string, Grade>>({});
@@ -176,7 +176,7 @@ export function ImageStudio({ deptId }: { deptId?: string }) {
 
   // Persist to the ERP: the graded result + the ORIGINAL + the exact grade params, so the
   // correction is reproducible/reversible (and becomes an AI training pair, phase 2).
-  const saveToErp = useCallback(async () => {
+  const saveToErp = useCallback(async (asVersion?: boolean) => {
     if (!selected || !canvasRef.current) return;
     setBusy(true); setSaveMsg(null);
     try {
@@ -195,14 +195,16 @@ export function ImageStudio({ deptId }: { deptId?: string }) {
         original: await blobToBase64(originalBlob),
         originalContentType: originalBlob.type || "image/jpeg",
         departmentId: deptId,
+        // DW-6h §35.2: opened from an asset, "Save as a new version" sends `versionOf` (the server inherits the department).
+        ...(asVersion && versionOf ? { versionOf: versionOf.id, departmentId: undefined } : {}),
       });
-      setSaveMsg(res.ok ? "Saved to ERP ✓" : res.error ?? "Save failed.");
+      setSaveMsg(res.ok ? (asVersion && versionOf ? `Saved as version ${res.versionNo ?? ""} of ${versionOf.name} ✓` : "Saved to ERP ✓") : res.error ?? "Save failed.");
     } catch (e) {
       setSaveMsg(e instanceof Error ? e.message : "Save failed.");
     } finally {
       setBusy(false);
     }
-  }, [selected, grades, activePreset, deptId, loadImage]);
+  }, [selected, grades, activePreset, deptId, loadImage, versionOf]);
 
   // ── Empty state ────────────────────────────────────────────────────────────
   if (items.length === 0) {
@@ -280,9 +282,20 @@ export function ImageStudio({ deptId }: { deptId?: string }) {
 
           <div className="cs-section">
             <div className="cs-actions">
-              <button className="lux-btn lux-btn--solid lux-btn--md" onClick={saveToErp} disabled={busy}>
-                {busy ? "Saving…" : "Save to ERP"}
-              </button>
+              {versionOf ? (
+                <>
+                  <button className="lux-btn lux-btn--solid lux-btn--md" onClick={() => saveToErp(true)} disabled={busy}>
+                    {busy ? "Saving…" : `Save as a new version of ${versionOf.name}`}
+                  </button>
+                  <button className="lux-btn lux-btn--ghost lux-btn--md" onClick={() => saveToErp(false)} disabled={busy}>
+                    Save as a new asset
+                  </button>
+                </>
+              ) : (
+                <button className="lux-btn lux-btn--solid lux-btn--md" onClick={() => saveToErp()} disabled={busy}>
+                  {busy ? "Saving…" : "Save to ERP"}
+                </button>
+              )}
               <button className="lux-btn lux-btn--ghost lux-btn--md" onClick={exportSelected} disabled={busy}>
                 Export WebP
               </button>

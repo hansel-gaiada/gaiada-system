@@ -8,12 +8,13 @@ import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
+import { creativeErrorSentence, errorToken } from "./creativeReviews";
 
 export interface SaveAssetInput {
   name: string;
   presetId: string;
-  width: number;
-  height: number;
+  width?: number;
+  height?: number;
   grade: Record<string, number>;
   /** base64 (no data-URI prefix) of the exported graded WebP. */
   graded: string;
@@ -21,9 +22,13 @@ export interface SaveAssetInput {
   original?: string;
   originalContentType?: string;
   departmentId?: string;
+  /** DW-6h §35.2: save this as the NEXT VERSION of the named asset's group. */
+  versionOf?: string;
+  /** Defaults to image/webp (the Studio's export); a plain upload from the asset detail sends its own. */
+  contentType?: string;
 }
 
-export interface SaveAssetResult { ok: boolean; id?: string; error?: string }
+export interface SaveAssetResult { ok: boolean; id?: string; versionNo?: number; error?: string }
 
 export interface ToggleResult { ok: boolean; error?: string }
 
@@ -53,11 +58,11 @@ export async function saveCreativeAsset(input: SaveAssetInput): Promise<SaveAsse
   if (!input.name || !input.graded) return { ok: false, error: "Nothing to save." };
 
   try {
-    const res = await platformFetch<{ id: string }>(`/api/${tenant}/creative/assets`, userId, {
+    const res = await platformFetch<{ id: string; versionNo?: number }>(`/api/${tenant}/creative/assets`, userId, {
       method: "POST",
       body: JSON.stringify({
         name: input.name,
-        contentType: "image/webp",
+        contentType: input.contentType ?? "image/webp",
         width: input.width,
         height: input.height,
         presetId: input.presetId,
@@ -66,13 +71,16 @@ export async function saveCreativeAsset(input: SaveAssetInput): Promise<SaveAsse
         graded: input.graded,
         original: input.original,
         originalContentType: input.originalContentType,
+        versionOf: input.versionOf,
       }),
     });
-    return { ok: true, id: res.id };
+    if (input.versionOf) revalidatePath("/departments/[deptId]/assets", "layout");
+    return { ok: true, id: res.id, versionNo: res.versionNo };
   } catch (e) {
-    if (e instanceof PlatformError && (e.status === 404 || e.status === 405)) {
+    if (e instanceof PlatformError && (e.status === 404 || e.status === 405) && !errorToken(e.reason) && !errorToken(e.message)) {
       return { ok: false, error: "Saved locally — the ERP persist endpoint isn't deployed yet." };
     }
+    if (e instanceof PlatformError) return { ok: false, error: creativeErrorSentence(e) };
     return { ok: false, error: e instanceof Error ? e.message : "Save failed." };
   }
 }
