@@ -142,10 +142,15 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
     // DW-5a (2026-10-13) added `agency.campaign_part.update`: a department head updates the status and
     // brief of their own department's part of a shared campaign (FRONTEND-BFF-CONTRACT §31.2). It is
     // unit-bounded like the rest, and it never reaches money: `allocate` is not in this bundle.
+    //
+    // DW-5c (2026-10-14) added `core.work_request.deliver` and `core.work_request.decline`: a department head
+    // delivers and declines the asks routed to their own department (FRONTEND-BFF-CONTRACT §32.2). Both are
+    // unit-bounded like the rest; `cancel` (the requester's) and `create` are not in this bundle.
     expect(keys).toEqual([
       "agency.campaign_part.update",
       "core.position.assign", "core.position.read", "core.position.unassign",
       "core.role_grant.create", "core.role_grant.read", "core.role_grant.revoke",
+      "core.work_request.decline", "core.work_request.deliver",
       "lms.course.create", "lms.course.publish", "lms.course.retire", "lms.course.update",
       "lms.enrollment.create", "lms.enrollment.grade", "lms.enrollment.read", "lms.enrollment.update",
       "reports.appraisal.read", "reports.document.read_department",
@@ -161,6 +166,9 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
     expect(keys).not.toContain("lms.enrollment.export");
     expect(keys).not.toContain("lms.course.delete");
     expect(keys).not.toContain("agency.campaign_part.allocate");
+    expect(keys).not.toContain("core.work_request.cancel");
+    expect(keys).not.toContain("core.work_request.create");
+    expect(keys).not.toContain("core.work_request.read");
   });
 
   it("ACCEPTANCE: a legitimate client@company grant is completely unaffected", async () => {
