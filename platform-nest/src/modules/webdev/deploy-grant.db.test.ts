@@ -303,13 +303,14 @@ describe.skipIf(!live)("M6-P4g — deploy grant (real Postgres, faked GitHub)", 
     });
     expect(row.deploy_grant_revoked_at).toBeTruthy();
     const ev = await adminPool().query(`SELECT payload FROM outbox_events WHERE entity_id = $1 AND event_type = 'webdev.site.deploy_revoked'`, [s.id]);
-    expect(ev.rows[0].payload).toMatchObject({ reason: "the client's contract ended", secretNames: [GRANT, siteSecret(s)] });
+    // M6-P6h2: a revoke covers every derivable per-site name, the production one too (this site has no production row).
+    expect(ev.rows[0].payload).toMatchObject({ reason: "the client's contract ended", secretNames: [GRANT, siteSecret(s), prodSecret(s)] });
     expect(gh.orgSecrets.get(siteSecret(s))!.repos.size).toBe(0);
     const revokeRows = await adminPool().query(
       `SELECT count(*)::int AS n FROM activities WHERE tenant_id = $1 AND verb = 'github.secret_write' AND metadata->>'basis' = 'deploy-gate-revoke' AND metadata->>'repo' = $2`,
       [T, `${ORG}/${s.slug}`],
     );
-    expect(revokeRows.rows[0].n).toBe(4); // two secrets, attempted + succeeded each
+    expect(revokeRows.rows[0].n).toBe(6); // three names (the marker, staging, production), attempted + succeeded each
     expect(await grantDeploySecrets(ports(s), { siteId: s.id, trigger: "scaffold" })).toMatchObject({ outcome: "skipped_revoked" });
     expect(gh.orgSecrets.get(GRANT)!.repos.size).toBe(0);
   });
