@@ -233,10 +233,8 @@ const SITES: Site[] = [
     old: `id = $1 AND client_id = ANY($6::uuid[]) AND status = 'pending'`,
     now: `id = $1 AND ${postReviewInPortalScope("", { clients: 6 })} AND status = 'pending'` },
 
-  // ── portal-profile.controller.ts (the People area, PV2-07) ──
-  { site: "profile contacts (People)",
-    old: `cc.client_id = ANY($1::uuid[]) AND cc.deleted_at IS NULL AND cc.status <> 'revoked'`,
-    now: clientContactInPortalScope("cc", { clients: 1 }) },
+  // portal-profile.controller.ts (the People area, PV2-07) is NOT in this table any more: PV-D36 (2026-10-13)
+  // changed its meaning on purpose, so it has its own tests below ("PV4-13 People list").
 ];
 
 describe("PV3-02 equivalence — every switched call site keeps its exact conjunct set", () => {
@@ -290,6 +288,31 @@ describe("PV3-02 equivalence — every switched call site keeps its exact conjun
     );
     // And a narrower OR is a DIFFERENT conjunct, which is the whole point.
     expect(conjuncts(contractInPortalScope("k", S12))).not.toEqual(conjuncts(runInPortalScope("k", S12)));
+  });
+});
+
+describe("PV4-13 People list (owner ruling PV-D36) — clientContactInPortalScope", () => {
+  const people = clientContactInPortalScope("cc", scopeAt(1));
+
+  it("is the old People predicate PLUS exactly one conjunct: the per-client project arm that admits project-less contacts", () => {
+    const old = `cc.client_id = ANY($1::uuid[]) AND cc.deleted_at IS NULL AND cc.status <> 'revoked'`;
+    expect(conjuncts(old).filter((c) => !conjuncts(people).includes(c))).toEqual([]);
+    expect(conjuncts(people).filter((c) => !conjuncts(old).includes(c))).toEqual([
+      `(cc.client_id = ANY($2::uuid[]) OR cc.project_id = ANY($3::uuid[]) OR cc.project_id IS NULL)`,
+    ]);
+  });
+
+  it("binds the three scope arrays at whatever index the caller names, and refuses a params object without `wide`", () => {
+    expect(clientContactInPortalScope("c", { clients: 4, wide: 5, projects: 6 })).toContain(
+      `(c.client_id = ANY($5::uuid[]) OR c.project_id = ANY($6::uuid[]) OR c.project_id IS NULL)`,
+    );
+    expect(() => clientContactInPortalScope("cc", { clients: 1, projects: 2 } as never)).toThrow(/invalid parameter index/);
+  });
+
+  it("the profile controller feeds it the whole scope (scopeAt + scopeValues), not just the client ids", () => {
+    const src = codeOnly(readFileSync(join(SRC, "core/portal-profile.controller.ts"), "utf8"));
+    expect(src).toContain(`clientContactInPortalScope("cc", scopeAt(1))`);
+    expect(src).not.toMatch(/clientContactInPortalScope\("cc", \{/);
   });
 });
 

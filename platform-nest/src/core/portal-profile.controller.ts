@@ -36,7 +36,13 @@ export class PortalProfileController {
    *
    *  Fellow contacts are included because a client stakeholder legitimately needs to know who else on
    *  their side has access — that is a governance question they own, not ours. Only name/email/
-   *  capability/status is exposed, and only for contacts of THEIR clients. */
+   *  capability/status is exposed, and only for contacts of THEIR clients.
+   *
+   *  PV-D36 (owner ruling 2026-10-13): the list is PER CLIENT and shows only SHARED reach. On a client
+   *  the caller reaches client-wide, every contact of it; on a client where they are limited to some
+   *  projects, the client-wide contacts plus the contacts on their own projects. A contact on a project
+   *  outside their reach is not returned, so neither is that contact's `projectId`
+   *  (`clientContactInPortalScope`, portal-visibility.ts). */
   @Get(":tenantId/portal/profile")
   async profile(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
     await authorize(req.principal, { kind: "portal", tenantId }, "read");
@@ -65,9 +71,9 @@ export class PortalProfileController {
                   cc.project_id AS "projectId",
                   CASE WHEN u.kind = 'client' THEN 'client' ELSE 'provider' END AS "side"
              FROM client_contacts cc JOIN users u ON u.id = cc.user_id
-            WHERE ${clientContactInPortalScope("cc", { clients: 1 })}
+            WHERE ${clientContactInPortalScope("cc", scopeAt(1))}
             ORDER BY u.name`,
-          [scope.clientIds],
+          scopeValues(scope),
         ),
         // The caller's own grants, spelled out. A contact who cannot sign should be able to SEE that
         // this is why the button is disabled, rather than concluding the portal is broken.

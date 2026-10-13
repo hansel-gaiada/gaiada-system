@@ -248,9 +248,18 @@ export function clientContactClientVisible(alias: string): string {
   return `${col(alias, "deleted_at")} IS NULL AND ${col(alias, "status")} <> 'revoked'`;
 }
 
-/** The full portal predicate for a client contact: contacts of the caller's clients. */
-export function clientContactInPortalScope(alias: string, params: PortalClientParams): string {
-  return `${inCallerClients(alias, params.clients)} AND ${clientContactClientVisible(alias)}`;
+/** The full portal predicate for a client contact, PER CLIENT (owner ruling PV-D36, 2026-10-13):
+ *  "A contact limited to some projects sees the client-wide contacts and the contacts on their own
+ *  projects, never contacts on projects outside their reach (nor those contacts' project ids); a
+ *  client-wide contact sees every contact of that client."
+ *
+ *  So, within the caller's clients: for a client the caller reaches client-wide (`wide`), every listed
+ *  contact; for any other of their clients, the client-wide contacts (`project_id IS NULL`) plus the
+ *  contacts whose project is one of the caller's own (`projects`). This is the same arm contracts and
+ *  change requests use (a project-less row is admitted to a project-scoped contact of that client).
+ *  A contact row outside the arm is not returned at all, so its `project_id` cannot leak either. */
+export function clientContactInPortalScope(alias: string, params: PortalScopeParams): string {
+  return `${inCallerClients(alias, params.clients)} AND ${clientContactClientVisible(alias)} AND ${inCallerProjects(alias, col(alias, "project_id"), params, true)}`;
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════
