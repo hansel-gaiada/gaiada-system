@@ -3,6 +3,7 @@ import { sanitizeReturnTo } from "@/lib/returnTo";
 import { peekSessionExpiry, needsRefresh } from "@/lib/session-expiry";
 import { readHostCookie, HOST_COOKIES } from "@/lib/cookieNames";
 import { allowedOrigins, isOriginAllowed, requestOwnOrigin, ORIGIN_CHECK_EXEMPT_PATHS } from "@/lib/originCheck";
+import { replayCspFor } from "@/lib/replaysCsp";
 
 /** CSRF gate (B0): refuse a state-changing request whose Origin / Sec-Fetch-Site says it came from a
  *  page that is not the ERP. The rule and its reasons live in `lib/originCheck.ts`. Runs FIRST, before
@@ -101,7 +102,15 @@ export function proxy(req: NextRequest) {
     // that throws is every page down.
   }
 
-  return NextResponse.next();
+  // M5-V6-c: the session-replay player page (and only it) carries its own Content-Security-Policy: images and media only from the
+  // site's own domains. The domains arrive signed in the URL; this only verifies them (no network). See lib/replaysCsp.ts. It
+  // replaces next.config's `frame-ancestors 'self'` on this one route, so the policy repeats it. Never throws; non-player paths get null.
+  const res = NextResponse.next();
+  if (req.method === "GET") {
+    const csp = replayCspFor(pathname, req.nextUrl.searchParams);
+    if (csp) res.headers.set("Content-Security-Policy", csp);
+  }
+  return res;
 }
 
 // `office-sprites` joins `fonts` here for the same reason fonts were excluded: they are static

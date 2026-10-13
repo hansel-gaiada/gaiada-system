@@ -58,7 +58,7 @@ server {
     proxy_pass http://$collect_upstream;
     include /etc/nginx/proxy-common.inc;
   }
-  location = /lib/kestrel/f {          # V3-b forget (always 204): {website, visitorId, consentId} is a few hundred bytes
+  location = /lib/kestrel/f {          # V3-b forget (204; 400/429/503 only for a malformed body, a full limiter or a store outage): {website, visitorId, consentId} is a few hundred bytes
     limit_except POST OPTIONS { deny all; }
     client_max_body_size 2k;
     set $collect_upstream "collector:8080";

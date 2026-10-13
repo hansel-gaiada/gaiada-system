@@ -53,6 +53,8 @@ for anyone who already has an ERP identity.
 | ClamAV | GPL-2.0 (socket) | No | VirusTotal API, none | days | 🟢 |
 | imgproxy v3 | AGPL-3.0 | No | Thumbor (MIT), `sharp` in-process (Apache-2.0) | 1 wk | 🟢 |
 | **Payload 3** | MIT / Enterprise for SSO | **Via Enterprise** | **Own editorial layer — WSK-40…51** | in flight | 🟢² |
+| pdf-lib 1.17.1 *(PV5-07, 2026-10-13: joins an agreement's pages with its evidence page, embeds a non-PDF agreement, adds the signature field)* | MIT | No | `@cantoo/pdf-lib` (maintained, API-compatible fork); pdfkit for generation + qpdf for joining | days | 🟢¹⁷ |
+| @signpdf/signpdf + placeholder-pdf-lib + utils 3.3.0 *(PV5-07: the PAdES byte ranges and embedding the CMS in the PDF)* | MIT | No | Our own ~150 lines: the step is fully specified (ISO 32000-1 §12.8) and the CMS it embeds is already ours | days | 🟢¹⁷ |
 
 ¹ **Cerbos is Red by construction, and that is accepted.** The 259 policy files are *our* asset,
 not the vendor's leverage — the PDP is Apache-2.0 with no tier we depend on, so the realistic
@@ -62,6 +64,16 @@ adopt Cerbos Hub** (EST-D-VI2), so nothing we own lives outside this repo.
 ² Payload's exit is already funded and in flight — see
 [`webdesk-independence.md`](./webdesk-independence.md). Band reflects the post-audit finding that
 Payload holds two collections, one of which is a boot stub.
+
+¹⁷ **PDF joining and the company seal (PV5-07, PV-D25), added 2026-10-13, PROTOTYPED.** Both are libraries
+inside platform-nest, no service and no account. **The cryptography is not vendored:** the CAdES SignedData,
+the self-issued certificate and the DER they need are our own code (`platform-nest/src/core/der.ts`,
+`document-seal.ts`) over `node:crypto`, because @signpdf's own signer (node-forge) cannot emit the
+signing-certificate-v2 attribute PAdES baseline requires. **Abandonment axis:** pdf-lib's last release
+is 1.17.1 (May 2022): stable and widely used, but a freeze, not maintenance (the same caution as the
+faster-whisper row). Its fork `@cantoo/pdf-lib` is maintained and API-compatible, so the exit is a
+dependency swap. The @signpdf packages were last released 2025-12. Licences read from the published
+packages (all MIT; pdf-lib's transitive deps MIT, its tslib 0BSD). Nothing drilled.
 
 ## 3 · Observability
 
@@ -95,6 +107,8 @@ Payload holds two collections, one of which is a boot stub.
 | **IP-to-company data** *(CANDIDATE, not chosen; phase 5 only, needs owner ruling + DPA review; M5-V1)*: IPinfo IP-to-Company database (local file) or Snitcher (API) | Proprietary / commercial | No (Snitcher: unlimited team members) | each other; Dealfront/Leadfeeder; or none (country/network only) | 2–4 wk (the profile store keeps only derived attributes) | 🟡¹² |
 | **Certified e-signature: VIDA** *(PV5-03 pick, approved 2026-10-12 for when the certified tier is first needed (PV-D25); PARKED, not contracted; runner-up Privy)* | Proprietary SaaS (per-signature) | No per-seat fee found; Business plan Rp175,000/mo, per-user status unconfirmed | Privy, Peruri Sign It, Digisign, Tilaka (all registered PSrEs) behind our `SignatureProvider` adapter | 3-8 wk (one new adapter, a new contract and sandbox; **custody exit: we store the signed PDF, certificate and audit record ourselves at signing time, so leaving never strands a signed contract**) | 🟡¹³ |
 | **Payment gateway: Midtrans Snap** *(PV5-03 pick, approved by the owner 2026-10-12 (PV-D25); PLANNED, merchant registration pending; runner-up DOKU)* | Proprietary SaaS (per-transaction) | No | DOKU Checkout, Xendit, behind our `PaymentProvider` adapter | 2-4 wk (one new adapter plus a new merchant approval; payments and receipts already live in our ledger) | 🟡¹⁴ |
+| **rrweb** *(the session recorder in the site and the event format the collector stores; exact version pinned; PLANNED, in use once the site recorder (M5-V6-d) ships; design §6.1)* | MIT | No | OpenReplay tracker, Highlight.io (Apache-2.0, an rrweb fork), PostHog session replay (rrweb underneath), Microsoft Clarity (hosted; the thing V6 is meant to replace) | 2-4 wk (a different recorder in the site, a new event parser and size and typing checks in the collector, a new player; recordings live 30 days, so no archive has to be converted) | 🟡¹⁵ |
+| **rrweb-player** *(the replay view in the ERP, platform-ui; exact version pinned, 2.1.6; IN PROGRESS: M5-V6-c)* | MIT | No | `@rrweb/replay` (the bare Replayer it wraps, MIT) with our own small controls; or the player that ships with whichever recorder replaces rrweb | days (the player is a view over the events; only the controls change) | 🟢¹⁶ |
 
 ³ **AUDITED 2026-09-21 — the single row became two, because the answer was not uniform.**
 Full evidence: [`../assessment/2026-09-21-agentic-native-n8n-audit.md`](../assessment/2026-09-21-agentic-native-n8n-audit.md).
@@ -201,6 +215,10 @@ Core or Plus runs today, and cost the fallback — before the next WhatsApp capa
 
 ¹⁴ **Payment gateway, Midtrans: added 2026-10-12 (PV5-03), PLANNED.** Reasoning: [`pv5-provider-comparison.md`](./pv5-provider-comparison.md). Per-transaction fees only (VA Rp4,000, QRIS 0.7%, card 2.9% + Rp2,000, no setup or monthly fee, read 2026-10-12); no seat concept. Amber, not Green, because moving needs a new merchant approval (company documents, a wait outside our control) as well as a new adapter. Hosted checkout means no card data ever reaches us, and payments and receipts live in our ledger, so history does not move. Virtual-account payments cannot be refunded through Midtrans's refund API, so refunds stay manual (out of PV-5 scope). Settlement timing was not found in public pages.
 
+¹⁵ **rrweb: added 2026-10-13 (M5-V6-c), PLANNED.** MIT; the 2.x line is stable (2.0.0 on 2026-06-01, 2.1.6 on 2026-09-18; source: the npm registry). Runs in the visitor's browser and in our collector's parser; no personal data is sent to the project. Standing risks: ① the format is the lock: the site recorder (V6-d), the collector's checks (V6-a) and the player all speak rrweb events, so leaving means changing all three together; ② it is a small-maintainer project with a long alpha history, so the exact version is **pinned** and updated deliberately, never floated (the platform-ui lockfile pins every `@rrweb/*` package too; see the `overrides` block in `platform-ui/package.json`); ③ masking is ours to prove (V6-e decodes stored chunks for a typed test string). Because the MIT source can be vendored and recordings expire after 30 days, abandonment is survivable: the band is Amber on the work, not on the licence. Exit drill: not rehearsed. Addendum v0.2 §8.2 row.
+
+¹⁶ **rrweb-player: added 2026-10-13 (M5-V6-c), IN PROGRESS.** MIT, **2.1.6** exactly (published 2026-09-18, more than two weeks old when chosen; the newer 2.1.7 of 2026-10-02 was too fresh). Runs in staff browsers in the ERP only; it loads no remote code and sends nothing anywhere. It adds one direct runtime dependency to platform-ui, with `@rrweb/packer`, `@rrweb/replay`, `@rrweb/types`, `@rrweb/utils`, `rrdom`, `rrweb` and `rrweb-snapshot` pinned to 2.1.6 through `overrides` so a fresh install cannot float to a newer release. The replayed page runs in an iframe sandboxed to `allow-same-origin` only; `UNSAFE_replayCanvas` stays off; the player page's CSP admits images only from the site's own domains (`platform-ui/src/lib/replaysCsp.ts`). Addendum v0.2 §8.2 row.
+
 ## 5 · AI
 
 | Dependency | Seat? | Replacement | Exit | Band |
@@ -243,8 +261,8 @@ deliverable. **Protect the interface: no capability may call a provider SDK dire
 
 | Band | Count | Notes |
 |---|---|---|
-| 🟢 Green | 21 | +Umami, +DB-IP Lite (2026-10-11) |
-| 🟡 Amber | 21 | all have a named replacement in this file; +IP-to-company candidate (2026-10-11); +VIDA e-signature and +Midtrans gateway (PV5-03 picks, 2026-10-12) |
+| 🟢 Green | 24 | +Umami, +DB-IP Lite (2026-10-11); +rrweb-player (2026-10-13); +pdf-lib, +@signpdf (PV5-07, 2026-10-13) |
+| 🟡 Amber | 22 | all have a named replacement in this file; +IP-to-company candidate (2026-10-11); +VIDA e-signature and +Midtrans gateway (PV5-03 picks, 2026-10-12); +rrweb recorder (2026-10-13) |
 | 🔴 Red | 4 | **Cerbos** (accepted — our asset, no tier dependency) · **WAHA** (corrected 2026-09-21: Core/Apache-2.0, not a paid tier — Red now stands on *"groups have no fallback at any price"*) · **GitHub signing/provenance**⁷ (design decision, not migration) · **n8n WS11 pipeline**³ (the agentic-native bar slipped; 2–3 months, not weeks) |
 | **Seat-priced** | **4** *(was 5)* | GitHub *(being removed — machine identity + WSK-49)* · Payload *(being removed — WSK-40…51)* · Google Workspace *(edge tool)* · Claude Code *(accepted, dev tooling)*. — **Cloudflare dropped off this list 2026-09-21: the re-check found Workers Paid is per account, not per seat.** |
 
@@ -266,3 +284,5 @@ edge tool), and the agent army (deliberately accepted).
 | 2026-09-21 | **Two new findings from the sweep, both now rows above:** ① the GitHub row splits — CI/registry is Amber, **cosign-keyless + build-provenance is Red** (GitHub-OIDC-bound, no Forgejo equivalent); ② `fedirz/faster-whisper-server` is **archived upstream**, last built Jan 2025 — digest-pinned, but that is a freeze, not maintenance. **Abandonment is a distinct risk axis this register did not originally model.** |
 | 2026-10-11 | **Analytics and geo rows added (M5-G4/M5-V1):** Umami 3.x (🟢), DB-IP Lite (🟢), IP-to-company candidate (🟡, not chosen). Review in [`../plans/2026-10-11-m5-geo-and-company-data-review.md`](../plans/2026-10-11-m5-geo-and-company-data-review.md). Nothing drilled. |
 | 2026-10-12 | **PV-5 provider rows added (PV5-03):** certified e-signature VIDA (🟡, custody exit) and payment gateway Midtrans (🟡), runners-up Privy and DOKU. Owner ruling PV-D25 the same day: Midtrans approved; VIDA approved but parked until the certified tier is first needed. Comparison in [`pv5-provider-comparison.md`](./pv5-provider-comparison.md). Nothing drilled. |
+| 2026-10-13 | **Session replay rows added (M5-V6-c):** rrweb (🟡, the event format is the lock; PLANNED until the site recorder ships) and rrweb-player (🟢, 2.1.6 pinned, in platform-ui; IN PROGRESS). Both MIT, no seat. Addendum v0.2 §8.2. Nothing drilled. |
+| 2026-10-13 | **PV5-07 rows added:** pdf-lib (🟢, joins and prepares PDFs) and @signpdf (🟢, PAdES byte ranges) for issued-invoice PDFs and the sealed signed copy of a contract (PV-D25). The seal's CMS and certificate are our own code over `node:crypto`; no new service, no new account. pdf-lib's release freeze noted (¹⁷). Nothing drilled. |

@@ -13,6 +13,7 @@ import { AuthzPermissionsController } from "./core/authz-permissions.controller"
 import { ClientWorkController } from "./core/client-work.controller";
 import { InvoiceController } from "./modules/invoice/invoice.controller";
 import { BillingProfileController } from "./modules/invoice/billing-profile.controller";
+import { BillingProfileAgentController } from "./modules/invoice/billing-profile-agent.controller";
 import { CollabController } from "./core/collab.controller";
 import { AutomationApprovalsController } from "./core/automation-approvals.controller";
 import { PipelineController } from "./core/pipeline.controller";
@@ -175,6 +176,7 @@ import { SiteBuildsController } from "./modules/webdev/site-builds.controller";
 import { CheckinsController } from "./modules/reports/checkins.controller"; // TR-09
 import { AppraisalsController } from "./modules/reports/appraisals.controller"; // TR-24
 import { PrintPayloadController } from "./modules/reports/print-payload.controller"; // TR-21
+import { DocumentPrintPayloadController } from "./core/document-print-payload.controller"; // PV5-07
 import { McpToolsController } from "./modules/mcp-tools.controller";
 import { ModuleCatalogController } from "./modules/module-catalog.controller";
 // MAIL-04 — core mail infra (src/mail/, design A1: same class as src/events/, no ModuleContract
@@ -197,7 +199,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
 @Module({
   controllers: [
     HealthController, IdentityController, CoreController, CustomFieldsController,
-    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, BillingProfileController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalCentreController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, PortalConversationController, ConversationController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, AgencyPrivacyController, GithubReposController, GithubWebhookController, ContractsController, ClientContactsController, ClientInviteAcceptController, ClientWebsiteAccessController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
+    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, BillingProfileController, BillingProfileAgentController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalCentreController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, PortalConversationController, ConversationController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, AgencyPrivacyController, GithubReposController, GithubWebhookController, ContractsController, ClientContactsController, ClientInviteAcceptController, ClientWebsiteAccessController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
     CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, AgentsController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, FinanceController, ClientsController, ClientsCentreController, HrController, LoansController,
@@ -277,6 +279,8 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     // TR-21: the internal, token-only PDF payload fetch — root-level, no `/api` prefix, no
     // guards (identity.controller.ts's precedent). See print-payload.controller.ts's own header.
     PrintPayloadController,
+    // PV5-07: the same token-only payload fetch for the invoice and sealed-contract print routes.
+    DocumentPrintPayloadController,
     // MCP tool-def aggregation for the hub (WS2 §6).
     McpToolsController,
     // Compiled-in module list for the settings UI (see the controller header for why it is

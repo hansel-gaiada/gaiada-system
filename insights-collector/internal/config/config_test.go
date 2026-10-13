@@ -215,7 +215,11 @@ func TestConsentedChannelDefaultsWhenEmpty(t *testing.T) {
 	if c.BufferRetention != 72*time.Hour || c.PurgeInterval != 15*time.Minute || c.ConsentRatePerSec != 100 {
 		t.Errorf("defaults: %v %v %d", c.BufferRetention, c.PurgeInterval, c.ConsentRatePerSec)
 	}
-	if _, ok := c.ConsentEventNames["cta_click"]; !ok || len(c.ConsentEventNames) != 10 {
+	// The site's 13 names (confirmed by V3-j); `switch_language`, not the first guess `language_switch`.
+	_, cta := c.ConsentEventNames["cta_click"]
+	_, lang := c.ConsentEventNames["switch_language"]
+	_, guess := c.ConsentEventNames["language_switch"]
+	if !cta || !lang || guess || len(c.ConsentEventNames) != 13 {
 		t.Errorf("event names: %v", c.ConsentEventNames)
 	}
 }

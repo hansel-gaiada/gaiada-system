@@ -196,3 +196,92 @@ func TestOpenAIEmbedFailsOver(t *testing.T) {
 		t.Fatal("expected embed to be unsupported (fail over)")
 	}
 }
+
+// M6-P4n: the `reasoning` body field is OpenRouter's, so it is sent ONLY when configured. Unset (0)
+// must leave the body as it always was (OpenAI's own API does not take the field).
+func TestOpenAIReasoningFieldOnlyWhenConfigured(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer srv.Close()
+
+	p := NewOpenAIProvider(srv.URL, "k", "m", "", 512, srv.Client())
+	if _, err := p.Complete(context.Background(), "hi"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(gotBody, "reasoning") {
+		t.Fatalf("reasoning must not be sent when unconfigured, got %q", gotBody)
+	}
+
+	p.WithReasoningMaxTokens(0)
+	if _, err := p.Complete(context.Background(), "hi"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(gotBody, "reasoning") {
+		t.Fatalf("reasoning must not be sent for 0, got %q", gotBody)
+	}
+
+	p.WithReasoningMaxTokens(3000)
+	if _, err := p.Complete(context.Background(), "hi"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(gotBody, `"reasoning":{"max_tokens":3000}`) {
+		t.Fatalf("expected reasoning.max_tokens=3000 in body, got %q", gotBody)
+	}
+	if !strings.Contains(gotBody, `"max_tokens":512`) {
+		t.Fatalf("the top-level max_tokens must stay, got %q", gotBody)
+	}
+}
+
+// M6-P4n: empty content + finish_reason "length" is a truncated generation (a reasoning model that
+// spent its whole budget thinking), not a legitimate empty answer.
+func TestOpenAICompleteErrorsOnEmptyContentWhenLengthCutOff(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"content":"  \n"},"finish_reason":"length"}]}`))
+	}))
+	defer srv.Close()
+
+	p := NewOpenAIProvider(srv.URL, "k", "m", "", 512, srv.Client())
+	text, err := p.Complete(context.Background(), "hi")
+	if err == nil {
+		t.Fatalf("expected an error for empty content with finish_reason=length, got %q", text)
+	}
+	if !strings.Contains(err.Error(), "finish_reason=length") {
+		t.Fatalf("expected the error to name the cause, got: %v", err)
+	}
+}
+
+func TestOpenAICompleteKeepsEmptyContentOnStop(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"content":""},"finish_reason":"stop"}]}`))
+	}))
+	defer srv.Close()
+
+	p := NewOpenAIProvider(srv.URL, "k", "m", "", 512, srv.Client())
+	text, err := p.Complete(context.Background(), "hi")
+	if err != nil || text != "" {
+		t.Fatalf("expected (\"\", nil) for empty content with finish_reason=stop, got (%q, %v)", text, err)
+	}
+}
+
+// A length-truncated answer that DID produce content is still returned (partial text is not the
+// empty-generation failure this guards).
+func TestOpenAICompleteKeepsPartialContentOnLength(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"content":" partial "},"finish_reason":"length"}]}`))
+	}))
+	defer srv.Close()
+
+	p := NewOpenAIProvider(srv.URL, "k", "m", "", 512, srv.Client())
+	text, err := p.Complete(context.Background(), "hi")
+	if err != nil || text != "partial" {
+		t.Fatalf("expected (\"partial\", nil), got (%q, %v)", text, err)
+	}
+}

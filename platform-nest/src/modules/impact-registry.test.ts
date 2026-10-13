@@ -103,10 +103,11 @@ describe("AGN-5 · every write is impact-classified in the registry", () => {
 
   it("a mutating METHOD and the `write` flag agree — one implies the other", () => {
     // `write` drives the gate; `method` drives the transport. They are declared separately, so they
-    // can disagree, and the dangerous direction is a POST/PATCH/DELETE that forgot `write: true`:
+    // can disagree, and the dangerous direction is a POST/PUT/PATCH/DELETE that forgot `write: true`:
     // that tool is a mutation the impact gate never sees at all, which no amount of impact
     // classification would catch.
-    const mutatingMethods = ["POST", "PATCH", "DELETE"];
+    // PUT joined with `meetings.saveMinutes` (PV4-07): a PUT that forgot `write: true` would otherwise slip past this check.
+    const mutatingMethods = ["POST", "PUT", "PATCH", "DELETE"];
     const writesWithoutFlag = tools
       .filter((t) => t.method && mutatingMethods.includes(t.method) && !t.write)
       .map((t) => `${t.name} (${t.method})`)

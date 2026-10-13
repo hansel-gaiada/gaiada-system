@@ -43,6 +43,7 @@ import {
 } from "./portal-visibility";
 import type { PoolClient } from "pg";
 import { claimHeadroom, hasCurrencyPrecision } from "../modules/invoice/issue";
+import { CONTRACT_SIGNED_COPY_FILE_ID, INVOICE_PDF_FILE_ID } from "./document-read-fields";
 
 const PAYMENT_METHODS = new Set(["bank_transfer", "card", "cash", "other"]);
 /** Proof receipts are photos of a transfer slip or a small PDF. 10 MB is generous for both and well
@@ -54,7 +55,7 @@ export const MAX_PROOF_BYTES = 10 * 1024 * 1024;
 // (PV5-04 removed the 1% overpayment tolerance: a claim is bounded by the LEDGER's outstanding amount, because an AR
 // allocation can never exceed what is owed. See recordPayment.)
 
-type DownloadableKind = "deliverable" | "contract" | "invoice_payment" | "project" | "conversation";
+type DownloadableKind = "deliverable" | "contract" | "invoice_payment" | "project" | "conversation" | "invoice";
 
 /** Where a client-visible file may live. An entity NOT in this map is unreachable through the portal's
  *  download route even if a file id is guessed, because the route resolves ownership by looking the
@@ -67,6 +68,10 @@ const DOWNLOADABLE: Record<string, DownloadableKind> = {
   // PV4-03: a Conversation message attachment (`target_entity_id` = the MESSAGE id). Reached through
   // message -> thread -> conversationThreadInPortalScope in ownsEntity below.
   conversation: "conversation",
+  // PV5-07: an issued invoice's PDF (files.role = 'invoice_pdf'). ownsEntity admits only an ISSUED invoice in the
+  // caller's scope, so a draft, an approved-but-unissued or a legacy never-issued invoice has no downloadable file, even
+  // though some of those are visible in the portal. (A contract's sealed copy rides the existing `contract` kind.)
+  invoice: "invoice",
 };
 
 /**
@@ -138,7 +143,8 @@ export class PortalCommerceController {
                 COALESCE(i.issued_at, i.created_at) AS "issuedAt", cl.name AS "clientName",
                 COALESCE(pay.confirmed, 0)::float8 AS paid,
                 COALESCE(pay.pending, 0)::float8 AS "pendingConfirmation",
-                ${PORTAL_INVOICE_RECORD_COLUMNS}
+                ${PORTAL_INVOICE_RECORD_COLUMNS},
+                ${INVOICE_PDF_FILE_ID("i")} AS "pdfFileId"
            FROM invoices i
            LEFT JOIN clients cl ON cl.id = i.client_id
            LEFT JOIN finance_ar_invoices ar ON ar.id = i.ar_invoice_id
@@ -334,7 +340,8 @@ export class PortalCommerceController {
                 -- does not exist, and a portal that showed a live contract as expired (or the reverse)
                 -- because a cron missed a night would be worse than computing it on read.
                 (k.ends_on IS NOT NULL AND k.ends_on < current_date) AS "termEnded",
-                ${AMENDMENT_COLUMNS}
+                ${AMENDMENT_COLUMNS},
+                ${CONTRACT_SIGNED_COPY_FILE_ID("k")} AS "signedCopyFileId"
            FROM contracts k LEFT JOIN projects p ON p.id = k.project_id
            ${amendmentJoins({ clients: 1, projects: 2 })}
           WHERE ${contractInPortalScope("k", { clients: 1, projects: 2 })}
@@ -542,8 +549,8 @@ export class PortalCommerceController {
     await authorize(req.principal, { kind: "portal", tenantId }, "read");
     const file = await withTenants([tenantId], async (c) => {
       const scope = await resolvePortalScope(c, req.principal);
-      const r = await c.query<{ storage_key: string | null; content_type: string; filename: string; target_entity_type: string; target_entity_id: string }>(
-        `SELECT storage_key, content_type, filename, target_entity_type, target_entity_id
+      const r = await c.query<{ storage_key: string | null; content_type: string; filename: string; target_entity_type: string; target_entity_id: string; role: string | null }>(
+        `SELECT storage_key, content_type, filename, target_entity_type, target_entity_id, role
            FROM files WHERE id = $1 AND deleted_at IS NULL`,
         [fileId],
       );
@@ -551,6 +558,8 @@ export class PortalCommerceController {
       if (!f) throw new NotFoundException("file not found");
       const kind = DOWNLOADABLE[f.target_entity_type];
       if (!kind) throw new NotFoundException("file not found");
+      // PV5-07: under an invoice, only the invoice of record's PDF is a client document.
+      if (kind === "invoice" && f.role !== "invoice_pdf") throw new NotFoundException("file not found");
       if (!(await this.ownsEntity(c, scope, kind, f.target_entity_id))) {
         // 404, not 403: distinguishing them turns this route into an existence oracle for other
         // clients' file ids.
@@ -584,7 +593,8 @@ export class PortalCommerceController {
               to_char(i.period_end, 'YYYY-MM-DD') AS "periodEnd",
               COALESCE(i.issued_at, i.created_at) AS "issuedAt", cl.name AS "clientName",
               i.ar_invoice_id AS "arInvoiceId",
-              ${PORTAL_INVOICE_RECORD_COLUMNS}
+              ${PORTAL_INVOICE_RECORD_COLUMNS},
+              ${INVOICE_PDF_FILE_ID("i")} AS "pdfFileId"
          FROM invoices i LEFT JOIN clients cl ON cl.id = i.client_id
          LEFT JOIN finance_ar_invoices ar ON ar.id = i.ar_invoice_id
         WHERE i.id = $1 AND ${invoiceInPortalScope("i", { clients: 2 })}`,
@@ -607,7 +617,8 @@ export class PortalCommerceController {
               k.sent_at AS "sentAt", k.signed_at AS "signedAt", k.decline_reason AS "declineReason",
               k.project_id AS "projectId",
               (k.ends_on IS NOT NULL AND k.ends_on < current_date) AS "termEnded",
-              ${AMENDMENT_COLUMNS}
+              ${AMENDMENT_COLUMNS},
+              ${CONTRACT_SIGNED_COPY_FILE_ID("k")} AS "signedCopyFileId"
          FROM contracts k
          ${amendmentJoins({ clients: 2, projects: 3 })}
         WHERE k.id = $1 AND ${contractInPortalScope("k", { clients: 2, projects: 3 })}`,
@@ -646,11 +657,15 @@ export class PortalCommerceController {
       conversation: `SELECT 1 FROM conversation_messages m JOIN conversation_threads t ON t.id = m.thread_id
                       WHERE m.id = $1 AND ${conversationAttachmentClientVisible("m")}
                         AND ${conversationThreadInPortalScope("t", { clients: 2, projects: 3 })}`,
+      // PV5-07: only an ISSUED invoice (the invoice of record) has a downloadable document, and only in scope.
+      invoice: `SELECT 1 FROM invoices i WHERE i.id = $1 AND i.issued_at IS NOT NULL
+                  AND ${invoiceInPortalScope("i", { clients: 2 })}`,
     }[kind];
     // A receipt has no project reach, so its query binds only $1/$2. Passing an unreferenced $3 makes
     // Postgres refuse the statement ("could not determine data type of parameter $3"), which 500s the
     // download for EVERY caller: no test had exercised the receipt route before PV3-02c.
-    const r = await c.query(q, kind === "invoice_payment" ? [id, scope.clientIds] : [id, scope.clientIds, scope.projectIds]);
+    const clientOnly = kind === "invoice_payment" || kind === "invoice";
+    const r = await c.query(q, clientOnly ? [id, scope.clientIds] : [id, scope.clientIds, scope.projectIds]);
     return r.rows.length > 0;
   }
 

@@ -150,7 +150,8 @@ not necessarily take it) · **IRREDUCIBLE** (§4).
 | Component | Seat? | Verdict |
 |---|---|---|
 | Google Workspace / Drive (an `integration_connections` provider) | **YES** | **Amber** — a real per-seat bill, outside the system. Drive is used as a deliverable store; the exit is the estate's own MinIO |
-| Semrush · Canva · Figma · Sentry · Zapier connectors | **YES** | **Not adopted — keep it that way.** Benchmark §6 already ruled SEO *data* NOT A CONTEST, so Semrush may be a deliberate buy; the others are not needed |
+| Semrush · Canva · Sentry · Zapier connectors | **YES** | **Not adopted — keep it that way.** Benchmark §6 already ruled SEO *data* NOT A CONTEST, so Semrush may be a deliberate buy; the others are not needed |
+| Figma | **YES** | **Adopted as an edge tool. Owner ruling DW-Q6 (2026-10-13) amends this row.** It is connected read-only: frames, comments and exports appear on tasks and requests. The exit is that every delivered design is exported into the Asset Library, so nothing depends on Figma staying |
 | SMTP delivery provider | No — per volume | **BUY, and now chosen — §4.1.** Never self-host the MTA |
 | Linear | **YES** | ✅ **Already retired.** The estate has done this before |
 | web3forms | No | ✅ Being killed at M0 |

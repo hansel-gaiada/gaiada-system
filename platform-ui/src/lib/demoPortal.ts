@@ -188,6 +188,8 @@ interface DemoContract {
   signatures: Array<{ party: "provider" | "client"; signerName: string | null; signerTitle: string | null; signedAt: string }>;
   // PV5-06/PV5-07: the SHA-256 fixed at send, the tier, and the sealed signed copy (null until rendered).
   contentSha256: string; signatureTier: "attested" | "certified"; signedCopyFileId: string | null;
+  /** PV4-04: an amendment names the contract it amends and (optionally) the change request it came from. */
+  kind?: "agreement" | "amendment"; amendsId?: string | null; amendsReference?: string | null; changeRequestId?: string | null;
 }
 
 const CONTRACTS: DemoContract[] = [
@@ -228,6 +230,23 @@ const CONTRACTS: DemoContract[] = [
     signatures: [{ party: "provider", signerName: "D. Syrowatka", signerTitle: "Director", signedAt: stamp(-2) }],
     contentSha256: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0", signatureTier: "attested",
     signedCopyFileId: null,
+  },
+  {
+    // PV4-08: an amendment that is already signed, so the "needs you" list and the unsigned-contract counts the
+    // other fixtures and specs rely on do not move. It shows the banner: "Amendment to GDA-2026-004" and
+    // "From your request" (the seeded change request wcr-seed-1).
+    id: "ctr-amd-msa-1", title: "Amendment 1 — Master Services Agreement", reference: "GDA-2026-004-A1", version: 1,
+    status: "signed", value: 12_000_000, currency: "IDR", startsOn: day(-20), endsOn: day(275),
+    sentAt: stamp(-22), signedAt: stamp(-20), projectId: null, projectName: null,
+    bodyMd: "## Change\n\nAdds a live chat widget to the homepage scope, as requested.",
+    fileId: null,
+    signatures: [
+      { party: "provider", signerName: "D. Syrowatka", signerTitle: "Director", signedAt: stamp(-21) },
+      { party: "client", signerName: "Dana Whitfield", signerTitle: "Marketing Lead", signedAt: stamp(-20) },
+    ],
+    kind: "amendment", amendsId: "ctr-msa-2026", amendsReference: "GDA-2026-004", changeRequestId: "wcr-seed-1",
+    // Signed, and its sealed copy is not rendered yet: the page says "being prepared".
+    contentSha256: "5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d", signatureTier: "attested", signedCopyFileId: null,
   },
   {
     id: "ctr-sow-brand", title: "Statement of Work — Brand refresh", reference: "GDA-2026-019", version: 1,
@@ -331,6 +350,80 @@ const WEBDEV_CRS: DemoChangeRequest[] = ((globalThis as Record<symbol, unknown>)
   },
 ]) as DemoChangeRequest[];
 
+// ── PV4-08: conversation + shared meeting notes (BFF contract §29a, §29c) ──────────────────────────
+//
+// Same globalThis pinning as the change-request store above (the server-action graph and the page graph are bundled
+// separately). The demo client identities are client-wide, so `canUseGeneral` is true. The 15-minute edit window
+// is computed from `createdAt` as the BFF does (`editableUntil` only for the caller's OWN live message).
+// Nothing here reproduces the staff side: a staff reply is not drivable in demo mode (the stub BFF's spec injects one).
+interface DemoMessage {
+  id: string; threadId: string; authorId: string; authorName: string; authorSide: "client" | "staff";
+  body: string | null; retracted: boolean; edited: boolean; editedAt: string | null; createdAt: string;
+  attachments: Array<{ id: string; filename: string; contentType: string; byteSize: number }>;
+}
+interface DemoThread {
+  id: string; projectId: string | null; subject: string | null; status: "open" | "closed";
+  createdSide: "client" | "staff"; createdAt: string; unread: number;
+}
+interface DemoMinutes {
+  id: string; projectId: string | null; title: string; meetingDate: string; sharedAt: string; sharedBy: string; bodyMd: string;
+}
+const CONV_STORE_KEY = Symbol.for("gaiada.demoPortal.conversation");
+const CONV = ((globalThis as Record<symbol, unknown>)[CONV_STORE_KEY] ??= {
+  threads: [
+    { id: "th-general", projectId: null, subject: null, status: "open", createdSide: "staff", createdAt: stamp(-12), unread: 0 },
+    { id: "th-site", projectId: "proj-nw-site", subject: "Homepage copy", status: "open", createdSide: "client", createdAt: stamp(-5), unread: 1 },
+    { id: "th-brand", projectId: "proj-nw-brand", subject: "Logo options", status: "closed", createdSide: "staff", createdAt: stamp(-9), unread: 0 },
+  ] as DemoThread[],
+  messages: [
+    { id: "msg-g1", threadId: "th-general", authorId: "demo-staff-made", authorName: "Made Prabowo", authorSide: "staff", body: "Welcome to your portal. Ask us anything here; we reply within a working day.", retracted: false, edited: false, editedAt: null, createdAt: stamp(-12), attachments: [] },
+    { id: "msg-g2", threadId: "th-general", authorId: "demo-client", authorName: "Dana Whitfield", authorSide: "client", body: "Thanks Made. Where do I find the invoices? See https://example.com/help.", retracted: false, edited: true, editedAt: stamp(-11), createdAt: stamp(-11.5), attachments: [] },
+    { id: "msg-s1", threadId: "th-site", authorId: "demo-client", authorName: "Dana Whitfield", authorSide: "client", body: "Can we change the homepage headline before Friday?", retracted: false, edited: false, editedAt: null, createdAt: stamp(-5), attachments: [{ id: "file-msg-s1", filename: "headline-options.pdf", contentType: "application/pdf", byteSize: 48_213 }] },
+    { id: "msg-s2", threadId: "th-site", authorId: "demo-staff-made", authorName: "Made Prabowo", authorSide: "staff", body: "Yes. Send us the wording and we will have it live by Thursday.", retracted: false, edited: false, editedAt: null, createdAt: stamp(-4), attachments: [] },
+    { id: "msg-b1", threadId: "th-brand", authorId: "demo-staff-made", authorName: "Made Prabowo", authorSide: "staff", body: "Three logo directions attached for review.", retracted: false, edited: false, editedAt: null, createdAt: stamp(-9), attachments: [] },
+    { id: "msg-b2", threadId: "th-brand", authorId: "demo-client", authorName: "Dana Whitfield", authorSide: "client", body: null, retracted: true, edited: false, editedAt: null, createdAt: stamp(-8), attachments: [] },
+  ] as DemoMessage[],
+  minutes: [
+    { id: "min-kickoff", projectId: "proj-nw-site", title: "Website relaunch kickoff", meetingDate: stamp(-30), sharedAt: stamp(-29), sharedBy: "Made Prabowo",
+      bodyMd: "## Decisions\n\n- Launch target is the end of next quarter\n- Two rounds of revisions per template\n\n## Actions\n\n- Northwind sends brand assets\n- We share the sitemap draft" },
+    { id: "min-design", projectId: "proj-nw-site", title: "Design review", meetingDate: stamp(-10), sharedAt: stamp(-9), sharedBy: "Made Prabowo",
+      bodyMd: "The homepage direction was **approved**. The product page needs a second pass." },
+  ] as DemoMinutes[],
+}) as { threads: DemoThread[]; messages: DemoMessage[]; minutes: DemoMinutes[] };
+
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
+function convMessageView(m: DemoMessage, userId: string) {
+  const mine = m.authorId === userId && m.authorSide === "client";
+  const until = new Date(m.createdAt).getTime() + EDIT_WINDOW_MS;
+  return {
+    id: m.id, threadId: m.threadId, authorId: m.authorId, authorName: m.authorName, authorSide: m.authorSide,
+    body: m.retracted ? null : m.body, retracted: m.retracted, edited: m.edited, editedAt: m.editedAt, createdAt: m.createdAt,
+    editableUntil: mine && !m.retracted && until > Date.now() ? new Date(until).toISOString() : null,
+    mine, attachments: m.retracted ? [] : m.attachments,
+  };
+}
+function convThreadView(t: DemoThread, withUnread: boolean) {
+  const last = CONV.messages.filter((m) => m.threadId === t.id).map((m) => m.createdAt).sort().at(-1) ?? t.createdAt;
+  const proj = t.projectId ? PROJECTS.find((x) => x.id === t.projectId) : null;
+  return {
+    id: t.id, clientId: CLIENT_ID, clientName: "Northwind Traders", projectId: t.projectId, projectName: proj?.name ?? null,
+    general: t.projectId === null, subject: t.subject, status: t.status, createdSide: t.createdSide,
+    lastMessageAt: last, createdAt: t.createdAt, ...(withUnread ? { unreadCount: t.unread } : {}),
+  };
+}
+const MB10 = 10 * 1024 * 1024;
+/** The BFF's own write checks for a new message (§29): body 1..10,000, at most 5 files and 10 MB in total. */
+function convCheckNew(parsed: Record<string, unknown>): { error: string; field: string } | { body: string; files: DemoMessage["attachments"] } {
+  const body = typeof parsed.body === "string" ? parsed.body.trim() : "";
+  if (!body) return { error: "body is required", field: "body" };
+  if (body.length > 10_000) return { error: "body too long (max 10,000 characters)", field: "body" };
+  const atts = Array.isArray(parsed.attachments) ? (parsed.attachments as Array<{ filename?: string; contentType?: string; content?: string }>) : [];
+  if (atts.length > 5) return { error: "too many attachments (max 5)", field: "attachments" };
+  const sizes = atts.map((a) => Math.floor(String(a.content ?? "").length * 3 / 4));
+  if (sizes.reduce((n, x) => n + x, 0) > MB10) return { error: "attachments too large (max 10 MB per message in total)", field: "attachments" };
+  return { body, files: atts.map((a, i) => ({ id: nextId("file"), filename: String(a.filename ?? "file"), contentType: String(a.contentType ?? "application/octet-stream"), byteSize: sizes[i] })) };
+}
+
 // ── Derivations ───────────────────────────────────────────────────────────────────────────────────
 
 function paymentsOf(invoiceId: string): DemoPayment[] {
@@ -376,6 +469,8 @@ function contractSummary(k: DemoContract) {
     providerSigned: k.signatures.some((s) => s.party === "provider"),
     termEnded: k.endsOn < day(0),
     signedCopyFileId: k.signedCopyFileId,
+    kind: k.kind ?? "agreement", amendsId: k.amendsId ?? null, amendsReference: k.amendsReference ?? null,
+    changeRequestId: k.changeRequestId ?? null,
   };
 }
 
@@ -467,7 +562,7 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
   // Route table FIRST, identity check second — but only for routes this module owns, so unmatched
   // portal routes still fall through to `portalDemo` (runs/gates) rather than being 403'd here.
   const seg = p.replace(/^\/api\/[^/]+\/portal\//, "");
-  const OWNED = /^(overview|projects|milestones|timeline|deliverables|invoices|contracts|profile|stream|files|change-requests)(\/|$)/;
+  const OWNED = /^(overview|projects|milestones|timeline|deliverables|invoices|contracts|profile|stream|files|change-requests|conversation|meetings)(\/|\?|$)/;
   if (!OWNED.test(seg)) return null;
   if (!isDemoPortalClient(userId)) return { status: 403, json: { error: "not a portal client" } };
 
@@ -500,6 +595,7 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
       })(),
       needsYou: needsYou(),
       finance: financeTotals(),
+      conversationUnread: CONV.threads.filter((t) => t.unread > 0).length,
     });
   }
 
@@ -592,6 +688,7 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
       value: k.value, currency: k.currency, startsOn: k.startsOn, endsOn: k.endsOn,
       sentAt: k.sentAt, signedAt: k.signedAt, projectId: k.projectId,
       bodyMd: k.bodyMd, declineReason: null, termEnded: s.termEnded,
+      kind: s.kind, amendsId: s.amendsId, amendsReference: s.amendsReference, changeRequestId: s.changeRequestId,
       canSign: k.status === "sent" && !s.clientSigned && !s.termEnded,
       viewOnly: false,
       signatures: k.signatures,
@@ -726,6 +823,83 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
     };
     WEBDEV_CRS.push(row);
     return created({ id, status: "new" });
+  }
+
+  // ── conversation (PV4-03 / PV4-08, §29a) ──
+  if (seg.startsWith("conversation?") || seg === "conversation") {
+    if (m === "GET") {
+      const pid = new URL(p, "http://demo").searchParams.get("projectId");
+      const rows = CONV.threads.filter((t) => (pid ? t.projectId === pid : true))
+        .map((t) => convThreadView(t, true))
+        .sort((a, b) => String(b.lastMessageAt).localeCompare(String(a.lastMessageAt)));
+      return ok({ threads: rows, canUseGeneral: true });
+    }
+    if (m === "POST") {
+      const checked = convCheckNew(parsed);
+      if ("error" in checked) return bad(checked.error, checked.field);
+      const projectId = typeof parsed.projectId === "string" && parsed.projectId ? parsed.projectId : null;
+      if (projectId && !PROJECTS.some((x) => x.id === projectId)) return notFound("project not found");
+      let thread = projectId ? undefined : CONV.threads.find((t) => t.projectId === null);
+      const createdNew = !thread;
+      if (!thread) {
+        thread = { id: nextId("th"), projectId, subject: parsed.subject ? String(parsed.subject).trim() || null : null, status: "open", createdSide: "client", createdAt: new Date().toISOString(), unread: 0 };
+        CONV.threads.push(thread);
+      }
+      if (thread.status === "closed") return { status: 409, json: { error: "thread is closed" } };
+      const id = nextId("msg");
+      CONV.messages.push({ id, threadId: thread.id, authorId: userId, authorName: profileName, authorSide: "client", body: checked.body, retracted: false, edited: false, editedAt: null, createdAt: new Date().toISOString(), attachments: checked.files });
+      return created({ threadId: thread.id, messageId: id, created: createdNew, attachmentIds: checked.files.map((f) => f.id) });
+    }
+  }
+  const msgM = seg.match(/^conversation\/messages\/([^/]+)$/);
+  if (msgM && (m === "PATCH" || m === "DELETE")) {
+    const msg = CONV.messages.find((x) => x.id === msgM[1]);
+    // Someone else's message, or one that is not a client message: 404 on the portal, never 403.
+    if (!msg || msg.authorSide !== "client" || msg.authorId !== userId) return notFound("message not found");
+    if (msg.retracted || new Date(msg.createdAt).getTime() + EDIT_WINDOW_MS <= Date.now()) {
+      return { status: 409, json: { error: "this message can no longer be changed (15 minutes)" } };
+    }
+    if (m === "DELETE") {
+      msg.retracted = true; msg.body = null; msg.attachments = [];
+      return ok({ id: msg.id, retracted: true, retractedAt: new Date().toISOString() });
+    }
+    const body = typeof parsed.body === "string" ? parsed.body.trim() : "";
+    if (!body || body.length > 10_000) return bad("body must be 1 to 10,000 characters", "body");
+    msg.body = body; msg.edited = true; msg.editedAt = new Date().toISOString();
+    return ok({ id: msg.id, edited: true, editedAt: msg.editedAt });
+  }
+  const thrM = seg.match(/^conversation\/([^/?]+)(\/messages)?$/);
+  if (thrM) {
+    const thread = CONV.threads.find((t) => t.id === thrM[1]);
+    if (!thread) return notFound("conversation not found");
+    if (!thrM[2] && m === "GET") {
+      thread.unread = 0; // opening a thread marks it read
+      return ok({
+        thread: convThreadView(thread, false),
+        messages: CONV.messages.filter((x) => x.threadId === thread.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((x) => convMessageView(x, userId)),
+      });
+    }
+    if (thrM[2] && m === "POST") {
+      if (thread.status === "closed") return { status: 409, json: { error: "thread is closed" } };
+      const checked = convCheckNew(parsed);
+      if ("error" in checked) return bad(checked.error, checked.field);
+      const id = nextId("msg");
+      const at = new Date().toISOString();
+      CONV.messages.push({ id, threadId: thread.id, authorId: userId, authorName: profileName, authorSide: "client", body: checked.body, retracted: false, edited: false, editedAt: null, createdAt: at, attachments: checked.files });
+      return created({ id, threadId: thread.id, createdAt: at, attachmentIds: checked.files.map((f) => f.id) });
+    }
+  }
+
+  // ── shared meeting notes (PV4-05 / PV4-08, §29c) ──
+  if (seg.startsWith("meetings") && m === "GET") {
+    const strip = ({ projectId: _p, ...rest }: DemoMinutes) => rest;
+    if (seg === "meetings" || seg.startsWith("meetings?")) {
+      const pid = new URL(p, "http://demo").searchParams.get("projectId");
+      return ok(CONV.minutes.filter((x) => (pid ? x.projectId === pid : true)).sort((a, b) => b.sharedAt.localeCompare(a.sharedAt)).map(strip));
+    }
+    const minM = seg.match(/^meetings\/([^/?]+)$/);
+    const row = minM ? CONV.minutes.find((x) => x.id === minM[1]) : undefined;
+    return row ? ok(strip(row)) : notFound("meeting minutes not found");
   }
 
   // ── files ──

@@ -18,7 +18,9 @@ import { platformFetch, PlatformError } from "./platform";
 
 /** One outstanding item, on either side of the relationship. */
 export interface ClientBallItem {
-  kind: "payment" | "review" | "request" | "contract" | "gate";
+  /** PV4-09: `conversation` = a thread whose last client message is waiting for our reply (BFF §29d); its `href`
+   *  is the thread page and `id` the thread id. */
+  kind: "payment" | "review" | "request" | "contract" | "gate" | "conversation";
   id: string;
   label: string;
   context: string;
@@ -55,6 +57,9 @@ export interface ClientOverview {
   needsUs: ClientBallItem[];
   /** Outstanding items only the CLIENT can clear — the staff view of what the portal is asking them. */
   needsClient: ClientBallItem[];
+  /** PV4-09 (BFF §29d): open threads whose last non-retracted message is the client's. Optional: an older server
+   *  omits it, and then the tile is not shown (a missing count is not a zero). */
+  conversationsAwaitingReply?: number;
 }
 
 export async function getClientOverview(

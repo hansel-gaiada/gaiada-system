@@ -1,5 +1,9 @@
 # Department Console Design — Command Center + Persistent Rail
 
+> **Superseded in part (2026-10-13):** the persistent My-work rail (decision #10) is retired by **DW-D4**. "Needs you" moves to
+> the department **Overview** (the new name for Home), and tool pages get the full width. See the
+> [Department workspaces plan](../../plans/2026-10-13-department-workspaces.md) §2.4 and §3. The one-queue rule (R-1) stands.
+
 **Status:** DESIGN COMPLETE (P1-02) · **Date:** 2026-07-22 · **Owner:** senior-uiux
 **Ticket:** P1-02 in `docs/superpowers/plans/web-dev-phase1-tickets.md` — blocks P1-06/07/09/10.
 **Extends:** `platform-ui/src/components/ui.css` (luxury primitives) +

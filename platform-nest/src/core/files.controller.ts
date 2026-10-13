@@ -1,7 +1,7 @@
 // Files / attachments (Nest port of core/files.ts). base64 upload, day-one scrub on text,
 // target-entity IDOR guard, attachment-only download with nosniff (stored-XSS guard),
 // RFC 5987 filename (header-injection guard).
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
@@ -145,14 +145,17 @@ export class FilesController {
   async remove(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("fileId") fileId: string) {
     await authorize(req.principal, { kind: "file", id: fileId, tenantId }, "delete");
     const found = await withTenants([tenantId], (c) =>
-      c.query<{ storage_key: string; target_entity_type: string; target_entity_id: string }>(
-        `SELECT storage_key, target_entity_type, target_entity_id FROM files WHERE id = $1 AND deleted_at IS NULL`,
+      c.query<{ storage_key: string; target_entity_type: string; target_entity_id: string; role: string | null }>(
+        `SELECT storage_key, target_entity_type, target_entity_id, role FROM files WHERE id = $1 AND deleted_at IS NULL`,
         [fileId],
       ),
     );
     const f = found.rows[0];
     if (!f) throw new NotFoundException("file not found");
     await authorize(req.principal, { kind: f.target_entity_type, id: f.target_entity_id, tenantId }, "read");
+    // PV5-07: an issued invoice's PDF and a contract's sealed copy are records, not attachments. The database refuses
+    // the soft delete too (trg_files_guard_role_file); saying so here turns its error into a plain 409.
+    if (f.role) throw new ConflictException("this file is an issued document (an invoice PDF or a sealed contract copy) and cannot be deleted");
     await withTenants([tenantId], (c) => c.query(`UPDATE files SET deleted_at = now(), updated_at = now() WHERE id = $1`, [fileId]));
     if (f.storage_key) await storage().del(f.storage_key);
     await writeActivity(tenantId, req.principal.userId, "deleted", "file", fileId);

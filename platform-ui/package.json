@@ -25,6 +25,7 @@
     "next": "^16.3.8",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "rrweb-player": "2.1.6",
     "server-only": "^0.0.1"
   },
   "devDependencies": {
@@ -39,5 +40,14 @@
     "jsdom": "^25.0.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
+  },
+  "overrides": {
+    "@rrweb/packer": "2.1.6",
+    "@rrweb/replay": "2.1.6",
+    "@rrweb/types": "2.1.6",
+    "@rrweb/utils": "2.1.6",
+    "rrdom": "2.1.6",
+    "rrweb": "2.1.6",
+    "rrweb-snapshot": "2.1.6"
   }
 }

@@ -51,6 +51,12 @@ import {
   ballFacetOptions, responsibleFacetOptions, type BoardSwimlane,
 } from "@/lib/departments";
 import { PM_TERMS } from "@/lib/pmVocabulary";
+import { listThreads } from "@/lib/conversation-data";
+import { readResult } from "@/lib/readResult";
+import { startConversationAction } from "@/lib/conversationActions";
+import { ThreadList } from "@/components/clients/conversation/ThreadList";
+import { StartConversation } from "@/components/clients/conversation/StartConversation";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { FacetFilters } from "@/components/pm/FacetFilters";
 import { TAG_COLOR_HEX } from "@/lib/tagColors";
 import { BALL_GATE_CAPABILITY, leadWithUnassigned } from "@/app/(app)/pm/page-helpers";
@@ -84,7 +90,7 @@ export type ProjectWorkspaceSearch = {
 // console's: "Ball gets its own tab in EVERY project-management surface — not just /pm — and
 // stops polluting the board"). It used to be a "Group by" axis on the Board tab below; see
 // `ProjectSwimlane`'s doc comment just below for what replaced it.
-const VIEWS = ["board", "ball", "list", "timeline", "charts", "milestones", "docs", "files", "discussion", "meetings"] as const;
+const VIEWS = ["board", "ball", "list", "timeline", "charts", "milestones", "docs", "files", "discussion", "meetings", "conversation"] as const;
 // The tag/ball/responsible filter panel applies to the task-list views only — not Milestones, Docs,
 // Files, Discussion or Meetings, where it rendered as an empty "Filters" box.
 const TASK_VIEWS = new Set<string>(["board", "ball", "list", "timeline"]);
@@ -172,6 +178,12 @@ export async function ProjectWorkspaceView({
     const runsRes = await listPipelineRunsWithGates(userId, tenant, { projectId });
     projectRuns = runsRes.kind === "ok" ? runsRes.data.map(({ gates, ...run }) => ({ run, gates })) : [];
   }
+  // PV4-09: the Conversation tab exists only for a project that HAS a client (a conversation is with a client's
+  // contacts). Read lazily, like the Meetings tab, and refused in words rather than shown as "none".
+  const projectClientId = base?.client_id ?? null;
+  const threadsRes = view === "conversation" && projectClientId
+    ? await readResult(listThreads(userId, tenant, { clientId: projectClientId, projectId }))
+    : null;
   const deptMatch = backHref.match(/^\/departments\/([^/]+)/);
   const prdHref = deptMatch ? `/departments/${deptMatch[1]}/prd` : "/pipeline";
   const workspacePath = `${backHref.replace(/\/$/, "")}/${projectId}?view=meetings`;
@@ -333,6 +345,7 @@ export async function ProjectWorkspaceView({
           {tab("files", files.length ? `Files (${files.length})` : "Files")}
           {tab("discussion", comments.length ? `Discussion (${comments.length})` : "Discussion")}
           {tab("meetings", meetings.length ? `Meetings (${meetings.length})` : "Meetings")}
+          {projectClientId && tab("conversation", "Conversation")}
         </div>
         <NewTaskForm assignable={assignable} milestones={milestones} customFieldDefs={taskCustomFieldDefs} create={createPmTask.bind(null, projectId)} />
       </div>
@@ -562,6 +575,27 @@ export async function ProjectWorkspaceView({
 
       {view === "discussion" && (
         <CommentThread comments={comments} post={postEntityComment.bind(null, "project", projectId)} />
+      )}
+
+      {/* PV4-09 — this project's conversation threads with its client, and "Start a conversation" on this project.
+          Hidden entirely for a project with no client (the tab is not rendered and a hand-typed ?view= shows nothing). */}
+      {view === "conversation" && projectClientId && threadsRes && (
+        threadsRes.kind !== "ok" ? (
+          <ReadRefusal subject="this project's conversations" kind={threadsRes.kind} reason={threadsRes.kind === "unavailable" ? threadsRes.reason : undefined} />
+        ) : (
+          <Card title={`Conversation with ${base?.client_name ?? "the client"}${threadsRes.data.length ? ` · ${threadsRes.data.length}` : ""}`} hint="Messages about this project. The client reads and answers them in their portal.">
+            <ThreadList threads={threadsRes.data} clientId={projectClientId} />
+            {can(me, "client.write", tenant) && (
+              <StartConversation
+                clientId={projectClientId}
+                clientName={base?.client_name ?? "the client"}
+                projects={[]}
+                fixedProjectId={projectId}
+                start={startConversationAction}
+              />
+            )}
+          </Card>
+        )
       )}
 
       {/* WD-07 (Web Dev Phase 1 §12) — capture a briefing straight from this project so it lands

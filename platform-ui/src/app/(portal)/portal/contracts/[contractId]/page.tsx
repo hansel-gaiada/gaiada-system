@@ -9,6 +9,7 @@ import { Card, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ArtifactMarkdown } from "@/components/pipeline/ArtifactMarkdown";
 import { PortalLive } from "@/components/portal/PortalLive";
+import { PortalAmendmentBanner } from "@/components/portal/PortalAmendmentBanner";
 import { PortalSignForm } from "@/components/portal/PortalSignForm";
 import { PortalSignedNote } from "@/components/portal/PortalSignedNote";
 import { PortalFacts, PortalLink, PortalPageHead, PortalStatus } from "@/components/portal/PortalBits";
@@ -62,6 +63,8 @@ export default async function PortalContractPage({ params }: { params: Promise<{
       />
 
       <div className="cp-stack">
+        {/* PV4-08: an amendment says which agreement it amends and the request it came from (renders nothing otherwise). */}
+        <PortalAmendmentBanner contract={k} />
         <Card title="Terms at a glance" headerRight={<PortalStatus status={k.termEnded && k.status === "signed" ? "expired" : k.status} />}>
           <PortalFacts
             rows={[

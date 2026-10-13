@@ -21,7 +21,7 @@ import { build } from "esbuild";
 import { addAsset, COMPANY, concurrentSave, decideApproval, handleKeyRequest, handlePublicMedia, handleWebdesk, listApprovals, mediaState, seed, setBuild } from "./wd.mjs";
 import { reviewSnapshot } from "./editorial.mjs";
 import { assistSnapshot, resetAssist } from "./assist.mjs";
-import { handlePortalWebsite, isPortalWebsitePath, PORTAL_USERS, portalMe, portalOverview, portalUserIdFor, seedPortal } from "./portal.mjs";
+import { conversationSnapshot, handlePortalConversation, handlePortalWebsite, isPortalConversationPath, isPortalWebsitePath, PORTAL_USERS, portalMe, portalOverview, portalUserIdFor, seedPortal, staffReply } from "./portal.mjs";
 
 let heldGate = null;
 let heldOpen = null;
@@ -103,6 +103,9 @@ const server = http.createServer(async (req, res) => {
           approvals: [...S.approvals.values()], build: S.build, stagingStale: S.stagingStale, review: reviewSnapshot(S), assist: assistSnapshot(S),
         });
       }
+      // PV4-08: a staff member answers in a client's conversation thread, and the spec reads back what the server holds.
+      if (cmd === "staff-reply") return send(res, 200, staffReply(S, body ?? {}));
+      if (cmd === "conversation-state") return send(res, 200, conversationSnapshot(S));
       if (cmd === "decide") { const r = decideApproval(S, body.id, body.outcome, body.by); return send(res, r.status, r.json); }
       if (cmd === "corrupt-args") { const a = S.approvals.get(body.id); if (a) a.toolArgs = { unexpected: true }; return send(res, 200, { ok: !!a }); }
       // File a key.mint request AS another user (so the logged-in user can approve it: maker != checker).
@@ -118,7 +121,13 @@ const server = http.createServer(async (req, res) => {
 
     // ── the client portal: who the viewer is, and the client website BFF (§16j) ─────────────────
     if (PORTAL_USERS[userId] && pathname === "/api/me") return send(res, 200, portalMe(userId));
-    if (PORTAL_USERS[userId] && /^\/api\/[^/]+\/portal\/overview$/.test(pathname)) return send(res, 200, portalOverview());
+    if (PORTAL_USERS[userId] && /^\/api\/[^/]+\/portal\/overview$/.test(pathname)) return send(res, 200, portalOverview(S));
+    // PV4-08: the client Conversation BFF (§29a).
+    if (isPortalConversationPath(pathname)) {
+      await slow(S);
+      const r = handlePortalConversation(S, { method, pathname, body, userId });
+      return send(res, r.status, r.json);
+    }
     if (isPortalWebsitePath(pathname)) {
       await slow(S);
       const pm = pathname.match(/^\/api\/([^/]+)\//);

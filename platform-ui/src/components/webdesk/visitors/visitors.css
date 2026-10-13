@@ -25,3 +25,7 @@
 .wv-rule .wv-rule__weight { width: 80px; }
 .wv-actions { display: flex; gap: var(--space-8); flex-wrap: wrap; align-items: center; }
 .wv-bots { font: 600 13px var(--font-body); color: var(--ink-strong); margin: 0 0 8px; }
+.wv-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.wv-player { display: flex; flex-direction: column; gap: var(--space-16); }
+.wv-player__stage { width: 100%; max-width: 100%; overflow: auto; }
+.wv-player__stage:not(:empty) { background: var(--surface-card-solid); border: 1px solid var(--line-soft); }

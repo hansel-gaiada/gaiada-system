@@ -16,6 +16,7 @@ import type { PoolClient } from "pg";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity } from "./http";
+import { REFUSALS, authorizeOrRefuseAgent } from "./agent-refusal";
 import { clientFilterSql, parseClientFilter } from "./client-filter";
 import { staffMeetingMinutesClientVisible, staffNeverClientVisible } from "./portal-visibility";
 import { resolveClientRecipients, notifyBestEffort } from "./client-notify";
@@ -748,6 +749,9 @@ export class MeetingRecordingsController {
       return this.minutesView(c, id);
     });
     if (!view) throw new NotFoundException("recording not found");
+    // PV4-07 (criterion 6): a save is attributed, so the actor (a bot when an agent drafted the minutes) is on record. Only
+    // ids, the size and who wrote it: never the text. Written after the commit, like `shared_minutes` below.
+    await writeActivity(tenantId, userId, "saved_minutes", "meeting_recording", id, { minutesId: view.minutes?.id ?? null, chars: text.length, byAgent: agent });
     return view;
   }
 
@@ -759,7 +763,8 @@ export class MeetingRecordingsController {
   @Post(":tenantId/meetings/:id/minutes/share")
   @HttpCode(200)
   async shareMinutes(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
-    await authorize(req.principal, { kind: "meeting_recording", id, tenantId }, "share_minutes");
+    // PV4-07: an agent's refusal is typed (`agents_draft_staff_send`, naming meetings.saveMinutes); a person is unaffected.
+    await authorizeOrRefuseAgent(req.principal, { kind: "meeting_recording", id, tenantId }, "share_minutes", REFUSALS.shareMinutes);
     if (!isUuid(id)) throw new NotFoundException("recording not found");
     const userId = req.principal.userId as string;
     const out = await withTenants([tenantId], async (c) => {

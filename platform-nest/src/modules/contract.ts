@@ -33,8 +33,12 @@ export interface McpToolDef {
    *  `DELETE` was added 2026-08-20 for `iam.revokeRoleGrant`, whose endpoint is a real DELETE. The hub
    *  needed no change — `module-tools.ts` reads `def.method` and passes it straight to `fetch`, so this
    *  union was the only thing narrower than the transport. Every param a DELETE needs is in its path,
-   *  so the body it sends is an empty object and the handler ignores it. */
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+   *  so the body it sends is an empty object and the handler ignores it.
+   *
+   *  `PUT` was added 2026-10-13 for `meetings.saveMinutes` (PV4-07), whose endpoint is a real PUT (replace the
+   *  draft). Same reasoning as DELETE: the hub passes `def.method` to `fetch` untouched, so only this union
+   *  (and the hub's mirror in module-tools.ts) was narrower than the transport. */
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   pathTemplate?: string;
   /** Mutating tool (drives the hub's D14 automation write gate). */
   write?: boolean;

@@ -19,6 +19,7 @@ import "server-only";
 // client concludes their project has no milestones, no invoices and no contract.
 import { platformFetch, PlatformError } from "./platform";
 import type {
+  PortalConversationDetail, PortalConversationList, PortalMeetingMinutes,
   PortalChangeRequest, PortalContract, PortalContractDetail, PortalDeliverable, PortalInvoice,
   PortalInvoiceDetail, PortalMilestone, PortalOverview, PortalProfile, PortalProject, PortalProjectDetail,
   PortalRun, PortalRunDetail, PortalSocialReview, PortalTimelineEvent,
@@ -100,6 +101,37 @@ export async function getPortalContract(userId: string, tenant: string, contract
 
 export async function getPortalProfile(userId: string, tenant: string): Promise<PortalProfile | null> {
   return safe(platformFetch<PortalProfile>(`/api/${tenant}/portal/profile`, userId), null);
+}
+
+// ── PV4-08: conversation and meeting notes (FRONTEND-BFF-CONTRACT §29a, §29c) ─────────────────────────
+
+/** The caller's threads (all projects, or one with `projectId`) and whether they may use the client-wide "General"
+ *  thread. An older server (404) or a non-contact (403) reads as "nothing yet". */
+export async function listPortalConversations(
+  userId: string,
+  tenant: string,
+  projectId?: string,
+): Promise<PortalConversationList> {
+  const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+  return safe(
+    platformFetch<PortalConversationList>(`/api/${tenant}/portal/conversation${qs}`, userId),
+    { threads: [], canUseGeneral: false },
+  );
+}
+
+/** One thread with its messages, oldest first. Opening it marks it read on the server. 404 = not yours or absent. */
+export async function getPortalConversation(userId: string, tenant: string, threadId: string): Promise<PortalConversationDetail | null> {
+  return safe(platformFetch<PortalConversationDetail>(`/api/${tenant}/portal/conversation/${encodeURIComponent(threadId)}`, userId), null);
+}
+
+/** The minutes staff SHARED with the client, newest first (a draft never appears). */
+export async function listPortalMeetings(userId: string, tenant: string, projectId?: string): Promise<PortalMeetingMinutes[]> {
+  const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+  return safe(platformFetch<PortalMeetingMinutes[]>(`/api/${tenant}/portal/meetings${qs}`, userId), []);
+}
+
+export async function getPortalMeeting(userId: string, tenant: string, minutesId: string): Promise<PortalMeetingMinutes | null> {
+  return safe(platformFetch<PortalMeetingMinutes>(`/api/${tenant}/portal/meetings/${encodeURIComponent(minutesId)}`, userId), null);
 }
 
 // ── Runs / approvals (WS11, kept unchanged in behaviour) ──────────────────────────────────────────
