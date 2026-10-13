@@ -11,6 +11,16 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.127.0` - DW-6m: the Project Management view is called "Board" again (DW-D21) (2026-10-13) - PROTOTYPED
+
+- **What.** `PM_TERMS.board` is "Board" again (owner ruling DW-D21, 2026-10-13). It reverses the 2026-08-10 Board→Overview rename. Every department workspace has its own "Overview" row, the dashboard (DW-D12), right above Project Management, so the PM tab was a second "Overview" beside it. "Overview" now means only the workspace dashboard. Every surface that reads the term changes with it: `/pm`, `/project-management`, the project page and each department's Project Management tabs.
+- **Unchanged.** URLs, the `board` tab key, `?view=board`, `Board.tsx` and the CSS classes, so no link or bookmark breaks. The `PM_RENAMES` "Board" entry is removed, because it would rename a term to itself, and a note records the reversal.
+- **Docs.** DW-D21 is in plan §11.4 and the decision log. BFF contract §34 (DW-6f: pull requests and CI status on tasks) is added as a contract only; nothing is built.
+- **Proof.**
+  - The vocabulary test pins `PM_TERMS.board === "Board"`, and `e2e/workspace-departments.spec.ts` and `e2e/pm-unified-interface.spec.ts` expect "Board".
+  - Branch gates on `77e4d834`: CI 38404981003 green (platform-ui 460 files, 8013 tests); sumopod `workspace-departments` 11/11 twice and `pm-unified` 10/10.
+  - The landing sha's own runs are on the board.
+
 ### platform-ui `0.126.0` - DW-3j: the Overview's My activity (2026-10-13) - PROTOTYPED
 
 - **What.** The You band's second block (plan §3.2, §14.5): the person's last 16 full weeks of PM activity as a heatmap, and "Today so far". One read of their own series, `getProductivity(userId, tenant, { userId: <self>, from: <window start - 7 days> })`, with no `to`, so the server decides what today is (the series ends on its own today, in its reports time zone). The window starts on the Monday 16 weeks before this week's and runs through today (16 full weeks plus the current week so far); the extra week in `from` only covers a clock a day off.
