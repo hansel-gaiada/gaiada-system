@@ -793,31 +793,3 @@ export function threadTitle(t: Pick<PortalThread, "subject" | "general" | "proje
   if (t.general) return multiClient && t.clientName ? `General: ${t.clientName}` : "General";
   return t.projectName ?? "Conversation";
 }
-
-export type TextPart = { kind: "text"; text: string } | { kind: "link"; text: string; href: string };
-
-/** Split plain text into text and http(s) links. Nothing here builds markup: a caller renders each part as a
- *  React text node or an `<a>`, so a body like `<img onerror=...>` stays literal text. Trailing punctuation
- *  stays outside the link. Only `http:` and `https:` become links (never `javascript:`). */
-export function linkifyText(text: string): TextPart[] {
-  const parts: TextPart[] = [];
-  const re = /https?:\/\/[^\s<>"']+/gi;
-  let last = 0;
-  for (const m of text.matchAll(re)) {
-    let url = m[0];
-    const trail = url.match(/[.,;:!?)\]]+$/)?.[0] ?? "";
-    if (trail) url = url.slice(0, url.length - trail.length);
-    const start = m.index ?? 0;
-    if (start > last) parts.push({ kind: "text", text: text.slice(last, start) });
-    try {
-      const u = new URL(url);
-      if (u.protocol === "http:" || u.protocol === "https:") parts.push({ kind: "link", text: url, href: u.href });
-      else parts.push({ kind: "text", text: url });
-    } catch {
-      parts.push({ kind: "text", text: url });
-    }
-    last = start + url.length;
-  }
-  if (last < text.length) parts.push({ kind: "text", text: text.slice(last) });
-  return parts;
-}
