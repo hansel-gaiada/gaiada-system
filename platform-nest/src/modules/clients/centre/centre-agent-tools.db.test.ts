@@ -24,9 +24,11 @@ function tool(name: string): McpToolDef {
 
 /** Fill a tool's pathTemplate with real ids, exactly as the hub would before calling the route. */
 function urlFor(t: McpToolDef, ids: Record<string, string>): string {
-  return t.pathTemplate.replace(/:(\w+)/g, (_, k: string) => {
+  const template = t.pathTemplate;
+  if (!template) throw new Error(`tool ${t.name} has no pathTemplate`);
+  return template.replace(/:(\w+)/g, (_, k: string) => {
     const v = ids[k];
-    if (!v) throw new Error(`no value for :${k} in ${t.pathTemplate}`);
+    if (!v) throw new Error(`no value for :${k} in ${template}`);
     return v;
   });
 }
