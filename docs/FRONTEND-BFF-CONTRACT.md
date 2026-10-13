@@ -1720,14 +1720,32 @@ each (client-wide `signer` on A, `viewer` limited to one project on B). `PortalS
   when the caller is client-wide on at least one client) and gains `generalClientIds` (additive): the
   clients whose General thread they may use. Posting to General (`POST /portal/conversation` with no
   `projectId`) needs that client in `generalClientIds`; naming one of their clients where they are only
-  project-scoped is 404. UI follow-up: the "General" entry and the change-request "client-wide" option
-  should be offered per client from these lists, not from the booleans.
+  project-scoped is 404. **UI BUILT (PV4-13, 2026-10-13):** the portal Conversation page offers the General
+  thread and "start in General" only for clients in `generalClientIds` (`groupThreads(threads, generalClientIds)`,
+  `generalClientChoices`; with several such clients a picker lists exactly those and sends `clientId`, with one
+  it sends that `clientId` without a choice). The portal requests form offers a client-wide ("whole account")
+  change request per client in `profile.access.wideClientIds` (`wideClientChoices`, option value
+  `client:<clientId>`, sent as `clientId` with no `projectId`; the route's rule: a client-wide request needs a
+  client the caller reaches client-wide, else 400 "select one of your projects"). `canUseGeneral` and
+  `access.wholeClient` stay summaries and gate nothing in the UI. Component tests: a contact client-wide on A and
+  project-scoped on B sees General for A only and the start form never offers B's General.
 - **Live stream.** `GET /portal/stream` subscribers stay keyed by `clientIds`; frames are content-free
   hints, so a project-scoped contact may receive a hint for a sibling project and refetch the same
   (scoped) data. Over-delivery only, never data.
 - **Shared test fixture.** `platform-nest/src/testing/portal-fixtures.ts` → `createMultiClientContact`
   builds exactly that contact (A client-wide signer; B viewer on B1, with B2 and a General thread). Drive
   any new portal read or signing route with it; `portal-scope-per-client.db.test.ts` is the reference.
+- **Contact rows name a project of their own client (PV4-13, migration `202610132210`).**
+  `client_contacts (project_id, client_id, tenant_id)` has a composite FK to `projects (id, client_id,
+  tenant_id)` (`fk_client_contacts_project_client_tenant`, the shape of PV4-01's thread FK). A contact
+  row naming another client's project is refused with `23503`; a NULL `project_id` (client-wide) skips it.
+  It is **NOT VALID**: enforced for new and updated rows only, so the deploy cannot fail on existing seed
+  data; the migration prints ONE `[PV4-13] ... N row(s)` NOTICE (the count of existing violating rows,
+  counted per company so RLS cannot hide them) and does **not** validate. `VALIDATE CONSTRAINT` is a later
+  step once live reads 0. The invite route (`POST /clients/:clientId/contacts`, `projectId`) now answers
+  **404** "project not found for this client" for a project that is not the client's (it used to accept any
+  project of the tenant); the other writers (`provision-client-portal-logins`, `client-logins` seed,
+  `portal-clients` seed, lead conversion) only write client-wide rows.
 
 `capability` (`signer` | `viewer` | `admin`) gates signing only, per client: a viewer may still give
 feedback, converse, request a change and record a payment. Not-yours and does-not-exist both answer
@@ -1766,7 +1784,7 @@ ids. The one 403 is the explicit view-only signing refusal, on a target the call
 
 | Status | Method | Path | Notes |
 |---|---|---|---|
-| ✅ | GET | `/api/:t/portal/profile` | `{me, clients[], contacts[], access{canSign,wholeClient,grants[]}}`. `contacts[]` = fellow contacts of THEIR clients only. **Additive (PV2-03):** `clients[].accountManager: {name,email} \| null` (`clients.owner_user_id` → active, non-deleted `users`; read only for clients in the caller's scope) and `contacts[].side: 'client' \| 'provider'` (`users.kind = 'client'` → `client`, anything else → `provider`; `side` labels, it never filters anyone out). |
+| ✅ | GET | `/api/:t/portal/profile` | `{me, clients[], contacts[], access{canSign,wholeClient,signerClientIds,wideClientIds,grants[]}}`. `contacts[]` = fellow contacts of THEIR clients only, and **only the people within the caller's shared reach (owner ruling PV-D36, BUILT PV4-13, 2026-10-13), PER CLIENT**: on a client the caller reaches client-wide (`wideClientIds`) every listed contact of it; on a client where they are limited to some projects, the client-wide contacts (`project_id IS NULL`) plus the contacts whose `project_id` is one of the caller's own (`projectIds`). A contact on a project outside their reach is NOT returned, so neither is that contact's `projectId`. Predicate: `clientContactInPortalScope("cc", scopeAt(1))` (`portal-visibility.ts`), fed `...scopeValues(scope)`; "listed" is unchanged (not soft-deleted, not `revoked`; an `invited` contact is listed). Tests: `portal-people-list.db.test.ts` (the shared multi-client contact sees all of A, B's client-wide and B1 contacts and never B2's; a client-wide contact of B sees B2's) and the static pin in `portal-visibility.test.ts`. **Additive (PV2-03):** `clients[].accountManager: {name,email} \| null` (`clients.owner_user_id` → active, non-deleted `users`; read only for clients in the caller's scope) and `contacts[].side: 'client' \| 'provider'` (`users.kind = 'client'` → `client`, anything else → `provider`; `side` labels, it never filters anyone out). |
 | ✅ | PATCH | `/api/:t/portal/profile` | `{name?, title?}` — the caller's own `users` row, two columns, nothing else. **Never `email`** (the IdP identity and the invite's bound address) or `status`. Action `update_profile`. |
 | ✅ | POST | `/api/:t/portal/profile/change-request` | `{message, clientId?}` → **202**. Records an activity + notifies the account owners. Mutates NOTHING: `clients.name`/`contact` appear on issued invoices and signed contracts, so a client editing them would change what frozen documents appear to say. |
 
@@ -6092,7 +6110,7 @@ Plan: `docs/plans/2026-10-12-pv4-conversation-tickets.md` (PV4-03). Rulings PV-D
 
 | Status | Method | Path | Cerbos | Payload / notes |
 |---|---|---|---|---|
-| PROTOTYPED | GET | `/api/:t/portal/conversation[?projectId]` | `portal` · `read` | `{threads: PortalThread[], canUseGeneral: boolean}`. `PortalThread` = `{id, clientId, clientName, projectId, projectName, general, subject, status:'open'\|'closed', createdSide, lastMessageAt, createdAt, unreadCount}`, newest activity first, max 200. `canUseGeneral` = the caller is a client-wide contact (may post to, and so lazily create, the general thread). |
+| PROTOTYPED | GET | `/api/:t/portal/conversation[?projectId]` | `portal` · `read` | `{threads: PortalThread[], canUseGeneral: boolean, generalClientIds: string[]}`. `PortalThread` = `{id, clientId, clientName, projectId, projectName, general, subject, status:'open'\|'closed', createdSide, lastMessageAt, createdAt, unreadCount}`, newest activity first, max 200. `canUseGeneral` = the caller is client-wide on at least one client (a summary); **`generalClientIds` = the clients whose general thread they may read, post to and lazily create (those they reach client-wide), and the UI offers General per client from it (PV4-13)**. |
 | PROTOTYPED | GET | `/api/:t/portal/conversation/:threadId` | `portal` · `read` | `{thread: PortalThread (no unreadCount), messages: Message[]}`, oldest first (newest 500). Marks the thread read. `Message` = `{id, threadId, authorId, authorName, authorSide:'client'\|'staff', body: string, createdAt, mine, attachments:[{id, filename, contentType, byteSize}]}` (PV-D34: no `retracted`, `edited`, `editedAt` or `editableUntil`). No `draftedBy` on the portal: the sender shown is the named person (design decision 4). |
 | PROTOTYPED | POST | `/api/:t/portal/conversation` | `portal` · `converse` | `{projectId?, clientId?, subject?, body, attachments?}` -> **201** `{threadId, messageId, created, attachmentIds}`. With `projectId` (one of the caller's projects; otherwise 404): a NEW thread on that project. Without: the client's ONE general thread, created on first post (race-safe: concurrent first posts land in one thread via the partial unique `ux_conv_threads_client_wide`); a project-scoped contact gets 404; a client-wide contact of several clients names one with `clientId` (validated against their scope, else 400). |
 | PROTOTYPED | POST | `/api/:t/portal/conversation/:threadId/messages` | `portal` · `converse` | `{body, attachments?}` -> **201** `{id, threadId, createdAt, attachmentIds}`. 404 outside scope, 409 closed. |
