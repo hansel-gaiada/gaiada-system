@@ -6,6 +6,7 @@ import { getActiveTenant } from "@/lib/tenant";
 import { listDevices, listDeviceEvents, summarizeHealth } from "@/lib/it";
 import { Card, KpiTile, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { pilotFrame } from "@/components/overview/pilot";
 
 function whenTime(iso: string): string {
   if (!iso) return "—";
@@ -16,7 +17,7 @@ function whenTime(iso: string): string {
 
 const SEV_LABEL: Record<string, string> = { info: "active", warn: "on hold", critical: "blocked" };
 
-export default async function ITOverviewPage() {
+export default async function ITOverviewPage({ searchParams }: { searchParams: Promise<{ period?: string }> }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
@@ -26,6 +27,10 @@ export default async function ITOverviewPage() {
     return <EmptyNote>Select a company from the top bar.</EmptyNote>;
   }
 
+  // DW-3a: on the pilot switch the Overview frames this page body, which stays below its bands until the
+  // Overview's own blocks replace it. The body is built once, below, and passed through `frame`.
+  const frame = await pilotFrame(me, tenant, { slug: "it" }, searchParams);
+
   const [devices, events] = await Promise.all([
     listDevices(userId, tenant),
     listDeviceEvents(userId, tenant, { limit: 15 }),
@@ -33,7 +38,7 @@ export default async function ITOverviewPage() {
   const health = summarizeHealth(devices);
   const openAlerts = events.filter((e) => e.severity === "critical" || e.severity === "warn").length;
 
-  return (
+  const body = (
     <>
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", marginBottom: 20 }}>
         <KpiTile label="Devices" value={String(health.total)} foot={`${health.unknown} unknown`} />
@@ -63,4 +68,5 @@ export default async function ITOverviewPage() {
       </Card>
     </>
   );
+  return frame ? frame(body) : body;
 }

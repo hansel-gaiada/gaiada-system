@@ -24,6 +24,16 @@ export async function decideApproval(tenantId: string, approvalId: string, decis
 
 export type QueueDecideOrigin = "agency" | "automation" | "pipeline";
 
+// DW-3c: the pages that render the Overview's "Needs you" block for the workspaces pilot. `/` and
+// `/departments` do not cover them: `revalidatePath` matches one path, and `/departments/[deptId]` is a
+// dynamic segment. The functional workspaces' Overviews are their own pages.
+function revalidateOverviews() {
+  revalidatePath("/departments/[deptId]", "page");
+  revalidatePath("/hr");
+  revalidatePath("/finance");
+  revalidatePath("/it");
+}
+
 // The Home `NeedsMeQueue`'s decide dispatcher — one action shape over the
 // queue's three approval-like origins, matching contract §9(a)'s generic
 // decide façade in spirit (`POST /api/:t/approvals/:id/decide {origin,
@@ -51,6 +61,7 @@ export async function decideQueueItem(
   }
   revalidatePath("/");
   revalidatePath("/departments");
+  revalidateOverviews();
   return { ok: true };
 }
 

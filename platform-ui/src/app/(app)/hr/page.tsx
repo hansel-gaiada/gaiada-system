@@ -8,17 +8,22 @@ import { listDepartmentBriefs } from "@/lib/departments";
 import { hrScopeCompanies, listLeave, listCases } from "@/lib/hr";
 import { Card, KpiTile } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { pilotFrame } from "@/components/overview/pilot";
 
 // HR console home — headcount and org shape at a glance, plus a way into the
 // people directory and the leave/attendance/onboarding/cases surfaces (WSD-5).
 // The scope pill here is informational (which companies you serve for HR) —
 // each sub-page owns its own `?company=` scope and envelope.
-export default async function HROverviewPage() {
+export default async function HROverviewPage({ searchParams }: { searchParams: Promise<{ period?: string }> }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
   if (!tenant) return <EmptyNote>Select a company from the top bar.</EmptyNote>;
+
+  // DW-3a: on the pilot switch the Overview frames this page body, which stays below its bands until the
+  // Overview's own blocks replace it. The body is built once, below, and passed through `frame`.
+  const frame = await pilotFrame(me, tenant, { slug: "hr" }, searchParams);
 
   const scopeCompanies = hrScopeCompanies(me, tenant);
   const [members, depts, pendingLeave, openCases] = await Promise.all([
@@ -28,7 +33,7 @@ export default async function HROverviewPage() {
     listCases(userId, tenant, { status: "open" }),
   ]);
 
-  return (
+  const body = (
     <>
       {scopeCompanies.length > 1 && (
         <p style={{ margin: "0 0 16px", font: "400 13px var(--font-body)", color: "var(--erp-ink-60)", textAlign: "right" }}>
@@ -73,4 +78,5 @@ export default async function HROverviewPage() {
       </Card>
     </>
   );
+  return frame ? frame(body) : body;
 }

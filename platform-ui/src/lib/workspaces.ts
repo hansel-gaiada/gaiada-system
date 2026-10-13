@@ -199,8 +199,8 @@ const AGENCY_ONLY: Gate = { kind: "pack", pack: "agency" };
 /** Every department workspace's Overview: the five questions in their fixed order. Campaigns and
  *  Requests are the agency pack's cross-department work, so a generic company never sees them. */
 const DEPARTMENT_OVERVIEW: readonly OverviewWidget[] = [
-  { key: "needs-you", band: "now", label: "Needs you", ticket: "DW-3c" },
-  { key: "today", band: "now", label: "Today", ticket: "DW-3b" },
+  { key: "needs-you", band: "now", label: "Needs you" },
+  { key: "today", band: "now", label: "Today" },
   { key: "your-numbers", band: "you", label: "Your numbers", ticket: "DW-3d" },
   { key: "my-activity", band: "you", label: "My activity", ticket: "DW-3j" },
   { key: "condition", band: "department", label: "Department condition", ticket: "DW-3k" },
@@ -213,9 +213,9 @@ const DEPARTMENT_OVERVIEW: readonly OverviewWidget[] = [
 ];
 
 /** The Office of the GM's company Overview (§3.5), same band order. */
-const COMPANY_OVERVIEW: readonly OverviewWidget[] = [
+export const COMPANY_OVERVIEW: readonly OverviewWidget[] = [
   { key: "decisions", band: "now", label: "Needs you: decisions", ticket: "DW-3i" },
-  { key: "today", band: "now", label: "Today", ticket: "DW-3b" },
+  { key: "today", band: "now", label: "Today" },
   { key: "company", band: "department", label: "Company", ticket: "DW-3i" },
   { key: "departments", band: "department", label: "Departments by condition", ticket: "DW-3i" },
   { key: "campaigns", band: "work", label: "Campaigns", gate: AGENCY_ONLY, ticket: "DW-3i" },

@@ -19,6 +19,10 @@ import { QueueAgendaHome } from "@/components/dashboard/QueueAgendaHome";
 import { listMyTasks } from "@/lib/agenda";
 import type { QueueItem } from "@/lib/queueUrgency";
 import { CheckinCard } from "@/components/dashboard/CheckinCard";
+import { WorkspaceOverview } from "@/components/overview/WorkspaceOverview";
+import { getPrefs } from "@/lib/prefs";
+import { myWorkspaces } from "@/lib/workspaces-data";
+import { COMPANY_SUBJECT, parseOverviewPeriod, resolveHomeRoute } from "@/lib/overview";
 import { decideQueueItem } from "./actions";
 
 function timeOfDay(): string {
@@ -31,7 +35,7 @@ function parseFilter(raw: string | undefined): QueueFilter | undefined {
   return FILTER_KEYS.includes(raw as QueueFilter) ? (raw as QueueFilter) : undefined;
 }
 
-type SearchParams = Promise<{ scope?: string; filter?: string }>;
+type SearchParams = Promise<{ scope?: string; filter?: string; period?: string }>;
 
 // The role-differentiated Home (UX-2 §1, WSUX-5 headline). Scope defaults to
 // ALL companies (owner decision 2); manager-tier gets the Command Center
@@ -52,7 +56,20 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
   // client reach /projects or /tasks and get the staff shell. One guard, at the group boundary.
 
   const tenantId = await getActiveTenant(me);
-  const { scope: rawScope, filter: rawFilter } = await searchParams;
+  const { scope: rawScope, filter: rawFilter, period: rawPeriod } = await searchParams;
+
+  // DW-3a: on the pilot switch `/` is not My Work. A person whose home is a workspace goes to that
+  // workspace's Overview; one whose home is the Company area stays for the company-level frame (DW-3i
+  // fills it). Classic users, and a person with no active company, keep today's page below.
+  const prefs = await getPrefs();
+  // The workspaces are read only on the pilot, so classic users make no extra call.
+  if (tenantId && prefs.shell === "workspaces") {
+    const route = resolveHomeRoute({ shell: prefs.shell, home: (await myWorkspaces(me, tenantId)).home, tenantId });
+    if (route.kind === "redirect") redirect(route.href);
+    if (route.kind === "company") {
+      return <WorkspaceOverview me={me} tenantId={tenantId} subject={COMPANY_SUBJECT} period={parseOverviewPeriod(rawPeriod)} />;
+    }
+  }
   const firstName = me.name.split(/\s+/)[0];
 
   const companies = accessibleCompanies(me);

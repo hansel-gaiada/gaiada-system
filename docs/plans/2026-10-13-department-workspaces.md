@@ -310,7 +310,7 @@ GROWTH ────────────────────────�
 
 | Band | Block | Contents | Source (all exist unless marked) |
 |---|---|---|---|
-| Now | **Needs you** | One ranked list, max 6: approvals and gates, the ball with me, overdue and due today, mentions, requests assigned to me | `getMyWorkQueue` and the department task reads; PM-task ranking in `lib/queue.ts` (DW-3c, a known gap) |
+| Now | **Needs you** | One ranked list, max 6: approvals and gates, the ball with me, overdue and due today, mentions, requests assigned to me | `getMyWorkQueue`, which already ranks PM tasks (`fromPmTask`); ball tasks arrive through the PM leg's `assignee=me` (ball-or-responsible on the backend), so no department task read is added |
 | Now | **Today** | Agenda, check-in state, my pinned tools | calendar, check-ins, the department's tool set |
 | You | **Your numbers** | Tasks done, on-time %, hours logged, check-ins; each against the previous period | person-grain report facts, timesheets, check-ins |
 | Department | **Pulse** | 4 department tiles (§4) | per-tile reads |
@@ -353,6 +353,54 @@ The Office of the GM's Overview keeps the GM cockpit's numbers, in the same band
 - A new feature is one widget, plus a row if it needs one.
 - A new widget must replace something or earn its place in its ticket. That keeps the page clean as
   it grows.
+
+
+### 3.7 Build notes (DW-3, 2026-10-13)
+
+Written when DW-3 started, from a survey of every source on main (`5703f27b`).
+
+**Where the Overview renders.** Each workspace's existing Overview URL renders it, so no URL moves:
+- `/departments/[deptId]` for a department, and `/hr`, `/finance` and `/it`;
+- the Office of the GM's page renders the company Overview (§3.5);
+- for someone whose home is the Company area, `/` renders the company-level Overview;
+- `/` otherwise sends a pilot user to their home workspace's Overview.
+
+All of this is for people on the pilot switch (DW-D7). Everyone else keeps today's pages.
+
+**How a block behaves.**
+- Each widget is a server component behind its own Suspense boundary.
+- A read that fails renders "unavailable" in that block alone.
+- A widget whose ticket is still open is hidden (`isPlanned`), so a band can be empty or absent.
+
+**The period.**
+- `?period=` carries the period: day, week or month, defaulting to month.
+- Quarter, semester and year show, disabled, until DW-4a.
+- Numbers come from the reports document (`getReportDocument`), whose `header.comparison` and per-KPI `delta` give "against the previous period" in the same call.
+
+**Only honest readers feed a number.** Many readers turn a 403, a 404 or an error into `[]` or 0. They must not feed a tile, because a denied reader would read as "nothing to do". A tile without an honest reader stays hidden, and its reason is written next to it in the registry. Two kinds qualify:
+- readers built on `ReadResult` or `Guarded`, or that return `null` for "not available";
+- `getReportDocument` and `getReportOverview`, where a ratio whose denominator is 0 means "no data".
+
+**What exists, block by block:**
+
+| Block | Built on | Gap that stays visible |
+|---|---|---|
+| Needs you (3c) | `getMyWorkQueue` already ranks PM tasks (`fromPmTask`) and mentions; `computeUrgency` | "See all" waits for My tasks (DW-8a); until then it links to the queue's own pages |
+| Today (3c) | `getTodayCheckin`, `listMyTasks` (due today), the workspace's tool set | No calendar events exist yet (DW-8g) |
+| Your numbers (3d) | person `getReportDocument`: tasks completed, on-time rate, minutes logged, check-in compliance, each with its delta | — |
+| My activity (3j) | `getProductivity` (16 weeks plus today; PM work only until DW-4h) | — |
+| Pulse (3e) | Web Dev: change requests (new), pipeline gates waiting, monitoring summary. Social: scheduled and failed posts. IT: account requests | SEO, Creatives and the deliverables tile have no honest reader yet. HR and Finance tiles are DW-7e |
+| Projects (3f) | owned projects with `computeProjectHealth`, top 4 by risk | `listProjects` must be read through `ReadResult`, not `.catch(() => [])` |
+| Campaigns, Requests (3f) | Social campaigns (`Guarded`); Web Dev change requests | Shared campaign parts are DW-5a and requests between departments DW-5c. Until then these blocks show only these two and stay hidden elsewhere |
+| Learning (3g) | `getMyLearning`: assigned, due, overdue | No per-course progress, so "next course" becomes "next due" |
+| Appraisal (3g) | `getMyAppraisals`: the last finalized result and the current pack's status | Staff cannot read the cycle's stage (HR-only endpoint), so it is not shown |
+| Me \| Team (3h) | department `getReportDocument` (narrowed to the led unit by the server), `getCheckinCompliance` with `rollUpCompliance` | Team learning is tenant-wide only (`getCompliance`), so it is shown only where the reader is not narrowed wrongly |
+| Company Overview (3i) | the GM cockpit's readers: the company and department report overviews, `GmMoneyCard`, the monitoring summary, the approval queue | "By condition" needs DW-4e, so until then departments are listed without a condition |
+| Condition (3k) | needs KPI targets and conditions | **After DW-4e.** Nothing is shown until a condition exists |
+
+**Testing.**
+- No demo login is placed in a department today: `u-dev`, `u-pm` and `u-gm` sit in the demo org tree, but no login uses them. DW-3a adds a placed demo identity, so the Overview can be driven as a real employee.
+- The workspace-shell e2e (`e2e/workspace-shell.spec.ts`, run with `qa/e2e-gate.sh` on sumopod) grows with each ticket.
 
 ---
 

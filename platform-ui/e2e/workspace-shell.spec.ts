@@ -1,5 +1,5 @@
 import { test, expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
-import { loginAsPersona, type PersonaKey } from "./personas";
+import { loginAsPersona, loginAsPlacedWebDev, type PersonaKey } from "./personas";
 import { tenantCookie } from "./appCookies";
 
 // DW-2g: the department workspace shell (DW-2a..2f), end to end, per persona, under DEMO_MODE.
@@ -10,8 +10,9 @@ import { tenantCookie } from "./appCookies";
 //
 //   - The demo company is `co-agency` (Gaia Digital Agency, vertical "agency"). With no backend its org tree
 //     is the seeded default (lib/org.ts): Web Dev (dept-1), Creatives (dept-2), SEO (dept-3), Social Media
-//     (dept-4) and GM (dept-5). The only people placed in it are u-dev, u-pm and u-gm, and NO demo login is
-//     any of those, so nobody has a department placement.
+//     (dept-4) and GM (dept-5). The only people placed in it are u-dev, u-pm and u-gm. Only ONE demo login is
+//     any of those: `webdev@gaiada.com` is u-dev (DW-3a), placed in Web Dev > Frontend. The personas below
+//     have no placement.
 //   - Home is therefore decided by GM access (lib/workspaceAccess.ts):
 //       superadmin (hansel@gaiada.com, platform_admin)  -> reports.company.view      -> Office of the GM, own
 //       manager    (manager@gaiada.com, manager)        -> reports.department.view  -> Office of the GM, own (narrowed)
@@ -58,6 +59,12 @@ async function openSwitcher(page: Page) {
   return { mine: page.getByRole("list", { name: "Your workspaces" }), others: page.getByRole("list", { name: "Departments" }) };
 }
 
+/** The placed Web Dev employee (DW-3a): u-dev, a plain member seated in Web Dev, signed in on the pilot or not. */
+async function signInWebDev(page: Page, context: BrowserContext, opts: { pilot?: boolean } = {}) {
+  await loginAsPlacedWebDev(page);
+  await context.addCookies([tenantCookie(page.url()), ...(opts.pilot === false ? [] : [pilotCookie(page.url())])]);
+}
+
 const DEPARTMENTS = ["Web Dev", "Creatives", "SEO", "Social Media"];
 
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -78,9 +85,10 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
     expect(names.slice(0, DEPARTMENTS.length)).toEqual(DEPARTMENTS);
     expect(names).not.toContain("Office of the GM");
 
-    // "Your workspaces" sits above "Departments".
+    // "Your workspaces" sits above "Departments". The label is found by its class: since DW-3 `/` lands on the
+    // Office of the GM's page, whose cockpit has a "Departments" card of its own.
     const y = async (l: Locator) => (await l.boundingBox())!.y;
-    expect(await y(page.getByText("Your workspaces"))).toBeLessThan(await y(page.getByText("Departments", { exact: true })));
+    expect(await y(page.getByText("Your workspaces"))).toBeLessThan(await y(page.locator(".ws-switch__label", { hasText: /^Departments$/ })));
 
     // Choosing a department goes to its Overview and closes the panel.
     await others.getByRole("link", { name: "SEO" }).click();
@@ -385,6 +393,190 @@ test.describe("search_staff (seo-staff@gaiada.com)", () => {
     await page.goto("/departments/dept-3");
     await expect(sidebar(page).getByText("Visiting SEO")).toBeVisible();
     await expect(sidebar(page).getByRole("link", { name: "Back to Company" })).toBeVisible();
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────────────────────────
+// DW-3a/3b/3c: the Overview's frame and its Now band. A placed employee (webdev@gaiada.com = u-dev, Web Dev >
+// Frontend) lands on their department's Overview from `/`. Needs you and Today are built; every other block is
+// still planned, so under them is today's page body (nothing is removed, plan §2.6 rule 1); never an invented
+// number.
+// ──────────────────────────────────────────────────────────────────────────────────────────────────
+test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.com)", () => {
+  const greeting = /^Good (morning|afternoon|evening), Made$/;
+
+  test("from / they land on the Web Dev Overview: greeting, workspace line, period selector, honest empty state", async ({ page, context }) => {
+    await signInWebDev(page, context);
+    await page.goto("/");
+
+    await expect(page).toHaveURL(/\/departments\/dept-1$/);
+    await expect(menu(page, "Web Dev")).toBeVisible();
+    // Home, not a visit: no "Visiting" and no way "back".
+    await expect(sidebar(page).getByText(/^Visiting /)).toHaveCount(0);
+
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
+    // Right after a load, React's streaming holder `div#S:0[hidden]` can still hold a copy of the page next to the
+    // revealed one for a moment (seen on sumopod, in the retry of a diagnostic run, for about 170 ms). It is not
+    // visible, so the claim is that exactly ONE copy is visible.
+    await expect(page.getByText(/^Web Dev · Gaia Digital Agency · (Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day \d{1,2} [A-Z][a-z]+$/).locator("visible=true")).toHaveCount(1);
+
+    const period = page.getByRole("group", { name: "Period" });
+    await expect(period.getByRole("button")).toHaveText(["Today", "Week", "Month", "Quarter", "Semester", "Year"]);
+    await expect(period.getByRole("button", { name: "Month" })).toHaveAttribute("aria-pressed", "true");
+    // A period the backend cannot report yet (if any: DW-4a is turning them on) carries its reason.
+    for (const b of await period.locator('button[aria-disabled="true"]').all()) {
+      await expect(b).toHaveAccessibleDescription(/^Available when /);
+    }
+
+    // The workspace's built quick actions, made concrete.
+    const actions = page.getByRole("navigation", { name: "Quick actions" });
+    await expect(actions.getByRole("link", { name: "New briefing" })).toHaveAttribute("href", "/departments/dept-1/prd");
+
+    // Only the Now band is built, so today's department Home stays below it, under its own label, and the
+    // "being built" line is not needed.
+    await expect(page.getByRole("heading", { level: 2, name: "Now", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "More from Web Dev" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Project health" })).toBeVisible();
+    await expect(page.getByText(/Overview is being built/)).toHaveCount(0);
+    for (const band of ["You", "Work", "Growth"]) await expect(page.getByRole("heading", { level: 2, name: band, exact: true })).toHaveCount(0);
+  });
+
+  // DW-3c: what `/` showed before it redirected (the queue, the check-in) is on the Overview, so a pilot user
+  // loses nothing when `/` sends them here.
+  test("the Now band has Needs you and Today: the queue (or its honest empty line), the check-in and the tools", async ({ page, context }) => {
+    await signInWebDev(page, context);
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/departments\/dept-1$/);
+
+    const needs = page.getByRole("region", { name: "Needs you", exact: true });
+    await expect(needs).toBeVisible();
+    await expect(needs.getByRole("heading", { level: 3 })).toHaveText(/^Needs you( · \d+)?$/);
+    // Never "Unavailable" with the demo backend, and never a bare 0: either rows or the empty line.
+    await expect(needs.getByText("Unavailable")).toHaveCount(0);
+    const rows = needs.locator(".needs-me-queue__row");
+    if ((await rows.count()) === 0) {
+      await expect(needs.getByText(/Nothing needs you right now|Nothing found in the sources that could be read/)).toBeVisible();
+    } else {
+      await expect(needs.getByRole("heading", { level: 3 })).toHaveText(/^Needs you · \d+$/);
+      // A decidable item keeps today's inline decide: Approve always comes with Deny. Never clicked here.
+      for (const row of await rows.all()) {
+        if ((await row.getByRole("button", { name: "Approve" }).count()) > 0) {
+          await expect(row.getByRole("button", { name: "Deny" })).toBeVisible();
+        }
+      }
+    }
+    // The queue is capped at six rows until "Show all" opens the rest in place.
+    expect(await rows.count()).toBeLessThanOrEqual(6);
+
+    const today = page.getByRole("region", { name: "Today", exact: true });
+    await expect(today).toBeVisible();
+    await expect(today.getByText("Check-in unavailable")).toHaveCount(0);
+    // The check-in is the card (a form to submit) or its one-line states: submitted, excused, not expected.
+    await expect(today.locator(".checkin-card__form, .checkin-line").first()).toBeVisible();
+    await expect(today.getByRole("heading", { level: 4, name: "Due today" })).toBeVisible();
+    // Web Dev's tools, as the department Home's row draws them (icon links named by the tool).
+    await expect(today.getByRole("heading", { level: 4, name: "Tools" })).toBeVisible();
+    await expect(today.getByRole("link", { name: /^GitHub/ })).toBeVisible();
+    await expect(today.getByRole("link", { name: /^Claude Code/ })).toBeVisible();
+  });
+
+  test("the department's own header is not doubled on the Overview, and stays on its other pages", async ({ page, context }) => {
+    await signInWebDev(page, context);
+    await page.goto("/departments/dept-1");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+    await expect(page.getByRole("heading", { level: 1, name: "Web Dev", exact: true })).toHaveCount(0);
+
+    // Another page of the same department keeps the console's header exactly as it was.
+    await page.goto("/departments/dept-1/board");
+    await expect(page.getByRole("heading", { level: 1, name: "Web Dev", exact: true })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Period" })).toHaveCount(0);
+  });
+
+  test("choosing Week puts period=week in the URL, and a disabled period changes nothing", async ({ page, context }) => {
+    await signInWebDev(page, context);
+    await page.goto("/departments/dept-1");
+    const period = page.getByRole("group", { name: "Period" });
+
+    await press(period.getByRole("button", { name: "Week" }));
+    await expect(page).toHaveURL(/\/departments\/dept-1\?period=week$/);
+    await expect(period.getByRole("button", { name: "Week" })).toHaveAttribute("aria-pressed", "true");
+    await expect(period.getByRole("button", { name: "Month" })).toHaveAttribute("aria-pressed", "false");
+
+    // A disabled option, if there is one, is not selectable. Playwright will not click an aria-disabled button,
+    // so the click is dispatched; the page must ignore it.
+    for (const b of await period.locator('button[aria-disabled="true"]').all()) {
+      await hydrated(b);
+      await b.dispatchEvent("click");
+    }
+    await expect(page).toHaveURL(/\/departments\/dept-1\?period=week$/);
+    await expect(period.getByRole("button", { name: "Week" })).toHaveAttribute("aria-pressed", "true");
+
+    // A forged period in the URL reads as Month.
+    await page.goto("/departments/dept-1?period=bogus");
+    await expect(page.getByRole("group", { name: "Period" }).getByRole("button", { name: "Month" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("another department's Overview is its own: visiting SEO shows SEO, with its own line", async ({ page, context }) => {
+    await signInWebDev(page, context);
+    await page.goto("/departments/dept-3");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
+    await expect(page.getByText(/^SEO · Gaia Digital Agency · /)).toBeVisible();
+    await expect(sidebar(page).getByText("Visiting SEO")).toBeVisible();
+  });
+
+  test("a classic user's / and department page are unchanged", async ({ page, context }) => {
+    await signInWebDev(page, context, { pilot: false });
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("link", { name: "Dashboard", exact: true })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Period" })).toHaveCount(0);
+
+    await page.goto("/departments/dept-1");
+    await expect(page.getByRole("heading", { level: 1, name: "Web Dev", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Project health" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Period" })).toHaveCount(0);
+    await expect(page.getByText(/Overview is being built/)).toHaveCount(0);
+  });
+});
+
+test.describe("the Overview's frame: the functional workspaces keep their page body", () => {
+  test("/hr, /finance and /it show the Overview header with today's body under it", async ({ page, context }) => {
+    await signIn(page, context, "superadmin");
+    for (const [path, label] of [["/hr", "HR"], ["/finance", "Finance"], ["/it", "IT"]]) {
+      await page.goto(path);
+      await expect(page.getByRole("heading", { level: 1 }), path).toHaveText(/^Good (morning|afternoon|evening), Clement$/);
+      await expect(page.getByRole("heading", { name: `More from ${label}` }), path).toBeVisible();
+      await expect(page.getByRole("group", { name: "Period" }), path).toBeVisible();
+      await expect(page.getByText(/Overview is being built/), path).toHaveCount(0);
+    }
+  });
+});
+
+test.describe("the Overview's frame: someone whose home is the Company area", () => {
+  test("a member with no workspace of their own stays on / and gets the company-level frame", async ({ page, context }) => {
+    await signIn(page, context, "member");
+    await page.goto("/");
+
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), Gede$/);
+    await expect(page.getByText(/^Company · Gaia Digital Agency · /)).toBeVisible();
+    await expect(page.getByRole("group", { name: "Period" }).getByRole("button", { name: "Month" })).toHaveAttribute("aria-pressed", "true");
+    // Today is built for the company frame; its decisions block (DW-3i) is not, so no Needs you here.
+    await expect(page.getByText(/The Company Overview is being built/)).toHaveCount(0);
+    await expect(page.getByRole("heading", { level: 2, name: "Now", exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Today", exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Needs you", exact: true })).toHaveCount(0);
+    await expect(menu(page, "Company")).toBeVisible();
+  });
+
+  test("a platform admin's home is the Office of the GM: / goes there, and the cockpit keeps its own page", async ({ page, context }) => {
+    await signIn(page, context, "superadmin");
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/departments\/dept-5$/);
+    // The GM's page is still the cockpit until DW-3i, so no Overview frame here.
+    await expect(page.getByRole("group", { name: "Period" })).toHaveCount(0);
+    await expect(page.getByText(/Overview is being built/)).toHaveCount(0);
   });
 });
 

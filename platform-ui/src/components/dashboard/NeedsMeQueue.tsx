@@ -28,11 +28,10 @@ function when(iso: string): string {
   return `Due ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
 }
 
-// The shared ranked list — UX-2 §1.4. Used verbatim by both Home variants
-// (CommandCenterHome/QueueAgendaHome); a client component only because
-// approval/gate rows need optimistic decide + a toast (mirrors
-// components/dashboard/ApprovalsPanel.tsx's own pattern).
-export function NeedsMeQueue({ items, decide, emptyText }: { items: QueueItem[]; decide: Decide; emptyText?: string }) {
+// The decide state of a ranked list: the optimistic "gone" set, the toast and the dispatch to the
+// `decide` prop. Shared by `NeedsMeQueue` (the Home variants) and the Overview's Needs you block
+// (DW-3c), so approving from either runs the very same code.
+export function useQueueDecisions(items: QueueItem[], decide: Decide) {
   const [gone, setGone] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
   const visible = items.filter((i) => !gone.has(i.id));
@@ -50,17 +49,19 @@ export function NeedsMeQueue({ items, decide, emptyText }: { items: QueueItem[];
     setTimeout(() => setToast(null), 2200);
   }
 
-  if (visible.length === 0) {
-    return (
-      <div className="dash-empty">
-        <p>{emptyText ?? "Nothing needs you right now."}</p>
-      </div>
-    );
-  }
+  return { visible, act, toast };
+}
 
+/** The rows of a ranked list, with each row's Approve/Deny/View/Open control. `showCompany` tags each row with
+ *  its company (always, on the Home); the Overview turns it off for someone with a single company. */
+export function QueueRows({ items, act, showCompany = true }: {
+  items: QueueItem[];
+  act: (item: QueueItem, decision: "approved" | "rejected") => void;
+  showCompany?: boolean;
+}) {
   return (
     <div className="needs-me-queue">
-      {visible.map((item) => {
+      {items.map((item) => {
         const band = urgencyBand(item);
         const isApprovalLike = item.type === "approval" || item.type === "gate";
         const title = item.href ? (
@@ -75,9 +76,9 @@ export function NeedsMeQueue({ items, decide, emptyText }: { items: QueueItem[];
                 <span className="needs-me-queue__title">{title}</span>
               </div>
               <div className="needs-me-queue__meta">
-                <span className="needs-me-queue__company">{item.company}</span>
-                {item.meta && <span className="needs-me-queue__meta-extra"> · {item.meta}</span>}
-                {item.dueDate && <span className="needs-me-queue__due"> · {when(item.dueDate)}</span>}
+                {showCompany && <span className="needs-me-queue__company">{item.company}</span>}
+                {item.meta && <span className="needs-me-queue__meta-extra">{showCompany ? " · " : ""}{item.meta}</span>}
+                {item.dueDate && <span className="needs-me-queue__due">{showCompany || item.meta ? " · " : ""}{when(item.dueDate)}</span>}
               </div>
             </div>
             <div className="needs-me-queue__actions">
@@ -97,7 +98,29 @@ export function NeedsMeQueue({ items, decide, emptyText }: { items: QueueItem[];
           </div>
         );
       })}
-      {toast && <Toast message={toast} />}
     </div>
+  );
+}
+
+// The shared ranked list — UX-2 §1.4. Used verbatim by both Home variants
+// (CommandCenterHome/QueueAgendaHome); a client component only because
+// approval/gate rows need optimistic decide + a toast (mirrors
+// components/dashboard/ApprovalsPanel.tsx's own pattern).
+export function NeedsMeQueue({ items, decide, emptyText }: { items: QueueItem[]; decide: Decide; emptyText?: string }) {
+  const { visible, act, toast } = useQueueDecisions(items, decide);
+
+  if (visible.length === 0) {
+    return (
+      <div className="dash-empty">
+        <p>{emptyText ?? "Nothing needs you right now."}</p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <QueueRows items={visible} act={act} />
+      {toast && <Toast message={toast} />}
+    </>
   );
 }
