@@ -474,6 +474,8 @@ const SWITCHED = [
   "src/core/portal-profile.controller.ts",
   // PV4-03: written on the builders from day one; listed so the importer scan must find it.
   "src/core/portal-conversation.controller.ts",
+  // PV5-08: the Documents list, written on the builders from day one.
+  "src/core/portal-documents.controller.ts",
 ];
 
 describe("PV3-02 guard — portal-facing files carry no inline row-visibility literal", () => {

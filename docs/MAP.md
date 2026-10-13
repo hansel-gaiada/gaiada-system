@@ -208,6 +208,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/automation-approvals.controller.ts` |
 | `/api` | `platform-nest/src/core/claude-seats.controller.ts` |
 | `/api` | `platform-nest/src/core/client-contacts.controller.ts` |
+| `/api` | `platform-nest/src/core/client-documents.controller.ts` |
 | `/api` | `platform-nest/src/core/client-website-access.controller.ts` |
 | `/api` | `platform-nest/src/core/client-work.controller.ts` |
 | `/api` | `platform-nest/src/core/collab.controller.ts` |
@@ -224,6 +225,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/portal-centre.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-commerce.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-conversation.controller.ts` |
+| `/api` | `platform-nest/src/core/portal-documents.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-profile.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-stream.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-workspace.controller.ts` |
@@ -527,6 +529,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/portal/conversation`
 - `/portal/conversation/[threadId]`
 - `/portal/deliverables`
+- `/portal/documents`
 - `/portal/invoices`
 - `/portal/invoices/[invoiceId]`
 - `/portal/meetings/[minutesId]`

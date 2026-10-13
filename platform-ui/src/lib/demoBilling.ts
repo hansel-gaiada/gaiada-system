@@ -158,6 +158,22 @@ export function billingDemo(method: string, p: string, params: URLSearchParams, 
   const s = store();
   let hit: RegExpMatchArray | null;
 
+  // ── documents (PV5-08, BFF §30b): signed agreements and payment proofs of one client, newest first ──
+  if ((hit = p.match(/^\/api\/[^/]+\/clients\/([^/]+)\/documents$/)) && m === "GET") {
+    if (!CONTRACT_READ.has(userId)) return deny("read", "client");
+    const cid = hit[1];
+    const items = [
+      ...s.contracts.filter((k) => k.clientId === cid && k.status === "signed").map((k) => ({
+        id: k.id, kind: "signed_contract", title: k.title, date: k.signedAt ?? k.createdAt,
+        fileId: k.id === "dk-5" ? "f-signed-dk5" : k.fileId, ready: k.id === "dk-5", clientVisible: contractVisible(k),
+      })),
+      ...s.payments.filter((x) => x.clientId === cid && x.proofFileId).map((x) => ({
+        id: x.id, kind: "receipt", title: "Payment proof", date: x.paidOn, fileId: x.proofFileId, ready: true, clientVisible: paymentVisible(x),
+      })),
+    ];
+    return ok({ items: items.sort((x, y) => Date.parse(y.date) - Date.parse(x.date)) });
+  }
+
   // ── payments ────────────────────────────────────────────────────────────────────────────────
   if ((hit = p.match(/^\/api\/[^/]+\/invoice-payments$/)) && m === "GET") {
     if (!INVOICE_READ.has(userId)) return deny("read", "invoice");
