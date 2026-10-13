@@ -140,11 +140,24 @@ resourcePolicy:
     # inline owner / finance_manager rule. FAIL-CLOSED: a principal that omits the attribute has no
     # assurance, so it is denied (principalPayload() always sends it; the has() arm covers a raw caller).
     # Every successful change also notifies all owners of the company (PV5-04).
+    #
+    # PV-D29 (2026-10-13): interim until MFA is enabled (infra/runbooks/enable-mfa.md); then restore
+    # PV-D26's unconditional high-assurance DENY. Live Keycloak emits no `amr` claim, so no web session
+    # ever reaches "high" and the unconditional DENY made our own bank details unsettable. Until then the
+    # DENY fires only for a principal that is below high AND holds NO owner / finance_manager grant at
+    # company scope on this tenant (the same grant expression as the ALLOW above). So an owner or
+    # finance_manager of the company may change the bank details at "linked" assurance ("low" is still
+    # refused by `notLow` in the ALLOW), while platform_admin, which holds neither grant, still needs
+    # high (unreachable today, so the operator cannot). Bots and automation have their own DENY above.
+    # Fail-closed is unchanged: no assurance attribute and no such grant means denied.
     - actions: ["set_bank_details"]
       effect: EFFECT_DENY
       roles: ["user"]
       condition:
         match:
           expr: >-
-            !has(request.principal.attr.assurance) ||
-            request.principal.attr.assurance != "high"
+            (!has(request.principal.attr.assurance) ||
+              request.principal.attr.assurance != "high") &&
+            !request.principal.attr.grants.exists(g,
+              (g.role == "owner" || g.role == "finance_manager") &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
