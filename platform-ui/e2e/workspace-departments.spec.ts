@@ -71,9 +71,9 @@ interface DeptSpec {
   rows: readonly RowSpec[];
 }
 
-// Project Management (PM_ROW): Projects, then the toolkit's Board tab, which PM_TERMS.board labels "Overview"
+// Project Management (PM_ROW): Projects, then the toolkit's Board tab, which PM_TERMS.board labels "Board" (DW-D21)
 // (lib/pmVocabulary.ts), Ball, Timeline, Activity. Charts moved to Analytics.
-const PM: RowSpec = { row: "Project Management", tabs: ["Projects", "Overview", "Ball", "Timeline", "Activity"], click: { tab: "Activity", url: /\/activity$/ } };
+const PM: RowSpec = { row: "Project Management", tabs: ["Projects", "Board", "Ball", "Timeline", "Activity"], click: { tab: "Activity", url: /\/activity$/ } };
 const TOOLS: RowSpec = { row: "Tools & connections" };
 
 const DEPARTMENTS: readonly DeptSpec[] = [

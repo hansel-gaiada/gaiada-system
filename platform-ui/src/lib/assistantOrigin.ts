@@ -32,8 +32,8 @@ function clean(path: string): string {
  *  it, so a record page under /board still reads "Board". */
 function pageNameOf(ws: Workspace, deptId: string | null, path: string): string | null {
   const here = clean(path);
-  // `root` marks the Overview by position, not by label: the Project Management board is also called
-  // "Overview" (PM_TERMS.board), and it must still claim the records below it.
+  // `root` marks the Overview by position, not by label: the Project Management board used to be called
+  // "Overview" (until DW-D21), and the root flag keeps the Overview from claiming the records below it.
   const candidates: { href: string; label: string; root?: boolean }[] = [{ href: ws.overviewHref, label: "Overview", root: true }];
   for (const row of ws.work) for (const t of row.tabs) candidates.push({ href: t.href, label: t.label });
   for (const t of [...ws.reports, ...ws.analytics]) candidates.push({ href: t.href, label: t.label });

@@ -36,11 +36,11 @@ const HANSEL = "hansel@gaiada.com"; // demo-hansel: elevated (platform_admin + g
 const GEDE = "gede@gaiada.com"; // gede-ic: plain `member` -> holds pm.contribute, NOT pm.manage
 const SEO_STAFF = "seo-staff@gaiada.com"; // seo-staff: search_staff -> holds neither pm.contribute nor pm.manage
 
-test.describe("Ball is its own tab, everywhere, and is gone from Overview's Group-by", () => {
+test.describe("Ball is its own tab, everywhere, and is gone from Board's Group-by", () => {
   // The negative half is the point of the whole rename (2026-08-09 owner decision moved Ball OUT
   // of the Board "Group by" swimlane into its own peer tab) — a rename-blind suite would pass
   // through Ball quietly staying a swimlane option just as easily as through it becoming a tab.
-  test("/pm: Ball tab exists; Overview's Group by no longer lists Ball", async ({ page, context }) => {
+  test("/pm: Ball tab exists; Board's Group by no longer lists Ball", async ({ page, context }) => {
     await loginAs(page, context, HANSEL);
     await page.goto("/pm");
 
@@ -51,7 +51,7 @@ test.describe("Ball is its own tab, everywhere, and is gone from Overview's Grou
     await page.waitForURL(/\/pm\?view=ball/);
     await expect(ballTab).toHaveAttribute("aria-current", "page");
 
-    // Back on Overview (was Board — PM_TERMS.board is the source of truth for this label,
+    // Back on Board (PM_TERMS.board is the source of truth for this label,
     // pmVocabulary.ts), the swimlane <select> must not offer Ball as a grouping.
     await page.goto("/pm?view=board");
     const swimlaneOptions = page.locator('select[name="swimlane"] option');
@@ -108,7 +108,7 @@ test.describe("Ball is its own tab, everywhere, and is gone from Overview's Grou
 });
 
 test.describe("/project-management resolves with the full tab set, no scope switcher", () => {
-  test("shows Overview/Ball/Timeline/Charts/Productivity/Projects/Tasks, and no PM scope switcher", async ({ page, context }) => {
+  test("shows Board/Ball/Timeline/Charts/Productivity/Projects/Tasks, and no PM scope switcher", async ({ page, context }) => {
     await loginAs(page, context, HANSEL);
     await page.goto("/project-management");
 
@@ -117,7 +117,7 @@ test.describe("/project-management resolves with the full tab set, no scope swit
     // The renamed labels ARE the requirement here, so assert the literal visible text (source of
     // truth: PM_TERMS in src/lib/pmVocabulary.ts — a future rename there updates this UI in one
     // place, and this assertion is what proves it actually reached this surface).
-    for (const label of ["Overview", "Ball", "Timeline", "Charts", "Productivity", "Projects", "Tasks"]) {
+    for (const label of ["Board", "Ball", "Timeline", "Charts", "Productivity", "Projects", "Tasks"]) {
       await expect(page.getByRole("link", { name: label, exact: true })).toBeVisible();
     }
 
@@ -174,7 +174,7 @@ test.describe("Department console primary group reads 'Project Management', not 
     await page.waitForURL(/\/departments\/dept-1\/projects$/);
 
     const subStrip = page.getByRole("navigation", { name: /project management tools/i });
-    for (const label of ["Projects", "Overview", "Ball", "Timeline", "Charts", "Activity"]) {
+    for (const label of ["Projects", "Board", "Ball", "Timeline", "Charts", "Activity"]) {
       await expect(subStrip.getByRole("link", { name: label, exact: true })).toBeVisible();
     }
   });

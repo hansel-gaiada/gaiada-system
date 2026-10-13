@@ -1,4 +1,4 @@
-// Shared PM scope-workspace sections — Overview (was "Board"), Ball, Timeline (was "Gantt"),
+// Shared PM scope-workspace sections — Board, Ball, Timeline (was "Gantt"),
 // Charts, Productivity — factored out of `/pm/page.tsx` (2026-08-10 owner directive: "Business and
 // Departments must use the same interface as /pm... one component set parameterized by scope, not
 // three parallel implementations"). This is that one set. Every caller hands in a `work` object
@@ -71,7 +71,7 @@ function TagSwatch({ color }: { color: Tag["color"] }) {
 }
 
 // ---------------------------------------------------------------------------
-// Overview (was "Board" — owner decision 2026-08-10; PM_TERMS.board carries the label everywhere).
+// Board (the 2026-08-10 Board->Overview rename was reversed by DW-D21, 2026-10-13; PM_TERMS.board carries the label everywhere).
 export async function OverviewSection({
   basePath, work, sp, canEdit, taskUrgencyById, userId, tenant,
 }: {
