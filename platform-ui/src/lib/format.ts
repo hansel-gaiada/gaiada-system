@@ -14,6 +14,11 @@ const DISPLAY_TZ = process.env.NEXT_PUBLIC_DISPLAY_TZ || "Asia/Singapore";
 // Currencies with no minor unit (amount is NOT /100).
 const ZERO_DECIMAL = new Set(["IDR", "JPY", "KRW", "VND", "CLP", "ISK"]);
 
+/** True for a currency with no minor unit, so a minor-unit integer IS the amount (DW-5b: amount inputs). */
+export function isZeroDecimal(currency: string | null | undefined): boolean {
+  return ZERO_DECIMAL.has((currency ?? "").toUpperCase());
+}
+
 // Money from MINOR units (cents) — currency-aware, unlike the old assumption.
 export function formatBudget(minor: number | null | undefined, currency: string | null | undefined): string {
   if (minor == null) return "—";
