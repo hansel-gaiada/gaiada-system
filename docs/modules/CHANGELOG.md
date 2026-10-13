@@ -11,6 +11,22 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### infra `0.13.16` - the Umami/collector edge never writes a visitor's address to its logs (2026-10-13) - DEV-VERIFIED
+
+- **Found by the M5 end-to-end QA on sumopod.** The edge nginx logged at `warn`. A request body larger than the in-memory buffer (any replay chunk over about 16 KB) was spilled to a temp file, and the warn line named `client: <the visitor's address>`, which Docker's logs kept.
+  - Request-level `error` lines carry the same field, e.g. when the collector is down.
+  - This applied to the live Umami edge since it went live.
+- **The fix, in `infra/sumopod/umami/nginx/nginx.conf`:**
+  - `error_log /dev/stderr crit`;
+  - `client_body_buffer_size 32k`, matching the server cap;
+  - the templated `/lib/kestrel/r` location keeps its 320k body in memory.
+- **New `check-config.sh` checks** keep all three in place.
+- **Verified:**
+  - `check-config.sh` ALL PASS on sumopod;
+  - the end-to-end QA re-run: 5 test IPs, 0 hits in every log and both dumps;
+  - GitHub Actions 38334930360.
+- **The live `umami` edge takes this on its next `docker compose up -d edge`.**
+
 ### automation `0.6.3` - `wf:billing-chaser` sends each client's unsigned-contract reminders to that client's account owner (2026-10-13) - PROTOTYPED
 
 - Completes PV-D28's routing. A contract the client has not signed for more than 7 days goes to that client's `owner_user_id` (from `clients.list`, which already carries it; no hub or platform change). A client with no owner falls back to the configured recipients, with a "no account owner set" note. Payment claims (more than 2 days) and countersign waits (more than 1 day) stay with the configured recipients (`BILLING_NOTIFY_USER_IDS`, else `NOTIFY_USER_ID`). There is one digest per recipient, each covering only that recipient's clients, and the internal sentinel client is skipped.
