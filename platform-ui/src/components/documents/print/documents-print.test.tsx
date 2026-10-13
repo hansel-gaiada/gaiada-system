@@ -124,6 +124,27 @@ describe("the render nonce and the refusal", () => {
     expect(document.title).toBe("render-nonce-1");
   });
 
+  it("DocumentTitle keeps the nonce when the framework commits the metadata title after it (Next 16 streams metadata)", async () => {
+    const { unmount } = render(<DocumentTitle nonce="render-nonce-2" />);
+    expect(document.title).toBe("render-nonce-2");
+    // What Next 16.3 does on live: the page's `metadata.title` is committed after the effect ran.
+    const late = document.querySelector("title") ?? document.head.appendChild(document.createElement("title"));
+    late.textContent = "Invoice";
+    await new Promise((r) => setTimeout(r, 0)); // MutationObserver callbacks run as microtasks
+    expect(document.title).toBe("render-nonce-2");
+    // A replaced <title> element is caught too.
+    document.querySelectorAll("title").forEach((t) => t.remove());
+    const fresh = document.createElement("title");
+    fresh.textContent = "Signed agreement";
+    document.head.appendChild(fresh);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.title).toBe("render-nonce-2");
+    unmount();
+    document.title = "after unmount";
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.title).toBe("after unmount");
+  });
+
   it("the refusal carries no nonce and no detail", () => {
     document.title = "before";
     render(<DocumentRefusal />);
