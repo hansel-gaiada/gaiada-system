@@ -11,6 +11,14 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### infra `0.13.17` - M6-P6k: the operator runbook for WebDesk site delivery (2026-10-13) - PROTOTYPED (docs only; no one has run it end to end)
+
+- **New `infra/runbooks/webdesk-site-delivery.md`.** One page, from the principal on the host to a promote, a rotation, a rollback and a teardown, each step with who does it, the exact route, what success reads back and the typed refusals.
+  - Every route, field and token in it was read from the code and docs at `dc636175`. It links the domain, staging-rebuild, control-channel and key runbooks rather than repeating them.
+  - It says plainly what is not built: O-3 (every live grant fails `github_permission_missing: organization_secrets`), M6-P6h2 (every promote fails `production_secret_not_granted`), M6-P6l (the fullstack API), M6-P6b (the hPanel facts), the untracked VLT-4 import (no tracked path seals a hosting credential), and the 501 rollback and key rotate/revoke routes.
+  - It is DEV-VERIFIED only after the P6 gate's first run follows it from the page alone.
+- `docs/plans/2026-10-11-webdesk-m6-plan.md` M6-P6k row: BUILT. The domain runbook's pointer to this page is now true.
+
 ### ai-agents `0.16.0` - M6-P6m: the scaffolded fullstack pages are statically exportable (2026-10-13) - DEV-VERIFIED
 
 - **M6-P6m (WSK-D83, O-6 option A).** `next-page-composer.ts` no longer emits `force-dynamic`, which `output: "export"` refuses (the template's build job failed on every scaffolded fullstack site).

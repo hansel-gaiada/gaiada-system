@@ -42,7 +42,7 @@ versions below; the running build reports it at `GET /health`.
 | insights-collector | `0.3.2` | PROTOTYPED | SEO | 2026-10-13 |
 | automation (n8n) | `0.6.3` | PROTOTYPED | WS4 | 2026-10-13 |
 | observability | `0.6.2` | DEV-VERIFIED | WS9 | 2026-08-06 |
-| infra | `0.13.16` | PROTOTYPED | WS10 | 2026-10-13 |
+| infra | `0.13.17` | PROTOTYPED | WS10 | 2026-10-13 |
 | wa-chat-bot | `0.10.0` | PROTOTYPED | WS5 | 2026-10-12 |
 | ai-agents | `0.16.0` | PROTOTYPED | WS8 | 2026-10-13 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
