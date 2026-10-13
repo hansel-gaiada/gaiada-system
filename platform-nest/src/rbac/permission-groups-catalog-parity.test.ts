@@ -128,7 +128,8 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // M5-V3-f (2026-10-12): +2 grantable (search.property.read_visitors, search.property.view_replay), 428 -> 430, each in its own NEW authoring group (search_read_visitors, search_view_replay); none advancedOnly.
     // PV4-05 (2026-10-12): +1 grantable on the EXISTING meeting_recording kind, 430 -> 431 (core.meeting_recording.share_minutes in 1 NEW authoring group, `meeting_minutes_share`, not advancedOnly).
     // DW-5a (2026-10-13): +5 grantable (agency.campaign_part.{read,create,update,delete,allocate} on the NEW agency_campaign_part kind, in 1 NEW authoring group `agency_campaign_parts`, not advancedOnly). 431 -> 436.
-    expect(grantable.length).toBe(436);
+    // DW-5c (2026-10-13): +5 grantable (core.work_request.{read,create,cancel,deliver,decline} on the NEW work_request kind, in 1 NEW authoring group `work_requests`, not advancedOnly). 436 -> 441.
+    expect(grantable.length).toBe(441);
     expect(relationshipKeys.size).toBe(15);
   });
 
