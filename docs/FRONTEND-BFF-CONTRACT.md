@@ -7327,3 +7327,28 @@ There is **no new Cerbos kind**. A link is part of the work it is on, so it is a
 - `compliance?unit=d-seo` as the Web Dev head → 403;
 - an unknown unit → 403 for the head, and 404 for a company-wide caller;
 - without `unit`, the head is still refused (unchanged).
+
+## 39. A department head's Team appraisals (DW-4d, 2026-10-13) — `platform-nest/src/modules/reports/appraisals.controller.ts` (`listRoute`) — **STATUS: PLANNED (contract first)**
+
+**Why.** Plan §5.3: the Appraisals row's Team tab is for heads ("score my people; who is written, scored and signed"). Today `GET /api/:t/appraisals` serves three tiers:
+- broad (HR, admin): every appraisal;
+- `manager`/`team_lead`: only rows whose `managerUserId` is the caller;
+- everyone else: their own, from `submitted` on.
+
+A department head therefore sees only the appraisals assigned to them personally, never their department's: a division lead's reports are invisible to the head above. A caller whose only head role is `org_unit_lead` is refused outright (403), because the bulk Cerbos check carries no `unitAncestors` (the controller's own "HIER-2 boundary" note), while the registry's Team tab admits them (`unitCap appraisal.read`). A tab must never open a refusal (DW-D20).
+
+**The head's list.** For a caller who holds `org_unit_lead` in this company (whether or not they also hold `manager`) and has no broad tier:
+1. Their led scope is `loadLedUnitScope(c, tenant, userId, today, principal)`: the subtrees of every unit they lead, through a lead placement or an `org_unit_lead` grant, as of today in `REPORTS_TZ`. An empty scope falls through to the existing branches, never "everything".
+2. Cerbos: `appraisal` read once, with the `unitAncestors` of one led unit. This confirms the caller is a lead there before anything is read; the subtree narrowing below is the server's job, as for the TR-25 report listing.
+3. Rows: every appraisal whose subject's primary unit, as of today, is in the led scope, UNION every row whose `managerUserId` is the caller (their `manager` semantics are kept). The filters `cycleId` and `subjectId` apply to both. A subject outside the scope with no manager link to the caller is never returned. The `subjectId` filter cannot widen the scope.
+4. The response shape is unchanged: `{appraisals: [{id, cycleId, subjectUserId, managerUserId, status, composite}]}`.
+
+**Unchanged.** The broad tier, a plain member's own list, `GET /appraisals/mine`, `GET /appraisals/:id` (already ancestor-wired), and every write: scoring stays manager-of-subject, and finalising stays HR. Reading a list never grants a write.
+
+**The UI.** `/appraisals` opens for a company-wide holder as today, or for a head through `leadsAnyUnitWith(me, "appraisal.read", tenant)`. A head sees the list and opens a row (the single read already admits them). Scoring controls keep their own gates.
+
+**Proof (live Postgres + Cerbos on the CI gate, added to `appraisals.controller.db.test.ts`):**
+- an `org_unit_lead`-only head of `d-web` gets 200 with exactly the `d-web` subtree's appraisals (a `d-web` division member's appraisal included, a `d-seo` subject's excluded);
+- a head who also holds `manager` gets their unit's rows plus their manager rows, with no duplicates;
+- `subjectId` of an out-of-scope subject returns an empty list;
+- a plain member's list and the broad tier's list are unchanged.
