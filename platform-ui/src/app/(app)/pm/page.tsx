@@ -39,7 +39,7 @@ import "@/components/pm/pm.css";
 //
 // P4-A6: `Responsible`/`Ball` ARE first-class views here, at every scope, with `leadWithUnassigned`
 // (./page-helpers) normalising both to lead with a "no user" column, matching the reference
-// (§1.4/§1.5). `Responsible` is reached through Overview's "Group by" swimlane selector (no fourth
+// (§1.4/§1.5). `Responsible` is reached through Board's "Group by" swimlane selector (no fourth
 // set of components, per the ticket). `Ball` used to be the fourth swimlane option there too, but
 // owner decision 2026-08-09 pulled it out into its own peer tab — a full board-layout switch just
 // to see who's holding the ball cluttered the board view's real job (status triage).
@@ -50,7 +50,7 @@ import "@/components/pm/pm.css";
 // implementations"): the section bodies that used to live below this component (BoardSection/
 // BallSection/GanttSection/ChartsSection/ProductivitySection) moved to
 // `components/pm/PmScopeSections.tsx` (as OverviewSection/BallSection/TimelineSection/
-// ChartsSection/ProductivitySection — "Board"->"Overview" and "Gantt"->"Timeline" per the same
+// ChartsSection/ProductivitySection — "Board"->"Overview" (reversed by DW-D21) and "Gantt"->"Timeline" per the same
 // decision) so `/project-management` (Business's surface) and this page render the identical
 // bodies, parameterized only by `basePath` and which `PmScope` they resolved `work` from. A
 // department console's Work/Board/Ball/Timeline/Charts tabs stay their own thin pages (they

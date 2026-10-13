@@ -117,6 +117,12 @@ describe("intakeStatusId / readyStatusId", () => {
   });
 });
 
+describe("PM_TERMS.board (DW-D21)", () => {
+  it("is 'Board' again, so 'Overview' means only the workspace dashboard", () => {
+    expect(PM_TERMS.board).toBe("Board");
+  });
+});
+
 describe("PM_RENAMES", () => {
   it("never renames a term to itself", () => {
     for (const r of PM_RENAMES) expect(r.was, r.was).not.toBe(r.now);

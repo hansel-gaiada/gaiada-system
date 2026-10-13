@@ -35,10 +35,15 @@ export const PM_TERMS = {
   projectManagement: "Project Management",
 
   // Views. 2026-08-10 owner decision, reversing the 2026-08-06 Timeline->Gantt rename and adding
-  // Board->Overview: three surfaces (`/pm`, Business, a department console) had drifted onto
+  // Board->Overview (reversed 2026-10-13, see `board` below): three surfaces (`/pm`, Business, a department console) had drifted onto
   // different words for the same two views. See PM_RENAMES.
   gantt: "Timeline",
-  board: "Overview",
+  // The kanban view is "Board" again. The 2026-08-10 owner decision renamed it "Overview", and DW-D21
+  // (owner, 2026-10-13) reversed that: every department workspace has its own "Overview" row (the
+  // dashboard, DW-D12) right above Project Management, so this tab was a second "Overview" beside it.
+  // "Overview" now means only the workspace dashboard. The ?view=board value, the "board" tab key and
+  // the /board route never changed.
+  board: "Board",
   charts: "Charts",
   productivity: "Productivity",
   milestones: "Milestones",
@@ -109,10 +114,9 @@ export const PM_RENAMES: { was: string; now: string; idUnchanged?: string; note?
     was: "Timeline (2026-08-06), then Gantt", now: PM_TERMS.gantt,
     note: "2026-08-10 owner decision: three surfaces (/pm, Business, a department console) disagreed on names — back to \"Timeline\". The ?view=gantt query value, Gantt.tsx, and every pm-gantt__* CSS class stay for old links/code (id-stability rule above).",
   },
-  {
-    was: "Board", now: PM_TERMS.board,
-    note: "2026-08-10 owner decision, same pass as Gantt->Timeline: \"Overview\", so the kanban view stops sharing a name with the department console's Work/Project Management group. The ?view=board query value, the tab key \"board\", Board.tsx, and every pm-col__*/pm-board__* CSS class stay unchanged.",
-  },
+  // No "Board" entry: the 2026-08-10 Board->Overview rename was REVERSED by DW-D21 (owner, 2026-10-13),
+  // so `board` is "Board" again and a `was: "Board", now: "Board"` row would be a no-op (the test below
+  // rejects that). The ?view=board value, the tab key, Board.tsx and the pm-col__*/pm-board__* classes never moved.
   {
     was: "PM", now: PM_TERMS.projectManagement,
     note: "2026-08-10 owner decision: the sidebar's Workspace row, the collapsed Business row, and every department console's \"Work\" group all read \"Project Management\" now — one name for the one surface. Routes/paths are unchanged (/pm, /project-management, /departments/[deptId]/<tab>).",

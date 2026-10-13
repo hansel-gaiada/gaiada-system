@@ -1047,6 +1047,7 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 | ID | Question | Ruling |
 |---|---|---|
 | DW-D20 | DW-2g found that a member who types `/admin` gets an empty Admin area (the pages render and the server refuses each read). Should such a page be reachable? | **Owner (2026-10-13): a page is reachable only by those allowed to use it; everyone else gets a 404.** Applied to the whole Admin area (Settings `/admin/*`, Group `/group`, `/group/reports`, `/rollups`, Platform `/systems/*`), each page by its own gate, and the Settings tabs offer only the pages the person may open. The server stays the authority |
+| DW-D21 | Every department's Project Management "Board" tab was labelled "Overview" (PM_TERMS.board, owner decision 2026-08-10), right under the workspace's own Overview row. Rename it back? | **Owner (2026-10-13): rename it back to "Board".** "Overview" then means only the workspace dashboard (DW-D12). URLs and keys are unchanged |
 
 ---
 
@@ -1377,6 +1378,7 @@ These are built in code but give no real data until someone outside engineering 
 ## Decision log
 
 - **2026-10-13 (owner, during the build):** DW-D20: Admin-area pages 404 for anyone not allowed to use them (§11.4). Built with DW-2g, whose e2e pinned the old empty Admin area.
+- **2026-10-13 (owner, during the build):** DW-D21: the Project Management view is called "Board" again, reversing the 2026-08-10 Board→Overview rename (§11.4). Built as DW-6m.
 - **2026-10-13 (owner, "all the decisions follow the recommendation"):**
   - DW-D1 to DW-D8, DW-D15 and DW-D19 ruled as recommended; DW-Q2, DW-Q3 and DW-Q5 ruled as defaulted.
   - **DW-Q4:** each department has its own KPIs and appraisal, highlighted to show its condition and standing, and the HOD is made aware (§5.5).

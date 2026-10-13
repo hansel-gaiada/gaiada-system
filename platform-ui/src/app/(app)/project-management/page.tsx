@@ -26,7 +26,7 @@ import "@/components/pm/pm.css";
 // ("Projects", "Tasks"). Those routes are UNCHANGED (`/projects`, `/tasks` keep their own rich list
 // pages — the hard constraint against breaking bookmarked deep links) — they are folded in as two
 // more tabs on `PmSurfaceTabs`, which every one of these three pages now shares, so navigating
-// Overview -> Projects -> Tasks -> back to Ball reads as one continuous surface instead of jumping
+// Board -> Projects -> Tasks -> back to Ball reads as one continuous surface instead of jumping
 // across unrelated parts of the sidebar. See `PmSurfaceTabs`'s own header for why Projects/Tasks are
 // plain links rather than a `?view=` value like the other five.
 type SearchParams = Promise<{

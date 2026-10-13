@@ -38,8 +38,8 @@ describe("Ball tab's gate matches the server's actual write-path capability", ()
   });
 
   // 2026-08-10: BoardSection/GanttSection/BallSection moved to the shared
-  // components/pm/PmScopeSections.tsx (as OverviewSection/TimelineSection/BallSection — "Board"->
-  // "Overview" and "Gantt"->"Timeline" per the same owner decision) so `/project-management`
+  // components/pm/PmScopeSections.tsx (as OverviewSection/TimelineSection/BallSection — "Board" was renamed
+  // "Overview", back to "Board" by DW-D21; "Gantt"->"Timeline") so `/project-management`
   // (Business) can mount the identical bodies. page.tsx now just calls them; the gate wiring this
   // test guards is unchanged, only the component names moved.
   it("page.tsx wires BALL_GATE_CAPABILITY — not a hardcoded pm.manage — into the Ball tab's canPassBall", () => {

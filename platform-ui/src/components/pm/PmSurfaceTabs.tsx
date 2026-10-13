@@ -1,6 +1,6 @@
 // The ONE PM tab row, shared between `/project-management` (Business) and the Business-owned
 // `/projects`/`/tasks` list pages — owner directive 2026-08-10: Business must read as one surface,
-// not a sidebar row that lands on a page with no relation to the other two. Overview/Ball/Timeline/
+// not a sidebar row that lands on a page with no relation to the other two. Board/Ball/Timeline/
 // Charts/Productivity are `?view=` on `/project-management` itself (same idiom `/pm` uses);
 // Projects/Tasks are real, separately-bookmarked routes (`/projects`, `/tasks` — see the hard
 // constraint in the 2026-08-10 rename plan: deep links must not break), so their tabs are plain

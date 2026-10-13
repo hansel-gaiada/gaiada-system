@@ -38,7 +38,7 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
   }
   // 2026-08-10 owner directive: Business collapses Projects+Tasks into ONE entry
   // (PM_TERMS.projectManagement) — those two are the PM-domain items, now tabs on
-  // `/project-management` alongside Overview/Ball/Timeline/Charts/Productivity (see that page's
+  // `/project-management` alongside Board/Ball/Timeline/Charts/Productivity (see that page's
   // own header). Clients/Deliverables/Timesheets/Invoices/Agency/Meetings/Delivery Pipeline
   // stay siblings — folding those in too would make one page mean everything, defeating the point.
   //
