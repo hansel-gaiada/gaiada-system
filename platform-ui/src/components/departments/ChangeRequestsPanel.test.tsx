@@ -341,3 +341,30 @@ describe("ChangeRequestsPanel — PV4-09: the price and amendment columns", () =
     expect(screen.queryByRole("link", { name: "Amendment signed" })).not.toBeInTheDocument();
   });
 });
+
+describe("ChangeRequestsPanel — origin (DW-5e)", () => {
+  const rows = [row({ id: "cr-1", title: "From a request" }), row({ id: "cr-2", title: "From a client" })];
+
+  it("shows no Origin column when the prop is absent (today's page)", () => {
+    render(<ChangeRequestsPanel rows={rows} canTriage actions={actionsStub()} />);
+    expect(screen.queryByText("Origin")).toBeNull();
+  });
+
+  it("shows the department, the person and a link to the request, and a dash for the rest", () => {
+    render(
+      <ChangeRequestsPanel
+        rows={rows} canTriage actions={actionsStub()}
+        origins={{ state: "ok", byChangeRequest: { "cr-1": { requestId: "req-9", from: "Marketing", person: "Dana" } } }}
+      />,
+    );
+    expect(screen.getByText("Origin")).toBeInTheDocument();
+    expect(screen.getByText(/From Marketing · Dana/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open request" })).toHaveAttribute("href", "/requests/req-9");
+  });
+
+  it("says Unavailable on every row when the read failed, and still renders the queue", () => {
+    render(<ChangeRequestsPanel rows={rows} canTriage actions={actionsStub()} origins={{ state: "unavailable" }} />);
+    expect(screen.getAllByText("Unavailable")).toHaveLength(2);
+    expect(screen.getByText("From a request")).toBeInTheDocument();
+  });
+});

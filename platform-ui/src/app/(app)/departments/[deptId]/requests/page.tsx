@@ -5,7 +5,15 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { listChangeRequests } from "@/lib/webdevChangeRequests-data";
-import { ChangeRequestsPanel } from "@/components/departments/ChangeRequestsPanel";
+import { ChangeRequestsPanel, type ChangeRequestOrigins } from "@/components/departments/ChangeRequestsPanel";
+import { Card } from "@/components/ui";
+import { IncomingRequestsTable } from "@/components/requests/IncomingRequestsTable";
+import { getDepartment } from "@/lib/departments";
+import { activeCompany } from "@/lib/companyContext";
+import { workspaceFor } from "@/lib/workspaces";
+import { readRequests } from "@/lib/requests-data";
+import { originsByChangeRequest, requestsPageView } from "@/lib/requests";
+import "@/components/requests/requests.css";
 import { listSignedContractsAction } from "@/lib/conversationActions";
 import { getChangeRequestDetailAction, triageChangeRequestAction } from "./actions";
 
@@ -28,6 +36,24 @@ export default async function ChangeRequestsPage({ params }: { params: Params })
   const { deptId } = await params;
   if (!tenant) notFound();
 
+  // DW-5d / DW-5e: the page follows the department's workspace (the shell's own `workspaceFor` name match).
+  const dept = await getDepartment(userId, tenant, deptId);
+  const view = dept ? requestsPageView(workspaceFor(activeCompany(me, tenant)?.vertical, dept.name).key) : "other";
+
+  if (view === "creatives") {
+    // DW-5d, Incoming: the asset requests waiting on this department, open, oldest first (the server's order).
+    const incoming = await readRequests(userId, tenant, { box: "incoming", unitId: deptId }, "open", { kind: "assets" });
+    if (incoming.kind === "forbidden") return <ReadRefusal subject="this department's incoming requests" kind="forbidden" />;
+    if (incoming.kind === "unavailable") return <ReadRefusal subject="This department's incoming requests" kind="unavailable" reason={incoming.reason} />;
+    return (
+      <Card title="Incoming requests" hint="A request is a task on this department's board. Open it to see the brief, and deliver it from its page.">
+        {incoming.data.length === 0
+          ? <p className="req-empty">No requests are waiting for this department.</p>
+          : <IncomingRequestsTable rows={incoming.data} />}
+      </Card>
+    );
+  }
+
   // AGN-3: the queue is this tab's subject. A denied reader used to get the teach-state ("no
   // requests yet"), which is the one reading of an empty queue that was never true for them. An
   // ALLOWED-but-empty queue still shows the teach-state, which is MI-05's actual acceptance criterion.
@@ -41,11 +67,19 @@ export default async function ChangeRequestsPage({ params }: { params: Params })
   const rows = rowsResult.data;
   const canTriage = can(me, "pm.manage", tenant);
 
+  // DW-5e: a change request that came from a request between departments says where from. A UI-side join on the work item's
+  // id; if that read fails the column says so, and the queue still renders.
+  let origins: ChangeRequestOrigins | undefined;
+  if (view === "web-dev") {
+    const eng = await readRequests(userId, tenant, { box: "incoming", unitId: deptId }, "all", { kind: "engineering" });
+    origins = eng.kind === "ok" ? { state: "ok", byChangeRequest: originsByChangeRequest(eng.data) } : { state: "unavailable" };
+  }
+
   const actions = {
     getDetail: getChangeRequestDetailAction.bind(null, tenant),
     triage: triageChangeRequestAction.bind(null, tenant, deptId),
     listSignedContracts: listSignedContractsAction,
   };
 
-  return <ChangeRequestsPanel rows={rows} canTriage={canTriage} actions={actions} />;
+  return <ChangeRequestsPanel rows={rows} canTriage={canTriage} actions={actions} origins={origins} />;
 }

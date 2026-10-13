@@ -594,3 +594,50 @@ export function detailOf(body: unknown): Record<string, unknown> | undefined {
 
 /** What every request write returns: a value, never a thrown refusal, so the UI can say what happened. */
 export type RequestResult<T = object> = ({ ok: true } & T) | { ok: false; error: string; reason?: string; field?: string };
+
+// ── DW-5d / DW-5e: the receiving department's lists ──────────────────────────────────────────────
+
+/** Which Requests page a department gets: Creatives' incoming asset requests (DW-5d), Web Dev's change-request triage
+ *  (MI-05, with DW-5e's origin), or today's page for everyone else. Decided by the workspace KEY, the shell's own match. */
+export type RequestsPageView = "creatives" | "web-dev" | "other";
+export function requestsPageView(workspaceKey: string): RequestsPageView {
+  return workspaceKey === "creatives" ? "creatives" : workspaceKey === "web-dev" ? "web-dev" : "other";
+}
+
+/** The delivered ones only, newest delivery first (the server's `closed` also carries declined and cancelled). */
+export function deliveredOnly(rows: readonly RequestRow[]): { delivered: RequestRow[]; otherClosed: number } {
+  const delivered = rows.filter((r) => r.status === "delivered");
+  const time = (r: RequestRow) => {
+    const t = Date.parse(r.closedAt ?? r.createdAt ?? "");
+    return Number.isNaN(t) ? 0 : t;
+  };
+  delivered.sort((a, b) => time(b) - time(a));
+  return { delivered, otherClosed: rows.length - delivered.length };
+}
+
+/** "Today", "1 day", "5 days" since the request was made; a quiet dash when the date is unknown. */
+export function ageText(createdAt: string | null, now: Date = new Date()): string {
+  const t = createdAt ? Date.parse(createdAt) : NaN;
+  if (Number.isNaN(t)) return "—";
+  const days = Math.max(0, Math.floor((now.getTime() - t) / 86_400_000));
+  return days === 0 ? "Today" : days === 1 ? "1 day" : `${days} days`;
+}
+
+/** A needed-by date strictly before today (the start of `now`'s day). */
+export function isNeededByOverdue(neededBy: string | null, now: Date = new Date()): boolean {
+  const t = neededBy ? Date.parse(neededBy) : NaN;
+  if (Number.isNaN(t)) return false;
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  return t < startOfToday;
+}
+
+/** Where an engineering request came from, keyed by the change request id its work item is (DW-5e's UI-side join). */
+export interface RequestOrigin { requestId: string; from: string; person: string }
+export function originsByChangeRequest(rows: readonly RequestRow[]): Record<string, RequestOrigin> {
+  const out: Record<string, RequestOrigin> = {};
+  for (const r of rows) {
+    if (r.work.state !== "live" || r.work.work.type !== "change_request") continue;
+    out[r.work.work.id] = { requestId: r.id, from: unitText(r.fromUnit), person: r.requestedBy.name };
+  }
+  return out;
+}

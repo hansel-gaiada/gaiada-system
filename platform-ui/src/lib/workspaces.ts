@@ -473,9 +473,8 @@ const CREATIVES: Workspace = {
     {
       key: "requests", label: "Requests", icon: "bell",
       tabs: [
-        // Incoming and Delivered are DW-5d's: only Sent is built, so only it is offered for now.
-        { key: "incoming", label: "Incoming", href: deptPath("requests"), icon: "bell", ticket: "DW-5d", blurb: "Asset requests from every department." },
-        { key: "delivered", label: "Delivered", href: deptPath("requests/delivered"), icon: "check", ticket: "DW-5d" },
+        { key: "incoming", label: "Incoming", href: deptPath("requests"), icon: "bell", blurb: "Asset requests from every department." },
+        { key: "delivered", label: "Delivered", href: deptPath("requests/delivered"), icon: "check" },
         SENT_REQUESTS,
       ],
     },
