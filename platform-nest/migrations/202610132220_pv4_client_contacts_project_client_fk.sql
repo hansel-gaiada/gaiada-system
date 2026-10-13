@@ -1,4 +1,4 @@
--- 202610132210_pv4_client_contacts_project_client_fk.sql — PV4-13: a client contact's project belongs to the contact's client.
+-- 202610132220_pv4_client_contacts_project_client_fk.sql — PV4-13: a client contact's project belongs to the contact's client.
 -- Follow-up to the portal scope-per-client fix (4ea548d0) and owner ruling PV-D36 (2026-10-13, the portal People list).
 --
 -- THE GAP

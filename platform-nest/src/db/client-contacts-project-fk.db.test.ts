@@ -1,4 +1,4 @@
-// PV4-13 — migration 202610132210: client_contacts.project_id must name a project of the contact's OWN client.
+// PV4-13 — migration 202610132220: client_contacts.project_id must name a project of the contact's OWN client.
 // Real Postgres (skips silently without DATABASE_URL_TEST; runs on the Linux gate).
 //
 // Before this, project_id was a plain FK to projects(id): a contact row could point at a project of ANOTHER client of
@@ -21,7 +21,7 @@ import { createCompany, createUser, createClient, createProject } from "../testi
 
 const NAME = "fk_client_contacts_project_client_tenant";
 const MIGRATION_SQL = readFileSync(
-  join(__dirname, "..", "..", "migrations", "202610132210_pv4_client_contacts_project_client_fk.sql"),
+  join(__dirname, "..", "..", "migrations", "202610132220_pv4_client_contacts_project_client_fk.sql"),
   "utf8",
 );
 

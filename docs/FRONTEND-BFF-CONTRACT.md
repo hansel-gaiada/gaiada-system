@@ -1735,7 +1735,7 @@ each (client-wide `signer` on A, `viewer` limited to one project on B). `PortalS
 - **Shared test fixture.** `platform-nest/src/testing/portal-fixtures.ts` → `createMultiClientContact`
   builds exactly that contact (A client-wide signer; B viewer on B1, with B2 and a General thread). Drive
   any new portal read or signing route with it; `portal-scope-per-client.db.test.ts` is the reference.
-- **Contact rows name a project of their own client (PV4-13, migration `202610132210`).**
+- **Contact rows name a project of their own client (PV4-13, migration `202610132220`).**
   `client_contacts (project_id, client_id, tenant_id)` has a composite FK to `projects (id, client_id,
   tenant_id)` (`fk_client_contacts_project_client_tenant`, the shape of PV4-01's thread FK). A contact
   row naming another client's project is refused with `23503`; a NULL `project_id` (client-wide) skips it.
