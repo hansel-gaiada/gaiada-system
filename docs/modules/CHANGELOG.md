@@ -11,6 +11,17 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.126.0` - DW-4d: a department head's Team appraisals (2026-10-13) - PROTOTYPED
+
+Contract: `docs/FRONTEND-BFF-CONTRACT.md` §39. Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.3 and §5.6.
+- **The gap.** `GET /api/:t/appraisals` showed a head only the appraisals they manage personally (a division lead's reports were invisible to the department head) and refused a caller whose only head role is `org_unit_lead` (the bulk Cerbos check had no unit to match), while the Team tab admitted them.
+- **The head's list.** For a caller with an `org_unit_lead` grant and no broad tier: the appraisals of every subject whose primary unit today is in their led scope (`loadLedUnitScope`, the scope that narrows report reads since TR-25), plus every row they manage, in one read (no duplicates, `created_at` order kept). Cerbos is asked once with the ancestors of one led unit. An empty scope falls through to the old branches, never "everything". `cycleId` and `subjectId` only narrow. Broad, manager-only and member lists, `/appraisals/mine`, the single read and every write are unchanged; reading never grants a write (a head's score PATCH stays 403).
+- **Tests** (`appraisals.controller.db.test.ts`, live Postgres + Cerbos): an `org_unit_lead`-only head of `d-web` sees exactly `d-web` and its division `dv-fe`; a head who is also a manager gets unit rows plus a managed `d-seo` row once; an out-of-scope `subjectId` returns nothing; the broad, manager-only and member lists are unchanged.
+
+### platform-ui `0.134.0` - DW-4d: the Team appraisals console opens for a department head (2026-10-13) - PROTOTYPED
+
+- `/appraisals` opens for a head through `leadsAnyUnitWith(me, "appraisal.read", tenant)` as well as the company-wide gates. Scoring controls keep their own gates.
+
 ### platform-nest `0.125.0` - DW-6f: pull requests and CI status on PM tasks (2026-10-13) - PROTOTYPED
 
 - **What.** BFF contract §34. A pull request appears on the PM task its work is for, with its CI status. Code is written outside the ERP, and its result comes back to the task (plan §14.1, launch and return).
