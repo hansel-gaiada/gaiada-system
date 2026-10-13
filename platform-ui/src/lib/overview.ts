@@ -166,3 +166,13 @@ export function resolveHomeRoute(input: { shell: ShellLayout; home: HomeArea; te
   const href = hrefFor(workspace.overviewHref, { deptId, companyId: input.tenantId });
   return href && href !== "/" ? { kind: "redirect", href } : { kind: "company" };
 }
+
+/** DW-3a2: the layout's own answer to `/`. The page's `redirect()` sits under `loading.tsx`, so on a document
+ *  request Next has already streamed the shell and emits a meta refresh instead of a 307. The layout is outside
+ *  that boundary, so it redirects there: only for the pilot, on exactly `/` (the proxy's pathname header, no
+ *  query), when `resolveHomeRoute` says redirect. Anything else returns null and the page decides as before. */
+export function layoutHomeRedirect(input: { pathname: string | null; shell: ShellLayout; home: HomeArea; tenantId: string | null }): string | null {
+  if (input.pathname !== "/") return null;
+  const route = resolveHomeRoute({ shell: input.shell, home: input.home, tenantId: input.tenantId });
+  return route.kind === "redirect" ? route.href : null;
+}

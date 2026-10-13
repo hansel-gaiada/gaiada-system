@@ -74,8 +74,7 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
   test("home is the Office of the GM; the switcher lists their workspace first, then the departments", async ({ page, context }) => {
     await signIn(page, context, "superadmin");
     await page.goto("/");
-    // `/` sits under `(app)/loading.tsx`, so Next streams the home redirect and the browser reloads at the
-    // Overview after `/` has loaded. Wait for that reload, or the switcher is opened on a page about to go.
+    // The layout answers `/` with a real redirect (DW-3a2); wait for the Overview before opening the switcher.
     await expect(page).toHaveURL(/\/departments\/dept-5$/);
 
     await expect(menu(page, "Office of the GM")).toBeVisible();
@@ -298,6 +297,23 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
     await expect(page.getByRole("menu").getByRole("menuitem").first()).toHaveText("Project");
   });
 
+  test("`/` is a real redirect to the home workspace's Overview, not a streamed 200 (DW-3a2)", async ({ page, context }) => {
+    await signIn(page, context, "superadmin");
+    // page.request shares the context's cookies (session, tenant, pilot) and is told NOT to follow redirects.
+    const res = await page.request.get("/", { maxRedirects: 0 });
+    expect(res.status()).toBe(307);
+    expect(res.headers()["location"] ?? "").toMatch(/\/departments\/dept-5$/);
+    // A client cannot steer the layout with its own pathname header.
+    const spoofed = await page.request.get("/projects", { maxRedirects: 0, headers: { "x-gaiada-pathname": "/" } });
+    expect(spoofed.status()).toBe(200);
+  });
+
+  test("`/` is a plain 200 for a classic user, even one whose home is a workspace (DW-3a2)", async ({ page, context }) => {
+    await signIn(page, context, "superadmin", { pilot: false });
+    const res = await page.request.get("/", { maxRedirects: 0 });
+    expect(res.status()).toBe(200);
+  });
+
   test("classic is untouched without the pilot cookie: classic sidebar, floating assistant button, and a way into the new layout", async ({ page, context }) => {
     await signIn(page, context, "superadmin", { pilot: false });
     await page.goto("/");
@@ -339,6 +355,12 @@ test.describe("manager (manager@gaiada.com)", () => {
 // member: no placement, no GM access, so no workspace of their own. Home is the Company area.
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
 test.describe("member (gede@gaiada.com)", () => {
+  test("`/` is a plain 200 for a member whose home is Company (DW-3a2)", async ({ page, context }) => {
+    await signIn(page, context, "member");
+    const res = await page.request.get("/", { maxRedirects: 0 });
+    expect(res.status()).toBe(200);
+  });
+
   test("with no workspace of their own the switcher lists only departments, home is Company, and Admin is absent", async ({ page, context }) => {
     await signIn(page, context, "member");
     await page.goto("/");

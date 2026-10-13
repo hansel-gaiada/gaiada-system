@@ -3,6 +3,7 @@ import { sanitizeReturnTo } from "@/lib/returnTo";
 import { peekSessionExpiry, needsRefresh } from "@/lib/session-expiry";
 import { readHostCookie, HOST_COOKIES } from "@/lib/cookieNames";
 import { allowedOrigins, isOriginAllowed, requestOwnOrigin, ORIGIN_CHECK_EXEMPT_PATHS } from "@/lib/originCheck";
+import { PATHNAME_HEADER } from "@/lib/pathnameHeader";
 import { replayCspFor } from "@/lib/replaysCsp";
 
 /** CSRF gate (B0): refuse a state-changing request whose Origin / Sec-Fetch-Site says it came from a
@@ -105,7 +106,11 @@ export function proxy(req: NextRequest) {
   // M5-V6-c: the session-replay player page (and only it) carries its own Content-Security-Policy: images and media only from the
   // site's own domains. The domains arrive signed in the URL; this only verifies them (no network). See lib/replaysCsp.ts. It
   // replaces next.config's `frame-ancestors 'self'` on this one route, so the policy repeats it. Never throws; non-player paths get null.
-  const res = NextResponse.next();
+  // DW-3a2: hand the pathname to the server as a REQUEST header so `(app)/layout.tsx` (outside the loading boundary)
+  // can answer `/` with a real 307. Always SET, so a value the client sent can never survive.
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set(PATHNAME_HEADER, pathname);
+  const res = NextResponse.next({ request: { headers: requestHeaders } });
   if (req.method === "GET") {
     const csp = replayCspFor(pathname, req.nextUrl.searchParams);
     if (csp) res.headers.set("Content-Security-Policy", csp);

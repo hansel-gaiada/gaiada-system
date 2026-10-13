@@ -11,6 +11,7 @@ import path from "node:path";
 import { NextRequest } from "next/server";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { proxy, config } from "./proxy";
+import { PATHNAME_HEADER } from "./lib/pathnameHeader";
 import { sealSession, encodeSession } from "./lib/session";
 import { cookieName, HOST_COOKIES } from "./lib/cookieNames";
 
@@ -230,5 +231,27 @@ describe("proxy matcher", () => {
       const p = `/${seg.replace(/^\[+\.{0,3}|\]+$/g, "") || "x"}/anything`;
       expect(matches(p), p).toBe(true);
     }
+  });
+});
+
+describe("proxy — the pathname request header (DW-3a2)", () => {
+  // NextResponse.next({ request: { headers } }) reports the forwarded request headers on the response as
+  // `x-middleware-request-<name>` (and lists them in `x-middleware-override-headers`).
+  const forwarded = (res: Response) => res.headers.get(`x-middleware-request-${PATHNAME_HEADER}`);
+
+  it("hands the request's pathname to the server, without the query", () => {
+    const res = proxy(req("/", { cookie: devCookie() }));
+    expect(forwarded(res)).toBe("/");
+    expect(forwarded(proxy(req("/projects?x=1", { cookie: devCookie() })))).toBe("/projects");
+  });
+
+  it("overwrites a client-sent value, so it can never be spoofed", () => {
+    const res = proxy(req("/projects", { cookie: devCookie(), headers: { [PATHNAME_HEADER]: "/" } }));
+    expect(forwarded(res)).toBe("/projects");
+  });
+
+  it("keeps the other request headers", () => {
+    const res = proxy(req("/", { cookie: devCookie(), headers: { "x-keep": "yes" } }));
+    expect(res.headers.get("x-middleware-request-x-keep")).toBe("yes");
   });
 });

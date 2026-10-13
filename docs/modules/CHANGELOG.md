@@ -11,6 +11,12 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.140.0` - DW-3a2: a pilot user's home is a real redirect (2026-10-13) - PROTOTYPED
+
+- **What.** `/` for a pilot user whose home is a workspace is now a real HTTP 307 to that Overview. Before, `(app)/page.tsx` threw `redirect()` under `(app)/loading.tsx`, so Next had streamed the shell and `/`'s skeleton and emitted `<meta id="__next-page-redirect">`; while that tag exists the client router turns every navigation into a full page load. The result was a 200, a skeleton and a reload on every visit.
+- **How.** `proxy.ts` sets the request header `x-gaiada-pathname` (always overwriting a client-sent value; name in `lib/pathnameHeader.ts`). `(app)/layout.tsx`, which is outside the loading boundary and already reads `myWorkspaces`, calls `redirect()` through the pure `layoutHomeRedirect` (`lib/overview.ts`, wraps `resolveHomeRoute`) only on exactly `/`. If the shell model fails to build, no redirect. The page keeps its own redirect for a client-side navigation to `/`, which arrives in the RSC payload and leaves no meta tag.
+- **Tests.** `overview.test.ts` (helper), `proxy.test.ts` (header set, overwritten, other headers kept), `e2e/workspace-shell.spec.ts` (307 for the superadmin with `maxRedirects: 0`; 200 for a Company-home member and a classic user).
+
 ### platform-nest `0.127.0` - DW-6h: asset versions and review rounds, with the `creative_asset` Cerbos kind (2026-10-13) - PROTOTYPED
 
 - **What.** BFF contract §35 and PERMISSION-CONTRACT §37.

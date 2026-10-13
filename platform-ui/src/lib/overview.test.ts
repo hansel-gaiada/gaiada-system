@@ -4,7 +4,7 @@ import type { HomeArea } from "./workspaceAccess";
 import { resolveMyWorkspaces } from "./workspaceAccess";
 import {
   COMPANY_SUBJECT, DEFAULT_OVERVIEW_PERIOD, OVERVIEW_PERIOD_OPTIONS, dateLineFor, greetingFor, parseOverviewPeriod,
-  periodHref, resolveHomeRoute, selectBands, selectQuickActions, subjectOfRef, workspaceRefForPage,
+  layoutHomeRedirect, periodHref, resolveHomeRoute, selectBands, selectQuickActions, subjectOfRef, workspaceRefForPage,
 } from "./overview";
 import { HOTEL, agencyTree, me, member } from "./workspaceFixtures";
 
@@ -260,5 +260,19 @@ describe("the header's words", () => {
   it("writes the date as weekday, day and month, with no comma", () => {
     expect(dateLineFor(new Date(2026, 9, 13, 9, 0))).toBe("Tuesday 13 October");
     expect(dateLineFor(new Date(2026, 0, 1, 9, 0))).toBe("Thursday 1 January");
+  });
+});
+
+describe("layoutHomeRedirect (the layout's real 307 for `/`)", () => {
+  const unplaced = resolveMyWorkspaces({ me: employee, tenantId: "co-a", root: agencyTree() });
+  it("redirects a pilot user on `/` whose home is a workspace", () => {
+    expect(layoutHomeRedirect({ pathname: "/", shell: "workspaces", home: placed.home, tenantId: "co-a" })).toBe("/departments/d-web");
+  });
+  it("does not redirect a Company-home person, a classic user, another path, a missing header or `/` with a query", () => {
+    expect(layoutHomeRedirect({ pathname: "/", shell: "workspaces", home: unplaced.home, tenantId: "co-a" })).toBeNull();
+    expect(layoutHomeRedirect({ pathname: "/", shell: "classic", home: placed.home, tenantId: "co-a" })).toBeNull();
+    expect(layoutHomeRedirect({ pathname: "/projects", shell: "workspaces", home: placed.home, tenantId: "co-a" })).toBeNull();
+    expect(layoutHomeRedirect({ pathname: null, shell: "workspaces", home: placed.home, tenantId: "co-a" })).toBeNull();
+    expect(layoutHomeRedirect({ pathname: "/?scope=co-a", shell: "workspaces", home: placed.home, tenantId: "co-a" })).toBeNull();
   });
 });

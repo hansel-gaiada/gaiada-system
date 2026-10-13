@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
@@ -7,6 +8,8 @@ import { listDepartmentBriefs, type DeptBrief } from "@/lib/departments";
 import { Shell } from "@/components/shell/Shell";
 import { isClientOnly } from "@/lib/rbac";
 import { myWorkspaces } from "@/lib/workspaces-data";
+import { layoutHomeRedirect } from "@/lib/overview";
+import { PATHNAME_HEADER } from "@/lib/pathnameHeader";
 import { buildShellModel, type ShellModel } from "@/lib/shellModel";
 
 // `drawer` is the parallel slot the intercepted task route renders into (see @drawer/). It sits
@@ -37,13 +40,21 @@ export default async function AppLayout({ children, drawer }: { children: React.
   // DW-2a: only the pilot switch reads the person's workspaces, so the classic shell makes no extra call.
   // A model that cannot be built leaves the classic sidebar, never a broken page.
   let workspaceModel: ShellModel | null = null;
+  let homeHref: string | null = null;
   if (prefs.shell === "workspaces") {
     try {
-      workspaceModel = buildShellModel({ me, tenantId, workspaces: await myWorkspaces(me, tenantId) });
+      const workspaces = await myWorkspaces(me, tenantId);
+      workspaceModel = buildShellModel({ me, tenantId, workspaces });
+      // DW-3a2: `/` for a pilot user whose home is a workspace is answered HERE, with a real 307. The page's own
+      // redirect would stream (it sits under loading.tsx) and leave a meta refresh that breaks client navigation.
+      homeHref = layoutHomeRedirect({ pathname: (await headers()).get(PATHNAME_HEADER), shell: prefs.shell, home: workspaces.home, tenantId });
     } catch {
       workspaceModel = null;
+      homeHref = null;
     }
   }
+  // Outside the try: redirect() works by throwing.
+  if (homeHref) redirect(homeHref);
   return (
     <>
       <Shell me={me} tenantId={tenantId} moduleLabel="My Workspace" prefs={prefs} departments={departments} workspaceModel={workspaceModel}>

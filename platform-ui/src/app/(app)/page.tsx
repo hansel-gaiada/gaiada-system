@@ -62,6 +62,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
   // workspace's Overview; one whose home is the Company area stays for the company-level frame (DW-3i
   // fills it). Classic users, and a person with no active company, keep today's page below.
   const prefs = await getPrefs();
+  // Two redirects cover `/`: the layout's (a real 307 on a document request) and this one (a client-side
+  // navigation to `/` does not re-render the layout, and there the redirect rides the RSC payload, no meta tag).
   // The workspaces are read only on the pilot, so classic users make no extra call.
   if (tenantId && prefs.shell === "workspaces") {
     const route = resolveHomeRoute({ shell: prefs.shell, home: (await myWorkspaces(me, tenantId)).home, tenantId });
