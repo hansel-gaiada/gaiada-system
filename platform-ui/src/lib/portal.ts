@@ -681,7 +681,7 @@ export function changeRequestFormProps(
 // ── PV4-08: Conversation and meeting notes (§29, §29c) ─────────────────────────────────────────────
 //
 // Mirrors `portal-conversation.controller.ts` and the portal meetings routes. A message body is PLAIN TEXT
-// (design decision 7): the UI renders it as text and only makes URLs clickable (`linkifyText`).
+// (design decision 7): the UI renders it as text and only makes URLs clickable (`linkify`, lib/linkify.ts).
 
 export interface PortalThread {
   id: string;

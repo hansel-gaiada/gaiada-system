@@ -3,7 +3,7 @@
 // all import it (same split as lib/webdevChangeRequests.ts).
 //
 // Backend contract: docs/FRONTEND-BFF-CONTRACT.md §29 / §29b. Rules this file encodes:
-//   - bodies are PLAIN TEXT, 1..10,000 characters (design decision 7). `splitLinks` is the only "rich" step and it
+//   - bodies are PLAIN TEXT, 1..10,000 characters (design decision 7). `linkify` (lib/linkify.ts) is the only "rich" step and it
 //     returns data, never markup: the renderer turns each part into a React text node or an <a>.
 //   - at most 5 attachments and 10 MB in total per message (§29, lead decision).
 //   - messages are PERMANENT (PV-D34): no edit, no retract, and so no `edited`, `retracted` or `editableUntil` field.
