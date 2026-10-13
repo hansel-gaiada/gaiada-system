@@ -1,7 +1,7 @@
 // PV4-03 — the parts of client Conversation that the STAFF and the PORTAL controllers share: input
 // validation, the lazy client-wide thread, message insert, inline attachments, read markers and the
 // message read shape. Messages are permanent (PV-D34): there is no edit and no retract, and a
-// database trigger (migration 202610132100_pv4_conversation_messages_permanent.sql) refuses UPDATE and DELETE.
+// database trigger (migration 202610132130_pv4_conversation_messages_permanent.sql) refuses UPDATE and DELETE.
 // Plan: docs/plans/2026-10-12-pv4-conversation-tickets.md (PV4-03; design decisions 3, 4, 7; PV4-Q1; PV-D34).
 //
 // ── WHAT THIS FILE NEVER DOES ─────────────────────────────────────────────────────────────────────

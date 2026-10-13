@@ -43,7 +43,7 @@ describe("PV4-11: conversation messages are permanent (static guards)", () => {
   });
 
   it("the migration documents the errcode and the escape hatch, and asserts the triggers", () => {
-    const sql = readFileSync(join(MIGRATIONS, "202610132100_pv4_conversation_messages_permanent.sql"), "utf8");
+    const sql = readFileSync(join(MIGRATIONS, "202610132130_pv4_conversation_messages_permanent.sql"), "utf8");
     expect(sql).toContain("ERRCODE = 'PD034'");
     expect(sql).toContain("current_setting('app.conversation_purge', true) = 'on'");
     expect(sql).toMatch(/NO APPLICATION CODE MAY SET IT/);

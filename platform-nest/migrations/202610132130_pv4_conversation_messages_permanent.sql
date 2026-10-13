@@ -1,4 +1,4 @@
--- 202610132100_pv4_conversation_messages_permanent.sql — PV-4 / PV4-11: a conversation message is permanent.
+-- 202610132130_pv4_conversation_messages_permanent.sql — PV-4 / PV4-11: a conversation message is permanent.
 -- Ruling: PV-D34 (owner, 2026-10-13): "conversation messages can never be edited or retracted. A message is permanent
 -- from the moment it is posted; a correction is a new message. Replaces the built 15-minute window."
 -- Plan: docs/plans/2026-10-12-pv4-conversation-tickets.md (PV4-11). Table: 202610122330_pv4_conversation_data_model.sql.
@@ -64,7 +64,7 @@ BEGIN
   END IF;
   RAISE EXCEPTION 'conversation messages are permanent (PV-D34)'
     USING ERRCODE = 'PD034',
-          HINT = 'A correction is a new message. Operator erasure of a row: SET LOCAL app.conversation_purge = ''on'' in the deleting transaction (see migration 202610132100).';
+          HINT = 'A correction is a new message. Operator erasure of a row: SET LOCAL app.conversation_purge = ''on'' in the deleting transaction (see migration 202610132130).';
 END;
 $$;
 

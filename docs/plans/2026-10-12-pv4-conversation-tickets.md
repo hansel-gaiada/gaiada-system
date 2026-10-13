@@ -565,7 +565,7 @@ PV4-03, PV4-08 and PV4-09 built (the lead's default for PV4-Q2, now ruled).
   `conversation.message.edited` event are removed. The `conversation` topic, `posted` and `opened` stay.
 - **Payload.** `editableUntil`, `edited`, `editedAt` and `retracted` are removed from every message payload;
   `body` is always a string. Nothing else in the response moved.
-- **Database guard (lead decision).** Migration `202610132100_pv4_conversation_messages_permanent.sql` adds
+- **Database guard (lead decision).** Migration `202610132130_pv4_conversation_messages_permanent.sql` adds
   two row triggers on `conversation_messages`: `BEFORE UPDATE` always raises, `BEFORE DELETE` raises unless the
   transaction ran `SET LOCAL app.conversation_purge = 'on'` (an operator hatch for erasure and test teardown; no
   application code may set it, and a static test fails the build if one does). SQLSTATE `PD034`, message
