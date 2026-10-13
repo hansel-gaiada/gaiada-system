@@ -11,6 +11,17 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.111.3` - M6-P4g2: archiving a WebDesk site revokes its repo's deploy grant (WSK-D82) (2026-10-13) - PROTOTYPED
+
+- **The change:** after an approved `site.archive` executes, the executor (`webdesk-approved-command.ts`) calls the new `revokeDeployAfterArchive()`.
+  - It finds every provisioned site whose `webdesk_tenant_slug` is the archived site's WebDesk tenant.
+  - It runs `revokeDeployForSite` on each, as the decider, with a reason naming the site and the approval.
+- **It never fails or undoes the archive.** The archive is irreversible in WebDesk.
+  - The result's new optional `deployRevoke` lists each repo as `revoked`, `not_granted`, `partial` or `failed`, with a typed error: a refusal's row token, `forbidden`, `deploy_revoke_failed` or `lookup_failed`.
+  - A failure is logged for the operator route.
+  - Before O-3 every revoke is expected to answer `not_granted` or `github_permission_missing`.
+- **Tests:** `webdesk-archive-revoke.unit.test.ts`, 7 tests.
+
 ### infra `0.13.15` - M6-P4p: the hub can reach the agent runner (2026-10-13) - PROTOTYPED
 
 - **The bug:** found live by the M6 P4 gate after 369. Six pinned gate sites reached `code.scaffold` and stopped: the hub answered "agent runner not configured (AGENT_RUNNER_URL empty)" (n8n executions 2753-2759).
