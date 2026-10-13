@@ -11,6 +11,40 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.112.0` - M6-P6g: the delivery binding in the registry (2026-10-13) - PROTOTYPED
+
+- **What this adds:** a site row can be bound to WHERE it is delivered and HOW we reach it, and the console can tell "awaiting deploy credential" from "ready". Nothing is deployed; no host, user, path or secret is stored.
+  - **Plan:** `docs/plans/2026-10-11-webdesk-m6-plan.md` §6.0 and the M6-P6g row (WSK-D79: targets are per site; HSR-4 and HSR-8 for new rows).
+- **Migrations (both additive; no DML):**
+  - `202610132100_search_properties_control_panel_hpanel.sql` (HSR-4): adds `hpanel` to `search_properties.control_panel`'s CHECK.
+    - **Not typed from memory.** The new list is read from the LIVE definition (`pg_get_constraintdef`) and `hpanel` is unioned in (the VLT-1 idiom). The only migration that ever touched that constraint is `202608300818` (the five values `cpanel plesk directadmin none other`); the file asserts every earlier value survived and that exactly one such CHECK exists, and a re-run is a no-op.
+    - **NULL stays valid**, explicitly (`control_panel IS NULL OR ...`): NULL means "not surveyed".
+  - `202610132110_webdev_sites_promoted_from.sql`: `webdev_sites.promoted_from_site_id`, a composite same-tenant FK to the staging row, a CHECK (a row that names a staging row is a production row and not its own origin) and a partial unique index.
+    - **Why:** the existing one-production-per-project index is partial on `project_id IS NOT NULL`, so a project-less provisioned site could get two production rows. The new index makes "once only" true for every site.
+- **`POST sites/:id/delivery-binding`** (authz `webdev_site · update`, no new action):
+  - **Body:** EXACTLY `{hostKind, hostRef, access, vaultRef}`. Any other key is a 400 `binding_body_invalid`, so a host, user, path or secret is refused rather than ignored.
+  - **Values:**
+    - `hostKind` is `shared-hosting` or `our-box` (`delphi`/`helios` stay per-site targets).
+    - `hostRef` is an opaque label (`^[a-z0-9][a-z0-9_-]{0,62}$`: no dot, `@`, slash, colon or space).
+    - `access` is `ssh` (SFTP) or `ftp` (FTPS). No new `access` value was needed.
+  - **`vaultRef`:** read inside the same transaction under RLS with `tenant_id = $tenant`, so another tenant's record and an id that does not exist both answer `422 vault_ref_unknown` (no existence oracle). It must also be:
+    - not deleted, and `linked` (`vault_ref_not_linked`);
+    - the provider the access needs: `ssh` for `ssh`, `ftp` for `ftp` (`vault_ref_wrong_provider`);
+    - owned by the company or by this site's own client (`vault_ref_wrong_owner`).
+  - **Row and result:** a staging or production row only (`site_environment_not_deliverable` otherwise); the row is locked `FOR UPDATE`. A re-bind replaces the four facts. Emits `webdev.site.delivery_bound` (no pointer in the payload) and writes an `activities` row.
+- **`POST sites/:id/production`** (authz `webdev_site · create`): creates a provisioned site's production row from its staging row.
+  - **Body:** EXACTLY `{domain}`. The new row copies project, client, kind, repo, branch, adoption and contract version, and starts unbound.
+  - **Refusals (409):** `production_row_exists` (once only, also for a project-less site), `domain_taken` (names the domain; the staging row's own domain included), `not_a_provisioned_staging_row`. A `.invalid` or malformed domain is a 400 `production_domain_invalid`. The registry's unique domain index still holds.
+- **The console's delivery state:** `deliveryState` is `awaiting_deploy_credential` for a provisioned site until the binding is complete, then `ready`; null for a row that is not a provisioned site. `ready` needs a bindable host kind, a `host_ref`, a deploy transport and a vault record that still resolves, is linked and is the right provider, so a revoked record turns a once-ready site back into awaiting.
+  - **Where:** `GET console/portfolio` (each site, additive `deliveryState`), `GET console/sites` (each row, additive `delivery.environments`) and `GET provisioned-sites/:id` (additive `delivery`).
+  - **Not the deploy grant.** `deployGrant` (M6-P4g) is GitHub-side; this is host-side. They are read by different queries and shown side by side, and no combined "ready" exists.
+- **Tests:**
+  - `delivery-binding.unit.test.ts`: 18 cases (body, host label, vault rules, console word).
+  - `delivery-binding.db.test.ts`: the standing every-earlier-value CHECK test, a rebuild from an old-definition database, a later-added value surviving, a re-run no-op; bind, cross-tenant and unknown vault ref, nothing host-like stored, production-from-staging once only and the indexes bypassed, RLS, console states.
+  - `delivery-binding-http.test.ts`: `app.inject`, real Cerbos.
+  - **Not run locally** (no Docker, owner order; the shared checkout's installed dependencies are stale). The unit suite and `tsc` ran; the DB and HTTP suites are the server gate.
+- **Capability inventory:** regenerated (`UPDATE_INVENTORY=1`), the webdev driver count 31 to 32 for the new HTTP suite. `docs/MAP.md` regenerated (migration head).
+
 ### infra `0.13.15` - M6-P4p: the hub can reach the agent runner (2026-10-13) - PROTOTYPED
 
 - **The bug:** found live by the M6 P4 gate after 369. Six pinned gate sites reached `code.scaffold` and stopped: the hub answered "agent runner not configured (AGENT_RUNNER_URL empty)" (n8n executions 2753-2759).
