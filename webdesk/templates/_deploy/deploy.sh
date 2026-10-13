@@ -40,6 +40,8 @@ FTPS_CHECK_HOSTNAME="${DEPLOY_FTPS_CHECK_HOSTNAME:-yes}"
 TLS_PRIORITY="${DEPLOY_FTPS_TLS_PRIORITY:-NORMAL:-VERS-SSL3.0:-VERS-TLS1.0:-VERS-TLS1.1}"
 BASE="${DEPLOY_REMOTE_BASE:-}"
 DOCROOT="${DEPLOY_DOCROOT:-}"
+DOCROOT_PARENT="${DEPLOY_DOCROOT_PARENT:-}"   # optional: the directory that holds the docroot, when it is not BASE itself (M6-P6f, wp)
+CREATE_BASE="${DEPLOY_CREATE_BASE:-no}"         # yes: create BASE (its last component only) when it does not exist
 ARTIFACT="${DEPLOY_ARTIFACT_DIR:-}"
 MANIFEST="${DEPLOY_MANIFEST:-}"
 MANIFEST_SHA="${DEPLOY_MANIFEST_SHA256:-}"
@@ -79,6 +81,12 @@ esac
 BASE="${BASE%/}"
 [[ "$DOCROOT" =~ ^[A-Za-z0-9._-]+$ && "$DOCROOT" != "." && "$DOCROOT" != ".." && "$DOCROOT" != "releases" && "$DOCROOT" != .* ]] \
   || die 2 "DEPLOY_DOCROOT must be a plain directory name (not releases, not hidden)"
+if [ -n "$DOCROOT_PARENT" ]; then
+  [[ "$DOCROOT_PARENT" =~ ^[A-Za-z0-9._/~-]+$ && "$DOCROOT_PARENT" != "/" && "$DOCROOT_PARENT" != *..* ]] || die 2 "DEPLOY_DOCROOT_PARENT is unsafe"
+  DOCROOT_PARENT="${DOCROOT_PARENT%/}"
+  [ "$DOCROOT_PARENT" != "$BASE/releases" ] && [ "$DOCROOT_PARENT" != "$BASE/.deploy-lock" ] || die 2 "DEPLOY_DOCROOT_PARENT must not be the releases or lock directory"
+fi
+[[ "$CREATE_BASE" == yes || "$CREATE_BASE" == no ]] || die 2 "DEPLOY_CREATE_BASE must be yes or no"
 [[ "$KEEP" =~ ^[0-9]+$ && "$KEEP" -ge 2 ]] || die 2 "DEPLOY_KEEP must be a number >= 2 (the live release plus a rollback target)"
 [[ "$LOCK_STALE" =~ ^[0-9]+$ && "$LOCK_WAIT" =~ ^[0-9]+$ && "$STAMP_TIMEOUT" =~ ^[0-9]+$ && "$PARALLEL" =~ ^[1-9][0-9]?$ ]] \
   || die 2 "a numeric option is malformed"
@@ -122,7 +130,8 @@ chmod 700 "$TMP"
 RC="$TMP/lftp.rc"
 LOCK_DIR="$BASE/.deploy-lock"
 RELEASES="$BASE/releases"
-LIVE="$BASE/$DOCROOT"
+LIVE_PARENT="${DOCROOT_PARENT:-$BASE}"   # where the docroot lives: BASE itself, or (a subdirectory deploy) another directory of the same host
+LIVE="$LIVE_PARENT/$DOCROOT"
 LOCK_HELD=0
 TMP_REMOTE=""
 RUN_TAG="$(printf "%s" "${GITHUB_RUN_ID:-local}" | tr -cd "A-Za-z0-9")-$$"
@@ -282,6 +291,11 @@ connect_check() {
     show_err 6
     die 2 "the host's identity does not match the pin (host key or certificate); nothing was sent"
   fi
+  # A subdirectory deploy (wp) owns a directory of its own beside the docroot's parent; the first run creates it, and only it.
+  if [ "$CREATE_BASE" = yes ] && grep -qiE 'no such file|not found|does not exist|550' "$TMP/err" "$TMP/out"; then
+    log "the base directory $BASE does not exist; creating it (DEPLOY_CREATE_BASE=yes, its last component only)"
+    if rl "mkdir $BASE" && rl "cls -1 $BASE/"; then return 0; fi
+  fi
   show_err 6
   die 7 "could not log in or list the base directory $BASE (the host's message is above)"
 }
@@ -325,7 +339,7 @@ lock_acquire() {
 swap_in() {
   local target="$1" park="$2" src="$RELEASES/$1" win_ms
   if [ -n "$TEST_FAIL_ACTIVATION" ] && [ "$MODE" = deploy ] && [ "$target" = "${RELEASE_ID:-}" ]; then src="$RELEASES/.does-not-exist"; fi
-  if ! r_has "$BASE" "$DOCROOT/"; then
+  if ! r_has "$LIVE_PARENT" "$DOCROOT/"; then
     rl "mv $src $LIVE" || return 1          # nothing is being served yet, so there is no window to lose
     WINDOW_MS=0
     return 0
@@ -339,7 +353,7 @@ mv $LIVE $RELEASES/$park && (mv $src $LIVE || mv $RELEASES/$park $LIVE)
     || {
       show_err 4
       # The one state that must never persist: no docroot. If the session died between the two renames, undo the first now.
-      if ! r_has "$BASE" "$DOCROOT/" && r_has "$RELEASES" "$park/"; then
+      if ! r_has "$LIVE_PARENT" "$DOCROOT/" && r_has "$RELEASES" "$park/"; then
         log "docroot is MISSING after a failed swap; restoring $park"
         rl "mv $RELEASES/$park $LIVE" || log "CRITICAL: could not restore the docroot; run: mv $RELEASES/$park $LIVE"
       fi
@@ -371,7 +385,7 @@ log "mode=$MODE transport=$TRANSPORT host=$HOST user=$USER_ base=$BASE docroot=$
 lock_acquire
 
 # A run killed between the two renames leaves no docroot. We hold the lock, so nobody is mid-swap: put the newest release back.
-if ! r_has "$BASE" "$DOCROOT/"; then
+if ! r_has "$LIVE_PARENT" "$DOCROOT/"; then
   newest="$(r_names "$RELEASES" | grep -v '^\.' | sed 's|/$||' | LC_ALL=C sort -r | head -1)"
   if [ -n "$newest" ]; then
     log "WARNING: the docroot is missing (an earlier run died between its two renames); restoring release $newest"
@@ -445,7 +459,7 @@ rl "mv $TMP_REMOTE $RELEASES/$RELEASE_ID" || classify_failure "could not finalis
 TMP_REMOTE=""
 
 live_id="$(read_live_id)"
-if r_has "$BASE" "$DOCROOT/"; then
+if r_has "$LIVE_PARENT" "$DOCROOT/"; then
   [ -n "$live_id" ] || live_id="0000-legacy-$(epoch)"
   if r_has "$RELEASES" "$live_id/"; then live_id="$live_id.dup$(epoch)"; fi
 else

@@ -19,6 +19,13 @@
 #   4b, 8b  Tailwind 4 really emitted utilities: a class used in a page (`.p-8`) is in the built CSS (a v4 build with a
 #        wrong PostCSS/CSS setup succeeds and silently emits NO utilities)
 #   10 npm audit --omit=dev is printed per project (informational, never fails the run)
+#   11 (M6-P6f) the deploy job's scripts: the secret-name fixture and the offline script tests (plan.sh, write-stamp.sh,
+#        deploy-from-secret.sh against a stub deploy.sh). Needs jq; the node image has none, so it is installed first.
+#   12 each template's .webdesk/deploy/ copy equals webdesk/templates/_deploy/ (sync-deploy-scripts.mjs --check)
+#   13 each site.yml keeps the credential shape (check-workflows.mjs); actionlint itself is run separately (see README)
+#   14 fullstack: WEBDESK_STATIC_EXPORT=1 makes apps/web write a static site (out/index.html, out/404.html)
+#   15 INFORMATIONAL: the same export of the SCAFFOLDED site (its item/listing pages are force-dynamic today, so it is expected to
+#        fail; the line says so, and says it again if that ever changes)
 set -uo pipefail
 
 SRC="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
@@ -76,10 +83,26 @@ if step "5a ai-agents: npm install (scaffolder deps)" "$WORK/repo/ai-agents" npm
   step "8  scaffolded site: next build" "$WORK/site/apps/web" npm run build
   step "8b scaffolded site: built CSS has the .p-8 utility (Tailwind 4)" "$WORK/site" css_has_utility apps/web p-8
   step "9  scaffolded site: vitest run (offline)" "$WORK/site/apps/web" npm test
+  # 15 (informational, never fails the run): can the scaffolded site be exported statically? Its collection pages say
+  # `export const dynamic = "force-dynamic"`, which `output: "export"` refuses.
+  if (cd "$WORK/site/apps/web" && WEBDESK_STATIC_EXPORT=1 npm run build) >"$WORK/export15.log" 2>&1 && [ -f "$WORK/site/apps/web/out/index.html" ]; then
+    echo "INFO  15 scaffolded site: the static export WORKS (out/index.html written)"
+  else
+    echo "INFO  15 scaffolded site: the static export FAILS, as expected while the composer emits force-dynamic pages: $(grep -m1 -iE 'force-dynamic|export|error' "$WORK/export15.log" | cut -c1-160)"
+  fi
   ( cd "$WORK/site" && echo "--- audit scaffolded site (omit dev)" && npm audit --omit=dev 2>&1 | tail -4 ) || true
 else
   FAILED=1
 fi
+
+# ---- the deploy job's scripts, copies and workflows (M6-P6f) --------------------------------------------------
+if ! command -v jq >/dev/null 2>&1; then
+  (apt-get update -qq && apt-get install -y -qq --no-install-recommends jq) >"$WORK/apt-jq.log" 2>&1 || { echo "FAIL  11 could not install jq"; tail -5 "$WORK/apt-jq.log"; FAILED=1; }
+fi
+step "11 deploy scripts: secret-name fixture + offline script tests" "$WORK/repo" bash -c 'bash webdesk/templates/_deploy/test-secret-name.sh | tail -1 && bash webdesk/templates/_deploy/test-scripts.sh | tail -3'
+step "12 the templates' .webdesk/deploy copies equal _deploy/" "$WORK/repo" node webdesk/templates/sync-deploy-scripts.mjs --check
+step "13 the three site.yml files keep the credential shape" "$WORK/repo" node webdesk/templates/check-workflows.mjs
+step "14 fullstack: WEBDESK_STATIC_EXPORT=1 writes a static apps/web/out" "$WORK/full" bash -c 'WEBDESK_STATIC_EXPORT=1 npm run build -w apps/web && test -f apps/web/out/index.html && test -f apps/web/out/404.html'
 
 if [ "$FAILED" -eq 0 ]; then echo "### build-templates PASS"; exit 0; fi
 echo "### build-templates FAIL"; exit 1

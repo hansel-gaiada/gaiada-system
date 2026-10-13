@@ -17,6 +17,7 @@ See `.env.example` for the names: `GAIADA_WEBDESK_BASE_URL`, `GAIADA_WEBDESK_TEN
 
 - No secrets, tokens or client names in the repo.
 - No content in the WordPress database; no Composer, no plugin dependencies.
-- No deploy target here: deployment is configuration (M6-P6), gated by `WEBDESK_DEPLOY_GRANT`.
+- No deploy target here: deployment is configuration (M6-P6f), gated by `WEBDESK_DEPLOY_GRANT` and this site's own per-site secret.
+  A deploy writes `wp-content/themes/gaiada-webdesk/` and nothing else (`.webdesk/deploy/`).
 - `docker-compose.yml` is LOCAL DEV ONLY.
 - Nothing builds or deploys without `CONTRACT.lock`.
