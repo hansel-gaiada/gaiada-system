@@ -223,7 +223,7 @@ test.describe("Tools & connections (superadmin, DW-6c)", () => {
     await expectSubsequence(connections.getByRole("heading", { level: 4 }), ["GitHub", "Google Drive", "Claude seats"]);
   });
 
-  test("a pin can be removed and put back, and each choice survives a reload", async ({ page, context }) => {
+  test("a pin can be removed and put back, each choice survives a reload, and the Overview's Today follows it", async ({ page, context }) => {
     await signInSuperadmin(page, context);
     await page.goto(WEB_DEV_CONNECTIONS);
     const tools = toolsCard(page);
@@ -239,6 +239,13 @@ test.describe("Tools & connections (superadmin, DW-6c)", () => {
     // The other five stay pinned.
     await expect(toolsCard(page).locator('button[aria-pressed="true"]')).toHaveCount(5);
 
+    // The Overview's Today block follows the pins: Figma is gone from it, GitHub is still there.
+    await page.goto("/departments/dept-1");
+    const today = page.getByRole("region", { name: "Today", exact: true });
+    await expect(today.getByRole("link", { name: /^GitHub/ })).toBeVisible();
+    await expect(today.getByRole("link", { name: /^Figma/ })).toHaveCount(0);
+
+    await page.goto(WEB_DEV_CONNECTIONS);
     const pin = toolsCard(page).getByRole("button", { name: "Pin Figma to the Overview" });
     await hydrated(pin);
     await pin.click();
@@ -247,6 +254,10 @@ test.describe("Tools & connections (superadmin, DW-6c)", () => {
     await page.reload();
     await expect(toolsCard(page).getByRole("button", { name: "Pin Figma to the Overview" })).toHaveAttribute("aria-pressed", "true");
     await expect(toolsCard(page).locator('button[aria-pressed="true"]')).toHaveCount(6);
+
+    // And Figma is back on the Overview.
+    await page.goto("/departments/dept-1");
+    await expect(page.getByRole("region", { name: "Today", exact: true }).getByRole("link", { name: /^Figma/ })).toBeVisible();
   });
 
   test("without the pilot cookie the same URL is the classic page: no Tools section", async ({ page, context }) => {

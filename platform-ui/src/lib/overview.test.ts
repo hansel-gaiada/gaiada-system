@@ -190,6 +190,15 @@ describe("workspaceRefForPage", () => {
     expect(subject.unitPath).toEqual(["d-web", "root"]);
     expect(subject.widgets).toBe(WORKSPACES.find((x) => x.key === "web-dev")!.overview);
   });
+
+  it("gives the Today block the person's pinned tools in registry order, or the first six when none are pinned (DW-6c)", () => {
+    const all = WORKSPACES.find((x) => x.key === "web-dev")!.tools.map((t) => t.key);
+    expect(subjectOfRef(placed.mine[0]).tools.map((t) => t.key)).toEqual(all.slice(0, 6));
+    expect(subjectOfRef(placed.mine[0], { "web-dev": ["figma", "claude"] }).tools.map((t) => t.key)).toEqual(["claude", "figma"]);
+    expect(subjectOfRef(placed.mine[0], { "web-dev": [] }).tools).toEqual([]);
+    // Another workspace's pins do not leak in.
+    expect(subjectOfRef(placed.mine[0], { seo: ["gsc"] }).tools.map((t) => t.key)).toEqual(all.slice(0, 6));
+  });
 });
 
 describe("resolveHomeRoute (what `/` does)", () => {

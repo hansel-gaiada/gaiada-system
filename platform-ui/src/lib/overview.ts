@@ -11,6 +11,7 @@ import {
 import { gateAllows, type GateContext, type HomeArea, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
 import type { ShellLayout } from "@/lib/shellLayout";
 import type { DeptLauncher } from "@/lib/deptToolkits";
+import { pinnedToolsFor } from "@/lib/pinnedTools";
 
 // ── The period (plan §3.2) ───────────────────────────────────────────────────────────────────────
 
@@ -59,7 +60,8 @@ export interface OverviewSubject {
   label: string;
   widgets: readonly OverviewWidget[];
   quickActions: readonly QuickAction[];
-  /** The workspace's tools, for the Today block. Empty for Company. */
+  /** The tools the Today block shows: the person's pinned tools of this workspace (DW-6c), or its first six
+   *  when they have pinned none. Empty for Company. */
   tools: readonly DeptLauncher[];
   /** The department's org node id; null for a functional workspace without one, and for Company. */
   deptId: string | null;
@@ -67,9 +69,10 @@ export interface OverviewSubject {
   unitPath: readonly string[];
 }
 
-export function subjectOfRef(ref: WorkspaceRef): OverviewSubject {
+/** `pins` is `Prefs.pinnedTools` (DW-6c); left out, the Today block shows the workspace's first six tools. */
+export function subjectOfRef(ref: WorkspaceRef, pins: Readonly<Record<string, string[]>> = {}): OverviewSubject {
   const { workspace, deptId, unitPath } = ref;
-  return { label: workspace.label, widgets: workspace.overview, quickActions: workspace.quickActions, tools: workspace.tools, deptId, unitPath };
+  return { label: workspace.label, widgets: workspace.overview, quickActions: workspace.quickActions, tools: pinnedToolsFor(pins, workspace), deptId, unitPath };
 }
 
 /** The company-level Overview at `/` for someone whose home is the Company area. DW-3i fills it. */

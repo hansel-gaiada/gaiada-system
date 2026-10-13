@@ -24,7 +24,8 @@ export async function pilotFrame(
   const ref = workspaceRefForPage(await myWorkspaces(me, tenantId), target);
   if (!ref) return null;
   const { period } = await searchParams;
-  const subject = subjectOfRef(ref);
+  // DW-6c: the Today block shows the tools this person pinned for this workspace (Tools & connections).
+  const subject = subjectOfRef(ref, prefs.pinnedTools);
   const parsed = parseOverviewPeriod(period);
   return (legacy) => <WorkspaceOverview me={me} tenantId={tenantId} subject={subject} period={parsed} legacy={legacy} />;
 }
