@@ -355,11 +355,11 @@ describe.skipIf(!TEST_URL)("Client Centre · Services & results (PV6-02)", () =>
       expect(kpiOf(card, "website.domain_days").value).toBe(100);
     });
 
-    it("website: a WebDesk-linked site is listed with every probe figure null (the ERP holds no domain for it)", async () => {
+    it("website: a WebDesk-linked site is listed with NO kpis (the ERP holds no domain for it, so nothing can be measured yet)", async () => {
       const [card] = cardsOf(await compose(T, clientC), "website");
       expect(card.title).toBe("Website content");
       expect(card.items).toEqual([{ label: "Managed website", detail: null }]);
-      for (const k of card.kpis) expect(k.value, k.key).toBeNull();
+      expect(card.kpis).toEqual([]);
     });
 
     it("a client never sees another client's rows, in any service", () => {

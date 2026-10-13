@@ -4,8 +4,8 @@
 //   * `webdev_sites` (module wall `webdev`): a registered domain. The probes are matched to it by HOST: an enabled
 //     monitor of this client whose target host is the domain (or a subdomain of it) is a probe of this site.
 //   * `webdesk_site_clients` (plain tenant wall): a WebDesk site linked to the client. The ERP holds only WebDesk's
-//     opaque ids for it, no domain, so nothing can be attributed to it: its card lists the site and leaves every
-//     probe KPI null (unknown, never 0). Linking a monitor to a WebDesk site is a follow-up (see the hand-back).
+//     opaque ids for it, no domain, so nothing can be attributed to it: its card lists the site and carries NO
+//     KPIs (they cannot be measured yet). Linking a monitor to a WebDesk site is a follow-up (see the hand-back).
 //
 // The probe figures are read only when the company has the `monitoring` module enabled, in their own transaction
 // that declares only `monitoring`. Uptime uses the SAME SQL text as the monitoring console (UPTIME_RATIO_SQL,
@@ -56,13 +56,6 @@ function daysUntil(d: Date | null, now: Date): number | null {
   const t = new Date(d).getTime();
   return Number.isNaN(t) ? null : Math.floor((t - now.getTime()) / DAY);
 }
-
-const nullKpis = (): Kpi[] => [
-  kpi("website.uptime_30d", "Uptime, last 30 days", "percent", null),
-  kpi("website.open_incidents", "Open incidents", "count", null),
-  kpi("website.cert_days", "Days until the certificate expires", "count", null),
-  kpi("website.domain_days", "Days until the domain expires", "count", null),
-];
 
 export const websiteBuilder: ResultsBuilder = {
   service: "website",
@@ -158,7 +151,8 @@ export const websiteBuilder: ResultsBuilder = {
         status: "active",
         since: l.since,
         items: [{ label: "Managed website", detail: null }],
-        kpis: nullKpis(),
+        // No KPIs, not null ones: null means "not measured yet" and these cannot be measured until a monitor->site link exists (follow-up).
+        kpis: [],
         clientVisible: true,
       });
     }
