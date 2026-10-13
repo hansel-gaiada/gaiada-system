@@ -339,10 +339,11 @@ test.describe("member (gede@gaiada.com)", () => {
     await expect(sidebar(page).getByRole("link", { name: "Company", exact: true })).toBeVisible();
     await expect(sidebar(page).getByRole("link", { name: "Admin", exact: true })).toHaveCount(0);
     // Typing the URL still lands on an Admin page (it redirects to /admin/users in DEMO_MODE), but the shell
-    // offers a member no Admin row: the menu has nothing to link to.
+    // offers a member no Admin row: the menu holds only the way back, no row of the area.
     await page.goto("/admin");
     await expect(menu(page, "Admin")).toBeVisible();
-    await expect(menu(page, "Admin").getByRole("link")).toHaveCount(0);
+    await expect(menu(page, "Admin").getByRole("link", { name: /^(?!Back to)/ })).toHaveCount(0);
+    await expect(menu(page, "Admin").getByRole("link", { name: "Back to Company" })).toBeVisible();
   });
 
   test("visiting a department says so and Back returns to Company; its own create action leads + New", async ({ page, context }) => {
