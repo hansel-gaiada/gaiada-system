@@ -6630,9 +6630,9 @@ Plan: §7.2 and §7.3, ruling DW-D14 (Creatives supplies the assets, and Web Dev
 - **`work_request_assets`** links delivered assets:
   - Columns: `request_id uuid → work_requests`, `asset_id uuid → creative_assets`, `tenant_id`, `added_by uuid → users`, `added_at`. PK `(request_id, asset_id)`.
   - RLS as above. An asset may serve more than one request.
-- **`work_request_intakes`** holds each receiving department's requests project:
+- **`work_request_intakes`** holds each receiving department's requests project, which serves BOTH kinds (the asset task lives in it, and an engineering request's change request names it as its `project_id`):
   - Columns: `tenant_id`, `unit_id text`, `project_id uuid → projects`, `created_at`. PK `(tenant_id, unit_id)`. RLS as above.
-  - The service creates the project lazily on the department's first asset request, as an internal project: `is_internal = true`, `department_id = unit_id`, named `"<Department> · Requests"`, with no client.
+  - The service creates the project lazily on the department's first request of either kind, as an internal project: `is_internal = true`, `department_id = unit_id`, named `"<Department> · Requests"`, with no client.
   - It uses `INSERT … ON CONFLICT DO NOTHING` and then a re-select, so two concurrent first requests create one project.
   - The table leaves `projects` untouched and is the future home of per-department request settings (SLA, accepted kinds).
 
@@ -6684,7 +6684,7 @@ Six artifacts, as in §31.2.
     - description = the brief, plus a plain-text summary of the form and a "Requested by <name> (<department>)" line;
     - `dueDate` = `neededBy`; priority `normal`;
     - assignee `{kind: 'department', refId: toUnitId, refName}`.
-  - **`engineering`:** the service inserts the change request: `source 'internal'`, `kind` = `form.kind`, `title`, `body` = the brief, `affected_url` from the form, `requested_by` = the principal, and status `new`. It emits `webdev.change_request.created` as the internal-create route does.
+  - **`engineering`:** the service inserts the change request: `source 'internal'`, `kind` = `form.kind`, `title`, `body` = the brief, `affected_url` from the form, `project_id` = the receiving department's intake project (the same one assets use, ensured as above), `requested_by` = the principal, and status `new`. Web Dev's `pm_task` triage therefore needs no extra input and lands the task in "<Department> · Requests". It emits `webdev.change_request.created` as the internal-create route does.
   - **Then** it inserts the `work_requests` row.
   - **Module checks:** when the receiving module is off for the tenant (`pm` for assets, `webdev` for engineering), the answer is **409 `request_kind_unavailable`**.
   - **Campaign part:** `campaignPartId` must be a live, not-cancelled part in this tenant, or the answer is **400 `campaign_part_invalid`**.
@@ -6790,12 +6790,16 @@ Deviations from §32, each deliberate:
 7. **Authorization runs before body validation** on every write; `requestedBy`, `assigneeIds` and `unitAncestors` are read from the request row and its task, never from the body. When the request is absent (or another tenant's), a caller who may not even read requests is answered 403 first, so the 404 is never an existence oracle for an outsider.
 8. **Text is scrubbed like change requests** (`scrubText`: PAN, national ids and e-mail addresses) in the title, the brief, `form.notes` and the decline reason, and NULs are stripped (plain text). References and URLs are not scrubbed.
 9. **Unit objects always carry `unitMissing`** (`{id, name, unitMissing}`), not only when the unit has left the tree. `GET requests/summary` requires `unitId` and answers 400 `unit_invalid` without a department.
-10. **Events and notifications beyond the letter of §32.7.** A reopen (unverify) emits `work_request.reopened`, a fifth event type, so the outbox shows the move. "Deliver more" emits `work_request.delivered` with `more: true` and notifies the requester again (`request.delivered`, "More assets were delivered"). The change-request routes' own notifications to the requester (`webdev.change_request.declined` and `.verified`, with a portal href) still fire for an internal request, so a requester gets that one AND `request.declined` / `request.delivered`. Left as it was: "do not change any other change-request behaviour".
+10. **Events and notifications beyond the letter of §32.7.** A reopen (unverify) emits `work_request.reopened`, a fifth event type, so the outbox shows the move. "Deliver more" emits `work_request.delivered` with `more: true` and notifies the requester again (`request.delivered`, "More assets were delivered"). The change-request routes no longer double-notify a staff requester (see the review round below).
 11. **`closed_by` is the person who delivered, declined or cancelled** (for an engineering request, the triager or verifier); the ask has no separate `created_by`, since `requested_by` is the principal.
 
-Surprises the board should know:
+Review round (2026-10-14):
 
-- **An engineering request has no project, so Web Dev's `pm_task` triage route cannot convert it** (400 "names no project"). Only `mini_run` works for a request from this route, and `content` and `bug` default to `pm_task`, so triage must pick `mini_run` explicitly (the suite does). Whether engineering requests should name a project is a decision for the board; nothing here guesses one.
+- **Engineering requests carry a project.** The intake project serves both kinds, so `ensureIntakeProject` runs for an engineering request too and its id is written to the change request's `project_id`. Web Dev's `pm_task` triage works with no extra input (suite: `work-requests.test.ts`, "route pm_task"); `mini_run` still works.
+- **A deliberate, scoped change to the change-request routes.** On triage decline and verify ONLY, when the change request carries a work request, its `requested_by` is dropped from the recipients of `webdev.change_request.declined` / `.verified` (their `/portal/requests` href is wrong for a staff requester, and `request.declined` / `request.delivered` already tells them). Client recipients are untouched; a change request with no work request notifies exactly as before.
+
+Note:
+
 - `campaignPartId` is context for the ask, not a routing rule: the part's department is not required to match `toUnitId`.
 
 ## 37. A unit's roster on the person-grain report overview (DW-4b, 2026-10-13) — `platform-nest/src/modules/reports/reports.controller.ts` (`getOverview`), `person-scope.ts` — **STATUS: BUILT, PROTOTYPED (DB suite tr25-person-axis.db.test.ts on the Linux CI gate)**
