@@ -32,7 +32,9 @@ function clean(path: string): string {
  *  it, so a record page under /board still reads "Board". */
 function pageNameOf(ws: Workspace, deptId: string | null, path: string): string | null {
   const here = clean(path);
-  const candidates: { href: string; label: string }[] = [{ href: ws.overviewHref, label: "Overview" }];
+  // `root` marks the Overview by position, not by label: the Project Management board is also called
+  // "Overview" (PM_TERMS.board), and it must still claim the records below it.
+  const candidates: { href: string; label: string; root?: boolean }[] = [{ href: ws.overviewHref, label: "Overview", root: true }];
   for (const row of ws.work) for (const t of row.tabs) candidates.push({ href: t.href, label: t.label });
   for (const t of [...ws.reports, ...ws.analytics]) candidates.push({ href: t.href, label: t.label });
   let best: { len: number; label: string } | null = null;
@@ -45,7 +47,7 @@ function pageNameOf(ws: Workspace, deptId: string | null, path: string): string 
     }
     href = clean(href);
     // The Overview is the department root: only an exact match, or every department page would read "Overview".
-    const hit = c.label === "Overview" ? here === href : here === href || here.startsWith(`${href}/`);
+    const hit = c.root ? here === href : here === href || here.startsWith(`${href}/`);
     if (hit && (!best || href.length > best.len)) best = { len: href.length, label: c.label };
   }
   return best?.label ?? null;

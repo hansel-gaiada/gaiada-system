@@ -39,8 +39,13 @@ describe("resolveAssistantOrigin", () => {
     expect(o.prompts).toEqual(GENERIC_WORKSPACE.assistantPrompts);
   });
 
+  it("names the department that owns a route outside /departments", () => {
+    // The registry's ownedRoutes: the company report belongs to the Office of the GM.
+    expect(resolveAssistantOrigin("/reports/company", refs)!.department).toBe(workspaceBySlug("gm")!.label);
+  });
+
   it("keeps the way back but shows no department for a page that belongs to none", () => {
-    for (const path of ["/projects/p-web-1", "/tasks/t-4", "/reports/company", "/"]) {
+    for (const path of ["/projects/p-web-1", "/tasks/t-4", "/"]) {
       const o = resolveAssistantOrigin(path, refs)!;
       expect(o.path).toBe(path);
       expect(o.department).toBeNull();
