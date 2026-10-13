@@ -88,7 +88,7 @@ if step "5a ai-agents: npm install (scaffolder deps)" "$WORK/repo/ai-agents" npm
   if (cd "$WORK/site/apps/web" && WEBDESK_STATIC_EXPORT=1 npm run build) >"$WORK/export15.log" 2>&1 && [ -f "$WORK/site/apps/web/out/index.html" ]; then
     echo "INFO  15 scaffolded site: the static export WORKS (out/index.html written)"
   else
-    echo "INFO  15 scaffolded site: the static export FAILS, as expected while the composer emits force-dynamic pages: $(grep -m1 -iE 'force-dynamic|export|error' "$WORK/export15.log" | cut -c1-160)"
+    echo "INFO  15 scaffolded site: the static export FAILS, as expected while the composer emits force-dynamic pages: $(grep -iE 'force-dynamic|error' "$WORK/export15.log" | head -2 | paste -sd' ' - | cut -c1-260)"
   fi
   ( cd "$WORK/site" && echo "--- audit scaffolded site (omit dev)" && npm audit --omit=dev 2>&1 | tail -4 ) || true
 else
