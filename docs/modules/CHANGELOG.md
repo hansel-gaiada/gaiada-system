@@ -11,6 +11,19 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.135.0` + mcp-hub `0.15.4` + automation `0.7.0` - DW-4j-1: the head is made aware of a condition change (2026-10-15) - PROTOTYPED
+
+Contract: `docs/FRONTEND-BFF-CONTRACT.md` §43.1 to §43.6 (with §43.6a "as built") and `docs/PERMISSION-CONTRACT.md` §38b. Plan §5.5, "How the HOD is made aware".
+- **The run** (`POST /api/:t/dept-kpis/watch`, `reports/dept-kpi-watch.ts`): evaluates every department's KPIs for the current month in `REPORTS_TZ` with the §40 engine (so it agrees with the KPI page), compares each KPI's and each department's condition with the last one remembered, and tells the department's heads once per unit when something changed. It tells a move between on track, at risk and off track (either way), or a KPI turning at risk or off track; a first run, anything to "unavailable" and "unavailable" to on track are stored silently. It decides under a per-tenant advisory lock and notifies after the commit, so a retried or doubled run tells each change once. Gate: `report_admin` · `recompute`.
+- **Who is told:** the holders of a current `org_unit_lead` grant on the department node exactly, who are active members of the company. Not the heads of enclosing units, not a placed manager.
+- **The notification** (`dept_kpi.condition_changed`, Inbox only, no mail): "Web Dev: off track", one line per change ("Projects on time: at risk → off track (71% against 85%)"), a link to the KPI page; critical, warning or info. No person is named.
+- **Off-track alerts** (`dept_kpi_alerts`): opened by the run while a KPI is off track, resolved when it is not; `GET /dept-kpis/alerts` gives a head their open, unacknowledged alerts (the coming Needs-you source, 4j-2) or one unit's history; `POST /dept-kpis/alerts/:id/acknowledge {note?}` records that a head saw it.
+- **Memory** (`dept_kpi_conditions`): the last condition per (unit, KPI), `'*'` for the department. Migration `202610150200_dept_kpi_watch` (both tables, RLS with the reports module wall). No Cerbos change.
+- **automation `0.7.0`:** new flow `reports-kpi-watch.json` (id `wsrptkpiwatch001`), daily at 06:30 after the nightly facts; account `wf:reports-kpi-watch` (company_admin) in `seed/automation.ts`. **mcp-hub `0.15.4`:** its allowlist entry `["notify"]` (the dead-letter alert only).
+- **Server steps after the deploy:** run `seed:automation` in the platform-nest container (the new account), then import the flow into the live n8n with the CLI and activate it (an import deactivates; restart n8n).
+- **Tests:** `dept-kpi-watch.test.ts` (the change rule over every pair, the text, the plan), `dept-kpi-watch.controller.db.test.ts` (live Postgres + Cerbos: the first run, a change told once, back, a new month, two concurrent runs, the recipients, alerts open, resolve and acknowledge, every refusal), `seed/automation.test.ts`, `automation-policy.test.ts`.
+- **Known gap:** a grant carries a node id and no company, so a person who is an active member of two companies and heads a node id both companies use would be told about both. Node ids are per company today; a company on the grant is an IAM-wide question.
+
 ### platform-nest `0.134.0` - PV-D41: a simulated Midtrans for the review stage (2026-10-15) - PROTOTYPED
 
 Owner, 2026-10-14: "simulate midtrans for now" (PV-D41). PV5-10's online payment runs end to end on live against an in-process simulated Midtrans, behind the REAL adapter. Contract: BFF §30c "Simulated Midtrans (review stage, PV-D41)"; runbook `infra/runbooks/midtrans-payments.md` §7.

@@ -648,7 +648,7 @@ Declared `id` is load-bearing (sub-workflow references). Import with the CLI, ne
 | `pipeline-delivery.json` | `ws11delivery0001` | WS11 delivery track (hard gate -> design -> 3-beat -> revise loop -> Claude Code -> staging -> prod) |
 | `pipeline-fanout.json` | `ws11fanout000001` | WS11 fan-out (on pipeline.run.created -> scope sign-off + report route) |
 | `reports-eod-reminder.json` | — | reports-eod-reminder (CRON) |
-| `reports-kpi-watch.json` | — | reports-kpi-watch (CRON) |
+| `reports-kpi-watch.json` | `wsrptkpiwatch001` | reports-kpi-watch (CRON) |
 | `reports-monthly-seal.json` | — | reports-monthly-seal (CRON) |
 | `reports-morning-escalation.json` | — | reports-morning-escalation (CRON) |
 | `reports-nightly-facts.json` | — | reports-nightly-facts (CRON) |
