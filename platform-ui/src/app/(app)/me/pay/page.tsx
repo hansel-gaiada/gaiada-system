@@ -27,7 +27,10 @@ export default async function MyPayPage() {
   const year = new Date().getUTCFullYear();
   const [payslips, ledger] = await Promise.all([
     listPayslips(userId, tenant),
-    getLeaveLedger(userId, tenant, undefined, year),
+    // The person's OWN ledger, named explicitly: the backend reads `subjectUserId` for anyone who may read other people's
+    // records (HR, admins) and refuses 400 without it; for everyone else it uses the caller and ignores this. Leaving it
+    // out made this page fail for every staff reader (found live on 397, DW-8 Wave A check).
+    getLeaveLedger(userId, tenant, userId, year),
   ]);
 
   const latest = payslips[0];

@@ -11,6 +11,9 @@ import { StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ScopePill } from "@/components/scope/ScopePill";
 import { EnvelopeBanner } from "@/components/scope/EnvelopeBanner";
+// The rows use the data table's link style (`.dt__link`), which lives in its stylesheet; without it they render as
+// default blue underlined links (seen live on 397).
+import "@/components/data/data.css";
 
 type Search = Promise<{ show?: string; scope?: string }>;
 type Show = "open" | "done" | "all";
