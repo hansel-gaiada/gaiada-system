@@ -29,7 +29,7 @@
 // `loadLedUnitScope` see) whose holder is an active member of the company. The position reconciler's `own_unit` grants and
 // direct grants are the same rows. Not told: the heads of enclosing units, a manager placed in the unit, an `is_lead` seat
 // with no grant. `user_roles` has no RLS and no tenant column, so it is read with `withGlobal`, and the membership
-// conjunct is what keeps a node id that two companies happen to share (`d-hr`) from reaching across companies.
+// conjunct (read under the tenant, since `company_memberships` is RLS'd) is what keeps a node id that two companies happen to share (`d-hr`) from reaching across companies.
 import type { PoolClient } from "pg";
 import { newId, withGlobal, withTenants } from "../../db";
 import { config } from "../../config";
@@ -237,10 +237,25 @@ export function planWatch(reads: readonly UnitKpis[], previous: PreviousStates, 
 /** The CURRENT `org_unit_lead` grant, in SQL: the role, the scope type, and the expiry conjunct `assemblePrincipal` applies
  *  (`expires_at IS NULL OR expires_at > now()`). Used by both directions so they cannot drift apart. */
 const CURRENT_LEAD_GRANT = `r.name = 'org_unit_lead' AND ur.scope_type = 'org_unit' AND (ur.expires_at IS NULL OR ur.expires_at > now())`;
-const ACTIVE_MEMBER = `EXISTS (SELECT 1 FROM company_memberships m
-                                WHERE m.tenant_id = $1 AND m.user_id = ur.user_id AND m.deleted_at IS NULL AND m.status = 'active')`;
 
-/** The heads of each of `unitNodeIds`, exact node, as unit -> sorted distinct user ids. A unit with no head is absent. */
+/** Which of `userIds` are active members of the company. `company_memberships` is tenant-RLS'd (an unset tenant GUC reads
+ *  ZERO rows, so this cannot run under `withGlobal`), hence the tenant transaction. */
+async function activeMembers(tenantId: string, userIds: string[]): Promise<Set<string>> {
+  if (userIds.length === 0) return new Set();
+  const rows = await withTenants([tenantId], async (c) =>
+    (
+      await c.query<{ user_id: string }>(
+        `SELECT user_id FROM company_memberships
+          WHERE tenant_id = $1 AND user_id = ANY($2::uuid[]) AND deleted_at IS NULL AND status = 'active'`,
+        [tenantId, [...new Set(userIds)]],
+      )
+    ).rows,
+  );
+  return new Set(rows.map((r) => r.user_id));
+}
+
+/** The heads of each of `unitNodeIds`, exact node, as unit -> sorted distinct user ids. A unit with no head is absent. The
+ *  grants come from the global `user_roles`; the holder must also be an active member of THIS company (see the header). */
 export async function loadLeadUserIdsByUnit(tenantId: string, unitNodeIds: string[]): Promise<Map<string, string[]>> {
   const out = new Map<string, string[]>();
   if (unitNodeIds.length === 0) return out;
@@ -248,12 +263,14 @@ export async function loadLeadUserIdsByUnit(tenantId: string, unitNodeIds: strin
     c.query<{ unit: string; user_id: string }>(
       `SELECT DISTINCT ur.scope_id AS unit, ur.user_id
          FROM user_roles ur JOIN roles r ON r.id = ur.role_id
-        WHERE ${CURRENT_LEAD_GRANT} AND ur.scope_id = ANY($2::text[]) AND ${ACTIVE_MEMBER}
+        WHERE ${CURRENT_LEAD_GRANT} AND ur.scope_id = ANY($1::text[])
         ORDER BY ur.scope_id, ur.user_id`,
-      [tenantId, unitNodeIds],
+      [unitNodeIds],
     ),
   );
+  const members = await activeMembers(tenantId, rows.map((r) => r.user_id));
   for (const r of rows) {
+    if (!members.has(r.user_id)) continue;
     const list = out.get(r.unit) ?? [];
     list.push(r.user_id);
     out.set(r.unit, list);
@@ -269,13 +286,14 @@ export async function loadUnitLeadUserIds(tenantId: string, unitNodeId: string):
 
 /** The inverse of the above, for the caller: the nodes `userId` heads exactly (current grants, active member). */
 export async function loadUnitsLedExactly(tenantId: string, userId: string): Promise<string[]> {
+  if (!(await activeMembers(tenantId, [userId])).has(userId)) return [];
   const { rows } = await withGlobal((c) =>
     c.query<{ unit: string }>(
       `SELECT DISTINCT ur.scope_id AS unit
          FROM user_roles ur JOIN roles r ON r.id = ur.role_id
-        WHERE ${CURRENT_LEAD_GRANT} AND ur.user_id = $2 AND ur.scope_id IS NOT NULL AND ${ACTIVE_MEMBER}
+        WHERE ${CURRENT_LEAD_GRANT} AND ur.user_id = $1 AND ur.scope_id IS NOT NULL
         ORDER BY ur.scope_id`,
-      [tenantId, userId],
+      [userId],
     ),
   );
   return rows.map((r) => r.unit);
