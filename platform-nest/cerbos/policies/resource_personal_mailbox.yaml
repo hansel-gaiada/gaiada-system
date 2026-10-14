@@ -9,14 +9,15 @@
 # ── NOBODY READS OR SENDS AS ANYONE ELSE ─────────────────────────────────────────────────────────
 # The only ALLOW is the SELF rule: the resource's `ownerId` (fed by the handler as the CALLER's own id, never from a body) equals the
 # principal, held as `member`, `manager` or `company_admin`. No role reaches another person's mailbox: not company_admin, not HR, not IT.
-# A `roles: ["user"]` EFFECT_DENY then covers all three actions for anyone who is NOT the owner, which every principal carries, so under
-# deny-overrides it beats the `platform_admin` wildcard too. This is the mail design's "no domain-wide delegation" rule (§8C), written as
+# A `roles: ["user"]` EFFECT_DENY then covers every action (the three below, and any action a later ticket adds: written as `*` so a new
+# one can never be left reachable through the platform_admin wildcard) for anyone who is NOT the owner, which every principal carries, so
+# under deny-overrides it beats the `platform_admin` wildcard too. This is the mail design's "no domain-wide delegation" rule (§8C), written as
 # policy. An unfed `ownerId` ("" by default in resourcePayload) is not the caller, so a probe that names no owner is denied for every role,
 # platform_admin included, by design. The platform_admin parity sweep (core/authz-permissions.controller.test.ts) probes with `ownerId` set
 # to its own principal id ("u1"), which satisfies the owner test.
 #
 # ── NO AUTOMATION OR BOT PRINCIPAL CONNECTS, READS OR SENDS ──────────────────────────────────────
-# `EFFECT_DENY` on all three actions for `principal.attr.kind in ["automation","bot"]`, shaped like resource_work_request.yaml's
+# `EFFECT_DENY` on every action (`*`, as above) for `principal.attr.kind in ["automation","bot"]`, shaped like resource_work_request.yaml's
 # (`roles: ["user"]`, `has()`-guarded). An agent reading a person's mail is a separate decision, for the separate AI plan. A client-only
 # principal never holds member, manager or company_admin, so it reaches nothing.
 #
@@ -49,7 +50,7 @@ resourcePolicy:
             request.resource.attr.ownerId == request.principal.id
 
     # ══════════ nobody but the owner, EVERY role (platform_admin included): no domain-wide delegation ══════════
-    - actions: ["connect", "read", "send"]
+    - actions: ["*"]
       effect: EFFECT_DENY
       roles: ["user"]
       condition:
@@ -60,7 +61,7 @@ resourcePolicy:
               request.resource.attr.ownerId == request.principal.id)
 
     # ══════════ automation and bot principals never connect, read or send (the agents plan decides later) ══════════
-    - actions: ["connect", "read", "send"]
+    - actions: ["*"]
       effect: EFFECT_DENY
       roles: ["user"]
       condition:
