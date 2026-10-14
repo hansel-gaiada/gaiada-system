@@ -1570,6 +1570,21 @@ const configBase = {
       timeoutMs: Number(process.env.GOOGLE_OAUTH_TIMEOUT_MS ?? 15000),
     },
   },
+  // DW-6i (docs/FRONTEND-BFF-CONTRACT.md §42.2) — Google Drive: connect, pick and attach. Drive has its OWN Google Cloud OAuth
+  // client, separate from search's `google` block above (its own consent screen, scope review and redirect URI), plus the two
+  // values Google's Picker needs in the browser (a browser API key and the Cloud project number). NO DEFAULTS: every value is
+  // empty until the owner sets it (DW-11 item 6), and `googleDriveConfigured()` is true only when ALL FIVE are present, so a
+  // half-set deployment reports `drive_not_configured` rather than offering a flow that fails at Google. The endpoints and
+  // timeouts are the shared `google` block's (one Google issuer for the whole estate).
+  googleDrive: {
+    clientId: process.env.GOOGLE_DRIVE_CLIENT_ID ?? "",
+    clientSecret: process.env.GOOGLE_DRIVE_CLIENT_SECRET ?? "",
+    // The ONE exactly-registered redirect URI (Google permits no wildcards); the tenant travels in the signed `state`.
+    redirectUri: process.env.GOOGLE_DRIVE_REDIRECT_URI ?? "",
+    // Browser-side values the Picker needs (§42.4): returned to the signed-in caller only, never logged.
+    pickerApiKey: process.env.GOOGLE_PICKER_API_KEY ?? "",
+    pickerAppId: process.env.GOOGLE_PICKER_APP_ID ?? "",
+  },
   // WD-04 (Web Dev Phase 1 §12) — in-ERP audio upload -> server-side transcription. Calls the
   // whisper container's OpenAI-compatible /v1/audio/transcriptions endpoint DIRECTLY (never via
   // ai-gateway-go): meeting-length audio can exceed the gateway's ~2.5-min per-call timeout
@@ -1912,4 +1927,13 @@ export function knowledgeIngestEnabled(): boolean {
 export function googleOAuthConfigured(): boolean {
   const g = config.search.google;
   return !!(g.clientId && g.clientSecret && g.redirectUri);
+}
+
+/** DW-6i — Google Drive is fully configured: the OAuth client (id, secret, redirect URI) AND the Picker's browser API key and
+ *  Cloud project number. All five are required (§42.2: "when any of these is unset, the feature reports drive_not_configured").
+ *  Callers turn a false into the 503 token `drive_not_configured`; no value is ever invented. Reads `config` at call time, so a
+ *  test that sets the values after import is honoured. */
+export function googleDriveConfigured(): boolean {
+  const d = config.googleDrive;
+  return !!(d.clientId && d.clientSecret && d.redirectUri && d.pickerApiKey && d.pickerAppId);
 }

@@ -17,6 +17,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { GOOGLE_DRIVE_API_HOST, isDriveApiUrl, isGoogleHost } from "./hosts";
 
 const ROOT = __dirname;
 
@@ -108,5 +109,46 @@ describe("core/google-oauth egress inventory (WD-23A-1, mirroring SM-39 §A5)", 
     for (const ns of FOREIGN_CONFIG_NAMESPACES) {
       expect(text, `token-endpoint-client.ts must not reference ${ns}`).not.toContain(ns);
     }
+  });
+});
+
+// ── DW-6i · Google Drive's API host is allowed DELIBERATELY ─────────────────────────────────────────
+// Drive's `files.get` carries a person's access token to www.googleapis.com. That host is added here by name (hosts.ts:
+// GOOGLE_DRIVE_API_HOST + isDriveApiUrl), not by the loose `.googleapis.com` suffix, and these tests pin both what passes and
+// the look-alikes that must not. The fetch itself lives in core/google-drive/client.ts, whose own egress.test.ts pins that it is
+// the only file there that talks to the network.
+describe("DW-6i · the Drive API host allow-list", () => {
+  it("Drive's documented files.get URL is allowed", () => {
+    expect(isDriveApiUrl("https://www.googleapis.com/drive/v3/files/1AbC_dEf-GhIj?fields=id,name,mimeType,webViewLink")).toBe(true);
+    expect(GOOGLE_DRIVE_API_HOST).toBe("www.googleapis.com");
+  });
+  it("the same host is also recognised as Google's by the label predicate", () => {
+    expect(isGoogleHost("https://www.googleapis.com/drive/v3/files/x")).toBe(true);
+  });
+  it("refuses every look-alike, another scheme, another path and embedded credentials", () => {
+    const bad = [
+      "http://www.googleapis.com/drive/v3/files/x",
+      "https://www.googleapis.com.evil.test/drive/v3/files/x",
+      "https://evil.test/www.googleapis.com/drive/v3/files/x",
+      "https://evilwww.googleapis.com/drive/v3/files/x",
+      "https://drive.googleapis.com/drive/v3/files/x",
+      "https://googleapis.com/drive/v3/files/x",
+      "https://www.googleapis.com@evil.test/drive/v3/files/x",
+      "https://user:pw@www.googleapis.com/drive/v3/files/x",
+      "https://www.googleapis.com:8443/drive/v3/files/x",
+      "https://www.googleapis.com/oauth2/v1/userinfo",
+      "https://www.googleapis.com/upload/drive/v3/files",
+      "javascript:alert(1)",
+      "not a url",
+      "",
+    ];
+    for (const u of bad) expect(isDriveApiUrl(u), u).toBe(false);
+  });
+  it("the shared token client still refuses to be the Drive client: it never names the Drive host", () => {
+    const text = readFileSync(join(ROOT, "token-endpoint-client.ts"), "utf8");
+    expect(text).not.toContain("drive/v3");
+  });
+  it("id-token.ts is pure: it has no network reference at all", () => {
+    expect(networkLines(readFileSync(join(ROOT, "id-token.ts"), "utf8"))).toEqual([]);
   });
 });
