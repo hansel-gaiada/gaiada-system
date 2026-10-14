@@ -87,6 +87,23 @@
 .cal-chip--overdue { border-color: var(--status-critical); }
 .cal-chip--overdue .cal-chip__dot { background: var(--status-critical); }
 
+/* DW-8g events. A cancelled event is struck through, one the caller declined is dimmed; neither is a colour, so both
+   survive a monochrome display. The state is also said in words (`cal-chip__sr`, `title`) for a screen reader. */
+.cal-chip--event .cal-chip__dot { background: transparent; border: 1px solid var(--erp-accent); }
+.cal-chip__time { font-variant-numeric: tabular-nums; color: var(--erp-ink-60); }
+.cal-chip--cancelled .cal-chip__text { text-decoration: line-through; }
+.cal-chip--cancelled { opacity: 0.6; }
+.cal-chip--declined { opacity: 0.45; }
+.cal-chip__sr {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+.cal-day__time { flex: 0 0 auto; min-width: 92px; font: 400 12px var(--font-body); color: var(--erp-ink-60); font-variant-numeric: tabular-nums; }
+.cal-day__row--cancelled .cal-day__title { text-decoration: line-through; }
+.cal-day__row--cancelled { opacity: 0.6; }
+.cal-day__row--declined { opacity: 0.45; }
+.cal-events-note { margin: 0 0 12px; font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.cal-actions { display: inline-flex; gap: 8px; align-items: center; }
+
 .cal-week {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -175,3 +192,20 @@
   .cal-chip__text { display: none; }
   .cal-range { min-width: 0; }
 }
+
+/* DW-8g: the schedule / edit form and the event page. */
+.cal-form { display: grid; gap: 18px; max-width: 720px; }
+.cal-form__people { border: 0.5px solid var(--erp-hairline); margin: 0; padding: 12px 14px; display: grid; gap: 10px; min-width: 0; }
+.cal-form__list { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; display: grid; gap: 6px; }
+
+.cal-event { display: grid; gap: 16px; max-width: 760px; }
+.cal-event__title--cancelled { text-decoration: line-through; }
+.cal-event__facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 18px; margin: 0; font: 400 14px var(--font-body); }
+.cal-event__facts dt { color: var(--erp-ink-60); }
+.cal-event__facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.cal-event__notes { margin: 0; white-space: pre-wrap; font: 400 14px/1.5 var(--font-body); }
+.cal-event__people { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.cal-event__person { display: flex; gap: 12px; justify-content: space-between; font: 400 14px var(--font-body); border-bottom: 0.5px solid var(--erp-hairline-soft); padding: 6px 0; }
+.cal-event__answer { color: var(--erp-ink-60); }
+.cal-event__banner { margin: 0; font: 700 13px var(--font-body); color: var(--status-critical-fg); }
+.cal-event__row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

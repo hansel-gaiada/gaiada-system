@@ -4,6 +4,7 @@ import { TodayBlock } from "./TodayBlock";
 import type { QueueItem } from "@/lib/queueUrgency";
 import type { CheckinCardData } from "@/lib/checkins-data";
 import type { LauncherItem } from "@/components/departments/LauncherRow";
+import type { TodayEvent } from "@/lib/calendarEvents";
 
 const checkin: CheckinCardData = {
   today: {
@@ -25,7 +26,7 @@ const tools: LauncherItem[] = [
 ];
 
 const draw = (p: Partial<Parameters<typeof TodayBlock>[0]> = {}) =>
-  render(<TodayBlock tenantId="co-a" checkin={checkin} submitAction={vi.fn()} dueToday={[]} partial={false} tools={tools} {...p} />);
+  render(<TodayBlock tenantId="co-a" checkin={checkin} submitAction={vi.fn()} dueToday={[]} partial={false} events={[]} tools={tools} {...p} />);
 
 describe("TodayBlock", () => {
   it("draws today's check-in card, so it can still be submitted from the Overview", () => {
@@ -81,9 +82,37 @@ describe("TodayBlock", () => {
     expect(links[0]).toHaveAttribute("target", "_blank");
   });
 
-  it("draws no Tools part for a workspace without tools (Company), and invents no calendar", () => {
+  it("draws no Tools part for a workspace without tools (Company)", () => {
     draw({ tools: [] });
     expect(screen.queryByRole("heading", { name: "Tools" })).not.toBeInTheDocument();
-    expect(screen.queryByText(/calendar|meeting|agenda/i)).not.toBeInTheDocument();
+  });
+
+  // DW-8g: today's calendar events.
+  const ev = (id: string, extra: Partial<TodayEvent> = {}): TodayEvent => ({ id, title: `Event ${id}`, time: "10:00–10:45", href: `/calendar/events/${id}?company=co-a`, ...extra });
+
+  it("lists today's events with their time and a link to the event, and no longer says none exist yet", () => {
+    draw({ events: [ev("e1"), ev("e2", { time: "All day", title: "Offsite" })] });
+    const part = screen.getByRole("heading", { name: "Events today" }).parentElement as HTMLElement;
+    expect(within(part).getByRole("link", { name: "Event e1" })).toHaveAttribute("href", "/calendar/events/e1?company=co-a");
+    expect(within(part).getByText(/10:00–10:45/)).toBeInTheDocument();
+    expect(within(part).getByRole("link", { name: "Offsite" })).toBeInTheDocument();
+    expect(screen.queryByText(/No calendar events exist yet/)).not.toBeInTheDocument();
+  });
+
+  it("marks a cancelled or declined event instead of hiding it", () => {
+    draw({ events: [ev("e1", { state: "cancelled" }), ev("e2", { state: "declined" })] });
+    expect(screen.getByText("(cancelled)")).toBeInTheDocument();
+    expect(screen.getByText("(declined)")).toBeInTheDocument();
+  });
+
+  it("says No events today for a settled empty day, and Events are unavailable (never none) when the read failed", () => {
+    const { unmount } = draw({ events: [] });
+    expect(screen.getByText("No events today")).toBeInTheDocument();
+    unmount();
+    draw({ events: null });
+    expect(screen.getByText("Events are unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("No events today")).not.toBeInTheDocument();
+    // The rest of the block still draws.
+    expect(screen.getByText("Nothing due today")).toBeInTheDocument();
   });
 });

@@ -17,15 +17,28 @@ import "./calendar.css";
 const CHIP_LIMIT = 3;
 
 function Chip({ item, today }: { item: CalItem; today: string }) {
-  const over = isOverdue(item.date, today);
+  const event = item.kind === "event";
+  // An event is never "overdue": it is at its time, or it was.
+  const over = !event && isOverdue(item.date, today);
+  const cls = [
+    "cal-chip",
+    over ? "cal-chip--overdue" : "",
+    event ? "cal-chip--event" : "",
+    item.state ? `cal-chip--${item.state}` : "",
+  ].filter(Boolean).join(" ");
+  const stateWord = item.state === "cancelled" ? " (cancelled)" : item.state === "declined" ? " (declined)" : "";
   return (
     <Link
       href={item.href}
-      className={`cal-chip${over ? " cal-chip--overdue" : ""}`}
-      title={`${item.title}${item.projectName ? ` · ${item.projectName}` : ""}${item.company ? ` · ${item.company}` : ""}`}
+      className={cls}
+      title={`${item.time ? `${item.time} ` : ""}${item.title}${stateWord}${item.projectName ? ` · ${item.projectName}` : ""}${item.company ? ` · ${item.company}` : ""}`}
     >
       <span className="cal-chip__dot" aria-hidden="true" />
-      <span className="cal-chip__text">{item.title}</span>
+      <span className="cal-chip__text">
+        {event && item.time && /^\d\d:\d\d/.test(item.time) && <span className="cal-chip__time">{item.time.slice(0, 5)} </span>}
+        {item.title}
+        {stateWord && <span className="cal-chip__sr">{stateWord}</span>}
+      </span>
     </Link>
   );
 }
@@ -107,17 +120,18 @@ export function WeekView({ anchor, today, items, dayHref }: {
 export function DayView({ anchor, today, items }: { anchor: string; today: string; items: CalItem[] }) {
   const dayItems = groupByDate(items).get(anchor) ?? [];
   if (dayItems.length === 0) {
-    return <EmptyNote>Nothing of yours is due on this day.</EmptyNote>;
+    return <EmptyNote>Nothing of yours is scheduled or due on this day.</EmptyNote>;
   }
   return (
     <div className="cal-day">
       {dayItems.map((it) => (
-        <div key={it.id} className="cal-day__row">
+        <div key={it.id} className={`cal-day__row${it.state ? ` cal-day__row--${it.state}` : ""}`}>
+          {it.kind === "event" && <span className="cal-day__time">{it.time}</span>}
           <Link href={it.href} className="cal-day__title">{it.title}</Link>
           <span className="cal-day__meta">
             {it.projectName && <span>{it.projectName}</span>}
             {it.company && <span>{it.company}</span>}
-            {isOverdue(it.date, today) && <span className="cal-day__overdue">Overdue</span>}
+            {it.kind !== "event" && isOverdue(it.date, today) && <span className="cal-day__overdue">Overdue</span>}
           </span>
           <StatusBadge label={it.status} />
         </div>

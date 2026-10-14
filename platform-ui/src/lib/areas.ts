@@ -44,6 +44,8 @@ const PERSONAL: AreaRule[] = [
   rule("/account", "personal"),
   rule("/approvals", "personal", true),
   rule("/calendar", "personal"),
+  rule("/calendar/new", "personal", false, "DW-8g: schedule a meeting"),
+  rule("/calendar/events", "personal", true, "DW-8g: one event, and its edit page"),
   rule("/meetings", "personal", true),
   rule("/timesheets", "personal"),
   rule("/me", "personal"),
