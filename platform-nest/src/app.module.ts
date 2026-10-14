@@ -114,6 +114,8 @@ import { AgentsController } from "./admin/agents.controller";
 import { MonitoringController, MonitoringHeartbeatController } from "./modules/monitoring/monitoring.controller";
 import { BotAdminController } from "./admin/bot-admin.controller";
 import { IntelligenceController } from "./admin/intelligence.controller";
+// DW-8i (§46): knowledge search for staff, filtered per hit by the caller's read right on the source record.
+import { KnowledgeSearchController } from "./modules/knowledge/search.controller";
 import { AgencyController } from "./modules/agency/agency.controller";
 import { PmController } from "./modules/pm/pm.controller";
 import { ItController } from "./modules/it/it.controller";
@@ -228,7 +230,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
   controllers: [
     HealthController, IdentityController, StepUpController, CoreController, CustomFieldsController,
     AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, BillingProfileController, BillingProfileAgentController, BillingNumberingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalDocumentsController, ClientDocumentsController, PortalProfileController, PortalCentreController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, PortalConversationController, ConversationController, WorkRequestsController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, AgencyPrivacyController, GithubReposController, GithubWebhookController, PaymentWebhookController, PaymentEventsController, SignatureWebhookController, CertifiedSigningController, SimulatedPsreController, MidtransSimulatorController, SimulatedPaymentPortalController, ContractsController, ClientContactsController, ClientInviteAcceptController, ClientWebsiteAccessController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController, FigmaController, GoogleDriveController, GoogleDriveOauthCallbackController,
-    CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, AgentsController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController,
+    CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, AgentsController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController, KnowledgeSearchController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, FinanceController, ClientsController, ClientsCentreController, CentreDiscoveryController, HrController, LoansController,
     HrPolicyController, RecruitmentController, PayrollController, HrLifecycleController,
