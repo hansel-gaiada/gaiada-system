@@ -1,4 +1,4 @@
-// DW-8g (docs/FRONTEND-BFF-CONTRACT.md §47.1, §47.6 "Migration") — migration 202610150400_calendar_events.sql, proven against a
+// DW-8g (docs/FRONTEND-BFF-CONTRACT.md §47.1, §47.6 "Migration") — migration 202610151100_calendar_events.sql, proven against a
 // REAL Postgres as the NOSUPERUSER NOBYPASSRLS app role: the CHECKs (each time shape, the 14-day span, cancelled, the field
 // sizes and the https-only link), the recording UNIQUE and its tenant-safe FK, the attendee table's keys, and RLS (zero rows
 // with the tenant GUC unset, nothing across tenants, FORCE on).

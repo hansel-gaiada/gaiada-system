@@ -85,7 +85,7 @@ describe.skipIf(!TEST_URL)("DW-8g calendar events (HTTP, real Postgres + Cerbos)
     (await q().query(`SELECT user_id FROM notifications WHERE type = $1 AND payload->>'entityId' = $2`, [type, entityId])).rows.map((r) => r.user_id as string).sort();
   const sorted = (...ids: string[]) => [...ids].sort();
   const verbs = async (entityType: string, id: string) =>
-    (await q().query(`SELECT verb FROM activities WHERE target_entity_type = $1 AND target_entity_id = $2 ORDER BY created_at, id`, [entityType, id])).rows.map((r) => r.verb as string);
+    (await q().query(`SELECT verb FROM activities WHERE target_entity_type = $1 AND target_entity_id = $2 ORDER BY occurred_at, id`, [entityType, id])).rows.map((r) => r.verb as string);
   const eventTypes = async (entityType: string, id: string) =>
     (await q().query(`SELECT event_type FROM outbox_events WHERE entity_type = $1 AND entity_id = $2 ORDER BY created_at, id`, [entityType, id])).rows.map((r) => r.event_type as string);
   const count = async (sql: string, args: unknown[] = []) => Number((await q().query(sql, args)).rows[0].n);
@@ -786,7 +786,7 @@ describe.skipIf(!TEST_URL)("DW-8g calendar events (HTTP, real Postgres + Cerbos)
     it("the window is required and at most 92 days; scope is `all` or a company id", async () => {
       for (const [query, reason] of [
         ["", "window_required"], ["from=2026-12-01", "window_required"], ["from=2026-12-31&to=2026-12-01", "window_invalid"],
-        ["from=2026-10-01&to=2027-01-02", "window_too_large"], [`${WINDOW}&scope=acme`, "scope_invalid"], ["from=tomorrow&to=2026-12-01", "date_invalid"],
+        ["from=2026-10-01&to=2027-01-02", "window_too_large"], [`${WINDOW}&scope=acme`, "scope_invalid"], ["from=tomorrow&to=2026-12-01", "time_invalid"],
       ] as const) {
         const r = await mine(att1, query);
         expect([r.statusCode, reasonOf(r)], query).toEqual([400, reason]);

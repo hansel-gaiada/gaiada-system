@@ -428,7 +428,7 @@ describe.skipIf(!live)("scopeLevelPermissions vs can() — live parity sweep (su
       // key is still probed WITHOUT one, so an ordinary key that platform_admin loses still goes red
       // here. The gate itself is proven by the dedicated test below (denied without, allowed with).
       const allowed = await can(p, key, {
-        id: "probe-1", tenantId: T1, ownerId: "u1", subjectUserId: "u1", module: "hr", creatorId: "someone-else",
+        id: "probe-1", tenantId: T1, ownerId: "u1", subjectUserId: "u1", attendeeIds: ["u1"], module: "hr", creatorId: "someone-else",
         ...(APPROVAL_GATED_KEYS.has(key) ? { approvalId: "probe-approval" } : {}),
       });
       if (!allowed) mismatches.push(key);
