@@ -708,3 +708,43 @@ describe("work_request.decide (DW-5c)", () => {
     });
   });
 });
+
+// DW-4e-2: the department KPI target capabilities mirror resource_dept_kpi_target.yaml (BFF §40.2). `propose` is the
+// company_admin tier plus the head of the unit (canInUnit); `approve` is the company_admin tier, which `owner` mirrors through
+// the permission arm; `manager` (every head's company-wide role) and a unit lead never approve. The parity register explains why
+// a pure owner is left out of `propose`.
+describe("reports.dept_kpi_target.propose / approve (DW-4e-2)", () => {
+  const as = (role: string, scopeType = "company", scopeId: string | null = "co-a") => me([{ role, scopeType, scopeId }]);
+  it("lets company_admin and platform_admin propose and approve", () => {
+    for (const cap of ["reports.dept_kpi_target.propose", "reports.dept_kpi_target.approve"] as const) {
+      expect(can(as("company_admin"), cap, "co-a")).toBe(true);
+      expect(can(as("platform_admin", "global", null), cap, "co-a")).toBe(true);
+    }
+  });
+  it("lets owner approve but not propose (no propose mirror in the policy)", () => {
+    expect(can(as("owner"), "reports.dept_kpi_target.approve", "co-a")).toBe(true);
+    expect(can(as("owner"), "reports.dept_kpi_target.propose", "co-a")).toBe(false);
+  });
+  it("never lets manager, member, viewer or HR approve or propose company-wide", () => {
+    for (const role of ["manager", "member", "viewer", "hr_manager", "hr_staff", "client"]) {
+      expect(can(as(role), "reports.dept_kpi_target.approve", "co-a"), role).toBe(false);
+      expect(can(as(role), "reports.dept_kpi_target.propose", "co-a"), role).toBe(false);
+    }
+  });
+  it("reaches a unit head for propose only through canInUnit over their own unit, and never for approve", () => {
+    const head = me([
+      { role: "member", scopeType: "company", scopeId: "co-a" },
+      { role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web" },
+    ]);
+    expect(can(head, "reports.dept_kpi_target.propose", "co-a")).toBe(false);
+    expect(canInUnit(head, "reports.dept_kpi_target.propose", "co-a", ["d-web", "root"])).toBe(true);
+    expect(canInUnit(head, "reports.dept_kpi_target.propose", "co-a", ["d-seo", "root"])).toBe(false);
+    expect(canInUnit(head, "reports.dept_kpi_target.approve", "co-a", ["d-web", "root"])).toBe(false);
+  });
+  it("is declared in the capability map with the permissions it mirrors", () => {
+    expect(CAPABILITY_MAP["reports.dept_kpi_target.propose"]).toEqual({ permissions: ["reports.dept_kpi_target.propose"], semantics: "all" });
+    expect(CAPABILITY_MAP["reports.dept_kpi_target.approve"]).toEqual({
+      permissions: ["reports.dept_kpi_target.approve", "reports.dept_kpi_target.reject"], semantics: "all",
+    });
+  });
+});

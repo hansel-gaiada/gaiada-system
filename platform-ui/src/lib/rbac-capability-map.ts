@@ -907,4 +907,15 @@ export const CAPABILITY_MAP = {
     permissions: ["core.work_request.deliver", "core.work_request.decline"],
     semantics: "all",
   },
+
+  // ── DW-4e-2 · department KPI targets (contract §40.2) ────────────────────────────────────────
+  "reports.dept_kpi_target.propose": {
+    permissions: ["reports.dept_kpi_target.propose"],
+    semantics: "all",
+  },
+  "reports.dept_kpi_target.approve": {
+    // Approve and reject go to the same approver tier, so `all`.
+    permissions: ["reports.dept_kpi_target.approve", "reports.dept_kpi_target.reject"],
+    semantics: "all",
+  },
 } as const satisfies Record<Capability, CapabilityDef>;

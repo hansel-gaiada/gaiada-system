@@ -207,6 +207,11 @@ describe("gates are carried as data, unchanged (plan §2.6 rule 4)", () => {
     expect(reportsTeam.gate).toEqual({ kind: "unitCap", cap: "reports.department.view" });
     expect(reportsTeam.href).toBe("/reports/team?unit={dept}");
     expect(reportsTeam.ticket).toBeUndefined(); // DW-4b built it: /reports/team
+    // DW-4e-2: the Department tab is built (no ticket) and opens the KPI page for THEIR department (BFF §40).
+    const apprDept = PERFORMANCE_ROWS.find((r) => r.key === "appraisals")!.tabs.find((t) => t.key === "department")!;
+    expect(apprDept.href).toBe("/appraisals/department?unit={dept}");
+    expect(apprDept.ticket).toBeUndefined();
+    expect(apprDept.gate).toEqual({ kind: "unitCap", cap: "reports.department.view" });
     const team = PERFORMANCE_ROWS.find((r) => r.key === "appraisals")!.tabs.find((t) => t.key === "team")!;
     expect(gateMentions(team.gate, (g) => g.kind === "cap" && g.cap === "appraisal.score")).toBe(true);
     expect(gateMentions(team.gate, (g) => g.kind === "unitCap" && g.cap === "appraisal.read")).toBe(true);

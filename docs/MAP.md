@@ -340,6 +340,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/appraisals/[id]`
 - `/appraisals/cycles`
 - `/appraisals/cycles/[id]`
+- `/appraisals/department`
 - `/appraisals/mine`
 - `/approvals`
 - `/approvals/[id]`

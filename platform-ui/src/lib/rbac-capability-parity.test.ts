@@ -327,6 +327,17 @@ const KNOWN_NON_DRIFT: RegisterEntry[] = [
       "owner's bundle carries core.work_request.deliver and core.work_request.decline from the catalog seed, but resource_work_request.yaml's permission arm honours only read and create; a principal whose only grant is `owner` is denied on deliver and decline unless it also holds company_admin or manager.",
     decisionRef: "docs/FRONTEND-BFF-CONTRACT.md §32.10 deviation 3; cerbos/policies/resource_work_request.yaml (rules + perm arm); same shape as the MON-20 entries above",
   },
+  // DW-4e-2 (2026-10-14): the catalog bundles `reports.dept_kpi_target.propose` for `owner`, but resource_dept_kpi_target.yaml
+  // has NO permission-arm mirror for `propose` (an org_unit_lead holds the same key at unit scope, so a mirror would be broader
+  // than that grant: PERMISSION-CONTRACT §38, the same call as work_request's decline). A pure owner is refused by Cerbos.
+  {
+    role: "owner",
+    capability: "reports.dept_kpi_target.propose",
+    direction: "under-claim",
+    reason:
+      "owner's bundle carries reports.dept_kpi_target.propose from the catalog seed, but resource_dept_kpi_target.yaml's permission arm honours read, approve and reject only; a principal whose only grant is `owner` is denied on propose, and widening ROLE_CAPS.owner would show a Propose control that always 403s.",
+    decisionRef: "docs/FRONTEND-BFF-CONTRACT.md §40.3a; PERMISSION-CONTRACT §38; cerbos/policies/resource_dept_kpi_target.yaml; same shape as work_request.decide above",
+  },
 ];
 
 const knownNonDriftKey = (role: string, capability: Capability) => `${role} ${capability}`;

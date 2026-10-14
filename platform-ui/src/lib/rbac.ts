@@ -428,6 +428,15 @@ export const CAPABILITIES = [
   // `owner` holds both keys in the bundle but the policy's permission arm covers `read` and `create` only (§32.10 deviation 3),
   // so a pure owner is refused by Cerbos: the mirror leaves `owner` out and the parity register says why.
   "work_request.decide",
+
+  // ── DW-4e-2 (2026-10-14, department KPI targets, docs/FRONTEND-BFF-CONTRACT.md §40.2) — mirrors `resource_dept_kpi_target.yaml`.
+  // `propose`: company_admin by role and org_unit_lead over the unit or an enclosing one (`canInUnit`); platform_admin by wildcard.
+  // The catalog bundles it for `owner` too, but the policy has no permission-arm mirror for `propose` (PERMISSION-CONTRACT §38), so
+  // a pure owner is refused and the mirror leaves `owner` out (the parity register says why).
+  "reports.dept_kpi_target.propose",
+  // `approve` + `reject`: the approver, the company_admin tier, which `owner` mirrors through the permission arm. Never `manager`
+  // (every head carries it company-wide) and never a unit lead. The service also refuses a proposer approving their own proposal.
+  "reports.dept_kpi_target.approve",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -513,6 +522,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "agency.campaign.manage",
     // DW-5c UI: company_admin is on work_request `deliver` and `decline`.
     "work_request.decide",
+    // DW-4e-2: company_admin proposes, approves and rejects department KPI targets.
+    "reports.dept_kpi_target.propose", "reports.dept_kpi_target.approve",
   ],
   // §8's "Dept lead (own unit)" column. Reads person/project/department — NEVER company grain, NEVER
   // seal/amend, NEVER facts recompute, NEVER the n8n ops polls, NEVER cycle admin. May score the
@@ -750,7 +761,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
                   "lms.authoring", "lms.publish", "lms.progress.view", "lms.assign", "lms.grade",
                   // DW-5c UI: work_request `deliver` and `decline` each have an `org_unit_lead` rule over the receiving unit.
                   // As with every unit-lead capability, only `canInUnit(..., unitPath)` honours it, never a company-wide `can()`.
-                  "work_request.decide"],
+                  "work_request.decide",
+                  // DW-4e-2: the head proposes a target for their own unit (the approval is the company_admin tier's).
+                  "reports.dept_kpi_target.propose"],
   // IAM-02a-FIX / DR-2b — see the `Role` union's `agency_approver` comment for the full trail. Its
   // ENTIRE verified Cerbos reach is `agency_approval:approve` (via `module_approver`, module always
   // `"agency"`) — nothing else, not even `agency_approval:read` (that baseline rule names
@@ -856,6 +869,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // DW-5b: owner holds all four keys in the bundle AND the policies' permission arm
     // (`perm_agency_campaign_update`, `perm_agency_campaign_part_create|delete|allocate`) honours them.
     "agency.campaign.manage",
+    // DW-4e-2: owner holds approve/reject through the permission arm (`perm_dept_kpi_target_approve|reject`). NOT propose (no mirror).
+    "reports.dept_kpi_target.approve",
   ],
 };
 

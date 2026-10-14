@@ -22,6 +22,7 @@ import { reportsDemo } from "./demoReports";
 import { checkinsDemo } from "./demoCheckins";
 import { appraisalsDemo } from "./demoAppraisals";
 import { lmsDemo } from "./demoLms";
+import { deptKpisDemo } from "./demoDeptKpis";
 import { financeDemo } from "./demoFinance";
 import { loansDemo } from "./demoLoans";
 import { assistantDemo } from "./demoAssistant";
@@ -2254,6 +2255,11 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // `/api/:t/modules/*` catch-all can answer an LMS path with a generic {ok:true}.
   const lms = lmsDemo(method, p, url.searchParams, body, userId);
   if (lms) return lms;
+
+  // DW-4e-2 — the department KPI API (`/dept-kpis*`, BFF §40). Stateful targets (lib/demoDeptKpis.ts), placed high for the same
+  // reason as LMS: no later catch-all may answer a KPI path with an empty list, which the page would read as "no KPIs".
+  const deptKpis = deptKpisDemo(method, p, url.searchParams, body, userId);
+  if (deptKpis) return deptKpis;
 
   // Finance (/api/:t/finance/*) — fixture store (lib/demoFinance.ts). Placed beside
   // LMS and for the same reason: high enough that no later `/api/:t/...` catch-all can answer a

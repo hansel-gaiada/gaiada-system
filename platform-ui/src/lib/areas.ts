@@ -63,6 +63,7 @@ const PERFORMANCE: AreaRule[] = [
   rule("/reports/project", "performance"),
   rule("/appraisals", "performance"),
   rule("/appraisals/mine", "performance"),
+  rule("/appraisals/department", "performance"),
   rule("/appraisals/[id]", "performance", false, "An appraisal record; /appraisals/cycles beats it (static wins)"),
   rule("/learning", "performance"),
   rule("/learning/authoring", "performance", true),

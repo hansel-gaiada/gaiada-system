@@ -1,0 +1,30 @@
+/* DW-4e-2 — department KPI page. Colours are the existing status tokens only; the condition is always also said
+   in words (badge text), never by colour alone. */
+.dk-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 18px; padding: 12px 16px;
+  border: 0.5px solid var(--erp-ink-20, currentColor); border-left-width: 4px; background: var(--erp-surface, transparent);
+  font: 600 14px/1.5 var(--font-body); }
+.dk-banner--ok, .dk-tile--ok { border-left-color: var(--status-ok-fg); }
+.dk-banner--warning, .dk-tile--warning { border-left-color: var(--status-warning-fg); }
+.dk-banner--danger, .dk-tile--danger { border-left-color: var(--status-danger-fg); }
+.dk-banner--idle, .dk-tile--idle { border-left-color: var(--status-idle-fg); }
+.dk-badge { font: 700 11px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; }
+.dk-badge--ok { color: var(--status-ok-fg); }
+.dk-badge--warning { color: var(--status-warning-fg); }
+.dk-badge--danger { color: var(--status-danger-fg); }
+.dk-badge--idle { color: var(--status-idle-fg); }
+.dk-tiles { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin: 0 0 24px; }
+.dk-tile { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border: 0.5px solid var(--erp-ink-20, currentColor);
+  border-left-width: 4px; background: var(--erp-surface, transparent); }
+.dk-tile__label { font: 600 12px/1.4 var(--font-body); color: var(--erp-ink-60); }
+.dk-tile__value { font: 600 28px/1.1 var(--font-display, var(--font-body)); }
+.dk-tile__foot { font: 400 12px/1.5 var(--font-body); color: var(--erp-ink-60); }
+.dk-target { display: flex; flex-direction: column; gap: 10px; padding: 14px 0; border-top: 0.5px solid var(--erp-ink-20, currentColor); }
+.dk-target:first-child { border-top: 0; }
+.dk-target__head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+.dk-target__name { font: 600 14px var(--font-body); margin: 0; }
+.dk-target__meta { font: 400 13px/1.5 var(--font-body); color: var(--erp-ink-60); margin: 0; }
+.dk-target__actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.dk-form { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); align-items: start; max-width: 760px; }
+.dk-form__row { grid-column: 1 / -1; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.dk-msg { font: 400 12px/1.5 var(--font-body); max-width: 460px; }
+.dk-msg--bad { color: var(--status-danger-fg); }

@@ -918,7 +918,8 @@ export const PERFORMANCE_ROWS: readonly WorkspaceRow[] = [
       // nav.ts's Team Appraisals gate (`appraisal.score` or `appraisal.read`), plus the head of the unit.
       { key: "team", label: "Team", href: "/appraisals", icon: "check",
         gate: { kind: "any", gates: [{ kind: "cap", cap: "appraisal.score" }, { kind: "unitCap", cap: "appraisal.read" }] } },
-      { key: "department", label: "Department", href: "/appraisals/department", icon: "award", gate: { kind: "unitCap", cap: "reports.department.view" }, ticket: "DW-4e" },
+      // DW-4e-2: the department's KPI tiles, condition and targets screen, opened for THIS department (BFF §40).
+      { key: "department", label: "Department", href: "/appraisals/department?unit={dept}", icon: "award", gate: { kind: "unitCap", cap: "reports.department.view" } },
     ],
   },
   {
