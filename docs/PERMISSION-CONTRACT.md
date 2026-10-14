@@ -2122,3 +2122,54 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §41 (plan `docs/plans/2026-10-13-depart
   It records only that the alert was seen. It changes no target, no condition and no score, so it needs no write action of its own.
 - **The scheduled run and the digest** (`POST /dept-kpis/watch` and `/digest`) reuse `report_admin` · `recompute` (company_admin, platform_admin), the gate of `POST /reports/facts/recompute`. The n8n automation account `wf:reports-kpi-watch` holds company_admin, like the other reports flows.
 - **The drivers read** (`GET /dept-kpis/drivers`, 4j-3) uses the unit read's gate, narrowed to heads and the company-wide tier. Placed staff get 403.
+
+## 39. DW-8g — the `calendar_event` kind (2026-10-14, PLANNED)
+
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §47 (plan `docs/plans/2026-10-13-department-workspaces.md` §8.1, row 8g). Status: **PLANNED**.
+
+**A new core kind, `calendar_event` (no module), with five actions.** The policy is `resource_calendar_event.yaml`, with keys `core.calendar_event.{read,create,update,cancel,respond}`. One resource is one event on the company calendar, which may carry a scheduled meeting recording.
+
+| Action | Reach | What it is |
+|---|---|---|
+| `read` | `company_admin`. **Its own rule** for the organizer (`ownerId == principal.id`, held as `member`). **Its own rule** for an attendee (`principal.id in attendeeIds`, held as `member` or `viewer`). **Its own rule** for every `member` and `viewer` when `visibility == "company"` | see an event. A manager does NOT read every calendar |
+| `create` | `company_admin`, `manager`, `member` | schedule an event or a meeting. It is also the gate of the busy-times read |
+| `update` | `company_admin`; **its own rule** for the organizer | edit time, title, attendees or place |
+| `cancel` | `company_admin`; **its own rule** for the organizer | call it off |
+| `respond` | **its own rule** for an attendee (`principal.id in attendeeIds`) | accept, decline or say maybe, for themselves only. Nobody answers for someone else, `company_admin` included |
+
+**Authoring rules:**
+- Each attribute-dependent rule stands alone (HIER-2): the organizer, attendee and company-visibility rules are separate rules, never mixed with a scope role.
+- **`EFFECT_DENY` on `create`, `update`, `cancel` and `respond`** for `principal.attr.kind in ["automation","bot"]`, shaped like `resource_work_request.yaml`'s (`roles: ["user"]`, `has()`-guarded). `read` stays allowed. Agents may schedule later, under the separate AI plan.
+- **`platform_admin`** keeps the house wildcard. A deny-overrides `respond` rule stops it answering for others: `principal.id in attendeeIds` must hold for every role.
+
+**Resource attributes**, fed by the handler from the rows and never from a body:
+- `ownerId` (from `organizer_id`): an existing allow-list entry.
+- `attendeeIds` (from `calendar_event_attendees`): **new**, default `[]`.
+- `visibility`: **new**, default `"attendees"`.
+
+Both new attributes go in the `Resource` type and in the `resourcePayload()` allow-list in `src/rbac/cerbos.ts`. An attribute missing from that allow-list is silently dropped, and an unfed resource denies.
+
+**The permission arm covers `create` only.** `read` (all three of its rules depend on attributes), `update`, `cancel` and `respond` are shapes that a flat `perms` mirror cannot express. They carry no `perm_*` rule, the same call as `work_request`.
+
+**Bundles:**
+
+| Role | Holds |
+|---|---|
+| `company_admin`, `owner`, `platform_admin` | all five keys |
+| `manager` | `create` |
+| `member` | `create`; self-scoped `read`, `update`, `cancel` and `respond` |
+| `viewer` | self-scoped `read` and `respond` |
+
+No key is `sensitive`.
+
+**The six artifacts** are as in §36:
+- the policy and its derived role;
+- `cerbos.ts`;
+- the catalog;
+- the groups (a `calendar` group);
+- a migration seeding `permissions` and `role_permissions`, with the DO-block self-assertion (owner mirrors company_admin, plus the self-scoped markers);
+- the bundles, regenerated from a clean worktree.
+
+Then move the four pinned literals.
+
+**Proof:** `src/rbac/cerbos-calendar-event.test.ts` (a static pin, plus the live matrix with `CERBOS_URL`). **Restart Cerbos after the deploy, then probe:** on a fresh tenant, a GET of a zero-uuid event answers 404.

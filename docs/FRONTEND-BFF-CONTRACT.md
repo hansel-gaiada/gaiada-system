@@ -8200,3 +8200,180 @@ The existing callers of `listFiles` (the task and project pages) are not changed
 
 ### 46.6 A finding outside this ticket
 The hub's `knowledge.search` tool and the assistant's retrieval (`config.knowledgeTopK`, ASST-18) apply only the tier's rule today. So the AI Assistant can quote internal chunks, such as a person's report or a meeting transcript, to any member of the company. §46.2's filter is written as a shared function (`search-filter.ts`) so those paths can adopt it. Whether and when they do is the owner's decision (see the DW-8 board), not part of DW-8i.
+
+## 47. Calendar events and meeting scheduling (DW-8g, 2026-10-14) — `platform-nest/src/core/calendar-events.{controller,service}.ts` (new), migration `<next free>_calendar_events.sql`; UI `/calendar` — **STATUS: PLANNED**
+
+**Why.** Plan §8.1 (row 8g) and §14.2 ("Meetings: schedule a meeting, see events, not only tasks").
+- The calendar shows tasks only.
+- The one way to put a meeting in the future is `POST /:t/meetings/recordings/schedule`. It creates a recording row in state `scheduled`, with no attendees, no end time and no invitation.
+
+This section adds events with attendees. A meeting is an event that can carry that scheduled recording. The Cerbos kind is PERMISSION-CONTRACT §39.
+
+**Out of scope (v1):**
+- recurrence;
+- client contacts as attendees;
+- email invitations (system mail stays approvals and risk only; personal Gmail is DW-8j);
+- Google Calendar sync (waits for DW-11's OAuth client);
+- agent writes (the `calendar_event` DENY for automation and bot principals follows the `work_request` precedent; agents get it under the separate AI plan).
+
+### 47.1 Data
+
+**`calendar_events`:**
+
+| Column | Type and rule |
+|---|---|
+| `id`, `tenant_id` | |
+| `title` | 1 to 200 characters |
+| `description` | at most 5,000 characters, scrubbed like other free text |
+| `starts_at`, `ends_at` | `timestamptz`, for a timed event |
+| `starts_on`, `ends_on` | `date`, for an all-day event (inclusive) |
+| `location` | at most 300 characters |
+| `video_url` | `https:` only, at most 2,048 characters |
+| `organizer_id` | `users` |
+| `visibility` | `attendees` (default) or `company` |
+| `status` | `confirmed` or `cancelled` |
+| `cancelled_at` | |
+| `client_id`, `project_id` | nullable FKs in the same tenant |
+| `meeting_recording_id` | nullable, unique, FK `meeting_recordings` |
+| `created_at`, `updated_at` | |
+| `origin_site` | no default |
+
+**CHECKs:**
+- exactly one of the two time shapes is set;
+- `ends_at > starts_at`, and at most 14 days apart;
+- `ends_on >= starts_on`;
+- `cancelled_at` is set exactly when `status = 'cancelled'`. Use `IS NOT DISTINCT FROM`, because a CHECK passes on NULL.
+
+**`calendar_event_attendees`:**
+- `(event_id, user_id)` is the primary key. Columns: `tenant_id`, `response` (`needs_action`, `accepted`, `declined` or `tentative`) and `responded_at`.
+- The organizer is always an attendee, with the answer `accepted`.
+
+**RLS, indexes and time zone:**
+- FORCE RLS on both tables, with the standard tenant predicate.
+- Indexes: `(tenant_id, starts_at)`, `(tenant_id, starts_on)`, and `(user_id)` on the attendees.
+- Times are stored in UTC. The UI shows them in the display zone (`NEXT_PUBLIC_DISPLAY_TZ`).
+
+### 47.2 Who sees and does what (PERMISSION-CONTRACT §39)
+
+**Who may read an event:**
+- the organizer;
+- every attendee;
+- every member and viewer of the company, when `visibility = 'company'`;
+- `company_admin`.
+
+Nobody else reads it, a manager included.
+
+**What a read never reveals:**
+- Calendar reads never leak the title of an event the caller cannot read.
+- Busy times (§47.4) carry no title at all.
+
+**A linked recording keeps its own rule.** Meeting recordings are readable by every member today (`resource_meeting_recording.yaml`). An event's privacy does not narrow its recording, and the form says so when "Record this meeting" is ticked.
+
+**Who may change an event:**
+- `create`: `company_admin`, `manager` and `member`. A viewer cannot.
+- `update` and `cancel`: the organizer and `company_admin`.
+- `respond`: an attendee, for themselves only.
+
+### 47.3 Endpoints
+
+**`GET /api/calendar/events/mine?from=&to=&scope=`**
+
+The caller's events (organizer or attendee) across their companies, in the `tasks/mine` envelope (`{items, companies}`). A failing company leg is `included: false`, never a 500.
+- **Parameters:** the window `[from, to)` is required and at most 92 days, else 400. `scope` is `all` or a company id.
+- **A row:** `{id, tenantId, company, title, startsAt, endsAt, allDay, startsOn, endsOn, location, videoUrl, status, myResponse, organizer: {id, name}, attendeeCount, recording: {id, status} | null, client: {id, name} | null, project: {id, name} | null, href: "/calendar/events/<id>?company=<tenantId>"}`.
+- **Included states:** cancelled events are included, so the calendar can strike them through. An event the caller declined is included with `myResponse: "declined"`.
+
+**`GET /api/:t/calendar/events/:id`**
+
+The detail, with `attendees: [{userId, name, response}]` and `canEdit` / `canRespond` (from Cerbos). An event the caller cannot read answers 404, not 403, so an id is never an existence oracle.
+
+**`POST /api/:t/calendar/events`**
+- **Body:** `{title, startsAt, endsAt}` or `{allDay: true, startsOn, endsOn}`, plus `location?, videoUrl?, description?, attendeeIds: string[], visibility?, clientId?, projectId?, record?: boolean}`.
+- **Attendees:** at most 50, each an active member of the company, else 422 `{error: "attendee_not_member", userId}`. The organizer is added if absent.
+- **`record: true`:** also authorizes `meeting_recording` · `create`. It creates the `scheduled` recording row through the same code path as `POST …/recordings/schedule`, in the same transaction, linked by `meeting_recording_id`. The recording's `scheduledAt` is `startsAt`, so this is for timed events only: an all-day event with `record` is 400.
+- **Answer:** 201 with the detail.
+- **Invitations:** every attendee except the organizer gets an Inbox notification (`type "calendar.invited"`, the title, the time in words, an `href` to the event).
+
+**`PATCH /api/:t/calendar/events/:id`**
+
+The organizer edits any field above, except `record`.
+- **Attendees:** added people are invited, and removed people are told it is off for them.
+- **A time change:** tells everyone and resets the answers to `needs_action`.
+- **A linked recording** that is still `scheduled` has its `scheduled_at` moved with the start.
+- **A cancelled event** answers 409 `event_cancelled`.
+
+**`POST /api/:t/calendar/events/:id/cancel`**
+
+Sets `cancelled` and tells every attendee.
+- **Idempotent:** a second call answers 200 with the same state.
+- **A linked recording** is left as it is; Meetings shows that the event was cancelled.
+
+**`POST /api/:t/calendar/events/:id/respond`**
+
+Body `{response: "accepted" | "declined" | "tentative"}`. Attendees only, for themselves. On a cancelled event it answers 409.
+
+**Activity rows** (`writeActivity`) are written for create, update, cancel and respond. They carry ids, never the description.
+
+### 47.4 Busy times, for scheduling
+
+**`GET /api/:t/calendar/busy?userIds=a,b&from=&to=`**
+
+- **Answer:** `{busy: [{userId, intervals: [{startsAt, endsAt}]}]}`. The intervals come from confirmed timed events the person attends with an answer other than `declined`. All-day events are left out.
+- **What it never carries:** a title, a location or an organizer. A person is not told who looked.
+- **Limits:** at most 20 users and a window of at most 14 days. Each user must be an active member of the company, else 422.
+- **Gate:** `calendar_event` · `create` on the tenant, the same people who can schedule.
+- **To confirm with the owner when 8g starts.** Busy times show only when someone is busy, never what they are doing. This is the scheduling aid every calendar offers, but it is new people data, so it is asked, not assumed (compare DW-D19).
+
+### 47.5 UI
+
+**`/calendar`:**
+- Events join the Day, Week and Month grids next to tasks, from the cross-company read.
+- Cancelled events are struck through; declined ones are dimmed.
+- "Schedule a meeting" opens `/calendar/new`.
+
+**`/calendar/new`:**
+- title;
+- date and time in the display zone, or all day;
+- attendees (picked from `GET /api/:t/members`);
+- location or video link;
+- an optional client and project;
+- "Record this meeting", shown where the Meetings row is (`agencyRow: meetings`);
+- visibility: "Only the people invited" or "Everyone in the company".
+
+The chosen attendees' busy times for that day show as plain blocks.
+
+**`/calendar/events/[id]`:**
+- the detail and the answer buttons;
+- edit and cancel, for the organizer.
+
+It sits in the personal area, Calendar row.
+
+**The Overview's Today block** (`components/overview/widgets/TodayBlock.tsx`) lists today's events, and its note "No calendar events exist yet (DW-8g)" goes.
+
+**DEMO_MODE:** a stateful demo store for events, as `demoMeetings` does for recordings.
+
+### 47.6 Tests
+
+**Migration:**
+- the CHECKs: each time shape, the 14-day span, cancelled, and both shapes refused;
+- RLS returns zero rows with the GUC unset.
+
+**HTTP suite** on the Linux CI gate (real Postgres and Cerbos):
+- create: timed, all-day, and with `record` (both rows written);
+- attendee validation: 422;
+- read: 200 for the organizer, an attendee and a member of a company-visible event; 404 for an uninvited member and for a manager;
+- update: 200 for the organizer, 403 for an attendee;
+- a time change resets the answers and moves a scheduled recording;
+- cancel is idempotent;
+- respond: 200 for an attendee, 403/404 for a non-attendee, 409 on a cancelled event;
+- busy times carry no title, and 21 users or a 15-day window is refused;
+- `mine` returns only the caller's events, and its envelope reports a failing leg;
+- an automation principal is refused `create`.
+
+**Cerbos matrix:** `src/rbac/cerbos-calendar-event.test.ts`.
+
+**UI:**
+- the grid merge: tasks and events, and the time zone at the day's edges;
+- the form's validation sentences;
+- the busy blocks;
+- the Today block.
