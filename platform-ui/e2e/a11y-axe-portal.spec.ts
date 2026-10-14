@@ -51,6 +51,10 @@ const PAGES = [
   "/portal/invoices/inv-2026-021",
   "/portal/contracts/ctr-msa-2026",
   "/portal/contracts/ctr-sow-brand",
+  // PV5-11 (PV-D43): a certified contract offering "Sign with Simulated PSrE (review stage)", and the client's signing page
+  // at the simulated PSrE (banner, the document, the signers, the sign form).
+  "/portal/contracts/ctr-certified-retainer",
+  "/portal/simulated-psre/simenv_00000000000000000000d001",
   // PV5-08: legal and money documents.
   "/portal/documents",
   "/portal/profile",

@@ -17,7 +17,7 @@ import { webdevProvisionedSitesDemo } from "./demoWebdevProvisionedSites";
 import { webdevConsoleDemo } from "./demoWebdevConsole";
 import { githubReposDemo } from "./demoGithubRepos";
 import { monitoringDemo } from "./demoMonitoring";
-import { portalDashboardDemo } from "./demoPortal";
+import { portalDashboardDemo, simulatedPsreStaffDemo } from "./demoPortal";
 import { reportsDemo } from "./demoReports";
 import { checkinsDemo } from "./demoCheckins";
 import { appraisalsDemo } from "./demoAppraisals";
@@ -2504,6 +2504,10 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
 
   const portalDash = portalDashboardDemo(method, p, userId, body);
   if (portalDash) return portalDash;
+
+  // PV5-11: the staff side of the SIMULATED PSrE (the countersigner's page) and the staff certified-signing refresh.
+  const simPsreStaff = simulatedPsreStaffDemo(method, p, body);
+  if (simPsreStaff) return simPsreStaff;
 
   // Client portal runs/gates (C5) — identity-aware, so a staff user still gets the 403 the real BFF returns.
   const portal = portalDemo(method, p, userId);

@@ -316,3 +316,34 @@ describe("PV5-08 documents route", () => {
     expect(portalDashboardDemo("GET", T("documents"), "demo-hansel")?.status).toBe(403);
   });
 });
+
+describe("PV5-11 certified signing through the simulated PSrE (demo)", () => {
+  const ENV = "simenv_00000000000000000000d001";
+  it("a certified contract offers 'Sign with <provider>' and never the typed-name form", () => {
+    const d = portalDashboardDemo("GET", T("contracts/ctr-certified-retainer"), CLIENT)?.json as Record<string, unknown>;
+    expect(d).toMatchObject({
+      signatureTier: "certified", canSign: false,
+      certifiedSigning: { provider: "simulated", simulated: true, available: true, canStart: true, signingUrl: `/portal/simulated-psre/${ENV}` },
+    });
+  });
+
+  it("start needs the hash the page showed; the envelope pages refuse staff on the portal side and the full round trip signs", async () => {
+    vi.resetModules();
+    const { portalDashboardDemo: fresh, simulatedPsreStaffDemo } = await import("./demoPortal");
+    const d = fresh("GET", T("contracts/ctr-certified-retainer"), CLIENT)?.json as { contentSha256: string };
+    expect(fresh("POST", T("contracts/ctr-certified-retainer/certified-signing"), CLIENT, JSON.stringify({ contentSha256: "0".repeat(64) }))?.status).toBe(409);
+    const st = fresh("POST", T("contracts/ctr-certified-retainer/certified-signing"), CLIENT, JSON.stringify({ contentSha256: d.contentSha256 }));
+    expect(st?.json).toMatchObject({ envelopeId: ENV, simulated: true, signingUrl: `/portal/simulated-psre/${ENV}` });
+    expect(fresh("GET", T(`simulated-psre/envelopes/${ENV}`), "demo-hansel")?.status).toBe(403);
+    const view = fresh("GET", T(`simulated-psre/envelopes/${ENV}`), CLIENT)?.json as Record<string, unknown>;
+    expect(view).toMatchObject({ simulated: true, notice: "Simulated certified signature: not a real PSrE signature", yourRole: "client", canSign: true });
+    const sign = { agree: true, signerName: "Dana Whitfield", documentSha256: d.contentSha256 };
+    expect(fresh("POST", T(`simulated-psre/envelopes/${ENV}/sign`), CLIENT, JSON.stringify(sign))?.json).toMatchObject({ outcome: "signed", completed: false });
+    const staffView = simulatedPsreStaffDemo("GET", `/api/co-agency/simulated-psre/envelopes/${ENV}`)?.json as Record<string, unknown>;
+    expect(staffView).toMatchObject({ yourRole: "countersigner", canSign: true });
+    expect(simulatedPsreStaffDemo("POST", `/api/co-agency/simulated-psre/envelopes/${ENV}/countersign`, JSON.stringify({ ...sign, signerName: "Olive Owner" }))?.json)
+      .toMatchObject({ outcome: "signed", completed: true });
+    expect((fresh("GET", T("contracts/ctr-certified-retainer"), CLIENT)?.json as { status: string }).status).toBe("signed");
+    expect(simulatedPsreStaffDemo("GET", `/api/co-agency/simulated-psre/envelopes/simenv_unknown`)?.status).toBe(404);
+  });
+});

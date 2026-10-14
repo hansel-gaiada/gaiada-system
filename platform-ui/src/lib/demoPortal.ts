@@ -194,6 +194,8 @@ interface DemoContract {
   contentSha256: string; signatureTier: "attested" | "certified"; signedCopyFileId: string | null;
   /** PV4-04: an amendment names the contract it amends and (optionally) the change request it came from. */
   kind?: "agreement" | "amendment"; amendsId?: string | null; amendsReference?: string | null; changeRequestId?: string | null;
+  /** PV5-11: a certified contract signed through the SIMULATED PSrE (review stage): its provider and envelope. */
+  signatureProvider?: string | null; providerEnvelopeId?: string | null;
 }
 
 const CONTRACTS: DemoContract[] = [
@@ -262,7 +264,97 @@ const CONTRACTS: DemoContract[] = [
     contentSha256: "9e8d7c6b5a49382716059e8d7c6b5a49382716059e8d7c6b5a49382716059e8d", signatureTier: "attested",
     signedCopyFileId: null,
   },
+  {
+    // PV5-11 (PV-D43): a CERTIFIED agreement, sent, signed through the SIMULATED PSrE. The client has reached the sign step
+    // (its envelope exists), so the contract page offers "Sign with Simulated PSrE (review stage)" and the envelope's
+    // simulated signing pages (portal and staff) are drivable.
+    id: "ctr-certified-retainer", title: "Retainer agreement (certified)", reference: "GDA-2026-022", version: 1,
+    status: "sent", value: 180_000_000, currency: "IDR", startsOn: day(0), endsOn: day(365),
+    sentAt: stamp(-1), signedAt: null, projectId: null, projectName: null,
+    bodyMd: "## Retainer\n\nA monthly retainer for website care, signed with a certified electronic signature.",
+    fileId: null,
+    signatures: [],
+    contentSha256: "c3e1d2f4a5b6978877665544332211ffc3e1d2f4a5b6978877665544332211ff", signatureTier: "certified",
+    signedCopyFileId: null,
+    signatureProvider: "simulated", providerEnvelopeId: "simenv_00000000000000000000d001",
+  },
 ];
+
+// ── PV5-11: the SIMULATED PSrE's envelope for ctr-certified-retainer (review stage, PV-D43) ───────────────
+const SIM_LABEL = "Simulated PSrE (review stage)";
+const SIM_NOTICE = "Simulated certified signature: not a real PSrE signature";
+type DemoSimSigner = {
+  role: "client" | "countersigner"; displayName: string; state: "pending" | "signed";
+  signerName: string | null; signerTitle: string | null; signedAt: string | null;
+};
+const SIM_SIGNERS: DemoSimSigner[] = [
+  { role: "client", displayName: "Northwind Traders, authorised signatory", state: "pending", signerName: null, signerTitle: null, signedAt: null },
+  { role: "countersigner", displayName: "Our company, authorised signatory", state: "pending", signerName: null, signerTitle: null, signedAt: null },
+];
+function simContract(): DemoContract {
+  return CONTRACTS.find((k) => k.providerEnvelopeId && k.signatureProvider === "simulated") as DemoContract;
+}
+function simView(role: "client" | "countersigner", tenantPath: string) {
+  const k = simContract();
+  const slot = SIM_SIGNERS.find((x) => x.role === role) as DemoSimSigner;
+  const completed = SIM_SIGNERS.every((x) => x.state === "signed");
+  const canSign = slot.state === "pending" && !completed && k.status === "sent";
+  return {
+    envelopeId: k.providerEnvelopeId, provider: "simulated", label: SIM_LABEL, simulated: true, notice: SIM_NOTICE,
+    title: `${k.title} (${k.reference})`, status: completed ? "completed" : "pending", completedAt: null,
+    contractId: k.id, clientId: CLIENT_ID, contractStatus: k.status, contentSha256: k.contentSha256,
+    documentFilename: `${k.reference}.md`, documentContentType: "text/markdown; charset=utf-8", documentSha256: k.contentSha256,
+    documentText: k.bodyMd, documentPath: `${tenantPath}/simulated-psre/envelopes/${k.providerEnvelopeId}/document`,
+    signers: SIM_SIGNERS.map((x) => ({ ...x })), yourRole: role, canSign,
+    reason: canSign || slot.state === "signed" ? null : `this agreement is ${k.status} and cannot be signed`,
+  };
+}
+function simSign(role: "client" | "countersigner", parsed: Record<string, unknown>): DemoResult {
+  const k = simContract();
+  if (parsed.agree !== true) return bad("you must confirm you agree to the terms", "agree");
+  const signerName = String(parsed.signerName ?? "").trim();
+  if (signerName.length < 2) return bad("signerName required", "signerName");
+  if (String(parsed.documentSha256 ?? "").trim().toLowerCase() !== k.contentSha256) {
+    return conflict("this document changed since you opened it; reload it and read it again before signing", "content_changed");
+  }
+  const slot = SIM_SIGNERS.find((x) => x.role === role) as DemoSimSigner;
+  if (slot.state === "signed") return ok({ ok: true, simulated: true, outcome: "already_signed", completed: false, noticesDelivered: 0 });
+  slot.state = "signed";
+  slot.signerName = signerName;
+  slot.signerTitle = parsed.signerTitle ? String(parsed.signerTitle) : null;
+  slot.signedAt = new Date().toISOString();
+  // What the ERP records after its re-fetch (the real path writes it from the provider's status, never from this call).
+  k.signatures.push({ party: role === "client" ? "client" : "provider", signerName, signerTitle: slot.signerTitle, signedAt: slot.signedAt });
+  const completed = SIM_SIGNERS.every((x) => x.state === "signed");
+  if (completed) {
+    k.status = "signed";
+    k.signedAt = new Date().toISOString();
+  }
+  return ok({ ok: true, simulated: true, outcome: "signed", completed, noticesDelivered: completed ? 2 : 1 });
+}
+
+/** PV5-11: the STAFF side of the simulated PSrE (the countersigner's page) and the staff refresh, in DEMO_MODE. */
+export function simulatedPsreStaffDemo(method: string, p: string, body?: string): DemoResult | null {
+  const m = method.toUpperCase();
+  const tenantPath = (p.match(/^(\/api\/[^/]+)\//) ?? [])[1];
+  if (!tenantPath) return null;
+  const k = simContract();
+  const parsed: Record<string, unknown> = (() => {
+    if (!body) return {};
+    try { return JSON.parse(body) as Record<string, unknown>; } catch { return {}; }
+  })();
+  const env = p.match(/^\/api\/[^/]+\/simulated-psre\/envelopes\/([^/]+)(\/countersign|\/document)?$/);
+  if (env) {
+    if (env[1] !== k.providerEnvelopeId) return notFound("envelope not found");
+    if (!env[2] && m === "GET") return ok(simView("countersigner", tenantPath));
+    if (env[2] === "/countersign" && m === "POST") return simSign("countersigner", parsed);
+    if (env[2] === "/document") return notFound("no stored content in demo mode");
+  }
+  if (/^\/api\/[^/]+\/contracts\/[^/]+\/certified-signing\/refresh$/.test(p) && m === "POST") {
+    return ok({ status: "pending", outcome: "nothing new at the provider", contractStatus: k.status });
+  }
+  return null;
+}
 
 let profileName = "Dana Whitfield";
 let profileTitle = "Marketing Lead, Northwind Traders";
@@ -572,7 +664,7 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
   // Route table FIRST, identity check second — but only for routes this module owns, so unmatched
   // portal routes still fall through to `portalDemo` (runs/gates) rather than being 403'd here.
   const seg = p.replace(/^\/api\/[^/]+\/portal\//, "");
-  const OWNED = /^(overview|projects|milestones|timeline|deliverables|invoices|contracts|documents|profile|stream|files|change-requests|conversation|meetings|payments)(\/|\?|$)/;
+  const OWNED = /^(overview|projects|milestones|timeline|deliverables|invoices|contracts|documents|profile|stream|files|change-requests|conversation|meetings|payments|simulated-psre)(\/|\?|$)/;
   if (!OWNED.test(seg)) return null;
   if (!isDemoPortalClient(userId)) return { status: 403, json: { error: "not a portal client" } };
 
@@ -749,16 +841,49 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
       sentAt: k.sentAt, signedAt: k.signedAt, projectId: k.projectId,
       bodyMd: k.bodyMd, declineReason: null, termEnded: s.termEnded,
       kind: s.kind, amendsId: s.amendsId, amendsReference: s.amendsReference, changeRequestId: s.changeRequestId,
-      canSign: k.status === "sent" && !s.clientSigned && !s.termEnded,
+      canSign: k.status === "sent" && !s.clientSigned && !s.termEnded && k.signatureTier !== "certified",
       viewOnly: false,
-      signatures: k.signatures,
+      signatures: k.signatures.map((x) => ({ ...x, provider: k.signatureProvider ?? null })),
       contentSha256: k.contentSha256,
       signatureTier: k.signatureTier,
       signedCopyFileId: k.signedCopyFileId,
+      // PV5-11: the certified-signing block (null for an attested contract), as the BFF computes it.
+      signatureProvider: k.signatureProvider ?? null,
+      providerEnvelopeId: k.providerEnvelopeId ?? null,
+      certifiedSigning: k.signatureTier === "certified"
+        ? {
+            provider: "simulated", label: SIM_LABEL, simulated: true, available: true, envelopeStarted: !!k.providerEnvelopeId,
+            canStart: k.status === "sent" && !s.clientSigned && !s.termEnded,
+            signingUrl: k.status === "sent" && !s.clientSigned && !s.termEnded && k.providerEnvelopeId
+              ? `/portal/simulated-psre/${k.providerEnvelopeId}` : null,
+          }
+        : null,
       document: k.fileId
         ? { id: k.fileId, filename: `${k.reference}.pdf`, contentType: "application/pdf", byteSize: 214_882, url: null }
         : null,
     });
+  }
+  // ── PV5-11: certified signing through the SIMULATED PSrE ──
+  const certM = seg.match(/^contracts\/([^/]+)\/certified-signing(\/refresh)?$/);
+  if (certM && m === "POST") {
+    const k = CONTRACTS.find((x) => x.id === certM[1]);
+    if (!k) return notFound("contract not found");
+    if (certM[2]) return ok({ status: "pending", outcome: "nothing new at the provider", contractStatus: k.status });
+    if (k.signatureTier !== "certified" || !k.providerEnvelopeId) {
+      return conflict("this agreement is signed by typed name, not through a certified signing provider", "not_certified");
+    }
+    if (String(parsed.contentSha256 ?? "").trim().toLowerCase() !== k.contentSha256) {
+      return conflict("this agreement changed since you opened it; reload it and read it again before signing", "content_changed");
+    }
+    return ok({ envelopeId: k.providerEnvelopeId, provider: "simulated", label: SIM_LABEL, simulated: true, signingUrl: `/portal/simulated-psre/${k.providerEnvelopeId}` });
+  }
+  const simEnvM = seg.match(/^simulated-psre\/envelopes\/([^/]+)(\/sign|\/document)?$/);
+  if (simEnvM) {
+    const k = simContract();
+    if (simEnvM[1] !== k.providerEnvelopeId) return notFound("envelope not found");
+    if (!simEnvM[2] && m === "GET") return ok(simView("client", p.replace(/\/simulated-psre\/.*$/, "")));
+    if (simEnvM[2] === "/sign" && m === "POST") return simSign("client", parsed);
+    if (simEnvM[2] === "/document") return notFound("no stored content in demo mode");
   }
   const signM = seg.match(/^contracts\/([^/]+)\/sign$/);
   if (signM && m === "POST") {

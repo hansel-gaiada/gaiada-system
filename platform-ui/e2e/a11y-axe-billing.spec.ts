@@ -9,6 +9,7 @@ import { tenantCookie } from "./appCookies";
 //   - accounting settings (which now links to the billing profile),
 //   - tax (PV5-F2: tax codes, the standard PPN action and the add form, beside the PPN position),
 //   - the client's Contracts & billing page (tier, content fingerprint, Mark certified disabled with its reason).
+//   - PV5-11: the simulated PSrE's countersign page (review stage, labelled simulated).
 //
 // Modelled on `a11y-axe-client-hub.spec.ts`. Runs in the default `chromium` project on the shared staff session and, like
 // every axe spec here, is not `@smoke` and does not gate a merge; CI does not run Playwright at all. Read
@@ -26,6 +27,8 @@ const PAGES = [
   "/finance/settings",
   "/finance/tax", // PV5-F2: the tax-code setup card (the standard PPN codes, add, end-date)
   "/clients/cl-1/billing",
+  // PV5-11 (PV-D43): the countersigner's page at the SIMULATED PSrE (banner, the document, the signers, the form).
+  "/simulated-psre/simenv_00000000000000000000d001",
 ];
 
 async function pinTheme(page: Page, theme: Theme) {
