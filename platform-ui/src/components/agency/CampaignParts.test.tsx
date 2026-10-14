@@ -7,6 +7,8 @@ vi.mock("@/lib/campaignActions", () => ({
   addPartAction: vi.fn(), removePartAction: vi.fn(), updatePartAction: vi.fn(),
 }));
 
+vi.mock("@/lib/figmaActions", () => ({ addFigmaLinkAction: vi.fn(), removeFigmaLinkAction: vi.fn(), exportFigmaLinkAction: vi.fn() }));
+
 import { CampaignParts, type CampaignPartsProps } from "./CampaignParts";
 import { formatBudget } from "@/lib/format";
 
@@ -82,5 +84,33 @@ describe("CampaignParts", () => {
   it("says when no department has a part yet", () => {
     render(<CampaignParts {...props({ parts: [] })} />);
     expect(screen.getByText("No department has a part in this campaign yet.")).toBeTruthy();
+  });
+});
+
+// DW-6k: each part carries its own Designs section when the page read its Figma links.
+describe("CampaignParts · Designs (DW-6k)", () => {
+  const figmaLink = {
+    id: "fl1", targetKind: "campaign_part" as const, targetId: "p1", fileKey: "k", nodeId: null, url: "https://www.figma.com/design/k",
+    title: "Reels kit", lastModified: null, openComments: null, cachedAt: null, assetGroupId: null, stale: false, refreshError: null,
+  };
+
+  it("draws no Designs section for a part whose links were not read", () => {
+    render(<CampaignParts {...props()} />);
+    expect(screen.queryByRole("region", { name: "Designs" })).toBeNull();
+  });
+
+  it("shows the part's links, with an unread comment count as 'not read yet' and never 0", () => {
+    const figma = { kind: "ok" as const, data: { figmaConnected: false, items: [figmaLink] } };
+    render(<CampaignParts {...props({ parts: [{ part: part(), canEdit: false, figma }], now: Date.now() })} />);
+    const card = screen.getByRole("article", { name: "Part: Social Media" });
+    expect(within(card).getByText("Reels kit")).toBeTruthy();
+    expect(within(card).getByText("Comments not read yet")).toBeTruthy();
+    expect(within(card).getByText(/Figma isn't connected for this company/)).toBeTruthy();
+  });
+
+  it("says a refused links read is refused, not 'no designs'", () => {
+    render(<CampaignParts {...props({ parts: [{ part: part(), canEdit: false, figma: { kind: "forbidden" as const } }] })} />);
+    expect(screen.getByText("You can't see the designs linked here.")).toBeTruthy();
+    expect(screen.queryByText(/No Figma designs/)).toBeNull();
   });
 });

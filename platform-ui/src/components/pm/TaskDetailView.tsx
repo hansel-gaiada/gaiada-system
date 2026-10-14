@@ -4,7 +4,11 @@ import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { getTask, listFiles, getFieldDefs } from "@/lib/entities";
+import { getTask, getProject, listFiles, getFieldDefs } from "@/lib/entities";
+import { can } from "@/lib/rbac";
+import { readFigmaLinks } from "@/lib/figma-data";
+import { connectionsHrefFor } from "@/lib/figma";
+import { Designs } from "@/components/figma/Designs";
 import { attachFileAction, deleteFileAction } from "@/lib/collabActions";
 import { Attachments } from "@/components/Attachments";
 import {
@@ -89,7 +93,7 @@ export async function TaskDetailView({
     );
   }
 
-  const [comments, suggestions, assignable, projectTasks, timeLogs, files, tagRegistry, customFieldDefs, projectStatuses, followers, assignmentHistory, pullRequests] = await Promise.all([
+  const [comments, suggestions, assignable, projectTasks, timeLogs, files, tagRegistry, customFieldDefs, projectStatuses, followers, assignmentHistory, pullRequests, figma] = await Promise.all([
     listTaskComments(userId, tenant, taskId),
     listSuggestions(userId, tenant, taskId),
     assignableUnits(userId, tenant),
@@ -102,7 +106,15 @@ export async function TaskDetailView({
     listFollowers(userId, tenant, taskId),
     listAssignmentHistory(userId, tenant, taskId), // P4-B7
     getTaskPullRequests(userId, tenant, taskId), // DW-6f — a ReadResult; never throws
+    // DW-6k — a ReadResult; never throws. Read ONCE: the Designs section and the "Open in" menu both use this one answer.
+    readFigmaLinks(userId, tenant, "pm_task", taskId),
   ]);
+  // A manager is told where to connect Figma only when it is known not to be (one extra read, then, for the department).
+  const figmaDept = can(me, "company.manage", tenant) && figma.kind === "ok" && !figma.data.figmaConnected
+    ? await getProject(userId, tenant, task.projectId).then((p) => p.department_id, () => null)
+    : null;
+  const figmaConnectionsHref = connectionsHrefFor(can(me, "company.manage", tenant), figmaDept, figma);
+  const figmaNow = Date.now();
   const canEdit = true; // signed-in members; backend RLS is the real boundary
   const statusLabel = (id: string) => projectStatuses.find((s) => s.id === id)?.label ?? id;
 
@@ -178,7 +190,7 @@ export async function TaskDetailView({
       />
       <Link href={`/tasks/${task.id}/edit`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit</Link>
       {/* DW-6c2 — pilot only: renders nothing on the classic shell. */}
-      <OpenInSlot scope="task" projectId={task.projectId} taskKey={task.displayCode} />
+      <OpenInSlot scope="task" projectId={task.projectId} taskKey={task.displayCode} figma={figma} />
       {canEdit && (
         <form action={duplicateTaskAction.bind(null, task.id)}>
           <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Duplicate</button>
@@ -247,6 +259,11 @@ export async function TaskDetailView({
           {/* DW-6f (§34.7) — pull requests + CI linked through the task's key. Renders nothing when there is nothing to
               say; "Pull requests unavailable" when the read failed. Not pilot-gated: this page is shared by both layouts. */}
           <PullRequestsSection result={pullRequests} />
+
+          {/* DW-6k (§36.6) — the Figma files and frames linked to this task. Shared by both layouts, like the pull requests. */}
+          <Section label="Designs" count={figma.kind === "ok" && figma.data.items.length ? String(figma.data.items.length) : undefined}>
+            <Designs targetKind="pm_task" targetId={task.id} result={figma} now={figmaNow} connectionsHref={figmaConnectionsHref} />
+          </Section>
 
           {customFieldDefs.length > 0 && (
             <Section label="Custom fields">

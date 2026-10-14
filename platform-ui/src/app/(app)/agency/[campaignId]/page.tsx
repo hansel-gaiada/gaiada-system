@@ -10,6 +10,8 @@ import { listDepartmentBriefs } from "@/lib/departments";
 import { readCampaignDetail, readClientNames, readOrgRoot, readPersonChoices } from "@/lib/campaigns-data";
 import { canEditPart, leadText, moneyView } from "@/lib/campaigns";
 import { formatDate } from "@/lib/format";
+import { readFigmaLinks } from "@/lib/figma-data";
+import { connectionsHrefFor } from "@/lib/figma";
 import { PageHeader } from "@/components/PageHeader";
 import { DescriptionList } from "@/components/DescriptionList";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
@@ -100,8 +102,14 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
     { label: "Dates", value: datesText(campaign.startsOn, campaign.endsOn) },
   ];
 
-  const partCards = campaign.parts.map((part) => ({
+  // DW-6k (§36.6): each part's Figma links, one read per part (a campaign holds one part per department), read together.
+  const figmaByPart = await Promise.all(campaign.parts.map((part) => readFigmaLinks(userId, tenant, "campaign_part", part.id)));
+  const figmaNow = Date.now();
+
+  const partCards = campaign.parts.map((part, i) => ({
     part,
+    figma: figmaByPart[i],
+    figmaConnectionsHref: connectionsHrefFor(can(me, "company.manage", tenant), part.unitId, figmaByPart[i]),
     canEdit: canEditPart({
       canManage,
       meId: me.userId,
@@ -160,6 +168,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
             departments={departments}
             people={people.kind === "ok" ? people.data : null}
             linkAccess={campaign.linkAccess}
+            now={figmaNow}
           />
         </Card>
 

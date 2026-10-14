@@ -12,6 +12,9 @@ import { getActiveTenant } from "@/lib/tenant";
 import { canInUnit, can, leadUnits, unitPathOf } from "@/lib/rbac";
 import { formatDateTime } from "@/lib/format";
 import { readLibraryAssets, readRequestDetail, readTaskAssigneeIds } from "@/lib/requests-data";
+import { readFigmaLinks } from "@/lib/figma-data";
+import { connectionsHrefFor } from "@/lib/figma";
+import { Designs } from "@/components/figma/Designs";
 import { readOrgRoot } from "@/lib/campaigns-data";
 import {
   assetDownloadHref, formLinks, formSummary, neededByText, requestActions, requestKindLabel, requestStatusLabel, routeText,
@@ -72,6 +75,10 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
     ? library.data.filter((a) => !delivered.has(a.id)).map((a) => ({ id: a.id, name: a.name, contentType: a.content_type }))
     : null;
 
+  // DW-6k (§36.6): the Figma designs linked to this request. A refusal or failed read is said as itself by the section.
+  const figma = await readFigmaLinks(userId, tenant, "work_request", req.id);
+  const figmaConnectionsHref = connectionsHrefFor(can(me, "company.manage", tenant), req.toUnit.id, figma);
+
   // The page.
   const link = workLink(req, req.work);
   const lines = formSummary(req.kind, req.form);
@@ -129,6 +136,10 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
             </ul>
           </Card>
         )}
+
+        <Card title="Designs" hint="Figma files and frames for this request. An export lands in the Asset Library, ready to deliver.">
+          <Designs targetKind="work_request" targetId={req.id} result={figma} now={Date.now()} connectionsHref={figmaConnectionsHref} />
+        </Card>
 
         {req.kind === "assets" && (
           <Card title="Delivered assets">

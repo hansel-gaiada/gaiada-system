@@ -7195,7 +7195,7 @@ The deploy restarts Cerbos and then probes it.
 - **New version:** from the detail, a file upload sends `POST /creative/assets` with `versionOf` = the latest version and the identity grade; from Image Studio, `?versionOf=<assetId>` (linked from the detail as "Edit in Image Studio") offers "Save as a new version of <name>", which sends `versionOf`. Studio still starts empty (the asset's pixels are not preloaded).
 - Files: `lib/creativeReviews.ts` (pure), `creativeReviews-data.ts` (readers), `creativeReviewActions.ts` (actions), `components/creative/AssetDetail.tsx`, tests beside each.
 
-## 36. Figma links on tasks, requests and campaign parts (DW-6k, 2026-10-13) — `platform-nest/src/core/figma/` (new) — **STATUS: BACKEND BUILT, PROTOTYPED (stubbed Figma client; live proof waits for DW-11)**
+## 36. Figma links on tasks, requests and campaign parts (DW-6k, 2026-10-13) — `platform-nest/src/core/figma/` (new) — **STATUS: BACKEND AND UI BUILT, PROTOTYPED (stubbed Figma client; the UI reads well with Figma not connected; live proof waits for DW-11)**
 
 Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.1 (Figma, owner ruling DW-Q6: "use Figma too"), §4.2 (DW-6k) and §14.1 (launch and return). Editing still happens in Figma, because a design tool cannot run inside the ERP. This section adds the connected half:
 - link a file or frame to the work it belongs to;
@@ -7365,7 +7365,26 @@ There is **no new Cerbos kind**. A link is part of the work it is on, so it is a
 14. **URL normalisation.** `http` is accepted and stored as `https`; the stored link is `https://www.figma.com/<kind>/<key>` plus `?node-id=1-2`, with the slug and every other parameter dropped. A node id of the nested-instance form (`I1-2;3-4`) is accepted. The file key must be alphanumeric (it is put into a Figma API path).
 15. **Audit.** Activity rows on `figma_link` (`created`, `deleted`, `exported`) and on `integration_connection` (`connected`, `disconnected`, never the token). No outbox event and no notification.
 
-**Not yet done.** The UI (§36.6) and the live proof (DW-11 item 7).
+**UI (DW-6k, 2026-10-14, `platform-ui`).**
+- **Readers and writes.**
+  - `lib/figma.ts` (pure): the shapes, the normalisers (a malformed count is `null`, never `0`), the route URLs and every sentence, including the error-token map: every token in deviations 4 and 5 above, read from the start of `error` (or from `reason`), each with its own plain sentence. A 403 is always the calm permission sentence.
+  - `lib/figma-data.ts`: `readFigmaLinks` and `readFigmaConnection`, both `ReadResult`s. `lib/figmaActions.ts`: add, remove, export, connect and disconnect; the token crosses it once, inbound, and is never returned.
+- **Designs section** (`components/figma/Designs.tsx`) on three pages:
+  - the PM task page (`TaskDetailView`, both layouts);
+  - the request page (`app/(app)/requests/[id]`);
+  - each part card of the campaign page (`app/(app)/agency/[campaignId]`, `CampaignParts`).
+  Each link shows its thumbnail, title, "changed <relative time>", "<n> open comments" (opens Figma at the frame), "Open in Figma", a "Stale" note, Export (PNG, SVG or PDF, with a success line naming the new version) and Remove. A comment count of `null` reads "Comments not read yet". With `figmaConnected: false` the links keep their cached values, with one line, "Figma isn't connected for this company", and a Tools & connections link for `company.manage` holders. Add, Remove and Export are offered to everyone who can read the section; the server decides and a refusal is a sentence.
+- **Thumbnail proxy.** The `<img>` points at `GET /api/figma-links/:linkId/thumbnail` on platform-ui (`app/api/figma-links/[linkId]/thumbnail/route.ts`), which forwards the caller's session to the platform's thumbnail route for the active company, passes on only a PNG, and sets `Cache-Control: private, max-age=600`, `nosniff` and a sandbox CSP. It loads lazily, with `alt` = the title; a failed load shows "Preview unavailable".
+- **Tools & connections** (`FigmaConnectionBlock`, pilot branch): the `DW-6k` ticket is removed from `CONN.figma`. Everyone sees whether Figma is connected and the token type (never the token). `company.manage` holders get a password field, the type (Personal access token or OAuth), Connect (Replace token while connected) and Disconnect.
+- **"Open in".** `CONTEXT_BUILDERS.figma` links each of the task's links by its stored `url`, with the title as the detail; none, or none usable, opens Figma's home. The task page reads the links once and passes the same answer to the Designs section and to `OpenInSlot`.
+- **Demo mode** answers `figma-links` and `integrations/figma` as not connected with nothing linked.
+- **UI deviations.**
+  1. The link is read once per page; on the campaign page that is one read per part (a campaign holds one part per department).
+  2. No Designs section is drawn for a part card whose links were not read.
+  3. The Tools & connections link is offered only when a department is known (the request's receiving department, the part's department, the task's project department), and only when Figma is known not to be connected.
+- **Tests.** `lib/figma.test.ts`, `lib/figma-data.test.ts`, `lib/figmaActions.test.ts`, `components/figma/Designs.test.tsx`, `components/departments/FigmaConnectionBlock.test.tsx`, `app/api/figma-links/[linkId]/thumbnail/route.test.ts`; additions to `lib/toolContext.test.ts`, `components/agency/CampaignParts.test.tsx` and `components/departments/ConnectionBlocks.test.tsx`; `e2e/workspace-departments.spec.ts` asserts the Figma block's "not connected" line.
+
+**Not yet done.** The live proof (DW-11 item 7).
 
 ## 37. A unit's roster on the person-grain report overview (DW-4b, 2026-10-13) — `platform-nest/src/modules/reports/reports.controller.ts` (`getOverview`), `person-scope.ts` — **STATUS: BUILT, PROTOTYPED (DB suite tr25-person-axis.db.test.ts on the Linux CI gate)**
 

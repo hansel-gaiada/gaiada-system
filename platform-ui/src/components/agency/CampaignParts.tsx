@@ -16,6 +16,9 @@ import {
 } from "@/lib/campaigns";
 import { addPartAction, removePartAction, updatePartAction, type PartPatch } from "@/lib/campaignActions";
 import { formatDate } from "@/lib/format";
+import type { ReadResult } from "@/lib/readResult";
+import type { FigmaLinks } from "@/lib/figma";
+import { Designs } from "@/components/figma/Designs";
 import "@/components/forms/forms.css";
 import "./campaigns.css";
 
@@ -23,6 +26,10 @@ export interface PartCard {
   part: CampaignPart;
   /** May this person be offered status, owner, brief and due date? Manager, the part's owner, or the department head. */
   canEdit: boolean;
+  /** DW-6k (§36.6): the part's Figma links, read by the page. Absent: no Designs section is drawn (a page that did not read them). */
+  figma?: ReadResult<FigmaLinks>;
+  /** Where a manager connects Figma, when it is known not to be connected. */
+  figmaConnectionsHref?: string | null;
 }
 
 export interface CampaignPartsProps {
@@ -38,6 +45,8 @@ export interface CampaignPartsProps {
   /** The company's people for the owner pickers; null when the directory could not be read. */
   people: { id: string; name: string }[] | null;
   linkAccess: { searchCampaigns: LinkAccess; socialCampaigns: LinkAccess };
+  /** The page's "now" in ms, for the Designs section's "changed 3 hours ago" (the same on the server and after hydration). */
+  now?: number;
 }
 
 type Mode = "view" | "edit" | "allocation" | "remove";
@@ -52,7 +61,7 @@ function ownerOptions(people: CampaignPartsProps["people"], current: { id: strin
 }
 
 export function CampaignParts(props: CampaignPartsProps) {
-  const { campaignId, currency, hasBudget, parts, canManage, departments, people, linkAccess } = props;
+  const { campaignId, currency, hasBudget, parts, canManage, departments, people, linkAccess, now = 0 } = props;
   const taken = new Set(parts.map((p) => p.part.unitId));
   const addable = departments.filter((d) => !taken.has(d.id));
   return (
@@ -63,7 +72,7 @@ export function CampaignParts(props: CampaignPartsProps) {
         parts.map((c) => (
           <PartCardView
             key={c.part.id} card={c} campaignId={campaignId} currency={currency} hasBudget={hasBudget}
-            canManage={canManage} people={people} linkAccess={linkAccess}
+            canManage={canManage} people={people} linkAccess={linkAccess} now={now}
           />
         ))
       )}
@@ -77,10 +86,10 @@ export function CampaignParts(props: CampaignPartsProps) {
 // ── one part ─────────────────────────────────────────────────────────────────────────────────────
 
 function PartCardView({
-  card, campaignId, currency, hasBudget, canManage, people, linkAccess,
+  card, campaignId, currency, hasBudget, canManage, people, linkAccess, now,
 }: {
   card: PartCard; campaignId: string; currency: string | null; hasBudget: boolean; canManage: boolean;
-  people: CampaignPartsProps["people"]; linkAccess: CampaignPartsProps["linkAccess"];
+  people: CampaignPartsProps["people"]; linkAccess: CampaignPartsProps["linkAccess"]; now: number;
 }) {
   const { part, canEdit } = card;
   const router = useRouter();
@@ -155,6 +164,13 @@ function PartCardView({
       {part.brief ? <p className="cmp-part__brief">{part.brief}</p> : null}
 
       <PartLinks part={part} linkAccess={linkAccess} />
+
+      {card.figma && (
+        <div className="cmp-links__group">
+          <span className="cmp-links__title">Designs</span>
+          <Designs targetKind="campaign_part" targetId={part.id} result={card.figma} now={now} connectionsHref={card.figmaConnectionsHref ?? null} />
+        </div>
+      )}
 
       {mode === "edit" && (
         <form className="cmp-form" onSubmit={saveWork} aria-label={`Edit the ${unitText} part`}>

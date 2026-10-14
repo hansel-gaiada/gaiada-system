@@ -5,11 +5,12 @@
 // other tool opens its home `url`, marked `contextual: false` so the reader can tell. No vendor query parameter
 // is ever invented: a tool is listed in CONTEXT_BUILDERS only when its deep link is a documented, exact form.
 //
-// THE SEAM for later tickets is `CONTEXT_BUILDERS`: one function per tool key. DW-6k adds `figma`, DW-6i adds
+// THE SEAM for later tickets is `CONTEXT_BUILDERS`: one function per tool key. DW-6k added `figma`, DW-6i adds
 // `drive`; nothing else in this file or in the menu changes.
 //
 // Pure and client-safe: no I/O, no server-only imports.
 import type { DeptLauncher } from "@/lib/deptToolkits";
+import { safeFigmaHref } from "@/lib/figma";
 
 /** A linked repository. `fullName` is GitHub's `owner/name`. */
 export interface RepoRef {
@@ -33,6 +34,14 @@ export interface ToolContext {
   /** The task's key (`ABC-12`), on a task page only. */
   taskKey?: string | null;
   searchProperties?: readonly SearchPropertyRef[];
+  /** The task's Figma links (DW-6k), on a task page only. Absent or empty: Figma opens its home. */
+  figmaLinks?: readonly FigmaLinkRef[];
+}
+
+/** A Figma link as far as the menu needs it: the stored `url` and the cached `title` (null until Figma was read). */
+export interface FigmaLinkRef {
+  url: string;
+  title: string | null;
 }
 
 export interface ToolLink {
@@ -127,11 +136,27 @@ const searchConsole: Builder = (tool, ctx) => {
   return out.length > 0 ? out : [home(tool)];
 };
 
-/** Tool key -> its context builder. A tool not listed here opens its home `url`. DW-6k: `figma`. DW-6i: `drive`. */
+/** Figma opens each file or frame linked to the task, by the link's own stored `url` (BFF §36.2: normalised to
+ *  `https://www.figma.com/<kind>/<key>` plus `?node-id=` for a frame, so the link opens at the frame). Only a real https
+ *  figma.com address is used; a task with no usable link opens Figma's home. The detail is the link's title. */
+const figma: Builder = (tool, ctx) => {
+  const seen = new Set<string>();
+  const out: ToolLink[] = [];
+  for (const l of ctx.figmaLinks ?? []) {
+    const href = typeof l?.url === "string" ? safeFigmaHref(l.url) : null;
+    if (!href || seen.has(href)) continue;
+    seen.add(href);
+    out.push({ key: tool.key, label: tool.label, href, contextual: true, detail: l.title?.trim() || "linked Figma file" });
+  }
+  return out.length > 0 ? out : [home(tool)];
+};
+
+/** Tool key -> its context builder. A tool not listed here opens its home `url`. DW-6i: `drive`. */
 const CONTEXT_BUILDERS: Readonly<Record<string, Builder>> = {
   github,
   vscode,
   gsc: searchConsole,
+  figma,
 };
 
 /** The menu's entries, in the registry's order. A tool with several contexts (several repositories) expands in place. */
