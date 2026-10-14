@@ -11,6 +11,18 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.128.0` - client contacts: revoke no longer locks people out; an invite can no longer take over an account (2026-10-14) - PROTOTYPED
+
+Found by the PV-5 Release A live drive (2026-10-13). Contract: `docs/FRONTEND-BFF-CONTRACT.md`, the revoke note and the `invites/accept` row.
+- **Revoke disabled the person's login everywhere (live bug).** `POST /api/:t/client-contacts/:id/revoke` asked "does this person still hold another active contact?" under a bare `withGlobal`, which sets no GUC on the FORCE-RLS `client_contacts`, so it always read zero rows and disabled the Keycloak account. Proven live on a placeholder contact (re-enabled by hand, no password change); the owner's account is itself an active client contact. The read now runs under `principal_lookup` (`withPrincipalLookup`, transaction-local `app.principal_user_id`), so only a person's LAST active contact disables their login.
+- **Account takeover through `POST /api/invites/accept` (found by code reading; never exercised on a real account).** Any manager or company_admin of any company could invite any email (`users` are global), received the raw token, and accept then re-enabled that person's Keycloak account and set the password the token holder chose; for a staff `users` row with no Keycloak account yet, accept created one with that password. The identity is now decided first, under `principal_lookup`: a staff identity (any `company_memberships` row ever, or any role beyond `client` / `client_website_editor`) is never created, enabled or given a password by an invite (`staff_not_provisioned` / `existing_kept`); an existing portal-only account is never given a password, only re-enabled when it has no other active contact (`existing_reenabled`); only a brand-new portal-only identity is created with the chosen password. The activation event carries `accountPath`, never a password.
+- **Tests.** `client-contacts-http.test.ts` 27 (3 revoke cases, 8 accept cases). Teeth: the old revoke read (run 38426281452), the old unconditional adopt (38498886465), a password set on the re-enable path (38498928095), the staff guard removed (38500659948), each red on exactly its cases.
+- **Not changed.** Re-inviting an ACTIVE contact still resets it to `invited` (no password is ever set by that path). Two more bare-`withGlobal` reads of FORCE-RLS tables were found by the sweep and are on the board for the owner: offboarding's `org_units` subselect (`admin/employees.controller.ts`) and the D-9 appointment execute (`admin/iam-approval-execute.ts`).
+
+### platform-ui `0.142.0` - the invite page says when you already have an account (2026-10-14) - PROTOTYPED
+
+- `AcceptInviteForm` reads `existingAccount` from the accept response: "You already have an account. Sign in with it to open your portal. If you have forgotten its password, ask your project manager to reset it." The hint implying a password could be set on an existing account is gone. `AcceptInviteForm.test.tsx` 5.
+
 ### platform-ui `0.141.0` - DW-3g: the Overview's Learning and Appraisal (2026-10-14) - PROTOTYPED
 
 - **What.** The Growth band, two blocks about the signed-in person, behind the pilot switch like DW-3a to 3f. Both are in every workspace's Overview where the registry lists them (the department workspaces, HR, Finance and IT); the Company frame lists none of them (its Growth blocks are DW-3i).
