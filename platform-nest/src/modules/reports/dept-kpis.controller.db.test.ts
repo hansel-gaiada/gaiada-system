@@ -316,9 +316,11 @@ describe.skipIf(!TEST_URL)("DW-4e-1 department KPIs (live PG + RLS + Cerbos)", (
     expect({ value: onTime.value, numerator: onTime.numerator, denominator: onTime.denominator }).toEqual({ value: fact.value, numerator: fact.numerator, denominator: fact.denominator });
   });
 
-  it("unavailable: a module KPI (no_reader), a ratio with a 0 denominator (no_data, even with a target), and no target (no_target)", async () => {
+  it("unavailable: a module KPI with nothing to measure (no_data), a ratio with a 0 denominator (no_data, even with a target), and no target (no_target)", async () => {
     const r = await read(`unitNodeId=d-web&${SEPT}`, webStaff);
-    expect(kpiOf(r, "requests-within-sla")).toMatchObject({ value: null, condition: "unavailable", reason: "no_reader", targetSource: "none" });
+    // DW-6n1 gave requests-within-sla a reader; the unit has no requests due, so it reads no_data (no_reader stays pinned in
+    // dept-kpis.test.ts and dept-kpi-readers.engine.db.test.ts, for a module KPI without a readerId).
+    expect(kpiOf(r, "requests-within-sla")).toMatchObject({ value: null, condition: "unavailable", reason: "no_data", targetSource: "none" });
     // reopened-work-rate has an approved target from September, but no completed work: reopened / completed = 0 / 0
     expect(kpiOf(r, "reopened-work-rate")).toMatchObject({ value: null, target: 0.05, targetSource: "approved", condition: "unavailable", reason: "no_data" });
     // Operations (generic): 0 overdue tasks is a real 0 with no target

@@ -85,6 +85,7 @@ describe.skipIf(!TEST_URL)("DW-6n0 the module KPI reader seam (live PG)", () => 
   });
 
   it("with no readerId the KPI is unavailable / no_reader, as before", async () => {
+    webDef().reader = { kind: "module" }; // the catalogue now wires a real reader (DW-6n1); restored in afterEach
     const { k } = await kpi();
     expect(k).toMatchObject({ value: null, condition: "unavailable", reason: "no_reader" });
   });
@@ -118,7 +119,7 @@ describe.skipIf(!TEST_URL)("DW-6n0 the module KPI reader seam (live PG)", () => 
     const { dept, k } = await kpi();
     expect(k).toMatchObject({ value: null, condition: "unavailable", reason: "read_failed" });
     const other = (key: string) => dept.kpis.find((x) => x.key === key)!;
-    expect(other("client-site-uptime")).toMatchObject({ condition: "unavailable", reason: "no_reader" });
+    expect(other("client-site-uptime").reason).not.toBe("read_failed"); // its own reader (or none) still reads
     expect(other("projects-on-time").reason).not.toBe("read_failed"); // still read from the report document
     expect(other("reopened-work-rate").reason).not.toBe("read_failed");
     expect(dept.kpis).toHaveLength(DEPT_KPI_SETS["web-dev"].length);

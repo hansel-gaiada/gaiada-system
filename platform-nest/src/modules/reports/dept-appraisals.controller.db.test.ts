@@ -333,8 +333,8 @@ describe.skipIf(!TEST_URL)("DW-4e-3 department appraisal per cycle (live PG + RL
     // 0.714 against 0.75 +/- 0.05 is at risk; against September's 0.85 it would be off track
     expect(k.condition).toBe("at_risk");
     expect(a.condition).toBe("at_risk");
-    // the engine's other KPIs keep their §40 reasons
-    expect(kpiOf(a, "requests-within-sla")).toMatchObject({ value: null, condition: "unavailable", reason: "no_reader" });
+    // the engine's other KPIs keep their §40 reasons: a module KPI with a reader (DW-6n1) and nothing to measure reads no_data
+    expect(kpiOf(a, "requests-within-sla")).toMatchObject({ value: null, condition: "unavailable", reason: "no_data" });
   });
 
   it("the history agrees month by month with GET /dept-kpis for each month (each judged against its OWN month's target)", async () => {

@@ -51,6 +51,8 @@ export const WORKSPACE_SLUGS = ["web-dev", "seo", "social-media", "creatives", "
 export type WorkspaceSlug = (typeof WORKSPACE_SLUGS)[number];
 
 const MODULE: KpiReader = { kind: "module" };
+/** A module KPI whose reader exists: `readerId` names it in dept-kpi-readers.ts (§40.5.1). */
+const read = (readerId: string): KpiReader => ({ kind: "module", readerId });
 const dept = (metricKey: string): KpiReader => ({ kind: "report_fact", metricKey, grain: "department" });
 
 const pct = (key: string, label: string, direction: KpiDirection, reader: KpiReader, target: number, tolerance: number): DeptKpiDef => ({
@@ -63,14 +65,14 @@ const DAY = 1440; // minutes
 export const DEPT_KPI_SETS: Readonly<Record<WorkspaceSlug, readonly DeptKpiDef[]>> = {
   "web-dev": [
     pct("projects-on-time", "Projects on time", "up_good", dept("delivery.milestone_hit_rate"), 0.85, 0.05),
-    pct("requests-within-sla", "Requests delivered by the date needed", "up_good", MODULE, 0.9, 0.05),
+    pct("requests-within-sla", "Requests delivered by the date needed", "up_good", read("webdev.requests_delivered_by_needed"), 0.9, 0.05),
     pct("client-site-uptime", "Client site uptime", "up_good", MODULE, 0.995, 0.005),
     pct("reopened-work-rate", "Reopened work rate", "down_good", dept("flow.reopen_rate"), 0.05, 0.03),
   ],
   seo: [
-    pct("clients-ranking-growth", "Clients with ranking growth", "up_good", MODULE, 0.7, 0.1),
-    pct("client-reports-on-time", "Client reports delivered on time", "up_good", MODULE, 0.95, 0.05),
-    pct("ad-budgets-on-pace", "Ad budgets on pace", "up_good", MODULE, 0.9, 0.05),
+    pct("clients-ranking-growth", "Clients with ranking growth", "up_good", read("search.clients_ranking_growth"), 0.7, 0.1),
+    pct("client-reports-on-time", "Client reports delivered on time", "up_good", read("search.client_reports_on_time"), 0.95, 0.05),
+    pct("ad-budgets-on-pace", "Ad budgets on pace", "up_good", read("search.ad_budgets_on_pace"), 0.9, 0.05),
     pct("client-retention", "Client retention", "up_good", MODULE, 0.9, 0.05),
   ],
   "social-media": [
@@ -79,9 +81,9 @@ export const DEPT_KPI_SETS: Readonly<Record<WorkspaceSlug, readonly DeptKpiDef[]
     pct("engagement-growth", "Engagement growth across clients", "up_good", MODULE, 0.05, 0.05),
   ],
   creatives: [
-    pct("asset-requests-on-time", "Asset requests delivered on time", "up_good", MODULE, 0.9, 0.05),
-    { key: "revision-rounds", label: "Revision rounds per asset", unit: "count", direction: "down_good", reader: MODULE, suggestedTarget: 2, suggestedTolerance: 1 },
-    { key: "assets-delivered", label: "Assets delivered", unit: "count", direction: "up_good", reader: MODULE, suggestedTarget: null, suggestedTolerance: null },
+    pct("asset-requests-on-time", "Asset requests delivered on time", "up_good", read("creatives.asset_requests_on_time"), 0.9, 0.05),
+    { key: "revision-rounds", label: "Revision rounds per asset", unit: "count", direction: "down_good", reader: read("creatives.revision_rounds"), suggestedTarget: 2, suggestedTolerance: 1 },
+    { key: "assets-delivered", label: "Assets delivered", unit: "count", direction: "up_good", reader: read("creatives.assets_delivered"), suggestedTarget: null, suggestedTolerance: null },
   ],
   gm: [
     pct("revenue-vs-plan", "Revenue against plan", "up_good", MODULE, 1, 0.05),

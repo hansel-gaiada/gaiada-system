@@ -1,5 +1,31 @@
 // DW-6n (docs/FRONTEND-BFF-CONTRACT.md §40.5): the delivery departments' module KPI readers. Each reader registers here under
 // the `readerId` its catalogue entry (dept-kpis.ts) names; dept-kpi-readers.ts merges this record into MODULE_KPI_READERS.
+//
+// A reader over a module's tables is GATED on `isModuleEnabled` (§40.5.1): a company without the module reads `null`
+// (`no_data`) and the reader never runs. The module wall alone is not enough, because `app_module_allowed()` checks only the
+// scopes a query declares, not whether the company has the module, so a company that turned a module off would still read
+// its old rows. Readers over core tables (work requests, creative assets and reviews, clients) are not gated.
+import { isModuleEnabled } from "../../../registry";
 import type { ModuleKpiReader } from "../types";
+import { assetsDelivered, revisionRounds } from "./creative-reviews";
+import { adBudgetsOnPace, clientReportsOnTime, clientsRankingGrowth } from "./search";
+import { assetRequestsOnTime, webdevRequestsDeliveredByNeeded } from "./work-requests-on-time";
 
-export const DELIVERY_READERS: Record<string, ModuleKpiReader> = {};
+/** The reader, run only when the company has `module` (own `enabled_modules` or an active service assignment). */
+export const gated =
+  (module: string, read: ModuleKpiReader): ModuleKpiReader =>
+  async (ctx) =>
+    (await isModuleEnabled(ctx.tenantId, module)) ? read(ctx) : null;
+
+export const DELIVERY_READERS: Record<string, ModuleKpiReader> = {
+  // Web Dev
+  "webdev.requests_delivered_by_needed": webdevRequestsDeliveredByNeeded,
+  // SEO
+  "search.clients_ranking_growth": gated("search", clientsRankingGrowth),
+  "search.client_reports_on_time": gated("search", clientReportsOnTime),
+  "search.ad_budgets_on_pace": gated("search", adBudgetsOnPace),
+  // Creatives
+  "creatives.asset_requests_on_time": assetRequestsOnTime,
+  "creatives.revision_rounds": revisionRounds,
+  "creatives.assets_delivered": assetsDelivered,
+};
