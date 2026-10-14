@@ -1,0 +1,70 @@
+# DW-8j (docs/FRONTEND-BFF-CONTRACT.md §48; docs/PERMISSION-CONTRACT.md §40; ruling DW-D24; plan docs/plans/2026-10-13-department-workspaces.md
+# §8.1 row 8j, §11.4) — authz for the NEW `personal_mailbox` resource kind (core, no module): one person's OWN Gmail, linked to the ERP.
+# The ERP stores nothing from it (render on demand). Three actions:
+#   connect — link or unlink your own Gmail.
+#   read    — read your own threads, on demand.
+#   send    — send or reply as yourself.
+# Restart `gaiada-test-cerbos` after editing this file; the bind-mount does not hot-reload.
+#
+# ── NOBODY READS OR SENDS AS ANYONE ELSE ─────────────────────────────────────────────────────────
+# The only ALLOW is the SELF rule: the resource's `ownerId` (fed by the handler as the CALLER's own id, never from a body) equals the
+# principal, held as `member`, `manager` or `company_admin`. No role reaches another person's mailbox: not company_admin, not HR, not IT.
+# A `roles: ["user"]` EFFECT_DENY then covers all three actions for anyone who is NOT the owner, which every principal carries, so under
+# deny-overrides it beats the `platform_admin` wildcard too. This is the mail design's "no domain-wide delegation" rule (§8C), written as
+# policy. An unfed `ownerId` ("" by default in resourcePayload) is not the caller, so a probe that names no owner is denied for every role,
+# platform_admin included, by design. The platform_admin parity sweep (core/authz-permissions.controller.test.ts) probes with `ownerId` set
+# to its own principal id ("u1"), which satisfies the owner test.
+#
+# ── NO AUTOMATION OR BOT PRINCIPAL CONNECTS, READS OR SENDS ──────────────────────────────────────
+# `EFFECT_DENY` on all three actions for `principal.attr.kind in ["automation","bot"]`, shaped like resource_work_request.yaml's
+# (`roles: ["user"]`, `has()`-guarded). An agent reading a person's mail is a separate decision, for the separate AI plan. A client-only
+# principal never holds member, manager or company_admin, so it reaches nothing.
+#
+# ── NO PERMISSION ARM ────────────────────────────────────────────────────────────────────────────
+# Every rule is self-scoped (`ownerId == principal.id`), a shape a flat `perms` mirror cannot express (a mirror would let any holder of the
+# key act on EVERY mailbox), so there is no `perm_*` derived role. Same call as resource_work_request.yaml. Consequence: the
+# permission-native `owner` role (zero role-arm rules) holds the three keys in its bundle but reaches nothing through Cerbos unless it also
+# holds company_admin, manager or member. A viewer holds none: a viewer is a read-only seat, and personal mail is a working tool.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: personal_mailbox
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # ---- the SELF rule: connect, read and send, for the mailbox's own owner ----
+    - actions: ["connect", "read", "send"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member", "manager", "company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.ownerId) && request.resource.attr.ownerId != "" &&
+            request.resource.attr.ownerId == request.principal.id
+
+    # ══════════ nobody but the owner, EVERY role (platform_admin included): no domain-wide delegation ══════════
+    - actions: ["connect", "read", "send"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            !(has(request.resource.attr.ownerId) &&
+              request.resource.attr.ownerId != "" &&
+              request.resource.attr.ownerId == request.principal.id)
+
+    # ══════════ automation and bot principals never connect, read or send (the agents plan decides later) ══════════
+    - actions: ["connect", "read", "send"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot"]

@@ -25,6 +25,8 @@ export const GOOGLE_PROVIDERS = [
   "google_analytics",
   "google_ads",
   "google_drive",
+  // DW-8j: a person's OWN Gmail (core surface, ownerKind user). Registered by core/gmail/surface.ts.
+  "google_gmail",
 ] as const;
 export type GoogleProvider = (typeof GOOGLE_PROVIDERS)[number];
 
