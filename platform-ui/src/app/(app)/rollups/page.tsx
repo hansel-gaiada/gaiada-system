@@ -20,7 +20,7 @@ export default async function RollupsPage({ searchParams }: { searchParams: Prom
   guardAdminRoute("/rollups", me, tenantId); // DW-D20
   // PV-D13: the group's name comes from data; a person outside the root gets the plain wording.
   const groupName = groupNameOf(me, tenantId);
-  const groupSubtitle = groupName ? `Cross-company metrics across the ${groupName} group.` : "Cross-company metrics across your group.";
+  const groupSubtitle = groupName ? `Cross-company metrics across ${groupName} and its companies.` : "Cross-company metrics across your group's companies.";
   const sp = await searchParams;
   const periodParam = sp.period;
 
