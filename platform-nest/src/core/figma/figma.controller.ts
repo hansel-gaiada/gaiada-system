@@ -26,19 +26,11 @@ import {
   Body, Controller, Delete, Get, HttpCode, HttpException, Param, Post, Put, Query, Req, Res, UseGuards,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import type { PoolClient } from "pg";
-import { withTenants } from "../../db";
 import { AuthGuard } from "../../auth/guards";
-import { can } from "../../rbac/can";
-import type { Principal } from "../../rbac/principal";
-import type { Resource } from "../../rbac/cerbos";
 import { authorize, writeActivity } from "../http";
 import { isUuidShaped } from "../dept-resolution";
 import { cerbosOwnerId, connectionAction } from "../integrations.controller";
-import { factsResource } from "../work-requests.controller";
-import { loadAuthFacts } from "../work-requests.service";
-import { partResource } from "../../modules/agency/agency.controller";
-import { partUnitAncestors } from "../../modules/agency/agency-campaign-parts.service";
+import { authorizeWrite, findTarget, readResourceOf, type Target } from "../work-targets";
 import {
   FigmaRuleError, TARGET_KINDS, parseExportBody, parseTargetKind, type TargetKind,
 } from "./rules";
@@ -60,73 +52,11 @@ async function mapRules<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/** The Cerbos kind each target kind is authorised as. */
-const CERBOS_KIND: Record<TargetKind, string> = {
-  pm_task: "pm_task",
-  work_request: "work_request",
-  campaign_part: "agency_campaign_part",
-};
-
-/** The resource a READ on the target sends: what the target's own read routes send. `id` is added only when it is usable. */
-function readResourceOf(kind: TargetKind, tenantId: string, id?: string): Resource {
-  if (kind === "campaign_part") return partResource(tenantId, id ? { id } : {});
-  return { kind: CERBOS_KIND[kind], tenantId, ...(id ? { id } : {}) };
-}
-
-interface Target {
-  id: string;
-  /** The target's department (an org-node id) where it has one; the exported asset carries it. */
-  departmentId: string | null;
-  /** The resource a WRITE on the target sends, attributes read from the DB. */
-  writeResource: Resource;
-}
-
-async function readTarget(c: PoolClient, tenantId: string, kind: TargetKind, id: string): Promise<Target | null> {
-  if (kind === "pm_task") {
-    const r = await c.query<{ department_id: string | null }>(
-      `SELECT p.department_id FROM pm_tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = $1 AND t.deleted_at IS NULL`,
-      [id],
-    );
-    if (!r.rows[0]) return null;
-    return { id, departmentId: r.rows[0].department_id, writeResource: { kind: "pm_task", tenantId, id } };
-  }
-  if (kind === "work_request") {
-    const facts = await loadAuthFacts(c, tenantId, id);
-    if (!facts) return null;
-    return { id, departmentId: facts.toUnitId, writeResource: factsResource(tenantId, facts) };
-  }
-  const r = await c.query<{ unit_id: string; owner_id: string | null }>(
-    `SELECT unit_id, owner_id FROM agency_campaign_parts WHERE id = $1 AND deleted_at IS NULL`,
-    [id],
-  );
-  if (!r.rows[0]) return null;
-  const ancestors = await partUnitAncestors(c, tenantId, r.rows[0].unit_id);
-  return {
-    id, departmentId: r.rows[0].unit_id,
-    writeResource: partResource(tenantId, { id, ownerId: r.rows[0].owner_id ?? undefined, unitAncestors: ancestors }),
-  };
-}
-
 /** The target, or 404 `target_not_found`: absent, deleted, another tenant's (RLS) or an id that cannot be one. */
 async function requireTarget(tenantId: string, kind: TargetKind, id: string | null): Promise<Target> {
-  if (!id || !isUuidShaped(id)) throw svc.targetNotFound();
-  const t = await withTenants([tenantId], (c) => readTarget(c, tenantId, kind, id));
+  const t = await findTarget(tenantId, kind, id);
   if (!t) throw svc.targetNotFound();
   return t;
-}
-
-/** The write check on a target (§36.5). `work_request` allows either `deliver` (the receiving side) or `cancel` (the asker):
- *  two questions through `can()`, which answers without throwing, then the ONE authoritative `authorize()` on the action
- *  that passed (it audits, enforces the session and the act-for intersection). When neither passes it asks `deliver`, so the
- *  refusal is the standard audited 403. */
-async function authorizeWrite(principal: Principal, kind: TargetKind, target: Target): Promise<void> {
-  if (kind !== "work_request") return authorize(principal, target.writeResource, "update");
-  // `can()` sets the Cerbos kind itself from the catalog entry, so the full resource is passed as it is.
-  let action = "deliver";
-  if (!(await can(principal, "core.work_request.deliver", target.writeResource))) {
-    if (await can(principal, "core.work_request.cancel", target.writeResource)) action = "cancel";
-  }
-  return authorize(principal, target.writeResource, action);
 }
 
 /** `kind` from a body or query value, or null when it is not one of the three. */
