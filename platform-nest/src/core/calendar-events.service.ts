@@ -320,7 +320,7 @@ export function diffAttendees(current: readonly string[], next: readonly string[
   return {
     added: [...want].filter((u) => !have.has(u)),
     removed: [...have].filter((u) => !want.has(u)),
-    kept: [...want].filter((u) => have.has(u)),
+    kept: [...have].filter((u) => want.has(u)),
   };
 }
 
@@ -484,7 +484,7 @@ export async function firstNonMember(c: PoolClient, tenantId: string, userIds: r
     `SELECT m.user_id
        FROM company_memberships m JOIN users u ON u.id = m.user_id
       WHERE m.tenant_id = $1 AND m.user_id = ANY($2::uuid[])
-        AND m.deleted_at IS NULL AND m.status = 'active' AND u.deleted_at IS NULL AND u.status = 'active'`,
+        AND m.deleted_at IS NULL AND m.status = 'active' AND u.deleted_at IS NULL AND u.status = 'active' AND u.kind = 'employee'`,
     [tenantId, [...userIds]],
   );
   const ok = new Set(rows.map((r) => r.user_id));
