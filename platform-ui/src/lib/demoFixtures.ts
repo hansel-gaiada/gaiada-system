@@ -867,6 +867,11 @@ function demoNumberCode(serviceLineKey: string, businessType: string): string {
 const FILES: Record<string, unknown>[] = [
   { id: "f-1", entity_type: "project", entity_id: "p-web-1", filename: "Redesign SOW.pdf", content_type: "application/pdf", byte_size: 184320, scrubbed: true, uploader_id: "u-pm", created_at: "2026-06-20T09:00:00Z", url: null },
   { id: "f-2", entity_type: "task", entity_id: "t-4", filename: "hero-mock.fig", content_type: "application/octet-stream", byte_size: 51200, scrubbed: true, uploader_id: "u-dev", created_at: "2026-07-03T09:00:00Z", url: null },
+  // DW-8h (contract §45): a labelled placeholder on each new target kind, so the panels show a row in demo mode.
+  { id: "f-wr-1", entity_type: "work_request", entity_id: "wr-demo-1", filename: "DEMO placeholder - request brief.pdf", content_type: "application/pdf", byte_size: 90112, scrubbed: false, uploader_id: "u-pm", created_at: "2026-10-14T08:00:00Z", url: null },
+  { id: "f-cp-1", entity_type: "agency_campaign", entity_id: "cmp-demo-1", filename: "DEMO placeholder - campaign plan.pdf", content_type: "application/pdf", byte_size: 143360, scrubbed: false, uploader_id: "u-pm", created_at: "2026-10-14T08:00:00Z", url: null },
+  { id: "f-part-1", entity_type: "agency_campaign_part", entity_id: "part-demo-1", filename: "DEMO placeholder - part spec.pdf", content_type: "application/pdf", byte_size: 61440, scrubbed: false, uploader_id: "u-dev", created_at: "2026-10-14T08:00:00Z", url: null },
+  { id: "f-cl-1", entity_type: "client", entity_id: "cl-1", filename: "DEMO placeholder - client file.pdf", content_type: "application/pdf", byte_size: 30720, scrubbed: false, uploader_id: "u-pm", created_at: "2026-10-14T08:00:00Z", url: null },
 ];
 
 // ---- F2 work-activity feed (P1-04 backend contract, P1-07 wires the UI) ----
@@ -2775,9 +2780,14 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   if (filesMatch) {
     if (m === "POST") {
       const b = JSON.parse(body || "{}");
-      const f = { id: demoId("f"), entity_type: String(b.entityType ?? ""), entity_id: String(b.entityId ?? ""), filename: String(b.filename ?? "file"), content_type: (b.content_type as string) ?? "application/octet-stream", byte_size: 0, scrubbed: true, uploader_id: DEMO_USER_ID, created_at: "2026-07-16T09:00:00Z", url: (b.url as string) || null };
+      // The real route takes `targetType`/`targetId` or the `entityType`/`entityId` aliases, `contentType` or `content_type`, and
+      // base64 `content` for an upload (DW-8h, §45.2); its answer is {id, scrubbed, byteSize}.
+      const content = typeof b.content === "string" ? b.content : "";
+      const size = content ? Math.floor((content.length * 3) / 4) : 0;
+      if (size > 25 * 1024 * 1024) return { status: 400, json: { error: "file too large" } };
+      const f = { id: demoId("f"), entity_type: String(b.targetType ?? b.entityType ?? ""), entity_id: String(b.targetId ?? b.entityId ?? ""), filename: String(b.filename ?? "file"), content_type: String(b.contentType ?? b.content_type ?? "application/octet-stream"), byte_size: size, scrubbed: false, uploader_id: DEMO_USER_ID, created_at: "2026-07-16T09:00:00Z", url: (b.url as string) || null };
       FILES.push(f);
-      return { status: 201, json: { id: f.id } };
+      return { status: 201, json: { id: f.id, scrubbed: f.scrubbed, byteSize: size } };
     }
     const et = url.searchParams.get("entityType"), eid = url.searchParams.get("entityId");
     return ok(FILES.filter((f) => (!et || f.entity_type === et) && (!eid || f.entity_id === eid)));

@@ -8,7 +8,10 @@ import type { Me } from "@/lib/platform";
 vi.mock("next/navigation", () => ({
   redirect: vi.fn(() => { throw new Error("redirect"); }),
   notFound: vi.fn(() => { throw new Error("notFound"); }),
+  useRouter: () => ({ refresh: vi.fn() }),
 }));
+vi.mock("@/lib/driveActions", () => ({ loadPickerCredentialsAction: vi.fn(), attachDriveFileAction: vi.fn() }));
+vi.mock("@/lib/drivePicker", () => ({ openDrivePicker: vi.fn() }));
 vi.mock("next/link", () => ({ default: ({ href, children, ...r }: { href: string; children: React.ReactNode }) => <a href={href} {...r}>{children}</a> }));
 vi.mock("@/lib/session-server", () => ({ getSessionUserId: vi.fn(async () => "u-staff") }));
 const meMock = vi.fn();
@@ -17,6 +20,7 @@ vi.mock("@/lib/tenant", () => ({ getActiveTenant: vi.fn(async () => "co-agency")
 vi.mock("@/lib/entities", () => ({
   getClient: vi.fn(async () => ({ id: "cl-1", name: "Northwind Traders", owner_name: null, contact: {} })),
   listProjects: vi.fn(async () => []),
+  readFiles: vi.fn(async () => ({ kind: "ok", data: [] })),
   CLIENT_CONTACT_KEYS: [],
   CLIENT_CONTACT_LABELS: {},
 }));
@@ -24,6 +28,7 @@ vi.mock("@/lib/meetings", () => ({
   listRecordings: vi.fn(async () => ({ kind: "ok", data: [] })),
   STATUS_LABEL: {}, formatDuration: () => "",
 }));
+vi.mock("@/lib/collabActions", () => ({ attachFileAction: vi.fn(), deleteFileAction: vi.fn(), uploadFileAction: vi.fn() }));
 vi.mock("@/lib/clientContacts", () => ({ listClientContacts: vi.fn(async () => []) }));
 const accessMock = vi.fn();
 vi.mock("@/lib/clientWebsiteAccess", () => ({ getStaffWebsiteAccess: (...a: unknown[]) => accessMock(...a) }));
@@ -36,6 +41,7 @@ vi.mock("@/components/meetings/ScheduleMeetingPanel", () => ({ ScheduleMeetingPa
 
 import { isValidElement, Children, type ReactElement, type ReactNode } from "react";
 import ClientContactsPage from "./page";
+import { FilesPanel } from "@/components/FilesPanel";
 import { ClientWebsiteAccessSection } from "@/components/clients/ClientWebsiteAccessSection";
 
 const staff = (role: string): Me =>
@@ -134,7 +140,27 @@ describe("staff Contacts page: Website access", () => {
   it("sits right after the Client access card (the meetings cards moved to Projects in PV3-05)", async () => {
     const tree = (await ClientContactsPage({ params: Promise.resolve({ clientId: "cl-1" }) })) as ReactElement<{ children: ReactNode[] }>;
     const kids = tree.props.children;
-    expect(kids).toHaveLength(3);
-    expect((kids[2] as ReactElement).type).toBe(ClientWebsiteAccessSection);
+    expect(kids).toHaveLength(4);
+    expect((kids[3] as ReactElement).type).toBe(ClientWebsiteAccessSection);
+  });
+});
+
+// DW-8h (45.4): the client's Files card, staff only.
+describe("staff Contacts page: Files", () => {
+  it("shows the client's files with the staff-only line, on the client target", async () => {
+    const tree = (await ClientContactsPage({ params: Promise.resolve({ clientId: "cl-1" }) })) as ReactElement<{ children: ReactNode[] }>;
+    type P = React.ComponentProps<typeof FilesPanel>;
+    const found: ReactElement<P>[] = [];
+    const walk = (n: ReactNode) => Children.forEach(n, (c) => {
+      if (!isValidElement(c)) return;
+      const el = c as ReactElement<{ children?: ReactNode }>;
+      if (el.type === FilesPanel) found.push(el as unknown as ReactElement<P>);
+      else walk(el.props.children);
+    });
+    walk(tree.props.children);
+    expect(found).toHaveLength(1);
+    expect(found[0].props).toMatchObject({ entityType: "client", entityId: "cl-1", revalidate: "/clients/cl-1/contacts" });
+    render(<FilesPanel {...found[0].props} />);
+    expect(screen.getByText("Only staff see these files.")).toBeInTheDocument();
   });
 });

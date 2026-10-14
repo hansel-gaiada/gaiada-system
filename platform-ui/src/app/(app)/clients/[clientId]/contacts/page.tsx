@@ -7,6 +7,8 @@ import { ClientContactsPanel } from "@/components/clients/ClientContactsPanel";
 import { ClientWebsiteAccessSection } from "@/components/clients/ClientWebsiteAccessSection";
 import { listClientContacts } from "@/lib/clientContacts";
 import { Card } from "@/components/ui";
+import { readFiles } from "@/lib/entities";
+import { FilesPanel } from "@/components/FilesPanel";
 import { DescriptionList } from "@/components/DescriptionList";
 
 type Params = Promise<{ clientId: string }>;
@@ -30,6 +32,9 @@ export default async function ClientContactsPage({ params }: { params: Params })
   const clientProjects = (await listProjects(userId, tenant, clientId).catch(() => []))
     .map((p) => ({ id: p.id, name: p.name }));
 
+  // DW-8h (§45.4): the client's files. Staff only: a client file is never a portal document.
+  const files = await readFiles(userId, tenant, "client", clientId);
+
   return (
     <>
       {/* CC-D8 — this tab was "Details"; PV3-05 — it is the hub's People area. Status sits in the hub
@@ -52,6 +57,11 @@ export default async function ClientContactsPage({ params }: { params: Params })
             contacts={contacts}
             projects={clientProjects}
           />
+        </Card>
+      </div>
+      <div style={{ marginTop: 20 }}>
+        <Card title="Files">
+          <FilesPanel entityType="client" entityId={clientId} revalidate={`/clients/${clientId}/contacts`} result={files} note="Only staff see these files." />
         </Card>
       </div>
       <ClientWebsiteAccessSection me={me} userId={userId} tenant={tenant} clientId={clientId} clientName={client.name} />

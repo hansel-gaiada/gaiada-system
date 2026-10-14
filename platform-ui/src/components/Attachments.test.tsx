@@ -50,10 +50,12 @@ describe("Attachments: a file with a link", () => {
 });
 
 describe("Attachments: a file without a link", () => {
-  it("stays plain text, with no link and no mark", () => {
-    render(<Attachments {...base} files={[file({ filename: "Notes.txt", url: null })]} />);
-    expect(screen.getByText("Notes.txt")).toBeInTheDocument();
-    expect(screen.queryByRole("link")).toBeNull();
+  it("is an uploaded file: a download link to /api/files/:id, with its size and no Drive mark (DW-8h)", () => {
+    render(<Attachments {...base} files={[file({ id: "f9", filename: "Notes.txt", url: null, byte_size: 2048 })]} />);
+    const a = screen.getByRole("link", { name: "Download Notes.txt" });
+    expect(a).toHaveAttribute("href", "/api/files/f9");
+    expect(a).toHaveAttribute("download");
+    expect(screen.getByText(/2 KB/)).toBeInTheDocument();
     expect(screen.queryByLabelText("Google Drive")).toBeNull();
   });
 
@@ -61,7 +63,7 @@ describe("Attachments: a file without a link", () => {
     const f = file({ filename: "Old.txt" });
     delete (f as { url?: unknown }).url;
     render(<Attachments {...base} files={[f]} />);
-    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/api/files/f1");
   });
 });
 

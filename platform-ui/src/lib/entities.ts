@@ -349,6 +349,24 @@ export const listNotifications = (u: string, t: string, unreadOnly = false) =>
 export interface FileMeta { id: string; filename: string; content_type: string; byte_size: number; scrubbed: boolean; uploader_id: string | null; created_at: string; url?: string | null }
 export const listFiles = (u: string, t: string, entityType: string, entityId: string) =>
   skipUnavailable(platformFetch<FileMeta[]>(`/api/${t}/files?entityType=${entityType}&entityId=${entityId}`, u), [] as FileMeta[]);
+/** DW-8h (§45.3): the honest list read. A refusal, a missing target and an unreachable platform are each said as themselves,
+ *  never folded into an empty list. A 404 `target_not_found` is `unavailable` with that reason (the panel words it). */
+export async function readFiles(u: string, t: string, entityType: string, entityId: string): Promise<ReadResult<FileMeta[]>> {
+  try {
+    const rows = await platformFetch<FileMeta[]>(`/api/${t}/files?entityType=${encodeURIComponent(entityType)}&entityId=${encodeURIComponent(entityId)}`, u);
+    return { kind: "ok", data: rows };
+  } catch (e) {
+    if (e instanceof PlatformError) {
+      if (e.status === 403) return { kind: "forbidden" };
+      if (e.status === 404) return { kind: "unavailable", reason: "target_not_found" };
+      return { kind: "unavailable", reason: e.message };
+    }
+    return { kind: "unavailable", reason: (e as Error)?.message ?? "unknown error" };
+  }
+}
+/** DW-8h (§45.2): upload bytes (base64) as a stored file. The answer says whether personal data was scrubbed from the copy. */
+export const uploadFile = (u: string, t: string, body: { targetType: string; targetId: string; filename: string; contentType: string; content: string }) =>
+  platformFetch<{ id: string; scrubbed: boolean; byteSize: number }>(`/api/${t}/files`, u, { method: "POST", body: JSON.stringify(body) });
 // Attach a file reference (metadata + optional URL). True binary/multipart upload
 // is a documented follow-up — see docs/FRONTEND-BFF-CONTRACT.md.
 export const attachFile = (u: string, t: string, body: { entityType: string; entityId: string; filename: string; url?: string; content_type?: string }) =>
