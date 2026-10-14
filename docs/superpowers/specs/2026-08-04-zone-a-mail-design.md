@@ -837,6 +837,11 @@ state.
 
 ### 8C. Staff Gmail read surface (IN the roadmap — staging-ready, NOT parked)
 
+> **Extended 2026-10-14 by DW-D24** (owner; `docs/plans/2026-10-13-department-workspaces.md` §11.4, ticket
+> DW-8j): staff also **reply and send** through their own Gmail from the ERP, including "Email this client".
+> The constraints below still hold (Internal app, per-person link, no domain-wide delegation, nothing
+> stored). Sending adds a send scope and its own contract (BFF §48). System mail stays approvals and risk only.
+
 Owner will have Google keys in staging and wants this ready for the staging stage; the OAuth app
 setup happens at the staging window (owner action, §15 R7). Design constraints, all
 owner-locked (M14):

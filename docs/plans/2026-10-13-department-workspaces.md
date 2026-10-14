@@ -1004,6 +1004,39 @@ The backend contracts come first. They are in `docs/FRONTEND-BFF-CONTRACT.md`: *
     "Mine".
   - The `/me` door cards that repeated the tabs are removed.
 
+### 8.1 Build notes (DW-8, 2026-10-14)
+
+**Evidence.** `origin/main` at `7abcf66b` (release 395), read from a clean worktree, plus one read-only
+survey. DW-1a and DW-2 already built most of the menus: `YOU_ROWS`, `COMPANY_ROWS` and `ADMIN_ROWS` in
+`UI/lib/workspaces.ts`, the Company and Admin footer links, and the DW-D20 404s (`UI/lib/adminAccess.ts`).
+Only My tasks is still hidden behind its ticket. Most of DW-8 is therefore one new page, a few moves, and
+four backends.
+
+| Ticket | Today (`7abcf66b`) | DW-8 adds |
+|---|---|---|
+| 8a My tasks | `GET /api/tasks/mine` (`PN/core/tasks-mine.controller.ts`) is a union of `tasks` and `pm_tasks` in an envelope, with `scope`, `status` and `dueBefore`, and no pagination. The UI reader `listMyTasks` (`UI/lib/agenda.ts`) reports `unavailable` honestly. There is no `/me/tasks` page | `/me/tasks`, grouped by due date (Overdue, Today, This week, Later, No date), with a status filter; companies the read left out are named from the envelope. The Overview's Needs you "See all" points there (§3.7) |
+| 8b Inbox | `/me/inbox` and `/notifications` both render `listNotifications`. The bell's "Open inbox" and the top bar's bell link go to `/notifications` | `/me/inbox` gains the severity and unread filters of `/notifications`, which redirects there with its query. The bell and the top bar point to `/me/inbox`. Notifications and mail stay separate systems (mail design) |
+| 8c Meetings | The registry's Calendar row already has Calendar and Meetings tabs (Meetings is agency-gated), and the new shell draws them. In the classic shell, `/calendar` and `/meetings` have no strip | The same two-tab strip on both pages for the classic shell. `SectionTabs` hides itself in the new shell |
+| 8d Me | `/me` shows three stats and eight door cards. The strip in `me/layout.tsx` is Overview, Inbox, Leave, Loans, Pay and Learning | The door cards go, since each has a home (§10). The strip becomes Summary, Leave, Loans, Pay, Timesheet and Account, matching the registry. "Your employee page" stays as a header link |
+| 8e Company | `COMPANY_ROWS` and the footer link exist. `/departments` (divisions, people and open tasks per department) is reachable only from there and ⌘K | The Departments directory: each department opens its workspace Overview and names its head. The classic Departments group links the directory. An e2e pins that an agency company shows Clients and Campaigns and a generic-pack company does not |
+| 8f Admin | `ADMIN_ROWS` and the DW-D20 404s exist (DW-2g) | Every admin page has a home and a 404 rule (for example `/systems/github`), with an e2e per gate |
+| 8g Calendar events | No events table. The only scheduling is `POST /:t/meetings/recordings/schedule` | Contract first (BFF §47, PERMISSION-CONTRACT §39). Events with attendees; a meeting is an event that can carry a recording. Calendar shows events and tasks, and a meeting can be scheduled. Google Calendar sync waits for DW-11 |
+| 8h Attachments | `files` is polymorphic behind an allowlist (`TARGET_KINDS`: project, task, deliverable, client, agency_campaign, agency_creative_asset, contract, invoice_payment). `UI/components/Attachments.tsx` attaches references only, and only the task page uses it | Contract first (BFF §45). `work_request` and `agency_campaign_part` join the allowlist under their DW-5 Cerbos kinds. The panel appears on requests, campaign parts, campaigns and the staff client page, with binary upload (the controller already takes base64 up to 25 MB). Drive references after DW-6i |
+| 8i Knowledge search | The RAG store lives in `ai-agents` (two tiers). `/knowledge` lists sources only. There is no staff search route, and `/search` is a client-side substring match | Contract first (BFF §46). `GET /:t/knowledge/search` reads the internal tier with the tenant pre-filter, then re-checks every hit against the caller's read right on its source record before returning it, because a caller-supplied scope is unsafe (`PN/modules/knowledge/README.md`). A search box on `/knowledge` |
+| 8j Email | The mail module sends system mail for approvals and risk only. The `GmailClient` seam has fixtures (MAIL-16D); there is no link flow and no UI | DW-D24. Each person links their own Gmail (Internal app, no domain-wide delegation, nothing stored), reads threads, replies and sends, including "Email this client". Contract first (BFF §48, PERMISSION-CONTRACT §40). Built against the simulated Gmail; live when the Google OAuth client exists (DW-11) |
+| 8k Approvals | The row is ungated | DW-D23. The row shows when something waits on your decision or you hold any right to decide, and its badge counts what is pending. The page stays reachable for everyone; the server decides who may act |
+| 8l Group name | `/rollups` hard-codes the group's name in its subtitle | The root company's name, read from `Me.companies`. The same fix applies to the other staff-facing hard-codes the survey found (the sidebar wordmark, `/companies`). The login page and the HTML title have no session, so they are flagged, not changed |
+
+**Order and tiers.**
+- **Wave A, UI only, one landing:** 8a (Sonnet), then 8b with 8d (Sonnet), then 8c, 8f and 8l (Haiku),
+  then 8e with 8k (Sonnet).
+- **Wave B, one landing each, contract first.** The orchestrating session writes each contract. The order
+  is 8h, 8i, 8g, then 8j.
+- **Coordination.** 8h touches DW-5's request pages and PV-3's staff client page, so DW-5 and PV see the
+  file list first. It builds on DW-6i's `url` on file rows.
+- **Contract numbers:** BFF §45 (8h), §46 (8i), §47 (8g) and §48 (8j); PERMISSION-CONTRACT §39 (8g) and
+  §40 (8j).
+
 ---
 
 ## 9. Company and Admin
@@ -1108,6 +1141,8 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 | DW-D20 | DW-2g found that a member who types `/admin` gets an empty Admin area (the pages render and the server refuses each read). Should such a page be reachable? | **Owner (2026-10-13): a page is reachable only by those allowed to use it; everyone else gets a 404.** Applied to the whole Admin area (Settings `/admin/*`, Group `/group`, `/group/reports`, `/rollups`, Platform `/systems/*`), each page by its own gate, and the Settings tabs offer only the pages the person may open. The server stays the authority |
 | DW-D21 | Every department's Project Management "Board" tab was labelled "Overview" (PM_TERMS.board, owner decision 2026-08-10), right under the workspace's own Overview row. Rename it back? | **Owner (2026-10-13): rename it back to "Board".** "Overview" then means only the workspace dashboard (DW-D12). URLs and keys are unchanged |
 | DW-D22 | DW-3z removed the GM cockpit's money card from under the company Overview; the Company block showed revenue and overdue receivables but not the card's net margin rate. Add it? | **Owner (2026-10-14): add it.** The Company block shows the net margin rate (net over revenue, from the same P&L read; a dash-free "no data" when revenue is zero). Built in DW-3z2. |
+| DW-D23 | DW-8k: should Approvals in You show only to people who decide approvals? Deciding is split across several rights (agency approvals, pipeline gates, automation and AI actions, leave, loans, IAM overrides), and some of them are conditional, so one permission check could hide the page from a real decider | **Owner (2026-10-14): show it when it concerns you.** The row shows when something waits on your decision or you hold any right to decide, and its badge counts what is pending. The page stays reachable by URL and ⌘K for everyone, and the server decides who may act |
+| DW-D24 | DW-8j: what is "email from the ERP"? The mail design (2026-08-04, §8C, A14) planned only reading your own Gmail inside the ERP, and system mail is for approvals and risk only | **Owner (2026-10-14): read and send through your own Gmail.** Each employee links their own Google account (Internal app, per person, no domain-wide delegation, nothing stored), then reads, replies and sends inside the ERP, including "Email this client" from the client page. It is built now against a simulated Gmail and goes live when the Google OAuth client exists (DW-11). This extends the mail design's read-only Gmail scope to sending; system mail stays approvals and risk only |
 
 ---
 
@@ -1437,6 +1472,7 @@ These are built in code but give no real data until someone outside engineering 
 
 ## Decision log
 
+- **2026-10-14 (owner, during the build):** DW-D23: Approvals in You shows when it concerns you (§11.4), for DW-8k. DW-D24: email from the ERP means reading and sending through your own Gmail (§11.4), for DW-8j; the mail design's §8C gains a pointer.
 - **2026-10-13 (owner, during the build):** DW-D20: Admin-area pages 404 for anyone not allowed to use them (§11.4). Built with DW-2g, whose e2e pinned the old empty Admin area.
 - **2026-10-13 (owner, during the build):** DW-D21: the Project Management view is called "Board" again, reversing the 2026-08-10 Board→Overview rename (§11.4). Built as DW-6m.
 - **2026-10-14 (owner, during the build):** DW-D22: the Company block of the company Overview shows the net margin rate the GM cockpit's money card showed (§11.4, §3.8). Built as DW-3z2.
