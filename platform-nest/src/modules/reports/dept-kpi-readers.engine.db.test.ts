@@ -18,7 +18,7 @@ import { rebuildOrgUnitClosure } from "../../core/org-unit-closure";
 import { DEPT_KPI_SETS, type KpiReader } from "./dept-kpis";
 import { evaluateUnits } from "./dept-kpi-targets";
 import { runDeptKpiWatch } from "./dept-kpi-watch";
-import { setModuleKpiReadersForTests } from "./dept-kpi-readers";
+import { MODULE_KPI_READERS, setModuleKpiReadersForTests } from "./dept-kpi-readers";
 import type { ModuleKpiReader, ReaderCtx } from "./dept-kpi-readers/types";
 import { todayIsoInTz } from "./person-scope";
 
@@ -36,7 +36,8 @@ describe.skipIf(!TEST_URL)("DW-6n0 the module KPI reader seam (live PG)", () => 
   const withReader = (reader: ModuleKpiReader) => {
     // Replace the entry's reader object: the catalogue's shared MODULE constant must never be mutated.
     webDef().reader = { kind: "module", readerId: READER_ID };
-    setModuleKpiReadersForTests({ [READER_ID]: reader });
+    // On top of the real registry: the catalogue's other wired KPIs keep their own readers (DW-6n).
+    setModuleKpiReadersForTests({ ...MODULE_KPI_READERS, [READER_ID]: reader });
   };
   const kpi = async (range: { periodKind: "month"; start: string; end: string } = OCT) => {
     const [r] = await evaluateUnits(co, "agency", [WEB], [WEB], range);
@@ -133,7 +134,7 @@ describe.skipIf(!TEST_URL)("DW-6n0 the module KPI reader seam (live PG)", () => 
   it("(c) a readerId with no registered reader reads read_failed, never a crash", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     webDef().reader = { kind: "module", readerId: "test.typo" };
-    setModuleKpiReadersForTests({});
+    setModuleKpiReadersForTests({ ...MODULE_KPI_READERS });
     expect((await kpi()).k).toMatchObject({ condition: "unavailable", reason: "read_failed" });
   });
 
