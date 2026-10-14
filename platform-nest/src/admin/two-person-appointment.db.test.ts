@@ -14,10 +14,11 @@
 // ⚠ Needs DATABASE_URL_TEST. Skips silently otherwise.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
-import { withGlobal } from "../db";
+import { newId, withGlobal, withTenants } from "../db";
 import { assertGrantAllowed, type GrantSpec } from "./grant-write.service";
+import { executeApprovedIamRequest, IAM_APPOINTMENT_WORKFLOW } from "./iam-approval-execute";
 import { createRole, grantRole, createCompany, createUser } from "../testing/fixtures";
-import type { PermissionGrant } from "../rbac/principal";
+import type { PermissionGrant, Principal } from "../rbac/principal";
 
 let tenant: string;
 let platformAdminRole: string;
@@ -208,5 +209,54 @@ describe.skipIf(!TEST_URL)("IAM-16 · two-person appointment (D-9)", () => {
         tenantId: tenant,
       }),
     ).rejects.toThrow(/appointment_pair_incomplete/);
+  });
+
+  // ── EXECUTION: the decided approval row is read back under the approval's own tenant ─────────────────
+  // `automation_approvals` is FORCE RLS. The requester used to be read under a bare `withGlobal` (no tenant GUC):
+  // ZERO rows, no error, so EVERY decided appointment died "appointment approval row not found" and the D-9 path
+  // was dead end to end. The tests above call `assertGrantAllowed` directly and never reach that read.
+  async function fileAppointment(tenantId: string, requestedBy: string, targetUserId: string): Promise<string> {
+    const id = newId();
+    await withTenants([tenantId], (c) =>
+      c.query(
+        `INSERT INTO automation_approvals (id, tenant_id, workflow_id, tool_name, tool_args, impact, reason, requested_by, origin, origin_site)
+         VALUES ($1, $2, $3, 'iam.appointment', $4, 'high', 'D-9 appointment', $5, 'iam', 'central')`,
+        [id, tenantId, IAM_APPOINTMENT_WORKFLOW, JSON.stringify({ targetUserId, roleId: platformAdminRole, scopeType: "global" }), requestedBy],
+      ),
+    );
+    return id;
+  }
+
+  it("🔴 a D-9 appointment decided by the second person EXECUTES: the requester is read from the approval row", async () => {
+    const appointee = await createUser("appointee-exec@appoint.test");
+    const approvalId = await fileAppointment(tenant, holdingOwner, appointee);
+    const decider = { userId: superadmin, perms: await godPerms(platformAdminRole) } as unknown as Principal;
+
+    const out = await executeApprovedIamRequest(
+      tenant, approvalId, IAM_APPOINTMENT_WORKFLOW,
+      { targetUserId: appointee, roleId: platformAdminRole, scopeType: "global" }, decider,
+    );
+    expect(out.kind).toBe("appointment");
+    expect(out.grantId).toBeTruthy();
+
+    const row = await withGlobal((c) =>
+      c.query<{ user_id: string; scope_type: string; origin_approval_id: string | null }>(
+        `SELECT user_id, scope_type, origin_approval_id FROM user_roles WHERE id = $1`, [out.grantId],
+      ),
+    );
+    expect(row.rows[0]).toMatchObject({ user_id: appointee, scope_type: "global", origin_approval_id: approvalId });
+  });
+
+  it("an appointment execute finds the requester only under the approval's OWN tenant", async () => {
+    const appointee = await createUser("appointee-xtenant@appoint.test");
+    const approvalId = await fileAppointment(tenant, holdingOwner, appointee);
+    const otherTenant = await createCompany("Appointment Other Co");
+    const decider = { userId: superadmin, perms: await godPerms(platformAdminRole) } as unknown as Principal;
+    await expect(
+      executeApprovedIamRequest(
+        otherTenant, approvalId, IAM_APPOINTMENT_WORKFLOW,
+        { targetUserId: appointee, roleId: platformAdminRole, scopeType: "global" }, decider,
+      ),
+    ).rejects.toThrow(/appointment approval row not found/);
   });
 });

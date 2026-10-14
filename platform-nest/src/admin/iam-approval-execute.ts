@@ -120,10 +120,16 @@ export async function executeApprovedIamRequest(
     // requester id would let one principal name a second one it does not control and satisfy D-9's
     // pair by assertion — the whole rule reduces to "who actually filed this request", and only the
     // row knows that.
-    const req = await withGlobal((c) =>
-      c.query<{ requested_by: string | null }>(`SELECT requested_by FROM automation_approvals WHERE id = $1`, [
-        approvalId,
-      ]),
+    //
+    // ⚠ THE RLS ZERO-ROW TRAP: `automation_approvals` is FORCE RLS (0014, `tenant_isolation`), so this read must
+    // run under `withTenants` for the approval's own tenant. Under a bare `withGlobal` no tenant GUC is set, the
+    // read returned ZERO rows with no error, and every D-9 appointment failed "appointment approval row not found".
+    // The `AND tenant_id` is belt and braces: an id from another tenant's row finds nothing even if a caller passed one.
+    const req = await withTenants([tenantId], (c) =>
+      c.query<{ requested_by: string | null }>(
+        `SELECT requested_by FROM automation_approvals WHERE id = $1 AND tenant_id = $2`,
+        [approvalId, tenantId],
+      ),
     );
     if (!req.rows[0]) throw new BadRequestException("appointment approval row not found");
     const requesterUserId = req.rows[0].requested_by;

@@ -760,6 +760,8 @@ the Cerbos action from `origin` + `workflow_id`, exactly as it already does for 
 approving decision **executes in-band** through the grant choke point, tagged `expires_at` +
 `origin_approval_id`, and bumps the target's session.
 
+A decided D-9 `iam:appointment` executes the same way, reading its requester from the approval row under the approval's own tenant (`automation_approvals` is FORCE RLS; the bare global read used to find nothing, so every appointment failed "appointment approval row not found", fixed 2026-10-14).
+
 **Routing is code this wave** (`role-grants.controller.ts::routeFor`, design §6.5; the configurable
 table is IAM-22): a role carrying above-baseline `hr.*`-sensitive keys routes to `hr_manager`,
 everything else to `company_admin`. Cerbos holds the OUTER bound (the union of routable approvers);

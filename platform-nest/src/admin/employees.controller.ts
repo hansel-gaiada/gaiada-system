@@ -740,7 +740,13 @@ export class EmployeesController {
       // seat ever claimed — those are this tenant's MANUAL grants, and §5.3 requires this flow to
       // revoke them and report the audited list. Routed through P2-04's choke point, never a direct
       // DELETE.
-      const manual = await withGlobal((c) =>
+      //
+      // ⚠ THE RLS ZERO-ROW TRAP (found by the 2026-10-14 sweep): this read MUST run under `withTenants`. Its
+      // org_unit arm subselects `org_units`, which is FORCE RLS (0026, `tenant_isolation`); under a bare
+      // `withGlobal` no tenant GUC is set, the subselect returned ZERO rows with no error, and a leaver's
+      // org_unit-scoped manual grants were never found, never revoked and never reported (only the company-scope
+      // arm worked). `user_roles` and `roles` have no RLS, so the tenant context costs the rest of the query nothing.
+      const manual = await withTenants([tenantId], (c) =>
         c.query<{ id: string; role: string; scope_type: string; scope_id: string | null }>(
           `SELECT ur.id, r.name AS role, ur.scope_type, ur.scope_id
              FROM user_roles ur

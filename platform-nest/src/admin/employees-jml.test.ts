@@ -365,6 +365,45 @@ describe.skipIf(!TEST_URL || !live)("P2-06 — joiner / mover / leaver over the 
     expect(mem.rows[0].status).toBe("inactive");
   });
 
+  it("terminate revokes the leaver's org_unit-scoped MANUAL grants in this company, and only this company's (RLS zero-row trap)", async () => {
+    // `org_units` is FORCE RLS. The leaver read used to subselect it under a bare `withGlobal` (no tenant GUC), got
+    // ZERO rows, and so never found an org_unit-scoped grant: a leaver kept their department-level access. Only the
+    // company-scope arm worked, which is all the test above exercises.
+    const hired = await hire({ displayName: "Dept Leaver", workEmail: "deptleaver@a.test", positionId: hrPosition });
+    expect(hired.statusCode).toBe(201);
+    const employeeId = hired.json().id as string;
+    const userId = hired.json().userId as string;
+
+    const other = await createCompany("Other Org-Unit Co", ["hr"]);
+    const anchorUnit = (tenant: string, nodeId: string) =>
+      withTenants([tenant], (c) =>
+        c.query(`INSERT INTO org_units (id, tenant_id, node_id, kind, name) VALUES ($1,$2,$3,'department',$4)`, [
+          newId(), tenant, nodeId, nodeId,
+        ]),
+      );
+    await anchorUnit(T, "d-leaver-ou");
+    await anchorUnit(other, "d-other-co-ou");
+    // Two manual org_unit grants (no managed_by / managed_by_position): one in OUR unit, one in ANOTHER company's.
+    await grantRole(userId, leadRole, "org_unit", "d-leaver-ou");
+    await grantRole(userId, leadRole, "org_unit", "d-other-co-ou");
+
+    const res = await app.inject({
+      method: "POST", url: `/api/${T}/hr/employees/${employeeId}/terminate`,
+      headers: asUser(companyAdmin), payload: { reason: "left" },
+    });
+    expect(res.statusCode).toBe(200);
+    const revoked = res.json().revokedManualGrants as { scopeType: string; scopeId: string }[];
+    expect(revoked.filter((g) => g.scopeType === "org_unit").map((g) => g.scopeId)).toEqual(["d-leaver-ou"]);
+
+    const left = await withGlobal((c) =>
+      c.query<{ scope_id: string }>(
+        `SELECT scope_id FROM user_roles WHERE user_id = $1 AND scope_type = 'org_unit' AND scope_id IN ('d-leaver-ou','d-other-co-ou')`,
+        [userId],
+      ),
+    );
+    expect(left.rows.map((r) => r.scope_id)).toEqual(["d-other-co-ou"]);
+  });
+
   it("a retried termination is idempotent", async () => {
     const hired = await hire({ displayName: "Twice Gone", workEmail: "twice@a.test", positionId: webPosition });
     const employeeId = hired.json().id as string;
