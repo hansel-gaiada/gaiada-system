@@ -698,13 +698,21 @@ where a ticket says the classic shell changes too.
     workspace by the node's name (`deptSlug`), so a department named "HR" is the HR workspace. A new company
     gets no tree at all today (the GET answers 404 until someone saves one).
   - *Adds:*
-    - one pure helper that adds the department nodes `d-hr` "HR", `d-finance` "Finance" and `d-it` "IT" under
-      the root, each only when no department in the tree already has that id or a name with that slug. It
-      never renames, moves or removes a node, and places nobody;
+    - one pure helper that adds the department nodes "HR", "Finance" and "IT" under the root, each only when
+      no department in the tree already has that id, the legacy plain id (`d-hr`), or a name with that slug.
+      It never renames, moves or removes a node, and places nobody;
+    - **node ids unique per company:** `d-hr-<companyId>`, `d-finance-<companyId>`, `d-it-<companyId>`. An
+      `org_unit_lead` grant carries no company, and the Cerbos derived role matches the node id alone
+      (`scopeId in unitAncestors`), so a `d-hr` shared by two companies would let one company's head of HR
+      lead the other's (found by DW-4 during the build). The org builder already mints random ids, so only
+      seed-made ids can collide. Tying org-unit grants to their company is an IAM gap (BFF §43.6a), not
+      DW-7's;
     - a new company is created with a starting tree: the root plus the three;
     - an idempotent backfill for every live company, run through `applyOrgStructure`. It defaults to a dry run
       that prints, per company, what it would add and the departments already there, so a hand-built
-      "Human Resources" is seen before anything is written. A company with no tree gets the starting tree;
+      "Human Resources" is seen before anything is written. A company with no tree gets the starting tree.
+      It appends to the raw stored tree and refuses a tree the sanitizer would rewrite, and in the same
+      transaction re-points the LMS courses and paths seeded on the legacy `d-hr`/`d-it` to the company's node;
     - the agency and resort seeds gain the three, so CI and sumopod match live;
     - the classic sidebar keeps exactly one HR and one IT row, as it already does for Finance: a tree row named
       HR or IT opens `/hr` or `/it`, and the fixed row is appended only when the tree has none;
@@ -712,8 +720,8 @@ where a ticket says the classic shell changes too.
       department has one home;
     - the demo company gains the three departments.
   - *What it switches on:* HR, Finance and IT get a department id, so their Project Management row, Analytics ›
-    Work and Tools & connections are offered. LMS courses already on `d-hr` and `d-it` show as department
-    courses. DW-4e's KPI engine already maps the three slugs, so their conditions appear, reading
+    Work and Tools & connections are offered. The HR and IT LMS courses show as department courses once
+    re-pointed. DW-4e's KPI engine already maps the three slugs, so their conditions appear, reading
     "unavailable" until targets are approved.
   - *Checked before live:* the backfill's DB test on the Linux CI gate (closure rows for the new nodes,
     memberships unchanged, hand edits untouched, a second run writes nothing), then a dry run on live, then the
@@ -753,6 +761,11 @@ where a ticket says the classic shell changes too.
     backend and the screen. The contract rules what deactivating an account with postings or a balance means.
 - **7h · IT isolation rules and threat response.** Designed, not built: `lib/network.ts` documents the routes and
   the isolate write (a D14 approval), but no backend serves them and the pages read fixtures. Later.
+- **7j · Department KPI readers (DW-D25, owner 2026-10-14).** DW-4e left the functional departments' and the
+  GM's 12 KPIs reading "unavailable (no reader)": GM 2, HR 4, Finance 3, IT 3. Contract first in BFF §40.6, on
+  the seam DW-6 and DW-4 agreed in §40.5.1; one reader per ticket, each plugging into the §40 catalogue
+  (`{value, numerator?, denominator?}` or null). The targets, the condition and the DW-4j watch then pick
+  it up unchanged.
 
 **Order, one agent at a time:**
 1. 7d backend (Sonnet, Opus review), then 7d UI (Sonnet), then the release, the live dry run and the apply.
@@ -761,12 +774,12 @@ where a ticket says the classic shell changes too.
 4. 7b's analytics page (Sonnet).
 5. 7f-1 to 7f-5 (Sonnet; 7f-1 with an Opus review).
 6. 7g-1 (Sonnet), then contract §49 and 7g-2.
+7. Contract §40.6, then 7j's readers (Sonnet), after 7d is live (the readers need the departments' nodes).
 
 **Defaults taken, which the owner may overrule:**
 - Every company gets the three departments, including the venues and the holding, because DW-D6 says each
   company. A department nobody is placed in is empty, not hidden.
-- The node ids are `d-hr`, `d-finance` and `d-it` (the LMS seed already uses `d-hr` and `d-it`), at the top of
-  the tree beside the other departments.
+- The three sit at the top of the tree beside the other departments.
 - Rows mirror their pages' read gates. Whether the pages themselves should 404 for everyone else (DW-D20, as in
   Admin) is the owner's call, because today any staff member can open `/hr` in the classic shell.
 
@@ -774,8 +787,8 @@ where a ticket says the classic shell changes too.
 - In `lib/workspaces.ts`, DW-7 edits only the HR, Finance and IT workspaces, the three DW-7e `CONN` entries and
   `FUNCTIONAL_SLUGS`. DW-8 holds the You, Company and Admin rows.
 - `Pulse.tsx` gains sources; the existing ones are not touched.
-- In the BFF contract DW-7 takes §49 to §52, and §41 to §42 in PERMISSION-CONTRACT. DW-8 holds §45 to §48
-  and §39 to §40.
+- In the BFF contract DW-7 takes §40.6 (DW-D25) and §49 to §52, and §41 to §42 in PERMISSION-CONTRACT. DW-8
+  holds §45 to §48 and §39 to §40.
 - The browser test is its own file, `e2e/workspace-functional.spec.ts`.
 
 **Testing.** As DW-6: UI and backend suites on GitHub Actions CI, the browser test on sumopod with
