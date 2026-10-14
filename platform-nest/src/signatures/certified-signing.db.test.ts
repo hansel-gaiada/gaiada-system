@@ -257,7 +257,7 @@ describe.skipIf(!TEST_URL)("PV5-11 · certified signing through the simulated PS
 
       // The audit trail, labelled simulated.
       const verbs = await all<{ verb: string; metadata: Record<string, unknown> }>(
-        `SELECT verb, metadata FROM activities WHERE target_entity_id = $1 AND verb LIKE 'certified_%' ORDER BY created_at`, [id]);
+        `SELECT verb, metadata FROM activities WHERE target_entity_id = $1 AND verb LIKE 'certified_%' ORDER BY occurred_at`, [id]);
       expect(verbs.map((v) => v.verb)).toEqual(["certified_envelope_created", "certified_signed", "certified_signed", "certified_completed"]);
       for (const v of verbs) expect(v.metadata).toMatchObject({ simulated: true, provider: "simulated" });
       expect(verbs[3].metadata).toMatchObject({ certifiedCopyFileId: copyFile.id, certifiedCopySha256: copyFile.sha256, certificateFileId: certFile.id });

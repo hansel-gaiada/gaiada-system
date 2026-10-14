@@ -9,7 +9,10 @@ import { join } from "node:path";
 import type { PoolClient } from "pg";
 import { contractDocumentsSql, invoiceDocumentsSql, loadDocuments, receiptDocumentsSql, toPortalItem } from "./client-documents";
 
-type Raw = { id: string; title: string; date: string; file_id: string | null; ready: boolean; flag: boolean };
+type Raw = {
+  id: string; title: string; date: string; file_id: string | null; ready: boolean; flag: boolean;
+  certified?: boolean; simulated?: boolean; certificate_file_id?: string | null;
+};
 const row = (id: string, date: string, extra: Partial<Raw> = {}): Raw => ({ id, title: id, date, file_id: null, ready: false, flag: true, ...extra });
 
 function fakeClient(byKind: { contract: Raw[]; invoice: Raw[]; receipt: Raw[] }) {
@@ -50,11 +53,26 @@ describe("PV5-08 loadDocuments", () => {
     expect(by("FROM invoice_payments pp")).toEqual(["r"]);
   });
 
-  it("keeps `clientVisible` as a strict boolean for staff, and the portal shape has exactly six keys", async () => {
+  it("keeps `clientVisible` as a strict boolean for staff, and the portal shape has exactly its nine keys", async () => {
     const { c } = fakeClient({ contract: [row("k1", "2026-09-01T00:00:00Z", { flag: true })], invoice: [], receipt: [row("p1", "2026-09-02", { flag: false })] });
     const items = await loadDocuments(c, parts);
     expect(items.map((i) => i.clientVisible)).toEqual([false, true]);
-    for (const i of items) expect(Object.keys(toPortalItem(i)).sort()).toEqual(["date", "fileId", "id", "kind", "ready", "title"]);
+    // PV5-11 added certified, simulated and certificateFileId (BFF §30b); false/null unless the row says otherwise.
+    for (const i of items) {
+      expect(Object.keys(toPortalItem(i)).sort()).toEqual(
+        ["certificateFileId", "certified", "date", "fileId", "id", "kind", "ready", "simulated", "title"],
+      );
+      expect(i).toMatchObject({ certified: false, simulated: false, certificateFileId: null });
+    }
+  });
+
+  it("PV5-11: a certified contract row carries its markers and certificate, as strict booleans", async () => {
+    const { c } = fakeClient({
+      contract: [row("k1", "2026-09-01T00:00:00Z", { flag: true, certified: true, simulated: true, certificate_file_id: "f-cert" })],
+      invoice: [], receipt: [],
+    });
+    const [item] = await loadDocuments(c, parts);
+    expect(item).toMatchObject({ certified: true, simulated: true, certificateFileId: "f-cert" });
   });
 });
 
@@ -64,6 +82,11 @@ describe("PV5-08 the SQL names its rules", () => {
     expect(sql).toMatch(/k\.status = 'signed'/);
     expect(sql).toMatch(/COALESCE\(\(SELECT f\.id FROM files f[\s\S]*contract_signed_copy[\s\S]*\), af\.id\) AS file_id/);
     expect(sql).toMatch(/IS NOT NULL\) AS ready/);
+    // PV5-11: a certified contract's copy is the provider's certified copy, and the row says so.
+    expect(sql).toMatch(/WHEN k\.signature_tier = 'certified' THEN 'contract_certified_copy' ELSE 'contract_signed_copy'/);
+    expect(sql).toMatch(/\(k\.signature_tier = 'certified'\) AS certified/);
+    expect(sql).toMatch(/k\.signature_provider = 'simulated'\) AS simulated/);
+    expect(sql).toMatch(/contract_certified_certificate[\s\S]*AS certificate_file_id/);
   });
   it("invoices: issued only, the stored PDF", () => {
     const sql = invoiceDocumentsSql("W", "TRUE");
