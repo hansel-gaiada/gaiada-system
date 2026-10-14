@@ -36,7 +36,9 @@ export class FilesController {
     await authorize(req.principal, { kind: entityType, id: entityId, tenantId }, "read");
     const rows = await withTenants([tenantId], (c) =>
       c.query(
-        `SELECT id, filename, content_type, byte_size, scrubbed, uploader_id, created_at FROM files
+        // DW-6i: `url` is returned so a reference attachment (a link with no bytes, such as a Google Drive file) can be opened from
+        // the list. It is NULL for an uploaded file. Additive; the row shape is otherwise unchanged.
+        `SELECT id, filename, content_type, byte_size, scrubbed, uploader_id, created_at, url FROM files
          WHERE target_entity_type = $1 AND target_entity_id = $2 AND deleted_at IS NULL ORDER BY created_at DESC`,
         [entityType, entityId],
       ),

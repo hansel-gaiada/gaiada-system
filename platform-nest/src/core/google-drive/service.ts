@@ -386,10 +386,19 @@ export async function pickerAnswer(tenantId: string, userId: string): Promise<Pi
 
 export const isFileId = isDriveFileId;
 
-/** The task must exist in this tenant: another tenant's task (RLS hides it), a deleted one or an unknown id is `target_not_found`. */
+/** The task must exist in this tenant: another tenant's task (RLS hides it), a deleted one or an unknown id is `target_not_found`.
+ *  The files target `task` serves BOTH task tables. The task page (`TaskDetailView`, `getPmTask`) shows a PM task (`pm_tasks`) and
+ *  attaches its files as target `task` with the PM task's id; the legacy base `tasks` rows use the same target. A check on base
+ *  `tasks` alone would refuse every real PM task, so either table proves the task exists. */
 export async function taskExists(tenantId: string, taskId: string): Promise<boolean> {
   const r = await withTenants([tenantId], (c) =>
-    c.query(`SELECT 1 FROM tasks WHERE id = $1 AND deleted_at IS NULL`, [taskId]),
+    c.query(
+      `SELECT 1 FROM pm_tasks WHERE id = $1 AND deleted_at IS NULL
+       UNION ALL
+       SELECT 1 FROM tasks WHERE id = $1 AND deleted_at IS NULL
+       LIMIT 1`,
+      [taskId],
+    ),
   );
   return r.rows.length > 0;
 }
