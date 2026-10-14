@@ -149,28 +149,28 @@ DECLARE
 BEGIN
   SELECT count(*) INTO n FROM pg_class WHERE relname = 'figma_links' AND relrowsecurity AND relforcerowsecurity;
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610140800: figma_links must exist with RLS ENABLED and FORCED';
+    RAISE EXCEPTION '202610140820: figma_links must exist with RLS ENABLED and FORCED';
   END IF;
   SELECT count(*) INTO n FROM pg_policies WHERE tablename = 'figma_links' AND policyname = 'tenant_isolation';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610140800: figma_links needs exactly one tenant_isolation policy, found %', n;
+    RAISE EXCEPTION '202610140820: figma_links needs exactly one tenant_isolation policy, found %', n;
   END IF;
   SELECT count(*) INTO n FROM pg_indexes
    WHERE tablename = 'figma_links' AND indexname IN ('ux_figma_links_target_file_node', 'ix_figma_links_target');
   IF n <> 2 THEN
-    RAISE EXCEPTION '202610140800: the two figma_links indexes are missing (found % of 2)', n;
+    RAISE EXCEPTION '202610140820: the two figma_links indexes are missing (found % of 2)', n;
   END IF;
   SELECT count(*) INTO n FROM pg_indexes
    WHERE tablename = 'figma_links' AND indexname = 'ux_figma_links_target_file_node'
      AND indexdef ILIKE '%UNIQUE%' AND indexdef ILIKE '%deleted_at IS NULL%' AND indexdef ILIKE '%COALESCE%';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610140800: ux_figma_links_target_file_node must be a UNIQUE partial index over COALESCE(node_id, '''')';
+    RAISE EXCEPTION '202610140820: ux_figma_links_target_file_node must be a UNIQUE partial index over COALESCE(node_id, '''')';
   END IF;
   SELECT count(*) INTO n FROM pg_constraint
    WHERE conrelid = 'figma_links'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) ILIKE '%target_kind%'
      AND pg_get_constraintdef(oid) ILIKE '%pm_task%' AND pg_get_constraintdef(oid) ILIKE '%work_request%'
      AND pg_get_constraintdef(oid) ILIKE '%campaign_part%';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610140800: the target_kind CHECK is missing or incomplete (found % matching)', n;
+    RAISE EXCEPTION '202610140820: the target_kind CHECK is missing or incomplete (found % matching)', n;
   END IF;
 END $$;

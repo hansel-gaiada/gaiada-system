@@ -7313,7 +7313,7 @@ There is **no new Cerbos kind**. A link is part of the work it is on, so it is a
 ### 36.8 As built (backend, DW-6k, 2026-10-14)
 
 **Where it is.**
-- Migration `202610140800_figma_links.sql`:
+- Migration `202610140820_figma_links.sql`:
   - the provider CHECK on `integration_connections` is rebuilt from its LIVE definition (the 202610130210 idiom, never a typed list) and a DO block asserts the full list;
   - provider list before (12): `github`, `google_drive`, `claude`, `google_search_console`, `google_analytics`, `google_ads`, `semrush`, `cpanel`, `ftp`, `ssh`, `wp_admin`, `bing_webmaster`; after (13): the same twelve plus `figma`;
   - `figma_links` exactly as §36.2 (RLS enable plus force, the `tenant_isolation` policy, the unique partial index over `COALESCE(node_id, '')`, the target index), with a DO-block self-assertion.
