@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
-import { PageHeader } from "@/components/PageHeader";
 import { MeTabs } from "@/components/shell/MeTabs";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
@@ -32,18 +31,13 @@ export default async function MeLayout({ children }: { children: React.ReactNode
   // DW-8d: the strip is the registry's Me row (Summary, Leave, Loans, Pay, Timesheet, Account), gated the
   // way the sidebar gates it, so a company without a timesheets row shows no Timesheet tab and the strip
   // cannot drift from the sidebar. Inbox, My tasks and Learning have their own sidebar rows and are not
-  // tabs; `MeTabs` draws nothing on them.
+  // tabs: `MeTabs` draws neither the "Me" title nor the strip on them, and each carries its own title.
   const me = await getMe(userId);
   const tenantId = await getActiveTenant(me);
   const tabs = meStripTabs({ me, tenantId, unitPath: [] });
 
   return (
     <>
-      <PageHeader
-        eyebrow="Personal"
-        title="Me"
-        subtitle="Everything that is yours — your requests, your record, your inbox."
-      />
       <MeTabs tabs={tabs} />
       {children}
     </>

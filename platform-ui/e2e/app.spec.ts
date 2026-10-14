@@ -55,7 +55,7 @@ test("notifications surface shows items and unread badge", async ({ page }) => {
   await expect(bell).toBeVisible();
   await bell.click();
   await page.waitForURL("**/me/inbox");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText(/me/i);
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/inbox/i);
   await expect(page.getByText(/approval requested/i)).toBeVisible();
 });
 

@@ -25,9 +25,16 @@ describe("MeTabs", () => {
     expect(screen.getByRole("link", { name: "Summary" })).not.toHaveAttribute("aria-current");
   });
 
-  it.each(["/me/inbox", "/me/tasks", "/me/learning"])("draws nothing on %s", (path) => {
+  it("titles Me's own pages \"Me\"", () => {
+    nav.pathname = "/me/pay";
+    render(<MeTabs tabs={tabs} />);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Me");
+  });
+
+  it.each(["/me/inbox", "/me/tasks", "/me/learning"])("draws no title and no strip on %s (it has its own title)", (path) => {
     nav.pathname = path;
     render(<MeTabs tabs={tabs} />);
     expect(strip()).toBeNull();
+    expect(screen.queryByRole("heading")).toBeNull();
   });
 });
