@@ -11,6 +11,18 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.158.0` - DW-8 Wave A: You, Company and Admin in the workspace shell (2026-10-14) - PROTOTYPED
+
+Plan `docs/plans/2026-10-13-department-workspaces.md` §8, §8.1 and §11.4 (owner rulings DW-D23 and DW-D24). UI only: no backend, migration or Cerbos change. Contracts for the next DW-8 tickets ride along as docs: BFF §45 (8h attachments), §46 (8i staff knowledge search) and §47 with PERMISSION-CONTRACT §39 (8g calendar events), all PLANNED.
+- **DW-8a My tasks** at `/me/tasks`: the person's own tasks across every company (`GET /api/tasks/mine`), grouped Overdue, Today, This week, Later and No due date, with an Open, Done and All filter. "Today" is the display zone's date (`todayIsoInDisplayZone`), not the server's UTC clock. The You block's My tasks row is no longer hidden.
+- **DW-8b One Inbox:** `/me/inbox` gains the severity and unread filters; `/notifications` redirects there (a `next.config.ts` redirect, because a page `redirect()` under `loading.tsx` forces a full reload), keeping its query. The bell's "Open inbox" and the top bar point to `/me/inbox`.
+- **DW-8d Me is personal admin:** the `/me` door cards are gone (each has a home); the strip is the registry's Me row (Summary, Leave, Loans, Pay, Timesheet, Account) with the sidebar's gates, and with Me's title it shows only on Me's own pages. Inbox and My learning carry their own titles.
+- **DW-8m Approvals when it concerns you (DW-D23):** a `decider` gate (something waits on your decision, or you hold a decide right in any of your companies; an unknown or failed read never hides it) and the first sidebar count, the pending approvals, read once per page in the pilot layout. The palette keeps `/approvals` for everyone.
+- **DW-8e Company:** the Departments directory opens each department's workspace Overview (HR, Finance and IT their consoles) and the classic Departments group links it ("All departments").
+- **DW-8l (PV-D13):** the group's name comes from data (`groupNameOf`): the `/rollups` and `/companies` subtitles and both sidebar wordmarks. The login page, the HTML title and the 404 page keep the hard-coded name (no session there); flagged for the owner.
+- **DW-8c, DW-8f:** tests pin the Calendar and Meetings strip and that every Admin-area page has a 404 rule; both already held.
+- Verified: platform-ui vitest locally (507 files, 8922 tests) as a pre-check; the gate is CI on the landing sha.
+
 ### platform-nest `0.139.0` - PV5-11s: certified signing against a SIMULATED PSrE for the review stage (PV-D43) (2026-10-15) - PROTOTYPED
 
 Owner, 2026-10-14: "sign it as this is still review" (PV-D43, confirmed by pick-list). Contract: BFF §30d "Certified signing: simulated provider (review stage, PV-D43)", rows in §16b, §16e, §30a and §30b; runbook `infra/runbooks/certified-signing-simulated.md`. NOT a certified signature in law; the real PSrE (VIDA, PV-D25) comes when counsel sets a threshold or a client asks.

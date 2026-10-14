@@ -524,6 +524,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/me/loans`
 - `/me/loans/[loanId]`
 - `/me/pay`
+- `/me/tasks`
 - `/meetings`
 - `/meetings/[id]`
 - `/monitoring`
@@ -531,7 +532,6 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/monitoring/channels`
 - `/monitoring/maintenance`
 - `/monitoring/new`
-- `/notifications`
 - `/office`
 - `/office-lab`
 - `/office/credits`
