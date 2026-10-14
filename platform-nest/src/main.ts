@@ -183,6 +183,7 @@ import { registerInboundRawBodyCapture } from "./mail/inbound/raw-body";
 // GitHub signed, not a re-parsed/re-serialized object). See core/github-webhook-raw-body.ts.
 import { registerGithubWebhookRawBodyCapture } from "./core/github-webhook-raw-body";
 import { registerRequestContext } from "./core/request-context";
+import { assertGmailBootSafe } from "./core/gmail/mode";
 // 2026-08-24 — `:tenantId` shape validation. See src/core/tenant-param.ts for why this is a root
 // hook rather than a pipe on 602 `@Param("tenantId")` call sites.
 import { registerTenantParamValidation } from "./core/tenant-param";
@@ -527,6 +528,11 @@ async function bootstrap(): Promise<void> {
   // SM-75: the search provider-mode + ads-write-mode boot wiring — see wireSearchProviderModeAndAdsWriteMode's
   // own header above `bootstrap()` for why this is a single unconditional call rather than inline code.
   wireSearchProviderModeAndAdsWriteMode();
+  // DW-8j (FRONTEND-BFF-CONTRACT §48.1): GMAIL_MODE is `simulated` (the default) or `live`. A boot ERROR, not a warning, for any other
+  // word, and for `live` without the Gmail OAuth client: a request-time failure would surface only after a person had written their message.
+  // Unconditional and at function scope (the SM-26 lesson above: a refusal nested inside a branch reads as enforced and enforces nothing).
+  // eslint-disable-next-line no-console
+  console.log(`[gmail] mode: ${assertGmailBootSafe()} (GMAIL_MODE)`);
   // SMM-05/06: register the social publisher driver (Postiz, or deliberately register nothing).
   // Also the home of the one social BOOT REFUSAL — a publisher base URL pointing at a PUBLIC
   // address, which means the containment perimeter moved (addendum §A4l §2/§3). No network call is
