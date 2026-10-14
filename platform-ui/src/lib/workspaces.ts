@@ -622,6 +622,12 @@ const OFFICE_OF_THE_GM: Workspace = {
 // offered.
 
 const HR_ON: Gate = { kind: "module", module: "hr" };
+// Each gated tab mirrors the read its page makes (DW-7a), through an existing capability: `hr.view` is `hr_record`/`hr_case`
+// read and the HR people file (`employee` read), `hr.recruitment.view` is `hr_recruitment` read. What a plain member may read
+// stays ungated (Leave and Attendance, their own cases, Reviews and Settings read `hr_policy`, open to every member).
+const HR_VIEW: Gate = { kind: "cap", cap: "hr.view" };
+// The directory page's own gate (nav.ts's Organization gate, as `DIRECTORY` below), repeated here: that constant is declared later.
+const HR_DIRECTORY: Gate = { kind: "any", gates: [{ kind: "cap", cap: "people.directory" }, { kind: "elevated" }] };
 
 const HR: Workspace = {
   key: "hr",
@@ -634,8 +640,9 @@ const HR: Workspace = {
     {
       key: "people", label: "People", icon: "hr", gate: HR_ON,
       tabs: [
-        { key: "directory", label: "Directory", href: "/hr/people", icon: "hr" },
-        { key: "onboarding", label: "Onboarding", href: "/hr/onboarding", icon: "box" },
+        { key: "directory", label: "Directory", href: "/hr/people", icon: "hr", gate: HR_DIRECTORY },
+        // The checklist board lists every company's cases (`hr_case` read); without `hr.view` the page only says so.
+        { key: "onboarding", label: "Onboarding", href: "/hr/onboarding", icon: "box", gate: HR_VIEW },
         // Edited on the company org builder; HR is its main consumer (as the HR console links it today).
         { key: "org", label: "Org structure", href: "/companies/{company}/org", icon: "inventory" },
       ],
@@ -658,7 +665,7 @@ const HR: Workspace = {
     {
       key: "talent", label: "Talent", icon: "award", gate: HR_ON,
       tabs: [
-        { key: "recruitment", label: "Recruitment", href: "/hr/recruitment", icon: "hr" },
+        { key: "recruitment", label: "Recruitment", href: "/hr/recruitment", icon: "hr", gate: { kind: "cap", cap: "hr.recruitment.view" } },
         { key: "reviews", label: "Reviews", href: "/hr/reviews", icon: "check" },
         { key: "cycles", label: "Appraisal cycles", href: "/appraisals/cycles", icon: "award", gate: { kind: "cap", cap: "appraisal.cycle.admin" } },
       ],
@@ -669,13 +676,13 @@ const HR: Workspace = {
       key: "cases", label: "Cases & compliance", icon: "inventory", gate: HR_ON,
       tabs: [
         { key: "cases", label: "Cases", href: "/hr/cases", icon: "inventory" },
-        { key: "compliance", label: "Compliance", href: "/hr/compliance", icon: "inventory" },
+        { key: "compliance", label: "Compliance", href: "/hr/compliance", icon: "inventory", gate: HR_VIEW },
         { key: "settings", label: "Settings", href: "/hr/settings", icon: "settings" },
       ],
     },
   ],
   reports: [],
-  analytics: [{ key: "people", label: "People analytics", href: "/hr/analytics", icon: "pulse", gate: HR_ON }],
+  analytics: [{ key: "people", label: "People analytics", href: "/hr/analytics", icon: "pulse", gate: { kind: "all", gates: [HR_ON, HR_VIEW] } }],
   tools: [DRIVE, CLAUDE],
   connections: [CONN.drive, CONN.claudeSeats],
   overview: DEPARTMENT_OVERVIEW,
@@ -707,7 +714,13 @@ const HR: Workspace = {
   ownedRoutes: ["/hr", "/appraisals/cycles"],
 };
 
-// Finance's tabs are ungated in the UI today (`FinanceTabs`); the server gates each read.
+// Finance's tabs were ungated in the UI (`FinanceTabs`); the server gates each read. DW-7b gates a tab only where an existing
+// capability is the page's own read: `finance.ar.view` (`finance_ar` read) and `finance.statement.view` (`finance_statement`
+// read). The pages that read `finance_ledger`, `finance_ap`, `finance_tax`, `finance_config`, `finance_period`,
+// `finance_bank`, `finance_ownership` have no capability, so they stay ungated until one is added.
+const FIN_AR: Gate = { kind: "cap", cap: "finance.ar.view" };
+const FIN_STATEMENT: Gate = { kind: "cap", cap: "finance.statement.view" };
+
 const FINANCE: Workspace = {
   key: "finance",
   kind: "functional",
@@ -727,7 +740,7 @@ const FINANCE: Workspace = {
     {
       key: "receivables", label: "Receivables", icon: "wallet",
       tabs: [
-        { key: "receivables", label: "Receivables", href: "/finance/receivables", icon: "wallet" },
+        { key: "receivables", label: "Receivables", href: "/finance/receivables", icon: "wallet", gate: FIN_AR },
         // nav.ts's Business › Invoices gate, unchanged.
         { key: "invoices", label: "Invoices", href: "/invoices", icon: "wallet",
           gate: { kind: "all", gates: [{ kind: "agencyRow", row: "invoices" }, { kind: "cap", cap: "company.manage" }] } },
@@ -749,7 +762,7 @@ const FINANCE: Workspace = {
       key: "close", label: "Close", icon: "check",
       tabs: [
         { key: "close", label: "Period close", href: "/finance/close", icon: "check" },
-        { key: "consolidation", label: "Consolidation", href: "/finance/consolidation", icon: "manufacturing" },
+        { key: "consolidation", label: "Consolidation", href: "/finance/consolidation", icon: "manufacturing", gate: FIN_STATEMENT },
         { key: "ownership", label: "Ownership", href: "/finance/ownership", icon: "sitemap" },
         { key: "cutover", label: "Cutover", href: "/finance/cutover", icon: "clock" },
         { key: "settings", label: "Settings", href: "/finance/settings", icon: "settings" },
@@ -758,7 +771,7 @@ const FINANCE: Workspace = {
     },
   ],
   // Finance's own Reports tab (the financial statements) joins the Reports row (§4).
-  reports: [{ key: "statements", label: "Financial statements", href: "/finance/reports", icon: "chart" }],
+  reports: [{ key: "statements", label: "Financial statements", href: "/finance/reports", icon: "chart", gate: FIN_STATEMENT }],
   // No money-analytics page exists yet (Receivables and Treasury are Work tabs); it is built with the
   // Finance workspace (DW-7b) and stays planned until then (DW-4c).
   analytics: [{ key: "money", label: "Revenue, AR and cash", href: "/finance/analytics", icon: "pulse", ticket: "DW-7b" }],
@@ -794,6 +807,10 @@ const FINANCE: Workspace = {
 };
 
 const IT_ON: Gate = { kind: "module", module: "it" };
+// Devices and Topology read `device`, open to members and viewers; the network pages have no route behind them yet (labelled
+// fixtures). Accounts (`it_account` read: company_admin, it_admin, it_manager) and Workflows (`isItOrPlatformOperator`: the IT
+// roles or a platform operator) are narrower, so `it.manage` stands in, a superset that hides nobody the server admits.
+const IT_MANAGE: Gate = { kind: "cap", cap: "it.manage" };
 
 const IT: Workspace = {
   key: "it",
@@ -814,8 +831,9 @@ const IT: Workspace = {
         { key: "occupancy", label: "Occupancy", href: "/it/network/presence", icon: "user" },
       ],
     },
-    { key: "accounts", label: "IT accounts", icon: "hr", gate: IT_ON, tabs: [{ key: "accounts", label: "IT accounts", href: "/it/accounts", icon: "hr" }] },
-    { key: "workflows", label: "Workflows", icon: "automation", gate: IT_ON, tabs: [{ key: "workflows", label: "Workflows", href: "/it/workflows", icon: "automation" }] },
+    { key: "accounts", label: "IT accounts", icon: "hr", gate: { kind: "all", gates: [IT_ON, IT_MANAGE] }, tabs: [{ key: "accounts", label: "IT accounts", href: "/it/accounts", icon: "hr" }] },
+    { key: "workflows", label: "Workflows", icon: "automation",
+      gate: { kind: "all", gates: [IT_ON, { kind: "any", gates: [IT_MANAGE, { kind: "platformOperator" }] }] }, tabs: [{ key: "workflows", label: "Workflows", href: "/it/workflows", icon: "automation" }] },
   ],
   reports: [],
   analytics: [],

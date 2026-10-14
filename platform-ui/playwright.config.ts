@@ -29,7 +29,7 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ".auth/user.json" },
       dependencies: ["setup"],
-      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, /workspace-shell\.spec\.ts/, /workspace-departments\.spec\.ts/, WEBDESK_STUB_SPECS],
+      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, /workspace-shell\.spec\.ts/, /workspace-departments\.spec\.ts/, /workspace-functional\.spec\.ts/, WEBDESK_STUB_SPECS],
     },
     {
       // CP-17 client portal. Its OWN project with NO stored session, because every test here signs in as
@@ -117,6 +117,13 @@ export default defineConfig({
       name: "workspace-departments",
       use: { ...devices["Desktop Chrome"] },
       testMatch: /workspace-departments\.spec\.ts/,
+    },
+    {
+      // DW-7a/7b/7c: HR, Finance and IT walked row by row, as the superadmin and as a plain member. Same reasoning as
+      // `workspace-departments` above: it signs in itself and plants the pilot cookie, so NO stored session.
+      name: "workspace-functional",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /workspace-functional\.spec\.ts/,
     },
     {
       // P3-12 CI build-gate smoke check. Self-contained (does its own login),

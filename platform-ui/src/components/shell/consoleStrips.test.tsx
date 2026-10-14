@@ -19,8 +19,9 @@ beforeEach(() => {
 
 const tab = (key: string, href: string): SectionTab => ({ key, label: key, href, icon: "home" });
 
-// hr/layout.tsx without the two payroll tabs (a plain member does not hold `hr.payroll.view`, in the
-// layout or in the registry), with the Org structure tab for the active company.
+// hr/layout.tsx without the two payroll tabs, with the Org structure tab for the active company. Since DW-7a the registry
+// gates some HR, IT and Finance tabs on the capability their page reads, so a strip is hidden only for a person the
+// registry offers them to (`adminShellModel`: a company admin); a plain member keeps the console strip (see below).
 const HR_TABS = [
   tab("overview", "/hr"), tab("people", "/hr/people"), tab("leave", "/hr/leave"), tab("attendance", "/hr/attendance"),
   tab("onboarding", "/hr/onboarding"), tab("cases", "/hr/cases"), tab("recruitment", "/hr/recruitment"), tab("reviews", "/hr/reviews"),
@@ -50,11 +51,21 @@ describe("SectionTabs inside the workspace shell", () => {
     ["IT", IT_TABS, "/it/devices"],
     ["IT network", NETWORK_TABS, "/it/network/threats"],
     ["Me", ME_TABS, "/me/leave"],
-  ])("hides the %s strip, because every tab is a row of the shell", (_name, tabs, path) => {
+  ])("hides the %s strip, because every tab is a row of the shell", (name, tabs, path) => {
     nav.pathname = path;
-    render(inShell(<SectionTabs tabs={tabs} />));
+    // HR and IT hold gated tabs now; Me's rows are ungated, so the plain employee stays its own case.
+    render(inShell(<SectionTabs tabs={tabs} />, name === "Me" ? undefined : adminShellModel));
     expect(section()).toBeNull();
   });
+
+  it.each([["HR", HR_TABS, "/hr/people"], ["IT", IT_TABS, "/it/devices"]])(
+    "keeps the %s strip for a plain member: the registry gates tabs away from them (DW-7a), so the shell does not offer every one",
+    (_name, tabs, path) => {
+      nav.pathname = path;
+      render(inShell(<SectionTabs tabs={tabs} />));
+      expect(section()).toBeInTheDocument();
+    },
+  );
 
   it("keeps the Admin strip: its pages are not registry tabs", () => {
     // The admin is offered the Admin area (Settings is one tab, `/admin`), but none of the strip's pages.
@@ -95,8 +106,14 @@ describe("SectionTabs in the classic shell", () => {
 describe("FinanceTabs", () => {
   it("hides inside the workspace shell: Finance's rows offer every tab", () => {
     nav.pathname = "/finance/journals";
-    render(inShell(<FinanceTabs />));
+    render(inShell(<FinanceTabs />, adminShellModel));
     expect(screen.queryByRole("navigation", { name: "Finance sections" })).toBeNull();
+  });
+
+  it("stays for a plain member, whom the registry offers no Reports, Receivables or Consolidation (DW-7b)", () => {
+    nav.pathname = "/finance/journals";
+    render(inShell(<FinanceTabs />));
+    expect(screen.getByRole("navigation", { name: "Finance sections" })).toBeInTheDocument();
   });
 
   it("always draws in the classic shell", () => {
