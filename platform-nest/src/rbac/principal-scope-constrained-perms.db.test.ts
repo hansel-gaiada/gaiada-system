@@ -154,6 +154,10 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
     // DW-4e-1 (2026-10-14) added `reports.dept_kpi_target.propose`: a department head proposes their own unit's KPI
     // targets (FRONTEND-BFF-CONTRACT §40.2). Unit-bounded like the rest; `approve` and `reject` (the approver's) and
     // `read` (held through the member grant at company scope) are not in this bundle.
+    //
+    // DW-4e-3 (2026-10-15) added `reports.dept_kpi_target.appraisal_comment`: a department head writes the commentary on
+    // their own unit's appraisal for an open cycle (FRONTEND-BFF-CONTRACT §41.3). Unit-bounded like the rest;
+    // `appraisal_assess` (the GM's) is not in this bundle.
     expect(keys).toEqual([
       "agency.campaign_part.update",
       "core.creative_asset.decide_review",
@@ -162,7 +166,8 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
       "core.work_request.decline", "core.work_request.deliver",
       "lms.course.create", "lms.course.publish", "lms.course.retire", "lms.course.update",
       "lms.enrollment.create", "lms.enrollment.grade", "lms.enrollment.read", "lms.enrollment.update",
-      "reports.appraisal.read", "reports.dept_kpi_target.propose", "reports.document.read_department",
+      "reports.appraisal.read", "reports.dept_kpi_target.appraisal_comment", "reports.dept_kpi_target.propose",
+      "reports.document.read_department",
     ]);
     // NOTE what is absent: `lms.course.read`. A department head browses the catalogue through their
     // MEMBER grant at COMPANY scope, not through org_unit_lead at unit scope — the read rule names
@@ -182,6 +187,7 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
     expect(keys).not.toContain("core.creative_asset.withdraw_review");
     expect(keys).not.toContain("reports.dept_kpi_target.approve");
     expect(keys).not.toContain("reports.dept_kpi_target.reject");
+    expect(keys).not.toContain("reports.dept_kpi_target.appraisal_assess");
   });
 
   it("ACCEPTANCE: a legitimate client@company grant is completely unaffected", async () => {

@@ -8,8 +8,14 @@
 //   3. approve and reject: company_admin only. `manager` (every head's company-wide role) never decides.
 //   4. Each attribute-dependent rule stands alone (HIER-2 authoring rule): org_unit_lead is never beside a scope role.
 //   5. The permission arm covers read, approve and reject and NOT propose (the mirror-reach invariant).
-//   6. `owner` (permission-native, zero rules) holds the same four keys as company_admin in its bundle, and reaches
-//      read/approve/reject through the mirrors but not propose.
+//   6. `owner` (permission-native, zero rules) holds the same keys as company_admin in its bundle, and reaches
+//      read/approve/reject (and appraisal_assess) through the mirrors but not propose or appraisal_comment.
+//   7. DW-4e-3 (FRONTEND-BFF-CONTRACT §41.3), two more actions on the SAME kind:
+//      appraisal_comment: company_admin, and an org_unit_lead of the unit or an enclosing one (its own rule,
+//        `unitAncestors`), never manager/member/viewer/the HR tier; NO permission mirror (the lead rule is
+//        attribute-dependent), exactly as propose.
+//      appraisal_assess: company_admin only (the approver tier), with a permission mirror (owner reaches it); a head
+//        never assesses.
 //
 // Two layers:
 //   A. STATIC (always runs): re-parses cerbos/policies/*.yaml and pins the structure.
@@ -24,8 +30,8 @@ import { check, type Resource } from "./cerbos";
 import type { Principal, RoleGrant, PermissionGrant } from "./principal";
 
 const POLICIES_DIR = join(__dirname, "../../cerbos/policies");
-const ACTIONS = ["read", "propose", "approve", "reject"] as const;
-const MIRRORED = ["read", "approve", "reject"] as const;
+const ACTIONS = ["read", "propose", "approve", "reject", "appraisal_comment", "appraisal_assess"] as const;
+const MIRRORED = ["read", "approve", "reject", "appraisal_assess"] as const;
 
 interface ParsedRule {
   actions: string[];
@@ -94,20 +100,36 @@ describe("DW-4e-1 static pin — resource_dept_kpi_target.yaml", () => {
     }
   });
 
-  it("org_unit_lead appears only on propose, and always alone", () => {
+  it("appraisal_comment has TWO rules (DW-4e-3): company_admin, and org_unit_lead on its own", () => {
+    const rs = reach("appraisal_comment");
+    expect(rs.length).toBe(2);
+    expect(rs.find((r) => r.derivedRoles.includes("company_admin"))!.derivedRoles).toEqual(["company_admin"]);
+    const lead = rs.find((r) => r.derivedRoles.includes("org_unit_lead"))!;
+    expect(lead.derivedRoles, "org_unit_lead is never mixed with a scope role (HIER-2 §1.4)").toEqual(["org_unit_lead"]);
+    expect(lead.actions).toEqual(["appraisal_comment"]);
+  });
+
+  it("appraisal_assess: company_admin only — never manager, member, viewer, the HR tier or org_unit_lead", () => {
+    expect(reach("appraisal_assess").flatMap((r) => r.derivedRoles)).toEqual(["company_admin"]);
+  });
+
+  it("org_unit_lead appears only on propose and appraisal_comment, and always alone", () => {
+    const leadActions: string[] = [];
     for (const r of roleArm) {
       if (r.derivedRoles.includes("org_unit_lead")) {
         expect(r.derivedRoles).toEqual(["org_unit_lead"]);
-        expect(r.actions).toEqual(["propose"]);
+        expect(r.actions.length).toBe(1);
+        leadActions.push(...r.actions);
       }
     }
+    expect(leadActions.sort()).toEqual(["appraisal_comment", "propose"]);
   });
 
   it("every role-arm rule is gated by inTenant && notLow", () => {
     for (const r of roleArm) expect(r.condition).toBe("variables.inTenant && variables.notLow");
   });
 
-  it("the permission arm mirrors read, approve and reject exactly once each, under inTenant && notLow && inRoot, and NOT propose", () => {
+  it("the permission arm mirrors read, approve, reject and appraisal_assess exactly once each, under inTenant && notLow && inRoot, and NOT propose or appraisal_comment", () => {
     for (const a of MIRRORED) {
       const mirrors = rules.filter((r) => r.derivedRoles.some((d) => d.startsWith("perm_")) && r.actions.includes(a));
       expect(mirrors.length, `perm mirror rules for ${a}`).toBe(1);
@@ -120,8 +142,10 @@ describe("DW-4e-1 static pin — resource_dept_kpi_target.yaml", () => {
       expect(expr).toContain('g.scopeType == "global"');
       expect(expr).toContain('g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId');
     }
-    expect(rules.filter((r) => r.derivedRoles.some((d) => d.startsWith("perm_")) && r.actions.includes("propose"))).toEqual([]);
-    expect(roleExprs.has("perm_dept_kpi_target_propose")).toBe(false);
+    for (const a of ["propose", "appraisal_comment"]) {
+      expect(rules.filter((r) => r.derivedRoles.some((d) => d.startsWith("perm_")) && r.actions.includes(a)), a).toEqual([]);
+      expect(roleExprs.has(`perm_dept_kpi_target_${a}`), a).toBe(false);
+    }
   });
 
   it("the `client` role is named by no rule", () => {
@@ -137,7 +161,7 @@ describe("DW-4e-1 static pin — resource_dept_kpi_target.yaml", () => {
     expect(src).toContain("unitAncestors: r.unitAncestors ?? []");
   });
 
-  it("the bundle JSON: owner == company_admin (all four), manager/member/viewer/hr_staff/hr_manager read, org_unit_lead propose, client none, no self-scoped pair", () => {
+  it("the bundle JSON: owner == company_admin (all six), manager/member/viewer/hr_staff/hr_manager read, org_unit_lead propose + appraisal_comment, client none, no self-scoped pair", () => {
     const doc = JSON.parse(readFileSync(join(__dirname, "role-permission-bundles.json"), "utf8")) as {
       roles: Record<string, string[]>;
       selfScoped: Record<string, string[]>;
@@ -150,7 +174,7 @@ describe("DW-4e-1 static pin — resource_dept_kpi_target.yaml", () => {
     for (const role of ["manager", "member", "viewer", "hr_staff", "hr_manager"]) {
       expect(keys(role), role).toEqual(["reports.dept_kpi_target.read"]);
     }
-    expect(keys("org_unit_lead")).toEqual(["reports.dept_kpi_target.propose"]);
+    expect(keys("org_unit_lead")).toEqual(["reports.dept_kpi_target.appraisal_comment", "reports.dept_kpi_target.propose"]);
     for (const role of ["client", "reports_staff", "reports_manager", "webdev_manager", "agency_approver"]) {
       expect(keys(role), role).toEqual([]);
     }
@@ -188,8 +212,8 @@ const target = (extra: Partial<Resource> = {}, tenantId = T1): Resource => ({
 const allow = async (p: Principal, r: Resource, a: string) => (await check(p, r, a)).allow;
 
 type Cell = Record<(typeof ACTIONS)[number], boolean>;
-const ALL: Cell = { read: true, propose: true, approve: true, reject: true };
-const NONE: Cell = { read: false, propose: false, approve: false, reject: false };
+const ALL: Cell = { read: true, propose: true, approve: true, reject: true, appraisal_comment: true, appraisal_assess: true };
+const NONE: Cell = { read: false, propose: false, approve: false, reject: false, appraisal_comment: false, appraisal_assess: false };
 const READ_ONLY: Cell = { ...NONE, read: true };
 
 describe.skipIf(!live)("DW-4e-1 Cerbos matrix — dept_kpi_target (role x action)", () => {
@@ -201,10 +225,10 @@ describe.skipIf(!live)("DW-4e-1 Cerbos matrix — dept_kpi_target (role x action
     ["viewer @T1: reads only", principal([co("viewer")]), READ_ONLY],
     ["hr_staff @T1: reads only", principal([co("hr_staff")]), READ_ONLY],
     ["hr_manager @T1: reads only", principal([co("hr_manager")]), READ_ONLY],
-    ["org_unit_lead of d-web alone: proposes, nothing else (no read either)", principal([lead("d-web")]), { ...NONE, propose: true }],
-    ["org_unit_lead of d-corp (an ANCESTOR unit): proposes", principal([lead("d-corp")]), { ...NONE, propose: true }],
+    ["org_unit_lead of d-web alone: proposes and comments, nothing else (no read either, never assesses)", principal([lead("d-web")]), { ...NONE, propose: true, appraisal_comment: true }],
+    ["org_unit_lead of d-corp (an ANCESTOR unit): proposes and comments", principal([lead("d-corp")]), { ...NONE, propose: true, appraisal_comment: true }],
     ["org_unit_lead of d-seo (a SIBLING unit): nothing", principal([lead("d-seo")]), NONE],
-    ["org_unit_lead of d-web + manager (the real head shape): reads and proposes, never decides", principal([lead("d-web"), co("manager")]), { ...READ_ONLY, propose: true }],
+    ["org_unit_lead of d-web + manager (the real head shape): reads, proposes and comments, never decides or assesses", principal([lead("d-web"), co("manager")]), { ...READ_ONLY, propose: true, appraisal_comment: true }],
     ["company-scoped org_unit_lead grant (mis-scoped): nothing", principal([co("org_unit_lead")]), NONE],
     ["client @T1", principal([co("client")]), NONE],
     ["reports_manager @T1 (a module tier)", principal([co("reports_manager")]), NONE],
@@ -222,10 +246,12 @@ describe.skipIf(!live)("DW-4e-1 Cerbos matrix — dept_kpi_target (role x action
   }
 
   it("the lead rule fails closed: an unfed unitAncestors ([]) denies, and the cascade is one-directional (down, never up)", async () => {
-    expect(await allow(principal([lead("d-web")]), target({ unitAncestors: undefined }), "propose")).toBe(false);
-    expect(await allow(principal([lead("d-web")]), target({ unitAncestors: ["d-corp"] }), "propose")).toBe(false);
-    // a unit that is not in the org tree has no closure rows: the head is refused before existence is revealed
-    expect(await allow(principal([lead("d-web")]), target({ unitAncestors: [] }), "propose")).toBe(false);
+    for (const action of ["propose", "appraisal_comment"]) {
+      expect(await allow(principal([lead("d-web")]), target({ unitAncestors: undefined }), action), action).toBe(false);
+      expect(await allow(principal([lead("d-web")]), target({ unitAncestors: ["d-corp"] }), action), action).toBe(false);
+      // a unit that is not in the org tree has no closure rows: the head is refused before existence is revealed
+      expect(await allow(principal([lead("d-web")]), target({ unitAncestors: [] }), action), action).toBe(false);
+    }
   });
 
   it("an unlisted action is a deny (only platform_admin holds '*')", async () => {
@@ -250,16 +276,18 @@ describe.skipIf(!live)("DW-4e-1 Cerbos matrix — dept_kpi_target, the permissio
     });
   }
 
-  it("the bare propose permission allows NOTHING (there is deliberately no mirror)", async () => {
+  it("the bare propose and appraisal_comment permissions allow NOTHING (there is deliberately no mirror)", async () => {
     expect(await allow(permP("reports.dept_kpi_target.propose"), target(), "propose")).toBe(false);
+    expect(await allow(permP("reports.dept_kpi_target.appraisal_comment"), target(), "appraisal_comment")).toBe(false);
   });
 
-  it("a permission-native OWNER (the bundle's keys, zero rules) reads, approves and rejects, but its propose key has no arm", async () => {
+  it("a permission-native OWNER (the bundle's keys, zero rules) reads, approves, rejects and assesses, but its propose and appraisal_comment keys have no arm", async () => {
     const bundles = JSON.parse(readFileSync(join(__dirname, "role-permission-bundles.json"), "utf8")) as { roles: Record<string, string[]> };
     const ownerP = principal([co("owner")], {
       perms: bundles.roles.owner.map((key) => ({ key, scopeType: "company" as const, scopeId: T1 })),
     });
     for (const a of MIRRORED) expect(await allow(ownerP, target(), a), `owner · ${a}`).toBe(true);
     expect(await allow(ownerP, target(), "propose"), "owner · propose").toBe(false);
+    expect(await allow(ownerP, target(), "appraisal_comment"), "owner · appraisal_comment").toBe(false);
   });
 });

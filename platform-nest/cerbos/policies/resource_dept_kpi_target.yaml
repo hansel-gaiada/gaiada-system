@@ -15,8 +15,15 @@
 #              `manager` company-wide, so `manager` cannot mean "the GM" and holds no decision here). Whether the
 #              Office of the GM's lead seat should also approve is an OPEN owner decision, recorded in §40.2.
 #   reject   — refuse a proposal. The same approver.
+#   appraisal_comment — DW-4e-3 (FRONTEND-BFF-CONTRACT §41.3): the head's commentary on the department's appraisal for a
+#              cycle. company_admin; and an `org_unit_lead` of the unit or an enclosing one (its own rule, `unitAncestors`).
+#   appraisal_assess  — DW-4e-3: the GM's assessment of the department's appraisal. The approver tier: company_admin
+#              only (the tier that approves targets; owner mirrors it through the permission arm).
 # A proposer never approves their own proposal: that is an identity comparison on the ROW (`proposed_by`), checked in
 # the service (409 `cannot_approve_own_proposal`), not here.
+# Reading a department's appraisal (GET /dept-appraisals) needs no new action: it uses `read` (tenant-wide here) and the
+# handler narrows it to the unit's heads and the company-wide tiers (staff of the unit read the KPI page, not the
+# appraisal). The two writes stop when the cycle is closed (409 `cycle_closed`, the service's, not Cerbos's).
 # Restart `gaiada-test-cerbos` after editing this file; the bind-mount does not hot-reload.
 #
 # ── EVERY ATTRIBUTE-DEPENDENT RULE STANDS ALONE (the HIER-2 authoring rule) ──────────────────────
@@ -26,13 +33,15 @@
 # rows, so its ancestors are [] and no lead grant can match: a head is refused (403) before anything says whether the
 # unit exists.
 #
-# ── THE PERMISSION ARM COVERS `read`, `approve` AND `reject`; NOT `propose` ─────────────────────
-# `propose` is reachable by `org_unit_lead` through an attribute-dependent rule, and a flat `perms` mirror cannot tell
+# ── THE PERMISSION ARM COVERS `read`, `approve`, `reject` AND `appraisal_assess`; NOT `propose` OR `appraisal_comment` ──
+# `propose` (and, DW-4e-3, `appraisal_comment`, by the same shape) is reachable by `org_unit_lead` through an
+# attribute-dependent rule, and a flat `perms` mirror cannot tell
 # "holds the key through company_admin" from "holds it through a lead grant over ONE unit": a mirror would let a head
-# propose for EVERY unit (iam-04-reg1-mirror-reach-invariant). Same call as work_request's `decline` and
+# propose (or comment) for EVERY unit (iam-04-reg1-mirror-reach-invariant). Same call as work_request's `decline` and
 # agency_campaign_part's `update`. `read`, `approve` and `reject` are reached only through scope-only rules, so their
-# mirrors grant no more than the role arm. Consequence: the permission-native `owner` role (zero role-arm rules) reads,
-# approves and rejects through its bundle, but proposes only if it also holds company_admin or leads the unit.
+# mirrors grant no more than the role arm (`appraisal_assess` is reached only through company_admin, so its mirror is
+# safe too). Consequence: the permission-native `owner` role (zero role-arm rules) reads, approves, rejects and assesses
+# through its bundle, but proposes and comments only if it also holds company_admin or leads the unit.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
@@ -62,6 +71,15 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # DW-4e-3: the department appraisal. company_admin comments and assesses; the head's own comment rule is below.
+    - actions: ["appraisal_comment"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["appraisal_assess"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
     # Department head of the unit or an enclosing one — OWN rule, never mixed (HIER-2 §1.4). Containment is the derived
     # role's: the grant's scopeId must be in resource.attr.unitAncestors (the target unit and every ancestor of it).
@@ -69,8 +87,14 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["org_unit_lead"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # DW-4e-3: the head comments on their department's appraisal (the unit or an enclosing one). Its OWN rule, never
+    # mixed with `propose` or a scope role: each attribute-dependent rule stands alone.
+    - actions: ["appraisal_comment"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
-    # =========== permission-matching arm: read / approve / reject ONLY (see the header) ===========================
+    # =========== permission-matching arm: read / approve / reject / appraisal_assess ONLY (see the header) ==========
     # Generic global-or-company mirror per action. The platform_admin wildcard is deliberately NOT mirrored
     # (IAM-04c: the tier bypass never enters the permission catalog).
     - actions: ["read"]
@@ -84,4 +108,8 @@ resourcePolicy:
     - actions: ["reject"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_dept_kpi_target_reject"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["appraisal_assess"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_dept_kpi_target_appraisal_assess"]
       condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

@@ -146,7 +146,8 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // DW-5c (2026-10-13): +5 pairs / +1 kind: `work_request` (read/create/cancel/deliver/decline, NEW core kind). 451 -> 456, kinds 105 -> 106.
     // DW-6h (2026-10-13): +4 pairs / +1 kind: `creative_asset` (read/request_review/decide_review/withdraw_review, NEW core kind: the review rounds of an Asset Library asset). 456 -> 460, kinds 106 -> 107.
     // DW-4e-1 (2026-10-14): +4 pairs / +1 kind: `dept_kpi_target` (read/propose/approve/reject, NEW kind, module reports). On top of DW-6h: 460 -> 464, kinds 107 -> 108.
-    expect(catalog.length).toBe(464);
+    // DW-4e-3 (2026-10-15): +2 pairs, no new kind: `reports.dept_kpi_target.{appraisal_comment,appraisal_assess}`. 464 -> 466, kinds stay 108.
+    expect(catalog.length).toBe(466);
     expect(catalogKindSet.size).toBe(108);
   });
 

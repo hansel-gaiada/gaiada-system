@@ -15,14 +15,14 @@
     "note": "class='relationship' permissions are NEVER present in any bundle (Ruling 3); enforced here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against the live `role_permissions_reject_relationship` DB trigger (0093).",
     "counts": {
       "roles": 28,
-      "totalPairs": 2038,
+      "totalPairs": 2045,
       "perRole": {
-        "platform_admin": 449,
-        "company_admin": 412,
+        "platform_admin": 451,
+        "company_admin": 414,
         "manager": 206,
         "member": 104,
         "viewer": 36,
-        "org_unit_lead": 21,
+        "org_unit_lead": 22,
         "client": 9,
         "it_admin": 8,
         "it_manager": 8,
@@ -44,7 +44,7 @@
         "finance_manager": 43,
         "lms_staff": 2,
         "lms_manager": 11,
-        "owner": 412
+        "owner": 414
       },
       "selfScopedPairs": 33
     }
@@ -374,6 +374,8 @@
       "reports.checkin.pending_reminders",
       "reports.checkin.read",
       "reports.checkin.submit",
+      "reports.dept_kpi_target.appraisal_assess",
+      "reports.dept_kpi_target.appraisal_comment",
       "reports.dept_kpi_target.approve",
       "reports.dept_kpi_target.propose",
       "reports.dept_kpi_target.read",
@@ -790,6 +792,8 @@
       "reports.checkin.missed_by_unit",
       "reports.checkin.pending_reminders",
       "reports.checkin.read",
+      "reports.dept_kpi_target.appraisal_assess",
+      "reports.dept_kpi_target.appraisal_comment",
       "reports.dept_kpi_target.approve",
       "reports.dept_kpi_target.propose",
       "reports.dept_kpi_target.read",
@@ -1287,6 +1291,7 @@
       "lms.enrollment.read",
       "lms.enrollment.update",
       "reports.appraisal.read",
+      "reports.dept_kpi_target.appraisal_comment",
       "reports.dept_kpi_target.propose",
       "reports.document.read_department"
     ],
@@ -2019,6 +2024,8 @@
       "reports.checkin.missed_by_unit",
       "reports.checkin.pending_reminders",
       "reports.checkin.read",
+      "reports.dept_kpi_target.appraisal_assess",
+      "reports.dept_kpi_target.appraisal_comment",
       "reports.dept_kpi_target.approve",
       "reports.dept_kpi_target.propose",
       "reports.dept_kpi_target.read",

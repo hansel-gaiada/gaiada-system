@@ -724,6 +724,17 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "reports.dept_kpi_target.reject" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # DW-4e-3: appraisal_assess is reached only through the company_admin rule, so its mirror grants no more than the
+    # role arm. NO appraisal_comment mirror, on purpose: it is also reached by the org_unit_lead rule (one unit's
+    # subtree), which a flat `perms` mirror cannot express (iam-04-reg1-mirror-reach-invariant). Same call as propose.
+    - name: perm_dept_kpi_target_appraisal_assess
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "reports.dept_kpi_target.appraisal_assess" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_agency_creative_asset_* — IAM-04-ROLLOUT-B12
     - name: perm_agency_creative_asset_read
       parentRoles: ["user"]
