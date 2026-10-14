@@ -46,6 +46,11 @@
 .needs-me-queue__title-link:hover { text-decoration: underline; }
 .needs-me-queue__meta { font: 400 12px var(--font-body); color: var(--ink-subtle); margin-top: 3px; }
 .needs-me-queue__actions { display: flex; gap: 6px; flex-shrink: 0; }
+/* DW-4j-2: a KPI alert's one action, Acknowledge, and its optional note (collapsed until asked for). */
+.needs-me-queue__ack { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 280px; }
+.needs-me-queue__ack-buttons { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.needs-me-queue__ack-note { width: 100%; min-width: 200px; resize: vertical; padding: 6px 8px; font: 400 13px/1.4 var(--font-body); color: var(--text-primary);
+  background: transparent; border: 1px solid var(--line); border-radius: 4px; }
 
 .filter-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 /* GOLD-GLASS UI/UX pass: the design draws the filter row as PILLS and

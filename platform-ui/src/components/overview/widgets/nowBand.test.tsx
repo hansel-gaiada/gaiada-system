@@ -16,6 +16,7 @@ vi.mock("@/lib/queue", async (importOriginal) => ({ ...(await importOriginal<typ
 vi.mock("@/lib/checkins-data", () => ({ getCheckinCardData: vi.fn() }));
 vi.mock("@/lib/checkinActions", () => ({ submitCheckin: vi.fn() }));
 vi.mock("@/app/(app)/actions", () => ({ decideQueueItem: vi.fn() }));
+vi.mock("@/lib/deptKpiAlertActions", () => ({ acknowledgeKpiAlert: vi.fn() }));
 
 const person = meFixture([member()]);
 // Someone in two companies: Needs you keeps both companies' items (DW-Q2), Today stays with the Overview's own.

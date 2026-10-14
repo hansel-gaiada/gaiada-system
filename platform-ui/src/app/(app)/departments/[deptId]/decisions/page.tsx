@@ -57,6 +57,7 @@ const TYPE_LABEL: Record<QueueItemType, string> = {
   task: "Task",
   mention: "Mention",
   conversation: "Conversation",
+  alert: "KPI off track",
 };
 
 function ageDays(createdAt: string, todayIso: string): number | null {
@@ -105,7 +106,8 @@ export default async function GmDecisionsPage({ params }: { params: Params }) {
 
   // Decisions first, then everything else — the tier weights already rank approvals/gates above
   // tasks/mentions, so `rankByUrgency`'s order is kept as-is rather than re-sorted here.
-  const decisions = items.filter((i) => i.type === "approval" || i.type === "gate");
+  // DW-4j-2: a KPI alert for a department the person heads waits on THEM like a decision does (it ranks in the same tier), so it is listed here.
+  const decisions = items.filter((i) => i.type === "approval" || i.type === "gate" || i.type === "alert");
   const rest = items.filter((i) => i.type === "task" || i.type === "mention" || i.type === "conversation");
 
   const withAge = decisions.map((i) => ({ item: i, days: ageDays(i.createdAt, today) }));
@@ -128,7 +130,7 @@ export default async function GmDecisionsPage({ params }: { params: Params }) {
         ) : (
           <>
             <div style={KPI_ROW}>
-              <KpiTile label="Awaiting a decision" value={String(decisions.length)} foot="approvals and pipeline gates" />
+              <KpiTile label="Awaiting a decision" value={String(decisions.length)} foot="approvals, pipeline gates and KPI alerts" />
               <KpiTile
                 label={`Waiting ${STALE_DAYS}d+`}
                 value={String(stale)}
@@ -151,7 +153,7 @@ export default async function GmDecisionsPage({ params }: { params: Params }) {
                 days === null ? "—" : days === 0 ? "today" : `${days}d`,
                 item.href ? (
                   <Link key="go" href={item.href} style={LINK}>
-                    {item.decidable ? "Decide" : "Open"}
+                    {item.decidable ? (item.type === "alert" ? "Acknowledge" : "Decide") : "Open"}
                   </Link>
                 ) : (
                   // No href means no deep link exists for this row. Rendering unlinked text is the

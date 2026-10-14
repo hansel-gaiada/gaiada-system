@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { getMyWorkQueue, projectQueueForCompany, getPmHomeData, getPmCounters, isoDaysAgo, homeWindowLabel, humanizeToolName } from "./queue";
+import { getMyWorkQueue, fromKpiAlert, projectQueueForCompany, getPmHomeData, getPmCounters, isoDaysAgo, homeWindowLabel, humanizeToolName } from "./queue";
 import type { Me } from "./platform";
 import type { QueueItem } from "./queueUrgency";
 import type { Envelope } from "./envelope";
@@ -385,6 +385,8 @@ describe("getMyWorkQueue: client conversations waiting for my reply (DW-5g)", ()
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       const u = String(url);
       if (u.includes("/co-a/conversation")) { seen.push(u); return new Response(JSON.stringify({ threads: [thread] }), { status: 200 }); }
+      // The KPI alerts source (DW-4j-2) answers its own shape: an empty list is `{alerts: []}`, and an array would be read as a failed read.
+      if (u.includes("/co-a/dept-kpis/alerts")) return new Response(JSON.stringify({ alerts: [] }), { status: 200 });
       return new Response(JSON.stringify([]), { status: 200 });
     }));
     const queue = await getMyWorkQueue(m, "u1", companies);
@@ -404,6 +406,7 @@ describe("getMyWorkQueue: client conversations waiting for my reply (DW-5g)", ()
   it("a failed conversation read is named in partialSources, never a silent empty", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (String(url).includes("/co-a/conversation")) return new Response(JSON.stringify({ error: "boom" }), { status: 500 });
+      if (String(url).includes("/co-a/dept-kpis/alerts")) return new Response(JSON.stringify({ alerts: [] }), { status: 200 });
       return new Response(JSON.stringify([]), { status: 200 });
     }));
     const queue = await getMyWorkQueue(m, "u1", companies);
@@ -411,5 +414,86 @@ describe("getMyWorkQueue: client conversations waiting for my reply (DW-5g)", ()
     const leg = queue.companies[0];
     expect(leg.included).toBe(true);
     expect(leg.partialSources).toContain("conversations");
+  });
+});
+
+describe("getMyWorkQueue: department KPI alerts waiting for their head (DW-4j-2)", () => {
+  const companies = [{ id: "co-a", name: "Agency" }];
+  const m = me(companies, [{ role: "manager", scopeType: "company", scopeId: "co-a" }]);
+  const alert = {
+    id: "al-1", unit: { id: "dept-1", name: "Web Dev" }, kpiKey: "projects-on-time", kpiLabel: "Projects on time", kpiUnit: "percent",
+    periodStart: "2026-10-01", openedAt: "2026-10-03T06:30:00.000Z", value: 0.72, target: 0.9,
+    acknowledgedBy: null, acknowledgedByName: null, acknowledgedAt: null, ackNote: null, resolvedAt: null, resolvedCondition: null,
+  };
+  const stub = (alertsRes: () => Response) =>
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("/co-a/dept-kpis/alerts")) return alertsRes();
+      return new Response(JSON.stringify([]), { status: 200 });
+    }));
+
+  it("maps an alert to a decidable item: namespaced id, a title naming the KPI and the department, the value against the target, the unit's KPI page", () => {
+    expect(fromKpiAlert(alert as never, companies[0])).toEqual({
+      id: "alert:co-a:al-1", type: "alert", originId: "al-1", title: "Projects on time is off track · Web Dev", meta: "72% against 90%",
+      companyId: "co-a", company: "Agency", href: "/appraisals/department?unit=dept-1", createdAt: "2026-10-03T06:30:00.000Z",
+      decidable: true, urgencyScore: 0,
+    });
+    // a unit id is encoded into the href, and a KPI the workspace dropped has no reading (no scale to word it in)
+    const odd = fromKpiAlert({ ...alert, unit: { id: "d 1/x", name: "Odd" }, kpiUnit: null } as never, companies[0]);
+    expect(odd.href).toBe("/appraisals/department?unit=d%201%2Fx");
+    expect(odd.meta).toBeUndefined();
+  });
+
+  it("adds the caller's alerts to the queue, ranked in the approval tier above an overdue task", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/co-a/dept-kpis/alerts")) return new Response(JSON.stringify({ alerts: [alert] }), { status: 200 });
+      if (u.includes("/co-a/tasks?assignee=me")) {
+        return new Response(JSON.stringify([{ id: "t-1", title: "Ship SEO audit", status: "todo", priority: "high", due_date: "2020-01-01", project_name: "SEO" }]), { status: 200 });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    }));
+    const queue = await getMyWorkQueue(m, "u1", companies);
+    expect(queue.items.map((i) => i.id)).toEqual(["alert:co-a:al-1", "task:co-a:t-1"]);
+    expect(queue.items[0].urgencyScore).toBeGreaterThanOrEqual(30_000);
+    expect(queue.companies[0].partialSources).toBeUndefined();
+  });
+
+  it("asks the unscoped alerts path (the caller's own), once per company", async () => {
+    stub(() => new Response(JSON.stringify({ alerts: [] }), { status: 200 }));
+    await getMyWorkQueue(m, "u1", companies);
+    const urls = vi.mocked(fetch).mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/dept-kpis/alerts"));
+    expect(urls).toEqual(["http://p.test/api/co-a/dept-kpis/alerts"]);
+  });
+
+  it("a failed alerts read is named in partialSources, never a silent empty", async () => {
+    stub(() => new Response(JSON.stringify({ error: "boom" }), { status: 500 }));
+    const queue = await getMyWorkQueue(m, "u1", companies);
+    expect(queue.items.some((i) => i.type === "alert")).toBe(false);
+    expect(queue.companies[0].included).toBe(true);
+    expect(queue.companies[0].partialSources).toContain("KPI alerts");
+  });
+
+  it("an answer of the wrong shape is a failed read too", async () => {
+    stub(() => new Response(JSON.stringify({ alerts: [{ id: "x" }] }), { status: 200 }));
+    const queue = await getMyWorkQueue(m, "u1", companies);
+    expect(queue.companies[0].partialSources).toContain("KPI alerts");
+  });
+
+  it("a refusal or a company without the reports module is not a lost source: there are no alerts for this person there", async () => {
+    stub(() => new Response(JSON.stringify({ error: "not authorized" }), { status: 403 }));
+    expect((await getMyWorkQueue(m, "u1", companies)).companies[0].partialSources).toBeUndefined();
+    stub(() => new Response(JSON.stringify({ error: "Not Found" }), { status: 404 }));
+    expect((await getMyWorkQueue(m, "u1", companies)).companies[0].partialSources).toBeUndefined();
+  });
+
+  it("does not collide when the same alert id appears under two companies", async () => {
+    const two = [{ id: "co-a", name: "Agency" }, { id: "co-b", name: "Resort" }];
+    const mm = me(two, [{ role: "manager", scopeType: "company", scopeId: "co-a" }]);
+    vi.stubGlobal("fetch", vi.fn(async (url: string) =>
+      String(url).includes("/dept-kpis/alerts")
+        ? new Response(JSON.stringify({ alerts: [alert] }), { status: 200 })
+        : new Response(JSON.stringify([]), { status: 200 })));
+    const ids = (await getMyWorkQueue(mm, "u1", two)).items.map((i) => i.id).sort();
+    expect(ids).toEqual(["alert:co-a:al-1", "alert:co-b:al-1"]);
   });
 });

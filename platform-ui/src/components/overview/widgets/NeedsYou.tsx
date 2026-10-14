@@ -2,6 +2,7 @@ import type { OverviewWidgetProps } from "./index";
 import { readNowQueue, unreadCompanyNames } from "@/lib/overviewQueue";
 import { selectNeedsYou } from "@/lib/overviewNow";
 import { decideQueueItem } from "@/app/(app)/actions";
+import { acknowledgeKpiAlert } from "@/lib/deptKpiAlertActions";
 import { NeedsYouBlock } from "./NeedsYouBlock";
 import { TeamNeedsYou } from "./TeamWidgets";
 
@@ -19,5 +20,5 @@ export async function NeedsYou(props: OverviewWidgetProps) {
   const { me } = props;
   const queue = await readNowQueue(me);
   const { all } = selectNeedsYou(queue.items);
-  return <NeedsYouBlock items={all} unread={unreadCompanyNames(queue.companies)} multiCompany={queue.companies.length > 1} decide={decideQueueItem} />;
+  return <NeedsYouBlock items={all} unread={unreadCompanyNames(queue.companies)} multiCompany={queue.companies.length > 1} decide={decideQueueItem} acknowledge={acknowledgeKpiAlert} />;
 }

@@ -101,3 +101,25 @@ describe("NeedsYouBlock", () => {
     expect(screen.getByText("Some sources could not be read: Hotel, Spa")).toBeInTheDocument();
   });
 });
+
+// DW-4j-2 — the Overview's Needs you carries the KPI alert and its one action, through the same hook the Home uses.
+describe("NeedsYouBlock: a KPI off-track alert", () => {
+  const alertRow = () => item("alert:co-a:al-1", "alert", { originId: "al-1", title: "Projects on time is off track · Web Dev", meta: "72% against 90%" });
+
+  it("shows the alert, counts it, and offers Acknowledge, not Approve or Deny", () => {
+    render(<NeedsYouBlock items={[alertRow()]} decide={decide()} acknowledge={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "Needs you · 1" })).toBeInTheDocument();
+    expect(screen.getByText("KPI off track")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Acknowledge" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Deny" })).not.toBeInTheDocument();
+  });
+
+  it("acknowledges through the action and the block says nothing is waiting once the row is gone", async () => {
+    const acknowledge = vi.fn(async () => ({ ok: true }));
+    render(<NeedsYouBlock items={[alertRow()]} decide={decide()} acknowledge={acknowledge} />);
+    fireEvent.click(screen.getByRole("button", { name: "Acknowledge" }));
+    await waitFor(() => expect(acknowledge).toHaveBeenCalledWith("co-a", "al-1", ""));
+    await waitFor(() => expect(screen.getByText("Nothing needs you right now")).toBeInTheDocument());
+  });
+});

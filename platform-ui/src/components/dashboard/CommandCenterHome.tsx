@@ -1,5 +1,5 @@
 import type { QueueItem } from "@/lib/queueUrgency";
-import { NeedsMeQueue } from "./NeedsMeQueue";
+import { NeedsMeQueue, type Acknowledge } from "./NeedsMeQueue";
 import { FilterChips, type QueueFilter, type FilterChipDef } from "./FilterChips";
 import { ThroughputSparkline } from "./ThroughputSparkline";
 import { TodayAgenda } from "./TodayAgenda";
@@ -45,11 +45,13 @@ export function applyQueueFilter(items: QueueItem[], filter: QueueFilter | undef
 // hero; KPI tiles are reborn as clickable filter chips over that same queue
 // (not static vanity numbers); a demoted sparkline keeps glance value
 // without leading.
-export function CommandCenterHome({ items, filter, buildFilterHref, decide, throughput, emptyText, agendaItems }: {
+export function CommandCenterHome({ items, filter, buildFilterHref, decide, acknowledge, throughput, emptyText, agendaItems }: {
   items: QueueItem[];
   filter: QueueFilter | undefined;
   buildFilterHref: (next: QueueFilter | undefined) => string;
   decide: Decide;
+  /** DW-4j-2: acknowledges a KPI alert row. */
+  acknowledge?: Acknowledge;
   throughput: number[];
   emptyText?: string;
   /** The caller's own open tasks. Passed in rather than filtered out of `items`: the queue's task
@@ -77,7 +79,7 @@ export function CommandCenterHome({ items, filter, buildFilterHref, decide, thro
             panel. Class added, nothing removed. */}
         <section className="lux-card">
           <span className="command-center__heading">Needs you{items.length > 0 ? ` (${items.length})` : ""}</span>
-          <NeedsMeQueue items={filtered} decide={decide} emptyText={emptyText} />
+          <NeedsMeQueue items={filtered} decide={decide} acknowledge={acknowledge} emptyText={emptyText} />
         </section>
         <section className="lux-card">
           <span className="command-center__heading">Your work</span>

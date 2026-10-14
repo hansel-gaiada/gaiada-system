@@ -97,3 +97,21 @@ describe("DW-5g: a client conversation waiting for my reply", () => {
     expect(urgencyBand(item({ id: "c", type: "conversation" }), NOW)).toBe("soon");
   });
 });
+
+describe("DW-4j-2: an off-track KPI alert waiting for its head", () => {
+  it("ranks in the approval tier: with approvals and gates, above overdue tasks and conversations, older first", () => {
+    const approval = item({ id: "a", type: "approval", createdAt: iso(1) });
+    const alertOld = item({ id: "al-old", type: "alert", createdAt: iso(9) });
+    const alertNew = item({ id: "al-new", type: "alert", createdAt: iso(2) });
+    const overdue = item({ id: "t1", type: "task", dueDate: due(-30), createdAt: iso(40) });
+    const conv = item({ id: "c", type: "conversation", createdAt: iso(20) });
+    const ranked = rankByUrgency([conv, overdue, alertNew, approval, alertOld], NOW);
+    expect(ranked.map((r) => r.id)).toEqual(["al-old", "al-new", "a", "t1", "c"]);
+    expect(ranked[0].urgencyScore).toBeGreaterThanOrEqual(30_000);
+    expect(ranked[2].urgencyScore).toBeGreaterThan(ranked[3].urgencyScore);
+  });
+  it("scores exactly as a gate of the same age does, and reads as a NOW item", () => {
+    expect(computeUrgency(item({ id: "x", type: "alert", createdAt: iso(5) }), NOW)).toBe(computeUrgency(item({ id: "y", type: "gate", createdAt: iso(5) }), NOW));
+    expect(urgencyBand(item({ id: "x", type: "alert" }), NOW)).toBe("now");
+  });
+});

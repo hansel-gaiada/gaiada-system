@@ -24,6 +24,7 @@ import "server-only";
 // `requests-within-sla` is `no_reader`. Here it carries a value and no target so the `no_target` state is reachable on the
 // department the demo opens on. The page itself is honest either way.
 import { compareByConditionThenName, isMonthStart, nextMonthStart, type DeptKpi, type KpiCondition, type KpiDirection, type KpiReason, type KpiUnit, type DeptKpiTargetRow } from "./deptKpiFormat";
+import { ALERT_NOTE_MAX, type KpiAlert } from "./deptKpiAlertFormat";
 
 interface DemoResult { status: number; json: unknown }
 const ok = (json: unknown): DemoResult => ({ status: 200, json });
@@ -116,10 +117,46 @@ function seedRows(): DeptKpiTargetRow[] {
 }
 rows = seedRows();
 
+// ── THE ALERTS (DW-4j-2, BFF §43.5 and §43.6a) ──────────────────────────────────────────────────────────────────────────────────
+// `GET dept-kpis/alerts` (the caller's open, unacknowledged alerts of the units they lead EXACTLY: nobody else's), `GET dept-kpis/alerts?unitNodeId=`
+// (one unit's whole history under the unit read's gate, newest first, at most 100) and `POST dept-kpis/alerts/:id/acknowledge {note?}`.
+//
+// What the fixture holds, and why. An OPEN alert is only ever on a KPI that is off track in the fixture above: Creatives' "Asset requests delivered on
+// time" (72% against 90%), so the alert the demo shows is the state the fixture really is in. Nobody in the demo heads Creatives (`LED` has no one
+// for dept-2, and adding a lead would change who may propose there), so no demo user's Needs you shows it: it is read on the Creatives KPI page by the
+// company-wide users (`demo-hansel`, `demo-owner`), who may acknowledge it (§43.5: a head of the unit or the company-wide tier). Web Dev (the head
+// `u-webhead`'s unit) has HISTORY only, because it has no off-track KPI: one alert resolved as back on track after its head acknowledged it with a
+// note, and one resolved as `unavailable` (the KPI has no reader) that nobody acknowledged. `u-webhead` therefore reads history on the page and has an
+// honestly empty Needs you. Acknowledging stays in memory, like the targets, and resets with `resetDeptKpiDemo()`.
+interface DemoAlert {
+  id: string; unitId: string; kpiKey: string; periodStart: string; openedAt: string; value: number | null; target: number | null;
+  acknowledgedBy: string | null; acknowledgedAt: string | null; ackNote: string | null; resolvedAt: string | null; resolvedCondition: KpiCondition | null;
+}
+/** Display names of the people who can acknowledge in the demo (`users.name`). */
+const ALERT_NAMES: Record<string, string> = { "demo-hansel": "Hansel", "demo-owner": "Owner", "dept-manager": "SEO head", "u-webhead": "Ketut Arta" };
+
+function seedAlerts(): DemoAlert[] {
+  const none = { acknowledgedBy: null, acknowledgedAt: null, ackNote: null, resolvedAt: null, resolvedCondition: null };
+  return [
+    { id: "demo-dka-1", unitId: "dept-2", kpiKey: "asset-requests-on-time", periodStart: "2026-10-01", openedAt: "2026-10-03T06:30:00.000Z", value: 0.72, target: 0.9, ...none },
+    {
+      id: "demo-dka-2", unitId: "dept-1", kpiKey: "projects-on-time", periodStart: "2026-08-01", openedAt: "2026-08-12T06:30:00.000Z", value: 0.78, target: 0.85,
+      acknowledgedBy: "u-webhead", acknowledgedAt: "2026-08-13T09:10:00.000Z", ackNote: "Two launches slipped on client content. Rebooked.",
+      resolvedAt: "2026-09-02T06:30:00.000Z", resolvedCondition: "on_track",
+    },
+    {
+      id: "demo-dka-3", unitId: "dept-1", kpiKey: "client-site-uptime", periodStart: "2026-09-01", openedAt: "2026-09-15T06:30:00.000Z", value: 0.97, target: 0.995,
+      acknowledgedBy: null, acknowledgedAt: null, ackNote: null, resolvedAt: "2026-10-01T06:30:00.000Z", resolvedCondition: "unavailable",
+    },
+  ];
+}
+let alertRows: DemoAlert[] = seedAlerts();
+
 /** Tests only: back to the seeded state. */
 export function resetDeptKpiDemo(): void {
   seq = 1;
   rows = seedRows();
+  alertRows = seedAlerts();
 }
 
 function inForce(unit: string, kpi: string, asOfStart: string): DeptKpiTargetRow | null {
@@ -276,6 +313,37 @@ function propose(userId: string, body?: string): DemoResult {
   return { status: 201, json: { id: row.id, status: "proposed" } };
 }
 
+const newestOpened = (a: DemoAlert, b: DemoAlert) => (a.openedAt < b.openedAt ? 1 : a.openedAt > b.openedAt ? -1 : 0);
+
+function alertView(a: DemoAlert): KpiAlert {
+  const unit = UNITS.find((u) => u.id === a.unitId);
+  const def = unit?.kpis.find((k) => k.key === a.kpiKey);
+  return {
+    id: a.id, unit: { id: a.unitId, name: unit?.name ?? a.unitId }, kpiKey: a.kpiKey, kpiLabel: def?.label ?? a.kpiKey, kpiUnit: def?.unit ?? null,
+    periodStart: a.periodStart, openedAt: a.openedAt, value: a.value, target: a.target,
+    acknowledgedBy: a.acknowledgedBy, acknowledgedByName: a.acknowledgedBy ? ALERT_NAMES[a.acknowledgedBy] ?? null : null, acknowledgedAt: a.acknowledgedAt,
+    ackNote: a.ackNote, resolvedAt: a.resolvedAt, resolvedCondition: a.resolvedCondition,
+  };
+}
+
+/** The server's check order for an acknowledge (§43.6a): the alert (404), the narrowing (403), the state (409 `resolved`, then `already_acknowledged`), then the note (400). */
+function acknowledge(id: string, userId: string, body?: string): DemoResult {
+  const a = alertRows.find((r) => r.id === id);
+  if (!a) return err(404, "alert_not_found", "id");
+  // A head of THAT unit or the company-wide tier; a unit's staff or another unit's head is out of line.
+  if (!COMPANY_WIDE.has(userId) && !(LED[userId] ?? []).includes(a.unitId)) return err(403, "outside your reporting line");
+  if (a.resolvedAt) return err(409, "resolved");
+  if (a.acknowledgedAt) return err(409, "already_acknowledged");
+  const noteRaw = parse(body).note;
+  if (noteRaw !== undefined && noteRaw !== null && (typeof noteRaw !== "string" || noteRaw.length > ALERT_NOTE_MAX)) {
+    return err(400, `note must be a string of at most ${ALERT_NOTE_MAX} characters`, "note");
+  }
+  a.acknowledgedBy = userId;
+  a.acknowledgedAt = new Date().toISOString();
+  a.ackNote = typeof noteRaw === "string" && noteRaw.trim() ? noteRaw.trim() : null;
+  return ok(alertView(a));
+}
+
 /** Returns null when the path is not a department-KPI route, so the caller falls through. */
 export function deptKpisDemo(
   method: string, p: string, qs: URLSearchParams, body?: string, userId = "demo-hansel",
@@ -310,6 +378,21 @@ export function deptKpisDemo(
     if (!unit) return err(404, "unit_not_found", "unitNodeId");
     return ok(targetsView(unit));
   }
+
+  if (verb === "GET" && rest === "alerts") {
+    const unitId = qs.get("unitNodeId");
+    if (unitId === null) {
+      // Needs you: the open, unacknowledged alerts of the units the caller leads exactly. Anyone else (company-wide tiers included) has none, and that is true.
+      const led = LED[userId] ?? [];
+      return ok({ alerts: alertRows.filter((a) => !a.resolvedAt && !a.acknowledgedAt && led.includes(a.unitId)).sort(newestOpened).map(alertView) });
+    }
+    if (unitId.trim() === "") return err(400, "unitNodeId must not be empty", "unitNodeId");
+    if (whoReads(userId, unitId) === "none") return err(403, "outside your reporting line");
+    if (!UNITS.some((u) => u.id === unitId)) return err(404, "unit_not_found", "unitNodeId");
+    return ok({ alerts: alertRows.filter((a) => a.unitId === unitId).sort(newestOpened).slice(0, 100).map(alertView) });
+  }
+  const ack = rest.match(/^alerts\/([^/]+)\/acknowledge$/);
+  if (verb === "POST" && ack) return acknowledge(decodeURIComponent(ack[1]), userId, body);
 
   if (verb === "POST" && rest === "targets") return propose(userId, body);
   const d = rest.match(/^targets\/([^/]+)\/(approve|reject)$/);

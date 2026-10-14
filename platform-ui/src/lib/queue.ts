@@ -26,6 +26,7 @@ import { listThreads } from "./conversation-data";
 import { threadTitle } from "./conversation";
 import type { StaffThread } from "./conversation";
 import { listNotifications, type NotificationItem } from "./entities";
+import { getMyKpiAlerts, alertTitle, alertReading, type KpiAlert } from "./deptKpiAlerts";
 import { mergeLegs, type Envelope } from "./envelope";
 import { rankByUrgency, type QueueItem, type QueueItemType } from "./queueUrgency";
 import { PM_STATUS_LADDER } from "./pmVocabulary";
@@ -242,6 +243,27 @@ function fromConversation(t: StaffThread, company: { id: string; name: string })
   };
 }
 
+// DW-4j-2: a department KPI that is off track and waits for ME, its head, to acknowledge it (BFF §43.5). The server returns only the
+// caller's own heads-alerts (the units they head exactly), so every row is theirs to act on: `decidable` is true and the one action is
+// Acknowledge, never Approve/Deny. `createdAt` is when the alert opened, so it ages in the approval tier like a gate does. The id carries
+// the company (see the note above): an alert id is a uuid, but the key must stay unique however a fixture mints them. The href is the
+// unit's KPI page, where the alert is shown beside its KPI and the unit's history.
+export function fromKpiAlert(a: KpiAlert, company: { id: string; name: string }): QueueItem {
+  return {
+    id: `alert:${company.id}:${a.id}`,
+    type: "alert",
+    originId: a.id,
+    title: alertTitle(a),
+    meta: alertReading(a) ?? undefined,
+    companyId: company.id,
+    company: company.name,
+    href: `/appraisals/department?unit=${encodeURIComponent(a.unit.id)}`,
+    createdAt: a.openedAt,
+    decidable: true,
+    urgencyScore: 0,
+  };
+}
+
 export interface MyWorkQueueOptions {
   /** Cap on automation-approval + pipeline-gate reads (both tenant-wide
    *  lists); default matches the rail's own convention of pending-only. */
@@ -250,7 +272,7 @@ export interface MyWorkQueueOptions {
 
 /** THE shared queue spine (R-1). Fans out per company — same shape as
  *  `getPendingApprovals` — merging approvals + automation approvals +
- *  pipeline gates + tasks + mentions into one ranked `Envelope<QueueItem>`.
+ *  pipeline gates + tasks + mentions + KPI alerts into one ranked `Envelope<QueueItem>`.
  *  Every accessible company gets its own try/catch net so one bad leg is
  *  excluded (reason "error") without dropping the rest (UX-2 §1.5/§4.3). */
 export async function getMyWorkQueue(
@@ -266,7 +288,7 @@ export async function getMyWorkQueue(
         // AGN-3: every source names itself, so a leg that survives a dead source reports WHICH one it
         // lost instead of quietly returning a shorter queue.
         const lost: string[] = [];
-        const [approvals, automation, gates, tasks, pmTasks, notifications, conversations] = await Promise.all([
+        const [approvals, automation, gates, tasks, pmTasks, notifications, conversations, kpiAlerts] = await Promise.all([
           settle("approvals", getPendingApprovals(userId, [c]), lost),
           settle("automation approvals", listAutomationApprovals(userId, c.id, { status: "pending" }), lost),
           // A refused gate read is a REFUSAL, not an empty gate list, so it is reported as a lost
@@ -283,6 +305,18 @@ export async function getMyWorkQueue(
           settle("PM tasks", listAllPmTasks(userId, c.id, { assignee: "me" }), lost),
           settle("mentions", listNotifications(userId, c.id, true), lost),
           settle("conversations", listThreads(userId, c.id, { awaitingReply: true, mine: true, status: "open" }), lost),
+          // A failed read is a LOST source, never an empty list. Two answers are not failures: `forbidden` (the caller may not read
+          // KPI alerts in this company, so none are theirs) and `not_found` (the company has no `reports` module, so there is no such
+          // source). Naming either as lost would put a permanent "some sources could not be read" note on every such company.
+          settle(
+            "KPI alerts",
+            getMyKpiAlerts(userId, c.id).then((r) => {
+              if (r.kind === "ok") return r.data;
+              if (r.kind === "forbidden" || r.kind === "not_found") return [];
+              throw new Error(r.reason);
+            }),
+            lost,
+          ),
         ]);
         const rows: QueueItem[] = [
           ...approvals.map((a) => fromApproval(a, decidable)),
@@ -292,6 +326,7 @@ export async function getMyWorkQueue(
           ...pmTasks.filter((t) => t.status !== "done").map((t) => fromPmTask(t, c)),
           ...notifications.filter(isMentionEligible).map((n) => fromMention(n, c)),
           ...conversations.map((t) => fromConversation(t, c)),
+          ...kpiAlerts.map((a) => fromKpiAlert(a, c)),
         ];
         return { company: c, ok: true, rows, partialSources: lost };
       } catch {

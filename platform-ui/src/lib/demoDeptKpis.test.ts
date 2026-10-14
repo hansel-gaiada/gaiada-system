@@ -217,3 +217,127 @@ describe("POST propose / approve / reject", () => {
     expect(get("/nothing", {}).status).toBe(404);
   });
 });
+
+// DW-4j-2 — the KPI alerts in the demo (BFF §43.5, §43.6a). The fixture must model the server's reads, gates and 409s, and its open alert must be on a KPI
+// that is really off track in the fixture above.
+describe("GET dept-kpis/alerts (the caller's own: Needs you)", () => {
+  type A = { id: string; kpiKey: string; unit: { id: string }; resolvedAt: string | null; acknowledgedAt: string | null };
+  const mine = (user: string) => (get("/alerts", {}, user).json as { alerts: A[] }).alerts;
+
+  it("is empty for the head of Web Dev, who has no open alert: that is true, and honest", () => {
+    expect(get("/alerts", {}, "u-webhead").status).toBe(200);
+    expect(mine("u-webhead")).toEqual([]);
+  });
+  it("is empty for the company-wide tiers and for everyone who heads no unit (the list is personal, §43.5)", () => {
+    for (const u of ["demo-hansel", "demo-owner", "dept-manager", "u-dev", "gede-ic"]) expect(mine(u)).toEqual([]);
+  });
+  it("has the one open alert on Creatives, whom no demo user heads, so no demo user's Needs you shows it", () => {
+    const open = (get("/alerts", { unitNodeId: "dept-2" }).json as { alerts: A[] }).alerts.filter((a) => !a.resolvedAt && !a.acknowledgedAt);
+    expect(open).toHaveLength(1);
+    expect(mine("dept-manager")).toEqual([]);
+  });
+});
+
+describe("GET dept-kpis/alerts?unitNodeId= (one unit's history)", () => {
+  type A = { id: string; kpiKey: string; kpiLabel: string; kpiUnit: string | null; unit: { id: string; name: string }; openedAt: string; value: number | null; target: number | null;
+    acknowledgedBy: string | null; acknowledgedByName: string | null; acknowledgedAt: string | null; ackNote: string | null; resolvedAt: string | null; resolvedCondition: string | null };
+  const hist = (unit: string, user = "demo-hansel") => (get("/alerts", { unitNodeId: unit }, user).json as { alerts: A[] }).alerts;
+
+  it("gives Creatives an OPEN alert on a KPI that is off track in the fixture, with the reading the tile shows", () => {
+    const open = hist("dept-2").filter((a) => !a.resolvedAt);
+    expect(open).toHaveLength(1);
+    const view = get("", { unitNodeId: "dept-2", ...Q }).json as { kpis: Kpi[] };
+    const k = view.kpis.find((x) => x.key === open[0].kpiKey)!;
+    expect(k.condition).toBe("off_track");
+    expect(open[0]).toMatchObject({ unit: { id: "dept-2", name: "Creatives" }, kpiLabel: "Asset requests delivered on time", kpiUnit: "percent", value: k.value, target: k.target, acknowledgedAt: null });
+    expect(open[0].openedAt.slice(0, 10)).toBe("2026-10-03");
+  });
+  it("gives Web Dev history for its head: one alert resolved as back on track after an acknowledgement with a note, one resolved as unavailable that nobody acknowledged", () => {
+    const rows = hist("dept-1", "u-webhead");
+    expect(rows.map((a) => a.kpiKey)).toEqual(["client-site-uptime", "projects-on-time"]); // newest opened first
+    expect(rows.every((a) => a.resolvedAt)).toBe(true); // Web Dev has no off-track KPI, so nothing of it is open
+    expect(rows[1]).toMatchObject({ acknowledgedBy: "u-webhead", acknowledgedByName: "Ketut Arta", resolvedCondition: "on_track" });
+    expect(rows[1].ackNote).toBeTruthy();
+    expect(rows[0]).toMatchObject({ acknowledgedBy: null, acknowledgedByName: null, acknowledgedAt: null, ackNote: null, resolvedCondition: "unavailable" });
+  });
+  it("returns an ok with no rows for a unit with no alerts yet", () => {
+    expect(get("/alerts", { unitNodeId: "dept-3" }).json).toEqual({ alerts: [] });
+  });
+  it("applies the unit read's gate: 400 for an empty id, 403 before any word on whether the unit exists, then 404", () => {
+    expect(get("/alerts", { unitNodeId: "" }).status).toBe(400);
+    expect(get("/alerts", { unitNodeId: "dept-99" }, "dept-manager").status).toBe(403);
+    expect(get("/alerts", { unitNodeId: "dept-99" }).status).toBe(404);
+    expect(get("/alerts", { unitNodeId: "dept-99" }).json).toEqual({ error: "unit_not_found", field: "unitNodeId" });
+    expect(get("/alerts", { unitNodeId: "dept-1" }, "dept-manager").status).toBe(403);
+    expect(get("/alerts", { unitNodeId: "dept-1" }, "u-dev").status).toBe(200); // staff of the unit read it, as the unit read allows
+    expect(get("/alerts", { unitNodeId: "dept-2" }, "u-dev").status).toBe(403);
+  });
+  it("is reached through getDemoResponse", () => {
+    const r = getDemoResponse("GET", `${base}/alerts?unitNodeId=dept-2`, "demo-hansel");
+    expect(r.status).toBe(200);
+    expect((r.json as { alerts: unknown[] }).alerts).toHaveLength(1);
+  });
+});
+
+describe("POST dept-kpis/alerts/:id/acknowledge", () => {
+  const ackPath = (id: string) => `/alerts/${id}/acknowledge`;
+  const creatives = () => ((get("/alerts", { unitNodeId: "dept-2" }).json as { alerts: Array<{ id: string }> }).alerts[0].id);
+
+  it("records who, when and the trimmed note, returns the alert row, and the alert stays open", () => {
+    const id = creatives();
+    const r = post(ackPath(id), { note: "  Seen, vendor chased.  " }, "demo-hansel");
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ id, acknowledgedBy: "demo-hansel", acknowledgedByName: "Hansel", ackNote: "Seen, vendor chased.", resolvedAt: null });
+    expect((r.json as { acknowledgedAt: string }).acknowledgedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    const after = (get("/alerts", { unitNodeId: "dept-2" }).json as { alerts: Array<{ id: string; acknowledgedAt: string | null; resolvedAt: string | null }> }).alerts[0];
+    expect(after).toMatchObject({ id, resolvedAt: null });
+    expect(after.acknowledgedAt).not.toBeNull();
+  });
+  it("stores no note for an empty one and accepts a missing note", () => {
+    expect((post(ackPath(creatives()), { note: "   " }, "demo-owner").json as { ackNote: string | null }).ackNote).toBeNull();
+    resetDeptKpiDemo();
+    expect(post(ackPath(creatives()), {}, "demo-owner").status).toBe(200);
+  });
+  it("409 already_acknowledged the second time", () => {
+    const id = creatives();
+    expect(post(ackPath(id), {}).status).toBe(200);
+    const again = post(ackPath(id), {});
+    expect(again.status).toBe(409);
+    expect(again.json).toEqual({ error: "already_acknowledged" });
+  });
+  it("409 resolved for a resolved alert, acknowledged or not (checked before already_acknowledged)", () => {
+    const rows = (get("/alerts", { unitNodeId: "dept-1" }).json as { alerts: Array<{ id: string; kpiKey: string }> }).alerts;
+    const acknowledgedAndResolved = rows.find((a) => a.kpiKey === "projects-on-time")!;
+    const unacknowledgedResolved = rows.find((a) => a.kpiKey === "client-site-uptime")!;
+    expect(post(ackPath(acknowledgedAndResolved.id), {}, "u-webhead")).toEqual({ status: 409, json: { error: "resolved" } });
+    expect(post(ackPath(unacknowledgedResolved.id), {}, "u-webhead")).toEqual({ status: 409, json: { error: "resolved" } });
+  });
+  it("404 alert_not_found for an unknown id", () => {
+    expect(post(ackPath("nope"), {})).toEqual({ status: 404, json: { error: "alert_not_found", field: "id" } });
+  });
+  it("403 for anyone who does not head the alert's unit and is not company-wide, before any 409", () => {
+    const id = creatives();
+    for (const u of ["u-webhead", "dept-manager", "u-dev", "gede-ic"]) {
+      const r = post(ackPath(id), {}, u);
+      expect(r.status).toBe(403);
+      expect(r.json).toEqual({ error: "outside your reporting line" });
+    }
+    // and still open: a refusal changed nothing
+    expect((get("/alerts", { unitNodeId: "dept-2" }).json as { alerts: Array<{ acknowledgedAt: string | null }> }).alerts[0].acknowledgedAt).toBeNull();
+  });
+  it("400 on a note that is too long or not a string, only after the 403 and the 409", () => {
+    const id = creatives();
+    expect(post(ackPath(id), { note: "x".repeat(1001) }).status).toBe(400);
+    expect(post(ackPath(id), { note: "x".repeat(1001) }).json).toEqual({ error: "note must be a string of at most 1000 characters", field: "note" });
+    expect(post(ackPath(id), { note: 5 }).status).toBe(400);
+    expect(post(ackPath(id), { note: "x".repeat(1001) }, "u-dev").status).toBe(403);
+    expect(post(ackPath(id), { note: "x".repeat(1000) }).status).toBe(200); // exactly 1000 is allowed
+    expect(post(ackPath(id), { note: "x".repeat(1001) }).status).toBe(409);
+  });
+  it("is reset by resetDeptKpiDemo", () => {
+    const id = creatives();
+    post(ackPath(id), {});
+    resetDeptKpiDemo();
+    expect(post(ackPath(id), {}).status).toBe(200);
+  });
+});
