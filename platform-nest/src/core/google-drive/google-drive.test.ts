@@ -193,8 +193,8 @@ describe("the shared token client with a surface's OWN OAuth client (DW-6i)", ()
     expect(calls).toEqual([]);
   });
   it("with NO client given it still reads search's settings, exactly as before (a regression guard for search's flow)", async () => {
-    const savedG = { clientId: config.google.clientId, clientSecret: config.google.clientSecret };
-    config.google.clientId = "search-client-id"; config.google.clientSecret = "search-client-secret";
+    const savedG = { clientId: config.google.clientId, clientSecret: config.google.clientSecret, redirectUri: config.google.redirectUri };
+    config.google.clientId = "search-client-id"; config.google.clientSecret = "search-client-secret"; config.google.redirectUri = "https://search.example.test/cb";
     try {
       const { f, calls } = stub();
       await exchangeAuthorizationCode({ code: "c", codeVerifier: "v", redirectUri: "r" }, f);
