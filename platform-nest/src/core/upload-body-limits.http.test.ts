@@ -23,11 +23,12 @@ import { newId, withTenants } from "../db";
 import { resetModules } from "../modules/registry";
 import { resetCoreRollupProviders } from "../rollups/engine";
 import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setup";
-import { createCompany, createUser, addMembership, createRole, grantRole, createClient } from "../testing/fixtures";
+import { createCompany, createUser, addMembership, createRole, grantRole, createClient, createProject } from "../testing/fixtures";
 import { setStorageForTest, localStorage as diskStorage, type StorageBackend } from "./storage";
 import { MAX_ATTACHMENT_TOTAL_BYTES, MAX_ATTACHMENTS } from "./conversation-core";
 import { MAX_PROOF_BYTES } from "./portal-commerce.controller";
 import { UPLOAD_ROUTES, inlineUploadBodyLimit } from "./upload-body-limits";
+import { MAX_BYTES as MAX_STAFF_FILE_BYTES } from "./files.controller";
 import { createIssuedInvoice, ensureBillingSetup } from "../seed/billing-setup";
 
 const svc = { authorization: "Bearer svc-token" };
@@ -68,6 +69,8 @@ describe.skipIf(!TEST_URL)("PV4-03b: per-route body limits for the inline-upload
   let clientA: string;
   let contact: string; // client-wide contact of A (may open the general thread, may pay)
   let staffUser: string;
+  let manager: string; // may attach files to a project (DW-8h staff upload)
+  let projectId: string;
   let invoice: string;
   let portalThread: string;
   let staffThread: string;
@@ -104,6 +107,11 @@ describe.skipIf(!TEST_URL)("PV4-03b: per-route body limits for the inline-upload
     staffUser = await createUser("upload-staff@agency.test");
     await addMembership(co, staffUser);
     await grantRole(staffUser, memberRole, "company", co);
+
+    manager = await createUser("upload-manager@agency.test");
+    await addMembership(co, manager);
+    await grantRole(manager, await createRole("manager"), "company", co);
+    projectId = await createProject(co, "PV4-03b Project", manager);
 
     // PV5-04: a client can claim a payment only on an ISSUED invoice, so the fixture issues one for real.
     await ensureBillingSetup(co);
@@ -220,6 +228,39 @@ describe.skipIf(!TEST_URL)("PV4-03b: per-route body limits for the inline-upload
     });
   });
 
+  // ── 3b. DW-8h: the staff file upload (POST /api/:tenantId/files, FRONTEND-BFF-CONTRACT §45.2) ──────────────────
+  describe("staff file upload", () => {
+    const upload = (bytes: number, name: string) =>
+      app.inject({
+        method: "POST", url: `/api/${co}/files`, headers: asUser(manager),
+        payload: { targetType: "project", targetId: projectId, filename: name, contentType: "application/octet-stream", content: b64Of(bytes) },
+      });
+
+    it("a ~5 MB file is stored (201), not cut off by Fastify's 1 MiB default", async () => {
+      const size = 5 * 1024 * 1024;
+      const r = await upload(size, "five-mb.bin");
+      expect(isFastify413(r), r.body.slice(0, 200)).toBe(false);
+      expect(r.statusCode, r.body.slice(0, 300)).toBe(201);
+      const out = r.json() as { id: string; byteSize: number };
+      expect(out.byteSize).toBe(size);
+      const row = (await rows(`SELECT byte_size, storage_key FROM files WHERE id = $1`, [out.id]))[0];
+      expect(Number(row.byte_size)).toBe(size);
+      expect(memStore.get(row.storage_key)?.byteLength).toBe(size);
+    });
+
+    it("a 26 MB file reaches the handler and is refused 400 'file too large', not Fastify's 413", async () => {
+      const r = await upload(26 * 1024 * 1024, "twenty-six-mb.bin");
+      expect(isFastify413(r)).toBe(false);
+      expect(r.statusCode).toBe(400);
+      expect(r.json().error).toBe("file too large");
+    });
+
+    it("the table entry takes its cap from the handler's own constant", () => {
+      const e = UPLOAD_ROUTES.find((x) => x.url === "/api/:tenantId/files");
+      expect(e).toMatchObject({ method: "POST", capBytes: MAX_STAFF_FILE_BYTES, label: "staff file upload" });
+    });
+  });
+
   // ── 4. the global default is untouched ─────────────────────────────────────────────────────────────
   describe("every other route keeps Fastify's 1 MiB default", () => {
     it("a ~2 MiB JSON body to a non-upload route is refused with Fastify's 413", async () => {
@@ -247,7 +288,7 @@ describe.skipIf(!TEST_URL)("PV4-03b: per-route body limits for the inline-upload
     it("the real table matches every registered route exactly once (this very app booted through the guard)", () => {
       // buildApp() in beforeAll already ran assertAllMatched(); reaching here is the proof. Pin the count so
       // adding a route to the table without a controller (or the reverse) is a deliberate, reviewed change.
-      expect(UPLOAD_ROUTES).toHaveLength(5);
+      expect(UPLOAD_ROUTES).toHaveLength(6);
     });
   });
 });

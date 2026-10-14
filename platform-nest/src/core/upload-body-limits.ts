@@ -31,6 +31,7 @@
 import type { FastifyInstance } from "fastify";
 import { MAX_ATTACHMENT_TOTAL_BYTES } from "./conversation-core";
 import { MAX_PROOF_BYTES } from "./portal-commerce.controller";
+import { MAX_BYTES as MAX_STAFF_FILE_BYTES } from "./files.controller";
 
 /** Room for everything in the JSON request that is NOT file content: the message body (<= 10,000 chars,
  *  at most 3 UTF-8 bytes each = 30 KB), the subject (200 chars), up to 5 attachments' filename (<= 200
@@ -73,6 +74,9 @@ export const UPLOAD_ROUTES: readonly UploadRoute[] = [
   { method: "POST", url: "/api/:tenantId/portal/conversation/:threadId/messages", capBytes: MAX_ATTACHMENT_TOTAL_BYTES, label: "portal conversation: reply" },
   { method: "POST", url: "/api/:tenantId/conversation", capBytes: MAX_ATTACHMENT_TOTAL_BYTES, label: "staff conversation: open thread" },
   { method: "POST", url: "/api/:tenantId/conversation/:threadId/messages", capBytes: MAX_ATTACHMENT_TOTAL_BYTES, label: "staff conversation: reply" },
+  // DW-8h (§45.2): the staff file upload takes `{content}` as base64 up to its own 25 MB cap; without this entry Fastify's 1 MiB
+  // default 413'd any upload over ~750 KB before the handler ran.
+  { method: "POST", url: "/api/:tenantId/files", capBytes: MAX_STAFF_FILE_BYTES, label: "staff file upload" },
 ];
 
 /** One boot-log line per table entry: `POST /api/... (label): cap N B -> bodyLimit M B`. The match itself is
