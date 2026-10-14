@@ -7710,6 +7710,93 @@ Files: `dept-appraisals.ts` (the reads, the writes and the pure helpers), `dept-
 - **UI.** `/appraisals/department?unit=&cycle=`: the picker reads `GET /dept-appraisals/cycles` through an honest reader (ok / forbidden / error). A refusal is said as a refusal and a failed read as a failure, never shown as an empty picker; "no cycles yet" is said only when the read was allowed and empty. The forms mirror the capabilities `reports.dept_kpi_target.appraisal_comment` (`canInUnit` over the unit's path, or company-wide `can`) and `.appraisal_assess` (`can`), and appear only while the cycle is not closed. The demo (`demoDeptAppraisals.ts`) serves the cycles list with the same gate, `demo-cycle-h2` (open) and `demo-cycle-h1` (closed, with a written commentary and assessment).
 - **Not changed.** The capability inventory (`docs/modules/CAPABILITY-INVENTORY.md`) is unchanged: no MCP tool is registered, and the new HTTP suite names no registered route family in its URLs, so the generator's driver count stays as committed.
 
+## 42. Google Drive: connect, pick and attach (DW-6i, 2026-10-14) — `platform-nest/src/core/google-drive/` (new) — **STATUS: CONTRACT (nothing built; live proof waits for the Drive OAuth client, DW-11 item 6)**
+
+Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.2 (DW-6i) and §14.1 (launch and return). A person connects their own Google Drive, picks a file with Google's own Picker, and the file is attached to a PM task as a link. The file stays in Drive; the ERP keeps a reference to it. The owner chose (2026-10-14) to build this before the OAuth client exists, against stubs, so that going live needs only the client.
+
+### 42.1 What exists
+
+- `google_drive` is already a provider in the credential vault (`integration_connections`) and in the shared Google OAuth state machine (`core/google-oauth/registry.ts`, `GOOGLE_PROVIDERS`).
+- No surface registers it. Search's flow keeps Drive out on purpose (`isSearchGoogleProvider`), and the only OAuth callback is search's own.
+- The Tools & connections page has a manual "Google Drive" row today. It records an email address with no credential behind it.
+- Files attach to a PM task through the generic files table (`files`, target `task`, the PM task's id). A reference attach (`url`, no bytes) already exists in `core/files.controller.ts`.
+
+### 42.2 Scope and consent
+
+- **One scope:** `https://www.googleapis.com/auth/drive.file`, plus `openid` and `email` to show which account is connected.
+  - `drive.file` reaches only the files a person picks with the Picker or that the app creates. It cannot list or read the rest of their Drive.
+  - That keeps the app clear of Drive's restricted scopes and their security assessment. Check Google's current scope classification when building, and record the source in §42.8.
+- **The credential is the person's own:** `owner_kind = 'user'`, `owner_id` = the person. Nobody else's Drive is ever reached.
+- **The OAuth client is its own:** `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET` and `GOOGLE_DRIVE_REDIRECT_URI`. It is separate from search's client.
+- **The Picker** also needs a browser API key and the Cloud project number (`GOOGLE_PICKER_API_KEY`, `GOOGLE_PICKER_APP_ID`).
+- **When any of these is unset,** the feature reports `drive_not_configured`, and the UI says so. No default value is ever invented.
+
+### 42.3 Connect and disconnect
+
+- **The surface.** Register a `google_drive` surface in the shared registry: `module: null` (core), the scopes above, `ownerKind: "user"`, and an `authz` that lets a person create their own connection (the same rule the "My connections" rows use today).
+- **`GET /api/:t/integrations/google-drive/oauth/start`** answers `{ authUrl }`.
+  - The state row goes through the shared state machine, and the state is signed as search's is.
+  - Consent asks for `access_type=offline`, so a refresh token comes back.
+- **`GET /api/google-drive/oauth/callback`.** The tenant and the person come from the verified state, never from the query.
+  - It exchanges the code through the shared token client (`token-endpoint-client.ts`), then seals the tokens in the person's `google_drive` row.
+  - **One row per person:** if the manual row already exists, the tokens are added to it. The account email comes from the ID token, verified through the shared client.
+  - It then redirects to the page the flow started from, with a coarse outcome flag, as search's callback does.
+  - Every failure lands as a typed state failure: `drive_state_invalid`, `drive_consent_denied` or `drive_exchange_failed`. Never a 500 page.
+- **`DELETE /api/:t/integrations/google-drive`** revokes the token at Google (best effort; the result is recorded) and clears the sealed tokens. Attachments already made stay: they are links.
+- **The connection's status** is read as part of the Picker read (§42.4), or through the existing connections list. The token is never returned there.
+
+### 42.4 Pick
+
+`GET /api/:t/integrations/google-drive/picker` answers `{ configured, connected, accountEmail, accessToken, expiresAt, apiKey, appId }`, for the calling person only.
+- **The access token** is refreshed first when it expires within 5 minutes; a failed refresh marks the connection `needs_reconnect`.
+  - The Picker runs in the browser and needs a live token, so a short-lived `drive.file` token is the one secret this route returns.
+  - The refresh token never leaves the server.
+- **`Cache-Control: no-store`.** The route never logs the token.
+- **When not connected or not configured,** it answers `connected: false` or `configured: false` with no token.
+
+### 42.5 Attach
+
+`POST /api/:t/integrations/google-drive/attach` with `{ targetType: "task", targetId, fileId }`:
+- **Authorise first,** exactly as `POST /files` does: `file` · `create`, then `read` on the target. Validate after.
+- **Read the file's metadata from Drive** with the person's own token: `GET https://www.googleapis.com/drive/v3/files/{fileId}?fields=id,name,mimeType,webViewLink`. This proves the person can reach the file, and takes the real name and link from Drive rather than from the browser.
+  - A file the token cannot reach answers 404 `drive_file_not_found`.
+  - A refused or expired token answers 409 `drive_needs_reconnect`.
+  - A Drive outage answers 502 `drive_unavailable`.
+- **Write a reference file row** through the same path `POST /files` uses: `filename` = the Drive name, `content_type` = the MIME type, `url` = `webViewLink`, with no bytes. It answers 201 with the file row.
+- **The same Drive file on the same task twice** answers 409 `drive_already_attached`.
+- **Targets in v1:** PM tasks only (`task`). Other file targets can follow; the route checks `targetType` against a list of one.
+
+### 42.6 UI
+
+- **Tools & connections** (pilot page): the Google Drive block shows one of:
+  - "Connect Google Drive", which starts §42.3;
+  - the connected account's email with Disconnect;
+  - "Reconnect", when `needs_reconnect`;
+  - "Google Drive isn't set up for this ERP yet", when `configured: false`.
+  - The manual email row is replaced by this block in the pilot. The classic page is unchanged.
+- **The PM task's Attachments** gain "Attach from Google Drive" when the person is connected and the feature is configured.
+  - It loads Google's Picker script (`https://apis.google.com/js/api.js`) only on click, opens the Picker with `drive.file` access, and posts each picked file to §42.5.
+  - The new attachment shows with a Drive mark and opens in a new tab.
+  - The global CSP today is only `frame-ancestors 'self'`, so the Picker needs no CSP change. If a stricter CSP arrives later, it must allow `apis.google.com`, `docs.google.com` and `drive.google.com`.
+- **Every refusal is said in plain words.** None crashes the page.
+
+### 42.7 Tests (the Linux CI gate: Postgres and Cerbos), with Google stubbed at `fetch`
+
+- **Unit:** the state round trip; the not-configured answers; refresh within 5 minutes; the token never in a response other than the Picker's, never in an error, never in an activity row.
+- **HTTP:**
+  - start, then callback with a stubbed token exchange; the manual row upgraded in place; one row per person;
+  - disconnect clears the tokens and calls revoke;
+  - the Picker read: `configured: false`, `connected: false`, a live token, a refresh, `needs_reconnect`;
+  - attach:
+    - authorisation before validation: a caller refused `read` on the task gets 403 even with a bad body;
+    - another tenant's task answers 404;
+    - a Drive file the token cannot reach answers 404 `drive_file_not_found`;
+    - attaching the same file twice answers 409;
+    - the written row carries Drive's own name, MIME type and link.
+- **Fixtures** come from Google's documented response shapes: the OAuth 2.0 token response, Drive v3 `files.get`. Cite the doc URLs in the client's header.
+- **UI vitest:** the connection block's four states; the attach button shown only when connected and configured; the Picker loader wired lazily, tested with a fake `gapi` and `google.picker`; the refusal sentences.
+- **Live proof** waits for DW-11 item 6. It means connecting one real account, picking one file, attaching it to a task and opening it from the task.
+
 ## 43. The head is made aware: condition changes, off-track alerts and the weekly digest (DW-4j, 2026-10-15) — `platform-nest/src/modules/reports/dept-kpi-watch*.ts` — **STATUS: BUILT, PROTOTYPED (4j-1: dept-kpi-watch.test.ts, dept-kpi-watch.controller.db.test.ts, seed/automation.test.ts and mcp-hub automation-policy.test.ts on the Linux CI gate; 4j-2 UI and 4j-3 digest and drivers still PLANNED)**
 
 **Why.** Plan §5.5, "How the HOD is made aware", items 2 and 3, and the 4j row of §5.6. The §40 engine computes a condition on read and remembers nothing, so nothing can say "it changed". This section adds:
