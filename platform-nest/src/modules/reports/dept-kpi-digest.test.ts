@@ -257,8 +257,9 @@ describe("behind the miss (§43.8): which KPIs have drivers", () => {
     expect(noDriversReason(defOf("generic", "check-in-compliance"))).toBeNull();
   });
 
-  it("a module KPI has no reader; the company-grain and the derived KPIs have no drivers", () => {
-    expect(noDriversReason(defOf("web-dev", "client-site-uptime"))).toBe("no_reader");
+  it("a module KPI without a reader has no reader; one with a reader, the company-grain and the derived KPIs have no drivers", () => {
+    // Web Dev's client site uptime has a reader since DW-6n (06db3f0b); HR's payroll waits for DW-7j.
+    expect(noDriversReason(defOf("web-dev", "client-site-uptime"))).toBe("no_drivers");
     expect(noDriversReason(defOf("hr", "payroll-on-time"))).toBe("no_reader");
     // a module KPI that has a reader of its own has a value but no drivers
     expect(noDriversReason({ reader: { kind: "module", readerId: "x" } as unknown as DeptKpiDef["reader"] })).toBe("no_drivers");

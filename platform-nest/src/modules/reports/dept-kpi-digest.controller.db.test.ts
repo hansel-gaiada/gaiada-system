@@ -9,7 +9,7 @@
 //   * the ledger sits behind the tenant wall AND the reports module wall (rows are really visible and written), its constraints hold;
 //   * `digest`: a non-admin is 403 (before the body), a bad `weekStart` is 400, the admin gets the contract's shape;
 //   * the drivers read: the head 200, a placed member 403, another unit's head 403, a company-wide caller 200, an unknown unit 404
-//     (403 first for a narrowed caller), a KPI outside the set 400, a module KPI `drivers: null, reason: "no_reader"`, projects on
+//     (403 first for a narrowed caller), a KPI outside the set 400, a module KPI with a reader `drivers: null, reason: "no_drivers"` (the pure test covers `no_reader`), projects on
 //     time lists projects worst first with numerator and denominator, reopened work / overdue tasks / check-in compliance list the
 //     unit's people worst first with the Team report's own numbers, a person with no miss is not listed, at most five; and the
 //     gate answers exactly as the department appraisal's (the extracted function is the same).
@@ -330,7 +330,8 @@ describe.skipIf(!TEST_URL)("DW-4j-3 the weekly digest and the drivers (live PG +
       title: "Web Dev this week: at risk",
       body: [
         `Projects on time: 67% against 80% ${DOT} at risk (${DOWN} 13 pts from the week before)`,
-        "2 KPIs not measured yet; 1 KPI has no target",
+        // DW-6n (on main since 06db3f0b) gave Web Dev's two module KPIs readers: with no rows here they read no_data.
+        "1 KPI has no target; 2 KPIs have no data",
       ].join("\n"),
       href: `/appraisals/department?unit=d-web&periodKind=week&start=${WEEK}`,
       severity: "warning",
@@ -514,14 +515,14 @@ describe.skipIf(!TEST_URL)("DW-4j-3 the weekly digest and the drivers (live PG +
   // ═══════════════════════════════ behind the miss: the drivers (§43.8) ═══════════════════════════════
 
   describe("drivers: which KPIs and which rows", () => {
-    it("a module KPI has no reader: 200, drivers null, reason no_reader", async () => {
+    it("a module KPI with a reader of its own (DW-6n) has no drivers: 200, drivers null, reason no_drivers", async () => {
       const r = await drivers(webHead, weekQ("d-web", "client-site-uptime"));
       expect(r.statusCode).toBe(200);
       expect(r.json()).toEqual({
         kpi: { key: "client-site-uptime", label: "Client site uptime", unit: "percent", direction: "up_good" },
         period: { periodKind: "week", start: WEEK, end: WEEK_END },
         drivers: null,
-        reason: "no_reader",
+        reason: "no_drivers",
       });
     });
 
