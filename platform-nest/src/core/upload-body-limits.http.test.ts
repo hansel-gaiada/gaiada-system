@@ -248,11 +248,19 @@ describe.skipIf(!TEST_URL)("PV4-03b: per-route body limits for the inline-upload
       expect(memStore.get(row.storage_key)?.byteLength).toBe(size);
     });
 
-    it("a 26 MB file reaches the handler and is refused 400 'file too large', not Fastify's 413", async () => {
-      const r = await upload(26 * 1024 * 1024, "twenty-six-mb.bin");
+    // Just over the handler's 25 MB, but its base64 still fits the route's derived limit (the encoded cap plus the 64 KiB
+    // JSON allowance), so it reaches the handler, which refuses it in words. A file whose ENCODED size passes the limit
+    // (26 MB does) is Fastify's 413 by design: the limit is a ceiling (see the payment-proof case above).
+    it("a file just over 25 MB reaches the handler and is refused 400 'file too large', not Fastify's 413", async () => {
+      const r = await upload(MAX_STAFF_FILE_BYTES + 1024, "just-over-25-mb.bin");
       expect(isFastify413(r)).toBe(false);
       expect(r.statusCode).toBe(400);
       expect(r.json().error).toBe("file too large");
+    });
+
+    it("a 26 MB file is beyond the route's derived limit and Fastify refuses it 413", async () => {
+      const r = await upload(26 * 1024 * 1024, "twenty-six-mb.bin");
+      expect(isFastify413(r)).toBe(true);
     });
 
     it("the table entry takes its cap from the handler's own constant", () => {
