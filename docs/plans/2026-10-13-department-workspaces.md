@@ -688,6 +688,20 @@ where a ticket says the classic shell changes too.
     only refuses. Today the HR rows gate on the module alone and Finance's rows are ungated;
   - Finance's "Revenue, AR and cash" analytics tab (`/finance/analytics`), which no page serves yet (7b).
 - Settings stays where DW-1a put it: HR's in Cases & compliance, Finance's in Close.
+- **As built (7a-7c, 2026-10-14).** Each row or tab gates on the UI capability that mirrors its page's backend read,
+  and never wider than before:
+  - HR: Onboarding and Compliance (`hr.view`), Recruitment (`hr.recruitment.view`), People analytics (`hr.view`), and
+    the Directory (the page's own `people.directory` check). Pay keeps `hr.payroll.view`.
+  - Finance: Receivables (`finance.ar.view`), Consolidation and the Financial statements (`finance.statement.view`).
+    Journals, General ledger, Chart of accounts, Payables, Treasury, Fixed assets, Tax, Period close, Cutover,
+    Settings and Ownership read finance kinds the UI has no capability for, so they stay as they were (the
+    server refuses). Ownership must NOT take `finance.statement.view`: that would widen it.
+  - IT: IT accounts (`it.manage`, and NOT the module: its API works with the module off) and Workflows (`it.manage` or a
+    platform operator). Both are a superset of the server's rule, so they never hide a row from someone the server admits.
+  - The shell model now carries each workspace's `withheld` tab paths (dropped by a gate, never by a ticket), and a
+    console strip counts them as covered. Without that, a person missing a gated tab would see the console's own
+    strip doubled beside the shell's.
+  - `e2e/workspace-functional.spec.ts` walks HR, Finance and IT as the superadmin and as a plain member.
 
 **What each ticket builds on, and what it adds:**
 
