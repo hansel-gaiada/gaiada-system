@@ -109,7 +109,7 @@ export async function financeRecipients(tenantId: string): Promise<string[]> {
          JOIN roles r ON r.id = ur.role_id
          JOIN users u ON u.id = ur.user_id AND u.deleted_at IS NULL AND u.status = 'active'
         WHERE r.name IN ('finance_manager', 'owner', 'company_admin')
-          AND ur.scope_type = 'company' AND ur.scope_id IN (SELECT id FROM chain)
+          AND ur.scope_type = 'company' AND ur.scope_id IN (SELECT id::text FROM chain)
           AND (ur.expires_at IS NULL OR ur.expires_at > now())`,
       [tenantId],
     ),

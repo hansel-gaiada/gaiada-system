@@ -114,7 +114,9 @@ describe.skipIf(!ready)("PV5-14 — simulated second factor (PV-D40)", () => {
     botUser = await createUser("bot@pv514.test", "PV5-14 Bot");
     await addMembership(tenant, botUser);
     await grantRole(botUser, fm, "company", tenant);
-    await withGlobal((c) => c.query(`UPDATE users SET kind = 'bot' WHERE id = $1`, [botUser]));
+    // PV5-10 review: an IdP login may no longer CLAIM a bot or automation account by email (oidc.ts provisionUser), so
+    // the bot's IdP subject is linked here, as an operator would link one; the step-up refusal under test is unchanged.
+    await withGlobal((c) => c.query(`UPDATE users SET kind = 'bot', idp_subject = 'kc-pv514-bot' WHERE id = $1`, [botUser]));
 
     await withTenants([tenant], async (c) => {
       await c.query(`INSERT INTO finance_company_settings (tenant_id, functional_currency, presentation_currency) VALUES ($1,'IDR','IDR')`, [tenant]);

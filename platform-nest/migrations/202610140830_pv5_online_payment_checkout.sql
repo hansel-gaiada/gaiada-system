@@ -95,12 +95,11 @@ CREATE INDEX ix_provider_events_ref ON provider_events (provider, ref) WHERE ref
 -- ══════════════════════════════════════════════════════════════════════════════════════════════════
 -- 4 · payment_checkouts: environment and the reconciliation clock
 -- ══════════════════════════════════════════════════════════════════════════════════════════════════
--- No checkout exists before PV5-10's code; the transient default only lets the NOT NULL column be added to a table that
--- is empty everywhere, and is dropped at once so every row states its environment explicitly.
+-- The code always writes the environment explicitly (storeCheckout). The default 'sandbox' stays only for writers that
+-- predate it (PV5-01a's own constraint suite inserts checkouts without one); a production row is never defaulted.
 ALTER TABLE payment_checkouts
   ADD COLUMN environment     text NOT NULL DEFAULT 'sandbox',
   ADD COLUMN last_checked_at timestamptz;
-ALTER TABLE payment_checkouts ALTER COLUMN environment DROP DEFAULT;
 ALTER TABLE payment_checkouts
   ADD CONSTRAINT payment_checkouts_environment_check CHECK (environment IN ('sandbox', 'production')),
   ADD CONSTRAINT ux_payment_checkouts_id_tenant UNIQUE (id, tenant_id);
