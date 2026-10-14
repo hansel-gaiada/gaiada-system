@@ -178,7 +178,8 @@ export interface DigestResult {
 /** The scheduled digest (§43.8): evaluate the week and the week before, claim the ledger rows under the tenant's lock, notify
  *  after the commit. Throws a 400 `field: "weekStart"` for a bad week (see `resolveDigestWeek`). */
 export async function runDeptKpiDigest(tenantId: string, weekStartRaw?: unknown, now: Date = new Date()): Promise<DigestResult> {
-  const { weekStart, weekEnd } = resolveDigestWeek(weekStartRaw, todayIsoInTz(config.reportsTz, now));
+  const today = todayIsoInTz(config.reportsTz, now);
+  const { weekStart, weekEnd } = resolveDigestWeek(weekStartRaw, today);
   const range = resolveRange("week", weekStart);
   const previousRange = resolveRange("week", addDaysIso(weekStart, -7));
 
@@ -186,10 +187,11 @@ export async function runDeptKpiDigest(tenantId: string, weekStartRaw?: unknown,
   const structure = await withTenants([tenantId], (c) => loadOrgStructure(c, tenantId), { modules: DEPT_KPI_MODULES });
   const departments = departmentUnits(structure);
   const vertical = await companyVertical(tenantId);
-  const reads = await evaluateUnits(tenantId, vertical, departments, departments, range);
+  // `today` pins what the module readers count as already due (§40.5.1), so a pinned `now` gives a deterministic run.
+  const reads = await evaluateUnits(tenantId, vertical, departments, departments, range, range.start, today);
   const heads = await loadLeadUserIdsByUnit(tenantId, departments.map((d) => d.id));
   const withHead = departments.filter((d) => (heads.get(d.id)?.length ?? 0) > 0);
-  const previousReads = withHead.length > 0 ? await evaluateUnits(tenantId, vertical, withHead, departments, previousRange) : [];
+  const previousReads = withHead.length > 0 ? await evaluateUnits(tenantId, vertical, withHead, departments, previousRange, previousRange.start, today) : [];
 
   // (2) Claim, serialised per tenant: the rows this run actually inserts are the departments it tells.
   const claimed = await withTenants(
