@@ -11,6 +11,24 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.147.0` - DW-6k: the Figma screens (2026-10-14) - PROTOTYPED
+
+- **What.** The UI half of BFF contract §36, on top of the 6k backend (platform-nest 0.131.0).
+- **A Designs section** (`components/figma/Designs.tsx`) on the PM task page, the request page and each campaign part.
+  - **Each link shows:**
+    - its thumbnail, through the session-forwarding proxy route `app/api/figma-links/[linkId]/thumbnail` (PNG only, `nosniff`, a sandbox CSP, never stored);
+    - its title and "changed <time>";
+    - the open comments, where `null` reads as "not read yet", never 0;
+    - Open in Figma, a stale note, Remove, and Export (PNG, SVG or PDF), which names the new Asset Library version.
+  - **Adding a link** is done by pasting a Figma URL. Every backend refusal is said in plain words.
+  - **When Figma is not connected,** which is the normal state until DW-11, the section keeps its cached links and says "Figma isn't connected for this company".
+- **Tools & connections.** The Figma kind loses its `DW-6k` ticket. The pilot page shows whether Figma is connected and the token type, never the token. `company.manage` holders get a connect form (token and type) and Disconnect.
+- **Open in.** The `figma` seam of `toolContextLinks` opens each linked file or frame, with its title.
+- **Proof.**
+  - `figma.test.ts` (32), `Designs.test.tsx` (24), `toolContext.test.ts` (28), `figmaActions.test.ts` (17), `FigmaConnectionBlock.test.tsx` (10), the thumbnail route test (7), `figma-data.test.ts` (8).
+  - Branch CI 38508666549 on `89dc9dca`: platform-ui 487 files, 8431 tests.
+  - The landing sha's own runs are on the board.
+
 ### platform-ui `0.146.0` - DW-4e-2: a department's KPIs, condition and targets (2026-10-14) - PROTOTYPED
 
 Contract: `docs/FRONTEND-BFF-CONTRACT.md` §40 (the engine is live since 1.0.0-alpha.387). Plan §5.3 and §5.5.
