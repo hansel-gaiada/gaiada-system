@@ -23,6 +23,7 @@ import { checkinsDemo } from "./demoCheckins";
 import { appraisalsDemo } from "./demoAppraisals";
 import { lmsDemo } from "./demoLms";
 import { deptKpisDemo } from "./demoDeptKpis";
+import { deptAppraisalsDemo } from "./demoDeptAppraisals";
 import { financeDemo } from "./demoFinance";
 import { loansDemo } from "./demoLoans";
 import { assistantDemo } from "./demoAssistant";
@@ -2265,6 +2266,11 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // reason as LMS: no later catch-all may answer a KPI path with an empty list, which the page would read as "no KPIs".
   const deptKpis = deptKpisDemo(method, p, url.searchParams, body, userId);
   if (deptKpis) return deptKpis;
+
+  // DW-4e-3 — the department appraisal per cycle (`/dept-appraisals*`, BFF §41). Stateful commentary and assessment
+  // (lib/demoDeptAppraisals.ts), which reads its KPIs from the fixture above and its cycles from the appraisals fixture.
+  const deptAppraisals = deptAppraisalsDemo(method, p, url.searchParams, body, userId);
+  if (deptAppraisals) return deptAppraisals;
 
   // Finance (/api/:t/finance/*) — fixture store (lib/demoFinance.ts). Placed beside
   // LMS and for the same reason: high enough that no later `/api/:t/...` catch-all can answer a

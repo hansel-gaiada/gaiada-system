@@ -918,4 +918,14 @@ export const CAPABILITY_MAP = {
     permissions: ["reports.dept_kpi_target.approve", "reports.dept_kpi_target.reject"],
     semantics: "all",
   },
+
+  // ── DW-4e-3 · the department appraisal per cycle (contract §41.3) ─────────────────────────────
+  "reports.dept_kpi_target.appraisal_comment": {
+    permissions: ["reports.dept_kpi_target.appraisal_comment"],
+    semantics: "all",
+  },
+  "reports.dept_kpi_target.appraisal_assess": {
+    permissions: ["reports.dept_kpi_target.appraisal_assess"],
+    semantics: "all",
+  },
 } as const satisfies Record<Capability, CapabilityDef>;

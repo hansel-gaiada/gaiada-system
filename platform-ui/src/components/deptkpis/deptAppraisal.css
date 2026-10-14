@@ -1,0 +1,38 @@
+/* DW-4e-3 — the department appraisal view. Colours are the existing status tokens only; a condition is always also said in
+   words (badge text), never by colour alone. No text-transform: sentence case throughout. */
+.da-picker { margin: 0 0 18px; display: flex; flex-direction: column; gap: 8px; }
+.da-picker__label { font: 600 12px var(--font-body); color: var(--ink-muted); }
+.da-picker__list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.da-picker__item { display: inline-flex; gap: 8px; align-items: baseline; padding: 6px 12px; text-decoration: none; color: inherit;
+  border: 0.5px solid var(--line); background: var(--surface-card); font: 600 13px/1.4 var(--font-body); }
+.da-picker__item[aria-current="page"] { border-color: var(--ink-strong); border-width: 1.5px; }
+.da-picker__item:focus-visible { outline: 2px solid var(--ink-strong); outline-offset: 2px; }
+.da-picker__meta { font: 400 12px var(--font-body); color: var(--ink-muted); }
+.da-picker__note { font: 400 12px/1.5 var(--font-body); color: var(--ink-muted); margin: 0; max-width: 640px; }
+.da-heading { font: 600 15px var(--font-body); margin: 24px 0 8px; }
+.da-note { font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); margin: 0 0 12px; max-width: 640px; }
+.da-history { list-style: none; margin: 0 0 24px; padding: 0; display: flex; flex-wrap: wrap; gap: 10px; }
+.da-month { display: flex; flex-direction: column; gap: 4px; padding: 8px 12px; min-width: 92px; border: 0.5px solid var(--line);
+  border-bottom-width: 4px; background: var(--surface-card); }
+.da-month--ok { border-bottom-color: var(--status-ok-fg); }
+.da-month--warning { border-bottom-color: var(--status-warning-fg); }
+.da-month--danger { border-bottom-color: var(--status-danger-fg); }
+.da-month--idle { border-bottom-color: var(--status-idle-fg); }
+.da-month__name { font: 600 13px var(--font-body); }
+.da-people__headline { font: 600 14px var(--font-body); margin: 0 0 8px; }
+.da-status { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.da-status__label { font: 400 13px var(--font-body); color: var(--ink-muted); }
+.da-status__count { font: 600 13px var(--font-body); }
+.da-bands { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-width: 420px; }
+.da-band { display: grid; grid-template-columns: 64px 1fr 28px; gap: 10px; align-items: center; }
+.da-band__label { font: 400 12px var(--font-body); color: var(--ink-muted); }
+.da-band__bar { display: block; height: 10px; background: var(--surface-sunken); border: 0.5px solid var(--line); }
+.da-band__fill { display: block; height: 100%; background: var(--ink-strong); }
+.da-band__count { font: 600 12px var(--font-body); text-align: right; }
+.da-text { font: 400 14px/1.6 var(--font-body); margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.da-by { font: 400 12px/1.5 var(--font-body); color: var(--ink-muted); margin: 0 0 12px; }
+.da-judgement { display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; font: 400 13px var(--font-body); margin: 0 0 10px; }
+.da-form { display: grid; gap: 12px; max-width: 760px; margin-top: 12px; }
+.da-form__row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.da-msg { font: 400 12px/1.5 var(--font-body); max-width: 460px; }
+.da-msg--bad { color: var(--status-danger-fg); }

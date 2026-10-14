@@ -748,3 +748,43 @@ describe("reports.dept_kpi_target.propose / approve (DW-4e-2)", () => {
     });
   });
 });
+
+// DW-4e-3: the department appraisal capabilities mirror resource_dept_kpi_target.yaml (BFF §41.3). `appraisal_comment` is the
+// company_admin tier plus the head of the unit (canInUnit), with no permission mirror (so a pure owner is refused, as for
+// `propose`); `appraisal_assess` is the company_admin tier, which `owner` mirrors. The head comments and never assesses.
+describe("reports.dept_kpi_target.appraisal_comment / appraisal_assess (DW-4e-3)", () => {
+  const as = (role: string, scopeType = "company", scopeId: string | null = "co-a") => me([{ role, scopeType, scopeId }]);
+  const COMMENT = "reports.dept_kpi_target.appraisal_comment" as const;
+  const ASSESS = "reports.dept_kpi_target.appraisal_assess" as const;
+  it("lets company_admin and platform_admin comment and assess", () => {
+    for (const cap of [COMMENT, ASSESS]) {
+      expect(can(as("company_admin"), cap, "co-a")).toBe(true);
+      expect(can(as("platform_admin", "global", null), cap, "co-a")).toBe(true);
+    }
+  });
+  it("lets owner assess but not comment (no appraisal_comment mirror in the policy)", () => {
+    expect(can(as("owner"), ASSESS, "co-a")).toBe(true);
+    expect(can(as("owner"), COMMENT, "co-a")).toBe(false);
+  });
+  it("never lets manager, member, viewer or HR comment or assess company-wide", () => {
+    for (const role of ["manager", "member", "viewer", "hr_manager", "hr_staff", "client"]) {
+      expect(can(as(role), COMMENT, "co-a"), role).toBe(false);
+      expect(can(as(role), ASSESS, "co-a"), role).toBe(false);
+    }
+  });
+  it("reaches a unit head for comment only through canInUnit over their own unit, and never for assess", () => {
+    const head = me([
+      { role: "member", scopeType: "company", scopeId: "co-a" },
+      { role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web" },
+    ]);
+    expect(can(head, COMMENT, "co-a")).toBe(false);
+    expect(canInUnit(head, COMMENT, "co-a", ["d-web", "root"])).toBe(true);
+    expect(canInUnit(head, COMMENT, "co-a", ["d-seo", "root"])).toBe(false);
+    expect(canInUnit(head, ASSESS, "co-a", ["d-web", "root"])).toBe(false);
+    expect(can(head, ASSESS, "co-a")).toBe(false);
+  });
+  it("is declared in the capability map with the permissions it mirrors", () => {
+    expect(CAPABILITY_MAP[COMMENT]).toEqual({ permissions: ["reports.dept_kpi_target.appraisal_comment"], semantics: "all" });
+    expect(CAPABILITY_MAP[ASSESS]).toEqual({ permissions: ["reports.dept_kpi_target.appraisal_assess"], semantics: "all" });
+  });
+});

@@ -184,8 +184,9 @@ function unitView(unit: DemoUnit, period: { periodKind: string; start: string; e
   return { unit: { id: unit.id, name: unit.name }, workspace: unit.workspace, period, condition: deptCondition(kpis), kpis };
 }
 
-type Who = "wide" | "led" | "staff" | "none";
-function whoReads(userId: string, unitId: string): Who {
+/** Exported for demoDeptAppraisals.ts (DW-4e-3): the same placement gate, so the two fixtures cannot disagree about who leads a unit. */
+export type Who = "wide" | "led" | "staff" | "none";
+export function whoReads(userId: string, unitId: string): Who {
   if (COMPANY_WIDE.has(userId)) return "wide";
   if ((LED[userId] ?? []).includes(unitId)) return "led";
   if ((STAFF_OF[userId] ?? []).includes(unitId)) return "staff";

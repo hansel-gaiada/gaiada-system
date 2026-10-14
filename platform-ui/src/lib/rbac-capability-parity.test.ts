@@ -338,6 +338,17 @@ const KNOWN_NON_DRIFT: RegisterEntry[] = [
       "owner's bundle carries reports.dept_kpi_target.propose from the catalog seed, but resource_dept_kpi_target.yaml's permission arm honours read, approve and reject only; a principal whose only grant is `owner` is denied on propose, and widening ROLE_CAPS.owner would show a Propose control that always 403s.",
     decisionRef: "docs/FRONTEND-BFF-CONTRACT.md §40.3a; PERMISSION-CONTRACT §38; cerbos/policies/resource_dept_kpi_target.yaml; same shape as work_request.decide above",
   },
+  // DW-4e-3 (2026-10-15): the same call for `appraisal_comment`. The catalog bundles it for `owner` (owner == company_admin), but the policy
+  // has NO permission-arm mirror for it: an org_unit_lead holds the same key at unit scope through an attribute-dependent rule, so a mirror
+  // would be broader than that grant (PERMISSION-CONTRACT §38a). A pure owner is refused by Cerbos; `appraisal_assess` HAS a mirror.
+  {
+    role: "owner",
+    capability: "reports.dept_kpi_target.appraisal_comment",
+    direction: "under-claim",
+    reason:
+      "owner's bundle carries reports.dept_kpi_target.appraisal_comment from the catalog seed, but resource_dept_kpi_target.yaml's permission arm honours read, approve, reject and appraisal_assess only; a principal whose only grant is `owner` is denied on appraisal_comment, and widening ROLE_CAPS.owner would show a Comment form that always 403s.",
+    decisionRef: "docs/FRONTEND-BFF-CONTRACT.md §41.3; PERMISSION-CONTRACT §38a; cerbos/policies/resource_dept_kpi_target.yaml; same shape as reports.dept_kpi_target.propose above",
+  },
 ];
 
 const knownNonDriftKey = (role: string, capability: Capability) => `${role} ${capability}`;

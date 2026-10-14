@@ -9,6 +9,7 @@ import {
   bannerSentence, conditionLabel, conditionTone, formatKpiValue, formatMonth, formatTolerance, getDeptKpis, getDeptKpiTargets,
   ratioParts, tileFoot, type DeptKpiTargetRow, type DeptKpiTargetsKpi, type DeptKpiTargetsView, type DeptKpisView,
 } from "@/lib/deptKpis";
+import { getCyclePicks, getDeptAppraisal } from "@/lib/deptAppraisals";
 import type { ReportPeriodKind } from "@/lib/reports";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui";
@@ -17,10 +18,12 @@ import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { ReportAccessDenied } from "@/components/reports/ReportAccessDenied";
 import { ReportPeriodBar } from "@/components/reports/ReportPeriodBar";
 import { ProposeTargetForm, DecideButtons } from "@/components/deptkpis/TargetControls";
+import { AppraisalView, CyclePicker } from "@/components/deptkpis/AppraisalView";
 import "@/components/deptkpis/deptKpis.css";
 
 const TITLE = "Department";
 const DENIED = "A department's KPIs are limited to the people in it, its heads, and the company-wide tiers (reporting blueprint §8).";
+const DENIED_APPRAISAL = "A department's appraisal is limited to its heads and the company-wide tiers. The people of the department read its KPIs, not its appraisal.";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -35,10 +38,15 @@ function todayIso(): string {
 // in words rather than showing a number it does not have. The server stays the authority on every action; the
 // buttons here only mirror `reports.dept_kpi_target.*` so a viewer is not offered what the server will refuse.
 // Staff of the department read the tiles and the banner and nothing else (plan §5.5: no ranking, no targets screen).
+//
+// With `?cycle=` (DW-4e-3, BFF §41.5) the page is the department's APPRAISAL for that cycle instead of the KPIs for a period: the
+// KPI results over the cycle, the condition month by month, the people's appraisals as counts, the head's commentary and the GM's
+// assessment, each with the same honest reader (ok / forbidden / not found / failed). The picker lists the company's cycles, which
+// the server gives to the appraisal administrators; anyone else is told so and can still open a cycle by its link.
 export default async function DepartmentKpiPage({
   searchParams,
 }: {
-  searchParams: Promise<{ unit?: string | string[]; periodKind?: string; start?: string; end?: string }>;
+  searchParams: Promise<{ unit?: string | string[]; cycle?: string | string[]; periodKind?: string; start?: string; end?: string }>;
 }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
@@ -64,6 +72,63 @@ export default async function DepartmentKpiPage({
           This page opens from a department workspace. Choose a department on <Link href="/departments">Departments</Link>,
           then open Performance &rsaquo; Appraisals &rsaquo; Department.
         </EmptyNote>
+      </>
+    );
+  }
+
+  const cycleId = typeof sp.cycle === "string" && sp.cycle !== "" ? sp.cycle : null;
+  // The cycle list is the appraisal administrators' (`cycle_admin`): everyone else is told so instead of being sent to a refusal.
+  const cyclesRes = can(me, "appraisal.cycle.admin", tenant) ? await getCyclePicks(userId, tenant) : ({ kind: "forbidden" } as const);
+  const picker = (
+    <CyclePicker
+      unitId={unit}
+      cycles={cyclesRes.kind === "ok" ? cyclesRes.data : null}
+      chosenId={cycleId}
+      reason={cyclesRes.kind === "ok" ? undefined : cyclesRes.kind === "forbidden" ? "forbidden" : cyclesRes.reason}
+    />
+  );
+
+  if (cycleId !== null) {
+    const appraisal = await getDeptAppraisal(userId, tenant, { unit, cycleId });
+    if (appraisal.kind === "forbidden") {
+      return (
+        <>
+          <PageHeader eyebrow="Appraisals" title={TITLE} />
+          {picker}
+          <ReportAccessDenied reason={DENIED_APPRAISAL} />
+        </>
+      );
+    }
+    if (appraisal.kind === "not_found") {
+      return (
+        <>
+          <PageHeader eyebrow="Appraisals" title={TITLE} />
+          {picker}
+          <EmptyNote>{appraisal.what === "cycle" ? "This appraisal cycle does not exist." : "This department does not exist."}</EmptyNote>
+        </>
+      );
+    }
+    if (appraisal.kind === "error") {
+      return (
+        <>
+          <PageHeader eyebrow="Appraisals" title={TITLE} />
+          {picker}
+          <ReadRefusal subject="This department's appraisal" kind="unavailable" reason={appraisal.reason} />
+        </>
+      );
+    }
+    // The two forms mirror `reports.dept_kpi_target.appraisal_comment` (the head over this unit, or company_admin) and
+    // `.appraisal_assess` (company_admin, which owner mirrors); the server decides again and ends both when the cycle closes.
+    const treeRoot = await readOrgRoot(me, tenant);
+    const canComment =
+      can(me, "reports.dept_kpi_target.appraisal_comment", tenant) ||
+      canInUnit(me, "reports.dept_kpi_target.appraisal_comment", tenant, treeRoot ? unitPathOf(treeRoot, unit) : []);
+    const canAssess = can(me, "reports.dept_kpi_target.appraisal_assess", tenant);
+    return (
+      <>
+        <PageHeader eyebrow="Appraisals" title={`${appraisal.data.unit.name} · ${TITLE}`} />
+        {picker}
+        <AppraisalView view={appraisal.data} canComment={canComment} canAssess={canAssess} />
       </>
     );
   }
@@ -115,6 +180,7 @@ export default async function DepartmentKpiPage({
   return (
     <>
       <PageHeader eyebrow="Appraisals" title={`${view.unit.name} · ${TITLE}`} />
+      {picker}
       <ReportPeriodBar
         value={{ kind: view.period.periodKind as ReportPeriodKind, start: view.period.start, end: view.period.end }}
         todayIso={today}
