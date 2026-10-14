@@ -11,7 +11,7 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
-### platform-nest `0.142.0` + platform-ui `0.162.0` - DW-6n: the delivery departments' KPI readers (2026-10-14) - PROTOTYPED
+### platform-nest `0.143.0` + platform-ui `0.163.0` - DW-6n: the delivery departments' KPI readers (2026-10-14) - PROTOTYPED
 
 Contract: `docs/FRONTEND-BFF-CONTRACT.md` §40.5 (with §40.5.8 as built). Rulings: DW-D25 moved these readers to DW-6; DW-D27 (owner, first-hand) set four definitions.
 - **What.** The twelve Web Dev, SEO, Social Media and Creatives KPIs that read "Not measured yet" now have readers over data the modules already write. Their values feed:
@@ -34,6 +34,25 @@ Contract: `docs/FRONTEND-BFF-CONTRACT.md` §40.5 (with §40.5.8 as built). Rulin
   - Per reader: `work-requests-on-time` (7), `creative-reviews` (7), `search` (11), `client-retention` (12), `social` (11) and `monitoring-uptime` (5), all `*.db.test.ts`.
   - Seam: the engine test (live PG, with the watch storing `read_failed` silently), the parity test, and the gate test `delivery/index.test.ts`.
   - The landing sha's runs are on the board.
+
+### platform-nest `0.142.0` - PV-5 close-out: offboarding revokes grants on the whole org; void retires the online checkout; re-inviting an active contact is refused; the agent's billing view shows the clearing account (2026-10-15) - PROTOTYPED
+
+Owner, 2026-10-15: "we just need a simple signing without vida" (PV-D44) and "fix anything that needs fix based on your recommendation of best practice".
+- **Offboarding** (`admin/employees.controller.ts`, `terminate`). The org_unit arm of the manual-grant sweep now covers the company's whole org: the org blob (`company_org_structure`, walked raw), every `org_unit_closure` descendant and the anchored `org_units` (`loadCompanyUnitNodeIds`, under `withTenants`). Since 0.133.0 only anchored units were seen. Unit ids are free text and can repeat, so a grant whose unit id also exists in the org of another company where the leaver is still active is KEPT and listed as `keptAmbiguousOrgUnitGrants: [{grantId, role, scopeId, otherCompanyIds}]` (memberships read through `principal_lookup`, each other company's org under its own `withTenants`). The `terminated` activity row now carries `revokedManualGrants` and `keptAmbiguousOrgUnitGrants`. Company-scope, reconciler-managed and global grants are unchanged. `employees-jml.test.ts` 18 (+2); teeth 38561504449, 38561509705.
+- **Void retires the open checkout** (`modules/invoice/issue.ts`, `payments/checkout.ts`): inside the void transaction the invoice's open `payment_checkouts` row is retired; after commit it is expired at the provider, best effort and never blocking. `online-payment.db.test.ts` 35 (+2).
+- **Re-inviting an ACTIVE client contact** (`core/client-contacts.controller.ts`) answers 409 `{reason: "already_active", existing: {contactId}}` and changes nothing (before, it reset the contact to `invited` and cut their access until they accepted again). Revoked and still-invited contacts keep the re-invite. `client-contacts-http.test.ts` 29.
+- **The agent's masked billing profile** (`billing-profile-agent.controller.ts`, tool `billingProfile.read`) includes `gatewayClearingAccountCode`; the bank number stays masked. `invoice-issue-tools.test.ts` 19.
+- Teeth for the last three: run 38563647841 (fixes reverted, tests kept: each red).
+
+### platform-ui `0.162.0` - PV-5 close-out screens (2026-10-15) - PROTOTYPED
+
+- **Certified signing controls are hidden while certified signing is unavailable** (PV-D44: simple signing only): "Mark certified" renders only when the backend's `certifiedSigning.available` is true, and "Countersign at <provider>" only when the backend also allows it; nothing (no disabled button) otherwise. Existing certified contracts keep their read-only tier, provider and certified copy. `contracts.test.ts` 29, `billing.test.tsx` 40.
+- The contact invite shows the 409 `already_active` in plain words (`clientContactsActions.test.ts` 3).
+- The termination message names the department grants the platform kept and asks HR to review them in Access (`iamActions.terminate.test.ts` 2).
+
+### docs - decision log PV-D44 and PV-D45 (2026-10-15)
+
+- PV-D44: simple signing only (our attested tier with the company seal); no VIDA/PSrE and no certified tier; the simulated certified path is switched off on live and its controls hidden. PV-D45: real MFA and the real billing setup come after staging.
 
 ### platform-nest `0.141.0` + platform-ui `0.161.0` - DW-7d: HR, Finance and IT in every company's org tree (2026-10-14) - PROTOTYPED
 

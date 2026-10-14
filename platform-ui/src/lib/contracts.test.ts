@@ -170,17 +170,23 @@ describe("contractActions · Mark certified comes from the backend field (PV5-11
     expect(on.markCertified).toEqual({ shown: true, enabled: true, reason: null });
   });
 
-  it("🔴 stays disabled, with its reason, when the server says unavailable", () => {
+  it("🔴 PV5-F4: is not offered at all (no disabled button, no reason) when the server says unavailable", () => {
     const off = contractActions(k({ ...draft, certifiedSigning: { available: false, provider: null, label: null, simulated: false } }));
-    expect(off.markCertified.shown).toBe(true);
-    expect(off.markCertified.enabled).toBe(false);
-    expect(off.markCertified.reason).toMatch(/isn't set up/);
+    expect(off.markCertified).toEqual({ shown: false, enabled: true, reason: null });
   });
 
-  it("🔴 an older server that omits the field reads as not set up, never as enabled", () => {
-    const a = contractActions(k(draft));
-    expect(a.markCertified.enabled).toBe(false);
-    expect(a.markCertified.reason).toMatch(/isn't set up/);
+  it("🔴 PV5-F4: an older server that omits the field reads as unavailable, never as offered", () => {
+    expect(contractActions(k(draft)).markCertified.shown).toBe(false);
+  });
+
+  it("🔴 PV5-F4: Countersign at the provider needs available AND the backend's flag AND a URL", () => {
+    const cs = { available: true, provider: "simulated_psre", label: "Simulated PSrE (review stage)", simulated: true };
+    const base = { status: "sent" as const, bodyMd: "x", canCountersignAtProvider: true, countersignUrl: "/simulated-psre/e1" };
+    expect(contractActions(k({ ...base, certifiedSigning: cs })).countersignAtProvider).toBe(true);
+    expect(contractActions(k({ ...base, certifiedSigning: { ...cs, available: false } })).countersignAtProvider).toBe(false);
+    expect(contractActions(k({ ...base, certifiedSigning: cs, canCountersignAtProvider: false })).countersignAtProvider).toBe(false);
+    expect(contractActions(k({ ...base, certifiedSigning: cs, countersignUrl: null })).countersignAtProvider).toBe(false);
+    expect(contractActions(k(base)).countersignAtProvider).toBe(false);
   });
 
   it("is not offered once the draft is already marked certified, and never for a sent contract", () => {

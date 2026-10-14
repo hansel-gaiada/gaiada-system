@@ -664,6 +664,21 @@ REQUEST endpoint too, because a request path that accepted what the write path r
 hole), the self-assign DENY, and the fact that nobody approves their own request. A stale request
 against a position retired in the meantime is refused at execution rather than applied.
 
+**What a termination revokes (offboarding, revised 2026-10-14).** Seat-justified grants are torn down by the
+position reconciler. Besides those, `terminate` sweeps the leaver's **manual** grants (`managed_by` and
+`managed_by_position` both NULL; reconciler-managed rows stay the reconciler's) that belong to this company:
+company scope on this company, and `org_unit` scope on **any node of this company's org**, which is the org blob
+(`company_org_structure`, read with its raw ids) ∪ its `org_unit_closure` ∪ the anchored `org_units` rows
+(`core/org-unit-closure.ts::loadCompanyUnitNodeIds`, read under `withTenants([tenantId])`). `org_units` alone is
+not the unit set: it holds only lazily anchored, service-assigned units, so until this revision a manual grant on
+any other node survived the leaver. **Cross-company guard:** an `org_unit` grant carries no tenant and node ids repeat
+across companies, so a grant whose node id is also in the org of another company where the leaver still holds an
+ACTIVE membership is **kept**, not revoked, and listed as `keptAmbiguousOrgUnitGrants[]` in the response and in the
+`terminated` activity row, for HR/IT to decide by hand. The leaver's memberships are read through `principal_lookup`
+(their own rows only) and each other company's unit set under its own single-tenant `withTenants`; no RLS context is
+widened. A node id shared only with companies where the leaver is not active is revoked as usual. Proof:
+`employees-jml.test.ts` (Linux gate).
+
 ### 11.3 Unchanged by this ticket
 
 No permission key was added, no bundle moved, no `perm_*` arm wired. The four Phase-2 kinds remain

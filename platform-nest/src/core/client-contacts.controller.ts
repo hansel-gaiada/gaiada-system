@@ -17,6 +17,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Get,
   HttpCode,
@@ -198,12 +199,23 @@ export class ClientContactsController {
     const result = await withTenants([tenantId], async (c: PoolClient) => {
       // Re-inviting a known contact must not duplicate the row (0072's partial uniques would refuse
       // it anyway); adopt and reset it to `invited` so a revoked contact can be brought back.
+      // PV5-F4: but NEVER an ACTIVE one. Resetting it to `invited` would cut the person off until they accept again
+      // and would mint a second token for a login that already works. Nothing is changed; there is no route that edits
+      // a contact's capability in place, so changing it means revoking the contact and inviting again.
       const existing = await c.query<{ id: string; status: string }>(
         `SELECT id, status FROM client_contacts
           WHERE client_id = $1 AND user_id = $2 AND project_id IS NOT DISTINCT FROM $3 AND deleted_at IS NULL`,
         [clientId, userId, projectId],
       );
       let contactId: string;
+      if (existing.rows[0]?.status === "active") {
+        throw new ConflictException({
+          message: "this contact already has access, so it was not invited again and nothing changed. To change what they may do, revoke the contact and invite them again.",
+          reason: "already_active",
+          // `existing` is the one object the error filter forwards (http-error.filter.ts); a bare top-level field is dropped.
+          existing: { contactId: existing.rows[0].id },
+        });
+      }
       if (existing.rows[0]) {
         contactId = existing.rows[0].id;
         await c.query(

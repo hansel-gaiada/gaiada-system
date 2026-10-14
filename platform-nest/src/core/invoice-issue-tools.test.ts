@@ -282,6 +282,14 @@ describe.skipIf(!TEST_URL)("PV5-12 · invoice-issue tools through the real endpo
       expect(p.bank.accountNo).toBeUndefined();
       expect(r.body).not.toContain(FULL_ACCOUNT_NO);
       expect(r.body).not.toContain("1234567890");
+      // PV5-F4: the gateway clearing account CODE is part of the agent's view (a code is not secret); null until set.
+      expect(p).toHaveProperty("gatewayClearingAccountCode", null);
+      await adminPool().query(`UPDATE company_billing_profiles SET gateway_clearing_account_code = '1125' WHERE tenant_id = $1`, [tenant]);
+      const withCode = await callTool("billingProfile.read", { tenantId: tenant }, ADMIN);
+      expect(withCode.statusCode, withCode.body).toBe(200);
+      expect(withCode.json().gatewayClearingAccountCode).toBe("1125");
+      expect(withCode.json().bank.accountNoMasked).toBe("••••0123"); // the bank number stays masked
+      expect(withCode.body).not.toContain(FULL_ACCOUNT_NO);
       // The route is a refusal for a caller who may not read profiles, never an empty profile.
       const denied = await callTool("billingProfile.read", { tenantId: tenant }, MEMBER);
       expect(denied.statusCode, denied.body).toBe(403);

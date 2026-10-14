@@ -91,6 +91,14 @@ export async function inviteClientContactAction(
       email: r.contact.email,
     };
   } catch (e) {
+    // PV5-F4: someone who already has access is not invited again (it would cut them off until they accepted). Branch on
+    // the machine `reason`, never on the API's wording.
+    if (e instanceof PlatformError && e.status === 409 && e.reason === "already_active") {
+      return {
+        ok: false,
+        error: `${email} already has access to this client, so no new invitation was made and nothing changed. To change what they may do, revoke their access and invite them again.`,
+      };
+    }
     return fail(e);
   }
 }

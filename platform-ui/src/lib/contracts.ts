@@ -163,15 +163,21 @@ export interface ContractActions {
   countersign: boolean;
   /** Void from any state but void itself, behind a confirm. */
   void: boolean;
-  /** PV5-09: "Mark certified", a draft only. Shown, but DISABLED with its reason while certified signing is not set up
-   *  (PV-D25 parks PV5-11): the button names a thing that exists, and says why it cannot be used yet. */
+  /** PV5-09: "Mark certified", a draft only, and (PV5-F4, owner ruling PV-D44: simple signing only) ONLY while the backend
+   *  says `certifiedSigning.available`. When it does not, nothing is rendered: no disabled button, no reason. `enabled` and
+   *  `reason` are kept for the row's markup and are always `true` and `null`. */
   markCertified: { shown: boolean; enabled: boolean; reason: string | null };
+  /** PV5-F4: "Countersign at <provider>", a link. The backend's `canCountersignAtProvider` and a `countersignUrl`, AND the
+   *  provider still being available: a switched-off provider's page cannot be reached, so the link is not offered. */
+  countersignAtProvider: boolean;
 }
 
-/** PV-D43: certified signing is on for the review stage through a SIMULATED provider, behind a server flag. Whether it is
- *  offered comes from the backend per row (`certifiedSigning.available`), never from a constant in the browser. When the
- *  server says no (or an older server says nothing) the button is offered disabled with its reason, and the 409 below
- *  stays handled either way: the server is the authority. */
+/** PV-D43 / PV-D44: certified signing is available only while a provider is switched on (a simulated one for the review
+ *  stage, behind a server flag; PV-D44, 2026-10-15: simple signing only, the simulated path is to be switched off). Whether
+ *  it is offered comes from the backend per row (`certifiedSigning.available`), never from a constant in the browser. When
+ *  the server says no (or an older server says nothing) the certified controls are NOT RENDERED, and the 409 below stays
+ *  handled either way: the server is the authority. A contract that is already certified keeps its read-only tier,
+ *  provider and signed-copy display. */
 export const CERTIFIED_UNAVAILABLE_REASON = "Certified signing isn't set up yet. Every contract is signed by typed name and sealed by our company for now.";
 
 /** The mark-certified route's refusals, in words. Branch on `reason`, never on the message. */
@@ -201,10 +207,11 @@ export function contractActions(c: Contract): ContractActions {
     countersign: c.canCountersign === true,
     void: c.status !== "void",
     markCertified: {
-      shown: isDraft && c.certifiedRequested !== true,
-      enabled: isDraft && certifiedAvailable,
-      reason: isDraft && !certifiedAvailable ? CERTIFIED_UNAVAILABLE_REASON : null,
+      shown: isDraft && c.certifiedRequested !== true && certifiedAvailable,
+      enabled: true,
+      reason: null,
     },
+    countersignAtProvider: certifiedAvailable && c.canCountersignAtProvider === true && Boolean(c.countersignUrl),
   };
 }
 

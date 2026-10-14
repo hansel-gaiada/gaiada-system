@@ -134,6 +134,51 @@ export async function loadUnitAncestors(c: PoolClient, tenantId: string, nodeId:
   return rows.map((r) => r.ancestor_id);
 }
 
+/**
+ * Every org node id THIS company owns: the answer to "is `scope_id` one of this company's units?".
+ *
+ * Three sources, UNIONed, because each alone is incomplete:
+ *   1. the org blob (`company_org_structure.structure`) — the single placement AUTHORITY (see
+ *      org-structure.service.ts's header). Walked in SQL exactly as 0101's backfill walks it, on the
+ *      RAW stored ids: never through `sanitizeStructure`, whose duplicate-id repair would rename ids
+ *      and so miss a grant scoped at the id actually stored. Covers blobs written by a seed that never
+ *      rebuilt the closure.
+ *   2. `org_unit_closure` — the blob's materialization, rebuilt in the SAME transaction as every blob
+ *      write that goes through `applyOrgStructure`; every `descendant_id` is a node of the tree.
+ *   3. `org_units` — the LAZILY anchored, service-assigned units (0026). A unit can stay anchored
+ *      after it left the blob (status 'orphaned'), and a grant on it is still this company's.
+ *
+ * `org_units` ALONE was the 2026-10-14 offboarding gap: a unit never anchored there (most of them —
+ * anchoring only happens on a service assignment) was not recognized as this company's, so a leaver's
+ * manual org_unit grant on it was never revoked.
+ *
+ * ⚠ CALLER CONTRACT: `c` must be inside `withTenants([tenantId], ...)`. All three tables are FORCE RLS
+ * on the authorized-tenant-set; under a bare `withGlobal` every arm returns ZERO rows with no error
+ * (the RLS zero-row trap), which would read as "this company has no units".
+ */
+export async function loadCompanyUnitNodeIds(c: PoolClient, tenantId: string): Promise<Set<string>> {
+  const { rows } = await c.query<{ node_id: string }>(
+    `WITH RECURSIVE tree(node) AS (
+       SELECT s.structure -> 'root' FROM company_org_structure s WHERE s.tenant_id = $1
+       UNION ALL
+       SELECT ch.child
+         FROM tree t
+         CROSS JOIN LATERAL jsonb_array_elements(
+           CASE WHEN jsonb_typeof(t.node -> 'children') = 'array' THEN t.node -> 'children' ELSE '[]'::jsonb END
+         ) AS ch(child)
+        WHERE jsonb_typeof(t.node) = 'object'
+     )
+     SELECT node ->> 'id' AS node_id FROM tree
+      WHERE jsonb_typeof(node) = 'object' AND jsonb_typeof(node -> 'id') = 'string' AND node ->> 'id' <> ''
+     UNION
+     SELECT descendant_id FROM org_unit_closure WHERE tenant_id = $1
+     UNION
+     SELECT node_id FROM org_units WHERE tenant_id = $1`,
+    [tenantId],
+  );
+  return new Set(rows.map((r) => r.node_id));
+}
+
 /** Read helper for hot query 2 ("all descendants of node N"): every descendant of `nodeId`
  *  (INCLUSIVE of itself, depth 0), nearest-first. Served by the table's PRIMARY KEY leftmost
  *  prefix `(tenant_id, ancestor_id, descendant_id)` — no separate index needed. */

@@ -44,6 +44,8 @@ export class FakeMidtrans {
   /** Every order id we were asked to expire (POST /v2/{id}/expire), in order. */
   readonly expired: string[] = [];
   statusFailure: number | null = null;
+  /** Force the next expire call to answer this HTTP status (e.g. 503), once. The order is still recorded in `expired`. */
+  expireFailure: number | null = null;
   private seq = 0;
 
   constructor(readonly serverKey: string) {}
@@ -79,6 +81,11 @@ export class FakeMidtrans {
       const orderId = decodeURIComponent(ex[1]);
       const o = this.orders.get(orderId);
       this.expired.push(orderId);
+      if (this.expireFailure !== null) {
+        const s = this.expireFailure;
+        this.expireFailure = null;
+        return reply(s, { status_message: "forced failure" });
+      }
       if (!o || !o.transactionStatus) return reply(404, { status_code: "404", status_message: "Transaction doesn't exist." });
       if (o.transactionStatus === "settlement" || o.transactionStatus === "capture") return reply(412, { status_code: "412" });
       o.transactionStatus = "expire";

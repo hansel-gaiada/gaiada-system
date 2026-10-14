@@ -184,6 +184,7 @@ export async function terminateEmployee(formData: FormData): Promise<IamResult> 
     const res = await platformFetch<{
       ok: true; userDisabled: boolean; itFollowUp: string | null;
       closedAssignmentIds: string[]; revokedManualGrants: string[];
+      keptAmbiguousOrgUnitGrants?: { grantId: string; role: string; scopeId: string; otherCompanyIds: string[] }[];
     }>(`/api/${c.tenant}/hr/employees/${employeeId}/terminate`, c.userId, {
       method: "POST",
       body: JSON.stringify({ reason, ...(str(formData, "lastDay") ? { lastDay: str(formData, "lastDay") } : {}) }),
@@ -196,11 +197,20 @@ export async function terminateEmployee(formData: FormData): Promise<IamResult> 
       ? "Their login is disabled."
       : "Their login stays ACTIVE because they are still a member of another company — that is correct, not a miss.";
     const it = res.itFollowUp ? " IT's accounts worklist will show the login change." : "";
+    // A department grant whose unit id also exists at another company where the person still works is KEPT by the
+    // platform (unit ids are free text and can repeat), so a grant they still need there is not cut. It is never
+    // silent: HR is told which ones, to review by hand in Access.
+    const kept = res.keptAmbiguousOrgUnitGrants ?? [];
+    const keptLine = kept.length
+      ? ` ${kept.length} department grant(s) were KEPT because the same unit also exists at another company where they ` +
+        `still work: ${kept.map((g) => `${g.role} on ${g.scopeId}`).join(", ")}. Review them in Access and remove any ` +
+        `that belonged to this company.`
+      : "";
     return {
       ok: true,
       message:
         `Terminated. ${res.closedAssignmentIds.length} seat(s) closed, ` +
-        `${res.revokedManualGrants.length} manual grant(s) revoked. ${login}${it}`,
+        `${res.revokedManualGrants.length} manual grant(s) revoked. ${login}${it}${keptLine}`,
     };
   } catch (err) {
     const h = humanize(err);
