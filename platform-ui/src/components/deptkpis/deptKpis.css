@@ -7,7 +7,7 @@
 .dk-banner--warning, .dk-tile--warning { border-left-color: var(--status-warning-fg); }
 .dk-banner--danger, .dk-tile--danger { border-left-color: var(--status-danger-fg); }
 .dk-banner--idle, .dk-tile--idle { border-left-color: var(--status-idle-fg); }
-.dk-badge { font: 700 11px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; }
+.dk-badge { font: 600 12px var(--font-body); }
 .dk-badge--ok { color: var(--status-ok-fg); }
 .dk-badge--warning { color: var(--status-warning-fg); }
 .dk-badge--danger { color: var(--status-danger-fg); }
