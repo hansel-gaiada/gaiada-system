@@ -11,6 +11,8 @@ import { listClaudeSeats, mySeat, launcherSeatProps } from "@/lib/claudeSeats";
 import { toolkitFor } from "@/lib/deptToolkits";
 import { activeCompany } from "@/lib/companyContext";
 import { gmAccessFor, canReadGmMoney, isGmDept, parseGmPeriodKind } from "@/lib/gm";
+import { companyAccess } from "@/lib/overviewCompany";
+import { gmHiddenSections, keepsSection } from "@/lib/overviewCoverage";
 import { GmCockpit } from "@/components/departments/gm/GmCockpit";
 import { GmAccessDenied } from "@/components/departments/gm/GmAccessDenied";
 import { pilotFrame } from "@/components/overview/pilot";
@@ -67,6 +69,9 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
     // server lets them read, rather than the same refusal a member gets.
     const access = gmAccessFor(me, tenant);
     if (access === "none") return <GmAccessDenied />;
+    // DW-3z: on the pilot, the cockpit sections the company Overview now shows (§3.8) are left out for the person it shows them to.
+    const gmFrame = await pilotFrame(me, tenant, { deptId }, searchParams);
+    const hide = gmFrame ? gmHiddenSections(companyAccess(me, tenant)) : [];
     const cockpit = (
       <GmCockpit
         userId={userId}
@@ -76,19 +81,22 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
         anchorDate={new Date().toISOString().slice(0, 10)}
         access={access}
         canReadMoney={canReadGmMoney(me, tenant)}
+        hide={hide}
       />
     );
     // DW-3i: on the pilot switch the Office of the GM's page is the company Overview, and today's cockpit stays under it as "More
-    // from the Office of the GM" (plan §2.6 rule 1: nothing is removed). The refusal above stays frameless, so a person without
-    // the access sees no Overview. Classic users get the cockpit alone, as before.
-    const gmFrame = await pilotFrame(me, tenant, { deptId }, searchParams);
+    // from the Office of the GM" (plan §2.6 rule 1: nothing is removed), less what its blocks now show (DW-3z, plan §3.8). The
+    // refusal above stays frameless, so a person without the access sees no Overview. Classic users get the cockpit alone, as before.
     return gmFrame ? gmFrame(cockpit) : cockpit;
   }
 
   // DW-3a: on the pilot switch the Overview frames this Home body, which stays below its bands until the
   // Overview's own blocks replace it. After the GM branch, which frames its own cockpit (DW-3i). The body is built
   // once, below, and passed through `frame`.
+  // DW-3z: under the frame, only the sections the Overview does not cover stay (plan §3.8): the Project health, Recent activity
+  // and Build tools cards are the Projects block, the Activity tab and Tools & connections now, so their reads are not made.
   const frame = await pilotFrame(me, tenant, { deptId }, searchParams);
+  const keeps = (section: string) => keepsSection("department-home", section, { framed: !!frame });
 
   const { sscope } = await searchParams;
   const servicedScope = sscope ?? "all";
@@ -98,9 +106,9 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
     // One over the preview limit: the extra row is never rendered, it only tells the feed whether
     // there is more history behind it, so the card can say "Last 8 shown" instead of implying the
     // department has only ever done eight things. There is no count endpoint to ask instead.
-    listWorkActivity(userId, tenant, { deptId, limit: ACTIVITY_PREVIEW_LIMIT + 1 }),
-    listMembers(userId, tenant).catch(() => []),
-    listClaudeSeats(userId, tenant, "me"),
+    keeps("recent-activity") ? listWorkActivity(userId, tenant, { deptId, limit: ACTIVITY_PREVIEW_LIMIT + 1 }) : Promise.resolve<Awaited<ReturnType<typeof listWorkActivity>>>([]),
+    keeps("recent-activity") ? listMembers(userId, tenant).catch(() => []) : Promise.resolve<Awaited<ReturnType<typeof listMembers>>>([]),
+    keeps("build-tools") ? listClaudeSeats(userId, tenant, "me") : Promise.resolve<Awaited<ReturnType<typeof listClaudeSeats>>>({ rows: [], unavailable: false }),
   ]);
   const buildServicedHref = (v: "all" | string) => `/departments/${deptId}${v === "all" ? "" : `?sscope=${v}`}`;
 
@@ -158,7 +166,7 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
         totalProjectsFoot={owned.length ? `across ${owned.length} project${owned.length === 1 ? "" : "s"}` : undefined}
       />
 
-      <Card title="Project health">
+      {keeps("project-health") && <Card title="Project health">
         {owned.length === 0 ? (
           <TeachState
             glyph="◎"
@@ -184,20 +192,20 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
             ))}
           </div>
         )}
-      </Card>
+      </Card>}
 
-      <Card
+      {keeps("recent-activity") && <Card
         title="Recent activity"
         headerRight={<Link href={`/departments/${deptId}/activity`} className="lux-btn lux-btn--ghost lux-btn--sm">View all →</Link>}
       >
         {/* "Now" is resolved here and handed down so the feed stays pure — see its `nowIso` doc
             for why deciding "Today" inside the component was wrong. */}
         <ActivityFeed items={activityItems} nowIso={new Date().toISOString()} truncated={activityTruncated} />
-      </Card>
+      </Card>}
 
-      <Card title="Build tools">
+      {keeps("build-tools") && <Card title="Build tools">
         <LauncherRow items={launcherItems} />
-      </Card>
+      </Card>}
 
       <Card
         title="Team"

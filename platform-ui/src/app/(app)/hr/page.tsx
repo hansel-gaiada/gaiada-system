@@ -9,6 +9,15 @@ import { hrScopeCompanies, listLeave, listCases } from "@/lib/hr";
 import { Card, KpiTile } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { pilotFrame } from "@/components/overview/pilot";
+import { keepsSection } from "@/lib/overviewCoverage";
+
+// The four area cards: each is a link and one line of words, and each area is a row or tab of the HR workspace (plan §3.8).
+const AREA_CARDS = [
+  { section: "card-leave", title: "Leave", href: "/hr/leave", text: "File leave, track balances, and clear the approval queue." },
+  { section: "card-attendance", title: "Attendance", href: "/hr/attendance", text: "Daily present/remote/absent/leave log." },
+  { section: "card-onboarding", title: "Onboarding", href: "/hr/onboarding", text: "Onboarding/offboarding checklist board." },
+  { section: "card-cases", title: "Cases", href: "/hr/cases", text: "Review-lite, grievance and general HR cases." },
+] as const;
 
 // HR console home — headcount and org shape at a glance, plus a way into the
 // people directory and the leave/attendance/onboarding/cases surfaces (WSD-5).
@@ -23,7 +32,11 @@ export default async function HROverviewPage({ searchParams }: { searchParams: P
 
   // DW-3a: on the pilot switch the Overview frames this page body, which stays below its bands until the
   // Overview's own blocks replace it. The body is built once, below, and passed through `frame`.
+  // DW-3z: under the frame, the cards that are only links to the workspace's own rows and tabs go (plan §3.8); the counts and the
+  // scope note stay, because no block shows them yet.
   const frame = await pilotFrame(me, tenant, { slug: "hr" }, searchParams);
+  const keeps = (section: string) => keepsSection("hr", section, { framed: !!frame });
+  const areaCards = AREA_CARDS.filter((c) => keeps(c.section));
 
   const scopeCompanies = hrScopeCompanies(me, tenant);
   const [members, depts, pendingLeave, openCases] = await Promise.all([
@@ -52,22 +65,17 @@ export default async function HROverviewPage({ searchParams }: { searchParams: P
         <KpiTile label="Open cases" value={String(openCases.length)} />
       </div>
 
-      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", marginBottom: 22 }}>
-        <Card title="Leave" headerRight={<Link href="/hr/leave" className="lux-btn lux-btn--ghost lux-btn--sm">Open →</Link>}>
-          <p style={{ margin: 0, font: "400 13px/1.5 var(--font-body)", color: "var(--erp-ink-60)" }}>File leave, track balances, and clear the approval queue.</p>
-        </Card>
-        <Card title="Attendance" headerRight={<Link href="/hr/attendance" className="lux-btn lux-btn--ghost lux-btn--sm">Open →</Link>}>
-          <p style={{ margin: 0, font: "400 13px/1.5 var(--font-body)", color: "var(--erp-ink-60)" }}>Daily present/remote/absent/leave log.</p>
-        </Card>
-        <Card title="Onboarding" headerRight={<Link href="/hr/onboarding" className="lux-btn lux-btn--ghost lux-btn--sm">Open →</Link>}>
-          <p style={{ margin: 0, font: "400 13px/1.5 var(--font-body)", color: "var(--erp-ink-60)" }}>Onboarding/offboarding checklist board.</p>
-        </Card>
-        <Card title="Cases" headerRight={<Link href="/hr/cases" className="lux-btn lux-btn--ghost lux-btn--sm">Open →</Link>}>
-          <p style={{ margin: 0, font: "400 13px/1.5 var(--font-body)", color: "var(--erp-ink-60)" }}>Review-lite, grievance and general HR cases.</p>
-        </Card>
-      </div>
+      {areaCards.length > 0 && (
+        <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", marginBottom: 22 }}>
+          {areaCards.map((c) => (
+            <Card key={c.section} title={c.title} headerRight={<Link href={c.href} className="lux-btn lux-btn--ghost lux-btn--sm">Open →</Link>}>
+              <p style={{ margin: 0, font: "400 13px/1.5 var(--font-body)", color: "var(--erp-ink-60)" }}>{c.text}</p>
+            </Card>
+          ))}
+        </div>
+      )}
 
-      <Card
+      {keeps("people-directory") && <Card
         title="People directory"
         headerRight={<Link href="/hr/people" className="lux-btn lux-btn--ghost lux-btn--sm">Open directory →</Link>}
       >
@@ -75,7 +83,7 @@ export default async function HROverviewPage({ searchParams }: { searchParams: P
           Everyone in {me.companies.find((c) => c.id === tenant)?.name ?? "this company"} — profiles, roles, assigned work and
           identity links. Manage placement in the org structure from the Org tab.
         </p>
-      </Card>
+      </Card>}
     </>
   );
   return frame ? frame(body) : body;

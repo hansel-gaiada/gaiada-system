@@ -12,6 +12,7 @@ import {
 import { Card, KpiTile, HairlineTable, StatusBadge, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { pilotFrame } from "@/components/overview/pilot";
+import { keepsSection } from "@/lib/overviewCoverage";
 
 // Finance & Accounting overview.
 //
@@ -80,6 +81,9 @@ export default async function FinanceOverviewPage({ searchParams }: { searchPara
 async function FinanceOverviewBody({ userId, tenant, framed }: { userId: string; tenant: string; framed: boolean }) {
   // Inside the Overview the page's own title steps down, so the page keeps one h1 (the Overview's greeting).
   const Title = framed ? "h3" : "h1";
+  // DW-3z: inside the Overview, the cards that are the Receivables, Payables and Close tabs' own content, or only links to them,
+  // go (plan §3.8). The totals, the integrity verdicts and the close gate stay: no block shows them yet (DW-7e).
+  const keeps = (section: string) => keepsSection("finance", section, { framed });
   const periods = await listPeriods(userId, tenant);
 
   // Department rows in the sidebar are deliberately ungated (see components/shell/nav.ts) — the
@@ -236,7 +240,7 @@ async function FinanceOverviewBody({ userId, tenant, framed }: { userId: string;
         )}
       </Card>
 
-      <Card
+      {keeps("ar-aging") && <Card
         title="Receivables aging"
         hint="Bucketed by DAYS OVERDUE, not invoice age — an invoice on 60-day terms raised 45 days ago is current."
       >
@@ -255,9 +259,9 @@ async function FinanceOverviewBody({ userId, tenant, framed }: { userId: string;
             ])}
           />
         )}
-      </Card>
+      </Card>}
 
-      <Card
+      {keeps("ap-aging") && <Card
         title="Payables aging"
         hint="Amounts are what each vendor is owed. Withheld tax is a separate liability to the tax office and is not included."
       >
@@ -276,13 +280,13 @@ async function FinanceOverviewBody({ userId, tenant, framed }: { userId: string;
             ])}
           />
         )}
-      </Card>
+      </Card>}
 
       {/* Configuration lives BEHIND the console rather than in the sidebar. nav.ts renders exactly
           one Finance row on purpose (an org structure often contains a department of the same name,
           and two identical labels pointing at different screens is the kind of thing a user learns
           to distrust). Adding two more top-level rows would fight that; the console is the entry. */}
-      <Card
+      {keeps("configuration") && <Card
         title="Configuration"
         hint="The cap table decides who can SEE which companies — it is an access record as much as a financial one."
       >
@@ -296,9 +300,9 @@ async function FinanceOverviewBody({ userId, tenant, framed }: { userId: string;
             <span className="fin-muted"> — PKP status, NPWP and reporting currency</span>
           </li>
         </ul>
-      </Card>
+      </Card>}
 
-      <Card
+      {keeps("fiscal-periods") && <Card
         title="Fiscal periods"
         hint="A closed period is terminal — a wrong figure is corrected by an entry in an open period, never by reopening."
       >
@@ -311,7 +315,7 @@ async function FinanceOverviewBody({ userId, tenant, framed }: { userId: string;
             p.name, p.startDate, p.endDate, PERIOD_STATE_LABEL[p.state], p.signedOff ? "yes" : "—",
           ])}
         />
-      </Card>
+      </Card>}
     </div>
   );
 }

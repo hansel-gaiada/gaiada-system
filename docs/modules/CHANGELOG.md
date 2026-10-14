@@ -11,6 +11,16 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.151.0` - DW-3z: the Overview stands on its own (2026-10-14) - PROTOTYPED
+
+- **What.** The closing ticket of DW-3. Under "More from <workspace>" a pilot user no longer sees the sections of today's page that an Overview block covers, or that have their own row or tab. Plan §3.8 is the inventory, section by section, with its verdict: **covered by <block>**, **reachable at <row/tab>**, or **not covered** (it stays). Rule §2.6.1 holds: nothing is removed without a home the person can reach in one click, and a section that is not in the inventory stays.
+- **Department Home:** Project health (the Projects block, which links All projects), Recent activity (Project Management > Activity) and Build tools (Tools & connections > Tools; Today keeps the pinned tools) go. The KPI strip, the Team roster and the serviced companies stay: no block shows them. The reads behind the removed cards (the activity feed, the members, the Claude seat) are not made.
+- **Office of the GM:** for a person who gets the company figures, the cockpit's period line, The business, Departments and Money cards go (the Company and Departments-by-condition blocks, with the Company report and Finance links); client monitoring stays, no block shows it. A department lead has no company block, so their strip and notice stay. A section that goes is not read. The cockpit's net margin rate is not on the Overview (net amount is), an owner decision in plan §3.8.
+- **HR:** the Leave, Attendance, Onboarding and Cases cards and the People directory card go (each is a row or tab of the workspace); the scope note and the four counts stay (HR's Pulse tiles are DW-7e). **Finance:** Receivables aging, Payables aging, Configuration and Fiscal periods go (Receivables, Payables and Close tabs hold the same); the totals, Integrity and the close gate stay. **IT:** nothing is covered, so the page is left alone.
+- **A classic user keeps today's pages exactly**; nothing here runs without the pilot frame.
+- **Fix.** `workLinks` did not look at the generic workspace (it is not in `WORKSPACES`), so a generic department's Projects block had no "All projects" link. It does now, which is what lets Project health go there too.
+- **New:** `lib/overviewCoverage.ts` (the inventory as data, `keepsSection`, `gmHiddenSections`). `GmCockpit` takes `hide`. **Tests:** `overviewCoverage.test.ts` pins every claim to the registry (each named block is built and placed, each named tab exists in every workspace the page renders for, the page's `keeps()` ids are the inventory's both ways); `workLinks` for the generic workspace; `e2e/workspace-shell.spec.ts` updated where it asserted a removed section (the Web Dev Overview's "Project health", the Office of the GM's "The business") and extended for each slimmed page, pilot and classic.
+
 ### platform-nest `0.132.0` + platform-ui `0.150.0` - DW-4e-3: the department appraisal per cycle (2026-10-15) - PROTOTYPED
 
 Contract: `docs/FRONTEND-BFF-CONTRACT.md` §41 (with §41.6 "as built") and `docs/PERMISSION-CONTRACT.md` §38a. Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.3 and §5.5 (owner ruling DW-Q4).

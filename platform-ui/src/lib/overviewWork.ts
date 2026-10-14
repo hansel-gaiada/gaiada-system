@@ -6,7 +6,7 @@ import { computeProjectHealth } from "./departments";
 import { statusFlags, type Milestone, type PmTask, type ProjectStatus } from "./pm";
 import type { DeptCampaignRow } from "./campaigns";
 import type { RequestSummary } from "./requests";
-import { WORKSPACES, hrefFor } from "./workspaces";
+import { GENERIC_WORKSPACE, WORKSPACES, hrefFor } from "./workspaces";
 
 export const NO_ACCESS = "No access";
 export const UNAVAILABLE = "Unavailable";
@@ -27,9 +27,11 @@ export function workWidgetPlaced(key: string, subject: { deptId: string | null }
   return !(WORK_KEYS as readonly string[]).includes(key) || !!subject.deptId;
 }
 
-/** A tab of the workspace's own registry rows, made concrete; null when the workspace has no such tab. */
+/** A tab of the workspace's own registry rows, made concrete; null when the workspace has no such tab. The generic workspace is
+ *  not in `WORKSPACES` (it takes the department's own name) but has the Project Management row, so a generic department's
+ *  Projects block links to its projects too (DW-3z: Project health leaves the Home because this link says where the rest lives). */
 function tabHref(workspaceKey: string | null, rowKey: string, tabKey: string, deptId: string | null): string | null {
-  const tab = WORKSPACES.find((w) => w.key === workspaceKey)?.work
+  const tab = [...WORKSPACES, GENERIC_WORKSPACE].find((w) => w.key === workspaceKey)?.work
     .filter((r) => r.key === rowKey).flatMap((r) => r.tabs).find((t) => t.key === tabKey);
   return tab ? hrefFor(tab.href, { deptId }) : null;
 }

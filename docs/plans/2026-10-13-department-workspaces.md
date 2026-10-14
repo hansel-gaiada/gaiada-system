@@ -402,6 +402,61 @@ All of this is for people on the pilot switch (DW-D7). Everyone else keeps today
 - No demo login is placed in a department today: `u-dev`, `u-pm` and `u-gm` sit in the demo org tree, but no login uses them. DW-3a adds a placed demo identity, so the Overview can be driven as a real employee.
 - The workspace-shell e2e (`e2e/workspace-shell.spec.ts`, run with `qa/e2e-gate.sh` on sumopod) grows with each ticket.
 
+### 3.8 DW-3z coverage (2026-10-14)
+
+DW-3z closes DW-3. Until now every Overview page drew today's whole body under the bands as "More from <workspace>". This ticket takes
+out the sections an Overview block now covers, and nothing else (rule §2.6.1). The inventory is data (`lib/overviewCoverage.ts`), and
+`overviewCoverage.test.ts` pins each claim to the registry.
+
+**The test for a verdict.** A section leaves only if one of these holds:
+- **covered by <block>:** a block shows the same information, honestly. A section that shows MORE than its block (rows, columns,
+  actions) counts as covered only where the block links to where the rest lives.
+- **reachable at <row/tab>:** the information has its own home one click away, a row or tab of the workspace. The test checks the
+  tab exists in every workspace the page renders for, behind no gate stricter than the module, with its page served.
+- **not covered:** it stays under "More from <workspace>". A section that is not in the inventory also stays.
+
+**Pilot only.** The slimming runs only for a person on the pilot switch. A classic page keeps today's body exactly, and a section
+that leaves is not read either.
+
+| Page | Section | Verdict |
+|---|---|---|
+| Department Home | KPI strip (Active, Due soon, Blocked, Progress) | **Not covered.** No block counts the department's tasks: Pulse has no generic tile built, Condition is the target-based KPIs, Team mode is a head's alone |
+| | Project health | **Covered by Projects**, which shows the open projects most at risk first with health and next due date, and links All projects (the Projects tab: the ownership rollup with urgency, counts and range). The generic workspace was missing that link (`workLinks` did not look at it), so DW-3z fixes it |
+| | Recent activity | **Reachable at Project Management > Activity**, the full feed, filterable. The card was its first eight rows |
+| | Build tools | **Reachable at Tools & connections > Tools**: every tool with the person's seat line and the pin buttons. Today shows the pinned tools (the first six by default) as the glance |
+| | Team | **Not covered.** The roster with each person's open and blocked work has no block (Team mode is numbers, for a head) and no tab |
+| | Serviced companies | **Not covered.** The companies this department serves are not the Clients row's list, and no block shows them |
+| Office of the GM (cockpit) | Scoped to the departments you lead (notice) | **Not covered.** It qualifies the strip a department lead keeps |
+| | Period and range line | **Covered by Company** (period, money window, Company report link), for a person who gets the company figures. For a lead the strip stays, so the line stays |
+| | The business (headline KPIs) | **Covered by Company** (milestones hit, utilization), which links the Company report, where the cockpit itself said the further metrics sit. For a person who gets the company figures |
+| | Departments (strip) | **Covered by Departments by condition** (§3.5 item 3), with Oversight > Departments holding the report metrics (All metrics). For a person who gets the company figures; a lead has no such block, so the strip stays for them |
+| | Client monitoring | **Not covered.** No block shows it (the GM's Pulse tiles stay planned) and the Office of the GM has no Monitoring tab: that row is Web Dev's |
+| | Money (revenue, net margin, overdue receivables) | **Covered by Company's money part**, which has the card's own gate and rules: revenue with its net amount, overdue receivables with the 90+ days line, the no-books note, and a Finance link. Only the net margin rate (net over revenue) is not drawn; see the decision below |
+| HR | "You serve HR for N companies" note | **Not covered.** No block or tab says which companies the person serves |
+| | People, Departments, Leave pending, Open cases | **Not covered.** HR's Pulse tiles are DW-7e |
+| | Leave, Attendance, Onboarding, Cases cards | **Reachable at** Time > Leave, Time > Attendance, People > Onboarding, Cases & compliance > Cases. Each card is a link and one line |
+| | People directory | **Reachable at** People > Directory and People > Org structure. The card is two links and a paragraph |
+| Finance | Total assets, Receivables, Payables, Trial balance | **Not covered.** Finance's Pulse tiles are DW-7e |
+| | Integrity | **Not covered.** The ledger-chain check has no other page, and the verdicts are the page's design rule (never an unearned green) |
+| | Can this period close? | **Not covered.** Close > Period close answers for the latest OPEN period, the card for the current one, so it is not the same reading; the Pulse tile is DW-7e |
+| | Receivables aging, Payables aging | **Reachable at** Receivables > Aging, Payables > Aging: the same table at the same default date, with its tie-out verdict. The totals stay in the KPI tiles |
+| | Configuration | **Reachable at** Close > Ownership and Close > Settings. The card is two links |
+| | Fiscal periods | **Reachable at** Close > Period close, whose Periods table has the same columns |
+| IT | Devices, Online, Degraded, Offline, Open alerts | **Not covered.** IT's devices-offline and threat-alert tiles are DW-7e |
+| | Recent device events | **Not covered.** Read only here; a device page lists its own |
+
+**What this leaves.**
+- Department Home: "More from <department>" holds the KPI strip, the Team roster and the serviced companies.
+- The Office of the GM: for a person with the company figures, only client monitoring; for a department lead, the notice, the period line, the strip and monitoring.
+- HR: the note and the four counts. Finance: the four totals, Integrity and the close gate. IT: its whole page, which is why `/it` is left alone.
+- No page's "More from" section disappears whole. DW-7e's Pulse tiles are what let HR's counts, Finance's verdicts and IT's page go.
+
+**For the owner to decide.** The cockpit's Money card drew a **net margin rate**. Company shows the revenue and its net amount, not the
+ratio, so after this ticket the rate is one link away (Finance > Financial statements). If the owner wants the rate on the Overview,
+it is one more tile in the Company block (DW-3i), and nothing else changes.
+
+**Actions.** No button or form lived only in a removed section: every removed card held links to a row or tab, and the page's own actions (the settings and ownership links, the area links) are those tabs.
+
 ---
 
 ## 4. Workspaces, department by department

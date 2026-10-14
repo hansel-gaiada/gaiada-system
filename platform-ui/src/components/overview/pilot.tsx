@@ -14,7 +14,8 @@ import { WorkspaceOverview } from "./WorkspaceOverview";
  *
  *  The page decides this BEFORE it reads its own data, builds its body once, and passes it through `wrap`,
  *  so the page reads exactly what it read before. Today's body stays under the Overview's bands until the
- *  Overview's own blocks replace it (plan §2.6 rule 1: nothing is removed). */
+ *  Overview's own blocks replace it (plan §2.6 rule 1: nothing is removed). DW-3z: each page builds a smaller body for this frame,
+ *  leaving out the sections the inventory in plan §3.8 (`lib/overviewCoverage.ts`) says a block or a tab now holds. */
 export async function pilotFrame(
   me: Me,
   tenantId: string,

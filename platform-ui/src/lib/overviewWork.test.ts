@@ -67,6 +67,12 @@ describe("the Work blocks' placement (DW-3f)", () => {
     expect(seo.requestsSent).toBe("/departments/d-3/requests/sent");
     expect(workLinks({ workspaceKey: null, deptId: null })).toEqual({ projects: null, campaigns: null, requestsIncoming: null, requestsSent: null });
   });
+
+  it("gives a generic department's Projects block its projects link too (DW-3z): the generic workspace has the Project Management row", () => {
+    expect(workLinks({ workspaceKey: "generic", deptId: "d-9" })).toEqual({
+      projects: "/departments/d-9/projects", campaigns: null, requestsIncoming: null, requestsSent: null,
+    });
+  });
 });
 
 describe("Projects: next due date", () => {

@@ -464,13 +464,15 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     const actions = page.getByRole("navigation", { name: "Quick actions" });
     await expect(actions.getByRole("link", { name: "New briefing" })).toHaveAttribute("href", "/departments/dept-1/prd");
 
-    // Only the Now, You, Department (Pulse) and Work bands are built, so today's department Home stays below them, under
-    // its own label, and the "being built" line is not needed.
+    // Only the Now, You, Department (Pulse) and Work bands are built, so what today's department Home shows that no block does
+    // stays below them, under its own label, and the "being built" line is not needed.
     await expect(page.getByRole("heading", { level: 2, name: "Now", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { level: 2, name: "You", exact: true })).toBeVisible();
     await expect(page.locator("#main-content").getByRole("heading", { level: 2, name: "Web Dev", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "More from Web Dev" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Project health" })).toBeVisible();
+    // DW-3z: what stays under it is what no block covers (the KPI strip), no longer Project health: that is the Projects block now.
+    await expect(page.locator("#main-content .ov-legacy .dept-kpi-strip")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Project health" })).toHaveCount(0);
     await expect(page.getByText(/Overview is being built/)).toHaveCount(0);
     await expect(page.getByRole("heading", { level: 2, name: "Work", exact: true })).toBeVisible();
     await expect(page.locator("#main-content").getByRole("heading", { level: 2, name: "Growth", exact: true })).toBeVisible();
@@ -743,6 +745,42 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     await expect(sidebar(page).getByText("Visiting SEO")).toBeVisible();
   });
 
+  // DW-3z (plan §3.8): the Overview stands on its own where a block covers a section of today's Home. Project health is the Projects
+  // block, which links All projects; Recent activity is Project Management > Activity; Build tools are the Today tools and
+  // Tools & connections. The KPI strip, the Team roster and the serviced companies have no block, so they stay.
+  test("under More from Web Dev: Project health, Recent activity and Build tools are gone, what no block covers stays, and each removed one is a click away (DW-3z)", async ({ page, context }) => {
+    await signInWebDev(page, context);
+    await page.goto("/departments/dept-1");
+    const main = page.locator("#main-content");
+    const legacy = main.locator(".ov-legacy");
+    await expect(main.getByRole("heading", { level: 2, name: "More from Web Dev" })).toBeVisible();
+    await expect(legacy.locator(".dept-kpi-strip")).toBeVisible();
+    await expect(legacy.getByRole("heading", { name: "Team", exact: true })).toBeVisible();
+    for (const name of ["Project health", "Recent activity", "Build tools"]) {
+      await expect(main.getByRole("heading", { name, exact: true }), name).toHaveCount(0);
+    }
+    // The Overview's own blocks carry what replaced them.
+    const projects = main.getByRole("region", { name: "Projects", exact: true });
+    await expect(projects.getByRole("link", { name: "All projects" })).toHaveAttribute("href", "/departments/dept-1/projects");
+    await expect(main.getByRole("region", { name: "Today", exact: true })).toBeVisible();
+
+    // One click from the Overview: the Project Management row's Activity tab, and the Tools & connections row.
+    const work = menu(page, "Web Dev").getByRole("group", { name: "Work" });
+    const pm = work.getByRole("link", { name: "Project Management", exact: true });
+    await hydrated(pm);
+    await pm.click();
+    const tab = page.getByRole("navigation", { name: "Project Management sections" }).getByRole("link", { name: "Activity", exact: true });
+    await hydrated(tab);
+    await tab.click();
+    await expect(page).toHaveURL(/\/departments\/dept-1\/activity$/);
+    await page.goto("/departments/dept-1");
+    const tools = work.getByRole("link", { name: "Tools & connections", exact: true });
+    await hydrated(tools);
+    await tools.click();
+    await expect(page).toHaveURL(/\/departments\/dept-1\/connections$/);
+    await expect(page.locator("#main-content").getByRole("heading", { name: "Tools", exact: true })).toBeVisible();
+  });
+
   test("a classic user's / and department page are unchanged", async ({ page, context }) => {
     await signInWebDev(page, context, { pilot: false });
     await page.goto("/");
@@ -753,6 +791,9 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     await page.goto("/departments/dept-1");
     await expect(page.getByRole("heading", { level: 1, name: "Web Dev", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Project health" })).toBeVisible();
+    // DW-3z removes nothing from a classic page: every card of today's Home is still there.
+    for (const name of ["Recent activity", "Build tools", "Team"]) await expect(page.getByRole("heading", { name, exact: true }).first(), name).toBeVisible();
+    await expect(page.locator(".ov-legacy")).toHaveCount(0);
     await expect(page.getByRole("group", { name: "Period" })).toHaveCount(0);
     await expect(page.getByText(/Overview is being built/)).toHaveCount(0);
     // None of the Overview's Work band (DW-3f) reaches a classic user.
@@ -1047,6 +1088,57 @@ test.describe("the Overview's frame: the functional workspaces keep their page b
       await expect(page.getByText(/Overview is being built/), path).toHaveCount(0);
     }
   });
+
+  // DW-3z (plan §3.8): HR's area cards and Finance's aging, configuration and period cards are rows and tabs of their workspaces, so
+  // they leave the Overview's page; the counts, the integrity verdicts, the close gate and all of IT's page have no block yet, so they stay.
+  // A classic user keeps every card.
+  const section = (page: Page) => page.locator("#main-content .ov-legacy");
+  const heading = (loc: Locator | Page, name: string) => loc.getByRole("heading", { name, exact: true });
+
+  test("/hr under the Overview: the area cards and the directory card are gone, the counts stay, and a classic user keeps every card (DW-3z)", async ({ page, context }) => {
+    await signIn(page, context, "superadmin");
+    await page.goto("/hr");
+    await expect(page.getByRole("heading", { name: "More from HR" })).toBeVisible();
+    await expect(section(page).getByText("Leave pending")).toBeVisible();
+    await expect(section(page).getByText("Open cases")).toBeVisible();
+    for (const name of ["Leave", "Attendance", "Onboarding", "Cases", "People directory"]) {
+      await expect(heading(page.locator("#main-content"), name), name).toHaveCount(0);
+    }
+    // Where they went: the workspace's own rows.
+    const work = menu(page, "HR").getByRole("group", { name: "Work" });
+    for (const row of ["People", "Time", "Cases & compliance"]) await expect(work.getByRole("link", { name: row, exact: true }), row).toBeVisible();
+
+    await context.addCookies([pilotCookie(page.url(), "classic")]);
+    await page.goto("/hr");
+    await expect(page.locator(".ov-legacy")).toHaveCount(0);
+    for (const name of ["Leave", "Attendance", "Onboarding", "Cases", "People directory"]) await expect(heading(page, name).first(), name).toBeVisible();
+  });
+
+  test("/finance under the Overview: the aging, configuration and period cards are gone, the totals, integrity and close gate stay, and a classic user keeps every card (DW-3z)", async ({ page, context }) => {
+    await signIn(page, context, "superadmin");
+    await page.goto("/finance");
+    await expect(page.getByRole("heading", { name: "More from Finance" })).toBeVisible();
+    for (const name of ["Integrity", "Can this period close?"]) await expect(heading(section(page), name), name).toBeVisible();
+    await expect(section(page).getByText("Total assets")).toBeVisible();
+    for (const name of ["Receivables aging", "Payables aging", "Configuration", "Fiscal periods"]) {
+      await expect(heading(page.locator("#main-content"), name), name).toHaveCount(0);
+    }
+
+    await context.addCookies([pilotCookie(page.url(), "classic")]);
+    await page.goto("/finance");
+    await expect(page.locator(".ov-legacy")).toHaveCount(0);
+    for (const name of ["Integrity", "Can this period close?", "Receivables aging", "Payables aging", "Configuration", "Fiscal periods"]) {
+      await expect(heading(page, name).first(), name).toBeVisible();
+    }
+  });
+
+  test("/it under the Overview: nothing on the page is covered by a block, so all of it stays (DW-3z)", async ({ page, context }) => {
+    await signIn(page, context, "superadmin");
+    await page.goto("/it");
+    await expect(page.getByRole("heading", { name: "More from IT" })).toBeVisible();
+    await expect(heading(section(page), "Recent device events")).toBeVisible();
+    await expect(section(page).getByText("Open alerts")).toBeVisible();
+  });
 });
 
 test.describe("the Overview's frame: someone whose home is the Company area", () => {
@@ -1092,7 +1184,11 @@ test.describe("the Overview's frame: someone whose home is the Company area", ()
 
     // The spec's band order (plan §3.5), then today's cockpit under it: nothing is removed.
     await expect(main.locator(".ov-band__label")).toHaveText(["Now", "Office of the GM", "Work", "Growth", "More from Office of the GM"]);
-    await expect(main.getByText("The business", { exact: true })).toBeVisible();
+    // DW-3z (plan §3.8): the cockpit's business, departments and money cards are the Company and Departments-by-condition blocks now, so
+    // what is left under it is what no block shows: the client monitoring summary.
+    for (const name of ["The business", "Departments", "Money"]) await expect(main.getByRole("heading", { name, exact: true }), name).toHaveCount(0);
+    await expect(main.locator(".ov-legacy").getByRole("heading", { name: "Client monitoring", exact: true })).toBeVisible();
+    await expect(main.getByText(/Headline figures only; this read carries no seal state/)).toHaveCount(0);
 
     // Needs you: decisions, in whatever honest state the demo queue gives (never a bare 0).
     const decisions = main.getByRole("region", { name: "Needs you: decisions", exact: true });
@@ -1155,8 +1251,11 @@ test.describe("the Overview's frame: someone whose home is the Company area", ()
       await expect(main.getByRole("region", { name, exact: true }), name).toHaveCount(0);
     }
     await expect(main.getByText(/\bIDR\b/)).toHaveCount(0);
-    // Today's narrowed cockpit is under it, with its own notice.
+    // Today's narrowed cockpit is under it, with its own notice. No company block is placed for a department lead, so the cockpit's
+    // Departments strip stays (DW-3z): only a section a block shows to this person goes.
     await expect(main.getByText(/Scoped to the departments you lead/)).toBeVisible();
+    await expect(main.locator(".ov-legacy").getByRole("heading", { name: "Departments", exact: true })).toBeVisible();
+    await expect(main.locator(".ov-legacy").getByRole("heading", { name: "Client monitoring", exact: true })).toBeVisible();
   });
 
   test("a classic user sees none of it: the Office of the GM's page is the cockpit alone", async ({ page, context }) => {

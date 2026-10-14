@@ -5,6 +5,7 @@ import { KpiTiles } from "@/components/reports/charts/KpiTiles";
 import { getReportOverview, isForbidden, isRangeTooLarge } from "@/lib/reports-data";
 import type { ReportOverview, ReportOverviewScope } from "@/lib/reports-data";
 import { GM_PERIOD_KINDS, GM_TIER1_LIMIT, GM_NARROWED_NOTICE, type GmAccess, type GmPeriodKind } from "@/lib/gm";
+import type { GmSection } from "@/lib/overviewCoverage";
 import { GmProvenance } from "./GmProvenance";
 import { GmMoneyCard } from "./GmMoneyCard";
 import { GmMonitoringCard } from "./GmMonitoringCard";
@@ -104,6 +105,7 @@ export async function GmCockpit({
   anchorDate,
   access,
   canReadMoney,
+  hide = [],
 }: {
   userId: string;
   tenantId: string;
@@ -118,15 +120,20 @@ export async function GmCockpit({
   /** Today, as ISO. Passed in rather than read from a clock here: the page resolves it once so
    *  every tier of one render shares an anchor. */
   anchorDate: string;
+  /** DW-3z: the sections the company Overview now shows, left out when the cockpit sits under it (plan §3.8). A section left out is
+   *  not read either. The default, and every classic page, leaves nothing out. */
+  hide?: readonly GmSection[];
 }) {
+  const shows = (section: GmSection) => !hide.includes(section);
   // A narrowed principal does not get the company read AT ALL — not requested, not requested-and-
   // discarded. Firing it would put a guaranteed 403 in the server log on every page view and invite a
   // future refactor to "helpfully" render whatever came back.
+  const skipped = Promise.resolve<Tier<ReportOverview>>({ state: "forbidden" });
   const [company, depts] = await Promise.all([
-    access === "full"
+    access === "full" && shows("business")
       ? readOverview(tenantId, userId, "company", periodKind, anchorDate)
-      : Promise.resolve<Tier<ReportOverview>>({ state: "forbidden" }),
-    readOverview(tenantId, userId, "department", periodKind, anchorDate),
+      : skipped,
+    shows("departments") ? readOverview(tenantId, userId, "department", periodKind, anchorDate) : skipped,
   ]);
 
   // The company grain resolves to exactly one scope (the tenant itself — the controller requires
@@ -162,7 +169,7 @@ export async function GmCockpit({
       {/* Provenance comes from whichever read actually answered. A narrowed reader has no company
           read at all, so echoing `company.data` would drop the line entirely — and the period +
           "no seal state" caveat matter just as much at department grain. */}
-      {provenance && (
+      {shows("provenance") && provenance && (
         <GmProvenance
           periodKind={periodKind}
           start={provenance.start}
@@ -171,7 +178,7 @@ export async function GmCockpit({
         />
       )}
 
-      {access === "narrowed" ? null : (
+      {access === "narrowed" || !shows("business") ? null : (
       <Card title="The business" headerRight={<PeriodToggle deptId={deptId} active={periodKind} />}>
         {company.state !== "ok" ? (
           <TierNote tier={company} subject="Company figures" />
@@ -194,7 +201,7 @@ export async function GmCockpit({
       </Card>
       )}
 
-      <Card
+      {shows("departments") && <Card
         title="Departments"
         headerRight={
           // The toggle normally rides the company card. A narrowed reader has no company card, so it
@@ -226,7 +233,7 @@ export async function GmCockpit({
             }
           />
         )}
-      </Card>
+      </Card>}
 
       {/* Client monitoring sits with the OPERATING tiers, above money: it is an input signal about
           work already sold, not a financial outcome. Ungated deliberately — `monitoring.read` on the
@@ -242,7 +249,7 @@ export async function GmCockpit({
           `explainRefusal={false}` — a GM without finance access gets NO card rather than a permanent
           refusal notice on their home screen. The money TAB passes true, because that is the surface
           where the question was actually asked. */}
-      {canReadMoney && (
+      {canReadMoney && shows("money") && (
         <GmMoneyCard
           userId={userId}
           tenantId={tenantId}
