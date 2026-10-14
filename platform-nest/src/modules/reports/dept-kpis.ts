@@ -66,7 +66,7 @@ export const DEPT_KPI_SETS: Readonly<Record<WorkspaceSlug, readonly DeptKpiDef[]
   "web-dev": [
     pct("projects-on-time", "Projects on time", "up_good", dept("delivery.milestone_hit_rate"), 0.85, 0.05),
     pct("requests-within-sla", "Requests delivered by the date needed", "up_good", read("webdev.requests_delivered_by_needed"), 0.9, 0.05),
-    pct("client-site-uptime", "Client site uptime", "up_good", MODULE, 0.995, 0.005),
+    pct("client-site-uptime", "Client site uptime", "up_good", read("monitoring.client_uptime"), 0.995, 0.005),
     pct("reopened-work-rate", "Reopened work rate", "down_good", dept("flow.reopen_rate"), 0.05, 0.03),
   ],
   seo: [
@@ -76,9 +76,9 @@ export const DEPT_KPI_SETS: Readonly<Record<WorkspaceSlug, readonly DeptKpiDef[]
     pct("client-retention", "Client retention", "up_good", MODULE, 0.9, 0.05),
   ],
   "social-media": [
-    pct("posts-on-schedule", "Posts published on schedule", "up_good", MODULE, 0.95, 0.05),
-    { key: "client-approval-turnaround", label: "Client approval turnaround", unit: "minutes", direction: "down_good", reader: MODULE, suggestedTarget: 2 * DAY, suggestedTolerance: DAY },
-    pct("engagement-growth", "Engagement growth across clients", "up_good", MODULE, 0.05, 0.05),
+    pct("posts-on-schedule", "Posts published on schedule", "up_good", read("social.posts_on_schedule"), 0.95, 0.05),
+    { key: "client-approval-turnaround", label: "Client approval turnaround", unit: "minutes", direction: "down_good", reader: read("social.client_approval_turnaround"), suggestedTarget: 2 * DAY, suggestedTolerance: DAY },
+    pct("engagement-growth", "Engagement growth across clients", "up_good", read("social.engagement_growth"), 0.05, 0.05),
   ],
   creatives: [
     pct("asset-requests-on-time", "Asset requests delivered on time", "up_good", read("creatives.asset_requests_on_time"), 0.9, 0.05),

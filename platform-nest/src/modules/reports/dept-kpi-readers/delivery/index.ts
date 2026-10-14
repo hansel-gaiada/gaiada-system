@@ -8,7 +8,9 @@
 import { isModuleEnabled } from "../../../registry";
 import type { ModuleKpiReader } from "../types";
 import { assetsDelivered, revisionRounds } from "./creative-reviews";
+import { clientSiteUptime } from "./monitoring-uptime";
 import { adBudgetsOnPace, clientReportsOnTime, clientsRankingGrowth } from "./search";
+import { clientApprovalTurnaround, engagementGrowth, postsOnSchedule } from "./social";
 import { assetRequestsOnTime, webdevRequestsDeliveredByNeeded } from "./work-requests-on-time";
 
 /** The reader, run only when the company has `module` (own `enabled_modules` or an active service assignment). */
@@ -20,10 +22,15 @@ export const gated =
 export const DELIVERY_READERS: Record<string, ModuleKpiReader> = {
   // Web Dev
   "webdev.requests_delivered_by_needed": webdevRequestsDeliveredByNeeded,
+  "monitoring.client_uptime": gated("monitoring", clientSiteUptime),
   // SEO
   "search.clients_ranking_growth": gated("search", clientsRankingGrowth),
   "search.client_reports_on_time": gated("search", clientReportsOnTime),
   "search.ad_budgets_on_pace": gated("search", adBudgetsOnPace),
+  // Social Media
+  "social.posts_on_schedule": gated("social", postsOnSchedule),
+  "social.client_approval_turnaround": gated("social", clientApprovalTurnaround),
+  "social.engagement_growth": gated("social", engagementGrowth),
   // Creatives
   "creatives.asset_requests_on_time": assetRequestsOnTime,
   "creatives.revision_rounds": revisionRounds,
