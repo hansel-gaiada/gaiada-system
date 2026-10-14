@@ -122,10 +122,11 @@ describe("selectBands", () => {
   it("draws the Now band, the You band, Pulse (the Department band) the Work band (DW-3f) and the Growth band (DW-3g) for departments, while the other blocks are planned", () => {
     for (const ws of WORKSPACES) {
       const company = ws.overview[0].key === "decisions";
-      expect(selectBands(ws.overview, ctx).map((b) => b.band), ws.key).toEqual(company ? ["now"] : ["now", "you", "department", "work", "growth"]);
+      expect(selectBands(ws.overview, ctx).map((b) => b.band), ws.key).toEqual(company ? ["now", "work"] : ["now", "you", "department", "work", "growth"]);
     }
-    // The company frame has Today; its decisions block waits for DW-3i.
-    expect(selectBands(COMPANY_SUBJECT.widgets, ctx).map((b) => [b.band, b.widgets.map((w) => w.key)])).toEqual([["now", ["today"]]]);
+    // For a plain member the company frame has Today and, in an agency, the campaigns across departments (DW-3i): decisions, the
+    // company's money and figures, the departments and the growth blocks are behind the cockpit's gates (overviewCompany.test.ts).
+    expect(selectBands(COMPANY_SUBJECT.widgets, ctx).map((b) => [b.band, b.widgets.map((w) => w.key)])).toEqual([["now", ["today"]], ["work", ["company-campaigns"]]]);
     // Department workspaces have Needs you and Today.
     const dept = WORKSPACES.find((w) => w.key === "web-dev")!;
     expect(selectBands(dept.overview, ctx)[0].widgets.map((w) => w.key)).toEqual(["needs-you", "today"]);

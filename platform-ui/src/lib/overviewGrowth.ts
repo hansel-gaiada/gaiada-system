@@ -11,7 +11,7 @@ export const APPRAISAL_HREF = "/appraisals/mine";
 /** The module each Growth block reads from, the same gate its page uses (`/me/learning` gates on `lms`,
  *  `/appraisals` on `reports`). A company that switched the module off has no backend for the block, so it is not
  *  placed (plan §3.3: a block with no backend is hidden), rather than saying "Unavailable" forever. */
-const GROWTH_MODULE: Readonly<Record<string, string>> = { learning: "lms", appraisal: "reports" };
+const GROWTH_MODULE: Readonly<Record<string, string>> = { learning: "lms", appraisal: "reports", "learning-compliance": "lms", "appraisal-cycle": "reports" };
 
 /** Whether a widget may be placed, as far as the Growth band is concerned. `moduleOn` is the company's module gate,
  *  which fails open, so only a module the company really switched off drops its block. */

@@ -949,29 +949,126 @@ test.describe("the Overview's frame: the functional workspaces keep their page b
 });
 
 test.describe("the Overview's frame: someone whose home is the Company area", () => {
-  test("a member with no workspace of their own stays on / and gets the company-level frame", async ({ page, context }) => {
+  test("a member with no workspace of their own stays on / and gets the company-level frame: Today and Campaigns, no money, no company figures", async ({ page, context }) => {
     await signIn(page, context, "member");
     await page.goto("/");
 
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), Gede$/);
-    await expect(page.locator("#main-content").getByText(/^Company · Gaia Digital Agency · /)).toBeVisible();
+    const main = page.locator("#main-content");
+    await expect(main.getByText(/^Company · Gaia Digital Agency · /)).toBeVisible();
     await expect(page.getByRole("group", { name: "Period" }).getByRole("button", { name: "Month" })).toHaveAttribute("aria-pressed", "true");
-    // Today is built for the company frame; its decisions block (DW-3i) is not, so no Needs you here.
-    await expect(page.getByText(/The Company Overview is being built/)).toHaveCount(0);
-    await expect(page.getByRole("heading", { level: 2, name: "Now", exact: true })).toBeVisible();
-    await expect(page.getByRole("region", { name: "Today", exact: true })).toBeVisible();
-    await expect(page.getByRole("region", { name: "Needs you", exact: true })).toHaveCount(0);
+    await expect(main.getByText(/The Company Overview is being built/)).toHaveCount(0);
+    await expect(main.getByRole("region", { name: "Today", exact: true })).toBeVisible();
+    await expect(main.getByRole("region", { name: "Needs you", exact: true })).toHaveCount(0);
+
+    // DW-3i: the campaigns across departments need only the Agency page's own gate, so the member has them (the demo has two)...
+    const campaigns = main.getByRole("region", { name: "Campaigns", exact: true });
+    await expect(campaigns).toBeVisible();
+    await expect(campaigns.getByRole("link", { name: "Q3 lead-gen push" })).toBeVisible();
+    await expect(campaigns.getByRole("link", { name: "Brand awareness — social" })).toBeVisible();
+    // ...and every block behind the cockpit's gates is not placed at all: not "No access", not drawn.
+    for (const name of ["Needs you: decisions", "Company", "Departments by condition", "Learning compliance", "Appraisal cycle"]) {
+      await expect(main.getByRole("region", { name, exact: true }), name).toHaveCount(0);
+    }
+    await expect(main.getByText(/No access/)).toHaveCount(0);
+    // No money anywhere on the page.
+    await expect(main.getByText(/\bIDR\b/)).toHaveCount(0);
+    await expect(main.getByText(/Revenue|Overdue receivables/)).toHaveCount(0);
+    await expect(main.locator(".ov-band__label")).toHaveText(["Now", "Work"]);
     await expect(menu(page, "Company")).toBeVisible();
   });
 
-  test("a platform admin's home is the Office of the GM: / goes there, and the cockpit keeps its own page", async ({ page, context }) => {
+  test("a platform admin's home is the Office of the GM: / goes there, and the page is the company Overview with the cockpit under it (DW-3i)", async ({ page, context }) => {
     await signIn(page, context, "superadmin");
     await page.goto("/");
     await expect(page).toHaveURL(/\/departments\/dept-5$/);
-    // The GM's page is still the cockpit until DW-3i, so no Overview frame here.
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), Clement$/);
+    const main = page.locator("#main-content");
+    await expect(main.getByText(/^Office of the GM · Gaia Digital Agency · /)).toBeVisible();
+    await expect(page.getByRole("group", { name: "Period" })).toBeVisible();
+    await expect(main.getByText(/Overview is being built/)).toHaveCount(0);
+
+    // The spec's band order (plan §3.5), then today's cockpit under it: nothing is removed.
+    await expect(main.locator(".ov-band__label")).toHaveText(["Now", "Office of the GM", "Work", "Growth", "More from Office of the GM"]);
+    await expect(main.getByText("The business", { exact: true })).toBeVisible();
+
+    // Needs you: decisions, in whatever honest state the demo queue gives (never a bare 0).
+    const decisions = main.getByRole("region", { name: "Needs you: decisions", exact: true });
+    await expect(decisions).toBeVisible();
+    await expect(decisions).toContainText(/awaiting a decision|Nothing is waiting on a decision|Nothing found in the sources|Unavailable/);
+    await expect(main.getByRole("region", { name: "Today", exact: true })).toBeVisible();
+
+    // Company: the ledger's own P&L total from the demo books, then the report figures in a state the demo gives.
+    const company = main.getByRole("region", { name: "Company", exact: true });
+    await expect(company).toBeVisible();
+    await expect(company.locator('[data-tile="revenue"]')).toHaveAttribute("data-state", "ok");
+    await expect(company.locator('[data-tile="revenue"]')).toContainText("331.0M IDR");
+    await expect(company.locator('[data-tile="overdue"]')).toHaveAttribute("data-state", /^(ok|no-data)$/);
+    await expect(company.locator('[data-tile="milestones"]')).toHaveAttribute("data-state", /^(ok|no-data)$/);
+    await expect(company.locator('[data-tile="utilization"]')).toHaveAttribute("data-state", /^(ok|no-data)$/);
+    await expect(company.getByRole("link", { name: "Company report" })).toBeVisible();
+    await expect(company.getByRole("link", { name: "Finance" })).toHaveAttribute("href", "/finance/reports");
+
+    // Departments by condition: `dept-kpis/overview` has no demo fixture until DW-4e-2, so the honest demo state is Unavailable;
+    // once it has one this is the worst-first list. Either way, never an empty list that reads as "no departments".
+    const departments = main.getByRole("region", { name: "Departments by condition", exact: true });
+    await expect(departments).toBeVisible();
+    await expect(departments).toHaveAttribute("data-state", /^(unavailable|ok)$/);
+    if ((await departments.getAttribute("data-state")) === "unavailable") {
+      await expect(departments.getByText("Unavailable")).toBeVisible();
+      await expect(departments.getByRole("listitem")).toHaveCount(0);
+    } else {
+      await expect(departments.getByRole("listitem").first()).toBeVisible();
+    }
+
+    // Campaigns across departments: the demo's two campaigns, undated, so by name; no department part yet.
+    const campaigns = main.getByRole("region", { name: "Campaigns", exact: true });
+    await expect(campaigns).toBeVisible();
+    await expect(campaigns.getByRole("listitem")).toHaveCount(2);
+    await expect(campaigns.getByRole("link", { name: "Q3 lead-gen push" })).toHaveAttribute("href", "/agency/cam-1");
+    await expect(campaigns.getByText("No department part yet")).toHaveCount(2);
+
+    // Growth: the demo's company-wide compliance grid (2 mandatory paths, 30 of 46 complete) and the appraisal list, counted by stage.
+    const learning = main.getByRole("region", { name: "Learning compliance", exact: true });
+    await expect(learning).toBeVisible();
+    await expect(learning.getByText("65% of mandatory training complete")).toBeVisible();
+    await expect(learning.getByText("30 of 46 assigned, across 2 mandatory paths")).toBeVisible();
+    await expect(learning.getByText("Lowest: Security awareness, 48%")).toBeVisible();
+    await expect(learning.getByRole("link", { name: "Learning compliance" })).toHaveAttribute("href", "/learning/compliance");
+    const appraisal = main.getByRole("region", { name: "Appraisal cycle", exact: true });
+    await expect(appraisal).toBeVisible();
+    await expect(appraisal.getByText(/^\d+ of \d+ finalized$/)).toBeVisible();
+    await expect(appraisal.getByText(/^Across \d+ cycles?$/)).toBeVisible();
+    await expect(appraisal.getByText(/Unavailable|No access/)).toHaveCount(0);
+  });
+
+  test("a manager's home is the Office of the GM through narrowed access: the decisions and nothing of the company's money or figures", async ({ page, context }) => {
+    await signIn(page, context, "manager");
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/departments\/dept-5$/);
+    const main = page.locator("#main-content");
+    await expect(main.locator(".ov-band__label")).toHaveText(["Now", "Work", "More from Office of the GM"]);
+    await expect(main.getByRole("region", { name: "Needs you: decisions", exact: true })).toBeVisible();
+    await expect(main.getByRole("region", { name: "Today", exact: true })).toBeVisible();
+    for (const name of ["Company", "Departments by condition", "Learning compliance", "Appraisal cycle"]) {
+      await expect(main.getByRole("region", { name, exact: true }), name).toHaveCount(0);
+    }
+    await expect(main.getByText(/\bIDR\b/)).toHaveCount(0);
+    // Today's narrowed cockpit is under it, with its own notice.
+    await expect(main.getByText(/Scoped to the departments you lead/)).toBeVisible();
+  });
+
+  test("a classic user sees none of it: the Office of the GM's page is the cockpit alone", async ({ page, context }) => {
+    await signIn(page, context, "superadmin", { pilot: false });
+    await page.goto("/departments/dept-5");
+    const main = page.locator("#main-content");
+    await expect(main.getByText("The business", { exact: true })).toBeVisible();
     await expect(page.getByRole("group", { name: "Period" })).toHaveCount(0);
-    await expect(page.getByText(/Overview is being built/)).toHaveCount(0);
+    await expect(main.locator(".ov-band__label")).toHaveCount(0);
+    for (const name of ["Needs you: decisions", "Company", "Departments by condition", "Campaigns", "Learning compliance", "Appraisal cycle"]) {
+      await expect(main.getByRole("region", { name, exact: true }), name).toHaveCount(0);
+    }
   });
 });
 

@@ -40,7 +40,7 @@ describe("HideOnOverview", () => {
     expect(screen.getByText("Web Dev header")).toBeInTheDocument();
   });
 
-  it("keeps it where the layout opts out (the GM's cockpit page)", () => {
+  it("keeps it where the layout opts out (the GM's refusal page)", () => {
     nav.pathname = "/departments/d-web";
     render(inShell(<HideOnOverview overviewPath="/departments/d-web" enabled={false}>{header}</HideOnOverview>));
     expect(screen.getByText("Web Dev header")).toBeInTheDocument();

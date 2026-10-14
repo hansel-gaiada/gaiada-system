@@ -227,15 +227,27 @@ const DEPARTMENT_OVERVIEW: readonly OverviewWidget[] = [
   { key: "appraisal", band: "growth", label: "Appraisal" },
 ];
 
-/** The Office of the GM's company Overview (§3.5), same band order. */
+// The cockpit's access tiers (`lib/gm.ts`: `gmAccessFor`, `canReadGmMoney`) as registry gates, so the Overview places a block for
+// exactly the people the cockpit shows its figures to, and never for anyone else. `companyAccess` (lib/overviewCompany.ts) is the same
+// rule in code, and a test pins the two together for every role.
+const GM_CONSOLE: Gate = { kind: "any", gates: [{ kind: "cap", cap: "reports.company.view" }, { kind: "cap", cap: "reports.department.view" }] };
+/** "full": company-grain figures, and the read of every department's standing (`dept-kpis/overview` is the company-wide tiers'). */
+const GM_FULL: Gate = { kind: "cap", cap: "reports.company.view" };
+/** Company money is its own boundary: a console reader who also holds the finance read capability. */
+const GM_MONEY: Gate = { kind: "all", gates: [GM_CONSOLE, { kind: "cap", cap: "finance.statement.view" }] };
+
+/** The Office of the GM's company Overview (§3.5), same band order. Every block carries the cockpit's own gate. */
 export const COMPANY_OVERVIEW: readonly OverviewWidget[] = [
-  { key: "decisions", band: "now", label: "Needs you: decisions", ticket: "DW-3i" },
+  { key: "decisions", band: "now", label: "Needs you: decisions", gate: GM_CONSOLE },
   { key: "today", band: "now", label: "Today" },
-  { key: "company", band: "department", label: "Company", ticket: "DW-3i" },
-  { key: "departments", band: "department", label: "Departments by condition", ticket: "DW-3i" },
-  { key: "campaigns", band: "work", label: "Campaigns", gate: AGENCY_ONLY, ticket: "DW-3i" },
-  { key: "learning-compliance", band: "growth", label: "Learning compliance", ticket: "DW-3i" },
-  { key: "appraisal-cycle", band: "growth", label: "Appraisal cycle", ticket: "DW-3i" },
+  // Revenue and overdue receivables need the money gate, milestones and utilization the full one; the block draws only the parts the
+  // person may see (`companyAccess`).
+  { key: "company", band: "department", label: "Company", gate: { kind: "any", gates: [GM_FULL, GM_MONEY] } },
+  { key: "departments", band: "department", label: "Departments by condition", gate: GM_FULL },
+  // The cockpit's Campaigns row gate. Not `campaigns`: that key is the department blocks' (shared campaigns with OUR part).
+  { key: "company-campaigns", band: "work", label: "Campaigns", gate: { kind: "agencyRow", row: "agency" } },
+  { key: "learning-compliance", band: "growth", label: "Learning compliance", gate: { kind: "all", gates: [GM_FULL, { kind: "cap", cap: "lms.progress.view" }] } },
+  { key: "appraisal-cycle", band: "growth", label: "Appraisal cycle", gate: { kind: "all", gates: [GM_FULL, { kind: "cap", cap: "appraisal.read" }] } },
 ];
 
 // ── Rows every department workspace shares ───────────────────────────────────────────────────────
@@ -559,6 +571,8 @@ const OFFICE_OF_THE_GM: Workspace = {
   tools: launchersOf("gm"),
   connections: [CONN.drive, CONN.claudeSeats],
   overview: COMPANY_OVERVIEW,
+  // These four are the numbers the Company block already shows (DW-3i): the company Overview has no Pulse, so they stay planned
+  // rather than draw the same figure twice. Project health has no honest company reader.
   pulse: [
     { key: "revenue", label: "Revenue", ticket: "DW-3i" },
     { key: "overdue-receivables", label: "Overdue receivables", ticket: "DW-3i" },

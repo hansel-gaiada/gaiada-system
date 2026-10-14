@@ -108,10 +108,10 @@ describe("the next step comes from the status alone", () => {
 });
 
 describe("the Growth band's placement in the registry", () => {
-  it("every department workspace lists Learning and Appraisal as built blocks; the company frame lists none of them", () => {
+  it("every department workspace lists Learning and Appraisal as built blocks; the company frame lists its own two, Learning compliance and Appraisal cycle (DW-3i)", () => {
     for (const ws of WORKSPACES) {
       const growth = ws.overview.filter((w) => w.band === "growth");
-      if (ws.overview[0].key === "decisions") { expect(growth.every(isPlanned), ws.key).toBe(true); continue; }
+      if (ws.overview[0].key === "decisions") { expect(growth.map((w) => [w.key, isPlanned(w)]), ws.key).toEqual([["learning-compliance", false], ["appraisal-cycle", false]]); continue; }
       expect(growth.map((w) => [w.key, isPlanned(w)]), ws.key).toEqual([["learning", false], ["appraisal", false]]);
     }
   });
@@ -123,6 +123,11 @@ describe("the Growth band's placement in the registry", () => {
     expect(growthWidgetPlaced("appraisal", off("reports"))).toBe(false);
     expect(growthWidgetPlaced("learning", off("reports"))).toBe(true);
     expect(growthWidgetPlaced("projects", () => false)).toBe(true);
+    // The company Overview's two blocks follow the same modules (DW-3i).
+    expect(growthWidgetPlaced("learning-compliance", off("lms"))).toBe(false);
+    expect(growthWidgetPlaced("appraisal-cycle", off("reports"))).toBe(false);
+    expect(growthWidgetPlaced("learning-compliance", off("reports"))).toBe(true);
+    expect(growthWidgetPlaced("appraisal-cycle", off("lms"))).toBe(true);
     expect(growthWidgetPlaced("learning", () => true)).toBe(true);
   });
 

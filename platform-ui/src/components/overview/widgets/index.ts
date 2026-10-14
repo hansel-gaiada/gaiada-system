@@ -24,6 +24,12 @@ import { Campaigns } from "./Campaigns";
 import { Requests } from "./Requests";
 import { Learning } from "./Learning";
 import { Appraisal } from "./Appraisal";
+import { Decisions } from "./Decisions";
+import { Company } from "./Company";
+import { Departments } from "./Departments";
+import { CompanyCampaigns } from "./CompanyCampaigns";
+import { CompanyLearning } from "./CompanyLearning";
+import { CompanyAppraisals } from "./CompanyAppraisals";
 
 export interface OverviewWidgetProps {
   me: Me;
@@ -60,6 +66,14 @@ export const OVERVIEW_WIDGETS: Readonly<Record<string, OverviewWidgetComponent>>
   requests: Requests,
   learning: Learning,
   appraisal: Appraisal,
+  // The company Overview's blocks (DW-3i). Their keys differ from the department blocks' (`campaigns`, `learning`, `appraisal`) on
+  // purpose: one key, one component, whichever workspace lists it.
+  decisions: Decisions,
+  company: Company,
+  departments: Departments,
+  "company-campaigns": CompanyCampaigns,
+  "learning-compliance": CompanyLearning,
+  "appraisal-cycle": CompanyAppraisals,
 };
 
 export function hasOverviewWidget(key: string, widgets: Readonly<Record<string, OverviewWidgetComponent>> = OVERVIEW_WIDGETS): boolean {

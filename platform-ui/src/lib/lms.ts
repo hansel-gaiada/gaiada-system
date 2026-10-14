@@ -181,6 +181,18 @@ export const getCompliance = (u: string, t: string) =>
   soft(() => platformFetch<ComplianceRow[]>(`${base(t)}/compliance`, u), []);
 
 /**
+ * DW-3i — the company-wide compliance grid for the company Overview. NOT `soft()`, unlike `getCompliance` above: a refusal
+ * folded into `[]` would say "no mandatory training is assigned anywhere", the wrong answer this surface must never give.
+ * Rethrows; the caller wraps it in `readResult`. An answer that is not the array (a unit-scoped object from a backend that
+ * misread the call) is an error, never numbers.
+ */
+export async function getCompanyCompliance(u: string, t: string): Promise<ComplianceRow[]> {
+  const data = await platformFetch<unknown>(`${base(t)}/compliance`, u);
+  if (!Array.isArray(data)) throw new Error("unexpected answer from the compliance endpoint");
+  return data as ComplianceRow[];
+}
+
+/**
  * DW-4g — a department head's Team progress (BFF §38). NOT `soft()`: a refusal read as an empty list
  * would say "nobody here has any training", the wrong answer this surface must never give.
  *

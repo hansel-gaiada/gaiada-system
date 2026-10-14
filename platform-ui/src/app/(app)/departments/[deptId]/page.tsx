@@ -67,7 +67,7 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
     // server lets them read, rather than the same refusal a member gets.
     const access = gmAccessFor(me, tenant);
     if (access === "none") return <GmAccessDenied />;
-    return (
+    const cockpit = (
       <GmCockpit
         userId={userId}
         tenantId={tenant}
@@ -78,11 +78,16 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
         canReadMoney={canReadGmMoney(me, tenant)}
       />
     );
+    // DW-3i: on the pilot switch the Office of the GM's page is the company Overview, and today's cockpit stays under it as "More
+    // from the Office of the GM" (plan §2.6 rule 1: nothing is removed). The refusal above stays frameless, so a person without
+    // the access sees no Overview. Classic users get the cockpit alone, as before.
+    const gmFrame = await pilotFrame(me, tenant, { deptId }, searchParams);
+    return gmFrame ? gmFrame(cockpit) : cockpit;
   }
 
   // DW-3a: on the pilot switch the Overview frames this Home body, which stays below its bands until the
-  // Overview's own blocks replace it. After the GM branch on purpose: the GM's company Overview is DW-3i, so
-  // its cockpit stays as it is until then. The body is built once, below, and passed through `frame`.
+  // Overview's own blocks replace it. After the GM branch, which frames its own cockpit (DW-3i). The body is built
+  // once, below, and passed through `frame`.
   const frame = await pilotFrame(me, tenant, { deptId }, searchParams);
 
   const { sscope } = await searchParams;

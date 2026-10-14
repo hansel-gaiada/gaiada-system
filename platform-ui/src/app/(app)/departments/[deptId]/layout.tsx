@@ -9,7 +9,7 @@ import { titleWithRecurrenceGlyph, isDoneStatus, taskUrgency, openDependencies }
 import { getMyWorkQueue, projectQueueForCompany } from "@/lib/queue";
 import { toolkitFor, visibleGroups } from "@/lib/deptToolkits";
 import { activeCompany } from "@/lib/companyContext";
-import { isGmDept } from "@/lib/gm";
+import { canReadGmConsole, isGmDept } from "@/lib/gm";
 import { PageHeader } from "@/components/PageHeader";
 import { HideOnOverview } from "@/components/overview/HideOnOverview";
 import { DeptTabs } from "@/components/shell/DeptTabs";
@@ -138,8 +138,9 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
   return (
     <>
       {/* DW-3a: in the workspace shell the Overview draws its own header, so this one steps aside on that
-          page only. The GM keeps it: its page is still the cockpit until DW-3i. */}
-      <HideOnOverview overviewPath={`/departments/${encodeURIComponent(deptId)}`} enabled={!isGmDept(dept.name)}>
+          page only. DW-3i: the GM's page draws the company Overview too, for anyone who may open the cockpit; a person the cockpit
+          refuses sees the refusal with no Overview, so the header stays for them. */}
+      <HideOnOverview overviewPath={`/departments/${encodeURIComponent(deptId)}`} enabled={!isGmDept(dept.name) || canReadGmConsole(me, tenant)}>
         <PageHeader
           eyebrow="Department workspace"
           title={dept.name}

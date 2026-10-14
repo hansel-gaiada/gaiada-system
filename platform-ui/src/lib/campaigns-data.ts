@@ -46,6 +46,20 @@ export async function listSharedCampaigns(u: string, t: string, unitId: string):
 export const readSharedCampaigns = (u: string, t: string, unitId: string): Promise<ReadResult<DeptCampaignRow[]>> =>
   readResult(listSharedCampaigns(u, t, unitId));
 
+/** DW-3i: `GET campaigns` with no `unitId`: every campaign of the company, each with its lead unit, dates and `partCount` (§31.4).
+ *  The company Overview's "Campaigns across departments". `part` is null on every row (no department is asked about). */
+export const readAllCampaigns = (u: string, t: string): Promise<ReadResult<DeptCampaignRow[]>> =>
+  readResult(
+    whenModuleOn(platformFetch<unknown>(`${agency(t)}/campaigns`, u), "Agency").then((raw) => {
+      // A 200 that is not a list is a broken read, never "no campaigns".
+      if (!Array.isArray(raw)) throw new Error("The campaigns read returned an unexpected answer.");
+      return raw.flatMap((r) => {
+        const row = normalizeDeptCampaignRow(r);
+        return row ? [row] : [];
+      });
+    }),
+  );
+
 /** `GET campaigns/:id`. `ok` with `null` is a real 404 (`campaign_not_found`): the page calls `notFound()`. */
 export const readCampaignDetail = (u: string, t: string, campaignId: string): Promise<ReadResult<CampaignDetail | null>> =>
   readResult(

@@ -10,7 +10,7 @@ import { useWorkspaceShell } from "@/components/shell/WorkspaceShellContext";
 //
 // Everywhere else it renders its children untouched: classic shell (no shell context), every other page of
 // the workspace, and a layout that passes `enabled={false}` because its page keeps the header (the GM's
-// cockpit, until DW-3i).
+// refusal page, which draws no Overview).
 export function HideOnOverview({ overviewPath, enabled = true, children }: {
   /** The workspace's Overview path, e.g. `/departments/<id>` or `/hr`. */
   overviewPath: string;
