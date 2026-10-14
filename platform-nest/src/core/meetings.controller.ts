@@ -24,6 +24,7 @@ import { isUuid } from "./conversation-core";
 import { storage } from "./storage";
 import { sha256Hex } from "./content-hash";
 import { emitEvent } from "../events/outbox.service";
+import { mintMeetingId, recordingScheduledActivity, scheduleRecordingInTx } from "./meeting-schedule";
 import { AuthGuard } from "../auth/guards";
 
 const KINDS = new Set(["audio", "video"]);
@@ -36,12 +37,8 @@ const MAX_MINUTES_CHARS = 100_000;
 // unreachable through `update()`'s validation despite being perfectly legal in the database.
 const STATUSES = new Set(["scheduled", "recording", "recorded", "transcribing", "transcribed", "ingested", "failed"]);
 
-/** Mint the stable meeting id — the frozen-contract dedupe key `start` has always used. Both
- *  `start` and `schedule` (W0) go through this ONE function so the two entry points can never
- *  diverge in shape; a caller-supplied id is honoured as-is (helper retry / explicit id). */
-function mintMeetingId(explicit?: string): string {
-  return explicit ?? `mtg-${newId()}`;
-}
+// `mintMeetingId` (the frozen-contract dedupe key `start` and `schedule` both use) lives in ./meeting-schedule.ts with the
+// scheduled-row writer, so the calendar's `record: true` path shares it (DW-8g).
 
 type Row = {
   id: string;
@@ -259,19 +256,15 @@ export class MeetingRecordingsController {
     await authorize(req.principal, { kind: "meeting_recording", tenantId }, "create");
     const meetingId = mintMeetingId(body?.meetingId);
     const id = newId();
-    const result = await withTenants([tenantId], async (c) => {
-      await c.query(
-        `INSERT INTO meeting_recordings
-           (id, tenant_id, meeting_id, client_id, project_id, title, kind, status, scheduled_at, scheduled_by, created_by, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'scheduled', $8, $9, $10, $11)`,
-        [id, tenantId, meetingId, clientId ?? null, projectId ?? null, title ?? null, kind, scheduledDate.toISOString(), req.principal.userId, req.principal.userId, config.originSite],
-      );
-      await emitEvent(c, tenantId, "meeting_recording", id, "meeting.recording.scheduled", {
-        meetingId, kind, scheduledAt: scheduledDate.toISOString(), actorId: req.principal.userId,
-      });
-      return { id, meetingId, scheduledAt: scheduledDate.toISOString() };
-    });
-    await writeActivity(tenantId, req.principal.userId, "scheduled", "meeting_recording", result.id, { meetingId, scheduledAt: result.scheduledAt });
+    // DW-8g: the INSERT + `meeting.recording.scheduled` event + activity row moved, unchanged, into ./meeting-schedule.ts so the
+    // calendar's `record: true` path writes the SAME row through the SAME function.
+    const result = await withTenants([tenantId], (c) =>
+      scheduleRecordingInTx(c, {
+        tenantId, id, meetingId, title: title ?? null, kind, clientId: clientId ?? null, projectId: projectId ?? null,
+        scheduledAt: scheduledDate, userId: req.principal.userId,
+      }),
+    );
+    await recordingScheduledActivity(tenantId, req.principal.userId, result);
     return result;
   }
 
