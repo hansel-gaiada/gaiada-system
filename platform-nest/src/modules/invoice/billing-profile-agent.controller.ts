@@ -28,7 +28,7 @@ export function maskAccountNo(raw: string | null | undefined): string | null {
 interface AgentProfileRow {
   legalName: string; address: string; invoicePrefix: string; defaultPaymentTermsDays: number; currencyCode: string;
   bankName: string | null; bankAccountName: string | null; bankAccountNo: string | null;
-  bankLedgerAccountCode: string | null; defaultRevenueAccountCode: string | null;
+  bankLedgerAccountCode: string | null; defaultRevenueAccountCode: string | null; gatewayClearingAccountCode: string | null;
   signatureThreshold: string | null; updatedAt: string;
 }
 
@@ -45,6 +45,7 @@ export class BillingProfileAgentController {
                 bank_name AS "bankName", bank_account_name AS "bankAccountName", bank_account_no AS "bankAccountNo",
                 bank_ledger_account_code AS "bankLedgerAccountCode",
                 default_revenue_account_code AS "defaultRevenueAccountCode",
+                gateway_clearing_account_code AS "gatewayClearingAccountCode",
                 signature_threshold::text AS "signatureThreshold", updated_at AS "updatedAt"
            FROM company_billing_profiles WHERE tenant_id = $1`,
         [tenantId],
@@ -64,6 +65,9 @@ export class BillingProfileAgentController {
         : null,
       bankLedgerAccountCode: p.bankLedgerAccountCode,
       defaultRevenueAccountCode: p.defaultRevenueAccountCode,
+      // PV5-F4: the gateway clearing account's CODE (PV5-10: where an online receipt is booked). A ledger account code is
+      // not a secret, unlike the bank account number, which stays masked above.
+      gatewayClearingAccountCode: p.gatewayClearingAccountCode,
       signatureThreshold: p.signatureThreshold,
       updatedAt: p.updatedAt,
     };

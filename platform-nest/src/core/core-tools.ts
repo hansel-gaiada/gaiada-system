@@ -985,8 +985,8 @@ const INVOICE_ISSUE_CORE_TOOLS: McpToolDef[] = [
   {
     name: "billingProfile.read",
     description:
-      "The company's billing profile: legal name, address, invoice number prefix, payment terms, currency, the two " +
-      "ledger account codes and the bank block with the account number MASKED to its last 4 digits " +
+      "The company's billing profile: legal name, address, invoice number prefix, payment terms, currency, the ledger " +
+      "account codes (bank, default revenue, online-payment gateway clearing; a code is not secret) and the bank block with the account number MASKED to its last 4 digits " +
       "(`accountNoMasked`). The full number is never returned, to anyone. 404 if the company has no profile yet. " +
       "Changing the profile or its bank details is a human action in Settings, not a tool.",
     minAssurance: "verified",
