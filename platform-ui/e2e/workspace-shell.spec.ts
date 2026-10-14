@@ -1093,7 +1093,8 @@ test.describe("the Overview's frame: the functional workspaces keep their page b
   // they leave the Overview's page; the counts, the integrity verdicts, the close gate and all of IT's page have no block yet, so they stay.
   // A classic user keeps every card.
   const section = (page: Page) => page.locator("#main-content .ov-legacy");
-  const heading = (loc: Locator | Page, name: string) => loc.getByRole("heading", { name, exact: true });
+  // A card title with a "?" hint carries the hint's button inside its heading, so the name starts with the title but is not equal to it.
+  const heading = (loc: Locator | Page, name: string) => loc.getByRole("heading", { name: new RegExp(`^${name.replace(/[?]/g, "\\$&")}(?!\\w)`) });
 
   test("/hr under the Overview: the area cards and the directory card are gone, the counts stay, and a classic user keeps every card (DW-3z)", async ({ page, context }) => {
     await signIn(page, context, "superadmin");
