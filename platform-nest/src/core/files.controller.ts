@@ -20,7 +20,7 @@ export const MAX_BYTES = 25 * 1024 * 1024;
 // re-authorizes the caller against `{kind: targetType}`, and neither kind is readable by the `client`
 // derived role in Cerbos — so a client CANNOT upload through this staff route. Client-side proof
 // upload goes through the portal's own route, which authorizes on `portal` + client ownership.
-const TARGET_KINDS = new Set(["project", "task", "deliverable", "client", "agency_campaign", "agency_creative_asset", "contract", "invoice_payment", "work_request", "agency_campaign_part"]);
+export const TARGET_KINDS = new Set(["project", "task", "deliverable", "client", "agency_campaign", "agency_creative_asset", "contract", "invoice_payment", "work_request", "agency_campaign_part"]);
 
 // DW-8h (docs/FRONTEND-BFF-CONTRACT.md §45.1). The two kinds below are resolved through the shared work-target module
 // (work-targets.ts, DW-6k's resolver): the target must exist (404 `target_not_found`), reads follow the target's own read, and
@@ -55,7 +55,7 @@ async function writeWorkTarget(req: FastifyRequest, tenantId: string, kind: Work
 }
 
 /** The READ resource for a file's target: the new kinds send what their own read route sends, the rest the inline shape. */
-function targetReadResource(f: { target_entity_type: string; target_entity_id: string }, tenantId: string) {
+export function targetReadResource(f: { target_entity_type: string; target_entity_id: string }, tenantId: string) {
   const wk = workKindOf(f.target_entity_type);
   return wk ? readResourceOf(wk, tenantId, f.target_entity_id) : { kind: f.target_entity_type, id: f.target_entity_id, tenantId };
 }

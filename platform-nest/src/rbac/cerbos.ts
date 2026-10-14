@@ -306,6 +306,48 @@ export async function checkActions(p: Principal, r: Resource, actions: readonly 
   return Object.fromEntries(actions.map((a) => [a, got[a] === "EFFECT_ALLOW"]));
 }
 
+/** Cerbos refuses a CheckResources request over 50 resources (the limit the repo already hit once). */
+export const CERBOS_BATCH_LIMIT = 50;
+
+/**
+ * ONE action on MANY resources: the same principal and resource payloads `check` sends (so the attribute allow-list in
+ * `resourcePayload` cannot drift), in chunks of at most `CERBOS_BATCH_LIMIT`. Answers a boolean per input resource, in input
+ * order. ADVISORY like `checkActions`: it audits nothing and does not run `authorize()`'s session or act-for checks, so a caller
+ * that returns data on the strength of it (DW-8i knowledge search) does those itself.
+ *
+ * FAILS CLOSED, per resource. A result is matched to its input by POSITION and then confirmed by its echoed `kind` and `id`;
+ * a response of the wrong length, or a result that echoes a different resource or none, answers `false` for what it cannot vouch for.
+ * An HTTP error throws (a caller must not read "Cerbos is down" as "nothing is allowed").
+ */
+export async function checkMany(p: Principal, resources: readonly Resource[], action: string): Promise<boolean[]> {
+  const out: boolean[] = [];
+  for (let i = 0; i < resources.length; i += CERBOS_BATCH_LIMIT) {
+    const chunk = resources.slice(i, i + CERBOS_BATCH_LIMIT);
+    const payloads = chunk.map(resourcePayload);
+    const res = await fetch(`${config.cerbosUrl}/api/check/resources`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requestId: "platform",
+        principal: principalPayload(p),
+        resources: payloads.map((resource) => ({ actions: [action], resource })),
+      }),
+    });
+    if (!res.ok) throw new Error(`cerbos ${res.status}`);
+    const data = (await res.json()) as {
+      results?: Array<{ resource?: { kind?: string; id?: string }; actions?: Record<string, string> }>;
+    };
+    const results = Array.isArray(data.results) && data.results.length === chunk.length ? data.results : [];
+    chunk.forEach((_, j) => {
+      const got = results[j];
+      const echoed = got?.resource;
+      const matches = echoed !== undefined && (echoed.kind === payloads[j].kind && echoed.id === payloads[j].id);
+      out.push(Boolean(got) && matches && got.actions?.[action] === "EFFECT_ALLOW");
+    });
+  }
+  return out;
+}
+
 export interface QueryPlan {
   kind: "always-allowed" | "always-denied" | "conditional";
   /** For conditional plans: the raw Cerbos AST (the RLS layer maps the parts it supports). */
