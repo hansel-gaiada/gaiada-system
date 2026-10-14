@@ -24,6 +24,7 @@ import { MAX_ATTACHMENT_TOTAL_BYTES } from "./conversation-core";
 import { MAX_PROOF_BYTES, PortalCommerceController } from "./portal-commerce.controller";
 import { PortalConversationController } from "./portal-conversation.controller";
 import { ConversationController } from "./conversation.controller";
+import { FilesController, MAX_BYTES } from "./files.controller";
 
 const DEFAULT_LIMIT = 1024 * 1024;
 const MIB = 1024 * 1024;
@@ -54,7 +55,9 @@ describe("upload body limit arithmetic", () => {
       "/api/:tenantId/portal/conversation", "/api/:tenantId/portal/conversation/:threadId/messages",
       "/api/:tenantId/conversation", "/api/:tenantId/conversation/:threadId/messages",
     ]) expect(byUrl.get(url), url).toBe(MAX_ATTACHMENT_TOTAL_BYTES);
-    expect(UPLOAD_ROUTES).toHaveLength(5);
+    expect(byUrl.get("/api/:tenantId/files")).toBe(MAX_BYTES); // DW-8h: staff file upload, the handler's own 25 MB cap
+    expect(MAX_BYTES).toBe(25 * MIB);
+    expect(UPLOAD_ROUTES).toHaveLength(6);
   });
 
   it("the boot log has one line per entry naming its limit", () => {
@@ -78,11 +81,12 @@ describe("the table's URLs are the paths Nest registers for the real controllers
     return out;
   }
 
-  it("each entry is a POST route declared on one of the three controllers", () => {
+  it("each entry is a POST route declared on one of the four controllers", () => {
     const all = [
       ...registered(PortalCommerceController as never, RequestMethod.POST),
       ...registered(PortalConversationController as never, RequestMethod.POST),
       ...registered(ConversationController as never, RequestMethod.POST),
+      ...registered(FilesController as never, RequestMethod.POST),
     ];
     for (const r of UPLOAD_ROUTES) expect(all.filter((u) => u === r.url), r.url).toHaveLength(1);
   });
