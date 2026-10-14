@@ -5,7 +5,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../../../testing/setup";
 import { uptimeRatio } from "../../../monitoring/runner";
 import { clientSiteUptime } from "./monitoring-uptime";
-import { at, seedDept, UNIT, type DeptWorld } from "./dept-seed";
+import { at, seedDept, UNIT, type DeptWorld } from "../../../../testing/dept-kpi-seed";
 
 type Status = "up" | "down" | "degraded" | "maintenance" | "unknown";
 

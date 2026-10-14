@@ -5,11 +5,11 @@
 // and four clients, each with one project placed in a unit:
 //   inUnit -> d-soc (counted), child -> dv-sub (counted), sibling -> d-other (never), internal -> d-soc but is_internal (never).
 import { randomUUID } from "node:crypto";
-import { config } from "../../../../config";
-import { withTenants } from "../../../../db";
-import { rebuildOrgUnitClosure } from "../../../../core/org-unit-closure";
-import { adminPool } from "../../../../testing/setup";
-import { createClient, createCompany, createProject } from "../../../../testing/fixtures";
+import { config } from "../config";
+import { withTenants } from "../db";
+import { rebuildOrgUnitClosure } from "../core/org-unit-closure";
+import { adminPool } from "./setup";
+import { createClient, createCompany, createProject } from "./fixtures";
 
 export const UNIT = "d-soc";
 

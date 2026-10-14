@@ -79,9 +79,10 @@ export const clientApprovalTurnaround: ModuleKpiReader = async (ctx): Promise<Kp
 };
 
 // n9 `social.engagement_growth`: (cur - prev) / prev, pooled over accounts with at least one non-null `engagements`
-// value in BOTH windows. cur covers the inclusive dates [start, end]; prev the same number of days just before start.
+// value in BOTH windows. Measured to date, so a window still running is not read as a decline: with L = asOf - start + 1,
+// cur covers the dates [start, asOf] and prev the L days just before start, [start - L, start - 1]. Rows after asOf never count.
 // Numerator and denominator are left out: this is a growth rate, not a share.
-// $1 tenant, $2 unit, $3 start, $4 end.
+// $1 tenant, $2 unit, $3 start, $4 asOf (the earlier of asOf and end).
 const GROWTH_SQL = `
   WITH per AS (
     SELECT m.account_id,
@@ -101,10 +102,12 @@ const GROWTH_SQL = `
     FROM per WHERE cur_n > 0 AND prev_n > 0`;
 
 export const engagementGrowth: ModuleKpiReader = async (ctx): Promise<KpiValue | null> => {
+  const upTo = ctx.asOf < ctx.end ? ctx.asOf : ctx.end;
+  if (upTo < ctx.start) return null; // the window has not begun: nothing measured yet
   const row = await social(
     ctx,
     async (c) =>
-      (await c.query<{ cur: string | null; prev: string | null; accounts: string }>(GROWTH_SQL, [ctx.tenantId, ctx.unitId, ctx.start, ctx.end]))
+      (await c.query<{ cur: string | null; prev: string | null; accounts: string }>(GROWTH_SQL, [ctx.tenantId, ctx.unitId, ctx.start, upTo]))
         .rows[0],
   );
   if (!row || Number(row.accounts) === 0 || row.cur === null || row.prev === null) return null;

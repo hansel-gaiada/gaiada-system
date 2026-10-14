@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../../../testing/setup";
 import { clientApprovalTurnaround, engagementGrowth, postsOnSchedule } from "./social";
-import { at, seedDept, uuid, UNIT, type DeptWorld } from "./dept-seed";
+import { at, seedDept, uuid, UNIT, type DeptWorld } from "../../../../testing/dept-kpi-seed";
 
 const MIN = 60;
 
@@ -261,6 +261,23 @@ describe.skipIf(!TEST_URL)("DW-6n social readers (live PG + RLS)", () => {
       // cur = 150 + 50, prev = 100 + 50
       const v = await engagementGrowth(ctx(w.tenant));
       expect(v!.value).toBeCloseTo(50 / 150, 10);
+    });
+
+    it("a running window is measured to date: cur is [start, asOf], prev the same number of days before start", async () => {
+      const w = await seedDept("DW6n-n9 D", ["social"]);
+      const a = await account(w.tenant, w.clients.inUnit);
+      await metric(w, a, "2026-02-18", 999); // before prev starts (Feb 19): out
+      await metric(w, a, "2026-02-19", 30); // prev first day: in
+      await metric(w, a, "2026-02-28", 70); // prev last day: in
+      await metric(w, a, "2026-03-01", 60); // cur first day: in
+      await metric(w, a, "2026-03-10", 90); // asOf: in
+      await metric(w, a, "2026-03-11", 999); // after asOf: out
+      await metric(w, a, "2026-03-31", 999); // window end, after asOf: out
+      const running = { ...ctx(w.tenant), start: "2026-03-01", end: "2026-03-31", asOf: "2026-03-10" };
+      // L = 10: cur = 150, prev = 100
+      expect((await engagementGrowth(running))!.value).toBeCloseTo(0.5, 10);
+      // A window that has not begun reads null.
+      expect(await engagementGrowth({ ...running, asOf: "2026-02-28" })).toBeNull();
     });
 
     it("a decline is negative", async () => {
