@@ -84,10 +84,11 @@ export class CompanyCrudController {
           [newId(), id, req.principal.userId, config.originSite],
         );
       }
-      // DW-7d: a new company starts with a tree holding the HR, Finance and IT departments (DW-D6), so
-      // its org-structure never 404s and those workspaces are real departments from day one.
-      await applyOrgStructure(c, id, startingOrgStructure(name, id));
       await emitEvent(c, id, "company", id, "company.created", { name, type, vertical, parentCompanyId: parentId });
+      // DW-7d: a new company starts with a tree holding the HR, Finance and IT departments (DW-D6), so
+      // its org-structure never 404s and those workspaces are real departments from day one. After
+      // `company.created`, so the outbox announces the company before its tree.
+      await applyOrgStructure(c, id, startingOrgStructure(name, id));
     });
     await writeActivity(id, req.principal.userId, "created", "company", id, { name });
     return { id };
