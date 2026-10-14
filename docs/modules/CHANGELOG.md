@@ -11,6 +11,14 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.133.0` - two more RLS zero-row reads fixed: offboarding revokes org-unit grants; D-9 appointments execute (2026-10-14) - PROTOTYPED
+
+Found by the sweep that came with the client-contact fix (0.128.0); the owner said "fix it" (2026-10-14). Both read a FORCE-RLS tenant table under a bare `withGlobal`, which sets no GUC, so Postgres returned zero rows with no error.
+- **Offboarding** (`admin/employees.controller.ts`, `terminate`): the manual-grant sweep's org_unit arm subselects `org_units`; it found nothing, so a leaver's org_unit-scoped manual grants were never revoked (only company-scope ones were). Now under `withTenants([tenantId], â€¦)`, SQL unchanged. `employees-jml.test.ts` 16 (+1: own-company unit grant revoked, another company's untouched); teeth run 38530214881.
+- **D-9 two-person appointment execute** (`admin/iam-approval-execute.ts`): the requester lookup on `automation_approvals` found nothing, so every appointment failed 400 "appointment approval row not found" (a dead feature, failing closed). Now under `withTenants` for the approval's tenant, with `AND tenant_id`. `two-person-appointment.db.test.ts` 11 (+2); teeth run 38530232182.
+- **Not changed (owner's call):** `org_units` holds only the lazily anchored, service-assigned units, so an org_unit grant on an un-anchored node of the org blob is still not found by the offboarding sweep. Widening it to the org closure needs a rule for node ids reused across companies. Recorded on the board.
+
+
 ### platform-ui `0.152.0` - DW-3z2: the Company block shows the net margin rate (owner ruling DW-D22) (2026-10-14) - PROTOTYPED
 
 - **What.** The company Overview's Company block gains a "Net margin" tile between Revenue and Overdue receivables: net over revenue from the same P&L read, in the cockpit's own words. "No data" (never 0%) when revenue is zero or a total is missing; refused like revenue when the P&L is refused. Revenue no longer repeats the net amount, since the margin tile carries it. Plan section 11.4 DW-D22, section 3.8.
