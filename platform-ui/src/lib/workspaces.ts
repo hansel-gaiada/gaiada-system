@@ -377,7 +377,7 @@ const WEB_DEV: Workspace = {
   ],
   kpis: [
     { key: "projects-on-time", label: "Projects on time" },
-    { key: "requests-within-sla", label: "Requests answered within the SLA" },
+    { key: "requests-within-sla", label: "Requests delivered by the date needed" },
     { key: "client-site-uptime", label: "Client site uptime" },
     { key: "reopened-work-rate", label: "Reopened work rate" },
   ],

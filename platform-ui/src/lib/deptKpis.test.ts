@@ -52,6 +52,7 @@ describe("condition wording", () => {
     expect(reasonText("no_target")).toBe("No target yet");
     expect(reasonText("no_reader")).toBe("Not measured yet");
     expect(reasonText("no_data")).toBe("No data this period");
+    expect(reasonText("read_failed")).toBe("Couldn't be read right now");
     expect(reasonText(undefined)).toBe("");
   });
 });
@@ -89,6 +90,7 @@ describe("bannerSentence", () => {
     expect(bannerSentence({ unit: web, condition: "unavailable", kpis: [kpi({ key: "a", label: "A", reason: "no_reader" })] }))
       .toBe("Web Dev: condition unavailable · None of its KPIs is measured yet");
     expect(unavailableWhy([kpi({ key: "a", label: "A", reason: "no_data" })])).toBe("No data this period");
+    expect(unavailableWhy([kpi({ key: "a", label: "A", reason: "read_failed" })])).toBe("Some KPIs could not be read right now");
     expect(unavailableWhy([])).toBe("This department has no KPIs yet");
   });
 });

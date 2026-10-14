@@ -337,7 +337,8 @@ export async function runDeptKpiWatch(tenantId: string, now: Date = new Date()):
   // (1) Evaluate: read-only, outside the transaction.
   const structure = await withTenants([tenantId], (c) => loadOrgStructure(c, tenantId), { modules: DEPT_KPI_MODULES });
   const departments = departmentUnits(structure);
-  const reads = await evaluateUnits(tenantId, await companyVertical(tenantId), departments, departments, range);
+  // `today` is the watch's own (from `now`), so module readers judge "already due" on the day this run evaluates (§40.5.1).
+  const reads = await evaluateUnits(tenantId, await companyVertical(tenantId), departments, departments, range, range.start, today);
 
   // (2) Decide and write, serialised per tenant.
   const plan = await withTenants(

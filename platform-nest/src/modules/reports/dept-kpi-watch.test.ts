@@ -210,6 +210,17 @@ describe("planWatch — what one run does", () => {
     expect(plan.alertsToResolve).toEqual([{ id: "a1", unitNodeId: "d-web", kpiKey: "projects-on-time", condition: "unavailable" }]);
   });
 
+  it("a KPI whose reader failed (read_failed) is stored with its reason and never notifies (§40.5.1)", () => {
+    const failed: KpiRead = { ...kpi("projects-on-time", "Projects on time", "unavailable"), reason: "read_failed" };
+    const plan = planWatch(
+      [unitRead("d-web", "Web Dev", "unavailable", [failed])],
+      memory([["d-web", "projects-on-time", "on_track"], ["d-web", KPI_KEY_DEPARTMENT, "on_track"]]),
+      [],
+    );
+    expect(plan.notices).toEqual([]);
+    expect(plan.upserts.find((u) => u.kpiKey === "projects-on-time")).toMatchObject({ condition: "unavailable", reason: "read_failed" });
+  });
+
   it("the month's first real reading is told when it is at risk or off track, not when it is on track", () => {
     const worse = planWatch(
       [unitRead("d-web", "Web Dev", "at_risk", [kpi("projects-on-time", "Projects on time", "at_risk", 0.82, 0.85)])],

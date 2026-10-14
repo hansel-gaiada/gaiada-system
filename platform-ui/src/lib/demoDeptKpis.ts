@@ -46,7 +46,7 @@ interface DemoUnit { id: string; name: string; workspace: string; kpis: KpiDef[]
 const UNITS: DemoUnit[] = [
   { id: "dept-1", name: "Web Dev", workspace: "web-dev", kpis: [
     pct("projects-on-time", "Projects on time", "up_good", 0.85, 0.05),
-    pct("requests-within-sla", "Requests answered within the SLA", "up_good", 0.9, 0.05),
+    pct("requests-within-sla", "Requests delivered by the date needed", "up_good", 0.9, 0.05),
     pct("client-site-uptime", "Client site uptime", "up_good", 0.995, 0.005),
     pct("reopened-work-rate", "Reopened work rate", "down_good", 0.05, 0.03),
   ] },

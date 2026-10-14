@@ -21,6 +21,7 @@ import {
   workspaceSlugFor,
   type DeptKpiDef,
   type KpiCondition,
+  type UnavailableReason,
 } from "./dept-kpis";
 import { REPORT_METRICS } from "./metrics";
 import type { ReportDocument, ReportKpi } from "./report-document";
@@ -229,6 +230,36 @@ describe("DW-4e-1 · a KPI's condition at each boundary", () => {
     expect(kpiCondition(UP, null, null)).toEqual({ condition: "unavailable", reason: "no_data" });
     expect(kpiCondition(UP, Number.NaN, T)).toEqual({ condition: "unavailable", reason: "no_data" });
     expect(kpiCondition(UP, 0.9, null)).toEqual({ condition: "unavailable", reason: "no_target" });
+  });
+});
+
+describe("DW-6n0 · a module KPI with a readerId reads like a report_fact KPI (§40.5.1)", () => {
+  const WITH_READER: Pick<DeptKpiDef, "direction" | "reader"> = { direction: "up_good", reader: { kind: "module", readerId: "delivery.x" } };
+
+  it("a value gives a condition against the target", () => {
+    expect(kpiCondition(WITH_READER, 0.9, T)).toEqual({ condition: "on_track" });
+    expect(kpiCondition(WITH_READER, 0.8, T)).toEqual({ condition: "at_risk" });
+    expect(kpiCondition(WITH_READER, 0.5, T)).toEqual({ condition: "off_track" });
+    expect(kpiCondition(WITH_READER, 0.9, null)).toEqual({ condition: "unavailable", reason: "no_target" });
+  });
+
+  it("null is no_data, before no_target", () => {
+    expect(kpiCondition(WITH_READER, null, T)).toEqual({ condition: "unavailable", reason: "no_data" });
+    expect(kpiCondition(WITH_READER, null, null)).toEqual({ condition: "unavailable", reason: "no_data" });
+  });
+
+  it("a module KPI without a readerId stays no_reader, whatever the value", () => {
+    expect(kpiCondition({ direction: "up_good", reader: { kind: "module" } }, 0.9, T)).toEqual({ condition: "unavailable", reason: "no_reader" });
+  });
+
+  it("read_failed is a valid reason", () => {
+    const reason: UnavailableReason = "read_failed";
+    expect(reason).toBe("read_failed");
+  });
+
+  it("the web-dev label changed, its key did not (§40.5.5)", () => {
+    expect(kpiDefFor("web-dev", "requests-within-sla")?.label).toBe("Requests delivered by the date needed");
+    expect(kpiDefFor("it", "requests-within-sla")?.label).toBe("Account and device requests resolved within the SLA");
   });
 });
 

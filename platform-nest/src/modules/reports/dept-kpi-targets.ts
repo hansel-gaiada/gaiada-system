@@ -27,6 +27,8 @@ import type { PoolClient } from "pg";
 import { newId, withGlobal, withTenants } from "../../db";
 import { config } from "../../config";
 import { fetchReportDocumentForRead } from "./reports.controller";
+import { moduleKpiReaders } from "./dept-kpi-readers";
+import { todayIsoInTz } from "./person-scope";
 import type { ReportDocument, ReportPeriodKind } from "./report-document";
 import {
   DEPT_KPI_SETS,
@@ -321,21 +323,28 @@ export interface PeriodRange {
   end: string;
 }
 
-function kpiRead(def: DeptKpiDef, v: KpiValue | null, t: TargetRow | undefined): KpiRead {
+/** A module KPI without a readerId has no read yet (`no_reader`) and never carries a value. With one, it is read exactly
+ *  like a report_fact KPI (§40.5.1). */
+const hasNoRead = (def: DeptKpiDef): boolean => def.reader.kind === "module" && def.reader.readerId === undefined;
+
+/** `failed`: the KPI's module reader threw (§40.5.1). It reads unavailable with `read_failed`, whatever its target. */
+function kpiRead(def: DeptKpiDef, v: KpiValue | null, t: TargetRow | undefined, failed = false): KpiRead {
   const level = t ? { target: t.target, tolerance: t.tolerance } : null;
-  const { condition, reason } = kpiCondition(def, def.reader.kind === "module" ? null : v ? v.value : null, level);
+  const { condition, reason }: { condition: KpiCondition; reason?: UnavailableReason } = failed
+    ? { condition: "unavailable", reason: "read_failed" }
+    : kpiCondition(def, hasNoRead(def) ? null : v ? v.value : null, level);
   const out: KpiRead = {
     key: def.key,
     label: def.label,
     unit: def.unit,
     direction: def.direction,
-    value: def.reader.kind === "module" || !v ? null : v.value,
+    value: hasNoRead(def) || !v ? null : v.value,
     target: level ? level.target : null,
     tolerance: level ? level.tolerance : null,
     targetSource: level ? "approved" : "none",
     condition,
   };
-  if (v && def.reader.kind !== "module") {
+  if (v && !hasNoRead(def)) {
     if (v.numerator !== undefined) out.numerator = v.numerator;
     if (v.denominator !== undefined) out.denominator = v.denominator;
   }
@@ -353,6 +362,10 @@ function kpiRead(def: DeptKpiDef, v: KpiValue | null, t: TargetRow | undefined):
  * `targetsAsOf` (DW-4e-3, FRONTEND-BFF-CONTRACT §41.1) is the date the in-force target is looked up at; it defaults to the
  * range's start (§40.2: "on or before the period's start"). The department appraisal reads a whole cycle as one custom
  * range but judges it against the target in force for the cycle's LAST month, so it passes that month's start.
+ *
+ * `today` (§40.5.1) is the date "already due" is judged against: module readers get `asOf`, the earlier of the range's end
+ * and `today`. It defaults to today in REPORTS_TZ; a caller that pins time (the §43 watch's `now`) passes its own, so the
+ * readers and the caller can never disagree about which day it is.
  */
 export async function evaluateUnits(
   tenantId: string,
@@ -361,7 +374,10 @@ export async function evaluateUnits(
   departments: OrgUnitRef[],
   range: PeriodRange,
   targetsAsOf: string = range.start,
+  today: string = todayIsoInTz(config.reportsTz),
 ): Promise<UnitKpis[]> {
+  // Computed ONCE so every reader of this evaluation agrees on what is "already due" (§40.5.1).
+  const asOf = range.end < today ? range.end : today;
   const slugOf = (u: OrgUnitRef) => workspaceSlugFor(vertical, u.name);
   const needsDerived = units.some((u) => DEPT_KPI_SETS[slugOf(u)].some((d) => d.reader.kind === "derived"));
   const population = needsDerived ? uniqueUnits([...units, ...departments]) : units;
@@ -380,16 +396,39 @@ export async function evaluateUnits(
 
   // Pass 1: every non-derived KPI of the population (report_fact and module readers).
   const base = new Map<string, KpiRead[]>();
+  // One module reader, isolated: a reader that throws (or is not registered) fails only its own KPI (§40.5.1). The log
+  // carries the reader id and the message, never row data.
+  const readModule = async (readerId: string, unitId: string): Promise<{ v: KpiValue | null; failed: boolean }> => {
+    try {
+      const reader = moduleKpiReaders()[readerId];
+      if (!reader) throw new Error("no reader registered");
+      const v = await reader({ tenantId, unitId, periodKind: range.periodKind, start: range.start, end: range.end, asOf });
+      return { v, failed: false };
+    } catch (err) {
+      console.error(`[DEPT-KPI] reader "${readerId}" failed:`, (err as Error).message);
+      return { v: null, failed: true };
+    }
+  };
+
   for (const u of population) {
+    const defs = DEPT_KPI_SETS[slugOf(u)];
+    // A unit's module readers run concurrently; each is awaited in catalogue order below, so the reads keep their order.
+    const moduleReads = new Map<string, Promise<{ v: KpiValue | null; failed: boolean }>>();
+    for (const def of defs) {
+      if (def.reader.kind === "module" && def.reader.readerId !== undefined) moduleReads.set(def.key, readModule(def.reader.readerId, u.id));
+    }
     const reads: KpiRead[] = [];
-    for (const def of DEPT_KPI_SETS[slugOf(u)]) {
+    for (const def of defs) {
       if (def.reader.kind === "derived") continue;
       let v: KpiValue | null = null;
+      let failed = false;
       if (def.reader.kind === "report_fact") {
         const doc = await docFor(def.reader.grain, def.reader.grain === "company" ? tenantId : u.id);
         v = reportFactValue(def.reader.metricKey, doc);
+      } else if (moduleReads.has(def.key)) {
+        ({ v, failed } = await moduleReads.get(def.key)!);
       }
-      reads.push(kpiRead(def, v, targets.get(u.id)?.get(def.key)));
+      reads.push(kpiRead(def, v, targets.get(u.id)?.get(def.key), failed));
     }
     base.set(u.id, reads);
   }

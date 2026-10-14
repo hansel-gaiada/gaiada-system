@@ -13,8 +13,10 @@
 //   - `report_fact`: a metric of the report document (the department-grain document for the unit, or the company
 //     document for `utilization`), so the number is the one the Reports page shows;
 //   - `derived`: departments-in-good-condition, the share of the OTHER departments whose condition is on track;
-//   - `module`: a module read that does not exist yet. It reads `unavailable` (reason `no_reader`) until its own
-//     ticket adds the read. §40.1's table names the only report_fact KPIs in 4e-1; every other KPI is `module`.
+//   - `module`: a module read. Without a `readerId` it does not exist yet and the KPI reads `unavailable` (reason
+//     `no_reader`) until its own ticket adds the read; with one, the id names a reader in dept-kpi-readers.ts and the KPI
+//     behaves like a report_fact KPI (§40.5.1). §40.1's table names the only report_fact KPIs in 4e-1; every other KPI is
+//     `module`. The id is only a string here: this file stays pure.
 //
 // ══════════════════════════ SCALES ══════════════════════════
 // `percent` values, targets and tolerances are FRACTIONS (0.85 = 85%), the scale of the report document's own
@@ -32,7 +34,7 @@ export type KpiDirection = "up_good" | "down_good";
 export type KpiReader =
   | { kind: "report_fact"; metricKey: string; grain: "department" | "company" }
   | { kind: "derived"; source: "departments_in_good_condition" }
-  | { kind: "module" };
+  | { kind: "module"; readerId?: string };
 
 export interface DeptKpiDef {
   key: string;
@@ -61,7 +63,7 @@ const DAY = 1440; // minutes
 export const DEPT_KPI_SETS: Readonly<Record<WorkspaceSlug, readonly DeptKpiDef[]>> = {
   "web-dev": [
     pct("projects-on-time", "Projects on time", "up_good", dept("delivery.milestone_hit_rate"), 0.85, 0.05),
-    pct("requests-within-sla", "Requests answered within the SLA", "up_good", MODULE, 0.9, 0.05),
+    pct("requests-within-sla", "Requests delivered by the date needed", "up_good", MODULE, 0.9, 0.05),
     pct("client-site-uptime", "Client site uptime", "up_good", MODULE, 0.995, 0.005),
     pct("reopened-work-rate", "Reopened work rate", "down_good", dept("flow.reopen_rate"), 0.05, 0.03),
   ],
@@ -144,8 +146,9 @@ export function workspaceSlugFor(vertical: string | null | undefined, deptName: 
 // ══════════════════════════ CONDITION (§40.3) ══════════════════════════
 
 export type KpiCondition = "on_track" | "at_risk" | "off_track" | "unavailable";
-/** Why a KPI has no condition: no reader yet, no data in the window, or no target in force. */
-export type UnavailableReason = "no_reader" | "no_data" | "no_target";
+/** Why a KPI has no condition: no reader yet, no data in the window, no target in force, or its reader threw
+ *  (`read_failed`, §40.5.1: set by the engine, never by `kpiCondition`). */
+export type UnavailableReason = "no_reader" | "no_data" | "no_target" | "read_failed";
 
 export interface KpiTargetLevel {
   target: number;
@@ -169,7 +172,7 @@ export function kpiCondition(
   value: number | null,
   target: KpiTargetLevel | null,
 ): { condition: KpiCondition; reason?: UnavailableReason } {
-  if (def.reader.kind === "module") return { condition: "unavailable", reason: "no_reader" };
+  if (def.reader.kind === "module" && def.reader.readerId === undefined) return { condition: "unavailable", reason: "no_reader" };
   if (value === null || !Number.isFinite(value)) return { condition: "unavailable", reason: "no_data" };
   if (target === null) return { condition: "unavailable", reason: "no_target" };
   const shortfall = def.direction === "up_good" ? target.target - value : value - target.target;

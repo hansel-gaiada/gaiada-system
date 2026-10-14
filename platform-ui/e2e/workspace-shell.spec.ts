@@ -1006,7 +1006,7 @@ test.describe("the Overview's department condition (DW-3k)", () => {
     await expect(onTime.getByText("At risk", { exact: true })).toBeVisible();
     await expect(onTime.getByText("17 of 21")).toBeVisible();
     await expect(onTime.getByText("Target 85% (tolerance 5 pts)")).toBeVisible();
-    await expect(tiles.filter({ hasText: "Requests answered within the SLA" }).getByText("No target yet")).toBeVisible();
+    await expect(tiles.filter({ hasText: "Requests delivered by the date needed" }).getByText("No target yet")).toBeVisible();
     await expect(tiles.filter({ hasText: "Client site uptime" }).getByText("Not measured yet")).toBeVisible();
 
     // First block of the Department band, above Pulse.
