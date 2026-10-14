@@ -169,11 +169,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610140740_iam_creative_asset_permissions.sql`
+- Head: `202610140810_iam_dept_kpi_target_permissions.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 296 (121 legacy `NNNN_`, 175 timestamped)
+- Applied files on disk: 298 (121 legacy `NNNN_`, 177 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -255,6 +255,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/modules/webdev/webdesk-client-website.controller.ts` |
 | `/api/:tenantId/appraisals` | `platform-nest/src/modules/reports/appraisals.controller.ts` |
 | `/api/:tenantId/checkins` | `platform-nest/src/modules/reports/checkins.controller.ts` |
+| `/api/:tenantId/dept-kpis` | `platform-nest/src/modules/reports/dept-kpis.controller.ts` |
 | `/api/:tenantId/modules/agency` | `platform-nest/src/modules/agency/agency.controller.ts` |
 | `/api/:tenantId/modules/hr` | `platform-nest/src/modules/hr/hr-lifecycle.controller.ts` |
 | `/api/:tenantId/modules/hr` | `platform-nest/src/modules/hr/hr-policy.controller.ts` |
