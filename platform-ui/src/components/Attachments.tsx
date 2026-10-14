@@ -4,17 +4,23 @@ import { useRouter } from "next/navigation";
 import type { FileMeta } from "@/lib/entities";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { formatDate } from "@/lib/format";
+import { isDriveUrl } from "@/lib/drive";
+import { DrivePicker } from "@/components/drive/DrivePicker";
 
 interface Props {
   files: (FileMeta & { url?: string | null })[];
   canEdit: boolean;
+  /** DW-6i: the person is connected to Google Drive and it is configured (the Picker read said so). Offers "Attach from Google Drive". */
+  canAttachFromDrive?: boolean;
+  /** The task the Drive picker attaches to; required with `canAttachFromDrive`. */
+  driveTaskId?: string;
   attach: (formData: FormData) => Promise<{ ok: boolean; error?: string }>;
   remove: (fileId: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 // File references on an entity (name + optional link). Binary/multipart upload
 // is a documented backend follow-up; this attaches references today.
-export function Attachments({ files, canEdit, attach, remove }: Props) {
+export function Attachments({ files, canEdit, canAttachFromDrive = false, driveTaskId, attach, remove }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -29,8 +35,12 @@ export function Attachments({ files, canEdit, attach, remove }: Props) {
           {files.map((f) => (
             <div key={f.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "9px 0", borderBottom: "0.5px solid var(--erp-hairline-soft)" }}>
               <span style={{ minWidth: 0 }}>
-                {f.url ? <a href={f.url} target="_blank" rel="noreferrer" style={{ font: "400 14px var(--font-body)", color: "var(--text-primary)" }}>{f.filename}</a>
-                  : <span style={{ font: "400 14px var(--font-body)", color: "var(--text-primary)" }}>{f.filename}</span>}
+                {f.url ? (
+                  <>
+                    {isDriveUrl(f.url) && <span className="drive-mark" title="Google Drive" aria-label="Google Drive" role="img" style={{ marginRight: 6, font: "600 11px var(--font-body)", color: "var(--erp-ink-50)" }}>&#9650;</span>}
+                    <a href={f.url} target="_blank" rel="noopener noreferrer" style={{ font: "400 14px var(--font-body)", color: "var(--text-primary)" }}>{f.filename}</a>
+                  </>
+                ) : <span style={{ font: "400 14px var(--font-body)", color: "var(--text-primary)" }}>{f.filename}</span>}
                 <span style={{ font: "400 11px var(--font-body)", color: "var(--erp-ink-50)", marginLeft: 8 }}>{formatDate(f.created_at)}</span>
               </span>
               {canEdit && <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" disabled={pending} onClick={() => run(() => remove(f.id))}>Remove</button>}
@@ -48,6 +58,7 @@ export function Attachments({ files, canEdit, attach, remove }: Props) {
       ) : (
         <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" style={{ alignSelf: "flex-start" }} onClick={() => setOpen(true)}>Attach file</button>
       ))}
+      {canEdit && canAttachFromDrive && driveTaskId && <DrivePicker taskId={driveTaskId} />}
       {msg && <p style={{ margin: 0, font: "400 12px var(--font-body)", color: "var(--erp-accent)" }}>{msg}</p>}
     </div>
   );

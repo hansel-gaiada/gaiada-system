@@ -7679,7 +7679,7 @@ Files: `dept-appraisals.ts` (the reads, the writes and the pure helpers), `dept-
 - **UI.** `/appraisals/department?unit=&cycle=`: the picker reads `GET /dept-appraisals/cycles` through an honest reader (ok / forbidden / error). A refusal is said as a refusal and a failed read as a failure, never shown as an empty picker; "no cycles yet" is said only when the read was allowed and empty. The forms mirror the capabilities `reports.dept_kpi_target.appraisal_comment` (`canInUnit` over the unit's path, or company-wide `can`) and `.appraisal_assess` (`can`), and appear only while the cycle is not closed. The demo (`demoDeptAppraisals.ts`) serves the cycles list with the same gate, `demo-cycle-h2` (open) and `demo-cycle-h1` (closed, with a written commentary and assessment).
 - **Not changed.** The capability inventory (`docs/modules/CAPABILITY-INVENTORY.md`) is unchanged: no MCP tool is registered, and the new HTTP suite names no registered route family in its URLs, so the generator's driver count stays as committed.
 
-## 42. Google Drive: connect, pick and attach (DW-6i, 2026-10-14) — `platform-nest/src/core/google-drive/` (new) — **STATUS: BACKEND BUILT, PROTOTYPED (Google stubbed; live proof waits for DW-11 item 6)**
+## 42. Google Drive: connect, pick and attach (DW-6i, 2026-10-14) — `platform-nest/src/core/google-drive/` (new) — **STATUS: BACKEND AND UI BUILT, PROTOTYPED (Google stubbed; live proof waits for DW-11 item 6)**
 
 Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.2 (DW-6i) and §14.1 (launch and return). A person connects their own Google Drive, picks a file with Google's own Picker, and the file is attached to a PM task as a link. The file stays in Drive; the ERP keeps a reference to it. The owner chose (2026-10-14) to build this before the OAuth client exists, against stubs, so that going live needs only the client.
 
@@ -7828,5 +7828,25 @@ Google is STUBBED at `fetch` in every test; nothing here has met real Google (DW
 **For the UI ticket.**
 - `GET /api/:t/files` does not return `url`, so an attachment cannot be opened from the list yet. `files.controller` was left unchanged on purpose (this ticket keeps it identical). The UI ticket needs `url` added to that SELECT, and a Drive mark can then be derived from the link's host.
 - The Picker script and the CSP note of §42.6 are unchanged and wait for the live proof.
+
+**As built (UI, DW-6i, 2026-10-14).** In `platform-ui/src`; none of it has met real Google (DW-11 item 6).
+- **The redirect URI the owner registers at Google (`GOOGLE_DRIVE_REDIRECT_URI`) is `<ERP origin>/api/google-drive/callback`**, for example `https://erp.gaiada.com/api/google-drive/callback`. The route is `app/api/google-drive/callback/route.ts`; the path is `DRIVE_CALLBACK_UI_PATH` in `lib/drive.ts`.
+  - It reads `code`/`state`/`error` off its own URL, calls the backend `GET /api/google-drive/oauth/callback` as the signed-in person (§42.8 deviation 1), and redirects to the page the flow started from with `driveOAuth=connected|denied|error`. It adds `driveOAuthReason=<token>` only when the backend refused with one of its own known tokens.
+  - The return path comes ONLY from a short-lived httpOnly cookie (`HOST_COOKIES.driveOAuthPending`, set by `startDriveConnectAction`, 10 minutes) and is re-validated by `sanitizeReturnTo` where the redirect is issued. No query parameter is ever a redirect target. With no cookie it still completes the connection and lands on `/departments`.
+- **Readers and actions.**
+  - `lib/drive.ts`: pure; the shapes, route paths, the token-to-sentence map `driveErrorText`, the outcome line, `isDriveUrl`.
+  - `lib/drive-data.ts`: `readDriveStatus`, a `ReadResult` of the Picker answer with the token DROPPED.
+  - `lib/driveActions.ts`: start, disconnect, `loadPickerCredentialsAction`, attach.
+  - `lib/drivePicker.ts`: the Google loader. `lib/drive-pending.ts`: the cookie.
+- **Tools & connections** (pilot): `components/departments/DriveConnectionBlock.tsx` replaces the manual Drive row in the pilot with the four states and the outcome line. Classic is unchanged (it keeps the manual row).
+- **PM task page:** `components/drive/DrivePicker.tsx` ("Attach from Google Drive") sits inside `components/Attachments.tsx`, shown only when `readDriveStatus` says `configured && connected`.
+  - On click it loads `https://apis.google.com/js/api.js` once, opens the Picker (multi-select) with a FRESH token, posts each picked id to the attach route in turn, then `router.refresh()`.
+  - A file with a `url` opens it in a new tab (`rel="noopener noreferrer"`), with a Drive mark for `drive.google.com` and `docs.google.com` links.
+- **The access token** is read only by `loadPickerCredentialsAction` on the click, held in that closure, and never stored, logged or passed as a page prop. The page's own read (`readDriveStatus`) never sees it.
+- **Deviations from §42.6:**
+  - (1) The attach button's gate is a second Picker read per task page view, because the token must not ride the page; the click re-reads for a fresh token.
+  - (2) The OAuth landing adds the optional `driveOAuthReason` beside the coarse flag, whitelisted to the backend's own tokens.
+  - (3) A new pending-flow cookie rather than reusing search's, because that one's parser only accepts a search provider.
+  - (4) No CSP was changed: the global CSP is `frame-ancestors 'self'` only, so the Picker is not blocked.
 
 **Tests** (the Linux gate; Google stubbed at `fetch`): `core/google-drive/google-drive.http.test.ts` (Postgres and Cerbos), `google-drive.test.ts`, `client.test.ts`, `egress.test.ts`, `core/google-oauth/id-token.test.ts`, the extended `core/google-oauth/egress.test.ts`, and one added case in `core/files-reference.test.ts`. The secret rule is asserted twice: over every response the HTTP suite received (an access token only in a Picker answer, nothing else anywhere) and over every table the run wrote (activities, events, files, state rows, the connection's non-secret columns). The vault columns hold only `enc:v1:` envelopes. The capability inventory (`docs/modules/CAPABILITY-INVENTORY.md`) is unchanged: `inv-drivers.mjs` reports no owner row that differs.

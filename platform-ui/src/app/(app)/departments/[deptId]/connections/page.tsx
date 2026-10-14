@@ -19,6 +19,8 @@ import { ConnectionBlocks, visibleConnections } from "@/components/departments/C
 import { SocialAccountsBlock } from "@/components/departments/SocialAccountsBlock";
 import { FigmaConnectionBlock } from "@/components/departments/FigmaConnectionBlock";
 import { readFigmaConnection } from "@/lib/figma-data";
+import { DriveConnectionBlock } from "@/components/departments/DriveConnectionBlock";
+import { readDriveStatus } from "@/lib/drive-data";
 import { getPrefs } from "@/lib/prefs";
 import { togglePinnedToolAction } from "@/lib/prefsActions";
 import { workspaceFor } from "@/lib/workspaces";
@@ -36,7 +38,7 @@ import {
 type Params = Promise<{ deptId: string }>;
 // Next 15: searchParams is async — carries the Google OAuth callback's coarse outcome flag
 // (app/api/search/google/callback/route.ts's own redirect).
-type SearchParams = Promise<{ googleOAuth?: string; googleOAuthDetail?: string }>;
+type SearchParams = Promise<{ googleOAuth?: string; googleOAuthDetail?: string; driveOAuth?: string; driveOAuthReason?: string }>;
 
 // Connections — GitHub / Google Drive / Claude-seat links (F1 §12, C1 §12a).
 // "My connections" is self-service and person-scoped (not department-scoped
@@ -160,6 +162,8 @@ export default async function DepartmentConnectionsPage({ params, searchParams }
     }
     // DW-6k: the company's Figma connection (BFF §36.8). A failed read is a ReadResult the block says in words, never "not connected".
     const figmaConnection = kinds.has("figma") ? await readFigmaConnection(userId, tenant) : null;
+    // DW-6i: the person's Google Drive status (BFF §42.4), token already dropped. A failed read is a ReadResult the block says in words.
+    const driveStatus = kinds.has("drive") ? await readDriveStatus(userId, tenant) : null;
     const panelActions = { connect, update, revoke, mapSeat, updateSeat, unmapSeat };
     const githubBlock = (
       <>
@@ -178,7 +182,14 @@ export default async function DepartmentConnectionsPage({ params, searchParams }
     );
     const blocks = {
       github: githubBlock,
-      drive: <ConnectionsPanel drive={drive} actions={panelActions} only={["drive"]} />,
+      drive: driveStatus ? (
+        <DriveConnectionBlock
+          result={driveStatus}
+          returnPath={`/departments/${deptId}/connections`}
+          outcome={sp.driveOAuth}
+          outcomeReason={sp.driveOAuthReason}
+        />
+      ) : null,
       "claude-seats": <ConnectionsPanel seat={seat} actions={panelActions} only={["seat"]} />,
       "google-accounts": (
         <GoogleConnectionsPanel
