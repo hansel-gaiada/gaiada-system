@@ -124,4 +124,30 @@ describe.skipIf(!TEST_URL)("company writes respect the vertical (PV1-03)", () =>
     expect(r.json()).toMatchObject({ field: "vertical" });
     expect(await row(co)).toEqual(before);
   });
+
+  // DW-7d (DW-D6): a company created through the API starts with HR, Finance and IT in its org tree,
+  // so GET org-structure no longer 404s for it. Node ids carry the new company's id, never a shared one.
+  it("a created company starts with an org tree holding HR, Finance and IT, and closure rows for them", async () => {
+    const mk = async (name: string) => (await create({ name })).json().id as string;
+    const x = await mk("DW7d Tree Co X");
+    const y = await mk("DW7d Tree Co Y");
+    const got = await app.inject({ method: "GET", url: `/api/${x}/org-structure`, headers: asUser(platformAdmin) });
+    expect(got.statusCode).toBe(200);
+    const root = (got.json() as { root: { id: string; name: string; kind: string; children: { id: string; name: string; kind: string }[] } }).root;
+    expect(root).toMatchObject({ id: "root", name: "DW7d Tree Co X", kind: "company" });
+    expect(root.children.map((c) => [c.id, c.name, c.kind])).toEqual([
+      [`d-hr-${x}`, "HR", "department"],
+      [`d-finance-${x}`, "Finance", "department"],
+      [`d-it-${x}`, "IT", "department"],
+    ]);
+    const closure = await adminPool().query<{ descendant_id: string }>(
+      `SELECT descendant_id FROM org_unit_closure WHERE tenant_id = $1 AND ancestor_id = 'root'`, [x]);
+    expect(closure.rows.map((r) => r.descendant_id).sort()).toEqual(
+      ["root", `d-finance-${x}`, `d-hr-${x}`, `d-it-${x}`].sort());
+    const other = await adminPool().query(`SELECT structure FROM company_org_structure WHERE tenant_id = $1`, [y]);
+    expect(JSON.stringify(other.rows[0].structure)).not.toContain(x);
+    const ev = await adminPool().query(
+      `SELECT 1 FROM outbox_events WHERE tenant_id = $1 AND event_type = 'org_structure.updated'`, [x]);
+    expect(ev.rowCount).toBe(1);
+  });
 });

@@ -32,16 +32,25 @@ import { STAFF, AGENCY_DEPTS } from "./roster";
 // the blob alone would have fixed what the org page renders while leaving authorization-relevant
 // scope pointing at the invented roster, which is a worse failure than the one being fixed.
 import { applyOrgStructure } from "../admin/org-structure.service";
+import {
+  FUNCTIONAL_DEPARTMENTS, ensureFunctionalDepartments, functionalNodeId, legacyFunctionalNodeId,
+} from "../admin/functional-departments";
 
 const AGENCY_NAME = "Gaia Digital Agency";
 
 /** Node ids the seed's own tree builder emits: the root, one per department, one per division, and
- *  `p-<first 8 of a user id>` per person. Anything else means a human added a node. */
+ *  `p-<first 8 of a user id>` per person. Anything else means a human added a node. The functional
+ *  departments (DW-7d) carry the company's id (or the legacy plain `d-hr`), added per tenant in `seedNodeIds`. */
 const SEED_NODE_IDS = new Set<string>([
   "root",
   ...AGENCY_DEPTS.map((d) => d.id),
   ...AGENCY_DEPTS.flatMap((d) => d.divisions.map(([vid]) => vid)),
 ]);
+const seedNodeIds = (tenantId: string): Set<string> =>
+  new Set([
+    ...SEED_NODE_IDS,
+    ...FUNCTIONAL_DEPARTMENTS.flatMap((f) => [functionalNodeId(f.slug, tenantId), legacyFunctionalNodeId(f.slug)]),
+  ]);
 
 /** The invented roster this replaces. Present so a tree containing ONLY these people still counts as
  *  seed-shaped — otherwise the very state we are fixing would be treated as hand-edited. */
@@ -111,9 +120,10 @@ export async function refreshOrgStructure(opts: { force: boolean }): Promise<Org
   const peopleBefore: string[] = [];
   const unknownNodes: string[] = [];
   if (hadBlob) {
+    const known = seedNodeIds(tenantId);
     walk(existing.rows[0].structure.root, (n) => {
       if (n.kind === "person") peopleBefore.push(n.name);
-      else if (!SEED_NODE_IDS.has(n.id)) unknownNodes.push(`${n.kind}:${n.id}`);
+      else if (!known.has(n.id)) unknownNodes.push(`${n.kind}:${n.id}`);
     });
   }
   const rosterNames = new Set(STAFF.map((s) => s.name));
@@ -167,7 +177,7 @@ export async function refreshOrgStructure(opts: { force: boolean }): Promise<Org
     kind: "department",
     children: [...divisions.map(([vid, vname]) => div(vid, vname)), ...people(id)],
   });
-  const structure = {
+  const built = {
     root: {
       id: "root",
       name: AGENCY_NAME,
@@ -175,6 +185,8 @@ export async function refreshOrgStructure(opts: { force: boolean }): Promise<Org
       children: AGENCY_DEPTS.map((d) => dept(d.id, d.name, d.divisions)),
     } as Node,
   };
+  // DW-7d: HR, Finance and IT belong in the rebuilt tree too (ids unique to this company).
+  const structure = ensureFunctionalDepartments(built, tenantId).structure;
 
   const peopleAfter: string[] = [];
   walk(structure.root, (n) => {

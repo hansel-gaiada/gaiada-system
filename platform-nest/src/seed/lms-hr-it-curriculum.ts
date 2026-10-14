@@ -38,11 +38,15 @@
 //
 // Idempotent: this will NOT rewrite an existing course.
 import { withTenants, withGlobal, closePool, newId } from "../db";
+import { functionalNodeId } from "../admin/functional-departments";
 
 const AGENCY_NAME = "Gaia Digital Agency";
-/** Functional-department node ids — NOT in roster.ts's AGENCY_DEPTS. See header. */
-const UNIT_HR = "d-hr";
-const UNIT_IT = "d-it";
+/** Functional departments (NOT in roster.ts's AGENCY_DEPTS), by slug. DW-7d: a node id is per company
+ *  (`functionalNodeId(slug, tenantId)`), so the specs below name the slug and the id is resolved for
+ *  the tenant being seeded. Estates seeded before that hold `d-hr` / `d-it`; `seed:functional-departments
+ *  --apply` re-points them. */
+const UNIT_HR = "hr";
+const UNIT_IT = "it";
 
 type Kind = "read" | "quiz" | "scenario";
 type Grading = "auto" | "review" | "none";
@@ -581,7 +585,7 @@ export async function seedHrItCurriculum(companyName = AGENCY_NAME): Promise<HrI
                                     unit_node_id, discipline, level, status, estimated_minutes,
                                     published_at, origin_site)
            VALUES ($1,$2,$3,1,$4,$5,'department',$6,$7,$8,'published',$9,now(),'central')`,
-          [courseId, tenantId, course.key, course.title, course.summary, course.unit, course.discipline,
+          [courseId, tenantId, course.key, course.title, course.summary, functionalNodeId(course.unit, tenantId), course.discipline,
            course.level, course.minutes],
         );
         let n = 0;
@@ -629,7 +633,7 @@ export async function seedHrItCurriculum(companyName = AGENCY_NAME): Promise<HrI
                                   discipline, level, status, is_mandatory, applies_to, due_days,
                                   certification_valid_months, certification_label, published_at, origin_site)
            VALUES ($1,$2,$3,$4,$5,'department',$6,$7,$8,'published',false,'unit',NULL,$9,$10,now(),'central')`,
-          [pathId, tenantId, path.key, path.title, path.summary, path.unit, path.discipline, path.level,
+          [pathId, tenantId, path.key, path.title, path.summary, functionalNodeId(path.unit, tenantId), path.discipline, path.level,
            path.validMonths ?? null, path.certification ?? null],
         );
         // `requires_previous` TRUE throughout — the order is enforced, not suggested.
@@ -660,26 +664,26 @@ export async function verifyHrItCurriculum(tenantId: string): Promise<Record<str
     async (c) => {
       const out: Record<string, number> = {};
       const courses = await c.query<{ n: string }>(
-        `SELECT count(*)::text AS n FROM lms_courses WHERE unit_node_id IN ($1,$2)`, [UNIT_HR, UNIT_IT],
+        `SELECT count(*)::text AS n FROM lms_courses WHERE unit_node_id IN ($1,$2)`, [functionalNodeId(UNIT_HR, tenantId), functionalNodeId(UNIT_IT, tenantId)],
       );
       const paths = await c.query<{ n: string }>(
-        `SELECT count(*)::text AS n FROM lms_paths WHERE unit_node_id IN ($1,$2)`, [UNIT_HR, UNIT_IT],
+        `SELECT count(*)::text AS n FROM lms_paths WHERE unit_node_id IN ($1,$2)`, [functionalNodeId(UNIT_HR, tenantId), functionalNodeId(UNIT_IT, tenantId)],
       );
       const disciplines = await c.query<{ n: string }>(
-        `SELECT count(DISTINCT discipline)::text AS n FROM lms_courses WHERE unit_node_id IN ($1,$2)`, [UNIT_HR, UNIT_IT],
+        `SELECT count(DISTINCT discipline)::text AS n FROM lms_courses WHERE unit_node_id IN ($1,$2)`, [functionalNodeId(UNIT_HR, tenantId), functionalNodeId(UNIT_IT, tenantId)],
       );
       const quizzes = await c.query<{ n: string }>(
         `SELECT count(*)::text AS n FROM lms_activities a
            JOIN lms_modules m ON m.id = a.module_id
            JOIN lms_courses co ON co.id = m.course_id
-          WHERE co.unit_node_id IN ($1,$2) AND a.kind = 'quiz'`, [UNIT_HR, UNIT_IT],
+          WHERE co.unit_node_id IN ($1,$2) AND a.kind = 'quiz'`, [functionalNodeId(UNIT_HR, tenantId), functionalNodeId(UNIT_IT, tenantId)],
       );
       // Expected to be zero until the lab runner exists — see header.
       const labs = await c.query<{ n: string }>(
         `SELECT count(*)::text AS n FROM lms_activities a
            JOIN lms_modules m ON m.id = a.module_id
            JOIN lms_courses co ON co.id = m.course_id
-          WHERE co.unit_node_id IN ($1,$2) AND a.kind = 'lab'`, [UNIT_HR, UNIT_IT],
+          WHERE co.unit_node_id IN ($1,$2) AND a.kind = 'lab'`, [functionalNodeId(UNIT_HR, tenantId), functionalNodeId(UNIT_IT, tenantId)],
       );
       out.courses = Number(courses.rows[0].n);
       out.paths = Number(paths.rows[0].n);
