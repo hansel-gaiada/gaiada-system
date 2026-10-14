@@ -7680,6 +7680,88 @@ Files: `dept-kpis.ts` (catalogue, slug resolution, condition rules; pure), `dept
 - staff of the unit may read and staff of another unit may not;
 - the overview is company-wide tiers only, worst first.
 
+### 40.5 Delivery-department readers (DW-6n, 2026-10-14) — **STATUS: CONTRACT (nothing built)**
+
+**Why.** DW-D25 moved the delivery departments' twelve `module` KPIs to DW-6. Today each one reads `unavailable` (`no_reader`). This section gives each a reader over data the modules already write, so the §40 engine, targets, conditions, the §41 appraisal and the §43 watch pick the numbers up with no other change. DW-D27 (owner, 2026-10-14) settles the four definitions the data could not settle on its own.
+
+#### 40.5.1 The seam (shared with §40.6)
+- **Catalogue.** `KpiReader`'s `module` arm gains an optional `readerId`: `{ kind: "module"; readerId?: string }`.
+  - With no `readerId`, nothing changes: `unavailable`, `no_reader`.
+  - With one, the KPI behaves like a `report_fact` KPI. A value gives a condition against the target; `null` gives `unavailable` with `no_data`.
+  - `dept-kpis.ts` stays pure: the id is a string.
+- **Registry.** A new file, `modules/reports/dept-kpi-readers.ts`, holds `MODULE_KPI_READERS: Record<string, ModuleKpiReader>`.
+  - `type ModuleKpiReader = (ctx: { tenantId: string; unitId: string; start: string; end: string }) => Promise<KpiValue | null>`.
+  - `start` and `end` are the engine's range: ISO dates, both INCLUSIVE, in `REPORTS_TZ`.
+  - DW-6's readers live in `dept-kpi-readers/delivery.ts` and DW-7's in `dept-kpi-readers/functional.ts`. The registry merges the two.
+- **Parity.** A test pins that every `readerId` in the catalogue has a registered reader, and every registered reader is named by exactly one catalogue entry. A typo is then a failed build, never a silent `no_reader`.
+- **Engine.** `evaluateUnits`, pass 1: for a `module` KPI with a `readerId`, `v = await MODULE_KPI_READERS[id](ctx)`. `kpiRead` passes `numerator` and `denominator` through as it does for `report_fact`.
+- **A reader that throws fails the read,** exactly as a failing report document does today. There is no new reason code. A module the tenant does not have is not an error: its walled rows are invisible, so the reader finds nothing and answers `null` (`no_data`).
+- **The window.** A reader turns `[start, end]` into the instants `[start 00:00, end + 1 day 00:00)` in `REPORTS_TZ`. Every timestamp test below uses that half-open interval, and every date test (`needed_by`, a due date) uses the inclusive date range.
+- **"Now".** Where a rule says "already due", it means a due date before TODAY in `REPORTS_TZ`. So a window still running counts only what has fallen due.
+- **Each reader** queries through `withTenants([tenantId], fn, { modules })`, declaring its module walls.
+
+#### 40.5.2 The department's scope (one definition for every reader)
+- **S(u):** the unit itself and every `org_unit_closure` descendant of it in the tenant. This is the `departmentFilterSql` rule of §33 (`core/department-filter.ts`), so the clients and deliverables pages and these KPIs agree.
+- **The department's clients C(u):** clients with at least one project, not deleted, whose `department_id` is in S(u), excluding internal clients (`clients.is_internal`). This is §33's client rule.
+- **Rows that carry a unit directly** use it, never the client route: `work_requests.to_unit_id` and `creative_assets.department_id`.
+
+#### 40.5.3 The twelve readers
+
+| # | Workspace · key | Reader id | Value | Numerator / denominator | `null` (no data) when | Walls |
+|---|---|---|---|---|---|---|
+| n1 | web-dev · `requests-within-sla`, relabelled **"Requests delivered by the date needed"** (DW-D27) | `webdev.requests_delivered_by_needed` | numerator ÷ denominator | Denominator: `work_requests` of kind `engineering`, `to_unit_id` in S(u), not deleted, status `open` or `delivered`, `needed_by` inside the window, and already due or delivered. Numerator: those `delivered` with `closed_at`'s date (`REPORTS_TZ`) on or before `needed_by`. | denominator 0 | tenant |
+| n2 | web-dev · `client-site-uptime` | `monitoring.client_uptime` | the pooled ratio of `UPTIME_RATIO_SQL` (`monitoring.controller.ts`, reused, never copied) | Over `monitor_results` in the window, of enabled, not-deleted monitors whose client is in C(u). Numerator: results `up`. Denominator: results not `maintenance` or `unknown`. | no counted result | `monitoring` |
+| n3 | seo · `clients-ranking-growth` | `search.clients_ranking_growth` | numerator ÷ denominator | For each client in C(u) with a `search_properties` row: the keywords `(keyword_id, engine, device)` ranked (position not null) both in the last non-simulated `search_rank_snapshots` at or before the window's first instant AND in the last one before its end. A client "grew" when its mean position over those keywords fell (a lower number is better). Denominator: clients with at least one such keyword. Numerator: those that grew. | denominator 0 | `search` |
+| n4 | seo · `client-reports-on-time` | `search.client_reports_on_time` | numerator ÷ denominator | `search_reports` of engagements whose client is in C(u), with period `YYYY-MM`, due on **the 5th of the following month** (DW-D27, end of that day in `REPORTS_TZ`), the due date inside the window, and delivered or already due. Numerator: `delivered_at` on or before the due date. | denominator 0 | `search` |
+| n5 | seo · `ad-budgets-on-pace` | `search.ad_budgets_on_pace` | numerator ÷ denominator | **DW-D27: a campaign's `budget_minor` is a MONTHLY budget.** Judged in the window's LAST month that has started, up to today or the month's end. Over campaigns `live` in that month, with a budget above 0, of engagements whose client is in C(u), and at least one non-simulated daily metrics row in that month: spend is the sum of `cost_minor` from the 1st to the as-of day, and expected is `budget_minor × days elapsed ÷ days in the month`. **On pace: 0.9 ≤ spend ÷ expected ≤ 1.1.** A campaign whose metrics currency differs from its budget currency is left out. | denominator 0 | `search` |
+| n6 | seo · `client-retention` | `clients.retention` | numerator ÷ denominator | **The cohort:** clients in C(u) that were active on the window's first day. Active on a day D means one of: a `signed` contract with `starts_on ≤ D` and `ends_on` null or `≥ D`; or a project in S(u) with `start_date ≤ D` and status `active`, `planned` or `on_hold`. **Retained:** active on the window's last day, or (for a window still running) on today. A superseding contract continues its predecessor. | empty cohort | tenant |
+| n7 | social-media · `posts-on-schedule` | `social.posts_on_schedule` | numerator ÷ denominator | `social_post_variants` not deleted, not `native_import`, not `cancelled`, with `scheduled_at` inside the window, whose engagement's client is in C(u), and published or already due. Numerator: `published_at ≤ scheduled_at + 15 minutes`. The 15 minutes is a documented default, not a ruling. | denominator 0 | `social` |
+| n8 | social-media · `client-approval-turnaround` | `social.client_approval_turnaround` | the mean of `decided_at − requested_at`, in minutes | No numerator or denominator (an average, not a share). Over `social_post_client_reviews` with status `approved` or `changes_requested`, `decided_at` inside the window, and the client in C(u). | no decided review | `social` (variant join) |
+| n9 | social-media · `engagement-growth` | `social.engagement_growth` | `(cur − prev) ÷ prev` (can be negative) | Over `social_accounts` whose client is in C(u): `cur` is the sum of `social_metrics_daily.engagements` inside the window, and `prev` the sum over the same number of days just before it. Counts only accounts with a non-null `engagements` value in both windows; the sums are pooled across them. | no such account, or `prev` = 0 | `social` |
+| n10 | creatives · `asset-requests-on-time` | `creatives.asset_requests_on_time` | numerator ÷ denominator | As n1, with kind `assets`. | denominator 0 | tenant |
+| n11 | creatives · `revision-rounds` | `creatives.revision_rounds` | rounds ÷ groups | Version groups (`COALESCE(version_group_id, id)`) of `creative_assets` with `department_id` in S(u), whose APPROVED round's `decided_at` is inside the window. Value: the mean number of that group's rounds that ended `changes_requested`. `withdrawn` and `superseded` are not revisions, and a first-time approval counts 0. No numerator or denominator. | no approved group | tenant |
+| n12 | creatives · `assets-delivered` | `creatives.assets_delivered` | a count | **DW-D27: a delivered asset is a version group approved in review** in the window, counted once, `department_id` in S(u). A count of 0 is a real 0 when the department has creative assets at all. | the department has no creative asset at all | tenant |
+
+#### 40.5.4 What the numbers cannot say (said in the UI's notes, never hidden)
+- **n1, n10** count only requests that carry a `needed_by` date.
+- **n4** counts reports that exist. A month in which no report was drafted is not counted as late, because no record says one was due. A per-engagement cadence would close this gap; that is a later ticket, not in scope.
+- **n5:** the SEO tracker's pacing view (design §630, `sm-budget-pacing`) must adopt the same rule when it is built (DW-D27).
+- **n6** infers churn from contracts and projects; `clients.status` keeps no history.
+- **n8** sees only each variant's LATEST approval round. A re-request overwrites the earlier one (`UNIQUE (variant_id)`), so a turnaround series over a period that included re-requests is understated. Logging the rounds would fix it; that is a later ticket.
+- **n9:** each network defines "engagement" its own way, so this is growth on each network's own measure, pooled.
+- **n12:** an asset never sent for review is not counted as delivered.
+
+#### 40.5.5 Labels
+Only n1's label changes, and its key stays `requests-within-sla`, so stored targets, conditions and alerts carry over. The label changes in:
+- the server catalogue (`dept-kpis.ts`);
+- the UI registry row (`workspaces.ts`);
+- the demo catalogue (`demoDeptKpis.ts`);
+- the plan's KPI table;
+- the sumopod e2e pin in `workspace-shell.spec.ts`.
+
+#### 40.5.6 Proof (live Postgres + Cerbos on the Linux CI gate)
+For each reader, seeded rows that exercise:
+- a row inside the window and one outside it at each boundary (the first instant, the last instant, `end + 1 day 00:00`);
+- a row of a unit outside S(u) and of a client outside C(u) (never counted);
+- an internal client (never counted);
+- another tenant's row (never counted);
+- the `null` case;
+- the walled module turned off for the tenant (`null`, never an error).
+
+Plus:
+- n2's value equal to `uptimeRatio()` over the same results;
+- the seam's parity test;
+- the engine reading a registered reader (a value gives a condition; `null` gives `no_data`);
+- unregistered `module` KPIs still giving `no_reader`.
+
+#### 40.5.7 Tickets
+One reader per ticket, in this order:
+1. **n0:** the seam.
+2. **The four READY readers:** n10, n11, n12, n7.
+3. **Then:** n2, n1, n3, n4, n6, n5, n9, n8.
+
+Each lands as its own fast-forward with green CI on its exact sha.
+
 ## 41. The department appraisal per cycle (DW-4e-3, 2026-10-15) — `platform-nest/src/modules/reports/dept-appraisals*.ts` — **STATUS: BUILT, PROTOTYPED (backend: dept-appraisals.test.ts, dept-appraisals.controller.db.test.ts and src/rbac/cerbos-dept-kpi-target.test.ts on the Linux CI gate; UI: platform-ui deptAppraisalFormat.test.ts, demoDeptAppraisals.test.ts, deptAppraisals.test.ts, AppraisalView.test.tsx and rbac.test.ts on the CI gate)**
 
 **Why.** Plan §5.3 and §5.5 (owner ruling DW-Q4): each department has its own appraisal. The cycle's department appraisal is the department's KPIs over the appraisal period, with the result against each target, the condition history, the head's commentary and the GM's assessment. The Appraisals › Department tab shows it next to how the people's appraisals went. It is not a person's score, and a department KPI is never pinned on one person.

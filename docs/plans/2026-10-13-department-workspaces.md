@@ -528,6 +528,8 @@ Each department has its own set. The row opens one page with two sections:
 
 ### 4.2 Build notes (DW-6, 2026-10-13)
 
+**DW-6n (2026-10-14): the delivery departments' KPI readers** (DW-D25, DW-D27). The contract is BFF §40.5. A shared seam adds an optional `readerId` to the catalogue's `module` reader and a registry of readers. The twelve readers read data the modules already write; the survey verdicts and the limits of each are in §40.5.4. Order: the seam, then n10, n11, n12, n7, then n2, n1, n3, n4, n6, n5, n9, n8.
+
 Written when DW-6 started, from a survey of main (`2e222711`). Pilot users only, like DW-2.
 
 **Most of the regrouping is already built.**
@@ -1144,6 +1146,7 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 | DW-D23 | DW-8k: should Approvals in You show only to people who decide approvals? Deciding is split across several rights (agency approvals, pipeline gates, automation and AI actions, leave, loans, IAM overrides), and some of them are conditional, so one permission check could hide the page from a real decider | **Owner (2026-10-14): show it when it concerns you.** The row shows when something waits on your decision or you hold any right to decide, and its badge counts what is pending. The page stays reachable by URL and ⌘K for everyone, and the server decides who may act |
 | DW-D24 | DW-8j: what is "email from the ERP"? The mail design (2026-08-04, §8C, A14) planned only reading your own Gmail inside the ERP, and system mail is for approvals and risk only | **Owner (2026-10-14): read and send through your own Gmail.** Each employee links their own Google account (Internal app, per person, no domain-wide delegation, nothing stored), then reads, replies and sends inside the ERP, including "Email this client" from the client page. It is built now against a simulated Gmail and goes live when the Google OAuth client exists (DW-11). This extends the mail design's read-only Gmail scope to sending; system mail stays approvals and risk only |
 | DW-D25 | DW-4e left 24 department KPIs reading "unavailable (no reader)": each needs a reader from its own module (WebDesk, Monitoring, SEO, Social, Creatives, Finance, HR, IT). Do those readers stay in DW-4 (as DW-4n) or move to the programs that own the modules? | **Owner (2026-10-14): move them to the module programs.** DW-6 takes the delivery departments' 12 (Web Dev 2, SEO 4, Social 3, Creatives 3), contracts in BFF §40.5; DW-7 takes the functional departments' and the GM's 12 (GM 2, HR 4, Finance 3, IT 3), contracts in BFF §40.6. One reader per ticket, contract first, each plugging into the §40 catalogue (`{value, numerator?, denominator?}` or null), after which the targets, the condition and the DW-4j watch pick it up unchanged. Until its reader lands a KPI reads `unavailable` (`no_reader`). DW-4 ends without them |
+| DW-D27 | DW-6n: four of the delivery readers (BFF §40.5) could not be defined from the data alone: Web Dev's requests carry no SLA, SEO's monthly reports carry no due date, campaign budgets carry no period, and "assets delivered" has two candidate meanings | **Owner (2026-10-14), first-hand:** (1) Web Dev's `requests-within-sla` becomes "Requests delivered by the date needed" (the key stays); (2) a monthly client report is due by the 5th of the following month; (3) DW-6 defines ad pacing now: a campaign budget is monthly, and a campaign is on pace when its spend is 90% to 110% of the budget prorated by days elapsed (the SEO tracker's pacing view adopts the same rule); (4) a delivered asset is a version group approved in review. DW-D26 is DW-8's. |
 
 ---
 
@@ -1478,6 +1481,7 @@ These are built in code but give no real data until someone outside engineering 
 - **2026-10-13 (owner, during the build):** DW-D21: the Project Management view is called "Board" again, reversing the 2026-08-10 Board→Overview rename (§11.4). Built as DW-6m.
 - **2026-10-14 (owner, during the build):** DW-D22: the Company block of the company Overview shows the net margin rate the GM cockpit's money card showed (§11.4, §3.8). Built as DW-3z2.
 - **2026-10-14 (owner, during the build):** DW-D25: the department KPIs' module readers leave DW-4 for the programs that own the modules, DW-6 (delivery departments, BFF §40.5) and DW-7 (functional departments and the GM, BFF §40.6) (§11.4). DW-4n is closed as moved.
+- **2026-10-14 (owner, first-hand, during the build):** DW-D27: the four delivery-reader definitions of BFF §40.5 (§11.4), for DW-6n.
 - **2026-10-13 (owner, "all the decisions follow the recommendation"):**
   - DW-D1 to DW-D8, DW-D15 and DW-D19 ruled as recommended; DW-Q2, DW-Q3 and DW-Q5 ruled as defaulted.
   - **DW-Q4:** each department has its own KPIs and appraisal, highlighted to show its condition and standing, and the HOD is made aware (§5.5).
