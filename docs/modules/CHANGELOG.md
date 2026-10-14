@@ -11,6 +11,47 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.127.0` - DW-6h: asset versions and review rounds, with the `creative_asset` Cerbos kind (2026-10-13) - PROTOTYPED
+
+- **What.** BFF contract §35 and PERMISSION-CONTRACT §37.
+  - **Versions.** `creative_assets` gains a version group, a number and the version it supersedes (migration `202610140730`, no backfill; the group key is `COALESCE(version_group_id, id)`).
+    - A new version is today's save with `versionOf`. It is numbered under a lock on the group's first row, and a unique index is the second wall.
+    - `GET /creative/assets` lists the latest version of each group by default (`?versions=all` for every version), with `?departmentId=` (§33).
+  - **Review rounds** are kept in `creative_asset_reviews`, with RLS forced.
+    - They are numbered per asset, with one open round at a time, and only on the latest version.
+    - Each round is pinned by the SHA-256 of the file reviewed.
+    - A new version supersedes the open round in the same save, and deleting that version withdraws it.
+    - Decisions are `approved` or `changes_requested` (a comment is required).
+- **Authorization.** A new Cerbos kind, `creative_asset`, covers the review actions only. The existing asset routes keep the `file` kind and their gates.
+  - **`decide_review`** is allowed to:
+    - company_admin and manager;
+    - the lead of the asset's department or any unit above it;
+    - a requester of a work request the asset was delivered against.
+  - **EFFECT_DENY:** nobody decides a round they opened, whatever their role, and a bot never decides.
+  - **`withdraw_review`** is allowed to the person who opened the round, or a manager.
+  - **Permissions.** Migration `202610140740` seeds 4 permissions and 22 role rows, with self-assertions.
+  - **Deploy.** The deploy must restart Cerbos and probe it (107 resource policies).
+- **Proof.**
+  - `creative-reviews.test.ts`: 22 HTTP tests on real Postgres and Cerbos, including the self-approval deny for a company_admin, the lead and requester rules, and supersede and withdraw.
+  - `cerbos-creative-asset.test.ts`: 44 tests (12 static pins and 32 live).
+  - The existing `creative.test.ts` (9) still passes.
+
+### platform-ui `0.139.0` - DW-6h: versions and review rounds in the Asset Library (2026-10-13) - PROTOTYPED
+
+- **Asset Library.** It shows the department's latest versions (`?departmentId=`), with a "v3" badge when an asset has several versions and a review chip: In review, Approved or Changes requested.
+- **Asset detail,** a new page at `departments/[deptId]/assets/[assetId]`, shows:
+  - the version history;
+  - the review rounds, with decisions and comments;
+  - one comment thread for every version (generic comments on the group key).
+- **Actions** are shown only when they can work, and the server stays the authority (a refusal is said, never a crash):
+  - Upload new version;
+  - Request review;
+  - Approve and Request changes. They are hidden from the person who opened the round.
+  - Withdraw.
+- **Image Studio** saves "as a new version of …" when opened with `?versionOf=`.
+- **Proof.** `AssetDetail.test.tsx` (17), `creativeReviews.test.ts` (26), `creativeReviews-data.test.ts` (6), and the asset route test (5).
+- **Gates before landing.** Branch CI 38426038853 on `b36fbb5f` (backend, UI and the test fix) is all green. The landing sha's own runs are on the board.
+
 ### platform-ui `0.138.0` - PV5-13: issued-invoice PDFs and sealed copies render again (2026-10-14) - PROTOTYPED
 
 - **The bug (measured on live 1.0.0-alpha.382 by the PV-5 Release A drive).** Every `invoice_pdf` and `contract_signed_copy` job failed with `render_unverified`. With the renderer sidecar's own Chromium: `DocumentTitle` set `document.title` to the render nonce, then Next 16.3 committed the streamed metadata title (`Invoice`) after the effect, so the PDF /Title was never the nonce and platform-nest rightly refused every PDF. PV5-07 had only been tested against a stubbed renderer, and the Next 16 upgrade changed when metadata commits.
