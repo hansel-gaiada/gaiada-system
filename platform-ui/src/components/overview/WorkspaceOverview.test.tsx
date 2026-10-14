@@ -239,3 +239,29 @@ describe("WorkspaceOverview: the Work band (DW-3f)", () => {
     expect(screen.queryByText("projects block")).not.toBeInTheDocument();
   });
 });
+
+describe("WorkspaceOverview: the Growth band and the company's modules (DW-3g)", () => {
+  const host: Record<string, OverviewWidgetComponent> = {
+    learning: () => <p>learning block</p>,
+    appraisal: () => <p>appraisal block</p>,
+  };
+
+  it("places both blocks when every module is on (the default)", () => {
+    draw({ widgets: host });
+    expect(screen.getByRole("heading", { level: 2, name: "Growth" })).toBeInTheDocument();
+    expect(screen.getByText("learning block")).toBeInTheDocument();
+    expect(screen.getByText("appraisal block")).toBeInTheDocument();
+  });
+
+  it("drops only the block whose module is off", () => {
+    draw({ widgets: host, moduleOn: (m: string) => m !== "lms" });
+    expect(screen.queryByText("learning block")).not.toBeInTheDocument();
+    expect(screen.getByText("appraisal block")).toBeInTheDocument();
+  });
+
+  it("drops the whole band, label and all, when both modules are off", () => {
+    draw({ widgets: host, moduleOn: (m: string) => m !== "lms" && m !== "reports" });
+    expect(screen.queryByRole("heading", { level: 2, name: "Growth" })).not.toBeInTheDocument();
+    expect(screen.queryByText("appraisal block")).not.toBeInTheDocument();
+  });
+});

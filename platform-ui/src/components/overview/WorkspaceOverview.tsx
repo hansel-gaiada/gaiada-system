@@ -10,6 +10,7 @@ import {
 import { Skeleton } from "@/components/Feedback";
 import { builtPulseTiles } from "@/lib/overviewPulse";
 import { workLinks, workWidgetPlaced } from "@/lib/overviewWork";
+import { growthWidgetPlaced } from "@/lib/overviewGrowth";
 import { PeriodSelector } from "./PeriodSelector";
 import { WidgetBoundary } from "./WidgetBoundary";
 import { OVERVIEW_WIDGETS, hasOverviewWidget, type OverviewWidgetComponent } from "./widgets";
@@ -43,7 +44,7 @@ function WidgetSkeleton({ title }: { title: string }) {
   );
 }
 
-export function WorkspaceOverview({ me, tenantId, subject, period, legacy, now = new Date(), widgets = OVERVIEW_WIDGETS }: {
+export function WorkspaceOverview({ me, tenantId, subject, period, legacy, now = new Date(), widgets = OVERVIEW_WIDGETS, moduleOn = () => true }: {
   me: Me;
   tenantId: string;
   subject: OverviewSubject;
@@ -56,6 +57,9 @@ export function WorkspaceOverview({ me, tenantId, subject, period, legacy, now =
   now?: Date;
   /** The widget host. The default is the real one; a test passes its own. */
   widgets?: Readonly<Record<string, OverviewWidgetComponent>>;
+  /** The active company's module gate (`moduleGate(...).isEnabled`), read once by the page (`pilotFrame`). A block
+   *  whose module is off is not placed (DW-3g). Omitted means every module is on. */
+  moduleOn?: (moduleKey: string) => boolean;
 }) {
   const ctx = { me, tenantId, unitPath: subject.unitPath, workspaces: subject.workspaces };
   // The Pulse is the one block whose content depends on the workspace: with no built tile it is not placed at
@@ -63,7 +67,9 @@ export function WorkspaceOverview({ me, tenantId, subject, period, legacy, now =
   const pulse = builtPulseTiles(subject);
   // The Work blocks (DW-3f) read for the department unit: without one they are not placed, so the Work band is dropped.
   const links = workLinks(subject);
-  const bands = selectBands(subject.widgets, ctx, (key) => hasOverviewWidget(key, widgets) && (key !== "pulse" || pulse.length > 0) && workWidgetPlaced(key, subject));
+  // The Growth blocks (DW-3g) are not placed for a company that switched their module off.
+  const bands = selectBands(subject.widgets, ctx, (key) =>
+    hasOverviewWidget(key, widgets) && (key !== "pulse" || pulse.length > 0) && workWidgetPlaced(key, subject) && growthWidgetPlaced(key, moduleOn));
   const actions = selectQuickActions(subject.quickActions, { ...ctx, deptId: subject.deptId });
   const company = activeCompany(me, tenantId)?.name;
   const firstName = me.name.trim().split(/\s+/)[0];

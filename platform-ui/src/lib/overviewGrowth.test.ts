@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { appraisalNextStep, appraisalStatusText, appraisalView, learningView, scoreText } from "./overviewGrowth";
+import { appraisalNextStep, appraisalStatusText, appraisalView, growthWidgetPlaced, learningView, scoreText } from "./overviewGrowth";
 import type { MyEnrollment, MyLearning } from "./lms";
 import type { AppraisalStatus } from "./appraisals";
 import { selectBands } from "./overview";
@@ -114,6 +114,16 @@ describe("the Growth band's placement in the registry", () => {
       if (ws.overview[0].key === "decisions") { expect(growth.every(isPlanned), ws.key).toBe(true); continue; }
       expect(growth.map((w) => [w.key, isPlanned(w)]), ws.key).toEqual([["learning", false], ["appraisal", false]]);
     }
+  });
+
+  it("drops a block whose module the company switched off, and keeps every other widget", () => {
+    const off = (m: string) => (k: string) => k !== m;
+    expect(growthWidgetPlaced("learning", off("lms"))).toBe(false);
+    expect(growthWidgetPlaced("appraisal", off("lms"))).toBe(true);
+    expect(growthWidgetPlaced("appraisal", off("reports"))).toBe(false);
+    expect(growthWidgetPlaced("learning", off("reports"))).toBe(true);
+    expect(growthWidgetPlaced("projects", () => false)).toBe(true);
+    expect(growthWidgetPlaced("learning", () => true)).toBe(true);
   });
 
   it("selectBands keeps the Growth band only while a block of it is placed", () => {

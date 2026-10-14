@@ -8,6 +8,18 @@ import type { AppraisalPack, AppraisalStatus } from "./appraisals";
 export const LEARNING_HREF = "/me/learning";
 export const APPRAISAL_HREF = "/appraisals/mine";
 
+/** The module each Growth block reads from, the same gate its page uses (`/me/learning` gates on `lms`,
+ *  `/appraisals` on `reports`). A company that switched the module off has no backend for the block, so it is not
+ *  placed (plan §3.3: a block with no backend is hidden), rather than saying "Unavailable" forever. */
+const GROWTH_MODULE: Readonly<Record<string, string>> = { learning: "lms", appraisal: "reports" };
+
+/** Whether a widget may be placed, as far as the Growth band is concerned. `moduleOn` is the company's module gate,
+ *  which fails open, so only a module the company really switched off drops its block. */
+export function growthWidgetPlaced(key: string, moduleOn: (moduleKey: string) => boolean): boolean {
+  const mod = GROWTH_MODULE[key];
+  return mod === undefined || moduleOn(mod);
+}
+
 // ── Learning ─────────────────────────────────────────────────────────────────────────────────────
 
 export interface NextDue { title: string; dueOn: string; overdue: boolean }
@@ -56,6 +68,8 @@ export function appraisalStatusText(s: AppraisalStatus): string {
     case "acknowledged": return "Acknowledged";
     case "disputed": return "Disputed";
     case "finalized": return "Finalized";
+    // A status this build does not know yet (the backend moved first): say it as sent, never a blank.
+    default: return String(s);
   }
 }
 

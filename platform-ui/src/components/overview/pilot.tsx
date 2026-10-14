@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { Me } from "@/lib/platform";
 import { getPrefs } from "@/lib/prefs";
+import { moduleGate } from "@/lib/modules";
 import { myWorkspaces } from "@/lib/workspaces-data";
 import { parseOverviewPeriod, subjectOfRef, workspaceRefForPage } from "@/lib/overview";
 import { WorkspaceOverview } from "./WorkspaceOverview";
@@ -29,5 +30,7 @@ export async function pilotFrame(
   // DW-5f: `all` gives the `hasWorkspace` gate the company's department workspaces.
   const subject = subjectOfRef(ref, prefs.pinnedTools, all);
   const parsed = parseOverviewPeriod(period);
-  return (legacy) => <WorkspaceOverview me={me} tenantId={tenantId} subject={subject} period={parsed} legacy={legacy} />;
+  // DW-3g: one read of the company's modules, so a block whose module is off is not placed. It fails open.
+  const modules = await moduleGate(me.userId, tenantId);
+  return (legacy) => <WorkspaceOverview me={me} tenantId={tenantId} subject={subject} period={parsed} legacy={legacy} moduleOn={modules.isEnabled} />;
 }
