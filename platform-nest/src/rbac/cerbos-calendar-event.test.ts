@@ -2,11 +2,11 @@
 // kind.
 //
 // THE CLAIMS UNDER TEST
-//   1. read: company_admin; the ORGANIZER (member, ownerId == principal id); an ATTENDEE (member or viewer, principal id in
-//      attendeeIds); and every member and viewer when visibility == "company". A manager does NOT read every calendar.
+//   1. read: company_admin; the ORGANIZER (member or manager, ownerId == principal id); an ATTENDEE (member, viewer or manager,
+//      principal id in attendeeIds); and every member, viewer and manager when visibility == "company". Nobody reads every calendar.
 //   2. create: company_admin, manager, member (a viewer cannot).
-//   3. update and cancel: company_admin, and the organizer (member). An attendee, a manager and a viewer never edit or cancel.
-//   4. respond: an attendee (member or viewer) for themselves; company_admin holds the key. A deny-overrides rule makes it hold
+//   3. update and cancel: company_admin, and the organizer (member or manager). An attendee and a viewer never edit or cancel.
+//   4. respond: an attendee (member, viewer or manager) for themselves; company_admin holds the key. A deny-overrides rule makes it hold
 //      for EVERY role: nobody answers for someone else, company_admin and platform_admin included.
 //   5. Each attribute-dependent rule stands alone (HIER-2 authoring rule).
 //   6. EFFECT_DENY on create / update / cancel / respond for automation and bot principals (beats the platform_admin wildcard and
@@ -70,20 +70,21 @@ describe("DW-8g static pin — resource_calendar_event.yaml", () => {
   const attendeeCond = "request.principal.id in request.resource.attr.attendeeIds";
   const organizerCond = "request.resource.attr.ownerId == request.principal.id";
 
-  it("read has FOUR rules, each on its own: company_admin, the organizer, an attendee, company visibility; never manager", () => {
+  it("read has FOUR rules, each on its own: company_admin, the organizer, an attendee, company visibility (the last three on member and manager, viewers on the attendee and visibility rules)", () => {
     const rs = reach("read");
     expect(rs.length).toBe(4);
     const admin = rs.find((r) => r.derivedRoles.includes("company_admin"))!;
     expect(admin.derivedRoles).toEqual(["company_admin"]);
     expect(admin.condition).toBe("variables.inTenant && variables.notLow");
     const organizer = rs.find((r) => r.condition.includes(organizerCond))!;
-    expect(organizer.derivedRoles).toEqual(["member"]);
+    expect([...organizer.derivedRoles].sort()).toEqual(["manager", "member"]);
     expect(organizer.condition).toContain('request.resource.attr.ownerId != ""');
     const attendee = rs.find((r) => r.condition.includes(attendeeCond))!;
-    expect([...attendee.derivedRoles].sort()).toEqual(["member", "viewer"]);
+    expect([...attendee.derivedRoles].sort()).toEqual(["manager", "member", "viewer"]);
     const visible = rs.find((r) => r.condition.includes('request.resource.attr.visibility == "company"'))!;
-    expect([...visible.derivedRoles].sort()).toEqual(["member", "viewer"]);
-    expect(rs.some((r) => r.derivedRoles.includes("manager"))).toBe(false);
+    expect([...visible.derivedRoles].sort()).toEqual(["manager", "member", "viewer"]);
+    // manager only through the three attribute rules, never beside company_admin's unconditional one
+    expect(rs.filter((r) => r.derivedRoles.includes("manager")).length).toBe(3);
     for (const r of rs) expect(r.actions, "no read rule carries another action").toEqual(["read"]);
   });
 
@@ -94,34 +95,33 @@ describe("DW-8g static pin — resource_calendar_event.yaml", () => {
     expect(rs[0].condition).toBe("variables.inTenant && variables.notLow");
   });
 
-  it("update and cancel: company_admin in one rule, and the organizer (member + ownerId == principal.id) on its own rule per action", () => {
+  it("update and cancel: company_admin in one rule, and the organizer (member and manager, ownerId == principal.id) on its own rule per action", () => {
     for (const a of ["update", "cancel"]) {
       const rs = reach(a);
       expect(rs.length, a).toBe(2);
       expect(rs.find((r) => r.derivedRoles.includes("company_admin"))!.derivedRoles).toEqual(["company_admin"]);
       const organizer = rs.find((r) => r.derivedRoles.includes("member"))!;
-      expect(organizer.derivedRoles).toEqual(["member"]);
+      expect([...organizer.derivedRoles].sort()).toEqual(["manager", "member"]);
       expect(organizer.actions).toEqual([a]);
       expect(organizer.condition).toContain(organizerCond);
       expect(organizer.condition).toContain("variables.inTenant && variables.notLow");
-      expect(rs.some((r) => r.derivedRoles.includes("manager") || r.derivedRoles.includes("viewer")), a).toBe(false);
+      expect(rs.some((r) => r.derivedRoles.includes("viewer")), a).toBe(false);
     }
   });
 
-  it("respond: company_admin (broad, narrowed by the DENY) and the attendee rule (member + viewer); never manager", () => {
+  it("respond: company_admin (broad, narrowed by the DENY) and the attendee rule (member, viewer and manager)", () => {
     const rs = reach("respond");
     expect(rs.length).toBe(2);
     expect(rs.find((r) => r.derivedRoles.includes("company_admin"))!.derivedRoles).toEqual(["company_admin"]);
     const attendee = rs.find((r) => r.derivedRoles.includes("member"))!;
-    expect([...attendee.derivedRoles].sort()).toEqual(["member", "viewer"]);
+    expect([...attendee.derivedRoles].sort()).toEqual(["manager", "member", "viewer"]);
     expect(attendee.condition).toContain(attendeeCond);
-    expect(rs.some((r) => r.derivedRoles.includes("manager"))).toBe(false);
   });
 
-  it("the organizer, attendee and visibility rules are on member/viewer only, one action each, never beside a scope role", () => {
+  it("the organizer, attendee and visibility rules are on member/viewer/manager only, one action each, never beside company_admin", () => {
     for (const r of roleArm) {
       if (r.condition.includes("ownerId") || r.condition.includes("attendeeIds") || r.condition.includes("visibility")) {
-        expect(r.derivedRoles.every((d) => d === "member" || d === "viewer"), r.condition).toBe(true);
+        expect(r.derivedRoles.every((d) => d === "member" || d === "viewer" || d === "manager"), r.condition).toBe(true);
         expect(r.actions.length).toBe(1);
       }
     }
@@ -169,7 +169,7 @@ describe("DW-8g static pin — resource_calendar_event.yaml", () => {
     expect(src).toContain('ownerId: r.ownerId ?? ""');
   });
 
-  it("the bundle JSON: owner == company_admin == platform_admin (all five), manager create, member all five (update/cancel/respond self-scoped), viewer read+respond (respond self-scoped), nobody else", () => {
+  it("the bundle JSON: owner == company_admin == platform_admin (all five), manager and member all five (update/cancel/respond self-scoped), viewer read+respond (respond self-scoped), nobody else", () => {
     const doc = JSON.parse(readFileSync(join(__dirname, "role-permission-bundles.json"), "utf8")) as {
       roles: Record<string, string[]>;
       selfScoped: Record<string, string[]>;
@@ -179,7 +179,7 @@ describe("DW-8g static pin — resource_calendar_event.yaml", () => {
     expect(keys("company_admin")).toEqual(all);
     expect(keys("owner")).toEqual(all);
     expect(keys("platform_admin")).toEqual(all);
-    expect(keys("manager")).toEqual(["core.calendar_event.create"]);
+    expect(keys("manager")).toEqual(all);
     expect(keys("member")).toEqual(all);
     expect(keys("viewer")).toEqual(["core.calendar_event.read", "core.calendar_event.respond"]);
     for (const role of Object.keys(doc.roles)) {
@@ -187,8 +187,9 @@ describe("DW-8g static pin — resource_calendar_event.yaml", () => {
     }
     const marked = (role: string) => (doc.selfScoped[role] ?? []).filter((k) => k.startsWith("core.calendar_event.")).sort();
     expect(marked("member")).toEqual(["core.calendar_event.cancel", "core.calendar_event.respond", "core.calendar_event.update"]);
+    expect(marked("manager")).toEqual(["core.calendar_event.cancel", "core.calendar_event.respond", "core.calendar_event.update"]);
     expect(marked("viewer")).toEqual(["core.calendar_event.respond"]);
-    for (const role of ["company_admin", "manager", "platform_admin", "org_unit_lead"]) expect(marked(role), role).toEqual([]);
+    for (const role of ["company_admin", "platform_admin", "org_unit_lead"]) expect(marked(role), role).toEqual([]);
   });
 });
 
@@ -232,21 +233,21 @@ describe.skipIf(!live)("DW-8g Cerbos matrix — calendar_event (role x action)",
     // a stranger to the event (not organizer, not attendee, attendees-only visibility)
     ["platform_admin (global), not an attendee: everything but respond", principal([glob("platform_admin")]), event(), cell({ read: true, create: true, update: true, cancel: true })],
     ["company_admin @T1, not an attendee: everything but respond (nobody answers for someone else)", principal([co("company_admin")]), event(), cell({ read: true, create: true, update: true, cancel: true })],
-    ["manager @T1, not involved: create only (a manager does not read every calendar)", principal([co("manager")]), event(), cell({ create: true })],
+    ["manager @T1, not involved, attendees-only: create only (a manager does not read every calendar)", principal([co("manager")]), event(), cell({ create: true })],
     ["member @T1, not involved, attendees-only: create only", principal([co("member")]), event(), cell({ create: true })],
     ["viewer @T1, not involved, attendees-only: nothing", principal([co("viewer")]), event(), NONE],
     // company visibility opens READ to every member and viewer, and nothing else
     ["member @T1, company-visible event: reads, schedules, but cannot edit, cancel or answer", principal([co("member")]), event({ visibility: "company" }), cell({ read: true, create: true })],
     ["viewer @T1, company-visible event: reads only", principal([co("viewer")]), event({ visibility: "company" }), cell({ read: true })],
-    ["manager @T1, company-visible event: still create only (the visibility rule names member and viewer)", principal([co("manager")]), event({ visibility: "company" }), cell({ create: true })],
+    ["manager @T1, company-visible event: reads and schedules, but cannot edit, cancel or answer", principal([co("manager")]), event({ visibility: "company" }), cell({ read: true, create: true })],
     // the organizer
     ["member @T1, the ORGANIZER: reads, schedules, edits, cancels and answers (they are an attendee too)", principal([co("member")]), asOrganizer(), cell({ read: true, create: true, update: true, cancel: true, respond: true })],
     ["viewer @T1 who is the ORGANIZER by attribute: the organizer rules are on member; the attendee rule still reads and answers", principal([co("viewer")]), asOrganizer(), cell({ read: true, respond: true })],
-    ["manager @T1 who is the ORGANIZER: create only (the organizer rules are on member)", principal([co("manager")]), asOrganizer(), cell({ create: true })],
+    ["manager @T1, the ORGANIZER (a manager-only login): reads, schedules, edits, cancels and answers its own event", principal([co("manager")]), asOrganizer(), cell({ read: true, create: true, update: true, cancel: true, respond: true })],
     // an attendee
     ["member @T1, an ATTENDEE: reads, schedules and answers; cannot edit or cancel", principal([co("member")]), asAttendee(), cell({ read: true, create: true, respond: true })],
     ["viewer @T1, an ATTENDEE: reads and answers", principal([co("viewer")]), asAttendee(), cell({ read: true, respond: true })],
-    ["manager @T1, an ATTENDEE: create only (the attendee rule is on member and viewer)", principal([co("manager")]), asAttendee(), cell({ create: true })],
+    ["manager @T1, an ATTENDEE: reads, schedules and answers; cannot edit or cancel", principal([co("manager")]), asAttendee(), cell({ read: true, create: true, respond: true })],
     ["company_admin @T1, an ATTENDEE: everything, answering included", principal([co("company_admin")]), asAttendee(), cell({ read: true, create: true, update: true, cancel: true, respond: true })],
     ["platform_admin, an ATTENDEE: everything, answering included", principal([glob("platform_admin")]), asAttendee(), cell({ read: true, create: true, update: true, cancel: true, respond: true })],
     // the boundary
@@ -257,6 +258,7 @@ describe.skipIf(!live)("DW-8g Cerbos matrix — calendar_event (role x action)",
     ["a webdev_manager @T1 (a module tier)", principal([co("webdev_manager")]), asAttendee(), NONE],
     ["no grants at all", principal([]), asAttendee(), NONE],
     // the DENY: agents read, never schedule, edit, cancel or answer
+    ["a BOT holding manager, organizer and attendee: reads only", principal([co("manager")], { kind: "bot" }), asOrganizer(), cell({ read: true })],
     ["a BOT holding member, organizer and attendee: reads only", principal([co("member")], { kind: "bot" }), asOrganizer(), cell({ read: true })],
     ["an AUTOMATION principal holding company_admin: reads only", principal([co("company_admin")], { kind: "automation" }), event(), cell({ read: true })],
     ["platform_admin that is a bot: reads only (the DENY beats the wildcard)", principal([glob("platform_admin")], { kind: "bot" }), asAttendee(), cell({ read: true })],

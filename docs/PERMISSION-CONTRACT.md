@@ -2146,11 +2146,11 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §47 (plan `docs/plans/2026-10-13-depart
 
 | Action | Reach | What it is |
 |---|---|---|
-| `read` | `company_admin`. **Its own rule** for the organizer (`ownerId == principal.id`, held as `member`). **Its own rule** for an attendee (`principal.id in attendeeIds`, held as `member` or `viewer`). **Its own rule** for every `member` and `viewer` when `visibility == "company"` | see an event. A manager does NOT read every calendar |
+| `read` | `company_admin`. **Its own rule** for the organizer (`ownerId == principal.id`, held as `member` or `manager`). **Its own rule** for an attendee (`principal.id in attendeeIds`, held as `member`, `viewer` or `manager`). **Its own rule** for every `member`, `viewer` and `manager` when `visibility == "company"` | see an event. A manager reads only through those three rules, never every calendar |
 | `create` | `company_admin`, `manager`, `member` | schedule an event or a meeting. It is also the gate of the busy-times read |
-| `update` | `company_admin`; **its own rule** for the organizer | edit time, title, attendees or place |
-| `cancel` | `company_admin`; **its own rule** for the organizer | call it off |
-| `respond` | **its own rule** for an attendee (`principal.id in attendeeIds`) | accept, decline or say maybe, for themselves only. Nobody answers for someone else, `company_admin` included |
+| `update` | `company_admin`; **its own rule** for the organizer (`member` or `manager`) | edit time, title, attendees or place |
+| `cancel` | `company_admin`; **its own rule** for the organizer (`member` or `manager`) | call it off |
+| `respond` | **its own rule** for an attendee (`principal.id in attendeeIds`, held as `member`, `viewer` or `manager`) | accept, decline or say maybe, for themselves only. Nobody answers for someone else, `company_admin` included |
 
 **Authoring rules:**
 - Each attribute-dependent rule stands alone (HIER-2): the organizer, attendee and company-visibility rules are separate rules, never mixed with a scope role.
@@ -2171,9 +2171,9 @@ Both new attributes go in the `Resource` type and in the `resourcePayload()` all
 | Role | Holds |
 |---|---|
 | `company_admin`, `owner`, `platform_admin` | all five keys |
-| `manager` | `create` |
-| `member` | `create`; self-scoped `read`, `update`, `cancel` and `respond` |
-| `viewer` | self-scoped `read` and `respond` |
+| `manager` | `create`, `read`, and self-scoped `update`, `cancel` and `respond` |
+| `member` | `create`, `read`, and self-scoped `update`, `cancel` and `respond` |
+| `viewer` | `read`, and self-scoped `respond` |
 
 No key is `sensitive`.
 
@@ -2190,12 +2190,12 @@ Then move the four pinned literals.
 **Proof:** `src/rbac/cerbos-calendar-event.test.ts` (a static pin, plus the live matrix with `CERBOS_URL`). **Restart Cerbos after the deploy, then probe:** on a fresh tenant, a GET of a zero-uuid event answers 404.
 
 **As built (2026-10-14).** The policy `resource_calendar_event.yaml` follows the tables above, with these points the design left open or that moved:
-- **`read`** is four rules, each on its own: `company_admin` (unconditional beyond `inTenant && notLow`), the organizer (`member`, `ownerId == principal.id`), an attendee (`member` and `viewer`, `principal.id in attendeeIds`) and company visibility (`member` and `viewer`, `visibility == "company"`). No rule names `manager`, so a person whose only role is `manager` cannot read an event, even one they organize (open question, FRONTEND-BFF-CONTRACT §47.7).
-- **`create`** is one rule for `company_admin`, `manager` and `member`; **`update`** and **`cancel`** are `company_admin` plus an organizer rule per action on `member`.
-- **`respond`** is two ALLOW rules (`company_admin`, unconditional beyond `inTenant && notLow`; and the attendee rule on `member` and `viewer`) plus **a deny-overrides rule on `roles: ["user"]`** for any caller who is not in `attendeeIds` (`!has(attendeeIds) || !(principal.id in attendeeIds)`). That rule is what stops `company_admin` and `platform_admin` answering for someone else, and it makes an unfed `attendeeIds` deny `respond` for everyone.
+- **`read`** is four rules, each on its own: `company_admin` (unconditional beyond `inTenant && notLow`), the organizer (`member` and `manager`, `ownerId == principal.id`), an attendee (`member`, `viewer` and `manager`, `principal.id in attendeeIds`) and company visibility (`member`, `viewer` and `manager`, `visibility == "company"`). **manager added to the self rules at review, 2026-10-14: a manager-only login could create but not then read its own event.**
+- **`create`** is one rule for `company_admin`, `manager` and `member`; **`update`** and **`cancel`** are `company_admin` plus an organizer rule per action on `member` and `manager`.
+- **`respond`** is two ALLOW rules (`company_admin`, unconditional beyond `inTenant && notLow`; and the attendee rule on `member`, `viewer` and `manager`) plus **a deny-overrides rule on `roles: ["user"]`** for any caller who is not in `attendeeIds` (`!has(attendeeIds) || !(principal.id in attendeeIds)`). That rule is what stops `company_admin` and `platform_admin` answering for someone else, and it makes an unfed `attendeeIds` deny `respond` for everyone.
 - **The agent DENY** is the second `EFFECT_DENY` rule, on `create`, `update`, `cancel` and `respond` for `automation` and `bot`, shaped exactly like `resource_work_request.yaml`'s. `read` stays allowed.
 - **The permission arm** is `perm_calendar_event_create` only (`inTenant && notLow && inRoot`). The permission-native `owner` holds all five keys in its bundle but reaches only `create` through Cerbos unless it also holds `company_admin`.
-- **The self-scoped marker moved from the table above.** The generator derives `selfScoped` from the rule shape, and member·read and viewer·read include the company-visibility rule, which is a tenant-wide read, so they are NOT marked. The marked pairs are member·update, member·cancel, member·respond and viewer·respond (4). company_admin·respond is not marked (its rule is unconditional and the deny narrows it). The migration seeds exactly that.
-- **Bundles** (`role-permission-bundles.json`, `totalPairs` 2045 -> 2068, `selfScopedPairs` 33 -> 37): `platform_admin` 451 -> 456, `company_admin` 414 -> 419, `owner` 414 -> 419, `manager` 206 -> 207 (create), `member` 104 -> 109, `viewer` 36 -> 38. Migration `202610150410_iam_calendar_event_permissions.sql` seeds 23 `role_permissions` rows with a DO-block self-assertion (owner mirrors company_admin in both directions, the four self-scoped markers, manager create only, viewer read and respond only).
+- **The self-scoped marker moved from the table above.** The generator derives `selfScoped` from the rule shape, and member·read and viewer·read include the company-visibility rule, which is a tenant-wide read, so they (and manager·read) are NOT marked. The marked pairs are member and manager · update, cancel and respond, and viewer·respond (7). company_admin·respond is not marked (its rule is unconditional and the deny narrows it). The migration seeds exactly that.
+- **Bundles** (`role-permission-bundles.json`, `totalPairs` 2045 -> 2072, `selfScoped` pairs 33 -> 40): `platform_admin` 451 -> 456, `company_admin` 414 -> 419, `owner` 414 -> 419, `manager` 206 -> 211, `member` 104 -> 109, `viewer` 36 -> 38. Migration `202610150410_iam_calendar_event_permissions.sql` seeds 27 `role_permissions` rows with a DO-block self-assertion (owner mirrors company_admin in both directions, the seven self-scoped markers, viewer read and respond only). The catalog counts (109 kinds, 471 pairs, 456 grantable) do not move: no key was added.
 
 **The six artifacts:** the policy and the derived role `perm_calendar_event_create`; `cerbos.ts` (`attendeeIds` default `[]`, `visibility` default `"attendees"`, in the `Resource` type and the `resourcePayload()` allow-list; `ownerId` was already there); `permission-catalog.json` (+5 keys: 109 kinds, 471 pairs, 456 grantable, 15 relationship, 211 sensitive); `permission-groups.json` (+1 group, `calendar`: 169 groups, 417 covered); the migration; the bundle generator (no resolver change: the kind names only direct roles) and `role-permission-bundles.json` regenerated. Pinned literals moved: `cerbos-catalog-alignment` 466 -> 471 and 108 -> 109 kinds, `permission-groups-catalog-parity` 451 -> 456, `ui-grantable-catalog` 466/451 -> 471/456, `iam-215-boundary-pin` 108 -> 109 kinds and 104 -> 105 non-exempt. Proof: `src/rbac/cerbos-calendar-event.test.ts` (static pin always; live matrix needs `CERBOS_URL`) and the HTTP suite `src/core/calendar-events.test.ts`. **Restart `gaiada-test-cerbos` and the live sidecar after deploying the policy files** (nothing hot-reloads).

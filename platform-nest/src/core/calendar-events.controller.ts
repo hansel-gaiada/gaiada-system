@@ -117,7 +117,7 @@ export class CalendarEventsController {
         try {
           // The soft probe: may this caller read an event they are INVITED to in this company? That is what every row below
           // is (organizer or attendee, from the DB), so this is the whole read decision for the leg. A refusal is
-          // `no_access` (a manager alone, a low-assurance session, a company that is not theirs), never a 403.
+          // `no_access` (a module tier alone, a low-assurance session, a company that is not theirs), never a 403.
           try {
             await authorize(req.principal, { kind: KIND, tenantId, attendeeIds: [userId] }, "read");
           } catch (e) {

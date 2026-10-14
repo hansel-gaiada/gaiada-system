@@ -2,9 +2,10 @@
 # §8.1, row 8g) — authz for the NEW `calendar_event` resource kind (core, no module): one EVENT on a company's calendar, which
 # may carry a scheduled meeting recording. Five actions:
 #   read    — see an event. company_admin; the ORGANIZER (its own rule); every ATTENDEE (its own rule); and every member and
-#             viewer when the event is `company`-visible (its own rule). A manager does NOT read every calendar.
+#             viewer when the event is `company`-visible (its own rule). A manager reads only through those same three rules (organizer,
+#             attendee, company-visible), never every calendar.
 #   create  — schedule an event or a meeting: company_admin, manager, member. A viewer cannot. (Also the gate of busy times.)
-#   update  — edit time, title, attendees or place: company_admin, and the ORGANIZER (its own rule).
+#   update  — edit time, title, attendees or place: company_admin, and the ORGANIZER (its own rule; member or manager).
 #   cancel  — call it off: company_admin, and the ORGANIZER (its own rule).
 #   respond — accept, decline or say maybe, FOR YOURSELF ONLY: an ATTENDEE (its own rule), and nobody else. company_admin
 #             holds the key, but the deny-overrides rule below stops EVERY role (platform_admin too) answering for someone else.
@@ -13,13 +14,14 @@
 # ── EVERY ATTRIBUTE-DEPENDENT RULE STANDS ALONE (the HIER-2 authoring rule) ──────────────────────
 # `read`, `update` and `cancel` are each reachable by more than one kind of authority, so each is several rules, never one:
 #   1. company_admin            — a scope-only role, unconditional beyond `inTenant && notLow`.
-#   2. the ORGANIZER            — `resource.attr.ownerId == principal.id`, on `member`. Self-scoped: the bundle marks
-#                                 member·update and member·cancel `selfScoped`.
-#   3. an ATTENDEE              — `principal.id in resource.attr.attendeeIds`, on `member` and `viewer` (read, respond).
+#   2. the ORGANIZER            — `resource.attr.ownerId == principal.id`, on `member` and `manager`. Self-scoped: the bundle marks
+#                                 member·update, member·cancel, manager·update and manager·cancel `selfScoped`.
+#                                 (`manager` was added at review, 2026-10-14: a manager-only login could create an event but then not read it.)
+#   3. an ATTENDEE              — `principal.id in resource.attr.attendeeIds`, on `member`, `viewer` and `manager` (read, respond).
 #                                 Self-scoped too.
-#   4. company visibility       — `resource.attr.visibility == "company"`, on `member` and `viewer`. NOT self-scoped (it is a
-#                                 tenant-wide read of the events someone chose to share company-wide), so member·read and
-#                                 viewer·read are NOT in `selfScoped` (the generator derives the marker from the rule shape).
+#   4. company visibility       — `resource.attr.visibility == "company"`, on `member`, `viewer` and `manager`. NOT self-scoped (it is a
+#                                 tenant-wide read of the events someone chose to share company-wide), so member·read, viewer·read
+#                                 and manager·read are NOT in `selfScoped` (the generator derives the marker from the rule shape).
 # All three attributes are fed by the HANDLER (calendar-events.controller.ts) from the event row and its attendee rows:
 # `ownerId` from `calendar_events.organizer_id`, `attendeeIds` from `calendar_event_attendees`, `visibility` from the row.
 # None is ever read from a request body. An unfed resource fails closed: `ownerId` "" never equals a principal id,
@@ -63,7 +65,7 @@ resourcePolicy:
     # The ORGANIZER reads their own event.
     - actions: ["read"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["member"]
+      derivedRoles: ["member", "manager"]
       condition:
         match:
           expr: >-
@@ -73,7 +75,7 @@ resourcePolicy:
     # An ATTENDEE reads the event they are invited to.
     - actions: ["read"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["member", "viewer"]
+      derivedRoles: ["member", "viewer", "manager"]
       condition:
         match:
           expr: >-
@@ -83,7 +85,7 @@ resourcePolicy:
     # Everyone in the company reads a company-visible event.
     - actions: ["read"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["member", "viewer"]
+      derivedRoles: ["member", "viewer", "manager"]
       condition:
         match:
           expr: >-
@@ -103,7 +105,7 @@ resourcePolicy:
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     - actions: ["update"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["member"]
+      derivedRoles: ["member", "manager"]
       condition:
         match:
           expr: >-
@@ -112,7 +114,7 @@ resourcePolicy:
             request.resource.attr.ownerId == request.principal.id
     - actions: ["cancel"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["member"]
+      derivedRoles: ["member", "manager"]
       condition:
         match:
           expr: >-
@@ -127,7 +129,7 @@ resourcePolicy:
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     - actions: ["respond"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["member", "viewer"]
+      derivedRoles: ["member", "viewer", "manager"]
       condition:
         match:
           expr: >-
