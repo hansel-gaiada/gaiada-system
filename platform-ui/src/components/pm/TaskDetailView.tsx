@@ -22,6 +22,7 @@ import {
 import { PM_TERMS } from "@/lib/pmVocabulary";
 import { getTaskPullRequests } from "@/lib/pmPullRequests-data";
 import { PullRequestsSection } from "@/components/pm/PullRequests";
+import { OpenInSlot } from "@/components/launch/OpenInSlot";
 import { StatusSelect } from "@/components/pm/StatusSelect";
 import { PageHeader } from "@/components/PageHeader";
 import { DescriptionList } from "@/components/DescriptionList";
@@ -176,6 +177,8 @@ export async function TaskDetailView({
         unfollow={unfollowTask.bind(null, task.id)}
       />
       <Link href={`/tasks/${task.id}/edit`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit</Link>
+      {/* DW-6c2 — pilot only: renders nothing on the classic shell. */}
+      <OpenInSlot scope="task" projectId={task.projectId} taskKey={task.displayCode} />
       {canEdit && (
         <form action={duplicateTaskAction.bind(null, task.id)}>
           <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Duplicate</button>
