@@ -77,7 +77,7 @@ import {
 /** WD-23A-1: keyed by SEARCH's providers, not the shared `GoogleProvider` union. The union gained
  *  `google_drive`, which has no search scopes and no property-binding column — forcing an entry here
  *  would mean inventing one. Core surfaces declare their own scopes on their registry entry. */
-export type SearchGoogleProvider = Exclude<GoogleProvider, "google_drive">;
+export type SearchGoogleProvider = Exclude<GoogleProvider, "google_drive" | "google_gmail">;
 
 /** Validate a provider at a SEARCH request boundary.
  *

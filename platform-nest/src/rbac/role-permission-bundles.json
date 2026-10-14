@@ -15,12 +15,12 @@
     "note": "class='relationship' permissions are NEVER present in any bundle (Ruling 3); enforced here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against the live `role_permissions_reject_relationship` DB trigger (0093).",
     "counts": {
       "roles": 28,
-      "totalPairs": 2072,
+      "totalPairs": 2087,
       "perRole": {
-        "platform_admin": 456,
-        "company_admin": 419,
-        "manager": 211,
-        "member": 109,
+        "platform_admin": 459,
+        "company_admin": 422,
+        "manager": 214,
+        "member": 112,
         "viewer": 38,
         "org_unit_lead": 22,
         "client": 9,
@@ -44,9 +44,9 @@
         "finance_manager": 43,
         "lms_staff": 2,
         "lms_manager": 11,
-        "owner": 419
+        "owner": 422
       },
-      "selfScopedPairs": 40
+      "selfScopedPairs": 49
     }
   },
   "roles": {
@@ -167,6 +167,9 @@
       "core.notification.update",
       "core.org_structure.read",
       "core.org_structure.update",
+      "core.personal_mailbox.connect",
+      "core.personal_mailbox.read",
+      "core.personal_mailbox.send",
       "core.pipeline_gate.create",
       "core.pipeline_gate.decide",
       "core.pipeline_gate.read",
@@ -624,6 +627,9 @@
       "core.notification.update",
       "core.org_structure.read",
       "core.org_structure.update",
+      "core.personal_mailbox.connect",
+      "core.personal_mailbox.read",
+      "core.personal_mailbox.send",
       "core.pipeline_gate.create",
       "core.pipeline_gate.decide",
       "core.pipeline_gate.read",
@@ -1018,6 +1024,9 @@
       "core.notification.read",
       "core.notification.update",
       "core.org_structure.read",
+      "core.personal_mailbox.connect",
+      "core.personal_mailbox.read",
+      "core.personal_mailbox.send",
       "core.pipeline_gate.create",
       "core.pipeline_gate.read",
       "core.pipeline_run.create",
@@ -1206,6 +1215,9 @@
       "core.notification.read",
       "core.notification.update",
       "core.org_structure.read",
+      "core.personal_mailbox.connect",
+      "core.personal_mailbox.read",
+      "core.personal_mailbox.send",
       "core.pipeline_gate.create",
       "core.pipeline_run.create",
       "core.pipeline_run.update",
@@ -1873,6 +1885,9 @@
       "core.notification.update",
       "core.org_structure.read",
       "core.org_structure.update",
+      "core.personal_mailbox.connect",
+      "core.personal_mailbox.read",
+      "core.personal_mailbox.send",
       "core.pipeline_gate.create",
       "core.pipeline_gate.decide",
       "core.pipeline_gate.read",
@@ -2180,10 +2195,18 @@
     ]
   },
   "selfScoped": {
+    "company_admin": [
+      "core.personal_mailbox.connect",
+      "core.personal_mailbox.read",
+      "core.personal_mailbox.send"
+    ],
     "manager": [
       "core.calendar_event.cancel",
       "core.calendar_event.respond",
-      "core.calendar_event.update"
+      "core.calendar_event.update",
+      "core.personal_mailbox.connect",
+      "core.personal_mailbox.read",
+      "core.personal_mailbox.send"
     ],
     "member": [
       "agency.campaign_part.update",
@@ -2196,6 +2219,9 @@
       "core.integration_connection.delete",
       "core.integration_connection.read",
       "core.integration_connection.update",
+      "core.personal_mailbox.connect",
+      "core.personal_mailbox.read",
+      "core.personal_mailbox.send",
       "core.project.create",
       "core.project.delete",
       "core.project.update",

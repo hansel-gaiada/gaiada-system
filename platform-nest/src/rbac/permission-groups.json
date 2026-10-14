@@ -6,9 +6,9 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 169,
-      "grantablePermissionsInCatalog": 456,
-      "permissionsCoveredByGroups": 417,
+      "groups": 170,
+      "grantablePermissionsInCatalog": 459,
+      "permissionsCoveredByGroups": 420,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
       "sensitiveGroups": 114
@@ -1930,6 +1930,18 @@
         "core.calendar_event.update",
         "core.calendar_event.cancel",
         "core.calendar_event.respond"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "personal_mailbox",
+      "name": "Your own mailbox",
+      "domain": "core",
+      "description": "Reading and sending email from the ERP through your OWN Gmail. DW-8j: link or unlink your Gmail (connect), read your own threads (read), send or reply as yourself (send). Strictly personal: no role reaches another person's mailbox, company_admin and platform_admin included, and the ERP stores nothing from it. Agents and automation never connect, read or send. A viewer holds none.",
+      "permissions": [
+        "core.personal_mailbox.connect",
+        "core.personal_mailbox.read",
+        "core.personal_mailbox.send"
       ],
       "sensitive": false
     },

@@ -46,7 +46,7 @@ export {
 
 /** Search's three providers — the shared union minus the core-only ones. Lives here, with search's
  *  adapter, because it is search's vocabulary; `oauth.ts` re-exports it for existing importers. */
-export type SearchGoogleProvider = Exclude<GoogleProvider, "google_drive">;
+export type SearchGoogleProvider = Exclude<GoogleProvider, "google_drive" | "google_gmail">;
 
 /** Validate a provider at a SEARCH request boundary.
  *
