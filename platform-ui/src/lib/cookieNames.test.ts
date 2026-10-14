@@ -39,7 +39,7 @@ describe("cookie names", () => {
     expect(cookieName(HOST_COOKIES.tenant)).toBe("gaiada_tenant");
   });
 
-  it("cover exactly the seven session/auth/tenant-context cookies", () => {
+  it("cover exactly the eight session/auth/tenant-context and OAuth-flow cookies", () => {
     expect(Object.values(HOST_COOKIES).sort()).toEqual(
       [
         "gaiada_pm_scope",
@@ -48,6 +48,7 @@ describe("cookie names", () => {
         "gaiada_session",
         "gaiada_tenant",
         "oidc_pkce",
+        "sm_drive_oauth_pending",
         "sm_google_oauth_pending",
       ].sort(),
     );

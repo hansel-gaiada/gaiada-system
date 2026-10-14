@@ -31,6 +31,7 @@ export const HOST_COOKIES = {
   session: "gaiada_session",
   pkce: "oidc_pkce",
   googleOAuthPending: "sm_google_oauth_pending",
+  driveOAuthPending: "sm_drive_oauth_pending",
   tenant: "gaiada_tenant",
   portalTenant: "gaiada_portal_tenant",
   portalClient: "gaiada_portal_client",

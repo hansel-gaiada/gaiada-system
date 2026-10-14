@@ -623,6 +623,7 @@ Browser-facing route handlers (`route.ts`) — these exist only where the browse
 - `/api/creative-assets/[assetId]`
 - `/api/figma-links/[linkId]/thumbnail`
 - `/api/files/[fileId]`
+- `/api/google-drive/callback`
 - `/api/meetings/[id]/audio`
 - `/api/meetings/[id]/status`
 - `/api/portal/stream`

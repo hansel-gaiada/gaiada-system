@@ -7,6 +7,8 @@ import { getActiveTenant } from "@/lib/tenant";
 import { getTask, getProject, listFiles, getFieldDefs } from "@/lib/entities";
 import { can } from "@/lib/rbac";
 import { readFigmaLinks } from "@/lib/figma-data";
+import { readDriveStatus } from "@/lib/drive-data";
+import { canAttachFromDrive } from "@/lib/drive";
 import { connectionsHrefFor } from "@/lib/figma";
 import { Designs } from "@/components/figma/Designs";
 import { attachFileAction, deleteFileAction } from "@/lib/collabActions";
@@ -94,7 +96,7 @@ export async function TaskDetailView({
     );
   }
 
-  const [comments, suggestions, assignable, projectTasks, timeLogs, files, tagRegistry, customFieldDefs, projectStatuses, followers, assignmentHistory, pullRequests, figma] = await Promise.all([
+  const [comments, suggestions, assignable, projectTasks, timeLogs, files, tagRegistry, customFieldDefs, projectStatuses, followers, assignmentHistory, pullRequests, figma, driveStatus] = await Promise.all([
     listTaskComments(userId, tenant, taskId),
     listSuggestions(userId, tenant, taskId),
     assignableUnits(userId, tenant),
@@ -109,6 +111,8 @@ export async function TaskDetailView({
     getTaskPullRequests(userId, tenant, taskId), // DW-6f — a ReadResult; never throws
     // DW-6k — a ReadResult; never throws. Read ONCE: the Designs section and the "Open in" menu both use this one answer.
     readFigmaLinks(userId, tenant, "pm_task", taskId),
+    // DW-6i (§42.6) — a ReadResult, token already dropped. Gates "Attach from Google Drive"; a refused or failed read just hides the button.
+    readDriveStatus(userId, tenant),
   ]);
   // A manager is told where to connect Figma only when it is known not to be (one extra read, then, for the department).
   const figmaDept = can(me, "company.manage", tenant) && figma.kind === "ok" && !figma.data.figmaConnected
@@ -279,7 +283,7 @@ export async function TaskDetailView({
           )}
 
           <Section label="Attachments" count={files.length || undefined}>
-            <Attachments files={files} canEdit={canEdit} attach={attachFileAction.bind(null, "task", task.id)} remove={deleteFileAction.bind(null, "task", task.id)} />
+            <Attachments files={files} canEdit={canEdit} canAttachFromDrive={driveStatus.kind === "ok" && canAttachFromDrive(driveStatus.data)} driveTaskId={task.id} attach={attachFileAction.bind(null, "task", task.id)} remove={deleteFileAction.bind(null, "task", task.id)} />
           </Section>
 
           <Section label="Comments & activity" count={comments.length || undefined}>
