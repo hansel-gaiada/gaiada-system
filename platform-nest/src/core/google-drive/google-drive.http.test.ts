@@ -24,7 +24,7 @@
 //
 // Needs the Linux gate (DATABASE_URL_TEST + a Cerbos loaded with the CURRENT policy files). It SKIPS without a database; a skip is not a pass.
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../config";
 import { buildApp } from "../../main";
@@ -628,6 +628,33 @@ describe.skipIf(!TEST_URL)("DW-6i · Google Drive: connect, pick and attach (§4
       const row = await rowOf(member);
       expect(row.status).toBe("linked");
       expect(row.meta.driveNeedsReconnect).toBeUndefined();
+    });
+  });
+
+  // ═══════════════════════════════════════ attach to a PM task (pm_tasks) ═══════════════════════════════════════
+
+  describe("attach to a PM task, the record the task page shows (§42.5)", () => {
+    it("a picked Drive file attaches to a pm_tasks task: 201, and the reference row targets that task", async () => {
+      // The task page (TaskDetailView) reads `pm_tasks` through `getPmTask` and attaches files as target `task` with the PM
+      // task's id. The shared `createTask` fixture writes the base `tasks` table, so this case seeds a real PM task.
+      const projectId = (await q().query(`SELECT project_id FROM tasks WHERE id = $1`, [taskA])).rows[0].project_id as string;
+      const pmTask = randomUUID();
+      await q().query(
+        `INSERT INTO pm_tasks (id, tenant_id, project_id, title, origin_site) VALUES ($1, $2, $3, 'PM task for Drive', 'central')`,
+        [pmTask, A, projectId],
+      );
+      await connectOk(mgr2);
+      const r = await attach(mgr2, { targetType: "task", targetId: pmTask, fileId: FILE_1 });
+      expect(r.statusCode, r.body).toBe(201);
+      const rows = await filesOn(pmTask);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ target_entity_type: "task", target_entity_id: pmTask, url: DRIVE_FILES[FILE_1].webViewLink });
+
+      // A deleted PM task is gone again.
+      await q().query(`UPDATE pm_tasks SET deleted_at = now() WHERE id = $1`, [pmTask]);
+      const gone = await attach(mgr2, { targetType: "task", targetId: pmTask, fileId: FILE_2 });
+      expect(gone.statusCode, gone.body).toBe(404);
+      expect(reasonOf(gone)).toBe("target_not_found");
     });
   });
 
