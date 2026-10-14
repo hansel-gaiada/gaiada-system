@@ -169,11 +169,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610150300_pv5_certified_signing_simulated.sql`
+- Head: `202610150410_iam_calendar_event_permissions.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 305 (121 legacy `NNNN_`, 184 timestamped)
+- Applied files on disk: 307 (121 legacy `NNNN_`, 186 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -207,6 +207,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/authz-check.controller.ts` |
 | `/api` | `platform-nest/src/core/authz-permissions.controller.ts` |
 | `/api` | `platform-nest/src/core/automation-approvals.controller.ts` |
+| `/api` | `platform-nest/src/core/calendar-events.controller.ts` |
 | `/api` | `platform-nest/src/core/claude-seats.controller.ts` |
 | `/api` | `platform-nest/src/core/client-contacts.controller.ts` |
 | `/api` | `platform-nest/src/core/client-documents.controller.ts` |
