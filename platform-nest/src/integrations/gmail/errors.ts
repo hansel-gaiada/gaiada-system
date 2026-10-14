@@ -55,3 +55,20 @@ export class GmailNotFoundError extends GmailClientError {
     super(404, "gmail_not_found", `${kind} not found: ${id}`, { kind, id });
   }
 }
+
+/** DW-8j. 400. The outgoing message itself is malformed: `field` names which part (`to`, `cc`, `subject`, `body`, `inReplyTo`). */
+export class GmailInvalidMessageError extends GmailClientError {
+  constructor(
+    readonly field: string,
+    reason: string,
+  ) {
+    super(400, "gmail_send_invalid", `${field}: ${reason}`, { field });
+  }
+}
+
+/** DW-8j. 502. Gmail (or the network to it) failed: an outage, never a statement about the person's grant, so nothing is marked. */
+export class GmailUnavailableError extends GmailClientError {
+  constructor(detail?: Record<string, unknown>) {
+    super(502, "gmail_unavailable", "Gmail could not be reached", detail);
+  }
+}

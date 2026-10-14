@@ -82,18 +82,49 @@ export interface GmailMessage {
     subject: string;
     /** ISO-8601. */
     date: string;
+    /** DW-8j. Optional and additive: present when the message carries them (every sent reply does). */
+    cc?: string;
+    /** DW-8j. The `In-Reply-To` header: the RFC 5322 id of the message this one answers. */
+    inReplyTo?: string;
+    /** DW-8j. The `References` header: the chain of message ids the thread has accumulated. */
+    references?: string;
   };
   parts: GmailMessagePart[];
   attachments: GmailAttachmentMeta[];
 }
 
-/** The seam. Every method is READ-ONLY (M14: `gmail.readonly`, no send scope) and SELF-ONLY in
- *  spirit — a real adapter binds one instance to one caller's own connection; this interface itself
- *  carries no caller/tenant parameter because that binding is MAIL-16's concern (constructing the
- *  client from a resolved access token), not this seam's. */
+/** DW-8j: which mailbox view a thread list shows. Gmail's own system label ids. */
+export type GmailListLabel = "INBOX" | "SENT";
+export interface GmailListOptions {
+  /** Default INBOX. */
+  label?: GmailListLabel;
+}
+
+/** DW-8j: one outgoing plain-text message. Recipients are bare addr-spec addresses (no display names), at most 20 in all. */
+export interface GmailSendRequest {
+  to: string[];
+  cc?: string[];
+  subject: string;
+  /** Plain text only (v1 sends no HTML and no attachments). */
+  body: string;
+  /** A reply: keeps the thread and sets `In-Reply-To` and `References` from the message answered. */
+  inReplyTo?: { threadId: string; messageId: string };
+}
+export interface GmailSendResult {
+  messageId: string;
+  threadId: string;
+}
+
+/** The seam. SELF-ONLY in spirit — a real adapter binds one instance to one caller's own connection; this interface itself
+ *  carries no caller/tenant parameter because that binding is the service's concern (constructing the client from a resolved
+ *  access token, or the person's own simulated mailbox), not this seam's.
+ *
+ *  Reads were the MAIL-16D seam (M14: `gmail.readonly`). DW-8j (DW-D24) adds `sendMessage` (`gmail.send`), plus an optional list
+ *  option for the label view; both are additive, so MAIL-16D's contract cases pass unmodified. */
 export interface GmailClient {
-  listThreads(pageToken?: string): Promise<GmailThreadPage>;
+  listThreads(pageToken?: string, opts?: GmailListOptions): Promise<GmailThreadPage>;
   getThread(threadId: string): Promise<GmailThread>;
   getMessage(messageId: string): Promise<GmailMessage>;
   listLabels(): Promise<GmailLabel[]>;
+  sendMessage(req: GmailSendRequest): Promise<GmailSendResult>;
 }
