@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { activeCompany, isRootCompany, isRootOwner, isOperatorRootOwner, isPlatformOperator, moduleOn } from "./companyContext";
+import { activeCompany, groupNameOf, isRootCompany, isRootOwner, isOperatorRootOwner, isPlatformOperator, moduleOn } from "./companyContext";
 import type { Me } from "./platform";
 
 // PV-D31: `root` is the OPERATOR root. `cust` is a second root (a future subscriber's organization),
@@ -101,5 +101,21 @@ describe("moduleOn", () => {
   });
   it("treats an EMPTY list as 'nothing is on', not as unknown", () => {
     expect(moduleOn({ id: "x", name: "X", type: null, enabledModules: [] }, "clients")).toBe(false);
+  });
+});
+
+describe("groupNameOf (PV-D13)", () => {
+  it("is the name of the root of the active company", () => {
+    expect(groupNameOf(me([]), "kid")).toBe("Holding");
+  });
+  it("is the company's own name when the active company is itself a root", () => {
+    expect(groupNameOf(me([], withCustomer), "cust")).toBe("Customer");
+  });
+  it("is null when the person is not a member of the root", () => {
+    const orphan: Me["companies"] = [{ id: "kid", name: "Agency", type: "agency", vertical: "agency", rootCompanyId: "root" }];
+    expect(groupNameOf(me([], orphan), "kid")).toBeNull();
+  });
+  it("is null when the person has no companies", () => {
+    expect(groupNameOf(me([], []), "kid")).toBeNull();
   });
 });

@@ -2,6 +2,7 @@ import type { Me } from "@/lib/platform";
 import { getSidebarState } from "@/lib/prefs";
 import { accessibleCompanies, canSwitchCompany } from "@/lib/rbac";
 import { servedCompanyBadge } from "@/lib/serviceAssignments";
+import { activeCompany, groupNameOf } from "@/lib/companyContext";
 import { newMenuItems } from "./Sidebar";
 import { SidebarState } from "./sidebarState";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
@@ -13,6 +14,8 @@ export async function WorkspaceShellSidebar({ me, tenantId }: { me: Me; tenantId
   const collapsed = (await getSidebarState()) === "collapsed";
   const companies = accessibleCompanies(me);
   const current = companies.find((c) => c.id === tenantId) ?? companies[0] ?? null;
+  // PV-D13: the group's name from data, else the company's name (a person outside the root).
+  const brand = groupNameOf(me, tenantId) ?? activeCompany(me, tenantId)?.name ?? null;
   return (
     <SidebarState initial={collapsed}>
       <WorkspaceSidebar
@@ -21,6 +24,7 @@ export async function WorkspaceShellSidebar({ me, tenantId }: { me: Me; tenantId
         // The same list and the same rule as CompanyContext: a switch only for more than one company.
         companies={canSwitchCompany(me) ? companies.map((c) => ({ id: c.id, name: c.name, badge: servedCompanyBadge(me, c.id) })) : []}
         newItems={newMenuItems(me, tenantId)}
+        brand={brand}
       />
     </SidebarState>
   );

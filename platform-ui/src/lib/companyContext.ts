@@ -19,6 +19,14 @@ export function isRootCompany(company: MeCompany | undefined): boolean {
   return !!company && company.rootCompanyId === company.id;
 }
 
+/** PV-D13: the group's name, from data. The name of the ROOT company of the active company (the active company
+ *  itself when it is a root). Null when the person is not a member of that root, or has no active company. */
+export function groupNameOf(me: Me, tenantId?: string | null): string | null {
+  const active = activeCompany(me, tenantId);
+  const root = active?.rootCompanyId ? me.companies.find((c) => c.id === active.rootCompanyId) : undefined;
+  return root?.name ?? null;
+}
+
 /** PV-D20: holds the `owner` role, company-scoped, on a company that is a root. Owning a child
  *  company does not make anyone an owner of the group. */
 export function isRootOwner(me: Me): boolean {

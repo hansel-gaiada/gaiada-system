@@ -24,13 +24,15 @@ import "./workspace-sidebar.css";
 
 export interface SidebarCompany { id: string; name: string; badge?: string | null }
 
-export function WorkspaceSidebar({ tenantId, company, companies, newItems }: {
+export function WorkspaceSidebar({ tenantId, company, companies, newItems, brand }: {
   /** The active company, for the page context the Assistant drawer opens with (DW-2d). */
   tenantId: string | null;
   company: SidebarCompany | null;
   /** Every company the person may switch to; empty when there is only one. */
   companies: SidebarCompany[];
   newItems: { label: string; href: string }[];
+  /** The wordmark: the group's name (PV-D13). Omitted when unknown, and the tagline stays. */
+  brand?: string | null;
 }) {
   const shell = useWorkspaceShell();
   // Only the workspace shell draws this, inside its provider. Outside it there is nothing to draw.
@@ -52,7 +54,7 @@ export function WorkspaceSidebar({ tenantId, company, companies, newItems }: {
       <div className="erp-side__head">
         <Link href="/" className="erp-side__brand" aria-label="Home">
           <span className="erp-side__mark" aria-hidden="true"><Icon name="pulse" size={17} /></span>
-          <div className="erp-side__wordmark">Syrowatka</div>
+          {brand ? <div className="erp-side__wordmark">{brand}</div> : null}
           <Eyebrow className="erp-side__tagline">Operating Platform</Eyebrow>
         </Link>
         <SidebarToggle />

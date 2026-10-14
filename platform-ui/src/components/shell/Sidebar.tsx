@@ -7,6 +7,7 @@ import { NavGroupSection } from "./NavGroupSection";
 import { NewMenu } from "./NewMenu";
 import { Icon } from "./icons";
 import { can } from "@/lib/rbac";
+import { activeCompany, groupNameOf } from "@/lib/companyContext";
 import { CompanyContext } from "./CompanyContext";
 import { SidebarToggle } from "./SidebarToggle";
 import { SidebarState } from "./sidebarState";
@@ -30,6 +31,8 @@ export async function Sidebar({ me, tenantId, departments = [] }: { me: Me; tena
   const initials = me.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   const collapsed = (await getSidebarState()) === "collapsed";
   const newItems = newMenuItems(me, tenantId);
+  // PV-D13: the wordmark is the group's name, from data; the company's name when the person is outside the root.
+  const brand = groupNameOf(me, tenantId) ?? activeCompany(me, tenantId)?.name ?? null;
   return (
     <SidebarState initial={collapsed}>
       <aside className="erp-side" id="app-nav">
@@ -39,7 +42,7 @@ export async function Sidebar({ me, tenantId, departments = [] }: { me: Me; tena
               letter S. `icons.tsx` has no "use client", so this stays a server
               component. */}
             <span className="erp-side__mark" aria-hidden="true"><Icon name="pulse" size={17} /></span>
-            <div className="erp-side__wordmark">Syrowatka</div>
+            {brand ? <div className="erp-side__wordmark">{brand}</div> : null}
             <Eyebrow className="erp-side__tagline">Operating Platform</Eyebrow>
           </Link>
           <SidebarToggle />

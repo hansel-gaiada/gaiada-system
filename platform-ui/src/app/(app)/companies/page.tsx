@@ -2,6 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe, PlatformError } from "@/lib/platform";
+import { getActiveTenant } from "@/lib/tenant";
+import { groupNameOf } from "@/lib/companyContext";
 import { isElevated } from "@/lib/rbac";
 import { listCompanies, type Company } from "@/lib/entities";
 import { PageHeader } from "@/components/PageHeader";
@@ -9,7 +11,7 @@ import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { DataTable, type Column } from "@/components/data/DataTable";
 
-// D & A Syrowatka is a holding: the /organization page shows the hierarchy;
+// A root company is a holding: the /organization page shows the hierarchy;
 // this is the flat, searchable/sortable register of all companies.
 const COLUMNS: Column[] = [
   { key: "name", header: "Name", sortable: true },
@@ -22,6 +24,9 @@ export default async function CompaniesPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
+  // PV-D13: the subtitle names the group, from data.
+  const groupName = groupNameOf(me, await getActiveTenant(me));
+  const subtitle = groupName ? `${groupName} and its companies.` : "Your companies.";
 
   let companies: Company[];
   try {
@@ -30,7 +35,7 @@ export default async function CompaniesPage() {
     if (e instanceof PlatformError && e.status === 403) {
       return (
         <>
-          <PageHeader eyebrow="Organization" title="Companies" subtitle="D & A Syrowatka and its companies." />
+          <PageHeader eyebrow="Organization" title="Companies" subtitle={subtitle} />
           <EmptyNote>You don&apos;t have access to this in the current company.</EmptyNote>
         </>
       );
@@ -48,7 +53,7 @@ export default async function CompaniesPage() {
       <PageHeader
         eyebrow="Organization"
         title="Companies"
-        subtitle="D & A Syrowatka and its companies."
+        subtitle={subtitle}
         actions={isElevated(me) ? <Link href="/companies/new" className="lux-btn lux-btn--solid lux-btn--sm">New company</Link> : undefined}
       />
       {companies.length === 0 ? (

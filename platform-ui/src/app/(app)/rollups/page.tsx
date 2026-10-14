@@ -10,12 +10,17 @@ import { Card, KpiTile, HairlineTable } from "@/components/ui";
 import { RecomputeButton } from "@/components/RecomputeButton";
 import { ScopeBar } from "@/components/scope/ScopeBar";
 import { currentAxisValue, wholeGroupOption, type ScopeAxisConfig } from "@/lib/scope";
+import { groupNameOf } from "@/lib/companyContext";
 
 export default async function RollupsPage({ searchParams }: { searchParams: Promise<{ period?: string; entity?: string }> }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
-  guardAdminRoute("/rollups", me, await getActiveTenant(me)); // DW-D20
+  const tenantId = await getActiveTenant(me);
+  guardAdminRoute("/rollups", me, tenantId); // DW-D20
+  // PV-D13: the group's name comes from data; a person outside the root gets the plain wording.
+  const groupName = groupNameOf(me, tenantId);
+  const groupSubtitle = groupName ? `Cross-company metrics across the ${groupName} group.` : "Cross-company metrics across your group.";
   const sp = await searchParams;
   const periodParam = sp.period;
 
@@ -26,7 +31,7 @@ export default async function RollupsPage({ searchParams }: { searchParams: Prom
     if (e instanceof PlatformError && e.status === 403) {
       return (
         <>
-          <PageHeader eyebrow="Business" title="Rollups" subtitle="Cross-company metrics across the D & A Syrowatka group." />
+          <PageHeader eyebrow="Business" title="Rollups" subtitle={groupSubtitle} />
           <Card>
             <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
               This view is limited to group executives.
@@ -60,7 +65,7 @@ export default async function RollupsPage({ searchParams }: { searchParams: Prom
       <PageHeader
         eyebrow="Business"
         title="Rollups"
-        subtitle={<>Cross-company metrics across the D & A Syrowatka group.{period ? ` Period: ${period}.` : ""}</>}
+        subtitle={<>{groupSubtitle}{period ? ` Period: ${period}.` : ""}</>}
         actions={
           <form method="get" style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input type="date" name="period" defaultValue={period ?? undefined} aria-label="Period"
