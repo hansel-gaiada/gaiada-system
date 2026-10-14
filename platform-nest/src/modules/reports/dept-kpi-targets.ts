@@ -27,6 +27,8 @@ import type { PoolClient } from "pg";
 import { newId, withGlobal, withTenants } from "../../db";
 import { config } from "../../config";
 import { fetchReportDocumentForRead } from "./reports.controller";
+import { moduleKpiReaders } from "./dept-kpi-readers";
+import { todayIsoInTz } from "./person-scope";
 import type { ReportDocument, ReportPeriodKind } from "./report-document";
 import {
   DEPT_KPI_SETS,
@@ -321,21 +323,28 @@ export interface PeriodRange {
   end: string;
 }
 
-function kpiRead(def: DeptKpiDef, v: KpiValue | null, t: TargetRow | undefined): KpiRead {
+/** A module KPI without a readerId has no read yet (`no_reader`) and never carries a value. With one, it is read exactly
+ *  like a report_fact KPI (§40.5.1). */
+const hasNoRead = (def: DeptKpiDef): boolean => def.reader.kind === "module" && def.reader.readerId === undefined;
+
+/** `failed`: the KPI's module reader threw (§40.5.1). It reads unavailable with `read_failed`, whatever its target. */
+function kpiRead(def: DeptKpiDef, v: KpiValue | null, t: TargetRow | undefined, failed = false): KpiRead {
   const level = t ? { target: t.target, tolerance: t.tolerance } : null;
-  const { condition, reason } = kpiCondition(def, def.reader.kind === "module" ? null : v ? v.value : null, level);
+  const { condition, reason }: { condition: KpiCondition; reason?: UnavailableReason } = failed
+    ? { condition: "unavailable", reason: "read_failed" }
+    : kpiCondition(def, hasNoRead(def) ? null : v ? v.value : null, level);
   const out: KpiRead = {
     key: def.key,
     label: def.label,
     unit: def.unit,
     direction: def.direction,
-    value: def.reader.kind === "module" || !v ? null : v.value,
+    value: hasNoRead(def) || !v ? null : v.value,
     target: level ? level.target : null,
     tolerance: level ? level.tolerance : null,
     targetSource: level ? "approved" : "none",
     condition,
   };
-  if (v && def.reader.kind !== "module") {
+  if (v && !hasNoRead(def)) {
     if (v.numerator !== undefined) out.numerator = v.numerator;
     if (v.denominator !== undefined) out.denominator = v.denominator;
   }
@@ -362,6 +371,10 @@ export async function evaluateUnits(
   range: PeriodRange,
   targetsAsOf: string = range.start,
 ): Promise<UnitKpis[]> {
+  // The earlier of the range's end and today in REPORTS_TZ, computed ONCE so every reader of this evaluation agrees on
+  // what is "already due" (§40.5.1).
+  const today = todayIsoInTz(config.reportsTz);
+  const asOf = range.end < today ? range.end : today;
   const slugOf = (u: OrgUnitRef) => workspaceSlugFor(vertical, u.name);
   const needsDerived = units.some((u) => DEPT_KPI_SETS[slugOf(u)].some((d) => d.reader.kind === "derived"));
   const population = needsDerived ? uniqueUnits([...units, ...departments]) : units;
@@ -385,11 +398,23 @@ export async function evaluateUnits(
     for (const def of DEPT_KPI_SETS[slugOf(u)]) {
       if (def.reader.kind === "derived") continue;
       let v: KpiValue | null = null;
+      let failed = false;
       if (def.reader.kind === "report_fact") {
         const doc = await docFor(def.reader.grain, def.reader.grain === "company" ? tenantId : u.id);
         v = reportFactValue(def.reader.metricKey, doc);
+      } else if (def.reader.kind === "module" && def.reader.readerId !== undefined) {
+        const readerId = def.reader.readerId;
+        try {
+          const reader = moduleKpiReaders()[readerId];
+          if (!reader) throw new Error("no reader registered");
+          v = await reader({ tenantId, unitId: u.id, periodKind: range.periodKind, start: range.start, end: range.end, asOf });
+        } catch (err) {
+          // One failing reader fails only its own KPI. Log the reader id and the message, never row data.
+          console.error(`[DEPT-KPI] reader "${readerId}" failed:`, (err as Error).message);
+          failed = true;
+        }
       }
-      reads.push(kpiRead(def, v, targets.get(u.id)?.get(def.key)));
+      reads.push(kpiRead(def, v, targets.get(u.id)?.get(def.key), failed));
     }
     base.set(u.id, reads);
   }

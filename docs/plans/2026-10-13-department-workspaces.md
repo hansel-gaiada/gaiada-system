@@ -775,7 +775,7 @@ it.
 
 | Department | KPIs |
 |---|---|
-| Web Dev | projects on time · requests answered within the SLA · client site uptime · reopened work rate |
+| Web Dev | projects on time · requests delivered by the date needed · client site uptime · reopened work rate |
 | SEO | clients with ranking growth · client reports delivered on time · ad budgets on pace · client retention |
 | Social Media | posts published on schedule · client approval turnaround · engagement growth across clients |
 | Creatives | asset requests delivered on time · revision rounds per asset · assets delivered |

@@ -7,7 +7,7 @@
 export type KpiUnit = "percent" | "count" | "minutes";
 export type KpiDirection = "up_good" | "down_good";
 export type KpiCondition = "on_track" | "at_risk" | "off_track" | "unavailable";
-export type KpiReason = "no_reader" | "no_data" | "no_target";
+export type KpiReason = "no_reader" | "no_data" | "no_target" | "read_failed";
 export type TargetStatus = "proposed" | "approved" | "rejected" | "superseded";
 
 /** One KPI of a unit's read (§40.3a). `value`, `target` and `tolerance` are null when absent. */
@@ -116,6 +116,7 @@ export const REASON_TEXT: Readonly<Record<KpiReason, string>> = {
   no_target: "No target yet",
   no_reader: "Not measured yet",
   no_data: "No data this period",
+  read_failed: "Couldn't be read right now",
 };
 
 /** Why a KPI has no condition, in the words a head reads. A KPI with a condition has no reason (empty string). */
@@ -159,6 +160,7 @@ export function unavailableWhy(kpis: readonly DeptKpi[]): string {
   if (kpis.length === 0) return "This department has no KPIs yet";
   if (kpis.some((k) => k.reason === "no_target")) return "No KPI has an approved target yet";
   if (kpis.some((k) => k.reason === "no_data")) return "No data this period";
+  if (kpis.some((k) => k.reason === "read_failed")) return "Some KPIs could not be read right now";
   return "None of its KPIs is measured yet";
 }
 

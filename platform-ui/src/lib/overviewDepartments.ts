@@ -31,7 +31,7 @@ export interface DeptKpiOverview {
 }
 
 const CONDITIONS: readonly unknown[] = ["off_track", "at_risk", "on_track", "unavailable"];
-const REASONS: readonly unknown[] = ["no_reader", "no_data", "no_target"];
+const REASONS: readonly unknown[] = ["no_reader", "no_data", "no_target", "read_failed"];
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
