@@ -34,8 +34,8 @@ const NETWORK_TABS = [
   tab("traffic", "/it/network"), tab("threats", "/it/network/threats"), tab("rules", "/it/network/rules"), tab("presence", "/it/network/presence"),
 ];
 const ME_TABS = [
-  tab("overview", "/me"), tab("inbox", "/me/inbox"), tab("leave", "/me/leave"), tab("loans", "/me/loans"), tab("pay", "/me/pay"),
-  tab("learning", "/me/learning"),
+  tab("summary", "/me"), tab("leave", "/me/leave"), tab("loans", "/me/loans"), tab("pay", "/me/pay"),
+  tab("timesheet", "/timesheets"), tab("account", "/account"),
 ];
 const ADMIN_TABS = [
   tab("users", "/admin/users"), tab("identity", "/admin/identity"), tab("modules", "/admin/modules"), tab("services", "/admin/services"),

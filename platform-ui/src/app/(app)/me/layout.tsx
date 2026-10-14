@@ -1,7 +1,10 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { PageHeader } from "@/components/PageHeader";
-import { SectionTabs, type SectionTab } from "@/components/shell/SectionTabs";
+import { MeTabs } from "@/components/shell/MeTabs";
+import { getMe } from "@/lib/platform";
+import { getActiveTenant } from "@/lib/tenant";
+import { meStripTabs } from "@/lib/meTabs";
 
 // `/me` — the personal hub (employee-portal wave A).
 //
@@ -26,21 +29,13 @@ export default async function MeLayout({ children }: { children: React.ReactNode
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
 
-  const tabs: SectionTab[] = [
-    { key: "overview", label: "Overview", href: "/me", icon: "home" },
-    { key: "inbox", label: "Inbox", href: "/me/inbox", icon: "check" },
-    { key: "leave", label: "Leave", href: "/me/leave", icon: "clock" },
-    { key: "loans", label: "Loans", href: "/me/loans", icon: "wallet" },
-    // HR-FULL (2026-08-24). Ungated on purpose: the page asks the backend for "mine" and passes no
-    // subject, and resource_hr_payroll.yaml's member arm answers with this person's own PUBLISHED
-    // payslips or nothing. An employee with no payslips sees an empty state explaining why, which is
-    // a better answer than a missing tab that looks like the feature does not exist.
-    { key: "pay", label: "Pay", href: "/me/pay", icon: "finance" },
-    // LMS L1c (2026-08-24). Same reasoning as Pay, one step stronger: this tab tells an employee
-    // what mandatory training they still owe, and a hidden tab reads as "nothing is required of
-    // me". The `lms` module being dark shows as an explicit note on the page, never as an absence.
-    { key: "learning", label: "Learning", href: "/me/learning", icon: "learning" },
-  ];
+  // DW-8d: the strip is the registry's Me row (Summary, Leave, Loans, Pay, Timesheet, Account), gated the
+  // way the sidebar gates it, so a company without a timesheets row shows no Timesheet tab and the strip
+  // cannot drift from the sidebar. Inbox, My tasks and Learning have their own sidebar rows and are not
+  // tabs; `MeTabs` draws nothing on them.
+  const me = await getMe(userId);
+  const tenantId = await getActiveTenant(me);
+  const tabs = meStripTabs({ me, tenantId, unitPath: [] });
 
   return (
     <>
@@ -49,7 +44,7 @@ export default async function MeLayout({ children }: { children: React.ReactNode
         title="Me"
         subtitle="Everything that is yours — your requests, your record, your inbox."
       />
-      <SectionTabs tabs={tabs} />
+      <MeTabs tabs={tabs} />
       {children}
     </>
   );

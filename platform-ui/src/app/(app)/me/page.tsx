@@ -12,12 +12,10 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 
 // `/me` overview (wave A) — the HOME the seven scattered self-service surfaces never had.
 //
-// Two jobs, in this order:
-//   1. AT A GLANCE: the handful of numbers an employee opens the ERP to check — anything of theirs
-//      awaiting a decision, what they owe, what is unread.
-//   2. RE-HOME: one labelled door to each surface that already exists elsewhere. These are LINKS,
-//      not re-implementations — /timesheets, /reports/person, /appraisals/mine and the employee-360
-//      page keep their single implementation and stay reachable from their original nav homes too.
+// One job (DW-8d, "Me is personal admin"): AT A GLANCE, the handful of numbers an employee opens the ERP
+// to check — anything of theirs awaiting a decision, what they owe, what is unread — each linking to its
+// page. The door-card grid is gone: every door has a home in the sidebar (plan §10). The one link kept is
+// "Your employee page", quiet, under the strip.
 //
 // Every read below absence-degrades. `hr` is dark for companies other than the agency, so leave and
 // loan reads legitimately return nothing — that must render as a quiet dash, not an error.
@@ -87,21 +85,11 @@ export default async function MeOverviewPage() {
         },
   ];
 
-  // The seven surfaces this hub re-homes. `/people/[userId]` is the existing employee-360 page — the
-  // viewer is always allowed their own (canViewEmployee: self OR superadmin OR owner).
-  const doors: { label: string; href: string; blurb: string }[] = [
-    { label: "My work", href: "/", blurb: "Today's tasks, approvals and what needs you." },
-    { label: "My employee page", href: `/people/${userId}`, blurb: "Your profile, roles, projects and linked accounts." },
-    { label: "My timesheets", href: "/timesheets", blurb: "Log and review your own hours." },
-    { label: "My report", href: "/reports/person", blurb: "Your activity and delivery over time." },
-    { label: "My appraisals", href: "/appraisals/mine", blurb: "What your manager submitted, verbatim." },
-    { label: "Account settings", href: "/account", blurb: "Sign-in, linked identities, preferences." },
-    { label: "My leave", href: "/me/leave", blurb: "Request time off and track balances." },
-    { label: "My loans", href: "/me/loans", blurb: "Request a loan, follow the repayment schedule." },
-  ];
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <p style={{ margin: 0, font: "400 13px var(--font-body)" }}>
+        <Link href={`/people/${userId}`} style={{ color: "var(--erp-ink-50)" }}>Your employee page</Link>
+      </p>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
         {stats.map((s) => (
           <Link key={s.label} href={s.href} style={{ textDecoration: "none" }}>
@@ -124,32 +112,6 @@ export default async function MeOverviewPage() {
           </Link>
         ))}
       </div>
-
-      <section>
-        <h2 style={{
-          margin: "0 0 12px", font: "700 11px var(--font-body)", letterSpacing: "0.08em",
-          textTransform: "uppercase", color: "var(--erp-ink-50)",
-        }}>
-          Everything of yours
-        </h2>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
-          {doors.map((d) => (
-            <Link
-              key={d.href}
-              href={d.href}
-              style={{
-                textDecoration: "none", border: "0.5px solid var(--erp-hairline)",
-                padding: "16px 18px", display: "block",
-              }}
-            >
-              <p style={{ margin: 0, font: "500 14px var(--font-body)", color: "var(--erp-ink)" }}>{d.label}</p>
-              <p style={{ margin: "6px 0 0", font: "400 12px/1.5 var(--font-body)", color: "var(--erp-ink-50)" }}>
-                {d.blurb}
-              </p>
-            </Link>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }
