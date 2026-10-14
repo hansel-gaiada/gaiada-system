@@ -10,6 +10,12 @@
 //   (d) skip signature verification in the webhook                               -> "a forged signature" fails;
 //   (e) drop { modules: ["finance"] } from the portal checkout transaction       -> "checkout ... reuses it" fails (500, the
 //       zero-row guard in loadOnlinePaymentFacts refuses to read an issued invoice without its ledger row).
+// Review fixes (second teeth run):
+//   (f) expire past-expiry checkouts without asking the provider              -> "reconciliation: a paid checkout whose notice was lost" fails;
+//   (g) skip the redrive route's authorize()                                  -> "re-drive: only finance_config update" fails (200, not 403);
+//   (h) drop the environment from reusableCheckout                            -> "environment: a sandbox checkout is never reused" fails;
+//   (i) drop ux_invoice_payments_checkout                                     -> "one checkout can never yield two payments" fails;
+//   (j) resolve finance recipients on the company itself only                 -> "finance recipients: a finance manager of the parent" fails.
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
@@ -22,7 +28,7 @@ import { FakeMidtrans } from "../testing/fake-midtrans";
 import { createIssuedInvoice, ensureBillingSetup, recordConfirmedPayment } from "../seed/billing-setup";
 import { PROVIDER_PRINCIPALS, setPaymentFetchForTests } from "./registry";
 import { loadOnlinePaymentFacts } from "./checkout";
-import { paymentNoticeHandler, processPaymentEvent, sweepPaymentEvents } from "./process";
+import { financeRecipients, paymentNoticeHandler, processPaymentEvent, sweepPaymentEvents } from "./process";
 
 const KEY = "SB-Mid-server-DB-TEST-ONLY";
 const svc = { authorization: "Bearer svc-token" };
@@ -358,6 +364,8 @@ describe.skipIf(!TEST_URL)("PV5-10 — online payment (simulated Midtrans)", () 
         provider_payment_id: "txn-good-1",
       });
       expect(Number(pays[0].amount)).toBe(150_000);
+      const ckRow = await row<{ id: string }>(`SELECT id FROM payment_checkouts WHERE provider_checkout_id = $1`, [order]);
+      expect((await row<{ checkout_id: string }>(`SELECT checkout_id FROM invoice_payments WHERE id = $1`, [pays[0].id])).checkout_id).toBe(ckRow.id);
       const receipt = await row<{ bank_account_id: string; amount: string; journal_entry_id: string | null }>(
         `SELECT bank_account_id, amount::text AS amount, journal_entry_id FROM finance_ar_receipts WHERE id = $1`, [pays[0].ar_receipt_id]);
       expect(receipt.bank_account_id).toBe(clearingAccountId);
@@ -460,6 +468,8 @@ describe.skipIf(!TEST_URL)("PV5-10 — online payment (simulated Midtrans)", () 
       const { outcome } = await deliver(fake.notice("ck-not-ours-0001", { transactionStatus: "settlement", transactionId: "txn-stranger" }));
       expect(outcome).toMatchObject({ status: "ignored", reason: "unknown_checkout" });
       expect(await count(`SELECT count(*) FROM invoice_payments WHERE provider_payment_id = 'txn-stranger'`)).toBe(0);
+      // Not ours: the provider is not even asked.
+      expect(fake.statusChecks("ck-not-ours-0001")).toEqual([]);
     });
 
     it("a payment for an invoice voided meanwhile is ignored (invoice_void), never posted", async () => {
@@ -512,6 +522,147 @@ describe.skipIf(!TEST_URL)("PV5-10 — online payment (simulated Midtrans)", () 
         payload: ev.payload, originSite: "test", schemaVersion: 1, createdAt: new Date().toISOString(),
       });
       expect(await paymentsOn(inv.id)).toHaveLength(1);
+    });
+  });
+  // ── review fixes ─────────────────────────────────────────────────────────────────────────────────
+  describe("reconciliation (a payment whose notice was lost)", () => {
+    const pastExpiry = (order: string, interval: string) =>
+      adminPool().query(`UPDATE payment_checkouts SET expires_at = now() - $2::interval WHERE provider_checkout_id = $1`, [order, interval]);
+
+    it("a paid checkout whose notice was lost is recorded by the sweep, once, through a :reconcile claim", async () => {
+      const { inv, order } = await openCheckout(160_000);
+      fake.settle(order, "txn-lost");
+      await pastExpiry(order, "1 minute");
+      await sweepPaymentEvents({ ignoreGrace: true });
+      const pays = await paymentsOn(inv.id);
+      expect(pays).toHaveLength(1);
+      expect(pays[0].provider_payment_id).toBe("txn-lost");
+      expect((await claimOf(`${order}:reconcile`)).status).toBe("processed");
+      expect((await row<{ status: string }>(`SELECT status FROM invoices WHERE id = $1`, [inv.id])).status).toBe("paid");
+      // Again, and then the real notice arriving late: still one payment.
+      await adminPool().query(`UPDATE payment_checkouts SET last_checked_at = NULL WHERE provider_checkout_id = $1`, [order]);
+      await sweepPaymentEvents({ ignoreGrace: true });
+      const late = await deliver(fake.notice(order, { transactionStatus: "settlement", transactionId: "txn-lost" }));
+      expect(late.outcome.status).toBe("processed");
+      expect(await paymentsOn(inv.id)).toHaveLength(1);
+    });
+
+    it("an unpaid open checkout is asked about before it is expired, then expired here and at the provider", async () => {
+      const { inv, order } = await openCheckout(170_000);
+      fake.setStatus(order, { transactionStatus: "pending", transactionId: "txn-va" });
+      await pastExpiry(order, "1 minute");
+      const asked = fake.statusChecks(order).length;
+      await sweepPaymentEvents({ ignoreGrace: true });
+      expect(fake.statusChecks(order).length).toBe(asked + 1);
+      expect((await row<{ status: string }>(`SELECT status FROM payment_checkouts WHERE provider_checkout_id = $1`, [order])).status).toBe("expired");
+      expect(fake.expired).toContain(order);
+      expect(await paymentsOn(inv.id)).toEqual([]);
+    });
+
+    it("keeps asking for the configured days after expiry (a late payment is recorded) and stops after them", async () => {
+      const recent = await openCheckout(180_000);
+      fake.settle(recent.order, "txn-late");
+      await adminPool().query(`UPDATE payment_checkouts SET status = 'expired' WHERE provider_checkout_id = $1`, [recent.order]);
+      await pastExpiry(recent.order, "3 days");
+      const old = await openCheckout(190_000);
+      fake.settle(old.order, "txn-too-late");
+      await adminPool().query(`UPDATE payment_checkouts SET status = 'expired' WHERE provider_checkout_id = $1`, [old.order]);
+      await pastExpiry(old.order, `${config.payments.reconcileDays + 1} days`);
+      await sweepPaymentEvents({ ignoreGrace: true });
+      expect(await paymentsOn(recent.inv.id)).toHaveLength(1);
+      expect(fake.statusChecks(old.order)).toEqual([]);
+      expect(await paymentsOn(old.inv.id)).toEqual([]);
+    });
+  });
+
+  describe("re-drive of a failed notice", () => {
+    async function failedClaim() {
+      const { inv, order } = await openCheckout(115_000);
+      fake.settle(order, `txn-redrive-${order.slice(-6)}`);
+      const r = await webhook(fake.notice(order, { transactionStatus: "settlement", transactionId: `txn-redrive-${order.slice(-6)}` }));
+      expect(r.statusCode).toBe(200);
+      const claim = await claimOf(`${order}:settlement:200`);
+      await adminPool().query(
+        `UPDATE provider_events SET status = 'failed', error = 'gave up (test)', attempts = 30, processed_at = now() WHERE id = $1`, [claim.id]);
+      return { inv, claim };
+    }
+    const redrive = (id: string, who: string) =>
+      app.inject({ method: "POST", url: `/api/${A}/payments/provider-events/${id}/redrive`, headers: asUser(who), payload: {} });
+
+    it("only finance_config update may re-drive (403 before anything else), and it is audited", async () => {
+      const { inv, claim } = await failedClaim();
+      expect((await redrive(claim.id, contact)).statusCode).toBe(403);
+      expect((await redrive(newId(), contact)).statusCode).toBe(403);
+      const listed = await app.inject({ method: "GET", url: `/api/${A}/payments/provider-events?status=failed`, headers: asUser(finMgr) });
+      expect(listed.statusCode, listed.body).toBe(200);
+      expect((listed.json().items as Array<{ id: string }>).map((x) => x.id)).toContain(claim.id);
+
+      const r = await redrive(claim.id, finMgr);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(r.json().outcome.status).toBe("paid");
+      expect(await paymentsOn(inv.id)).toHaveLength(1);
+      expect(await count(`SELECT count(*) FROM activities WHERE target_entity_id = $1 AND actor_id = $2 AND verb = 'redriven'`, [claim.id, finMgr])).toBe(1);
+      // Not failed any more: nothing to re-drive.
+      expect((await redrive(claim.id, finMgr)).statusCode).toBe(404);
+    });
+  });
+
+  describe("environment", () => {
+    it("a sandbox checkout is never reused once production keys are in; it is retired", async () => {
+      const { inv, order, body } = await openCheckout(125_000);
+      config.payments.midtrans = { serverKey: KEY, environment: "production", tenantId: A };
+      const r = await checkout(inv.id);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(r.json().reused).toBe(false);
+      expect(r.json().checkoutUrl).not.toBe(body.checkoutUrl);
+      expect(r.json().checkoutUrl).toMatch(/^https:\/\/app\.midtrans\.com\//);
+      const rows2 = await rows<{ ref: string; status: string; environment: string }>(
+        `SELECT provider_checkout_id AS ref, status, environment FROM payment_checkouts WHERE invoice_id = $1 ORDER BY created_at`, [inv.id]);
+      expect(rows2.map((x) => [x.ref === order, x.status, x.environment])).toEqual([[true, "expired", "sandbox"], [false, "open", "production"]]);
+    });
+
+    it("retiring a checkout for a new amount asks the provider to expire it (best effort)", async () => {
+      const inv = await issued(220_000);
+      expect((await checkout(inv.id)).statusCode).toBe(200);
+      const first = await orderOf(inv.id);
+      fake.setStatus(first, { transactionStatus: "pending", transactionId: "txn-va-2" });
+      await withTenants([A], (c) => c.query(
+        `INSERT INTO invoice_payments (id, tenant_id, invoice_id, client_id, amount, currency, paid_on, status, recorded_by, origin_site, source)
+         VALUES ($1, $2, $3, $4, 20000, 'IDR', current_date, 'pending', $5, 'test', 'client_claim')`,
+        [newId(), A, inv.id, clientA, contact]));
+      expect((await checkout(inv.id)).statusCode).toBe(200);
+      expect(fake.expired).toContain(first);
+    });
+  });
+
+  describe("one checkout, at most one payment (database)", () => {
+    it("a second payment naming the same checkout is refused by ux_invoice_payments_checkout", async () => {
+      const { inv, order } = await openCheckout(135_000);
+      fake.settle(order, "txn-one");
+      await deliver(fake.notice(order, { transactionStatus: "settlement", transactionId: "txn-one" }));
+      const ck = await row<{ id: string }>(`SELECT id FROM payment_checkouts WHERE provider_checkout_id = $1`, [order]);
+      await expect(adminPool().query(
+        `INSERT INTO invoice_payments (id, tenant_id, invoice_id, client_id, amount, currency, paid_on, method, status, source,
+                                       provider, provider_payment_id, checkout_id, origin_site)
+         VALUES ($1, $2, $3, $4, 1, 'IDR', current_date, 'online', 'confirmed', 'gateway', 'midtrans', 'txn-two', $5, 'test')`,
+        [newId(), A, inv.id, clientA, ck.id])).rejects.toThrow(/ux_invoice_payments_checkout/);
+    });
+  });
+
+  describe("finance recipients (never silent)", () => {
+    it("a finance manager of the PARENT company is told; with nobody who may act, the company admins are", async () => {
+      const parent = await createCompany("PV5-10 Group Parent");
+      const child = await createCompany("PV5-10 Group Child", [], parent);
+      const groupFin = await createUser("group-finance@pv510.test");
+      await addMembership(parent, groupFin);
+      await grantRole(groupFin, await createRole("finance_manager"), "company", parent);
+      expect(await financeRecipients(child)).toEqual([groupFin]);
+
+      const lone = await createCompany("PV5-10 Lone Co");
+      const loneAdmin = await createUser("lone-admin@pv510.test");
+      await addMembership(lone, loneAdmin);
+      await grantRole(loneAdmin, await createRole("company_admin"), "company", lone);
+      expect(await financeRecipients(lone)).toEqual([loneAdmin]);
     });
   });
 });

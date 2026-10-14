@@ -7,6 +7,10 @@
 //   * `sweepPaymentEvents` (a plain-Postgres loop, like PV5-07's document sweep) retries every notice still `received`
 //     whose retry time has come. It is what makes processing survive Redis being off, a provider outage, a crash
 //     mid-flight, or a dead-lettered event. The claim row IS the job: no second queue.
+//   * the same sweep RECONCILES: every unpaid checkout past its expiry (and for PAYMENTS_RECONCILE_DAYS after) is asked
+//     about at the provider, and a paid one becomes a `<order_id>:reconcile` claim through this same path, so a notice lost
+//     while the ERP was down still records its payment (reconcileCheckouts, below). A `failed` claim can be re-driven by
+//     Finance (redrive.controller.ts).
 //
 // Retry clock (recordRetry): 1, 2, 4 ... minutes after each failed attempt, capped at an hour; MAX_ATTEMPTS ~ a day.
 //
@@ -44,7 +48,7 @@ import type { OutboxEvent } from "../events/types";
 import { notifyBestEffort, resolveClientRecipients } from "../core/client-notify";
 import { writeActivity } from "../core/http";
 import { postConfirmedPayment, withBilling } from "../modules/invoice/issue";
-import { configuredProvider, configuredProviders, PROVIDER_PRINCIPALS } from "./registry";
+import { configuredProvider, configuredProviders, PROVIDER_PRINCIPALS, type ConfiguredProvider } from "./registry";
 import { ProviderRequestError, ProviderUnavailableError, type ProviderPaymentStatus } from "./provider";
 
 /** The outbox event the webhook emits with each claim, and its stream (entity type). */
@@ -83,19 +87,44 @@ function noticeClaimsPaid(notice: Record<string, string> | null): boolean {
 // Recording outcomes that are not a payment
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 
-/** Finance (finance managers of the company), falling back to its owners: who is told about money needing a person. */
+/**
+ * Who is told about money that needs a person. By who may ACT on it: a live, active user holding a `finance_manager` or
+ * `owner` grant at company scope on this company OR on any company above it (its parent chain up to the root: a group's
+ * finance team covers its companies), whatever role row carries that name (global or company-defined). If nobody holds
+ * either, it falls back to the `company_admin`s of the same chain, and says so loudly; if there is still nobody, it says
+ * that loudly too. Never a silent empty list: an ignored payment nobody hears about is money lost in plain sight.
+ */
 export async function financeRecipients(tenantId: string): Promise<string[]> {
   const r = await withGlobal((c) =>
     c.query<{ user_id: string; name: string }>(
-      `SELECT DISTINCT ur.user_id, r.name FROM user_roles ur JOIN roles r ON r.id = ur.role_id
-        WHERE r.name IN ('finance_manager', 'owner') AND r.company_id IS NULL
-          AND ur.scope_type = 'company' AND ur.scope_id = $1
+      `WITH RECURSIVE chain AS (
+         SELECT id, parent_company_id, 0 AS depth FROM companies WHERE id = $1
+         UNION ALL
+         SELECT co.id, co.parent_company_id, ch.depth + 1
+           FROM companies co JOIN chain ch ON co.id = ch.parent_company_id
+          WHERE ch.depth < 32
+       )
+       SELECT DISTINCT ur.user_id, r.name
+         FROM user_roles ur
+         JOIN roles r ON r.id = ur.role_id
+         JOIN users u ON u.id = ur.user_id AND u.deleted_at IS NULL AND u.status = 'active'
+        WHERE r.name IN ('finance_manager', 'owner', 'company_admin')
+          AND ur.scope_type = 'company' AND ur.scope_id IN (SELECT id FROM chain)
           AND (ur.expires_at IS NULL OR ur.expires_at > now())`,
       [tenantId],
     ),
   );
-  const finance = r.rows.filter((x) => x.name === "finance_manager").map((x) => x.user_id);
-  return [...new Set(finance.length > 0 ? finance : r.rows.map((x) => x.user_id))];
+  const mayAct = [...new Set(r.rows.filter((x) => x.name === "finance_manager" || x.name === "owner").map((x) => x.user_id))];
+  if (mayAct.length > 0) return mayAct;
+  const admins = [...new Set(r.rows.filter((x) => x.name === "company_admin").map((x) => x.user_id))];
+  if (admins.length > 0) {
+    // eslint-disable-next-line no-console
+    console.error(`[payments] company ${tenantId} has no finance manager or owner to tell about an online payment; telling its company admins instead`);
+    return admins;
+  }
+  // eslint-disable-next-line no-console
+  console.error(`[payments] company ${tenantId} has NOBODY to tell about an online payment (no finance manager, owner or company admin on it or above it)`);
+  return [];
 }
 
 async function tellFinance(tenantId: string, principalId: string | null, eventId: string, title: string, body: string): Promise<void> {
@@ -187,15 +216,22 @@ export async function processPaymentEvent(tenantId: string, eventId: string): Pr
     return recordRetry(tenantId, ev, PROVIDER_PRINCIPALS[ev.provider] ?? null, `${ev.provider} is not configured for this company`);
   }
 
+  // 0. Only an order WE minted, for a checkout of THIS company, is ever re-checked. An unknown order is ignored with no
+  //    status call (it is not an invoice of ours: a payment taken in the provider's dashboard, a stranger's notice).
+  //    Finance hears about it only when the notice itself claims money moved; nothing is written either way.
+  const known = ev.ref.startsWith("ck-") && (await withTenants([tenantId], (c) =>
+    c.query(`SELECT 1 FROM payment_checkouts WHERE provider = $1 AND provider_checkout_id = $2`, [ev.provider, ev.ref]),
+  )).rows.length > 0;
+  if (!known) return ignoreUnknownOrder(tenantId, ev, gw.principalId);
+
   // 1. The provider's own account of the checkout. Never the notice's.
   let st: ProviderPaymentStatus;
   try {
     st = await gw.provider.fetchStatus(ev.ref);
   } catch (e) {
-    if (e instanceof ProviderUnavailableError || e instanceof ProviderRequestError) {
-      return recordRetry(tenantId, ev, gw.principalId, `status check failed: ${e.message}`);
-    }
-    throw e;
+    // Every failure counts an attempt, expected or not: an uncounted failure would retry every sweep, forever.
+    const kind = e instanceof ProviderUnavailableError || e instanceof ProviderRequestError ? "" : " (unexpected)";
+    return recordRetry(tenantId, ev, gw.principalId, `status check failed${kind}: ${(e as Error)?.message ?? String(e)}`);
   }
 
   if (st.state !== "paid") return settleNonPayment(tenantId, ev, gw.principalId, st);
@@ -219,6 +255,27 @@ export async function processPaymentEvent(tenantId: string, eventId: string): Pr
     await tellFinance(tenantId, gw.principalId, ev.id, "An online payment was not recorded", `Order ${ev.ref}: ${out.outcome}`);
   }
   return out;
+}
+
+/** An order that is no checkout of ours: `ignored`, no status call; Finance told only if the notice claims payment. */
+async function ignoreUnknownOrder(tenantId: string, ev: ClaimRow, principalId: string): Promise<ProcessOutcome> {
+  const outcome = `order ${ev.ref} is not a checkout of this company; nothing was checked or written`;
+  const done = await withTenants([tenantId], (c) =>
+    c.query(
+      `UPDATE provider_events
+          SET status = 'ignored', error = 'unknown_checkout', outcome = $2, processed_at = now(), last_error = NULL, next_attempt_at = NULL
+        WHERE id = $1 AND status = 'received'`,
+      [ev.id, outcome],
+    ),
+  );
+  if (!done.rowCount) return { status: "skipped", reason: "the notice is no longer waiting" };
+  // eslint-disable-next-line no-console
+  console.warn(`[payments] ${ev.provider} notice ${ev.id}: ${outcome}`);
+  if (noticeClaimsPaid(ev.notice) && (await claimFinanceNotice(tenantId, ev.id))) {
+    await tellFinance(tenantId, principalId, ev.id, "A payment arrived for an order that is not ours",
+      `The payment provider reports order ${ev.ref} as paid, but it is no checkout of this company. Check the provider's dashboard.`);
+  }
+  return { status: "ignored", reason: "unknown_checkout", outcome };
 }
 
 /** The provider says not paid (or not yet). Nothing is written to the books. */
@@ -306,7 +363,8 @@ async function writePayment(
   // The amount the provider took must be EXACTLY the checkout's (numeric, no tolerance), in the checkout's currency.
   const same = st.amount === null ? false
     : (await c.query<{ same: boolean }>(`SELECT $1::numeric = $2::numeric AS same`, [st.amount, ck.amount])).rows[0]?.same === true;
-  if (!same || (st.currency !== null && st.currency.toUpperCase() !== ck.currency)) {
+  // The currency must be STATED and match (IDR): a status with no currency is not evidence of the amount we expect.
+  if (!same || st.currency === null || st.currency.toUpperCase() !== ck.currency) {
     return ignore("amount_mismatch",
       `the provider reports ${st.currency ?? ck.currency} ${st.amount ?? "(no amount)"} for order ${ev.ref}, but the checkout was for ${ck.currency} ${ck.amount}`);
   }
@@ -334,10 +392,10 @@ async function writePayment(
   await c.query(
     `INSERT INTO invoice_payments
        (id, tenant_id, invoice_id, client_id, amount, currency, paid_on, method, reference, status,
-        recorded_by, confirmed_by, confirmed_at, source, provider, provider_payment_id, origin_site)
-     VALUES ($1, $2, $3, $4, $5::numeric, $6, $7::date, 'online', $8, 'confirmed', $9, $9, now(), 'gateway', $10, $11, $12)`,
+        recorded_by, confirmed_by, confirmed_at, source, provider, provider_payment_id, origin_site, checkout_id)
+     VALUES ($1, $2, $3, $4, $5::numeric, $6, $7::date, 'online', $8, 'confirmed', $9, $9, now(), 'gateway', $10, $11, $12, $13)`,
     [paymentId, tenantId, ck.invoiceId, inv.clientId ?? ck.clientId, ck.amount, ck.currency, paidOn, reference,
-     principalId, ev.provider, st.paymentId, config.originSite],
+     principalId, ev.provider, st.paymentId, config.originSite, ck.id],
   );
   const posted = await postConfirmedPayment(c, tenantId, {
     paymentId, invoiceId: ck.invoiceId, amount: ck.amount, currency: ck.currency, paidOn, reference,
@@ -422,22 +480,130 @@ export function registerPaymentEventHandlers(): void {
   registerCoreEventHandler(PAYMENT_NOTICE_EVENT, paymentNoticeHandler);
 }
 
+/** How often one unpaid checkout is asked about again during its reconciliation window. */
+export const RECONCILE_RECHECK_MINUTES = 60;
+
 /**
- * One pass: for each switched-on provider's company, every payment notice still `received` whose retry time has come
- * (and that the consumer has had a moment to take first), oldest first; and every open checkout past its expiry is
- * marked `expired`. `ignoreGrace` is for tests and the boot pass.
+ * RECONCILIATION: a payment whose notice never arrived (the ERP was down longer than the provider retries, the provider
+ * was switched off while checkouts were open, a lost delivery) must still be recorded. So an unpaid checkout is never
+ * just expired on our clock: once it is past its expiry, the sweep ASKS the provider, and keeps asking (hourly) for
+ * `config.payments.reconcileDays` after it. A paid answer is fed through the SAME path as a notice: a synthetic claim
+ * `<order_id>:reconcile` in provider_events (unique, so at most once per checkout), then processPaymentEvent, which
+ * re-fetches and writes through writePayment (the provider payment id and the checkout id are both unique on
+ * invoice_payments, so a late real notice and the reconciliation can never both write).
+ * Only checkouts of the provider's CURRENT environment can be asked; an open one from the other environment is retired.
+ */
+export async function reconcileCheckouts(gw: ConfiguredProvider, opts: { limit?: number } = {}): Promise<ProcessOutcome[]> {
+  const out: ProcessOutcome[] = [];
+  const due = await withTenants([gw.tenantId], async (c) => {
+    // Another environment's open checkouts cannot be checked or expired with this key: retire them.
+    await c.query(
+      `UPDATE payment_checkouts SET status = 'expired', updated_at = now()
+        WHERE tenant_id = $1 AND provider = $2 AND status = 'open' AND environment <> $3`,
+      [gw.tenantId, gw.provider.name, gw.provider.environment],
+    );
+    const r = await c.query<{ id: string; ref: string; status: string }>(
+      `SELECT id, provider_checkout_id AS ref, status FROM payment_checkouts
+        WHERE tenant_id = $1 AND provider = $2 AND environment = $3 AND status <> 'paid'
+          AND expires_at <= now() AND expires_at > now() - make_interval(days => $4::int)
+          AND (last_checked_at IS NULL OR last_checked_at < now() - make_interval(mins => $5::int))
+        ORDER BY expires_at
+        LIMIT $6`,
+      [gw.tenantId, gw.provider.name, gw.provider.environment, Math.ceil(config.payments.reconcileDays), RECONCILE_RECHECK_MINUTES, opts.limit ?? 20],
+    );
+    return r.rows;
+  });
+  for (const ck of due) {
+    let st: ProviderPaymentStatus;
+    try {
+      st = await gw.provider.fetchStatus(ck.ref);
+    } catch (e) {
+      // Unreachable: leave it as it is (an open checkout stays open) and ask again next pass.
+      // eslint-disable-next-line no-console
+      console.warn(`[payments] reconcile: status of ${ck.ref} unavailable: ${(e as Error)?.message ?? e}`);
+      continue;
+    }
+    if (st.state === "paid") {
+      const claim = await withTenants([gw.tenantId], async (c) => {
+        await c.query(`UPDATE payment_checkouts SET last_checked_at = now() WHERE id = $1`, [ck.id]);
+        const r = await c.query<{ id: string }>(
+          `INSERT INTO provider_events (provider, event_id, kind, tenant_id, ref, notice, status, origin_site)
+           VALUES ($1, $2, 'payment', $3, $4, $5::jsonb, 'received', $6)
+           ON CONFLICT (provider, event_id) DO NOTHING
+           RETURNING id`,
+          [gw.provider.name, `${ck.ref}:reconcile`, gw.tenantId, ck.ref,
+           JSON.stringify({ order_id: ck.ref, transaction_status: st.providerStatus, source: "reconcile" }), config.originSite],
+        );
+        return r.rows[0]?.id ?? null;
+      });
+      // eslint-disable-next-line no-console
+      console.warn(`[payments] reconcile: ${ck.ref} was paid at the provider with no notice recorded; ${claim ? "processing it" : "already claimed"}`);
+      if (claim) out.push(await processPaymentEvent(gw.tenantId, claim));
+      continue;
+    }
+    // Not paid: an OPEN checkout past its expiry is expired now, here and (best effort) at the provider; an already
+    // expired or failed one just has its clock moved on.
+    const nextStatus = st.state === "failed" ? "failed" : "expired";
+    const expiredNow = await withTenants([gw.tenantId], async (c) => {
+      const r = await c.query(
+        `UPDATE payment_checkouts
+            SET last_checked_at = now(), updated_at = now(),
+                status = CASE WHEN status = 'open' THEN $2 ELSE status END
+          WHERE id = $1 AND status <> 'paid'`,
+        [ck.id, nextStatus],
+      );
+      return ck.status === "open" && (r.rowCount ?? 0) > 0;
+    });
+    if (expiredNow && st.state !== "expired" && st.state !== "failed") {
+      try {
+        await gw.provider.expireCheckout(ck.ref);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn(`[payments] reconcile: could not expire ${ck.ref} at the provider: ${(e as Error)?.message ?? e}`);
+      }
+    }
+    out.push({ status: "processed", outcome: `checkout ${ck.ref}: not paid (${st.providerStatus})` });
+  }
+  return out;
+}
+
+/**
+ * Put a `failed` payment claim back in the queue (attempts 0) and process it now. For Finance once the cause is fixed
+ * (a clearing account set, a period opened, the provider reachable again). The caller authorizes and audits it
+ * (src/payments/redrive.controller.ts). Answers null when there is no failed claim with that id in this company.
+ */
+export async function redrivePaymentEvent(tenantId: string, eventId: string): Promise<ProcessOutcome | null> {
+  const reset = await withTenants([tenantId], (c) =>
+    c.query(
+      `UPDATE provider_events
+          SET status = 'received', attempts = 0, error = NULL, last_error = NULL, processed_at = NULL,
+              next_attempt_at = NULL, finance_notified_at = NULL,
+              outcome = 'redriven at ' || to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') || ' UTC'
+        WHERE id = $1 AND kind = 'payment' AND status = 'failed'`,
+      [eventId],
+    ),
+  );
+  if (!reset.rowCount) return null;
+  return processPaymentEvent(tenantId, eventId);
+}
+
+/**
+ * One pass: for each switched-on provider's company, the reconciliation above, then every payment notice still
+ * `received` whose retry time has come (and that the consumer has had a moment to take first), oldest first.
+ * `ignoreGrace` is for tests and the boot pass.
  */
 export async function sweepPaymentEvents(opts: { ignoreGrace?: boolean; limit?: number } = {}): Promise<ProcessOutcome[]> {
   const out: ProcessOutcome[] = [];
   for (const gw of configuredProviders()) {
+    try {
+      out.push(...(await reconcileCheckouts(gw)));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[payments] reconciliation of ${gw.provider.name} checkouts failed:`, (err as Error).message);
+    }
     let due: string[];
     try {
       due = await withTenants([gw.tenantId], async (c) => {
-        await c.query(
-          `UPDATE payment_checkouts SET status = 'expired', updated_at = now()
-            WHERE tenant_id = $1 AND provider = $2 AND status = 'open' AND expires_at < now()`,
-          [gw.tenantId, gw.provider.name],
-        );
         const r = await c.query<{ id: string }>(
           `SELECT id FROM provider_events
             WHERE tenant_id = $1 AND provider = $2 AND kind = 'payment' AND status = 'received'

@@ -20,6 +20,8 @@
 // unpaid. A late payment through an expired checkout is still recorded if it fits (process.ts).
 import { InternalServerErrorException } from "@nestjs/common";
 import type { PoolClient } from "pg";
+import { PAYMENTS_REUSE_MARGIN_MINUTES } from "../config";
+import type { PaymentProvider } from "./provider";
 
 export type OnlinePaymentReason =
   | "not_offered" | "not_issued" | "void" | "not_idr" | "nothing_outstanding" | "fractional_amount"
@@ -134,8 +136,9 @@ export async function loadOnlinePaymentFacts(c: PoolClient, invoiceId: string): 
   };
 }
 
-/** An open checkout is reused only while it has at least this long left. */
-export const REUSE_MARGIN_MINUTES = 10;
+/** An open checkout is reused only while it has at least this long left (defined in config.ts, which also keeps the
+ *  checkout lifetime above it). */
+export const REUSE_MARGIN_MINUTES = PAYMENTS_REUSE_MARGIN_MINUTES;
 
 export interface CheckoutView {
   checkoutUrl: string;
@@ -146,27 +149,43 @@ export interface CheckoutView {
 }
 
 /** The invoice's open checkout, if it can be handed out again for `amount` through `provider`. */
-export async function reusableCheckout(c: PoolClient, invoiceId: string, provider: string, amount: string): Promise<CheckoutView | null> {
+export async function reusableCheckout(
+  c: PoolClient, invoiceId: string, provider: string, environment: string, amount: string,
+): Promise<CheckoutView | null> {
+  // The ENVIRONMENT is part of "the same checkout": a sandbox checkout is worthless once production keys are in (and
+  // the reverse), and cannot even be checked or expired with the other environment's key.
   const r = await c.query<{ url: string; amount: string; currency: string; expiresAt: Date }>(
     `SELECT checkout_url AS url, amount::text AS amount, currency_code AS currency, expires_at AS "expiresAt"
        FROM payment_checkouts
-      WHERE invoice_id = $1 AND status = 'open' AND provider = $2 AND amount = $3::numeric
+      WHERE invoice_id = $1 AND status = 'open' AND provider = $2 AND environment = $5 AND amount = $3::numeric
         AND expires_at > now() + make_interval(mins => $4::int)`,
-    [invoiceId, provider, amount, REUSE_MARGIN_MINUTES],
+    [invoiceId, provider, amount, REUSE_MARGIN_MINUTES, environment],
   );
   const x = r.rows[0];
   return x ? { checkoutUrl: x.url, amount: x.amount, currency: x.currency, expiresAt: new Date(x.expiresAt).toISOString(), reused: true } : null;
 }
 
-/** Retire an open checkout that can no longer be reused (stale amount, another provider, about to lapse). */
-export async function retireStaleCheckout(c: PoolClient, invoiceId: string, provider: string, amount: string): Promise<number> {
-  const r = await c.query(
+/** A checkout we retired: the caller asks the provider (outside the transaction, best effort) to stop taking money on it. */
+export interface RetiredCheckout {
+  provider: string;
+  environment: string;
+  ref: string;
+}
+
+/** Retire an open checkout that can no longer be reused (stale amount, another provider or environment, about to lapse).
+ *  Answers the retired rows so the caller can expire them at the provider after commit. */
+export async function retireStaleCheckout(
+  c: PoolClient, invoiceId: string, provider: string, environment: string, amount: string,
+): Promise<RetiredCheckout[]> {
+  const r = await c.query<RetiredCheckout>(
     `UPDATE payment_checkouts SET status = 'expired', updated_at = now()
       WHERE invoice_id = $1 AND status = 'open'
-        AND NOT (provider = $2 AND amount = $3::numeric AND expires_at > now() + make_interval(mins => $4::int))`,
-    [invoiceId, provider, amount, REUSE_MARGIN_MINUTES],
+        AND NOT (provider = $2 AND environment = $5 AND amount = $3::numeric
+                 AND expires_at > now() + make_interval(mins => $4::int))
+      RETURNING provider, environment, provider_checkout_id AS ref`,
+    [invoiceId, provider, amount, REUSE_MARGIN_MINUTES, environment],
   );
-  return r.rowCount ?? 0;
+  return r.rows;
 }
 
 /** Store a freshly created provider checkout as THE open one, or answer the one a concurrent request stored first. */
@@ -174,18 +193,19 @@ export async function storeCheckout(
   c: PoolClient,
   p: {
     id: string; tenantId: string; invoiceId: string; clientId: string; amount: string; currency: string; provider: string;
-    providerCheckoutId: string; checkoutUrl: string; expiryMinutes: number; createdBy: string | null; originSite: string;
+    environment: string; providerCheckoutId: string; checkoutUrl: string; expiryMinutes: number; createdBy: string | null;
+    originSite: string;
   },
 ): Promise<CheckoutView> {
   const ins = await c.query<{ expiresAt: Date }>(
     `INSERT INTO payment_checkouts
        (id, tenant_id, invoice_id, client_id, amount, currency_code, provider, provider_checkout_id, checkout_url, status,
-        expires_at, created_by, origin_site)
-     VALUES ($1, $2, $3, $4, $5::numeric, $6, $7, $8, $9, 'open', now() + make_interval(mins => $10::int), $11, $12)
+        expires_at, created_by, origin_site, environment)
+     VALUES ($1, $2, $3, $4, $5::numeric, $6, $7, $8, $9, 'open', now() + make_interval(mins => $10::int), $11, $12, $13)
      ON CONFLICT (invoice_id) WHERE status = 'open' DO NOTHING
      RETURNING expires_at AS "expiresAt"`,
     [p.id, p.tenantId, p.invoiceId, p.clientId, p.amount, p.currency, p.provider, p.providerCheckoutId, p.checkoutUrl,
-     p.expiryMinutes, p.createdBy, p.originSite],
+     p.expiryMinutes, p.createdBy, p.originSite, p.environment],
   );
   if (ins.rows[0]) {
     return { checkoutUrl: p.checkoutUrl, amount: p.amount, currency: p.currency, expiresAt: new Date(ins.rows[0].expiresAt).toISOString(), reused: false };
@@ -198,4 +218,22 @@ export async function storeCheckout(
   const w = winner.rows[0];
   if (!w) throw new Error("payment checkout: the open checkout vanished between the conflict and the read");
   return { checkoutUrl: w.url, amount: w.amount, currency: w.currency, expiresAt: new Date(w.expiresAt).toISOString(), reused: true };
+}
+
+/** Best effort, never throws: ask the provider to stop taking money on checkouts we retired. Only the ones opened in the
+ *  provider's own environment can be expired with its key; the others are logged (they cannot be reached any more). */
+export async function expireAtProvider(provider: PaymentProvider, retired: RetiredCheckout[]): Promise<void> {
+  for (const r of retired) {
+    if (r.provider !== provider.name || r.environment !== provider.environment) {
+      // eslint-disable-next-line no-console
+      console.warn(`[payments] retired checkout ${r.ref} (${r.provider} ${r.environment}) cannot be expired with the current ${provider.environment} key`);
+      continue;
+    }
+    try {
+      await provider.expireCheckout(r.ref);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn(`[payments] could not expire retired checkout ${r.ref} at ${r.provider}: ${(e as Error)?.message ?? e}`);
+    }
+  }
 }

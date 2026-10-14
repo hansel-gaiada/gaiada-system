@@ -146,14 +146,19 @@ function str(v: unknown): string | null {
   return null;
 }
 
+/** Reversal words: each reversal notice is its own event (a second partial refund must tell Finance again). */
+const REVERSAL_STATUSES = new Set(["refund", "partial_refund", "chargeback", "partial_chargeback"]);
+
 export class MidtransSnapProvider implements PaymentProvider {
   readonly name = "midtrans";
+  readonly environment: MidtransEnvironment;
   private readonly hosts: { snap: string; api: string };
   private readonly fetchImpl: FetchLike;
   private readonly timeoutMs: number;
 
   constructor(private readonly opts: MidtransOptions) {
     if (!opts.serverKey) throw new Error("MidtransSnapProvider: no server key");
+    this.environment = opts.environment;
     this.hosts = MIDTRANS_HOSTS[opts.environment];
     if (!this.hosts) throw new Error(`MidtransSnapProvider: unknown environment ${String(opts.environment)}`);
     this.fetchImpl = opts.fetchImpl ?? (fetch as unknown as FetchLike);
@@ -257,10 +262,30 @@ export class MidtransSnapProvider implements PaymentProvider {
     // [UNVERIFIED until the sandbox drive] Midtrans has no event id. order_id + transaction_status + status_code is
     // unique per state change of one checkout, which is what must be processed once; the alternative (transaction_id)
     // is absent on some notices and would merge a `pending` with its later `settlement`.
+    // A reversal (refund, chargeback, partial or not) can happen several times on one order with the same status word
+    // and code, so its key also carries what tells the reversals apart: the refund key when Midtrans sends one, else the
+    // transaction time. Those fields are unsigned too; a replayed genuine reversal notice with them changed can at most
+    // make Finance look at one real reversal again (the re-fetch still decides), never write anything.
+    let reversalTag = "";
+    if (REVERSAL_STATUSES.has(normalised)) {
+      const refunds = Array.isArray(b.refunds) ? (b.refunds as Array<Record<string, unknown>>) : [];
+      const lastRefundKey = refunds.length ? str(refunds[refunds.length - 1]?.refund_key) : null;
+      const tag = str(b.refund_key) ?? lastRefundKey ?? str(b.transaction_time) ?? "";
+      reversalTag = `:${tag.replace(/[^A-Za-z0-9\-_~.: ]/g, "").slice(0, 64)}`;
+    }
     return {
       ok: true,
-      notice: { eventKey: `${orderId}:${normalised}:${statusCode.slice(0, 8)}`, ref: orderId, summary },
+      notice: { eventKey: `${orderId}:${normalised}:${statusCode.slice(0, 8)}${reversalTag}`, ref: orderId, summary },
     };
+  }
+
+  /** POST /v2/{order_id}/expire. A 404 (nobody picked a method yet, so nothing is payable) counts as done. */
+  async expireCheckout(ref: string): Promise<void> {
+    if (!MIDTRANS_ORDER_ID.test(ref)) throw new ProviderRequestError(`order id ${ref} is not a valid Midtrans order_id`);
+    const r = await this.call(`${this.hosts.api}/v2/${encodeURIComponent(ref)}/expire`, "POST");
+    const bodyCode = str(r.json?.status_code);
+    if (r.status === 404 || bodyCode === "404") return;
+    if (r.status < 200 || r.status >= 300) throw new ProviderUnavailableError(`midtrans expire answered ${r.status}`);
   }
 
   async fetchStatus(ref: string): Promise<ProviderPaymentStatus> {

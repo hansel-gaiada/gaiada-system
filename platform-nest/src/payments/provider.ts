@@ -90,6 +90,9 @@ export class ProviderRequestError extends Error {
 export interface PaymentProvider {
   /** The provider key used in URLs and rows (`/api/webhooks/payments/:provider`, `payment_checkouts.provider`). */
   readonly name: string;
+  /** Which of the provider's environments this instance talks to (sandbox | production). A checkout is only ever reused,
+   *  re-checked or expired by an instance of the environment it was opened in. */
+  readonly environment: string;
   /** A fresh, single-use id for one checkout attempt, in the provider's allowed alphabet and length. */
   mintOrderId(): string;
   createCheckout(req: CheckoutRequest): Promise<CheckoutCreated>;
@@ -97,4 +100,7 @@ export interface PaymentProvider {
   verifyNotice(body: unknown): NoticeVerification;
   /** Read the checkout's current state from the provider's status API. Throws ProviderUnavailableError when transient. */
   fetchStatus(ref: string): Promise<ProviderPaymentStatus>;
+  /** Best effort: tell the provider a checkout we retired must no longer take money (so a payer still on its page cannot
+   *  pay an amount we no longer ask for). Throws on failure; every caller logs and carries on. */
+  expireCheckout(ref: string): Promise<void>;
 }

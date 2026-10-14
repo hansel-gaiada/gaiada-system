@@ -48,8 +48,8 @@ import { CONTRACT_SIGNED_COPY_FILE_ID, INVOICE_PDF_FILE_ID } from "./document-re
 // src/payments/; this controller only admits the invoice through the portal scope first.
 import { providerForTenant } from "../payments/registry";
 import {
-  decideOnlinePayment, loadOnlinePaymentFacts, retireStaleCheckout, reusableCheckout, storeCheckout,
-  type CheckoutView,
+  decideOnlinePayment, expireAtProvider, loadOnlinePaymentFacts, retireStaleCheckout, reusableCheckout, storeCheckout,
+  type CheckoutView, type RetiredCheckout,
 } from "../payments/checkout";
 import { ProviderRequestError, ProviderUnavailableError } from "../payments/provider";
 
@@ -281,7 +281,7 @@ export class PortalCommerceController {
       const inv = await this.ownedInvoice(c, scope, invoiceId);
       const d = decideOnlinePayment(true, await loadOnlinePaymentFacts(c, invoiceId));
       if (!d.available) throw refuse(d);
-      const open = await reusableCheckout(c, invoiceId, gw.provider.name, d.amount);
+      const open = await reusableCheckout(c, invoiceId, gw.provider.name, gw.provider.environment, d.amount);
       return open ? { reuse: open } : { create: { amount: d.amount, currency: d.currency, clientId: inv.clientId } };
     }, { modules: ["finance"] });
     if ("reuse" in plan) return plan.reuse;
@@ -304,6 +304,7 @@ export class PortalCommerceController {
       throw e;
     }
 
+    let retired: RetiredCheckout[] = [];
     const view = await withTenants([tenantId], async (c) => {
       // Re-admit and re-decide: the amount must still be exactly what the provider was asked to collect.
       const scope = await resolvePortalScope(c, req.principal);
@@ -314,15 +315,20 @@ export class PortalCommerceController {
       if (!same.rows[0]?.same) {
         throw new ConflictException({ message: "the amount due changed while the checkout was being opened; please try again", reason: "amount_changed" });
       }
-      await retireStaleCheckout(c, invoiceId, gw.provider.name, d.amount);
+      retired = await retireStaleCheckout(c, invoiceId, gw.provider.name, gw.provider.environment, d.amount);
       return storeCheckout(c, {
         id: newId(), tenantId, invoiceId, clientId: plan.create.clientId, amount: plan.create.amount,
-        currency: plan.create.currency, provider: gw.provider.name, providerCheckoutId: created.providerCheckoutId,
+        currency: plan.create.currency, provider: gw.provider.name, environment: gw.provider.environment,
+        providerCheckoutId: created.providerCheckoutId,
         checkoutUrl: created.checkoutUrl, expiryMinutes: config.payments.checkoutExpiryMinutes,
         createdBy: req.principal.userId ?? null, originSite: config.originSite,
       });
     }, { modules: ["finance"] });
 
+    // After commit, best effort: a retired checkout must stop taking money at the provider (a payer still on its page
+    // would otherwise pay an amount we no longer ask for). Never blocks the answer; a failure is logged, and a payment
+    // that still lands is recorded by the reconciliation sweep (src/payments/process.ts).
+    await expireAtProvider(gw.provider, retired);
     if (!view.reused) {
       await writeActivity(tenantId, req.principal.userId, "checkout_started", "invoice", invoiceId, {
         provider: gw.provider.name, amount: view.amount, currency: view.currency,

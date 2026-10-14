@@ -41,6 +41,8 @@ export class FakeMidtrans {
   readonly orders = new Map<string, FakeOrder>();
   /** Force the next Snap create / status calls to answer this HTTP status (e.g. 503), once each. */
   snapFailure: number | null = null;
+  /** Every order id we were asked to expire (POST /v2/{id}/expire), in order. */
+  readonly expired: string[] = [];
   statusFailure: number | null = null;
   private seq = 0;
 
@@ -54,7 +56,9 @@ export class FakeMidtrans {
     if (init.headers.authorization !== expectedAuth) return reply(401, { status_code: "401", status_message: "unauthorized" });
 
     const u = new URL(url);
-    if (init.method === "POST" && u.hostname === "app.sandbox.midtrans.com" && u.pathname === "/snap/v1/transactions") {
+    const snapHost = u.hostname === "app.sandbox.midtrans.com" || u.hostname === "app.midtrans.com";
+    const apiHost = u.hostname === "api.sandbox.midtrans.com" || u.hostname === "api.midtrans.com";
+    if (init.method === "POST" && snapHost && u.pathname === "/snap/v1/transactions") {
       if (this.snapFailure !== null) {
         const s = this.snapFailure;
         this.snapFailure = null;
@@ -68,10 +72,20 @@ export class FakeMidtrans {
       this.orders.set(td.order_id, { grossAmount: `${td.gross_amount}.00` });
       this.seq += 1;
       const token = `tok-${this.seq}-${td.order_id.slice(-6)}`;
-      return reply(201, { token, redirect_url: `https://app.sandbox.midtrans.com/snap/v4/redirection/${token}` });
+      return reply(201, { token, redirect_url: `https://${u.hostname}/snap/v4/redirection/${token}` });
+    }
+    const ex = /^\/v2\/([^/]+)\/expire$/.exec(u.pathname);
+    if (init.method === "POST" && apiHost && ex) {
+      const orderId = decodeURIComponent(ex[1]);
+      const o = this.orders.get(orderId);
+      this.expired.push(orderId);
+      if (!o || !o.transactionStatus) return reply(404, { status_code: "404", status_message: "Transaction doesn't exist." });
+      if (o.transactionStatus === "settlement" || o.transactionStatus === "capture") return reply(412, { status_code: "412" });
+      o.transactionStatus = "expire";
+      return reply(200, { status_code: "407", transaction_status: "expire", order_id: orderId });
     }
     const m = /^\/v2\/([^/]+)\/status$/.exec(u.pathname);
-    if (init.method === "GET" && u.hostname === "api.sandbox.midtrans.com" && m) {
+    if (init.method === "GET" && apiHost && m) {
       if (this.statusFailure !== null) {
         const s = this.statusFailure;
         this.statusFailure = null;

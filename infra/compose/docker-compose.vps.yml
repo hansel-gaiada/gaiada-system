@@ -897,6 +897,9 @@ services:
       # (ms; blank = 30000, floor 10000).
       PAYMENTS_CHECKOUT_EXPIRY_MINUTES: ${PAYMENTS_CHECKOUT_EXPIRY_MINUTES:-}
       PAYMENTS_SWEEP_INTERVAL_MS: ${PAYMENTS_SWEEP_INTERVAL_MS:-}
+      # Days after an unpaid checkout's expiry that the sweep keeps asking Midtrans whether it was paid (a lost notice).
+      # Blank = 7.
+      PAYMENTS_RECONCILE_DAYS: ${PAYMENTS_RECONCILE_DAYS:-}
       # LMS L5 — the lab runner (`lab-runner/`), which executes a learner's submission in a capped,
       # unprivileged, network-less container. It does NOT run on this box: it lives on SumoPod bound
       # to 127.0.0.1, and the only path to it is an SSH tunnel with a port-restricted key

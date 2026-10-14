@@ -43,8 +43,14 @@ VPS file alone, never `--remove-orphans`). Check the boot line:
 [payments] notice retry sweep on: every 30000ms
 ```
 
-The platform **refuses to boot** if the key is set but `MIDTRANS_TENANT_ID` is missing, is not a uuid or is not a company
-in the database, or if `MIDTRANS_ENVIRONMENT` is anything but sandbox/production. Unset the key to back out.
+The platform **refuses to boot** if the key is set but `MIDTRANS_TENANT_ID` is missing, is not a uuid or is not a live
+company in the database, or if `MIDTRANS_ENVIRONMENT` is anything but sandbox/production.
+
+**Never unset or rotate the key while checkouts are open.** With the key unset the reconciliation sweep stops, and a payment
+made meanwhile is only recorded if the key comes back within `PAYMENTS_RECONCILE_DAYS` (default 7) of that checkout's expiry.
+To back out: wait until no checkout is open (`SELECT count(*) FROM payment_checkouts WHERE status = 'open'`, owner-run), or
+accept that Finance reconciles those payments by hand from the Midtrans dashboard. Rotate a key only to another key of the
+SAME merchant account and environment, and restart at once.
 
 ## 3. The Midtrans dashboard
 
@@ -68,7 +74,22 @@ In the Midtrans dashboard of the matching environment (sandbox: `dashboard.sandb
    - `invoice_payments`: one row `source='gateway', method='online', status='confirmed'`;
    - `finance_ar_receipts`: one receipt into the clearing account, allocated to the AR invoice.
 3. A notice that could not be processed stays `received` with `last_error`, is retried by the sweep, and after 30 attempts
-   (about a day) becomes `failed`; Finance managers (or the owners) are notified.
+   (about a day) becomes `failed`; Finance managers or owners (of the company or the group above it; else its company
+   admins) are notified.
+4. A payment whose notice never arrived is still recorded: the sweep asks Midtrans about every unpaid checkout once it
+   expires and, hourly, for 7 days after (a `<order_id>:reconcile` claim).
+
+### Re-driving a failed notice
+
+When the cause is fixed (the clearing account set, a period opened, Midtrans reachable again), Finance re-drives it:
+
+```
+GET  /api/<companyId>/payments/provider-events?status=failed         # find it (finance_config read)
+POST /api/<companyId>/payments/provider-events/<id>/redrive          # finance_config update; audited as `redriven`
+```
+
+The claim goes back to `received` with attempts 0 and is processed at once, exactly once. `ignored` notices (an amount
+mismatch, a void invoice, a refund) are refused on purpose and are handled in Finance, not re-driven.
 
 Record in the hand-back what was confirmed (the dedupe key, the notice field formats, the 404 for an unpaid order, the Snap
 `expiry` and `callbacks.finish`). They are marked `[UNVERIFIED until the sandbox drive]` in
@@ -82,8 +103,10 @@ Record in the hand-back what was confirmed (the dedupe key, the notice field for
    does not look like the environment's).
 3. Set the same Notification and Finish URLs in the PRODUCTION dashboard.
 4. Recreate the platform container and check the boot line says `midtrans production`.
-5. Open checkouts made in the sandbox are useless in production; they lapse on their own (24 h) and a new one is opened
-   on the next click.
+5. Open checkouts made in the sandbox are useless in production. Every checkout records its environment: after the
+   switch, the sweep retires the sandbox ones that are still open, and the next "Pay online" opens a production checkout
+   (a sandbox checkout is never handed out again). Sandbox payments are not money and are never re-checked with the
+   production key.
 
 ## 6. What Finance does by hand (v1)
 

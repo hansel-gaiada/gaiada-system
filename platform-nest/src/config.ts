@@ -247,6 +247,10 @@ export function readIntervalMs(raw: string | undefined, fallback: number, floor:
   return n;
 }
 
+/** PV5-10: an open hosted checkout is handed out again only while it has at least this long left (src/payments/checkout.ts).
+ *  PAYMENTS_CHECKOUT_EXPIRY_MINUTES must be greater, or no checkout could ever be reused. */
+export const PAYMENTS_REUSE_MARGIN_MINUTES = 10;
+
 /** WSK-61: the default grace window for a schedule that has not visibly taken effect (15 min). */
 export const SCHEDULE_SUPERSEDE_GRACE_DEFAULT_MS = 15 * 60_000;
 const SCHEDULE_SUPERSEDE_GRACE_MIN_MS = 60_000;
@@ -1662,16 +1666,20 @@ const configBase = {
   //   tenantId    : the company that OWNS the Midtrans merchant account. Money paid lands in that legal entity's
   //                 merchant balance, so only that company's invoices are offered online, and a notice is filed under
   //                 it (the GitHub receiver's GITHUB_REPO_SYNC_TENANT_ID precedent). NO DEFAULT, EVER.
-  //   checkoutExpiryMinutes : how long a hosted checkout stays usable (default 24 h, at most 7 days).
+  //   checkoutExpiryMinutes : how long a hosted checkout stays usable (default 24 h, at most 7 days, and MORE than the
+  //                           reuse margin below, or a fresh checkout could never be reused).
   //   sweepIntervalMs       : the retry sweep over notices still to process (default 30 s, floor 10 s).
+  //   reconcileDays         : how long after an unpaid checkout's expiry the sweep keeps asking the provider whether it
+  //                           was paid after all (a notice lost while the ERP was down; default 7 days).
   payments: {
     midtrans: {
       serverKey: process.env.MIDTRANS_SERVER_KEY ?? "",
       environment: (process.env.MIDTRANS_ENVIRONMENT ?? "").trim(),
       tenantId: (process.env.MIDTRANS_TENANT_ID ?? "").trim(),
     },
-    checkoutExpiryMinutes: numericEnv("PAYMENTS_CHECKOUT_EXPIRY_MINUTES", { default: 1440, min: 0, max: 10080 }),
+    checkoutExpiryMinutes: numericEnv("PAYMENTS_CHECKOUT_EXPIRY_MINUTES", { default: 1440, min: PAYMENTS_REUSE_MARGIN_MINUTES, max: 10080 }),
     sweepIntervalMs: readIntervalMs(process.env.PAYMENTS_SWEEP_INTERVAL_MS, 30_000, 10_000),
+    reconcileDays: numericEnv("PAYMENTS_RECONCILE_DAYS", { default: 7, min: 0, max: 60 }),
   },
   // LMS L5 — the lab runner (`lab-runner/`), the sidecar that executes a learner's submission in a
   // capped, unprivileged, network-less container and returns a graded result. Same fail-soft shape

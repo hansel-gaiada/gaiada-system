@@ -89,10 +89,18 @@ export async function provisionUser(tok: VerifiedToken): Promise<string> {
   // verified that email — otherwise anyone who registers an unverified address matching a
   // colleague's could hijack their account. An unverified email that collides is refused.
   if (tok.email) {
-    const byEmail = await withGlobal((c) => c.query<{ id: string }>(`SELECT id FROM users WHERE email = $1`, [tok.email]));
+    const byEmail = await withGlobal((c) => c.query<{ id: string; kind: string }>(`SELECT id, kind FROM users WHERE email = $1`, [tok.email]));
     if (byEmail.rows[0]) {
       if (!tok.emailVerified) {
         throw new Error("email collides with an existing account but is not IdP-verified — refusing to link");
+      }
+      // PV5-10 review: only a HUMAN account (users.kind employee or client) may be claimed by an IdP login. An automation
+      // or bot principal (a payment provider's, an n8n workflow's) carries an address nobody should own; an IdP that
+      // verified it anyway must not turn a login into that principal.
+      if (byEmail.rows[0].kind !== "employee" && byEmail.rows[0].kind !== "client") {
+        // eslint-disable-next-line no-console
+        console.warn(`[oidc] refused to link an IdP login to ${byEmail.rows[0].kind} principal ${byEmail.rows[0].id}`);
+        throw new Error(`email belongs to a ${byEmail.rows[0].kind} principal, not a person — refusing to link`);
       }
       await withGlobal((c) => c.query(`UPDATE users SET idp_subject = $1 WHERE id = $2`, [tok.sub, byEmail.rows[0].id]));
       return byEmail.rows[0].id;

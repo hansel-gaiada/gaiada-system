@@ -6432,6 +6432,37 @@ re-fetches `settlement`, finds the payment recorded and writes nothing.
 **Not the staff decide route, not D14.** The bypass is deliberate (plan finding 14) and written in `webhook.controller.ts`'s
 header: the second party is the provider's own status API, not a person.
 
+**Reconciliation (a lost notice).** An unpaid checkout is never expired on our clock alone. Once past its expiry the sweep
+asks the provider (`fetchStatus`), and keeps asking hourly for `PAYMENTS_RECONCILE_DAYS` (default 7) after it. A paid answer
+becomes a synthetic claim `<order_id>:reconcile` in `provider_events` and goes through the same processing; it can never
+write twice with a late real notice (`ux_invoice_payments_provider_payment` and `ux_invoice_payments_checkout`). An unpaid
+open checkout is expired here and, best effort, at the provider (`POST /v2/{order_id}/expire`). A checkout retired because
+the amount changed is expired at the provider the same way (outside the transaction; failures are logged, never block).
+**Never unset or rotate the key while checkouts are open** (runbook §2).
+
+**Environment.** `payment_checkouts.environment` (sandbox | production): a checkout is reused, re-checked or expired only
+with its own environment's key. After a switch, the other environment's open checkouts are retired and a fresh one is opened.
+
+**One checkout, one payment.** `invoice_payments.checkout_id` (FK, same tenant) is set on every gateway payment, with a
+partial UNIQUE index.
+
+**Unknown orders.** A notice whose `order_id` is not a `ck-` checkout of this company is `ignored: unknown_checkout` with no
+status call; Finance is told only when the notice itself claims payment (settlement or capture). A status answer with no
+`currency`, or one that is not the checkout's (IDR), is `ignored: amount_mismatch`.
+
+**Who Finance is.** `finance_manager` and `owner` grants at company scope on the company or any company above it (its parent
+chain); when none exists, its `company_admin`s, with a loud log; when there is still nobody, a loud log. Never silent.
+
+| Status | Method | Path | Authz | Notes |
+|---|---|---|---|---|
+| PROTOTYPED | GET | `/api/:t/payments/provider-events?status=failed\|ignored\|received\|processed` | `finance_config` · `read` | `{items: [{id, provider, orderId, status, error, lastError, attempts, outcome, receivedAt, processedAt}]}`, newest first, 200 at most; `status` defaults to `failed`. Authorized before validation (bad `status` 400). |
+| PROTOTYPED | POST | `/api/:t/payments/provider-events/:eventId/redrive` | `finance_config` · `update` (checked FIRST: 403 for anyone else, whatever the id) | Bodyless. Only a `failed` payment claim: back to `received`, attempts 0, processed at once through the normal path. **200** `{ok, outcome}`; **404** when there is no failed claim with that id in this company (an `ignored` claim was refused on purpose and is not re-driven). Writes an activity `redriven` (audit). |
+
+**Known v1 behaviour: a manual claim while a checkout is open.** A client can still record a bank-transfer claim while an
+online checkout for the same invoice is open. The next "Pay online" then charges only what the claims leave (and retires the
+old checkout); but a payer still on the old page could pay the old amount. If that payment lands it is recorded only when it
+still fits the outstanding balance, else `ignored: exceeds_outstanding` and Finance refunds or applies the difference.
+
 **Tenant resolution.** `provider_events` is FORCE RLS with `tenant_id NOT NULL`; nothing is loosened. The company is
 `MIDTRANS_TENANT_ID`, the company that owns the merchant account (the key that verified the signature is that account's), as
 the GitHub receiver uses `GITHUB_REPO_SYNC_TENANT_ID`. Only that company's invoices are offered online.

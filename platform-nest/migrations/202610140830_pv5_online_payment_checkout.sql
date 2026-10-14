@@ -32,12 +32,19 @@
 --                             the terminal 'failed' / 'ignored' reason, per 202610130400's CHECK);
 --        outcome              what processing concluded, in words (also for 'processed' rows: "no payment: pending");
 --        finance_notified_at  the once-only claim for telling Finance (a single UPDATE ... WHERE IS NULL).
+--   4. payment_checkouts gains `environment` (sandbox | production: a checkout is only ever reused, re-checked or
+--      expired with the key of the environment it was opened in) and `last_checked_at` (the reconciliation sweep's
+--      clock: an unpaid checkout is re-checked with the provider before it is expired and for N days after, so a payment
+--      whose notice was lost is still recorded). A composite unique (id, tenant_id) backs the FK below.
+--   5. invoice_payments.checkout_id: the checkout a GATEWAY payment came through, composite FK inside the tenant, with a
+--      PARTIAL UNIQUE index: one checkout can never yield two payments, at the database level. Only a gateway payment may
+--      name one (CHECK); the processor always sets it. No backfill: no gateway payment exists before this file.
 --
 -- RLS / GRANTS: no new table. provider_events and company_billing_profiles keep their ENABLE+FORCE RLS and tenant
 -- policies; columns inherit them. No grant changes (platform_app keeps no DELETE on provider_events). users carries no
 -- RLS (it never has).
 --
--- ROLLOUT: additive; safe before the code. Brief ACCESS EXCLUSIVE locks on two small tables. The one DML is the
+-- ROLLOUT: additive; safe before the code. Brief ACCESS EXCLUSIVE locks on four small tables. The one DML is the
 -- principal INSERT (idempotent: ON CONFLICT DO NOTHING, then asserted). Reverse: drop the added columns and constraints;
 -- the principal row can stay (it is referenced by any gateway payment ever written, so it must stay once one exists).
 
@@ -86,7 +93,35 @@ ALTER TABLE provider_events
 CREATE INDEX ix_provider_events_ref ON provider_events (provider, ref) WHERE ref IS NOT NULL;
 
 -- ══════════════════════════════════════════════════════════════════════════════════════════════════
--- 4 · Self-assertion
+-- 4 · payment_checkouts: environment and the reconciliation clock
+-- ══════════════════════════════════════════════════════════════════════════════════════════════════
+-- No checkout exists before PV5-10's code; the transient default only lets the NOT NULL column be added to a table that
+-- is empty everywhere, and is dropped at once so every row states its environment explicitly.
+ALTER TABLE payment_checkouts
+  ADD COLUMN environment     text NOT NULL DEFAULT 'sandbox',
+  ADD COLUMN last_checked_at timestamptz;
+ALTER TABLE payment_checkouts ALTER COLUMN environment DROP DEFAULT;
+ALTER TABLE payment_checkouts
+  ADD CONSTRAINT payment_checkouts_environment_check CHECK (environment IN ('sandbox', 'production')),
+  ADD CONSTRAINT ux_payment_checkouts_id_tenant UNIQUE (id, tenant_id);
+-- The reconciliation sweep: unpaid checkouts by expiry.
+CREATE INDEX ix_payment_checkouts_unpaid_expiry ON payment_checkouts (tenant_id, provider, expires_at) WHERE status <> 'paid';
+
+-- ══════════════════════════════════════════════════════════════════════════════════════════════════
+-- 5 · invoice_payments.checkout_id: one checkout, at most one payment
+-- ══════════════════════════════════════════════════════════════════════════════════════════════════
+ALTER TABLE invoice_payments ADD COLUMN checkout_id uuid;
+ALTER TABLE invoice_payments
+  ADD CONSTRAINT fk_invoice_payments_checkout_tenant FOREIGN KEY (checkout_id, tenant_id)
+    REFERENCES payment_checkouts (id, tenant_id),
+  -- Only a gateway payment names a checkout. (The converse, "every gateway payment names one", is the processor's rule,
+  -- not a CHECK: PV5-01a's own suite writes provider-only gateway rows to test its constraints.)
+  ADD CONSTRAINT invoice_payments_checkout_gateway CHECK (checkout_id IS NULL OR source = 'gateway');
+-- NULL defeats UNIQUE: partial over the gateway set.
+CREATE UNIQUE INDEX ux_invoice_payments_checkout ON invoice_payments (checkout_id) WHERE checkout_id IS NOT NULL;
+
+-- ══════════════════════════════════════════════════════════════════════════════════════════════════
+-- 6 · Self-assertion
 -- ══════════════════════════════════════════════════════════════════════════════════════════════════
 DO $$
 DECLARE
@@ -101,11 +136,19 @@ BEGIN
     RAISE EXCEPTION 'PV5-10: the Midtrans automation principal must hold no roles';
   END IF;
   FOREACH c IN ARRAY ARRAY['billing_profiles_clearing_code_format', 'provider_events_ref_format', 'provider_events_notice_object',
-                           'provider_events_attempts_nonneg', 'provider_events_retry_only_when_received'] LOOP
+                           'provider_events_attempts_nonneg', 'provider_events_retry_only_when_received',
+                           'payment_checkouts_environment_check', 'invoice_payments_checkout_gateway'] LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = c AND contype = 'c') THEN
       RAISE EXCEPTION 'PV5-10: CHECK % is missing', c;
     END IF;
   END LOOP;
+  SELECT indexdef INTO c FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'ux_invoice_payments_checkout';
+  IF c IS NULL OR c NOT LIKE 'CREATE UNIQUE INDEX%' OR c NOT LIKE '%WHERE%' THEN
+    RAISE EXCEPTION 'PV5-10: ux_invoice_payments_checkout is missing or is not a partial UNIQUE index';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_invoice_payments_checkout_tenant' AND contype = 'f') THEN
+    RAISE EXCEPTION 'PV5-10: FK fk_invoice_payments_checkout_tenant is missing';
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_class WHERE oid = 'public.provider_events'::regclass AND relrowsecurity AND relforcerowsecurity) THEN
     RAISE EXCEPTION 'PV5-10: provider_events lost ENABLE+FORCE RLS';
   END IF;

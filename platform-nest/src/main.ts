@@ -553,9 +553,9 @@ async function bootstrap(): Promise<void> {
   {
     const paymentsLine = describePaymentsConfig();
     for (const gw of configuredProviders()) {
-      const co = await getPool().query(`SELECT 1 FROM companies WHERE id = $1`, [gw.tenantId]);
+      const co = await getPool().query(`SELECT 1 FROM companies WHERE id = $1 AND deleted_at IS NULL`, [gw.tenantId]);
       if (!co.rows[0]) {
-        throw new Error(`MIDTRANS_TENANT_ID ${gw.tenantId} is not a company in this database; online payment cannot file its notices`);
+        throw new Error(`MIDTRANS_TENANT_ID ${gw.tenantId} is not a live company in this database; online payment cannot file its notices`);
       }
     }
     // eslint-disable-next-line no-console

@@ -217,3 +217,40 @@ describe("status re-fetch", () => {
     expect((await provider(f).fetchStatus("ck-8")).amount).toBeNull();
   });
 });
+
+describe("review fixes", () => {
+  it("each reversal notice is its own event: the refund key, else the transaction time, is in the key", () => {
+    const fake = new FakeMidtrans(KEY);
+    fake.setStatus("ck-rev", { grossAmount: "150000.00" });
+    const p = provider(fake.fetch);
+    const base = fake.notice("ck-rev", { transactionStatus: "partial_refund", statusCode: "200" });
+    const a = p.verifyNotice({ ...base, transaction_time: "2026-10-14 10:00:00" });
+    const b = p.verifyNotice({ ...base, transaction_time: "2026-10-15 11:00:00" });
+    const k = p.verifyNotice({ ...base, refund_key: "rf-123" });
+    expect(a.ok && b.ok && k.ok).toBe(true);
+    if (a.ok && b.ok && k.ok) {
+      expect(a.notice.eventKey).toBe("ck-rev:partial_refund:200:2026-10-14 10:00:00");
+      expect(b.notice.eventKey).not.toBe(a.notice.eventKey);
+      expect(k.notice.eventKey).toBe("ck-rev:partial_refund:200:rf-123");
+    }
+    // A non-reversal keeps the plain key.
+    const s = p.verifyNotice(fake.notice("ck-rev", { transactionStatus: "settlement", grossAmount: "150000.00" }));
+    expect(s.ok && s.notice.eventKey).toBe("ck-rev:settlement:200");
+  });
+
+  it("expireCheckout POSTs /v2/{order}/expire; nothing payable yet (404) is done; a 5xx throws", async () => {
+    const fake = new FakeMidtrans(KEY);
+    fake.setStatus("ck-x1", { grossAmount: "10.00", transactionStatus: "pending", transactionId: "t" });
+    await provider(fake.fetch).expireCheckout("ck-x1");
+    expect(fake.expired).toEqual(["ck-x1"]);
+    expect(fake.calls.at(-1)?.url).toBe("https://api.sandbox.midtrans.com/v2/ck-x1/expire");
+    await expect(provider(fake.fetch).expireCheckout("ck-nothing")).resolves.toBeUndefined();
+    const down: FetchLike = async () => ({ status: 503, text: async () => "{}" });
+    await expect(provider(down).expireCheckout("ck-x1")).rejects.toBeInstanceOf(ProviderUnavailableError);
+  });
+
+  it("an instance knows its environment (a checkout is only ever reused or expired by its own)", () => {
+    expect(provider(new FakeMidtrans(KEY).fetch).environment).toBe("sandbox");
+    expect(provider(new FakeMidtrans(KEY).fetch, "production").environment).toBe("production");
+  });
+});
