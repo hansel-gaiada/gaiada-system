@@ -46,7 +46,7 @@ describe.skipIf(!TEST_URL)("DW-8g calendar events (HTTP, real Postgres + Cerbos)
   let app: NestFastifyApplication;
   let A: string; // the company under test
   let B: string; // another company (its own people)
-  let C: string; // a company where the shared person is only a manager (no calendar read)
+  let C: string; // a company where the shared person holds only a module tier (no calendar read)
   let FRESH: string; // a company with no events at all
   let orgz: string; // member: the organizer of most events
   let att1: string; // member: invited
@@ -127,7 +127,7 @@ describe.skipIf(!TEST_URL)("DW-8g calendar events (HTTP, real Postgres + Cerbos)
     await grantRole(adm, roleOf.admin, "company", A);
     await grantRole(pa, roleOf.pa, "global", null);
     await grantRole(both, roleOf.member, "company", B);
-    await grantRole(both, roleOf.manager, "company", C); // a manager alone reads no calendar (the leg is `no_access`)
+    await grantRole(both, await createRole("webdev_manager"), "company", C); // a module tier alone reads no calendar (the leg is `no_access`)
     await grantRole(outsider, roleOf.member, "company", B);
     await grantRole(attB, roleOf.member, "company", B);
     await q().query(`UPDATE users SET kind = 'bot' WHERE id = $1`, [botU]);
@@ -341,14 +341,28 @@ describe.skipIf(!TEST_URL)("DW-8g calendar events (HTTP, real Postgres + Cerbos)
       }
     });
 
-    it("a company-visible event is read by every member and viewer, still not by a manager, and nobody but an attendee may answer or edit it", async () => {
-      for (const u of [mem, view]) {
+    it("a company-visible event is read by every member, viewer and manager, and nobody but an attendee may answer it or an organizer edit it", async () => {
+      for (const u of [mem, view, mgr]) {
         const r = await get(companyEv, u);
         expect(r.statusCode, `${u}: ${r.body}`).toBe(200);
         expect(r.json()).toMatchObject({ title: "All hands", canEdit: false, canRespond: false });
       }
-      expect((await get(companyEv, mgr)).statusCode).toBe(404);
       expect((await get(companyEv, outsider)).statusCode).toBe(404);
+    });
+
+    it("a MANAGER-only login reads, edits, answers and cancels the events it organizes or attends (and no one else's)", async () => {
+      const own = await mk(timedBody({ title: "Manager's own", attendeeIds: [att1] }), mgr);
+      expect(own).toMatchObject({ organizer: { id: mgr }, canEdit: true, canCancel: true, canRespond: true, myResponse: "accepted" });
+      expect((await get(own.id, mgr)).statusCode).toBe(200);
+      expect((await call("PATCH", `${ev()}/${own.id}`, mgr, { title: "Renamed by its organizer" })).statusCode).toBe(200);
+      const invited = await mk(timedBody({ title: "Manager invited", attendeeIds: [mgr] }), orgz);
+      const seen = await get(invited.id, mgr);
+      expect(seen.statusCode, seen.body).toBe(200);
+      expect(seen.json()).toMatchObject({ canEdit: false, canRespond: true });
+      expect((await call("POST", `${ev()}/${invited.id}/respond`, mgr, { response: "accepted" })).statusCode).toBe(200);
+      expect((await call("PATCH", `${ev()}/${invited.id}`, mgr, { title: "Hijacked" })).statusCode).toBe(403);
+      expect((await call("POST", `${ev()}/${invited.id}/cancel`, mgr)).statusCode).toBe(403);
+      expect((await call("POST", `${ev()}/${own.id}/cancel`, mgr)).statusCode).toBe(200);
     });
 
     it("an unknown id, a malformed id and a zero uuid on a fresh company are all 404 (PERMISSION-CONTRACT §39's post-restart probe)", async () => {
@@ -722,7 +736,7 @@ describe.skipIf(!TEST_URL)("DW-8g calendar events (HTTP, real Postgres + Cerbos)
       expect(narrow).toEqual([mineAllDay]);
     });
 
-    it("the organizer sees theirs, an uninvited member sees only what includes them, and a manager alone sees none (their leg is no_access)", async () => {
+    it("the organizer sees theirs, an uninvited member sees only what includes them, and a manager invited to nothing sees none (an empty leg, not an error)", async () => {
       const o = (await mine(orgz)).json().items.map((i: any) => i.id);
       expect(o).toEqual(expect.arrayContaining([mineInvited, mineDeclined, mineCancelled, mineAllDay, notMine, companyNotMine]));
       expect(o).not.toContain(mineOrganized);
@@ -730,7 +744,7 @@ describe.skipIf(!TEST_URL)("DW-8g calendar events (HTTP, real Postgres + Cerbos)
       expect(m.json().items.map((i: any) => i.id)).toEqual([mineInvited]);
       const g = await mine(mgr);
       expect(g.statusCode).toBe(200);
-      expect(g.json()).toEqual({ items: [], companies: [{ id: A, included: false, reason: "no_access" }] });
+      expect(g.json()).toEqual({ items: [], companies: [{ id: A, name: "Calendar Co A", included: true }] });
     });
 
     it("across companies: a person in two companies gets both legs, each row carries its company, and scope narrows to one", async () => {
@@ -739,7 +753,7 @@ describe.skipIf(!TEST_URL)("DW-8g calendar events (HTTP, real Postgres + Cerbos)
       const body = r.json();
       expect(body.companies.find((c: any) => c.id === A)).toEqual({ id: A, name: "Calendar Co A", included: true });
       expect(body.companies.find((c: any) => c.id === B)).toEqual({ id: B, name: "Calendar Co B", included: true });
-      // a company where the caller is only a manager is reported, never leaked and never an error
+      // a company where the caller holds only a module tier (no calendar read) is reported, never leaked and never an error
       expect(body.companies.find((c: any) => c.id === C)).toEqual({ id: C, included: false, reason: "no_access" });
       const b = body.items.find((i: any) => i.id === bEvent);
       expect(b).toMatchObject({ tenantId: B, company: "Calendar Co B", title: "In company B", myResponse: "needs_action" });

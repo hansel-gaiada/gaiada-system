@@ -19,17 +19,18 @@
 --   company_admin, owner — read, create, update, cancel, respond
 --                      (owner MUST mirror company_admin exactly: owner-role.db.test.ts; a new company_admin key does
 --                      NOT propagate to owner on its own)
---   manager          — create ONLY (a manager does not read every calendar, and holds no attendee or organizer rule)
+--   manager          — create; read (organizer, attendee and company-visibility rules, so never every calendar); update, cancel and respond
+--                      as SELF-SCOPED pairs. (Added at review, 2026-10-14: a manager-only login could create but not then read its own event.)
 --   member           — create; read (organizer, attendee and company-visibility rules); update and cancel as SELF-SCOPED
 --                      pairs (the organizer on their own event); respond as a SELF-SCOPED pair (an attendee, for themselves)
 --   viewer           — read (attendee and company-visibility rules); respond as a SELF-SCOPED pair
 --   everything else (client, org_unit_lead, module tiers, ...) — NOTHING
 --
 -- ── SELF-SCOPED MARKER ──────────────────────────────────────────────────────────────────────────
--- member·update, member·cancel, member·respond and viewer·respond are the ONLY marked pairs: every rule that grants one of
+-- member·update, member·cancel, member·respond, manager·update, manager·cancel, manager·respond and viewer·respond are the ONLY marked pairs: every rule that grants one of
 -- them to that role is an attribute-equality or membership rule (`ownerId == principal.id`, `principal.id in attendeeIds`).
 -- role-permission-bundles.json carries them under `selfScoped`, and self-scoped-marker-parity.db.test.ts pins the DB to the
--- JSON. member·read and viewer·read are deliberately NOT marked: one of their rules is the company-visibility rule
+-- JSON. member·read, viewer·read and manager·read are deliberately NOT marked: one of their rules is the company-visibility rule
 -- (`visibility == "company"`), a tenant-wide read, so the generator (which derives the marker from the rule shape) leaves
 -- them unmarked. company_admin·respond is not marked either: its ALLOW rule is unconditional and the deny-overrides rule
 -- (any role, attendee only) is what narrows it.
@@ -74,8 +75,17 @@ FROM (
      ('core.calendar_event.cancel'), ('core.calendar_event.respond')
    ) AS k(perm_key)
   UNION ALL
-  -- a manager schedules, nothing more
+  -- a manager schedules and reads (read is NOT self-scoped: it includes the company-visibility rule), and edits, cancels and
+  -- answers only its own events (the self-scoped pairs, as for member)
   SELECT 'manager', 'core.calendar_event.create', false
+  UNION ALL
+  SELECT 'manager', 'core.calendar_event.read', false
+  UNION ALL
+  SELECT 'manager', 'core.calendar_event.update', true
+  UNION ALL
+  SELECT 'manager', 'core.calendar_event.cancel', true
+  UNION ALL
+  SELECT 'manager', 'core.calendar_event.respond', true
   UNION ALL
   -- members schedule and read (read is NOT self-scoped: it includes the company-visibility rule)
   SELECT 'member', 'core.calendar_event.create', false
@@ -113,7 +123,7 @@ BEGIN
 
   FOR expected IN
     SELECT * FROM (VALUES
-      ('platform_admin', 5), ('company_admin', 5), ('owner', 5), ('manager', 1),
+      ('platform_admin', 5), ('company_admin', 5), ('owner', 5), ('manager', 5),
       ('member', 5), ('viewer', 2),
       ('org_unit_lead', 0), ('client', 0), ('group_executive', 0), ('webdev_staff', 0), ('webdev_manager', 0), ('hr_manager', 0)
     ) AS x(role_name, expected_count)
@@ -130,37 +140,36 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- Only the full-reach tier updates, cancels or reads without a relationship: a manager and a viewer never edit or cancel.
+  -- Only the full-reach tier, members and managers (self-scoped) update or cancel: a viewer never edits or cancels.
   SELECT count(*) INTO got
     FROM role_permissions rp
     JOIN roles r ON r.id = rp.role_id
     JOIN permissions p ON p.id = rp.permission_id
    WHERE r.company_id IS NULL
      AND p.key IN ('core.calendar_event.update', 'core.calendar_event.cancel')
-     AND r.name NOT IN ('platform_admin', 'company_admin', 'owner', 'member');
+     AND r.name NOT IN ('platform_admin', 'company_admin', 'owner', 'member', 'manager');
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610150410: update/cancel leaked to % row(s) outside platform_admin/company_admin/owner/member', got;
+    RAISE EXCEPTION '202610150410: update/cancel leaked to % row(s) outside platform_admin/company_admin/owner/member/manager', got;
   END IF;
 
-  -- A viewer never schedules, edits or cancels; a manager neither reads nor answers.
+  -- A viewer never schedules, edits or cancels.
   SELECT count(*) INTO got
     FROM role_permissions rp
     JOIN roles r ON r.id = rp.role_id
     JOIN permissions p ON p.id = rp.permission_id
    WHERE r.company_id IS NULL AND p.cerbos_kind = 'calendar_event'
-     AND ((r.name = 'viewer' AND p.action NOT IN ('read', 'respond'))
-          OR (r.name = 'manager' AND p.action <> 'create'));
+     AND (r.name = 'viewer' AND p.action NOT IN ('read', 'respond'));
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610150410: viewer or manager holds % calendar_event permission(s) outside its reach', got;
+    RAISE EXCEPTION '202610150410: viewer holds % calendar_event permission(s) outside its reach', got;
   END IF;
 
-  -- The self-scoped marker: exactly member·update, member·cancel, member·respond and viewer·respond, and nothing else on this kind.
+  -- The self-scoped marker: exactly member and manager update/cancel/respond, and viewer·respond, and nothing else on this kind.
   SELECT count(*) INTO got
     FROM role_permissions rp
     JOIN roles r ON r.id = rp.role_id
     JOIN permissions p ON p.id = rp.permission_id
    WHERE r.company_id IS NULL AND p.cerbos_kind = 'calendar_event' AND rp.self_scoped
-     AND NOT ((r.name = 'member' AND p.key IN ('core.calendar_event.update', 'core.calendar_event.cancel', 'core.calendar_event.respond'))
+     AND NOT ((r.name IN ('member', 'manager') AND p.key IN ('core.calendar_event.update', 'core.calendar_event.cancel', 'core.calendar_event.respond'))
               OR (r.name = 'viewer' AND p.key = 'core.calendar_event.respond'));
   IF got <> 0 THEN
     RAISE EXCEPTION '202610150410: % unexpected self_scoped calendar_event row(s)', got;
@@ -170,10 +179,10 @@ BEGIN
     JOIN roles r ON r.id = rp.role_id
     JOIN permissions p ON p.id = rp.permission_id
    WHERE r.company_id IS NULL AND rp.self_scoped
-     AND ((r.name = 'member' AND p.key IN ('core.calendar_event.update', 'core.calendar_event.cancel', 'core.calendar_event.respond'))
+     AND ((r.name IN ('member', 'manager') AND p.key IN ('core.calendar_event.update', 'core.calendar_event.cancel', 'core.calendar_event.respond'))
           OR (r.name = 'viewer' AND p.key = 'core.calendar_event.respond'));
-  IF got <> 4 THEN
-    RAISE EXCEPTION '202610150410: member·update/cancel/respond and viewer·respond must all be marked self_scoped (found %)', got;
+  IF got <> 7 THEN
+    RAISE EXCEPTION '202610150410: member and manager update/cancel/respond and viewer·respond must all be marked self_scoped (found %)', got;
   END IF;
 
   -- owner ≡ company_admin, in BOTH directions (equal counts alone would not catch the wrong keys).
@@ -207,8 +216,8 @@ BEGIN
     JOIN roles r ON r.id = rp.role_id
     JOIN permissions p ON p.id = rp.permission_id
    WHERE r.company_id IS NULL AND p.cerbos_kind = 'calendar_event';
-  IF got <> 23 THEN
-    RAISE EXCEPTION '202610150410: total bundled calendar_event permissions on global roles: expected 23 (3x5 + 1 + 5 + 2), found %', got;
+  IF got <> 27 THEN
+    RAISE EXCEPTION '202610150410: total bundled calendar_event permissions on global roles: expected 27 (3x5 + 5 + 5 + 2), found %', got;
   END IF;
 
   RAISE NOTICE '202610150410: role_permissions seeded — % calendar_event rows across 6 global roles', got;

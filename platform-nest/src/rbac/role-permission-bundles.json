@@ -15,11 +15,11 @@
     "note": "class='relationship' permissions are NEVER present in any bundle (Ruling 3); enforced here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against the live `role_permissions_reject_relationship` DB trigger (0093).",
     "counts": {
       "roles": 28,
-      "totalPairs": 2068,
+      "totalPairs": 2072,
       "perRole": {
         "platform_admin": 456,
         "company_admin": 419,
-        "manager": 207,
+        "manager": 211,
         "member": 109,
         "viewer": 38,
         "org_unit_lead": 22,
@@ -46,7 +46,7 @@
         "lms_manager": 11,
         "owner": 419
       },
-      "selfScopedPairs": 37
+      "selfScopedPairs": 40
     }
   },
   "roles": {
@@ -959,7 +959,11 @@
       "core.activity.read",
       "core.automation_approval.create",
       "core.automation_approval.read",
+      "core.calendar_event.cancel",
       "core.calendar_event.create",
+      "core.calendar_event.read",
+      "core.calendar_event.respond",
+      "core.calendar_event.update",
       "core.client.create",
       "core.client.delete",
       "core.client.read",
@@ -2176,6 +2180,11 @@
     ]
   },
   "selfScoped": {
+    "manager": [
+      "core.calendar_event.cancel",
+      "core.calendar_event.respond",
+      "core.calendar_event.update"
+    ],
     "member": [
       "agency.campaign_part.update",
       "core.calendar_event.cancel",
