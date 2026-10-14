@@ -11,6 +11,21 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.143.0` + platform-ui `0.163.0` - DW-8i: knowledge search for staff, every hit re-checked against its record (2026-10-14) - PROTOTYPED
+
+Contract `docs/FRONTEND-BFF-CONTRACT.md` §46 (as built: §46.7 backend, §46.8 UI). Plan §8.1 row 8i. No migration, no Cerbos policy change, no compose change.
+- **Backend.** `GET /api/:tenantId/knowledge/search?q=&limit=` (gate: `activity` · `read`, the knowledge module guard).
+  - It asks WS8's store as the caller (`x-obo-provider: platform`) and keeps internal-tier hits of this company only.
+  - It re-checks EVERY hit against the caller's read right on its source record, with that record's own read shape. Existence and title are read first; the Cerbos checks are batched at 50 (`checkMany`, fail closed per resource); the acting user must allow too.
+  - Families searchable in v1: client, project, task, PM task, deliverable, meeting, PM doc, file (the file and its parent). Reports, people and org are withheld until each has its own check.
+  - A refused hit is dropped silently, with no count. The query text is never logged.
+  - The knowledge service down → 503 `knowledge_unavailable`.
+- **UI.**
+  - `/knowledge` gains a search box (`?q=`) with honest states: unavailable, forbidden, too short, and "Nothing you can open matches".
+  - The palette offers "Search company knowledge for '…'" with two or more characters typed.
+- **Fix.** File sizes read the bigint the platform sends as a string; every file showed "0 B" on 398.
+- **Verified.** The new HTTP suite was green on the branch's CI. The gate is CI on the landing sha.
+
 ### platform-nest `0.141.0` + platform-ui `0.161.0` - DW-7d: HR, Finance and IT in every company's org tree (2026-10-14) - PROTOTYPED
 
 Plan §4.3 (DW-7d), owner ruling DW-D6. Contract: the `GET/PUT /api/:t/org-structure` row of `docs/FRONTEND-BFF-CONTRACT.md` (DW-7d note). No migration, no Cerbos change, no compose change.
