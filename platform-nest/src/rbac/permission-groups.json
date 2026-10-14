@@ -6,9 +6,9 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 168,
-      "grantablePermissionsInCatalog": 451,
-      "permissionsCoveredByGroups": 412,
+      "groups": 169,
+      "grantablePermissionsInCatalog": 456,
+      "permissionsCoveredByGroups": 417,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
       "sensitiveGroups": 114
@@ -1916,6 +1916,20 @@
         "core.work_request.cancel",
         "core.work_request.deliver",
         "core.work_request.decline"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "calendar",
+      "name": "Calendar and meetings",
+      "domain": "core",
+      "description": "Scheduling events and meetings on the company calendar and answering invitations. DW-8g: any member can schedule (create); the organizer edits and cancels their own event; an attendee answers for themselves only. Who sees an event: the organizer, the people invited, and everyone in the company when it is shared company-wide. Agents and automation can read events but never schedule, edit, cancel or answer.",
+      "permissions": [
+        "core.calendar_event.read",
+        "core.calendar_event.create",
+        "core.calendar_event.update",
+        "core.calendar_event.cancel",
+        "core.calendar_event.respond"
       ],
       "sensitive": false
     },

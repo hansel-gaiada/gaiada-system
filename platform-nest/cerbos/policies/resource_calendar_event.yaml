@@ -1,0 +1,166 @@
+# DW-8g (docs/FRONTEND-BFF-CONTRACT.md §47; docs/PERMISSION-CONTRACT.md §39; plan docs/plans/2026-10-13-department-workspaces.md
+# §8.1, row 8g) — authz for the NEW `calendar_event` resource kind (core, no module): one EVENT on a company's calendar, which
+# may carry a scheduled meeting recording. Five actions:
+#   read    — see an event. company_admin; the ORGANIZER (its own rule); every ATTENDEE (its own rule); and every member and
+#             viewer when the event is `company`-visible (its own rule). A manager does NOT read every calendar.
+#   create  — schedule an event or a meeting: company_admin, manager, member. A viewer cannot. (Also the gate of busy times.)
+#   update  — edit time, title, attendees or place: company_admin, and the ORGANIZER (its own rule).
+#   cancel  — call it off: company_admin, and the ORGANIZER (its own rule).
+#   respond — accept, decline or say maybe, FOR YOURSELF ONLY: an ATTENDEE (its own rule), and nobody else. company_admin
+#             holds the key, but the deny-overrides rule below stops EVERY role (platform_admin too) answering for someone else.
+# Restart `gaiada-test-cerbos` after editing this file; the bind-mount does not hot-reload.
+#
+# ── EVERY ATTRIBUTE-DEPENDENT RULE STANDS ALONE (the HIER-2 authoring rule) ──────────────────────
+# `read`, `update` and `cancel` are each reachable by more than one kind of authority, so each is several rules, never one:
+#   1. company_admin            — a scope-only role, unconditional beyond `inTenant && notLow`.
+#   2. the ORGANIZER            — `resource.attr.ownerId == principal.id`, on `member`. Self-scoped: the bundle marks
+#                                 member·update and member·cancel `selfScoped`.
+#   3. an ATTENDEE              — `principal.id in resource.attr.attendeeIds`, on `member` and `viewer` (read, respond).
+#                                 Self-scoped too.
+#   4. company visibility       — `resource.attr.visibility == "company"`, on `member` and `viewer`. NOT self-scoped (it is a
+#                                 tenant-wide read of the events someone chose to share company-wide), so member·read and
+#                                 viewer·read are NOT in `selfScoped` (the generator derives the marker from the rule shape).
+# All three attributes are fed by the HANDLER (calendar-events.controller.ts) from the event row and its attendee rows:
+# `ownerId` from `calendar_events.organizer_id`, `attendeeIds` from `calendar_event_attendees`, `visibility` from the row.
+# None is ever read from a request body. An unfed resource fails closed: `ownerId` "" never equals a principal id,
+# `attendeeIds` [] contains nobody, and `visibility` defaults to "attendees" (never "company").
+#
+# ── NO AUTOMATION OR BOT PRINCIPAL SCHEDULES, EDITS, CANCELS OR ANSWERS (after the PV-4 / work_request precedent) ──
+# Agents may schedule later, under the separate AI plan. `read` stays allowed. The DENY is shaped exactly like
+# resource_work_request.yaml's: `roles: ["user"]`, which every principal carries, so under deny-overrides it beats every ALLOW
+# below, the platform_admin wildcard and the perm mirror included. It reads `principal.attr.kind`; `has()` makes a raw caller
+# that omits the attribute evaluate to false.
+#
+# ── `respond` HOLDS FOR EVERY ROLE (a second deny-overrides rule) ────────────────────────────────
+# Nobody answers an invitation for someone else, `company_admin` and `platform_admin` included. The ALLOW rules for company_admin
+# and the platform_admin wildcard are broad on purpose (the bundles must show company_admin/owner/platform_admin holding the key),
+# and this DENY narrows every one of them to "you are an attendee". An unfed `attendeeIds` ([]) contains nobody, so a probe
+# that sends no event denies `respond` for platform_admin too, by design.
+#
+# ── THE PERMISSION ARM COVERS `create` ONLY ──────────────────────────────────────────────────────
+# `read` (all three of its rules depend on attributes), `update`, `cancel` (organizer rule: self-scoped, permission-arm-hazard-scan
+# Pattern B) and `respond` (attendee rule: self-scoped) are exactly the shapes a flat `perms` mirror cannot express: a mirror
+# would let any holder of the key act on EVERY event. Same call as resource_work_request.yaml. Consequence: the
+# permission-native `owner` role (zero role-arm rules) holds all five keys in its bundle but reaches only `create` through
+# Cerbos, unless it also holds company_admin.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: calendar_event
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # ---- read: four rules, each on its own ----
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # The ORGANIZER reads their own event.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.ownerId) && request.resource.attr.ownerId != "" &&
+            request.resource.attr.ownerId == request.principal.id
+    # An ATTENDEE reads the event they are invited to.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member", "viewer"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.attendeeIds) &&
+            request.principal.id in request.resource.attr.attendeeIds
+    # Everyone in the company reads a company-visible event.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member", "viewer"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.visibility) && request.resource.attr.visibility == "company"
+
+    # ---- create: any workspace can schedule; a viewer cannot ----
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ---- update and cancel: company_admin, and the organizer on its own rule ----
+    - actions: ["update", "cancel"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.ownerId) && request.resource.attr.ownerId != "" &&
+            request.resource.attr.ownerId == request.principal.id
+    - actions: ["cancel"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.ownerId) && request.resource.attr.ownerId != "" &&
+            request.resource.attr.ownerId == request.principal.id
+
+    # ---- respond: an attendee, for themselves; company_admin holds the key and the DENY below narrows it ----
+    - actions: ["respond"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["respond"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member", "viewer"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.attendeeIds) &&
+            request.principal.id in request.resource.attr.attendeeIds
+
+    # ══════════ nobody answers an invitation for someone else — EVERY role, platform_admin included ══════════
+    - actions: ["respond"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            !has(request.resource.attr.attendeeIds) ||
+            !(request.principal.id in request.resource.attr.attendeeIds)
+
+    # ══════════ automation and bot principals never schedule, edit, cancel or answer ══════════════
+    # Same `roles: ["user"]` DENY shape as resource_work_request.yaml, so it beats the platform_admin wildcard and every ALLOW
+    # (the perm mirror too) under deny-overrides. `read` is deliberately NOT listed.
+    - actions: ["create", "update", "cancel", "respond"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot"]
+
+    # =========== permission-matching arm: create ONLY (see the header) ===========================
+    # Generic global-or-company mirror. The platform_admin wildcard is deliberately NOT mirrored (IAM-04c: the tier bypass
+    # never enters the permission catalog).
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_calendar_event_create"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
