@@ -226,6 +226,8 @@ describe.skipIf(!TEST_URL)("client-contacts HTTP surface (W0-4)", () => {
     expect(second.json().contact.id).toBe(firstContactId); // same row, not a new one
     expect(second.json().contact.status).toBe("invited");
     expect(second.json().contact.capability).toBe("signer");
+    // A revoked contact keeps today's re-invite: back to invited WITH a fresh token to hand over.
+    expect(second.json().invite.token).toBeTruthy();
 
     // client_contacts itself has no email column (email lives on `users`) — join to filter by it.
     const rows = await adminPool().query(
@@ -234,6 +236,46 @@ describe.skipIf(!TEST_URL)("client-contacts HTTP surface (W0-4)", () => {
       [co, clientId, email],
     );
     expect(rows.rowCount).toBe(1);
+  });
+
+  it("PV5-F4: re-inviting an ACTIVE contact is refused (409 already_active): still active, capability kept, no new invite", async () => {
+    const email = "active-reinvite@bali-resort.test";
+    const active = await createUser(email);
+    const contactId = newId();
+    await adminPool().query(
+      `INSERT INTO client_contacts (id, tenant_id, client_id, user_id, project_id, capability, status, origin_site, activated_at)
+       VALUES ($1, $2, $3, $4, NULL, 'viewer', 'active', $5, now())`,
+      [contactId, co, clientId, active, config.originSite],
+    );
+    const invites = () => adminPool().query(`SELECT count(*)::int AS n FROM client_invites WHERE client_contact_id = $1`, [contactId]);
+    const before = (await invites()).rows[0].n;
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/${co}/clients/${clientId}/contacts`,
+      headers: asUser(manager),
+      payload: { email, capability: "signer" },
+    });
+    expect(res.statusCode, res.body).toBe(409);
+    expect(res.json()).toMatchObject({ reason: "already_active", contactId });
+    expect(res.json().invite).toBeUndefined();
+    expect(String(res.json().message)).toMatch(/revoke/i);
+
+    const row = (await adminPool().query(`SELECT status, capability, invited_by FROM client_contacts WHERE id = $1`, [contactId])).rows[0];
+    expect(row.status).toBe("active");
+    expect(row.capability).toBe("viewer"); // not overwritten by the refused request's "signer"
+    expect((await invites()).rows[0].n).toBe(before); // no new token minted
+    expect((await adminPool().query(`SELECT 1 FROM outbox_events WHERE entity_id = $1 AND event_type = 'client_contact.invited'`, [contactId])).rowCount).toBe(0);
+  });
+
+  it("PV5-F4: re-inviting a still-INVITED contact keeps today's behaviour: 201, the same row, a new token", async () => {
+    const email = "invited-reinvite@bali-resort.test";
+    const first = await app.inject({ method: "POST", url: `/api/${co}/clients/${clientId}/contacts`, headers: asUser(manager), payload: { email } });
+    expect(first.statusCode).toBe(201);
+    const second = await app.inject({ method: "POST", url: `/api/${co}/clients/${clientId}/contacts`, headers: asUser(manager), payload: { email, capability: "signer" } });
+    expect(second.statusCode, second.body).toBe(201);
+    expect(second.json().contact).toMatchObject({ id: first.json().contact.id, status: "invited", capability: "signer" });
+    expect(second.json().invite.token).not.toBe(first.json().invite.token);
   });
 
   // ---- project-scoped vs client-wide are independent rows for the same person ----
@@ -635,11 +677,11 @@ describe.skipIf(!TEST_URL)("client-contacts HTTP surface (W0-4)", () => {
       expect(JSON.stringify(payload)).not.toContain(ATTACKER_PASSWORD);
     });
 
-    it("re-inviting an ACTIVE contact and accepting does NOT set a password", async () => {
-      const active = await createUser("reinvited-active@cc.test");
-      await seedContact(active, co, clientId, "active");
+    it("a REVOKED contact re-invited and accepting does NOT set a password (an ACTIVE one cannot be re-invited any more, PV5-F4)", async () => {
+      const gone = await createUser("reinvited-revoked@cc.test");
+      await seedContact(gone, co, clientId, "revoked");
       // The re-invite flips this very row back to 'invited'; accepting it must still never set a credential.
-      const { accept } = await inviteAndAccept("reinvited-active@cc.test");
+      const { accept } = await inviteAndAccept("reinvited-revoked@cc.test");
       expect(accept.statusCode).toBe(200);
       expect(accept.json()).toMatchObject({ ok: true, existingAccount: true });
       expect(calls.setPassword).toEqual([]);
