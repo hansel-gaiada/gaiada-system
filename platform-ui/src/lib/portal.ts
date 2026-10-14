@@ -254,6 +254,39 @@ export interface PortalInvoiceDetail {
   onlinePayment?: { available: boolean; amount?: number; currency?: string; reason?: string; message?: string };
 }
 
+/** PV-D41: the simulated hosted payment page's data (review stage only; the BFF answers 404 when simulation is off). */
+export interface PortalSimulatedPayment {
+  simulated: true;
+  orderId: string;
+  invoiceId: string;
+  invoiceNo: string | null;
+  amount: number;
+  currency: string;
+  /** null: nothing chosen yet; else the simulated provider's word (pending, settlement, deny, expire). */
+  transactionStatus: string | null;
+  canAct: boolean;
+  returnUrl: string;
+}
+
+/** PV-D41: the three choices on the simulated page, in the order shown. */
+export const SIMULATED_ACTIONS = [
+  { action: "pay", label: "Pay (simulated)" },
+  { action: "pending", label: "Leave pending" },
+  { action: "fail", label: "Payment fails" },
+] as const;
+
+/** PV-D41: the simulated provider's word, in plain words. */
+export function simulatedStatusText(status: string | null): string {
+  switch (status) {
+    case null: return "Nothing chosen yet.";
+    case "pending": return "Left pending: no money has moved yet.";
+    case "settlement": return "Paid (simulated). No real money moved.";
+    case "deny": return "The simulated payment failed.";
+    case "expire": return "This simulated payment expired.";
+    default: return status;
+  }
+}
+
 /** PV5-10: is this a safe place to send the payer? The provider's own https page (the backend has already checked the
  *  host), or one of our own paths (the demo fixture's stand-in). Never a protocol-relative or other-scheme URL. */
 export function isCheckoutUrl(url: unknown): url is string {

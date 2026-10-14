@@ -900,6 +900,12 @@ services:
       # Days after an unpaid checkout's expiry that the sweep keeps asking Midtrans whether it was paid (a lost notice).
       # Blank = 7.
       PAYMENTS_RECONCILE_DAYS: ${PAYMENTS_RECONCILE_DAYS:-}
+      # PV-D41 — the SIMULATED Midtrans for the review stage (no real keys, no real money). Default OFF. "1" works only
+      # with MIDTRANS_ENVIRONMENT=simulated (boot refuses either half alone) and a placeholder MIDTRANS_SERVER_KEY
+      # (SIM-<random>). Must be OFF before the ERP holds real data. infra/runbooks/midtrans-payments.md §7.
+      PAYMENTS_SIMULATION_ENABLED: ${PAYMENTS_SIMULATION_ENABLED:-0}
+      # Where the simulator and our own webhook are reached from inside the container. Blank = http://127.0.0.1:3004.
+      PAYMENTS_SIMULATOR_INTERNAL_URL: ${PAYMENTS_SIMULATOR_INTERNAL_URL:-}
       # LMS L5 — the lab runner (`lab-runner/`), which executes a learner's submission in a capped,
       # unprivileged, network-less container. It does NOT run on this box: it lives on SumoPod bound
       # to 127.0.0.1, and the only path to it is an SSH tunnel with a port-restricted key

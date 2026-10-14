@@ -22,7 +22,7 @@ import type { DocumentItem } from "./documents";
 import type {
   PortalConversationDetail, PortalConversationList, PortalMeetingMinutes,
   PortalChangeRequest, PortalContract, PortalContractDetail, PortalDeliverable, PortalInvoice,
-  PortalInvoiceDetail, PortalMilestone, PortalOverview, PortalProfile, PortalProject, PortalProjectDetail,
+  PortalInvoiceDetail, PortalSimulatedPayment, PortalMilestone, PortalOverview, PortalProfile, PortalProject, PortalProjectDetail,
   PortalRun, PortalRunDetail, PortalSocialReview, PortalTimelineEvent,
 } from "./portal";
 
@@ -86,6 +86,11 @@ export async function listPortalDeliverables(
 
 export async function listPortalInvoices(userId: string, tenant: string): Promise<PortalInvoice[]> {
   return safe(platformFetch<PortalInvoice[]>(`/api/${tenant}/portal/invoices`, userId), []);
+}
+
+/** PV-D41: the simulated hosted payment page (null = not found, not yours, or simulation is off: the BFF's 404). */
+export async function getSimulatedPayment(userId: string, tenant: string, orderId: string): Promise<PortalSimulatedPayment | null> {
+  return safe(platformFetch<PortalSimulatedPayment>(`/api/${tenant}/portal/payments/simulated/${encodeURIComponent(orderId)}`, userId), null);
 }
 
 export async function getPortalInvoice(userId: string, tenant: string, invoiceId: string): Promise<PortalInvoiceDetail | null> {

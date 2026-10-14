@@ -30,6 +30,9 @@ const ok = (json: unknown): DemoResult => ({ status: 200, json });
 const created = (json: unknown): DemoResult => ({ status: 201, json });
 const bad = (error: string, field?: string): DemoResult => ({ status: 400, json: { error, field } });
 const notFound = (error = "not found"): DemoResult => ({ status: 404, json: { error } });
+/** PV-D41: the demo's one simulated order (inv-2026-014) and its simulated state. */
+const DEMO_SIM_ORDER = "ck-demo-sim";
+let demoSimStatus: string | null = null;
 const conflict = (error: string, reason?: string): DemoResult => ({ status: 409, json: { error, reason } });
 
 /** Dates relative to today so the fixture never rots into "everything is overdue". */
@@ -569,7 +572,7 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
   // Route table FIRST, identity check second — but only for routes this module owns, so unmatched
   // portal routes still fall through to `portalDemo` (runs/gates) rather than being 403'd here.
   const seg = p.replace(/^\/api\/[^/]+\/portal\//, "");
-  const OWNED = /^(overview|projects|milestones|timeline|deliverables|invoices|contracts|documents|profile|stream|files|change-requests|conversation|meetings)(\/|\?|$)/;
+  const OWNED = /^(overview|projects|milestones|timeline|deliverables|invoices|contracts|documents|profile|stream|files|change-requests|conversation|meetings|payments)(\/|\?|$)/;
   if (!OWNED.test(seg)) return null;
   if (!isDemoPortalClient(userId)) return { status: 403, json: { error: "not a portal client" } };
 
@@ -680,6 +683,26 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
       checkoutUrl: `/portal/invoices/${inv.id}?checkout=finished`, amount: String(flag.amount), currency: inv.currency,
       expiresAt: new Date(Date.now() + 86_400_000).toISOString(), reused: false,
     });
+  }
+  // PV-D41: the SIMULATED hosted payment page (review stage). One demo order on the open invoice, stateful per process.
+  const simM = seg.match(/^payments\/simulated\/([^/]+?)(\/act)?$/);
+  if (simM) {
+    if (simM[1] !== DEMO_SIM_ORDER) return notFound("payment not found");
+    const inv = INVOICES.find((x) => x.id === "inv-2026-014");
+    if (!inv) return notFound("payment not found");
+    const view = () => ({
+      simulated: true, orderId: DEMO_SIM_ORDER, invoiceId: inv.id, invoiceNo: inv.invoiceNo, amount: inv.total - confirmedSum(inv.id),
+      currency: inv.currency, transactionStatus: demoSimStatus, canAct: demoSimStatus === null || demoSimStatus === "pending",
+      returnUrl: `/portal/invoices/${inv.id}?checkout=finished`,
+    });
+    if (!simM[2] && m === "GET") return ok(view());
+    if (simM[2] && m === "POST") {
+      const action = String(parsed.action ?? "");
+      if (!["pay", "pending", "fail"].includes(action)) return bad("action must be pay|pending|fail", "action");
+      if (!view().canAct) return conflict("this simulated payment is already final", "already_final");
+      demoSimStatus = action === "pay" ? "settlement" : action === "pending" ? "pending" : "deny";
+      return ok({ ok: true, simulated: true, transactionStatus: demoSimStatus, returnUrl: view().returnUrl });
+    }
   }
   const payM = seg.match(/^invoices\/([^/]+)\/payments$/);
   if (payM && m === "POST") {

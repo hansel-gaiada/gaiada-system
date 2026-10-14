@@ -6458,6 +6458,37 @@ chain); when none exists, its `company_admin`s, with a loud log; when there is s
 | PROTOTYPED | GET | `/api/:t/payments/provider-events?status=failed\|ignored\|received\|processed` | `finance_config` · `read` | `{items: [{id, provider, orderId, status, error, lastError, attempts, outcome, receivedAt, processedAt}]}`, newest first, 200 at most; `status` defaults to `failed`. Authorized before validation (bad `status` 400). |
 | PROTOTYPED | POST | `/api/:t/payments/provider-events/:eventId/redrive` | `finance_config` · `update` (checked FIRST: 403 for anyone else, whatever the id) | Bodyless. Only a `failed` payment claim: back to `received`, attempts 0, processed at once through the normal path. **200** `{ok, outcome}`; **404** when there is no failed claim with that id in this company (an `ignored` claim was refused on purpose and is not re-driven). Writes an activity `redriven` (audit). |
 
+#### Simulated Midtrans (review stage, PV-D41) — **STATUS: PROTOTYPED (DB suite `src/payments/online-payment-simulated.db.test.ts` on the Linux CI gate, real HTTP on loopback)**
+
+Owner ruling PV-D41 (2026-10-14, "simulate midtrans for now"), in the spirit of PV-D40: online payment works end to end on
+the review stage with no keys and no money. **Labelled, audited, flag-gated, and OFF before the ERP holds real data.**
+
+- **Switch:** `PAYMENTS_SIMULATION_ENABLED=1` AND `MIDTRANS_ENVIRONMENT=simulated` AND a placeholder
+  `MIDTRANS_SERVER_KEY` (`SIM-` + random) AND `MIDTRANS_TENANT_ID`. Boot refuses either half alone, and the flag with
+  sandbox/production; boot logs `[payments:simulation-enabled]` once.
+- **The real path runs.** The real Midtrans adapter calls an in-process simulator over HTTP (loopback,
+  `PAYMENTS_SIMULATOR_INTERNAL_URL` + `/internal/payments/midtrans-sim`, not routed by nginx) with HTTP Basic: Snap create,
+  `GET /v2/{order}/status`, `POST /v2/{order}/expire`, Midtrans' shapes. The simulator's orders live in
+  `payment_simulator_orders` (migration `202610150130`, FORCE RLS, read only for `MIDTRANS_TENANT_ID`). On an action it
+  delivers a Midtrans-shaped notice, signed with the key (`gross_amount` as `"150000.00"`), by HTTP POST to
+  `/api/webhooks/payments/midtrans`, after answering the click, with retries (0, 0.5, 2, 5 s). Signature check, dedupe,
+  status re-fetch and posting are the normal ones. Checkouts carry `environment = 'simulated'` and never mix with sandbox
+  or production ones.
+- **Hosted page:** Snap's `redirect_url` is `/portal/pay/simulated/:orderId` (platform-ui), titled "Simulated payment",
+  lead "Simulated payment (review stage): no real money moves", with the invoice number, the amount and three actions:
+  "Pay (simulated)" (settlement), "Leave pending" (pending), "Payment fails" (deny). Afterwards the payer goes back to
+  `/portal/invoices/:id?checkout=finished`.
+
+| Status | Method | Path | Authz | Notes |
+|---|---|---|---|---|
+| PROTOTYPED | GET | `/api/:t/portal/payments/simulated/:orderId` | `portal` · `pay` (FIRST) | **404** unless the simulated Midtrans is the provider for this company, and unless the order's checkout invoice is in the caller's portal scope (`invoiceInPortalScope`; never 403). `{simulated: true, orderId, invoiceId, invoiceNo, amount, currency, transactionStatus (null \| pending \| settlement \| deny \| expire), canAct, returnUrl}`. |
+| PROTOTYPED | POST | `/api/:t/portal/payments/simulated/:orderId/act` | `portal` · `pay` (FIRST) | `{action: "pay" \| "pending" \| "fail"}` (400 otherwise, after the 404 checks). **409** `reason: already_final \| expired` once settled, denied or expired. **200** `{ok, simulated: true, transactionStatus, returnUrl}`. Writes an activity `payment.simulated` (actor, order, amount, currency, action) on the invoice, then delivers the notice. Writes no payment itself. |
+
+**Labels.** A payment through a simulated checkout has `invoice_payments.reference` starting `SIMULATED Online payment`
+and `note` "SIMULATED payment (review stage, PV-D41): no real money moved."; its AR receipt's reference therefore reads
+SIMULATED too. Every notification of the payment path (client, staff, Finance) is titled `SIMULATED: …` while the
+simulation is on.
+
 **Known v1 behaviour: a manual claim while a checkout is open.** A client can still record a bank-transfer claim while an
 online checkout for the same invoice is open. The next "Pay online" then charges only what the claims leave (and retires the
 old checkout); but a payer still on the old page could pay the old amount. If that payment lands it is recorded only when it

@@ -222,6 +222,28 @@ export async function portalStartCheckout(_prev: PortalActionResult | null, form
   }
 }
 
+/** PV-D41 — act on the SIMULATED hosted payment page (review stage): pay, leave pending, or fail. The BFF records it, audits
+ *  it and has the simulated provider send its notice; the payment itself is written by the normal notice path. Answers
+ *  the invoice's return URL (`?checkout=finished`) for the browser to go back to. */
+export async function portalSimulatedPaymentAct(_prev: PortalActionResult | null, formData: FormData): Promise<PortalActionResult> {
+  const c = await ctx();
+  if (!c) return { ok: false, error: "Your session has expired — please sign in again." };
+  const orderId = String(formData.get("orderId") ?? "");
+  const action = String(formData.get("action") ?? "");
+  if (!orderId || !["pay", "pending", "fail"].includes(action)) return { ok: false, error: "Choose what the simulated payment does." };
+  try {
+    const r = await platformFetch<{ returnUrl: string }>(
+      `/api/${c.tenant}/portal/payments/simulated/${encodeURIComponent(orderId)}/act`, c.userId,
+      { method: "POST", body: JSON.stringify({ action }) },
+    );
+    const url = typeof r?.returnUrl === "string" && r.returnUrl.startsWith("/portal/invoices/") ? r.returnUrl : "/portal/invoices";
+    revalidatePortal();
+    return { ok: true, url };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
 /** Update the caller's own name/title. */
 export async function portalUpdateProfile(_prev: PortalActionResult | null, formData: FormData): Promise<PortalActionResult> {
   const c = await ctx();

@@ -117,3 +117,31 @@ Each online payment is booked **DR clearing / CR receivables** automatically. Fi
 
 The clearing account should return to zero for each payout. Refunds and chargebacks are not automated: the platform
 records the notice as `ignored (reversed)`, notifies Finance, and Finance reverses the receipt.
+
+## 7. The simulated Midtrans (review stage only, PV-D41)
+
+Owner ruling PV-D41: until there are Midtrans keys, the review stage runs online payment against a SIMULATED Midtrans
+inside the platform. No real money moves; every simulated payment is labelled SIMULATED and audited
+(`payment.simulated` activity rows). **Never with a real key. Switch it OFF before the ERP holds real client data.**
+
+**On (gda-aicenter only).** In the server `.env`:
+
+```
+PAYMENTS_SIMULATION_ENABLED=1
+MIDTRANS_ENVIRONMENT=simulated
+MIDTRANS_SERVER_KEY=SIM-<32 random hex, e.g. openssl rand -hex 16>
+MIDTRANS_TENANT_ID=<companies.id of the company whose invoices are offered>
+PAYMENTS_SIMULATOR_INTERNAL_URL=          # blank = http://127.0.0.1:3004
+```
+
+The company also needs the clearing account (section 1.2). Recreate the platform container with the full compose file
+set and check the boot line starts `[payments] [payments:simulation-enabled] online payment is SIMULATED`. The Midtrans
+dashboard is not involved.
+
+**Use.** A portal contact opens an issued IDR invoice, presses "Pay online", lands on "Simulated payment" and picks
+"Pay (simulated)", "Leave pending" or "Payment fails". The invoice reads Paid within the sweep/consumer delay.
+
+**Off.** Set `PAYMENTS_SIMULATION_ENABLED=0` and unset (or replace with the real ones, section 2) `MIDTRANS_SERVER_KEY`,
+`MIDTRANS_ENVIRONMENT`; recreate the container. Simulated checkouts still open are retired by the sweep once a real
+environment is configured (they never mix). Simulated payments already booked stay in the books, labelled SIMULATED:
+before real data arrives, Finance reverses them (or the review database is reset).
