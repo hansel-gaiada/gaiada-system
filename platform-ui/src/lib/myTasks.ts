@@ -1,6 +1,7 @@
 // "My tasks" (DW-8a, docs/plans/2026-10-13-department-workspaces.md §8): the pure rules behind /me/tasks.
 // No React and no server imports, so the page stays thin and every rule is a plain unit test.
 import type { AgendaTaskRow } from "@/lib/agenda";
+import { todayIsoInDisplayZone } from "@/lib/format";
 
 /** Statuses that mean "no longer on the person's plate". `isDoneStatus` in `pm.ts` is server-only and knows
  *  only the literal `done` (a project may flag its own statuses done, which a row from `/api/tasks/mine`
@@ -13,12 +14,12 @@ export function isFinishedStatus(status: string | null | undefined): boolean {
   return FINISHED.has(String(status ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_"));
 }
 
-/** Today's date as YYYY-MM-DD, taken the way the Overview's Today block does (the queue's `urgencyBand`
- *  measures from the runtime's local start of day), so the two pages never disagree. */
+/** Today's date as YYYY-MM-DD in the display zone, the zone the due dates on the page are shown in. Not the
+ *  runtime's clock: the server renders in UTC, so between midnight and 08:00 in the display zone the runtime's
+ *  date is still yesterday and "Today" would hold yesterday's tasks. (The queue's `urgencyBand` still measures
+ *  from the runtime's local day; aligning it is outside DW-8a.) */
 export function todayIsoOf(now: Date = new Date()): string {
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${now.getFullYear()}-${m}-${d}`;
+  return todayIsoInDisplayZone(now);
 }
 
 export type MyTaskGroupKey = "overdue" | "today" | "week" | "later" | "none";

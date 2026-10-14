@@ -41,6 +41,12 @@ export function money(amount: number | null | undefined, currency = "USD"): stri
   }
 }
 
+/** Today's date (YYYY-MM-DD) in the display zone, the zone every date on screen is shown in. The runtime's own
+ *  clock is UTC in the container, so between midnight and 08:00 in the display zone it would name yesterday. */
+export function todayIsoInDisplayZone(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: DISPLAY_TZ }).format(now);
+}
+
 export function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);

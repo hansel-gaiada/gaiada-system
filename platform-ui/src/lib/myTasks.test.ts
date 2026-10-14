@@ -48,7 +48,14 @@ describe("isFinishedStatus", () => {
 });
 
 describe("todayIsoOf", () => {
-  it("formats the local date with zero padding", () => {
-    expect(todayIsoOf(new Date(2026, 0, 5, 23, 59))).toBe("2026-01-05");
+  // The display zone defaults to Asia/Singapore (UTC+8) unless NEXT_PUBLIC_DISPLAY_TZ says otherwise.
+  const zoned = !process.env.NEXT_PUBLIC_DISPLAY_TZ;
+  it.runIf(zoned)("names the display zone's date, not the runtime's (00:00 to 08:00 there is still yesterday in UTC)", () => {
+    expect(todayIsoOf(new Date(Date.UTC(2026, 9, 13, 20, 30)))).toBe("2026-10-14");
+    expect(todayIsoOf(new Date(Date.UTC(2026, 9, 14, 15, 59)))).toBe("2026-10-14");
+    expect(todayIsoOf(new Date(Date.UTC(2026, 9, 14, 16, 0)))).toBe("2026-10-15");
+  });
+  it("zero-pads month and day", () => {
+    expect(todayIsoOf(new Date(Date.UTC(2026, 0, 5, 4, 0)))).toMatch(/^2026-01-0[45]$/);
   });
 });
