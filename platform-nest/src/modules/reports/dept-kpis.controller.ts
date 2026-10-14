@@ -140,6 +140,37 @@ export async function authorizeUnitRead(principal: Principal, tenantId: string, 
   );
 }
 
+/**
+ * The HEAD-ONLY read gate for one unit (DW-4e-3's department appraisal, §41.3; DW-4j-3's "behind the miss" drivers, §43.8,
+ * PERMISSION-CONTRACT §38b): Cerbos `read` with the unit's ancestry, then the narrowing (403), then existence (404). Unlike
+ * `authorizeUnitRead` there is NO placed-staff branch: a unit's staff get 403 `outside your reporting line`. Only the
+ * company-wide tiers (`isCompanyWide`) and a caller whose led scope (`loadLedUnitScope`) holds the unit pass. Extracted from
+ * the appraisal controller, which now calls this exact function, so the two surfaces cannot drift apart.
+ */
+export async function authorizeUnitHeadRead(principal: Principal, tenantId: string, unitNodeId: string): Promise<{ unit: OrgUnitRef; structure: unknown }> {
+  const unitAncestors = await unitAncestorsOf(tenantId, unitNodeId);
+  await authorize(principal, { kind: "dept_kpi_target", tenantId, module: "reports", unitAncestors }, "read");
+  const companyWide = isCompanyWide(principal, tenantId);
+  const asOf = todayIsoInTz(config.reportsTz);
+  return withTenants(
+    [tenantId],
+    async (c) => {
+      const structure = await loadOrgStructure(c, tenantId);
+      if (!companyWide) {
+        const leads =
+          requiresUnitNarrowing(principal, tenantId) &&
+          !!principal.userId &&
+          (await loadLedUnitScope(c, tenantId, principal.userId, asOf, principal)).has(unitNodeId);
+        if (!leads) throw new ForbiddenException(OUT_OF_LINE_MESSAGE);
+      }
+      const unit = findOrgUnit(structure, unitNodeId);
+      if (!unit) throw new NotFoundException({ message: "unit_not_found", field: "unitNodeId" });
+      return { unit, structure };
+    },
+    { modules: DEPT_KPI_MODULES },
+  );
+}
+
 @Controller("api/:tenantId/dept-kpis")
 @UseGuards(AuthGuard, ModuleEnabledGuard("reports"))
 export class DeptKpisController {

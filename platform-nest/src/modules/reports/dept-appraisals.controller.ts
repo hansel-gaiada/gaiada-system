@@ -55,7 +55,7 @@ import { resolveRange } from "./reports.controller";
 import { OUT_OF_LINE_MESSAGE, loadLedUnitScope, loadOrgStructure, requiresUnitNarrowing, todayIsoInTz } from "./person-scope";
 import { findOrgUnit, type OrgUnitRef } from "./dept-kpis";
 import { DEPT_KPI_MODULES, companyVertical } from "./dept-kpi-targets";
-import { isCompanyWide, unitAncestorsOf } from "./dept-kpis.controller";
+import { authorizeUnitHeadRead, isCompanyWide, unitAncestorsOf } from "./dept-kpis.controller";
 import {
   GM_CONDITIONS,
   MAX_TEXT,
@@ -132,28 +132,9 @@ export class DeptAppraisalsController {
   }
 
   /** Cerbos `read` with the unit's ancestry, then the narrowing (403), then the unit's existence (404). */
-  private async authorizeRead(principal: Principal, tenantId: string, unitNodeId: string): Promise<{ unit: OrgUnitRef; structure: unknown }> {
-    const unitAncestors = await unitAncestorsOf(tenantId, unitNodeId);
-    await authorize(principal, { kind: "dept_kpi_target", tenantId, module: "reports", unitAncestors }, "read");
-    const companyWide = isCompanyWide(principal, tenantId);
-    const asOf = todayIsoInTz(config.reportsTz);
-    return withTenants(
-      [tenantId],
-      async (c) => {
-        const structure = await loadOrgStructure(c, tenantId);
-        if (!companyWide) {
-          const leads =
-            requiresUnitNarrowing(principal, tenantId) &&
-            !!principal.userId &&
-            (await loadLedUnitScope(c, tenantId, principal.userId, asOf, principal)).has(unitNodeId);
-          if (!leads) throw new ForbiddenException(OUT_OF_LINE_MESSAGE);
-        }
-        const unit = findOrgUnit(structure, unitNodeId);
-        if (!unit) throw new NotFoundException({ message: "unit_not_found", field: "unitNodeId" });
-        return { unit, structure };
-      },
-      { modules: DEPT_KPI_MODULES },
-    );
+  private authorizeRead(principal: Principal, tenantId: string, unitNodeId: string): Promise<{ unit: OrgUnitRef; structure: unknown }> {
+    // DW-4j-3: the gate is now an exported function (dept-kpis.controller.ts), shared with the drivers read; behaviour unchanged.
+    return authorizeUnitHeadRead(principal, tenantId, unitNodeId);
   }
 
   // ---------------- the writes (§41.4) ----------------

@@ -2,15 +2,18 @@
 // change rule and the alert reads and writes are dept-kpi-watch.ts; the KPI engine is dept-kpi-targets.ts / dept-kpis.ts (§40).
 //
 //   POST /api/:t/dept-kpis/watch                        — the scheduled run (n8n, daily): evaluate, tell, open and resolve alerts
+//   POST /api/:t/dept-kpis/digest {weekStart?}          — the weekly digest to each department head (n8n, Mondays; DW-4j-3, §43.8)
+//   GET  /api/:t/dept-kpis/drivers?unitNodeId=&kpiKey=&periodKind&start[&end] — "behind the miss" (DW-4j-3, §43.8; heads and company-wide only)
 //   GET  /api/:t/dept-kpis/alerts[?unitNodeId=]         — the caller's open, unacknowledged alerts (Needs you), or one unit's history
 //   POST /api/:t/dept-kpis/alerts/:id/acknowledge {note?} — a head records that they saw the alert (200)
 //
 // ── THE WALLS ────────────────────────────────────────────────────────────────────────────────────
-//   1. Cerbos. The run: `report_admin` · `recompute`, the action `POST /reports/facts/recompute` uses (company_admin and
-//      platform_admin; the n8n account `wf:reports-kpi-watch` holds company_admin). The reads and the acknowledgement:
-//      `dept_kpi_target` · `read` (tenant-wide in Cerbos). No new kind and no new action.
+//   1. Cerbos. The run and the digest: `report_admin` · `recompute`, the action `POST /reports/facts/recompute` uses
+//      (company_admin and platform_admin; the n8n account `wf:reports-kpi-watch` holds company_admin). The reads and the
+//      acknowledgement: `dept_kpi_target` · `read` (tenant-wide in Cerbos). No new kind and no new action.
 //   2. The handler's narrowing, which Cerbos cannot express. The unit-scoped read is the §40.3a unit read gate (the SAME
-//      function the KPI controller calls: `authorizeUnitRead`). The acknowledgement is narrowed to a head of the alert's unit
+//      function the KPI controller calls: `authorizeUnitRead`). The drivers read is narrowed to the unit's heads and the
+//      company-wide tier (`authorizeUnitHeadRead`, the appraisal's gate: no placed-staff branch). The acknowledgement is narrowed to a head of the alert's unit
 //      (§43.1's rule: an exact-node, current `org_unit_lead` grant) or the company-wide tier (`isCompanyWide`).
 //   3. The tenant choke-point and the `reports` third wall, in dept-kpi-watch.ts.
 // Plus `ModuleEnabledGuard("reports")`: 404-dark for a company without the reports module.
@@ -35,7 +38,12 @@ import { isUuidShaped } from "../../core/dept-resolution";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { OUT_OF_LINE_MESSAGE, loadOrgStructure } from "./person-scope";
 import { DEPT_KPI_MODULES } from "./dept-kpi-targets";
-import { authorizeUnitRead, isCompanyWide, unitAncestorsOf } from "./dept-kpis.controller";
+import { authorizeUnitHeadRead, authorizeUnitRead, isCompanyWide, unitAncestorsOf } from "./dept-kpis.controller";
+import { resolveRange } from "./reports.controller";
+import { companyVertical } from "./dept-kpi-targets";
+import { kpiDefFor, workspaceSlugFor } from "./dept-kpis";
+import { runDeptKpiDigest } from "./dept-kpi-digest";
+import { readDrivers } from "./dept-kpi-drivers";
 import {
   MAX_ACK_NOTE,
   acknowledgeAlert,
@@ -59,6 +67,46 @@ export class DeptKpiWatchController {
   async watch(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
     await authorize(req.principal, { kind: "report_admin", tenantId }, "recompute");
     return runDeptKpiWatch(tenantId);
+  }
+
+  // ---------------- the weekly digest (§43.8) ----------------
+
+  /** The weekly digest. Gate as the run (Cerbos `report_admin` · `recompute`), THEN the body: a bad `weekStart` (not a Monday,
+   *  not a complete week) is a 400 `field: "weekStart"`, never ahead of a 403. Two runs for one week: the second sends nothing. */
+  @Post("digest")
+  @HttpCode(200)
+  async digest(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Body() body: { weekStart?: unknown } | undefined) {
+    await authorize(req.principal, { kind: "report_admin", tenantId }, "recompute");
+    return runDeptKpiDigest(tenantId, body?.weekStart);
+  }
+
+  // ---------------- "behind the miss" (§43.8) ----------------
+
+  /** The drivers of one KPI of one unit for a period. Order: the parameters (400, no unit to authorize yet), the head-only unit
+   *  gate (Cerbos, 403 `outside your reporting line`, 404 `unit_not_found`), then the KPI being one of the unit's set (400
+   *  `field: "kpiKey"`). Declared before the `alerts` routes; no `:param` route here can swallow it. */
+  @Get("drivers")
+  async drivers(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("unitNodeId") unitNodeIdRaw?: string,
+    @Query("kpiKey") kpiKeyRaw?: string,
+    @Query("periodKind") periodKindRaw?: string,
+    @Query("start") start?: string,
+    @Query("end") end?: string,
+  ) {
+    if (typeof unitNodeIdRaw !== "string" || unitNodeIdRaw.trim() === "") {
+      throw new BadRequestException({ message: "unitNodeId is required", field: "unitNodeId" });
+    }
+    if (typeof kpiKeyRaw !== "string" || kpiKeyRaw.trim() === "") {
+      throw new BadRequestException({ message: "kpiKey is required", field: "kpiKey" });
+    }
+    const range = resolveRange(periodKindRaw, start, end);
+    const { unit } = await authorizeUnitHeadRead(req.principal, tenantId, unitNodeIdRaw);
+    const workspace = workspaceSlugFor(await companyVertical(tenantId), unit.name);
+    const def = kpiDefFor(workspace, kpiKeyRaw);
+    if (!def) throw new BadRequestException({ message: `kpiKey is not a KPI of this unit's workspace (${workspace})`, field: "kpiKey" });
+    return readDrivers(tenantId, req.principal, unit.id, def, range);
   }
 
   // ---------------- the alerts read (§43.5) ----------------

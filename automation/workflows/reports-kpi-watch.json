@@ -2,7 +2,7 @@
   "id": "wsrptkpiwatch001",
   "name": "reports-kpi-watch (CRON)",
   "meta": {
-    "description": "DW-4j-1, FRONTEND-BFF-CONTRACT §43.6 (reporting blueprint §10: n8n schedules, platform-nest gains no timer). Daily 06:30, after reports-nightly-facts (02:00) has rebuilt the facts: POST dept-kpis/watch. The platform evaluates every department's KPIs for the current month, compares each condition with the last one it remembered (dept_kpi_conditions), tells each department's heads ONE in-app notification per unit when something changed (dept_kpi.condition_changed), and opens or resolves the off-track alerts that feed Needs you. The decision is made once, in the platform, under a per-tenant advisory lock, so a retry (this node's retryOnFail, or the bridge redelivering a slow call) tells each change at most once: a second run in a row tells nothing. This flow does NO fan-out: it makes no hub call on success, because the platform notifies the heads itself. The endpoint is deliberately NEVER an MCP tool (it is a report_admin recompute-gated ops call, like facts/recompute), so the flow calls platform-nest DIRECTLY with the platform's own PLATFORM_SERVICE_TOKEN under the OBO identity wf:reports-kpi-watch (seed:automation grants it company_admin, the minimum role report_admin's recompute action allows). On failure: the HTTP node retries x3 (built-in retryOnFail), then the error branch raises an IN-APP notification via the hub's notify tool (the only hub call, allow-listed as [notify] in mcp-hub automation-policy.ts). Single-tenant, like every reports flow: AGENCY_TENANT_ID. Importing it on the server is a server step: a CLI import DEACTIVATES the flow, so activate it afterwards. Env: PLATFORM_URL, PLATFORM_SERVICE_TOKEN, AGENCY_TENANT_ID, HUB_SERVICE_TOKEN, NOTIFY_USER_ID."
+    "description": "DW-4j-1, FRONTEND-BFF-CONTRACT §43.6 (reporting blueprint §10: n8n schedules, platform-nest gains no timer). Daily 06:30, after reports-nightly-facts (02:00) has rebuilt the facts: POST dept-kpis/watch. The platform evaluates every department's KPIs for the current month, compares each condition with the last one it remembered (dept_kpi_conditions), tells each department's heads ONE in-app notification per unit when something changed (dept_kpi.condition_changed), and opens or resolves the off-track alerts that feed Needs you. The decision is made once, in the platform, under a per-tenant advisory lock, so a retry (this node's retryOnFail, or the bridge redelivering a slow call) tells each change at most once: a second run in a row tells nothing. This flow does NO fan-out: it makes no hub call on success, because the platform notifies the heads itself. The endpoint is deliberately NEVER an MCP tool (it is a report_admin recompute-gated ops call, like facts/recompute), so the flow calls platform-nest DIRECTLY with the platform's own PLATFORM_SERVICE_TOKEN under the OBO identity wf:reports-kpi-watch (seed:automation grants it company_admin, the minimum role report_admin's recompute action allows). On failure: the HTTP node retries x3 (built-in retryOnFail), then the error branch raises an IN-APP notification via the hub's notify tool (the only hub call, allow-listed as [notify] in mcp-hub automation-policy.ts). SECOND TRIGGER (DW-4j-3, BFF §43.8): Mondays 07:00, POST dept-kpis/digest with an empty body, the same headers, retry and error branch. The platform picks the last COMPLETE ISO week in REPORTS_TZ (Monday 07:00 is after the week has ended and after the 02:00 fact rebuild), evaluates every department for that week and the week before, and tells each department head ONE in-app notification (dept_kpi.weekly_digest) with the week's value against target and condition per KPI and the change from the week before. A per-department ledger (dept_kpi_digests) makes a retry or a redelivered call send a week at most once. Same account (wf:reports-kpi-watch), no hub allowlist change; the dead-letter notice is shared by both triggers. Single-tenant, like every reports flow: AGENCY_TENANT_ID. Importing it on the server is a server step: a CLI import DEACTIVATES the flow, so activate it afterwards. Env: PLATFORM_URL, PLATFORM_SERVICE_TOKEN, AGENCY_TENANT_ID, HUB_SERVICE_TOKEN, NOTIFY_USER_ID."
   },
   "nodes": [
     {
@@ -80,6 +80,49 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [660, 120]
+    },
+    {
+      "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "0 7 * * 1" }] } },
+      "name": "Mondays 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 360]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PLATFORM_URL }}/api/{{ $env.AGENCY_TENANT_ID }}/dept-kpis/digest",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.PLATFORM_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:reports-kpi-watch" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({}) }}",
+        "options": {}
+      },
+      "name": "POST dept-kpis/digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 360],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Success: nothing to notify -- the platform has already told each head. A clean run is silent; the summary is only for the execution log.\nconst body = $input.first().json.body ?? $input.first().json;\nreturn [{ json: { ok: true, weekStart: body.weekStart ?? null, weekEnd: body.weekEnd ?? null, evaluatedUnits: body.evaluatedUnits ?? null, sent: (body.sent ?? []).length, alreadySent: (body.alreadySent ?? []).length, unitsWithoutHead: body.unitsWithoutHead ?? [] } }];"
+      },
+      "name": "Parse digest result (success)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
     }
   ],
   "connections": {
@@ -90,7 +133,14 @@
         [{ "node": "Build dead-letter payload", "type": "main", "index": 0 }]
       ]
     },
-    "Build dead-letter payload": { "main": [[{ "node": "MCP notify (dead-letter)", "type": "main", "index": 0 }]] }
+    "Build dead-letter payload": { "main": [[{ "node": "MCP notify (dead-letter)", "type": "main", "index": 0 }]] },
+    "Mondays 07:00": { "main": [[{ "node": "POST dept-kpis/digest", "type": "main", "index": 0 }]] },
+    "POST dept-kpis/digest": {
+      "main": [
+        [{ "node": "Parse digest result (success)", "type": "main", "index": 0 }],
+        [{ "node": "Build dead-letter payload", "type": "main", "index": 0 }]
+      ]
+    }
   },
   "settings": {},
   "pinData": {}
