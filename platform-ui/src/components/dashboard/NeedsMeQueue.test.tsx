@@ -100,7 +100,7 @@ describe("NeedsMeQueue: a KPI off-track alert", () => {
   it("labels the row KPI off track, shows the reading, and links the title to the unit's KPI page", () => {
     render(<NeedsMeQueue items={[alertItem()]} decide={vi.fn()} acknowledge={vi.fn()} />);
     expect(screen.getByText("KPI off track")).toBeInTheDocument();
-    expect(screen.getByText("72% against 90%")).toBeInTheDocument();
+    expect(screen.getByText(/72% against 90%/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Projects on time is off track · Web Dev" })).toHaveAttribute("href", "/appraisals/department?unit=dept-1");
   });
 
