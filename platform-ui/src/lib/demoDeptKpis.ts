@@ -25,6 +25,7 @@ import "server-only";
 // department the demo opens on. The page itself is honest either way.
 import { compareByConditionThenName, isMonthStart, nextMonthStart, type DeptKpi, type KpiCondition, type KpiDirection, type KpiReason, type KpiUnit, type DeptKpiTargetRow } from "./deptKpiFormat";
 import { ALERT_NOTE_MAX, type KpiAlert } from "./deptKpiAlertFormat";
+import type { KpiDriver } from "./deptKpiDriverFormat";
 
 interface DemoResult { status: number; json: unknown }
 const ok = (json: unknown): DemoResult => ({ status: 200, json });
@@ -344,6 +345,60 @@ function acknowledge(id: string, userId: string, body?: string): DemoResult {
   return ok(alertView(a));
 }
 
+// ── "BEHIND THE MISS" (DW-4j-3, BFF §43.8 and §43.8a) ─────────────────────────────────────────────────────────────────────────────
+// `GET dept-kpis/drivers?unitNodeId=&kpiKey=&periodKind=&start=[&end=]`: the projects or people behind one KPI's miss, worst first, at most 5.
+// The gate is the head-only unit read's (`authorizeUnitHeadRead`): the company-wide demo users and the unit's demo head; a unit's staff, another
+// unit's head and everyone else are 403 (departments are never ranked to their own staff, plan §5.5). The fixture holds the drivers of the two KPIs
+// that are in trouble above, so the demo's two miss panels are real: Web Dev's "Projects on time" (at risk, 17 of 21 milestones: the two projects
+// below missed 2 each, so they add up to the department's four misses) and Creatives' off-track "Asset requests delivered on time" (18 of 25;
+// DEMO LIBERTY: the server has no reader for it, so a real Creatives read answers `no_reader`; the two people below missed 7 between them and a
+// third person hit all 6 of theirs, so 18 of 25 is whole). Web Dev's on-track "Reopened work rate" has one person with a reopen. Any other KPI answers
+// as the server does: a KPI with no reader `no_reader`, one with a reader and no breakdown (the derived one, utilization) `no_drivers`. Nothing here
+// changes a condition, value, lead or target above.
+const DRIVERS: Record<string, Record<string, KpiDriver[]>> = {
+  "dept-1": {
+    "projects-on-time": [
+      { kind: "project", id: "p-web-1", name: "Client site redesign", value: 3 / 5, numerator: 3, denominator: 5 },
+      { kind: "project", id: "p-web-2", name: "Mobile app revamp", value: 4 / 6, numerator: 4, denominator: 6 },
+    ],
+    "reopened-work-rate": [{ kind: "person", id: "u-dev", name: "Made Putra", value: 2 / 18, numerator: 2, denominator: 18 }],
+  },
+  "dept-2": {
+    "asset-requests-on-time": [
+      { kind: "person", id: "demo-cr-1", name: "Putu Ayu Lestari", value: 5 / 9, numerator: 5, denominator: 9 },
+      { kind: "person", id: "demo-cr-2", name: "Komang Adi Wirawan", value: 7 / 10, numerator: 7, denominator: 10 },
+    ],
+  },
+};
+
+const PERIOD_KINDS = new Set(["day", "week", "month", "quarter", "semester", "year", "custom"]);
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The server's check order (§43.8a): the parameters, the period, the head-only gate (403 before any word on whether the unit exists), the KPI being in the unit's set. */
+function drivers(userId: string, qs: URLSearchParams): DemoResult {
+  const unitId = qs.get("unitNodeId");
+  if (!unitId || unitId.trim() === "") return err(400, "unitNodeId is required", "unitNodeId");
+  const kpiKey = qs.get("kpiKey");
+  if (!kpiKey || kpiKey.trim() === "") return err(400, "kpiKey is required", "kpiKey");
+  const kind = qs.get("periodKind");
+  if (!kind || !PERIOD_KINDS.has(kind)) return err(400, "periodKind must be one of day, week, month, quarter, semester, year, custom", "periodKind");
+  const start = qs.get("start");
+  if (!start || !DATE_RE.test(start)) return err(400, "start must be a YYYY-MM-DD date", "start");
+  if (kind === "custom" && !DATE_RE.test(qs.get("end") ?? "")) return err(400, "end is required when periodKind=custom", "end");
+  const who = whoReads(userId, unitId);
+  if (who !== "wide" && who !== "led") return err(403, "outside your reporting line");
+  const unit = UNITS.find((u) => u.id === unitId);
+  if (!unit) return err(404, "unit_not_found", "unitNodeId");
+  const def = unit.kpis.find((k) => k.key === kpiKey);
+  if (!def) return err(400, `kpiKey is not a KPI of this unit's workspace (${unit.workspace})`, "kpiKey");
+  const kpi = { key: def.key, label: def.label, unit: def.unit, direction: def.direction };
+  const period = periodOf(qs);
+  const rows = DRIVERS[unit.id]?.[def.key];
+  if (rows) return ok({ kpi, period, drivers: rows });
+  const hasReader = def.key === "departments-in-good-condition" || READINGS[unit.id]?.[def.key] !== undefined;
+  return ok({ kpi, period, drivers: null, reason: hasReader ? "no_drivers" : "no_reader" });
+}
+
 /** Returns null when the path is not a department-KPI route, so the caller falls through. */
 export function deptKpisDemo(
   method: string, p: string, qs: URLSearchParams, body?: string, userId = "demo-hansel",
@@ -378,6 +433,8 @@ export function deptKpisDemo(
     if (!unit) return err(404, "unit_not_found", "unitNodeId");
     return ok(targetsView(unit));
   }
+
+  if (verb === "GET" && rest === "drivers") return drivers(userId, qs);
 
   if (verb === "GET" && rest === "alerts") {
     const unitId = qs.get("unitNodeId");

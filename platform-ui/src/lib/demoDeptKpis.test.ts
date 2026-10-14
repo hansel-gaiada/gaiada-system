@@ -341,3 +341,79 @@ describe("POST dept-kpis/alerts/:id/acknowledge", () => {
     expect(post(ackPath(id), {}).status).toBe(200);
   });
 });
+
+// DW-4j-3 — "behind the miss" (BFF §43.8a). The gate is the head-only unit read's; the payloads are the two KPIs in trouble above.
+describe("GET dept-kpis/drivers", () => {
+  type D = { kind: string; id: string; name: string; value: number; numerator?: number; denominator?: number };
+  type View = { kpi: { key: string; label: string; unit: string; direction: string }; period: { periodKind: string; start: string; end: string }; drivers: D[] | null; reason?: string };
+  const drivers = (unit: string, kpi: string, user = "demo-hansel", extra: Record<string, string> = {}) =>
+    get("/drivers", { unitNodeId: unit, kpiKey: kpi, ...Q, ...extra }, user);
+
+  it("gives Web Dev's at-risk 'Projects on time' two projects, worst first, that add up to the department's four misses", () => {
+    const r = drivers("dept-1", "projects-on-time");
+    expect(r.status).toBe(200);
+    const j = r.json as View;
+    expect(j.kpi).toEqual({ key: "projects-on-time", label: "Projects on time", unit: "percent", direction: "up_good" });
+    expect(j.period).toEqual({ periodKind: "month", start: "2026-10-01", end: "2026-10-31" });
+    expect(j.reason).toBeUndefined();
+    expect(j.drivers!.map((d) => [d.kind, d.name, d.numerator, d.denominator])).toEqual([
+      ["project", "Client site redesign", 3, 5],
+      ["project", "Mobile app revamp", 4, 6],
+    ]);
+    expect(j.drivers![0].value).toBeLessThan(j.drivers![1].value); // up-is-good: the lowest first
+    expect(j.drivers!.reduce((n, d) => n + (d.denominator! - d.numerator!), 0)).toBe(4); // 21 due - 17 hit
+  });
+  it("gives Creatives' off-track KPI two people, worst first, and the same KPI is off track in the unit read", () => {
+    const j = drivers("dept-2", "asset-requests-on-time").json as View;
+    expect(j.drivers!.map((d) => [d.kind, d.name, d.numerator, d.denominator])).toEqual([
+      ["person", "Putu Ayu Lestari", 5, 9],
+      ["person", "Komang Adi Wirawan", 7, 10],
+    ]);
+    const view = get("", { unitNodeId: "dept-2", ...Q }).json as { kpis: Kpi[] };
+    expect(view.kpis.find((k) => k.key === "asset-requests-on-time")!.condition).toBe("off_track");
+  });
+  it("answers a module KPI with no_reader and a KPI that has a reader and no breakdown with no_drivers; both have drivers null", () => {
+    expect(drivers("dept-1", "client-site-uptime").json).toMatchObject({ drivers: null, reason: "no_reader" });
+    expect(drivers("dept-2", "assets-delivered").json).toMatchObject({ drivers: null, reason: "no_reader" });
+    expect(drivers("dept-5", "utilization").json).toMatchObject({ drivers: null, reason: "no_drivers" });
+    expect(drivers("dept-5", "departments-in-good-condition").json).toMatchObject({ drivers: null, reason: "no_drivers" });
+    expect(drivers("dept-3", "client-reports-on-time").json).toMatchObject({ drivers: null, reason: "no_drivers" });
+  });
+  it("is for the company-wide demo users and the unit's own head only", () => {
+    expect(drivers("dept-1", "projects-on-time", "demo-hansel").status).toBe(200);
+    expect(drivers("dept-1", "projects-on-time", "demo-owner").status).toBe(200);
+    expect(drivers("dept-1", "projects-on-time", "u-webhead").status).toBe(200);
+    expect(drivers("dept-3", "client-reports-on-time", "dept-manager").status).toBe(200);
+  });
+  it("is 403 for a unit's placed staff, another unit's head and anyone else: they never see a ranking", () => {
+    for (const [u, unit] of [["u-dev", "dept-1"], ["seo-staff", "dept-3"], ["dept-manager", "dept-1"], ["u-webhead", "dept-2"], ["gede-ic", "dept-1"]]) {
+      const r = drivers(unit, "projects-on-time", u);
+      expect(r.status).toBe(403);
+      expect(r.json).toEqual({ error: "outside your reporting line" });
+    }
+  });
+  it("has the server's order of checks: parameters 400, then the period 400, then 403 before any word on the unit, then 404, then a KPI outside the set 400", () => {
+    expect(get("/drivers", { kpiKey: "projects-on-time", ...Q }).json).toEqual({ error: "unitNodeId is required", field: "unitNodeId" });
+    expect(get("/drivers", { unitNodeId: "dept-1", ...Q }).json).toEqual({ error: "kpiKey is required", field: "kpiKey" });
+    expect(get("/drivers", { unitNodeId: "dept-1", kpiKey: "projects-on-time", start: "2026-10-14" }).json).toMatchObject({ field: "periodKind" });
+    expect(get("/drivers", { unitNodeId: "dept-1", kpiKey: "projects-on-time", periodKind: "month" }).json).toMatchObject({ field: "start" });
+    expect(get("/drivers", { unitNodeId: "dept-1", kpiKey: "projects-on-time", periodKind: "custom", start: "2026-10-01" }).json).toMatchObject({ field: "end" });
+    // a bad parameter is 400 even for a caller who would be refused: there is no unit to authorize yet
+    expect(drivers("dept-1", "projects-on-time", "u-dev", { start: "yesterday" }).status).toBe(400);
+    expect(drivers("dept-99", "projects-on-time", "dept-manager").status).toBe(403);
+    expect(drivers("dept-99", "projects-on-time").json).toEqual({ error: "unit_not_found", field: "unitNodeId" });
+    expect(drivers("dept-1", "no-such-kpi").json).toMatchObject({ field: "kpiKey" });
+    expect(drivers("dept-1", "no-such-kpi").status).toBe(400);
+  });
+  it("carries a week period as the unit read does (the digest's link)", () => {
+    const j = drivers("dept-1", "projects-on-time", "demo-hansel", { periodKind: "week", start: "2026-10-05" }).json as View;
+    expect(j.period).toMatchObject({ periodKind: "week", start: "2026-10-05" });
+  });
+  it("changes no condition, value, lead or target: the unit read is as before, and the route is reached through getDemoResponse", () => {
+    const j = get("", { unitNodeId: "dept-1", ...Q }).json as { condition: string; kpis: Kpi[] };
+    expect(j.condition).toBe("at_risk");
+    const r = getDemoResponse("GET", `${base}/drivers?unitNodeId=dept-2&kpiKey=asset-requests-on-time&periodKind=month&start=2026-10-14`, "demo-hansel");
+    expect(r.status).toBe(200);
+    expect((r.json as View).drivers).toHaveLength(2);
+  });
+});
