@@ -7,6 +7,7 @@ import "server-only";
 
 import { pmDemo, allTrackerNotifications, pmTasksForUser } from "./demoPm";
 import { meetingsDemo } from "./demoMeetings";
+import { calendarEventsDemo } from "./demoCalendarEvents";
 import { conversationDemo, demoConversationNeedsUs } from "./demoConversation";
 import { pipelineDemo, portalDemo } from "./demoPipeline";
 import { clientCentreDemo, demoCentreRegisterClient, demoCentreSetBusinessType, demoIsBusinessType } from "./demoClientCentre";
@@ -2302,6 +2303,11 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // answer a minutes path with a generic miss.
   const conversation = conversationDemo(method, p, url.searchParams, body, userId);
   if (conversation) return conversation;
+
+  // DW-8g — calendar events and meeting scheduling (`/calendar/events*`, BFF §47). Stateful (lib/demoCalendarEvents.ts),
+  // placed before the meetings registry and every generic matcher so none can answer an event path with an empty list.
+  const calendarEvents = calendarEventsDemo(method, p, url.searchParams, body, userId);
+  if (calendarEvents) return calendarEvents;
 
   // Meeting-recordings registry (WS11 capture edge) — stateful store (lib/demoMeetings.ts).
   const meetings = meetingsDemo(method, p, url.searchParams, body);

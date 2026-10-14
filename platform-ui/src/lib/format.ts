@@ -10,7 +10,7 @@ const LOCALE = "en-GB";
 // discarding the server HTML for that subtree. Reading it from a NEXT_PUBLIC_ var keeps the value
 // byte-identical on both sides (inlined at build time); the default matches the operating zone the
 // rest of the stack already assumes (the bot's 12:00/18:00 Asia/Singapore digests).
-const DISPLAY_TZ = process.env.NEXT_PUBLIC_DISPLAY_TZ || "Asia/Singapore";
+export const DISPLAY_TZ = process.env.NEXT_PUBLIC_DISPLAY_TZ || "Asia/Singapore";
 // Currencies with no minor unit (amount is NOT /100).
 const ZERO_DECIMAL = new Set(["IDR", "JPY", "KRW", "VND", "CLP", "ISK"]);
 
