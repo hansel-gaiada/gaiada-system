@@ -7387,3 +7387,66 @@ A department head therefore sees only the appraisals assigned to them personally
 - a head who also holds `manager` gets their unit's rows plus their manager rows, with no duplicates;
 - `subjectId` of an out-of-scope subject returns an empty list;
 - a plain member's list and the broad tier's list are unchanged.
+
+## 40. Department KPIs: targets, condition and standing (DW-4e, 2026-10-14) — `platform-nest/src/modules/reports/dept-kpis*.ts` — **STATUS: PLANNED (contract first)**
+
+**Why.** Owner ruling DW-Q4: each department has its own KPIs. They are highlighted so everyone sees the department's condition and standing, and the head is always aware of it. Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.5 and §5.6. This section is the engine (4e-1). The head's banner, the KPI tiles and the staff strip (DW-3k), the GM's departments by condition (DW-3i), the HOD notifications and digest (DW-4j) and the department appraisal (4e-3) read it.
+
+### 40.1 The catalogue: one source, on the server
+- `dept-kpis.ts` holds every KPI definition: `{key, label, unit: percent|count|minutes, direction: up_good|down_good, reader, suggestedTarget, suggestedTolerance}`. The starting sets are plan §5.5's table, keyed by workspace slug, exactly the `kpis` keys in `platform-ui/src/lib/workspaces.ts`; a parity test pins the two lists. The UI registry keeps labels for display order only. Values, targets and conditions come from this API.
+- **A department's workspace** is resolved on the server the way `workspaceFor` does on the client: `deptSlug(node.name)`, then the functional slugs (HR, Finance, IT), then the company's pack, else generic. Both sides pin one golden table of names to slugs.
+- **Readers.** A KPI's `reader` is either `report_fact` (a department-grain metric of the report document: `metricKey`) or `module` (a module read that does not exist yet). In 4e-1 only these have a reader:
+
+  | KPI | Reader |
+  |---|---|
+  | projects-on-time | `delivery.milestone_hit_rate` (department) |
+  | reopened-work-rate | `flow.reopen_rate` (department) |
+  | overdue-tasks | `discipline.overdue_open` (department, point in time) |
+  | check-in-compliance | `discipline.checkin_compliance` (department) |
+  | utilization (GM) | `effort.capacity_utilization` (company) |
+  | departments-in-good-condition (GM) | derived: the share of departments whose condition is on track |
+
+  Every other starting-set KPI has `reader: module` and reads **unavailable** until its own ticket adds the read. A KPI is never given a number it does not have.
+
+### 40.2 Targets: the head proposes, the approver approves
+- **Table** `dept_kpi_targets`: `tenant_id, unit_node_id, kpi_key, effective_from (a month start), target numeric, tolerance numeric, status (proposed|approved|rejected|superseded), note, proposed_by, proposed_at, decided_by, decided_at`. RLS, origin_site, tenant-scoped like every reports table.
+- **In force for a period.** The latest `approved` row for (unit, KPI) whose `effective_from` is on or before the period's start. A newer proposal changes nothing until it is approved, so "last period's target stays in force". With no approved row the KPI reads `targetSource: "none"` and has no condition. The catalogue's suggested target only pre-fills a proposal; it is never in force.
+- **Targets are levels** (a rate, or a point-in-time count). The same target applies to a month, a quarter, a semester or a year, so the period selector needs no per-kind targets.
+- **Who may act.** A new Cerbos kind `dept_kpi_target`, resource attributes `unitAncestors`, with these actions:
+  - `read`;
+  - `propose`: `org_unit_lead` of the unit or an enclosing one, plus the company-wide tier;
+  - `approve` and `reject`: the approver. **Default approver: the `company_admin` tier, which `owner` mirrors.** Every head's lead position also carries `manager` company-wide, so `manager` cannot mean "the GM". Whether the Office of the GM's lead seat should also approve is an owner decision, recorded here as open.
+  - A proposer can never approve their own proposal (checked in the service, 409).
+- **Endpoints:**
+  - `POST /api/:t/dept-kpis/targets {unitNodeId, kpiKey, effectiveFrom, target, tolerance, note?}` → 201 `{id, status: "proposed"}`. A KPI not in the unit's set → 400. A month that is not a month start → 400.
+  - `POST /api/:t/dept-kpis/targets/:id/approve` or `/reject {note?}` → 200. Approving supersedes the previous approved row from the same `effective_from` on. Every proposal and decision writes an activity row.
+  - `GET /api/:t/dept-kpis/targets?unitNodeId=` → each KPI's in-force row, open proposals and history.
+
+### 40.3 Condition
+- **Per KPI**, given a value and an in-force target (with `direction`):
+  - **on track**: at or better than the target;
+  - **at risk**: worse than the target, but within `tolerance`;
+  - **off track**: worse by more than `tolerance`;
+  - **unavailable**: no reader, no data (a ratio with denominator 0, or a window with no facts), or no target. Its `reason` says which.
+- **The department**: off track if any KPI is off track or two are at risk; at risk if one is at risk; on track if at least one KPI has a condition and none is worse; unavailable if no KPI has a condition. "Trending to miss" (plan §5.5) is deferred: it needs a projection rule, and none is guessed.
+- **Read:** `GET /api/:t/dept-kpis?unitNodeId=&periodKind&start[&end]` → `{unit, workspace, period, condition, kpis: [{key, label, unit, direction, value, numerator?, denominator?, target, tolerance, targetSource, condition, reason?}]}`. The period follows the reporting blueprint's rules (all calendar kinds, custom up to 400 days). Values come from the department report document for that unit and period, so the numbers match the Reports page.
+  - **Who may read:** the people placed in the unit (the "quiet strip" for staff), its heads, and the company-wide tiers. Anyone else gets 403. A department's KPIs are never shown to another department's staff (§5.5: no league table for staff).
+- **Standing (GM and HR only):** `GET /api/:t/dept-kpis/overview?periodKind&start` → every department of the company with its condition, worst first, then by name. Only the company-wide tiers may read it.
+
+### 40.4 Not in 4e-1
+- The UI: the targets screen and the KPI tiles (4e-2, with DW-3k and DW-3i).
+- Module readers for the other KPIs (one ticket each, owned by the module's tracker).
+- The department appraisal per cycle: HOD commentary and GM assessment (4e-3, its own section).
+- Condition snapshots, change notifications and the weekly digest (DW-4j).
+
+**Proof (live Postgres + Cerbos on the CI gate):**
+- the catalogue/registry parity and the slug golden table;
+- a head proposes for their unit (201) and is refused another unit (403);
+- the head cannot approve their own proposal (409);
+- a non-approver's approve is refused (403);
+- an approved target is in force from its month and the previous one before it;
+- a KPI's condition at each boundary (equal to target, inside tolerance, outside);
+- the department rule (one at risk, two at risk, one off track, all unavailable);
+- `unavailable` for a module KPI, for a ratio with a 0 denominator and for no target;
+- staff of the unit may read and staff of another unit may not;
+- the overview is company-wide tiers only, worst first.
