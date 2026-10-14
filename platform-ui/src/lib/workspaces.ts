@@ -831,7 +831,9 @@ const IT: Workspace = {
         { key: "occupancy", label: "Occupancy", href: "/it/network/presence", icon: "user" },
       ],
     },
-    { key: "accounts", label: "IT accounts", icon: "hr", gate: { kind: "all", gates: [IT_ON, IT_MANAGE] }, tabs: [{ key: "accounts", label: "IT accounts", href: "/it/accounts", icon: "hr" }] },
+    // NOT module-gated: `/api/:t/it/accounts` works with the `it` module off (P2-14, ITModuleGate), so leavers' logins stay
+    // manageable; a module gate here would also withhold the IT strip's one working tab.
+    { key: "accounts", label: "IT accounts", icon: "hr", gate: IT_MANAGE, tabs: [{ key: "accounts", label: "IT accounts", href: "/it/accounts", icon: "hr" }] },
     { key: "workflows", label: "Workflows", icon: "automation",
       gate: { kind: "all", gates: [IT_ON, { kind: "any", gates: [IT_MANAGE, { kind: "platformOperator" }] }] }, tabs: [{ key: "workflows", label: "Workflows", href: "/it/workflows", icon: "automation" }] },
   ],
