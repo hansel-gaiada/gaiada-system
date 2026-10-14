@@ -19,8 +19,8 @@ import "./workspace-sidebar.css";
 //
 // Where the person is (area, view, active row) comes from `WorkspaceShellContext` (DW-2b), so the sidebar,
 // the tab strip and the breadcrumbs share one answer. Rows arrive already gated and concrete
-// (`lib/shellModel.ts`). This only draws them. No badges yet: a count arrives with its own ticket, never
-// made up.
+// (`lib/shellModel.ts`). This only draws them. A row carries a count only when the model read a real one above 0
+// (DW-8m: Approvals); nothing here makes a number up, and a row with no `count` draws no pill.
 
 export interface SidebarCompany { id: string; name: string; badge?: string | null }
 
@@ -131,9 +131,21 @@ function RowLink({ row, active, pathname, tenantId }: { row: ConcreteRow; active
       >
         <Icon name={row.icon} size={16} />
         <span>{row.label}</span>
+        {row.count ? <RowCount count={row.count} /> : null}
       </Link>
       {tip}
     </>
+  );
+}
+
+/** The count after a row's label (DW-8m). `role="img"` gives it the one accessible name, "3 waiting for you", in place of
+ *  the bare digits; it is a `<b>`, not a `<span>`, so the collapsed rail (which hides every row `span`) keeps it, drawn as
+ *  a dot-sized pill on the icon. Past 99 the figure reads "99+" and the name still says the real count. */
+function RowCount({ count }: { count: number }) {
+  return (
+    <b className="ws-row__count" role="img" aria-label={`${count} waiting for you`}>
+      {count > 99 ? "99+" : count}
+    </b>
   );
 }
 

@@ -108,6 +108,9 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
   const isFinanceRow = (name: string) => deptSlug(name) === "finance";
   const orgHasFinance = orderedDepartments.some((d) => isFinanceRow(d.name));
   const deptItems: NavItem[] = [
+    // DW-8e: the directory (each department's people, divisions and open work) is the group's first row, so it is no
+    // longer reachable only from the workspace shell's Company area and ⌘K.
+    { label: "All departments", href: "/departments", icon: "hr" },
     ...orderedDepartments.map((d) =>
       isFinanceRow(d.name)
         ? { label: d.name, href: "/finance", icon: "wallet" as IconName }

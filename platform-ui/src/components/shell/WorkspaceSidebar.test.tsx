@@ -214,3 +214,24 @@ describe("WorkspaceSidebar", () => {
     expect(container.querySelector("aside#app-nav.erp-side")).not.toBeNull();
   });
 });
+
+describe("the Approvals count (DW-8m)", () => {
+  it("draws the pending count after the label, named for a screen reader", () => {
+    const withCount = buildShellModel({
+      me: employee, tenantId: "co-a", approvals: { pending: 3 },
+      workspaces: resolveMyWorkspaces({ me: employee, tenantId: "co-a", root: agencyTree({ web: ["u-1"] }) }),
+    });
+    nav.pathname = "/";
+    render(
+      <WorkspaceShellProvider model={withCount}>
+        <WorkspaceSidebar tenantId="co-a" company={COMPANY} companies={[]} newItems={[]} />
+      </WorkspaceShellProvider>,
+    );
+    expect(screen.getByRole("img", { name: "3 waiting for you" })).toHaveTextContent("3");
+  });
+
+  it("draws no count when the model carries none", () => {
+    renderAt("/");
+    expect(screen.queryByRole("img", { name: /waiting for you/ })).toBeNull();
+  });
+});

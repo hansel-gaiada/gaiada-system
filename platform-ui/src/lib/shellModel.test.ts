@@ -224,3 +224,37 @@ describe("activeLocation (the deepest tab prefix, like SectionTabs)", () => {
     expect(activeLocation([{ key: "home", label: "Home", icon: "home", tabs: [{ key: "home", label: "Home", href: "/", icon: "home" }] }], "/me")).toBeNull();
   });
 });
+
+describe("buildShellModel: the Approvals row (DW-8m, DW-D23)", () => {
+  const plain = me([member()]);
+  const webOf = (approvals: { pending: number } | null | undefined) =>
+    buildShellModel({ me: plain, tenantId: "co-a", workspaces: resolveMyWorkspaces({ me: plain, tenantId: "co-a", root: agencyTree({ web: ["u-1"] }) }), approvals }).workspaces[0];
+
+  it("hides it from a member with nothing waiting and no right to decide", () => {
+    expect(keys(webOf({ pending: 0 }).rows.you)).not.toContain("approvals");
+  });
+
+  it("shows it with the count when something waits", () => {
+    expect(webOf({ pending: 4 }).rows.you.find((r) => r.key === "approvals")?.count).toBe(4);
+  });
+
+  it("shows it with no count when the read failed or was not made", () => {
+    for (const approvals of [null, undefined]) {
+      const row = webOf(approvals).rows.you.find((r) => r.key === "approvals");
+      expect(row).toBeDefined();
+      expect(row?.count).toBeUndefined();
+    }
+  });
+});
+
+describe("buildShellModel: the Company area by pack (DW-8e)", () => {
+  it("opens on Departments, with Clients and Campaigns for an agency company and neither for a generic-pack one", () => {
+    const agency = model(me([member()]), "co-a", agencyTree({ web: ["u-1"] }));
+    expect(keys(agency.company)[0]).toBe("departments");
+    expect(keys(agency.company)).toEqual(expect.arrayContaining(["clients", "campaigns"]));
+    const hotel = model(me([member("co-h")], [HOTEL]), "co-h", node("root", "Hotel", "company", [node("d-hk", "Housekeeping", "department", [person("p", "u-1")])]));
+    expect(keys(hotel.company)[0]).toBe("departments");
+    expect(keys(hotel.company)).not.toContain("clients");
+    expect(keys(hotel.company)).not.toContain("campaigns");
+  });
+});

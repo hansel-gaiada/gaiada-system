@@ -8,6 +8,8 @@ import { listDepartmentBriefs, type DeptBrief } from "@/lib/departments";
 import { Shell } from "@/components/shell/Shell";
 import { isClientOnly } from "@/lib/rbac";
 import { myWorkspaces } from "@/lib/workspaces-data";
+import { approvalsGateInput } from "@/lib/workspaceAccess";
+import { listApprovals } from "@/lib/approvals";
 import { layoutHomeRedirect } from "@/lib/overview";
 import { PATHNAME_HEADER } from "@/lib/pathnameHeader";
 import { buildShellModel, type ShellModel } from "@/lib/shellModel";
@@ -43,8 +45,10 @@ export default async function AppLayout({ children, drawer }: { children: React.
   let homeHref: string | null = null;
   if (prefs.shell === "workspaces") {
     try {
-      const workspaces = await myWorkspaces(me, tenantId);
-      workspaceModel = buildShellModel({ me, tenantId, workspaces });
+      // DW-8m: the pending approvals are read here, in parallel, for the Approvals row's gate and count (DW-D23). Only the
+      // pilot pays for it, and `listApprovals` never throws (a failed read is `unavailable`, which shows the row).
+      const [workspaces, pending] = await Promise.all([myWorkspaces(me, tenantId), listApprovals(userId, { status: "pending" })]);
+      workspaceModel = buildShellModel({ me, tenantId, workspaces, approvals: approvalsGateInput({ items: pending.envelope.items, unavailable: pending.unavailable }) });
       // DW-3a2: `/` for a pilot user whose home is a workspace is answered HERE, with a real 307. The page's own
       // redirect would stream (it sits under loading.tsx) and leave a meta refresh that breaks client navigation.
       homeHref = layoutHomeRedirect({ pathname: (await headers()).get(PATHNAME_HEADER), shell: prefs.shell, home: workspaces.home, tenantId });

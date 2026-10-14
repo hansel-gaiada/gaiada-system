@@ -81,22 +81,22 @@ describe("navFor (RBAC-gated visibility)", () => {
       [{ id: "dept-1", name: "Web Dev" }, { id: "dept-2", name: "SEO" }],
     );
     const depts = groups.find((g) => g.label === "Departments")!;
-    expect(depts.items.map((i) => i.label)).toEqual(["Web Dev", "SEO", "HR", "IT", "Finance"]);
-    expect(depts.items.map((i) => i.href)).toEqual(["/departments/dept-1", "/departments/dept-2", "/hr", "/it", "/finance"]);
+    expect(depts.items.map((i) => i.label)).toEqual(["All departments", "Web Dev", "SEO", "HR", "IT", "Finance"]);
+    expect(depts.items.map((i) => i.href)).toEqual(["/departments", "/departments/dept-1", "/departments/dept-2", "/hr", "/it", "/finance"]);
   });
   // GM-01/OQ-4: GM is the ROOT of the department spine (platform-nest `seed/roster.ts`:
   // `DEPT_PARENT["d-gm"] = null`, every other department parents to it), so it must not sort
   // among its own children.
-  it("hoists GM to the top of the Departments group whatever order it arrives in", () => {
+  it("hoists GM to the top of the department rows, under the directory link, whatever order it arrives in", () => {
     const groups = navFor(
       { ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] },
       "c1",
       [{ id: "dept-1", name: "Web Dev" }, { id: "dept-2", name: "SEO" }, { id: "dept-5", name: "GM" }],
     );
     const depts = groups.find((g) => g.label === "Departments")!;
-    expect(depts.items.map((i) => i.label)).toEqual(["GM", "Web Dev", "SEO", "HR", "IT", "Finance"]);
+    expect(depts.items.map((i) => i.label)).toEqual(["All departments", "GM", "Web Dev", "SEO", "HR", "IT", "Finance"]);
     // Ordering only — the href is untouched, so every existing deep link still resolves.
-    expect(depts.items[0].href).toBe("/departments/dept-5");
+    expect(depts.items[1].href).toBe("/departments/dept-5");
   });
 
   it("keeps the GM row for a plain member — the row is ungated, the CONSOLE gates its content", () => {
@@ -127,7 +127,14 @@ describe("navFor (RBAC-gated visibility)", () => {
   it("still lists HR and IT in the Departments group when no business departments are passed", () => {
     const groups = navFor({ ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] }, "c1");
     const depts = groups.find((g) => g.label === "Departments")!;
-    expect(depts.items.map((i) => i.label)).toEqual(["HR", "IT", "Finance"]);
+    expect(depts.items.map((i) => i.label)).toEqual(["All departments", "HR", "IT", "Finance"]);
+  });
+
+  // DW-8e: the directory page is the group's first row, so the classic shell no longer orphans it.
+  it("opens the Departments group with the directory, for everyone who has the group", () => {
+    const groups = navFor({ ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] }, "c1", [{ id: "dept-1", name: "Web Dev" }]);
+    const depts = groups.find((g) => g.label === "Departments")!;
+    expect(depts.items[0]).toMatchObject({ label: "All departments", href: "/departments" });
   });
   // An org structure that already has a Finance department must NOT get a second Finance row —
   // one label, two destinations, is how a nav loses trust. The org row is re-pointed at the
@@ -142,7 +149,7 @@ describe("navFor (RBAC-gated visibility)", () => {
     const finance = depts.items.filter((i) => i.label === "Finance");
     expect(finance).toHaveLength(1);
     expect(finance[0].href).toBe("/finance");
-    expect(depts.items.map((i) => i.label)).toEqual(["Web Dev", "Finance", "HR", "IT"]);
+    expect(depts.items.map((i) => i.label)).toEqual(["All departments", "Web Dev", "Finance", "HR", "IT"]);
   });
 
   it("platform_admin gets a Settings entry, Platform and the Group area (with Rollups, no longer in Business)", () => {

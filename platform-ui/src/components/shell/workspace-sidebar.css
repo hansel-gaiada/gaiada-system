@@ -63,6 +63,14 @@
 .ws-side .erp-navbtn--active > svg { color: var(--text-primary); }
 .ws-side .erp-navbtn--active:hover { background: color-mix(in srgb, var(--accent-fill) 44%, transparent); }
 
+/* The count after a row's label (DW-8m): a gold pill on gold ink, the pair the design system keeps together. In the
+   collapsed rail the labels are hidden (shell.css hides row spans, not this <b>), so the pill sits on the icon. */
+.ws-side .ws-row__count {
+  flex: none; min-width: 18px; padding: 1px 5px; text-align: center;
+  font: 600 11px/16px var(--font-body); font-variant-numeric: tabular-nums;
+  background: var(--accent-fill); color: var(--ink-on-accent-fill); border-radius: var(--radius-md);
+}
+
 /* ---- Visiting another department, and the way back ---- */
 .ws-side__context { padding: 2px 0 4px; }
 .ws-side__visiting { margin: 0; padding: 4px 10px 0; font: 400 12px var(--font-body); color: var(--ink-subtle); }
@@ -83,6 +91,7 @@
   html[data-sidebar="collapsed"] .ws-side__foot { padding: 8px 6px 0; }
   html[data-sidebar="collapsed"] .ws-side .ws-row,
   html[data-sidebar="collapsed"] .ws-side .ws-side__back { justify-content: center; gap: 0; padding: 9px 0; }
+  html[data-sidebar="collapsed"] .ws-side .ws-row__count { position: absolute; top: 2px; left: calc(50% + 4px); min-width: 14px; padding: 0 3px; font-size: 10px; line-height: 14px; }
   /* "+ New" keeps only its glyph; the text stays in the accessibility tree. */
   html[data-sidebar="collapsed"] .ws-side .erp-new__btn { font-size: 0; gap: 0; justify-content: center; padding: 0; }
   html[data-sidebar="collapsed"] .ws-side .erp-side__new .erp-new__menu { right: auto; min-width: 180px; }

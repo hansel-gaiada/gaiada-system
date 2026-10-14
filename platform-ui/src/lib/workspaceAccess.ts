@@ -15,14 +15,14 @@
 // Nothing here is a security boundary. `gateAllows` mirrors nav.ts and the consoles; the server
 // refuses everything it must, and every read is narrowed there.
 import type { Me } from "@/lib/platform";
-import { can, canInUnit, isElevated, isLeadOf, leadUnits, unitPathOf } from "@/lib/rbac";
+import { can, canInUnit, isElevated, isLeadOf, leadUnits, unitPathOf, type Capability } from "@/lib/rbac";
 import { packFor, ROW_MODULE } from "@/lib/packs";
 import { activeCompany, isPlatformOperator, isRootCompany, isRootOwner, moduleOn } from "@/lib/companyContext";
 import { gmAccessFor } from "@/lib/gm";
 import { deptSlug } from "@/lib/deptToolkits";
 import {
   FUNCTIONAL_SLUGS, hrefFor, isPlanned, workspaceBySlug, workspaceFor,
-  type Gate, type Workspace, type WorkspaceRow,
+  type Gate, type RowBadge, type Workspace, type WorkspaceRow,
 } from "@/lib/workspaces";
 import type { IconName } from "@/components/shell/icons";
 import type { Area } from "@/lib/areas";
@@ -45,6 +45,34 @@ export interface GateContext {
    *  `hasWorkspace` gate. Absent means "not known", and that gate then hides: it never offers a link to a department the
    *  caller cannot show exists. */
   workspaces?: readonly string[];
+  /** What the shell read of the person's pending approvals (`listApprovals`), for the `decider` gate and the row's count
+   *  (DW-D23, DW-8m). `pending` is how many wait on THIS person's decision (the items the server marks `decidable`).
+   *  `undefined` = the caller did not read approvals (the palette, the classic shell, a test): the gate ALLOWS, so
+   *  nothing that was findable stops being findable. `null` = the read was unavailable: the gate ALLOWS too, because a
+   *  failed read must never hide the page from a decider. */
+  approvals?: { pending: number } | null;
+}
+
+/** The decide rights the UI mirrors, any one of which makes the Approvals row worth showing (DW-D23). `approvals.decide`
+ *  covers agency approvals, automation and AI actions, pipeline gates and HR/IAM approvals routed through the inbox;
+ *  `hr.manage` is what the leave and loan pages already count as "may decide" (`hr/leave/page.tsx`); the two HR approve
+ *  rights decide requisitions, offers, payroll and separations. Deliberately left out: rights that decide something that is
+ *  never in the Approvals inbox (`invoice.approve`, `work_request.decide`, `search.report.approve`,
+ *  `reports.dept_kpi_target.approve`). A mirror, never the authority; the pending-count arm covers what it misses. */
+export const DECIDE_CAPABILITIES: readonly Capability[] = [
+  "approvals.decide", "hr.manage", "hr.recruitment.approve", "hr.payroll.approve",
+];
+
+/** Does the person hold a decide right in ANY company they can reach, or globally? The inbox is cross-company
+ *  (`scope=all`), so the active company alone would hide the row from someone who decides in another one. */
+function holdsDecideRight(me: Me): boolean {
+  return DECIDE_CAPABILITIES.some((cap) => can(me, cap, null) || me.companies.some((c) => can(me, cap, c.id)));
+}
+
+/** The `approvals` the gate context takes, from the shell's one read of the pending list: null when the read was
+ *  unavailable, else the number of items that wait on this person's own decision. */
+export function approvalsGateInput(read: { items: readonly { decidable: boolean }[]; unavailable: boolean }): { pending: number } | null {
+  return read.unavailable ? null : { pending: read.items.filter((i) => i.decidable).length };
 }
 
 /** Evaluate a registry gate. Mirrors the surface each gate was copied from; see `Gate`'s doc. */
@@ -74,6 +102,10 @@ export function gateAllows(gate: Gate | undefined, ctx: GateContext): boolean {
       return isPlatformOperator(ctx.me);
     case "rootGroup":
       return (isRootOwner(ctx.me) || isElevated(ctx.me)) && isRootCompany(company);
+    case "decider":
+      // Unknown (undefined) and failed (null) reads never hide the row (DW-D23).
+      if (ctx.approvals == null) return true;
+      return ctx.approvals.pending > 0 || holdsDecideRight(ctx.me);
     case "all":
       return gate.gates.every((g) => gateAllows(g, ctx));
     case "any":
@@ -199,7 +231,19 @@ export function homeArea(home: HomeArea): Area {
 // ── What a person is offered ──────────────────────────────────────────────────────────────────────
 
 export interface ConcreteTab { key: string; label: string; href: string; icon: IconName }
-export interface ConcreteRow { key: string; label: string; icon: IconName; tabs: ConcreteTab[] }
+export interface ConcreteRow {
+  key: string; label: string; icon: IconName; tabs: ConcreteTab[];
+  /** The count the sidebar draws after the label (DW-8m). Set only when above 0. */
+  count?: number;
+}
+
+/** The figure behind a row's badge key, from what the shell read. Add a case when another key is built. */
+function badgeCount(badge: RowBadge | undefined, ctx: GateContext): number {
+  switch (badge) {
+    case "approvals": return ctx.approvals?.pending ?? 0;
+    default: return 0;
+  }
+}
 
 /** Rows as the person may be offered them: planned items dropped (unless `includePlanned`, for sizing),
  *  gates applied, `{dept}`/`{company}` filled, and a row left with no tab dropped. */
@@ -217,7 +261,9 @@ export function concreteRows(
       const href = hrefFor(t.href, { deptId: ctx.deptId, companyId: ctx.tenantId });
       if (href) tabs.push({ key: t.key, label: t.label, href, icon: t.icon });
     }
-    if (tabs.length > 0) out.push({ key: row.key, label: row.label, icon: row.icon, tabs });
+    if (tabs.length === 0) continue;
+    const count = badgeCount(row.badge, ctx);
+    out.push({ key: row.key, label: row.label, icon: row.icon, tabs, ...(count > 0 ? { count } : {}) });
   }
   return out;
 }

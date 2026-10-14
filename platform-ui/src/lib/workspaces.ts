@@ -54,6 +54,13 @@ export type Gate =
   | { kind: "platformOperator" }
   /** The Group area: the root owner or `platform_admin`, while the active company is the root (PV-D11). */
   | { kind: "rootGroup" }
+  /** Approvals "when it concerns you" (DW-D23, owner ruling 2026-10-14): something waits on this person's decision, or they
+   *  hold any right to decide (`DECIDE_CAPABILITIES`, in any company they can reach: the inbox is cross-company). Deciding is
+   *  split across several Cerbos rights and some are conditional, so a capability check alone could hide the row from a real
+   *  decider; the pending count is the second arm. UNKNOWN NEVER HIDES: a caller that did not read the approvals (the palette,
+   *  the classic shell) or whose read failed gets the row, so the page stays reachable for everyone and the server decides who
+   *  may act (`GateContext.approvals`). */
+  | { kind: "decider" }
   | { kind: "all"; gates: readonly Gate[] }
   | { kind: "any"; gates: readonly Gate[] };
 
@@ -69,6 +76,11 @@ export interface WorkspaceTab {
   ticket?: string;
 }
 
+/** The counts a sidebar row can carry (DW-8m). A key, never a number: the shell reads the figure for the key when it builds
+ *  the model (`concreteRows`), and a count of 0 or an unknown one draws nothing. Only "approvals" is built; My tasks and
+ *  Inbox plug in by adding a key here and a case to `badgeCount` (`lib/workspaceAccess.ts`). */
+export type RowBadge = "approvals";
+
 /** A sidebar row. With one tab it is a plain link; with more, the shell draws one tab strip (DW-2b). */
 export interface WorkspaceRow {
   key: string;
@@ -77,6 +89,8 @@ export interface WorkspaceRow {
   tabs: readonly WorkspaceTab[];
   gate?: Gate;
   ticket?: string;
+  /** The count the sidebar draws after the label, when it is above 0 (DW-8m). */
+  badge?: RowBadge;
 }
 
 /** The Overview's five bands, in their fixed order (plan §3.1). A widget never moves band. */
@@ -954,6 +968,8 @@ export const PERFORMANCE_ROWS: readonly WorkspaceRow[] = [
   },
 ];
 
+const DECIDER: Gate = { kind: "decider" };
+
 /** The You block (plan §8). Personal pages keep the current workspace's sidebar. */
 export const YOU_ROWS: readonly WorkspaceRow[] = [
   { key: "tasks", label: "My tasks", icon: "check", tabs: [{ key: "tasks", label: "My tasks", href: "/me/tasks", icon: "check" }] },
@@ -965,8 +981,13 @@ export const YOU_ROWS: readonly WorkspaceRow[] = [
       { key: "meetings", label: "Meetings", href: "/meetings", icon: "clock", gate: { kind: "agencyRow", row: "meetings" } },
     ],
   },
-  // Ungated, as today. The plan shows it to people who decide approvals (§10); narrowing it is DW-8's call.
-  { key: "approvals", label: "Approvals", icon: "check", tabs: [{ key: "approvals", label: "Approvals", href: "/approvals", icon: "check" }] },
+  // DW-D23 (owner, 2026-10-14): shown when it concerns you, i.e. something waits on your decision or you hold any right to
+  // decide (the `decider` gate), with the pending count as its badge. The page stays reachable for everyone by URL and
+  // ⌘K, and the server decides who may act.
+  {
+    key: "approvals", label: "Approvals", icon: "check", gate: DECIDER, badge: "approvals",
+    tabs: [{ key: "approvals", label: "Approvals", href: "/approvals", icon: "check", gate: DECIDER }],
+  },
   {
     key: "me", label: "Me", icon: "user",
     tabs: [
@@ -1073,6 +1094,13 @@ export function hrefFor(href: string, ids: { deptId?: string | null; companyId?:
     out = out.replaceAll("{company}", encodeURIComponent(ids.companyId));
   }
   return out;
+}
+
+/** Where a department of the active company opens: its workspace's Overview (DW-8e). HR, Finance and IT open their own
+ *  consoles (`/hr`, `/finance`, `/it`), every other department its `/departments/{id}` Overview. Falls back to
+ *  `/departments/{id}` when the registry href cannot be made concrete, so a card never links nowhere. */
+export function departmentOverviewHref(vertical: string | null | undefined, dept: { id: string; name: string }, companyId: string | null): string {
+  return hrefFor(workspaceFor(vertical, dept.name).overviewHref, { deptId: dept.id, companyId }) ?? `/departments/${encodeURIComponent(dept.id)}`;
 }
 
 /** True when the item is not built yet and must not be rendered. */

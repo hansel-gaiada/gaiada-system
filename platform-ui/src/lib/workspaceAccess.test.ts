@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { Me } from "./platform";
 import { navFor } from "@/components/shell/nav";
 import { sidebarRows, workspaceBySlug, type Gate } from "./workspaces";
-import { concreteRows, gateAllows, homeArea, resolveMyWorkspaces } from "./workspaceAccess";
+import { approvalsGateInput, concreteRows, gateAllows, homeArea, resolveMyWorkspaces } from "./workspaceAccess";
 import { areaFor, resolveArea } from "./areas";
 import { AGENCY, HOTEL, ROOT, agencyTree, lead, me, member, node, person } from "./workspaceFixtures";
 
@@ -204,5 +204,45 @@ describe("homeArea feeds the last-area rule (lib/areas.ts)", () => {
   it("draws a personal page on a fresh load inside the home workspace", () => {
     const placed = resolveMyWorkspaces({ me: me([member()]), tenantId: "co-a", root: agencyTree({ web: ["u-1"] }) });
     expect(resolveArea(areaFor("/me/inbox"), null, homeArea(placed.home))).toEqual({ kind: "workspace", deptId: "d-web" });
+  });
+});
+
+describe("the decider gate: Approvals when it concerns you (DW-D23)", () => {
+  const plain = me([member()]);
+  // A member of the agency who is company_admin of the hotel: a decider, though not in the active company.
+  const deciderElsewhere = me([member(), { role: "company_admin", scopeType: "company", scopeId: "co-h" }], [AGENCY, HOTEL]);
+  const decider: Gate = { kind: "decider" };
+
+  it("allows when the approvals were not read (the palette, the classic shell) or the read failed", () => {
+    expect(gateAllows(decider, ctx(plain, "co-a"))).toBe(true);
+    expect(gateAllows(decider, { ...ctx(plain, "co-a"), approvals: null })).toBe(true);
+  });
+
+  it("hides the row from someone with nothing waiting and no right to decide", () => {
+    expect(gateAllows(decider, { ...ctx(plain, "co-a"), approvals: { pending: 0 } })).toBe(false);
+  });
+
+  it("shows it when something waits on the person, whatever their rights", () => {
+    expect(gateAllows(decider, { ...ctx(plain, "co-a"), approvals: { pending: 2 } })).toBe(true);
+  });
+
+  it("shows it to someone who decides in another of their companies (the inbox is cross-company)", () => {
+    expect(gateAllows(decider, { ...ctx(deciderElsewhere, "co-a"), approvals: { pending: 0 } })).toBe(true);
+  });
+
+  it("counts only the items that wait on this person's own decision, and a failed read is null", () => {
+    expect(approvalsGateInput({ items: [{ decidable: true }, { decidable: false }, { decidable: true }], unavailable: false })).toEqual({ pending: 2 });
+    expect(approvalsGateInput({ items: [], unavailable: true })).toBeNull();
+  });
+
+  it("puts the pending count on the Approvals row, only when above 0", () => {
+    const you = sidebarRows(workspaceBySlug("web-dev")!).you;
+    const approvalsRow = (m: Me, approvals: { pending: number } | null | undefined) =>
+      concreteRows(you, { ...ctx(m, "co-a"), deptId: null, approvals }).find((r) => r.key === "approvals");
+    expect(approvalsRow(plain, { pending: 3 })?.count).toBe(3);
+    expect(approvalsRow(plain, { pending: 0 })).toBeUndefined();
+    expect(approvalsRow(deciderElsewhere, { pending: 0 })).toMatchObject({ key: "approvals" });
+    expect(approvalsRow(deciderElsewhere, { pending: 0 })?.count).toBeUndefined();
+    expect(approvalsRow(plain, undefined)?.count).toBeUndefined();
   });
 });

@@ -9,7 +9,7 @@
 // Pure and client-safe, like the registry it reads. Gates mirror the server; they are not security.
 import type { Me } from "@/lib/platform";
 import { ADMIN_ROWS, COMPANY_ROWS, hrefFor, isPlanned, sidebarRows, type WorkspaceKind } from "@/lib/workspaces";
-import { concreteRows, gateAllows, homeArea, workspaceKeysOf, type ConcreteRow, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
+import { concreteRows, gateAllows, homeArea, workspaceKeysOf, type ConcreteRow, type GateContext, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
 import type { Area } from "@/lib/areas";
 
 export interface ShellRows {
@@ -49,8 +49,13 @@ export interface ShellModel {
 
 const idOf = (ref: WorkspaceRef) => ref.deptId ?? `slug:${ref.workspace.key}`;
 
-export function buildShellModel(input: { me: Me; tenantId: string | null; workspaces: MyWorkspaces }): ShellModel {
-  const { me, tenantId, workspaces } = input;
+export function buildShellModel(input: {
+  me: Me; tenantId: string | null; workspaces: MyWorkspaces;
+  /** The shell's one read of the pending approvals (`approvalsGateInput`), for the Approvals row's gate and count (DW-8m).
+   *  Omitted or null leaves the row shown with no count. */
+  approvals?: GateContext["approvals"];
+}): ShellModel {
+  const { me, tenantId, workspaces, approvals } = input;
   const homeRef = workspaces.home.kind === "workspace" ? workspaces.home.ref : null;
   // Which departments this company has, for the `hasWorkspace` gate (DW-5f: "Ask Creatives" needs a Creatives).
   const departments = workspaceKeysOf(workspaces);
@@ -62,7 +67,7 @@ export function buildShellModel(input: { me: Me; tenantId: string | null; worksp
     const dedupe = `${ref.workspace.key}:${ref.deptId ?? ""}`;
     if (seen.has(dedupe)) return;
     seen.add(dedupe);
-    const ctx = { me, tenantId, unitPath: ref.unitPath, deptId: ref.deptId, workspaces: departments };
+    const ctx = { me, tenantId, unitPath: ref.unitPath, deptId: ref.deptId, workspaces: departments, approvals };
     const raw = sidebarRows(ref.workspace);
     const creates = ref.workspace.creates.flatMap((key) => {
       const action = ref.workspace.quickActions.find((a) => a.key === key);
@@ -92,7 +97,7 @@ export function buildShellModel(input: { me: Me; tenantId: string | null; worksp
   for (const ref of workspaces.all) add(ref, false);
 
   // The Company and Admin areas belong to no department.
-  const flat = { me, tenantId, unitPath: [] as string[], deptId: null, workspaces: departments };
+  const flat = { me, tenantId, unitPath: [] as string[], deptId: null, workspaces: departments, approvals };
   const company = concreteRows(COMPANY_ROWS, flat);
   const admin = concreteRows(ADMIN_ROWS, flat);
 

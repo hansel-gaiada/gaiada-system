@@ -138,3 +138,16 @@ describe("workspacePaletteEntries: the union with today's entries", () => {
     expect(mergePaletteEntries([a], [{ ...a, id: "2" }])).toEqual([a]);
   });
 });
+
+describe("Approvals stays findable where its row is hidden (DW-D23)", () => {
+  // The row hides from a member with nothing waiting and no right to decide; the page must stay reachable by the palette.
+  // Today the classic nav's entries carry it. DW-9d retires those entries, and must keep this test green.
+  it("finds /approvals for a member whose sidebar has no Approvals row", () => {
+    const m = me([member()]);
+    const root = agencyTree({ web: ["u-1"] });
+    const model = buildShellModel({ me: m, tenantId: "co-a", workspaces: resolveMyWorkspaces({ me: m, tenantId: "co-a", root }), approvals: { pending: 0 } });
+    expect(model.workspaces[0].rows.you.map((r) => r.key)).not.toContain("approvals");
+    const today = buildNavEntries(navFor(m, "co-a", departmentsOf(root)));
+    expect(workspacePaletteEntries(model, today).map((e) => e.href)).toContain("/approvals");
+  });
+});

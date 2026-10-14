@@ -5,7 +5,7 @@ import { PACKS } from "./packs";
 import { bespokeToolkit, deptTabs } from "./deptToolkits";
 import {
   WORKSPACES, GENERIC_WORKSPACE, PERFORMANCE_ROWS, YOU_ROWS, COMPANY_ROWS, ADMIN_ROWS, TOOLS_ROW,
-  OVERVIEW_BANDS, REPORT_PERIODS, workspaceFor, workspaceBySlug, hrefFor, isPlanned, sidebarRows,
+  OVERVIEW_BANDS, REPORT_PERIODS, workspaceFor, workspaceBySlug, hrefFor, isPlanned, sidebarRows, departmentOverviewHref,
   type Gate, type Workspace, type WorkspaceRow, type WorkspaceTab,
 } from "./workspaces";
 
@@ -337,5 +337,15 @@ describe("assistant prompts (DW-2h)", () => {
 
   it("the generic workspace's prompts come with every department that has no workspace of its own", () => {
     expect(workspaceFor("agency", "Brand Studio").assistantPrompts).toEqual(GENERIC_WORKSPACE.assistantPrompts);
+  });
+});
+
+describe("departmentOverviewHref (DW-8e)", () => {
+  it("opens HR, Finance and IT on their own consoles and every other department on its Overview", () => {
+    expect(departmentOverviewHref("agency", { id: "d-hr-co-a", name: "HR" }, "co-a")).toBe("/hr");
+    expect(departmentOverviewHref("agency", { id: "d-finance-co-a", name: "Finance" }, "co-a")).toBe("/finance");
+    expect(departmentOverviewHref("agency", { id: "d-it-co-a", name: "IT" }, "co-a")).toBe("/it");
+    expect(departmentOverviewHref("agency", { id: "d-web", name: "Web Dev" }, "co-a")).toBe("/departments/d-web");
+    expect(departmentOverviewHref("hospitality", { id: "d-hk", name: "Housekeeping" }, "co-h")).toBe("/departments/d-hk");
   });
 });
