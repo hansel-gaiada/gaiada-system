@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { Me } from "./platform";
 import { navFor } from "@/components/shell/nav";
 import { sidebarRows, workspaceBySlug, type Gate } from "./workspaces";
-import { approvalsGateInput, concreteRows, gateAllows, homeArea, resolveMyWorkspaces } from "./workspaceAccess";
+import { approvalsGateInput, concreteRows, functionalConsoleFor, gateAllows, homeArea, resolveMyWorkspaces } from "./workspaceAccess";
 import { areaFor, resolveArea } from "./areas";
 import { AGENCY, HOTEL, ROOT, agencyTree, lead, me, member, node, person } from "./workspaceFixtures";
 
@@ -244,5 +244,20 @@ describe("the decider gate: Approvals when it concerns you (DW-D23)", () => {
     expect(approvalsRow(deciderElsewhere, { pending: 0 })).toMatchObject({ key: "approvals" });
     expect(approvalsRow(deciderElsewhere, { pending: 0 })?.count).toBeUndefined();
     expect(approvalsRow(plain, undefined)?.count).toBeUndefined();
+  });
+});
+
+describe("functionalConsoleFor (DW-7d: one home for HR, Finance and IT)", () => {
+  it("sends a functional department's Home to its console, whatever its node id", () => {
+    expect(functionalConsoleFor("HR")).toBe("/hr");
+    expect(functionalConsoleFor("Finance")).toBe("/finance");
+    expect(functionalConsoleFor("IT")).toBe("/it");
+    expect(functionalConsoleFor(" finance ")).toBe("/finance");
+  });
+  it("leaves every other department on the generic Home", () => {
+    expect(functionalConsoleFor("Web Dev")).toBeNull();
+    expect(functionalConsoleFor("GM")).toBeNull();
+    expect(functionalConsoleFor("Human Resources")).toBeNull();
+    expect(functionalConsoleFor("")).toBeNull();
   });
 });

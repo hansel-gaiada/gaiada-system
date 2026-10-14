@@ -2,6 +2,7 @@ import type { Me } from "@/lib/platform";
 import { can, isElevated, isClientOnly, canManageIT } from "@/lib/rbac";
 import { PM_TERMS } from "@/lib/pmVocabulary";
 import { deptSlug } from "@/lib/deptToolkits";
+import { FUNCTIONAL_SLUGS } from "@/lib/workspaces";
 import { packFor, ROW_MODULE, type AgencyRowKey } from "@/lib/packs";
 import { activeCompany, isRootCompany, isRootOwner, isPlatformOperator, moduleOn } from "@/lib/companyContext";
 import type { IconName } from "./icons";
@@ -73,7 +74,7 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
   ];
   // Departments is its own section (rendered exactly like Organization — a group
   // header with a flat list of rows): the business departments (from the org
-  // structure) plus the always-present functional departments HR and IT. Each
+  // structure) plus the always-present functional departments HR, IT and Finance. Each
   // row opens that department's console.
   //
   // GM-01/OQ-4: **GM sorts FIRST, not alphabetically among its own children.** `d-gm` is the root of
@@ -92,34 +93,42 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     ...departments.filter((d) => isGmRow(d.name)),
     ...departments.filter((d) => !isGmRow(d.name)),
   ];
-  // Finance has a bespoke console at /finance rather than the generic /departments/[id] shell —
-  // it is an operating surface (aging, the close gate, integrity checks), not a department read.
-  // `wallet` over `chart` for the same reason: this is where money is worked, not charted.
+  // HR, Finance and IT have bespoke consoles (/hr, /finance, /it) rather than the generic
+  // /departments/[id] shell: they are operating surfaces (cases, aging and the close gate, the IT
+  // estate), not department reads. `wallet` over `chart` for Finance for the same reason: this is
+  // where money is worked, not charted.
   //
-  // ⚠ AND IT MUST NOT PRODUCE TWO ROWS. An estate's org structure frequently DOES contain a
-  // department called Finance (nav.test.ts's own wide-estate fixture has one), so appending a
-  // functional row unconditionally — the way HR and IT are appended — would render "Finance" twice:
-  // once to /departments/<id> and once to /finance. Two identical labels pointing at different
-  // screens is the kind of thing a user learns to distrust rather than report.
+  // ⚠ AND EACH MUST NOT PRODUCE TWO ROWS. Since DW-7d every company's org tree holds HR, Finance and
+  // IT nodes (older or hand-built trees may too), so appending a functional row unconditionally
+  // would render "HR" twice: once to /departments/<id> and once to /hr. Two identical labels
+  // pointing at different screens is the kind of thing a user learns to distrust rather than report.
   //
-  // So: if the org structure claims the name, that row is re-pointed at the console. Only when no
-  // department claims it is a functional row appended. Exactly one Finance row either way, and it
-  // always opens the real console.
-  const isFinanceRow = (name: string) => deptSlug(name) === "finance";
-  const orgHasFinance = orderedDepartments.some((d) => isFinanceRow(d.name));
+  // So: if the org structure claims the slug, that row is re-pointed at the console and keeps the
+  // tree's label. Only when no department claims it is the fixed row appended. Exactly one row per
+  // functional department either way, and it always opens the real console.
+  const FUNCTIONAL_ROWS: Record<string, NavItem> = {
+    hr: { label: "HR", href: "/hr", icon: "hr" },
+    it: { label: "IT", href: "/it", icon: "pulse" },
+    finance: { label: "Finance", href: "/finance", icon: "wallet" },
+  };
+  const functionalSlug = (name: string) => {
+    const slug = deptSlug(name);
+    return FUNCTIONAL_SLUGS.includes(slug) ? slug : null;
+  };
+  const claimed = new Set<string>();
   const deptItems: NavItem[] = [
     // DW-8e: the directory (each department's people, divisions and open work) is the group's first row, so it is no
     // longer reachable only from the workspace shell's Company area and ⌘K.
     { label: "All departments", href: "/departments", icon: "hr" },
-    ...orderedDepartments.map((d) =>
-      isFinanceRow(d.name)
-        ? { label: d.name, href: "/finance", icon: "wallet" as IconName }
-        : { label: d.name, href: `/departments/${d.id}`, icon: "hr" as IconName },
-    ),
-    { label: "HR", href: "/hr", icon: "hr" },
-    { label: "IT", href: "/it", icon: "pulse" },
-    ...(orgHasFinance ? [] : [{ label: "Finance", href: "/finance", icon: "wallet" as IconName }]),
+    ...orderedDepartments.map((d): NavItem => {
+      const slug = functionalSlug(d.name);
+      // A second tree node with the same slug stays a plain department row: one console row per slug.
+      if (!slug || claimed.has(slug)) return { label: d.name, href: `/departments/${d.id}`, icon: "hr" as IconName };
+      claimed.add(slug);
+      return { label: d.name, href: FUNCTIONAL_ROWS[slug].href, icon: FUNCTIONAL_ROWS[slug].icon };
+    }),
   ];
+  for (const slug of ["hr", "it", "finance"]) if (!claimed.has(slug)) deptItems.push(FUNCTIONAL_ROWS[slug]);
   const groups: NavGroup[] = [
     // "Me" is FIRST and ungated (employee-portal wave A). Every principal with a staff surface has a
     // personal hub — there is no capability to hold, and gating it would be gating someone out of

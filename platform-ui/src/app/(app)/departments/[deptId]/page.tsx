@@ -10,6 +10,7 @@ import { listWorkActivity, objectLabel, activityHref, humanizeVerb, actorLabel }
 import { listClaudeSeats, mySeat, launcherSeatProps } from "@/lib/claudeSeats";
 import { toolkitFor } from "@/lib/deptToolkits";
 import { activeCompany } from "@/lib/companyContext";
+import { functionalConsoleFor } from "@/lib/workspaceAccess";
 import { gmAccessFor, canReadGmMoney, isGmDept, parseGmPeriodKind } from "@/lib/gm";
 import { companyAccess } from "@/lib/overviewCompany";
 import { gmHiddenSections, keepsSection } from "@/lib/overviewCoverage";
@@ -53,6 +54,12 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
 
   const dept = await getDepartment(userId, tenant, deptId);
   if (!dept) notFound();
+
+  // DW-7d: HR, Finance and IT are org nodes now, but keep their own consoles. Their department Home is
+  // the console root, so the department has one home. Only THIS root page redirects: the sub-pages
+  // (`/departments/<id>/projects`, ...) keep working as the functional workspace's PM rows.
+  const consoleHref = functionalConsoleFor(dept.name);
+  if (consoleHref) redirect(consoleHref);
 
   // ── GM: the cockpit replaces the template Home (GM-03) ──────────────────────────────────────────
   // Branched HERE, before the template's own reads, because none of them answer the GM's question.

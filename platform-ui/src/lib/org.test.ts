@@ -2,14 +2,19 @@ import { describe, it, expect } from "vitest";
 import { defaultStructure, sanitizeStructure } from "./org";
 
 describe("defaultStructure", () => {
-  it("seeds the five departments for the agency", () => {
+  it("seeds the eight departments for the agency: the five business ones, then HR, Finance and IT (DW-7d)", () => {
     const s = defaultStructure({ id: "co-agency", name: "Gaia Digital Agency", type: "agency", vertical: "agency" });
     expect(s.root.kind).toBe("company");
     // GM is LAST here on purpose: these ids are positional (`dept-${i + 1}`), so inserting it at the
     // front would renumber Web Dev off `dept-1` and SEO off `dept-3` — the latter is hard-wired into
     // the demo login mapping. The sidebar hoists GM for reading (`shell/nav.ts`); identity stays put.
-    expect(s.root.children.map((c) => c.name)).toEqual(["Web Dev", "Creatives", "SEO", "Social Media", "GM"]);
+    expect(s.root.children.map((c) => c.name)).toEqual(["Web Dev", "Creatives", "SEO", "Social Media", "GM", "HR", "Finance", "IT"]);
     expect(s.root.children.every((c) => c.kind === "department")).toBe(true);
+  });
+
+  it("gives HR, Finance and IT the ids dept-6..dept-8, after GM, so no earlier id moves (DW-7d)", () => {
+    const s = defaultStructure({ id: "co-agency", name: "Gaia Digital Agency", type: "agency", vertical: "agency" });
+    expect(s.root.children.slice(5).map((c) => [c.id, c.name])).toEqual([["dept-6", "HR"], ["dept-7", "Finance"], ["dept-8", "IT"]]);
   });
 
   it("gives GM its own department node with no divisions", () => {
@@ -42,7 +47,7 @@ describe("defaultStructure", () => {
   it("keys the agency tree on the vertical alone, not on type or id", () => {
     expect(defaultStructure({ id: "co-agency", name: "X", type: "agency", vertical: "hospitality" }).root.children).toEqual([]);
     expect(defaultStructure({ id: "co-agency", name: "X", type: "agency" }).root.children).toEqual([]);
-    expect(defaultStructure({ id: "anything", name: "X", type: null, vertical: "agency" }).root.children).toHaveLength(5);
+    expect(defaultStructure({ id: "anything", name: "X", type: null, vertical: "agency" }).root.children).toHaveLength(8);
   });
 });
 

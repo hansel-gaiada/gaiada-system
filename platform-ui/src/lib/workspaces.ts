@@ -615,9 +615,11 @@ const OFFICE_OF_THE_GM: Workspace = {
 };
 
 // ── Functional workspaces: every vertical (plan §4, DW-7) ─────────────────────────────────────────
-// They keep their route trees (/hr, /finance, /it). Until DW-7d puts them in the org tree they have no
-// department id, so every `{dept}` tab (Project Management, Analytics › Work, Tools & connections)
-// resolves to nothing for them and is not offered.
+// They keep their route trees (/hr, /finance, /it). Once a company's org tree holds them (DW-7d puts an
+// "HR", "Finance" and "IT" node in every company's tree) they have a department id, so their `{dept}`
+// tabs (Project Management, Analytics › Work, Tools & connections) are offered. A company whose tree
+// lacks one still gets the workspace, with no department id: those tabs resolve to nothing and are not
+// offered.
 
 const HR_ON: Gate = { kind: "module", module: "hr" };
 

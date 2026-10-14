@@ -152,6 +152,42 @@ describe("navFor (RBAC-gated visibility)", () => {
     expect(depts.items.map((i) => i.label)).toEqual(["All departments", "Web Dev", "Finance", "HR", "IT"]);
   });
 
+  // DW-7d: every company's org tree now holds HR, Finance and IT nodes. Each opens its console, keeps
+  // the tree's label and is the ONLY row for that department (no fixed row on top).
+  const asMember = { ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] } as Me;
+  const deptsOf = (tree: { id: string; name: string }[]) =>
+    navFor(asMember, "c1", tree).find((g) => g.label === "Departments")!;
+
+  it("re-points tree HR and IT nodes at /hr and /it: one row each, no fixed duplicates", () => {
+    const depts = deptsOf([{ id: "d-hr-c1", name: "HR" }, { id: "d1", name: "Web Dev" }, { id: "d-it-c1", name: "IT" }]);
+    expect(depts.items.filter((i) => i.label === "HR")).toEqual([{ label: "HR", href: "/hr", icon: "hr" }]);
+    expect(depts.items.filter((i) => i.label === "IT")).toEqual([{ label: "IT", href: "/it", icon: "pulse" }]);
+    // Tree order is kept for claimed rows; Finance is not in the tree, so its fixed row is appended.
+    expect(depts.items.map((i) => i.label)).toEqual(["All departments", "HR", "Web Dev", "IT", "Finance"]);
+    expect(depts.items.map((i) => i.href)).toEqual(["/departments", "/hr", "/departments/d1", "/it", "/finance"]);
+  });
+
+  it("a tree with HR, Finance and IT yields exactly three console rows and nothing appended", () => {
+    const depts = deptsOf([
+      { id: "d-hr-c1", name: "HR" }, { id: "d-finance-c1", name: "Finance" }, { id: "d-it-c1", name: "IT" }, { id: "d1", name: "Web Dev" },
+    ]);
+    expect(depts.items).toEqual([
+      { label: "All departments", href: "/departments", icon: "hr" },
+      { label: "HR", href: "/hr", icon: "hr" },
+      { label: "Finance", href: "/finance", icon: "wallet" },
+      { label: "IT", href: "/it", icon: "pulse" },
+      { label: "Web Dev", href: "/departments/d1", icon: "hr" },
+    ]);
+  });
+
+  it("keeps the tree's own label when its slug matches (a hand-built name)", () => {
+    const depts = deptsOf([{ id: "d9", name: "Human Resources" }, { id: "d-finance", name: "Finance" }]);
+    // "Human Resources" slugs to human-resources, not hr, so it stays a department and HR is appended.
+    expect(depts.items.map((i) => i.label)).toEqual(["All departments", "Human Resources", "Finance", "HR", "IT"]);
+    expect(depts.items.find((i) => i.label === "Finance")).toEqual({ label: "Finance", href: "/finance", icon: "wallet" });
+    expect(depts.items.find((i) => i.label === "Human Resources")!.href).toBe("/departments/d9");
+  });
+
   it("platform_admin gets a Settings entry, Platform and the Group area (with Rollups, no longer in Business)", () => {
     const groups = navFor({ ...base, roles: [{ role: "platform_admin", scopeType: "global", scopeId: null }] });
     expect(groups.flatMap((g) => g.items).some((i) => i.label === "Settings" && i.href === "/admin")).toBe(true);
