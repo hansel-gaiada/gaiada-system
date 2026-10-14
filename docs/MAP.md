@@ -221,6 +221,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/figma/figma.controller.ts` |
 | `/api` | `platform-nest/src/core/files.controller.ts` |
 | `/api` | `platform-nest/src/core/github-repos.controller.ts` |
+| `/api` | `platform-nest/src/core/google-drive/google-drive.controller.ts` |
 | `/api` | `platform-nest/src/core/integrations.controller.ts` |
 | `/api` | `platform-nest/src/core/meetings.controller.ts` |
 | `/api` | `platform-nest/src/core/pipeline.controller.ts` |
@@ -303,6 +304,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/admin/mail` | `platform-nest/src/mail/admin-mail.controller.ts` |
 | `/api/admin/observability` | `platform-nest/src/admin/observability.controller.ts` |
 | `/api/agents` | `platform-nest/src/admin/agents.controller.ts` |
+| `/api/google-drive/oauth` | `platform-nest/src/core/google-drive/google-drive.controller.ts` |
 | `/api/mail` | `platform-nest/src/mail/inbound.controller.ts` |
 | `/api/mail` | `platform-nest/src/mail/webhook.controller.ts` |
 | `/api/search/google/oauth` | `platform-nest/src/modules/search/search-google-oauth.controller.ts` |
