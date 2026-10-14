@@ -11,6 +11,19 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.136.0` - DW-5 guard: a task that carries an open request cannot be deleted (2026-10-14) - PROTOTYPED
+
+Contract: `docs/FRONTEND-BFF-CONTRACT.md` §32.8. DW-5's last open item.
+- **The guard.** `DELETE /api/:t/pm/tasks/:id` answers **409 `task_has_open_request`** with `detail: {requestId}` while an `open` request between departments points at the task. Deleting it used to leave the ask open with "work removed"; the receiver now declines or delivers instead. Closed asks (delivered, declined, cancelled) do not hold the task.
+- **Locking.** The check takes the ask row `FOR SHARE` before the task row, the requests service's own lock order, so a concurrent deliver cannot deadlock with a delete.
+- **Tests.** `work-requests.test.ts` "PM delete guard": refused while open (the task stays live, the ask stays open), allowed once declined; a task with no request deletes as before.
+- No migration, no Cerbos change, no new route.
+
+### platform-ui `0.154.0` - the task page's Delete says when it is refused (2026-10-14) - PROTOTYPED
+
+- **`components/pm/DeleteTaskButton.tsx`** replaces the Delete form on the task page. The form's action ignored the result and always went to the project page, so ANY refused delete looked like a success. Now success goes to the project as before, and a refusal stays on the task and shows the platform's reason (`role=alert`), for example the new `task_has_open_request`.
+- Tests: `DeleteTaskButton.test.tsx` (success, refusal with the reason, refusal with no words). Local: typecheck clean; `components/pm` 13 files, 129 tests.
+
 ### platform-nest `0.135.0` + mcp-hub `0.15.4` + automation `0.7.0` - DW-4j-1: the head is made aware of a condition change (2026-10-15) - PROTOTYPED
 
 Contract: `docs/FRONTEND-BFF-CONTRACT.md` §43.1 to §43.6 (with §43.6a "as built") and `docs/PERMISSION-CONTRACT.md` §38b. Plan §5.5, "How the HOD is made aware".
