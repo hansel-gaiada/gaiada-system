@@ -20,6 +20,7 @@ import type { ReportDocument, ReportKpi } from "@/lib/reports";
 // DW-3h: the Team-mode blocks of a head's Overview, each in its three read states (ok, forbidden, unavailable), empty and
 // filled, and Me mode untouched. The readers are mocked at their seams; the pure rules have their own tests (overviewTeam.test.ts).
 vi.mock("@/app/(app)/actions", () => ({ decideQueueItem: vi.fn() }));
+vi.mock("@/lib/deptKpiAlertActions", () => ({ acknowledgeKpiAlert: vi.fn() }));
 vi.mock("@/lib/reports-data", () => ({ getReportDocument: vi.fn() }));
 vi.mock("@/lib/checkins-data", () => ({ getCheckinCompliance: vi.fn() }));
 vi.mock("@/lib/appraisals-data", () => ({ listAppraisals: vi.fn(), getMyAppraisals: vi.fn() }));

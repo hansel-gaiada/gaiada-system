@@ -88,3 +88,65 @@ describe("NeedsMeQueue", () => {
     expect(screen.getByText("Flaky one")).toBeInTheDocument(); // restored, not lost
   });
 });
+
+// DW-4j-2 — an off-track KPI alert in Needs you: ONE action, Acknowledge, with an optional note, never Approve/Deny.
+describe("NeedsMeQueue: a KPI off-track alert", () => {
+  const alertItem = (over: Partial<QueueItem> = {}) =>
+    item({
+      id: "alert:co-a:al-1", type: "alert", title: "Projects on time is off track · Web Dev", meta: "72% against 90%", originId: "al-1",
+      href: "/appraisals/department?unit=dept-1", createdAt: "2026-10-03T06:30:00.000Z", ...over,
+    });
+
+  it("labels the row KPI off track, shows the reading, and links the title to the unit's KPI page", () => {
+    render(<NeedsMeQueue items={[alertItem()]} decide={vi.fn()} acknowledge={vi.fn()} />);
+    expect(screen.getByText("KPI off track")).toBeInTheDocument();
+    expect(screen.getByText("72% against 90%")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Projects on time is off track · Web Dev" })).toHaveAttribute("href", "/appraisals/department?unit=dept-1");
+  });
+
+  it("renders Acknowledge and never Approve, Deny, View or Open", () => {
+    render(<NeedsMeQueue items={[alertItem()]} decide={vi.fn()} acknowledge={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Acknowledge" })).toBeInTheDocument();
+    expect(screen.queryByText("Approve")).not.toBeInTheDocument();
+    expect(screen.queryByText("Deny")).not.toBeInTheDocument();
+    expect(screen.queryByText("View")).not.toBeInTheDocument();
+    expect(screen.queryByText("Open")).not.toBeInTheDocument();
+  });
+
+  it("acknowledges through the acknowledge prop with the company and the alert id, and the row leaves the list", async () => {
+    const decide = vi.fn();
+    const acknowledge = vi.fn(async () => ({ ok: true }));
+    render(<NeedsMeQueue items={[alertItem()]} decide={decide} acknowledge={acknowledge} />);
+    fireEvent.click(screen.getByRole("button", { name: "Acknowledge" }));
+    await waitFor(() => expect(screen.queryByText("Projects on time is off track · Web Dev")).not.toBeInTheDocument());
+    expect(acknowledge).toHaveBeenCalledWith("co-a", "al-1", "");
+    expect(decide).not.toHaveBeenCalled();
+  });
+
+  it("keeps the note collapsed until asked for, and sends what was typed", async () => {
+    const acknowledge = vi.fn(async () => ({ ok: true }));
+    render(<NeedsMeQueue items={[alertItem()]} decide={vi.fn()} acknowledge={acknowledge} />);
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add a note" }));
+    const box = screen.getByRole("textbox");
+    expect(box).toHaveAttribute("maxlength", "1000");
+    fireEvent.change(box, { target: { value: "Rebooked the two launches." } });
+    fireEvent.click(screen.getByRole("button", { name: "Acknowledge" }));
+    await waitFor(() => expect(acknowledge).toHaveBeenCalledWith("co-a", "al-1", "Rebooked the two launches."));
+  });
+
+  it("gives a refused acknowledge its row back and shows the server's sentence as sent", async () => {
+    const acknowledge = vi.fn(async () => ({ ok: false, error: "outside your reporting line" }));
+    render(<NeedsMeQueue items={[alertItem()]} decide={vi.fn()} acknowledge={acknowledge} />);
+    fireEvent.click(screen.getByRole("button", { name: "Acknowledge" }));
+    await waitFor(() => expect(screen.getByText("outside your reporting line")).toBeInTheDocument());
+    expect(screen.getByText("Projects on time is off track · Web Dev")).toBeInTheDocument(); // restored, not lost
+    expect(screen.getByRole("button", { name: "Acknowledge" })).toBeInTheDocument();
+  });
+
+  it("offers only Open (and nothing that would act) where no acknowledge action is wired", () => {
+    render(<NeedsMeQueue items={[alertItem()]} decide={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Acknowledge" })).not.toBeInTheDocument();
+    expect(screen.getByText("Open")).toHaveAttribute("href", "/appraisals/department?unit=dept-1");
+  });
+});

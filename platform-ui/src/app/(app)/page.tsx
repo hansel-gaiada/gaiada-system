@@ -24,6 +24,7 @@ import { getPrefs } from "@/lib/prefs";
 import { myWorkspaces } from "@/lib/workspaces-data";
 import { COMPANY_SUBJECT, parseOverviewPeriod, resolveHomeRoute } from "@/lib/overview";
 import { decideQueueItem } from "./actions";
+import { acknowledgeKpiAlert } from "@/lib/deptKpiAlertActions";
 
 function timeOfDay(): string {
   const h = new Date().getHours();
@@ -171,11 +172,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
           filter={filter}
           buildFilterHref={buildFilterHref}
           decide={decideQueueItem}
+          acknowledge={acknowledgeKpiAlert}
           throughput={throughput}
           agendaItems={agendaItems}
         />
       ) : (
-        <QueueAgendaHome items={scopedItems} decide={decideQueueItem} agendaItems={agendaItems} />
+        <QueueAgendaHome items={scopedItems} decide={decideQueueItem} acknowledge={acknowledgeKpiAlert} agendaItems={agendaItems} />
       )}
     </>
   );

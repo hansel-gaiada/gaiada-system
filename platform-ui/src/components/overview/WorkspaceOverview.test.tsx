@@ -14,6 +14,7 @@ vi.mock("next/navigation", () => ({
 
 // The real widget host reaches the server actions through the Now band's blocks; the frame's tests never run them.
 vi.mock("@/app/(app)/actions", () => ({ decideQueueItem: vi.fn() }));
+vi.mock("@/lib/deptKpiAlertActions", () => ({ acknowledgeKpiAlert: vi.fn() }));
 vi.mock("@/lib/checkinActions", () => ({ submitCheckin: vi.fn() }));
 
 afterEach(() => vi.restoreAllMocks());

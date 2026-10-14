@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { QueueItem } from "@/lib/queueUrgency";
 import type { QueueDecideOrigin } from "@/app/(app)/actions";
 import { NEEDS_YOU_LIMIT } from "@/lib/overviewNow";
-import { QueueRows, useQueueDecisions } from "@/components/dashboard/NeedsMeQueue";
+import { QueueRows, useQueueDecisions, type Acknowledge } from "@/components/dashboard/NeedsMeQueue";
 import { Toast } from "@/components/ui";
 
 type Decide = (tenantId: string, origin: QueueDecideOrigin, originId: string, decision: "approved" | "rejected") => Promise<{ ok: boolean; error?: string }>;
@@ -18,7 +18,7 @@ type Decide = (tenantId: string, origin: QueueDecideOrigin, originId: string, de
 //
 // The count is what is still waiting, so it drops as items are decided. An empty list is a claim: it says
 // "Nothing needs you right now" only when every source answered, and never a bare 0.
-export function NeedsYouBlock({ items, unread = [], multiCompany = false, decide, limit = NEEDS_YOU_LIMIT }: {
+export function NeedsYouBlock({ items, unread = [], multiCompany = false, decide, acknowledge, limit = NEEDS_YOU_LIMIT }: {
   /** Ranked, each id once, across every company the person can reach (DW-Q2). */
   items: QueueItem[];
   /** The companies (by name) with a source that could not be read: the list is short, and an empty one is not settled. */
@@ -26,10 +26,12 @@ export function NeedsYouBlock({ items, unread = [], multiCompany = false, decide
   /** The person has more than one company, so each row says which one it is from. */
   multiCompany?: boolean;
   decide: Decide;
+  /** DW-4j-2: the one action of a KPI alert row (Acknowledge, with an optional note). Absent: an alert row offers "Open" only. */
+  acknowledge?: Acknowledge;
   limit?: number;
 }) {
   const partial = unread.length > 0;
-  const { visible, act, toast } = useQueueDecisions(items, decide);
+  const { visible, act, ack, toast } = useQueueDecisions(items, decide, acknowledge);
   const [expanded, setExpanded] = useState(false);
   const shown = expanded ? visible : visible.slice(0, limit);
 
@@ -41,7 +43,7 @@ export function NeedsYouBlock({ items, unread = [], multiCompany = false, decide
           {partial ? "Nothing found in the sources that could be read." : "Nothing needs you right now"}
         </p>
       ) : (
-        <QueueRows items={shown} act={act} showCompany={multiCompany} />
+        <QueueRows items={shown} act={act} ack={ack} showCompany={multiCompany} />
       )}
       {visible.length > limit && (
         <button

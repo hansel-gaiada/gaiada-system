@@ -9,6 +9,8 @@ import {
   bannerSentence, conditionLabel, conditionTone, formatKpiValue, formatMonth, formatTolerance, getDeptKpis, getDeptKpiTargets,
   ratioParts, tileFoot, type DeptKpiTargetRow, type DeptKpiTargetsKpi, type DeptKpiTargetsView, type DeptKpisView,
 } from "@/lib/deptKpis";
+import { getUnitKpiAlerts } from "@/lib/deptKpiAlerts";
+import { openAlertsByKpi } from "@/lib/deptKpiAlertFormat";
 import { getCyclePicks, getDeptAppraisal } from "@/lib/deptAppraisals";
 import type { ReportPeriodKind } from "@/lib/reports";
 import { PageHeader } from "@/components/PageHeader";
@@ -19,6 +21,7 @@ import { ReportAccessDenied } from "@/components/reports/ReportAccessDenied";
 import { ReportPeriodBar } from "@/components/reports/ReportPeriodBar";
 import { ProposeTargetForm, DecideButtons } from "@/components/deptkpis/TargetControls";
 import { AppraisalView, CyclePicker } from "@/components/deptkpis/AppraisalView";
+import { AlertsSection, TileAlertLine } from "@/components/deptkpis/KpiAlerts";
 import "@/components/deptkpis/deptKpis.css";
 
 const TITLE = "Department";
@@ -141,7 +144,11 @@ export default async function DepartmentKpiPage({
   const start = sp.start ?? today;
   const end = sp.end;
 
-  const res = await getDeptKpis(userId, tenant, { unit, periodKind, start, ...(end ? { end } : {}) });
+  // The unit's alerts (DW-4j-2) are read in parallel with the KPIs. They are not period-bound: an alert is a state, open until the daily run resolves it.
+  const [res, alertsRes] = await Promise.all([
+    getDeptKpis(userId, tenant, { unit, periodKind, start, ...(end ? { end } : {}) }),
+    getUnitKpiAlerts(userId, tenant, unit),
+  ]);
   if (res.kind === "forbidden") {
     return (
       <>
@@ -179,6 +186,12 @@ export default async function DepartmentKpiPage({
 
   const targets = canPropose || canApprove ? await getDeptKpiTargets(userId, tenant, unit) : null;
 
+  // Acknowledging an alert is the head of the unit's action (or the company-wide tier's), the same people who may propose a target, so the same mirror
+  // decides whether the button is offered. The server decides again (403 is shown as sent).
+  const canAcknowledge = canPropose || canApprove;
+  const openAlerts = openAlertsByKpi(alertsRes.kind === "ok" ? alertsRes.data : []);
+  const refYear = new Date().getUTCFullYear();
+
   const tone = conditionTone(view.condition);
   return (
     <>
@@ -201,6 +214,7 @@ export default async function DepartmentKpiPage({
           {view.kpis.map((k) => {
             const kt = conditionTone(k.condition);
             const parts = ratioParts(k);
+            const alert = openAlerts.get(k.key);
             return (
               <li key={k.key} className={`dk-tile dk-tile--${kt}`}>
                 <span className="dk-tile__label">{k.label}</span>
@@ -210,11 +224,14 @@ export default async function DepartmentKpiPage({
                 </span>
                 <span className="dk-tile__foot">{tileFoot(k)}</span>
                 {parts && <span className="dk-tile__foot">{parts}</span>}
+                {alert && <TileAlertLine alert={alert} refYear={refYear} />}
               </li>
             );
           })}
         </ul>
       )}
+
+      <AlertsSection result={alertsRes} tenantId={tenant} canAcknowledge={canAcknowledge} refYear={refYear} />
 
       {targets !== null && (
         <TargetsSection

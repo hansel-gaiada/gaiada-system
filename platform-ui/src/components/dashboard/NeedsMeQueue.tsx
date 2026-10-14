@@ -1,13 +1,17 @@
 "use client";
-import { useState } from "react";
+import { useId, useState } from "react";
 import Link from "next/link";
 import type { QueueItem } from "@/lib/queueUrgency";
 import { urgencyBand } from "@/lib/queueUrgency";
 import { Toast } from "@/components/ui";
 import type { QueueDecideOrigin } from "@/app/(app)/actions";
+import { ALERT_NOTE_MAX } from "@/lib/deptKpiAlertFormat";
 import "./dashboard.css";
 
 type Decide = (tenantId: string, origin: QueueDecideOrigin, originId: string, decision: "approved" | "rejected") => Promise<{ ok: boolean; error?: string }>;
+
+/** DW-4j-2: the one action of a KPI alert row (BFF §43.5). The server decides who may; its sentence comes back in `error`. */
+export type Acknowledge = (tenantId: string, alertId: string, note?: string) => Promise<{ ok: boolean; error?: string }>;
 
 const TYPE_LABEL: Record<QueueItem["type"], string> = {
   approval: "Approval",
@@ -15,6 +19,7 @@ const TYPE_LABEL: Record<QueueItem["type"], string> = {
   task: "Task",
   mention: "Mention",
   conversation: "Conversation",
+  alert: "KPI off track",
 };
 
 function when(iso: string): string {
@@ -32,7 +37,11 @@ function when(iso: string): string {
 // The decide state of a ranked list: the optimistic "gone" set, the toast and the dispatch to the
 // `decide` prop. Shared by `NeedsMeQueue` (the Home variants) and the Overview's Needs you block
 // (DW-3c), so approving from either runs the very same code.
-export function useQueueDecisions(items: QueueItem[], decide: Decide) {
+//
+// DW-4j-2: a KPI alert has ONE action, Acknowledge, with an optional note, through the optional `acknowledge` prop. Without it the row offers
+// "Open" (the KPI page) and nothing that would act. Like a decision, an acknowledged alert leaves the list at once and comes back with the
+// server's sentence if the server refused.
+export function useQueueDecisions(items: QueueItem[], decide: Decide, acknowledge?: Acknowledge) {
   const [gone, setGone] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
   const visible = items.filter((i) => !gone.has(i.id));
@@ -50,14 +59,57 @@ export function useQueueDecisions(items: QueueItem[], decide: Decide) {
     setTimeout(() => setToast(null), 2200);
   }
 
-  return { visible, act, toast };
+  async function ack(item: QueueItem, note: string) {
+    if (!acknowledge || item.type !== "alert" || !item.originId) return;
+    setGone((g) => new Set(g).add(item.id)); // optimistic
+    let res: { ok: boolean; error?: string };
+    try {
+      res = await acknowledge(item.companyId, item.originId, note);
+    } catch {
+      res = { ok: false };
+    }
+    if (!res.ok) {
+      setGone((g) => { const n = new Set(g); n.delete(item.id); return n; });
+      setToast(res.error ?? "That acknowledgement didn't go through — please try again.");
+      setTimeout(() => setToast(null), 5000);
+    } else {
+      setToast("Acknowledged — noted.");
+      setTimeout(() => setToast(null), 2200);
+    }
+  }
+
+  return { visible, act, ack, toast };
+}
+
+/** The Acknowledge control of a KPI alert row: one button, and an optional note that stays collapsed until asked for. */
+function AckControl({ item, ack }: { item: QueueItem; ack: (item: QueueItem, note: string) => void }) {
+  const [noting, setNoting] = useState(false);
+  const [note, setNote] = useState("");
+  const id = useId();
+  return (
+    <div className="needs-me-queue__ack">
+      <div className="needs-me-queue__ack-buttons">
+        <button type="button" className="lux-btn lux-btn--solid lux-btn--sm" onClick={() => ack(item, note)}>Acknowledge</button>
+        <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" aria-expanded={noting} aria-controls={id}
+          onClick={() => setNoting((n) => !n)}>
+          {noting ? "Hide note" : "Add a note"}
+        </button>
+      </div>
+      {noting && (
+        <textarea id={id} className="needs-me-queue__ack-note" rows={2} maxLength={ALERT_NOTE_MAX} value={note}
+          aria-label={`Note for ${item.title} (optional)`} placeholder="Note (optional)" onChange={(e) => setNote(e.target.value)} />
+      )}
+    </div>
+  );
 }
 
 /** The rows of a ranked list, with each row's Approve/Deny/View/Open control. `showCompany` tags each row with
  *  its company (always, on the Home); the Overview turns it off for someone with a single company. */
-export function QueueRows({ items, act, showCompany = true }: {
+export function QueueRows({ items, act, ack, showCompany = true }: {
   items: QueueItem[];
   act: (item: QueueItem, decision: "approved" | "rejected") => void;
+  /** Acknowledge a KPI alert (DW-4j-2). Absent: an alert row offers "Open" only. */
+  ack?: (item: QueueItem, note: string) => void;
   showCompany?: boolean;
 }) {
   return (
@@ -83,7 +135,13 @@ export function QueueRows({ items, act, showCompany = true }: {
               </div>
             </div>
             <div className="needs-me-queue__actions">
-              {isApprovalLike ? (
+              {item.type === "alert" ? (
+                item.decidable && ack ? (
+                  <AckControl item={item} ack={ack} />
+                ) : item.href ? (
+                  <Link href={item.href} className="lux-btn lux-btn--ghost lux-btn--sm">Open</Link>
+                ) : null
+              ) : isApprovalLike ? (
                 item.decidable ? (
                   <>
                     <button type="button" className="lux-btn lux-btn--solid lux-btn--sm" onClick={() => act(item, "approved")}>Approve</button>
@@ -107,8 +165,8 @@ export function QueueRows({ items, act, showCompany = true }: {
 // (CommandCenterHome/QueueAgendaHome); a client component only because
 // approval/gate rows need optimistic decide + a toast (mirrors
 // components/dashboard/ApprovalsPanel.tsx's own pattern).
-export function NeedsMeQueue({ items, decide, emptyText }: { items: QueueItem[]; decide: Decide; emptyText?: string }) {
-  const { visible, act, toast } = useQueueDecisions(items, decide);
+export function NeedsMeQueue({ items, decide, acknowledge, emptyText }: { items: QueueItem[]; decide: Decide; acknowledge?: Acknowledge; emptyText?: string }) {
+  const { visible, act, ack, toast } = useQueueDecisions(items, decide, acknowledge);
 
   if (visible.length === 0) {
     return (
@@ -120,7 +178,7 @@ export function NeedsMeQueue({ items, decide, emptyText }: { items: QueueItem[];
 
   return (
     <>
-      <QueueRows items={visible} act={act} />
+      <QueueRows items={visible} act={act} ack={ack} />
       {toast && <Toast message={toast} />}
     </>
   );

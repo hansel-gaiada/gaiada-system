@@ -6,7 +6,9 @@
 // approvals/gates first, then overdue tasks, then due-today items by due
 // time, then everything else by age descending. Tuning the weights below is a
 // one-file change.
-export type QueueItemType = "approval" | "gate" | "task" | "mention" | "conversation";
+// DW-4j-2: `alert` is a department KPI that is off track, waiting for its head to acknowledge it (BFF §43.5). It is the head's own
+// decision-grade item, so it ranks in the approval tier.
+export type QueueItemType = "approval" | "gate" | "task" | "mention" | "conversation" | "alert";
 
 export interface QueueItem {
   id: string;
@@ -76,7 +78,7 @@ export function computeUrgency(
   item: Pick<QueueItem, "type" | "dueDate" | "createdAt">,
   now = new Date(),
 ): number {
-  if (item.type === "approval" || item.type === "gate") {
+  if (item.type === "approval" || item.type === "gate" || item.type === "alert") {
     return TIER_WEIGHT.approvalOrGate + Math.min(ageDays(item.createdAt, now), AGE_CAP_DAYS);
   }
   if (item.type === "conversation") {
@@ -110,7 +112,7 @@ export function urgencyBand(
   item: Pick<QueueItem, "type" | "dueDate">,
   now = new Date(),
 ): UrgencyBand {
-  if (item.type === "approval" || item.type === "gate") return "now";
+  if (item.type === "approval" || item.type === "gate" || item.type === "alert") return "now";
   if (item.dueDate) {
     const days = daysUntil(item.dueDate, now);
     if (days < 0) return "now";

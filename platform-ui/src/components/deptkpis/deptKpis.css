@@ -28,3 +28,13 @@
 .dk-form__row { grid-column: 1 / -1; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .dk-msg { font: 400 12px/1.5 var(--font-body); max-width: 460px; }
 .dk-msg--bad { color: var(--status-danger-fg); }
+/* DW-4j-2 — a KPI's open alert (the line on its tile) and the unit's alert history. Status colours stay the existing tokens. */
+.dk-tile__alert { color: var(--status-danger-fg); font-weight: 600; }
+.dk-alerts { list-style: none; margin: 0; padding: 0; }
+.dk-alert { display: flex; flex-direction: column; gap: 6px; padding: 14px 0; border-top: 0.5px solid var(--erp-ink-20, currentColor); }
+.dk-alert:first-child { border-top: 0; }
+.dk-alert__head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+.dk-alert__note { font-style: italic; }
+.dk-ack { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; max-width: 460px; }
+.dk-ack__note { width: 100%; resize: vertical; padding: 6px 8px; font: 400 13px/1.4 var(--font-body); background: transparent;
+  color: inherit; border: 0.5px solid var(--erp-ink-20, currentColor); }
