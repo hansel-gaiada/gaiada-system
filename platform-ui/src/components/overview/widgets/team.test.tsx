@@ -158,7 +158,8 @@ describe("Team needs you (widget)", () => {
   });
 
   it("says No access or Unavailable in each source's own place, never nothing waiting", async () => {
-    summary.mockRejectedValue(forbiddenErr());
+    // `readRequestSummary` already returns a ReadResult (it wraps itself); the project list is wrapped by the widget.
+    summary.mockResolvedValue({ kind: "forbidden" });
     projects.mockRejectedValue(new Error("down"));
     render(await NeedsYou(props("needs-you")));
     const block = screen.getByRole("region", { name: "Team needs you" });
