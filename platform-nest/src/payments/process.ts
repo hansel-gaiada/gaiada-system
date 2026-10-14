@@ -67,7 +67,7 @@ export type ProcessOutcome =
 interface ClaimRow {
   id: string;
   provider: string;
-  ref: string;
+  ref: string | null;
   status: string;
   attempts: number;
   notice: Record<string, string> | null;
@@ -177,6 +177,10 @@ export async function processPaymentEvent(tenantId: string, eventId: string): Pr
   if (!ev) return { status: "skipped", reason: "no such payment notice in this company" };
   if (ev.status !== "received") return { status: "skipped", reason: `already ${ev.status}` };
 
+  if (!ev.ref) {
+    // Never written by the webhook (it always stores the order id); a claim with nothing to re-fetch can never be paid.
+    return recordRetry(tenantId, ev, PROVIDER_PRINCIPALS[ev.provider] ?? null, "the notice names no checkout to re-check");
+  }
   const gw = configuredProvider(ev.provider);
   if (!gw || gw.tenantId !== tenantId) {
     // Switched off (or moved to another company) after the claim: keep it, and retry once it is back.

@@ -165,6 +165,17 @@ test.describe("client portal", () => {
     await expect(page.getByRole("link", { name: /download invoice DEMO\/2026\/0014/i })).toBeVisible();
   });
 
+  test("PV5-10: Pay online leaves for the hosted page and comes back to 'we're confirming your payment' @portal", async ({ page }) => {
+    await signInAsClient(page);
+    // In DEMO_MODE the "hosted page" is the invoice's own return URL, so the round trip stays inside the app.
+    await page.goto("/portal/invoices/inv-2026-014");
+    await expect(page.getByRole("heading", { name: /^pay online/i })).toBeVisible();
+    await page.getByRole("button", { name: "Pay online" }).click();
+    await page.waitForURL(/\/portal\/invoices\/inv-2026-014\?checkout=finished/);
+    await expect(page.getByRole("status").filter({ hasText: /confirming your payment/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Pay online" })).toHaveCount(0);
+  });
+
   test("a client records a payment and is told it is NOT yet settled @portal", async ({ page }) => {
     await signInAsClient(page);
     await page.goto("/portal/invoices");

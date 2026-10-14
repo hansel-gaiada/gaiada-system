@@ -43,6 +43,8 @@ const PAGES = [
   "/portal/contracts",
   "/portal/invoices",
   "/portal/invoices/inv-2026-014",
+  // PV5-10: the same invoice carries "Pay online"; with ?checkout=finished it shows "We're confirming your payment".
+  "/portal/invoices/inv-2026-014?checkout=finished",
   // PV5-09: the taxed invoice whose PDF is still being prepared, and a signed contract with its sealed copy.
   "/portal/invoices/inv-2026-021",
   "/portal/contracts/ctr-msa-2026",

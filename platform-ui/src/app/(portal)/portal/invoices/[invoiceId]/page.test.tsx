@@ -16,7 +16,7 @@ vi.mock("@/lib/session-server", () => ({ getSessionUserId: vi.fn(async () => "u-
 vi.mock("@/lib/platform", () => ({ getMe: vi.fn(async () => ({ userId: "u-client" })) }));
 vi.mock("@/lib/portal-company", () => ({ getActivePortalCompany: vi.fn(async () => ({ id: "northwind" })) }));
 vi.mock("@/lib/portal-data", () => ({ getPortalInvoice: vi.fn() }));
-vi.mock("@/lib/portalActions", () => ({ portalRecordPayment: vi.fn() }));
+vi.mock("@/lib/portalActions", () => ({ portalRecordPayment: vi.fn(), portalStartCheckout: vi.fn() }));
 vi.mock("@/components/portal/PortalLive", () => ({ PortalLive: () => null }));
 
 import { getPortalInvoice } from "@/lib/portal-data";
@@ -37,9 +37,12 @@ const ISSUED: PortalInvoiceDetail = {
   issuer: ISSUER, outstanding: 24_975_000, payable: true, pdfFileId: "f-pdf",
 };
 
-const mount = async (inv: PortalInvoiceDetail) => {
+const mount = async (inv: PortalInvoiceDetail, searchParams?: Record<string, string>) => {
   invoiceMock.mockResolvedValue(inv);
-  return render(await PortalInvoicePage({ params: Promise.resolve({ invoiceId: inv.id }) }));
+  return render(await PortalInvoicePage({
+    params: Promise.resolve({ invoiceId: inv.id }),
+    searchParams: searchParams ? Promise.resolve(searchParams) : undefined,
+  }));
 };
 // A card's heading also holds its "?" hint button, so the accessible name is "<title> ..." and is matched by prefix.
 const heading = (title: string) => new RegExp(`^${title}`);
@@ -114,5 +117,39 @@ describe("portal invoice · how to pay", () => {
     const select = screen.getByLabelText("How you paid") as HTMLSelectElement;
     expect([...select.options].map((o) => o.value)).toEqual(["bank_transfer", "cash", "other"]);
     expect(screen.queryByRole("option", { name: "Card" })).toBeNull();
+  });
+});
+
+// PV5-10 — "Pay online" through the payment provider's hosted page, shown ONLY when the backend says so.
+describe("portal invoice · pay online", () => {
+  const ONLINE: PortalInvoiceDetail = { ...ISSUED, onlinePayment: { available: true, amount: 24_975_000, currency: "IDR" } };
+
+  it("🔴 shows Pay online, with the amount the backend will charge, only when onlinePayment.available is true", async () => {
+    await mount(ONLINE);
+    const online = within(card("Pay online"));
+    expect(online.getByRole("button", { name: "Pay online" })).toBeInTheDocument();
+    expect(online.getByText(/24,975,000/)).toBeInTheDocument();
+    expect(online.queryByText(/card/i)).toBeNull();
+  });
+
+  it("🔴 no Pay online when the backend says it is not available, or an older server omits the flag (never guessed)", async () => {
+    const off = await mount({ ...ISSUED, onlinePayment: { available: false, reason: "not_offered", message: "Online payment isn't offered for this invoice." } });
+    expect(screen.queryByRole("button", { name: "Pay online" })).toBeNull();
+    off.unmount();
+    await mount(ISSUED);
+    expect(screen.queryByRole("button", { name: "Pay online" })).toBeNull();
+    // Bank transfer stays either way.
+    expect(screen.getByRole("heading", { name: heading("How to pay") })).toBeInTheDocument();
+  });
+
+  it("🔴 back from the provider (?checkout=finished): says we're confirming, and offers no second Pay online", async () => {
+    await mount(ONLINE, { checkout: "finished" });
+    expect(screen.getByRole("status")).toHaveTextContent(/We're confirming your payment/);
+    expect(screen.queryByRole("button", { name: "Pay online" })).toBeNull();
+  });
+
+  it("the provider's own return parameters count as a return too, and a settled invoice says thank you", async () => {
+    await mount({ ...ONLINE, status: "paid", balance: 0, paid: ONLINE.total }, { order_id: "ck-1", transaction_status: "settlement" });
+    expect(screen.getByRole("status")).toHaveTextContent(/Payment received/);
   });
 });

@@ -60,6 +60,9 @@ export function BillingProfileForm({ profile }: { profile: BillingProfile | null
         <Field id="bp-bankledger" label="Receipt account code" hint="The ledger bank account a confirmed payment is received into.">
           <input id="bp-bankledger" name="bankLedgerAccountCode" defaultValue={profile?.bankLedgerAccountCode ?? ""} disabled={pending} aria-describedby="bp-bankledger-hint" />
         </Field>
+        <Field id="bp-clearing" label="Online payment clearing account code" hint="Where a payment made online is booked until the payment provider pays it out to the bank. Leave blank and clients are not offered Pay online.">
+          <input id="bp-clearing" name="gatewayClearingAccountCode" defaultValue={profile?.gatewayClearingAccountCode ?? ""} disabled={pending} aria-describedby="bp-clearing-hint" />
+        </Field>
       </div>
       <div className="bs-actions">
         <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm" disabled={pending}>

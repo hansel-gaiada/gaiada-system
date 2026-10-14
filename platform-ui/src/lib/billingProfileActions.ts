@@ -47,6 +47,8 @@ export async function saveBillingProfileAction(_prev: ProfileSaveResult | null, 
     currencyCode: str(formData, "currencyCode"),
     bankLedgerAccountCode: str(formData, "bankLedgerAccountCode"),
     defaultRevenueAccountCode: str(formData, "defaultRevenueAccountCode"),
+    // PV5-10: only when the form carries the field, so a form without it never clears the code.
+    ...(formData.has("gatewayClearingAccountCode") ? { gatewayClearingAccountCode: str(formData, "gatewayClearingAccountCode") } : {}),
   };
   const bad = validateProfileForm(values);
   if (bad) return { ok: false, error: bad.message, field: bad.field };

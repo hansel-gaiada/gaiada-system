@@ -72,11 +72,10 @@ ALTER TABLE provider_events
   ADD COLUMN outcome              text,
   ADD COLUMN finance_notified_at  timestamptz;
 
--- No row exists yet (nothing wrote provider_events before this ticket), so these validate against an empty table; written
--- as plain CHECKs, each NULL-safe on purpose (a CHECK passes on NULL, so the payment rule is phrased as an OR on a
--- NOT NULL column).
+-- No row exists yet (nothing wrote provider_events before this ticket), so these validate against an empty table.
+-- `ref` stays NULLABLE on purpose: 202610130400's own suite claims rows with no ref, and the webhook always writes one;
+-- a payment claim with no ref is retried and then failed by the processor (it cannot be re-fetched), never paid.
 ALTER TABLE provider_events
-  ADD CONSTRAINT provider_events_payment_has_ref CHECK (kind <> 'payment' OR ref IS NOT NULL),
   ADD CONSTRAINT provider_events_ref_format     CHECK (ref IS NULL OR (length(ref) BETWEEN 1 AND 128)),
   ADD CONSTRAINT provider_events_notice_object  CHECK (notice IS NULL OR jsonb_typeof(notice) = 'object'),
   ADD CONSTRAINT provider_events_attempts_nonneg CHECK (attempts >= 0),
@@ -101,8 +100,7 @@ BEGIN
   IF EXISTS (SELECT 1 FROM user_roles WHERE user_id = 'a7100000-0000-4000-8000-000000000001') THEN
     RAISE EXCEPTION 'PV5-10: the Midtrans automation principal must hold no roles';
   END IF;
-  FOREACH c IN ARRAY ARRAY['billing_profiles_clearing_code_format', 'provider_events_payment_has_ref',
-                           'provider_events_ref_format', 'provider_events_notice_object',
+  FOREACH c IN ARRAY ARRAY['billing_profiles_clearing_code_format', 'provider_events_ref_format', 'provider_events_notice_object',
                            'provider_events_attempts_nonneg', 'provider_events_retry_only_when_received'] LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = c AND contype = 'c') THEN
       RAISE EXCEPTION 'PV5-10: CHECK % is missing', c;

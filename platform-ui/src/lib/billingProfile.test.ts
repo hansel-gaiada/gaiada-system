@@ -46,3 +46,17 @@ describe("profileBody", () => {
       });
   });
 });
+
+// PV5-10 — the online payment clearing account code rides the same PUT, and a form without the field never clears it.
+describe("profileBody · gatewayClearingAccountCode", () => {
+  it("sends the code when the form has it, null when blank, and nothing when the field is absent", () => {
+    expect(profileBody(v({ gatewayClearingAccountCode: " 1125 " }))).toMatchObject({ gatewayClearingAccountCode: "1125" });
+    expect(profileBody(v({ gatewayClearingAccountCode: "" }))).toMatchObject({ gatewayClearingAccountCode: null });
+    expect(profileBody(v())).not.toHaveProperty("gatewayClearingAccountCode");
+  });
+
+  it("refuses a malformed code before the round trip", () => {
+    expect(validateProfileForm(v({ gatewayClearingAccountCode: "11 25" }))?.field).toBe("gatewayClearingAccountCode");
+    expect(validateProfileForm(v({ gatewayClearingAccountCode: "1125" }))).toBeNull();
+  });
+});

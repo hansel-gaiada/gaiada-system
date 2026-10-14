@@ -19,6 +19,9 @@ export interface BillingProfile {
   bank: BankBlock | null;
   bankLedgerAccountCode: string | null;
   defaultRevenueAccountCode: string | null;
+  /** PV5-10: the account an ONLINE (payment gateway) receipt is booked into until the provider pays out. Online payment is
+   *  not offered while it is unset. Optional: an older server does not send it. */
+  gatewayClearingAccountCode?: string | null;
   /** PV-D8: the value above which a contract needs certified signing. Shown, never edited here: certified signing is not
    *  set up (PV-D25), and a threshold set early would block sending an unvalued contract for nothing. */
   signatureThreshold: string | null;
@@ -37,6 +40,8 @@ export interface BillingProfileFormValues {
   currencyCode: string;
   bankLedgerAccountCode: string;
   defaultRevenueAccountCode: string;
+  /** PV5-10. Optional so a form without the field never clears it. */
+  gatewayClearingAccountCode?: string;
 }
 
 /** Field-level checks the browser can make before the round trip. The server repeats every one of them. */
@@ -54,8 +59,8 @@ export function validateProfileForm(v: BillingProfileFormValues): { field: keyof
   if (!/^[A-Z]{3}$/.test(v.currencyCode.trim().toUpperCase())) {
     return { field: "currencyCode", message: "Use the three-letter currency code, for example IDR." };
   }
-  for (const f of ["bankLedgerAccountCode", "defaultRevenueAccountCode"] as const) {
-    const code = v[f].trim();
+  for (const f of ["bankLedgerAccountCode", "defaultRevenueAccountCode", "gatewayClearingAccountCode"] as const) {
+    const code = (v[f] ?? "").trim();
     if (code && !/^[A-Za-z0-9._-]{1,32}$/.test(code)) return { field: f, message: "An account code is letters, digits, dots, dashes or underscores (up to 32)." };
   }
   return null;
@@ -72,6 +77,7 @@ export function profileBody(v: BillingProfileFormValues): Record<string, unknown
     currencyCode: v.currencyCode.trim().toUpperCase(),
     bankLedgerAccountCode: v.bankLedgerAccountCode.trim() || null,
     defaultRevenueAccountCode: v.defaultRevenueAccountCode.trim() || null,
+    ...(v.gatewayClearingAccountCode !== undefined ? { gatewayClearingAccountCode: v.gatewayClearingAccountCode.trim() || null } : {}),
   };
 }
 

@@ -46,7 +46,8 @@ describe.skipIf(!TEST_URL)("PV5-10 — online payment (simulated Midtrans)", () 
 
   const row = async <T = Record<string, unknown>>(sql: string, args: unknown[] = []) => (await adminPool().query(sql, args)).rows[0] as T;
   const rows = async <T = Record<string, unknown>>(sql: string, args: unknown[] = []) => (await adminPool().query(sql, args)).rows as T[];
-  const count = async (sql: string, args: unknown[] = []) => Number((await row<{ n: string }>(sql, args)).n);
+  /** The single value of a one-column count query (whatever Postgres names the column). */
+  const count = async (sql: string, args: unknown[] = []) => Number(Object.values(await row<Record<string, unknown>>(sql, args))[0]);
 
   const issued = (amount: number, client = clientA, t = A, currency?: string) =>
     createIssuedInvoice(t, { clientId: client, actorId: admin, lines: [{ description: "Design work", amount }], currency });
