@@ -136,6 +136,15 @@ export interface Resource {
    *  the self-approval DENY's `has() && != ""` guard stays false (the invoice `approve` convention: fail-open for a
    *  DENY, fail-closed for an ALLOW); the handler always feeds it on a decision. */
   reviewRequestedBy?: string;
+  /** DW-8g (docs/FRONTEND-BFF-CONTRACT.md §47.2) -- every person invited to a `calendar_event` (`calendar_event_attendees`, the
+   *  organizer included). Backs the attendee `read` rule and the `respond` rule, and the deny-overrides `respond` rule that stops
+   *  every role (platform_admin too) answering for someone else (`principal.id in attendeeIds`). Resolved BY THE HANDLER from the
+   *  attendee rows, never from a body. Omitted -> [] -> contains nobody, so an unfed resource confers nothing and `respond` denies. */
+  attendeeIds?: string[];
+  /** DW-8g -- a `calendar_event`'s visibility, `attendees` or `company` (`calendar_events.visibility`). Backs the company-visibility
+   *  `read` rule for member and viewer. Read from the row by the handler, never from a body. Omitted -> "attendees" (never
+   *  "company"), so an unfed resource never opens to the whole company. */
+  visibility?: string;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -264,6 +273,11 @@ function resourcePayload(r: Resource) {
       // their ALLOW rules: [] contains nobody, and "" equals no principal id.
       requesterIds: r.requesterIds ?? [],
       reviewRequestedBy: r.reviewRequestedBy ?? "",
+      // DW-8g. Listed here or they never reach resource_calendar_event.yaml (this is an allow-list; the handler builds the
+      // Resource through an object spread, where TypeScript's excess-property check does not fire). Both fail closed: [] contains
+      // nobody, and "attendees" is the narrow visibility (the company-visibility rule reads exactly "company").
+      attendeeIds: r.attendeeIds ?? [],
+      visibility: r.visibility ?? "attendees",
     },
   };
 }

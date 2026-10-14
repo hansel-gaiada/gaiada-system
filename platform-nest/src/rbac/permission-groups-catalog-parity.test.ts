@@ -132,7 +132,8 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // DW-6h (2026-10-13): +4 grantable (core.creative_asset.{read,request_review,decide_review,withdraw_review} on the NEW creative_asset kind, in 1 NEW authoring group `creative_asset_reviews`, not advancedOnly). 441 -> 445.
     // DW-4e-1 (2026-10-14): +4 grantable (reports.dept_kpi_target.{read,propose,approve,reject} on the NEW dept_kpi_target kind, in 1 NEW authoring group `dept_kpi_targets`, not advancedOnly). On top of DW-6h: 445 -> 449.
     // DW-4e-3 (2026-10-15): +2 grantable (reports.dept_kpi_target.{appraisal_comment,appraisal_assess}, both added to the existing `dept_kpi_targets` group). 449 -> 451.
-    expect(grantable.length).toBe(451);
+    // DW-8g (2026-10-14): +5 grantable (core.calendar_event.{read,create,update,cancel,respond} on the NEW calendar_event kind, in 1 NEW authoring group `calendar`, not advancedOnly). 451 -> 456.
+    expect(grantable.length).toBe(456);
     expect(relationshipKeys.size).toBe(15);
   });
 
