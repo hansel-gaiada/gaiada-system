@@ -229,7 +229,11 @@ describe.skipIf(!TEST_URL)("PV5-08 · Documents (portal list, staff list, parity
       const times = items.map((i) => Date.parse(i.date));
       expect(times).toEqual([...times].sort((a, b) => b - a));
       for (const i of items) {
-        expect(Object.keys(i).sort(), `${i.id} has exactly the contract's keys`).toEqual(["date", "fileId", "id", "kind", "ready", "title"]);
+        // PV5-11 added the certified markers (certified, simulated, certificateFileId) to every item (BFF §30b).
+        expect(Object.keys(i).sort(), `${i.id} has exactly the contract's keys`).toEqual(
+          ["certificateFileId", "certified", "date", "fileId", "id", "kind", "ready", "simulated", "title"],
+        );
+        expect(i).toMatchObject({ certified: false, simulated: false, certificateFileId: null });
       }
     });
 

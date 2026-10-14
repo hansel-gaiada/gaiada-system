@@ -429,7 +429,18 @@ describe.skipIf(!TEST_URL)("PV5-01a — billing, series, issue, content and paym
         withTenants([A], (c) => insert(c, "contract_signatures", { id: newId(), tenant_id: A, contract_id: id, party: "client", origin_site: "test", ...cols }));
       await expect(sig({ content_sha256: "nope" })).rejects.toThrow(/contract_signatures_content_sha256_format/);
       await expect(sig({ provider_envelope_id: "env-1" })).rejects.toThrow(/contract_signatures_envelope_has_provider/);
-      await expect(sig({ content_sha256: HASH, provider: "demo", provider_envelope_id: "env-1" })).resolves.toBeUndefined();
+      // PV5-11 (202610150300): a provider signature must name the provider and envelope the contract is signed through,
+      // which only a CERTIFIED contract with an envelope has.
+      await expect(sig({ content_sha256: HASH, provider: "demo", provider_envelope_id: "env-1" })).rejects.toThrow(/PV5_PROVIDER_SIGNATURE_MISMATCH/);
+      const certified = await contract(A, clientA1, {
+        status: "sent", sent_at: new Date(), content_sha256: HASH, content_fixed_at: new Date(), signature_tier: "certified",
+        signature_provider: "demo", provider_envelope_id: "env-1",
+      });
+      await expect(
+        withTenants([A], (c) => insert(c, "contract_signatures", {
+          id: newId(), tenant_id: A, contract_id: certified, party: "client", origin_site: "test", content_sha256: HASH, provider: "demo", provider_envelope_id: "env-1",
+        })),
+      ).resolves.toBeUndefined();
     });
 
     it("files.sha256 is shaped and nullable", async () => {

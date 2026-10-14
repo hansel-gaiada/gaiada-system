@@ -410,6 +410,9 @@ export async function runContractSealJob(tenantId: string, contractId: string): 
       return { k, sigs: sigs.rows, file, certs: certs.rows };
     });
     if (!loaded || loaded.k.status !== "signed") return { status: "skipped", reason: "not_signed" };
+    // PV5-11: a CERTIFIED contract's document is the provider's signed copy (stored at completion, src/signatures/), never
+    // a company-sealed one. Nothing is owed here, and nothing is recorded as a failure.
+    if (loaded.k.signatureTier === "certified") return { status: "skipped", reason: "certified_tier" };
     const { k, sigs, file, certs } = loaded;
     const label = k.reference ? `${k.title} (${k.reference})` : k.title;
     notice = { what: `The signed copy of "${label}"`, href: `/clients/${k.clientId}/billing` };
@@ -579,6 +582,8 @@ export async function sweepDocumentJobs(opts: { ignoreBackoff?: boolean; limitPe
              SELECT 'contract_signed_copy', k.id, k.signed_at
                FROM contracts k
               WHERE k.status = 'signed' AND k.deleted_at IS NULL AND k.content_sha256 IS NOT NULL
+                -- PV5-11: a certified contract's copy is the provider's, stored at completion; never sealed here.
+                AND k.signature_tier IS DISTINCT FROM 'certified'
                 AND NOT EXISTS (SELECT 1 FROM files f WHERE f.target_entity_type = 'contract' AND f.target_entity_id = k.id
                                    AND f.role = 'contract_signed_copy' AND f.deleted_at IS NULL)
            )

@@ -419,6 +419,16 @@ const configBase = {
   // (`MFA_SIMULATION_ENABLED: ${MFA_SIMULATION_ENABLED:-0}`): a `.env` value alone never reaches the container.
   mfaSimulationEnabled:
     process.env.MFA_SIMULATION_ENABLED === "1" || process.env.MFA_SIMULATION_ENABLED === "true",
+  // PV5-11 / owner ruling PV-D43 (REVIEW stage ONLY): the SIMULATED certified-signature provider (src/signatures/).
+  // Default OFF; "1"/"true" makes the in-process simulated PSrE the certified signing provider: "Mark certified" and a
+  // certified send are allowed, the client signs at the simulated PSrE's labelled page, and its signature is labelled
+  // SIMULATED everywhere. Off: exactly the pre-PV5-11 behaviour (mark-certified and a certified send answer 409
+  // `no_certified_provider`; the simulator's routes and its webhook answer 404). Must be OFF before the ERP holds real
+  // client data (infra/runbooks/certified-signing-simulated.md). Read at CALL time by src/signatures/registry.ts, so a
+  // test switches it on this object. Needs the compose passthrough row
+  // (`SIGNATURE_SIMULATION_ENABLED: ${SIGNATURE_SIMULATION_ENABLED:-0}`): a `.env` value alone never reaches the container.
+  signatureSimulationEnabled:
+    process.env.SIGNATURE_SIMULATION_ENABLED === "1" || process.env.SIGNATURE_SIMULATION_ENABLED === "true",
   // ORG-6 release train (A4): the whole shared-service reconciler is DARK by default. When off,
   // the reconcile consumer drains its stream but materializes nothing — assignments stay dormant
   // metadata (exactly as ORG-2/ORG-3 left them). Flips on only with the rest of the train green.

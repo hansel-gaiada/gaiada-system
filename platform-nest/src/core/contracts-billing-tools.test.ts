@@ -596,6 +596,21 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
       expect(hubCalls).toBe(calls);
     });
 
+    it("🔴 PV5-11: contracts.countersign of a CERTIFIED contract is refused by the precondition (agents never sign one); the hub is not called", async () => {
+      const id = newId();
+      await adminPool().query(
+        `INSERT INTO contracts (id, tenant_id, client_id, title, status, sent_at, body_md, content_sha256, content_fixed_at, signature_tier, origin_site)
+         VALUES ($1, $2, $3, 'PV5-11 certified', 'sent', now(), 'Terms.', $4, now(), 'certified', 'test')`,
+        [id, tenant, clientA, sha256Hex("Terms.")],
+      );
+      const calls = hubCalls;
+      // Filed by the OWNER, who may countersign an attested contract: the refusal is about the tier, not the person.
+      const a = await fileApproved("contracts.countersign", { tenantId: tenant, contractId: id, signerName: "Olive Owner" }, owner, "high");
+      expect(await executeApprovedAutomationWrite(tenant, a)).toMatchObject({ status: "failed", error: "precondition_failed: contract_certified_tier" });
+      expect(hubCalls).toBe(calls);
+      expect((await adminPool().query(`SELECT 1 FROM contract_signatures WHERE contract_id = $1`, [id])).rows).toHaveLength(0);
+    });
+
     it("🔴 contracts.countersign filed by a company_admin is APPROVED but REFUSED at execution: the approver's authority never replaces the filer's", async () => {
       const id = await sentViaTool(clientA, "PV306-D14-3");
       // `admin` (a company_admin) is both the filer and, in this fixture, the decider; the owner is not involved.

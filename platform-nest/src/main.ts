@@ -163,6 +163,10 @@ import { registerDocumentJobHandlers, startDocumentJobSweep } from "./core/docum
 // PV5-10: online payment (hosted checkout). Off unless MIDTRANS_SERVER_KEY is set; see src/payments/registry.ts.
 import { configuredProviders, describePaymentsConfig } from "./payments/registry";
 import { PROVIDER_EVENT_STREAM, registerPaymentEventHandlers, startPaymentEventSweep } from "./payments/process";
+// PV5-11 / PV-D43: certified signing. Off unless SIGNATURE_SIMULATION_ENABLED is on (the simulated PSrE); see
+// src/signatures/registry.ts.
+import { certifiedSigningAccount, describeSignaturesConfig } from "./signatures/registry";
+import { registerSignatureEventHandlers, startSignatureEventSweep } from "./signatures/process";
 // MAIL-04 (design §7.7/§7.8) — the mail sender worker. Only started when MAIL_ENABLED=1 (the
 // master gate): starting it unconditionally would still send nothing today (resolveAdapter falls
 // back to dev-log when disabled, provider.ts), but not starting it at all is the honest "module is
@@ -561,6 +565,15 @@ async function bootstrap(): Promise<void> {
     // eslint-disable-next-line no-console
     console.log(`[payments] ${paymentsLine}`);
   }
+  // PV5-11: one line says whether certified signing is set up. With the SIMULATED PSrE on (PV-D43, review stage) the line
+  // is a warning that starts `[signatures:simulation-enabled]`, so a server that still has it on says so on every start.
+  {
+    const signaturesLine = describeSignaturesConfig();
+    // eslint-disable-next-line no-console
+    if (certifiedSigningAccount()?.simulated) console.warn(signaturesLine);
+    // eslint-disable-next-line no-console
+    else console.log(signaturesLine);
+  }
   if (config.redisUrl) {
     startRelayLoop();
     // Entity types with at least one registered handler; extend as modules add eventHandlers.
@@ -597,6 +610,9 @@ async function bootstrap(): Promise<void> {
     // PV5-10: a claimed payment notice is processed (status re-fetch, then the posting) off `payment.notice.received`
     // (src/payments/process.ts). A core handler; the `provider_event` stream is added to the consumer list below.
     registerPaymentEventHandlers();
+    // PV5-11: a claimed signature notice is processed (envelope re-fetch, then the signatures and the certified copy) off
+    // `signature.notice.received` (src/signatures/process.ts), on the same `provider_event` stream as payments.
+    registerSignatureEventHandlers();
     // P2-05: the position reconciler's outbox triggers. The HANDLERS are flag-gated (they also
     // re-check `positionSyncEnabled` internally, and every reconciler entry point returns null when
     // it is off) but the STREAMS below are listed unconditionally — an always-drained stream can
@@ -738,6 +754,14 @@ async function bootstrap(): Promise<void> {
     startPaymentEventSweep(config.payments.sweepIntervalMs);
     // eslint-disable-next-line no-console
     console.log(`[payments] notice retry sweep on: every ${config.payments.sweepIntervalMs}ms`);
+  }
+  // PV5-11: the signature-notice retry sweep and the envelope reconciliation. OUTSIDE the redisUrl gate (plain Postgres
+  // plus the provider), so a signature is still recorded when Redis is off or a notice never arrives. Only while a
+  // certified provider is set up.
+  if (certifiedSigningAccount()) {
+    startSignatureEventSweep(60_000);
+    // eslint-disable-next-line no-console
+    console.log("[signatures] notice retry sweep on: every 60000ms (open envelopes re-fetched every 5 minutes)");
   }
   // Knowledge (D9 RAG) corpus refresh: mirrors gaiada.com into the PUBLIC tier and every company's
   // ERP records into the INTERNAL tier, on an interval. Without this the vector store stays empty and

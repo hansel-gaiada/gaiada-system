@@ -11,12 +11,17 @@
 //   signed_contract : a SIGNED contract. `fileId` is the sealed copy (PV5-07, `contract_signed_copy`) with `ready: true`;
 //                     until that exists it is the document attached to the contract (if any) with `ready: false`
 //                     ("being prepared"), so a client sees the agreement exists and never gets an unsealed file labelled sealed.
+//                     PV5-11: a CERTIFIED contract lists the provider's certified copy instead (`contract_certified_copy`,
+//                     through CONTRACT_SIGNED_COPY_FILE_ID), with `certified: true`, `certificateFileId` (the provider's
+//                     certificate) and `simulated: true` when it was signed at the SIMULATED PSrE (PV-D43): the UI says
+//                     "Certified (simulated)" from these fields, never from a guess.
 //   invoice         : the `invoice_pdf` of an ISSUED invoice (PV5-07). `ready: false` and no file while it is being rendered.
 //   receipt         : the proof file on a payment (the portal's "tell us you have paid" upload, or staff's).
 // Every `fileId` is a file the portal file route (`GET portal/files/:fileId`) will serve to the same caller: the joins below
 // repeat that route's parent-entity test (target type + id, not deleted), so the list never offers a link that 404s.
 import type { PoolClient } from "pg";
-import { CONTRACT_SIGNED_COPY_FILE_ID, INVOICE_PDF_FILE_ID } from "./document-read-fields";
+import { CONTRACT_CERTIFICATE_FILE_ID, CONTRACT_SIGNED_COPY_FILE_ID, INVOICE_PDF_FILE_ID } from "./document-read-fields";
+import { SIMULATED_PROVIDER } from "../signatures/simulated-psre";
 
 export type DocumentKind = "signed_contract" | "invoice" | "receipt";
 
@@ -29,6 +34,12 @@ export interface DocumentItem {
   date: string;
   fileId: string | null;
   ready: boolean;
+  /** PV5-11: a signed contract signed through a certified provider (false for every other item). */
+  certified: boolean;
+  /** PV5-11 / PV-D43: that provider was the SIMULATED PSrE. Shown as "Certified (simulated)". */
+  simulated: boolean;
+  /** PV5-11: the provider's certificate stored with a certified copy; null otherwise. */
+  certificateFileId: string | null;
 }
 
 export interface StaffDocumentItem extends DocumentItem {
@@ -62,6 +73,9 @@ interface RawRow {
   file_id: string | null;
   ready: boolean;
   flag: boolean;
+  certified?: boolean;
+  simulated?: boolean;
+  certificate_file_id?: string | null;
 }
 
 /** Contracts: signed only. `k` = contracts. The attached document is joined the way the portal file route tests it. */
@@ -69,7 +83,10 @@ export function contractDocumentsSql(where: string, flag: string): string {
   return `SELECT k.id, k.title, ${ISO("COALESCE(k.signed_at, k.updated_at)")} AS date,
                  COALESCE(${CONTRACT_SIGNED_COPY_FILE_ID("k")}, af.id) AS file_id,
                  (${CONTRACT_SIGNED_COPY_FILE_ID("k")} IS NOT NULL) AS ready,
-                 ${flag} AS flag
+                 ${flag} AS flag,
+                 (k.signature_tier = 'certified') AS certified,
+                 (k.signature_tier = 'certified' AND k.signature_provider = '${SIMULATED_PROVIDER}') AS simulated,
+                 ${CONTRACT_CERTIFICATE_FILE_ID("k")} AS certificate_file_id
             FROM contracts k
             LEFT JOIN files af ON af.id = k.file_id AND af.target_entity_type = 'contract' AND af.target_entity_id = k.id
                               AND af.deleted_at IS NULL AND af.storage_key IS NOT NULL
@@ -109,7 +126,9 @@ export async function loadDocuments(c: PoolClient, q: DocumentQueryParts): Promi
     c.query<RawRow>(receiptDocumentsSql(q.receiptWhere, q.receiptFlag), q.receiptParams),
   ]);
   const map = (kind: DocumentKind) => (r: RawRow): StaffDocumentItem => ({
-    id: r.id, kind, title: r.title, date: r.date, fileId: r.file_id, ready: r.ready, clientVisible: r.flag === true,
+    id: r.id, kind, title: r.title, date: r.date, fileId: r.file_id, ready: r.ready,
+    certified: r.certified === true, simulated: r.simulated === true, certificateFileId: r.certificate_file_id ?? null,
+    clientVisible: r.flag === true,
   });
   const items = [
     ...contracts.rows.map(map("signed_contract")),

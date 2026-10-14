@@ -1,7 +1,10 @@
 // PV5-07 — the two read fields every invoice and contract read carries (staff and portal, list and detail), in ONE
 // place so the four controllers cannot drift:
 //   * `pdfFileId`        : the live `invoice_pdf` file of an ISSUED invoice; null = not issued, or being prepared.
-//   * `signedCopyFileId` : the live `contract_signed_copy` file of a contract; null = not signed, or being prepared.
+//   * `signedCopyFileId` : the contract's signed copy; null = not signed, or being prepared. For an ATTESTED contract
+//                          that is the live `contract_signed_copy` (PV5-07's company-sealed copy); for a CERTIFIED one it
+//                          is the live `contract_certified_copy` (PV5-11: the provider's signed PDF, stored at completion),
+//                          so every reader shows the certified copy INSTEAD of a sealed one without knowing the tiers.
 // PV5-08 (Documents) and PV5-09 (screens) consume exactly these names (FRONTEND-BFF-CONTRACT §30).
 //
 // Scalar subqueries over `files` (core table, tenant RLS): `ux_files_live_role` guarantees at most one row, and the
@@ -22,11 +25,23 @@ export function INVOICE_PDF_FILE_ID(i: string): string {
             LIMIT 1)`;
 }
 
-/** `(SELECT ...)` yielding the contract's sealed signed copy file id, or NULL. `k` = the contracts alias. */
+/** `(SELECT ...)` yielding the contract's signed copy file id, or NULL: the company-sealed copy of an attested contract,
+ *  the provider's certified copy of a certified one. `k` = the contracts alias. */
 export function CONTRACT_SIGNED_COPY_FILE_ID(k: string): string {
   const a = alias(k);
   return `(SELECT f.id FROM files f
-            WHERE f.target_entity_type = 'contract' AND f.target_entity_id = ${a}.id AND f.role = 'contract_signed_copy'
+            WHERE f.target_entity_type = 'contract' AND f.target_entity_id = ${a}.id
+              AND f.role = CASE WHEN ${a}.signature_tier = 'certified' THEN 'contract_certified_copy' ELSE 'contract_signed_copy' END
               AND f.deleted_at IS NULL
+            LIMIT 1)`;
+}
+
+/** PV5-11: `(SELECT ...)` yielding a certified contract's certificate file (the provider's, stored with the copy), or
+ *  NULL. `k` = the contracts alias. */
+export function CONTRACT_CERTIFICATE_FILE_ID(k: string): string {
+  const a = alias(k);
+  return `(SELECT f.id FROM files f
+            WHERE f.target_entity_type = 'contract' AND f.target_entity_id = ${a}.id AND f.role = 'contract_certified_certificate'
+              AND f.deleted_at IS NULL AND ${a}.signature_tier = 'certified'
             LIMIT 1)`;
 }

@@ -552,6 +552,12 @@ services:
       # audited "Simulate second factor" step. This row is what makes the flag reach the container at all
       # (a `.env` value alone is only interpolation). Turn it OFF before the ERP holds real client data.
       MFA_SIMULATION_ENABLED: ${MFA_SIMULATION_ENABLED:-0}
+      # PV5-11 / owner ruling PV-D43 (REVIEW STAGE ONLY): the SIMULATED certified-signature provider (PSrE). Default off
+      # ("0"); "1" makes certified contracts sign through an in-process simulated PSrE whose signatures are labelled
+      # SIMULATED everywhere (not a certified signature). Off: mark-certified / a certified send answer 409 as before. This
+      # row is what makes the flag reach the container. Turn it OFF before the ERP holds real client data
+      # (infra/runbooks/certified-signing-simulated.md).
+      SIGNATURE_SIMULATION_ENABLED: ${SIGNATURE_SIMULATION_ENABLED:-0}
       # Admin/Systems console aggregator (Phase C) — read-only probes of each downstream
       # service. All fail-soft: an unset URL just reports "not configured" in the console.
       GATEWAY_URL: http://ai-gateway:3002

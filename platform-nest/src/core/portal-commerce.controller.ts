@@ -52,6 +52,9 @@ import {
   type CheckoutView, type RetiredCheckout,
 } from "../payments/checkout";
 import { ProviderRequestError, ProviderUnavailableError } from "../payments/provider";
+// PV5-11: certified signing (a provider's envelope; the SIMULATED PSrE while PV-D43's review stage lasts).
+import { certifiedSigningAccount, signatureAccountNamed } from "../signatures/registry";
+import { SIMULATED_PROVIDER } from "../signatures/simulated-psre";
 
 const PAYMENT_METHODS = new Set(["bank_transfer", "card", "cash", "other"]);
 /** Proof receipts are photos of a transfer slip or a small PDF. 10 MB is generous for both and well
@@ -489,7 +492,7 @@ export class PortalCommerceController {
       const k = await this.ownedContract(c, scope, contractId);
       const [signatures, doc] = await Promise.all([
         c.query(
-          `SELECT party, signer_name AS "signerName", signer_title AS "signerTitle", signed_at AS "signedAt"
+          `SELECT party, signer_name AS "signerName", signer_title AS "signerTitle", signed_at AS "signedAt", provider
              FROM contract_signatures WHERE contract_id = $1 ORDER BY signed_at ASC`,
           [contractId],
         ),
@@ -501,8 +504,10 @@ export class PortalCommerceController {
             )
           : Promise.resolve({ rows: [] as Array<Record<string, unknown>> }),
       ]);
+      const clientSigned = signatures.rows.some((s: Record<string, unknown>) => s.party === "client");
       return {
         ...k,
+        certifiedSigning: this.certifiedSigningView(tenantId, k, canSignFor(scope, k.clientId), clientSigned),
         // `canSign` is the exact conjunction the POST below enforces, surfaced so the UI disables the
         // button for the same reasons the server would refuse — rather than offering an action that
         // 403s. Kept as ONE expression in ONE place for that reason.
@@ -734,14 +739,39 @@ export class PortalCommerceController {
     return r.rows[0];
   }
 
+  /** PV5-11 — the certified-signing block of the portal contract detail (BFF §16b, §30d). Null for an attested contract.
+   *  `canStart` is the exact conjunction `POST …/certified-signing` enforces (signer of THIS client, sent, not signed by the
+   *  client yet, term not ended, the provider switched on and the one the envelope is at), so the page offers "Sign with
+   *  <provider>" for the same reasons the server would accept it. `signingUrl` is set once the envelope exists. */
+  private certifiedSigningView(
+    tenantId: string,
+    k: { status: string; termEnded: boolean; signatureTier: string | null; signatureProvider: string | null; providerEnvelopeId: string | null },
+    signer: boolean,
+    clientSigned: boolean,
+  ) {
+    if (k.signatureTier !== "certified") return null;
+    const account = k.signatureProvider ? signatureAccountNamed(k.signatureProvider) : certifiedSigningAccount();
+    const canStart = !!account && signer && k.status === "sent" && !clientSigned && !k.termEnded;
+    return {
+      provider: account?.name ?? k.signatureProvider,
+      label: account?.label ?? null,
+      simulated: account ? account.simulated : k.signatureProvider === SIMULATED_PROVIDER,
+      available: !!account,
+      envelopeStarted: !!k.providerEnvelopeId,
+      canStart,
+      signingUrl: canStart && account && k.providerEnvelopeId ? account.forCompany(tenantId).signingUrl(k.providerEnvelopeId, "client") : null,
+    };
+  }
+
   private async ownedContract(c: PoolClient, scope: PortalScope, contractId: string) {
     const r = await c.query<{
       id: string; clientId: string; title: string; status: string; termEnded: boolean; fileId: string | null;
-      contentSha256: string | null; signatureTier: string | null;
+      contentSha256: string | null; signatureTier: string | null; signatureProvider: string | null; providerEnvelopeId: string | null;
     }>(
       `SELECT k.id, k.client_id AS "clientId", k.title, k.reference, k.version, k.status,
               k.value::float8 AS value, k.currency, k.body_md AS "bodyMd", k.file_id AS "fileId",
               k.content_sha256 AS "contentSha256", k.signature_tier AS "signatureTier",
+              k.signature_provider AS "signatureProvider", k.provider_envelope_id AS "providerEnvelopeId",
               to_char(k.starts_on, 'YYYY-MM-DD') AS "startsOn",
               to_char(k.ends_on, 'YYYY-MM-DD') AS "endsOn",
               k.sent_at AS "sentAt", k.signed_at AS "signedAt", k.decline_reason AS "declineReason",

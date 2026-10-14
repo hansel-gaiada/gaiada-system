@@ -41,6 +41,8 @@ import { assemblePrincipal, type Principal } from "../rbac/principal";
 import { contractContentSha256 } from "./content-hash";
 import { clientIpOf, hashForEvidence, userAgentOf } from "./evidence";
 import { certifiedSigningProvider, NO_CERTIFIED_PROVIDER } from "./signature-provider";
+import { certifiedSigningInfo, signatureAccountNamed } from "../signatures/registry";
+import { SIMULATED_PROVIDER } from "../signatures/simulated-psre";
 import { lockChangeRequest } from "./webdev-cr-lock";
 import { UUID_RE, assertAmendable, isDeadContractStatus } from "./webdev-amendment";
 import { CONTRACT_SIGNED_COPY_FILE_ID } from "./document-read-fields";
@@ -58,6 +60,8 @@ const CONTRACT_SELECT = `
          k.sent_at AS "sentAt", k.signed_at AS "signedAt", k.decline_reason AS "declineReason",
          k.content_sha256 AS "contentSha256", k.content_fixed_at AS "contentFixedAt",
          k.signature_tier AS "signatureTier", k.certified_requested AS "certifiedRequested",
+         -- PV5-11: the certified-signature provider and envelope (NULL until the client reaches the sign step).
+         k.signature_provider AS "signatureProvider", k.provider_envelope_id AS "providerEnvelopeId",
          k.created_by AS "createdBy", k.created_at AS "createdAt",
          -- PV4-04: an amendment names the contract it amends (never voided or superseded by it:
          -- supersedes_id keeps its re-issue meaning) and the change request that caused it.
@@ -101,9 +105,36 @@ async function mayCountersign(p: Principal, resource: Resource): Promise<boolean
   }
 }
 
-/** A row is countersignable only while it waits for us: `sent`, and no provider signature yet. */
-function withCountersign<T extends { status: string; providerSigned: boolean }>(row: T, may: boolean) {
-  return { ...row, canCountersign: may && row.status === "sent" && !row.providerSigned };
+/** A row is countersignable only while it waits for us: `sent`, and no provider signature yet.
+ *
+ *  PV5-11: a CERTIFIED contract is never countersigned by typed name (the POST refuses it, and so does the database's
+ *  trg_contract_signatures_tier_guard), so `canCountersign` is false for it. It is countersigned at the provider instead:
+ *  `canCountersignAtProvider` + `countersignUrl` (the provider's signing page for our countersigner) once the client has
+ *  reached the sign step (the envelope exists) and while that provider is switched on. Same `may` (one Cerbos probe).
+ *  `signatureSimulated` says the envelope is at the SIMULATED PSrE (PV-D43), and `certifiedSigning` is this server's
+ *  current certified-signing set-up, so the UI never guesses whether "Mark certified" can work. */
+interface CountersignRow {
+  status: string;
+  providerSigned: boolean;
+  signatureTier?: string | null;
+  signatureProvider?: string | null;
+  providerEnvelopeId?: string | null;
+}
+function withCountersign<T extends CountersignRow>(row: T, may: boolean, tenantId: string) {
+  const certified = row.signatureTier === "certified";
+  const waiting = row.status === "sent" && !row.providerSigned;
+  const account = row.signatureProvider ? signatureAccountNamed(row.signatureProvider) : null;
+  const atProvider = may && waiting && certified && !!account && !!row.providerEnvelopeId;
+  return {
+    ...row,
+    canCountersign: may && waiting && !certified,
+    canCountersignAtProvider: atProvider,
+    countersignUrl: atProvider && account && row.providerEnvelopeId
+      ? account.forCompany(tenantId).signingUrl(row.providerEnvelopeId, "countersigner")
+      : null,
+    signatureSimulated: row.signatureProvider === SIMULATED_PROVIDER,
+    certifiedSigning: certifiedSigningInfo(),
+  };
 }
 
 /** PV5-06 (plan decision 13) — the signature tier a contract takes when it is sent.
@@ -164,7 +195,7 @@ export class ContractsController {
     const filter = clientFilterSql(parseClientFilter(clientId, true), "k.client_id", 2);
     const [rows, may] = await Promise.all([
       withTenants([tenantId], (c) =>
-        c.query<{ status: string; providerSigned: boolean }>(
+        c.query<CountersignRow>(
           `${CONTRACT_SELECT}
              AND ($1::text IS NULL OR k.status = $1)
              AND ${filter.sql}
@@ -174,7 +205,7 @@ export class ContractsController {
       ),
       mayCountersign(req.principal, { kind: "contract", tenantId }),
     ]);
-    return rows.rows.map((r) => withCountersign(r, may));
+    return rows.rows.map((r) => withCountersign(r, may, tenantId));
   }
 
   @Get(":tenantId/contracts/:contractId")
@@ -182,15 +213,15 @@ export class ContractsController {
     await authorize(req.principal, { kind: "contract", id: contractId, tenantId }, "read");
     const may = await mayCountersign(req.principal, { kind: "contract", id: contractId, tenantId });
     return withTenants([tenantId], async (c) => {
-      const rows = await c.query<{ status: string; providerSigned: boolean }>(`${CONTRACT_SELECT} AND k.id = $1`, [contractId]);
+      const rows = await c.query<CountersignRow>(`${CONTRACT_SELECT} AND k.id = $1`, [contractId]);
       if (!rows.rows[0]) throw new NotFoundException("contract not found");
       const sigs = await c.query(
         `SELECT party, signer, signer_name AS "signerName", signer_title AS "signerTitle", signed_at AS "signedAt",
-                content_sha256 AS "contentSha256"
+                content_sha256 AS "contentSha256", provider
            FROM contract_signatures WHERE contract_id = $1 ORDER BY signed_at ASC`,
         [contractId],
       );
-      return { ...withCountersign(rows.rows[0], may), signatures: sigs.rows };
+      return { ...withCountersign(rows.rows[0], may, tenantId), signatures: sigs.rows };
     });
   }
 
@@ -438,8 +469,10 @@ export class ContractsController {
    *    * Once a threshold exists an UNVALUED contract cannot be sent: a missing value would silently escape it.
    *      A value in a currency other than the threshold's cannot be compared, so that is refused too (failing
    *      closed: never an attested contract that should have been certified).
-   *    * A certified tier needs a certified provider (PV5-11, parked by PV-D25). With none set up the send is
-   *      refused 409 rather than producing a contract nobody can sign. */
+   *    * A certified tier needs a certified provider (PV5-11; PV-D43 sets up the SIMULATED PSrE for the review stage
+   *      behind SIGNATURE_SIMULATION_ENABLED). With none set up the send is refused 409 rather than producing a contract
+   *      nobody can sign. The envelope is NOT created here: a PSrE charges per signature, so it is created when the client
+   *      reaches the sign step (src/signatures/certified-signing.controller.ts). */
   @Post(":tenantId/contracts/:contractId/send")
   @HttpCode(200)
   async send(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("contractId") contractId: string) {
@@ -492,8 +525,8 @@ export class ContractsController {
   /** PV5-06 — "Mark certified" (PV-D8): staff ask for the certified (PSrE) signature tier for a DRAFT contract.
    *  It decides the tier `send` will set; it never changes content.
    *
-   *  PV-D25 parks certified signing until counsel sets a threshold or a client asks, so with no provider set up
-   *  this answers 409 "no certified signing provider is set up" and writes nothing. AUTHORIZED FIRST (Cerbos
+   *  With no certified provider set up (PV-D25 parked it; PV-D43 sets up the SIMULATED PSrE for the review stage behind
+   *  SIGNATURE_SIMULATION_ENABLED) this answers 409 "no certified signing provider is set up" and writes nothing. AUTHORIZED FIRST (Cerbos
    *  `contract` / `mark_certified`, PV5-02), so a denied caller gets 403 whatever the state. `{ certified: false }`
    *  clears the mark. */
   @Post(":tenantId/contracts/:contractId/mark-certified")

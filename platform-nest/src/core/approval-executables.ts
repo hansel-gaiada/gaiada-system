@@ -2187,14 +2187,18 @@ async function contractSendPrecondition(client: PoolClient, args: Record<string,
 async function contractCountersignPrecondition(client: PoolClient, args: Record<string, unknown>): Promise<PreconditionVerdict> {
   const { tenantId, id } = billingArgs(args, "contractId");
   if (!tenantId || !id) return { ok: false, reason: "missing_contract_args" };
-  const { rows } = await client.query<{ status: string; provider_signed: boolean }>(
-    `SELECT k.status,
+  const { rows } = await client.query<{ status: string; provider_signed: boolean; signature_tier: string | null }>(
+    `SELECT k.status, k.signature_tier,
             EXISTS (SELECT 1 FROM contract_signatures s WHERE s.contract_id = k.id AND s.party = 'provider') AS provider_signed
        FROM contracts k WHERE k.tenant_id = $1 AND k.id = $2 AND k.deleted_at IS NULL`,
     [tenantId, id],
   );
   const k = rows[0];
   if (!k) return { ok: false, reason: "contract_not_found" };
+  // PV5-11: AGENTS NEVER SIGN A CERTIFIED CONTRACT. It is countersigned by a person at the certified provider (the
+  // provider's own page), never through this executable. The route would refuse it too (`certified_tier`, and the
+  // database's trg_contract_signatures_tier_guard under it); refusing here keeps an approved row from ever reaching it.
+  if (k.signature_tier === "certified") return { ok: false, reason: CONTRACT_CERTIFIED_TIER };
   // Our signature already landed (the route would answer `alreadySigned`); refuse rather than re-drive.
   if (k.provider_signed) return { ok: false, reason: "contract_already_countersigned" };
   if (k.status !== "sent") return { ok: false, reason: "contract_not_sent" };
@@ -2219,6 +2223,9 @@ async function paymentDecidePrecondition(client: PoolClient, args: Record<string
   if (p.status !== "pending") return { ok: false, reason: "payment_not_pending" };
   return { ok: true };
 }
+
+/** PV5-11: the reason `contracts.countersign` is refused for a certified contract (agents never sign one). */
+export const CONTRACT_CERTIFIED_TIER = "contract_certified_tier";
 
 /** The typed reason an approval of `invoicePayments.decide` by the payment's own recorder is refused with. */
 export const APPROVER_RECORDED_THIS_PAYMENT = "approver_recorded_this_payment";
