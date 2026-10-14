@@ -8633,3 +8633,120 @@ Built as §47.1 to §47.3 and §47.6 specify, except busy times: **§47.4 (`GET 
 - **`GET /calendar/events/mine`.** Legs run in parallel, one `withTenants([t])` per company. Each leg first asks Cerbos whether the caller may read an event they are invited to there (that is what every row is); a refusal is `no_access` (a login with no calendar read, such as a module tier alone), any other failure is `error`, never a 500. `from` and `to` take a date alone (that day's UTC midnight) or an instant with an offset; an all-day event is in the window when its days meet the window's UTC days. At most 500 rows per company. `scope` is `all` or a company id (anything else is 400).
 - **Manager added to the self rules at review (2026-10-14).** A manager-only login could create an event but not then read its own; `manager` now holds the organizer, attendee and company-visibility read rules, the organizer update and cancel rules and the attendee respond rule (PERMISSION-CONTRACT §39). The DENY for non-attendees on `respond` still holds for every role.
 - **Tests.** `calendar-events.service.test.ts` (33 pure cases), `meeting-schedule.test.ts` (6), `src/rbac/cerbos-calendar-event.test.ts` (10 static, 38 live with `CERBOS_URL`), `src/db/calendar-events-migration.db.test.ts` (23, DATABASE_URL_TEST) and `calendar-events.test.ts` (55, the HTTP suite, DATABASE_URL_TEST plus Cerbos).
+
+## 48. Email from the ERP through your own Gmail: read, reply, send, "Email this client" (DW-8j, DW-D24, 2026-10-14) — `platform-nest/src/core/gmail/` (new), `src/integrations/gmail/` (the MAIL-16D seam, extended); UI `/me/mail` — **STATUS: PLANNED**
+
+**Why.**
+- Plan §8.1 (row 8j) and §14.2 ("Send an email from the ERP").
+- Ruling DW-D24 (owner, 2026-10-14): each employee reads, replies and sends through their OWN Gmail inside the ERP, including "Email this client". It is built now against a simulated Gmail and goes live when the Google OAuth client exists (DW-11).
+- This extends the mail design's read-only Gmail scope (§8C, A14), whose constraints still hold:
+  - an Internal-type OAuth app;
+  - a per-person link;
+  - no domain-wide delegation;
+  - render on demand, store nothing.
+- System mail is unchanged: approvals and risk only. Gmail is never a notification channel.
+
+**What already exists (reused, not rebuilt):**
+- **The `GmailClient` seam** (`src/integrations/gmail/`, MAIL-16D): `listThreads`, `getThread`, `getMessage`, `listLabels`, a fixture implementation and a provider-agnostic contract suite.
+- **The shared Google OAuth state machine** (`src/core/google-oauth/`): the surface registry, signed single-use state and the token endpoint.
+- **DW-6i's Google Drive connection** (`src/core/google-drive/`, §42), the template for every connection route below. Tokens are sealed in `integration_connections` (`owner_kind='user'`, the person).
+
+### 48.1 Two modes, one switch
+`GMAIL_MODE` is `simulated` (the default) or `live`.
+
+**Simulated** is the dev and review stage:
+- "Connect" links a simulated mailbox with no Google round trip. The fixture threads come from MAIL-16D's fixtures, so the mailbox has content.
+- Sent messages land in that mailbox's Sent, held in process memory only: they are lost on restart, nothing is written to the database, and nothing leaves the box.
+- Every page and every answer carries `mode: "simulated"`. The UI labels the mailbox "Simulated mailbox: nothing is really sent".
+
+**Live** uses the real Gmail API with the person's own token:
+- Scopes are `https://www.googleapis.com/auth/gmail.readonly` and `https://www.googleapis.com/auth/gmail.send`.
+- Live mode refuses to start unless the Google client env is set. It must pass MAIL-16D's contract suite unmodified for reads, and §48.6's send contract.
+- Live is the staging step of DW-11. It is not run in this ticket.
+
+### 48.2 The connection (copy §42's shape, provider `google_gmail`)
+- **Provider.** `google_gmail` joins `GOOGLE_PROVIDERS` and the `integration_connections` provider CHECK, through a migration that re-declares the whole CHECK from main's current list (a DROP+ADD re-declares everything).
+- **Surface.** It is registered like Drive: `ownerKind: "user"`, `module: null`, `authz: {kind: "personal_mailbox", action: "connect"}`.
+- **Routes:**
+  - `GET /api/:t/integrations/gmail`: the token-free status `{configured, connected, needsReconnect, accountEmail, mode}`. It never calls Google.
+  - `GET /api/:t/integrations/gmail/oauth/start` → `{authUrl}`. Simulated mode answers `{linked: true}` and creates the simulated link at once.
+  - `GET /api/gmail/oauth/callback`: tenant-agnostic. The tenant and the person come only from the verified state.
+  - `DELETE /api/:t/integrations/gmail`: revoke at Google (best effort), then clear the sealed tokens.
+- **Failures.** A refused refresh marks "needs reconnect" and keeps the tokens. An outage is 502 `gmail_unavailable` and marks nothing.
+
+### 48.3 Reading your own mail (render on demand, cache nothing)
+**Routes.** The owner is always the caller, never a parameter:
+- `GET /api/:t/mail/me/threads?label=INBOX|SENT&pageToken=` → `{mode, threads: [{id, snippet, subject, from, lastMessageDate, unread}], nextPageToken}`.
+- `GET /api/:t/mail/me/threads/:threadId` → the thread, with every message decoded through `getMessage`: headers, the text part, the sanitized HTML part, and attachment metadata only.
+
+**Rules:**
+- **Nothing is stored.** No message content is written to the database, a log or the activity feed. The thread list is not cached between requests.
+- **HTML.** HTML bodies are sanitized with the mail module's `sanitize.ts`, and the UI shows them in a `sandbox=""` iframe, as `/admin/mail` previews do.
+- **Not connected** → 409 `gmail_not_connected`; the UI offers Connect.
+- **Gate.** `personal_mailbox` · `read` on `{ownerId: caller}` (PERMISSION-CONTRACT §40).
+
+### 48.4 Sending, replying and "Email this client"
+**The request:** `POST /api/:t/mail/me/send` with:
+- `to: string[]`, `cc?: string[]` (at most 20 addresses in all, each a valid address);
+- `subject` (1 to 300 characters);
+- `body` (plain text, 1 to 50,000 characters);
+- `inReplyTo?: {threadId, messageId}`, which keeps the thread and sets `In-Reply-To` and `References`;
+- `context?: {kind: "client", id}`.
+
+**The answer:** 202 `{mode, messageId, threadId}`.
+
+**Gates:**
+- `personal_mailbox` · `send` on `{ownerId: caller}`.
+- With a `context`: the client's read too (the same shape `/clients/:id` sends). A caller who cannot read the client cannot send "about" it.
+
+**What v1 leaves out:**
+- attachments (a later ticket may attach ERP files by id);
+- HTML compose;
+- scheduled send.
+
+**What is recorded:**
+- One activity row, `emailed` on the client when there is a `context`, else on nobody. It records who sent, when, how many recipients and `mode`, but never the subject, the body or the addresses (DW-D24: nothing stored).
+- No notification.
+
+**Rate limit:** 30 sends per person per hour (429 `gmail_send_rate_limited`, with `retryAfterSeconds`). It is a guard against a runaway client or script, not a quota.
+
+**Errors:** 409 `gmail_not_connected`, 502 `gmail_unavailable`, 400 `gmail_send_invalid` (with `field`), and 403.
+
+**"Email this client"** (staff client page):
+- The button opens compose prefilled with the client's primary contact address or addresses and `context: {kind: "client", id}`.
+- When the client has no contact address, the button says "This client has no contact email" and is disabled.
+
+### 48.5 UI
+**The registry.** You › Inbox becomes a two-tab row (`YOU_ROWS`): Notifications (`/me/inbox`, as today) and Mail (`/me/mail`). The bell still opens Notifications.
+
+**`/me/mail`:**
+- With no connection: one sentence and the Connect button, plus the simulated label in simulated mode.
+- Connected: the thread list (Inbox and Sent), then the thread, then Reply. Compose is at `/me/mail/new?to=&client=`.
+- Honest states:
+  - not connected;
+  - needs reconnect;
+  - unavailable ("Gmail can't be reached right now."), never an empty mailbox;
+  - rate limited (with the wait).
+
+**The staff client page:** "Email this client" sits on the client overview's contact area. PV-3 owns that page and reviews the placement before it lands.
+
+**DEMO_MODE:** answers in simulated mode with fixture threads.
+
+### 48.6 Tests
+- **The seam:** `sendMessage` joins the `GmailClient` interface with its own contract cases:
+  - the threading headers on a reply;
+  - recipients validated;
+  - a revoked token gives `GmailRevokedError`;
+  - a 429 gives `GmailRateLimitedError`.
+- **The fixture/simulated client** passes MAIL-16D's existing suite unmodified, plus the send cases.
+- **HTTP suite** on the Linux CI gate:
+  - connect, status and disconnect in simulated mode;
+  - reading another person's mailbox is impossible: there is no parameter for it, and a forged connection row of another owner is never read;
+  - send without a connection gives 409;
+  - send with a client context the caller cannot read gives 403;
+  - the activity row carries no subject, body or address;
+  - the 31st send in an hour gives 429;
+  - an automation or bot principal is refused `send`;
+  - the provider CHECK accepts `google_gmail` and still refuses an unknown provider.
+- **Cerbos matrix:** `src/rbac/cerbos-personal-mailbox.test.ts`.
+- **UI:** the mailbox states, compose validation, the reply prefill, the "Email this client" prefill and its no-address state, and the simulated label.
