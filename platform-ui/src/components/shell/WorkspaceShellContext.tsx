@@ -112,6 +112,7 @@ export function WorkspaceShellProvider({ model, children }: { model: ShellModel;
   const rows = view.kind === "workspace" ? allRows(view.ws) : view.kind === "company" ? model.company : model.admin;
   const active = activeLocation(rows, pathname);
   const tabPaths = new Set(rows.flatMap((r) => r.tabs.map((t) => pathOf(t.href))));
+  const withheld = new Set(view.kind === "workspace" ? view.ws.withheld : []);
   const value: WorkspaceShellValue = {
     model,
     pathname,
@@ -119,7 +120,9 @@ export function WorkspaceShellProvider({ model, children }: { model: ShellModel;
     rows,
     active,
     activeRow: active ? (rows.find((r) => r.key === active.rowKey) ?? null) : null,
-    covers: (hrefs) => hrefs.every((h) => tabPaths.has(pathOf(h))),
+    // A console strip hides when the shell offers every tab the person may USE (§2.6 rule 1). The registry's gated-out tabs
+    // (`withheld`) are pages their read gate refuses them, mirroring the server, so they need no second strip to find them.
+    covers: (hrefs) => hrefs.every((h) => tabPaths.has(pathOf(h)) || withheld.has(pathOf(h))),
     onToolPage: tabPaths.has(pathOf(pathname)),
   };
 

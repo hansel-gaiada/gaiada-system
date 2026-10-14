@@ -9,7 +9,7 @@
 // Pure and client-safe, like the registry it reads. Gates mirror the server; they are not security.
 import type { Me } from "@/lib/platform";
 import { ADMIN_ROWS, COMPANY_ROWS, hrefFor, isPlanned, sidebarRows, type WorkspaceKind } from "@/lib/workspaces";
-import { concreteRows, gateAllows, homeArea, workspaceKeysOf, type ConcreteRow, type GateContext, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
+import { concreteRows, gateAllows, homeArea, withheldTabPaths, workspaceKeysOf, type ConcreteRow, type GateContext, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
 import type { Area } from "@/lib/areas";
 
 export interface ShellRows {
@@ -34,6 +34,9 @@ export interface ShellWorkspace {
   /** The workspace's own create actions, planned and gated ones dropped, made concrete (DW-2f). */
   creates: { label: string; href: string }[];
   rows: ShellRows;
+  /** The paths of the registry tabs this person is not offered because a gate refuses them (`withheldTabPaths`), so a console
+   *  strip can tell "the shell lacks this tab" from "this page is not theirs". */
+  withheld: string[];
 }
 
 export interface ShellModel {
@@ -91,6 +94,7 @@ export function buildShellModel(input: {
         performance: concreteRows(raw.performance, ctx),
         you: concreteRows(raw.you, ctx),
       },
+      withheld: withheldTabPaths([...raw.top, ...raw.work, ...raw.performance, ...raw.you], ctx),
     });
   };
   for (const ref of workspaces.mine) add(ref, true);

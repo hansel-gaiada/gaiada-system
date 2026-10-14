@@ -214,14 +214,15 @@ test.describe("HR, Finance and IT workspaces (superadmin, pilot shell)", () => {
 // Compliance and People analytics (`hr.view`, `hr.recruitment.view`), Pay (`hr.payroll.view`), Finance's Receivables,
 // Consolidation (`finance.ar.view`, `finance.statement.view`), IT's accounts and workflows (`it.manage`). What a member's
 // page can read (Leave, their cases, Reviews, Settings, the Directory, Devices) is not asserted either way.
-// The console's own strip is NOT asserted absent: the shell hides it only where it offers every tab, and a member is not
-// offered the gated ones, so the console strip may stay beside the shell's for them (no page loses its way in).
+// The console's own strip is asserted absent for them too: the shell counts the tabs it withholds from a member as covered
+// (`withheld`), so one strip draws and never two.
 test.describe("HR, Finance and IT workspaces (plain member, pilot shell)", () => {
   test("HR: no Pay row, and no Onboarding, Recruitment, Compliance or People analytics tab", async ({ page, context }) => {
     await signIn(page, context, "member");
     await page.goto("/hr");
     const nav = menu(page, "HR");
     await expect(nav).toBeVisible();
+    await expectNoConsoleStrip(page, "HR (member) Overview");
     const work = workGroup(nav);
     await expectSubsequence(work.getByRole("link"), ["People", "Time", "Talent", "Cases & compliance"]);
     await expect(work.getByRole("link", { name: "Pay", exact: true })).toHaveCount(0);
@@ -232,6 +233,7 @@ test.describe("HR, Finance and IT workspaces (plain member, pilot shell)", () =>
     await people.click();
     await expectSubsequence(strip(page, "People").getByRole("link"), ["Directory", "Org structure"]);
     await expect(strip(page, "People").getByRole("link", { name: "Onboarding", exact: true })).toHaveCount(0);
+    await expectNoConsoleStrip(page, "HR (member) › People");
 
     // Talent keeps Reviews (hr_policy read is open to members); its only tab, so a plain link with no strip.
     const talent = work.getByRole("link", { name: "Talent", exact: true });
@@ -239,6 +241,7 @@ test.describe("HR, Finance and IT workspaces (plain member, pilot shell)", () =>
     await talent.click();
     await expect(page).toHaveURL(/\/hr\/reviews$/);
     await expect(strip(page, "Talent")).toHaveCount(0);
+    await expectNoConsoleStrip(page, "HR (member) › Talent");
 
     // Cases & compliance: Cases and Settings, but not Compliance (the expiring-documents read).
     const cases = work.getByRole("link", { name: "Cases & compliance", exact: true });
@@ -246,6 +249,7 @@ test.describe("HR, Finance and IT workspaces (plain member, pilot shell)", () =>
     await cases.click();
     await expectSubsequence(strip(page, "Cases & compliance").getByRole("link"), ["Cases", "Settings"]);
     await expect(strip(page, "Cases & compliance").getByRole("link", { name: "Compliance", exact: true })).toHaveCount(0);
+    await expectNoConsoleStrip(page, "HR (member) › Cases & compliance");
 
     // Nowhere in the sidebar or its strips is People analytics offered.
     await expect(page.getByRole("link", { name: "People analytics", exact: true })).toHaveCount(0);
@@ -256,6 +260,7 @@ test.describe("HR, Finance and IT workspaces (plain member, pilot shell)", () =>
     await page.goto("/finance");
     const nav = menu(page, "Finance");
     await expect(nav).toBeVisible();
+    await expectNoConsoleStrip(page, "Finance (member) Overview");
     const work = workGroup(nav);
     // The ungated rows stay offered (no capability mirrors their reads).
     await expectSubsequence(work.getByRole("link"), ["Ledger", "Payables", "Treasury & assets", "Tax", "Close"]);
@@ -267,6 +272,7 @@ test.describe("HR, Finance and IT workspaces (plain member, pilot shell)", () =>
     await expectSubsequence(strip(page, "Close").getByRole("link"), ["Period close", "Ownership", "Settings"]);
     await expect(strip(page, "Close").getByRole("link", { name: "Consolidation", exact: true })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Financial statements", exact: true })).toHaveCount(0);
+    await expectNoConsoleStrip(page, "Finance (member) › Close");
   });
 
   test("IT: no IT accounts and no Workflows row", async ({ page, context }) => {
@@ -274,6 +280,7 @@ test.describe("HR, Finance and IT workspaces (plain member, pilot shell)", () =>
     await page.goto("/it");
     const nav = menu(page, "IT");
     await expect(nav).toBeVisible();
+    await expectNoConsoleStrip(page, "IT (member) Overview");
     const work = workGroup(nav);
     await expectSubsequence(work.getByRole("link"), ["Devices", "Network"]);
     await expect(work.getByRole("link", { name: "IT accounts", exact: true })).toHaveCount(0);
