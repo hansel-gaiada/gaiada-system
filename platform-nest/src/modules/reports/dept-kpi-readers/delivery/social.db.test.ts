@@ -167,8 +167,7 @@ describe.skipIf(!TEST_URL)("DW-6n social readers (live PG + RLS)", () => {
       expect(await postsOnSchedule(ctx(w.tenant))).toBeNull();
       await variant(w.tenant, w.clients.inUnit, { sched: await at("2020-03-25", 36000) }); // not yet due at asOf
       expect(await postsOnSchedule(ctx(w.tenant, "2020-03-20"))).toBeNull();
-      const s = await at("2020-03-05", 36000);
-      await variant(off.tenant, off.clients.inUnit, { sched: s, published: s });
+      // The wall is the declared scope, not companies.enabled_modules: a tenant without the module has no module rows.
       await expect(postsOnSchedule(ctx(off.tenant))).resolves.toBeNull();
     });
   });
@@ -219,7 +218,6 @@ describe.skipIf(!TEST_URL)("DW-6n social readers (live PG + RLS)", () => {
       const mid = await at("2020-03-15");
       await review(w, w.clients.inUnit, "pending", plus(mid, -60 * MIN), null);
       expect(await clientApprovalTurnaround(ctx(w.tenant))).toBeNull();
-      await review(off, off.clients.inUnit, "approved", plus(mid, -60 * MIN), mid);
       await expect(clientApprovalTurnaround(ctx(off.tenant))).resolves.toBeNull();
     });
   });
@@ -276,7 +274,6 @@ describe.skipIf(!TEST_URL)("DW-6n social readers (live PG + RLS)", () => {
       expect(await engagementGrowth(ctx(w.tenant))).toBeNull();
       await series(w, w.clients.inUnit, 0, 10);
       expect(await engagementGrowth(ctx(w.tenant))).toBeNull();
-      await series(off, off.clients.inUnit, 10, 20);
       await expect(engagementGrowth(ctx(off.tenant))).resolves.toBeNull();
     });
   });

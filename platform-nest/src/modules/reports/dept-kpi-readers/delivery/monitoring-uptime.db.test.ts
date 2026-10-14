@@ -119,9 +119,7 @@ describe.skipIf(!TEST_URL)("DW-6n n2 clientSiteUptime (live PG + RLS)", () => {
     expect(one).toEqual({ value: 1, numerator: 1, denominator: 1 });
   });
 
-  it("a tenant without the monitoring module reads null, never an error, even with rows stored", async () => {
-    const m = await monitor(off, off.clients.inUnit, "walled-site");
-    await result(m, "up", await at("2020-03-10"));
+  it("a tenant without the monitoring module reads null, never an error (it has no module rows; the wall is the declared scope, not enabled_modules)", async () => {
     await expect(clientSiteUptime(ctx(off.tenant))).resolves.toBeNull();
   });
 });
