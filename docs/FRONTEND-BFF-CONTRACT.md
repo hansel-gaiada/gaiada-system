@@ -7664,7 +7664,7 @@ Files: `dept-kpis.ts` (catalogue, slug resolution, condition rules; pure), `dept
 
 ### 40.4 Not in 4e-1
 - The UI: the targets screen and the KPI tiles (4e-2, with DW-3k and DW-3i).
-- Module readers for the other KPIs (one ticket each, owned by the module's tracker).
+- Module readers for the other KPIs (one ticket each, owned by the module's tracker). **DW-D25 (owner, 2026-10-14):** the delivery departments' readers are DW-6's, written as §40.5; the functional departments' and the GM's are DW-7's, written as §40.6. Each plugs into the catalogue's `reader` and returns `{value, numerator?, denominator?}` or null.
 - The department appraisal per cycle: HOD commentary and GM assessment (4e-3, its own section).
 - Condition snapshots, change notifications and the weekly digest (DW-4j, §43).
 
