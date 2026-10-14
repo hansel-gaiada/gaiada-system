@@ -173,7 +173,13 @@ export function bannerSentence(view: Pick<DeptKpisView, "unit" | "condition" | "
   if (view.condition === "on_track") return `${name}: ${label}`;
   const w = worstKpi(view.kpis);
   if (!w) return `${name}: ${label}`;
-  return `${name}: ${label} · ${w.label} ${formatKpiValue(w.value, w.unit)} against ${formatKpiValue(w.target, w.unit)}`;
+  return `${name}: ${label} · ${driverText(w)}`;
+}
+
+/** The KPI that drives a condition, in the banner's words: "Projects on time 81% against 85%". Shared by the department banner
+ *  and the company Overview's rows, so a condition reads the same everywhere (DW-3i2). */
+export function driverText(k: DeptKpi): string {
+  return `${k.label} ${formatKpiValue(k.value, k.unit)} against ${formatKpiValue(k.target, k.unit)}`;
 }
 
 /** The line under a tile's value: the target in force, or why there is no condition. */

@@ -221,10 +221,10 @@ describe("Company (widget)", () => {
 // ── Departments by condition ─────────────────────────────────────────────────────────────────────
 
 const standing = (id: string, name: string, condition: DeptStanding["condition"], withTarget = true): DeptStanding => ({
-  id, name, workspace: null, condition,
+  unit: { id, name }, workspace: null, condition,
   kpis: [{
     key: "projects-on-time", label: "Projects on time", unit: "percent", direction: "up_good", value: withTarget ? 0.62 : null, target: withTarget ? 0.85 : null,
-    tolerance: withTarget ? 0.1 : null, targetSource: withTarget ? "approved" : "none", condition, reason: withTarget ? null : "no_target",
+    tolerance: withTarget ? 0.1 : null, targetSource: withTarget ? "approved" : "none", condition, ...(withTarget ? {} : { reason: "no_target" as const }),
   }],
 });
 
@@ -246,19 +246,20 @@ describe("Departments (widget)", () => {
     expect([...block.querySelectorAll("[data-dept]")].map((n) => [n.getAttribute("data-dept"), n.getAttribute("data-condition")])).toEqual([
       ["d-web", "off_track"], ["d-soc", "at_risk"], ["d-cr", "on_track"], ["d-seo", "unavailable"],
     ]);
-    expect(within(block).getByText("Projects on time: 62% against a target of 85%", { selector: "li[data-dept=d-web] span" })).toBeInTheDocument();
+    expect(within(block).getByText("Projects on time 62% against 85%", { selector: "li[data-dept=d-web] span" })).toBeInTheDocument();
     const seo = block.querySelector("[data-dept=d-seo]") as HTMLElement;
-    expect(within(seo).getByText("No condition yet")).toBeInTheDocument();
-    expect(within(seo).getByText("No target set")).toBeInTheDocument();
-    expect(within(block).getByText("1 off track, 1 at risk, 1 on track, 1 with no condition yet, worst first")).toBeInTheDocument();
+    // The words are `deptKpiFormat`'s (DW-3i2): the same ones the department banner uses.
+    expect(within(seo).getByText("Unavailable")).toBeInTheDocument();
+    expect(within(seo).getByText("No KPI has an approved target yet")).toBeInTheDocument();
+    expect(within(block).getByText("1 off track, 1 at risk, 1 on track, 1 unavailable, worst first")).toBeInTheDocument();
     expect(within(block).getByRole("link", { name: "Web Dev" })).toHaveAttribute("href", "/departments/d-web");
   });
 
-  it("the live state until targets are approved: every department says No target set", async () => {
+  it("the live state until targets are approved: every department says why it has no condition", async () => {
     readDepts.mockResolvedValue({ kind: "ok", data: { departments: [standing("d-b", "B", "unavailable", false), standing("d-a", "A", "unavailable", false)] } });
     render(await Departments(props("departments")));
     const block = screen.getByRole("region", { name: "Departments by condition" });
-    expect(within(block).getAllByText("No target set")).toHaveLength(2);
+    expect(within(block).getAllByText("No KPI has an approved target yet")).toHaveLength(2);
     expect([...block.querySelectorAll("[data-dept]")].map((n) => n.getAttribute("data-dept"))).toEqual(["d-a", "d-b"]);
   });
 
