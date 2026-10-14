@@ -39,18 +39,18 @@ unfalsifiable after.
 
 | Owner | Route families | Suites driving the real endpoint |
 |---|---|---|
-| agency | `agency` | 21 |
+| agency | `agency` | 22 |
 | assistant | `assistant` | 15 |
 | automation-console | `admin/automation` | 3 |
-| clients | `clients` | 19 |
-| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `positions` · `role-grants` | 69 |
+| clients | `clients` | 20 |
+| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `positions` · `role-grants` | 70 |
 | finance | `finance` | 3 |
 | hr | `hr` | 11 |
 | invoice | `invoices` | 13 |
 | it | `it` | 4 |
 | knowledge | `knowledge` | 2 |
 | monitoring | `monitoring` | 3 |
-| pm | `pm` | 13 |
+| pm | `pm` | 14 |
 | reports | `checkins` · `reports` | 18 |
 | search | `search` | 28 |
 | social | `social` | 13 |
