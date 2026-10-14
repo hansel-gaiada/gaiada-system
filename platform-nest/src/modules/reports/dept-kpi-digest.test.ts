@@ -185,7 +185,7 @@ describe("the notice (§43.8): title, body, href, severity", () => {
   const thisWeek = web(
     [
       read({ key: "projects-on-time", label: "Projects on time", value: 0.79, target: 0.85, tolerance: 0.05, targetSource: "approved", condition: "at_risk" }),
-      unavailable("requests-within-sla", "no_reader", "Requests answered within the SLA"),
+      unavailable("requests-within-sla", "no_reader", "Requests delivered by the date needed"),
       unavailable("client-site-uptime", "no_reader", "Client site uptime"),
       read({ key: "reopened-work-rate", label: "Reopened work rate", direction: "down_good", value: 0.03, target: 0.05, tolerance: 0.03, targetSource: "approved", condition: "on_track" }),
     ],

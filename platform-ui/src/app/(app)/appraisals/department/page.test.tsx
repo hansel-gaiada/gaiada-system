@@ -41,7 +41,7 @@ const kpi = (key: string, label: string, condition: DeptKpi["condition"], over: 
 });
 const KPIS: DeptKpi[] = [
   kpi("projects-on-time", "Projects on time", "at_risk"),
-  kpi("requests-within-sla", "Requests answered within the SLA", "on_track"),
+  kpi("requests-within-sla", "Requests delivered by the date needed", "on_track"),
   kpi("client-site-uptime", "Client site uptime", "unavailable", { value: null, reason: "no_reader" }),
   kpi("reopened-work-rate", "Reopened work rate", "off_track", { direction: "down_good", value: 0.2, target: 0.05 }),
 ];
