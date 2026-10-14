@@ -55,7 +55,7 @@ describe("useWorkspaceShell", () => {
     expect(screen.getByTestId("view")).toHaveTextContent("company");
     expect(screen.getByTestId("row")).toHaveTextContent("organization");
     unmount();
-    nav.pathname = "/notifications";
+    nav.pathname = "/appraisals/department";
     render(inShell(<Probe />));
     expect(screen.getByTestId("view")).toHaveTextContent("workspace:web-dev");
     expect(screen.getByTestId("row")).toHaveTextContent("none");

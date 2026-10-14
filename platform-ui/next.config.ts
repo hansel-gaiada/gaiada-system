@@ -55,6 +55,15 @@ const nextConfig: NextConfig = {
     // (Named `middlewareClientMaxBodySize` before Next 16.)
     proxyClientMaxBodySize: 520 * 1024 * 1024,
   },
+  // DW-8b: one Inbox. `/notifications` was a second page over the same feed; it now sends people to
+  // `/me/inbox`. Next carries the query string through (`?filter=unread` keeps its meaning), and
+  // backend-generated hrefs that still say `/notifications` land on the inbox. A config redirect, not
+  // a page-level `redirect()`: `app/(app)/loading.tsx` exists, and a `redirect()` under a loading
+  // boundary streams a 1 s meta refresh and forces a full reload. Temporary (307), not permanent, so
+  // browsers do not cache it.
+  async redirects() {
+    return [{ source: "/notifications", destination: "/me/inbox", permanent: false }];
+  },
   // FRAMING (B0, docs/plans/2026-10-11-erp-names-on-gaiada-com.md §3). On `erp.gaiada.com` every
   // `*.gaiada.com` page is same-site, and nginx's `X-Frame-Options: SAMEORIGIN` covers only requests
   // that pass through nginx. Set here too, so the app refuses to be framed by anything but itself

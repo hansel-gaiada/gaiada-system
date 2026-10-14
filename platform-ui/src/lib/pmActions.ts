@@ -477,7 +477,7 @@ export async function unfollowTask(taskId: string): Promise<PmResult> {
 export async function runTracker(taskId: string): Promise<PmResult> {
   const r = await send(`/pm/tasks/${taskId}/tracker/run`, "POST", {});
   revalTask(taskId);
-  revalidatePath("/notifications");
+  revalidatePath("/me/inbox");
   return r;
 }
 export async function confirmSuggestion(taskId: string, id: string): Promise<PmResult> {

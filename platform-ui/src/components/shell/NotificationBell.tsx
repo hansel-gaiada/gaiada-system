@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Icon } from "./icons";
 
 // DW-2c: the workspace top bar's bell. A disclosure button opens a small pop-over with the latest unread
-// notifications and "Open inbox"; the classic bell stays a plain link to /notifications.
+// notifications and "Open inbox"; the classic bell stays a plain link to /me/inbox.
 //
 // The server reads the notifications (the same read the count always used) and hands over the count and
 // the newest few. `unread === null` means the read failed: no count, and the pop-over says so, never a
@@ -87,7 +87,7 @@ export function NotificationBell({ unread, items }: { unread: number | null; ite
               ))}
             </ul>
           )}
-          <Link href="/notifications" className="erp-bell__all" onClick={() => setOpen(false)}>Open inbox</Link>
+          <Link href="/me/inbox" className="erp-bell__all" onClick={() => setOpen(false)}>Open inbox</Link>
         </div>
       )}
     </div>

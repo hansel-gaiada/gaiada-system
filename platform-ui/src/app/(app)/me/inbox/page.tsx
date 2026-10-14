@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
-import { getMe } from "@/lib/platform";
+import { getMe, PlatformError } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { listNotifications, type NotificationItem } from "@/lib/entities";
-import { markAllReadAction, markReadAction } from "../../notifications/actions";
+import { markAllReadAction, markReadAction } from "./actions";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { MailThreadPanel } from "@/components/mail/MailThreadPanel";
 
@@ -16,10 +16,10 @@ import { MailThreadPanel } from "@/components/mail/MailThreadPanel";
 // notification feed, plus the mail thread for whichever item you open. That is the honest shape of
 // an employee inbox on this backend, and it is why a notification row is the unit here.
 //
-// It reuses `/notifications`' server actions rather than forking them, so "read" means the same
-// thing in both places and there is one mark-read implementation. `/notifications` remains the
-// cross-cutting feed reachable from the bell; this is the same feed addressed to the employee, in
-// the section where they look for their own things.
+// DW-8b: this is the ONE inbox. `/notifications` used to render the same feed with severity and
+// unread filters; those filters live here now (same `?filter=` values, so old links keep their
+// meaning) and `/notifications` redirects here (next.config.ts), query string included. The bell and
+// the top bars point here too. The mark-read actions sit next to this page (`./actions`).
 //
 // Only notifications carrying an entityType/entityId can have a thread; opening one sets ?thread=
 // and renders a SINGLE MailThreadPanel rather than one panel per row (which would be N BFF reads
@@ -28,6 +28,17 @@ import { MailThreadPanel } from "@/components/mail/MailThreadPanel";
 type SP = Promise<{ filter?: string; thread?: string }>;
 
 type Severity = "info" | "warning" | "critical";
+type Filter = "all" | "unread" | Severity;
+const FILTERS: Filter[] = ["all", "unread", "critical", "warning", "info"];
+
+/** `/me/inbox` with the filter kept (and a thread open, when given). `all` is the bare URL. */
+function inboxHref(filter: Filter, thread?: string): string {
+  const q = new URLSearchParams();
+  if (filter !== "all") q.set("filter", filter);
+  if (thread) q.set("thread", thread);
+  const s = q.toString();
+  return s ? `/me/inbox?${s}` : "/me/inbox";
+}
 const SEVERITY_LABEL: Record<Severity, string> = { critical: "Critical", warning: "Warning", info: "Info" };
 // Rust (--status-critical) is reserved as the only-signal colour for real risk (the WSUX-11 rule);
 // `warning` takes the same bronze accent the rest of the app uses for attention states.
@@ -53,25 +64,49 @@ function when(iso: string): string {
 }
 
 export default async function MeInboxPage({ searchParams }: { searchParams: SP }) {
-  const { filter = "all", thread } = await searchParams;
+  const { filter: rawFilter, thread } = await searchParams;
+  const filter: Filter = FILTERS.includes(rawFilter as Filter) ? (rawFilter as Filter) : "all";
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
   if (!tenant) return <EmptyNote>Select a company from the top bar.</EmptyNote>;
 
-  const all = await listNotifications(userId, tenant);
+  let all: NotificationItem[];
+  try {
+    all = await listNotifications(userId, tenant);
+  } catch (e) {
+    // listNotifications already absorbs 404/403 (module not enabled) into an empty list, so a throw
+    // here means the backend was unreachable: say so rather than render a misleading empty inbox.
+    return (
+      <EmptyNote>
+        {e instanceof PlatformError
+          ? "Couldn't reach your inbox right now. Try again shortly."
+          : "Your inbox is temporarily unavailable."}
+      </EmptyNote>
+    );
+  }
   const unreadCount = all.filter((n) => !n.read_at).length;
-  const items = filter === "unread" ? all.filter((n) => !n.read_at) : all;
+  const bySeverity = { info: 0, warning: 0, critical: 0 } as Record<Severity, number>;
+  for (const n of all) bySeverity[severityOf(n)] += 1;
+  const items = all.filter((n) => {
+    if (filter === "all") return true;
+    if (filter === "unread") return !n.read_at;
+    return severityOf(n) === filter;
+  });
 
   const open = thread ? all.find((n) => n.id === thread) ?? null : null;
   const openEntity = open?.payload?.entityType && open?.payload?.entityId
     ? { entityType: open.payload.entityType, entityId: open.payload.entityId }
     : null;
 
-  const tabs: { key: string; label: string }[] = [
+  // Severity tabs only appear when there is something of that severity, as /notifications did.
+  const tabs: { key: Filter; label: string }[] = [
     { key: "all", label: `All${all.length ? ` (${all.length})` : ""}` },
     { key: "unread", label: `Unread${unreadCount ? ` (${unreadCount})` : ""}` },
+    ...(bySeverity.critical > 0 ? [{ key: "critical" as const, label: `Critical (${bySeverity.critical})` }] : []),
+    ...(bySeverity.warning > 0 ? [{ key: "warning" as const, label: `Warning (${bySeverity.warning})` }] : []),
+    ...(bySeverity.info > 0 ? [{ key: "info" as const, label: `Info (${bySeverity.info})` }] : []),
   ];
 
   return (
@@ -80,7 +115,7 @@ export default async function MeInboxPage({ searchParams }: { searchParams: SP }
         {tabs.map((t) => (
           <Link
             key={t.key}
-            href={`/me/inbox${t.key === "all" ? "" : "?filter=unread"}`}
+            href={inboxHref(t.key)}
             style={{
               font: filter === t.key ? "500 13px var(--font-body)" : "400 13px var(--font-body)",
               color: filter === t.key ? "var(--erp-ink)" : "var(--erp-ink-50)",
@@ -102,7 +137,11 @@ export default async function MeInboxPage({ searchParams }: { searchParams: SP }
 
       {items.length === 0 ? (
         <EmptyNote>
-          {filter === "unread" ? "Nothing unread — you are up to date." : "Nothing has arrived for you yet."}
+          {all.length === 0
+            ? "Nothing has arrived for you yet."
+            : filter === "unread"
+              ? "Nothing unread — you are up to date."
+              : "Nothing matches this filter."}
         </EmptyNote>
       ) : (
         <div style={{ border: "0.5px solid var(--erp-hairline)" }}>
@@ -154,7 +193,7 @@ export default async function MeInboxPage({ searchParams }: { searchParams: SP }
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
                   {hasEntity && (
                     <Link
-                      href={isOpen ? "/me/inbox" : `/me/inbox?thread=${n.id}`}
+                      href={inboxHref(filter, isOpen ? undefined : n.id)}
                       className="lux-btn lux-btn--sm"
                     >
                       {isOpen ? "Hide replies" : "Replies"}

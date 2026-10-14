@@ -21,7 +21,7 @@ export async function markRead(id?: string): Promise<ActionState> {
   const path = id ? `/api/${tenant}/notifications/${id}/read` : `/api/${tenant}/notifications/read-all`;
   try {
     await platformFetch(path, userId, { method: "POST" });
-    revalidatePath("/notifications");
+    revalidatePath("/me/inbox");
     return { ok: true };
   } catch (e) {
     if (e instanceof PlatformError && (e.status === 404 || e.status === 405)) {

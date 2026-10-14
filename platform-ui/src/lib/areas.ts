@@ -45,7 +45,6 @@ const PERSONAL: AreaRule[] = [
   rule("/approvals", "personal", true),
   rule("/calendar", "personal"),
   rule("/meetings", "personal", true),
-  rule("/notifications", "personal"),
   rule("/timesheets", "personal"),
   rule("/me", "personal"),
   rule("/me/inbox", "personal"),

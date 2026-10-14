@@ -40,7 +40,7 @@ describe("WorkspaceTabStrip", () => {
 
   it("draws nothing when no row holds the page", () => {
     // A personal page no sidebar row lists: the shell keeps the home workspace, and no row holds it.
-    nav.pathname = "/notifications";
+    nav.pathname = "/appraisals/department";
     const { container } = render(inShell(<WorkspaceTabStrip />));
     expect(container).toBeEmptyDOMElement();
   });

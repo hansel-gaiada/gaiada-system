@@ -50,7 +50,7 @@ describe("NotificationBell", () => {
       "Approval requested: Q4 budget5 min ago",
       "Mia mentioned you3 h ago",
     ]);
-    expect(within(panel).getByRole("link", { name: "Open inbox" })).toHaveAttribute("href", "/notifications");
+    expect(within(panel).getByRole("link", { name: "Open inbox" })).toHaveAttribute("href", "/me/inbox");
   });
 
   it("says Nothing new, with the link, when there is no unread", () => {
@@ -59,7 +59,7 @@ describe("NotificationBell", () => {
     fireEvent.click(bell());
     const panel = pop() as HTMLElement;
     expect(within(panel).getByText("Nothing new")).toBeInTheDocument();
-    expect(within(panel).getByRole("link", { name: "Open inbox" })).toHaveAttribute("href", "/notifications");
+    expect(within(panel).getByRole("link", { name: "Open inbox" })).toHaveAttribute("href", "/me/inbox");
   });
 
   it("shows no count and says it could not load when the read failed, never a 0", () => {

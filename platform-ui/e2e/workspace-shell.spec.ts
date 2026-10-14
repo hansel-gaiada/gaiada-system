@@ -227,7 +227,7 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
     await press(bell);
     const pop = page.getByRole("region", { name: "Notifications" });
     await expect(pop).toBeVisible();
-    await expect(pop.getByRole("link", { name: "Open inbox" })).toHaveAttribute("href", "/notifications");
+    await expect(pop.getByRole("link", { name: "Open inbox" })).toHaveAttribute("href", "/me/inbox");
     await page.keyboard.press("Escape");
     await expect(pop).toBeHidden();
     await expect(bell).toBeFocused();
