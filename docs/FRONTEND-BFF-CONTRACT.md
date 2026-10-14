@@ -7679,7 +7679,7 @@ Files: `dept-appraisals.ts` (the reads, the writes and the pure helpers), `dept-
 - **UI.** `/appraisals/department?unit=&cycle=`: the picker reads `GET /dept-appraisals/cycles` through an honest reader (ok / forbidden / error). A refusal is said as a refusal and a failed read as a failure, never shown as an empty picker; "no cycles yet" is said only when the read was allowed and empty. The forms mirror the capabilities `reports.dept_kpi_target.appraisal_comment` (`canInUnit` over the unit's path, or company-wide `can`) and `.appraisal_assess` (`can`), and appear only while the cycle is not closed. The demo (`demoDeptAppraisals.ts`) serves the cycles list with the same gate, `demo-cycle-h2` (open) and `demo-cycle-h1` (closed, with a written commentary and assessment).
 - **Not changed.** The capability inventory (`docs/modules/CAPABILITY-INVENTORY.md`) is unchanged: no MCP tool is registered, and the new HTTP suite names no registered route family in its URLs, so the generator's driver count stays as committed.
 
-## 42. Google Drive: connect, pick and attach (DW-6i, 2026-10-14) — `platform-nest/src/core/google-drive/` (new) — **STATUS: CONTRACT (nothing built; live proof waits for the Drive OAuth client, DW-11 item 6)**
+## 42. Google Drive: connect, pick and attach (DW-6i, 2026-10-14) — `platform-nest/src/core/google-drive/` (new) — **STATUS: BACKEND BUILT, PROTOTYPED (Google stubbed; live proof waits for DW-11 item 6)**
 
 Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.2 (DW-6i) and §14.1 (launch and return). A person connects their own Google Drive, picks a file with Google's own Picker, and the file is attached to a PM task as a link. The file stays in Drive; the ERP keeps a reference to it. The owner chose (2026-10-14) to build this before the OAuth client exists, against stubs, so that going live needs only the client.
 
@@ -7766,3 +7766,67 @@ Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.2 (DW-6i) and §14.1 
 - **UI vitest:** the connection block's four states; the attach button shown only when connected and configured; the Picker loader wired lazily, tested with a fake `gapi` and `google.picker`; the refusal sentences.
 - **Live proof** waits for DW-11 item 6. It means connecting one real account, picking one file, attaching it to a task and opening it from the task.
 
+
+### 42.8 As built (backend, DW-6i, 2026-10-14)
+
+Google is STUBBED at `fetch` in every test; nothing here has met real Google (DW-11 item 6). The UI of §42.6 is a later ticket.
+
+**Where it is.**
+- `core/google-drive/` (new):
+  - `surface.ts`: registers the `google_drive` surface (`module: null`, scopes `drive.file` + `openid` + `email`, `ownerKind: "user"`, `authz` = `integration_connection` · `create`, the self-service action `connectionAction("create", me, me)` gives for your own row). It registers when the file is imported, and the controller imports it.
+  - `client.ts`: the one Drive client (`files.get`), the only file in the directory that touches the network.
+  - `service.ts`: start, callback, disconnect, the live token and refresh, the Picker answer, attach.
+  - `google-drive.controller.ts`: the routes and every authorisation (`GoogleDriveController`, and `GoogleDriveOauthCallbackController` for the one tenant-agnostic callback path).
+- `core/google-oauth/` (shared, extended compatibly):
+  - `token-endpoint-client.ts`: `TokenResponse` gains `idToken`; `exchangeAuthorizationCode`, `refreshAccessToken`, `revokeToken` and `buildAuthorizeUrl` take an optional `client` (a surface's own OAuth client). With none given they read `config.google` exactly as before.
+  - `id-token.ts` (new, pure): reads the account from the ID token (see "ID token" below).
+  - `hosts.ts`: `GOOGLE_DRIVE_API_HOST` and `isDriveApiUrl` (exact host `www.googleapis.com`, https, `/drive/v3/`, no userinfo, default port).
+- `core/file-reference.ts` (new): the reference-attach write extracted from `POST /files` (the scrub of name and link, the 2048 cap, the INSERT, the `attached` activity row). `files.controller` calls it with no options; `files-reference.test.ts` pins its behaviour. Drive's attach calls it with `rejectDuplicateUrl`, which takes an advisory lock so two simultaneous attaches of one file cannot both pass.
+- `config.ts`: `config.googleDrive` (`clientId`, `clientSecret`, `redirectUri`, `pickerApiKey`, `pickerAppId`) and `googleDriveConfigured()` (all five, or false). No defaults. `app.module.ts` registers both controllers. No migration: `google_drive` was already an allowed provider, and an `owner_kind = 'user'` row already fits.
+- Env: `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_DRIVE_REDIRECT_URI`, `GOOGLE_PICKER_API_KEY` and `GOOGLE_PICKER_APP_ID` are documented in `platform-nest/.env.example` and `infra/compose/.env.example`, and passed through in `infra/compose/docker-compose.vps.yml` beside `GOOGLE_OAUTH_*` (which are passed through there).
+
+**Routes** (no new Cerbos kind; no policy change):
+
+| Method | Path | Answer | Authz |
+|---|---|---|---|
+| GET | `/api/:t/integrations/google-drive/oauth/start` | `{ authUrl }` | `integration_connection` · `create`, `ownerId` = the caller |
+| GET | `/api/google-drive/oauth/callback?code&state` (or `error`) | `{ status: "connected", accountEmail }` or `{ status: "denied", reason: "drive_consent_denied" }` | the surface's `authz`, against the TENANT IN THE VERIFIED STATE, before the state is spent |
+| DELETE | `/api/:t/integrations/google-drive` | `{ disconnected, revokedAtGoogle }` | `integration_connection` · `delete`, own row |
+| GET | `/api/:t/integrations/google-drive/picker` | `{ configured, connected, needsReconnect, accountEmail, accessToken, expiresAt, apiKey, appId }`, `Cache-Control: no-store` | `integration_connection` · `read`, own row |
+| POST | `/api/:t/integrations/google-drive/attach` | 201, the file row | `file` · `create`, then `task` · `read`, as `POST /files` |
+
+**Errors.** Each puts its token at the START of `message` and repeats it in `reason`: `drive_not_configured` (503), `drive_state_invalid` (400), `drive_exchange_failed` (502), `drive_not_connected` (409), `drive_needs_reconnect` (409), `drive_file_not_found` (404), `drive_unavailable` (502), `drive_already_attached` (409), `target_not_found` (404), `unsupported_target_type` (400), `bad_drive_file_id` (400) and `user_required` (400).
+
+**Docs used** (all read on 2026-10-14; the fetch tool summarises a page, so the quoted lines are its report of each page):
+- OAuth 2.0 for web server apps, https://developers.google.com/identity/protocols/oauth2/web-server: the token response is `access_token`, `expires_in`, `refresh_token` ("only present ... if you set the `access_type` parameter to `offline`"), `scope` and `token_type` (always `Bearer`). Revoke is `POST https://oauth2.googleapis.com/revoke`, form-encoded, body parameter `token`, success is HTTP 200. `prompt=consent` is what re-issues a refresh token.
+- OpenID Connect, https://developers.google.com/identity/openid-connect/openid-connect: the token response also carries `id_token`. `iss` must be `https://accounts.google.com` or `accounts.google.com`, `aud` must be the app's client id, and `exp` must be in the future. `email` is present only when the `email` scope was granted, and `sub` is the stable identifier.
+- Drive v3 `files.get`, https://developers.google.com/workspace/drive/api/reference/rest/v3/files/get: `GET https://www.googleapis.com/drive/v3/files/{fileId}`. That page does not document `fields`; it is documented at https://developers.google.com/workspace/drive/api/guides/fields-parameter (a comma-separated list).
+- The File resource, https://developers.google.com/workspace/drive/api/reference/rest/v3/files: `id`, `name`, `mimeType` and `webViewLink` ("Output only. A link for opening the file in a relevant Google editor or viewer in a browser").
+- Drive errors, https://developers.google.com/workspace/drive/api/guides/handle-errors: 401 (`authError`), 403 (usage limits and privileges), and 404 `notFound` ("the user doesn't have read access to a file, or the file doesn't exist"). The body is `{ error: { code, message, errors: [{ reason }] } }`.
+
+**Scope classification: `drive.file` is NOT restricted (it is not even sensitive).**
+- Source: https://developers.google.com/workspace/drive/api/guides/api-specific-auth, read 2026-10-14. It lists `drive.file` under "Non-sensitive scopes", with `drive.appdata`, `drive.appfolder` and `drive.install`. "Sensitive" holds `drive.apps.readonly`. "Restricted" holds `drive`, `drive.readonly`, `drive.activity`, `drive.activity.readonly`, `drive.meet.readonly`, `drive.metadata`, `drive.metadata.readonly` and `drive.scripts`. The `drive.file` row reads: "Create new Drive files, or modify existing files, that you open with an app".
+- Cross-check: https://developers.google.com/identity/protocols/oauth2/scopes (Drive API v3) describes `drive.file` as "See, edit, create, and delete only the specific Google Drive files you use with this app" and `drive` as "See, edit, create, and delete all of your Google Drive files". That page has no sensitivity column, so the classification above rests on the Drive page alone.
+- So the build needed no stop. A test (`google-drive.test.ts`) pins that the surface asks for no Drive scope wider than `drive.file`.
+
+**ID token.** The shared client had no ID-token handling, so `id-token.ts` adds it. The callback reads the account's email (and `sub`) from the ID token the token endpoint returned to OUR authenticated POST, and checks `iss` (the two documented spellings), `aud` (our Drive client id), `exp`, and that `sub` and `email` are present. It does NOT verify the JWT signature: Google's own page says a token that came directly from the token endpoint over HTTPS, in a request carrying the client secret, is authentic without it. That is the only way a token reaches the function; it is never taken from a browser. The ID token is read once and dropped (never stored, never returned). Any failure is `drive_exchange_failed` and seals nothing.
+
+**Deviations from §42** (each is deliberate):
+1. **The callback answers JSON; it does not redirect.** §42.3 says it redirects "as search's callback does", but search's backend callback does not. Google's redirect is a top-level navigation that cannot carry the `Authorization` header `AuthGuard` needs, so the URL registered as `redirect_uri` is a page the FRONT END owns. That page calls the backend callback as an ordinary authenticated request and then redirects with the coarse flag (`platform-ui/src/app/api/search/google/callback/route.ts` is that page for search). The Drive UI ticket must do the same. The backend answers the coarse outcome (`connected` or `denied`) and never a token.
+2. **Consent denied is a 200 `{ status: "denied", reason: "drive_consent_denied" }`**, as search's is, not an error: pressing Cancel is a normal OAuth outcome. The same answer covers a granular-consent token that lacks `drive.file` (the person unticked Drive access): it cannot power the Picker, so nothing is sealed. `drive_state_invalid` and `drive_exchange_failed` are errors (400, 502).
+3. **The Picker answer has one extra field, `needsReconnect`** (true when the connection exists but Google refused it), so the UI can show "Reconnect" without a second read. `connected` is false then.
+4. **"needs_reconnect" is not a new status.** The vault's status CHECK has no such value, so the row is set to status `error` (the vault's own state for a credential that stopped working) with `meta.driveNeedsReconnect = true`. The tokens are kept (a read path must not shred a credential). A successful reconnect clears the flag.
+5. **A failed refresh marks the row only when Google REFUSES it** (the token endpoint answers 4xx, such as `invalid_grant`, or there is no refresh token to use). A token-endpoint outage (network, 5xx) answers `502 drive_unavailable` and does not mark the row, since the grant may be fine.
+6. **Attach: a Drive 401 earns one forced refresh and one retry** before `409 drive_needs_reconnect` (the token may have been revoked or rotated since it was stored). A Drive 403 that is a usage limit is `502 drive_unavailable`; any other 403 is `404 drive_file_not_found` (with `drive.file`, a file the person did not pick answers as 404 or 403).
+7. **Added error tokens**: `drive_not_connected` (409, no usable connection), `unsupported_target_type`, `bad_drive_file_id` and `target_not_found`. The Drive link is accepted only when it is `https` on a Google host (it is opened in a new tab).
+8. **Order of the attach checks:** `file` · `create`; `task` · `read` (with the id when it is usable); then the `targetType` list of one. So a caller who may not read tasks is refused 403 even for an unsupported `targetType`. The task must exist in the tenant (404 `target_not_found`, which is also what another tenant's task answers); only then is `fileId` validated.
+9. **`task` means the core `tasks` row**, the one `POST /files` takes as `targetType: "task"` and the PM task page attaches to (`TaskDetailView`), not `pm_tasks`.
+10. **The attach answer is the file row in the shape `GET /files` lists** (snake_case: `id`, `filename`, `content_type`, `byte_size`, `scrubbed`, `uploader_id`, `created_at`) plus `url`, `target_entity_type` and `target_entity_id`. The `attached` activity row carries `source: "google_drive"` and `driveFileId` beside the usual `fileId` and `filename`; never a token.
+11. **`Pragma: no-cache`** is sent beside `Cache-Control: no-store` on the Picker answer.
+12. **The Drive call and the token calls use `config.google.timeoutMs`** and the shared `config.google` endpoints. Drive has no endpoint seam of its own: its host is a constant, and `isDriveApiUrl` refuses any other.
+
+**For the UI ticket.**
+- `GET /api/:t/files` does not return `url`, so an attachment cannot be opened from the list yet. `files.controller` was left unchanged on purpose (this ticket keeps it identical). The UI ticket needs `url` added to that SELECT, and a Drive mark can then be derived from the link's host.
+- The Picker script and the CSP note of §42.6 are unchanged and wait for the live proof.
+
+**Tests** (the Linux gate; Google stubbed at `fetch`): `core/google-drive/google-drive.http.test.ts` (Postgres and Cerbos), `google-drive.test.ts`, `client.test.ts`, `egress.test.ts`, `core/google-oauth/id-token.test.ts`, the extended `core/google-oauth/egress.test.ts`, and one added case in `core/files-reference.test.ts`. The secret rule is asserted twice: over every response the HTTP suite received (an access token only in a Picker answer, nothing else anywhere) and over every table the run wrote (activities, events, files, state rows, the connection's non-secret columns). The vault columns hold only `enc:v1:` envelopes. The capability inventory (`docs/modules/CAPABILITY-INVENTORY.md`) is unchanged: `inv-drivers.mjs` reports no owner row that differs.
