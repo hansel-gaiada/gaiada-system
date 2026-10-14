@@ -67,7 +67,6 @@ function ratioWords(kpiKey: string, n: number, d: number): string {
     case "projects-on-time": return `${nf(n)} of ${nf(d)} milestones hit`;
     case "reopened-work-rate": return `${nf(n)} of ${nf(d)} tasks reopened`;
     case "check-in-compliance": return `${nf(n)} of ${nf(d)} check-ins`;
-    case "asset-requests-on-time": return `${nf(n)} of ${nf(d)} requests on time`;
     default: return `${nf(n)} of ${nf(d)}`;
   }
 }

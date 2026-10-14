@@ -363,18 +363,29 @@ describe("GET dept-kpis/drivers", () => {
     expect(j.drivers![0].value).toBeLessThan(j.drivers![1].value); // up-is-good: the lowest first
     expect(j.drivers!.reduce((n, d) => n + (d.denominator! - d.numerator!), 0)).toBe(4); // 21 due - 17 hit
   });
-  it("gives Creatives' off-track KPI two people, worst first, and the same KPI is off track in the unit read", () => {
+  it("never shows what the server cannot answer: Creatives' off-track module KPI has no breakdown (no_drivers), though it is off track in the unit read", () => {
     const j = drivers("dept-2", "asset-requests-on-time").json as View;
-    expect(j.drivers!.map((d) => [d.kind, d.name, d.numerator, d.denominator])).toEqual([
-      ["person", "Putu Ayu Lestari", 5, 9],
-      ["person", "Komang Adi Wirawan", 7, 10],
-    ]);
+    expect(j.drivers).toBeNull();
+    expect(j.reason).toBe("no_drivers");
     const view = get("", { unitNodeId: "dept-2", ...Q }).json as { kpis: Kpi[] };
     expect(view.kpis.find((k) => k.key === "asset-requests-on-time")!.condition).toBe("off_track");
+  });
+  it("has drivers only for the report-fact KPIs that have them: Web Dev's projects on time and reopened work, nothing else", () => {
+    for (const unit of ["dept-1", "dept-2", "dept-3", "dept-4", "dept-5"]) {
+      const kpis = (get("", { unitNodeId: unit, ...Q }).json as { kpis: Kpi[] }).kpis;
+      for (const k of kpis) {
+        const j = drivers(unit, k.key).json as View;
+        const expected = unit === "dept-1" && (k.key === "projects-on-time" || k.key === "reopened-work-rate");
+        expect(Array.isArray(j.drivers), `${unit} ${k.key}`).toBe(expected);
+      }
+    }
+    const reopened = (drivers("dept-1", "reopened-work-rate").json as View).drivers!;
+    expect(reopened.map((d) => [d.kind, d.id])).toEqual([["person", "u-dev"]]);
   });
   it("answers a module KPI with no_reader and a KPI that has a reader and no breakdown with no_drivers; both have drivers null", () => {
     expect(drivers("dept-1", "client-site-uptime").json).toMatchObject({ drivers: null, reason: "no_reader" });
     expect(drivers("dept-2", "assets-delivered").json).toMatchObject({ drivers: null, reason: "no_reader" });
+    expect(drivers("dept-1", "requests-within-sla").json).toMatchObject({ drivers: null, reason: "no_drivers" });
     expect(drivers("dept-5", "utilization").json).toMatchObject({ drivers: null, reason: "no_drivers" });
     expect(drivers("dept-5", "departments-in-good-condition").json).toMatchObject({ drivers: null, reason: "no_drivers" });
     expect(drivers("dept-3", "client-reports-on-time").json).toMatchObject({ drivers: null, reason: "no_drivers" });
@@ -412,7 +423,7 @@ describe("GET dept-kpis/drivers", () => {
   it("changes no condition, value, lead or target: the unit read is as before, and the route is reached through getDemoResponse", () => {
     const j = get("", { unitNodeId: "dept-1", ...Q }).json as { condition: string; kpis: Kpi[] };
     expect(j.condition).toBe("at_risk");
-    const r = getDemoResponse("GET", `${base}/drivers?unitNodeId=dept-2&kpiKey=asset-requests-on-time&periodKind=month&start=2026-10-14`, "demo-hansel");
+    const r = getDemoResponse("GET", `${base}/drivers?unitNodeId=dept-1&kpiKey=projects-on-time&periodKind=month&start=2026-10-14`, "demo-hansel");
     expect(r.status).toBe(200);
     expect((r.json as View).drivers).toHaveLength(2);
   });
