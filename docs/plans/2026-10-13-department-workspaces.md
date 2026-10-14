@@ -431,7 +431,7 @@ that leaves is not read either.
 | | The business (headline KPIs) | **Covered by Company** (milestones hit, utilization), which links the Company report, where the cockpit itself said the further metrics sit. For a person who gets the company figures |
 | | Departments (strip) | **Covered by Departments by condition** (§3.5 item 3), with Oversight > Departments holding the report metrics (All metrics). For a person who gets the company figures; a lead has no such block, so the strip stays for them |
 | | Client monitoring | **Not covered.** No block shows it (the GM's Pulse tiles stay planned) and the Office of the GM has no Monitoring tab: that row is Web Dev's |
-| | Money (revenue, net margin, overdue receivables) | **Covered by Company's money part**, which has the card's own gate and rules: revenue with its net amount, overdue receivables with the 90+ days line, the no-books note, and a Finance link. Only the net margin rate (net over revenue) is not drawn; see the decision below |
+| | Money (revenue, net margin, overdue receivables) | **Covered by Company's money part**, which has the card's own gate and rules: revenue with its net amount, overdue receivables with the 90+ days line, the no-books note, and a Finance link. The net margin rate (net over revenue) is drawn too, since DW-D22 (DW-3z2); see the decision below |
 | HR | "You serve HR for N companies" note | **Not covered.** No block or tab says which companies the person serves |
 | | People, Departments, Leave pending, Open cases | **Not covered.** HR's Pulse tiles are DW-7e |
 | | Leave, Attendance, Onboarding, Cases cards | **Reachable at** Time > Leave, Time > Attendance, People > Onboarding, Cases & compliance > Cases. Each card is a link and one line |
@@ -451,9 +451,8 @@ that leaves is not read either.
 - HR: the note and the four counts. Finance: the four totals, Integrity and the close gate. IT: its whole page, which is why `/it` is left alone.
 - No page's "More from" section disappears whole. DW-7e's Pulse tiles are what let HR's counts, Finance's verdicts and IT's page go.
 
-**For the owner to decide.** The cockpit's Money card drew a **net margin rate**. Company shows the revenue and its net amount, not the
-ratio, so after this ticket the rate is one link away (Finance > Financial statements). If the owner wants the rate on the Overview,
-it is one more tile in the Company block (DW-3i), and nothing else changes.
+**Decided (DW-D22, owner 2026-10-14).** The cockpit's Money card drew a **net margin rate**. The Company block now draws it as its own
+"Net margin" tile (DW-3z2), net over revenue from the same P&L read, and "No data" when revenue is zero.
 
 **Actions.** No button or form lived only in a removed section: every removed card held links to a row or tab, and the page's own actions (the settings and ownership links, the area links) are those tabs.
 
@@ -1108,6 +1107,7 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 |---|---|---|
 | DW-D20 | DW-2g found that a member who types `/admin` gets an empty Admin area (the pages render and the server refuses each read). Should such a page be reachable? | **Owner (2026-10-13): a page is reachable only by those allowed to use it; everyone else gets a 404.** Applied to the whole Admin area (Settings `/admin/*`, Group `/group`, `/group/reports`, `/rollups`, Platform `/systems/*`), each page by its own gate, and the Settings tabs offer only the pages the person may open. The server stays the authority |
 | DW-D21 | Every department's Project Management "Board" tab was labelled "Overview" (PM_TERMS.board, owner decision 2026-08-10), right under the workspace's own Overview row. Rename it back? | **Owner (2026-10-13): rename it back to "Board".** "Overview" then means only the workspace dashboard (DW-D12). URLs and keys are unchanged |
+| DW-D22 | DW-3z removed the GM cockpit's money card from under the company Overview; the Company block showed revenue and overdue receivables but not the card's net margin rate. Add it? | **Owner (2026-10-14): add it.** The Company block shows the net margin rate (net over revenue, from the same P&L read; a dash-free "no data" when revenue is zero). Built in DW-3z2. |
 
 ---
 
@@ -1439,6 +1439,7 @@ These are built in code but give no real data until someone outside engineering 
 
 - **2026-10-13 (owner, during the build):** DW-D20: Admin-area pages 404 for anyone not allowed to use them (§11.4). Built with DW-2g, whose e2e pinned the old empty Admin area.
 - **2026-10-13 (owner, during the build):** DW-D21: the Project Management view is called "Board" again, reversing the 2026-08-10 Board→Overview rename (§11.4). Built as DW-6m.
+- **2026-10-14 (owner, during the build):** DW-D22: the Company block of the company Overview shows the net margin rate the GM cockpit's money card showed (§11.4, §3.8). Built as DW-3z2.
 - **2026-10-13 (owner, "all the decisions follow the recommendation"):**
   - DW-D1 to DW-D8, DW-D15 and DW-D19 ruled as recommended; DW-Q2, DW-Q3 and DW-Q5 ruled as defaulted.
   - **DW-Q4:** each department has its own KPIs and appraisal, highlighted to show its condition and standing, and the HOD is made aware (§5.5).

@@ -11,6 +11,10 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.152.0` - DW-3z2: the Company block shows the net margin rate (owner ruling DW-D22) (2026-10-14) - PROTOTYPED
+
+- **What.** The company Overview's Company block gains a "Net margin" tile between Revenue and Overdue receivables: net over revenue from the same P&L read, in the cockpit's own words. "No data" (never 0%) when revenue is zero or a total is missing; refused like revenue when the P&L is refused. Revenue no longer repeats the net amount, since the margin tile carries it. Plan section 11.4 DW-D22, section 3.8.
+
 ### platform-ui `0.151.0` - DW-3z: the Overview stands on its own (2026-10-14) - PROTOTYPED
 
 - **What.** The closing ticket of DW-3. Under "More from <workspace>" a pilot user no longer sees the sections of today's page that an Overview block covers, or that have their own row or tab. Plan §3.8 is the inventory, section by section, with its verdict: **covered by <block>**, **reachable at <row/tab>**, or **not covered** (it stays). Rule §2.6.1 holds: nothing is removed without a home the person can reach in one click, and a section that is not in the inventory stays.

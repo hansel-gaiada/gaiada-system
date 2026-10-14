@@ -20,7 +20,7 @@ import { canReadGmMoney, gmAccessFor } from "./gm";
 import type { ReadResult } from "./readResult";
 import type { ReportDocument, ReportKpi } from "./reports";
 import type { StatementRow, ArAgingRow } from "./finance";
-import { formatMoneyShort, summarizeArAging, summarizePnl } from "./gmMoney";
+import { formatMoneyShort, formatRate, summarizeArAging, summarizePnl } from "./gmMoney";
 import { NO_DATA, formatDay, formatHours } from "./overviewNumbers";
 import { isOpenProject, refusalText } from "./overviewWork";
 import { teamAppraisalsView, type TeamAppraisalsView } from "./overviewTeam";
@@ -118,9 +118,9 @@ export function decisionsView(queue: NowQueue, tenantId: string, now: Date): Dec
   };
 }
 
-// ── Company: revenue, overdue receivables, milestones, utilization ───────────────────────────────
+// ── Company: revenue, net margin, overdue receivables, milestones, utilization ───────────────────────────────
 
-export type CompanyTileKey = "revenue" | "overdue" | "milestones" | "utilization";
+export type CompanyTileKey = "revenue" | "margin" | "overdue" | "milestones" | "utilization";
 export type CompanyTileState = "ok" | "no-data" | "forbidden" | "unavailable";
 
 export interface CompanyTile {
@@ -134,6 +134,7 @@ export interface CompanyTile {
 
 const LABEL: Readonly<Record<CompanyTileKey, string>> = {
   revenue: "Revenue",
+  margin: "Net margin",
   overdue: "Overdue receivables",
   milestones: "Milestones hit",
   utilization: "Utilization",
@@ -195,18 +196,24 @@ export type MoneyPart =
 export function moneyPart(reads: MoneyReads): MoneyPart {
   const { periods, pnl, ar } = reads;
   if (periods.kind === "forbidden") return { kind: "hidden" };
-  if (periods.kind === "unavailable") return { kind: "tiles", tiles: [refused("revenue", "unavailable"), refused("overdue", "unavailable")] };
+  if (periods.kind === "unavailable") return { kind: "tiles", tiles: [refused("revenue", "unavailable"), refused("margin", "unavailable"), refused("overdue", "unavailable")] };
   if (periods.data.length === 0) return { kind: "no-books" };
 
   let revenue: CompanyTile;
-  if (!pnl) revenue = refused("revenue", "unavailable");
-  else if (pnl.kind !== "ok") revenue = refused("revenue", pnl.kind);
+  let margin: CompanyTile;
+  if (!pnl) { revenue = refused("revenue", "unavailable"); margin = refused("margin", "unavailable"); }
+  else if (pnl.kind !== "ok") { revenue = refused("revenue", pnl.kind); margin = refused("margin", pnl.kind); }
   else {
     const s = summarizePnl(pnl.data);
     // A statement with no total rows is a reporting gap, not a period in which nothing was earned.
     revenue = s.revenue === null
       ? noData("revenue", "The statement carried no totals")
-      : { key: "revenue", label: LABEL.revenue, state: "ok", value: formatMoneyShort(s.revenue), detail: s.net === null ? null : `${formatMoneyShort(s.net)} net` };
+      : { key: "revenue", label: LABEL.revenue, state: "ok", value: formatMoneyShort(s.revenue), detail: null };
+    // The cockpit's "Net margin" (DW-D22): net over revenue from the same summary. A margin on no revenue (or with no net) is
+    // undefined, never "0%".
+    if (s.revenue === null) margin = noData("margin", "The statement carried no totals");
+    else if (s.marginRate === null) margin = noData("margin", "A margin on no revenue is undefined");
+    else margin = { key: "margin", label: LABEL.margin, state: "ok", value: formatRate(s.marginRate), detail: `${formatMoneyShort(s.net)} net on ${formatMoneyShort(s.revenue)}` };
   }
 
   let overdue: CompanyTile;
@@ -219,7 +226,7 @@ export function moneyPart(reads: MoneyReads): MoneyPart {
       detail: s.over90 > 0 ? `${formatMoneyShort(s.over90)} past 90 days` : "nothing past 90 days",
     };
   }
-  return { kind: "tiles", tiles: [revenue, overdue] };
+  return { kind: "tiles", tiles: [revenue, margin, overdue] };
 }
 
 export interface CompanyModel {

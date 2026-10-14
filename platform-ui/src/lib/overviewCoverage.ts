@@ -89,7 +89,7 @@ export const COVERAGE: readonly CoverageEntry[] = [
   },
   {
     page: "gm-cockpit", section: "money", label: "Money", verdict: "covered", widget: "company", when: "money",
-    by: "Company's money part has the card's own gate and rules: revenue with its net amount, overdue receivables with the 90+ days line, and the no-books note. The net margin rate (net over revenue) is not drawn; the statements are one link away (the block's Finance link, Financial statements).",
+    by: "Company's money part has the card's own gate and rules: revenue, the net margin rate (net over revenue, from the same P&L read; DW-D22) with its net amount, overdue receivables with the 90+ days line, and the no-books note. The statements are one link away (the block's Finance link, Financial statements).",
   },
 
   // ── HR (`/hr`) ─────────────────────────────────────────────────────────────────────────────────

@@ -208,7 +208,8 @@ describe("moneyPart (the cockpit's GmMoneyCard rules)", () => {
     const part = moneyPart({ periods: books, pnl: pnl("331000000.0000", "199000000.0000"), ar: aging([{ totalOutstanding: "100000000", current: "40000000", d90Plus: "10000000" }]) });
     if (part.kind !== "tiles") throw new Error("expected tiles");
     expect(part.tiles.map((t) => [t.key, t.state, t.value, t.detail])).toEqual([
-      ["revenue", "ok", "331.0M IDR", "199.0M IDR net"],
+      ["revenue", "ok", "331.0M IDR", null],
+      ["margin", "ok", "60%", "199.0M IDR net on 331.0M IDR"],
       ["overdue", "ok", "60.0M IDR", "10.0M IDR past 90 days"],
     ]);
   });
@@ -224,22 +225,36 @@ describe("moneyPart (the cockpit's GmMoneyCard rules)", () => {
   it("is Unavailable on both tiles when the gate read failed", () => {
     const part = moneyPart({ periods: { kind: "unavailable", reason: "x" }, pnl: null, ar: null });
     if (part.kind !== "tiles") throw new Error("expected tiles");
-    expect(part.tiles.map((t) => t.value)).toEqual(["Unavailable", "Unavailable"]);
+    expect(part.tiles.map((t) => [t.key, t.value])).toEqual([["revenue", "Unavailable"], ["margin", "Unavailable"], ["overdue", "Unavailable"]]);
   });
 
   it("answers for each tile on its own: a refused P&L does not hide the receivables, and neither becomes 0", () => {
     const part = moneyPart({ periods: books, pnl: { kind: "forbidden" }, ar: aging([{ totalOutstanding: "5", current: "5" }]) });
     if (part.kind !== "tiles") throw new Error("expected tiles");
-    expect(part.tiles.map((t) => [t.key, t.state, t.value])).toEqual([["revenue", "forbidden", "No access"], ["overdue", "ok", "0 IDR"]]);
+    expect(part.tiles.map((t) => [t.key, t.state, t.value])).toEqual([["revenue", "forbidden", "No access"], ["margin", "forbidden", "No access"], ["overdue", "ok", "0 IDR"]]);
     const failed = moneyPart({ periods: books, pnl: pnl("1", "1"), ar: { kind: "unavailable", reason: "x" } });
     if (failed.kind !== "tiles") throw new Error("expected tiles");
-    expect(failed.tiles[1]).toMatchObject({ state: "unavailable", value: "Unavailable" });
+    expect(failed.tiles[2]).toMatchObject({ state: "unavailable", value: "Unavailable" });
   });
 
   it("says No data, not 0, for a statement that carried no totals", () => {
     const part = moneyPart({ periods: books, pnl: { kind: "ok", data: [{ section: "revenue", code: "4100", name: "Sales", amount: "5" }] }, ar: aging([]) });
     if (part.kind !== "tiles") throw new Error("expected tiles");
     expect(part.tiles[0]).toMatchObject({ key: "revenue", state: "no-data", value: "No data" });
+    expect(part.tiles[1]).toMatchObject({ key: "margin", state: "no-data", value: "No data", detail: "The statement carried no totals" });
+  });
+
+  it("says a margin on zero revenue is undefined, never 0%", () => {
+    const part = moneyPart({ periods: books, pnl: pnl("0.0000", "-5000000.0000"), ar: aging([]) });
+    if (part.kind !== "tiles") throw new Error("expected tiles");
+    expect(part.tiles[0]).toMatchObject({ key: "revenue", state: "ok", detail: null });
+    expect(part.tiles[1]).toMatchObject({ key: "margin", state: "no-data", value: "No data", detail: "A margin on no revenue is undefined" });
+  });
+
+  it("refuses the margin like revenue when the P&L was not read", () => {
+    const part = moneyPart({ periods: books, pnl: null, ar: aging([]) });
+    if (part.kind !== "tiles") throw new Error("expected tiles");
+    expect(part.tiles.slice(0, 2).map((t) => [t.key, t.state, t.value])).toEqual([["revenue", "unavailable", "Unavailable"], ["margin", "unavailable", "Unavailable"]]);
   });
 });
 
@@ -250,7 +265,7 @@ describe("buildCompany: each part only for the person who may see it", () => {
   const keys = (a: CompanyAccess, d: typeof document | null, m: MoneyReads | null) => buildCompany({ access: a, document: d, money: m, ...window })?.tiles.map((t) => t.key) ?? null;
 
   it("draws money, then milestones and utilization, for the full tier", () => {
-    expect(keys({ console: true, numbers: true, money: true }, document, money)).toEqual(["revenue", "overdue", "milestones", "utilization"]);
+    expect(keys({ console: true, numbers: true, money: true }, document, money)).toEqual(["revenue", "margin", "overdue", "milestones", "utilization"]);
   });
 
   it("draws no money for someone without the money gate, even if money reads were handed in", () => {
@@ -258,7 +273,7 @@ describe("buildCompany: each part only for the person who may see it", () => {
   });
 
   it("draws no company figures for someone without the numbers gate, even if a document was handed in", () => {
-    expect(keys({ console: true, numbers: false, money: true }, document, money)).toEqual(["revenue", "overdue"]);
+    expect(keys({ console: true, numbers: false, money: true }, document, money)).toEqual(["revenue", "margin", "overdue"]);
   });
 
   it("draws no block at all for a person with neither", () => {

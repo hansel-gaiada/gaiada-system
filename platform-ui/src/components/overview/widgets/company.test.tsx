@@ -154,8 +154,9 @@ describe("Company (widget)", () => {
     expect(getDocument).toHaveBeenCalledWith(T, "u-1", { grain: "company", scopeRef: T, periodKind: "month", start: "2026-10-14", end: "2026-10-14" });
     expect(readMoney).toHaveBeenCalledWith("u-1", T, "2026-10-01", "2026-10-31");
     const block = screen.getByRole("region", { name: "Company" });
-    expect([...block.querySelectorAll("[data-tile]")].map((n) => n.getAttribute("data-tile"))).toEqual(["revenue", "overdue", "milestones", "utilization"]);
+    expect([...block.querySelectorAll("[data-tile]")].map((n) => n.getAttribute("data-tile"))).toEqual(["revenue", "margin", "overdue", "milestones", "utilization"]);
     expect(tileValue(block, "revenue")).toContain("331.0M IDR");
+    expect(tileValue(block, "margin")).toContain("60%");
     expect(tileValue(block, "overdue")).toContain("60.0M IDR");
     expect(tileValue(block, "milestones")).toContain("50%");
     expect(tileValue(block, "utilization")).toContain("80%");
@@ -175,7 +176,7 @@ describe("Company (widget)", () => {
     render(await Company(props("company", narrowedWithFinance)));
     expect(getDocument).not.toHaveBeenCalled();
     const block = screen.getByRole("region", { name: "Company" });
-    expect([...block.querySelectorAll("[data-tile]")].map((n) => n.getAttribute("data-tile"))).toEqual(["revenue", "overdue"]);
+    expect([...block.querySelectorAll("[data-tile]")].map((n) => n.getAttribute("data-tile"))).toEqual(["revenue", "margin", "overdue"]);
     expect(within(block).queryByRole("link", { name: "Company report" })).toBeNull();
   });
 
@@ -195,7 +196,7 @@ describe("Company (widget)", () => {
     readMoney.mockResolvedValue({ periods: { kind: "unavailable", reason: "x" }, pnl: null, ar: null } as never);
     render(await Company(props("company")));
     const block = screen.getByRole("region", { name: "Company" });
-    for (const k of ["revenue", "overdue", "milestones", "utilization"]) expect(block.querySelector(`[data-tile="${k}"]`), k).toHaveAttribute("data-state", "unavailable");
+    for (const k of ["revenue", "margin", "overdue", "milestones", "utilization"]) expect(block.querySelector(`[data-tile="${k}"]`), k).toHaveAttribute("data-state", "unavailable");
     expect(within(block).queryByText(/^0/)).toBeNull();
   });
 

@@ -1202,6 +1202,10 @@ test.describe("the Overview's frame: someone whose home is the Company area", ()
     await expect(company).toBeVisible();
     await expect(company.locator('[data-tile="revenue"]')).toHaveAttribute("data-state", "ok");
     await expect(company.locator('[data-tile="revenue"]')).toContainText("331.0M IDR");
+    // DW-D22: the net margin rate. The demo books give 199.0M net over 331.0M revenue, so 60%.
+    await expect(company.locator('[data-tile="margin"]')).toHaveAttribute("data-state", "ok");
+    await expect(company.locator('[data-tile="margin"]')).toContainText("Net margin");
+    await expect(company.locator('[data-tile="margin"]')).toContainText("60%");
     await expect(company.locator('[data-tile="overdue"]')).toHaveAttribute("data-state", /^(ok|no-data)$/);
     await expect(company.locator('[data-tile="milestones"]')).toHaveAttribute("data-state", /^(ok|no-data)$/);
     await expect(company.locator('[data-tile="utilization"]')).toHaveAttribute("data-state", /^(ok|no-data)$/);
