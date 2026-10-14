@@ -99,7 +99,9 @@ describe("AppraisalView", () => {
         canComment canAssess={false}
       />,
     );
-    expect(screen.getByText("A <b>strong</b> half.")).toBeTruthy();
+    // The textarea carries its pre-filled value as text too, so the display is asserted on the paragraph.
+    const shown = screen.getByText("A <b>strong</b> half.", { selector: "p" });
+    expect(shown.querySelector("b")).toBeNull();
     expect(screen.getByText("By Ayu on 2026-10-02")).toBeTruthy();
     const form = screen.getByRole("form", { name: "Head's commentary" });
     expect((within(form).getByLabelText(/^Commentary/) as HTMLTextAreaElement).value).toBe("A <b>strong</b> half.");
@@ -116,7 +118,7 @@ describe("AppraisalView", () => {
     const para = screen.getByText(/Computed:/).closest("p")!;
     expect(para.textContent).toContain("Computed: At risk");
     expect(para.textContent).toContain("GM's judgement: On track");
-    expect(screen.getByText("Recovering well.")).toBeTruthy();
+    expect(screen.getByText("Recovering well.", { selector: "p" })).toBeTruthy();
     const form = screen.getByRole("form", { name: "GM's assessment" });
     expect((within(form).getByLabelText(/Your judgement/) as HTMLSelectElement).value).toBe("on_track");
   });
