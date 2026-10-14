@@ -22,6 +22,7 @@ import { CheckinCard } from "@/components/dashboard/CheckinCard";
 import { WorkspaceOverview } from "@/components/overview/WorkspaceOverview";
 import { getPrefs } from "@/lib/prefs";
 import { myWorkspaces } from "@/lib/workspaces-data";
+import { functionalConsoleFor } from "@/lib/workspaceAccess";
 import { COMPANY_SUBJECT, parseOverviewPeriod, resolveHomeRoute } from "@/lib/overview";
 import { decideQueueItem } from "./actions";
 import { acknowledgeKpiAlert } from "@/lib/deptKpiAlertActions";
@@ -138,7 +139,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <ScopePill companies={companies} value={scope} onChangeHref={buildScopeHref} />
           {placement && (
-            <Link href={`/departments/${placement.deptId}`} className="lux-btn lux-btn--ghost lux-btn--sm" style={{ textDecoration: "none" }}>
+            <Link href={functionalConsoleFor(placement.deptName) ?? `/departments/${placement.deptId}`} className="lux-btn lux-btn--ghost lux-btn--sm" style={{ textDecoration: "none" }}>
               My department: {placement.deptName}{placement.divisionName ? ` · ${placement.divisionName}` : ""} →
             </Link>
           )}
