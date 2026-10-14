@@ -194,7 +194,7 @@ describe.skipIf(!TEST_URL)("DW-6i · Google Drive: connect, pick and attach (§4
   const fileCount = async () => Number((await q().query(`SELECT count(*)::int AS n FROM files WHERE tenant_id = ANY($1::uuid[])`, [[A, B]])).rows[0].n);
   /** Activity rows of one verb on one entity (rows from earlier tests are never mistaken for this test's). */
   const activityRows = async (verb: string, entityId: string, tenant = A) =>
-    (await q().query(`SELECT * FROM activities WHERE tenant_id = $1 AND verb = $2 AND target_entity_id = $3 ORDER BY created_at`, [tenant, verb, entityId])).rows;
+    (await q().query(`SELECT * FROM activities WHERE tenant_id = $1 AND verb = $2 AND target_entity_id = $3 ORDER BY occurred_at`, [tenant, verb, entityId])).rows;
   const expireIn = (userId: string, interval: string) =>
     q().query(`UPDATE integration_connections SET token_expires_at = now() + $3::interval WHERE tenant_id = $1 AND owner_id = $2 AND provider = 'google_drive'`, [A, userId, interval]);
 
