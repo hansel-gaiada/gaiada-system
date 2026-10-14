@@ -256,6 +256,24 @@ function badgeCount(badge: RowBadge | undefined, ctx: GateContext): number {
   }
 }
 
+/** The paths (no query) of the tabs `concreteRows` drops for this person BECAUSE OF A GATE: a tab whose own gate fails, and every
+ *  tab of a row whose gate fails. A planned (ticketed) tab is "not built", not "not theirs", and a `{dept}` or `{company}` tab with
+ *  no id to fill is "not here", so neither counts. The console strips use it (`covers`): a page the person's read gate refuses them
+ *  must not keep a second strip on screen. Same gate evaluation as `concreteRows`, never a copy of it. */
+export function withheldTabPaths(rows: readonly WorkspaceRow[], ctx: GateContext & { deptId: string | null }): string[] {
+  const out = new Set<string>();
+  for (const row of rows) {
+    if (isPlanned(row)) continue;
+    const rowOpen = gateAllows(row.gate, ctx);
+    for (const t of row.tabs) {
+      if (isPlanned(t) || (rowOpen && gateAllows(t.gate, ctx))) continue;
+      const href = hrefFor(t.href, { deptId: ctx.deptId, companyId: ctx.tenantId });
+      if (href) out.add(href.split(/[?#]/)[0]);
+    }
+  }
+  return [...out];
+}
+
 /** Rows as the person may be offered them: planned items dropped (unless `includePlanned`, for sizing),
  *  gates applied, `{dept}`/`{company}` filled, and a row left with no tab dropped. */
 export function concreteRows(

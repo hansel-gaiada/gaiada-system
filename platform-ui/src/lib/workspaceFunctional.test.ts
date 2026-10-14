@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Me } from "./platform";
-import { sidebarRows, workspaceBySlug } from "./workspaces";
-import { concreteRows } from "./workspaceAccess";
+import { sidebarRows, workspaceBySlug, type WorkspaceRow } from "./workspaces";
+import { concreteRows, withheldTabPaths } from "./workspaceAccess";
 import { me, member } from "./workspaceFixtures";
 
 // DW-7a/7b/7c: each HR, Finance and IT row and tab is offered to the people whose page can read what it shows, through the
@@ -149,5 +149,31 @@ describe("IT rows (DW-7c)", () => {
   it("keeps the it module gate", () => {
     const rows = itRows(moduleOff("it_admin"));
     for (const key of ["devices", "network", "accounts", "workflows"]) expect(rows[key], key).toBeUndefined();
+  });
+});
+
+describe("withheldTabPaths (the console strips' `covers`)", () => {
+  const tab = (key: string, href: string, extra: object = {}) => ({ key, label: key, href, icon: "home" as const, ...extra });
+  const rows: WorkspaceRow[] = [
+    { key: "a", label: "A", icon: "home", tabs: [tab("open", "/x/open"), tab("gated", "/x/gated?view=1", { gate: { kind: "cap", cap: "hr.view" } })] },
+    { key: "b", label: "B", icon: "home", gate: { kind: "cap", cap: "hr.view" }, tabs: [tab("one", "/x/one"), tab("two", "/x/two")] },
+    { key: "c", label: "C", icon: "home", tabs: [tab("soon", "/x/soon", { ticket: "DW-9", gate: { kind: "cap", cap: "hr.view" } }), tab("dept", "/d/{dept}/t", { gate: { kind: "cap", cap: "hr.view" } })] },
+    { key: "d", label: "D", icon: "home", ticket: "DW-9", gate: { kind: "cap", cap: "hr.view" }, tabs: [tab("never", "/x/never")] },
+  ];
+  const ctxFor = (m: Me, deptId: string | null) => ({ me: m, tenantId: "co-a", unitPath: [], deptId });
+
+  it("withholds a tab whose own gate fails (its path, without the query) and every tab of a row whose gate fails", () => {
+    expect(withheldTabPaths(rows, ctxFor(plainMember, null)).sort()).toEqual(["/x/gated", "/x/one", "/x/two"]);
+  });
+
+  it("does not withhold a planned tab or row, nor a {dept} tab that has no department id", () => {
+    const withheld = withheldTabPaths(rows, ctxFor(plainMember, null));
+    for (const p of ["/x/soon", "/x/never", "/d/{dept}/t"]) expect(withheld).not.toContain(p);
+    // With a department id the {dept} tab is gated away, so it is withheld.
+    expect(withheldTabPaths(rows, ctxFor(plainMember, "d-1"))).toContain("/d/d-1/t");
+  });
+
+  it("withholds nothing from a person every gate admits", () => {
+    expect(withheldTabPaths(rows, ctxFor(as("hr_staff"), "d-1"))).toEqual([]);
   });
 });

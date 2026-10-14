@@ -20,8 +20,9 @@ beforeEach(() => {
 const tab = (key: string, href: string): SectionTab => ({ key, label: key, href, icon: "home" });
 
 // hr/layout.tsx without the two payroll tabs, with the Org structure tab for the active company. Since DW-7a the registry
-// gates some HR, IT and Finance tabs on the capability their page reads, so a strip is hidden only for a person the
-// registry offers them to (`adminShellModel`: a company admin); a plain member keeps the console strip (see below).
+// gates some HR, IT and Finance tabs on the capability their page reads; the shell still hides a console strip for a person
+// it gates them away from (`covers` counts a withheld tab as covered), so one strip draws, never two. The tests use a company
+// admin (offered every tab) and a plain member (offered fewer, the rest withheld).
 const HR_TABS = [
   tab("overview", "/hr"), tab("people", "/hr/people"), tab("leave", "/hr/leave"), tab("attendance", "/hr/attendance"),
   tab("onboarding", "/hr/onboarding"), tab("cases", "/hr/cases"), tab("recruitment", "/hr/recruitment"), tab("reviews", "/hr/reviews"),
@@ -59,11 +60,11 @@ describe("SectionTabs inside the workspace shell", () => {
   });
 
   it.each([["HR", HR_TABS, "/hr/people"], ["IT", IT_TABS, "/it/devices"]])(
-    "keeps the %s strip for a plain member: the registry gates tabs away from them (DW-7a), so the shell does not offer every one",
+    "hides the %s strip for a plain member too: the tabs the registry gates away from them are pages their read refuses (DW-7a)",
     (_name, tabs, path) => {
       nav.pathname = path;
       render(inShell(<SectionTabs tabs={tabs} />));
-      expect(section()).toBeInTheDocument();
+      expect(section()).toBeNull();
     },
   );
 
@@ -110,10 +111,10 @@ describe("FinanceTabs", () => {
     expect(screen.queryByRole("navigation", { name: "Finance sections" })).toBeNull();
   });
 
-  it("stays for a plain member, whom the registry offers no Reports, Receivables or Consolidation (DW-7b)", () => {
+  it("hides for a plain member too, whom the registry offers no Reports, Receivables or Consolidation (DW-7b)", () => {
     nav.pathname = "/finance/journals";
     render(inShell(<FinanceTabs />));
-    expect(screen.getByRole("navigation", { name: "Finance sections" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Finance sections" })).toBeNull();
   });
 
   it("always draws in the classic shell", () => {
