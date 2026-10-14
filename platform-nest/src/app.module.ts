@@ -196,6 +196,7 @@ import { CheckinsController } from "./modules/reports/checkins.controller"; // T
 import { AppraisalsController } from "./modules/reports/appraisals.controller"; // TR-24
 import { DeptKpisController } from "./modules/reports/dept-kpis.controller"; // DW-4e-1
 import { DeptAppraisalsController } from "./modules/reports/dept-appraisals.controller"; // DW-4e-3
+import { DeptKpiWatchController } from "./modules/reports/dept-kpi-watch.controller"; // DW-4j-1
 import { PrintPayloadController } from "./modules/reports/print-payload.controller"; // TR-21
 import { DocumentPrintPayloadController } from "./core/document-print-payload.controller"; // PV5-07
 import { McpToolsController } from "./modules/mcp-tools.controller";
@@ -301,6 +302,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     // DW-4e-1: department KPIs, /api/:t/dept-kpis/* (targets, condition and standing; own top-level prefix, no MCP tool).
     DeptKpisController,
     DeptAppraisalsController,
+    DeptKpiWatchController,
     // TR-21: the internal, token-only PDF payload fetch — root-level, no `/api` prefix, no
     // guards (identity.controller.ts's precedent). See print-payload.controller.ts's own header.
     PrintPayloadController,

@@ -104,8 +104,9 @@ describe("automation scoped service accounts + write gate (WS4 §3)", () => {
   // TR-22: the two P4 seal/generate/deliver flows are scoped to ONLY `notify` — everything else
   // they do (seal/overview/export) is a direct-to-platform call, never a hub tool, same shape as
   // TR-11's three reads/writes above.
-  it("wf:reports-weekly-seal and wf:reports-monthly-seal are scoped to notify ONLY", () => {
-    for (const id of ["wf:reports-weekly-seal", "wf:reports-monthly-seal"]) {
+  // DW-4j-1: the department KPI watch is the same shape (its run is a direct-to-platform call; the dead-letter is a notify).
+  it("wf:reports-weekly-seal, wf:reports-monthly-seal and wf:reports-kpi-watch are scoped to notify ONLY", () => {
+    for (const id of ["wf:reports-weekly-seal", "wf:reports-monthly-seal", "wf:reports-kpi-watch"]) {
       const p = wf(id);
       const visible = visibleTools(p).map((t) => t.name).sort();
       expect(visible).toEqual(["notify"]);

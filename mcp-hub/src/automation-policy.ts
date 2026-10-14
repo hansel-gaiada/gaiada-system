@@ -106,6 +106,11 @@ export const AUTOMATION_ALLOWLIST: Record<string, readonly string[]> = {
   // automation/README.md).
   "wf:reports-weekly-seal": ["notify"],
   "wf:reports-monthly-seal": ["notify"],
+  // DW-4j-1 (BFF §43.6): the department KPI watch (automation/workflows/reports-kpi-watch.json). The run itself is a
+  // direct-to-platform `POST dept-kpis/watch` (a report_admin recompute-gated ops call, never an MCP tool); the platform tells
+  // each head through its own notify, so the ONLY hub call this flow makes is `notify`, a dead-letter alert after 3
+  // exhausted retries (like wf:reports-nightly-facts).
+  "wf:reports-kpi-watch": ["notify"],
   // PV-D28 (owner ruling 2026-10-12): the billing chaser (automation/workflows/billing-chaser.json).
   // A daily CRON READ + notify job over the contract and payment tools: payment claims waiting >2 days
   // for confirmation, client-signed contracts waiting >1 day for our countersignature, contracts sent

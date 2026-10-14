@@ -109,37 +109,42 @@ export async function unitAncestorsOf(tenantId: string, unitNodeId: string): Pro
   return withTenants([tenantId], (c) => loadUnitAncestors(c, tenantId, unitNodeId), { modules: DEPT_KPI_MODULES });
 }
 
+/**
+ * The read gate for one unit (KPIs, targets and, from DW-4j, the unit's alerts): Cerbos `read` with the unit's ancestry, then
+ * the unit narrowing (403), then existence (404). Returns the unit's node, the company's org tree being read once for both
+ * checks. Exported so the watch controller (dept-kpi-watch.controller.ts) applies this exact gate, never a copy of it.
+ */
+export async function authorizeUnitRead(principal: Principal, tenantId: string, unitNodeId: string): Promise<{ unit: OrgUnitRef; structure: unknown }> {
+  const unitAncestors = await unitAncestorsOf(tenantId, unitNodeId);
+  await authorize(principal, { kind: "dept_kpi_target", tenantId, module: "reports", unitAncestors }, "read");
+  const companyWide = isCompanyWide(principal, tenantId);
+  const asOf = todayIsoInTz(config.reportsTz);
+  return withTenants(
+    [tenantId],
+    async (c) => {
+      const structure = await loadOrgStructure(c, tenantId);
+      if (!companyWide) {
+        const own = principal.userId ? await resolveSubjectUnit(c, tenantId, principal.userId, asOf) : null;
+        const placed = !!own && collectUnitSubtree(structure, unitNodeId).includes(own);
+        const leads =
+          !placed &&
+          requiresUnitNarrowing(principal, tenantId) &&
+          (await loadLedUnitScope(c, tenantId, principal.userId, asOf, principal)).has(unitNodeId);
+        if (!placed && !leads) throw new ForbiddenException(OUT_OF_LINE_MESSAGE);
+      }
+      const unit = findOrgUnit(structure, unitNodeId);
+      if (!unit) throw new NotFoundException({ message: "unit_not_found", field: "unitNodeId" });
+      return { unit, structure };
+    },
+    { modules: DEPT_KPI_MODULES },
+  );
+}
+
 @Controller("api/:tenantId/dept-kpis")
 @UseGuards(AuthGuard, ModuleEnabledGuard("reports"))
 export class DeptKpisController {
-  /**
-   * The read gate for one unit (KPIs and targets): Cerbos `read` with the unit's ancestry, then the unit narrowing
-   * (403), then existence (404). Returns the unit's node, the company's org tree being read once for both checks.
-   */
-  private async authorizeUnitRead(principal: Principal, tenantId: string, unitNodeId: string): Promise<{ unit: OrgUnitRef; structure: unknown }> {
-    const unitAncestors = await unitAncestorsOf(tenantId, unitNodeId);
-    await authorize(principal, { kind: "dept_kpi_target", tenantId, module: "reports", unitAncestors }, "read");
-    const companyWide = isCompanyWide(principal, tenantId);
-    const asOf = todayIsoInTz(config.reportsTz);
-    return withTenants(
-      [tenantId],
-      async (c) => {
-        const structure = await loadOrgStructure(c, tenantId);
-        if (!companyWide) {
-          const own = principal.userId ? await resolveSubjectUnit(c, tenantId, principal.userId, asOf) : null;
-          const placed = !!own && collectUnitSubtree(structure, unitNodeId).includes(own);
-          const leads =
-            !placed &&
-            requiresUnitNarrowing(principal, tenantId) &&
-            (await loadLedUnitScope(c, tenantId, principal.userId, asOf, principal)).has(unitNodeId);
-          if (!placed && !leads) throw new ForbiddenException(OUT_OF_LINE_MESSAGE);
-        }
-        const unit = findOrgUnit(structure, unitNodeId);
-        if (!unit) throw new NotFoundException({ message: "unit_not_found", field: "unitNodeId" });
-        return { unit, structure };
-      },
-      { modules: DEPT_KPI_MODULES },
-    );
+  private authorizeUnitRead(principal: Principal, tenantId: string, unitNodeId: string): Promise<{ unit: OrgUnitRef; structure: unknown }> {
+    return authorizeUnitRead(principal, tenantId, unitNodeId);
   }
 
   // ---------------- reads (§40.3) ----------------

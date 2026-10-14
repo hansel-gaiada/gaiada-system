@@ -64,6 +64,11 @@ export const AUTOMATION_ACCOUNTS: ReadonlyArray<{ workflowId: string; role: stri
   // AUTOMATION_ALLOWLIST entries (automation-policy.ts).
   { workflowId: "wf:reports-weekly-seal", role: "company_admin", email: "automation+reports-weekly-seal@gaiada.system", name: "Automation — Reports weekly seal" },
   { workflowId: "wf:reports-monthly-seal", role: "company_admin", email: "automation+reports-monthly-seal@gaiada.system", name: "Automation — Reports monthly seal" },
+  // DW-4j-1 (BFF §43.6): the department KPI watch (automation/workflows/reports-kpi-watch.json). Calls
+  // `POST dept-kpis/watch` DIRECT to platform-nest, which authorizes `report_admin`'s recompute (the gate
+  // `facts/recompute` uses), so company_admin is the minimum role, like the other reports flows. Its only hub call is `notify`
+  // (a dead-letter alert), matching the mcp-hub AUTOMATION_ALLOWLIST entry.
+  { workflowId: "wf:reports-kpi-watch", role: "company_admin", email: "automation+reports-kpi-watch@gaiada.system", name: "Automation — Reports KPI watch" },
   // WSK-31 — the WebDesk Zone B->A bridge identity (webdesk-design.md §03 channel 1 / §09;
   // ZoneBEventsController's own header names this seed as its job). `resource_webdev_zoneb_event.yaml`
   // grants `record` to company_admin/manager/module_manager, gated on `variables.inTenant &&

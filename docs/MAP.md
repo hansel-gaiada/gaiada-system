@@ -169,11 +169,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610150130_pv5_payment_simulator.sql`
+- Head: `202610150200_dept_kpi_watch.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 303 (121 legacy `NNNN_`, 182 timestamped)
+- Applied files on disk: 304 (121 legacy `NNNN_`, 183 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -259,6 +259,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/appraisals` | `platform-nest/src/modules/reports/appraisals.controller.ts` |
 | `/api/:tenantId/checkins` | `platform-nest/src/modules/reports/checkins.controller.ts` |
 | `/api/:tenantId/dept-appraisals` | `platform-nest/src/modules/reports/dept-appraisals.controller.ts` |
+| `/api/:tenantId/dept-kpis` | `platform-nest/src/modules/reports/dept-kpi-watch.controller.ts` |
 | `/api/:tenantId/dept-kpis` | `platform-nest/src/modules/reports/dept-kpis.controller.ts` |
 | `/api/:tenantId/modules/agency` | `platform-nest/src/modules/agency/agency.controller.ts` |
 | `/api/:tenantId/modules/hr` | `platform-nest/src/modules/hr/hr-lifecycle.controller.ts` |
@@ -647,6 +648,7 @@ Declared `id` is load-bearing (sub-workflow references). Import with the CLI, ne
 | `pipeline-delivery.json` | `ws11delivery0001` | WS11 delivery track (hard gate -> design -> 3-beat -> revise loop -> Claude Code -> staging -> prod) |
 | `pipeline-fanout.json` | `ws11fanout000001` | WS11 fan-out (on pipeline.run.created -> scope sign-off + report route) |
 | `reports-eod-reminder.json` | — | reports-eod-reminder (CRON) |
+| `reports-kpi-watch.json` | — | reports-kpi-watch (CRON) |
 | `reports-monthly-seal.json` | — | reports-monthly-seal (CRON) |
 | `reports-morning-escalation.json` | — | reports-morning-escalation (CRON) |
 | `reports-nightly-facts.json` | — | reports-nightly-facts (CRON) |

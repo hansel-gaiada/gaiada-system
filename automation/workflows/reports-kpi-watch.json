@@ -1,0 +1,96 @@
+{
+  "name": "reports-kpi-watch (CRON)",
+  "meta": {
+    "description": "DW-4j-1, FRONTEND-BFF-CONTRACT §43.6 (reporting blueprint §10: n8n schedules, platform-nest gains no timer). Daily 06:30, after reports-nightly-facts (02:00) has rebuilt the facts: POST dept-kpis/watch. The platform evaluates every department's KPIs for the current month, compares each condition with the last one it remembered (dept_kpi_conditions), tells each department's heads ONE in-app notification per unit when something changed (dept_kpi.condition_changed), and opens or resolves the off-track alerts that feed Needs you. The decision is made once, in the platform, under a per-tenant advisory lock, so a retry (this node's retryOnFail, or the bridge redelivering a slow call) tells each change at most once: a second run in a row tells nothing. This flow does NO fan-out: it makes no hub call on success, because the platform notifies the heads itself. The endpoint is deliberately NEVER an MCP tool (it is a report_admin recompute-gated ops call, like facts/recompute), so the flow calls platform-nest DIRECTLY with the platform's own PLATFORM_SERVICE_TOKEN under the OBO identity wf:reports-kpi-watch (seed:automation grants it company_admin, the minimum role report_admin's recompute action allows). On failure: the HTTP node retries x3 (built-in retryOnFail), then the error branch raises an IN-APP notification via the hub's notify tool (the only hub call, allow-listed as [notify] in mcp-hub automation-policy.ts). Single-tenant, like every reports flow: AGENCY_TENANT_ID. Importing it on the server is a server step: a CLI import DEACTIVATES the flow, so activate it afterwards. Env: PLATFORM_URL, PLATFORM_SERVICE_TOKEN, AGENCY_TENANT_ID, HUB_SERVICE_TOKEN, NOTIFY_USER_ID."
+  },
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "30 6 * * *" }] } },
+      "name": "Daily 06:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PLATFORM_URL }}/api/{{ $env.AGENCY_TENANT_ID }}/dept-kpis/watch",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.PLATFORM_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:reports-kpi-watch" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({}) }}",
+        "options": {}
+      },
+      "name": "POST dept-kpis/watch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Success: nothing to notify -- the platform has already told each head. A clean run is silent, same posture as every\n// other clear-on-success flow in this repo; the summary is only for the execution log.\nconst body = $input.first().json.body ?? $input.first().json;\nreturn [{ json: { ok: true, period: body.period ?? null, evaluatedUnits: body.evaluatedUnits ?? null, told: (body.told ?? []).length, alertsOpened: body.alertsOpened ?? null, alertsResolved: body.alertsResolved ?? null, unitsWithoutHead: body.unitsWithoutHead ?? [] } }];"
+      },
+      "name": "Parse result (success)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, -120]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Dead-letter payload for the error branch -- retries (x3) already exhausted at this point.\nconst err = $input.first().json.error ?? $input.first().json;\nreturn [{ json: { error: String(err?.message ?? err) } }];"
+      },
+      "name": "Build dead-letter payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 120]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:reports-kpi-watch" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $env.AGENCY_TENANT_ID, recipientId: $env.NOTIFY_USER_ID, type: \"reports_kpi_watch_failed\", payload: { error: $json.error } } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP notify (dead-letter)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 120]
+    }
+  ],
+  "connections": {
+    "Daily 06:30": { "main": [[{ "node": "POST dept-kpis/watch", "type": "main", "index": 0 }]] },
+    "POST dept-kpis/watch": {
+      "main": [
+        [{ "node": "Parse result (success)", "type": "main", "index": 0 }],
+        [{ "node": "Build dead-letter payload", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build dead-letter payload": { "main": [[{ "node": "MCP notify (dead-letter)", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "pinData": {}
+}

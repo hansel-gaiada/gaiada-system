@@ -166,4 +166,12 @@ describe.skipIf(!TEST_URL)("automation service accounts (WS4 §3)", () => {
     });
     expect(seal.statusCode).toBe(200);
   });
+
+  // DW-4j-1 (BFF §43.6): the daily KPI watch calls POST dept-kpis/watch under its own OBO identity. company_admin passes
+  // `report_admin` . `recompute`; the company has no org tree, so the run evaluates nothing and says so.
+  it("wf:reports-kpi-watch (company_admin role) can run POST dept-kpis/watch", async () => {
+    const r = await app.inject({ method: "POST", url: `/api/${co}/dept-kpis/watch`, headers: asWorkflow("wf:reports-kpi-watch") });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().evaluatedUnits).toBe(0);
+  });
 });
