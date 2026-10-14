@@ -11,6 +11,19 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.134.0` - PV-D41: a simulated Midtrans for the review stage (2026-10-15) - PROTOTYPED
+
+Owner, 2026-10-14: "simulate midtrans for now" (PV-D41). PV5-10's online payment runs end to end on live against an in-process simulated Midtrans, behind the REAL adapter. Contract: BFF §30c "Simulated Midtrans (review stage, PV-D41)"; runbook `infra/runbooks/midtrans-payments.md` §7.
+- **Switch.** `MIDTRANS_ENVIRONMENT=simulated` works only with `PAYMENTS_SIMULATION_ENABLED=1` (compose passthrough, default 0); boot refuses `simulated` without the flag, the flag with sandbox or production, and the flag without a server key, and logs `[payments:simulation-enabled]` once. Never with real keys; off before real data.
+- **Simulator** at `/internal/payments/midtrans-sim` (not routed from the internet): Snap create, `GET /v2/{order}/status`, `POST /v2/{order}/expire`, Midtrans' shapes, HTTP Basic with the server key; 404 when off. Orders in `payment_simulator_orders` (FORCE RLS, `tenant_isolation`, DELETE revoked). The real `midtrans.ts` adapter points at it, so signature check, dedupe, status re-fetch and posting are the normal code.
+- **Portal page** `/portal/pay/simulated/:orderId` ("Simulated payment (review stage): no real money moves"): Pay (simulated) / Leave pending / Payment fails, via `GET`/`POST /api/:t/portal/payments/simulated/:orderId[/act]` (`portal pay` first, 404 unless simulation is on for the company, portal scope else 404). The simulator then POSTs a Midtrans-shaped signed notice to our own webhook, with retries.
+- **Labels.** Activity `payment.simulated` per action; the payment reference starts `SIMULATED`, the note says no real money moved, the AR receipt carries it, and payment notifications are titled `SIMULATED:`. `payment_checkouts.environment` gains `simulated` (the CHECK re-declared with the whole list).
+- **Migration** `202610150130_pv5_payment_simulator.sql`. **Tests:** `online-payment-simulated.db.test.ts` 8 (full round trip through the real adapter and real HTTP; pending then pay; fail; another client's contact 404; forged notice still 401; replay once; flag off 404 and boot refusals). Teeth run 38531252127 (unverified notices accepted; scope check skipped), each red on exactly its test.
+
+### platform-ui `0.153.0` - PV-D41: the simulated payment page (2026-10-15) - PROTOTYPED
+
+- `/portal/pay/simulated/[orderId]` under Contracts & billing › Invoices: plainly labelled, the invoice number and amount, three actions; after an action the payer returns to the invoice with `?checkout=finished` (redirect done in the server action). axe light and dark in the portal sweep; `page.test.tsx` 3.
+
 ### platform-nest `0.133.0` - two more RLS zero-row reads fixed: offboarding revokes org-unit grants; D-9 appointments execute (2026-10-14) - PROTOTYPED
 
 Found by the sweep that came with the client-contact fix (0.128.0); the owner said "fix it" (2026-10-14). Both read a FORCE-RLS tenant table under a bare `withGlobal`, which sets no GUC, so Postgres returned zero rows with no error.
