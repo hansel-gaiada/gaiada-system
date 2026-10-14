@@ -25,6 +25,12 @@ function refuseForeignOrigin(req: NextRequest): NextResponse | null {
   return NextResponse.json({ error: "origin_not_allowed" }, { status: 403 });
 }
 
+/** DW-3a2: a browser loading a whole page: a GET that is neither a Server Action nor one of the client router's
+ *  RSC fetches (navigation, prefetch, refresh all send `rsc`). Only these may be answered by the layout's redirect. */
+function isDocumentRequest(req: NextRequest): boolean {
+  return req.method === "GET" && !req.headers.has("rsc") && !req.headers.has("next-action") && !req.headers.has("next-router-prefetch");
+}
+
 // Next 16 renamed `middleware.ts` to `proxy.ts` and runs it on the Node runtime instead of Edge. The check stays
 // what it was on Edge, a cookie PRESENCE check only; every page verifies the HMAC server-side via
 // getSessionUserId() before using the id.
@@ -107,9 +113,14 @@ export function proxy(req: NextRequest) {
   // site's own domains. The domains arrive signed in the URL; this only verifies them (no network). See lib/replaysCsp.ts. It
   // replaces next.config's `frame-ancestors 'self'` on this one route, so the policy repeats it. Never throws; non-player paths get null.
   // DW-3a2: hand the pathname to the server as a REQUEST header so `(app)/layout.tsx` (outside the loading boundary)
-  // can answer `/` with a real 307. Always SET, so a value the client sent can never survive.
+  // can answer `/` with a real 307. Only a document request carries it. A Server Action (`next-action`) or an RSC
+  // fetch (`rsc`: a client navigation, a prefetch, `router.refresh()`) also re-renders the layout, and a redirect the
+  // layout throws there never reaches the browser: "Try the new layout", an action on `/`, left the classic shell
+  // on screen. Those keep the page's own redirect, as before. Always cleared first, so a client-sent value never
+  // survives.
   const requestHeaders = new Headers(req.headers);
-  requestHeaders.set(PATHNAME_HEADER, pathname);
+  requestHeaders.delete(PATHNAME_HEADER);
+  if (isDocumentRequest(req)) requestHeaders.set(PATHNAME_HEADER, pathname);
   const res = NextResponse.next({ request: { headers: requestHeaders } });
   if (req.method === "GET") {
     const csp = replayCspFor(pathname, req.nextUrl.searchParams);

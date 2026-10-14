@@ -238,6 +238,7 @@ describe("proxy — the pathname request header (DW-3a2)", () => {
   // NextResponse.next({ request: { headers } }) reports the forwarded request headers on the response as
   // `x-middleware-request-<name>` (and lists them in `x-middleware-override-headers`).
   const forwarded = (res: Response) => res.headers.get(`x-middleware-request-${PATHNAME_HEADER}`);
+  afterEach(() => vi.unstubAllEnvs());
 
   it("hands the request's pathname to the server, without the query", () => {
     const res = proxy(req("/", { cookie: devCookie() }));
@@ -253,5 +254,20 @@ describe("proxy — the pathname request header (DW-3a2)", () => {
   it("keeps the other request headers", () => {
     const res = proxy(req("/", { cookie: devCookie(), headers: { "x-keep": "yes" } }));
     expect(res.headers.get("x-middleware-request-x-keep")).toBe("yes");
+  });
+
+  // A layout redirect thrown while a Server Action or an RSC fetch re-renders never reaches the browser ("Try the new
+  // layout" on `/` left the classic shell on screen), so only a document request carries the header.
+  it("withholds it from the client router's RSC fetches and prefetches, and strips a client-sent copy", () => {
+    expect(forwarded(proxy(req("/", { cookie: devCookie(), headers: { rsc: "1" } })))).toBeNull();
+    expect(forwarded(proxy(req("/", { cookie: devCookie(), headers: { rsc: "1", "next-router-prefetch": "1" } })))).toBeNull();
+    expect(forwarded(proxy(req("/", { cookie: devCookie(), headers: { rsc: "1", [PATHNAME_HEADER]: "/" } })))).toBeNull();
+  });
+
+  it("withholds it from a Server Action", () => {
+    vi.stubEnv("PUBLIC_ORIGIN", "https://erp.example");
+    const res = proxy(req("/", { method: "POST", cookie: devCookie(), headers: { origin: "https://erp.example", "next-action": "abc123" } }));
+    expect(res.status).not.toBe(403);
+    expect(forwarded(res)).toBeNull();
   });
 });
