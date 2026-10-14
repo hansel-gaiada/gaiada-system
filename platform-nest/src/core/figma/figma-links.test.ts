@@ -269,6 +269,10 @@ describe.skipIf(!TEST_URL)("DW-6k Figma links (HTTP, real Postgres + Cerbos, Fig
       applyOrgStructure(c, B, sanitizeStructure({ root: { id: "root", name: "Rival", kind: "company", children: [dept("d-b", "B Design")] } })),
     );
 
+    // The app first: the rows below are made through its own routes.
+    app = await buildApp();
+    await app.init();
+
     // Tenant A: a PM task in a project owned by d-seo, an asset request to d-creative (its asker `requester`, its task's
     // responsible person `assignee`), and a campaign part of d-seo owned by `partOwner`.
     projectA = await createProject(A, "Rebrand");
@@ -310,9 +314,6 @@ describe.skipIf(!TEST_URL)("DW-6k Figma links (HTTP, real Postgres + Cerbos, Fig
     await q().query(`INSERT INTO agency_campaigns (id, tenant_id, project_id, name, origin_site) VALUES ($1, $2, $3, 'B campaign', 'central')`, [campB, B, projectB]);
     partB = newId();
     await q().query(`INSERT INTO agency_campaign_parts (id, tenant_id, campaign_id, unit_id, origin_site) VALUES ($1, $2, $3, 'd-b', 'central')`, [partB, B, campB]);
-
-    app = await buildApp();
-    await app.init();
   });
 
   afterAll(async () => {
