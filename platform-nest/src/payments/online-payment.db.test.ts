@@ -482,6 +482,33 @@ describe.skipIf(!TEST_URL)("PV5-10 — online payment (simulated Midtrans)", () 
       expect(await paymentsOn(inv.id)).toEqual([]);
     });
 
+    it("PV5-F4: voiding an issued invoice retires its open checkout (here and at the provider); a new checkout is refused", async () => {
+      const { inv, order } = await openCheckout(145_000);
+      expect(fake.expired).not.toContain(order);
+      const v = await app.inject({ method: "POST", url: `/api/${A}/invoices/${inv.id}/void`, headers: asUser(admin), payload: { reason: "issued in error" } });
+      expect(v.statusCode, v.body).toBe(200);
+      // No open checkout is left, and the one we had is expired.
+      expect(await count(`SELECT count(*) FROM payment_checkouts WHERE invoice_id = $1 AND status = 'open'`, [inv.id])).toBe(0);
+      expect((await row<{ status: string }>(`SELECT status FROM payment_checkouts WHERE provider_checkout_id = $1`, [order])).status).toBe("expired");
+      // After commit, the provider was asked to stop taking money on it.
+      expect(fake.expired).toContain(order);
+      // A new checkout is refused: the invoice is void.
+      const again = await checkout(inv.id);
+      expect(again.statusCode, again.body).toBe(409);
+      expect(again.json().reason).toBe("void");
+      expect(await count(`SELECT count(*) FROM payment_checkouts WHERE invoice_id = $1`, [inv.id])).toBe(1);
+    });
+
+    it("PV5-F4: a provider that cannot be reached when a void expires its checkout never blocks the void", async () => {
+      const { inv, order } = await openCheckout(146_000);
+      fake.expireFailure = 503;
+      const v = await app.inject({ method: "POST", url: `/api/${A}/invoices/${inv.id}/void`, headers: asUser(admin), payload: { reason: "issued in error" } });
+      expect(v.statusCode, v.body).toBe(200);
+      expect(fake.expired).toContain(order);
+      expect((await row<{ status: string }>(`SELECT status FROM invoices WHERE id = $1`, [inv.id])).status).toBe("void");
+      expect((await row<{ status: string }>(`SELECT status FROM payment_checkouts WHERE provider_checkout_id = $1`, [order])).status).toBe("expired");
+    });
+
     it("a provider outage during the re-fetch is retried later; a missing clearing account waits and Finance is told once", async () => {
       const { inv, order } = await openCheckout(100_000);
       fake.settle(order, "txn-later");

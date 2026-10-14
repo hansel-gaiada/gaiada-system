@@ -32,6 +32,7 @@ import { newId, withTenants } from "../../db";
 import { emitEvent } from "../../events/outbox.service";
 import { recordInvoiceRevision, snapshotInvoice } from "./invoice-revisions";
 import { readServiceLineFacts } from "./billing-numbering";
+import { expireRetiredForTenant, retireAllCheckouts, type RetiredCheckout } from "../../payments/checkout";
 
 /** The only DB path for anything that touches finance_* tables from the invoice side. See the header. */
 export function withBilling<T>(tenantId: string, fn: (c: PoolClient) => Promise<T>): Promise<T> {
@@ -516,7 +517,10 @@ export async function voidIssuedInvoice(
   tenantId: string, invoiceId: string, actorId: string | null, reason: string,
 ): Promise<{ id: string; status: "void"; creditNoteId: string | null; alreadyVoid: boolean }> {
   if (!actorId) throw new ForbiddenException("voiding needs a known user");
-  return mapLedgerErrors(
+  // PV5-F4: the invoice's open online checkout is retired in the same transaction (a client must not be able to pay a void
+  // invoice) and expired at the provider after commit.
+  let retired: RetiredCheckout[] = [];
+  const out = await mapLedgerErrors(
     withBilling(tenantId, async (c) => {
       const inv = await c.query<{ status: string; issuedAt: string | null; arInvoiceId: string | null; prefix: string | null }>(
         `SELECT i.status, i.issued_at AS "issuedAt", i.ar_invoice_id AS "arInvoiceId", bp.invoice_prefix AS prefix
@@ -596,9 +600,14 @@ export async function voidIssuedInvoice(
       if (upd.rowCount !== 1) throw new ConflictException({ message: "the invoice changed while it was being voided; nothing was written", reason: "conflict" });
       await emitEvent(c, tenantId, "invoice", invoiceId, "invoice.voided", { arInvoiceId: row.arInvoiceId, creditNoteId: cnId, creditNoteNo: cnNo });
       await recordInvoiceRevision(c, tenantId, invoiceId, actorId, "status_changed", before);
+      retired = await retireAllCheckouts(c, invoiceId);
       return { id: invoiceId, status: "void" as const, creditNoteId: cnId, alreadyVoid: false };
     }),
   );
+  // After commit, outside the transaction, logged, never blocking the void (same pattern as the checkout route's retire).
+  // A payment that still lands is ignored as `invoice_void` (src/payments/process.ts).
+  await expireRetiredForTenant(tenantId, retired);
+  return out;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════

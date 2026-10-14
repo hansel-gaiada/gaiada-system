@@ -22,6 +22,7 @@ import { InternalServerErrorException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { PAYMENTS_REUSE_MARGIN_MINUTES } from "../config";
 import type { PaymentProvider } from "./provider";
+import { providerForTenant } from "./registry";
 
 export type OnlinePaymentReason =
   | "not_offered" | "not_issued" | "void" | "not_idr" | "nothing_outstanding" | "fractional_amount"
@@ -186,6 +187,31 @@ export async function retireStaleCheckout(
     [invoiceId, provider, amount, REUSE_MARGIN_MINUTES, environment],
   );
   return r.rows;
+}
+
+/** PV5-F4: retire EVERY open checkout of an invoice (it is being voided: nothing may be paid against it any more). Run
+ *  inside the void transaction; answers the retired rows so the caller can expire them at the provider after commit. */
+export async function retireAllCheckouts(c: PoolClient, invoiceId: string): Promise<RetiredCheckout[]> {
+  const r = await c.query<RetiredCheckout>(
+    `UPDATE payment_checkouts SET status = 'expired', updated_at = now()
+      WHERE invoice_id = $1 AND status = 'open'
+      RETURNING provider, environment, provider_checkout_id AS ref`,
+    [invoiceId],
+  );
+  return r.rows;
+}
+
+/** After commit, best effort, never throws: expire checkouts retired for a company at its configured provider. With the
+ *  provider switched off nothing can be reached, so the rows are only logged. */
+export async function expireRetiredForTenant(tenantId: string, retired: RetiredCheckout[]): Promise<void> {
+  if (retired.length === 0) return;
+  const gw = providerForTenant(tenantId);
+  if (!gw) {
+    // eslint-disable-next-line no-console
+    console.warn(`[payments] ${retired.length} retired checkout(s) for company ${tenantId} cannot be expired: no provider is configured for it`);
+    return;
+  }
+  await expireAtProvider(gw.provider, retired);
 }
 
 /** Store a freshly created provider checkout as THE open one, or answer the one a concurrent request stored first. */
