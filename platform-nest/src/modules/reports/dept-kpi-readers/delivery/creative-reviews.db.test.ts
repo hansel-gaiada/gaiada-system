@@ -25,6 +25,7 @@ describe.skipIf(!TEST_URL)("DW-6n n11 / n12 creative reviews (live PG + RLS)", (
       { id: "d-creative", kind: "department", name: "Creatives", children: [{ id: "dv-studio", kind: "division", name: "Studio", children: [] }] },
       { id: "d-seo", kind: "department", name: "SEO", children: [] },
       { id: "d-empty", kind: "department", name: "Empty", children: [] },
+      { id: "d-cycle", kind: "department", name: "Cycle", children: [] },
     ],
   };
   const ctx = (over: Partial<ReaderCtx> = {}): ReaderCtx => ({
@@ -82,6 +83,15 @@ describe.skipIf(!TEST_URL)("DW-6n n11 / n12 creative reviews (live PG + RLS)", (
       { round: 1, status: "approved", at: "2026-09-05T00:00:00Z" },
       { round: 2, status: "approved", at: "2026-09-06T00:00:00Z", asset: "v2" },
     ], { versions: 2 });
+    // d-cycle: v1 has 1 changes_requested then is approved BEFORE the window; v2 has 2 changes_requested then is approved
+    // inside it. Only the current cycle counts -> 2, not 3.
+    await group(co, "d-cycle", [
+      { round: 1, status: "changes_requested", at: "2026-07-20T00:00:00Z" },
+      { round: 2, status: "approved", at: "2026-08-01T00:00:00Z" },
+      { round: 3, status: "changes_requested", at: "2026-09-02T00:00:00Z", asset: "v2" },
+      { round: 4, status: "changes_requested", at: "2026-09-03T00:00:00Z", asset: "v2" },
+      { round: 5, status: "approved", at: "2026-09-10T00:00:00Z", asset: "v2" },
+    ], { versions: 2 });
     // Excluded: approved at end + 1 day 00:00, approved one ms before the first instant, no approval at all,
     // a sibling unit, another tenant, a deleted asset
     await group(co, "d-creative", [{ round: 1, status: "approved", at: "2026-09-30T16:00:00Z" }]);
@@ -112,6 +122,12 @@ describe.skipIf(!TEST_URL)("DW-6n n11 / n12 creative reviews (live PG + RLS)", (
     // G2's approval at 15:59:59.999Z on Sep 30 is in the last local day; the day after holds nothing of the department
     expect(await revisionRounds(ctx({ unitId: "dv-studio", start: "2026-09-30", end: "2026-09-30" }))).toEqual({ value: 2 });
     expect(await revisionRounds(ctx({ unitId: "dv-studio", start: "2026-10-01", end: "2026-10-01" }))).toBeNull();
+  });
+
+  it("n11: a group approved a second time counts only the revisions of its current cycle (2, not 3)", async () => {
+    expect(await revisionRounds(ctx({ unitId: "d-cycle" }))).toEqual({ value: 2 });
+    // the window holding only the earlier approval (Aug) sees the first cycle: 1 revision
+    expect(await revisionRounds(ctx({ unitId: "d-cycle", start: "2026-08-01", end: "2026-08-31" }))).toEqual({ value: 1 });
   });
 
   it("n11: null when no group was approved in the window (October, an empty unit)", async () => {

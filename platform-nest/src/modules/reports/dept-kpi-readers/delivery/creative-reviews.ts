@@ -15,7 +15,7 @@ import { unitSubtreeSql, windowEndSql, windowStartSql } from "../scope";
 
 // $1 tenant, $2 unit, $3 start, $4 end, $5 zone
 const APPROVED_GROUPS_SQL =
-  `SELECT DISTINCT ON (r.group_id) r.group_id
+  `SELECT DISTINCT ON (r.group_id) r.group_id, r.round AS approved_round
      FROM creative_asset_reviews r
      JOIN creative_assets a ON a.id = r.asset_id AND a.tenant_id = r.tenant_id
     WHERE r.tenant_id = $1::uuid
@@ -28,6 +28,9 @@ const APPROVED_GROUPS_SQL =
 const params = (ctx: ReaderCtx) => [ctx.tenantId, ctx.unitId, ctx.start, ctx.end, config.reportsTz];
 
 /** n11 · `creatives.revision_rounds`: the mean number of `changes_requested` rounds of the groups approved in the window.
+ *  Only THIS approval cycle counts: rounds are numbered per group and never reused, so a group's revisions are its
+ *  `changes_requested` rounds numbered after the group's previous approved round (0 when none) and before the approved
+ *  round A counted in the window. A group approved a second time does not carry its first cycle's revisions.
  *  `withdrawn` and `superseded` rounds are not revisions; a first-time approval counts 0. An average: no numerator or
  *  denominator. `null` when no group was approved in the window. */
 export const revisionRounds: ModuleKpiReader = async (ctx) => {
@@ -36,7 +39,11 @@ export const revisionRounds: ModuleKpiReader = async (ctx) => {
      SELECT count(*)::int AS groups,
             (COALESCE(sum((SELECT count(*) FROM creative_asset_reviews x
                             WHERE x.tenant_id = $1::uuid AND x.group_id = approved.group_id
-                              AND x.status = 'changes_requested')), 0))::float8 AS rounds
+                              AND x.status = 'changes_requested'
+                              AND x.round < approved.approved_round
+                              AND x.round > COALESCE((SELECT max(p.round) FROM creative_asset_reviews p
+                                                       WHERE p.tenant_id = $1::uuid AND p.group_id = approved.group_id
+                                                         AND p.status = 'approved' AND p.round < approved.approved_round), 0))), 0))::float8 AS rounds
        FROM approved`;
   const row = await withTenants([ctx.tenantId], async (c) => {
     const { rows } = await c.query<{ groups: number; rounds: number }>(sql, params(ctx));
