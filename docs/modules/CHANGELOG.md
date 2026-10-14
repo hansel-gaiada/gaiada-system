@@ -11,6 +11,16 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.146.0` - DW-4e-2: a department's KPIs, condition and targets (2026-10-14) - PROTOTYPED
+
+Contract: `docs/FRONTEND-BFF-CONTRACT.md` §40 (the engine is live since 1.0.0-alpha.387). Plan §5.3 and §5.5.
+- **New `/appraisals/department?unit=`** (the Appraisals row's Department tab, no longer planned): the period control, a condition banner ("Web Dev: at risk · Projects on time 81% against 85%", or why the condition is unavailable), one tile per KPI with its value, target and condition in words and colour (the existing status tokens), and a Targets section.
+- **Targets.** A head proposes a target for their own department (`canInUnit`), pre-filled with the catalogue's suggestion (percent typed as a whole number, sent as a fraction; a month among the next twelve). The approver tier approves or rejects, never their own proposal. Staff see the tiles and the banner only. The server stays the authority; its messages are shown as sent.
+- **Honest reads** (`lib/deptKpis.ts`): ok, forbidden, not found or error, never an empty list for a failed read. Pure formatters in `lib/deptKpiFormat.ts` (client-safe), including the server's overview order for DW-3i.
+- **Capabilities** `reports.dept_kpi_target.propose` (company_admin, org_unit_lead through `canInUnit`) and `reports.dept_kpi_target.approve` (company_admin, owner) added to the UI mirror, pinned in `rbac.test.ts`; the owner's missing propose is a recorded non-drift (the policy has no propose mirror).
+- **Demo** (`lib/demoDeptKpis.ts`): five departments in every condition, Web Dev in every tile state, an open proposal, propose, approve, reject and the own-approval refusal; the overview for the company-wide demo callers only.
+- Known gap: a proposal shows its proposer as a user id (the target rows carry no name).
+
 ### platform-nest `0.131.0` - DW-6k: Figma links on PM tasks, work requests and campaign parts (2026-10-14) - PROTOTYPED (stubbed Figma client; live proof waits for DW-11)
 
 - **What.** BFF contract §36 (as built: §36.8). Backend only; the UI is a later ticket.
