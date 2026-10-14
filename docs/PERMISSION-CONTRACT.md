@@ -2184,3 +2184,36 @@ Then move the four pinned literals.
 - **Bundles** (`role-permission-bundles.json`, `totalPairs` 2045 -> 2072, `selfScoped` pairs 33 -> 40): `platform_admin` 451 -> 456, `company_admin` 414 -> 419, `owner` 414 -> 419, `manager` 206 -> 211, `member` 104 -> 109, `viewer` 36 -> 38. Migration `202610150410_iam_calendar_event_permissions.sql` seeds 27 `role_permissions` rows with a DO-block self-assertion (owner mirrors company_admin in both directions, the seven self-scoped markers, viewer read and respond only). The catalog counts (109 kinds, 471 pairs, 456 grantable) do not move: no key was added.
 
 **The six artifacts:** the policy and the derived role `perm_calendar_event_create`; `cerbos.ts` (`attendeeIds` default `[]`, `visibility` default `"attendees"`, in the `Resource` type and the `resourcePayload()` allow-list; `ownerId` was already there); `permission-catalog.json` (+5 keys: 109 kinds, 471 pairs, 456 grantable, 15 relationship, 211 sensitive); `permission-groups.json` (+1 group, `calendar`: 169 groups, 417 covered); the migration; the bundle generator (no resolver change: the kind names only direct roles) and `role-permission-bundles.json` regenerated. Pinned literals moved: `cerbos-catalog-alignment` 466 -> 471 and 108 -> 109 kinds, `permission-groups-catalog-parity` 451 -> 456, `ui-grantable-catalog` 466/451 -> 471/456, `iam-215-boundary-pin` 108 -> 109 kinds and 104 -> 105 non-exempt. Proof: `src/rbac/cerbos-calendar-event.test.ts` (static pin always; live matrix needs `CERBOS_URL`) and the HTTP suite `src/core/calendar-events.test.ts`. **Restart `gaiada-test-cerbos` and the live sidecar after deploying the policy files** (nothing hot-reloads).
+
+## 40. DW-8j — the `personal_mailbox` kind (2026-10-14, PLANNED)
+
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §48 (ruling DW-D24, plan `docs/plans/2026-10-13-department-workspaces.md` §11.4). Status: **PLANNED**.
+
+**A new core kind, `personal_mailbox` (no module), with three actions.** The policy is `resource_personal_mailbox.yaml`, and the keys are `core.personal_mailbox.{connect,read,send}`. The resource is one person's OWN Gmail, linked to the ERP. The ERP stores nothing from it.
+
+| Action | Reach | What it is |
+|---|---|---|
+| `connect` | **Its own rule** for the owner (`ownerId == principal.id`), held as `member`, `manager` or `company_admin` | link or unlink your own Gmail |
+| `read` | the same self rule | read your own threads, on demand |
+| `send` | the same self rule | send or reply as yourself |
+
+**Nobody reads or sends as anyone else.**
+- No role reaches another person's mailbox: not `company_admin`, not HR, not IT.
+- An `EFFECT_DENY` with `roles: ["user"]` and the condition `!(has(request.resource.attr.ownerId) && request.resource.attr.ownerId == request.principal.id)` covers all three actions.
+- It beats the `platform_admin` wildcard under deny-overrides.
+- This is the mail design's "no domain-wide delegation" rule, written as policy.
+
+**No automation or bot principal connects or sends.** There is an `EFFECT_DENY` on `connect` and `send` for `principal.attr.kind in ["automation","bot"]`, shaped like `resource_work_request.yaml`'s. `read` is denied to them too, by the same rule:
+- an agent reading a person's mail is a separate decision, for the separate AI plan;
+- a client-only principal never holds `member`, `manager` or `company_admin`, so it reaches nothing.
+
+**Attributes and the permission arm.**
+- **Attribute:** `ownerId` only, fed by the handler as the caller's own id. It is never read from a body. The allow-list entry already exists.
+- **No permission arm:** every rule is self-scoped, a shape a flat `perms` mirror cannot express, so there is no `perm_*` rule.
+
+**Bundles and markers.**
+- `member`, `manager`, `company_admin`, `owner` and `platform_admin` hold all three keys. Every one of them is self-scoped (`selfScoped`), because the deny makes any other reach impossible.
+- `viewer` holds none. A viewer is a read-only seat, and personal mail is a working tool.
+- No key is `sensitive`: it reaches only the holder's own data.
+
+**The six artifacts** follow §36, plus the four pinned literals. **Restart Cerbos and probe after the deploy:** the status route answers `{connected: false}` for a fresh person.
