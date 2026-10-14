@@ -48,7 +48,7 @@ export interface TaskRow {
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-async function namesFor(ids: string[]): Promise<Map<string, string>> {
+export async function namesFor(ids: string[]): Promise<Map<string, string>> {
   if (!ids.length) return new Map();
   const { rows } = await withGlobal((c) =>
     c.query<{ id: string; name: string }>(
