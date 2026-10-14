@@ -198,6 +198,17 @@ export function ratioParts(k: DeptKpi): string | null {
   return `${k.numerator.toLocaleString("en-US")} of ${k.denominator.toLocaleString("en-US")}`;
 }
 
+/** The page's period from its query string (DW-4j-3: the weekly digest links `?unit=&periodKind=week&start=<Monday>`). A param that is
+ *  missing, empty or repeated falls back (month, today); `end` is passed only when given (the server re-derives it for every calendar kind). */
+export function kpiPeriodFromQuery(
+  sp: { periodKind?: string | string[]; start?: string | string[]; end?: string | string[] },
+  today: string,
+): { periodKind: string; start: string; end?: string } {
+  const one = (v: string | string[] | undefined) => (typeof v === "string" && v !== "" ? v : undefined);
+  const end = one(sp.end);
+  return { periodKind: one(sp.periodKind) ?? "month", start: one(sp.start) ?? today, ...(end ? { end } : {}) };
+}
+
 // ─────────────────────────────────────────────────────────────────── target forms ───────────────
 /** A UI number to the wire scale: a whole percent becomes a fraction. */
 export function toFraction(unit: KpiUnit, uiValue: number): number {

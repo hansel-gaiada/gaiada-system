@@ -7,9 +7,10 @@ import { can, canInUnit, unitPathOf } from "@/lib/rbac";
 import { readOrgRoot } from "@/lib/campaigns-data";
 import {
   bannerSentence, conditionLabel, conditionTone, formatKpiValue, formatMonth, formatTolerance, getDeptKpis, getDeptKpiTargets,
-  ratioParts, tileFoot, type DeptKpiTargetRow, type DeptKpiTargetsKpi, type DeptKpiTargetsView, type DeptKpisView,
+  kpiPeriodFromQuery, ratioParts, tileFoot, type DeptKpiTargetRow, type DeptKpiTargetsKpi, type DeptKpiTargetsView, type DeptKpisView,
 } from "@/lib/deptKpis";
 import { getUnitKpiAlerts } from "@/lib/deptKpiAlerts";
+import { getKpiDrivers, hasMiss } from "@/lib/deptKpiDrivers";
 import { openAlertsByKpi } from "@/lib/deptKpiAlertFormat";
 import { getCyclePicks, getDeptAppraisal } from "@/lib/deptAppraisals";
 import type { ReportPeriodKind } from "@/lib/reports";
@@ -22,6 +23,7 @@ import { ReportPeriodBar } from "@/components/reports/ReportPeriodBar";
 import { ProposeTargetForm, DecideButtons } from "@/components/deptkpis/TargetControls";
 import { AppraisalView, CyclePicker } from "@/components/deptkpis/AppraisalView";
 import { AlertsSection, TileAlertLine } from "@/components/deptkpis/KpiAlerts";
+import { BehindTheMiss } from "@/components/deptkpis/BehindTheMiss";
 import "@/components/deptkpis/deptKpis.css";
 
 const TITLE = "Department";
@@ -140,9 +142,8 @@ export default async function DepartmentKpiPage({
   }
 
   const today = todayIso();
-  const periodKind = sp.periodKind ?? "month";
-  const start = sp.start ?? today;
-  const end = sp.end;
+  // The period is the URL's (shareable): the weekly digest (DW-4j-3, BFF §43.8a) links here with `?periodKind=week&start=<Monday>`.
+  const { periodKind, start, end } = kpiPeriodFromQuery(sp, today);
 
   // The unit's alerts (DW-4j-2) are read in parallel with the KPIs. They are not period-bound: an alert is a state, open until the daily run resolves it.
   const [res, alertsRes] = await Promise.all([
@@ -184,7 +185,22 @@ export default async function DepartmentKpiPage({
     canInUnit(me, "reports.dept_kpi_target.propose", tenant, root ? unitPathOf(root, unit) : []);
   const canApprove = can(me, "reports.dept_kpi_target.approve", tenant);
 
-  const targets = canPropose || canApprove ? await getDeptKpiTargets(userId, tenant, unit) : null;
+  // "Behind the miss" (DW-4j-3, BFF §43.8) is for the unit's heads and the company-wide tiers, the same people as the targets screen, so the same
+  // mirror decides whether the page asks at all: a unit's staff never trigger the read (the server would 403 them) and never see the block. It is
+  // read for the KPIs that are at risk or off track only, for the period the page shows, in parallel with the targets read. The server decides again.
+  const mayDrill = canPropose || canApprove;
+  const missed = mayDrill ? view.kpis.filter((k) => hasMiss(k.condition)) : [];
+  const [targets, driverResults] = await Promise.all([
+    mayDrill ? getDeptKpiTargets(userId, tenant, unit) : Promise.resolve(null),
+    Promise.all(
+      missed.map((k) =>
+        getKpiDrivers(userId, tenant, {
+          unitNodeId: unit, kpiKey: k.key, periodKind: view.period.periodKind, start: view.period.start, end: view.period.end,
+        }),
+      ),
+    ),
+  ]);
+  const missEntries = missed.map((kpi, i) => ({ kpi, result: driverResults[i] }));
 
   // Acknowledging an alert is the head of the unit's action (or the company-wide tier's), the same people who may propose a target, so the same mirror
   // decides whether the button is offered. The server decides again (403 is shown as sent).
@@ -230,6 +246,8 @@ export default async function DepartmentKpiPage({
           })}
         </ul>
       )}
+
+      <BehindTheMiss entries={missEntries} />
 
       <AlertsSection result={alertsRes} tenantId={tenant} canAcknowledge={canAcknowledge} refYear={refYear} />
 
