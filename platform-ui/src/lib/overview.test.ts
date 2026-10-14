@@ -119,10 +119,10 @@ describe("selectBands", () => {
     expect(selectBands([w("lacks", "now")], ctx, () => false)).toEqual([]);
   });
 
-  it("draws the Now band, the You band, Pulse (the Department band) and the Work band (DW-3f) for departments, while the other blocks are planned", () => {
+  it("draws the Now band, the You band, Pulse (the Department band) the Work band (DW-3f) and the Growth band (DW-3g) for departments, while the other blocks are planned", () => {
     for (const ws of WORKSPACES) {
       const company = ws.overview[0].key === "decisions";
-      expect(selectBands(ws.overview, ctx).map((b) => b.band), ws.key).toEqual(company ? ["now"] : ["now", "you", "department", "work"]);
+      expect(selectBands(ws.overview, ctx).map((b) => b.band), ws.key).toEqual(company ? ["now"] : ["now", "you", "department", "work", "growth"]);
     }
     // The company frame has Today; its decisions block waits for DW-3i.
     expect(selectBands(COMPANY_SUBJECT.widgets, ctx).map((b) => [b.band, b.widgets.map((w) => w.key)])).toEqual([["now", ["today"]]]);
