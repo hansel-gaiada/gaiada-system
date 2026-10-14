@@ -48,11 +48,11 @@ unfalsifiable after.
 | hr | `hr` | 11 |
 | invoice | `invoices` | 13 |
 | it | `it` | 4 |
-| knowledge | `knowledge` | 2 |
+| knowledge | `knowledge` | 3 |
 | monitoring | `monitoring` | 3 |
-| pm | `pm` | 14 |
+| pm | `pm` | 15 |
 | reports | `checkins` · `reports` | 18 |
-| search | `search` | 28 |
+| search | `search` | 29 |
 | social | `social` | 13 |
 | webdev | `webdev` | 36 |
 
