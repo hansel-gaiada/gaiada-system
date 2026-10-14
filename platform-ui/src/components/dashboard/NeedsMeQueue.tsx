@@ -78,7 +78,7 @@ export function useQueueDecisions(items: QueueItem[], decide: Decide, acknowledg
     }
   }
 
-  return { visible, act, ack, toast };
+  return { visible, act, ack: acknowledge ? ack : undefined, toast };
 }
 
 /** The Acknowledge control of a KPI alert row: one button, and an optional note that stays collapsed until asked for. */
