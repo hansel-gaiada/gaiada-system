@@ -8066,3 +8066,137 @@ Files: `dept-kpi-watch.ts` (the pure rules, the run, the recipients and the aler
 - the alerts read: a head gets their own units only;
 - acknowledging: a head 200, another unit's head 403, twice 409, a resolved alert 409;
 - `watch` by a non-admin is 403.
+
+## 45. Attachments on requests, campaign parts, campaigns and the staff client page (DW-8h, 2026-10-14) — `platform-nest/src/core/files.controller.ts`; UI `platform-ui/src/components/Attachments.tsx` — **STATUS: PLANNED**
+
+**Why.** Plan §8.1 (row 8h) and §14.2. Today only the task and project pages show files. A request between departments, a campaign, a department's part of a campaign and a client cannot carry a brief, a spec or a delivered file, so that work leaves the ERP.
+
+The `files` table and `files.controller.ts` already store attachments for any kind in an allowlist (`TARGET_KINDS`), and the UI already has a download route (`GET /api/files/:fileId`, the files row of the endpoint table above). This section adds two kinds, a real upload from the UI, an honest list read and the panel on four pages. There is no migration and no Cerbos policy change.
+
+### 45.1 Two new target kinds, with their own write rule
+- `TARGET_KINDS` gains `work_request` (DW-5c, §32) and `agency_campaign_part` (DW-5a, §31). `client` and `agency_campaign` are already in it.
+- **Reading follows the target's read; writing follows the target's own write.** Reads of both new kinds are open to every member of the company (PERMISSION-CONTRACT §35, §36). If "may read" also meant "may attach", anyone could add files to any request or part. So for the two new kinds:
+  - **list** and **download:** `file` · `read`, then the target's read, in the shape its own read route sends: `{kind: "work_request", tenantId, id}`, and for a part `partResource(tenantId, {id})`.
+  - **attach** and **delete:** `file` · `create` (or `delete`), then the target's WRITE check, with attributes read from the database, never from the body:
+    - `work_request`: allowed when `deliver` (the receiving side) OR `cancel` (the asker) is allowed on `factsResource(tenantId, facts)` (`requestedBy`, `assigneeIds`, `unitAncestors`). This covers the asker, the assignees, the receiving department's head, and managers.
+    - `agency_campaign_part`: `update` on `partResource(tenantId, {id, ownerId, unitAncestors})`. This covers the part's owner, the department's head and managers. Without those attributes, the owner and head rules fail closed.
+  - DW-6k already resolves exactly these targets and their write check (`core/figma/figma.controller.ts`: `readResourceOf`, `readTarget`, `requireTarget`, `authorizeWrite`; §36.5). 8h moves them, unchanged, into a shared `core/work-targets.ts` that both controllers import. There is one copy of the rule, and DW-6k's Cerbos matrix keeps covering it.
+- **The existing kinds are unchanged** (`file` · action, then the target's `read`). Changing their write rule is out of scope here; it is recorded as a gap.
+- **The target must exist** (the two new kinds). `requireTarget` reads the row under the tenant. A request or part that is absent, soft-deleted or another tenant's, or an id that cannot be one, answers 404 `{error: "target_not_found"}` after the `file` check. Because a caller outside the tenant is refused first, the 404 is never an existence oracle.
+- **A closed target takes no new files.** Attaching to a `cancelled` or `declined` request, or a `cancelled` part, answers 409 `{error: "target_closed"}`. A `delivered` request still takes files ("deliver more"). Listing, downloading and deleting stay open on a closed target.
+- **PV rules stay** for every kind (PV5-06, PV5-07): a file with a `role` (an issued invoice PDF, a sealed or certified copy, a receipt, a certificate) is never deleted or replaced (409), and `files.sha256` is written on every upload that holds bytes.
+- **Staff only.** Neither new kind, nor `client`, is ever a portal parent:
+  - the portal download route (`portal/files/:fileId`) keeps its parent list;
+  - `core/client-documents.ts` (the portal and staff Documents list) and the `documents.list` agent tool list legal and money documents by role and parent only.
+
+  A guard test pins that a `client`, `work_request` or `agency_campaign_part` file is absent from the portal Documents list and refused by the portal download route.
+
+### 45.2 Upload from the UI
+- The platform already takes `{content}` as base64 up to 25 MB, scrubs text types and stores the bytes. The UI gains a real upload: the panel's file input sends the file through a server action, which base64-encodes it and posts `{targetType, targetId, filename, contentType, content}`.
+- **The route needs its body limit.** `POST /api/:tenantId/files` is not in `core/upload-body-limits.ts`'s table, so Fastify's 1 MiB default refuses (413) any upload over about 750 KB, although the handler allows 25 MB. 8h adds the entry `{method: "POST", url: "/api/:tenantId/files", capBytes: MAX_BYTES, label: "staff file upload"}`, which exports `MAX_BYTES`. `assertAllMatched()` then fails the boot if the route is ever renamed.
+- The action refuses a file over 25 MB before sending, with a sentence. The Server Action and proxy body caps (520 MB, `next.config.ts`) are not the limit; the platform's 25 MB is.
+- When the answer says `scrubbed: true`, the panel says that personal data was removed from the stored copy.
+- Linking stays: name plus an optional URL, stored as a reference row with no bytes. Once DW-6i lands, list rows carry `url`, and a reference row opens it. A row with bytes downloads through `GET /api/files/:fileId`.
+- The attach and remove actions take the page path to revalidate from the caller. Today they derive `/${entityType}s/${id}`, which is wrong for these kinds.
+
+### 45.3 An honest list read
+`listFiles` folds every failure into `[]` (`skipUnavailable`), so a refusal reads as "no files". The panel uses a new reader `readFiles(userId, tenantId, entityType, entityId)` that returns a `ReadResult`:
+- 403 → "You can't see this item's files.";
+- 404 `target_not_found` → "This item no longer exists.";
+- unreachable → "Files can't be read right now.", never an empty list.
+
+The existing callers of `listFiles` (the task and project pages) are not changed by this ticket.
+
+### 45.4 Where the panel appears
+- **A request** (`/requests/[id]`): the request's files (`work_request`, the request id). Everyone who can read the request sees them; the asker, the assignees, the receiving head and managers add them (§45.1). The add controls follow the page's existing write hints. Where there are none, the panel offers adding and words a 403 as "Only the people on this request can add files."
+- **A campaign** (`/agency/[campaignId]`): the campaign's own files (`agency_campaign`). Each department part on that page shows a quiet file count, which opens that part's files (`agency_campaign_part`) in place. There is no panel per part by default, so the page stays clean (plan §13 trap 5).
+- **The staff client page**, on its Details tab (`/clients/[clientId]/details`, agreed with PV): a Files section for the client (`client`). **Staff only** (§45.1); the panel says "Only staff see these files."
+- The panel shows each file's name, size, who added it and when (pinned locale and time zone), and Download or Open. Remove is offered when `canEdit` is true.
+
+### 45.5 Demo mode and tests
+- **DEMO_MODE:** `demoFixtures` answers list, attach and remove for the new targets, with a labelled placeholder file.
+- **Platform**, on the Linux CI gate (an HTTP suite against real Postgres and Cerbos):
+  - **A request:** the asker, an assignee and the receiving head may attach and delete. A plain member of a third department may list but not attach (403).
+  - **A part:** the owner and the department head may attach. A member of another department may not (403).
+  - another tenant's caller is refused 403 on list and attach;
+  - a missing or soft-deleted target answers 404 `target_not_found`;
+  - a cancelled or declined request, or a cancelled part, answers 409 `target_closed` on attach, while a delivered request takes files;
+  - an unsupported kind still answers 400;
+  - an upload over 25 MB answers 400, and one of about 5 MB is stored (the body limit applies; extend `upload-body-limits.http.test.ts`);
+  - a file with a `role` still answers 409 on delete;
+  - the staff-only guard: a `client`, `work_request` or `agency_campaign_part` file is absent from the portal Documents list and refused by the portal download route.
+- DW-6k's Figma suite stays green after the move to `core/work-targets.ts`.
+- **UI:** the panel's sentences for refused, missing, closed and unreachable; the size refusal before sending; the scrubbed notice; the revalidated path; the staff-only line on the client page; DW-6i's Drive button kept beside the upload.
+
+## 46. Knowledge search for staff (DW-8i, 2026-10-14) — `platform-nest/src/modules/knowledge/search.controller.ts` (new), `modules/knowledge/search-filter.ts` (new); UI `/knowledge` — **STATUS: PLANNED**
+
+**Why.** Plan §8.1 (row 8i) and §14.2 ("Find a company document"). The knowledge store (WS8, `ai-agents/src/knowledge/`) indexes ERP records every 6 hours, but staff cannot search it. `/knowledge` lists sources only, and `/search` is a client-side substring match over a few lists.
+
+**The rule that shapes this section.** The internal tier's chunks are written with an empty `acl`, which means "every member of the company" (`modules/knowledge/README.md`, "Known limits"). The ERP's own reads are narrower: a person's report, a meeting transcript and a file each have their own read rule. A search that returned chunks on the tier's rule alone would show a member records they cannot open in the ERP. That would widen visibility, which D-UX-2 forbids. So **every hit is re-checked against the caller's read right on its source record before it is returned, and a family with no such check is never returned.**
+
+### 46.1 The route
+- **Request:** `GET /api/:tenantId/knowledge/search?q=&limit=`, behind `AuthGuard` and `ModuleEnabledGuard("knowledge")`. The gate is Cerbos `activity` · `read` on the tenant, the gate `GET :tenantId/knowledge/sources` already uses. There is no new Cerbos kind or action.
+- **Validation:** `q` is 2 to 200 characters after trimming, else 400 `{error: "query_invalid"}`. `limit` is 1 to 20 (default 10).
+- **The store call:** the platform calls the knowledge service's `POST /search` the way `modules/search/knowledge-client.ts` does (`selfLinkUpsert`, then `x-obo-provider: platform` and `x-obo-external-id: <userId>`, with the service token). It asks for `topK = min(limit × 4, 80)`, leaving room for the filter.
+  - A new caller in that file returns a result or throws. The existing helper, which folds every failure into `[]`, is left as it is for its own callers.
+- **Tier and tenant:** only `audience: "internal"` hits whose `tenantId` equals `:tenantId` are kept. A public-tier hit (the website corpus) is not a company record and is dropped here.
+- **Service down:** an unset knowledge URL, a timeout or a non-2xx answer gives 503 `{error: "knowledge_unavailable"}`, never an empty list.
+
+### 46.2 The filter: one read check per hit
+`sourceRef` names the record (`erp:<family>:<id…>`, `modules/knowledge/ingest/erp-source.ts`).
+
+**Searchable (v1)**, each with the read check its own ERP read route makes, using the same resource shape and attributes:
+
+| Family | Record | Read check (verify each against its route) | Opens |
+|---|---|---|---|
+| `client` | client | the client read of `/clients/:id` | `/clients/:id` |
+| `project` | project | the project read | `/projects/:id` |
+| `task` | base task | the task read | `/tasks/:id` |
+| `pmtask` | PM task | the `pm_task` read | the PM task's own page (the href `GET /api/tasks/mine` builds) |
+| `deliverable` | deliverable | the deliverable read | `/deliverables/:id` |
+| `meeting` | meeting recording | the recording read of `meetings.controller.ts` | `/meetings/:id` |
+| `pmdoc` | PM doc | the PM doc read | the doc's page |
+| `file` | file | `file` · `read`, then its parent's read (as `GET :tenantId/files/:fileId` does) | the parent's page; the file downloads through `GET /api/files/:fileId` |
+
+**Withheld (v1):** `report`, `person`, `org` and `orgunits`, and any family not in the table above (fail closed).
+- Their read rules depend on who the person is: a report is read by self, head or HR; the people directory has its own gate.
+- Each can join the table later, with its own check and its own test.
+
+**How it is checked:**
+- Every check runs **after** the record is confirmed to exist under the tenant (`withTenants`). A deleted record's stale chunk is dropped, so search never surfaces a record the ERP no longer shows.
+- The checks are batched through Cerbos at most 50 per request (the batch limit).
+- **A refused hit is dropped silently.** No count of withheld hits is returned, because a count would confirm that hidden records match the query.
+
+### 46.3 The answer
+```
+200 { query, results: [{ sourceRef, family, title, snippet, href, score }], indexedAt }
+```
+- **One result per record.** Several chunks of one record collapse to the best-scoring one. Results are in score order, at most `limit`.
+- **`title`:** the record's current name, read from the ERP row during the existence check, never from the chunk.
+- **`snippet`:** up to 300 characters of the chunk, with whitespace collapsed.
+- **`indexedAt`:** the last successful sweep's finish time (`GET :tenantId/knowledge/ingest/status`), or `null`.
+- **Not stored:** the query text is never written to activity or audit logs. It can carry personal data, and it is not an action on a record.
+
+### 46.4 UI
+- `/knowledge` gains a search field at the top, kept in the URL (`?q=`), with results under it: title as a link, a family label, and the snippet. The source list stays below for the people who use it.
+- **Honest states:**
+  - 503 → "Search isn't available right now.";
+  - no results → "Nothing you can open matches." plus "Results include only records you can open.";
+  - always the line "Indexed every 6 hours (last: …). PDF and Word files are found by name, not by their contents."
+- ⌘K gains a "Search company knowledge for '…'" item that opens `/knowledge?q=…`.
+- **DEMO_MODE:** a fixture answers with a few labelled results.
+
+### 46.5 Tests
+- **Unit:** the family parser and the allowlist (an unknown family is dropped); collapsing to one result per record; the topK arithmetic.
+- **HTTP suite** on the Linux CI gate, against real Postgres and Cerbos, with the knowledge service stubbed:
+  - a member's hits on a record they can read are returned;
+  - hits on a record they cannot read are dropped;
+  - another tenant's and public-tier hits are dropped;
+  - a deleted record is dropped;
+  - a `report` or `person` hit is dropped for every caller, including `company_admin`;
+  - the service down gives 503;
+  - `q` too short gives 400;
+  - the query text appears in no activity row.
+
+### 46.6 A finding outside this ticket
+The hub's `knowledge.search` tool and the assistant's retrieval (`config.knowledgeTopK`, ASST-18) apply only the tier's rule today. So the AI Assistant can quote internal chunks, such as a person's report or a meeting transcript, to any member of the company. §46.2's filter is written as a shared function (`search-filter.ts`) so those paths can adopt it. Whether and when they do is the owner's decision (see the DW-8 board), not part of DW-8i.
