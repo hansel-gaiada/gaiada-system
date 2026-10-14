@@ -51,18 +51,20 @@ describe.skipIf(!TEST_URL)("DW-6n6 clients.retention (live PG)", () => {
     await withTenants([tenant], (c) => c.query(`UPDATE projects SET department_id = $2, status = $3, start_date = $4::date WHERE id = $1`, [id, unit, status, start]));
     return id;
   };
-  const contract = async (tenant: string, client: string, status: string, startsOn: string | null, endsOn: string | null, supersedes?: string) => {
+  const contract = async (tenant: string, client: string, status: string, startsOn: string | null, endsOn: string | null, supersedes?: string, signedAt: string | null = new Date().toISOString()) => {
     const id = newId();
     await withTenants([tenant], (c) =>
       c.query(
         `INSERT INTO contracts (id, tenant_id, client_id, title, version, supersedes_id, status, starts_on, ends_on, sent_at, signed_at,
                                 body_md, content_sha256, content_fixed_at, signature_tier, origin_site)
-         VALUES ($1,$2,$3,'MSA',$4,$5,$6,$7::date,$8::date, now(), CASE WHEN $6 = 'signed' THEN now() END, 'Terms.', $9, now(), 'attested', $10)`,
-        [id, tenant, client, supersedes ? 2 : 1, supersedes ?? null, status, startsOn, endsOn, SHA, config.originSite],
+         VALUES ($1,$2,$3,'MSA',$4,$5,$6,$7::date,$8::date, now(), CASE WHEN $6 = 'signed' THEN $11::timestamptz END, 'Terms.', $9, now(), 'attested', $10)`,
+        [id, tenant, client, supersedes ? 2 : 1, supersedes ?? null, status, startsOn, endsOn, SHA, config.originSite, signedAt],
       ),
     );
     return id;
   };
+  const createdAt = (tenant: string, projectId: string, at: string) =>
+    withTenants([tenant], (c) => c.query(`UPDATE projects SET created_at = $2::timestamptz WHERE id = $1`, [projectId, at]));
   const read = (over: Partial<ReaderCtx> = {}, tenant = () => co) =>
     clientRetention({ tenantId: tenant(), unitId: "d-seo", periodKind: "month", start: "2026-10-01", end: "2026-10-31", asOf: "2026-10-20", ...over });
 
@@ -182,6 +184,33 @@ describe.skipIf(!TEST_URL)("DW-6n6 clients.retention (live PG)", () => {
     expect(await read({ unitId: "d-empty" })).toBeNull();
     // 2025: nobody was active a year earlier
     expect(await read({ start: "2025-10-01", end: "2025-10-31", asOf: "2025-10-31" })).toBeNull();
+  });
+
+  // The common creation paths never set `start_date`/`starts_on`: the start falls back to created_at / signed_at (REPORTS_TZ date).
+  describe("fallback starts", () => {
+    let co2: string;
+    beforeAll(async () => {
+      co2 = await createCompany("DW-6n6 Fallback Co", ["pm"]);
+      await seedTree(co2, "DW-6n6 Fallback Co");
+      const early = await createClient(co2, "project created before the window");
+      await createdAt(co2, await project(co2, early, "d-seo", "active", null, "early"), "2026-09-01T12:00:00Z");
+      const late = await createClient(co2, "project created after the window opened");
+      await createdAt(co2, await project(co2, late, "d-seo", "active", null, "late"), "2026-10-10T12:00:00Z");
+      const signedEarly = await createClient(co2, "contract with no starts_on, signed before the window");
+      await contract(co2, signedEarly, "signed", null, null, undefined, "2026-09-01T12:00:00Z");
+      await project(co2, signedEarly, "d-seo", "completed", "2026-01-01", "done");
+      const neither = await createClient(co2, "signed contract with neither a start nor a signing time");
+      await contract(co2, neither, "signed", null, null, undefined, null);
+      await project(co2, neither, "d-seo", "completed", "2026-01-01", "done2");
+    }, 60_000);
+
+    it("a NULL start_date project created before start puts its client in the cohort; created after start it does not", async () => {
+      // cohort at 10-01: the early project, and the contract signed 09-01 (starts_on NULL). The late project and the contract with
+      // neither date are out. Both cohort members are still active on asOf.
+      expect(await read({ asOf: "2026-10-20" }, () => co2)).toEqual({ value: 1, numerator: 2, denominator: 2 });
+      // Moving the window start past the late project's creation brings its client in.
+      expect(await read({ start: "2026-10-11", end: "2026-10-31", asOf: "2026-10-20" }, () => co2)).toMatchObject({ numerator: 3, denominator: 3 });
+    });
   });
 
   it("a window that has not begun as of asOf is null", async () => {
