@@ -11,6 +11,27 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.140.0` + platform-ui `0.160.0` - DW-8h: attachments on requests, campaigns, campaign parts and the staff client page; a real upload (2026-10-14) - PROTOTYPED
+
+Contract `docs/FRONTEND-BFF-CONTRACT.md` §45 (as built: §45.6 backend, §45.7 UI). Plan §8.1 row 8h. No migration, no Cerbos policy change, no compose change.
+- **Backend.**
+  - `POST/GET/DELETE /api/:t/files` accept `work_request` and `agency_campaign_part`. The target must exist (404 `target_not_found`).
+  - Reads follow the target's own read. Attach and delete follow the target's own write: a request's asker, assignees, receiving head and managers; a part's owner, department head and managers. Read-for-write would have let any member attach to any request.
+  - A cancelled or declined request, or a cancelled part, refuses new files with 409 `target_closed`.
+  - The resolver is DW-6k's, moved unchanged into `core/work-targets.ts`; the Figma and files controllers share it.
+  - The existing kinds are unchanged (their read-for-write is a recorded gap).
+  - `POST /api/:tenantId/files` gets its own body limit: it was missing from `upload-body-limits.ts`, so any upload over about 750 KB got 413. A file just over 25 MB now reaches the handler (400 `file too large`); 26 MB passes the derived ceiling (413).
+- **UI.**
+  - A real upload: file input, a 25 MB check before sending, and a notice when personal data was scrubbed. An uploaded file gets a download link through `/api/files/:id`. DW-6i's Drive picker is kept.
+  - An honest `readFiles` read, so refused, missing and unreachable are each said in words.
+  - Files on `/requests/[id]`; on `/agency/[campaignId]` for the campaign, plus a quiet "Files (n)" per part that opens in place.
+  - On the staff client page's Internal Notes tab ("notes and files", at PV's call), with "Only staff see these files."
+- **Staff only.** A guard test pins that `client`, `work_request` and `agency_campaign_part` files never reach the portal's Documents list or its download route.
+- **Two fixes found on the DW-8 Wave A live check (397):**
+  - `/me/pay` crashed for every staff reader: the leave ledger read left out `subjectUserId` (400). It now names the viewer.
+  - My tasks rows load the data table's link style.
+- **Verified.** CI on the branch ran the new HTTP suite: 23 of 23 green. CI also corrected one body-limit test (26 MB is 413 by design). Gate: CI on the landing sha.
+
 ### platform-ui `0.159.0` - DW-4j-2: an off-track KPI waits in the head's Needs you, and the KPI page shows its alerts (2026-10-15) - PROTOTYPED
 
 Contract: `docs/FRONTEND-BFF-CONTRACT.md` §43.5 and §43.7 (with §43.7a "as built"). The API is live since 1.0.0-alpha.395 (DW-4j-1).
