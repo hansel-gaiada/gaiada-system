@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readDriveStatus } from "./drive-data";
 
-// DW-6i UI: the reader behind the Drive block and the attach-button gate. It builds the Picker URL for the active company,
-// keeps a refusal as data, and never lets the Picker's access token leave it.
+// DW-6i UI: the reader behind the Drive block and the attach-button gate. It reads the token-free STATUS route for the active
+// company (never the Picker route, which mints a token), keeps a refusal as data, and keeps only the four status fields.
 
 beforeEach(() => {
   process.env.PLATFORM_URL = "http://p.test";
@@ -17,14 +17,16 @@ const answer = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("readDriveStatus", () => {
-  it("asks the Picker route for the active company", async () => {
+  it("asks the status route for the active company, never the Picker route", async () => {
     const f = reply(200, answer());
     vi.stubGlobal("fetch", f);
     await readDriveStatus("u", "co-1");
-    expect(String(f.mock.calls[0][0])).toBe("http://p.test/api/co-1/integrations/google-drive/picker");
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(String(f.mock.calls[0][0])).toBe("http://p.test/api/co-1/integrations/google-drive");
+    expect((f.mock.calls[0][1] as RequestInit | undefined)?.method ?? "GET").toBe("GET");
   });
 
-  it("returns the status and drops the access token, the key and the app id", async () => {
+  it("returns the four status fields only, even if an answer carried more (a token, the key, the app id)", async () => {
     vi.stubGlobal("fetch", reply(200, answer()));
     const r = await readDriveStatus("u", "co-1");
     expect(r).toEqual({ kind: "ok", data: { configured: true, connected: true, needsReconnect: false, accountEmail: "a@b.test" } });
@@ -59,7 +61,7 @@ describe("readDriveStatus", () => {
     expect(await readDriveStatus("u", "co-1")).toEqual({ kind: "unavailable", reason: "socket hang up" });
   });
 
-  it("treats a 200 that is not the Picker shape as a broken read", async () => {
+  it("treats a 200 that is not the status shape as a broken read", async () => {
     vi.stubGlobal("fetch", reply(200, { hello: "world" }));
     const r = await readDriveStatus("u", "co-1");
     expect(r.kind).toBe("unavailable");

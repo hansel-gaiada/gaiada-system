@@ -56,6 +56,9 @@ export const canAttachFromDrive = (s: DriveStatus | null | undefined): boolean =
 
 // ── The routes (the tenant is the caller's active company) ────────────────────────────────────────
 const base = (t: string) => `/api/${encodeURIComponent(t)}/integrations/google-drive`;
+/** `GET`: the status alone, read from the connection row (no token; Google is never called). The pages' gate reads this. */
+export const statusPath = (t: string): string => base(t);
+/** `GET`: the status plus a live access token. Read only by the click that opens the Picker. */
 export const pickerPath = (t: string): string => `${base(t)}/picker`;
 export const startPath = (t: string): string => `${base(t)}/oauth/start`;
 export const disconnectPath = (t: string): string => base(t);

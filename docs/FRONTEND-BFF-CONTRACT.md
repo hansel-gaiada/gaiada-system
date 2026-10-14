@@ -7800,7 +7800,7 @@ Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.2 (DW-6i) and §14.1 
 
 ### 42.8 As built (backend, DW-6i, 2026-10-14)
 
-Google is STUBBED at `fetch` in every test; nothing here has met real Google (DW-11 item 6). The UI of §42.6 is a later ticket.
+Google is STUBBED at `fetch` in every test; nothing here has met real Google (DW-11 item 6). The UI of §42.6 is the "As built (UI)" block below.
 
 **Where it is.**
 - `core/google-drive/` (new):
@@ -7865,7 +7865,7 @@ Google is STUBBED at `fetch` in every test; nothing here has met real Google (DW
    - `connected` there means a credential is held and the connection is not flagged. A refresh Google refuses is found on that click, which flags the row, and the next status read says `needsReconnect`.
 
 **For the UI ticket.**
-- `GET /api/:t/files` does not return `url`, so an attachment cannot be opened from the list yet. `files.controller` was left unchanged on purpose (this ticket keeps it identical). The UI ticket needs `url` added to that SELECT, and a Drive mark can then be derived from the link's host.
+- `GET /api/:t/files` now returns `url` (added in review, `42c5e37c`; NULL for an uploaded file), so an attachment can be opened from the list. `FileMeta.url` carries it in the UI.
 - The Picker script and the CSP note of §42.6 are unchanged and wait for the live proof.
 
 **As built (UI, DW-6i, 2026-10-14).** In `platform-ui/src`; none of it has met real Google (DW-11 item 6).
@@ -7874,7 +7874,7 @@ Google is STUBBED at `fetch` in every test; nothing here has met real Google (DW
   - The return path comes ONLY from a short-lived httpOnly cookie (`HOST_COOKIES.driveOAuthPending`, set by `startDriveConnectAction`, 10 minutes) and is re-validated by `sanitizeReturnTo` where the redirect is issued. No query parameter is ever a redirect target. With no cookie it still completes the connection and lands on `/departments`.
 - **Readers and actions.**
   - `lib/drive.ts`: pure; the shapes, route paths, the token-to-sentence map `driveErrorText`, the outcome line, `isDriveUrl`.
-  - `lib/drive-data.ts`: `readDriveStatus`, a `ReadResult` of the Picker answer with the token DROPPED.
+  - `lib/drive-data.ts`: `readDriveStatus`, a `ReadResult` of the token-free status route (`GET /api/:t/integrations/google-drive`, deviation 13). It never reads the Picker route.
   - `lib/driveActions.ts`: start, disconnect, `loadPickerCredentialsAction`, attach.
   - `lib/drivePicker.ts`: the Google loader. `lib/drive-pending.ts`: the cookie.
 - **Tools & connections** (pilot): `components/departments/DriveConnectionBlock.tsx` replaces the manual Drive row in the pilot with the four states and the outcome line. Classic is unchanged (it keeps the manual row).
@@ -7883,7 +7883,7 @@ Google is STUBBED at `fetch` in every test; nothing here has met real Google (DW
   - A file with a `url` opens it in a new tab (`rel="noopener noreferrer"`), with a Drive mark for `drive.google.com` and `docs.google.com` links.
 - **The access token** is read only by `loadPickerCredentialsAction` on the click, held in that closure, and never stored, logged or passed as a page prop. The page's own read (`readDriveStatus`) never sees it.
 - **Deviations from §42.6:**
-  - (1) The attach button's gate is a second Picker read per task page view, because the token must not ride the page; the click re-reads for a fresh token.
+  - (1) The attach button's gate and the connection block read the token-free status route (deviation 13), so a page view never mints a token or waits on Google. The click alone reads the Picker answer, for a fresh token.
   - (2) The OAuth landing adds the optional `driveOAuthReason` beside the coarse flag, whitelisted to the backend's own tokens.
   - (3) A new pending-flow cookie rather than reusing search's, because that one's parser only accepts a search provider.
   - (4) No CSP was changed: the global CSP is `frame-ancestors 'self'` only, so the Picker is not blocked.

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   DRIVE_CALLBACK_UI_PATH, attachPath, callbackPath, canAttachFromDrive, disconnectPath, driveErrorText, driveErrorToken,
-  driveOutcomeText, isDriveUrl, normalizeCredentials, normalizeStatus, parseDrivePending, pickerPath, startPath,
+  driveOutcomeText, isDriveUrl, normalizeCredentials, normalizeStatus, parseDrivePending, pickerPath, startPath, statusPath,
 } from "./drive";
 
 // DW-6i UI: the pure half of Google Drive (BFF §42). The error tokens are put in words, the Picker answer is reduced to a status
@@ -115,7 +115,8 @@ describe("normalizeStatus and normalizeCredentials", () => {
 });
 
 describe("the route paths", () => {
-  it("builds the five backend routes for the active company", () => {
+  it("builds the six backend routes for the active company", () => {
+    expect(statusPath("co-1")).toBe("/api/co-1/integrations/google-drive");
     expect(pickerPath("co-1")).toBe("/api/co-1/integrations/google-drive/picker");
     expect(startPath("co-1")).toBe("/api/co-1/integrations/google-drive/oauth/start");
     expect(disconnectPath("co-1")).toBe("/api/co-1/integrations/google-drive");
