@@ -40,7 +40,7 @@ import { config } from "../config";
 import { authorize, writeActivity } from "../core/http";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
-import { loadUnitAncestors } from "../core/org-unit-closure";
+import { loadCompanyUnitNodeIds, loadUnitAncestors } from "../core/org-unit-closure";
 import { adoptManagedGrantAsManual } from "./service-reconciler";
 import { reconcileUser } from "./position-reconciler";
 import { revokeGrantById } from "./grant-write.service";
@@ -704,6 +704,7 @@ export class EmployeesController {
 
     const userId = prep.employee.user_id;
     const revokedManual: { grantId: string; role: string; scopeType: string; scopeId: string | null }[] = [];
+    const keptAmbiguous: { grantId: string; role: string; scopeId: string; otherCompanyIds: string[] }[] = [];
 
     await withTenants([tenantId], async (c) => {
       for (const seat of prep.open) {
@@ -741,26 +742,63 @@ export class EmployeesController {
       // revoke them and report the audited list. Routed through P2-04's choke point, never a direct
       // DELETE.
       //
-      // ⚠ THE RLS ZERO-ROW TRAP (found by the 2026-10-14 sweep): this read MUST run under `withTenants`. Its
-      // org_unit arm subselects `org_units`, which is FORCE RLS (0026, `tenant_isolation`); under a bare
-      // `withGlobal` no tenant GUC is set, the subselect returned ZERO rows with no error, and a leaver's
-      // org_unit-scoped manual grants were never found, never revoked and never reported (only the company-scope
-      // arm worked). `user_roles` and `roles` have no RLS, so the tenant context costs the rest of the query nothing.
-      const manual = await withTenants([tenantId], (c) =>
-        c.query<{ id: string; role: string; scope_type: string; scope_id: string | null }>(
-          `SELECT ur.id, r.name AS role, ur.scope_type, ur.scope_id
-             FROM user_roles ur
-             JOIN roles r ON r.id = ur.role_id
-            WHERE ur.user_id = $1
-              AND ur.managed_by IS NULL AND ur.managed_by_position IS NULL
-              AND ((ur.scope_type = 'company' AND ur.scope_id = $2)
-                OR (ur.scope_type = 'org_unit' AND ur.scope_id IN (
-                      SELECT node_id FROM org_units WHERE tenant_id = $2::uuid)))`,
-          [userId, tenantId],
-        ),
-      );
+      // ⚠ THE RLS ZERO-ROW TRAP (found by the 2026-10-14 sweep): the unit-set read MUST run under `withTenants`.
+      // The blob, `org_unit_closure` and `org_units` are all FORCE RLS; under a bare `withGlobal` no tenant GUC is
+      // set, the read returned ZERO rows with no error, and a leaver's org_unit-scoped manual grants were never
+      // found, never revoked and never reported (only the company-scope arm worked).
+      //
+      // "This company's units" is the WHOLE org (blob + closure) UNION the anchored `org_units` rows
+      // (`loadCompanyUnitNodeIds`). `org_units` alone holds only the lazily anchored, service-assigned units, so a
+      // manual grant on any other node of the org survived the leaver (the second 2026-10-14 gap).
+      const manual = await withTenants([tenantId], async (c) => {
+        const ids = await loadCompanyUnitNodeIds(c, tenantId);
+        return (
+          await c.query<{ id: string; role: string; scope_type: string; scope_id: string | null }>(
+            `SELECT ur.id, r.name AS role, ur.scope_type, ur.scope_id
+               FROM user_roles ur
+               JOIN roles r ON r.id = ur.role_id
+              WHERE ur.user_id = $1
+                AND ur.managed_by IS NULL AND ur.managed_by_position IS NULL
+                AND ((ur.scope_type = 'company' AND ur.scope_id = $2)
+                  OR (ur.scope_type = 'org_unit' AND ur.scope_id = ANY($3::text[])))
+              ORDER BY ur.scope_type, ur.scope_id, ur.id`,
+            [userId, tenantId, [...ids]],
+          )
+        ).rows;
+      });
+
+      // ⚠ CROSS-COMPANY GUARD. An org_unit grant carries no tenant: its `scope_id` is free text, and the same node id
+      // (`d-web`, `d-hr`) can sit in the org of several group companies. A grant on such a node is AMBIGUOUS when the
+      // leaver is still actively employed at one of those other companies: it may be that company's access, which this
+      // company's HR has no authority to remove. Those are KEPT and reported for HR/IT to decide by hand; a node id
+      // shared only with companies where the leaver has no active membership is revoked as usual.
+      //
+      // Memberships are read through `principal_lookup` (the leaver's own rows only), and each other company's unit set
+      // under `withTenants([thatCompany])` — one tenant per transaction, so no RLS context is ever widened.
+      const orgUnitCandidates = manual.filter((g) => g.scope_type === "org_unit" && g.scope_id !== null);
+      const otherOwners = new Map<string, string[]>(); // scope_id -> other companies (leaver active there) owning it
+      if (orgUnitCandidates.length > 0) {
+        const otherTenants = (await withGlobal((c) => activeMembershipTenantIds(c, userId))).filter(
+          (t) => t !== tenantId,
+        );
+        for (const other of otherTenants) {
+          const theirs = await withTenants([other], (c) => loadCompanyUnitNodeIds(c, other));
+          for (const g of orgUnitCandidates) {
+            if (!theirs.has(g.scope_id as string)) continue;
+            const owners = otherOwners.get(g.scope_id as string) ?? [];
+            if (!owners.includes(other)) owners.push(other);
+            otherOwners.set(g.scope_id as string, owners);
+          }
+        }
+      }
+
       await reconcileUser(tenantId, userId);
-      for (const g of manual.rows) {
+      for (const g of manual) {
+        const owners = g.scope_type === "org_unit" && g.scope_id !== null ? otherOwners.get(g.scope_id) : undefined;
+        if (owners && owners.length > 0) {
+          keptAmbiguous.push({ grantId: g.id, role: g.role, scopeId: g.scope_id as string, otherCompanyIds: owners });
+          continue;
+        }
         await withGlobal((c) => revokeGrantById(c, g.id, userId));
         revokedManual.push({ grantId: g.id, role: g.role, scopeType: g.scope_type, scopeId: g.scope_id });
       }
@@ -770,33 +808,9 @@ export class EmployeesController {
       // unaffected. `assemblePrincipal()` already returns null for a non-active user, so this is
       // what makes access stop before Keycloak is touched at all.
       const disabled = await withGlobal(async (c) => {
-        // ⚠ THE RLS ZERO-ROW TRAP, caught by this flow's own test rather than reasoned about in
-        // advance: `company_memberships` is RLS-protected, and a `withGlobal` connection sets no
-        // tenant GUC — so this count returned **0 for everyone**, and the flow concluded "no other
-        // employment" and disabled the login of every leaver, including people still employed at
-        // another group company. Unset GUC ⇒ zero rows, no error.
-        //
-        // The sanctioned cross-tenant read is the `principal_lookup` policy (0072 §7b), the same one
-        // `assemblePrincipal()` uses for precisely this question: it exposes only the rows of the ONE
-        // user named in `app.principal_user_id`. It is transaction-local, hence the explicit
-        // BEGIN/COMMIT around it, copied from `principal.ts`'s own usage.
-        await c.query("BEGIN");
-        let rows: { n: string }[];
-        try {
-          await c.query("SELECT set_config('app.principal_user_id', $1, true)", [userId]);
-          rows = (
-            await c.query<{ n: string }>(
-              `SELECT count(*)::text AS n FROM company_memberships
-                WHERE user_id = $1 AND status = 'active' AND deleted_at IS NULL`,
-              [userId],
-            )
-          ).rows;
-          await c.query("COMMIT");
-        } catch (err) {
-          await c.query("ROLLBACK");
-          throw err;
-        }
-        const stillEmployed = Number(rows[0]?.n ?? "0") > 0;
+        // Read through `principal_lookup` — see `activeMembershipTenantIds` for why a plain read here
+        // once disabled the login of every leaver.
+        const stillEmployed = (await activeMembershipTenantIds(c, userId)).length > 0;
         if (!stillEmployed) {
           await c.query(`UPDATE users SET status = 'disabled', updated_at = now() WHERE id = $1`, [userId]);
         }
@@ -809,8 +823,11 @@ export class EmployeesController {
         return !stillEmployed;
       });
 
+      // The audit row carries both lists: what was revoked, and what was deliberately KEPT for a human decision.
       await writeActivity(tenantId, req.principal.userId, "terminated", "employee", employeeId, {
         loginDisabled: disabled,
+        revokedManualGrants: revokedManual,
+        keptAmbiguousOrgUnitGrants: keptAmbiguous,
       });
       return {
         ok: true,
@@ -819,6 +836,9 @@ export class EmployeesController {
         lastDay,
         closedAssignmentIds: prep.open.map((o) => o.id),
         revokedManualGrants: revokedManual,
+        // Manual org_unit grants NOT revoked because the node id also belongs to another company where the
+        // leaver is still active (see the cross-company guard above). HR/IT decide each by hand.
+        keptAmbiguousOrgUnitGrants: keptAmbiguous,
         userDisabled: disabled,
         // The IT worklist (§5.4 / P2-13) is what completes the Keycloak side. HR never touches it.
         itFollowUp: disabled ? "disable_login" : null,
@@ -828,7 +848,39 @@ export class EmployeesController {
     await writeActivity(tenantId, req.principal.userId, "terminated", "employee", employeeId);
     return {
       ok: true, employeeId, userId: null, lastDay, closedAssignmentIds: [], revokedManualGrants: [],
-      userDisabled: false, itFollowUp: null,
+      keptAmbiguousOrgUnitGrants: [], userDisabled: false, itFollowUp: null,
     };
+  }
+}
+
+/**
+ * The companies where `userId` holds an ACTIVE membership, on a `withGlobal` client.
+ *
+ * ⚠ THE RLS ZERO-ROW TRAP, caught by the leaver flow's own test rather than reasoned about in
+ * advance: `company_memberships` is RLS-protected, and a `withGlobal` connection sets no tenant
+ * GUC — so a plain count returned **0 for everyone**, and the flow concluded "no other employment"
+ * and disabled the login of every leaver, including people still employed at another group
+ * company. Unset GUC ⇒ zero rows, no error.
+ *
+ * The sanctioned cross-tenant read is the `principal_lookup` policy (0004), the same one
+ * `assemblePrincipal()` uses for precisely this question: it exposes only the rows of the ONE user
+ * named in `app.principal_user_id`. It is transaction-local, hence the explicit BEGIN/COMMIT around
+ * it, copied from `principal.ts`'s own usage.
+ */
+async function activeMembershipTenantIds(c: PoolClient, userId: string): Promise<string[]> {
+  await c.query("BEGIN");
+  try {
+    await c.query("SELECT set_config('app.principal_user_id', $1, true)", [userId]);
+    const { rows } = await c.query<{ tenant_id: string }>(
+      `SELECT DISTINCT tenant_id::text AS tenant_id FROM company_memberships
+        WHERE user_id = $1 AND status = 'active' AND deleted_at IS NULL
+        ORDER BY 1`,
+      [userId],
+    );
+    await c.query("COMMIT");
+    return rows.map((r) => r.tenant_id);
+  } catch (err) {
+    await c.query("ROLLBACK");
+    throw err;
   }
 }

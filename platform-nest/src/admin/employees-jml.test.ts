@@ -22,6 +22,7 @@ import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
 import { createCompany, createUser, createRole, addMembership, grantRole } from "../testing/fixtures";
 import { check, type Resource } from "../rbac/cerbos";
 import { assemblePrincipal } from "../rbac/principal";
+import { rebuildOrgUnitClosure } from "../core/org-unit-closure";
 
 const live = !!process.env.CERBOS_URL && process.env.CERBOS_URL.length > 0;
 const svc = { authorization: "Bearer svc-token" };
@@ -402,6 +403,118 @@ describe.skipIf(!TEST_URL || !live)("P2-06 — joiner / mover / leaver over the 
       ),
     );
     expect(left.rows.map((r) => r.scope_id)).toEqual(["d-other-co-ou"]);
+  });
+
+  /** Give `tenant` an org the way the real pipeline stores one: the blob row plus its closure, in ONE transaction
+   *  (what `applyOrgStructure` does). Used for OTHER companies, whose admins this suite does not hold. */
+  async function seedOrg(tenant: string, nodeIds: string[]): Promise<void> {
+    const root = {
+      id: `root-${tenant}`, name: "Root", kind: "company", assigneeId: null, assigneeName: null,
+      children: nodeIds.map((id) => ({ id, name: id, kind: "department", assigneeId: null, assigneeName: null, children: [] })),
+    };
+    await withTenants([tenant], async (c) => {
+      await c.query(`INSERT INTO company_org_structure (tenant_id, structure, origin_site) VALUES ($1,$2,$3)`, [
+        tenant, JSON.stringify({ root }), config.originSite,
+      ]);
+      await rebuildOrgUnitClosure(c, tenant, root);
+    });
+  }
+
+  const terminate = (employeeId: string) =>
+    app.inject({
+      method: "POST", url: `/api/${T}/hr/employees/${employeeId}/terminate`,
+      headers: asUser(companyAdmin), payload: { reason: "left" },
+    });
+
+  const orgUnitGrantsLeft = (userId: string, scopeIds: string[]) =>
+    withGlobal((c) =>
+      c.query<{ id: string; scope_id: string }>(
+        `SELECT id, scope_id FROM user_roles
+          WHERE user_id = $1 AND scope_type = 'org_unit' AND scope_id = ANY($2::text[]) ORDER BY scope_id`,
+        [userId, scopeIds],
+      ),
+    );
+
+  it("terminate revokes a manual grant on an UN-ANCHORED node of this company's org (blob + closure, not org_units)", async () => {
+    // `org_units` holds only the LAZILY anchored, service-assigned units. The sweep used to recognize a company's units
+    // through `org_units` alone, so a manual grant on any other node of the org (most of them) survived the leaver.
+    const hired = await hire({ displayName: "Org Leaver", workEmail: "orgleaver@a.test", positionId: hrPosition });
+    expect(hired.statusCode).toBe(201);
+    const employeeId = hired.json().id as string;
+    const userId = hired.json().userId as string;
+
+    // The precondition that gives this case its teeth: 'dv-frontend' is a node of OUR org (the closure the real PUT
+    // built in beforeAll) and was never anchored in `org_units`.
+    const anchored = await withTenants([T], (c) =>
+      c.query(`SELECT 1 FROM org_units WHERE tenant_id = $1 AND node_id = 'dv-frontend'`, [T]),
+    );
+    expect(anchored.rows).toHaveLength(0);
+    const inClosure = await withTenants([T], (c) =>
+      c.query(`SELECT 1 FROM org_unit_closure WHERE tenant_id = $1 AND descendant_id = 'dv-frontend'`, [T]),
+    );
+    expect(inClosure.rows.length).toBeGreaterThan(0);
+
+    // A company the leaver has NO membership in, whose org repeats one of our node ids and has one of its own.
+    const stranger = await createCompany("Stranger Org Co", ["hr"]);
+    await seedOrg(stranger, ["dv-frontend", "d-stranger-only"]);
+    await grantRole(userId, leadRole, "org_unit", "dv-frontend");
+    await grantRole(userId, leadRole, "org_unit", "d-stranger-only");
+
+    const res = await terminate(employeeId);
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      revokedManualGrants: { scopeType: string; scopeId: string }[];
+      keptAmbiguousOrgUnitGrants: unknown[];
+    };
+    // Ours is revoked (the repeat in a company the leaver does not work at is not a reason to keep it); the
+    // stranger's own node is not this company's to touch.
+    expect(body.revokedManualGrants.filter((g) => g.scopeType === "org_unit").map((g) => g.scopeId)).toEqual(["dv-frontend"]);
+    expect(body.keptAmbiguousOrgUnitGrants).toEqual([]);
+    const left = await orgUnitGrantsLeft(userId, ["dv-frontend", "d-stranger-only"]);
+    expect(left.rows.map((r) => r.scope_id)).toEqual(["d-stranger-only"]);
+  });
+
+  it("terminate KEEPS and reports a manual grant whose node id is also in the org of a company where the leaver is still active", async () => {
+    // Node ids are free text and repeat across group companies, and an org_unit grant carries no tenant. If the leaver
+    // still works at another company whose org has the same node, the grant may be THAT company's access: this
+    // company's HR may not silently remove it, so it is kept and listed for HR/IT to decide by hand.
+    const hired = await hire({ displayName: "Shared Node Leaver", workEmail: "sharednode@a.test", positionId: hrPosition });
+    expect(hired.statusCode).toBe(201);
+    const employeeId = hired.json().id as string;
+    const userId = hired.json().userId as string;
+
+    const sister = await createCompany("Sister Org Co", ["hr"]);
+    await seedOrg(sister, ["d-web"]);
+    await addMembership(sister, userId); // still actively employed at the sister company
+    await grantRole(userId, leadRole, "org_unit", "d-web"); // in OUR org AND the sister's: ambiguous
+    await grantRole(userId, leadRole, "org_unit", "dv-hr-ops"); // ours only: revoked
+
+    const res = await terminate(employeeId);
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      revokedManualGrants: { scopeType: string; scopeId: string }[];
+      keptAmbiguousOrgUnitGrants: { grantId: string; role: string; scopeId: string; otherCompanyIds: string[] }[];
+      userDisabled: boolean;
+    };
+    expect(body.revokedManualGrants.filter((g) => g.scopeType === "org_unit").map((g) => g.scopeId)).toEqual(["dv-hr-ops"]);
+    const left = await orgUnitGrantsLeft(userId, ["d-web", "dv-hr-ops"]);
+    expect(left.rows.map((r) => r.scope_id)).toEqual(["d-web"]);
+    expect(body.keptAmbiguousOrgUnitGrants).toEqual([
+      { grantId: left.rows[0].id, role: "org_unit_lead", scopeId: "d-web", otherCompanyIds: [sister] },
+    ]);
+    expect(body.userDisabled).toBe(false);
+
+    // The audit row carries the kept list too, so the decision is traceable without the HTTP response.
+    const act = await withTenants([T], (c) =>
+      c.query<{ metadata: { keptAmbiguousOrgUnitGrants?: { scopeId: string; otherCompanyIds: string[] }[] } }>(
+        `SELECT metadata FROM activities WHERE tenant_id = $1 AND verb = 'terminated' AND target_entity_id = $2`,
+        [T, employeeId],
+      ),
+    );
+    expect(act.rows).toHaveLength(1);
+    expect(act.rows[0].metadata.keptAmbiguousOrgUnitGrants).toEqual([
+      expect.objectContaining({ scopeId: "d-web", otherCompanyIds: [sister] }),
+    ]);
   });
 
   it("a retried termination is idempotent", async () => {
