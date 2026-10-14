@@ -276,7 +276,7 @@ describe.skipIf(!TEST_URL)("DW-4j-1 the KPI watch (live PG + RLS + Cerbos)", () 
     expect(cond("d-gen", "projects-on-time")).toBe("off_track");
     expect(cond("d-gen", "*")).toBe("off_track");
     expect(cond("d-seo", "*")).toBe("unavailable");
-    expect(rows.find((x) => x.unit_node_id === "d-web" && x.kpi_key === "reopened-work-rate")).toMatchObject({ condition: "unavailable", reason: "no_target" });
+    expect(rows.find((x) => x.unit_node_id === "d-web" && x.kpi_key === "reopened-work-rate")).toMatchObject({ condition: "unavailable", reason: "no_data" }); // no facts at all: no_data outranks no_target
 
     const open = await alertRows();
     expect(open.map((a) => [a.unit_node_id, a.kpi_key, a.acknowledged_at, a.resolved_at])).toEqual([["d-gen", "projects-on-time", null, null]]);
