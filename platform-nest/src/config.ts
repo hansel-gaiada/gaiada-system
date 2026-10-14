@@ -1595,6 +1595,19 @@ const configBase = {
     pickerApiKey: process.env.GOOGLE_PICKER_API_KEY ?? "",
     pickerAppId: process.env.GOOGLE_PICKER_APP_ID ?? "",
   },
+  // DW-8j (docs/FRONTEND-BFF-CONTRACT.md §48.1, ruling DW-D24) — email from the ERP through each employee's OWN Gmail.
+  // `mode` is `simulated` (the DEFAULT: a fixture mailbox, sends held in process memory, nothing leaves the box) or `live` (the real
+  // Gmail API with the person's own token). Any other value is a BOOT ERROR (core/gmail/mode.ts `assertGmailBootSafe`), never a quiet
+  // fall-back to simulated, and `live` with the Gmail OAuth client unset is a boot error too. Gmail has its OWN Google Cloud OAuth
+  // client (an Internal-type app: consent screen, scopes gmail.readonly + gmail.send, redirect URI), separate from search's and Drive's.
+  // NO DEFAULTS for the client: empty until the owner sets it (DW-11). The endpoints and timeouts are the shared `google` block's.
+  gmail: {
+    mode: (process.env.GMAIL_MODE ?? "simulated").trim().toLowerCase(),
+    clientId: process.env.GOOGLE_GMAIL_CLIENT_ID ?? "",
+    clientSecret: process.env.GOOGLE_GMAIL_CLIENT_SECRET ?? "",
+    // The ONE exactly-registered redirect URI (Google permits no wildcards); the tenant travels in the signed `state`.
+    redirectUri: process.env.GOOGLE_GMAIL_REDIRECT_URI ?? "",
+  },
   // WD-04 (Web Dev Phase 1 §12) — in-ERP audio upload -> server-side transcription. Calls the
   // whisper container's OpenAI-compatible /v1/audio/transcriptions endpoint DIRECTLY (never via
   // ai-gateway-go): meeting-length audio can exceed the gateway's ~2.5-min per-call timeout
@@ -1946,4 +1959,11 @@ export function googleOAuthConfigured(): boolean {
 export function googleDriveConfigured(): boolean {
   const d = config.googleDrive;
   return !!(d.clientId && d.clientSecret && d.redirectUri && d.pickerApiKey && d.pickerAppId);
+}
+
+/** DW-8j — the Gmail OAuth client (id, secret, redirect URI) is fully set: what LIVE mode needs. Simulated mode needs none of it.
+ *  Reads `config` at call time, so a test that sets the values after import is honoured. */
+export function gmailLiveConfigured(): boolean {
+  const g = config.gmail;
+  return !!(g.clientId && g.clientSecret && g.redirectUri);
 }

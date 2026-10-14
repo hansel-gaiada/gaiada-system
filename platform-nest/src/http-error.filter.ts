@@ -28,12 +28,13 @@ export class HttpErrorFilter implements ExceptionFilter {
     let reason: string | undefined;
     let blockers: unknown[] | undefined;
     let detail: Record<string, unknown> | undefined;
+    let retryAfterSeconds: number | undefined;
     if (typeof res === "string") {
       error = res;
     } else {
       const r = res as {
         message?: string | string[]; field?: string; existing?: unknown; site?: unknown;
-        reason?: string; blockers?: unknown; detail?: unknown;
+        reason?: string; blockers?: unknown; detail?: unknown; retryAfterSeconds?: unknown;
       };
       const m = r.message;
       error = Array.isArray(m) ? m.join(", ") : m ?? exception.message;
@@ -55,6 +56,11 @@ export class HttpErrorFilter implements ExceptionFilter {
       if (r.detail && typeof r.detail === "object" && !Array.isArray(r.detail)) {
         detail = r.detail as Record<string, unknown>;
       }
+      // DW-8j: `retryAfterSeconds`, same additive rule. A 429 says how long to wait (`gmail_send_rate_limited`, FRONTEND-BFF-CONTRACT
+      // §48.4), so the UI shows the wait without guessing; the standard `Retry-After` header carries the same whole number.
+      if (typeof r.retryAfterSeconds === "number" && Number.isFinite(r.retryAfterSeconds) && r.retryAfterSeconds > 0) {
+        retryAfterSeconds = Math.ceil(r.retryAfterSeconds);
+      }
       if (r.existing && typeof r.existing === "object" && !Array.isArray(r.existing)) {
         existing = r.existing as Record<string, unknown>;
       }
@@ -72,6 +78,7 @@ export class HttpErrorFilter implements ExceptionFilter {
         site = r.site as Record<string, unknown>;
       }
     }
+    if (retryAfterSeconds !== undefined) void reply.header("retry-after", String(retryAfterSeconds));
     void reply.status(status).send({
       error,
       ...(field ? { field } : {}),
@@ -80,6 +87,7 @@ export class HttpErrorFilter implements ExceptionFilter {
       ...(site ? { site } : {}),
       ...(blockers ? { blockers } : {}),
       ...(detail ? { detail } : {}),
+      ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
     });
   }
 }
