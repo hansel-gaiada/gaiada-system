@@ -103,8 +103,9 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // DW-5a (2026-10-13): +5 grantable / +5 total on the NEW agency_campaign_part kind (all uiGrantable TRUE). 446 -> 451 / 431 -> 436.
     // DW-5c (2026-10-13): +5 grantable / +5 total on the NEW work_request kind (all uiGrantable TRUE). 451 -> 456 / 436 -> 441.
     // DW-6h (2026-10-13): +4 grantable / +4 total on the NEW creative_asset kind (all uiGrantable TRUE). 456 -> 460 / 441 -> 445.
-    expect(permissions.length).toBe(460);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(445);
+    // DW-4e-1 (2026-10-14): +4 grantable / +4 total on the NEW dept_kpi_target kind (all uiGrantable TRUE). On top of DW-6h: 460 -> 464 / 445 -> 449.
+    expect(permissions.length).toBe(464);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(449);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

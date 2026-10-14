@@ -696,6 +696,34 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.creative_asset.request_review" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_dept_kpi_target_* — DW-4e-1 (2026-10-14, docs/FRONTEND-BFF-CONTRACT.md §40.2). One generic global-or-company
+    # mirror for read, approve and reject. NO propose mirror, on purpose: propose is reachable by an org_unit_lead rule
+    # (attribute-dependent, over one unit's subtree) as well as by company_admin, and a flat `perms` mirror cannot tell
+    # those apart (iam-04-reg1-mirror-reach-invariant). Same call as work_request's decline.
+    - name: perm_dept_kpi_target_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "reports.dept_kpi_target.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_dept_kpi_target_approve
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "reports.dept_kpi_target.approve" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_dept_kpi_target_reject
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "reports.dept_kpi_target.reject" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_agency_creative_asset_* — IAM-04-ROLLOUT-B12
     - name: perm_agency_creative_asset_read
       parentRoles: ["user"]

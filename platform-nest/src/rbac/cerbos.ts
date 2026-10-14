@@ -46,7 +46,10 @@ export interface Resource {
    *  fail-closed by construction (an unfed resource confers nothing, same convention as every
    *  other optional attr on this type). Only two call sites populate it today
    *  (reports.controller.ts's report_document department grain; appraisals.controller.ts's
-   *  subject-unit resolution) — see each rule's own comment for why it stops there. */
+   *  subject-unit resolution) — see each rule's own comment for why it stops there.
+   *  DW-4e-1: `dept_kpi_target` (resource_dept_kpi_target.yaml) reads it too, for the head's `propose` rule; the
+   *  handler (dept-kpis.controller.ts) feeds the TARGET unit's chain. No allow-list change was needed: the line
+   *  below already carries it. */
   unitAncestors?: string[];
   /** P2-02/P2-06 — the person BEING acted upon, as distinct from the resource's owner or subject:
    *  the target of a `position` assign or a `role_grant` create/revoke. Backs the self-target DENY

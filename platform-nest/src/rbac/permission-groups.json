@@ -6,9 +6,9 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 167,
-      "grantablePermissionsInCatalog": 445,
-      "permissionsCoveredByGroups": 406,
+      "groups": 168,
+      "grantablePermissionsInCatalog": 449,
+      "permissionsCoveredByGroups": 410,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
       "sensitiveGroups": 114
@@ -1929,6 +1929,19 @@
         "core.creative_asset.request_review",
         "core.creative_asset.decide_review",
         "core.creative_asset.withdraw_review"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "dept_kpi_targets",
+      "name": "Department KPI targets",
+      "domain": "reports",
+      "description": "A department's own KPIs, their condition and standing, and their targets. DW-4e-1: staff of a department, its heads and the company-wide tiers read it (all departments side by side for the company-wide tiers only); the department head proposes a period's targets for their unit; the approver (company_admin, which owner mirrors) approves or rejects, never their own proposal.",
+      "permissions": [
+        "reports.dept_kpi_target.read",
+        "reports.dept_kpi_target.propose",
+        "reports.dept_kpi_target.approve",
+        "reports.dept_kpi_target.reject"
       ],
       "sensitive": false
     }

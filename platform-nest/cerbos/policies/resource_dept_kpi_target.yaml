@@ -1,0 +1,87 @@
+# DW-4e-1 (docs/FRONTEND-BFF-CONTRACT.md §40.2; plan docs/plans/2026-10-13-department-workspaces.md §5.5, owner ruling
+# DW-Q4) — authz for the NEW `dept_kpi_target` resource kind (module `reports`): a department KPI's TARGET, which the
+# department head proposes and the approver approves. The same kind also gates READING a department's KPI values,
+# condition and standing (`GET /dept-kpis`, `/dept-kpis/overview`, `/dept-kpis/targets`). Four actions:
+#   read     — see a department's KPIs, condition and targets. company_admin, manager, member, viewer, and the HR read
+#              tier (hr_people_reader). Deliberately TENANT-WIDE here: the per-unit narrowing ("the people placed in
+#              the unit, its heads, and the company-wide tiers"; never another department's staff) needs the caller's
+#              PLACEMENT as of today, which Cerbos cannot read. The handler (dept-kpis.controller.ts) applies it after
+#              this check, the same in-app narrowing person-scope.ts documents for the person axis. Cerbos bounds the
+#              tier; the service bounds the unit.
+#   propose  — propose a target for a unit's KPI. company_admin; and an `org_unit_lead` of the unit or an enclosing
+#              one (its own rule, `unitAncestors`).
+#   approve  — put a proposal in force. The approver: company_admin only (FRONTEND-BFF-CONTRACT §40.2: "Default
+#              approver: the company_admin tier, which owner mirrors". Every head's lead position also carries
+#              `manager` company-wide, so `manager` cannot mean "the GM" and holds no decision here). Whether the
+#              Office of the GM's lead seat should also approve is an OPEN owner decision, recorded in §40.2.
+#   reject   — refuse a proposal. The same approver.
+# A proposer never approves their own proposal: that is an identity comparison on the ROW (`proposed_by`), checked in
+# the service (409 `cannot_approve_own_proposal`), not here.
+# Restart `gaiada-test-cerbos` after editing this file; the bind-mount does not hot-reload.
+#
+# ── EVERY ATTRIBUTE-DEPENDENT RULE STANDS ALONE (the HIER-2 authoring rule) ──────────────────────
+# `org_unit_lead` is its own rule on `propose`, never mixed with a scope role. `unitAncestors` is the target unit's
+# node id expanded through `org_unit_closure` (`loadUnitAncestors`), fed by the HANDLER from the request's
+# `unitNodeId` (propose) or from the stored row (approve/reject). An id that is not in the org tree has no closure
+# rows, so its ancestors are [] and no lead grant can match: a head is refused (403) before anything says whether the
+# unit exists.
+#
+# ── THE PERMISSION ARM COVERS `read`, `approve` AND `reject`; NOT `propose` ─────────────────────
+# `propose` is reachable by `org_unit_lead` through an attribute-dependent rule, and a flat `perms` mirror cannot tell
+# "holds the key through company_admin" from "holds it through a lead grant over ONE unit": a mirror would let a head
+# propose for EVERY unit (iam-04-reg1-mirror-reach-invariant). Same call as work_request's `decline` and
+# agency_campaign_part's `update`. `read`, `approve` and `reject` are reached only through scope-only rules, so their
+# mirrors grant no more than the role arm. Consequence: the permission-native `owner` role (zero role-arm rules) reads,
+# approves and rejects through its bundle, but proposes only if it also holds company_admin or leads the unit.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: dept_kpi_target
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # The HR read tier (hr_staff, hr_manager): §40.3's standing is for "the GM and HR". Its own rule so the HR tier
+    # stays visible as a decision rather than folding into the scope roles above.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_reader"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["propose"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["approve", "reject"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Department head of the unit or an enclosing one — OWN rule, never mixed (HIER-2 §1.4). Containment is the derived
+    # role's: the grant's scopeId must be in resource.attr.unitAncestors (the target unit and every ancestor of it).
+    - actions: ["propose"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # =========== permission-matching arm: read / approve / reject ONLY (see the header) ===========================
+    # Generic global-or-company mirror per action. The platform_admin wildcard is deliberately NOT mirrored
+    # (IAM-04c: the tier bypass never enters the permission catalog).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_dept_kpi_target_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["approve"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_dept_kpi_target_approve"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["reject"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_dept_kpi_target_reject"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
