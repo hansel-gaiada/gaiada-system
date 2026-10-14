@@ -47,6 +47,7 @@ const DEMO_USER_IC_ID = "gede-ic";  // IC (Individual Contributor) tier — memb
 // identity, once it can reach dept-3 at all (see the login-mapping + org-structure note below).
 const DEMO_USER_SEARCH_STAFF_ID = "seo-staff";
 const DEMO_USER_WEBDEV_ID = "u-dev";  // DW-3a: a member PLACED in Web Dev > Frontend (lib/org.ts), so a department Overview is drivable
+const DEMO_USER_WEBHEAD_ID = "u-webhead";  // DW-3h: the HEAD of Web Dev (`org_unit_lead` on dept-1), so the Overview's Me | Team switch is drivable
 const DEMO_USER_MANAGER_ID = "dept-manager";  // manager tier — drives the GM console's narrowed view (GM-02b)
 // External-client tier. `client` is the ONLY role: `isClientOnly` keys off "holds no staff role", so
 // adding any second role here would silently turn this identity back into staff and stop exercising
@@ -166,6 +167,24 @@ const ME_WEBDEV = {
   companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
   roles: [
     { role: "member", scopeType: "company", scopeId: "co-agency" },
+  ],
+};
+
+// DW-3h: the head of Web Dev, for the Overview's Me | Team switch. `member` of the agency PLUS `org_unit_lead` on the
+// department's org node (`dept-1`, the id the demo org tree gives Web Dev), the grant a lead position materialises (BFF §38).
+// Like ME_WEBDEV a plain employee otherwise, so Me mode is what any member sees; Team mode is what the grant adds.
+// It is NOT seated in the org tree: a led unit adds its department to the person's own workspaces
+// (`resolveMyWorkspaces`), so Web Dev is their home all the same. DEMO_MODE only.
+const ME_WEBHEAD = {
+  userId: DEMO_USER_WEBHEAD_ID,
+  name: "Ketut Arta",
+  email: "webhead@gaiada.com",
+  title: "Head of Web Dev",
+  assurance: "high",
+  companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
+  roles: [
+    { role: "member", scopeType: "company", scopeId: "co-agency" },
+    { role: "org_unit_lead", scopeType: "org_unit", scopeId: "dept-1" },
   ],
 };
 
@@ -2201,6 +2220,7 @@ function getCurrentDemoIdentity(userId: string) {
   if (userId === DEMO_USER_MANAGER_ID) return ME_MANAGER;
   if (userId === DEMO_USER_IC_ID) return ME_IC;
   if (userId === DEMO_USER_WEBDEV_ID) return ME_WEBDEV;
+  if (userId === DEMO_USER_WEBHEAD_ID) return ME_WEBHEAD;
   if (userId === DEMO_USER_CLIENT_ID) return ME_CLIENT;
   if (userId === DEMO_USER_CLIENT_ADMIN_ID) return ME_CLIENT_ADMIN;
   if (userId === DEMO_USER_CLIENT_VIEWER_ID) return ME_CLIENT_VIEWER;

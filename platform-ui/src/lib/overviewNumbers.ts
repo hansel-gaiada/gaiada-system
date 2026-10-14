@@ -79,7 +79,7 @@ export function formatHours(minutes: number): string {
 }
 
 /** "1 May 2026" from an ISO date, in UTC so the day does not move with the server's zone. */
-function formatDay(iso: string): string {
+export function formatDay(iso: string): string {
   const d = new Date(`${iso}T00:00:00Z`);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
 }

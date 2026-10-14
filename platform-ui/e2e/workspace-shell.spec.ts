@@ -1,5 +1,5 @@
 import { test, expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
-import { loginAsPersona, loginAsPlacedWebDev, type PersonaKey } from "./personas";
+import { loginAsPersona, loginAsPlacedWebDev, loginAsWebDevHead, type PersonaKey } from "./personas";
 import { tenantCookie } from "./appCookies";
 
 // DW-2g: the department workspace shell (DW-2a..2f), end to end, per persona, under DEMO_MODE.
@@ -62,6 +62,12 @@ async function openSwitcher(page: Page) {
 /** The placed Web Dev employee (DW-3a): u-dev, a plain member seated in Web Dev, signed in on the pilot or not. */
 async function signInWebDev(page: Page, context: BrowserContext, opts: { pilot?: boolean } = {}) {
   await loginAsPlacedWebDev(page);
+  await context.addCookies([tenantCookie(page.url()), ...(opts.pilot === false ? [] : [pilotCookie(page.url())])]);
+}
+
+/** The head of Web Dev (DW-3h): u-webhead, `org_unit_lead` on dept-1, signed in on the pilot or not. */
+async function signInWebDevHead(page: Page, context: BrowserContext, opts: { pilot?: boolean } = {}) {
+  await loginAsWebDevHead(page);
   await context.addCookies([tenantCookie(page.url()), ...(opts.pilot === false ? [] : [pilotCookie(page.url())])]);
 }
 
@@ -755,6 +761,175 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     // Nor the Growth band (DW-3g).
     await expect(page.getByRole("heading", { level: 2, name: "Growth", exact: true })).toHaveCount(0);
     for (const name of ["Learning", "Appraisal"]) await expect(page.getByRole("region", { name, exact: true })).toHaveCount(0);
+  });
+});
+
+// DW-3h: the head's Me | Team switch (plan §3.4). Under DEMO_MODE the head of Web Dev is `webhead@gaiada.com` (u-webhead:
+// `member` plus `org_unit_lead` on dept-1; a led unit makes its department their home). The DEMO_MODE build gives each Team
+// block this state:
+//  - Team numbers: the department document carries on-time, blocked share and capacity (fixtures), the check-in grid is the led
+//    roster (u-dev, u-pm), so each tile is a figure or "No data" (a month starting today has no past working day), never a bare 0;
+//  - Team needs you: the demo has no `requests/summary`, so "Waiting on Web Dev" says Unavailable, and the blocked tasks of the
+//    open Web Dev projects are real ("Client site redesign" has one);
+//  - Team learning: `lms compliance?unit=dept-1` is 2 people, 4 required assignments, 3 complete: 75%, 1 overdue;
+//  - Team appraisals: the head's list is u-dev's pack (disputed) plus whatever the shared demo store holds for the roster.
+// The demo store is shared by every test in a run, so a count another spec could move is matched by shape, not by number.
+test.describe("the Overview's Me | Team switch: a head of department (webhead@gaiada.com)", () => {
+  const greeting = /^Good (morning|afternoon|evening), Ketut$/;
+  const figure = /^(No data|\d[\d,.]*( h|%)?( of \d[\d,.]*( h)?)?)$/;
+
+  test("a head sees the switch, defaulting to Me; the Me blocks are the ones everyone has", async ({ page, context }) => {
+    await signInWebDevHead(page, context);
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/departments\/dept-1$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
+
+    const main = page.locator("#main-content");
+    const view = page.getByRole("navigation", { name: "View" });
+    await expect(view.getByRole("link")).toHaveText(["Me", "Team"]);
+    await expect(view.getByRole("link", { name: "Me" })).toHaveAttribute("aria-current", "true");
+    await expect(view.getByRole("link", { name: "Team" })).not.toHaveAttribute("aria-current", "true");
+    await expect(view.getByRole("link", { name: "Team" })).toHaveAttribute("href", "?period=month&view=team");
+
+    await expect(main.getByRole("region", { name: "Your numbers", exact: true })).toBeVisible();
+    await expect(main.getByRole("region", { name: "Needs you", exact: true })).toBeVisible();
+    await expect(main.getByRole("region", { name: "Learning", exact: true })).toBeVisible();
+    await expect(main.getByRole("region", { name: "Appraisal", exact: true })).toBeVisible();
+    for (const name of ["Team numbers", "Team needs you", "Team learning", "Team appraisals"]) {
+      await expect(main.getByRole("region", { name, exact: true })).toHaveCount(0);
+    }
+    await expect(main.getByRole("heading", { level: 2, name: "You", exact: true })).toBeVisible();
+  });
+
+  test("Team shows the four Team blocks in their honest demo state, and Me brings the person's own back", async ({ page, context }) => {
+    await signInWebDevHead(page, context);
+    await page.goto("/departments/dept-1");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
+    const main = page.locator("#main-content");
+    const view = page.getByRole("navigation", { name: "View" });
+
+    await press(view.getByRole("link", { name: "Team" }));
+    await expect(page).toHaveURL(/\/departments\/dept-1\?period=month&view=team$/);
+    await expect(view.getByRole("link", { name: "Team" })).toHaveAttribute("aria-current", "true");
+    await expect(main.getByRole("heading", { level: 2, name: "You and your team" })).toBeVisible();
+
+    // Team numbers: four tiles, each a figure or "No data".
+    const numbers = main.getByRole("region", { name: "Team numbers", exact: true });
+    await expect(numbers).toBeVisible();
+    await expect(numbers.getByText("Unavailable")).toHaveCount(0);
+    await expect(numbers.getByText("No access")).toHaveCount(0);
+    const tiles = numbers.getByRole("listitem");
+    await expect(tiles).toHaveCount(4);
+    for (const [i, label] of ["Check-ins sent", "On time", "Blocked share", "Hours vs capacity"].entries()) {
+      await expect(tiles.nth(i).locator(".ov-nums__label")).toHaveText(label);
+      await expect(tiles.nth(i).locator(".ov-nums__value")).toHaveText(figure);
+    }
+    // The department document's own figures are there (not "No data"): on time is a percentage of tasks, hours a pair of hours.
+    await expect(tiles.nth(1).locator(".ov-nums__value")).toHaveText(/^\d+%$/);
+    await expect(tiles.nth(1).locator(".ov-nums__detail")).toHaveText(/^[\d,]+ of [\d,]+ tasks$/);
+    await expect(tiles.nth(3).locator(".ov-nums__value")).toHaveText(/^\d[\d,.]* h of \d[\d,.]* h$/);
+    await expect(numbers.getByRole("link", { name: "Open the team report" })).toHaveAttribute("href", /^\/reports\/team\?unit=dept-1&periodKind=month&start=\d{4}-\d{2}-\d{2}/);
+
+    // Team needs you: requests (no summary in the demo) and the blocked tasks of the open projects.
+    const needs = main.getByRole("region", { name: "Team needs you", exact: true });
+    await expect(needs).toBeVisible();
+    await expect(needs.locator("[data-part=requests]")).toContainText("Waiting on Web Dev");
+    await expect(needs.locator("[data-part=requests]")).toContainText(/(Unavailable|No access|No request is waiting|\d+ requests? waiting)/);
+    await expect(needs.locator("[data-part=blockers]")).toContainText(/\d+ blocked tasks?/);
+    await expect(needs.locator("[data-part=blockers]").getByRole("link", { name: "Client site redesign" })).toHaveAttribute("href", "/projects/p-web-1");
+
+    // Team learning and Team appraisals.
+    const learning = main.getByRole("region", { name: "Team learning", exact: true });
+    await expect(learning).toBeVisible();
+    await expect(learning.getByText("75% complete")).toBeVisible();
+    await expect(learning.getByText("3 of 4 required assignments, 2 people")).toBeVisible();
+    await expect(learning.getByText("1 overdue")).toBeVisible();
+    await expect(learning.getByRole("link", { name: "Team progress" })).toHaveAttribute("href", "/learning/compliance?unit=dept-1");
+    const appraisals = main.getByRole("region", { name: "Team appraisals", exact: true });
+    await expect(appraisals).toBeVisible();
+    await expect(appraisals.locator("[data-part=finalized]")).toHaveText(/^\d+ of \d+ finalized$/);
+    await expect(appraisals.getByText(/disputed/)).toBeVisible();
+    await expect(appraisals.getByText(/^Across \d+ cycles?, the people you lead and score$/)).toBeVisible();
+    await expect(appraisals.getByRole("link", { name: "Team appraisals" })).toHaveAttribute("href", "/appraisals");
+
+    // The person's own blocks are not drawn in Team mode.
+    for (const name of ["Your numbers", "Needs you", "Learning", "Appraisal"]) await expect(main.getByRole("region", { name, exact: true })).toHaveCount(0);
+
+    // Me brings them back.
+    await press(view.getByRole("link", { name: "Me" }));
+    await expect(page).toHaveURL(/\/departments\/dept-1\?period=month$/);
+    await expect(main.getByRole("region", { name: "Your numbers", exact: true })).toBeVisible();
+    await expect(main.getByRole("region", { name: "Team numbers", exact: true })).toHaveCount(0);
+  });
+
+  test("the period selector keeps the view, and the switch keeps the period", async ({ page, context }) => {
+    await signInWebDevHead(page, context);
+    await page.goto("/departments/dept-1?period=week&view=team");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
+    const view = page.getByRole("navigation", { name: "View" });
+    await expect(view.getByRole("link", { name: "Team" })).toHaveAttribute("aria-current", "true");
+    await expect(view.getByRole("link", { name: "Me" })).toHaveAttribute("href", "?period=week");
+    await expect(page.locator("#main-content").getByRole("region", { name: "Team numbers", exact: true })).toBeVisible();
+
+    await press(page.getByRole("group", { name: "Period" }).getByRole("button", { name: "Month" }));
+    await expect(page).toHaveURL(/\/departments\/dept-1\?period=month&view=team$/);
+    await expect(page.locator("#main-content").getByRole("region", { name: "Team numbers", exact: true })).toBeVisible();
+  });
+
+  test("a head of Web Dev visiting SEO has no switch there, and ?view=team changes nothing", async ({ page, context }) => {
+    await signInWebDevHead(page, context);
+    await page.goto("/departments/dept-3?view=team");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
+    const main = page.locator("#main-content");
+    await expect(main.getByText(/^SEO · Gaia Digital Agency · /)).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "View" })).toHaveCount(0);
+    await expect(main.getByRole("region", { name: "Your numbers", exact: true })).toBeVisible();
+    await expect(main.getByRole("region", { name: "Team numbers", exact: true })).toHaveCount(0);
+  });
+
+  test("a head on the classic layout sees none of it", async ({ page, context }) => {
+    await signInWebDevHead(page, context, { pilot: false });
+    await page.goto("/departments/dept-1?view=team");
+    await expect(page.getByRole("heading", { level: 1, name: "Web Dev", exact: true })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "View" })).toHaveCount(0);
+    await expect(page.getByRole("group", { name: "Period" })).toHaveCount(0);
+    for (const name of ["Team numbers", "Team needs you", "Team learning", "Team appraisals"]) {
+      await expect(page.getByRole("region", { name, exact: true })).toHaveCount(0);
+    }
+  });
+});
+
+// DW-3h: a person who does not head the department gets no switch, and `?view=team` is Me for them: nothing about a team is
+// read or drawn. Made Putra (u-dev) is placed in Web Dev with a plain `member` grant.
+test.describe("the Overview's Me | Team switch: someone who does not head the department (webdev@gaiada.com)", () => {
+  const greeting = /^Good (morning|afternoon|evening), Made$/;
+
+  test("no switch, and ?view=team changes nothing", async ({ page, context }) => {
+    await signInWebDev(page, context);
+    for (const url of ["/departments/dept-1", "/departments/dept-1?view=team", "/departments/dept-1?period=week&view=team"]) {
+      await page.goto(url);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
+      const main = page.locator("#main-content");
+      await expect(main.getByRole("region", { name: "Your numbers", exact: true })).toBeVisible();
+      await expect(main.getByRole("region", { name: "Needs you", exact: true })).toBeVisible();
+      await expect(main.getByRole("region", { name: "Learning", exact: true })).toBeVisible();
+      await expect(main.getByRole("region", { name: "Appraisal", exact: true })).toBeVisible();
+      await expect(page.getByRole("navigation", { name: "View" })).toHaveCount(0);
+      for (const name of ["Team numbers", "Team needs you", "Team learning", "Team appraisals"]) {
+        await expect(main.getByRole("region", { name, exact: true })).toHaveCount(0);
+      }
+      await expect(main.getByRole("heading", { level: 2, name: "You and your team" })).toHaveCount(0);
+    }
+  });
+
+  test("a classic user sees none of it", async ({ page, context }) => {
+    await signInWebDev(page, context, { pilot: false });
+    await page.goto("/departments/dept-1?view=team");
+    await expect(page.getByRole("heading", { level: 1, name: "Web Dev", exact: true })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "View" })).toHaveCount(0);
+    for (const name of ["Team numbers", "Team needs you", "Team learning", "Team appraisals"]) {
+      await expect(page.getByRole("region", { name, exact: true })).toHaveCount(0);
+    }
   });
 });
 

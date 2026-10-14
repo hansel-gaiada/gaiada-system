@@ -242,7 +242,12 @@ export function checkinsDemo(method: string, p: string, params: URLSearchParams,
     // exercise none of the ranking or roll-up the tab exists for.
     for (const u of DEMO_COHORT) seedIfNeeded(tenantId, u);
 
-    const rows = DEMO_COHORT.map((subjectUserId) => {
+    // DW-3h: a unit-scoped head (the real `requiresUnitNarrowing` tier) never gets the whole cohort: the server discards the
+    // `unit` param and slices to the led subtree. The demo head `u-webhead` leads dept-1, whose roster is below.
+    const led = DEMO_HEAD_UNITS[userId];
+    const cohort = led ? DEMO_COHORT.filter((u) => led.roster.includes(u)) : DEMO_COHORT;
+
+    const rows = cohort.map((subjectUserId) => {
       let expectedDays = 0, submittedDays = 0, missedDays = 0, excusedDays = 0;
       for (let d = from; d <= to; d = addDaysIso(d, 1)) {
         const row = store.get(key(tenantId, subjectUserId, d));
@@ -259,7 +264,7 @@ export function checkinsDemo(method: string, p: string, params: URLSearchParams,
     }).filter((r) => r.expectedDays > 0)
       .sort((a, b) => a.userId.localeCompare(b.userId));
 
-    return ok({ from, to, unit: params.get("unit") ?? null, rows });
+    return ok({ from, to, unit: led ? led.unit : (params.get("unit") ?? null), rows });
   }
 
   return null;
@@ -269,6 +274,10 @@ export function checkinsDemo(method: string, p: string, params: URLSearchParams,
  *  already uses for members/assignees, so names resolve through the same `listMembers` read the
  *  console uses rather than showing raw ids. */
 const DEMO_COHORT = ["demo-hansel", "gede-ic", "u-dev", "u-pm", "seo-staff"];
+
+/** DW-3h: the demo heads, by identity: the unit they lead (echoed back, as the real endpoint echoes the head's own unit) and
+ *  who sits in it. The same people as demoReports' `DEMO_ROSTERS["dept-1"]`. */
+const DEMO_HEAD_UNITS: Record<string, { unit: string; roster: string[] }> = { "u-webhead": { unit: "dept-1", roster: ["u-dev", "u-pm"] } };
 
 /** `periodKind` -> an inclusive [from, to]. Calendar kinds (day, week, month, quarter, semester,
  *  year — DW-4a) use the same snap rule as `resolveCheckinPeriod` in checkins.controller.ts, via

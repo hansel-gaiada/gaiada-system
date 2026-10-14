@@ -11,7 +11,9 @@ import { Skeleton } from "@/components/Feedback";
 import { builtPulseTiles } from "@/lib/overviewPulse";
 import { workLinks, workWidgetPlaced } from "@/lib/overviewWork";
 import { growthWidgetPlaced } from "@/lib/overviewGrowth";
+import { widgetTitle, youBandLabel, type OverviewView } from "@/lib/overviewTeam";
 import { PeriodSelector } from "./PeriodSelector";
+import { ViewSwitch } from "./ViewSwitch";
 import { WidgetBoundary } from "./WidgetBoundary";
 import { OVERVIEW_WIDGETS, hasOverviewWidget, type OverviewWidgetComponent } from "./widgets";
 import "./overview.css";
@@ -23,10 +25,10 @@ import "./overview.css";
 // Server component. Pilot only: the pages that render it check the switch, and everyone else keeps today's page.
 
 /** A band's quiet label. The Department band carries the workspace's own name. */
-function bandLabel(band: OverviewBand, subject: OverviewSubject): string {
+function bandLabel(band: OverviewBand, subject: OverviewSubject, view: OverviewView): string {
   switch (band) {
     case "now": return "Now";
-    case "you": return "You";
+    case "you": return youBandLabel(view);
     case "department": return subject.label;
     case "work": return "Work";
     case "growth": return "Growth";
@@ -44,11 +46,16 @@ function WidgetSkeleton({ title }: { title: string }) {
   );
 }
 
-export function WorkspaceOverview({ me, tenantId, subject, period, legacy, now = new Date(), widgets = OVERVIEW_WIDGETS, moduleOn = () => true }: {
+export function WorkspaceOverview({ me, tenantId, subject, period, view = "me", canSwitchView = false, legacy, now = new Date(), widgets = OVERVIEW_WIDGETS, moduleOn = () => true }: {
   me: Me;
   tenantId: string;
   subject: OverviewSubject;
   period: OverviewPeriod;
+  /** Me or Team (DW-3h). `pilotFrame` resolves it (`resolveOverviewView`), so "team" arrives only for a head of this
+   *  workspace's unit; the default is Me, which is every page that does not pass one. */
+  view?: OverviewView;
+  /** Whether to draw the Me | Team switch: the person is a head of this workspace's unit (`canSwitchToTeam`). */
+  canSwitchView?: boolean;
   /** The page's own body as it was before the Overview, built once by the page. It stays under the bands
    *  until the Overview's blocks replace it (plan §2.6 rule 1: nothing is removed), and while it is there the
    *  "being built" line is not needed. */
@@ -61,6 +68,8 @@ export function WorkspaceOverview({ me, tenantId, subject, period, legacy, now =
    *  whose module is off is not placed (DW-3g). Omitted means every module is on. */
   moduleOn?: (moduleKey: string) => boolean;
 }) {
+  // Team mode is a head's alone: whatever the caller passed, without the switch the page is Me.
+  const mode: OverviewView = canSwitchView ? view : "me";
   const ctx = { me, tenantId, unitPath: subject.unitPath, workspaces: subject.workspaces };
   // The Pulse is the one block whose content depends on the workspace: with no built tile it is not placed at
   // all, so the Department band does not draw a label over nothing.
@@ -82,6 +91,7 @@ export function WorkspaceOverview({ me, tenantId, subject, period, legacy, now =
           <p className="ov-head__line">{[subject.label, company, dateLineFor(now)].filter(Boolean).join(" · ")}</p>
         </div>
         <div className="ov-head__controls">
+          {canSwitchView && <ViewSwitch value={mode} period={period} />}
           <PeriodSelector value={period} />
           {actions.length > 0 && (
             <nav className="ov-actions" aria-label="Quick actions">
@@ -101,13 +111,13 @@ export function WorkspaceOverview({ me, tenantId, subject, period, legacy, now =
       ) : (
         bands.map(({ band, widgets: inBand }) => (
           <section key={band} className="ov-band" aria-labelledby={`ov-band-${band}`}>
-            <h2 id={`ov-band-${band}`} className="ov-band__label">{bandLabel(band, subject)}</h2>
+            <h2 id={`ov-band-${band}`} className="ov-band__label">{bandLabel(band, subject, mode)}</h2>
             <div className="ov-band__grid">
               {inBand.map((w) => {
                 const Widget = widgets[w.key];
                 return (
-                  <WidgetBoundary key={w.key} title={w.label}>
-                    <Suspense fallback={<WidgetSkeleton title={w.label} />}>
+                  <WidgetBoundary key={`${w.key}:${mode}`} title={widgetTitle(w.key, w.label, mode)}>
+                    <Suspense fallback={<WidgetSkeleton title={widgetTitle(w.key, w.label, mode)} />}>
                       <Widget
                         me={me}
                         tenantId={tenantId}
@@ -118,6 +128,8 @@ export function WorkspaceOverview({ me, tenantId, subject, period, legacy, now =
                         widget={w}
                         pulse={pulse}
                         workLinks={links}
+                        view={mode}
+                        subjectLabel={subject.label}
                       />
                     </Suspense>
                   </WidgetBoundary>

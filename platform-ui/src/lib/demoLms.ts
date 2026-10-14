@@ -295,7 +295,7 @@ const COMPLIANCE: ComplianceRow[] = [
 // `dept-manager` is the SEO Manager and leads `dept-3` (the same wiring as demoReports' LED_UNITS).
 const DEMO_UNITS = new Set(["dept-1", "dept-2", "dept-3", "dept-4", "dept-5"]);
 const DEMO_COMPANY_WIDE = new Set(["demo-hansel"]);
-const DEMO_LED: Record<string, string[]> = { "dept-manager": ["dept-3"] };
+const DEMO_LED: Record<string, string[]> = { "dept-manager": ["dept-3"], "u-webhead": ["dept-1"] };
 // [assigned, completed, outstanding, overdue, waived] per path key, over THAT roster only. A unit with
 // nobody placed has learners 0 and every count 0 — the page says "0 people", never a table of zeros.
 const DEMO_UNIT_PROGRESS: Record<string, { learners: number; counts: Record<string, [number, number, number, number, number]> }> = {

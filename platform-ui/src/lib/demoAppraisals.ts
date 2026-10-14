@@ -280,6 +280,11 @@ function isElevated(userId: string): boolean {
   return userId === "demo-hansel";
 }
 
+/** DW-3h (BFF §39): a department HEAD's list tier. The units a demo head leads, and who sits in each (the same flat `dept-N`
+ *  ids and rosters as demoReports' `DEMO_ROSTERS`). The real list is the led subtrees' subjects UNION the rows the caller is
+ *  the manager of; an empty scope falls through to the old branches. `u-webhead` (ME_WEBHEAD) leads dept-1. */
+const DEMO_HEAD_ROSTERS: Record<string, string[]> = { "u-webhead": ["u-dev", "u-pm"] };
+
 export function appraisalsDemo(method: string, p: string, params: URLSearchParams, body: string | undefined, userId: string): DemoResult | null {
   const tenantMatch = p.match(/^\/api\/([^/]+)\/appraisals(\/.*)?$/);
   if (!tenantMatch) return null;
@@ -383,6 +388,9 @@ export function appraisalsDemo(method: string, p: string, params: URLSearchParam
     let rows = [...appraisals.values()];
     if (isElevated(userId)) {
       // broad tier — no narrowing
+    } else if (DEMO_HEAD_ROSTERS[userId]) {
+      const team = new Set(DEMO_HEAD_ROSTERS[userId]);
+      rows = rows.filter((a) => team.has(a.subjectUserId) || a.managerUserId === userId);
     } else if (rows.some((a) => a.managerUserId === userId)) {
       rows = rows.filter((a) => a.managerUserId === userId);
     } else {

@@ -4,6 +4,7 @@ import { getPrefs } from "@/lib/prefs";
 import { moduleGate } from "@/lib/modules";
 import { myWorkspaces } from "@/lib/workspaces-data";
 import { parseOverviewPeriod, subjectOfRef, workspaceRefForPage } from "@/lib/overview";
+import { canSwitchToTeam, resolveOverviewView } from "@/lib/overviewTeam";
 import { WorkspaceOverview } from "./WorkspaceOverview";
 
 /** DW-3a: the one branch every Overview page takes. For a person on the pilot switch, a function that wraps
@@ -18,19 +19,25 @@ export async function pilotFrame(
   me: Me,
   tenantId: string,
   target: { deptId: string } | { slug: string },
-  searchParams: Promise<{ period?: string | string[] }>,
+  searchParams: Promise<{ period?: string | string[]; view?: string | string[] }>,
 ): Promise<((legacy: ReactNode) => ReactNode) | null> {
   const prefs = await getPrefs();
   if (prefs.shell !== "workspaces") return null;
   const all = await myWorkspaces(me, tenantId);
   const ref = workspaceRefForPage(all, target);
   if (!ref) return null;
-  const { period } = await searchParams;
+  const { period, view } = await searchParams;
   // DW-6c: the Today block shows the tools this person pinned for this workspace (Tools & connections).
   // DW-5f: `all` gives the `hasWorkspace` gate the company's department workspaces.
   const subject = subjectOfRef(ref, prefs.pinnedTools, all);
   const parsed = parseOverviewPeriod(period);
   // DW-3g: one read of the company's modules, so a block whose module is off is not placed. It fails open.
   const modules = await moduleGate(me.userId, tenantId);
-  return (legacy) => <WorkspaceOverview me={me} tenantId={tenantId} subject={subject} period={parsed} legacy={legacy} moduleOn={modules.isEnabled} />;
+  // DW-3h: the Me | Team switch is a head's, of THIS workspace's unit. For anyone else `?view=team` is ignored (Me), so
+  // nothing about a team is read for them. The switch is cosmetic: the server narrows every Team read.
+  const canSwitchView = canSwitchToTeam(me, tenantId, subject);
+  const mode = resolveOverviewView(view, canSwitchView);
+  return (legacy) => (
+    <WorkspaceOverview me={me} tenantId={tenantId} subject={subject} period={parsed} view={mode} canSwitchView={canSwitchView} legacy={legacy} moduleOn={modules.isEnabled} />
+  );
 }

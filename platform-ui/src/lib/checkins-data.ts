@@ -38,7 +38,7 @@ export interface CheckinComplianceParams {
    *  a unit-scoped (dept-lead) principal gets its led subtree regardless of what is sent, and a
    *  self-only principal gets its own row with `unit: null`. Read the response's `unit` echo. */
   unit?: string;
-  periodKind: "day" | "week" | "month" | "custom";
+  periodKind: "day" | "week" | "month" | "quarter" | "semester" | "year" | "custom";
   start: string;
   /** Required when `periodKind === "custom"` (the controller's own rule). */
   end?: string;

@@ -21,6 +21,14 @@
 .ov-period__btn[aria-disabled="true"] { color: var(--ink-subtle); cursor: not-allowed; }
 .ov-period__btn[aria-disabled="true"]:hover { background: transparent; color: var(--ink-subtle); }
 
+/* ---- The Me | Team switch of a head (DW-3h): two links, drawn like the period control ---- */
+.ov-view { display: inline-flex; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm); overflow: hidden; }
+.ov-view__link { display: inline-flex; align-items: center; height: 32px; padding: 0 var(--space-12); color: var(--ink-muted); font: 600 13px var(--font-body); text-decoration: none; }
+.ov-view__link + .ov-view__link { border-left: 0.5px solid var(--erp-hairline); }
+.ov-view__link:hover { background: var(--tint-hover); color: var(--text-primary); }
+.ov-view__link[aria-current="true"] { background: var(--tint-hover); color: var(--text-primary); box-shadow: inset 0 -2px 0 var(--accent); }
+.ov-view__link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
 /* ---- Bands: a quiet label, then the blocks ---- */
 .ov-band { display: flex; flex-direction: column; gap: var(--space-12); }
 .ov-band__label { margin: 0; padding-bottom: var(--space-8); border-bottom: 0.5px solid var(--erp-hairline); font: 600 12px var(--font-body); letter-spacing: 0.06em; color: var(--ink-muted); }
@@ -59,6 +67,7 @@
 /* Touch input: the 44px floor, like the rest of the shell. */
 @media (pointer: coarse) {
   .ov-period__btn { height: 44px; }
+  .ov-view__link { height: 44px; }
 }
 
 /* ---- Your numbers (DW-3d): four tiles, two by two, then the report link ---- */

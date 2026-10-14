@@ -108,6 +108,16 @@ describe("demoAppraisals — appraisalsDemo (DEMO_MODE fixtures, TR-26)", () => 
     expect(asSeo.appraisals.every((a) => a.status !== "draft")).toBe(true);
   });
 
+  it("DW-3h (BFF §39): a department head's list is their unit's people plus the rows they manage, never everything", () => {
+    const asHead = call("GET", "/api/co-agency/appraisals", {}, undefined, "u-webhead")!.json as { appraisals: AppraisalListEntry[] };
+    expect(asHead.appraisals.length).toBeGreaterThan(0);
+    // dept-1's roster is u-dev and u-pm; gede-ic, seo-staff and the rest are outside it and not managed by the head.
+    for (const a of asHead.appraisals) expect(["u-dev", "u-pm"]).toContain(a.subjectUserId);
+    expect(asHead.appraisals.some((a) => a.subjectUserId === "u-dev")).toBe(true);
+    const all = (call("GET", "/api/co-agency/appraisals")!.json as { appraisals: AppraisalListEntry[] }).appraisals;
+    expect(asHead.appraisals.length).toBeLessThan(all.length);
+  });
+
   it("submit enforces commentary length and unjustified deviations BEFORE persisting, mirroring appraisal-engine.ts", () => {
     // Use a freshly-generated draft so this test doesn't mutate the shared seeded fixtures other
     // tests depend on.

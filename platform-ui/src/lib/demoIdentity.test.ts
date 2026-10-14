@@ -68,4 +68,15 @@ describe("demoIdentityFor — dev-login identity tiers", () => {
     expect(demoIdentityFor("gede@gaiada.com")).toBe("gede-ic");
     expect(demoIdentityFor("made@gaiada.com")).toBe("demo-hansel");
   });
+
+  it("DW-3h: webhead resolves to u-webhead, the head of Web Dev, and moves no other address", () => {
+    expect(demoIdentityFor("webhead@gaiada.com")).toBe("u-webhead");
+    expect(demoIdentityFor("WebHead@Gaiada.com")).toBe("u-webhead");
+    // Before the "ic" test, like webdev: an address with "ic" in it is still the head.
+    expect(demoIdentityFor("webhead-ic@gaiada.com")).toBe("u-webhead");
+    // The Web Dev employee is a different identity, and so is every other tier.
+    expect(demoIdentityFor("webdev@gaiada.com")).toBe("u-dev");
+    expect(demoIdentityFor("manager@gaiada.com")).toBe("dept-manager");
+    expect(demoIdentityFor("gede@gaiada.com")).toBe("gede-ic");
+  });
 });

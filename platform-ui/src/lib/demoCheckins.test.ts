@@ -67,6 +67,17 @@ describe("demoCheckins — checkinsDemo (DEMO_MODE fixtures, TR-10/TR-38)", () =
       expect((res!.json as { rows: unknown[] }).rows).toEqual([]);
     });
 
+    it("DW-3h: a unit-scoped head gets the led roster whatever unit is asked, and the led unit echoed (the server's narrowing)", () => {
+      const q = { periodKind: "custom", start: addDaysIso(todayIso(), -7), end: addDaysIso(todayIso(), -1), unit: "dept-3" };
+      const asHead = call("GET", "/api/co-agency/checkins/compliance", q, undefined, "u-webhead")!.json as { unit: string | null; rows: { userId: string }[] };
+      expect(asHead.unit).toBe("dept-1");
+      expect(asHead.rows.length).toBeGreaterThan(0);
+      for (const r of asHead.rows) expect(["u-dev", "u-pm"]).toContain(r.userId);
+      // Everyone else still gets the whole cohort.
+      const asAdmin = call("GET", "/api/co-agency/checkins/compliance", q)!.json as { rows: { userId: string }[] };
+      expect(asAdmin.rows.length).toBeGreaterThan(asHead.rows.length);
+    });
+
     it("echoes the requested unit rather than inventing one", () => {
       const res = call("GET", "/api/co-agency/checkins/compliance", { periodKind: "week", start: todayIso(), unit: "dept-1" });
       expect((res!.json as { unit: string | null }).unit).toBe("dept-1");

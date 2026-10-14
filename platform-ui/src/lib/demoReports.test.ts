@@ -169,6 +169,33 @@ describe("demoReports — DW-4a calendar periods (golden table, twin of report-c
   });
 });
 
+describe("demoReports — the department document for a head (DW-3h)", () => {
+  const dept = (scopeRef: string, userId: string) =>
+    call("/api/co-agency/reports/document", { grain: "department", scopeRef, periodKind: "month", start: "2026-07-01" }, userId)!;
+
+  it("serves the head of Web Dev their own department and refuses another, like the server's led-unit narrowing", () => {
+    expect(dept("dept-1", "u-webhead").status).toBe(200);
+    expect(dept("dept-3", "u-webhead").status).toBe(403);
+  });
+
+  it("carries the department KPIs the Overview's Team numbers reads, each a ratio with both parts or a plain figure", () => {
+    const doc = dept("dept-1", "u-webhead").json as ReportDocument;
+    const kpi = (k: string) => doc.kpis.find((x) => x.metricKey === k)!;
+    for (const k of ["delivery.on_time_rate", "flow.blocked_share", "effort.capacity_utilization", "discipline.checkin_compliance"]) {
+      expect(kpi(k), k).toBeDefined();
+      expect(kpi(k).denominator, k).toBeGreaterThan(0);
+    }
+    expect(kpi("effort.minutes_logged").value).toBeGreaterThan(0);
+    // The listing's headline slice (first three) is unchanged by the additions.
+    expect(doc.kpis.slice(0, 3).map((k) => k.metricKey)).toEqual(["delivery.tasks_completed", "delivery.throughput_weighted", "delivery.on_time_rate"]);
+  });
+
+  it("keeps the person grain as it was: no department KPIs there", () => {
+    const person = call("/api/co-agency/reports/document", { grain: "person", scopeRef: "demo-hansel", periodKind: "month", start: "2026-07-01" })!.json as ReportDocument;
+    expect(person.kpis.map((k) => k.metricKey)).not.toContain("flow.blocked_share");
+  });
+});
+
 describe("demoReports — overview?grain=person&unit= (DW-4b, BFF §37)", () => {
   const base = { grain: "person", periodKind: "month", start: "2026-07-01" };
   type Scope = { scopeRef: string; scopeName: string; kpis: unknown[]; activity?: boolean };

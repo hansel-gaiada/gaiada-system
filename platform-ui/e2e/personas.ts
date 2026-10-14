@@ -107,3 +107,20 @@ export async function loginAsPlacedWebDev(page: Page): Promise<void> {
   await page.getByRole("button", { name: /sign in/i }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
+
+/**
+ * DW-3h: the one DEMO_MODE login that HEADS a department. `webhead@gaiada.com` resolves to `u-webhead`
+ * (src/lib/demoIdentity.ts, ME_WEBHEAD in src/lib/demoFixtures.ts): a `member` of the agency plus `org_unit_lead` on Web Dev's
+ * org node (`dept-1`), the grant a lead position materialises. A led unit adds its department to their own workspaces, so Web
+ * Dev is their home and the department Overview offers its Me | Team switch. Not a PersonaKey, for the reason
+ * `DEMO_PLACED_WEBDEV_EMAIL` is not: the real-backend personas have no head of a department, so a key here would silently
+ * log in as nobody against a real backend. DEMO_MODE only.
+ */
+export const DEMO_WEBDEV_HEAD_EMAIL = "webhead@gaiada.com";
+
+export async function loginAsWebDevHead(page: Page): Promise<void> {
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(DEMO_WEBDEV_HEAD_EMAIL);
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
+}

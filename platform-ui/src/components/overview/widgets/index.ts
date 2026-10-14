@@ -13,6 +13,7 @@ import type { OverviewWidget, PulseTile } from "@/lib/workspaces";
 import type { DeptLauncher } from "@/lib/deptToolkits";
 import type { WorkLinks } from "@/lib/overviewWork";
 import type { OverviewPeriod } from "@/lib/overview";
+import type { OverviewView } from "@/lib/overviewTeam";
 import { NeedsYou } from "./NeedsYou";
 import { Today } from "./Today";
 import { YourNumbers } from "./YourNumbers";
@@ -38,6 +39,11 @@ export interface OverviewWidgetProps {
   pulse?: readonly PulseTile[];
   /** The pages the Work blocks link to, from the workspace tabs in the registry (DW-3f). */
   workLinks?: WorkLinks;
+  /** Me or Team (DW-3h). The frame sets "team" only for a head of this workspace's unit who chose it, so a block may
+   *  read the team on this alone; omitted means Me. */
+  view?: OverviewView;
+  /** The workspace's name, for the Team blocks' words ("Waiting on Web Dev"). */
+  subjectLabel?: string;
 }
 
 export type OverviewWidgetComponent = (props: OverviewWidgetProps) => ReactNode | Promise<ReactNode>;

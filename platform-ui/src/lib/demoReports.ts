@@ -37,7 +37,7 @@ const FACT_HISTORY_START = "2026-05-01";
 // (same one-way-dependency rule demoPm.ts documents: demo modules never import demoFixtures).
 const PERSON_NAMES: Record<string, string> = {
   "demo-hansel": "Clement Hansel", "gede-ic": "Gede Kusuma", "seo-staff": "Nyoman Ari",
-  "u-pm": "Dewi Santoso", "u-dev": "Made Putra", "u-finance": "Rina Wibawa",
+  "u-pm": "Dewi Santoso", "u-dev": "Made Putra", "u-finance": "Rina Wibawa", "u-webhead": "Ketut Arta",
 };
 const PROJECT_NAMES: Record<string, string> = {
   "p-web-1": "Client site redesign", "p-web-2": "Mobile app revamp",
@@ -162,6 +162,21 @@ function buildKpis(grain: ReportGrain, days: string[], comparisonNoFacts = false
     { metricKey: "evidence.source_diversity", label: "Source diversity", unit: "count", value: 4, delta: 1, direction: "up_good", appraisalSafe: true, distinctOver: true },
     { metricKey: "flow.reopen_rate", label: "Reopen rate", unit: "percent", value: 0.06, numerator: Math.round(completed * 0.06), denominator: completed, delta: -0.01, direction: "down_good", appraisalSafe: true },
   ];
+  if (grain === "department") {
+    // DW-3h: the department-grain KPIs the Overview's Team numbers reads. The real builder emits every registry metric valid
+    // for the grain (`buildKpis`), so these exist there; the numbers are fixtures. Appended AFTER the six above, so the
+    // overview listing's first-three headline slice is unchanged. `capacity_utilization` is logged minutes over expected
+    // calendar minutes (a presence proxy); `blocked_share` is blocked task-days over open task-days.
+    const expectedMinutes = n * 8 * 60 * 3;
+    const loggedMinutes = Math.round(expectedMinutes * 0.78);
+    const openDays = Math.max(1, n * 12);
+    kpis.push(
+      { metricKey: "effort.minutes_logged", label: "Minutes logged", unit: "minutes", value: loggedMinutes, delta: Math.round(loggedMinutes * 0.05), direction: "neutral", appraisalSafe: false },
+      { metricKey: "effort.capacity_utilization", label: "Capacity utilization", unit: "percent", value: loggedMinutes / expectedMinutes, numerator: loggedMinutes, denominator: expectedMinutes, delta: 0.02, direction: "neutral", appraisalSafe: false },
+      { metricKey: "flow.blocked_share", label: "Blocked share", unit: "percent", value: Math.round(openDays * 0.09) / openDays, numerator: Math.round(openDays * 0.09), denominator: openDays, delta: -0.01, direction: "down_good", appraisalSafe: false },
+      { metricKey: "discipline.checkin_compliance", label: "Check-in compliance", unit: "percent", value: 0.88, numerator: Math.round(n * 3 * 0.88), denominator: n * 3, delta: 0.03, direction: "up_good", appraisalSafe: true },
+    );
+  }
   if (grain === "person") {
     // §15 (TR-08 ruling): person-grain packs are where billable-share is appraisal-UNSAFE — scoring
     // someone on it rewards whoever assigns the billable work, not how well they did it.
@@ -324,6 +339,8 @@ function buildDocument(tenantId: string, grain: ReportGrain, scopeRef: string, p
  *  `dept-manager` is the SEO Manager (see `demoFixtures.ts`'s ME_MANAGER), so it leads `dept-3`. */
 const LED_UNITS: Record<string, string[]> = {
   "dept-manager": ["dept-3"],
+  // DW-3h: the head of Web Dev (ME_WEBHEAD holds `org_unit_lead` on dept-1), the Overview's Team mode.
+  "u-webhead": ["dept-1"],
 };
 
 const GROUP_OWNER_ID = "demo-owner";
