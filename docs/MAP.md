@@ -169,11 +169,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610140830_pv5_online_payment_checkout.sql`
+- Head: `202610140840_figma_links.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 299 (121 legacy `NNNN_`, 178 timestamped)
+- Applied files on disk: 300 (121 legacy `NNNN_`, 179 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -218,6 +218,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/core.controller.ts` |
 | `/api` | `platform-nest/src/core/creative.controller.ts` |
 | `/api` | `platform-nest/src/core/custom-fields.controller.ts` |
+| `/api` | `platform-nest/src/core/figma/figma.controller.ts` |
 | `/api` | `platform-nest/src/core/files.controller.ts` |
 | `/api` | `platform-nest/src/core/github-repos.controller.ts` |
 | `/api` | `platform-nest/src/core/integrations.controller.ts` |

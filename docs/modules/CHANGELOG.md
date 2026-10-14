@@ -11,6 +11,15 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.131.0` - DW-6k: Figma links on PM tasks, work requests and campaign parts (2026-10-14) - PROTOTYPED (stubbed Figma client; live proof waits for DW-11)
+
+- **What.** BFF contract §36 (as built: §36.8). Backend only; the UI is a later ticket.
+  - **The company's Figma token** is sealed in the credentials vault: provider `figma` (migration `202610140840` rebuilds the provider CHECK from its live definition and asserts all thirteen values), `owner_kind = 'company'`, `meta.tokenType` `pat` (sent as `X-Figma-Token`) or `oauth` (sent as a Bearer). `PUT`/`DELETE`/`GET /api/:t/integrations/figma` connect, disconnect and report it; connecting needs `company.manage`, and the token is never returned or logged.
+  - **`figma_links`** (RLS forced) holds a link per target, file and frame, with a small cache (title, last changed, open comments). `GET/POST /figma-links`, `DELETE /figma-links/:id`. There is no new Cerbos kind: a link is authorised by its target's own kind (`pm_task`, `work_request` or `agency_campaign_part`), with the attributes that target's own routes send. A work request's link is writable by its asker (`cancel`) or its receiving side (`deliver`).
+  - **The cache** refreshes on read when it is older than ten minutes. A failed refresh, a refused token or a 429 keeps the old numbers and answers `stale: true` with the reason; nothing retries in a loop; nothing ever shows "no comments" for a failure.
+  - **`GET /figma-links/:id/thumbnail`** proxies a small PNG (`Cache-Control: private, max-age=600`) and never stores it. **`POST /figma-links/:id/export`** (`png`, `svg` or `pdf`) saves into the Asset Library through the same save path as an upload, now `core/creative-save.ts`: the first export starts a version group recorded on the link, every later one is a new version of it. The request it sits on is not delivered.
+- **Tests.** `core/figma/{url,rules,client}.test.ts` (pure) and `core/figma/figma-links.test.ts` (HTTP suite on the Linux CI gate: real Postgres and Cerbos, Figma stubbed at `fetch`); the provider-CHECK pin in `db/module-search-rls.test.ts`.
+
 ### platform-nest `0.130.0` - PV5-10: online payment through a Midtrans Snap hosted checkout, OFF until keys exist (2026-10-14) - PROTOTYPED
 
 Ticket PV5-10 (`docs/plans/2026-10-12-pv5-contracts-billing-tickets.md`), ruling PV-D9 / PV-D25. Contract: `docs/FRONTEND-BFF-CONTRACT.md` §16b, §16e, §30 and the new §30c. Runbook: `infra/runbooks/midtrans-payments.md`. Built against a simulated Midtrans (owner, 2026-10-13: no sandbox keys yet); nothing has run against Midtrans.

@@ -1070,7 +1070,7 @@ for the Phase-2 OAuth callbacks that ride this foundation.
   interface ConnectionRow {
     id: string; tenantId: string;
     ownerKind: 'user'|'company'; ownerId: string;
-    provider: 'github'|'google_drive'|'claude'|'cpanel'|'ftp'|'ssh'|'wp_admin'; // VLT-1: the 4 hosting kinds added 2026-09-04
+    provider: 'github'|'google_drive'|'claude'|'cpanel'|'ftp'|'ssh'|'wp_admin'|'figma'; // VLT-1: the 4 hosting kinds added 2026-09-04; DW-6k: 'figma' (§36)
     externalAccount: string | null;            // github login / google email / claude seat email
     scopes: string[];
     status: 'unconfigured'|'pending'|'linked'|'error'|'revoked';
@@ -7273,7 +7273,7 @@ The deploy restarts Cerbos and then probes it.
 - **New version:** from the detail, a file upload sends `POST /creative/assets` with `versionOf` = the latest version and the identity grade; from Image Studio, `?versionOf=<assetId>` (linked from the detail as "Edit in Image Studio") offers "Save as a new version of <name>", which sends `versionOf`. Studio still starts empty (the asset's pixels are not preloaded).
 - Files: `lib/creativeReviews.ts` (pure), `creativeReviews-data.ts` (readers), `creativeReviewActions.ts` (actions), `components/creative/AssetDetail.tsx`, tests beside each.
 
-## 36. Figma links on tasks, requests and campaign parts (DW-6k, 2026-10-13) — `platform-nest/src/core/figma/` (new) — **STATUS: CONTRACT (nothing built; live proof waits for Figma API access, DW-11)**
+## 36. Figma links on tasks, requests and campaign parts (DW-6k, 2026-10-13) — `platform-nest/src/core/figma/` (new) — **STATUS: BACKEND BUILT, PROTOTYPED (stubbed Figma client; live proof waits for DW-11)**
 
 Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.1 (Figma, owner ruling DW-Q6: "use Figma too"), §4.2 (DW-6k) and §14.1 (launch and return). Editing still happens in Figma, because a design tool cannot run inside the ERP. This section adds the connected half:
 - link a file or frame to the work it belongs to;
@@ -7387,6 +7387,63 @@ There is **no new Cerbos kind**. A link is part of the work it is on, so it is a
   - an export creates version 1 and then version 2 in the link's group;
   - `figma_not_connected` when there is no connection.
 - **Live proof** waits for Figma API access (DW-11 item 7): one file linked, a thumbnail shown, comments counted, one export landing in the Asset Library, observed on the live ERP.
+
+### 36.8 As built (backend, DW-6k, 2026-10-14)
+
+**Where it is.**
+- Migration `202610140840_figma_links.sql`:
+  - the provider CHECK on `integration_connections` is rebuilt from its LIVE definition (the 202610130210 idiom, never a typed list) and a DO block asserts the full list;
+  - provider list before (12): `github`, `google_drive`, `claude`, `google_search_console`, `google_analytics`, `google_ads`, `semrush`, `cpanel`, `ftp`, `ssh`, `wp_admin`, `bing_webmaster`; after (13): the same twelve plus `figma`;
+  - `figma_links` exactly as §36.2 (RLS enable plus force, the `tenant_isolation` policy, the unique partial index over `COALESCE(node_id, '')`, the target index), with a DO-block self-assertion.
+- `core/figma/`:
+  - `url.ts`: the pure parser;
+  - `rules.ts`: the pure rules (cache age, open-comment count, title, export body);
+  - `client.ts`: the injectable REST client, its types taken from Figma's published OpenAPI description (`github.com/figma/rest-api-spec`, `openapi/openapi.yaml` 0.44.0) and the `developers.figma.com/docs/rest-api/` pages, cited in its header;
+  - `service.ts`: the links, the cache, the connection and the export;
+  - `figma.controller.ts`: the routes.
+- `core/creative-save.ts` (new): the body of `POST /creative/assets`, moved unchanged, so an export saves through the SAME path as an upload. The route's behaviour is unchanged (`creative-reviews.test.ts` is its guard).
+- `CONNECTION_PROVIDERS` gains `figma`. `factsResource` (work-requests.controller.ts) and `partResource` (agency.controller.ts) are now exported, so the link's authorisation uses the very resources those targets' own routes send.
+
+**Routes** (all under `/api/:t`; every one is authorised by the target's own kind, there is still no new Cerbos kind):
+
+| Method | Path | Answer | Authz as built |
+|---|---|---|---|
+| GET | `/figma-links?targetKind=&targetId=` | `{ figmaConnected, items: [FigmaLink] }`, each due link refreshed first | `read` on the target |
+| POST | `/figma-links` | 201 `FigmaLink` | the write check below |
+| DELETE | `/figma-links/:id` | `{ id, deleted: true }` (soft delete: the slot is freed, exported assets stay) | the write check on the link's target |
+| GET | `/figma-links/:id/thumbnail` | the PNG, `Cache-Control: private, max-age=600` | `read` on the link's target |
+| POST | `/figma-links/:id/export` | 201 `{ linkId, assetId, assetGroupId, versionNo, name, contentType, byteSize }` | the write check AND `file` · `create` |
+| GET | `/integrations/figma` | `{ connected, tokenType }` (never the token) | `pm_task` · `read`: anyone who reads PM tasks |
+| PUT | `/integrations/figma` `{ token, tokenType?: "pat" \| "oauth" }` | `{ connected, tokenType }` | `integration_connection` · `manage` (company_admin, manager: `company.manage`) |
+| DELETE | `/integrations/figma` | `{ disconnected }` | `integration_connection` · `manage` |
+
+- **The write check per kind:**
+  - `pm_task`: `update` on `{ id }`, which is all that task's own routes send (the PM policy has no owner, lead or assignee rule, so none applies);
+  - `agency_campaign_part`: `update` on `{ id, ownerId, unitAncestors }`, so the part's owner and the lead of its department pass;
+  - `work_request`: `deliver` OR `cancel` on the request's `factsResource` (requestedBy, assigneeIds, unitAncestors). Two questions go through `can()`, which answers without throwing, then the one authoritative `authorize()` runs on the action that passed (it audits, enforces the session and the act-for intersection). When neither passes it asks `deliver`, so the refusal is the standard audited 403.
+- **FigmaLink:** `{ id, targetKind, targetId, fileKey, nodeId, url, title, lastModified, openComments, cachedAt, assetGroupId, createdBy, createdAt, stale, refreshError }`. `openComments`, `title`, `lastModified` and `cachedAt` are `null` when never read: never `0` standing in for "unknown".
+- **`stale` and `refreshError`:** `stale: true` means the cache was due and could not be refreshed, so the numbers are the old ones. `refreshError` names why: `figma_not_connected`, `figma_refused`, `figma_rate_limited`, `figma_not_found` or `figma_unavailable`. A link that is not yet due is `stale: false` even when Figma is not connected.
+
+**Tests.** `core/figma/url.test.ts`, `rules.test.ts` and `client.test.ts` (pure, no database); `core/figma/figma-links.test.ts` (the HTTP suite: real Postgres and Cerbos, Figma stubbed at `fetch` with JSON trimmed from the documented shapes, so the real client is exercised); the provider-CHECK test in `db/module-search-rls.test.ts` now pins all thirteen values. The capability inventory's suite counts moved (agency 21, core 66, pm 13) because the new suite is another driver of those route families; no MCP tool was added.
+
+**Deviations and clarifications, each with its reason.**
+1. **Three routes not in §36.5: the connection.** No HTTP path stored a company token (Phase 1's generic connections API accepts no tokens, see the vault note at the top of the connections section), and §36.1 needs one. They reuse the vault's own path (`createConnection` then `setConnectionTokens`, as the Bing connector does) and `meta.tokenType` records the kind. The token is not verified against Figma at connect (verification would be a fifth Figma read); a refused token surfaces as `figma_refused` on first use. The generic `POST /integrations/connections` now also accepts `provider: "figma"` as a token-less mapping row, like every provider.
+2. **Response shapes** (the list's `{ figmaConnected, items }`, `FigmaLink`, the export answer) were not in §36; they are defined above.
+3. **A link can be created without a working connection.** It is saved with an empty cache, and the 201 carries `stale: true` and the reason. Only the thumbnail and the export need Figma to answer, and they refuse with the tokens below.
+4. **HTTP statuses for the Figma failures.** `figma_not_connected`, `figma_refused` and `figma_not_found` are 409; `figma_rate_limited` is 503; `figma_unavailable`, `figma_render_failed` and `export_too_large` are 502. A 4xx 401/403 would read as the ERP's own authentication failing, so none is used for Figma's.
+5. **Extra tokens, each at the start of `message` and repeated in `reason`:** `link_exists` (409: the same file and frame on a target twice; a whole-file link is one slot), `too_many_links` (409: 25 live links per target, so one read never refreshes an unbounded set), `link_not_found` (404), `bad_target` (400, `field: "targetKind"`), `bad_export` (400, `field: "format"` or `"scale"`), `bad_token` and `bad_token_type` (400).
+6. **Open comments** are threads: replies (`parent_id` set) are not counted, so a resolved thread's replies cannot inflate the number. With a frame in the link, only a comment pinned to exactly that frame counts; a comment on bare canvas is off-node.
+7. **A frame Figma no longer has** is `figma_not_found` and the link is stale; it is not shown as a frame with no comments.
+8. **The order of the first gate.** The target kind names which kind to authorise, so it is read first. An unusable kind is answered 400 only after the caller has passed the `pm_task` read gate. A missing link is answered 404 only after that same gate.
+9. **Thumbnail and export sizes.** The thumbnail is a PNG at scale 0.5, buffered (capped at 8 MB) and sent with the cache header, not piped; an export is capped at the Asset Library's 25 MB. A frame link's thumbnail makes no read of the file.
+10. **`grade.nodeId` is the node that was actually rendered,** so a whole-file link records its first page (`document.children[0]`), not null.
+11. **A deleted group starts a new one.** When every version of the link's group was deleted, the next export starts a fresh group and records it on the link; the save path would otherwise refuse with `asset_deleted`. The link row is locked (`FOR UPDATE`) inside the save's transaction, so two first exports cannot start two groups.
+12. **A link whose target was deleted** answers 404 `target_not_found` on delete, thumbnail and export (the target's kind cannot be authorised without it).
+13. **Title** is `File name / Frame name`, or the file name alone.
+14. **URL normalisation.** `http` is accepted and stored as `https`; the stored link is `https://www.figma.com/<kind>/<key>` plus `?node-id=1-2`, with the slug and every other parameter dropped. A node id of the nested-instance form (`I1-2;3-4`) is accepted. The file key must be alphanumeric (it is put into a Figma API path).
+15. **Audit.** Activity rows on `figma_link` (`created`, `deleted`, `exported`) and on `integration_connection` (`connected`, `disconnected`, never the token). No outbox event and no notification.
+
+**Not yet done.** The UI (§36.6) and the live proof (DW-11 item 7).
 
 ## 37. A unit's roster on the person-grain report overview (DW-4b, 2026-10-13) — `platform-nest/src/modules/reports/reports.controller.ts` (`getOverview`), `person-scope.ts` — **STATUS: BUILT, PROTOTYPED (DB suite tr25-person-axis.db.test.ts on the Linux CI gate)**
 
