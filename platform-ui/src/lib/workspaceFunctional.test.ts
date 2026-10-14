@@ -146,9 +146,10 @@ describe("IT rows (DW-7c)", () => {
     }
   });
 
-  it("keeps the it module gate", () => {
+  it("keeps the it module gate, except on IT accounts, which works with the module off (P2-14)", () => {
     const rows = itRows(moduleOff("it_admin"));
-    for (const key of ["devices", "network", "accounts", "workflows"]) expect(rows[key], key).toBeUndefined();
+    for (const key of ["devices", "network", "workflows"]) expect(rows[key], key).toBeUndefined();
+    expect(rows.accounts).toEqual(["IT accounts"]);
   });
 });
 
