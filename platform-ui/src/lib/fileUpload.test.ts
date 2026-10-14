@@ -22,3 +22,12 @@ describe("fileUpload (DW-8h)", () => {
     expect(formatFileSize(5 * 1024 * 1024)).toBe("5.0 MB");
   });
 });
+
+describe("formatFileSize takes the bigint the platform sends as a string", () => {
+  it("formats numeric strings like numbers, and anything else as 0 B", () => {
+    expect(formatFileSize("47")).toBe("47 B");
+    expect(formatFileSize("5242880")).toBe("5.0 MB");
+    expect(formatFileSize("")).toBe("0 B");
+    expect(formatFileSize("x")).toBe("0 B");
+  });
+});

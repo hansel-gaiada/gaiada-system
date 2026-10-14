@@ -7,8 +7,11 @@ export const FILE_TOO_BIG = "Files can be at most 25 MB.";
 export const SCRUBBED_NOTICE = "Personal data was removed from the stored copy.";
 
 /** `1.4 MB`, `12 KB`, `300 B`: one decimal for MB and above, none below. */
-export function formatFileSize(bytes: number | null | undefined): string {
-  const n = typeof bytes === "number" && Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
+// `files.byte_size` is a Postgres bigint, which the platform's JSON carries as a STRING ("47"). Taking only numbers made every
+// file read "0 B" (seen live on 398), so a numeric string counts too.
+export function formatFileSize(bytes: number | string | null | undefined): string {
+  const v = typeof bytes === "string" && bytes.trim() !== "" ? Number(bytes) : bytes;
+  const n = typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0;
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;

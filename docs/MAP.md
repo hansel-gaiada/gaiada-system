@@ -251,6 +251,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/modules/invoice/billing-profile.controller.ts` |
 | `/api` | `platform-nest/src/modules/invoice/invoice.controller.ts` |
 | `/api` | `platform-nest/src/modules/it/it.controller.ts` |
+| `/api` | `platform-nest/src/modules/knowledge/search.controller.ts` |
 | `/api` | `platform-nest/src/modules/module-catalog.controller.ts` |
 | `/api` | `platform-nest/src/modules/monitoring/monitoring.controller.ts` |
 | `/api` | `platform-nest/src/modules/pm/pm.controller.ts` |

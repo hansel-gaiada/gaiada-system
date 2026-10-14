@@ -113,3 +113,73 @@ export async function queryPropertyKnowledge(userId: string, aclScope: string, q
     return [];
   }
 }
+
+/** A hit as the knowledge service's `POST /search` returns it (the chunk's tenant, ref, tier, text and score). */
+export interface KnowledgeStoreHit {
+  tenantId: string;
+  sourceRef: string;
+  kind: string;
+  text: string;
+  provenance: string;
+  confidence: number;
+  score: number;
+  audience: string;
+}
+
+/** The knowledge service could not answer: not configured, unreachable, timed out, non-2xx or an unreadable body. The staff
+ *  search route turns this into 503 `knowledge_unavailable`; it must never read as "no results". */
+export class KnowledgeUnavailableError extends Error {
+  constructor(reason: string) {
+    super(`knowledge unavailable: ${reason}`);
+    this.name = "KnowledgeUnavailableError";
+  }
+}
+
+/** DW-8i. The same call as `queryPropertyKnowledge` (the caller's own OBO envelope, so the store's tenant pre-filter is the
+ *  caller's own tenant set), but it RETURNS the store's hits whole, tier and tenant included, and THROWS `KnowledgeUnavailableError`
+ *  on every failure instead of folding it into `[]`. The query text is sent to the service only; it is not logged here. */
+export async function searchKnowledgeStrict(userId: string, query: string, topK: number): Promise<KnowledgeStoreHit[]> {
+  const svc = config.services.knowledge;
+  if (!svc.url) throw new KnowledgeUnavailableError("not configured");
+  if (!userId) throw new KnowledgeUnavailableError("no caller");
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), HTTP_TIMEOUT_MS);
+  try {
+    await selfLinkUpsert(userId);
+    const res = await fetch(`${svc.url.replace(/\/$/, "")}/search`, {
+      method: "POST",
+      signal: ac.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${svc.token}`,
+        "x-obo-provider": "platform",
+        "x-obo-external-id": userId,
+      },
+      body: JSON.stringify({ query, scope: "", topK, publicOnly: false }),
+    });
+    if (!res.ok) throw new KnowledgeUnavailableError(`HTTP ${res.status}`);
+    const json = (await res.json()) as { hits?: unknown };
+    if (!Array.isArray(json.hits)) throw new KnowledgeUnavailableError("malformed answer");
+    const out: KnowledgeStoreHit[] = [];
+    for (const h of json.hits as Array<Record<string, unknown>>) {
+      // A hit missing the fields the filter keys on is dropped, not repaired: it cannot be tied to a record.
+      if (!h || typeof h.sourceRef !== "string" || typeof h.text !== "string" || typeof h.tenantId !== "string" || typeof h.audience !== "string") continue;
+      out.push({
+        tenantId: h.tenantId,
+        sourceRef: h.sourceRef,
+        kind: typeof h.kind === "string" ? h.kind : "doc",
+        text: h.text,
+        provenance: typeof h.provenance === "string" ? h.provenance : "",
+        confidence: typeof h.confidence === "number" ? h.confidence : 0,
+        score: typeof h.score === "number" ? h.score : 0,
+        audience: h.audience,
+      });
+    }
+    return out;
+  } catch (e) {
+    if (e instanceof KnowledgeUnavailableError) throw e;
+    throw new KnowledgeUnavailableError(e instanceof Error ? e.name : "error");
+  } finally {
+    clearTimeout(timer);
+  }
+}

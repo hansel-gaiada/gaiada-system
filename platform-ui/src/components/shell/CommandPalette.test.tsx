@@ -190,5 +190,33 @@ describe("CommandPalette — search field handover (DW-2c)", () => {
     expect(push).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
+
+  describe("knowledge search action (DW-8i)", () => {
+    async function openAndType(text: string) {
+      renderPalette();
+      fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+      await waitFor(() => screen.getByRole("dialog"));
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: text } });
+    }
+
+    it("is absent under 2 characters", async () => {
+      await openAndType("a");
+      expect(screen.queryByText(/Search company knowledge for/)).toBeNull();
+    });
+
+    it("appears from 2 characters and opens /knowledge?q= with the text encoded", async () => {
+      await openAndType("kick off & co");
+      const opt = await screen.findByText("Search company knowledge for 'kick off & co'");
+      fireEvent.mouseDown(opt);
+      expect(push).toHaveBeenCalledWith("/knowledge?q=kick%20off%20%26%20co");
+    });
+
+    it("is not the default highlight: Enter with nothing else matching still goes to /search", async () => {
+      await openAndType("zzz");
+      await screen.findByText("Search company knowledge for 'zzz'");
+      fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+      expect(push).toHaveBeenCalledWith("/search?q=zzz");
+    });
+  });
 });
 

@@ -33,6 +33,9 @@ interface LiveSearchGroup { key: string; label: string; hits: LiveSearchHit[] }
 
 const DEBOUNCE_MS = 220;
 const STATIC_LIMIT = 8;
+/** DW-8i: the one typed-text action. Offered from 2 characters; never the default highlight, so Enter with
+ *  nothing else matching still goes to the whole-ERP `/search` (DW-2c). */
+const KNOWLEDGE_ACTION_ID = "action:knowledge-search";
 
 /** What a trigger may pass in `gaiada:palette:open`'s `detail`. */
 export interface PaletteOpenDetail { query?: string; onClose?: () => void }
@@ -132,18 +135,25 @@ export function CommandPalette({ entries }: { entries: PaletteEntry[] }) {
     return [...bySection.entries()].map(([label, options]) => ({ label, options }));
   }, [entries, q]);
 
-  const groups: PaletteGroup[] = q.length >= 2 ? [...staticGroups, ...liveGroups] : staticGroups;
+  const typed = query.trim();
+  const knowledgeGroup: PaletteGroup[] = typed.length >= 2
+    ? [{
+        label: "Knowledge",
+        options: [{ id: KNOWLEDGE_ACTION_ID, label: `Search company knowledge for '${typed}'`, href: `/knowledge?q=${encodeURIComponent(typed)}` }],
+      }]
+    : [];
+  const groups: PaletteGroup[] = q.length >= 2 ? [...staticGroups, ...liveGroups, ...knowledgeGroup] : staticGroups;
   const flatOptions = useMemo(() => groups.flatMap((g) => g.options), [groups]);
 
   useEffect(() => {
     if (flatOptions.length === 0) { setActiveId(null); return; }
-    if (!flatOptions.some((o) => o.id === activeId)) setActiveId(flatOptions[0].id);
+    if (!flatOptions.some((o) => o.id === activeId)) setActiveId(flatOptions.find((o) => o.id !== KNOWLEDGE_ACTION_ID)?.id ?? null);
   }, [flatOptions, activeId]);
 
   function move(delta: number) {
     if (flatOptions.length === 0) return;
     const at = flatOptions.findIndex((o) => o.id === activeId);
-    const next = flatOptions[(at + delta + flatOptions.length) % flatOptions.length];
+    const next = at < 0 ? flatOptions[delta > 0 ? 0 : flatOptions.length - 1] : flatOptions[(at + delta + flatOptions.length) % flatOptions.length];
     setActiveId(next.id);
     // jsdom (unit tests) has no layout engine and doesn't implement scrollIntoView at all.
     document.getElementById(`cmdk-opt-${next.id}`)?.scrollIntoView?.({ block: "nearest" });
@@ -203,7 +213,7 @@ export function CommandPalette({ entries }: { entries: PaletteEntry[] }) {
           <kbd className="cmdk__esc">Esc</kbd>
         </div>
         <ul className="cmdk__list" role="listbox" id={listboxId} aria-label="Results">
-          {flatOptions.length === 0 && (
+          {!flatOptions.some((o) => o.id !== KNOWLEDGE_ACTION_ID) && (
             <li className="cmdk__empty" role="presentation">
               {liveLoading ? "Searching…" : q.length >= 2 ? "No matches." : "Type to search pages, departments and records."}
             </li>
