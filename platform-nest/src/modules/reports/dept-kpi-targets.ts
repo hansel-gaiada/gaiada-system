@@ -349,6 +349,10 @@ function kpiRead(def: DeptKpiDef, v: KpiValue | null, t: TargetRow | undefined):
  * conditions computed WITHOUT any derived KPI (for every workspace but the GM's that is their full condition; for a
  * second GM-workspace department it is its condition from its own report and module KPIs). The unit being computed is
  * never counted in its own share.
+ *
+ * `targetsAsOf` (DW-4e-3, FRONTEND-BFF-CONTRACT §41.1) is the date the in-force target is looked up at; it defaults to the
+ * range's start (§40.2: "on or before the period's start"). The department appraisal reads a whole cycle as one custom
+ * range but judges it against the target in force for the cycle's LAST month, so it passes that month's start.
  */
 export async function evaluateUnits(
   tenantId: string,
@@ -356,11 +360,12 @@ export async function evaluateUnits(
   units: OrgUnitRef[],
   departments: OrgUnitRef[],
   range: PeriodRange,
+  targetsAsOf: string = range.start,
 ): Promise<UnitKpis[]> {
   const slugOf = (u: OrgUnitRef) => workspaceSlugFor(vertical, u.name);
   const needsDerived = units.some((u) => DEPT_KPI_SETS[slugOf(u)].some((d) => d.reader.kind === "derived"));
   const population = needsDerived ? uniqueUnits([...units, ...departments]) : units;
-  const targets = await inForceTargets(tenantId, population.map((u) => u.id), range.start);
+  const targets = await inForceTargets(tenantId, population.map((u) => u.id), targetsAsOf);
 
   const docs = new Map<string, ReportDocument>();
   const docFor = async (grain: "department" | "company", scopeRef: string): Promise<ReportDocument> => {

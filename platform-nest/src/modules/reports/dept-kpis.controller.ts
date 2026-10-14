@@ -91,7 +91,7 @@ const MAX_NOTE = 2000;
 
 /** The company-wide tiers of this surface (see the header): personAxisTier's two top tiers, plus `owner` of this
  *  company. Reads only `principal.roles` (server-assembled at auth time), never request input. */
-function isCompanyWide(principal: Principal, tenantId: string): boolean {
+export function isCompanyWide(principal: Principal, tenantId: string): boolean {
   const tier = personAxisTier(principal, tenantId);
   if (tier === "unrestricted" || tier === "company_wide") return true;
   return principal.roles.some((g) => g.role === "owner" && g.scopeType === "company" && g.scopeId === tenantId);
@@ -104,7 +104,7 @@ function requireUnitParam(raw: unknown): string {
   return raw;
 }
 
-async function unitAncestorsOf(tenantId: string, unitNodeId: string): Promise<string[]> {
+export async function unitAncestorsOf(tenantId: string, unitNodeId: string): Promise<string[]> {
   if (!unitNodeId) return [];
   return withTenants([tenantId], (c) => loadUnitAncestors(c, tenantId, unitNodeId), { modules: DEPT_KPI_MODULES });
 }
