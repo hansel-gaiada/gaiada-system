@@ -1,6 +1,6 @@
 -- IAM — DW-8g: the `calendar_event` permission family (docs/FRONTEND-BFF-CONTRACT.md §47.2, docs/PERMISSION-CONTRACT.md §39), a NEW
 -- core Cerbos kind (no module): one event on a company's calendar, which may carry a scheduled meeting recording. Pure IAM seed:
--- no DDL (202610150400 owns the tables).
+-- no DDL (202610151100 owns the tables).
 --
 -- A new Cerbos kind costs six coupled artifacts; this is #5 (copied from 202610140610_iam_work_request_permissions.sql).
 -- The others, all in the same change:
@@ -118,7 +118,7 @@ BEGIN
    WHERE cerbos_kind = 'calendar_event' AND class = 'grantable' AND module_key = 'core'
      AND sensitive = false AND ui_grantable = true;
   IF got <> 5 THEN
-    RAISE EXCEPTION '202610150410: expected 5 grantable, non-sensitive, ui_grantable calendar_event permissions, found %', got;
+    RAISE EXCEPTION '202610151110: expected 5 grantable, non-sensitive, ui_grantable calendar_event permissions, found %', got;
   END IF;
 
   FOR expected IN
@@ -135,7 +135,7 @@ BEGIN
      WHERE r.company_id IS NULL AND r.name = expected.role_name
        AND p.cerbos_kind = 'calendar_event';
     IF got <> expected.expected_count THEN
-      RAISE EXCEPTION '202610150410: role "%": expected % bundled calendar_event permission(s), found % (missing/typo''d role name or key, or a prior partial application)',
+      RAISE EXCEPTION '202610151110: role "%": expected % bundled calendar_event permission(s), found % (missing/typo''d role name or key, or a prior partial application)',
         expected.role_name, expected.expected_count, got;
     END IF;
   END LOOP;
@@ -149,7 +149,7 @@ BEGIN
      AND p.key IN ('core.calendar_event.update', 'core.calendar_event.cancel')
      AND r.name NOT IN ('platform_admin', 'company_admin', 'owner', 'member', 'manager');
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610150410: update/cancel leaked to % row(s) outside platform_admin/company_admin/owner/member/manager', got;
+    RAISE EXCEPTION '202610151110: update/cancel leaked to % row(s) outside platform_admin/company_admin/owner/member/manager', got;
   END IF;
 
   -- A viewer never schedules, edits or cancels.
@@ -160,7 +160,7 @@ BEGIN
    WHERE r.company_id IS NULL AND p.cerbos_kind = 'calendar_event'
      AND (r.name = 'viewer' AND p.action NOT IN ('read', 'respond'));
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610150410: viewer holds % calendar_event permission(s) outside its reach', got;
+    RAISE EXCEPTION '202610151110: viewer holds % calendar_event permission(s) outside its reach', got;
   END IF;
 
   -- The self-scoped marker: exactly member and manager update/cancel/respond, and viewer·respond, and nothing else on this kind.
@@ -172,7 +172,7 @@ BEGIN
      AND NOT ((r.name IN ('member', 'manager') AND p.key IN ('core.calendar_event.update', 'core.calendar_event.cancel', 'core.calendar_event.respond'))
               OR (r.name = 'viewer' AND p.key = 'core.calendar_event.respond'));
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610150410: % unexpected self_scoped calendar_event row(s)', got;
+    RAISE EXCEPTION '202610151110: % unexpected self_scoped calendar_event row(s)', got;
   END IF;
   SELECT count(*) INTO got
     FROM role_permissions rp
@@ -182,7 +182,7 @@ BEGIN
      AND ((r.name IN ('member', 'manager') AND p.key IN ('core.calendar_event.update', 'core.calendar_event.cancel', 'core.calendar_event.respond'))
           OR (r.name = 'viewer' AND p.key = 'core.calendar_event.respond'));
   IF got <> 7 THEN
-    RAISE EXCEPTION '202610150410: member and manager update/cancel/respond and viewer·respond must all be marked self_scoped (found %)', got;
+    RAISE EXCEPTION '202610151110: member and manager update/cancel/respond and viewer·respond must all be marked self_scoped (found %)', got;
   END IF;
 
   -- owner ≡ company_admin, in BOTH directions (equal counts alone would not catch the wrong keys).
@@ -208,7 +208,7 @@ BEGIN
         AND p.cerbos_kind = 'calendar_event')
   ) diff;
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610150410: owner''s calendar_event bundle diverges from company_admin''s by % key(s) — owner-role.db.test.ts will fail', got;
+    RAISE EXCEPTION '202610151110: owner''s calendar_event bundle diverges from company_admin''s by % key(s) — owner-role.db.test.ts will fail', got;
   END IF;
 
   SELECT count(*) INTO got
@@ -217,8 +217,8 @@ BEGIN
     JOIN permissions p ON p.id = rp.permission_id
    WHERE r.company_id IS NULL AND p.cerbos_kind = 'calendar_event';
   IF got <> 27 THEN
-    RAISE EXCEPTION '202610150410: total bundled calendar_event permissions on global roles: expected 27 (3x5 + 5 + 5 + 2), found %', got;
+    RAISE EXCEPTION '202610151110: total bundled calendar_event permissions on global roles: expected 27 (3x5 + 5 + 5 + 2), found %', got;
   END IF;
 
-  RAISE NOTICE '202610150410: role_permissions seeded — % calendar_event rows across 6 global roles', got;
+  RAISE NOTICE '202610151110: role_permissions seeded — % calendar_event rows across 6 global roles', got;
 END $$;

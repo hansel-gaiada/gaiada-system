@@ -20,7 +20,7 @@
 --   * project_id is composite for the same reason (ux_projects_id_tenant, 0056). client_id is a plain FK: clients has no
 --     (id, tenant_id) unique, and the service validates the client against the tenant (RLS) before it writes.
 --
--- Pure DDL. The Cerbos kind's permission seed is the NEXT migration (202610150410).
+-- Pure DDL. The Cerbos kind's permission seed is the NEXT migration (202610151110).
 
 -- ── 1 · calendar_events ─────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS calendar_events (
@@ -103,11 +103,11 @@ BEGIN
   FOREACH t IN ARRAY ARRAY['calendar_events', 'calendar_event_attendees'] LOOP
     SELECT count(*) INTO n FROM pg_class WHERE relname = t AND relrowsecurity AND relforcerowsecurity;
     IF n <> 1 THEN
-      RAISE EXCEPTION '202610150400: % must exist with RLS ENABLED and FORCED', t;
+      RAISE EXCEPTION '202610151100: % must exist with RLS ENABLED and FORCED', t;
     END IF;
     SELECT count(*) INTO n FROM pg_policies WHERE tablename = t AND policyname = 'tenant_isolation';
     IF n <> 1 THEN
-      RAISE EXCEPTION '202610150400: % needs exactly one tenant_isolation policy, found %', t, n;
+      RAISE EXCEPTION '202610151100: % needs exactly one tenant_isolation policy, found %', t, n;
     END IF;
   END LOOP;
 
@@ -117,14 +117,14 @@ BEGIN
                      'calendar_events_cancelled_ck', 'ux_calendar_events_recording',
                      'fk_calendar_events_recording_tenant', 'fk_calendar_events_project_tenant');
   IF n <> 7 THEN
-    RAISE EXCEPTION '202610150400: calendar_events should carry its 4 CHECKs, the recording UNIQUE and the two tenant FKs, found % of 7', n;
+    RAISE EXCEPTION '202610151100: calendar_events should carry its 4 CHECKs, the recording UNIQUE and the two tenant FKs, found % of 7', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_indexes
    WHERE indexname IN ('ix_calendar_events_starts_at', 'ix_calendar_events_starts_on', 'ix_calendar_event_attendees_user');
   IF n <> 3 THEN
-    RAISE EXCEPTION '202610150400: the three calendar lookup indexes are missing (found % of 3)', n;
+    RAISE EXCEPTION '202610151100: the three calendar lookup indexes are missing (found % of 3)', n;
   END IF;
 
-  RAISE NOTICE '202610150400: calendar_events and calendar_event_attendees are in place';
+  RAISE NOTICE '202610151100: calendar_events and calendar_event_attendees are in place';
 END $$;

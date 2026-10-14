@@ -169,7 +169,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610150410_iam_calendar_event_permissions.sql`
+- Head: `202610151110_iam_calendar_event_permissions.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
@@ -357,6 +357,9 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/assistant`
 - `/billing/[[...rest]]`
 - `/calendar`
+- `/calendar/events/[id]`
+- `/calendar/events/[id]/edit`
+- `/calendar/new`
 - `/client-centre`
 - `/client-centre/[clientId]/[[...section]]`
 - `/clients`
