@@ -2,6 +2,7 @@
 // docs/plans/2026-10-13-department-workspaces.md §5.3 and §5.5, owner ruling DW-Q4). Routes only: the reads, the writes
 // and the pure aggregation are dept-appraisals.ts; the KPI engine is dept-kpi-targets.ts / dept-kpis.ts (§40).
 //
+//   GET /api/:t/dept-appraisals/cycles                                     — the company's cycles for the picker (no drafts)
 //   GET /api/:t/dept-appraisals?cycleId=&unitNodeId=                       — the department's appraisal for a cycle
 //   PUT /api/:t/dept-appraisals/:cycleId/:unitNodeId/commentary {text}     — the head's commentary (200)
 //   PUT /api/:t/dept-appraisals/:cycleId/:unitNodeId/assessment {text, condition} — the GM's assessment (200)
@@ -60,6 +61,7 @@ import {
   MAX_TEXT,
   assembleDeptAppraisal,
   fetchCycle,
+  listPickableCycles,
   writeAssessment,
   writeCommentary,
   type GmCondition,
@@ -84,6 +86,29 @@ function textOf(body: { text?: unknown } | undefined): string {
 @Controller("api/:tenantId/dept-appraisals")
 @UseGuards(AuthGuard, ModuleEnabledGuard("reports"))
 export class DeptAppraisalsController {
+  // ---------------- the cycles list (§41.4) ----------------
+
+  /**
+   * The cycles the picker offers: the company's, newest first by period end, never `draft`. Company-wide metadata, so no unit.
+   * Cerbos `read` (the tenant gate), then the caller must be company-wide (HR's people-reader tier included) or lead a unit
+   * today (a non-empty led scope). A plain member or a unit's staff get 403: the list is for those who can read an appraisal.
+   * Declared before the unit read so no path parameter can swallow it.
+   */
+  @Get("cycles")
+  async cycles(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    const principal = req.principal;
+    await authorize(principal, { kind: "dept_kpi_target", tenantId, module: "reports" }, "read");
+    if (!isCompanyWide(principal, tenantId)) {
+      const asOf = todayIsoInTz(config.reportsTz);
+      const leads =
+        requiresUnitNarrowing(principal, tenantId) &&
+        !!principal.userId &&
+        (await withTenants([tenantId], (c) => loadLedUnitScope(c, tenantId, principal.userId!, asOf, principal), { modules: DEPT_KPI_MODULES })).size > 0;
+      if (!leads) throw new ForbiddenException(OUT_OF_LINE_MESSAGE);
+    }
+    return { cycles: await listPickableCycles(tenantId) };
+  }
+
   // ---------------- the read (§41.4) ----------------
 
   @Get()

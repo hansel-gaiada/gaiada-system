@@ -24,7 +24,7 @@ import type { PoolClient } from "pg";
 import { newId, withGlobal, withTenants } from "../../db";
 import { config } from "../../config";
 import { isUuidShaped } from "../../core/dept-resolution";
-import { getCycle } from "./appraisal-engine";
+import { getCycle, listCycles } from "./appraisal-engine";
 import type { AppraisalCycleRow } from "./appraisal-document";
 import { enumerateCalendarStarts, resolveCalendarRange } from "./report-calendar";
 import { collectUnitSubtree, loadUnitRoster, todayIsoInTz } from "./person-scope";
@@ -91,6 +91,28 @@ export function aggregatePeople(rows: readonly PeopleRow[]): PeopleAggregate {
 }
 
 // ═══════════════════════════════ reads ═══════════════════════════════
+
+export interface CyclePick {
+  id: string;
+  name: string;
+  periodStart: string;
+  periodEnd: string;
+  status: string;
+}
+
+/** PURE. The picker's list: every cycle but `draft` (HR's preparation, not yet anyone's appraisal), newest first by period end,
+ *  then by name. Never mutates its input. */
+export function pickCycles(cycles: readonly CyclePick[]): CyclePick[] {
+  return cycles
+    .filter((c) => c.status !== "draft")
+    .map((c) => ({ id: c.id, name: c.name, periodStart: c.periodStart, periodEnd: c.periodEnd, status: c.status }))
+    .sort((a, b) => (a.periodEnd < b.periodEnd ? 1 : a.periodEnd > b.periodEnd ? -1 : 0) || a.name.localeCompare(b.name));
+}
+
+/** The company's cycles for the department appraisal's picker (BFF §41.4). Company-wide metadata: no unit. */
+export async function listPickableCycles(tenantId: string): Promise<CyclePick[]> {
+  return pickCycles(await listCycles(tenantId));
+}
 
 /** The cycle, or null for an id that is not a uuid or not this company's. */
 export async function fetchCycle(tenantId: string, cycleId: string): Promise<AppraisalCycleRow | null> {

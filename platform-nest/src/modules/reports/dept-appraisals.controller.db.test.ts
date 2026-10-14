@@ -10,7 +10,9 @@
 //   * a subject outside the unit's roster (another unit, or a membership that has ended) is not counted;
 //   * a unit's staff get 403 (they read the KPI page, not the appraisal);
 //   * an unknown cycle or unit gets 404 for a company-wide caller (and 403 for a caller who may not read the unit);
-//   * the people block carries counts only, and every write records an activity row.
+//   * the people block carries counts only, and every write records an activity row;
+//   * the cycles list for the picker: no drafts, newest first by period end, for a head and the company-wide tiers, 403 for a
+//     plain member and a unit's staff, and another company's cycles never in it.
 // The month enumeration, the score bands and the withholding rule are pinned in dept-appraisals.test.ts (pure); the
 // policy matrix in src/rbac/cerbos-dept-kpi-target.test.ts.
 //
@@ -69,6 +71,8 @@ describe.skipIf(!TEST_URL)("DW-4e-3 department appraisal per cycle (live PG + RL
   let openCycle: string; // 2026-09-01 .. 2026-10-31, open
   let closedCycle: string; // 2026-07-01 .. 2026-08-31, closed
   let longCycle: string; // 2025-01-01 .. 2026-12-31 (730 days), open
+  let draftCycle: string; // 2027-01-01 .. 2027-06-30, draft: HR's preparation, never in the picker
+  let otherCycle: string; // another company's cycle
   let periodId: string;
 
   const place = (userId: string, unit: string, validTo: string | null = null) =>
@@ -218,6 +222,18 @@ describe.skipIf(!TEST_URL)("DW-4e-3 department appraisal per cycle (live PG + RL
     openCycle = await insertCycle("H2 2026 review", "2026-09-01", "2026-10-31", "open");
     closedCycle = await insertCycle("Mid 2026 review", "2026-07-01", "2026-08-31", "closed");
     longCycle = await insertCycle("Two-year review", "2025-01-01", "2026-12-31", "open");
+    draftCycle = await insertCycle("Next year review", "2027-01-01", "2027-06-30", "draft");
+    otherCycle = newId();
+    await withTenants(
+      [other],
+      (c) =>
+        c.query(
+          `INSERT INTO report_appraisal_cycles (id, tenant_id, name, period_start, period_end, status, created_by, origin_site)
+           VALUES ($1,$2,'Other company review','2027-01-01','2027-12-31','open',$3,$4)`,
+          [otherCycle, other, admin, config.originSite],
+        ),
+      { modules: ["reports"] },
+    );
 
     periodId = newId();
     await withTenants(
@@ -249,6 +265,48 @@ describe.skipIf(!TEST_URL)("DW-4e-3 department appraisal per cycle (live PG + RL
   afterAll(async () => {
     await app.close();
     await teardownTestDb();
+  });
+
+  // ═══════════════════════════════ the cycles list (§41.4) ═══════════════════════════════
+
+  const cycles = (as: string) => app.inject({ method: "GET", url: `/api/${co}/dept-appraisals/cycles`, headers: asUser(as) });
+  type Pick = { id: string; name: string; periodStart: string; periodEnd: string; status: string };
+
+  it("a head gets the company's cycles without drafts, newest first by period end, with only the picker's fields", async () => {
+    const r = await cycles(webHead);
+    expect(r.statusCode).toBe(200);
+    const list: Pick[] = r.json().cycles;
+    expect(list.map((c) => c.id)).toEqual([longCycle, openCycle, closedCycle]);
+    expect(list.map((c) => c.id)).not.toContain(draftCycle);
+    expect(list[1]).toEqual({ id: openCycle, name: "H2 2026 review", periodStart: "2026-09-01", periodEnd: "2026-10-31", status: "open" });
+    expect(Object.keys(r.json())).toEqual(["cycles"]);
+  });
+
+  it("the company-wide tiers get the same list: company_admin and HR's people-reader tier", async () => {
+    for (const who of [admin, hr]) {
+      const r = await cycles(who);
+      expect(r.statusCode).toBe(200);
+      expect((r.json().cycles as Pick[]).map((c) => c.id)).toEqual([longCycle, openCycle, closedCycle]);
+    }
+  });
+
+  it("a plain member and a unit's staff get 403: the list is for those who can read an appraisal", async () => {
+    for (const who of [webStaff, feStaff, seoStaff]) expect((await cycles(who)).statusCode, who).toBe(403);
+  });
+
+  it("RLS keeps another company's cycles out, and this company's out of theirs", async () => {
+    const mine = (await cycles(admin)).json().cycles as Pick[];
+    expect(mine.map((c) => c.id)).not.toContain(otherCycle);
+    expect(mine.map((c) => c.name)).not.toContain("Other company review");
+    const theirs = await withTenants([other], async (c) => (await c.query<{ id: string }>(`SELECT id FROM report_appraisal_cycles`)).rows.map((r) => r.id), { modules: ["reports"] });
+    expect(theirs).toEqual([otherCycle]);
+  });
+
+  it("a draft cycle is not in the list, and becomes pickable once HR opens it", async () => {
+    await withTenants([co], (c) => c.query(`UPDATE report_appraisal_cycles SET status = 'open' WHERE id = $1`, [draftCycle]), { modules: ["reports"] });
+    const opened = (await cycles(admin)).json().cycles as Pick[];
+    expect(opened.map((c) => c.id)).toEqual([draftCycle, longCycle, openCycle, closedCycle]);
+    await withTenants([co], (c) => c.query(`UPDATE report_appraisal_cycles SET status = 'draft' WHERE id = $1`, [draftCycle]), { modules: ["reports"] });
   });
 
   // ═══════════════════════════════ the read (§41.1, §41.4) ═══════════════════════════════

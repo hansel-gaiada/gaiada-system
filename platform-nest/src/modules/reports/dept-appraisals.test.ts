@@ -9,6 +9,7 @@ import {
   aggregatePeople,
   cycleMonthStarts,
   lastMonthStart,
+  pickCycles,
   scoreBand,
   type PeopleRow,
 } from "./dept-appraisals";
@@ -138,5 +139,25 @@ describe("aggregatePeople — counts, and the distribution unless it would expos
     const a = aggregatePeople([row("submitted", "3.00"), row("submitted", "4.00"), row("submitted", "5.00")]);
     expect(Object.keys(a).sort()).toEqual(["byStatus", "distribution", "total"]);
     for (const b of a.distribution!) expect(Object.keys(b).sort()).toEqual(["band", "count"]);
+  });
+});
+
+describe("pickCycles — the picker's list", () => {
+  const c = (name: string, periodEnd: string, status: string) => ({ id: name, name, periodStart: "2026-01-01", periodEnd, status });
+  it("drops drafts, and sorts newest first by period end, then by name", () => {
+    const out = pickCycles([
+      c("H1", "2026-06-30", "closed"),
+      c("Next", "2027-06-30", "draft"),
+      c("B Q3", "2026-09-30", "open"),
+      c("H2", "2026-12-31", "in_review"),
+      c("A Q3", "2026-09-30", "open"),
+    ]);
+    expect(out.map((x) => x.name)).toEqual(["H2", "A Q3", "B Q3", "H1"]);
+  });
+  it("returns only the picker's five fields and never mutates its input", () => {
+    const input = [{ ...c("H1", "2026-06-30", "open"), createdBy: "u1", defaultWeights: {} }];
+    const copy = JSON.stringify(input);
+    expect(Object.keys(pickCycles(input)[0]).sort()).toEqual(["id", "name", "periodEnd", "periodStart", "status"]);
+    expect(JSON.stringify(input)).toBe(copy);
   });
 });
