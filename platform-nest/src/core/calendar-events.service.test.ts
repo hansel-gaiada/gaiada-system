@@ -1,0 +1,285 @@
+// DW-8g (FRONTEND-BFF-CONTRACT §47.1 to §47.3) — the PURE rules of calendar-events.service.ts: the body and query parsers, the
+// two time shapes and the 14-day span, the attendee diff, the answer reset after a time change, the patch plan and the time in
+// words. No database, no Cerbos: runs everywhere. The HTTP/DB proof of the same rules is calendar-events.test.ts, which runs on
+// the Linux gate.
+import { describe, it, expect } from "vitest";
+import {
+  CalendarRuleError, ATTENDEES_MAX, describeWhen, diffAttendees, eventHref, mineSortKey, parseAttendeeIds, parseCreate, parseDay,
+  parseInstant, parseMineQuery, parsePatch, parseRespond, parseTimeSpec, planPatch, responseAfterTimeChange, timeChanged,
+  timeOfFacts, type EventFacts,
+} from "./calendar-events.service";
+
+function refusal(fn: () => unknown): CalendarRuleError {
+  try {
+    fn();
+  } catch (e) {
+    expect(e).toBeInstanceOf(CalendarRuleError);
+    return e as CalendarRuleError;
+  }
+  throw new Error("expected a CalendarRuleError, but nothing was thrown");
+}
+const reasonOf = (fn: () => unknown) => refusal(fn).reason;
+
+const U1 = "0190a000-0000-7000-8000-000000000001";
+const U2 = "0190a000-0000-7000-8000-000000000002";
+const U3 = "0190a000-0000-7000-8000-000000000003";
+const ORG = "0190a000-0000-7000-8000-0000000000aa";
+const REC = "0190a000-0000-7000-8000-0000000000bb";
+const T = "0190a000-0000-7000-8000-0000000000cc";
+
+const timed = { title: "Kickoff", startsAt: "2026-10-20T09:00:00+08:00", endsAt: "2026-10-20T10:00:00+08:00" };
+const allDay = { title: "Offsite", allDay: true, startsOn: "2026-10-20", endsOn: "2026-10-21" };
+
+describe("time shapes (§47.1)", () => {
+  it("a timed event takes two instants WITH an offset; a bare local time is refused, never read in the server's zone", () => {
+    const t = parseTimeSpec(timed)!;
+    expect(t.allDay).toBe(false);
+    if (!t.allDay) expect(t.startsAt.toISOString()).toBe("2026-10-20T01:00:00.000Z");
+    expect(reasonOf(() => parseTimeSpec({ startsAt: "2026-10-20T09:00:00", endsAt: "2026-10-20T10:00:00Z" }))).toBe("time_invalid");
+    expect(reasonOf(() => parseTimeSpec({ startsAt: "2026-10-20", endsAt: "2026-10-21" }))).toBe("time_invalid");
+    expect(reasonOf(() => parseTimeSpec({ startsAt: "2026-13-40T09:00:00Z", endsAt: "2026-10-20T10:00:00Z" }))).toBe("time_invalid");
+  });
+
+  it("an all-day event takes allDay: true and two inclusive dates; a same-day range is fine, a backwards one is not", () => {
+    expect(parseTimeSpec(allDay)).toEqual({ allDay: true, startsOn: "2026-10-20", endsOn: "2026-10-21" });
+    expect(parseTimeSpec({ allDay: true, startsOn: "2026-10-20", endsOn: "2026-10-20" })).toMatchObject({ allDay: true });
+    expect(reasonOf(() => parseTimeSpec({ allDay: true, startsOn: "2026-10-21", endsOn: "2026-10-20" }))).toBe("time_range_invalid");
+    expect(reasonOf(() => parseTimeSpec({ allDay: true, startsOn: "2026-02-30", endsOn: "2026-03-01" }))).toBe("date_invalid");
+  });
+
+  it("exactly one shape: mixing the two, half of one, or dates without allDay is a 400, never a silent pick", () => {
+    expect(reasonOf(() => parseTimeSpec({ allDay: true, startsAt: timed.startsAt, startsOn: "2026-10-20", endsOn: "2026-10-20" }))).toBe("time_shape_invalid");
+    expect(reasonOf(() => parseTimeSpec({ allDay: true, startsOn: "2026-10-20" }))).toBe("time_shape_invalid");
+    expect(reasonOf(() => parseTimeSpec({ startsAt: timed.startsAt }))).toBe("time_shape_invalid");
+    expect(reasonOf(() => parseTimeSpec({ startsOn: "2026-10-20", endsOn: "2026-10-20" }))).toBe("time_shape_invalid");
+    expect(reasonOf(() => parseTimeSpec({ allDay: "yes", startsOn: "2026-10-20", endsOn: "2026-10-20" }))).toBe("time_shape_invalid");
+    expect(parseTimeSpec({ title: "no time keys at all" })).toBeNull();
+  });
+
+  it("ends_at must be after starts_at, and the span is at most 14 days (the boundary is allowed)", () => {
+    expect(reasonOf(() => parseTimeSpec({ startsAt: "2026-10-20T10:00:00Z", endsAt: "2026-10-20T10:00:00Z" }))).toBe("time_range_invalid");
+    expect(reasonOf(() => parseTimeSpec({ startsAt: "2026-10-20T10:00:00Z", endsAt: "2026-10-20T09:00:00Z" }))).toBe("time_range_invalid");
+    expect(parseTimeSpec({ startsAt: "2026-10-01T00:00:00Z", endsAt: "2026-10-15T00:00:00Z" })).toMatchObject({ allDay: false });
+    expect(reasonOf(() => parseTimeSpec({ startsAt: "2026-10-01T00:00:00Z", endsAt: "2026-10-15T00:00:01Z" }))).toBe("time_span_too_long");
+  });
+
+  it("parseInstant and parseDay name the field they refuse", () => {
+    expect(refusal(() => parseInstant("tomorrow", "startsAt")).field).toBe("startsAt");
+    expect(refusal(() => parseDay("2026-1-1", "from")).field).toBe("from");
+  });
+});
+
+describe("parseCreate (§47.3)", () => {
+  it("a timed event with the defaults: attendees visibility, no recording, empty attendee list", () => {
+    const c = parseCreate({ ...timed, attendeeIds: [U1] });
+    expect(c).toMatchObject({ title: "Kickoff", description: "", location: null, videoUrl: null, visibility: "attendees", record: false, attendeeIds: [U1], clientId: null, projectId: null });
+    expect(parseCreate(timed).attendeeIds).toEqual([]);
+  });
+
+  it("an all-day event, and record:true on it is a 400 (the recording is scheduled for a start time)", () => {
+    expect(parseCreate(allDay).time).toEqual({ allDay: true, startsOn: "2026-10-20", endsOn: "2026-10-21" });
+    expect(reasonOf(() => parseCreate({ ...allDay, record: true }))).toBe("record_needs_timed_event");
+    expect(parseCreate({ ...timed, record: true }).record).toBe(true);
+    expect(reasonOf(() => parseCreate({ ...timed, record: "yes" }))).toBe("record_invalid");
+  });
+
+  it("a time is required, and the title is 1 to 200 characters", () => {
+    expect(reasonOf(() => parseCreate({ title: "No time" }))).toBe("time_shape_invalid");
+    expect(reasonOf(() => parseCreate({ ...timed, title: "   " }))).toBe("title_invalid");
+    expect(reasonOf(() => parseCreate({ ...timed, title: "x".repeat(201) }))).toBe("title_invalid");
+    expect(parseCreate({ ...timed, title: "x".repeat(200) }).title.length).toBe(200);
+    expect(reasonOf(() => parseCreate({ startsAt: timed.startsAt, endsAt: timed.endsAt }))).toBe("title_invalid");
+    expect(reasonOf(() => parseCreate("not an object"))).toBe("body_invalid");
+  });
+
+  it("description is scrubbed like other free text and capped at 5,000; a NUL byte never reaches Postgres", () => {
+    const d = parseCreate({ ...timed, description: "call 4111 1111 1111 1111 or mail a@b.co\u0000" }).description;
+    expect(d).toContain("[REDACTED-PAN]");
+    expect(d).toContain("[REDACTED-EMAIL]");
+    expect(d).not.toContain("\u0000");
+    expect(parseCreate({ ...timed, description: "d".repeat(5000) }).description.length).toBe(5000);
+    expect(reasonOf(() => parseCreate({ ...timed, description: "d".repeat(5001) }))).toBe("description_invalid");
+  });
+
+  it("location is at most 300 characters; videoUrl is https only, at most 2,048; blank clears; null clears", () => {
+    expect(parseCreate({ ...timed, location: "Room 1" }).location).toBe("Room 1");
+    expect(parseCreate({ ...timed, location: "  " }).location).toBeNull();
+    expect(reasonOf(() => parseCreate({ ...timed, location: "l".repeat(301) }))).toBe("location_invalid");
+    expect(parseCreate({ ...timed, videoUrl: "https://meet.example.com/abc" }).videoUrl).toBe("https://meet.example.com/abc");
+    expect(parseCreate({ ...timed, videoUrl: null }).videoUrl).toBeNull();
+    expect(reasonOf(() => parseCreate({ ...timed, videoUrl: "http://meet.example.com/abc" }))).toBe("video_url_invalid");
+    expect(reasonOf(() => parseCreate({ ...timed, videoUrl: "javascript:alert(1)" }))).toBe("video_url_invalid");
+    expect(reasonOf(() => parseCreate({ ...timed, videoUrl: "not a url" }))).toBe("video_url_invalid");
+    expect(reasonOf(() => parseCreate({ ...timed, videoUrl: `https://x.test/${"a".repeat(2048)}` }))).toBe("video_url_invalid");
+  });
+
+  it("visibility is attendees or company; client and project are ids or null", () => {
+    expect(parseCreate({ ...timed, visibility: "company" }).visibility).toBe("company");
+    expect(reasonOf(() => parseCreate({ ...timed, visibility: "public" }))).toBe("visibility_invalid");
+    expect(parseCreate({ ...timed, clientId: T, projectId: null }).clientId).toBe(T);
+    expect(reasonOf(() => parseCreate({ ...timed, clientId: "acme" }))).toBe("id_invalid");
+  });
+});
+
+describe("attendee list (§47.3: at most 50)", () => {
+  it("de-duplicates, lower-cases and keeps the input order", () => {
+    expect(parseAttendeeIds([U2, U1, U2.toUpperCase()])).toEqual([U2, U1]);
+  });
+
+  it("50 is allowed and 51 is a 400 attendees_too_many; a non-id is a 400", () => {
+    const many = (n: number) => Array.from({ length: n }, (_, i) => `0190a000-0000-7000-8000-${String(i + 1).padStart(12, "0")}`);
+    expect(parseAttendeeIds(many(ATTENDEES_MAX)).length).toBe(50);
+    expect(reasonOf(() => parseAttendeeIds(many(51)))).toBe("attendees_too_many");
+    expect(reasonOf(() => parseAttendeeIds(["nobody"]))).toBe("attendees_invalid");
+    expect(reasonOf(() => parseAttendeeIds("everyone"))).toBe("attendees_invalid");
+  });
+});
+
+describe("the attendee diff (§47.3)", () => {
+  it("added are invited, removed are told it is off, kept are the rest", () => {
+    expect(diffAttendees([ORG, U1, U2], [ORG, U2, U3], ORG)).toEqual({ added: [U3], removed: [U1], kept: [ORG, U2] });
+  });
+
+  it("the organizer is ALWAYS an attendee: absent from the new list they are added back, never removed", () => {
+    expect(diffAttendees([ORG, U1], [U1, U2], ORG)).toEqual({ added: [U2], removed: [], kept: [ORG, U1] });
+    expect(diffAttendees([ORG], [], ORG)).toEqual({ added: [], removed: [], kept: [ORG] });
+  });
+
+  it("an identical list changes nothing", () => {
+    expect(diffAttendees([ORG, U1], [U1, ORG], ORG)).toEqual({ added: [], removed: [], kept: [ORG, U1] });
+  });
+});
+
+describe("a time change resets the answers (§47.3)", () => {
+  it("everyone goes back to needs_action, and the organizer stays accepted", () => {
+    expect(responseAfterTimeChange(U1, ORG)).toBe("needs_action");
+    expect(responseAfterTimeChange(ORG, ORG)).toBe("accepted");
+  });
+
+  it("timeChanged: another instant, another day, or another shape counts; the same time does not", () => {
+    const a = parseTimeSpec(timed)!;
+    expect(timeChanged(a, parseTimeSpec(timed)!)).toBe(false);
+    expect(timeChanged(a, parseTimeSpec({ ...timed, endsAt: "2026-10-20T11:00:00+08:00" })!)).toBe(true);
+    // the same instant written in another offset is NOT a change
+    expect(timeChanged(a, parseTimeSpec({ startsAt: "2026-10-20T01:00:00Z", endsAt: "2026-10-20T02:00:00Z" })!)).toBe(false);
+    const d = parseTimeSpec(allDay)!;
+    expect(timeChanged(d, parseTimeSpec(allDay)!)).toBe(false);
+    expect(timeChanged(d, parseTimeSpec({ allDay: true, startsOn: "2026-10-20", endsOn: "2026-10-22" })!)).toBe(true);
+    expect(timeChanged(a, d)).toBe(true);
+  });
+});
+
+function facts(over: Partial<EventFacts> = {}): EventFacts {
+  return {
+    id: T, tenantId: T, title: "Kickoff", description: "Agenda", startsAt: new Date("2026-10-20T01:00:00Z"), endsAt: new Date("2026-10-20T02:00:00Z"),
+    startsOn: null, endsOn: null, location: "Room 1", videoUrl: null, organizerId: ORG, visibility: "attendees", status: "confirmed",
+    cancelledAt: null, clientId: null, projectId: null, meetingRecordingId: null, createdAt: new Date(0), updatedAt: new Date(0),
+    attendees: [{ userId: ORG, response: "accepted" }, { userId: U1, response: "accepted" }], ...over,
+  };
+}
+
+describe("parsePatch and planPatch (§47.3)", () => {
+  it("an empty patch is a 400, and `record` is never editable", () => {
+    expect(reasonOf(() => parsePatch({}))).toBe("nothing_to_change");
+    expect(reasonOf(() => parsePatch({ record: true }))).toBe("record_not_editable");
+    expect(reasonOf(() => parsePatch(null))).toBe("body_invalid");
+  });
+
+  it("a time change is a whole time spec: half of one is refused", () => {
+    expect(reasonOf(() => parsePatch({ endsAt: "2026-10-20T11:00:00Z" }))).toBe("time_shape_invalid");
+    expect(parsePatch({ startsAt: "2026-10-21T01:00:00Z", endsAt: "2026-10-21T02:00:00Z" }).time).toMatchObject({ allDay: false });
+  });
+
+  it("null clears a place, a link, a client and a project", () => {
+    expect(parsePatch({ location: null, videoUrl: null, clientId: null, projectId: null })).toEqual({ location: null, videoUrl: null, clientId: null, projectId: null });
+  });
+
+  it("a title edit alone moves no time and leaves the answers alone", () => {
+    const plan = planPatch(facts(), parsePatch({ title: "Kickoff v2" }));
+    expect(plan.title).toBe("Kickoff v2");
+    expect(plan.timeChanged).toBe(false);
+    expect(plan.changed).toEqual(["title"]);
+    expect(plan.attendees).toEqual({ added: [], removed: [], kept: [ORG, U1] });
+  });
+
+  it("a new time is a time change; the plan names it and the field names carry no values", () => {
+    const plan = planPatch(facts(), parsePatch({ startsAt: "2026-10-21T01:00:00Z", endsAt: "2026-10-21T02:00:00Z", description: "New agenda" }));
+    expect(plan.timeChanged).toBe(true);
+    expect(plan.changed).toEqual(["description", "time"]);
+    expect(JSON.stringify(plan.changed)).not.toContain("New agenda");
+  });
+
+  it("an attendee list is a replacement: added, removed, and the organizer kept", () => {
+    const plan = planPatch(facts(), parsePatch({ attendeeIds: [U2] }));
+    expect(plan.attendees).toEqual({ added: [U2], removed: [U1], kept: [ORG] });
+    expect(plan.changed).toEqual(["attendees"]);
+  });
+
+  it("an event with a recording cannot become all-day (409); one without can", () => {
+    const toAllDay = parsePatch({ allDay: true, startsOn: "2026-10-22", endsOn: "2026-10-22" });
+    const e = refusal(() => planPatch(facts({ meetingRecordingId: REC }), toAllDay));
+    expect([e.httpStatus, e.reason]).toEqual([409, "recording_needs_timed_event"]);
+    const ok = planPatch(facts(), toAllDay);
+    expect(ok.time).toEqual({ allDay: true, startsOn: "2026-10-22", endsOn: "2026-10-22" });
+    expect(ok.timeChanged).toBe(true);
+  });
+
+  it("timeOfFacts reads either stored shape", () => {
+    expect(timeOfFacts(facts())).toMatchObject({ allDay: false });
+    expect(timeOfFacts(facts({ startsAt: null, endsAt: null, startsOn: "2026-10-20", endsOn: "2026-10-21" }))).toEqual({ allDay: true, startsOn: "2026-10-20", endsOn: "2026-10-21" });
+  });
+});
+
+describe("parseRespond (§47.3)", () => {
+  it("accepted, declined and tentative are answers; needs_action and anything else are not", () => {
+    for (const response of ["accepted", "declined", "tentative"]) expect(parseRespond({ response })).toEqual({ response });
+    expect(reasonOf(() => parseRespond({ response: "needs_action" }))).toBe("response_invalid");
+    expect(reasonOf(() => parseRespond({ response: "yes" }))).toBe("response_invalid");
+    expect(reasonOf(() => parseRespond({}))).toBe("response_invalid");
+    expect(reasonOf(() => parseRespond(undefined))).toBe("response_invalid");
+  });
+});
+
+describe("parseMineQuery (§47.3: the window is required and at most 92 days)", () => {
+  it("both ends are required", () => {
+    expect(reasonOf(() => parseMineQuery({}))).toBe("window_required");
+    expect(reasonOf(() => parseMineQuery({ from: "2026-10-01" }))).toBe("window_required");
+  });
+
+  it("a date alone is that day's UTC midnight; an instant needs an offset", () => {
+    const w = parseMineQuery({ from: "2026-10-01", to: "2026-11-01" });
+    expect(w.from.toISOString()).toBe("2026-10-01T00:00:00.000Z");
+    expect(w.scope).toBe("all");
+    expect(parseMineQuery({ from: "2026-09-30T16:00:00Z", to: "2026-10-31T16:00:00Z" }).to.toISOString()).toBe("2026-10-31T16:00:00.000Z");
+    expect(reasonOf(() => parseMineQuery({ from: "2026-10-01T00:00:00", to: "2026-11-01" }))).toBe("time_invalid");
+  });
+
+  it("92 days is allowed, 93 is a 400, and to must follow from", () => {
+    expect(parseMineQuery({ from: "2026-10-01", to: "2026-12-31" }).to.toISOString()).toBe("2026-12-31T00:00:00.000Z");
+    expect(reasonOf(() => parseMineQuery({ from: "2026-10-01", to: "2027-01-02" }))).toBe("window_too_large");
+    expect(reasonOf(() => parseMineQuery({ from: "2026-10-02", to: "2026-10-01" }))).toBe("window_invalid");
+    expect(reasonOf(() => parseMineQuery({ from: "2026-10-01", to: "2026-10-01" }))).toBe("window_invalid");
+  });
+
+  it("scope is all or one company id", () => {
+    expect(parseMineQuery({ from: "2026-10-01", to: "2026-10-08", scope: T.toUpperCase() }).scope).toBe(T);
+    expect(reasonOf(() => parseMineQuery({ from: "2026-10-01", to: "2026-10-08", scope: "acme" }))).toBe("scope_invalid");
+  });
+});
+
+describe("the time in words, and the row helpers", () => {
+  it("a timed event is described in the display zone, an all-day one by its days", () => {
+    expect(describeWhen(parseTimeSpec(timed)!, "Asia/Singapore")).toBe("Tue 20 Oct, 09:00 to 10:00");
+    expect(describeWhen(parseTimeSpec(timed)!, "UTC")).toBe("Tue 20 Oct, 01:00 to 02:00");
+    expect(describeWhen(parseTimeSpec({ startsAt: "2026-10-20T20:00:00Z", endsAt: "2026-10-21T02:00:00Z" })!, "Asia/Singapore")).toBe("Wed 21 Oct, 04:00 to 10:00");
+    expect(describeWhen(parseTimeSpec({ startsAt: "2026-10-20T09:00:00Z", endsAt: "2026-10-22T09:00:00Z" })!, "UTC")).toBe("Tue 20 Oct, 09:00 to Thu 22 Oct, 09:00");
+    expect(describeWhen({ allDay: true, startsOn: "2026-10-20", endsOn: "2026-10-20" })).toBe("Tue 20 Oct, all day");
+    expect(describeWhen({ allDay: true, startsOn: "2026-10-20", endsOn: "2026-10-22" })).toBe("Tue 20 Oct to Thu 22 Oct, all day");
+  });
+
+  it("the href is the UI route with the company, and rows sort by start (an all-day event by its day)", () => {
+    expect(eventHref(T, ORG)).toBe(`/calendar/events/${ORG}?company=${T}`);
+    expect(mineSortKey({ startsAt: "2026-10-20T01:00:00.000Z", startsOn: null })).toBe(Date.parse("2026-10-20T01:00:00Z"));
+    expect(mineSortKey({ startsAt: null, startsOn: "2026-10-20" })).toBe(Date.parse("2026-10-20T00:00:00Z"));
+  });
+});
