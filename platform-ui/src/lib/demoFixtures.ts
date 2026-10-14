@@ -2242,6 +2242,15 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   if (m === "GET" && /^\/api\/[^/]+\/figma-links$/.test(p)) return { status: 200, json: { figmaConnected: false, items: [] } };
   if (m === "GET" && /^\/api\/[^/]+\/integrations\/figma$/.test(p)) return { status: 200, json: { connected: false, tokenType: null } };
 
+  // DW-6i — Google Drive (BFF §42.8). Demo mode has no Drive OAuth client, which is the real "not set up" state: the connection
+  // block says so and the task page offers no "Attach from Google Drive". The Picker read answers the same, with no token.
+  if (m === "GET" && /^\/api\/[^/]+\/integrations\/google-drive$/.test(p)) {
+    return { status: 200, json: { configured: false, connected: false, needsReconnect: false, accountEmail: null } };
+  }
+  if (m === "GET" && /^\/api\/[^/]+\/integrations\/google-drive\/picker$/.test(p)) {
+    return { status: 200, json: { configured: false, connected: false, needsReconnect: false, accountEmail: null, accessToken: null, expiresAt: null, apiKey: null, appId: null } };
+  }
+
   // WSK-49f — client website access (§16i): staff Contacts list + grants, portal People grants.
   // Stateful (lib/demoWebsiteAccess.ts) and placed first so no generic `/clients/:id/…` matcher below
   // can answer one of these paths with an empty list or a bare {ok:true}.

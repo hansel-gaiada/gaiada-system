@@ -223,6 +223,8 @@ test.describe("Tools & connections (superadmin, DW-6c)", () => {
     await expectSubsequence(connections.getByRole("heading", { level: 4 }), ["GitHub", "Figma", "Google Drive", "Claude seats"]);
     // DW-6k: demo mode has no Figma token, so the Figma block says so in words (the demo fixture answers `connected: false`).
     await expect(connections.locator('[data-connection-kind="figma"]')).toContainText("Figma isn't connected for this company");
+    // DW-6i: demo mode has no Drive OAuth client, so the Drive block says it is not set up (never "not connected").
+    await expect(connections.locator('[data-connection-kind="drive"]')).toContainText("Google Drive isn't set up for this ERP yet");
   });
 
   test("a pin can be removed and put back, each choice survives a reload, and the Overview's Today follows it", async ({ page, context }) => {
