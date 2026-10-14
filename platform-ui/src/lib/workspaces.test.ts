@@ -261,6 +261,16 @@ describe("hrefFor", () => {
   });
 });
 
+describe("department analytics (DW-4c)", () => {
+  it("offers only analytics pages that exist; one page, one row", () => {
+    // Web Dev's site health is Run › Portfolio and Monitoring; SEO's rankings trend is Optimize › Rankings.
+    expect(workspaceBySlug("web-dev")!.analytics.map((t) => t.key)).toEqual(["website"]);
+    expect(workspaceBySlug("seo")!.analytics.map((t) => t.key)).toEqual(["gsc-ga4"]);
+    // Finance has no money-analytics page yet: it stays planned, built with the Finance workspace.
+    expect(workspaceBySlug("finance")!.analytics.map((t) => [t.key, t.ticket])).toEqual([["money", "DW-7b"]]);
+  });
+});
+
 describe("the Overview, Performance and tools data", () => {
   it("lists Overview widgets in the fixed band order (plan §3.1)", () => {
     for (const ws of ALL) {

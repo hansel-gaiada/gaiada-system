@@ -329,8 +329,9 @@ const WEB_DEV: Workspace = {
   ],
   reports: [],
   analytics: [
+    // DW-4c: no "Sites" analytics page exists; site health lives in Run › Portfolio and Monitoring
+    // (`/sites` redirects to the Portfolio), so Analytics holds only the website's own analytics.
     fromToolkit("web-dev", "analytics", { key: "website", label: "Website" }),
-    { key: "sites", label: "Sites", href: deptPath("analytics/sites"), icon: "server", ticket: "DW-4c" },
   ],
   tools: launchersOf("web-dev"),
   connections: [CONN.github, CONN.figma, CONN.drive, CONN.claudeSeats],
@@ -390,8 +391,8 @@ const SEO: Workspace = {
   ],
   reports: [],
   analytics: [
+    // DW-4c: the rank tracker and its trend are one page, Optimize › Rankings; one page, one row.
     fromToolkit("seo", "gsc-ga4"),
-    { key: "rankings-trend", label: "Rankings trend", href: deptPath("analytics/rankings"), icon: "pulse", ticket: "DW-4c" },
   ],
   tools: launchersOf("seo"),
   connections: [CONN.googleAccounts, CONN.drive, CONN.claudeSeats],
@@ -728,7 +729,9 @@ const FINANCE: Workspace = {
   ],
   // Finance's own Reports tab (the financial statements) joins the Reports row (§4).
   reports: [{ key: "statements", label: "Financial statements", href: "/finance/reports", icon: "chart" }],
-  analytics: [{ key: "money", label: "Revenue, AR and cash", href: "/finance/analytics", icon: "pulse", ticket: "DW-4c" }],
+  // No money-analytics page exists yet (Receivables and Treasury are Work tabs); it is built with the
+  // Finance workspace (DW-7b) and stays planned until then (DW-4c).
+  analytics: [{ key: "money", label: "Revenue, AR and cash", href: "/finance/analytics", icon: "pulse", ticket: "DW-7b" }],
   // A bank portal is per company, so it is configured with the company (DW-7e), never written here.
   tools: [DRIVE, CLAUDE],
   connections: [CONN.bankFeeds, CONN.drive, CONN.claudeSeats],

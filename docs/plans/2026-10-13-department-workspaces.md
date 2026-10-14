@@ -656,11 +656,11 @@ then adds its own existing analytics pages, gathered here in one place:
 
 | Department | Its own analytics tabs |
 |---|---|
-| Web Dev | Website, Sites |
-| SEO | Search Console & GA4, Rankings trend |
+| Web Dev | Website (site health stays in Run › Portfolio and Monitoring, DW-4c) |
+| SEO | Search Console & GA4 (the rankings trend is on Optimize › Rankings, one page in one row, DW-4c) |
 | Social Media | Reach and engagement |
 | HR | People analytics |
-| Finance | Revenue, AR and cash |
+| Finance | Revenue, AR and cash (no page yet; built with the Finance workspace, DW-7b) |
 
 ### 5.3 Appraisals
 
