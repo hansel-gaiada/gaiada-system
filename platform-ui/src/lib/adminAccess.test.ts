@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
+import { readdirSync } from "node:fs";
+import { resolve } from "node:path";
 import type { Me } from "./platform";
 import { ADMIN_ROUTES, adminRouteAllowed } from "./adminAccess";
 import { ADMIN_ROWS } from "./workspaces";
@@ -109,6 +111,38 @@ describe("route matching", () => {
     for (const row of ADMIN_ROWS) {
       for (const tab of row.tabs) expect(adminRouteAllowed(tab.href, plainMember, "co-a"), tab.href).toBeDefined();
     }
+  });
+});
+
+// DW-8f: every page file of the Admin area has a rule. A page with no rule would 404 by default (the
+// table returns undefined), so a new page must come with its row here. The walk copies areas.test.ts.
+const APP = resolve(__dirname, "../app/(app)");
+const ADMIN_FOLDERS = ["admin", "group", "rollups", "systems"];
+
+/** Every page.tsx under the Admin folders as a URL path. A dynamic segment (`[id]`) becomes `x1`. */
+function adminPagePaths(): string[] {
+  const out: string[] = [];
+  const walk = (dir: string, segs: string[]) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(resolve(dir, entry.name), [...segs, entry.name.replace(/^\[.+\]$/, "x1")]);
+      else if (entry.name === "page.tsx") out.push(`/${segs.join("/")}`);
+    }
+  };
+  for (const folder of ADMIN_FOLDERS) walk(resolve(APP, folder), [folder]);
+  return out;
+}
+
+describe("every Admin-area page has a 404 rule", () => {
+  it("walks the Admin folders and finds a rule for every page (only /systems/github is exempt)", () => {
+    const pages = adminPagePaths();
+    expect(pages.length).toBeGreaterThan(10);
+    expect(pages).toContain("/admin/mail/x1");
+    const problems: string[] = [];
+    for (const path of pages) {
+      if (path === "/systems/github") continue;
+      if (adminRouteAllowed(path, platformAdmin, "co-a") === undefined) problems.push(`${path}: page has no rule in ADMIN_ROUTES`);
+    }
+    expect(problems, problems.join("\n")).toEqual([]);
   });
 });
 
