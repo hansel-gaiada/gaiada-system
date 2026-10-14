@@ -29,6 +29,20 @@ C="dw2g-e2e-$$"
 load=$(cut -d' ' -f1 /proc/loadavg)
 if awk -v l="$load" 'BEGIN { exit !(l > 4) }'; then echo "load $load is above 4: not starting"; exit 3; fi
 
+# ONE gate at a time, enforced here rather than left to the caller's check: on 2026-10-14 two sessions both saw a
+# quiet box and started 17 s apart. A lock serialises copies of this script, and the process check also catches an
+# older copy (scp'd from another branch) that takes no lock. The pattern matches a running gate (`bash <path>/e2e-gate.sh
+# …`), not the ssh shell that launched it (`bash -c nohup bash …`); a subshell of this run has this run as its parent.
+mkdir -p "$BASE"
+exec 9>"$BASE/.gate.lock"
+if ! flock -n 9; then echo "another gate holds the lock: not starting"; exit 3; fi
+others=$(for p in $(pgrep -f "^bash [^ ]*e2e-gate\.sh"); do
+  [ "$p" = "$$" ] && continue
+  [ "$(ps -o ppid= -p "$p" | tr -d ' ')" = "$$" ] && continue
+  echo "$p"
+done)
+if [ -n "$others" ]; then echo "another gate is running (pid $others): not starting"; exit 3; fi
+
 cleanup() { docker rm -f "$C" >/dev/null 2>&1; sudo -n rm -rf "$D" 2>/dev/null || rm -rf "$D"; }
 trap cleanup EXIT
 
