@@ -11,6 +11,31 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.137.0` + platform-ui `0.155.0` - DW-6i: Google Drive, connect, pick and attach (2026-10-14) - PROTOTYPED
+
+Contract: `docs/FRONTEND-BFF-CONTRACT.md` §42 (with §42.8 "as built" for the backend and the UI). Plan §4.2. Google is STUBBED at `fetch` in every test; nothing here has met real Google. Live proof waits for the owner's Drive OAuth client and Picker keys (DW-11 item 6).
+- **What.** Each person connects their OWN Google Drive (scope `drive.file`, which Google lists as non-sensitive), picks files with Google's Picker on a PM task, and the files attach as links. The ERP only ever sees the files the person picks.
+- **Backend** (`core/google-drive/`, new; no new Cerbos kind, no policy change, no migration):
+  - `GET /api/:t/integrations/google-drive/oauth/start` → `{ authUrl }`; `GET /api/google-drive/oauth/callback` (tenant-agnostic; the tenant and the person come only from the verified state) → `{ status: connected | denied }`; `DELETE /api/:t/integrations/google-drive` (revoke at Google, best effort, then clear the sealed tokens; attachments stay).
+  - `GET /api/:t/integrations/google-drive`: the status alone (`configured`, `connected`, `needsReconnect`, `accountEmail`), read from the row; it never mints or refreshes a token and never calls Google. Added in review so a page's gate never waits on Google.
+  - `GET /api/:t/integrations/google-drive/picker`: the status plus a short-lived access token (refreshed inside five minutes of expiry), `Cache-Control: no-store`. The one route that returns a token; the refresh token never leaves the server.
+  - `POST /api/:t/integrations/google-drive/attach` `{ targetType: "task", targetId, fileId }`: authorised exactly as `POST /files`, reads the file's name, type and link from Drive with the person's own token, and writes the reference row through the shared `core/file-reference.ts`. Target `task` covers both task tables (`pm_tasks` and `tasks`).
+  - `GET /api/:t/files` now returns `url` (NULL for an uploaded file), so a link attachment can be opened from the list.
+  - A refused refresh marks the connection "needs reconnect" (status `error`, `meta.driveNeedsReconnect`) and keeps the tokens; an outage is `502 drive_unavailable` and marks nothing.
+- **UI:**
+  - `/api/google-drive/callback` is the redirect URI page: it calls the backend callback as the signed-in person and returns to where the flow started, from a validated 10-minute httpOnly cookie only (never the query), with `driveOAuth=connected|denied|error`.
+  - Tools & connections (pilot): `DriveConnectionBlock` replaces the manual Drive row, with four states: not set up, connect, connected (email + Disconnect), reconnect. Classic is unchanged.
+  - PM task page: "Attach from Google Drive" in Attachments, shown only when connected and configured. It loads Google's script on the first click, opens a multi-select Picker with a fresh token held only in that click, and attaches each picked file. Link attachments open in a new tab, with a Drive mark for Drive and Docs links.
+- **Owner step (DW-11 item 6).**
+  - Create the Drive OAuth client and Picker keys and set `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_DRIVE_REDIRECT_URI`, `GOOGLE_PICKER_API_KEY` and `GOOGLE_PICKER_APP_ID`.
+  - Register `https://erp.gaiada.com/api/google-drive/callback` as the redirect URI.
+  - Until all five are set, every Drive surface says "not set up" and nothing calls Google.
+- **Compose:** five new optional env passthroughs in `docker-compose.vps.yml`, empty by default. No Cerbos change; no migration.
+- **Proof.**
+  - Backend: `google-drive.http.test.ts` (Postgres + Cerbos, including the status read, the pm_tasks attach and the secret scan over every response and table), `google-drive.test.ts`, `client.test.ts`, `egress.test.ts`, `google-oauth/id-token.test.ts`, `files-reference.test.ts`.
+  - UI: `drive.test.ts`, `drive-data.test.ts`, `driveActions.test.ts`, `drivePicker.test.ts`, the callback route test, `DriveConnectionBlock.test.tsx`, `DrivePicker.test.tsx`, `Attachments.test.tsx`, `cookieNames.test.ts`.
+  - Branch CI: 38537706459 (UI, platform-ui 511 files, 8949 tests). The landing sha's own runs are on the board.
+
 ### platform-nest `0.136.0` - DW-5 guard: a task that carries an open request cannot be deleted (2026-10-14) - PROTOTYPED
 
 Contract: `docs/FRONTEND-BFF-CONTRACT.md` §32.8. DW-5's last open item.
