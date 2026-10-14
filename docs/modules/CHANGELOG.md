@@ -11,6 +11,15 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.159.0` - DW-4j-2: an off-track KPI waits in the head's Needs you, and the KPI page shows its alerts (2026-10-15) - PROTOTYPED
+
+Contract: `docs/FRONTEND-BFF-CONTRACT.md` §43.5 and §43.7 (with §43.7a "as built"). The API is live since 1.0.0-alpha.395 (DW-4j-1).
+- **Needs you** gains the source "KPI alerts" (`GET dept-kpis/alerts`, the open, unacknowledged alerts of the units the caller heads): a new queue item type `alert` ("KPI off track"), ranked with approvals and gates, linked to the unit's KPI page. Its one action is **Acknowledge**, with an optional note (at most 1000 characters), never Approve or Deny; the row leaves the list at once and comes back with the server's sentence if refused. A failed read is a lost source ("KPI alerts"), never an empty list; a refusal or a company without the reports module means "none here".
+- **The KPI page** (`/appraisals/department?unit=`): a KPI with an open alert says "Off track since 3 Oct" (and who acknowledged it), and an Alerts section lists the unit's history (opened, acknowledged with the note, resolved and as what), with Acknowledge offered to the people who may propose or approve its targets. The server decides; its refusals are shown as sent.
+- **Honest readers** `lib/deptKpiAlerts.ts` (ok, forbidden, not found, error), pure words in `lib/deptKpiAlertFormat.ts`, the action in `lib/deptKpiAlertActions.ts`; values through `deptKpiFormat.ts`.
+- **Demo:** an open alert on Creatives' off-track "Asset requests delivered on time" (72% against 90%), acknowledgeable by the company-wide demo users; Web Dev's head `u-webhead` sees an acknowledged-and-resolved history and an honestly empty Needs you. No existing demo condition changed.
+- **Tests:** `deptKpiAlertFormat.test.ts`, `deptKpiAlerts.test.ts`, `deptKpiAlertActions.test.ts`, `KpiAlerts.test.tsx`, and the queue, urgency, demo, NeedsMeQueue and NeedsYouBlock suites.
+
 ### platform-ui `0.158.0` - DW-8 Wave A: You, Company and Admin in the workspace shell (2026-10-14) - PROTOTYPED
 
 Plan `docs/plans/2026-10-13-department-workspaces.md` §8, §8.1 and §11.4 (owner rulings DW-D23 and DW-D24). UI only: no backend, migration or Cerbos change. Contracts for the next DW-8 tickets ride along as docs: BFF §45 (8h attachments), §46 (8i staff knowledge search) and §47 with PERMISSION-CONTRACT §39 (8g calendar events), all PLANNED.
