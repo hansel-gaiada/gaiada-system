@@ -956,7 +956,7 @@ export const PERFORMANCE_ROWS: readonly WorkspaceRow[] = [
 
 /** The You block (plan §8). Personal pages keep the current workspace's sidebar. */
 export const YOU_ROWS: readonly WorkspaceRow[] = [
-  { key: "tasks", label: "My tasks", icon: "check", ticket: "DW-8a", tabs: [{ key: "tasks", label: "My tasks", href: "/me/tasks", icon: "check", ticket: "DW-8a" }] },
+  { key: "tasks", label: "My tasks", icon: "check", tabs: [{ key: "tasks", label: "My tasks", href: "/me/tasks", icon: "check" }] },
   { key: "inbox", label: "Inbox", icon: "bell", tabs: [{ key: "inbox", label: "Inbox", href: "/me/inbox", icon: "bell" }] },
   {
     key: "calendar", label: "Calendar", icon: "clock",

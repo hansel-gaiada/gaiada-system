@@ -52,6 +52,7 @@ const PERSONAL: AreaRule[] = [
   rule("/me/leave", "personal"),
   rule("/me/loans", "personal", true),
   rule("/me/pay", "personal"),
+  rule("/me/tasks", "personal"),
 ];
 
 const PERFORMANCE: AreaRule[] = [

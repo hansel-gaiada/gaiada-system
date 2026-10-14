@@ -163,12 +163,12 @@ describe("concreteRows", () => {
   };
 
   // Plan §0: a Web Dev employee goes from 38 rows to 19. The 19 count the Company door and not
-  // Approvals, which stays ungated as today until DW-8 rules on it; so 19 here, and 18 while
-  // My tasks is not built (Campaigns landed with DW-5b, Clients with DW-6d).
-  it("gives a Web Dev employee 18 rows today and 19 once the planned rows land", () => {
+  // Approvals, which stays ungated as today until DW-8 rules on it; so 19 here (Campaigns landed with
+  // DW-5b, Clients with DW-6d, My tasks with DW-8a, so no planned row is left hidden in this list).
+  it("gives a Web Dev employee 19 rows, the same with the planned rows included", () => {
     expect(rowsFor(employee).map((r) => r.key)).toEqual([
       "overview", "assistant", "pm", "build", "run", "website", "requests", "campaigns", "clients", "tools",
-      "reports", "analytics", "appraisals", "learning", "inbox", "calendar", "approvals", "me",
+      "reports", "analytics", "appraisals", "learning", "tasks", "inbox", "calendar", "approvals", "me",
     ]);
     expect(rowsFor(employee, true)).toHaveLength(19);
   });
