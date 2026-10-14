@@ -60,6 +60,8 @@ const PORTAL_PATH_ALIASES: Array<{ prefix: string; areaKey: string; tabHref: str
   { prefix: "/portal/meetings", areaKey: "projects", tabHref: "/portal/projects" },
   // PV-D41: the simulated hosted payment page belongs to the invoice it pays.
   { prefix: "/portal/pay", areaKey: "billing", tabHref: "/portal/invoices" },
+  // PV5-11: the client's signing page at the simulated PSrE is reached from a contract and returns to it.
+  { prefix: "/portal/simulated-psre", areaKey: "billing", tabHref: "/portal/contracts" },
 ];
 
 export function activePortalNav(pathname: string): { areaKey: string | null; tabHref: string | null } {

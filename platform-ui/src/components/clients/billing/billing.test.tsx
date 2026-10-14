@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
 import type { Contract, InvoicePayment } from "@/lib/contracts";
 
 // PV3-08 — the billing components render FROM the pure rules in lib/contracts.ts. These tests pin that:
@@ -14,6 +14,7 @@ const decide = vi.fn();
 const create = vi.fn();
 const update = vi.fn();
 const markCertified = vi.fn();
+vi.mock("next/link", () => ({ default: ({ href, children, ...r }: { href: string; children: React.ReactNode }) => <a href={href} {...r}>{children}</a> }));
 vi.mock("@/lib/contractsActions", () => ({
   markCertifiedAction: (...a: unknown[]) => markCertified(...a),
   sendContractAction: (...a: unknown[]) => send(...a),
@@ -344,5 +345,81 @@ describe("ContractRow · Mark certified (PV-D25: parked)", () => {
       expect(screen.queryByRole("button", { name: "Mark certified" })).toBeNull();
       unmount();
     }
+  });
+});
+
+// ── PV5-11: certified signing through the simulated PSrE ─────────────────────────────────────────────────────────
+
+const PSRE = "Simulated PSrE (review stage)";
+const CS = { available: true, provider: "simulated_psre", label: PSRE, simulated: true };
+const certifiedSent = (over: Partial<Contract> = {}) => k({
+  status: "sent", bodyMd: "x", sentAt: "2026-10-02T00:00:00Z", contentSha256: HASH, signatureTier: "certified", certifiedRequested: true,
+  signatureProvider: "simulated_psre", providerEnvelopeId: "simenv_1", signatureSimulated: true, certifiedSigning: CS, canCountersign: false, ...over,
+});
+
+describe("ContractRow · certified signing (PV5-11)", () => {
+  it("🔴 Mark certified is enabled when the backend says certifiedSigning.available", () => {
+    row(k({ status: "draft", bodyMd: "Terms.", certifiedSigning: CS }));
+    expect(screen.getByRole("button", { name: "Mark certified" })).toBeEnabled();
+    expect(screen.queryByText(/isn't set up yet/)).toBeNull();
+  });
+
+  it("🔴 'Countersign at <label>' is a link to the backend's countersignUrl, only when canCountersignAtProvider", () => {
+    const { unmount } = row(certifiedSent({ canCountersignAtProvider: true, countersignUrl: "/simulated-psre/simenv_1" }));
+    const link = screen.getByRole("link", { name: `Countersign at ${PSRE}` });
+    expect(link).toHaveAttribute("href", "/simulated-psre/simenv_1");
+    expect(link.className).toMatch(/lux-btn--solid/);
+    // The typed Countersign button never shows for a certified contract.
+    expect(screen.queryByRole("button", { name: "Countersign" })).toBeNull();
+    unmount();
+
+    row(certifiedSent({ canCountersignAtProvider: false, countersignUrl: "/simulated-psre/simenv_1" }));
+    expect(screen.queryByRole("link", { name: /Countersign at/ })).toBeNull();
+  });
+
+  it("a countersign link needs a URL: the flag alone shows nothing, and the label falls back to plain words", () => {
+    const { unmount } = row(certifiedSent({ canCountersignAtProvider: true, countersignUrl: null }));
+    expect(screen.queryByRole("link", { name: /Countersign at/ })).toBeNull();
+    unmount();
+    row(certifiedSent({ canCountersignAtProvider: true, countersignUrl: "/simulated-psre/simenv_1", certifiedSigning: { ...CS, label: null } }));
+    expect(screen.getByRole("link", { name: "Countersign at the signing provider" })).toBeInTheDocument();
+  });
+
+  it("a certified sent contract with no envelope yet says it is waiting for the client to start", () => {
+    row(certifiedSent({ providerEnvelopeId: null, signatureSimulated: false }));
+    expect(screen.getByText(`Waiting for the client to start signing at ${PSRE}.`)).toBeInTheDocument();
+    expect(screen.queryByText(/waiting for our countersignature/i)).toBeNull();
+  });
+
+  it("🔴 the Signing fact says certified (simulated: not a real PSrE signature) when the envelope is at the simulated PSrE", () => {
+    row(certifiedSent());
+    expect(screen.getByText("Certified (simulated: not a real PSrE signature)")).toBeInTheDocument();
+  });
+
+  it("the signed copy of a certified contract is the Certified copy (simulated), through the staff file route", () => {
+    const signed = { status: "signed" as const, signedAt: "2026-10-04T00:00:00Z", signedCopyFileId: "f-cert" };
+    const { unmount } = row(certifiedSent(signed));
+    expect(screen.getByRole("link", { name: /Certified copy \(simulated\)/ })).toHaveAttribute("href", "/api/files/f-cert");
+    expect(screen.queryByRole("link", { name: /Sealed signed copy/ })).toBeNull();
+    unmount();
+    row(certifiedSent({ ...signed, signatureSimulated: false, certifiedSigning: { ...CS, simulated: false } }));
+    expect(screen.getByRole("link", { name: /^Certified copy \(download\)/ })).toBeInTheDocument();
+  });
+
+  it("signature lines name the provider for a certified signature and nothing for a typed one", () => {
+    row(certifiedSent({ clientSigned: true }), {
+      signatures: [
+        { party: "client", signer: null, signerName: "Dana Whitfield", signerTitle: null, signedAt: "2026-10-03T00:00:00Z", provider: "simulated_psre" },
+        { party: "provider", signer: null, signerName: "Olive Owner", signerTitle: null, signedAt: "2026-10-04T00:00:00Z", provider: null },
+      ],
+    });
+    const lines = screen.getByRole("list", { name: "Signatures" });
+    expect(within(lines).getByText(new RegExp(`Dana Whitfield.*through ${PSRE.replace(/[()]/g, "\\$&")}`))).toBeInTheDocument();
+    expect(within(lines).getByText(/Olive Owner/).textContent).not.toMatch(/through/);
+  });
+
+  it("an attested contract keeps the sealed copy label and the typed Countersign", () => {
+    row(k({ status: "signed", bodyMd: "x", sentAt: "2026-10-02T00:00:00Z", signedAt: "2026-10-04T00:00:00Z", signatureTier: "attested", signedCopyFileId: "f-signed" }));
+    expect(screen.getByRole("link", { name: /Sealed signed copy/ })).toBeInTheDocument();
   });
 });

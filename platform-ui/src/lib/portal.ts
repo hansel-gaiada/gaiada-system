@@ -349,8 +349,55 @@ export interface PortalContractDetail extends Omit<PortalContract, "hasDocument"
   contentSha256?: string | null;
   /** PV5-06: `attested` (typed name) or `certified` (signed through a certified provider; never by typed name). */
   signatureTier?: "attested" | "certified" | null;
-  signatures: Array<{ party: "provider" | "client"; signerName: string | null; signerTitle: string | null; signedAt: string }>;
+  signatures: Array<{ party: "provider" | "client"; signerName: string | null; signerTitle: string | null; signedAt: string;
+    /** PV5-11: the provider a certified signature went through; null/absent is a typed name. */
+    provider?: string | null }>;
   document: { id: string; filename: string; contentType: string; byteSize: number; url: string | null } | null;
+  /** PV5-11: the provider this certified contract is signed through (null for an attested one). Optional: an older
+   *  server omits it, and a missing field claims nothing. */
+  signatureProvider?: string | null;
+  providerEnvelopeId?: string | null;
+  /** PV5-11: null for an attested contract. `canStart` is the backend's answer to "may THIS caller press Sign with
+   *  <label> now"; `simulated` means the provider is the SIMULATED PSrE of the review stage. */
+  certifiedSigning?: PortalCertifiedSigning | null;
+}
+
+export interface PortalCertifiedSigning {
+  provider: string | null;
+  label: string | null;
+  simulated: boolean;
+  available: boolean;
+  envelopeStarted: boolean;
+  canStart: boolean;
+  signingUrl: string | null;
+}
+
+/** PV5-11: the plain-words notice that every surface showing a simulated signature carries. */
+export const SIMULATED_SIGNATURE_NOTE =
+  "Simulated certified signature: not a real PSrE signature. This is the review stage; the signature has no legal standing as a certified signature.";
+
+/** PV5-11: is this a safe place to send the signer? Only our own simulated-PSRE page, as a same-site path. The server
+ *  action has already checked this; the browser checks again before it navigates. */
+export function isSimulatedSigningUrl(url: unknown): url is string {
+  if (typeof url !== "string") return false;
+  if (!url.startsWith("/portal/simulated-psre/")) return false;
+  // Nothing but the path segment after the prefix: no protocol-relative trick, no backslash, no traversal.
+  const rest = url.slice("/portal/simulated-psre/".length);
+  return /^[A-Za-z0-9_-]+$/.test(rest);
+}
+
+/** PV5-11: the words after a signature row's date, e.g. "through Simulated PSrE (review stage) (simulated)". Empty for
+ *  a typed-name signature. */
+export function signatureViaText(provider: string | null | undefined, cs: { label: string | null; simulated: boolean } | null | undefined): string {
+  if (!provider) return "";
+  const name = cs?.label && cs.label.trim() ? cs.label : "a certified provider";
+  return `through ${name}${cs?.simulated ? " (simulated)" : ""}`;
+}
+
+/** PV5-11: the heading-level words for a certified contract's final copy. */
+export function certifiedCopyLabel(cs: { simulated: boolean } | null | undefined): string | null {
+  if (!cs) return null;
+  return cs.simulated ? "Certified (simulated)" : "Certified";
 }
 
 export interface PortalProfile {
@@ -681,14 +728,44 @@ export function projectUrgencyTier(
 export type ContractSigningState =
   | { kind: "signed"; signerName: string | null; signerTitle: string | null; signedAt: string }
   | { kind: "sign" }
+  /** PV5-11: a certified contract the caller may start signing at the provider now. Never a typed-name form. */
+  | { kind: "certified"; label: string; simulated: boolean }
   | { kind: "closed"; reason: string };
 
 export function contractSigningState(
-  k: Pick<PortalContractDetail, "canSign" | "viewOnly" | "termEnded" | "status" | "signatures" | "document" | "bodyMd"> & { signatureTier?: PortalContractDetail["signatureTier"] },
+  k: Pick<PortalContractDetail, "canSign" | "viewOnly" | "termEnded" | "status" | "signatures" | "document" | "bodyMd"> & {
+    signatureTier?: PortalContractDetail["signatureTier"];
+    certifiedSigning?: PortalContractDetail["certifiedSigning"];
+  },
 ): ContractSigningState {
   const clientSig = k.signatures.find((s) => s.party === "client");
   if (clientSig) {
     return { kind: "signed", signerName: clientSig.signerName, signerTitle: clientSig.signerTitle, signedAt: clientSig.signedAt };
+  }
+  // PV5-11: a certified contract is never signed by typed name. The backend's `canStart` decides the button; the
+  // document must still exist, for the same reason as below.
+  const cs = k.certifiedSigning;
+  if (cs) {
+    if (cs.canStart === true && (k.document || k.bodyMd)) {
+      return { kind: "certified", label: cs.label ?? "a certified provider", simulated: cs.simulated === true };
+    }
+    const label = cs.label ?? "the certified provider";
+    return {
+      kind: "closed",
+      reason: k.viewOnly
+        ? "Your access to this portal is view-only, so a colleague with signing rights needs to sign this. You can read everything here and forward it to them."
+        : k.termEnded
+          ? "This agreement's term has ended. Ask your account manager to re-issue it."
+          : k.status !== "sent"
+            ? `This agreement is ${clientStatus(k.status).toLowerCase()} and can't be signed here.`
+            : !cs.available
+              ? "This agreement is signed through a certified provider, and that provider isn't set up right now. Your account manager will tell you when you can sign."
+              : cs.envelopeStarted
+                ? `Signing has already started at ${label}. If you did not finish, a colleague with signing rights can continue it.`
+                : !(k.document || k.bodyMd)
+                  ? "The document needs to be attached before this can be signed."
+                  : `You can't start signing at ${label} right now. Ask your account manager.`,
+    };
   }
   // Only offered when the DOCUMENT exists: a signature on terms the client cannot read is the one state
   // the contract page must refuse to produce.

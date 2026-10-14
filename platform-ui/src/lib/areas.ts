@@ -77,6 +77,7 @@ const SHARED: AreaRule[] = [
   rule("/people/[userId]", "shared", true, "Person records; /people/new beats it"),
   rule("/clients", "shared", true, "Linked from Company and the GM's Clients & sales"),
   rule("/client-centre", "shared", true),
+  rule("/simulated-psre", "shared", true, "PV5-11: the countersigner's page at the simulated PSrE; reached from a client's billing tab, so it keeps that area"),
   rule("/agency", "shared", true, "Campaigns and leads: Company and the GM both link them"),
   rule("/requests", "shared", true, "My requests, the new-request form and a request record: every workspace links them, and a record keeps the area you came from (DW-5c)"),
   rule("/learning/catalogue", "shared", false, "Company's catalogue and Performance > Learning both link it"),

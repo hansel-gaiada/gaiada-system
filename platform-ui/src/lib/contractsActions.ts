@@ -31,6 +31,7 @@ import {
   MAX_CONTRACT_FILE_BYTES, countersignErrorText, decideErrorText, validateContractForm, paymentDecisionState,
   markCertifiedErrorText,
 } from "./contracts";
+import { simulatedSignErrorText } from "./simulatedPsre";
 
 export interface BillingActionState {
   ok: boolean;
@@ -215,9 +216,8 @@ export async function countersignContractAction(_prev: BillingActionState | null
   } catch (e) { return fail(e, countersignErrorText); }
 }
 
-// PV5-09 (PV-D25): "Mark certified". Certified signing is parked (PV5-11), so the screen offers the button DISABLED with its
-// reason and this action is not reachable from it yet; it exists so the day the provider lands, flipping
-// `CERTIFIED_SIGNING_AVAILABLE` is the whole change. While no provider is set up the API answers 409
+// PV5-09 (PV-D25): "Mark certified". Whether the button is enabled is the backend's `certifiedSigning.available` on the row
+// (PV5-11, PV-D43: the simulated PSrE behind a server flag). While no provider is set up the API answers 409
 // `no_certified_provider` and writes nothing, and that answer is put in words here rather than shown raw. The
 // authority is the server either way: nothing here decides that a contract IS certified.
 export async function markCertifiedAction(_prev: BillingActionState | null, formData: FormData): Promise<BillingActionState> {
@@ -236,6 +236,45 @@ export async function markCertifiedAction(_prev: BillingActionState | null, form
     if (e instanceof PlatformError) return { ok: false, error: markCertifiedErrorText(e.status, e.reason, e.message) };
     throw e;
   }
+}
+
+// PV5-11: our company's countersigner signs at the SIMULATED PSrE (review stage). Only a company owner may; the server answers
+// 403 otherwise and that is put in words. Afterwards the contract is refreshed from the provider (best effort: a failure is
+// ignored) so the billing tab shows it Signed when both parties have signed.
+export async function countersignSimulatedPsreAction(_prev: BillingActionState | null, formData: FormData): Promise<BillingActionState> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  const clientId = str(formData, "clientId");
+  const contractId = str(formData, "contractId");
+  const envelopeId = str(formData, "envelopeId");
+  const signerName = str(formData, "signerName");
+  const signerTitle = str(formData, "signerTitle");
+  const documentSha256 = str(formData, "documentSha256");
+  const agree = formData.get("agree") !== null;
+  if (!clientId || !contractId || !envelopeId) return { ok: false, error: "Missing signing page." };
+  if (signerName.length < 2) return { ok: false, error: "Type your full name to sign.", field: "signerName" };
+  if (!agree) return { ok: false, error: "Confirm that you agree to the terms.", field: "agree" };
+  try {
+    await platformFetch(
+      `/api/${c.tenant}/simulated-psre/envelopes/${encodeURIComponent(envelopeId)}/countersign`, c.userId,
+      { method: "POST", body: JSON.stringify({ agree: true, signerName, ...(signerTitle ? { signerTitle } : {}), documentSha256 }) },
+    );
+  } catch (e) {
+    if (e instanceof PlatformError) {
+      if (e.status === 409 && e.reason === "content_changed") revalidatePath(`/simulated-psre/${envelopeId}`);
+      const message = e.status === 403 && !e.reason ? countersignErrorText(e.status, e.message) : simulatedSignErrorText(e.status, e.reason, e.message);
+      return { ok: false, error: message, ...(e.field ? { field: e.field } : {}) };
+    }
+    throw e;
+  }
+  try {
+    await platformFetch(`/api/${c.tenant}/contracts/${encodeURIComponent(contractId)}/certified-signing/refresh`, c.userId, { method: "POST" });
+  } catch {
+    // Best effort: the signature is recorded either way.
+  }
+  refresh(clientId);
+  revalidatePath(`/simulated-psre/${envelopeId}`);
+  return { ok: true, id: contractId, notice: "Signed at the simulated PSrE." };
 }
 
 export async function decidePaymentAction(_prev: BillingActionState | null, formData: FormData): Promise<BillingActionState> {

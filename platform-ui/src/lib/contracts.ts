@@ -54,10 +54,30 @@ export interface Contract {
   /** PV5-07: the sealed signed copy (the contract, its evidence page and the company seal), once rendered. Absent and
    *  null read alike: a signed contract says "being prepared", any other says nothing (lib/billingView.ts). */
   signedCopyFileId?: string | null;
+  /** PV5-11: certified signing through a provider (here the SIMULATED PSrE at the review stage). All optional: an older
+   *  server omits them, and a missing field claims nothing. Never derived from a role in the browser. */
+  signatureProvider?: string | null;
+  providerEnvelopeId?: string | null;
+  /** The backend's answer to "may THIS caller countersign at the provider now". A UI path in `countersignUrl`. */
+  canCountersignAtProvider?: boolean;
+  countersignUrl?: string | null;
+  /** The envelope is at the simulated PSrE: every surface says so. */
+  signatureSimulated?: boolean;
+  /** This server's certified-signing set-up (`label` e.g. "Simulated PSrE (review stage)"). */
+  certifiedSigning?: CertifiedSigningSetup;
+}
+
+export interface CertifiedSigningSetup {
+  available: boolean;
+  provider: string | null;
+  label: string | null;
+  simulated: boolean;
 }
 
 export interface ContractSignature {
   party: "client" | "provider";
+  /** PV5-11: the provider a certified signature was made through; null (or absent) is a typed name. */
+  provider?: string | null;
   signer: string | null;
   signerName: string;
   signerTitle: string | null;
@@ -148,11 +168,10 @@ export interface ContractActions {
   markCertified: { shown: boolean; enabled: boolean; reason: string | null };
 }
 
-/** PV-D25: certified signing (through a certified provider) is parked until counsel sets a threshold or a client asks for
- *  it (PV5-11). Until then `POST …/mark-certified` answers 409 `no_certified_provider` and writes nothing, so the button is
- *  offered disabled. Flip this when PV5-11 lands; the 409 below stays handled either way, because the server is the
- *  authority and this constant is only the UI's guess about it. */
-export const CERTIFIED_SIGNING_AVAILABLE: boolean = false;
+/** PV-D43: certified signing is on for the review stage through a SIMULATED provider, behind a server flag. Whether it is
+ *  offered comes from the backend per row (`certifiedSigning.available`), never from a constant in the browser. When the
+ *  server says no (or an older server says nothing) the button is offered disabled with its reason, and the 409 below
+ *  stays handled either way: the server is the authority. */
 export const CERTIFIED_UNAVAILABLE_REASON = "Certified signing isn't set up yet. Every contract is signed by typed name and sealed by our company for now.";
 
 /** The mark-certified route's refusals, in words. Branch on `reason`, never on the message. */
@@ -173,6 +192,8 @@ export function hasDocument(c: Pick<Contract, "bodyMd" | "fileId">): boolean {
 export function contractActions(c: Contract): ContractActions {
   const isDraft = c.status === "draft";
   const docOk = hasDocument(c);
+  // `=== true`: an older backend that omits the field reads as "not set up".
+  const certifiedAvailable = c.certifiedSigning?.available === true;
   return {
     edit: isDraft,
     send: { shown: isDraft, enabled: isDraft && docOk, reason: isDraft && !docOk ? SEND_BLOCKED_REASON : null },
@@ -181,17 +202,32 @@ export function contractActions(c: Contract): ContractActions {
     void: c.status !== "void",
     markCertified: {
       shown: isDraft && c.certifiedRequested !== true,
-      enabled: isDraft && CERTIFIED_SIGNING_AVAILABLE,
-      reason: isDraft && !CERTIFIED_SIGNING_AVAILABLE ? CERTIFIED_UNAVAILABLE_REASON : null,
+      enabled: isDraft && certifiedAvailable,
+      reason: isDraft && !certifiedAvailable ? CERTIFIED_UNAVAILABLE_REASON : null,
     },
   };
 }
 
 /** The "who has signed" line for a sent contract: party, name, title and date, one per signature. */
-export function signatureLine(s: ContractSignature, formatDate: (iso: string) => string): string {
+export function signatureLine(s: ContractSignature, formatDate: (iso: string) => string, providerLabel?: string | null): string {
   const who = s.party === "provider" ? "Our company" : "Client";
   const title = s.signerTitle ? `, ${s.signerTitle}` : "";
-  return `${who}: ${s.signerName}${title}, ${formatDate(s.signedAt)}`;
+  const via = s.provider ? `, through ${providerName(s.provider, providerLabel)}` : "";
+  return `${who}: ${s.signerName}${title}, ${formatDate(s.signedAt)}${via}`;
+}
+
+/** The provider named for a reader: the backend's label when it sent one, else a plain phrase. */
+export function providerName(provider: string | null | undefined, label?: string | null): string {
+  if (!provider) return "";
+  return label && label.trim() ? label : "a certified provider";
+}
+
+/** What the staff row says a certified contract is waiting for at the provider; null when it is not that case. */
+export function certifiedWaitingText(c: Pick<Contract, "status" | "certifiedRequested" | "signatureProvider" | "providerEnvelopeId" | "certifiedSigning" | "signatureTier">): string | null {
+  if (c.status !== "sent") return null;
+  const certified = c.certifiedRequested === true || c.signatureTier === "certified";
+  if (!certified || c.providerEnvelopeId) return null;
+  return `Waiting for the client to start signing at ${c.certifiedSigning?.label ?? "the signing provider"}.`;
 }
 
 /** What a sent contract is waiting for, in words. Both parties must sign, in either order. */
@@ -239,8 +275,13 @@ export function countersignErrorText(status: number | null, message: string): st
 
 // ── the tab badge ───────────────────────────────────────────────────────────────────────────────
 
+/** True when the backend says this caller may countersign this row now, typed or at the provider (PV5-11). */
+export function needsMyCountersign(c: Pick<Contract, "canCountersign" | "canCountersignAtProvider">): boolean {
+  return c.canCountersign === true || c.canCountersignAtProvider === true;
+}
+
 /** Pending payments plus contracts awaiting OUR countersignature (those the backend says this caller may
- *  countersign now: the layout counts rows whose `canCountersign` is true). Both are things this company has
+ *  countersign now: the layout counts rows whose `canCountersign` or `canCountersignAtProvider` is true). Both are things this company has
  *  to do, which is what the hub's badges mean. */
 export function billingBadgeCount(pendingPayments: number, contractsToCountersign: number): number {
   return pendingPayments + contractsToCountersign;

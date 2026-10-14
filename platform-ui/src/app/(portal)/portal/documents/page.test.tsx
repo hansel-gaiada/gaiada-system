@@ -83,3 +83,24 @@ describe("portal Documents page", () => {
     expect(screen.queryByText(/No documents yet/)).toBeNull();
   });
 });
+
+describe("portal Documents page · certified copies (PV5-11)", () => {
+  const CERT: DocumentItem = {
+    id: "k9", kind: "signed_contract", title: "Certified agreement", date: "2026-10-06T08:00:00Z", fileId: "f-cert", ready: true,
+    certified: true, simulated: true, certificateFileId: "f-certificate",
+  };
+
+  it("🔴 shows 'Certified (simulated)' as text and a Certificate link through the portal file route", async () => {
+    await mount([CERT]);
+    expect(screen.getByText("Certified (simulated)")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Certificate: Certified agreement" })).toHaveAttribute("href", "/api/northwind/portal/files/f-certificate");
+    expect(screen.getByRole("link", { name: "Download: Certified agreement" })).toHaveAttribute("href", "/api/northwind/portal/files/f-cert");
+  });
+
+  it("a real certified copy reads 'Certified'; other documents show no badge", async () => {
+    await mount([{ ...CERT, simulated: false, certificateFileId: null }, ...DOCS]);
+    expect(screen.getByText("Certified")).toBeInTheDocument();
+    expect(screen.queryByText(/simulated/i)).toBeNull();
+    expect(screen.queryByRole("link", { name: /^Certificate:/ })).toBeNull();
+  });
+});

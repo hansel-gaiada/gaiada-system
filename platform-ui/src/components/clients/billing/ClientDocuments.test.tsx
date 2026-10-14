@@ -37,3 +37,29 @@ describe("ClientDocuments", () => {
     expect(screen.getByText(/No signed agreement, issued invoice or payment receipt/)).toBeInTheDocument();
   });
 });
+
+describe("ClientDocuments · certified copies (PV5-11)", () => {
+  const cert = (over: Partial<StaffDocumentItem> = {}): StaffDocumentItem => ({
+    id: "k9", kind: "signed_contract", title: "Certified agreement", date: "2026-10-06T08:00:00Z", fileId: "f-cert", ready: true,
+    clientVisible: true, certified: true, simulated: true, certificateFileId: "f-certificate", ...over,
+  });
+
+  it("🔴 a simulated certified copy carries the text badge 'Certified (simulated)' and a Certificate link through the staff file route", () => {
+    render(<ClientDocuments items={[cert()]} />);
+    expect(screen.getByText("Certified (simulated)")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Certificate of Certified agreement/ })).toHaveAttribute("href", "/api/files/f-certificate");
+    expect(screen.getByRole("link", { name: /Download Certified agreement/ })).toHaveAttribute("href", "/api/files/f-cert");
+  });
+
+  it("a real certified copy says 'Certified'; no certificate file, no Certificate link", () => {
+    render(<ClientDocuments items={[cert({ simulated: false, certificateFileId: null })]} />);
+    expect(screen.getByText("Certified")).toBeInTheDocument();
+    expect(screen.queryByText(/simulated/i)).toBeNull();
+    expect(screen.queryByRole("link", { name: /Certificate of/ })).toBeNull();
+  });
+
+  it("an attested or older-server row has no badge: a missing flag claims nothing", () => {
+    render(<ClientDocuments items={ITEMS} />);
+    expect(screen.queryByText(/Certified/)).toBeNull();
+  });
+});

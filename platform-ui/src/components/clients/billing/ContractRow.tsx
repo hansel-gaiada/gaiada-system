@@ -1,11 +1,12 @@
 "use client";
 import { useActionState, useState } from "react";
+import Link from "next/link";
 import {
   countersignContractAction, markCertifiedAction, sendContractAction, voidContractAction, type BillingActionState,
 } from "@/lib/contractsActions";
 import { contractDocumentState, DOCUMENT_PREPARING_TEXT, tierLabel } from "@/lib/billingView";
 import { CopyHash } from "@/components/billing/CopyHash";
-import { awaitingText, contractActions, signatureLine, type Contract, type ContractSignature } from "@/lib/contracts";
+import { awaitingText, certifiedWaitingText, contractActions, signatureLine, type Contract, type ContractSignature } from "@/lib/contracts";
 import { formatDate, money } from "@/lib/format";
 import { StatusBadge } from "@/components/ui";
 import { ClientVisibilityMarker } from "../ClientVisibilityMarker";
@@ -31,12 +32,30 @@ import "./billing.css";
 // file is rendered after the commit, and an older server omits the field). Every one of these is the backend's field:
 // a missing one says "not recorded", never a guess.
 //
+// PV5-11 (certified signing through the SIMULATED PSrE, owner ruling PV-D43), all from the backend's fields on the row:
+//   - Mark certified is enabled from `certifiedSigning.available`, not from a constant here.
+//   - A certified contract is countersigned at the provider: a LINK styled as the Countersign button, shown only when the
+//     backend said `canCountersignAtProvider` and gave a `countersignUrl`. The typed Countersign never shows for it
+//     (`canCountersign` is false for a certified row).
+//   - Before the client has started signing there is no envelope yet, and the row says it is waiting for the client.
+//   - The Signing fact says "simulated: not a real PSrE signature" when `signatureSimulated`; the signed copy is the
+//     "Certified copy" (the provider's signed PDF), not the sealed one.
+//
 // A refusal the server gives (a 403, a 400) is shown in words under the row, never swallowed.
 
 function Msg({ state }: { state: BillingActionState | null }) {
   if (!state) return null;
   if (!state.ok && state.error) return <p className="bl-msg bl-msg--error" role="alert">{state.error}</p>;
   if (state.ok && state.notice) return <p className="bl-msg bl-msg--ok" role="status">{state.notice}</p>;
+  return null;
+}
+
+/** What a certified contract with an envelope at the provider is waiting for, from the signature rows the backend sent. */
+function providerWaitingText(c: Contract): string | null {
+  if (c.status !== "sent") return null;
+  const label = c.certifiedSigning?.label ?? "the signing provider";
+  if (c.clientSigned && !c.providerSigned) return `The client has signed at ${label}. Waiting for our countersignature there.`;
+  if (!c.clientSigned) return `Waiting for the client to sign at ${label}.`;
   return null;
 }
 
@@ -61,7 +80,11 @@ export function ContractRow({
   const [voidState, voidAction, voiding] = useActionState<BillingActionState | null, FormData>(voidContractAction, null);
   const [signState, signAction, signing] = useActionState<BillingActionState | null, FormData>(countersignContractAction, null);
   const [certState, certAction, certifying] = useActionState<BillingActionState | null, FormData>(markCertifiedAction, null);
-  const waiting = awaitingText(contract);
+  const certifiedRow = contract.certifiedRequested === true || contract.signatureTier === "certified" || Boolean(contract.signatureProvider);
+  const providerLabel = contract.certifiedSigning?.label ?? null;
+  // The envelope is at the provider: the typed words ("waiting for our countersignature") do not apply, the provider's do.
+  const certifiedWaiting = certifiedWaitingText(contract);
+  const waiting = certifiedRow ? (certifiedWaiting ?? providerWaitingText(contract)) : awaitingText(contract);
   const sendReasonId = `send-reason-${contract.id}`;
   const certReasonId = `cert-reason-${contract.id}`;
   const signedCopy = contractDocumentState(contract);
@@ -99,7 +122,7 @@ export function ContractRow({
           {contract.certifiedRequested === true && contract.status === "draft"
             ? "Marked certified. It will be signed through a certified provider once it is sent."
             : contract.signatureTier || contract.status === "draft"
-              ? tierLabel(contract.signatureTier)
+              ? tierLabel(contract.signatureTier, contract.signatureSimulated === true)
               : "The tier was not recorded for this contract."}
         </p>
         {contract.contentSha256 ? (
@@ -113,7 +136,10 @@ export function ContractRow({
           <p className="bl-contract__meta">
             <span className="bl-contract__k">Signed copy</span>{" "}
             {signedCopy.kind === "link"
-              ? <FileLink fileId={signedCopy.fileId} label="Sealed signed copy" />
+              ? <FileLink
+                  fileId={signedCopy.fileId}
+                  label={certifiedRow ? (contract.signatureSimulated === true || contract.certifiedSigning?.simulated === true ? "Certified copy (simulated)" : "Certified copy") : "Sealed signed copy"}
+                />
               : DOCUMENT_PREPARING_TEXT}
           </p>
         )}
@@ -125,7 +151,7 @@ export function ContractRow({
             <p className="bl-msg bl-msg--error">Who has signed cannot be read right now ({signaturesRefused}). That is not a statement that nobody has.</p>
           ) : signatures && signatures.length > 0 ? (
             <ul className="bl-contract__sigs" aria-label="Signatures">
-              {signatures.map((s) => <li key={`${s.party}-${s.signedAt}`}>{signatureLine(s, formatDate)}</li>)}
+              {signatures.map((s) => <li key={`${s.party}-${s.signedAt}`}>{signatureLine(s, formatDate, providerLabel)}</li>)}
             </ul>
           ) : null}
           {waiting && <p className="bl-contract__waiting">{waiting}</p>}
@@ -169,6 +195,11 @@ export function ContractRow({
           </form>
         )}
         {a.markCertified.shown && a.markCertified.reason && <span className="bl-reason" id={certReasonId}>{a.markCertified.reason}</span>}
+        {contract.canCountersignAtProvider === true && contract.countersignUrl && (
+          <Link href={contract.countersignUrl} className="lux-btn lux-btn--solid lux-btn--sm">
+            {`Countersign at ${providerLabel ?? "the signing provider"}`}
+          </Link>
+        )}
         {a.countersign && (
           <button type="button" className="lux-btn lux-btn--solid lux-btn--sm" onClick={() => setPanel(panel === "sign" ? null : "sign")} aria-expanded={panel === "sign"}>
             Countersign

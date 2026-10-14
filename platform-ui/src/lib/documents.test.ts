@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { documentLinkLabel, documentStateNote } from "./documents";
+import { certifiedBadgeText, documentLinkLabel, documentStateNote } from "./documents";
 
 describe("documents wording", () => {
   it("a ready document with a file says nothing about state", () => {
@@ -14,5 +14,15 @@ describe("documents wording", () => {
     expect(documentLinkLabel({ kind: "signed_contract", ready: false })).toMatch(/original/);
     expect(documentLinkLabel({ kind: "signed_contract", ready: true })).toBe("Download");
     expect(documentLinkLabel({ kind: "invoice", ready: false })).toBe("Download");
+  });
+});
+
+describe("certifiedBadgeText (PV5-11)", () => {
+  it("says Certified (simulated) for a simulated certified copy, Certified for a real one, and nothing otherwise", () => {
+    expect(certifiedBadgeText({ certified: true, simulated: true })).toBe("Certified (simulated)");
+    expect(certifiedBadgeText({ certified: true, simulated: false })).toBe("Certified");
+    expect(certifiedBadgeText({ certified: true })).toBe("Certified");
+    expect(certifiedBadgeText({ certified: false, simulated: true })).toBeNull();
+    expect(certifiedBadgeText({})).toBeNull();
   });
 });

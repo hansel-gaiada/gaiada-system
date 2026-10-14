@@ -4,7 +4,8 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError, type Me } from "./platform";
 import { getActivePortalCompany } from "./portal-company";
-import { attachmentProblem, CONVERSATION_BODY_MAX, describeSocialReviewError, isCheckoutUrl, parseWholeAccount } from "./portal";
+import { attachmentProblem, CONVERSATION_BODY_MAX, describeSocialReviewError, isCheckoutUrl, isSimulatedSigningUrl, parseWholeAccount } from "./portal";
+import { certifiedStartErrorText, simulatedSignErrorText } from "./simulatedPsre";
 
 // Client-portal WRITE actions: the client signs their gates and contracts, records a payment against
 // their own invoice, updates their own profile, and asks for a change to their company record.
@@ -151,6 +152,70 @@ export async function portalSignContract(_prev: PortalActionResult | null, formD
     }
     return fail(e);
   }
+}
+
+/** PV5-11: the client starts certified signing. The server creates the envelope at the provider (here the SIMULATED PSrE,
+ *  review stage) and answers where the client signs; the browser is sent there only when that is our own simulated-PSrE
+ *  page (`isSimulatedSigningUrl`). `contentSha256` is the hash the contract page showed: a 409 `content_changed` means the
+ *  agreement is not what the page showed, nothing was started, and the page is reloaded. */
+export async function portalStartCertifiedSigning(_prev: PortalActionResult | null, formData: FormData): Promise<PortalActionResult> {
+  const c = await ctx();
+  if (!c) return { ok: false, error: "Your session has expired — please sign in again." };
+  const contractId = String(formData.get("contractId") ?? "");
+  const contentSha256 = String(formData.get("contentSha256") ?? "").trim();
+  if (!contractId) return { ok: false, error: "Missing contract." };
+  try {
+    const r = await platformFetch<{ envelopeId: string; signingUrl: string | null }>(
+      `/api/${c.tenant}/portal/contracts/${encodeURIComponent(contractId)}/certified-signing`, c.userId,
+      { method: "POST", body: JSON.stringify({ contentSha256: contentSha256 || undefined }) },
+    );
+    revalidatePath(`/portal/contracts/${contractId}`);
+    if (!isSimulatedSigningUrl(r?.signingUrl)) return { ok: false, error: "We couldn't open the signing page. Please try again." };
+    return { ok: true, id: contractId, url: r.signingUrl };
+  } catch (e) {
+    if (e instanceof PlatformError) {
+      if (e.status === 409 && (e.reason === "content_changed" || e.reason === "content_mismatch")) revalidatePath(`/portal/contracts/${contractId}`);
+      return { ok: false, error: certifiedStartErrorText(e.status, e.reason, e.message), field: e.field };
+    }
+    throw e;
+  }
+}
+
+/** PV5-11: the client signs at the SIMULATED PSrE. Afterwards the contract is refreshed (best effort: a failure there is
+ *  ignored) so the contract page is current when the client returns to it. */
+export async function portalSignSimulatedPsre(_prev: PortalActionResult | null, formData: FormData): Promise<PortalActionResult> {
+  const c = await ctx();
+  if (!c) return { ok: false, error: "Your session has expired — please sign in again." };
+  const envelopeId = String(formData.get("envelopeId") ?? "");
+  const contractId = String(formData.get("contractId") ?? "");
+  const signerName = String(formData.get("signerName") ?? "").trim();
+  const signerTitle = String(formData.get("signerTitle") ?? "").trim();
+  const agree = formData.get("agree") !== null;
+  const documentSha256 = String(formData.get("documentSha256") ?? "").trim();
+  if (!envelopeId || !contractId) return { ok: false, error: "Missing signing page." };
+  if (signerName.length < 2) return { ok: false, error: "Please type your full name.", field: "signerName" };
+  if (!agree) return { ok: false, error: "Please confirm you agree to the terms.", field: "agree" };
+  try {
+    await platformFetch(
+      `/api/${c.tenant}/portal/simulated-psre/envelopes/${encodeURIComponent(envelopeId)}/sign`, c.userId,
+      { method: "POST", body: JSON.stringify({ agree: true, signerName, signerTitle: signerTitle || undefined, documentSha256 }) },
+    );
+  } catch (e) {
+    if (e instanceof PlatformError) {
+      if (e.status === 409 && e.reason === "content_changed") revalidatePath(`/portal/simulated-psre/${envelopeId}`);
+      return { ok: false, error: simulatedSignErrorText(e.status, e.reason, e.message), field: e.field };
+    }
+    throw e;
+  }
+  try {
+    await platformFetch(`/api/${c.tenant}/portal/contracts/${encodeURIComponent(contractId)}/certified-signing/refresh`, c.userId, { method: "POST" });
+  } catch {
+    // Best effort: the signature is recorded either way.
+  }
+  revalidatePortal();
+  revalidatePath(`/portal/contracts/${contractId}`);
+  revalidatePath(`/portal/simulated-psre/${envelopeId}`);
+  return { ok: true, id: contractId };
 }
 
 /** Record a payment against one of the caller's invoices, with an optional proof receipt.

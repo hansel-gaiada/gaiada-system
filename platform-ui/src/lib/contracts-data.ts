@@ -17,7 +17,7 @@ import "server-only";
 // page can never be handed every client's rows by a malformed id.
 import { platformFetch, PlatformError } from "./platform";
 import type { Invoice } from "./invoice";
-import type { Contract, ContractDetail, InvoicePayment } from "./contracts";
+import { needsMyCountersign, type Contract, type ContractDetail, type InvoicePayment } from "./contracts";
 import type { StaffDocumentItem } from "./documents";
 
 const q = (clientId: string) => `clientId=${encodeURIComponent(clientId)}`;
@@ -58,7 +58,7 @@ export async function listClientInvoices(userId: string, tenant: string, clientI
 export async function countContractsToCountersign(userId: string, tenant: string, clientId: string): Promise<number | null> {
   try {
     const rows = await listContracts(userId, tenant, clientId);
-    return rows.filter((c) => c.canCountersign === true).length;
+    return rows.filter(needsMyCountersign).length;
   } catch {
     return null;
   }

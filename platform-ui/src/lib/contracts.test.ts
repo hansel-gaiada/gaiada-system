@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   SEND_BLOCKED_REASON, awaitingText, billingBadgeCount, contractActions, countersignErrorText, decideErrorText,
   groupContracts, hasDocument, paymentDecisionState, signatureLine, validateContractForm, type Contract,
+  certifiedWaitingText, needsMyCountersign, providerName,
 } from "./contracts";
 
 // PV3-08 — the state-to-button rules behind /clients/[id]/billing. Pure, so every rule is pinned without
@@ -156,5 +157,65 @@ describe("validateContractForm", () => {
     expect(validateContractForm({ ...ok, startsOn: "2026-10-10", endsOn: "2026-10-09" })).toMatchObject({ field: "endsOn" });
     expect(validateContractForm({ ...ok, startsOn: "2026-10-10", endsOn: "2026-10-10" })).toBeNull();
     expect(validateContractForm({ ...ok, endsOn: "2026-10-09" })).toBeNull();
+  });
+});
+
+// ── PV5-11: certified signing through the simulated PSrE (owner ruling PV-D43) ─────────────────────────────────────
+
+describe("contractActions · Mark certified comes from the backend field (PV5-11)", () => {
+  const draft = { status: "draft" as const, bodyMd: "Terms." };
+
+  it("🔴 is enabled only when the row says certifiedSigning.available is true", () => {
+    const on = contractActions(k({ ...draft, certifiedSigning: { available: true, provider: "simulated_psre", label: "Simulated PSrE (review stage)", simulated: true } }));
+    expect(on.markCertified).toEqual({ shown: true, enabled: true, reason: null });
+  });
+
+  it("🔴 stays disabled, with its reason, when the server says unavailable", () => {
+    const off = contractActions(k({ ...draft, certifiedSigning: { available: false, provider: null, label: null, simulated: false } }));
+    expect(off.markCertified.shown).toBe(true);
+    expect(off.markCertified.enabled).toBe(false);
+    expect(off.markCertified.reason).toMatch(/isn't set up/);
+  });
+
+  it("🔴 an older server that omits the field reads as not set up, never as enabled", () => {
+    const a = contractActions(k(draft));
+    expect(a.markCertified.enabled).toBe(false);
+    expect(a.markCertified.reason).toMatch(/isn't set up/);
+  });
+
+  it("is not offered once the draft is already marked certified, and never for a sent contract", () => {
+    const cs = { available: true, provider: "simulated_psre", label: "Simulated PSrE (review stage)", simulated: true };
+    expect(contractActions(k({ ...draft, certifiedRequested: true, certifiedSigning: cs })).markCertified.shown).toBe(false);
+    expect(contractActions(k({ status: "sent", bodyMd: "x", certifiedSigning: cs })).markCertified.shown).toBe(false);
+  });
+});
+
+describe("needsMyCountersign · the tab badge counts both kinds (PV5-11)", () => {
+  it("counts a typed countersign and a countersign at the provider, and nothing else", () => {
+    expect(needsMyCountersign({ canCountersign: true })).toBe(true);
+    expect(needsMyCountersign({ canCountersign: false, canCountersignAtProvider: true })).toBe(true);
+    expect(needsMyCountersign({ canCountersign: false, canCountersignAtProvider: false })).toBe(false);
+    expect(needsMyCountersign({ canCountersign: false })).toBe(false);
+  });
+});
+
+describe("certified wording (PV5-11)", () => {
+  const label = "Simulated PSrE (review stage)";
+  it("a signature made through a provider names it; a typed one says nothing extra", () => {
+    const f = (iso: string) => iso.slice(0, 10);
+    const typed = { party: "client" as const, signer: null, signerName: "Dana", signerTitle: null, signedAt: "2026-10-11T00:00:00Z" };
+    expect(signatureLine(typed, f)).toBe("Client: Dana, 2026-10-11");
+    expect(signatureLine({ ...typed, provider: "simulated_psre" }, f, label)).toBe(`Client: Dana, 2026-10-11, through ${label}`);
+    expect(signatureLine({ ...typed, provider: "simulated_psre" }, f)).toBe("Client: Dana, 2026-10-11, through a certified provider");
+    expect(providerName(null, label)).toBe("");
+  });
+
+  it("a certified sent contract with no envelope says it is waiting for the client to start", () => {
+    const c = k({ status: "sent", certifiedRequested: true, signatureTier: "certified", providerEnvelopeId: null, certifiedSigning: { available: true, provider: "simulated_psre", label, simulated: true } });
+    expect(certifiedWaitingText(c)).toBe(`Waiting for the client to start signing at ${label}.`);
+    expect(certifiedWaitingText({ ...c, providerEnvelopeId: "simenv_1" })).toBeNull();
+    expect(certifiedWaitingText({ ...c, status: "draft" })).toBeNull();
+    expect(certifiedWaitingText(k({ status: "sent", signatureTier: "attested" }))).toBeNull();
+    expect(certifiedWaitingText({ ...c, certifiedSigning: undefined })).toBe("Waiting for the client to start signing at the signing provider.");
   });
 });

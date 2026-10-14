@@ -3,7 +3,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActivePortalCompany } from "@/lib/portal-company";
 import { getPortalContract } from "@/lib/portal-data";
-import { contractSigningState, money, portalDate } from "@/lib/portal";
+import { certifiedCopyLabel, contractSigningState, money, portalDate, signatureViaText, SIMULATED_SIGNATURE_NOTE } from "@/lib/portal";
 import { contractDocumentState } from "@/lib/billingView";
 import { Card, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -11,9 +11,11 @@ import { ArtifactMarkdown } from "@/components/pipeline/ArtifactMarkdown";
 import { PortalLive } from "@/components/portal/PortalLive";
 import { PortalAmendmentBanner } from "@/components/portal/PortalAmendmentBanner";
 import { PortalSignForm } from "@/components/portal/PortalSignForm";
+import { PortalCertifiedSign } from "@/components/portal/PortalCertifiedSign";
 import { PortalSignedNote } from "@/components/portal/PortalSignedNote";
 import { PortalFacts, PortalLink, PortalPageHead, PortalStatus } from "@/components/portal/PortalBits";
 import "@/components/pipeline/pipeline.css";
+import "@/components/signing/simulatedPsre.css";
 
 // CP-14 — one agreement: the terms, the signatures, and the sign form when it is the client's turn.
 //
@@ -38,6 +40,12 @@ import "@/components/pipeline/pipeline.css";
 // seal (PV-D25). It is rendered after the commit (PV5-07), so for a while a signed contract has no file: the page says
 // "being prepared" then, never a dead link. An older server omits `signedCopyFileId`, which reads the same. A contract that
 // is not signed shows nothing here, because there is no copy to promise yet.
+//
+// ── CERTIFIED SIGNING (PV5-11) ────────────────────────────────────────────────────────────────────
+// A certified contract is never signed by typed name. When the backend says `certifiedSigning.canStart`, the card is
+// "Sign with <label>" (PortalCertifiedSign), which creates the envelope and sends the client to the signing page. While the
+// provider is the SIMULATED PSrE (review stage) the card, the signature rows and the signed copy all say so in words.
+// Every flag is the backend's; nothing is derived from a role in the browser.
 export default async function PortalContractPage({ params }: { params: Promise<{ contractId: string }> }) {
   const { contractId } = await params;
   const userId = await getSessionUserId();
@@ -53,6 +61,9 @@ export default async function PortalContractPage({ params }: { params: Promise<{
   const providerSig = k.signatures.find((s) => s.party === "provider");
   const signing = contractSigningState(k);
   const signedCopy = contractDocumentState(k);
+  // PV5-11: a certified contract's final copy is the one signed through the provider; `simulated` is the backend's flag.
+  const certified = k.certifiedSigning ?? null;
+  const certifiedLabel = certifiedCopyLabel(certified);
 
   return (
     <>
@@ -112,14 +123,20 @@ export default async function PortalContractPage({ params }: { params: Promise<{
         </Card>
 
         {k.status === "signed" && (
-          <Card title="Your signed copy" hint="One PDF: the agreement, the record of who signed it and when, and our company seal.">
+          <Card
+            title="Your signed copy"
+            hint={certified
+              ? "One PDF: the agreement as signed through the certified provider, with the provider's record of who signed it and when."
+              : "One PDF: the agreement, the record of who signed it and when, and our company seal."}
+            headerRight={certifiedLabel ? <span className="sp-cert-badge">{certifiedLabel}</span> : undefined}
+          >
             {signedCopy.kind === "link" ? (
               <a
                 href={`/api/${tenant}/portal/files/${signedCopy.fileId}`}
                 className="btn"
                 style={{ fontSize: 13, textDecoration: "none", justifySelf: "start" }}
               >
-                Download your signed copy (PDF)
+                {certified ? "Download the copy signed through the provider (PDF)" : "Download your signed copy (PDF)"}
               </a>
             ) : (
               <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
@@ -131,8 +148,8 @@ export default async function PortalContractPage({ params }: { params: Promise<{
 
         <Card title="Signatures">
           <div style={{ display: "grid", gap: 12 }}>
-            <SignatureRow who="Your organisation" sig={clientSig} />
-            <SignatureRow who="Our company" sig={providerSig} />
+            <SignatureRow who="Your organisation" sig={clientSig} via={signatureViaText(clientSig?.provider, certified)} />
+            <SignatureRow who="Our company" sig={providerSig} via={signatureViaText(providerSig?.provider, certified)} />
           </div>
           {!providerSig && clientSig && (
             <p style={{ margin: "12px 0 0", font: "400 12px/1.5 var(--font-body)", color: "var(--ink-subtle)" }}>
@@ -149,6 +166,10 @@ export default async function PortalContractPage({ params }: { params: Promise<{
             <PortalSignedNote title={k.title} signerName={signing.signerName}
                               signerTitle={signing.signerTitle} signedAt={signing.signedAt} />
           </Card>
+        ) : signing.kind === "certified" ? (
+          <Card title="Sign this agreement">
+            <PortalCertifiedSign contractId={k.id} contentSha256={k.contentSha256} label={signing.label} simulated={signing.simulated} />
+          </Card>
         ) : signing.kind === "sign" ? (
           <Card title="Sign this agreement">
             <PortalSignForm contractId={k.id} title={k.title} contentSha256={k.contentSha256} />
@@ -156,6 +177,7 @@ export default async function PortalContractPage({ params }: { params: Promise<{
         ) : (
           <Card title="Signing">
             <EmptyNote>{signing.reason}</EmptyNote>
+            {certified?.simulated && <p className="sp-note" style={{ marginTop: 10 }}>{SIMULATED_SIGNATURE_NOTE}</p>}
           </Card>
         )}
 
@@ -165,9 +187,11 @@ export default async function PortalContractPage({ params }: { params: Promise<{
   );
 }
 
-function SignatureRow({ who, sig }: {
+function SignatureRow({ who, sig, via }: {
   who: string;
   sig?: { signerName: string | null; signerTitle: string | null; signedAt: string };
+  /** PV5-11: "through <provider> (simulated)" for a certified signature; empty for a typed name. */
+  via?: string;
 }) {
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
@@ -177,6 +201,7 @@ function SignatureRow({ who, sig }: {
           <span style={{ fontWeight: 500, color: "var(--ink-strong)" }}>{sig.signerName ?? "Signed"}</span>
           {sig.signerTitle && <span style={{ color: "var(--ink-muted)" }}> · {sig.signerTitle}</span>}
           <span style={{ color: "var(--ink-subtle)" }}> · {portalDate(sig.signedAt)}</span>
+          {via && <span style={{ color: "var(--ink-muted)" }}> · {via}</span>}
         </span>
       ) : (
         <span style={{ font: "400 14px var(--font-body)", color: "var(--ink-subtle)" }}>Not signed yet</span>

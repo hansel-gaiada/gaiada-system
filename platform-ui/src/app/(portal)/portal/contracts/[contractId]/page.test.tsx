@@ -18,7 +18,7 @@ vi.mock("@/lib/session-server", () => ({ getSessionUserId: vi.fn(async () => "u-
 vi.mock("@/lib/platform", () => ({ getMe: vi.fn(async () => ({ userId: "u-client" })) }));
 vi.mock("@/lib/portal-company", () => ({ getActivePortalCompany: vi.fn(async () => ({ id: "northwind" })) }));
 vi.mock("@/lib/portal-data", () => ({ getPortalContract: vi.fn() }));
-vi.mock("@/lib/portalActions", () => ({ portalSignContract: vi.fn() }));
+vi.mock("@/lib/portalActions", () => ({ portalSignContract: vi.fn(), portalStartCertifiedSigning: vi.fn() }));
 vi.mock("@/components/portal/PortalLive", () => ({ PortalLive: () => null }));
 vi.mock("@/components/pipeline/ArtifactMarkdown", () => ({ ArtifactMarkdown: ({ text }: { text: string }) => <div>{text}</div> }));
 
@@ -125,5 +125,65 @@ describe("contract page: the signed copy (PV5-09)", () => {
     await mount(FULLY_SIGNED);
     expect(screen.getByText("Our company")).toBeInTheDocument();
     expect(screen.queryByText(/Gaia Digital Agency/)).toBeNull();
+  });
+});
+
+// PV5-11 — a CERTIFIED contract is signed through the provider (here the SIMULATED PSrE), never by typed name. Every flag
+// below is the backend's `certifiedSigning`; the page reads it and decides nothing.
+describe("contract page: certified signing (PV5-11)", () => {
+  const LABEL = "Simulated PSrE (review stage)";
+  const CS = { provider: "simulated_psre", label: LABEL, simulated: true, available: true, envelopeStarted: false, canStart: true, signingUrl: null };
+  const CERTIFIED: PortalContractDetail = {
+    ...SENT, canSign: false, signatureTier: "certified", signatureProvider: "simulated_psre", providerEnvelopeId: null,
+    contentSha256: "c".repeat(64), certifiedSigning: CS,
+  };
+
+  it("🔴 canStart: the card is 'Sign with <label>' with the simulated note, and the typed sign form is absent", async () => {
+    await mount(CERTIFIED);
+    expect(screen.getByRole("button", { name: `Sign with ${LABEL}` })).toBeInTheDocument();
+    expect(screen.getByText(/Simulated certified signature: not a real PSrE signature\./)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^sign this agreement$/i })).toBeNull();
+    expect(screen.queryByLabelText(/your full name/i)).toBeNull();
+  });
+
+  it("without canStart there is no button, only a clear reason (view-only here)", async () => {
+    await mount({ ...CERTIFIED, viewOnly: true, certifiedSigning: { ...CS, canStart: false } });
+    expect(screen.queryByRole("button", { name: /Sign with/ })).toBeNull();
+    expect(screen.getByText(/view-only, so a colleague with signing rights needs to sign this/i)).toBeInTheDocument();
+    expect(screen.getByText(/Simulated certified signature: not a real PSrE signature\./)).toBeInTheDocument();
+  });
+
+  it("when the provider is not set up the page says so", async () => {
+    await mount({ ...CERTIFIED, certifiedSigning: { ...CS, canStart: false, available: false } });
+    expect(screen.queryByRole("button", { name: /Sign with/ })).toBeNull();
+    expect(screen.getByText(/provider isn't set up right now/)).toBeInTheDocument();
+  });
+
+  it("an attested contract (certifiedSigning null) keeps the typed form and shows no simulated wording", async () => {
+    await mount({ ...SENT, certifiedSigning: null });
+    expect(screen.getByRole("button", { name: /sign this agreement/i })).toBeInTheDocument();
+    expect(screen.queryByText(/PSrE/)).toBeNull();
+  });
+
+  const SIGNED_CERT: PortalContractDetail = {
+    ...CERTIFIED, status: "signed", signedAt: "2026-10-11T03:00:00Z", providerEnvelopeId: "simenv_1",
+    certifiedSigning: { ...CS, canStart: false, envelopeStarted: true },
+    signatures: [
+      { party: "client", signerName: "Dana Whitfield", signerTitle: null, signedAt: "2026-10-10T03:00:00Z", provider: "simulated_psre" },
+      { party: "provider", signerName: "Olive Owner", signerTitle: "Owner", signedAt: "2026-10-11T03:00:00Z", provider: "simulated_psre" },
+    ],
+  };
+
+  it("🔴 signature rows say 'through <label> (simulated)' and the signed copy is 'Certified (simulated)', through the portal file route", async () => {
+    await mount({ ...SIGNED_CERT, signedCopyFileId: "f-cert" });
+    expect(screen.getAllByText(/through Simulated PSrE \(review stage\) \(simulated\)/)).toHaveLength(2);
+    const card = screen.getByRole("heading", { name: /^Your signed copy/ }).closest("section") as HTMLElement;
+    expect(within(card).getByText("Certified (simulated)")).toBeInTheDocument();
+    expect(within(card).getByRole("link", { name: /copy signed through the provider/ })).toHaveAttribute("href", "/api/northwind/portal/files/f-cert");
+  });
+
+  it("a typed-name signature row (no provider) says nothing about a provider", async () => {
+    await mount({ ...SIGNED_CERT, certifiedSigning: null, signatures: [{ party: "client", signerName: "Dana Whitfield", signerTitle: null, signedAt: "2026-10-10T03:00:00Z", provider: null }] });
+    expect(screen.queryByText(/through /)).toBeNull();
   });
 });

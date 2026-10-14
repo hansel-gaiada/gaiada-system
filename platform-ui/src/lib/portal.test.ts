@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   changeRequestFormProps, parseWholeAccount, wholeAccountValue, changeRequestKindLabel, clientStatus, contractSigningState, isPastDue, money, overallProgress, portalDate,
   projectRange, projectUrgencyTier, relativeDays, splitTimeline, statusTone,
+  certifiedCopyLabel, isSimulatedSigningUrl, signatureViaText,
   type PortalContractDetail, type PortalProject, type PortalProjectOption, type PortalTimelineEvent,
 } from "./portal";
 
@@ -422,5 +423,89 @@ describe("contractSigningState", () => {
     expect(contractSigningState({ ...base, canSign: false, viewOnly: true })).toMatchObject({ kind: "closed", reason: expect.stringMatching(/view-only/) });
     expect(contractSigningState({ ...base, canSign: false, termEnded: true })).toMatchObject({ kind: "closed", reason: expect.stringMatching(/term has ended/) });
     expect(contractSigningState({ ...base, canSign: false, status: "declined" })).toMatchObject({ kind: "closed", reason: expect.stringMatching(/can't be signed here/) });
+  });
+});
+
+// ── PV5-11: certified signing through the simulated PSrE ─────────────────────────────────────────────────────────
+
+describe("isSimulatedSigningUrl", () => {
+  it.each([
+    ["/portal/simulated-psre/simenv_abc123", true],
+    ["/portal/simulated-psre/abc-DEF_9", true],
+    ["/portal/simulated-psre/", false],
+    ["/portal/simulated-psre", false],
+    ["/portal/simulated-psre/x/../../login", false],
+    ["/portal/simulated-psre/x?next=//evil.example", false],
+    ["/portal/simulated-psre/x#frag", false],
+    ["/portal/simulated-psre/x\\y", false],
+    ["//evil.example/portal/simulated-psre/x", false],
+    ["https://evil.example/portal/simulated-psre/x", false],
+    ["/portal/contracts/k1", false],
+    ["/simulated-psre/simenv_1", false],
+    ["javascript:alert(1)", false],
+    ["", false],
+    [null, false],
+    [undefined, false],
+    [42, false],
+  ])("isSimulatedSigningUrl(%s) = %s", (url, want) => expect(isSimulatedSigningUrl(url)).toBe(want));
+});
+
+describe("certified signing wording", () => {
+  const cs = { label: "Simulated PSrE (review stage)", simulated: true };
+  it("a signature row says 'through <label>' and '(simulated)' only when the backend says so", () => {
+    expect(signatureViaText("simulated_psre", cs)).toBe("through Simulated PSrE (review stage) (simulated)");
+    expect(signatureViaText("some_provider", { label: "Acme Sign", simulated: false })).toBe("through Acme Sign");
+    expect(signatureViaText("some_provider", null)).toBe("through a certified provider");
+    expect(signatureViaText(null, cs)).toBe("");
+    expect(signatureViaText(undefined, cs)).toBe("");
+  });
+
+  it("the signed-copy badge: 'Certified (simulated)', 'Certified', or nothing for an attested contract", () => {
+    expect(certifiedCopyLabel({ simulated: true })).toBe("Certified (simulated)");
+    expect(certifiedCopyLabel({ simulated: false })).toBe("Certified");
+    expect(certifiedCopyLabel(null)).toBeNull();
+    expect(certifiedCopyLabel(undefined)).toBeNull();
+  });
+});
+
+describe("contractSigningState · certified (PV5-11)", () => {
+  type K = Parameters<typeof contractSigningState>[0];
+  const certified = (over: Partial<NonNullable<PortalContractDetail["certifiedSigning"]>> = {}) => ({
+    provider: "simulated_psre", label: "Simulated PSrE (review stage)", simulated: true, available: true,
+    envelopeStarted: false, canStart: true, signingUrl: null, ...over,
+  });
+  const base: K = {
+    canSign: false, viewOnly: false, termEnded: false, status: "sent", signatures: [], document: null,
+    bodyMd: "## Scope\nThe work.", signatureTier: "certified", certifiedSigning: certified(),
+  };
+
+  it("🔴 offers 'Sign with <label>' when the backend says canStart, and never the typed form", () => {
+    expect(contractSigningState(base)).toEqual({ kind: "certified", label: "Simulated PSrE (review stage)", simulated: true });
+    // Even a (contradictory) canSign: true on a certified contract never turns into the typed form.
+    expect(contractSigningState({ ...base, canSign: true, certifiedSigning: certified({ canStart: false }) }).kind).toBe("closed");
+  });
+
+  it("never offers it above terms the client cannot read", () => {
+    const s = contractSigningState({ ...base, bodyMd: null, document: null });
+    expect(s).toMatchObject({ kind: "closed", reason: expect.stringMatching(/document needs to be attached/) });
+  });
+
+  it("a recorded client signature wins over every reason", () => {
+    const sig = { party: "client" as const, signerName: "Dana", signerTitle: null, signedAt: "2026-10-11T03:00:00Z", provider: "simulated_psre" };
+    expect(contractSigningState({ ...base, signatures: [sig], certifiedSigning: certified({ canStart: false }) }).kind).toBe("signed");
+  });
+
+  it("gives a clear reason for each way it cannot start", () => {
+    const closed = (over: Partial<K>, cs = {}) => contractSigningState({ ...base, ...over, certifiedSigning: certified({ canStart: false, ...cs }) });
+    expect(closed({ viewOnly: true })).toMatchObject({ kind: "closed", reason: expect.stringMatching(/view-only/) });
+    expect(closed({ termEnded: true })).toMatchObject({ reason: expect.stringMatching(/term has ended/) });
+    expect(closed({ status: "declined" })).toMatchObject({ reason: expect.stringMatching(/can't be signed here/) });
+    expect(closed({}, { available: false })).toMatchObject({ reason: expect.stringMatching(/provider isn't set up/) });
+    expect(closed({}, { envelopeStarted: true })).toMatchObject({ reason: expect.stringMatching(/already started at Simulated PSrE/) });
+    expect(closed({})).toMatchObject({ reason: expect.stringMatching(/right now/) });
+  });
+
+  it("an attested contract (no certifiedSigning) is unchanged", () => {
+    expect(contractSigningState({ ...base, certifiedSigning: null, canSign: true, signatureTier: "attested" })).toEqual({ kind: "sign" });
   });
 });

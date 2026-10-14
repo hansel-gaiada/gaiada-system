@@ -1,9 +1,10 @@
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
-import { DOCUMENT_KIND_LABEL, documentStateNote, type StaffDocumentItem } from "@/lib/documents";
+import { certifiedBadgeText, DOCUMENT_KIND_LABEL, documentStateNote, type StaffDocumentItem } from "@/lib/documents";
 import { formatDate } from "@/lib/format";
 import { ClientVisibilityMarker } from "../ClientVisibilityMarker";
 import { FileLink } from "./FileLink";
+import "@/components/signing/simulatedPsre.css";
 import "./billing.css";
 
 // PV5-08 — the hub's Documents section: this client's legal and money documents (signed agreements, issued-invoice
@@ -20,10 +21,14 @@ export function ClientDocuments({ items }: { items: StaffDocumentItem[] }) {
       <ul style={{ margin: 0, padding: 0 }}>
         {items.map((d) => {
           const note = documentStateNote(d);
+          const badge = certifiedBadgeText(d);
           return (
             <li key={`${d.kind}-${d.id}`} className="bl-payment" style={{ listStyle: "none" }}>
               <div className="bl-payment__head">
-                <p className="bl-payment__amount">{d.title}</p>
+                <p className="bl-payment__amount">
+                  {d.title}
+                  {badge && <> <span className="sp-cert-badge">{badge}</span></>}
+                </p>
                 <span className="bl-payment__meta">
                   {DOCUMENT_KIND_LABEL[d.kind]} · {formatDate(d.date)}
                   <ClientVisibilityMarker clientVisible={d.clientVisible} />
@@ -33,7 +38,8 @@ export function ClientDocuments({ items }: { items: StaffDocumentItem[] }) {
                 {d.fileId ? (
                   <FileLink fileId={d.fileId} label={d.ready ? `Download ${d.title}` : `Download the original of ${d.title} (not yet sealed)`} />
                 ) : null}
-                {d.fileId && note ? " · " : null}
+                {d.certificateFileId ? <>{d.fileId ? " · " : null}<FileLink fileId={d.certificateFileId} label={`Certificate of ${d.title}`} /></> : null}
+                {(d.fileId || d.certificateFileId) && note ? " · " : null}
                 {note}
               </p>
             </li>

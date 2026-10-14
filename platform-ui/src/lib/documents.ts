@@ -20,6 +20,13 @@ export interface DocumentItem {
   fileId: string | null;
   /** False while the document is being prepared (the sealed copy, an invoice PDF still rendering). */
   ready: boolean;
+  /** PV5-11: this is the CERTIFIED copy of a contract signed through a certified provider. Optional: an older server
+   *  omits it, and a missing field claims nothing (no badge). */
+  certified?: boolean;
+  /** PV5-11: the provider is the SIMULATED PSrE (review stage). The badge then reads "Certified (simulated)". */
+  simulated?: boolean;
+  /** PV5-11: the provider's certificate (a file), when one exists. */
+  certificateFileId?: string | null;
 }
 
 export interface StaffDocumentItem extends DocumentItem {
@@ -44,4 +51,10 @@ export function documentStateNote(d: Pick<DocumentItem, "kind" | "fileId" | "rea
 /** The label of the link: the sealed copy is the document; before it exists the link is the unsealed original. */
 export function documentLinkLabel(d: Pick<DocumentItem, "kind" | "ready">): string {
   return d.kind === "signed_contract" && !d.ready ? "Download the original (not yet sealed)" : "Download";
+}
+
+/** PV5-11: the badge on a certified document, or null for any other. Text, not colour alone. */
+export function certifiedBadgeText(d: Pick<DocumentItem, "certified" | "simulated">): string | null {
+  if (d.certified !== true) return null;
+  return d.simulated === true ? "Certified (simulated)" : "Certified";
 }

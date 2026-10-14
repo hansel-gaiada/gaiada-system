@@ -3,12 +3,13 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActivePortalCompany } from "@/lib/portal-company";
 import { listPortalDocuments } from "@/lib/portal-data";
-import { DOCUMENT_KIND_LABEL, documentLinkLabel, documentStateNote } from "@/lib/documents";
+import { certifiedBadgeText, DOCUMENT_KIND_LABEL, documentLinkLabel, documentStateNote } from "@/lib/documents";
 import { portalDate } from "@/lib/portal";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { PortalLive } from "@/components/portal/PortalLive";
 import { PortalPageHead } from "@/components/portal/PortalBits";
+import "@/components/signing/simulatedPsre.css";
 
 // PV5-08 — Documents: the legal and money documents between you and us, newest first. A signed agreement (the sealed
 // copy), each issued invoice's PDF, and the receipts for payments you reported. Deliverables are not here: they stay
@@ -44,15 +45,28 @@ export default async function PortalDocumentsPage() {
           <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 14 }}>
             {items.map((d) => {
               const note = documentStateNote(d);
+              const badge = certifiedBadgeText(d);
               return (
                 <li key={`${d.kind}-${d.id}`} style={{ display: "flex", gap: 16, alignItems: "baseline", flexWrap: "wrap" }}>
                   <div style={{ minWidth: 0, flex: "1 1 240px" }}>
-                    <div style={{ font: "500 14px/1.4 var(--font-body)", color: "var(--ink-strong)" }}>{d.title}</div>
+                    <div style={{ font: "500 14px/1.4 var(--font-body)", color: "var(--ink-strong)" }}>
+                      {d.title}
+                      {badge && <> <span className="sp-cert-badge">{badge}</span></>}
+                    </div>
                     <div style={{ font: "400 12px/1.5 var(--font-body)", color: "var(--ink-subtle)" }}>
                       {DOCUMENT_KIND_LABEL[d.kind]} · {portalDate(d.date)}
                       {note && <span role="status"> · {note}</span>}
                     </div>
                   </div>
+                  {d.certificateFileId && (
+                    <a
+                      href={`/api/${tenant}/portal/files/${d.certificateFileId}`}
+                      aria-label={`Certificate: ${d.title}`}
+                      style={{ font: "500 13px var(--font-body)", color: "var(--erp-accent)", textDecoration: "none" }}
+                    >
+                      Certificate →
+                    </a>
+                  )}
                   {d.fileId && (
                     <a
                       href={`/api/${tenant}/portal/files/${d.fileId}`}

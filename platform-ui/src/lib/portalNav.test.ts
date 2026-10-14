@@ -65,6 +65,8 @@ describe("activePortalNav", () => {
     ["/portal/website/gaiada/site-1/~media", "business", "/portal/website"],
     ["/portal/contracts", "billing", "/portal/contracts"],
     ["/portal/contracts/k1", "billing", "/portal/contracts"],
+    // PV5-11: the simulated PSrE signing page lights Contracts.
+    ["/portal/simulated-psre/simenv_1", "billing", "/portal/contracts"],
     ["/portal/invoices", "billing", "/portal/invoices"],
     ["/portal/invoices/i1", "billing", "/portal/invoices"],
     // PV5-08: Documents is a Contracts & billing sub-tab.

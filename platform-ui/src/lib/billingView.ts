@@ -59,7 +59,9 @@ export function maskAccountNo(accountNo: string | null | undefined): string {
 export type SignatureTier = "attested" | "certified";
 
 /** What the tier means, in words (PV-D8, PV-D25). `null` is a draft: the tier is chosen when the contract is sent. */
-export function tierLabel(tier: SignatureTier | null | undefined): string {
+export function tierLabel(tier: SignatureTier | null | undefined, simulated = false): string {
+  // PV5-11: a certified contract whose envelope is at the SIMULATED PSrE says so in the same breath (owner ruling PV-D43).
+  if (tier === "certified" && simulated) return "Certified (simulated: not a real PSrE signature)";
   if (tier === "certified") return "Certified (signed through a certified provider)";
   if (tier === "attested") return "Attested (typed name and agreement, sealed by our company)";
   return "Set when the contract is sent";
