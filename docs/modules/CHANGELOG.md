@@ -11,6 +11,13 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.138.0` and platform-ui `0.156.0` - no raw control bytes in source; two vacuous word-boundary assertions made real (2026-10-15) - PROTOTYPED
+
+- **Why.** dw4 found two raw NUL bytes in `rbac/principal.ts` since `f07b7893` (an edit through an escape-processing path turned the escape into bytes). Git then treats the file as binary, so `git diff` and `git log -p` hide changes to an auth file from review. A scan found ten source files with raw control bytes, all inside literals.
+- **Fixed, behaviour unchanged:** `principal.ts`, `core/org-unit-closure.ts`, `modules/reports/fact-job.ts`, `modules/search/providers/simulation.ts`, `components/prd/transcriptText.ts` and three tests now write those characters as `\xNN` escapes.
+- **Fixed, a real check restored:** `webdev-contracts/egress-inventory.test.ts` and `components/agency/AgencyLeadsQueue.test.tsx` held a raw BACKSPACE where a regex word boundary (`\b`) was meant, so each assertion matched a character that never occurs and could never fail. The word boundary is restored; both pass as real checks.
+- **Guard:** `platform-nest/src/source-control-bytes.test.ts` refuses any C0 control byte other than TAB, LF and CR (and DEL) in `.ts/.tsx/.js` under platform-nest, platform-ui and report-renderer. Proven to bite: red with `principal.ts` as it was.
+
 ### platform-nest `0.137.0` + platform-ui `0.155.0` - DW-6i: Google Drive, connect, pick and attach (2026-10-14) - PROTOTYPED
 
 Contract: `docs/FRONTEND-BFF-CONTRACT.md` §42 (with §42.8 "as built" for the backend and the UI). Plan §4.2. Google is STUBBED at `fetch` in every test; nothing here has met real Google. Live proof waits for the owner's Drive OAuth client and Picker keys (DW-11 item 6).
