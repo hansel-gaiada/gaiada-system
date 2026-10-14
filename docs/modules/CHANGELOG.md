@@ -11,6 +11,30 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.142.0` + platform-ui `0.162.0` - DW-6n: the delivery departments' KPI readers (2026-10-14) - PROTOTYPED
+
+Contract: `docs/FRONTEND-BFF-CONTRACT.md` §40.5 (with §40.5.8 as built). Rulings: DW-D25 moved these readers to DW-6; DW-D27 (owner, first-hand) set four definitions.
+- **What.** The twelve Web Dev, SEO, Social Media and Creatives KPIs that read "Not measured yet" now have readers over data the modules already write. Their values feed:
+  - the KPI page, the Overview and the department appraisal;
+  - the daily KPI watch, with no other change.
+- **The seam (shared with DW-7's §40.6):**
+  - a catalogue `module` KPI may name a `readerId`, and `dept-kpi-readers.ts` registers the readers (parity is checked both ways);
+  - a reader is pure over `{ tenantId, unitId, periodKind, start, end, asOf }`, where `asOf` is the earlier of the range's end and the caller's today (the watch passes its own);
+  - a unit's readers run concurrently;
+  - a reader that throws fails only its own KPI, as the new reason `read_failed` ("Couldn't be read right now").
+- **The readers**, scoped to the department's subtree and its clients (§33's rules), with tests on live Postgres:
+  - Web Dev: requests delivered by the date needed (the KPI is relabelled; its key `requests-within-sla` stays), and client site uptime (the monitoring module's own uptime SQL).
+  - SEO: clients with ranking growth; client reports delivered by the 5th of the next month; ad budgets on pace (monthly budget, 90 to 110% of the prorated budget); client retention.
+  - Social Media: posts published on schedule (15 minutes' grace); client approval turnaround; engagement growth (to date, against the same number of days before).
+  - Creatives: asset requests on time; revision rounds per asset (this approval cycle only); assets delivered (version groups approved in review).
+- **Module gate.** A reader over a module's tables (monitoring, search, social) runs only when the company has that module (`isModuleEnabled`). The database wall checks only the declared scopes, so without the gate a company that turned a module off would still read its old rows.
+- **Migration** `202610150400_dept_kpi_conditions_read_failed.sql`: the watch's reason CHECK gains `read_failed`. No Cerbos change. No compose change.
+- **UI:** the reason words, the Overview's reason allow-list, and the Web Dev label (registry, demo, e2e pin).
+- **Proof:**
+  - Per reader: `work-requests-on-time` (7), `creative-reviews` (7), `search` (11), `client-retention` (12), `social` (11) and `monitoring-uptime` (5), all `*.db.test.ts`.
+  - Seam: the engine test (live PG, with the watch storing `read_failed` silently), the parity test, and the gate test `delivery/index.test.ts`.
+  - The landing sha's runs are on the board.
+
 ### platform-nest `0.141.0` + platform-ui `0.161.0` - DW-7d: HR, Finance and IT in every company's org tree (2026-10-14) - PROTOTYPED
 
 Plan §4.3 (DW-7d), owner ruling DW-D6. Contract: the `GET/PUT /api/:t/org-structure` row of `docs/FRONTEND-BFF-CONTRACT.md` (DW-7d note). No migration, no Cerbos change, no compose change.
