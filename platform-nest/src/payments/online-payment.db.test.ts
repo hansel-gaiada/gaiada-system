@@ -254,11 +254,16 @@ describe.skipIf(!TEST_URL)("PV5-10 — online payment (simulated Midtrans)", () 
     it("refuses a balance that is not a whole number of rupiah, never rounding it (409 fractional_amount)", async () => {
       const inv = await issued(200_000);
       // Half a rupiah written off in the ledger (superuser: a state no portal path can produce, but the books can).
+      // Undone in `finally`: the half rupiah has no journal behind it, and the good-notice test reconciles the books.
       await adminPool().query(`UPDATE finance_ar_invoices SET amount_written_off = 0.5 WHERE id = $1`, [inv.arInvoiceId]);
-      const r = await checkout(inv.id);
-      expect(r.statusCode, r.body).toBe(409);
-      expect(r.json().reason).toBe("fractional_amount");
-      expect(fake.snapCreates().some((c) => (c.body as { transaction_details?: { gross_amount?: number } })?.transaction_details?.gross_amount === 199_999)).toBe(false);
+      try {
+        const r = await checkout(inv.id);
+        expect(r.statusCode, r.body).toBe(409);
+        expect(r.json().reason).toBe("fractional_amount");
+        expect(fake.snapCreates().some((c) => (c.body as { transaction_details?: { gross_amount?: number } })?.transaction_details?.gross_amount === 199_999)).toBe(false);
+      } finally {
+        await adminPool().query(`UPDATE finance_ar_invoices SET amount_written_off = 0 WHERE id = $1`, [inv.arInvoiceId]);
+      }
     });
 
     it("refuses while the whole balance is being verified, and while Finance has not set the clearing account", async () => {

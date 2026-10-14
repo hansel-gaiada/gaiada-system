@@ -170,10 +170,10 @@ test.describe("client portal", () => {
     // In DEMO_MODE the "hosted page" is the invoice's own return URL, so the round trip stays inside the app.
     await page.goto("/portal/invoices/inv-2026-014");
     await expect(page.getByRole("heading", { name: /^pay online/i })).toBeVisible();
-    await page.getByRole("button", { name: "Pay online" }).click();
+    await page.getByRole("button", { name: "Pay online", exact: true }).click();
     await page.waitForURL(/\/portal\/invoices\/inv-2026-014\?checkout=finished/);
     await expect(page.getByRole("status").filter({ hasText: /confirming your payment/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Pay online" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Pay online", exact: true })).toHaveCount(0);
   });
 
   test("a client records a payment and is told it is NOT yet settled @portal", async ({ page }) => {
