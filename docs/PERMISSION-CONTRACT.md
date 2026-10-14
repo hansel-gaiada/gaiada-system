@@ -2112,3 +2112,13 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §41 (plan `docs/plans/2026-10-13-depart
 **Bundles** (hand-edited to the generator's derivation; `totalPairs` 2038 -> 2045): `platform_admin` 449 -> 451, `company_admin` 412 -> 414, `owner` 412 -> 414, `org_unit_lead` 21 -> 22; every other role unchanged. A head's unit-scoped keys gain `appraisal_comment` (`principal-scope-constrained-perms.db.test.ts`). Neither key is `sensitive` or self-scoped.
 
 **Artifacts.** `resource_dept_kpi_target.yaml` (the `company_admin` rules for both actions, the head's own `appraisal_comment` rule, the `appraisal_assess` mirror), `derived_roles.yaml` (+`perm_dept_kpi_target_appraisal_assess`), `permission-catalog.json` (+2 keys: 464 -> 466 pairs, 449 -> 451 grantable, 108 kinds unchanged), `permission-groups.json` (the two keys join the `dept_kpi_targets` group: 449 -> 451 grantable, 410 -> 412 covered), `role-permission-bundles.json`, and migration `202610150100_iam_dept_appraisal_permissions.sql` (7 `role_permissions` rows: 3 x 2 + 1, with a DO-block self-assertion: `appraisal_assess` held only by `platform_admin`/`company_admin`/`owner`, `owner` == `company_admin` over the whole kind, 25 `dept_kpi_target` rows on global roles). Pinned literals moved: `cerbos-catalog-alignment` 464 -> 466 (kinds stay 108), `permission-groups-catalog-parity` 449 -> 451, `ui-grantable-catalog` 464/449 -> 466/451 (`iam-215-boundary-pin` unchanged: no new kind). Proof: `src/rbac/cerbos-dept-kpi-target.test.ts` (role x action matrix extended to six actions; static pin always, live matrix needs `CERBOS_URL`). **Restart `gaiada-test-cerbos` and the live sidecar after deploying the policy files** (nothing hot-reloads).
+
+## 38b. DW-4j — the head's KPI alerts and the scheduled run, BFF §43 (2026-10-15, PLANNED): no new kind, no new action
+
+- **Acknowledging an off-track alert** (`POST /dept-kpis/alerts/:id/acknowledge`) is a write. Its gate:
+  - Cerbos `dept_kpi_target` · `read` with the unit's ancestry;
+  - then a narrowing in the handler: the caller heads the alert's unit (holds `org_unit_lead` scoped to that node) or is in the company-wide tier.
+
+  It records only that the alert was seen. It changes no target, no condition and no score, so it needs no write action of its own.
+- **The scheduled run and the digest** (`POST /dept-kpis/watch` and `/digest`) reuse `report_admin` · `recompute` (company_admin, platform_admin), the gate of `POST /reports/facts/recompute`. The n8n automation account `wf:reports-kpi-watch` holds company_admin, like the other reports flows.
+- **The drivers read** (`GET /dept-kpis/drivers`, 4j-3) uses the unit read's gate, narrowed to heads and the company-wide tier. Placed staff get 403.

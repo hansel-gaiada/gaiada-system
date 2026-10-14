@@ -7636,7 +7636,7 @@ Files: `dept-kpis.ts` (catalogue, slug resolution, condition rules; pure), `dept
 - The UI: the targets screen and the KPI tiles (4e-2, with DW-3k and DW-3i).
 - Module readers for the other KPIs (one ticket each, owned by the module's tracker).
 - The department appraisal per cycle: HOD commentary and GM assessment (4e-3, its own section).
-- Condition snapshots, change notifications and the weekly digest (DW-4j).
+- Condition snapshots, change notifications and the weekly digest (DW-4j, §43).
 
 **Proof (live Postgres + Cerbos on the CI gate):**
 - the catalogue/registry parity and the slug golden table;
@@ -7709,3 +7709,129 @@ Files: `dept-appraisals.ts` (the reads, the writes and the pure helpers), `dept-
 - **Table.** `dept_appraisals` has a surrogate `id` (for the activity log) beside the natural key; each half is all-or-nothing (text, author and time, or none: CHECK), `gm_assessment` and `gm_condition` come together, `gm_condition` is `on_track | at_risk | off_track` (never `unavailable`, which is the engine's).
 - **UI.** `/appraisals/department?unit=&cycle=`: the picker reads `GET /dept-appraisals/cycles` through an honest reader (ok / forbidden / error). A refusal is said as a refusal and a failed read as a failure, never shown as an empty picker; "no cycles yet" is said only when the read was allowed and empty. The forms mirror the capabilities `reports.dept_kpi_target.appraisal_comment` (`canInUnit` over the unit's path, or company-wide `can`) and `.appraisal_assess` (`can`), and appear only while the cycle is not closed. The demo (`demoDeptAppraisals.ts`) serves the cycles list with the same gate, `demo-cycle-h2` (open) and `demo-cycle-h1` (closed, with a written commentary and assessment).
 - **Not changed.** The capability inventory (`docs/modules/CAPABILITY-INVENTORY.md`) is unchanged: no MCP tool is registered, and the new HTTP suite names no registered route family in its URLs, so the generator's driver count stays as committed.
+
+## 43. The head is made aware: condition changes, off-track alerts and the weekly digest (DW-4j, 2026-10-15) — `platform-nest/src/modules/reports/dept-kpi-watch*.ts` — **STATUS: PLANNED (contract first)**
+
+**Why.** Plan §5.5, "How the HOD is made aware", items 2 and 3, and the 4j row of §5.6. The §40 engine computes a condition on read and remembers nothing, so nothing can say "it changed". This section adds:
+- the memory (the last condition seen);
+- the scheduled run that n8n drives (reporting blueprint §10: n8n schedules, the platform exposes an endpoint, and platform-nest gains no timer);
+- the Inbox notification;
+- the Needs-you item;
+- the weekly digest.
+
+It ships in three tickets:
+- **4j-1**, backend: §43.1 to §43.6;
+- **4j-2**, the UI: §43.7;
+- **4j-3**, the digest and the "behind the miss" read: §43.8.
+
+### 43.1 Who is told: the department's heads
+- A department's heads are the users who hold `org_unit_lead` scoped to that department's node **exactly**: a `user_roles` row with `scope_type = 'org_unit'` and `scope_id` equal to the node id.
+  - The row comes either from the position reconciler (a lead seat's `own_unit` role) or from a direct grant. It is the same authority that Cerbos and `loadLedUnitScope` use.
+  - Not told: the leads of enclosing units (the GM reads the company Overview), a `manager` placed in the unit, and a `positions.is_lead` seat that carries no grant.
+- One function computes this: `loadUnitLeadUserIds(tenantId, unitNodeId)`. A DB test pins it against the forward direction: every user it returns has the unit in their `loadLedUnitScope`.
+- `notify()` already skips a recipient who is no longer an active member of the company. A department with no head is told nothing, and the run lists it in `unitsWithoutHead`.
+
+### 43.2 What is evaluated
+- **The period** is the current calendar month to date in `REPORTS_TZ`. That is the default of the KPI page and of the Overview.
+- **The engine** is `evaluateUnits` over every `department` node, exactly as `GET /dept-kpis/overview` computes it. So a notification always agrees with what the head sees when they open the page. The GM workspace's unit is evaluated like any other.
+
+### 43.3 The memory: `dept_kpi_conditions`
+- **Columns:** `tenant_id, unit_node_id, kpi_key, period_start, condition, reason, value, target, evaluated_at, changed_at, origin_site`.
+- **`kpi_key`** is the KPI's key, or `'*'` for the department's own condition. It is never NULL, because NULL defeats the unique key.
+- **Unique** on (tenant, unit, kpi_key). There is one row per (unit, KPI), holding the last state seen. It is not a history; the history is recomputed on read, as §41 does.
+- **RLS** with the tenant and the `reports` module wall, like `dept_kpi_targets`. `origin_site` has no default.
+
+### 43.4 The change rule
+The rule is pure: `classifyChange(previous, next)` returns `tell` or `store`. It applies to each KPI and to the department.
+- **No previous row** (the first run, a new KPI, a new department): store, and tell nothing. A deploy never floods the Inbox.
+- **Tell** when the new condition is real (`on_track`, `at_risk` or `off_track`) and either:
+  - the previous one was a different real condition, in either direction (worse, or back); or
+  - the previous one was `unavailable` and the new one is `at_risk` or `off_track`.
+- **Store silently** in every other case:
+  - no change;
+  - anything to `unavailable` (a new month with no data yet, a target withdrawn, a failed reader);
+  - `unavailable` to `on_track`.
+- **A new month is not a change in itself.** The comparison is condition to condition:
+  - if the condition is the same across the month boundary, nothing is told;
+  - if the new month starts `unavailable` (no data yet) and then turns at risk or off track, that is told, because it is the month's first real reading.
+
+**One notification per unit per run**, sent only when the unit has something to tell:
+- `type: "dept_kpi.condition_changed"`.
+- `title`: the department's condition now, e.g. "Web Dev: off track".
+- `body`: one line per change told, e.g. "Projects on time: at risk → off track (71% against 85%)", plus the department line when the department changed.
+- `href`: `/appraisals/department?unit=<id>`.
+- `severity`: `critical` if the department or any KPI told is now off track; `warning` if at risk; `info` when every change told is an improvement.
+- No `entityType`, so the Inbox opens no thread panel. No person is named, and the numbers are department-level ones the head already reads on the KPI page (blueprint §11).
+
+**Once, under retries:**
+- The run evaluates first (read-only).
+- It then decides and writes in one transaction under a per-tenant transaction advisory lock, and notifies after the commit.
+- So a retried or doubled run tells each change once. This covers n8n's retries and the bridge's redelivery.
+- A crash between the commit and the notification loses that notification rather than doubling it, and it is logged.
+
+### 43.5 Off-track alerts: the Needs-you item
+- **Table `dept_kpi_alerts`:** `id, tenant_id, unit_node_id, kpi_key, opened_at, period_start, value, target, acknowledged_by, acknowledged_at, ack_note, resolved_at, resolved_condition, origin_site`.
+  - There is one open alert per (unit, KPI), enforced by a partial unique index `WHERE resolved_at IS NULL`.
+  - RLS and the module wall are as in §43.3. An alert is never deleted.
+- **Opened** by the run when a KPI is `off_track` and has no open alert. An alert is a state, not a change, so the first run opens alerts for KPIs that are already off track; it does not notify.
+- **Resolved** by the run when the KPI is no longer `off_track`. Any other condition counts, `unavailable` included, and `resolved_condition` records which.
+- **Acknowledged** by a head: `POST /api/:t/dept-kpis/alerts/:id/acknowledge {note?}`, where `note` is up to 1000 characters.
+  - It records who and when. The alert leaves Needs you but stays open until the run resolves it.
+  - Acknowledging twice → 409 `already_acknowledged`. A resolved alert → 409 `resolved`. An unknown id → 404.
+- **Read:** `GET /api/:t/dept-kpis/alerts`.
+  - **Without `unitNodeId`:** the open, unacknowledged alerts of the units the caller heads (§43.1's rule, applied to the caller). This is the Needs-you source. A caller who heads no unit gets 200 `{alerts: []}`, and that is true: they have none.
+  - **With `unitNodeId`:** the unit read's gate (§40.3a). Every alert of that unit (open, acknowledged, resolved), newest first, up to 100.
+  - **A row:** `{id, unit: {id, name}, kpiKey, kpiLabel, kpiUnit, periodStart, openedAt, value, target, acknowledgedBy, acknowledgedByName, acknowledgedAt, ackNote, resolvedAt, resolvedCondition}`.
+- **Who may acknowledge:** a head of the alert's unit (§43.1) or the company-wide tier. The check order is Cerbos `read` with the unit's ancestry, then that narrowing, else 403. No new Cerbos kind or action (PERMISSION-CONTRACT §38b).
+
+### 43.6 The scheduled run
+- **Endpoint:** `POST /api/:t/dept-kpis/watch` → 200 `{period: {start, end}, evaluatedUnits, told: [{unitNodeId, recipients, changes}], alertsOpened, alertsResolved, unitsWithoutHead}`.
+  - Gate: Cerbos `report_admin` · `recompute`, the action `POST /reports/facts/recompute` uses (company_admin and platform_admin). It sits behind the reports module guard. No new Cerbos kind or action.
+  - Two runs in a row: the second tells nothing.
+- **Flow:** `automation/workflows/reports-kpi-watch.json`, daily at 06:30, after `reports-nightly-facts` at 02:00.
+  - It follows the shape of every reports flow: one tenant through `$env.AGENCY_TENANT_ID`; the service token with OBO `wf:reports-kpi-watch`; retry 3; an error branch to the hub `notify`.
+  - It needs a new automation account in `seed/automation.ts` (company_admin, like the other reports accounts) and the hub allowlist entry `["notify"]` in `mcp-hub/src/automation-policy.ts`, with its pinned test.
+  - Importing the flow on the server is a server step. A CLI import deactivates the flow, so it must be activated after the import.
+- **No mail.** The new types stay out of `MAIL_NOTIFICATION_TYPES`; the plan asks for the Inbox.
+
+### 43.7 The UI (4j-2)
+- **Needs you** gains the source `GET dept-kpis/alerts` (open, not acknowledged).
+  - It is a new queue item type `alert`, labelled "KPI off track", with the approval tier's rank.
+  - It is decidable by the head with one action, **Acknowledge**, with an optional note. Its href is the unit's KPI page.
+  - A failed read goes to `partialSources` and is never shown as an empty claim.
+  - The exhaustive label maps (`NeedsMeQueue.tsx` and the department decisions page) gain the type.
+- **The KPI page** shows a KPI's open alert ("Off track since 3 Oct · acknowledged by Ayu") and the unit's alert history.
+- **The Inbox** needs no change: it renders title, body, href and severity.
+
+### 43.8 The weekly digest and "behind the miss" (4j-3)
+- **Endpoint:** `POST /api/:t/dept-kpis/digest {weekStart?}`, with the same gate as the run. The default is the last complete ISO week in `REPORTS_TZ`.
+- **One Inbox row per head** of each department, `type: "dept_kpi.weekly_digest"`:
+  - `title`: e.g. "Web Dev this week: at risk";
+  - `body`: one line per KPI that has a condition, giving the week's value against its target and its condition, plus the change from the week before, with "no data" said as such. The KPIs with no reader are summed up in one line ("4 KPIs not measured yet");
+  - `href`: the KPI page with that week as its period.
+- **Ledger** `dept_kpi_digests (tenant_id, unit_node_id, week_start, sent_at, recipients)`, unique on (tenant, unit, week_start). A retried run never sends twice.
+- **The top contributors to a miss stay on the page, not in the Inbox row.** A notification links and never carries person-grain data (blueprint §11, and the weekly-seal flow's precedent).
+  - The KPI page gains "Behind the miss" for each KPI that is at risk or off track, visible to the unit's heads and the company-wide tiers only.
+  - Read: `GET /api/:t/dept-kpis/drivers?unitNodeId=&kpiKey=&periodKind&start` → `{kpi, drivers: [{kind: "project" | "person", id, name, value, numerator?, denominator?}]}`, at most 5, worst first.
+  - Projects on time lists the projects with missed milestones, because the metric has no person grain. Reopened work, overdue tasks and check-in compliance list people, from the person-grain rows the Team report already shows the head (§37).
+  - A unit's staff get 403: they never see a ranking.
+- **Schedule:** a second trigger in the same flow, Mondays at 07:00.
+
+### 43.9 Not in DW-4j
+- Iterating tenants. The reports flows are single-tenant today; a tenant list for n8n is a reports-wide ticket.
+- "Trending to miss" (§40.3: it needs a projection rule).
+- Mail.
+- Telling the GM. The company Overview's departments block is the GM's view.
+
+**Proof (live Postgres + Cerbos on the CI gate):**
+- `classifyChange`: every pair of the four conditions, plus "no previous";
+- a first run stores and tells nothing, and opens alerts for KPIs already off track;
+- an approved target that puts a KPI off track: one notification to the head and one alert; the same run again tells nothing;
+- the KPI back within tolerance: "back" is told and the alert is resolved;
+- a new month with no data is silent;
+- two concurrent runs tell once;
+- the recipients are exact-node `org_unit_lead` holders only (not an enclosing head, not a placed manager), and a unit with no head is reported;
+- no notification payload carries a person's name;
+- the alerts read: a head gets their own units only;
+- acknowledging: a head 200, another unit's head 403, twice 409, a resolved alert 409;
+- `watch` by a non-admin is 403.
