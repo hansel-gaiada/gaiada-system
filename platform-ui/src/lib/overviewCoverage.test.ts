@@ -45,6 +45,15 @@ const moduleOnly = (g: Gate | undefined): boolean => g === undefined || g.kind =
 const pageFile = (href: string): string =>
   resolve(APP, `.${href.split(/[?#]/)[0].replaceAll("{dept}", "[deptId]").replaceAll("{company}", "[companyId]")}`, "page.tsx");
 
+// DW-7a/7b: three tabs a card's verdict names are gated on what their own page reads, so a person who lacks it is offered
+// neither the tab nor the card (the card was a link to a page that only refuses them). Pinned exactly, so no other tab
+// slips past "no stricter gate than the module".
+const READ_GATED: Record<string, Gate> = {
+  "/hr/people": { kind: "any", gates: [{ kind: "cap", cap: "people.directory" }, { kind: "elevated" }] },
+  "/hr/onboarding": { kind: "cap", cap: "hr.view" },
+  "/finance/receivables": { kind: "cap", cap: "finance.ar.view" },
+};
+
 const PAGES = [...new Set(COVERAGE.map((e) => e.page))] as LegacyPage[];
 const entriesOf = (page: LegacyPage): CoverageEntry[] => COVERAGE.filter((e) => e.page === page);
 
@@ -75,7 +84,7 @@ describe("the coverage inventory (plan §3.8)", () => {
     }
   });
 
-  it("every tab a verdict names exists in each workspace the page renders for, behind no stricter gate than the module, and its page is served", () => {
+  it("every tab a verdict names exists in each workspace the page renders for, behind no stricter gate than the module (bar the three tabs gated on their page's own read), and its page is served", () => {
     for (const e of COVERAGE.filter((x) => x.hrefs)) {
       for (const href of e.hrefs!) {
         expect(existsSync(pageFile(href)), `${e.page}/${e.section}: no page file for ${href}`).toBe(true);
@@ -83,7 +92,8 @@ describe("the coverage inventory (plan §3.8)", () => {
           const tab = tabsOf(ws).find((t) => t.href === href);
           expect(tab, `${e.page}/${e.section}: ${href} in ${ws.key}`).toBeDefined();
           expect(tab!.ticket, `${href} in ${ws.key}`).toBeUndefined();
-          expect(moduleOnly(tab!.gate), `${href} tab gate in ${ws.key}`).toBe(true);
+          if (href in READ_GATED) expect(tab!.gate, `${href} tab gate in ${ws.key}`).toEqual(READ_GATED[href]);
+          else expect(moduleOnly(tab!.gate), `${href} tab gate in ${ws.key}`).toBe(true);
           expect(moduleOnly(rowGateOf(ws, tab!)), `${href} row gate in ${ws.key}`).toBe(true);
         }
       }
