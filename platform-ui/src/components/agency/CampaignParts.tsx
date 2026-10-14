@@ -19,6 +19,8 @@ import { formatDate } from "@/lib/format";
 import type { ReadResult } from "@/lib/readResult";
 import type { FigmaLinks } from "@/lib/figma";
 import { Designs } from "@/components/figma/Designs";
+import type { FileMeta } from "@/lib/entities";
+import { FilesPanel } from "@/components/FilesPanel";
 import "@/components/forms/forms.css";
 import "./campaigns.css";
 
@@ -30,6 +32,8 @@ export interface PartCard {
   figma?: ReadResult<FigmaLinks>;
   /** Where a manager connects Figma, when it is known not to be connected. */
   figmaConnectionsHref?: string | null;
+  /** DW-8h (§45.4): the part's files, read by the page. Absent: no Files control is drawn. */
+  files?: ReadResult<FileMeta[]>;
 }
 
 export interface CampaignPartsProps {
@@ -172,6 +176,8 @@ function PartCardView({
         </div>
       )}
 
+      {card.files && <PartFiles partId={part.id} campaignId={campaignId} canEdit={canEdit || canManage} result={card.files} />}
+
       {mode === "edit" && (
         <form className="cmp-form" onSubmit={saveWork} aria-label={`Edit the ${unitText} part`}>
           <div className="cmp-form__row">
@@ -235,6 +241,25 @@ function PartCardView({
       )}
       {mode === "view" && error && <p className="cmp-error" role="alert">{error}</p>}
     </article>
+  );
+}
+
+// ── a part's files (DW-8h) ───────────────────────────────────────────────────────────────────────
+// A quiet "Files (n)" control; the list opens in place. The count is the page's read: when the read did not return files,
+// the control says "Files" and the panel says why.
+
+function PartFiles({ partId, campaignId, canEdit, result }: { partId: string; campaignId: string; canEdit: boolean; result: ReadResult<FileMeta[]> }) {
+  const [open, setOpen] = useState(false);
+  const label = result.kind === "ok" ? `Files (${result.data.length})` : "Files";
+  return (
+    <div className="cmp-links__group">
+      <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" style={{ alignSelf: "flex-start" }} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        {label}
+      </button>
+      {open && (
+        <FilesPanel entityType="agency_campaign_part" entityId={partId} revalidate={`/agency/${campaignId}`} canEdit={canEdit} result={result} />
+      )}
+    </div>
   );
 }
 

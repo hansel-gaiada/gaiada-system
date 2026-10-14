@@ -13,6 +13,8 @@ import { canInUnit, can, leadUnits, unitPathOf } from "@/lib/rbac";
 import { formatDateTime } from "@/lib/format";
 import { readLibraryAssets, readRequestDetail, readTaskAssigneeIds } from "@/lib/requests-data";
 import { readFigmaLinks } from "@/lib/figma-data";
+import { readFiles } from "@/lib/entities";
+import { FilesPanel } from "@/components/FilesPanel";
 import { connectionsHrefFor } from "@/lib/figma";
 import { Designs } from "@/components/figma/Designs";
 import { readOrgRoot } from "@/lib/campaigns-data";
@@ -79,6 +81,9 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
   const figma = await readFigmaLinks(userId, tenant, "work_request", req.id);
   const figmaConnectionsHref = connectionsHrefFor(can(me, "company.manage", tenant), req.toUnit.id, figma);
 
+  // DW-8h (§45.4): the request's files, from an honest read. Everyone who can read the request sees them; the server decides who adds.
+  const files = await readFiles(userId, tenant, "work_request", req.id);
+
   // The page.
   const link = workLink(req, req.work);
   const lines = formSummary(req.kind, req.form);
@@ -139,6 +144,10 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
 
         <Card title="Designs" hint="Figma files and frames for this request. An export lands in the Asset Library, ready to deliver.">
           <Designs targetKind="work_request" targetId={req.id} result={figma} now={Date.now()} connectionsHref={figmaConnectionsHref} />
+        </Card>
+
+        <Card title="Files" hint="Briefs, specs and other files for this request. The people on the request can add files.">
+          <FilesPanel entityType="work_request" entityId={req.id} revalidate={`/requests/${req.id}`} result={files} />
         </Card>
 
         {req.kind === "assets" && (

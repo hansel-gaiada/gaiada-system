@@ -11,6 +11,8 @@ import { readCampaignDetail, readClientNames, readOrgRoot, readPersonChoices } f
 import { canEditPart, leadText, moneyView } from "@/lib/campaigns";
 import { formatDate } from "@/lib/format";
 import { readFigmaLinks } from "@/lib/figma-data";
+import { readFiles } from "@/lib/entities";
+import { FilesPanel } from "@/components/FilesPanel";
 import { connectionsHrefFor } from "@/lib/figma";
 import { PageHeader } from "@/components/PageHeader";
 import { DescriptionList } from "@/components/DescriptionList";
@@ -106,9 +108,17 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
   const figmaByPart = await Promise.all(campaign.parts.map((part) => readFigmaLinks(userId, tenant, "campaign_part", part.id)));
   const figmaNow = Date.now();
 
+  // DW-8h (§45.4): the campaign's own files, and each part's files (one read per part: a campaign holds one part per department,
+  // so a handful). The part reads give the "Files (n)" count; a part's list opens in place on request.
+  const [campaignFiles, filesByPart] = await Promise.all([
+    readFiles(userId, tenant, "agency_campaign", campaign.id),
+    Promise.all(campaign.parts.map((part) => readFiles(userId, tenant, "agency_campaign_part", part.id))),
+  ]);
+
   const partCards = campaign.parts.map((part, i) => ({
     part,
     figma: figmaByPart[i],
+    files: filesByPart[i],
     figmaConnectionsHref: connectionsHrefFor(can(me, "company.manage", tenant), part.unitId, figmaByPart[i]),
     canEdit: canEditPart({
       canManage,
@@ -170,6 +180,10 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
             linkAccess={campaign.linkAccess}
             now={figmaNow}
           />
+        </Card>
+
+        <Card title="Files" hint="Briefs, specs and other files for the whole campaign. A department's own files sit on its part above.">
+          <FilesPanel entityType="agency_campaign" entityId={campaign.id} revalidate={`/agency/${campaign.id}`} result={campaignFiles} />
         </Card>
 
         <Card title="Briefs">
