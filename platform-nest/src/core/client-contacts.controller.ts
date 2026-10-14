@@ -92,6 +92,21 @@ const SELECT_CONTACT = `
  *  (granted through the dedicated client-scope path). Anyone holding any OTHER role is not a portal-only identity. */
 const CLIENT_CONTACT_ROLES = ["client", CLIENT_WEBSITE_EDITOR_ROLE];
 
+/** True when this platform user is, or ever was, STAFF or holds anything beyond a client contact's access: any
+ *  `company_memberships` row ever (every status, deleted rows included, so ex-staff are covered) or any role grant
+ *  other than the client-contact roles. Must run on a `withPrincipalLookup` connection: `company_memberships` is
+ *  FORCE RLS, and without the GUC it reads zero rows and calls everyone portal-only. `user_roles` has no RLS. */
+async function holdsStaffIdentity(c: PoolClient, userId: string): Promise<boolean> {
+  const m = await c.query(`SELECT 1 FROM company_memberships WHERE user_id = $1 LIMIT 1`, [userId]);
+  if (m.rowCount) return true;
+  const r = await c.query(
+    `SELECT 1 FROM user_roles ur JOIN roles ro ON ro.id = ur.role_id
+      WHERE ur.user_id = $1 AND NOT (ro.company_id IS NULL AND ro.name = ANY($2::text[])) LIMIT 1`,
+    [userId, CLIENT_CONTACT_ROLES],
+  );
+  return !!r.rowCount;
+}
+
 /** Run `fn` in its own transaction with `app.principal_user_id` set (transaction-local) to `userId`, so the
  *  `principal_lookup` policies (company_memberships 0001/0004, client_contacts 0072 §7b) admit exactly that one
  *  user's rows across ALL tenants. `client_contacts` and `company_memberships` are FORCE RLS: a bare `withGlobal`
@@ -381,63 +396,56 @@ export class ClientInviteAcceptController {
     // link a first login to this pre-existing users row unless the IdP says the address is verified.
     // Consuming a token delivered to that address is what makes the flag honest.
     //
+    // ⚠ ACCOUNT TAKEOVER, closed here (2026-10-13). A token proves control of an INVITATION, never of an
+    // ACCOUNT or of the mailbox. The invite route lets any company manager invite ANY email (`users` are
+    // global, and most staff rows have no Keycloak account yet) and even re-invite an ACTIVE contact, and the
+    // raw token is handed back to that same manager (there is no email transport). Two ways in existed:
+    //   a. the platform user is STAFF with no Keycloak account: accepting CREATED one (verified email, chosen
+    //      password), and the first login then linked it to the staff row with all its memberships and roles;
+    //   b. a Keycloak account already existed: accepting ADOPTED it (enable + set the body's password).
+    // So the identity is decided FIRST, before anything touches Keycloak:
+    //   - STAFF (`holdsStaffIdentity`: any `company_memberships` row ever, deleted rows included, or any role
+    //     beyond the client-contact roles): Keycloak is never created, enabled or given a password by an invite.
+    //     Staff logins are IT's job. The contact is still activated (it gives the inviter nothing).
+    //   - PORTAL-ONLY, no Keycloak user: created with the chosen password (the new client's own first login).
+    //   - PORTAL-ONLY, Keycloak user exists: NEVER a password; re-enabled only when they hold no other ACTIVE
+    //     contact (a revoke disables the login, and the inviter learns no credential from re-enabling it).
+    // All reads run under `principal_lookup` (`company_memberships` is FORCE RLS: a bare `withGlobal` would see
+    // zero rows and call every staff member portal-only, the same trap as revoke).
+    //
     // `accountPath` records which branch ran (it goes into the activation event; NEVER a password):
-    //   created             no Keycloak user existed: made one with the chosen password
-    //   existing_kept       a Keycloak user existed: left exactly as it was
-    //   existing_reenabled  a Keycloak user existed for a portal-only identity: re-enabled, nothing else
-    let kcUserId: string;
-    let accountPath: "created" | "existing_kept" | "existing_reenabled" = "created";
-    try {
-      kcUserId = await kcCreateUser({ email: invite.email, password });
-    } catch (e) {
-      if (e instanceof KeycloakUserExistsError) {
+    //   created                no Keycloak user existed: made one with the chosen password
+    //   existing_kept          a Keycloak user existed: left exactly as it was
+    //   existing_reenabled     a Keycloak user existed for a portal-only identity: re-enabled, nothing else
+    //   staff_not_provisioned  a staff identity with no Keycloak user: none created
+    const access = await withPrincipalLookup(cc.user_id, async (c) => ({
+      staff: await holdsStaffIdentity(c, cc.user_id),
+      // Another ACTIVE contact elsewhere means a Keycloak account of theirs is in live use: leave it alone too.
+      otherActiveContact: !!(
+        await c.query(
+          `SELECT 1 FROM client_contacts WHERE user_id = $1 AND id <> $2 AND status = 'active' AND deleted_at IS NULL LIMIT 1`,
+          [cc.user_id, cc.id],
+        )
+      ).rowCount,
+    }));
+    let accountPath: "created" | "existing_kept" | "existing_reenabled" | "staff_not_provisioned" = "created";
+    if (access.staff) {
+      accountPath = (await kcFindUserByEmail(invite.email)) ? "existing_kept" : "staff_not_provisioned";
+    } else {
+      try {
+        await kcCreateUser({ email: invite.email, password });
+      } catch (e) {
+        if (!(e instanceof KeycloakUserExistsError)) throw e;
         const existing = await kcFindUserByEmail(invite.email);
         if (!existing) throw e;
-        kcUserId = existing.id;
-        // ⚠ ACCOUNT TAKEOVER, closed here (2026-10-13). This branch used to ADOPT unconditionally:
-        // `kcEnableUser` + `kcSetPassword(<the password from THIS request>)`. But the invite route lets any
-        // company manager invite ANY email (`users` are global) and even re-invite an ACTIVE contact, and the
-        // raw token is handed back to that same manager (there is no email transport). So a manager could invite
-        // e.g. the platform admin's address, accept the token themselves with a password of their choosing and
-        // sign in as that person. Holding the token proves control of an INVITATION, never of the ACCOUNT.
-        //
-        // The rule for an EXISTING Keycloak user:
-        //   1. NEVER set a password, in any branch. The password in the body is ignored for every existing
-        //      account (a person who forgot theirs asks the company contact to reset it).
-        //   2. Re-enable ONLY a portal-only identity: no `company_memberships` row EVER (any status, deleted rows
-        //      included, so ex-staff are covered) and no role grant beyond the client-contact roles. That lets a
-        //      client whose every earlier engagement was revoked (which disabled their login) use this new
-        //      invite, and gives the inviter nothing, because they do not know the password. Staff, ex-staff
-        //      and global-role holders are NEVER re-enabled by an invite: IT decides that.
-        //      Also not re-enabled: anyone with another ACTIVE contact (that account is in live use already).
-        //   3. Anything else: Keycloak is not touched at all.
-        // Both reads run under `principal_lookup` (`company_memberships` is FORCE RLS: a bare `withGlobal` would
-        // see zero rows and call every staff member portal-only, the same trap as revoke). `user_roles` has no
-        // RLS; it is read on the same connection.
-        const portalOnly = await withPrincipalLookup(cc.user_id, async (c) => {
-          const m = await c.query(`SELECT 1 FROM company_memberships WHERE user_id = $1 LIMIT 1`, [cc.user_id]);
-          if (m.rowCount) return false;
-          // Another ACTIVE contact elsewhere means the account is in live use (and enabled): leave it alone too.
-          const o = await c.query(
-            `SELECT 1 FROM client_contacts WHERE user_id = $1 AND id <> $2 AND status = 'active' AND deleted_at IS NULL LIMIT 1`,
-            [cc.user_id, cc.id],
-          );
-          if (o.rowCount) return false;
-          const r = await c.query(
-            `SELECT 1 FROM user_roles ur JOIN roles ro ON ro.id = ur.role_id
-              WHERE ur.user_id = $1 AND NOT (ro.company_id IS NULL AND ro.name = ANY($2::text[])) LIMIT 1`,
-            [cc.user_id, CLIENT_CONTACT_ROLES],
-          );
-          return !r.rowCount;
-        });
-        if (portalOnly) {
-          accountPath = "existing_reenabled";
-          await kcEnableUser(kcUserId);
-        } else {
+        // NEVER `kcSetPassword` here: the body's password is ignored for every existing account (a person who
+        // forgot theirs asks the project manager to reset it).
+        if (access.otherActiveContact) {
           accountPath = "existing_kept";
+        } else {
+          accountPath = "existing_reenabled";
+          await kcEnableUser(existing.id);
         }
-      } else {
-        throw e;
       }
     }
 

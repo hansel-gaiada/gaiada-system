@@ -544,13 +544,15 @@ describe.skipIf(!TEST_URL)("client-contacts HTTP surface (W0-4)", () => {
     }
 
     beforeAll(() => {
-      // Every email "already exists" in Keycloak except the one test that wants a brand-new user.
+      // Every email "already exists" in Keycloak except these: there createUser WOULD succeed, so a handler that
+      // wrongly creates an account is caught by `calls.create`.
+      const noKeycloakAccount = new Set(["brand-new-contact@cc.test", "staff-unprovisioned@cc.test"]);
       kc.create = async (input) => {
         calls.create.push([input.email, input.password]);
-        if (input.email === "brand-new-contact@cc.test") return "kc-brand-new";
+        if (noKeycloakAccount.has(input.email)) return `kc-new-${input.email}`;
         throw new KeycloakUserExistsError(input.email);
       };
-      kc.find = async (email) => ({ id: `kc-${email}` });
+      kc.find = async (email) => (noKeycloakAccount.has(email) ? null : { id: `kc-${email}` });
       kc.enable = async (id) => { calls.enable.push(id); };
       kc.setPassword = async (id, password) => { calls.setPassword.push([id, password]); };
     });
@@ -570,6 +572,24 @@ describe.skipIf(!TEST_URL)("client-contacts HTTP surface (W0-4)", () => {
       // `member@cc.test` is an active member of `co`; a manager of the same company invites that address.
       const { contactId, accept } = await inviteAndAccept("member@cc.test");
       await expectUntouched(contactId, accept);
+    });
+
+    it("STAFF with NO Keycloak account yet: none is created, no password set, contact still activated", async () => {
+      // The takeover on the CREATE path: createUser would succeed here (verified email, chosen password) and the
+      // first login would then link to the staff row with its memberships and roles.
+      const staff = await createUser("staff-unprovisioned@cc.test");
+      await addMembership(co, staff);
+      const { contactId, accept } = await inviteAndAccept("staff-unprovisioned@cc.test");
+      expect(accept.statusCode).toBe(200);
+      expect(accept.json()).toMatchObject({ ok: true, status: "active", portalPath: "/portal", existingAccount: true });
+      expect(calls.create).toEqual([]);
+      expect(calls.enable).toEqual([]);
+      expect(calls.setPassword).toEqual([]);
+      const row = await adminPool().query(`SELECT status FROM client_contacts WHERE id = $1`, [contactId]);
+      expect(row.rows[0].status).toBe("active");
+      const payload = await activationPayload(contactId);
+      expect(payload?.accountPath).toBe("staff_not_provisioned");
+      expect(JSON.stringify(payload)).not.toContain(ATTACKER_PASSWORD);
     });
 
     it("EX-STAFF (only a deleted membership): Keycloak untouched, not re-enabled", async () => {
