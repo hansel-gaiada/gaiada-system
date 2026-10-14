@@ -8157,7 +8157,7 @@ Built exactly as §45.1 to §45.5 specify, with these points the text left open:
 - **Placement.** `/clients/[clientId]/details` is only a redirect to `contacts` since CC-D8, so PV placed the card on the Internal Notes tab ("notes and files"): staff-only material lives there (PV-D4), and a staff-only card on People could be mistaken for something the portal's People list shows.
 - **Demo mode.** `demoFixtures` seeds a labelled placeholder file on each of the four kinds (`wr-demo-1`, `cmp-demo-1`, `part-demo-1`, `cl-1`) and its POST takes the new body and answers `{id, scrubbed, byteSize}`. The demo has no request or campaign pages to show them on.
 
-## 46. Knowledge search for staff (DW-8i, 2026-10-14) — `platform-nest/src/modules/knowledge/search.controller.ts` (new), `modules/knowledge/search-filter.ts` (new); UI `/knowledge` — **STATUS: PLANNED**
+## 46. Knowledge search for staff (DW-8i, 2026-10-14) — `platform-nest/src/modules/knowledge/search.controller.ts` (new), `modules/knowledge/search-filter.ts` (new); UI `/knowledge` — **STATUS: BACKEND BUILT, PROTOTYPED (unit suite `search-filter.test.ts` run locally; the HTTP suite `search.controller.test.ts` is written for the Linux CI gate against real Postgres + Cerbos and has NOT been run yet); UI PLANNED (a second ticket)**
 
 **Why.** Plan §8.1 (row 8i) and §14.2 ("Find a company document"). The knowledge store (WS8, `ai-agents/src/knowledge/`) indexes ERP records every 6 hours, but staff cannot search it. `/knowledge` lists sources only, and `/search` is a client-side substring match over a few lists.
 
@@ -8229,6 +8229,33 @@ Built exactly as §45.1 to §45.5 specify, with these points the text left open:
 
 ### 46.6 A finding outside this ticket
 The hub's `knowledge.search` tool and the assistant's retrieval (`config.knowledgeTopK`, ASST-18) apply only the tier's rule today. So the AI Assistant can quote internal chunks, such as a person's report or a meeting transcript, to any member of the company. §46.2's filter is written as a shared function (`search-filter.ts`) so those paths can adopt it. Whether and when they do is the owner's decision (see the DW-8 board), not part of DW-8i.
+
+### 46.7 As built (backend, DW-8i)
+
+**Files.** `modules/knowledge/search.controller.ts` (the route), `modules/knowledge/search-filter.ts` (ref parser, collapse, topK, snippet, the per-family table, the filter), `modules/search/knowledge-client.ts` (`searchKnowledgeStrict`, which returns the store's hits whole or throws `KnowledgeUnavailableError`; the old fail-soft helper is untouched), `rbac/cerbos.ts` (`checkMany`: one action on many resources, at most 50 a request, fail closed), `core/files.controller.ts` (`TARGET_KINDS` and `targetReadResource` are now exported, no behaviour change). Registered in `app.module.ts` next to `IntelligenceController`. No migration, no Cerbos policy, no new permission.
+
+**The read resource per family** (each copied from the record's own read route; `search-filter.ts` `FAMILY_SPECS` carries the same comment):
+
+| Family | Existence and title (tenant, not deleted) | Cerbos `read` resource | Copied from |
+|---|---|---|---|
+| `client` | `clients.name` | `{kind: "client", id, tenantId}` | `getClient` in `clients.controller.ts`; the route sits behind `ModuleEnabledGuard("clients")`, so the hit is dropped when that module is off |
+| `project` | `projects.name` | `{kind: "project", tenantId, id}` | `projectDetail` in `core.controller.ts` |
+| `task` | `tasks.title` (joined to `projects`) | `{kind: "task", tenantId, id}` | `taskDetail` in `core.controller.ts` |
+| `pmtask` | `pm_tasks.title` (joined to `projects`, as `TASK_SELECT` does) | `{kind: "pm_task", tenantId, id}` | `getTask` in `pm.controller.ts`; behind `ModuleEnabledGuard("pm")` |
+| `deliverable` | `deliverables.name` | `{kind: "deliverable", id, tenantId}` | `getDeliverable` in `client-work.controller.ts` |
+| `meeting` | `meeting_recordings.title`, else "Meeting <date>" | `{kind: "meeting_recording", tenantId}` (the route sends no id) | `get` in `meetings.controller.ts` |
+| `pmdoc` | `pm_docs.title` | `{kind: "pm_project", tenantId, id: <the doc's project>}` | `getDoc` in `pm.controller.ts`; behind `ModuleEnabledGuard("pm")` |
+| `file` | `files.filename` | BOTH `{kind: "file", id, tenantId}` and the parent's read from `targetReadResource` | `metadata` in `files.controller.ts` |
+
+**Deviations, with reasons.**
+- **Module guards.** The `clients` and `pm` routes are behind their module guard, so a hit on one of them is dropped when the module is off for the company (§46.2 did not say this; the route would 404).
+- **File parents.** A file is returned only when its parent kind is one the upload route can attach to (`TARGET_KINDS`). Files attached to other kinds (reports, assistant messages, and so on) are withheld, not guessed at. The ERP's own file route would ask Cerbos about those; fail closed here costs findability, never visibility.
+- **Hrefs.** A deliverable has no page of its own in the UI (only the list), so it opens on its project (`/projects/:projectId`, or `/deliverables` when it has none). A PM doc opens on its project's Docs tab (`/projects/:projectId?view=docs`). A PM task opens at `/tasks/:id`, as `GET /api/tasks/mine` builds it. A file opens on its parent's page for a client, project, task or campaign, else it downloads (`/api/files/:fileId`).
+- **`indexedAt`** is the finish time of the last sweep of this company's internal tier in this process when that sweep had no errors, else `null` (the sweep result is held in memory, so it is `null` after a restart until the next sweep).
+- **`limit`** outside 1 to 20 is clamped and a non-number falls back to 10 (§46.1 gives only the range).
+- **Acting for someone.** When the principal acts for a human (`actFor`), every read must also be allowed for that human, as `authorize()` does. This only narrows.
+
+**Who the filter actually narrows.** Every v1 family except `file` is readable by every `company_admin`, `manager`, `member` and `viewer` of the company (and by the matching `core.*.read` permission arm), so for those the filter matters for outsiders, for principals without the role, for the module switch, and for deleted rows. The genuinely narrower case is a `file` whose parent has a narrower read, such as a contract (`contract` read is `company_admin` and `manager`; the member and viewer bundles hold no `core.contract.read`). The HTTP suite drives that case.
 
 ## 47. Calendar events and meeting scheduling (DW-8g, 2026-10-14) — `platform-nest/src/core/calendar-events.{controller,service}.ts` (new), migration `<next free>_calendar_events.sql`; UI `/calendar` — **STATUS: PLANNED**
 
