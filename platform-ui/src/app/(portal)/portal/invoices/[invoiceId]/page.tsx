@@ -3,12 +3,13 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActivePortalCompany } from "@/lib/portal-company";
 import { getPortalInvoice } from "@/lib/portal-data";
-import { clientStatus, money, portalDate } from "@/lib/portal";
+import { clientStatus, isCheckoutReturn, money, portalDate } from "@/lib/portal";
 import { DOCUMENT_PREPARING_TEXT, invoiceDocumentState } from "@/lib/billingView";
 import { Card, Eyebrow, HairlineTable } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { PortalLive } from "@/components/portal/PortalLive";
 import { PortalPaymentForm } from "@/components/portal/PortalPaymentForm";
+import { PortalPayOnline } from "@/components/portal/PortalPayOnline";
 import { PortalFacts, PortalLink, PortalPageHead, PortalStatus } from "@/components/portal/PortalBits";
 
 // CP-13 — one invoice: its frozen line items, its payment history, and the form to tell us you've paid.
@@ -22,8 +23,17 @@ import { PortalFacts, PortalLink, PortalPageHead, PortalStatus } from "@/compone
 // with the bank account from that same frozen block. Every figure is the API's, formatted and never recomputed here. The
 // PDF is rendered after the commit (PV5-07), so an issued invoice with no file yet says "being prepared"; an older server
 // omits the field, which reads the same.
-export default async function PortalInvoicePage({ params }: { params: Promise<{ invoiceId: string }> }) {
+//
+// PV5-10 — "Pay online" (the payment provider's hosted page) shows ONLY when the API's `onlinePayment.available` says so.
+// Coming back from that page (`?checkout=finished`, or the provider's own return parameters) shows "We're confirming your
+// payment" and nothing else changes: the payment itself is written only from the provider's verified, re-fetched notice,
+// and PortalLive refreshes this page when it is (`invoice.payment.confirmed`).
+export default async function PortalInvoicePage({ params, searchParams }: {
+  params: Promise<{ invoiceId: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { invoiceId } = await params;
+  const returning = isCheckoutReturn(await searchParams);
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
@@ -45,6 +55,9 @@ export default async function PortalInvoicePage({ params }: { params: Promise<{ 
   const taxLines = Array.isArray(invoice.taxLines) ? invoice.taxLines : [];
   const hasTotalsBreakdown = invoice.subtotal != null || taxLines.length > 0 || invoice.taxTotal != null;
   const labelInk = { display: "block", marginBottom: 3, color: "var(--ink-subtle)" } as const;
+  const settled = invoice.status === "paid" || invoice.balance <= 0;
+  // Hidden while a payer is just back from the provider: a second "Pay online" there invites paying twice.
+  const payOnline = invoice.onlinePayment?.available === true && !returning;
 
   return (
     <>
@@ -62,6 +75,16 @@ export default async function PortalInvoicePage({ params }: { params: Promise<{ 
       />
 
       <div className="cp-stack">
+        {returning && (
+          <Card title="Your online payment">
+            <p role="status" style={{ margin: 0, font: "400 14px/1.6 var(--font-body)" }}>
+              {settled
+                ? "Payment received. Thank you, this invoice is settled."
+                : "We're confirming your payment with the payment provider. This page updates by itself once it is confirmed, usually within a minute. You don't need to tell us about it."}
+            </p>
+          </Card>
+        )}
+
         <Card title="Summary" headerRight={<PortalStatus status={invoice.status} />}>
           <div style={{ display: "flex", gap: 32, flexWrap: "wrap", marginBottom: 16 }}>
             <div>
@@ -209,6 +232,16 @@ export default async function PortalInvoicePage({ params }: { params: Promise<{ 
                 </ul>
               </div>
             )}
+          </Card>
+        )}
+
+        {payOnline && (
+          <Card title="Pay online" hint="Pay on our payment provider's secure page. It confirms the payment to us directly.">
+            <PortalPayOnline
+              invoiceId={invoice.id}
+              amountDue={invoice.onlinePayment?.amount ?? invoice.outstanding ?? invoice.balance}
+              currency={invoice.onlinePayment?.currency ?? invoice.currency}
+            />
           </Card>
         )}
 

@@ -30,6 +30,7 @@ const ok = (json: unknown): DemoResult => ({ status: 200, json });
 const created = (json: unknown): DemoResult => ({ status: 201, json });
 const bad = (error: string, field?: string): DemoResult => ({ status: 400, json: { error, field } });
 const notFound = (error = "not found"): DemoResult => ({ status: 404, json: { error } });
+const conflict = (error: string, reason?: string): DemoResult => ({ status: 409, json: { error, reason } });
 
 /** Dates relative to today so the fixture never rots into "everything is overdue". */
 function day(offset: number): string {
@@ -445,6 +446,16 @@ function recordFields(inv: DemoInvoice) {
     payable: inv.status === "sent" && outstanding - pendingSum(inv.id) > 0, pdfFileId: inv.pdfFileId,
   };
 }
+/** PV5-10: the backend's online-payment decision, mirrored for the demo: an issued IDR invoice with something still owed
+ *  after the claims being verified. The amount is that headroom. */
+function onlinePaymentFlag(inv: DemoInvoice) {
+  const headroom = Math.round((inv.total - confirmedSum(inv.id) - pendingSum(inv.id)) * 100) / 100;
+  if (inv.status === "sent" && inv.currency === "IDR" && headroom > 0) return { available: true, amount: headroom, currency: inv.currency };
+  if (inv.status === "paid" || inv.total - confirmedSum(inv.id) <= 0) {
+    return { available: false, reason: "nothing_outstanding", message: "Nothing is left to pay on this invoice." };
+  }
+  return { available: false, reason: "payment_being_verified", message: "We're verifying a payment you told us about. Once that's done, any balance left can be paid online." };
+}
 function invoiceSummary(inv: DemoInvoice) {
   const paid = confirmedSum(inv.id);
   return {
@@ -654,6 +665,20 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
       ...rest, payments: paymentsOf(inv.id), paid, balance: Math.round((inv.total - paid) * 100) / 100,
       ...recordFields(inv),
       taxLines: inv.taxTotal != null && inv.taxCode ? [{ code: inv.taxCode, rate: taxRate, base: inv.subtotal, amount: inv.taxTotal }] : [],
+      onlinePayment: onlinePaymentFlag(inv),
+    });
+  }
+  // PV5-10: "Pay online". There is no provider in the demo, so the "hosted page" is the invoice's own return URL: the
+  // flow (click, leave, come back to "We're confirming your payment") is drivable without leaving the app.
+  const ckM = seg.match(/^invoices\/([^/]+)\/checkout$/);
+  if (ckM && m === "POST") {
+    const inv = INVOICES.find((x) => x.id === ckM[1]);
+    if (!inv) return notFound("invoice not found");
+    const flag = onlinePaymentFlag(inv);
+    if (!flag.available) return conflict(flag.message ?? "online payment is not available", "reason" in flag ? String(flag.reason) : undefined);
+    return ok({
+      checkoutUrl: `/portal/invoices/${inv.id}?checkout=finished`, amount: String(flag.amount), currency: inv.currency,
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(), reused: false,
     });
   }
   const payM = seg.match(/^invoices\/([^/]+)\/payments$/);

@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError, type Me } from "./platform";
 import { getActivePortalCompany } from "./portal-company";
-import { attachmentProblem, CONVERSATION_BODY_MAX, describeSocialReviewError, parseWholeAccount } from "./portal";
+import { attachmentProblem, CONVERSATION_BODY_MAX, describeSocialReviewError, isCheckoutUrl, parseWholeAccount } from "./portal";
 
 // Client-portal WRITE actions: the client signs their gates and contracts, records a payment against
 // their own invoice, updates their own profile, and asks for a change to their company record.
@@ -28,6 +28,8 @@ export interface PortalActionResult {
   error?: string;
   field?: string;
   id?: string;
+  /** PV5-10: where to send the payer (the provider's hosted checkout page). */
+  url?: string;
 }
 
 async function ctx(): Promise<{ userId: string; tenant: string } | null> {
@@ -195,6 +197,26 @@ export async function portalRecordPayment(_prev: PortalActionResult | null, form
     revalidatePortal();
     revalidatePath(`/portal/invoices/${invoiceId}`);
     return { ok: true, id: r.id };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** PV5-10 — open (or resume) the provider's hosted checkout for one of the caller's invoices and answer its URL. The
+ *  amount is the invoice's, decided by the backend; nothing about money is sent from here. The client component sends
+ *  the browser to `url`. The backend's refusals ("nothing is left to pay", "online payment is unavailable right now")
+ *  are written for the client and are shown as they are. */
+export async function portalStartCheckout(_prev: PortalActionResult | null, formData: FormData): Promise<PortalActionResult> {
+  const c = await ctx();
+  if (!c) return { ok: false, error: "Your session has expired — please sign in again." };
+  const invoiceId = String(formData.get("invoiceId") ?? "");
+  if (!invoiceId) return { ok: false, error: "Missing invoice." };
+  try {
+    const r = await platformFetch<{ checkoutUrl: string }>(
+      `/api/${c.tenant}/portal/invoices/${encodeURIComponent(invoiceId)}/checkout`, c.userId, { method: "POST" },
+    );
+    if (!isCheckoutUrl(r?.checkoutUrl)) return { ok: false, error: "We couldn't open the payment page. Please try again, or pay by bank transfer." };
+    return { ok: true, url: r.checkoutUrl };
   } catch (e) {
     return fail(e);
   }

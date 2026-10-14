@@ -179,7 +179,7 @@ describe.skipIf(!TEST_URL)("PV5-10 — online payment (simulated Midtrans)", () 
   describe("checkout", () => {
     it("opens ONE checkout for the outstanding balance, with a minted order id (never the invoice number), and reuses it", async () => {
       const inv = await issued(150_000);
-      expect((await detail(inv.id)).json().onlinePayment).toEqual({ available: true });
+      expect((await detail(inv.id)).json().onlinePayment).toEqual({ available: true, amount: 150_000, currency: "IDR" });
       const before = fake.snapCreates().length;
       const r1 = await checkout(inv.id);
       expect(r1.statusCode, r1.body).toBe(200);

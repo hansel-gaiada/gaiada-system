@@ -249,6 +249,30 @@ export interface PortalInvoiceDetail {
   overdue?: boolean;
   /** PV5-07: see `PortalInvoice.pdfFileId`. */
   pdfFileId?: string | null;
+  /** PV5-10: whether "Pay online" is offered, decided by the backend (never guessed here). `reason` and `message` when
+   *  not; an older server omits the field, which reads as "not offered". */
+  onlinePayment?: { available: boolean; amount?: number; currency?: string; reason?: string; message?: string };
+}
+
+/** PV5-10: is this a safe place to send the payer? The provider's own https page (the backend has already checked the
+ *  host), or one of our own paths (the demo fixture's stand-in). Never a protocol-relative or other-scheme URL. */
+export function isCheckoutUrl(url: unknown): url is string {
+  if (typeof url !== "string" || url.length === 0) return false;
+  if (url.startsWith("/")) return !url.startsWith("//") && !url.startsWith("/\\");
+  try {
+    return new URL(url).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/** PV5-10: the payer has just come back from the provider's page (our own `?checkout=finished`, or the provider's own
+ *  return parameters on the dashboard's Finish URL). Only words follow from it; the payment itself comes from the
+ *  verified provider notice alone. */
+export function isCheckoutReturn(sp: Record<string, string | string[] | undefined> | undefined): boolean {
+  if (!sp) return false;
+  const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
+  return first(sp.checkout).startsWith("finished") || first(sp.transaction_status) !== "" || first(sp.order_id) !== "";
 }
 
 export interface PortalContract {

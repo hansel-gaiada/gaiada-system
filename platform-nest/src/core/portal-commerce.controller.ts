@@ -247,8 +247,9 @@ export class PortalCommerceController {
         payments: payments.rows,
         paid: Math.round(paid * 100) / 100,
         balance: Math.round((inv.total - paid) * 100) / 100,
+        // `amount` is what the checkout will charge (the balance less the client's claims being verified), for display.
         onlinePayment: decision.available
-          ? { available: true }
+          ? { available: true, amount: Number(decision.amount), currency: decision.currency }
           : { available: false, reason: decision.reason, message: decision.message },
       };
     }, { modules: ["finance"] });
