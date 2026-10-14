@@ -1,5 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError, type Me } from "./platform";
 import { getActivePortalCompany } from "./portal-company";
@@ -231,17 +232,20 @@ export async function portalSimulatedPaymentAct(_prev: PortalActionResult | null
   const orderId = String(formData.get("orderId") ?? "");
   const action = String(formData.get("action") ?? "");
   if (!orderId || !["pay", "pending", "fail"].includes(action)) return { ok: false, error: "Choose what the simulated payment does." };
+  let url: string;
   try {
     const r = await platformFetch<{ returnUrl: string }>(
       `/api/${c.tenant}/portal/payments/simulated/${encodeURIComponent(orderId)}/act`, c.userId,
       { method: "POST", body: JSON.stringify({ action }) },
     );
-    const url = typeof r?.returnUrl === "string" && r.returnUrl.startsWith("/portal/invoices/") ? r.returnUrl : "/portal/invoices";
-    revalidatePortal();
-    return { ok: true, url };
+    url = typeof r?.returnUrl === "string" && r.returnUrl.startsWith("/portal/invoices/") ? r.returnUrl : "/portal/invoices";
   } catch (e) {
     return fail(e);
   }
+  revalidatePortal();
+  // Navigate from the action itself: the page re-renders without its buttons once the payment is final, so a client-side
+  // effect waiting on the result would be unmounted before it could send the payer back.
+  redirect(url);
 }
 
 /** Update the caller's own name/title. */

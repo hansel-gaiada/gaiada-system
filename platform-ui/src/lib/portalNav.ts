@@ -58,6 +58,8 @@ export const PORTAL_AREAS: PortalArea[] = [
  *  the "minutes shared" notice (`/portal/meetings/<id>`); they sit in Projects and light that area's first tab. */
 const PORTAL_PATH_ALIASES: Array<{ prefix: string; areaKey: string; tabHref: string }> = [
   { prefix: "/portal/meetings", areaKey: "projects", tabHref: "/portal/projects" },
+  // PV-D41: the simulated hosted payment page belongs to the invoice it pays.
+  { prefix: "/portal/pay", areaKey: "billing", tabHref: "/portal/invoices" },
 ];
 
 export function activePortalNav(pathname: string): { areaKey: string | null; tabHref: string | null } {

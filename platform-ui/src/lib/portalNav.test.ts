@@ -51,6 +51,7 @@ describe("activePortalNav", () => {
     ["/portal/conversation", "projects", "/portal/conversation"],
     ["/portal/conversation/t1", "projects", "/portal/conversation"],
     ["/portal/meetings/m1", "projects", "/portal/projects"],
+    ["/portal/pay/simulated/ck-1", "billing", "/portal/invoices"],
     ["/portal/social-reviews", "projects", "/portal/social-reviews"],
     ["/portal/social-reviews/s1", "projects", "/portal/social-reviews"],
     ["/portal/timeline", "projects", "/portal/timeline"],

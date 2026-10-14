@@ -176,6 +176,16 @@ test.describe("client portal", () => {
     await expect(page.getByRole("button", { name: "Pay online", exact: true })).toHaveCount(0);
   });
 
+  test("PV-D41: the simulated payment page says no real money moves, and Pay (simulated) goes back to the invoice @portal", async ({ page }) => {
+    await signInAsClient(page);
+    await page.goto("/portal/pay/simulated/ck-demo-sim");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Simulated payment");
+    await expect(page.getByText("Simulated payment (review stage): no real money moves.")).toBeVisible();
+    await page.getByRole("button", { name: "Pay (simulated)", exact: true }).click();
+    await page.waitForURL(/\/portal\/invoices\/inv-2026-014\?checkout=finished/);
+    await expect(page.getByRole("status").filter({ hasText: /confirming your payment/i })).toBeVisible();
+  });
+
   test("a client records a payment and is told it is NOT yet settled @portal", async ({ page }) => {
     await signInAsClient(page);
     await page.goto("/portal/invoices");
