@@ -149,6 +149,12 @@ describe.skipIf(!TEST_URL)("DW-6n0 the module KPI reader seam (live PG)", () => 
     expect(seen).toHaveLength(2);
     expect(seen[0]).toEqual({ tenantId: co, unitId: "d-web", periodKind: "month", start: "2026-10-01", end: "2026-10-31", asOf: earlier("2026-10-31") });
     expect(seen[1]).toEqual({ tenantId: co, unitId: "d-web", periodKind: "month", start: "2026-09-01", end: "2026-09-30", asOf: earlier("2026-09-30") });
+
+    // A caller that pins its own `today` (the §43 watch passes the day of its `now`) decides asOf, never the wall clock.
+    seen.length = 0;
+    await evaluateUnits(co, "agency", [WEB], [WEB], OCT, OCT.start, "2026-10-12");
+    await evaluateUnits(co, "agency", [WEB], [WEB], SEP, SEP.start, "2026-10-12");
+    expect(seen.map((c) => c.asOf)).toEqual(["2026-10-12", "2026-09-30"]);
   });
 
   it("(e) the watch stores a read_failed KPI with its reason and tells nobody", async () => {
