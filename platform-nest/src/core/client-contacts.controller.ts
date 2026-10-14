@@ -212,7 +212,8 @@ export class ClientContactsController {
         throw new ConflictException({
           message: "this contact already has access, so it was not invited again and nothing changed. To change what they may do, revoke the contact and invite them again.",
           reason: "already_active",
-          contactId: existing.rows[0].id,
+          // `existing` is the one object the error filter forwards (http-error.filter.ts); a bare top-level field is dropped.
+          existing: { contactId: existing.rows[0].id },
         });
       }
       if (existing.rows[0]) {

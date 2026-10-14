@@ -257,9 +257,9 @@ describe.skipIf(!TEST_URL)("client-contacts HTTP surface (W0-4)", () => {
       payload: { email, capability: "signer" },
     });
     expect(res.statusCode, res.body).toBe(409);
-    expect(res.json()).toMatchObject({ reason: "already_active", contactId });
+    expect(res.json()).toMatchObject({ reason: "already_active", existing: { contactId } });
     expect(res.json().invite).toBeUndefined();
-    expect(String(res.json().message)).toMatch(/revoke/i);
+    expect(String(res.json().error)).toMatch(/revoke/i);
 
     const row = (await adminPool().query(`SELECT status, capability, invited_by FROM client_contacts WHERE id = $1`, [contactId])).rows[0];
     expect(row.status).toBe("active");
