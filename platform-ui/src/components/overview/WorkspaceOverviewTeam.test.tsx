@@ -59,7 +59,7 @@ describe("WorkspaceOverview: Me | Team", () => {
     expect(screen.getByRole("group", { name: "Period" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Me" })).toHaveAttribute("aria-current", "true");
     expect(screen.getByText("needs-you view:me")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "You", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: /^You$/ })).toBeInTheDocument();
   });
 
   it("hands every block the Team view, with the workspace's name, and says so in the You band", () => {
@@ -69,7 +69,7 @@ describe("WorkspaceOverview: Me | Team", () => {
     expect(screen.getByText("needs-you view:team")).toBeInTheDocument();
     expect(screen.getByText("your-numbers view:team label:Web Dev")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "You and your team" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { level: 2, name: "You", exact: true })).toBeNull();
+    expect(screen.queryByRole("heading", { level: 2, name: /^You$/ })).toBeNull();
   });
 
   it("draws no switch for anyone else, and a Team view handed to the frame is Me for them", () => {
@@ -86,7 +86,7 @@ describe("pilotFrame: ?view=team is a head's alone (DW-3h)", () => {
     vi.mocked(workspacesData.myWorkspaces).mockResolvedValue(ws);
     const frame = await pilotFrame(who, "co-a", { deptId }, Promise.resolve(search));
     expect(frame).not.toBeNull();
-    return (frame!(null) as { props: { view: string; canSwitchView: boolean } }).props;
+    return (frame!(null) as unknown as { props: { view: string; canSwitchView: boolean } }).props;
   };
 
   it("passes Team to a head of this unit who asked for it", async () => {
