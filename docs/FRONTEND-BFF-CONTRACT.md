@@ -7618,3 +7618,49 @@ Files: `dept-kpis.ts` (catalogue, slug resolution, condition rules; pure), `dept
 - `unavailable` for a module KPI, for a ratio with a 0 denominator and for no target;
 - staff of the unit may read and staff of another unit may not;
 - the overview is company-wide tiers only, worst first.
+
+## 41. The department appraisal per cycle (DW-4e-3, 2026-10-15) — `platform-nest/src/modules/reports/dept-appraisals*.ts` — **STATUS: PLANNED (contract first)**
+
+**Why.** Plan §5.3 and §5.5 (owner ruling DW-Q4): each department has its own appraisal. The cycle's department appraisal is the department's KPIs over the appraisal period, with the result against each target, the condition history, the head's commentary and the GM's assessment. The Appraisals › Department tab shows it next to how the people's appraisals went. It is not a person's score, and a department KPI is never pinned on one person.
+
+### 41.1 What it reads (no new numbers)
+- **The cycle** is a `report_appraisal_cycles` row: `name`, `period_start`, `period_end`, `status`.
+- **KPIs over the cycle:** the §40 engine on a custom range `[period_start, period_end]` (capped at 400 days, as every report range is). The result against each target uses the target in force for the cycle's LAST month.
+- **Condition history:** the §40 engine run for each calendar month inside the cycle, with that month's in-force target. Each entry is the month and the department's condition, plus each KPI's condition. It is computed on read; nothing is snapshotted, so it always agrees with the KPI page. Months before the tenant's first fact read `unavailable` (`no_data`).
+- **The people's appraisals:** `report_appraisals` of this cycle whose subject's primary unit is in the department's subtree today (the §37 roster rule), aggregated only:
+  - `total`, and the counts by `status` (`draft`, `submitted`, `acknowledged`, `disputed`, `finalized`);
+  - the composite distribution: counts of submitted-or-later rows by rounded score band (1 to 5). It is withheld (`distribution: null, reason: "too_few"`) when fewer than 3 rows are scored, so no individual's score can be read from it;
+  - no names, no individual scores, no commentary.
+
+### 41.2 What it stores
+- **Table** `dept_appraisals`: `tenant_id, cycle_id, unit_node_id, hod_commentary, hod_by, hod_at, gm_assessment, gm_condition (on_track|at_risk|off_track, nullable), gm_by, gm_at, origin_site, created_at, updated_at`. Unique on (tenant, cycle, unit). RLS with the tenant and the `reports` module wall, like `dept_kpi_targets`.
+- The row is created on the first write. A read with no row returns null commentary and assessment.
+- **Writes end when the cycle is `closed`.** Both writes then get 409 `cycle_closed`. A closed cycle's department appraisal is the record.
+
+### 41.3 Who may act
+- **No new Cerbos kind.** Two actions are added to `dept_kpi_target`:
+  - `appraisal_comment`: `org_unit_lead` of the unit or an enclosing one (through `unitAncestors`), plus `company_admin`;
+  - `appraisal_assess`: the approver tier (`company_admin`, which `owner` mirrors), the same tier that approves targets (§40.2).
+  - The permission keys are `reports.dept_kpi_target.appraisal_comment` and `.appraisal_assess`. They take the same six-artifact path and pins as §40, with no new kind.
+- **Who may read:** the unit's heads (their led scope) and the company-wide tiers, including HR's people-reader tier. Staff of the unit may not read it: they read the KPI page (§40.3), not the appraisal. Anyone else gets 403, and an unknown unit or cycle gets 404, with the same order as §37.
+
+### 41.4 Endpoints
+- `GET /api/:t/dept-appraisals?cycleId=&unitNodeId=` → `{cycle: {id, name, periodStart, periodEnd, status}, unit, workspace, kpis (the §40 shape over the cycle), condition, history: [{month, condition, kpis: [{key, condition}]}], people: {total, byStatus, distribution|null, reason?}, hodCommentary: {text, by, at}|null, gmAssessment: {text, condition, by, at}|null}`.
+- `PUT /api/:t/dept-appraisals/:cycleId/:unitNodeId/commentary {text}`: needs `appraisal_comment`. `text` is 1 to 4000 characters.
+- `PUT /api/:t/dept-appraisals/:cycleId/:unitNodeId/assessment {text, condition}`: needs `appraisal_assess`, and `condition` is one of the three. The GM's condition is their judgement, shown beside the computed one and never replacing it.
+- Every write records an activity row.
+
+### 41.5 The UI (same ticket)
+- `/appraisals/department` gains a cycle picker (the company's cycles, newest first). With a cycle chosen, the page shows the department appraisal: the KPI results over the cycle, the history as a row of months, the people block (counts, and the distribution or "too few to show"), the head's commentary (editable by `appraisal_comment` while the cycle is open) and the GM's assessment (editable by `appraisal_assess`). Without a cycle, the page is the §40 KPI view, as built in 4e-2.
+- The demo serves the same routes with one open cycle and one closed cycle.
+
+**Proof (live Postgres + Cerbos on the CI gate):**
+- the history agrees month by month with `GET /dept-kpis` for each month;
+- the result uses the last month's in-force target;
+- a head comments on their unit and is refused another unit (403);
+- a non-approver's assessment is refused (403);
+- writes on a closed cycle get 409 `cycle_closed`;
+- the distribution is withheld below 3 scored rows;
+- a subject outside the unit's roster is not counted;
+- a unit's staff get 403;
+- an unknown cycle or unit gets 404 for a company-wide caller.
