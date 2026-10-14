@@ -21,7 +21,7 @@ export interface PickProject { id: string; name: string; clientId: string | null
 export type SaveEventAction = (input: EventFormInput, names: Record<string, string>) => Promise<EventActionResult>;
 
 export function EventForm({
-  mode, initial, members, clients, projects, canRecord, hiddenPersonId, zoneLabel, save, cancelHref,
+  mode, initial, members, clients, projects, linksUnavailable = false, canRecord, hiddenPersonId, zoneLabel, save, cancelHref,
 }: {
   mode: "create" | "edit";
   initial: EventFormInput;
@@ -29,6 +29,8 @@ export function EventForm({
   members: PickMember[];
   clients: PickClient[];
   projects: PickProject[];
+  /** The client or project list could not be read: say so, so empty pickers never read as "there are none". */
+  linksUnavailable?: boolean;
   /** The company has the Meetings row: only then is "Record this meeting" offered (and only when creating). */
   canRecord: boolean;
   /** The organizer: always invited, so not listed as a choice. */
@@ -171,6 +173,9 @@ export function EventForm({
           </span>
         ) })}
       </div>
+      {linksUnavailable && (
+        <p className="lux-field__hint" role="status">Clients and projects couldn&apos;t be loaded right now. You can still schedule without them.</p>
+      )}
 
       {Row({ id: "visibility", label: "Who can see it", children: (
         <span className="lux-field__selectwrap">

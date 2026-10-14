@@ -28,8 +28,8 @@ export default async function NewEventPage() {
 
   const [members, clients, projects] = await Promise.all([
     listMembers(userId, tenant).then((m) => m, () => null),
-    listClients(userId, tenant).then((c) => c, () => []),
-    listProjects(userId, tenant).then((p) => p, () => []),
+    listClients(userId, tenant).then((c) => c, () => null),
+    listProjects(userId, tenant).then((p) => p, () => null),
   ]);
   if (!members) {
     return (
@@ -51,8 +51,9 @@ export default async function NewEventPage() {
           mode="create"
           initial={initial}
           members={members.map((m) => ({ id: m.user_id, name: m.name }))}
-          clients={clients.map((c) => ({ id: c.id, name: c.name }))}
-          projects={projects.map((p) => ({ id: p.id, name: p.name, clientId: p.client_id }))}
+          clients={(clients ?? []).map((c) => ({ id: c.id, name: c.name }))}
+          projects={(projects ?? []).map((p) => ({ id: p.id, name: p.name, clientId: p.client_id }))}
+          linksUnavailable={clients === null || projects === null}
           canRecord={canRecord}
           hiddenPersonId={me.userId}
           zoneLabel={DISPLAY_TZ}
