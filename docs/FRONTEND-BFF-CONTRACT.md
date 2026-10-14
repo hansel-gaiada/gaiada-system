@@ -7684,20 +7684,30 @@ Files: `dept-kpis.ts` (catalogue, slug resolution, condition rules; pure), `dept
 
 **Why.** DW-D25 moved the delivery departments' twelve `module` KPIs to DW-6. Today each one reads `unavailable` (`no_reader`). This section gives each a reader over data the modules already write, so the §40 engine, targets, conditions, the §41 appraisal and the §43 watch pick the numbers up with no other change. DW-D27 (owner, 2026-10-14) settles the four definitions the data could not settle on its own.
 
-#### 40.5.1 The seam (shared with §40.6)
+#### 40.5.1 The seam (shared with §40.6; reviewed by DW-4)
 - **Catalogue.** `KpiReader`'s `module` arm gains an optional `readerId`: `{ kind: "module"; readerId?: string }`.
   - With no `readerId`, nothing changes: `unavailable`, `no_reader`.
   - With one, the KPI behaves like a `report_fact` KPI. A value gives a condition against the target; `null` gives `unavailable` with `no_data`.
+  - Reason precedence stays `no_reader` > `no_data` > `no_target` (§40.3a), so `null` is `no_data` before `no_target`.
   - `dept-kpis.ts` stays pure: the id is a string.
 - **Registry.** A new file, `modules/reports/dept-kpi-readers.ts`, holds `MODULE_KPI_READERS: Record<string, ModuleKpiReader>`.
-  - `type ModuleKpiReader = (ctx: { tenantId: string; unitId: string; start: string; end: string }) => Promise<KpiValue | null>`.
+  - `type ModuleKpiReader = (ctx: ReaderCtx) => Promise<KpiValue | null>`.
+  - `ReaderCtx = { tenantId: string; unitId: string; periodKind: ReportPeriodKind; start: string; end: string; asOf: string }`.
   - `start` and `end` are the engine's range: ISO dates, both INCLUSIVE, in `REPORTS_TZ`.
   - DW-6's readers live in `dept-kpi-readers/delivery.ts` and DW-7's in `dept-kpi-readers/functional.ts`. The registry merges the two.
+- **A reader is pure over its inputs.** It never reads the clock.
+  - `evaluateUnits` computes `asOf` once per evaluation: the earlier of `end` and today in `REPORTS_TZ`.
+  - Every "already due" test uses `asOf`. So the page, the §41 appraisal history and the §43 watch agree for the same inputs, and a past window is fixed for good.
+  - **"Already due"** means a due date on or before `asOf` (for a timestamp, before the end of `asOf`'s day). An item due today and not delivered counts as late today.
 - **Parity.** A test pins that every `readerId` in the catalogue has a registered reader, and every registered reader is named by exactly one catalogue entry. A typo is then a failed build, never a silent `no_reader`.
 - **Engine.** `evaluateUnits`, pass 1: for a `module` KPI with a `readerId`, `v = await MODULE_KPI_READERS[id](ctx)`. `kpiRead` passes `numerator` and `denominator` through as it does for `report_fact`.
-- **A reader that throws fails the read,** exactly as a failing report document does today. There is no new reason code. A module the tenant does not have is not an error: its walled rows are invisible, so the reader finds nothing and answers `null` (`no_data`).
+- **A reader that throws fails only ITS KPI.** It reads `unavailable` with a new reason, **`read_failed`**, and the error is logged with the reader id, never the row data.
+  - The department's other KPIs, the page, the appraisal and the watch carry on. The department condition already treats `unavailable` as having no condition.
+  - The §43 watch stores a move to `unavailable` silently, so a flaky reader never notifies a head.
+  - `read_failed` joins `UnavailableReason` in `dept-kpis.ts` and the UI's reason words in `platform-ui/src/lib/deptKpiFormat.ts` (plus the demo catalogue).
+  - It also needs a migration that widens `dept_kpi_conditions.reason`'s CHECK (`202610150200_dept_kpi_watch.sql`), or the watch's upsert would fail on the first one.
+- **A module the tenant does not have is not an error.** Its walled rows are invisible, so the reader finds nothing and answers `null` (`no_data`).
 - **The window.** A reader turns `[start, end]` into the instants `[start 00:00, end + 1 day 00:00)` in `REPORTS_TZ`. Every timestamp test below uses that half-open interval, and every date test (`needed_by`, a due date) uses the inclusive date range.
-- **"Now".** Where a rule says "already due", it means a due date before TODAY in `REPORTS_TZ`. So a window still running counts only what has fallen due.
 - **Each reader** queries through `withTenants([tenantId], fn, { modules })`, declaring its module walls.
 
 #### 40.5.2 The department's scope (one definition for every reader)
@@ -7713,8 +7723,8 @@ Files: `dept-kpis.ts` (catalogue, slug resolution, condition rules; pure), `dept
 | n2 | web-dev · `client-site-uptime` | `monitoring.client_uptime` | the pooled ratio of `UPTIME_RATIO_SQL` (`monitoring.controller.ts`, reused, never copied) | Over `monitor_results` in the window, of enabled, not-deleted monitors whose client is in C(u). Numerator: results `up`. Denominator: results not `maintenance` or `unknown`. | no counted result | `monitoring` |
 | n3 | seo · `clients-ranking-growth` | `search.clients_ranking_growth` | numerator ÷ denominator | For each client in C(u) with a `search_properties` row: the keywords `(keyword_id, engine, device)` ranked (position not null) both in the last non-simulated `search_rank_snapshots` at or before the window's first instant AND in the last one before its end. A client "grew" when its mean position over those keywords fell (a lower number is better). Denominator: clients with at least one such keyword. Numerator: those that grew. | denominator 0 | `search` |
 | n4 | seo · `client-reports-on-time` | `search.client_reports_on_time` | numerator ÷ denominator | `search_reports` of engagements whose client is in C(u), with period `YYYY-MM`, due on **the 5th of the following month** (DW-D27, end of that day in `REPORTS_TZ`), the due date inside the window, and delivered or already due. Numerator: `delivered_at` on or before the due date. | denominator 0 | `search` |
-| n5 | seo · `ad-budgets-on-pace` | `search.ad_budgets_on_pace` | numerator ÷ denominator | **DW-D27: a campaign's `budget_minor` is a MONTHLY budget.** Judged in the window's LAST month that has started, up to today or the month's end. Over campaigns `live` in that month, with a budget above 0, of engagements whose client is in C(u), and at least one non-simulated daily metrics row in that month: spend is the sum of `cost_minor` from the 1st to the as-of day, and expected is `budget_minor × days elapsed ÷ days in the month`. **On pace: 0.9 ≤ spend ÷ expected ≤ 1.1.** A campaign whose metrics currency differs from its budget currency is left out. | denominator 0 | `search` |
-| n6 | seo · `client-retention` | `clients.retention` | numerator ÷ denominator | **The cohort:** clients in C(u) that were active on the window's first day. Active on a day D means one of: a `signed` contract with `starts_on ≤ D` and `ends_on` null or `≥ D`; or a project in S(u) with `start_date ≤ D` and status `active`, `planned` or `on_hold`. **Retained:** active on the window's last day, or (for a window still running) on today. A superseding contract continues its predecessor. | empty cohort | tenant |
+| n5 | seo · `ad-budgets-on-pace` | `search.ad_budgets_on_pace` | numerator ÷ denominator | **DW-D27: a campaign's `budget_minor` is a MONTHLY budget.** Judged in the month that contains `asOf`, from its 1st to `asOf`. Over campaigns `live` in that month, with a budget above 0, of engagements whose client is in C(u), and at least one non-simulated daily metrics row in that month: spend is the sum of `cost_minor` from the 1st to the as-of day, and expected is `budget_minor × days elapsed ÷ days in the month`. **On pace: 0.9 ≤ spend ÷ expected ≤ 1.1.** A campaign whose metrics currency differs from its budget currency is left out. | denominator 0 | `search` |
+| n6 | seo · `client-retention` | `clients.retention` | numerator ÷ denominator | **The cohort:** clients in C(u) that were active on the window's first day. Active on a day D means one of: a `signed` contract with `starts_on ≤ D` and `ends_on` null or `≥ D`; or a project in S(u) with `start_date ≤ D` and status `active`, `planned` or `on_hold`. **Retained:** active on `asOf`. A superseding contract continues its predecessor. | empty cohort | tenant |
 | n7 | social-media · `posts-on-schedule` | `social.posts_on_schedule` | numerator ÷ denominator | `social_post_variants` not deleted, not `native_import`, not `cancelled`, with `scheduled_at` inside the window, whose engagement's client is in C(u), and published or already due. Numerator: `published_at ≤ scheduled_at + 15 minutes`. The 15 minutes is a documented default, not a ruling. | denominator 0 | `social` |
 | n8 | social-media · `client-approval-turnaround` | `social.client_approval_turnaround` | the mean of `decided_at − requested_at`, in minutes | No numerator or denominator (an average, not a share). Over `social_post_client_reviews` with status `approved` or `changes_requested`, `decided_at` inside the window, and the client in C(u). | no decided review | `social` (variant join) |
 | n9 | social-media · `engagement-growth` | `social.engagement_growth` | `(cur − prev) ÷ prev` (can be negative) | Over `social_accounts` whose client is in C(u): `cur` is the sum of `social_metrics_daily.engagements` inside the window, and `prev` the sum over the same number of days just before it. Counts only accounts with a non-null `engagements` value in both windows; the sums are pooled across them. | no such account, or `prev` = 0 | `social` |
@@ -7750,7 +7760,7 @@ For each reader, seeded rows that exercise:
 
 Plus:
 - n2's value equal to `uptimeRatio()` over the same results;
-- the seam's parity test;
+- the seam's parity test, and a throwing reader reading `read_failed` while its department's other KPIs still read (with the watch storing it);
 - the engine reading a registered reader (a value gives a condition; `null` gives `no_data`);
 - unregistered `module` KPIs still giving `no_reader`.
 
