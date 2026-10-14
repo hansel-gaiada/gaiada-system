@@ -11,6 +11,31 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.146.0` + platform-ui `0.166.0` - DW-8g: calendar events and meeting scheduling, the `calendar_event` kind (2026-10-14) - PROTOTYPED
+
+Contracts: `docs/FRONTEND-BFF-CONTRACT.md` §47 (as built §47.7 backend, §47.8 UI) and `docs/PERMISSION-CONTRACT.md` §39. Plan §8.1 row 8g. ERP migrations `202610151100_calendar_events` (tables, FORCE RLS, NULL-safe CHECKs) and `202610151110_iam_calendar_event_permissions` (the permissions seed with its self-assertion). **Cerbos policy change:** the new `resource_calendar_event.yaml` and a derived role. Restart Cerbos after the deploy and probe it: a zero-uuid event answers 404. No compose change.
+- **Backend.**
+  - Events with attendees: `GET /api/calendar/events/mine` (the cross-company envelope), plus detail, create, update, cancel (idempotent) and respond.
+  - `record: true` schedules the meeting recording through the same code as `POST …/recordings/schedule`, now shared in `meeting-schedule.ts`.
+  - Attendees get Inbox notifications on invite, change and cancel.
+  - The activity rows never carry the description.
+- **Who can read and change an event:**
+  - read: the organizer, the attendees, everyone when the event is company-visible, and company_admin. A manager does not read every calendar.
+  - update and cancel: the organizer, and company_admin.
+  - respond: attendees only, for every role.
+  - Automation and bot principals are refused writes.
+  - `manager` joined the self rules at review.
+- **UI.**
+  - Events join the Day, Week and Month grids, with zone-aware day maths (`zoneTime.ts`, no date library).
+  - `/calendar/new` schedules a meeting (optionally recorded); `/calendar/events/[id]` shows the detail, the answers and edit/cancel.
+  - The Overview's Today block lists today's events.
+  - The form says so when clients or projects couldn't be loaded.
+- **Not built:** busy times (§47.4), which wait for an owner ruling.
+- **Verified.**
+  - The branch's CI was green on the backend and UI, after three test fixes.
+  - The migrations were renamed off `202610150400`, which DW-6n holds.
+  - The gate is CI on the landing sha.
+
 ### platform-nest `0.145.0` + platform-ui `0.165.0` + automation `0.8.0` - DW-4j-3: the weekly KPI digest to each head, and "behind the miss" (2026-10-15) - PROTOTYPED
 
 Contract: `docs/FRONTEND-BFF-CONTRACT.md` §43.8 (with §43.8a and §43.8b "as built") and `docs/PERMISSION-CONTRACT.md` §38b. Plan §5.5, "A weekly digest".
