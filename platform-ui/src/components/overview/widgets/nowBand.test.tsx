@@ -59,13 +59,13 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("the Now band is registered (DW-3c)", () => {
-  it("hosts Needs you, Today, Your numbers (DW-3d), My activity (DW-3j), Pulse (DW-3e), the Work blocks (DW-3f), the Growth blocks (DW-3g) and the company blocks (DW-3i), and still no other block", () => {
+  it("hosts Needs you, Today, Your numbers (DW-3d), My activity (DW-3j), Pulse (DW-3e), the Condition (DW-3k), the Work blocks (DW-3f), the Growth blocks (DW-3g) and the company blocks (DW-3i), and still no other block", () => {
     expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual([
-      "appraisal", "appraisal-cycle", "campaigns", "company", "company-campaigns", "decisions", "departments", "learning", "learning-compliance",
+      "appraisal", "appraisal-cycle", "campaigns", "company", "company-campaigns", "condition", "decisions", "departments", "learning", "learning-compliance",
       "my-activity", "needs-you", "projects", "pulse", "requests", "today", "your-numbers",
     ]);
-    // `condition` is the department's banner (DW-3k); the six company blocks are DW-3i's.
-    expect(hasOverviewWidget("condition")).toBe(false);
+    // `condition` is the department's banner and strip (DW-3k); the six company blocks are DW-3i's.
+    expect(hasOverviewWidget("condition")).toBe(true);
   });
 
   it("draws the Now band in every workspace, the You band (Your numbers, My activity) in every department's, Pulse in the Department band (DW-3e) and the Work band (DW-3f) and the Growth band (DW-3g), and no other", () => {
@@ -78,7 +78,7 @@ describe("the Now band is registered (DW-3c)", () => {
       expect(bands.map((b) => b.band), ws.key).toEqual(company ? ["now", "work"] : ["now", "you", "department", "work", "growth"]);
       expect(bands[0].widgets.map((w) => w.key), ws.key).toEqual(company ? ["today"] : ["needs-you", "today"]);
       if (!company) expect(bands[1].widgets.map((w) => w.key), ws.key).toEqual(["your-numbers", "my-activity"]);
-      if (!company) expect(bands[2].widgets.map((w) => w.key), ws.key).toEqual(["pulse"]);
+      if (!company) expect(bands[2].widgets.map((w) => w.key), ws.key).toEqual(["condition", "pulse"]);
       if (!company) expect(bands[3].widgets.map((w) => w.key), ws.key).toEqual(["projects", "campaigns", "requests"]);
       if (!company) expect(bands[4].widgets.map((w) => w.key), ws.key).toEqual(["learning", "appraisal"]);
     }

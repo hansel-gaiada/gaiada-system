@@ -14,7 +14,7 @@
 //                                    queue is Me mode.
 //   - Learning    -> Team learning:  `lms compliance?unit=` (BFF §38, DW-4g).
 //   - Appraisal   -> Team appraisals: `appraisals` list for a head (BFF §39, DW-4d).
-// Not built here: the department's condition banner (DW-3k needs DW-4e's KPI targets).
+// The department's condition banner is DW-3k (`lib/overviewCondition.ts`): a head sees it in Me and in Team mode alike.
 import type { Me } from "./platform";
 import { isLeadOf, leadUnits } from "./rbac";
 import type { ReadResult } from "./readResult";

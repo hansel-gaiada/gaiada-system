@@ -933,6 +933,107 @@ test.describe("the Overview's Me | Team switch: someone who does not head the de
   });
 });
 
+// DW-3k: the department's condition on its Overview (plan §5.5). The numbers are DW-4e-2's demo `dept-kpis` fixture
+// (lib/demoDeptKpis.ts): Web Dev is AT RISK (Projects on time 17 of 21 = 81% against 85%), with one KPI on track, one with no
+// reader and one with no target. Who reads it there: the head of Web Dev (u-webhead), staff placed in Web Dev (u-dev); anyone else
+// is refused, so a visitor sees nothing at all.
+test.describe("the Overview's department condition (DW-3k)", () => {
+  const SENTENCE = /^Web Dev: at risk · Projects on time \d+% against 85%$/;
+
+  test("the head of Web Dev sees the banner and a tile per KPI, first in the Department band above Pulse, in Me and in Team", async ({ page, context }) => {
+    await signInWebDevHead(page, context);
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/departments\/dept-1$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), Ketut$/);
+    const main = page.locator("#main-content");
+
+    const condition = main.getByRole("region", { name: "Department condition", exact: true });
+    await expect(condition).toBeVisible();
+    await expect(condition).toHaveAttribute("data-state", "banner");
+    await expect(condition).toHaveAttribute("data-condition", "at_risk");
+    await expect(condition.getByText(SENTENCE)).toBeVisible();
+    await expect(condition.locator(".dk-banner").getByText("At risk", { exact: true })).toBeVisible();
+    await expect(condition.getByRole("link", { name: "Open the department KPIs" })).toHaveAttribute("href", /^\/appraisals\/department\?unit=dept-1&periodKind=month&start=\d{4}-\d{2}-\d{2}$/);
+
+    // One tile per KPI in the catalogue's order, each with its own condition; the two with nothing to rate say why and never read as on track.
+    const tiles = condition.locator("[data-kpi]");
+    await expect(tiles).toHaveCount(4);
+    expect(await tiles.evaluateAll((els) => els.map((e) => [e.getAttribute("data-kpi"), e.getAttribute("data-condition")]))).toEqual([
+      ["projects-on-time", "at_risk"], ["requests-within-sla", "unavailable"], ["client-site-uptime", "unavailable"], ["reopened-work-rate", "on_track"],
+    ]);
+    const onTime = tiles.filter({ hasText: "Projects on time" });
+    await expect(onTime.getByText("At risk", { exact: true })).toBeVisible();
+    await expect(onTime.getByText("17 of 21")).toBeVisible();
+    await expect(onTime.getByText("Target 85% (tolerance 5 pts)")).toBeVisible();
+    await expect(tiles.filter({ hasText: "Requests answered within the SLA" }).getByText("No target yet")).toBeVisible();
+    await expect(tiles.filter({ hasText: "Client site uptime" }).getByText("Not measured yet")).toBeVisible();
+
+    // First block of the Department band, above Pulse.
+    const band = main.locator('section.ov-band[aria-labelledby="ov-band-department"]');
+    await expect(band.locator("section[aria-label]").nth(0)).toHaveAttribute("aria-label", "Department condition");
+    await expect(band.locator("section[aria-label]").nth(1)).toHaveAttribute("aria-label", "Pulse");
+
+    // Team mode keeps it: always on top for the head.
+    await page.goto("/departments/dept-1?period=month&view=team");
+    await expect(page).toHaveURL(/view=team$/);
+    await expect(main.getByRole("region", { name: "Team numbers", exact: true })).toBeVisible();
+    const inTeam = main.getByRole("region", { name: "Department condition", exact: true });
+    await expect(inTeam).toHaveAttribute("data-state", "banner");
+    await expect(inTeam.getByText(SENTENCE)).toBeVisible();
+    await expect(inTeam.locator("[data-kpi]")).toHaveCount(4);
+  });
+
+  test("staff of Web Dev see a quiet strip: the one line, no tiles, no link", async ({ page, context }) => {
+    await signInWebDev(page, context);
+    await page.goto("/departments/dept-1");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), Made$/);
+    const main = page.locator("#main-content");
+    const strip = main.getByRole("region", { name: "Department condition", exact: true });
+    await expect(strip).toBeVisible();
+    await expect(strip).toHaveAttribute("data-state", "strip");
+    await expect(strip.getByText(SENTENCE)).toBeVisible();
+    await expect(strip.locator("[data-kpi]")).toHaveCount(0);
+    await expect(strip.getByRole("list")).toHaveCount(0);
+    await expect(strip.getByRole("link")).toHaveCount(0);
+    await expect(main.getByRole("list", { name: "Department KPIs" })).toHaveCount(0);
+    // And no ranking: the company's departments-by-condition block is not theirs.
+    await expect(main.getByRole("region", { name: "Departments by condition", exact: true })).toHaveCount(0);
+  });
+
+  test("a visitor from another department sees no condition block, and no No-access box, on someone else's department", async ({ page, context }) => {
+    await signInWebDev(page, context);
+    await page.goto("/departments/dept-3");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), Made$/);
+    const main = page.locator("#main-content");
+    await expect(main.getByText(/^SEO · Gaia Digital Agency · /)).toBeVisible();
+    await expect(main.getByRole("region", { name: "Your numbers", exact: true })).toBeVisible();
+    await expect(main.getByRole("region", { name: "Department condition", exact: true })).toHaveCount(0);
+    await expect(main.getByRole("list", { name: "Department KPIs" })).toHaveCount(0);
+    await expect(main.getByText("Department condition")).toHaveCount(0);
+    // SEO has no other block in the Department band, so the band is not drawn over nothing.
+    await expect(main.getByRole("heading", { level: 2, name: "SEO", exact: true })).toHaveCount(0);
+  });
+
+  test("the head of Web Dev visiting SEO sees no condition there: heading one department does not read another's", async ({ page, context }) => {
+    await signInWebDevHead(page, context);
+    await page.goto("/departments/dept-3");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), Ketut$/);
+    const main = page.locator("#main-content");
+    await expect(main.getByText(/^SEO · Gaia Digital Agency · /)).toBeVisible();
+    await expect(main.getByRole("region", { name: "Your numbers", exact: true })).toBeVisible();
+    await expect(main.getByRole("region", { name: "Department condition", exact: true })).toHaveCount(0);
+    await expect(main.getByRole("list", { name: "Department KPIs" })).toHaveCount(0);
+  });
+
+  test("a classic user sees none of it", async ({ page, context }) => {
+    await signInWebDevHead(page, context, { pilot: false });
+    await page.goto("/departments/dept-1");
+    await expect(page.getByRole("heading", { level: 1, name: "Web Dev", exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Department condition", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("list", { name: "Department KPIs" })).toHaveCount(0);
+  });
+});
+
 test.describe("the Overview's frame: the functional workspaces keep their page body", () => {
   test("/hr, /finance and /it show the Overview header with today's body under it", async ({ page, context }) => {
     await signIn(page, context, "superadmin");

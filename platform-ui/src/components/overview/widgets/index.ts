@@ -18,6 +18,7 @@ import { NeedsYou } from "./NeedsYou";
 import { Today } from "./Today";
 import { YourNumbers } from "./YourNumbers";
 import { MyActivity } from "./MyActivity";
+import { Condition } from "./Condition";
 import { Pulse } from "./Pulse";
 import { Projects } from "./Projects";
 import { Campaigns } from "./Campaigns";
@@ -60,6 +61,7 @@ export const OVERVIEW_WIDGETS: Readonly<Record<string, OverviewWidgetComponent>>
   today: Today,
   "your-numbers": YourNumbers,
   "my-activity": MyActivity,
+  condition: Condition,
   pulse: Pulse,
   projects: Projects,
   campaigns: Campaigns,

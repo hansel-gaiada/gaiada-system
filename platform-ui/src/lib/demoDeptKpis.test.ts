@@ -68,6 +68,11 @@ describe("GET dept-kpis (unit read)", () => {
     expect(get("", { unitNodeId: "dept-3", ...Q }, "dept-manager").status).toBe(200);
     expect(get("", { unitNodeId: "dept-1", ...Q }, "dept-manager").status).toBe(403);
     expect(get("", { unitNodeId: "dept-1", ...Q }, "gede-ic").status).toBe(403);
+    // DW-3k: the head of Web Dev reads Web Dev (at risk in the fixture) and no other department.
+    const head = get("", { unitNodeId: "dept-1", ...Q }, "u-webhead");
+    expect(head.status).toBe(200);
+    expect((head.json as { condition: string }).condition).toBe("at_risk");
+    expect(get("", { unitNodeId: "dept-3", ...Q }, "u-webhead").status).toBe(403);
   });
 });
 

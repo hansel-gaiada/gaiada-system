@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/Feedback";
 import { builtPulseTiles } from "@/lib/overviewPulse";
 import { workLinks, workWidgetPlaced } from "@/lib/overviewWork";
 import { growthWidgetPlaced } from "@/lib/overviewGrowth";
+import { conditionWidgetPlaced } from "@/lib/overviewCondition";
 import { widgetTitle, youBandLabel, type OverviewView } from "@/lib/overviewTeam";
 import { PeriodSelector } from "./PeriodSelector";
 import { ViewSwitch } from "./ViewSwitch";
@@ -76,9 +77,11 @@ export function WorkspaceOverview({ me, tenantId, subject, period, view = "me", 
   const pulse = builtPulseTiles(subject);
   // The Work blocks (DW-3f) read for the department unit: without one they are not placed, so the Work band is dropped.
   const links = workLinks(subject);
+  // The condition (DW-3k) reads for the department unit, so a workspace without one does not place it. Whether the person may read it
+  // is the server's answer: a refused read draws nothing, so a visitor sees no block on someone else's department.
   // The Growth blocks (DW-3g) are not placed for a company that switched their module off.
   const bands = selectBands(subject.widgets, ctx, (key) =>
-    hasOverviewWidget(key, widgets) && (key !== "pulse" || pulse.length > 0) && workWidgetPlaced(key, subject) && growthWidgetPlaced(key, moduleOn));
+    hasOverviewWidget(key, widgets) && (key !== "pulse" || pulse.length > 0) && workWidgetPlaced(key, subject) && conditionWidgetPlaced(key, subject) && growthWidgetPlaced(key, moduleOn));
   const actions = selectQuickActions(subject.quickActions, { ...ctx, deptId: subject.deptId });
   const company = activeCompany(me, tenantId)?.name;
   const firstName = me.name.trim().split(/\s+/)[0];

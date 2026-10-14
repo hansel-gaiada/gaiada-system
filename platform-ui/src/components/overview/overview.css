@@ -34,6 +34,15 @@
 .ov-band__label { margin: 0; padding-bottom: var(--space-8); border-bottom: 0.5px solid var(--erp-hairline); font: 600 12px var(--font-body); letter-spacing: 0.06em; color: var(--ink-muted); }
 .ov-band__grid { display: grid; gap: var(--space-16); grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); align-items: start; }
 
+/* ---- The department's condition (DW-3k): the department KPI page's banner and tiles (deptKpis.css), full width in the band;
+        a head's is the banner and the tiles, everyone else's is one quiet line ---- */
+.ov-cond { grid-column: 1 / -1; display: flex; flex-direction: column; gap: var(--space-12); }
+.ov-cond .dk-banner { margin: 0; }
+.ov-cond .dk-tiles { margin: 0; padding: 0; list-style: none; }
+.ov-cond .ov-cond__strip { padding: var(--space-8) var(--space-12); font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); }
+/* A band whose only block was refused (a visitor on another department) draws no label over nothing. */
+.ov-band:has(> .ov-band__grid:empty) { display: none; }
+
 /* ---- A block's loading and unavailable states (the block itself is its widget's own) ---- */
 .ov-block { display: flex; flex-direction: column; gap: var(--space-12); padding: var(--space-20); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); background: var(--surface-card-solid); }
 .ov-block__title { margin: 0; font: 600 14px var(--font-body); color: var(--text-primary); }

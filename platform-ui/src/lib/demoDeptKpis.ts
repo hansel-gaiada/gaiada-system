@@ -9,7 +9,7 @@ import "server-only";
 //
 // WHO (the same wiring as demoLms / demoReports): `demo-hansel` is the approver and company-wide (company_admin tier);
 // `demo-owner` reads, overviews, approves and rejects but cannot propose (§40.3a: no propose mirror for owner);
-// `dept-manager` is the SEO head and leads `dept-3`; `u-dev` is staff placed in `dept-1` and `seo-staff` in `dept-3`
+// `dept-manager` is the SEO head and leads `dept-3`; `u-webhead` is the Web Dev head and leads `dept-1` (DW-3k); `u-dev` is staff placed in `dept-1` and `seo-staff` in `dept-3`
 // (they read their own department, never propose). The open Web Dev proposal below was made by `demo-head-webdev`, a
 // head who is not a login, so `demo-hansel` can approve it. Anyone else is 403, and for a non-company-wide caller the 403
 // comes BEFORE any word on whether the unit exists, exactly as the server orders it.
@@ -33,7 +33,8 @@ const COMPANY_WIDE = new Set(["demo-hansel", "demo-owner"]);
 /** Who may propose company-wide: the company_admin tier. `demo-owner` is deliberately absent (§40.3a). */
 const PROPOSERS_WIDE = new Set(["demo-hansel"]);
 const APPROVERS = new Set(["demo-hansel", "demo-owner"]);
-const LED: Record<string, string[]> = { "dept-manager": ["dept-3"] };
+// DW-3k: `u-webhead` (webhead@gaiada.com, DW-3h's demo head of Web Dev) leads `dept-1`, so the Overview's condition banner is drivable.
+const LED: Record<string, string[]> = { "dept-manager": ["dept-3"], "u-webhead": ["dept-1"] };
 const STAFF_OF: Record<string, string[]> = { "u-dev": ["dept-1"], "seo-staff": ["dept-3"] };
 
 interface KpiDef { key: string; label: string; unit: KpiUnit; direction: KpiDirection; suggestedTarget: number | null; suggestedTolerance: number | null }
