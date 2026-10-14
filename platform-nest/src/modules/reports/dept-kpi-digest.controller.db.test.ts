@@ -121,8 +121,8 @@ describe.skipIf(!TEST_URL)("DW-4j-3 the weekly digest and the drivers (live PG +
         );
         await c.query(
           `INSERT INTO pm_task_assignees (id, tenant_id, task_id, role, assignee_kind, assignee_ref, user_id, valid_from, origin_site)
-           VALUES ($1,$2,$3,'owner','person',$4,$4,'2026-01-01'::date,$5)`,
-          [newId(), co, taskId, userId, config.originSite],
+           VALUES ($1,$2,$3,'owner','person',$4,$5,'2026-01-01'::date,$6)`,
+          [newId(), co, taskId, userId, userId, config.originSite],
         );
       });
     }
