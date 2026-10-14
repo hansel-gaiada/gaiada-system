@@ -11,6 +11,17 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.129.0` - DW-4e-1: department KPIs, the engine (targets, condition and standing) (2026-10-14) - PROTOTYPED
+
+Contract: `docs/FRONTEND-BFF-CONTRACT.md` §40 (with §40.3a "as built") and `docs/PERMISSION-CONTRACT.md` §38. Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.5 and §5.6 (owner ruling DW-Q4).
+- **Catalogue on the server** (`reports/dept-kpis.ts`, pure): every department KPI with unit, direction, reader and a suggested target and tolerance. The keys equal the workspace registry's `kpis` lists (a parity test reads `platform-ui/src/lib/workspaces.ts`). A department's workspace is resolved as the client's `workspaceFor` does (a 20-row golden table shared byte-for-byte with `platform-ui/src/lib/dept-workspace-slugs.test.ts`). Only report-fact KPIs have a reader (projects on time = milestone hit rate, reopened work, overdue tasks, check-in compliance, utilization) plus the GM's derived "departments in good condition"; every other KPI reads `unavailable` (`no_reader`).
+- **Targets** (`dept_kpi_targets`, migration `202610140800`, RLS with the reports module wall): a head proposes, the `company_admin` tier (which `owner` mirrors) approves or rejects, a proposer can never approve their own (409), and approving supersedes later approved rows. The latest approved target stays in force from its month; a suggested target is never in force, so a KPI with no approved target reads `no_target`. Values, targets and tolerances for a percent are fractions (0.85).
+- **Condition** per KPI (on track, at risk within the tolerance, off track beyond it, unavailable with a reason: `no_reader`, `no_data`, `no_target`) and per department (off track if any KPI is off track or two are at risk). "Trending to miss" is deferred. Values come from the department report document, so they match the Reports page.
+- **Routes** (`/api/:t/dept-kpis`): the unit read (people placed in the unit, its heads, company-wide tiers; others 403; an unknown unit 404 for a company-wide caller and 403 for others), the GM and HR overview (company-wide tiers, worst first), and the targets list, propose, approve and reject. No MCP tool.
+- **New Cerbos kind `dept_kpi_target`** (`read`, `propose`, `approve`, `reject`), its six artifacts and the pins (catalog 464 pairs and 108 kinds with DW-6h's `creative_asset`; role bundles 2038 pairs), migration `202610140810` seeding 18 role permissions with self-assertions (owner mirrors company_admin; approve and reject held only by the admin tiers).
+- **Tests:** `dept-kpis.test.ts` (catalogue parity, the slug golden table, every condition boundary, the department rule, value rules), `dept-kpis.controller.db.test.ts` (live Postgres + Cerbos: propose, approve, reject, own-approval 409, supersede, in-force months, values equal the Reports page, every `unavailable` reason, who may read, the overview, RLS), `src/rbac/cerbos-dept-kpi-target.test.ts`.
+- **Deploy:** two migrations; a new Cerbos policy, reloaded by the deploy's "Reload Cerbos policies" step. Open owner decision: whether anyone besides the `company_admin` tier (e.g. the Office of the GM's lead seat) should approve.
+
 ### platform-ui `0.143.0` - DW-6c2: every outside tool opens with its context (2026-10-14) - PROTOTYPED
 
 - **What.** For people on "Try the new layout", the PM task page, the project page (and the task drawer) and the client hub have an **Open in** menu. Plan §4.2 and §14.1, "launch and return".
