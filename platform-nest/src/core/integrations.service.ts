@@ -22,7 +22,12 @@ import { encryptSecret, TOKEN_KEY_VERSION } from "./secret-box";
 // are still excluded here on purpose — they are created through search's own dedicated path, never
 // through this generic client-facing endpoint, and adding them here would be an unrelated widening
 // this ticket does not own.
-export const CONNECTION_PROVIDERS = new Set(["github", "google_drive", "claude", "cpanel", "ftp", "ssh", "wp_admin"]);
+//
+// DW-6k (docs/FRONTEND-BFF-CONTRACT.md §36.1) adds `figma`: the company's own Figma token, owner_kind 'company'. The generic
+// POST here only creates the mapping row (no tokens, as for every provider); the token itself is sealed through
+// `PUT /api/:t/integrations/figma` (core/figma/figma.controller.ts), which uses this file's createConnection and
+// setConnectionTokens, the same vault path the Bing connector uses.
+export const CONNECTION_PROVIDERS = new Set(["github", "google_drive", "claude", "cpanel", "ftp", "ssh", "wp_admin", "figma"]);
 /** Every owner_kind the DB CHECK admits (migration 202608311000 added 'github_app' — GH-01 §2.3(b)
  *  corrected). NOT the set a client may create through the generic HTTP API — see
  *  CLIENT_CREATABLE_OWNER_KINDS below for that. */

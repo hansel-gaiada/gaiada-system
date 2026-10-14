@@ -693,7 +693,8 @@ export class AgencyController {
 
 // ───────────────────────────── DW-5a helpers (module scope: the class above stays routes only) ─────────────────────────────
 
-const partResource = (tenantId: string, extra: Partial<Resource> = {}): Resource => ({
+/** Exported for DW-6k (core/figma), which authorises a Figma link on a part with the SAME resource the part's own routes send. */
+export const partResource = (tenantId: string, extra: Partial<Resource> = {}): Resource => ({
   kind: "agency_campaign_part", tenantId, module: "agency", ...extra,
 });
 const partNotFound = () => new parts.PartRuleError(404, "part_not_found", "part not found");

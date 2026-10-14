@@ -222,6 +222,39 @@ describe.skipIf(!TEST_URL)("search module RLS — served-tenant + third-wall + c
     }
   });
 
+  // DW-6k (202610140800) widened the SAME CHECK again, to admit 'figma'. The migration rebuilds it from the live definition;
+  // this pins the FULL list so a later DROP + ADD written from a hand-typed list cannot silently delete a value (the trap
+  // 202608311000 and 202609040401 document). Every value here was added by an earlier migration, named in the comment.
+  it("integration_connections admits every provider ever added, and figma (DW-6k widen is additive)", async () => {
+    const providers = [
+      "github", "google_drive", "claude",                                   // 0033
+      "google_search_console", "google_analytics", "google_ads", "semrush", // 0035
+      "cpanel", "ftp", "ssh", "wp_admin",                                   // 202609040401
+      "bing_webmaster",                                                     // 202610130210
+      "figma",                                                              // 202610140800
+    ];
+    for (const p of providers) {
+      const r = await withTenants([B], (c) =>
+        c.query(
+          `INSERT INTO integration_connections (id, tenant_id, owner_kind, owner_id, provider, origin_site)
+           VALUES (gen_random_uuid(),$1,'company',gen_random_uuid(),$2,'central') RETURNING id`,
+          [B, p],
+        ),
+      );
+      expect(r.rows.length, p).toBe(1);
+    }
+    // and the constraint text itself names all thirteen
+    const def = await withTenants([B], (c) =>
+      c.query<{ def: string }>(
+        `SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
+          WHERE conrelid = 'integration_connections'::regclass AND contype = 'c'
+            AND pg_get_constraintdef(oid) ILIKE '%provider%' AND pg_get_constraintdef(oid) ILIKE '%github%'`,
+      ),
+    );
+    expect(def.rows.length).toBe(1);
+    for (const p of providers) expect(def.rows[0].def, p).toContain(`'${p}'`);
+  });
+
   it("integration_connections rejects a still-invalid provider (widen did not open the field)", async () => {
     await expect(
       withTenants([B], (c) =>

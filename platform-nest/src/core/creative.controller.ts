@@ -27,6 +27,7 @@ import { departmentFilterSql, parseDepartmentFilter } from "./department-filter"
 import { notifyBestEffort } from "./client-notify";
 import { loadUnitHeads } from "./work-requests.service";
 import * as rv from "./creative-reviews";
+import { saveCreativeAsset } from "./creative-save";
 
 const MAX_BYTES = 25 * 1024 * 1024;
 
@@ -136,86 +137,18 @@ export class CreativeController {
     const versionOf = await rv.mapCreativeRules(async () => rv.parseVersionOf(b.versionOf));
     const userId = req.principal.userId as string;
 
-    const id = newId();
     const gradedBytes = decodeImage(b.graded, "graded");
     let originalBytes: Buffer | null = null;
     if (b.original) originalBytes = decodeImage(b.original, "original");
-    const gradedKey = `${tenantId}/creative/${id}`;
-    await storage().put(gradedKey, gradedBytes);
 
-    let originalKey: string | null = null;
-    let originalSize = 0;
-    if (originalBytes) {
-      originalKey = `${tenantId}/creative/${id}.orig`;
-      originalSize = originalBytes.byteLength;
-      await storage().put(originalKey, originalBytes);
-    }
-
-    let out: { versionNo: number; versionGroupId: string; supersedesId: string | null; superseded: { round: number } | null };
-    try {
-      out = await rv.mapCreativeRules(() =>
-        withTenants([tenantId], async (c) => {
-          let versionNo = 1;
-          let groupId: string | null = null;
-          let supersedesId: string | null = null;
-          let departmentId: string | null = b.departmentId ?? null;
-          let superseded: { round: number } | null = null;
-          if (versionOf) {
-            const ref = await rv.loadAssetRef(c, tenantId, versionOf);
-            if (!ref) throw rv.assetNotFound();
-            await rv.lockGroup(c, tenantId, ref.group_id);
-            // Re-read under the lock: a concurrent delete of the named version is committed now or not at all.
-            const now = await rv.loadAssetRef(c, tenantId, versionOf);
-            if (!now || now.deleted_at) throw rv.assetDeleted();
-            const latest = await rv.latestLiveVersion(c, tenantId, ref.group_id);
-            if (!latest) throw rv.assetDeleted();
-            versionNo = await rv.nextVersionNo(c, tenantId, ref.group_id);
-            groupId = ref.group_id;
-            supersedesId = latest.id;
-            if (b.departmentId === undefined || b.departmentId === null) departmentId = latest.department_id;
-          }
-          await c.query(
-            `INSERT INTO creative_assets
-               (id, tenant_id, uploader_id, department_id, name, content_type, width, height, preset_id,
-                grade, original_key, original_content_type, original_byte_size, graded_key, graded_byte_size, origin_site,
-                version_group_id, version_no, supersedes_id)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
-            [
-              id, tenantId, userId, departmentId, b.name,
-              b.contentType ?? "image/webp", b.width ?? null, b.height ?? null, b.presetId ?? "custom",
-              JSON.stringify(grade), originalKey, b.originalContentType ?? null, originalSize,
-              gradedKey, gradedBytes.byteLength, config.originSite,
-              groupId, versionNo, supersedesId,
-            ],
-          );
-          // §35.3: a new version supersedes the open round, in this same transaction (the group lock is held).
-          if (groupId) {
-            const closed = await rv.supersedeOpenRound(c, tenantId, groupId);
-            if (closed) superseded = { round: closed.round };
-          }
-          return { versionNo, versionGroupId: groupId ?? id, supersedesId, superseded };
-        }),
-      );
-    } catch (e) {
-      // Nothing was committed: do not leave the bytes behind.
-      await storage().del(gradedKey).catch(() => undefined);
-      if (originalKey) await storage().del(originalKey).catch(() => undefined);
-      throw e;
-    }
-
-    await writeActivity(tenantId, userId, "graded", "creative_asset", id, {
-      name: b.name, presetId: b.presetId ?? "custom",
-      ...(versionOf ? { versionOf, versionNo: out.versionNo, versionGroupId: out.versionGroupId } : {}),
+    // DW-6k: the save itself lives in creative-save.ts, so a Figma export (§36.4) takes the very same road.
+    return saveCreativeAsset({
+      tenantId, userId, name: b.name,
+      contentType: b.contentType ?? "image/webp", width: b.width ?? null, height: b.height ?? null,
+      presetId: b.presetId ?? "custom", departmentId: b.departmentId,
+      grade, graded: gradedBytes, original: originalBytes, originalContentType: b.originalContentType ?? null,
+      versionOf,
     });
-    if (out.superseded) {
-      await writeActivity(tenantId, userId, "review_superseded", "creative_asset", out.versionGroupId, {
-        round: out.superseded.round, byVersion: id, versionNo: out.versionNo,
-      });
-    }
-    return {
-      id, gradedByteSize: gradedBytes.byteLength, originalByteSize: originalSize,
-      versionNo: out.versionNo, versionGroupId: out.versionGroupId, supersedesId: out.supersedesId,
-    };
   }
 
   @Get(":tenantId/creative/assets/:id")

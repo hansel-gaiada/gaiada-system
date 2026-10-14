@@ -27,6 +27,15 @@ local stack). None of these mean "production-done".
 - **Tests.** `overview.test.ts` (helper), `proxy.test.ts` (header set on a document GET, stripped from RSC fetches, prefetches and Server Actions, a client-sent copy never survives, other headers kept), `e2e/workspace-shell.spec.ts` (307 for the superadmin with `maxRedirects: 0`; 200 for a Company-home member and a classic user).
 - **QA.** `qa/e2e-gate.sh` refuses to start beside another gate. It takes a flock on `~/dw2g/.gate.lock`, and also refuses while any other copy of itself runs, which catches an older copy that takes no lock. Two sessions had started gates 17 s apart on 2026-10-14.
 
+### platform-nest `0.128.0` - DW-6k: Figma links on PM tasks, work requests and campaign parts (2026-10-14) - PROTOTYPED (stubbed Figma client; live proof waits for DW-11)
+
+- **What.** BFF contract §36 (as built: §36.8). Backend only; the UI is a later ticket.
+  - **The company's Figma token** is sealed in the credentials vault: provider `figma` (migration `202610140800` rebuilds the provider CHECK from its live definition and asserts all thirteen values), `owner_kind = 'company'`, `meta.tokenType` `pat` (sent as `X-Figma-Token`) or `oauth` (sent as a Bearer). `PUT`/`DELETE`/`GET /api/:t/integrations/figma` connect, disconnect and report it; connecting needs `company.manage`, and the token is never returned or logged.
+  - **`figma_links`** (RLS forced) holds a link per target, file and frame, with a small cache (title, last changed, open comments). `GET/POST /figma-links`, `DELETE /figma-links/:id`. There is no new Cerbos kind: a link is authorised by its target's own kind (`pm_task`, `work_request` or `agency_campaign_part`), with the attributes that target's own routes send. A work request's link is writable by its asker (`cancel`) or its receiving side (`deliver`).
+  - **The cache** refreshes on read when it is older than ten minutes. A failed refresh, a refused token or a 429 keeps the old numbers and answers `stale: true` with the reason; nothing retries in a loop; nothing ever shows "no comments" for a failure.
+  - **`GET /figma-links/:id/thumbnail`** proxies a small PNG (`Cache-Control: private, max-age=600`) and never stores it. **`POST /figma-links/:id/export`** (`png`, `svg` or `pdf`) saves into the Asset Library through the same save path as an upload, now `core/creative-save.ts`: the first export starts a version group recorded on the link, every later one is a new version of it. The request it sits on is not delivered.
+- **Tests.** `core/figma/{url,rules,client}.test.ts` (pure) and `core/figma/figma-links.test.ts` (HTTP suite on the Linux CI gate: real Postgres and Cerbos, Figma stubbed at `fetch`); the provider-CHECK pin in `db/module-search-rls.test.ts`.
+
 ### platform-nest `0.127.0` - DW-6h: asset versions and review rounds, with the `creative_asset` Cerbos kind (2026-10-13) - PROTOTYPED
 
 - **What.** BFF contract §35 and PERMISSION-CONTRACT §37.
