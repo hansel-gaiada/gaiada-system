@@ -45,26 +45,26 @@ DECLARE
 BEGIN
   SELECT count(*) INTO n FROM pg_class WHERE relname = 'dept_kpi_digests' AND relrowsecurity AND relforcerowsecurity;
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610150400: dept_kpi_digests must exist with RLS ENABLED and FORCED';
+    RAISE EXCEPTION '202610150500: dept_kpi_digests must exist with RLS ENABLED and FORCED';
   END IF;
   SELECT count(*) INTO n FROM pg_policies WHERE tablename = 'dept_kpi_digests' AND policyname = 'tenant_isolation';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610150400: dept_kpi_digests needs exactly one tenant_isolation policy, found %', n;
+    RAISE EXCEPTION '202610150500: dept_kpi_digests needs exactly one tenant_isolation policy, found %', n;
   END IF;
   SELECT count(*) INTO n FROM pg_policies
    WHERE tablename = 'dept_kpi_digests' AND policyname = 'tenant_isolation'
      AND qual LIKE '%app_module_allowed(%reports%' AND with_check LIKE '%app_module_allowed(%reports%';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610150400: dept_kpi_digests tenant_isolation must carry the reports module wall on USING and WITH CHECK';
+    RAISE EXCEPTION '202610150500: dept_kpi_digests tenant_isolation must carry the reports module wall on USING and WITH CHECK';
   END IF;
   SELECT count(*) INTO n FROM information_schema.columns
    WHERE table_name = 'dept_kpi_digests' AND column_name = 'origin_site' AND column_default IS NULL AND is_nullable = 'NO';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610150400: dept_kpi_digests.origin_site must be NOT NULL with NO default';
+    RAISE EXCEPTION '202610150500: dept_kpi_digests.origin_site must be NOT NULL with NO default';
   END IF;
   SELECT count(*) INTO n FROM pg_constraint
    WHERE conrelid = 'dept_kpi_digests'::regclass AND conname = 'dept_kpi_digests_uq';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610150400: dept_kpi_digests_uq is missing';
+    RAISE EXCEPTION '202610150500: dept_kpi_digests_uq is missing';
   END IF;
 END $$;

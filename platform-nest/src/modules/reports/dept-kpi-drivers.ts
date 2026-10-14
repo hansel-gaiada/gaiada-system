@@ -59,7 +59,9 @@ const DRIVER_METRICS: Readonly<Record<string, DriverKind>> = {
 
 /** PURE. Why a KPI has no drivers, or null when it has some to look for. */
 export function noDriversReason(def: Pick<DeptKpiDef, "reader">): "no_reader" | "no_drivers" | null {
-  if (def.reader.kind === "module") return "no_reader";
+  // A module KPI with a reader of its own (a later catalogue gives the `module` arm an optional `readerId`) has a value but no
+  // drivers; one without has no reader. Duck-typed so this file compiles before and after that field exists.
+  if (def.reader.kind === "module") return (def.reader as { readerId?: string }).readerId ? "no_drivers" : "no_reader";
   if (def.reader.kind === "report_fact" && def.reader.grain === "department" && def.reader.metricKey in DRIVER_METRICS) return null;
   return "no_drivers";
 }
