@@ -225,7 +225,11 @@ async function putBytes(tenantId: string, bytes: Buffer): Promise<{ fileId: stri
  * Re-fetch the envelope from the provider and apply it. The ONLY place certified signatures, the certified copy and the
  * `signed` status of a certified contract are written.
  */
-export async function syncEnvelope(account: SignatureProviderAccount, tenantId: string, contractId: string): Promise<SyncOutcome> {
+export async function syncEnvelope(
+  account: SignatureProviderAccount, tenantId: string, contractId: string,
+  /** What a notice CLAIMED (its unauthenticated content), for the outcome text only. Never read to decide anything. */
+  noticeSaid?: Record<string, string> | null,
+): Promise<SyncOutcome> {
   const k = await loadSyncContract(tenantId, contractId);
   if (!k || !k.envelopeId) return { status: "skipped", reason: "no envelope for this contract" };
   if (k.provider !== account.name) return { status: "skipped", reason: `the contract is signed through ${k.provider}, not ${account.name}` };
@@ -251,6 +255,7 @@ export async function syncEnvelope(account: SignatureProviderAccount, tenantId: 
   if (st.documentSha256 !== k.contentSha256) {
     return { status: "refused", reason: "document_mismatch", outcome: "the provider holds a different document than the content fixed at send; nothing was recorded" };
   }
+  const said = noticeSaid?.event ? ` (the notice said ${noticeSaid.event}${noticeSaid.signerRole ? ` by the ${noticeSaid.signerRole}` : ""}; the provider reports the envelope ${st.state})` : "";
   const signed = st.signers.filter((s) => s.state === "signed" && s.signedAt);
   const roles = new Set(signed.map((s) => s.role));
   if (st.state === "declined" || st.state === "expired") {
@@ -406,7 +411,7 @@ export async function syncEnvelope(account: SignatureProviderAccount, tenantId: 
   }
   return {
     status: "pending",
-    outcome: applied.newSigs.length ? `recorded ${applied.newSigs.map((s) => s.party).join(" and ")} signature` : "nothing new at the provider",
+    outcome: applied.newSigs.length ? `recorded ${applied.newSigs.map((s) => s.party).join(" and ")} signature${said}` : `nothing new at the provider${said}`,
     newSignatures: applied.newSigs.length,
   };
 }

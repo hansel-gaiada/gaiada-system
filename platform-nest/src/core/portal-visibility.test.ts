@@ -528,6 +528,9 @@ const SWITCHED = [
   "src/core/portal-documents.controller.ts",
   // PV6-02: Services & results; its client-wide test is the per-client scope's `wideClientIds`.
   "src/core/portal-centre-results.controller.ts",
+  // PV5-11: the certified-signing start route and the simulated PSrE's portal pages, written on the builders from day one.
+  "src/signatures/certified-signing.controller.ts",
+  "src/signatures/simulated-psre.controller.ts",
 ];
 
 describe("PV3-02 guard — portal-facing files carry no inline row-visibility literal", () => {

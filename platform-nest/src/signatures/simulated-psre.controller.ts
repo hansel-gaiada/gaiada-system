@@ -74,6 +74,8 @@ export interface SimulatedEnvelopeView {
   status: "pending" | "completed";
   completedAt: string | null;
   contractId: string;
+  /** The contract's client (the staff page returns to that client's billing tab). */
+  clientId: string;
   contractStatus: string;
   /** The contract's hash fixed at send; equals documentSha256 for an envelope created from it. */
   contentSha256: string | null;
@@ -126,6 +128,7 @@ async function viewOf(
     status: e.status,
     completedAt: e.completedAt,
     contractId: k.id,
+    clientId: k.clientId,
     contractStatus: k.status,
     contentSha256: k.contentSha256,
     documentFilename: e.documentFilename,

@@ -45,6 +45,7 @@ interface ClaimRow {
   ref: string | null;
   status: string;
   attempts: number;
+  notice: Record<string, string> | null;
 }
 
 async function finish(tenantId: string, eventId: string, status: "processed" | "ignored", outcome: string, error: string | null): Promise<boolean> {
@@ -118,7 +119,7 @@ async function tellOwners(tenantId: string, contractId: string, text: string): P
 /** Process one claimed signature notice. Idempotent: anything but a `received` claim is left alone. */
 export async function processSignatureEvent(tenantId: string, eventId: string): Promise<SignatureProcessOutcome> {
   const ev = (await withTenants([tenantId], (c) =>
-    c.query<ClaimRow>(`SELECT id, provider, ref, status, attempts FROM provider_events WHERE id = $1 AND kind = 'signature'`, [eventId]),
+    c.query<ClaimRow>(`SELECT id, provider, ref, status, attempts, notice FROM provider_events WHERE id = $1 AND kind = 'signature'`, [eventId]),
   )).rows[0];
   if (!ev) return { status: "skipped", reason: "no such signature notice in this company" };
   if (ev.status !== "received") return { status: "skipped", reason: `already ${ev.status}` };
@@ -141,7 +142,8 @@ export async function processSignatureEvent(tenantId: string, eventId: string): 
 
   let sync: SyncOutcome;
   try {
-    sync = await syncEnvelope(account, tenantId, contract.id);
+    // The notice's own claims ride along for the outcome text only; syncEnvelope writes what the provider re-fetch says.
+    sync = await syncEnvelope(account, tenantId, contract.id, ev.notice);
   } catch (e) {
     return recordRetry(tenantId, ev, `processing failed: ${(e as Error)?.message ?? String(e)}`);
   }
