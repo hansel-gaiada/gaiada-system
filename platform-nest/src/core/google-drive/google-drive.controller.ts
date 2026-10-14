@@ -36,7 +36,7 @@ import { googleSurfaceFor } from "../google-oauth/registry";
 import { GOOGLE_DRIVE_SURFACE } from "./surface";
 import {
   ATTACH_TARGET_TYPES, attachDriveFile, completeConnect, disconnect, driveError, isFileId, notConfigured, pickerAnswer, startConnect,
-  taskExists, verifiedStateTenant, type PickerAnswer,
+  statusAnswer, taskExists, verifiedStateTenant, type DriveStatusAnswer, type PickerAnswer,
 } from "./service";
 import { googleDriveConfigured } from "../../config";
 
@@ -74,6 +74,15 @@ export class GoogleDriveController {
       });
     }
     return { disconnected: out.disconnected, revokedAtGoogle: out.revokedAtGoogle };
+  }
+
+  /** `{ configured, connected, needsReconnect, accountEmail }` for the caller only: the status without a token, read from the row
+   *  alone (Google is never called). The pages that only need to know whether to offer Drive read this, not the Picker read. */
+  @Get(":tenantId/integrations/google-drive")
+  async status(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string): Promise<DriveStatusAnswer> {
+    const me = req.principal.userId ?? "";
+    await authorize(req.principal, { kind: "integration_connection", tenantId, ownerId: me }, connectionAction("read", me, me));
+    return statusAnswer(tenantId, requireUser(req));
   }
 
   /** `{ configured, connected, needsReconnect, accountEmail, accessToken, expiresAt, apiKey, appId }` for the caller only. The

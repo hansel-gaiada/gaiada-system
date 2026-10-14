@@ -382,6 +382,23 @@ export async function pickerAnswer(tenantId: string, userId: string): Promise<Pi
   }
 }
 
+/** The connection's status alone: the Picker answer without its token, key or app id. */
+export type DriveStatusAnswer = Pick<PickerAnswer, "configured" | "connected" | "needsReconnect" | "accountEmail">;
+
+/** The status read, for the caller only (§42.4, added in review): what the Tools & connections block and the task page's
+ *  "Attach from Google Drive" gate need. It reads the row and nothing else: it never unseals or refreshes a token and never calls
+ *  Google, so a page that only asks "is Drive connected?" does not wait on Google's token endpoint. `connected` means a credential
+ *  is held and the connection is not flagged. A refresh Google refuses is found by the Picker read (on the click), which flags the
+ *  row, and the next status read says `needsReconnect`. */
+export async function statusAnswer(tenantId: string, userId: string): Promise<DriveStatusAnswer> {
+  const base: DriveStatusAnswer = { configured: false, connected: false, needsReconnect: false, accountEmail: null };
+  if (!googleDriveConfigured()) return base;
+  const row = await loadOwnRow(tenantId, userId);
+  if (!row || row.status === "revoked" || (!row.access_token_enc && !row.refresh_token_enc)) return { ...base, configured: true };
+  if (flagged(row)) return { ...base, configured: true, needsReconnect: true, accountEmail: row.external_account };
+  return { ...base, configured: true, connected: true, accountEmail: row.external_account };
+}
+
 // ───────────────────────────────────────────── 6 · attach ─────────────────────────────────────────────
 
 export const isFileId = isDriveFileId;

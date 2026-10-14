@@ -169,6 +169,7 @@ describe.skipIf(!TEST_URL)("DW-6i · Google Drive: connect, pick and attach (§4
   const start = (as: string, tenant = A) => call("GET", `/api/${tenant}/integrations/google-drive/oauth/start`, as);
   const callback = (as: string, qs: string) => call("GET", `/api/google-drive/oauth/callback?${qs}`, as);
   const picker = (as: string, tenant = A) => call("GET", `/api/${tenant}/integrations/google-drive/picker`, as);
+  const status = (as: string, tenant = A) => call("GET", `/api/${tenant}/integrations/google-drive`, as);
   const disconnect = (as: string, tenant = A) => call("DELETE", `/api/${tenant}/integrations/google-drive`, as);
   const attach = (as: string, body: unknown, tenant = A) => call("POST", `/api/${tenant}/integrations/google-drive/attach`, as, body);
   const stateOf = (authUrl: string) => new URL(authUrl).searchParams.get("state") as string;
@@ -628,6 +629,61 @@ describe.skipIf(!TEST_URL)("DW-6i · Google Drive: connect, pick and attach (§4
       const row = await rowOf(member);
       expect(row.status).toBe("linked");
       expect(row.meta.driveNeedsReconnect).toBeUndefined();
+    });
+  });
+
+  // ═══════════════════════════════════════ the status read (no token) ═══════════════════════════════════════
+
+  describe("the status read (§42.4: the pages' gate, never a token, never Google)", () => {
+    const NOT_CONNECTED = { configured: true, connected: false, needsReconnect: false, accountEmail: null };
+
+    it("not configured, not connected, a manual row: the status alone, and Google is not called", async () => {
+      const keep = config.googleDrive.pickerAppId;
+      config.googleDrive.pickerAppId = "";
+      try {
+        const r = await status(member);
+        expect(r.statusCode, r.body).toBe(200);
+        expect(json(r)).toEqual({ configured: false, connected: false, needsReconnect: false, accountEmail: null });
+      } finally { config.googleDrive.pickerAppId = keep; }
+
+      expect(json(await status(member))).toEqual(NOT_CONNECTED);
+      await call("POST", `/api/${A}/integrations/connections`, member, { provider: "google_drive", externalAccount: "typed-by-hand@x.test" });
+      expect(json(await status(member))).toEqual(NOT_CONNECTED);
+      expect(fx.seen).toEqual([]);
+    });
+
+    it("connected: the account email and nothing else, and no refresh even when the token is about to expire", async () => {
+      await connectOk(member);
+      fx.seen.length = 0;
+      await expireIn(member, "1 minute"); // the Picker read would refresh here; the status read must not
+      const r = await status(member);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(json(r)).toEqual({ configured: true, connected: true, needsReconnect: false, accountEmail: "dana@gmail.test" });
+      expect(r.body).not.toContain(ACCESS_1);
+      expect(r.body).not.toContain(REFRESH_1);
+      expect(fx.seen).toEqual([]);
+
+      // Someone else, same company: their own answer. A person outside the company: refused.
+      expect(json(await status(mgr))).toEqual(NOT_CONNECTED);
+      expect((await status(stranger)).statusCode).toBe(403);
+    });
+
+    it("a connection the Picker read found refused answers needsReconnect; a reconnect clears it", async () => {
+      await connectOk(member);
+      fx.refresh = "invalid_grant";
+      await expireIn(member, "1 minute");
+      expect(json(await picker(member)).needsReconnect).toBe(true);
+      expect(json(await status(member))).toEqual({ configured: true, connected: false, needsReconnect: true, accountEmail: "dana@gmail.test" });
+
+      fx.refresh = "ok";
+      await connectOk(member);
+      expect(json(await status(member))).toMatchObject({ connected: true, needsReconnect: false });
+    });
+
+    it("after a disconnect it reads as not connected", async () => {
+      await connectOk(member);
+      expect((await disconnect(member)).statusCode).toBe(200);
+      expect(json(await status(member))).toMatchObject({ configured: true, connected: false, needsReconnect: false });
     });
   });
 

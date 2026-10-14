@@ -7823,6 +7823,7 @@ Google is STUBBED at `fetch` in every test; nothing here has met real Google (DW
 | GET | `/api/:t/integrations/google-drive/oauth/start` | `{ authUrl }` | `integration_connection` · `create`, `ownerId` = the caller |
 | GET | `/api/google-drive/oauth/callback?code&state` (or `error`) | `{ status: "connected", accountEmail }` or `{ status: "denied", reason: "drive_consent_denied" }` | the surface's `authz`, against the TENANT IN THE VERIFIED STATE, before the state is spent |
 | DELETE | `/api/:t/integrations/google-drive` | `{ disconnected, revokedAtGoogle }` | `integration_connection` · `delete`, own row |
+| GET | `/api/:t/integrations/google-drive` | `{ configured, connected, needsReconnect, accountEmail }`: the status alone, read from the row (no token; Google is never called) | `integration_connection` · `read`, own row |
 | GET | `/api/:t/integrations/google-drive/picker` | `{ configured, connected, needsReconnect, accountEmail, accessToken, expiresAt, apiKey, appId }`, `Cache-Control: no-store` | `integration_connection` · `read`, own row |
 | POST | `/api/:t/integrations/google-drive/attach` | 201, the file row | `file` · `create`, then `task` · `read`, as `POST /files` |
 
@@ -7858,6 +7859,10 @@ Google is STUBBED at `fetch` in every test; nothing here has met real Google (DW
 10. **The attach answer is the file row in the shape `GET /files` lists** (snake_case: `id`, `filename`, `content_type`, `byte_size`, `scrubbed`, `uploader_id`, `created_at`) plus `url`, `target_entity_type` and `target_entity_id`. The `attached` activity row carries `source: "google_drive"` and `driveFileId` beside the usual `fileId` and `filename`; never a token.
 11. **`Pragma: no-cache`** is sent beside `Cache-Control: no-store` on the Picker answer.
 12. **The Drive call and the token calls use `config.google.timeoutMs`** and the shared `config.google` endpoints. Drive has no endpoint seam of its own: its host is a constant, and `isDriveApiUrl` refuses any other.
+13. **A status read with no token** (added in review). The Picker read refreshes the token when it is near expiry, so a page that only needs to know whether to offer Drive would wait on Google's token endpoint on every view.
+   - `GET /api/:t/integrations/google-drive` answers `{ configured, connected, needsReconnect, accountEmail }` from the row alone. It never unseals or refreshes a token and never calls Google.
+   - The Tools & connections block and the task page's "Attach from Google Drive" gate read it. Only the click that opens the Picker reads the Picker answer.
+   - `connected` there means a credential is held and the connection is not flagged. A refresh Google refuses is found on that click, which flags the row, and the next status read says `needsReconnect`.
 
 **For the UI ticket.**
 - `GET /api/:t/files` does not return `url`, so an attachment cannot be opened from the list yet. `files.controller` was left unchanged on purpose (this ticket keeps it identical). The UI ticket needs `url` added to that SELECT, and a Drive mark can then be derived from the link's host.
