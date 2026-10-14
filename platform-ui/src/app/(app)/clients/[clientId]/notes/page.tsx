@@ -4,7 +4,7 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import {
-  listClientNotes, listClientHistory, listMembers, CLIENT_CONTACT_LABELS,
+  listClientNotes, listClientHistory, listMembers, readFiles, CLIENT_CONTACT_LABELS,
   type ClientHistoryEntry, type ClientContactKey,
 } from "@/lib/entities";
 import { addClientNoteAction, deleteClientNoteForm } from "@/lib/clientWorkActions";
@@ -13,6 +13,7 @@ import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { ClientNoteForm } from "@/components/forms/ClientWorkForms";
+import { FilesPanel } from "@/components/FilesPanel";
 import { formatDateTime } from "@/lib/format";
 import { registry, centreChangeLabel, isAreaTogglePath } from "@/lib/clientCentre";
 
@@ -29,6 +30,10 @@ import { registry, centreChangeLabel, isAreaTogglePath } from "@/lib/clientCentr
 // nothing written here reaches the client. Anyone with `client.write` can add one; you can delete your
 // own, and `client.delete` (manager+) can delete anyone's — the same line the backend enforces.
 //
+// FILES (DW-8h, BFF §45.4) are the client's own attachments (`client` target): staff only, like everything here. The
+// portal never lists or serves a `client` file. Placed here, "notes and files", at PV's call (PV-D4: staff-only material
+// lives in the Internal area).
+//
 // HISTORY is the activity log for this client, newest first. Owner changes are stored as user ids and
 // rendered as names here, from the same directory the owner picker uses.
 export default async function ClientNotesPage({ params }: { params: Promise<{ clientId: string }> }) {
@@ -39,11 +44,12 @@ export default async function ClientNotesPage({ params }: { params: Promise<{ cl
   const { clientId } = await params;
   if (!tenant) notFound();
 
-  const [notesRes, historyRes, membersRes] = await Promise.all([
+  const [notesRes, historyRes, membersRes, filesRes] = await Promise.all([
     listClientNotes(userId, tenant, clientId),
     listClientHistory(userId, tenant, clientId),
     // Only used to turn owner ids in the history into names; its refusal is shown beside the history.
     readResult(listMembers(userId, tenant)),
+    readFiles(userId, tenant, "client", clientId),
   ]);
   const canWrite = can(me, "client.write", tenant);
   const canDeleteAny = can(me, "client.delete", tenant);
@@ -85,6 +91,10 @@ export default async function ClientNotesPage({ params }: { params: Promise<{ cl
             })}
           </ul>
         )}
+      </Card>
+
+      <Card title="Files" hint="Internal to our team. Clients never see these.">
+        <FilesPanel entityType="client" entityId={clientId} revalidate={`/clients/${clientId}/notes`} result={filesRes} note="Only staff see these files." />
       </Card>
 
       <Card title="History" hint="Every change to this client and its profile, newest first.">
