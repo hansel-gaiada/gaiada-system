@@ -1,6 +1,6 @@
 # Gmail client seam (MAIL-16D)
 
-**Status: DEV-VERIFIED — the seam only.** See `docs/superpowers/specs/2026-08-04-zone-a-mail-design.md`
+**Status: DEV-VERIFIED — the seam only; extended by DW-8j (2026-10-15) with `sendMessage`, a simulated mailbox and a live adapter (see the DW-8j section at the foot).** See `docs/superpowers/specs/2026-08-04-zone-a-mail-design.md`
 §8C and decision A14 (binding), and the MAIL-16D row of
 `docs/superpowers/plans/2026-08-04-mail-subsystem-tickets.md`, for the scope this directory is
 allowed to cover and why it stops here.
@@ -58,3 +58,20 @@ fixture-specific carve-out.
 No OAuth link/consent/revoke flow, no live Google adapter, no reading-pane UI, no persistence of
 message content anywhere, no database migration (the `integration_connections` provider-CHECK
 widening for `google_gmail` ships with MAIL-16 at staging, not here).
+
+## DW-8j (DW-D24, 2026-10-15) — what changed in this directory
+
+`docs/FRONTEND-BFF-CONTRACT.md` §48 builds "email from the ERP through each employee's OWN Gmail" on this seam. The MAIL-16D rules above still hold
+(render on demand, cache nothing); the list under "Explicitly NOT in this directory" is superseded as follows:
+
+- `GmailClient` gains `sendMessage` and an optional `{label: "INBOX" | "SENT"}` on `listThreads`; `GmailMessage.headers` gains optional `cc`,
+  `inReplyTo`, `references`; the error family gains `GmailInvalidMessageError` and `GmailUnavailableError`. All additive: MAIL-16D's cases are unchanged.
+- `send-validation.ts` is the one definition of a valid outgoing message (shared by the HTTP service and every client).
+- `fixture-client.ts` now also backs the SIMULATED mailbox (`simulated-mailboxes.ts`): a per-person in-process Sent, memory only, nothing sent anywhere.
+  `gmail.simulated-isolation.test.ts` is the executable proof that the simulated files cannot reach a network, mail, process, filesystem or database
+  primitive, or the live adapter.
+- `api-client.ts` is the LIVE adapter (the Gmail REST API with one person's access token). It is exercised only at a stubbed `fetch`
+  (`api-client.test.ts`); it must pass `contract.ts`, send cases included, UNMODIFIED against a staging account at DW-11, through a sibling
+  `api-client.contract.test.ts` that supplies `sendRecipient` and a harness built from that account. Its MIME handling and fan-out are UNVERIFIED
+  against real Google (the honesty note above applies to it in full).
+- Still not here: attachments, HTML compose, scheduled send, any persistence of message content.
