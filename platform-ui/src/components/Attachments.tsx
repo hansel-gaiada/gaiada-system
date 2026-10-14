@@ -65,7 +65,7 @@ export function Attachments({ files, canEdit, canAttachFromDrive = false, driveT
                   <a href={`/api/files/${encodeURIComponent(f.id)}`} download style={{ font: "400 14px var(--font-body)", color: "var(--text-primary)" }} aria-label={`Download ${f.filename}`}>{f.filename}</a>
                 )}
                 <span style={{ font: "400 11px var(--font-body)", color: "var(--erp-ink-50)", marginLeft: 8 }}>
-                  {f.byte_size > 0 ? `${formatFileSize(f.byte_size)} · ` : ""}{formatDate(f.created_at)}
+                  {Number(f.byte_size) > 0 ? `${formatFileSize(f.byte_size)} · ` : ""}{formatDate(f.created_at)}
                 </span>
               </span>
               {canEdit && <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" disabled={pending} onClick={() => run(() => remove(f.id))}>Remove</button>}

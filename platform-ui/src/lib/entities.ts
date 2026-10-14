@@ -346,7 +346,7 @@ export const listNotifications = (u: string, t: string, unreadOnly = false) =>
 // ---- Files / attachments (5c.4 — endpoints exist) ----
 /** `url` (DW-6i): set for a reference attachment, such as a Google Drive file; NULL for an uploaded file. Optional because an older
  *  platform-nest does not return it. */
-export interface FileMeta { id: string; filename: string; content_type: string; byte_size: number; scrubbed: boolean; uploader_id: string | null; created_at: string; url?: string | null }
+export interface FileMeta { id: string; filename: string; content_type: string; /** A bigint: the JSON carries it as a string. */ byte_size: number | string; scrubbed: boolean; uploader_id: string | null; created_at: string; url?: string | null }
 export const listFiles = (u: string, t: string, entityType: string, entityId: string) =>
   skipUnavailable(platformFetch<FileMeta[]>(`/api/${t}/files?entityType=${entityType}&entityId=${entityId}`, u), [] as FileMeta[]);
 /** DW-8h (§45.3): the honest list read. A refusal, a missing target and an unreachable platform are each said as themselves,
