@@ -672,6 +672,115 @@ Written when DW-6 started, from a survey of main (`2e222711`). Pilot users only,
   Cerbos.
 - The browser test runs on sumopod with `platform-ui/qa/e2e-gate.sh`, one gate at a time.
 
+### 4.3 Build notes (DW-7, 2026-10-14)
+
+Written when DW-7 started, from a survey of main (`7abcf66b`, release 395). Pilot users only, like DW-2, except
+where a ticket says the classic shell changes too.
+
+**The regrouping is already built, as it was for DW-6.**
+- DW-1a put HR, Finance and IT in the registry with the rows of §4: HR's 5 Work rows (Appraisal cycles in
+  Talent), Finance's 6 Work rows plus the statements in Reports (Invoices in Receivables), IT's 4 Work rows.
+- The pilot shell draws them, and the old console strips hide inside it (`consoleStrips.test.tsx` pins HR, IT,
+  IT's network strip and Finance).
+- So 7a, 7b and 7c are proofs, not builds. What is left:
+  - a browser test that walks the three workspaces and checks the rows and tabs against §4;
+  - each row's gate mirrors its page's backend read gate, so the pilot sidebar never offers a row whose page
+    only refuses. Today the HR rows gate on the module alone and Finance's rows are ungated;
+  - Finance's "Revenue, AR and cash" analytics tab (`/finance/analytics`), which no page serves yet (7b).
+- Settings stays where DW-1a put it: HR's in Cases & compliance, Finance's in Close.
+
+**What each ticket builds on, and what it adds:**
+
+- **7d · HR, Finance and IT in each company's org tree (DW-D6).**
+  - *Builds on:* the tree is one JSON blob per company (`company_org_structure`). Every write goes through
+    `applyOrgStructure` (blob, membership sweep, closure rebuild and the `org_structure.updated` event in one
+    transaction), so a SQL migration is the wrong tool: it would leave the closure stale. The UI finds a
+    workspace by the node's name (`deptSlug`), so a department named "HR" is the HR workspace. A new company
+    gets no tree at all today (the GET answers 404 until someone saves one).
+  - *Adds:*
+    - one pure helper that adds the department nodes `d-hr` "HR", `d-finance` "Finance" and `d-it` "IT" under
+      the root, each only when no department in the tree already has that id or a name with that slug. It
+      never renames, moves or removes a node, and places nobody;
+    - a new company is created with a starting tree: the root plus the three;
+    - an idempotent backfill for every live company, run through `applyOrgStructure`. It defaults to a dry run
+      that prints, per company, what it would add and the departments already there, so a hand-built
+      "Human Resources" is seen before anything is written. A company with no tree gets the starting tree;
+    - the agency and resort seeds gain the three, so CI and sumopod match live;
+    - the classic sidebar keeps exactly one HR and one IT row, as it already does for Finance: a tree row named
+      HR or IT opens `/hr` or `/it`, and the fixed row is appended only when the tree has none;
+    - `/departments/<id>` for a functional department opens its console (`/hr`, `/finance`, `/it`), so the
+      department has one home;
+    - the demo company gains the three departments.
+  - *What it switches on:* HR, Finance and IT get a department id, so their Project Management row, Analytics ›
+    Work and Tools & connections are offered. LMS courses already on `d-hr` and `d-it` show as department
+    courses. DW-4e's KPI engine already maps the three slugs, so their conditions appear, reading
+    "unavailable" until targets are approved.
+  - *Checked before live:* the backfill's DB test on the Linux CI gate (closure rows for the new nodes,
+    memberships unchanged, hand edits untouched, a second run writes nothing), then a dry run on live, then the
+    apply.
+- **7e · Pulse tiles and tool sets.**
+  - *Builds on:* `Pulse.tsx` maps a `source` to a reader, and a reading is a count, "No access" or
+    "Unavailable", never a 0 for a failure. The HR readers (`listLeave`, `listCases`, `listPayrollRuns`), AR
+    aging and `listDevices` all turn 403/404 into `[]`, so none can feed a tile as it is. Each tile gets a
+    `readResult` reader.
+  - *Adds, HR:* leave pending, onboarding in progress, open cases, payroll status.
+  - *Adds, Finance:* client payments to confirm (`GET invoice-payments?status=pending` without a client, the
+    company-wide queue), overdue receivables, close progress for the current period, integrity findings (the
+    ledger and reconciliation verdicts).
+  - *Adds:* the queue the "Confirm payments" quick action promises. It points at Receivables, which has no
+    payment queue today, so Receivables gains a "Payments to confirm" section using the existing decide route.
+  - *Adds, IT:* devices offline.
+  - *Then:* `overviewCoverage.ts` lets HR's four counts, Finance's totals and IT's device counts leave "More
+    from" (§3.8), each only where a tile now covers it.
+  - *Gaps, moved out of 7e:* threat alerts have no backend (the network pages read fixtures; 7h). Failing
+    workflows have no failure read; 7e builds the tile only if an honest one exists, else it moves to 7i. The
+    bank-feed, network-controller and Google Workspace admin connections have nothing to connect to yet (7i).
+- **7f · HR write screens.** The backends are complete and tested (`hr-full-acceptance.test.ts` and others);
+  every page is view-only and `hrActions.ts` has none of these writes. One ticket per area:
+  - 7f-1 payroll: create a run, calculate, approve (with the unratified-statutory override and its reason),
+    publish, mark paid. Money: Opus reviews it;
+  - 7f-2 recruitment: requisitions (create, edit, submit), candidates, applications and stages, interviews,
+    scorecards, offers and their status, convert an offer into a hire;
+  - 7f-3 compensation: salary, allowances, benefits and the tax profile per employee;
+  - 7f-4 review cycles and their participants;
+  - 7f-5 policies: leave policies and their assignments, holiday calendars, pay grades, statutory parameters
+    and their ratification (all on HR › Settings).
+- **7g · Finance.**
+  - 7g-1 VAT return preparation. The backend exists (`GET/POST finance/tax/returns`, `…/file`, `…/drift`);
+    the UI has no client for it. Tax gains a Returns section: prepare a period's return, review it, record the
+    filing.
+  - 7g-2 accounts. No route creates, renames or deactivates an account. Contract first (BFF §49), then the
+    backend and the screen. The contract rules what deactivating an account with postings or a balance means.
+- **7h · IT isolation rules and threat response.** Designed, not built: `lib/network.ts` documents the routes and
+  the isolate write (a D14 approval), but no backend serves them and the pages read fixtures. Later.
+
+**Order, one agent at a time:**
+1. 7d backend (Sonnet, Opus review), then 7d UI (Sonnet), then the release, the live dry run and the apply.
+2. 7a + 7b + 7c: the browser test and the gate mirror (Sonnet).
+3. 7e (Sonnet), HR and IT tiles first, then Finance with the payment queue.
+4. 7b's analytics page (Sonnet).
+5. 7f-1 to 7f-5 (Sonnet; 7f-1 with an Opus review).
+6. 7g-1 (Sonnet), then contract §49 and 7g-2.
+
+**Defaults taken, which the owner may overrule:**
+- Every company gets the three departments, including the venues and the holding, because DW-D6 says each
+  company. A department nobody is placed in is empty, not hidden.
+- The node ids are `d-hr`, `d-finance` and `d-it` (the LMS seed already uses `d-hr` and `d-it`), at the top of
+  the tree beside the other departments.
+- Rows mirror their pages' read gates. Whether the pages themselves should 404 for everyone else (DW-D20, as in
+  Admin) is the owner's call, because today any staff member can open `/hr` in the classic shell.
+
+**Shared files.**
+- In `lib/workspaces.ts`, DW-7 edits only the HR, Finance and IT workspaces, the three DW-7e `CONN` entries and
+  `FUNCTIONAL_SLUGS`. DW-8 holds the You, Company and Admin rows.
+- `Pulse.tsx` gains sources; the existing ones are not touched.
+- In the BFF contract DW-7 takes §49 to §52, and §41 to §42 in PERMISSION-CONTRACT. DW-8 holds §45 to §48
+  and §39 to §40.
+- The browser test is its own file, `e2e/workspace-functional.spec.ts`.
+
+**Testing.** As DW-6: UI and backend suites on GitHub Actions CI, the browser test on sumopod with
+`platform-ui/qa/e2e-gate.sh`, one gate at a time.
+
 ---
 
 ## 5. Performance, inside every department
@@ -1257,6 +1366,7 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
   - export into the Asset Library, versioned against the request.
 
 **DW-7 · HR, Finance and IT as workspaces**
+- Build notes, the order and what DW-1 already built: §4.3.
 - **7a** (Sonnet) HR: 14 tabs become 5 Work rows.
 - **7b** (Sonnet) Finance: 15 tabs become 6 Work rows, plus Reports.
 - **7c** (Haiku) IT: 10 tabs become 4 Work rows.
