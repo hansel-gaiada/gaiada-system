@@ -76,6 +76,12 @@ const AGENCY_DEPARTMENTS: { name: string; divisions: { name: string; roles?: Org
   // (`shell/nav.ts`) — ordering there is presentation, ids here are identity, and the two must not
   // be conflated.
   { name: "GM", divisions: [], people: [person("d5-p1", "Edward", "u-gm")] },
+  // HR, Finance and IT (DW-7d): the functional departments are org nodes in every company's tree, so the
+  // demo agency has them too (`dept-6`..`dept-8`). They keep their own consoles (/hr, /finance, /it);
+  // the node gives each workspace a department id. Appended for the same positional-id reason as GM.
+  { name: "HR", divisions: [] },
+  { name: "Finance", divisions: [] },
+  { name: "IT", divisions: [] },
 ];
 
 /** What the default tree needs of a company. `vertical` selects the seed (PV-D13: never a name or an

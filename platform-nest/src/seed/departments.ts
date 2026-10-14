@@ -30,6 +30,7 @@ import { deriveBlobPlacements, diffMembershipSweep, isUuidShaped, todayIso, type
 import { allocateTaskSeq, deriveUniqueShortCode } from "../core/project-short-codes";
 import { EMPLOYEES, AGENCY_DEPTS } from "./roster";
 import { resolveSeedActor, assertNotRetired } from "./seed-actor";
+import { ensureFunctionalDepartments } from "../admin/functional-departments";
 
 const site = () => config.originSite;
 const DAY_MINUTES = 480;
@@ -89,6 +90,12 @@ async function mergeOrgPlacements(tenantId: string): Promise<void> {
       for (const [vid, vname] of d.divisions) {
         if (!findNode(root, vid)) { deptNode.children.push({ id: vid, name: vname, kind: "division", children: [] }); changed = true; }
       }
+    }
+    // DW-7d (DW-D6): HR, Finance and IT, appended when missing. They get no seeded portfolio below
+    // (DEPT_PROJECTS / DEPT_TASKS are keyed by the AGENCY_DEPTS ids) and no placed people.
+    const have = new Set((root.children ?? []).map((n) => n.id));
+    for (const n of ensureFunctionalDepartments(structure, tenantId).structure.root.children) {
+      if (!have.has(n.id)) { root.children.push(n); changed = true; }
     }
     for (const [, name, , target] of EMPLOYEES) {
       const person = roster.get(name);

@@ -10,11 +10,13 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { withTenants } from "../db";
 import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
 import { createCompany } from "../testing/fixtures";
+import { functionalNodeId } from "../admin/functional-departments";
 import { seedHrItCurriculum, verifyHrItCurriculum } from "./lms-hr-it-curriculum";
 
 const RUN = !!TEST_URL;
-const UNIT_HR = "d-hr";
-const UNIT_IT = "d-it";
+// DW-7d: node ids are per company, so these are set once the company exists.
+let UNIT_HR = "";
+let UNIT_IT = "";
 
 describe.skipIf(!RUN)("LMS — the HR and IT curriculum", () => {
   let A: string;
@@ -22,6 +24,8 @@ describe.skipIf(!RUN)("LMS — the HR and IT curriculum", () => {
   beforeAll(async () => {
     await initTestDb();
     A = await createCompany("Gaia Digital Agency", ["lms", "hr"]);
+    UNIT_HR = functionalNodeId("hr", A);
+    UNIT_IT = functionalNodeId("it", A);
     await seedHrItCurriculum("Gaia Digital Agency");
   });
   afterAll(async () => { await teardownTestDb(); });

@@ -11,6 +11,23 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.141.0` + platform-ui `0.161.0` - DW-7d: HR, Finance and IT in every company's org tree (2026-10-14) - PROTOTYPED
+
+Plan §4.3 (DW-7d), owner ruling DW-D6. Contract: the `GET/PUT /api/:t/org-structure` row of `docs/FRONTEND-BFF-CONTRACT.md` (DW-7d note). No migration, no Cerbos change, no compose change.
+- **What.** HR, Finance and IT become department nodes in each company's org tree, so the HR, Finance and IT workspaces are real departments: they get a department id, and their Project Management row, Analytics › Work and Tools & connections are offered in the new layout.
+- **Node ids are unique per company:** `d-hr-<companyId>`, `d-finance-<companyId>`, `d-it-<companyId>`. An `org_unit_lead` grant carries no company and the Cerbos derived role matches the node id alone, so a shared `d-hr` would let one company's head of HR lead another company's HR. The tenant-binding of org_unit grants stays an IAM gap (BFF §43.6a).
+- **Backend:**
+  - `admin/functional-departments.ts` (new, pure): adds the three under the root only when the company's tree has no department with that id, the legacy plain id (`d-hr`), or a name with the same slug. It never renames, moves or removes a node, and places nobody.
+  - `POST /api/companies`: a new company starts with a tree (root + the three), written through `applyOrgStructure` after `company.created`, so its org-structure no longer 404s.
+  - `seed:functional-departments` (new): the one-off backfill for existing companies. Dry run by default, `--apply` writes, exit 1 on any conflict. It appends to the RAW stored tree and refuses a tree the sanitizer would rewrite, so nothing else in a tree changes. In the same transaction it re-points the LMS courses and paths seeded on the legacy `d-hr`/`d-it` to the company's own HR/IT node.
+  - Seeds (agency, resort, departments merge, org-structure refresh, LMS HR/IT curriculum) use the same rule and ids.
+- **UI:**
+  - Classic sidebar: one HR, one Finance and one IT row. A tree department with that name opens its console (`/hr`, `/finance`, `/it`); the fixed row is appended only when the tree has none (Finance's old rule, generalised).
+  - `/departments/<id>` for HR, Finance or IT redirects to its console, so each has one home; the classic dashboard's "My department" button and The Office's record links go straight there.
+  - The demo agency tree gains HR, Finance and IT (`dept-6`..`dept-8`); the shell e2e now expects their Overviews to draw the Work band.
+- **Tests (GitHub Actions CI on the landing sha):** `functional-departments.test.ts` 13, `seed/functional-departments.test.ts` 4, `seed/functional-departments.db.test.ts` 9 (real Postgres: dry run writes nothing; apply appends, closure rows, memberships unchanged, second run writes nothing, per-company ids never shared, drift and conflict companies untouched, LMS rows moved), `company-vertical.db.test.ts` +1, `lms-hr-it-curriculum.db.test.ts`; UI `nav.test.ts` +3, `workspaceAccess.test.ts` +1 block, `org.test.ts`, `WorkspaceSidebar.functional.test.tsx` (new). Sumopod: `workspace-shell` 51/51 ×2 + smoke, `workspace-departments` 13/13 ×2.
+- **Server step after the deploy:** `npm run seed:functional-departments` (dry run) in the platform-nest container, read it, then `-- --apply`.
+
 ### platform-nest `0.140.0` + platform-ui `0.160.0` - DW-8h: attachments on requests, campaigns, campaign parts and the staff client page; a real upload (2026-10-14) - PROTOTYPED
 
 Contract `docs/FRONTEND-BFF-CONTRACT.md` §45 (as built: §45.6 backend, §45.7 UI). Plan §8.1 row 8h. No migration, no Cerbos policy change, no compose change.

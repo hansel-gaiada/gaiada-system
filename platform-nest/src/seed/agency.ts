@@ -12,6 +12,7 @@ import { createRole, grantRole, addMembership } from "../testing/fixtures";
 import { seedDepartmentsAndHr, type SeededDepartments } from "./departments";
 import { AGENCY_DEPTS, STAFF } from "./roster";
 import { seedPositions } from "./positions";
+import { ensureFunctionalDepartments } from "../admin/functional-departments";
 import { resolveSeedActor, assertNotRetired } from "./seed-actor";
 import { emptyProfileState, loadProfileRow, saveProfileRow } from "../modules/clients/centre/store";
 import { createIssuedInvoice, ensureBillingSetup } from "./billing-setup";
@@ -328,14 +329,17 @@ async function seedOrgStructures(tenantId: string, resortId: string, u: Record<s
   const div = (id: string, name: string) => ({ id, name, kind: "division", children: people(id) });
   const dept = (id: string, name: string, divisions: [string, string][]) =>
     ({ id, name, kind: "department", children: [...divisions.map(([vid, vname]) => div(vid, vname)), ...people(id)] });
-  const agency = {
+  const agencyBase = {
     root: { id: "root", name: AGENCY_NAME, kind: "company", children: AGENCY_DEPTS.map((d) => dept(d.id, d.name, d.divisions)) },
   };
-  const resort = { root: { id: "root", name: RESORT_NAME, kind: "company", children: [
+  const resortBase = { root: { id: "root", name: RESORT_NAME, kind: "company", children: [
     { id: "d-ops", name: "Operations", kind: "department", children: [
       { id: "v-fo", name: "Front Office", kind: "division", children: [
         { id: "r-gm", name: "General Manager", kind: "role", children: [
           { id: "p-gm", name: "Wayan (GM)", kind: "person", assigneeId: u.resortGm, assigneeName: "Wayan (GM)", children: [] }] }] }] }] } };
+  // DW-7d: HR, Finance and IT in both trees, with ids unique to each company.
+  const agency = ensureFunctionalDepartments(agencyBase, tenantId).structure;
+  const resort = ensureFunctionalDepartments(resortBase, resortId).structure;
   // Insert-if-absent: seed a starting tree but NEVER overwrite edits made in the org builder.
   for (const [tid, struct] of [[tenantId, agency], [resortId, resort]] as const) {
     await withTenants([tid], (c) => c.query(

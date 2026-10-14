@@ -15,6 +15,8 @@ import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { packFor, VERTICALS } from "../core/packs";
 import { isElevated } from "./elevated";
+import { applyOrgStructure } from "./org-structure.service";
+import { startingOrgStructure } from "./functional-departments";
 
 const COMPANY_COLS = "id, name, type, vertical, enabled_modules, status, parent_company_id, settings";
 
@@ -83,6 +85,10 @@ export class CompanyCrudController {
         );
       }
       await emitEvent(c, id, "company", id, "company.created", { name, type, vertical, parentCompanyId: parentId });
+      // DW-7d: a new company starts with a tree holding the HR, Finance and IT departments (DW-D6), so
+      // its org-structure never 404s and those workspaces are real departments from day one. After
+      // `company.created`, so the outbox announces the company before its tree.
+      await applyOrgStructure(c, id, startingOrgStructure(name, id));
     });
     await writeActivity(id, req.principal.userId, "created", "company", id, { name });
     return { id };

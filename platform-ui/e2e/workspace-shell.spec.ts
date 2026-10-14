@@ -10,7 +10,8 @@ import { tenantCookie } from "./appCookies";
 //
 //   - The demo company is `co-agency` (Gaia Digital Agency, vertical "agency"). With no backend its org tree
 //     is the seeded default (lib/org.ts): Web Dev (dept-1), Creatives (dept-2), SEO (dept-3), Social Media
-//     (dept-4) and GM (dept-5). The only people placed in it are u-dev, u-pm and u-gm. Only ONE demo login is
+//     (dept-4), GM (dept-5), and since DW-7d HR (dept-6), Finance (dept-7) and IT (dept-8). The only people
+//     placed in it are u-dev, u-pm and u-gm. Only ONE demo login is
 //     any of those: `webdev@gaiada.com` is u-dev (DW-3a), placed in Web Dev > Frontend. The personas below
 //     have no placement.
 //   - Home is therefore decided by GM access (lib/workspaceAccess.ts):
@@ -20,8 +21,8 @@ import { tenantCookie } from "./appCookies";
 //       search_staff (seo-staff@gaiada.com)             -> none                     -> no workspace of their own: Company
 //   - Admin needs `admin.access`: platform_admin only. The Company area (first row "Departments") is open to all.
 //     An Admin page is a 404 for anyone not allowed to use it (DW-D20, lib/adminAccess.ts).
-//   - The tree has no HR, IT or Finance node, so the registry appends those three workspaces after the
-//     departments in the switcher.
+//   - The tree holds HR, Finance and IT (DW-7d), so those workspaces have a department id and follow the
+//     other departments in the switcher, in tree order.
 //   - client_contact (dana@northwind.example) is client-only and belongs in /portal, never the staff shell.
 
 // A button is a plain control until React owns it; clicking earlier does nothing (same helper as the
@@ -111,7 +112,7 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
 
     for (const group of ["Work", "Performance", "You"]) await expect(nav.getByRole("group", { name: group })).toBeVisible();
     await expect(nav.getByRole("group", { name: "Performance" }).getByRole("link")).toHaveText(["Reports", "Analytics", "Appraisals", "Learning"]);
-    await expect(nav.getByRole("group", { name: "You" }).getByRole("link")).toHaveText(["Inbox", "Calendar", "Approvals", "Me"]);
+    await expect(nav.getByRole("group", { name: "You" }).getByRole("link")).toHaveText(["My tasks", "Inbox", "Calendar", /^Approvals/, "Me"]); // DW-8a added My tasks; DW-8m: a decider's Approvals row may carry its pending count
     const work = nav.getByRole("group", { name: "Work" });
     for (const row of ["Project Management", "Command", "Oversight", "Tools & connections"]) {
       await expect(work.getByRole("link", { name: row, exact: true })).toBeVisible();
@@ -1082,8 +1083,8 @@ test.describe("the Overview's frame: the functional workspaces keep their page b
       await page.goto(path);
       await expect(page.getByRole("heading", { level: 1 }), path).toHaveText(/^Good (morning|afternoon|evening), Clement$/);
       await expect(page.getByRole("heading", { name: `More from ${label}` }), path).toBeVisible();
-      // No org node to scope to (DW-3f): no Work band.
-      await expect(page.getByRole("heading", { level: 2, name: "Work", exact: true }), path).toHaveCount(0);
+      // DW-7d: HR, Finance and IT are org nodes, so the Work blocks (DW-3f) have a department to read for.
+      await expect(page.getByRole("heading", { level: 2, name: "Work", exact: true }), path).toBeVisible();
       await expect(page.getByRole("group", { name: "Period" }), path).toBeVisible();
       await expect(page.getByText(/Overview is being built/), path).toHaveCount(0);
     }
@@ -1312,7 +1313,7 @@ test.describe("phone viewport", () => {
     await expect(nav.getByRole("link", { name: "AI Assistant" })).toBeVisible();
     await expect(nav.getByRole("group", { name: "Work" })).toBeVisible();
     await expect(nav.getByRole("group", { name: "Performance" }).getByRole("link")).toHaveText(["Reports", "Analytics", "Appraisals", "Learning"]);
-    await expect(nav.getByRole("group", { name: "You" }).getByRole("link")).toHaveText(["Inbox", "Calendar", "Approvals", "Me"]);
+    await expect(nav.getByRole("group", { name: "You" }).getByRole("link")).toHaveText(["My tasks", "Inbox", "Calendar", /^Approvals/, "Me"]); // DW-8a added My tasks; DW-8m: a decider's Approvals row may carry its pending count
 
     await page.keyboard.press("Escape");
     await expect(nav).not.toBeInViewport();

@@ -113,11 +113,22 @@ export function gateAllows(gate: Gate | undefined, ctx: GateContext): boolean {
   }
 }
 
+// ── A functional department's one home ────────────────────────────────────────────────────────────
+
+/** The console root (`/hr`, `/finance`, `/it`) for a department whose NAME slugs to a functional slug,
+ *  else null. Since DW-7d these departments are org nodes too, so `/departments/<id>` would be a second
+ *  home; the Home page sends it here. Name-keyed like `workspaceFor`, so every company resolves its own node. */
+export function functionalConsoleFor(deptName: string): string | null {
+  const slug = deptSlug(deptName);
+  return FUNCTIONAL_SLUGS.includes(slug) ? `/${slug}` : null;
+}
+
 // ── The person's workspaces ───────────────────────────────────────────────────────────────────────
 
 export interface WorkspaceRef {
   workspace: Workspace;
-  /** The department's org node id. Null for a functional department not in the org tree yet (DW-7d). */
+  /** The department's org node id. A functional department (HR, Finance, IT) has one once the company's
+   *  tree holds it (DW-7d); null for a company whose tree lacks it, which still gets the workspace. */
   deptId: string | null;
   /** The unit and its ancestors, nearest first, for unit-scoped gates. [] without an org node. */
   unitPath: readonly string[];

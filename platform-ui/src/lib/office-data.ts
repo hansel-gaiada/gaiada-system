@@ -10,6 +10,7 @@ import "server-only";
 // implying otherwise. No location HISTORY is stored anywhere — this function reads current org
 // data and returns a fresh scene on every call; nothing here is a table.
 import { listDepartmentBriefs, getDepartment, type DeptBrief } from "./departments";
+import { functionalConsoleFor } from "./workspaceAccess";
 import { platformFetch } from "./platform";
 import { getAgentGoals, getAgentGoal, type AgentGoal } from "./admin";
 import { listAutomationApprovals, type AutomationApproval } from "./automationApprovals";
@@ -200,7 +201,8 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
         recordKind: "person",
         recordId: p.id,
         recordLabel: `${p.name} — ${d.name}`,
-        recordHref: `/departments/${d.id}`,
+        // DW-7d: HR, Finance and IT are org nodes whose home is their console, not /departments/<id>.
+        recordHref: functionalConsoleFor(d.name) ?? `/departments/${d.id}`,
         note:
           `Real org placement in "${d.name}". This is a seat, not a live location — the office does not track where anyone actually is (plan §2).` +
           (busyUntil
