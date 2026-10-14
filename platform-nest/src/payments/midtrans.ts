@@ -37,10 +37,15 @@ import {
   type ProviderPaymentStatus,
 } from "./provider";
 
-export type MidtransEnvironment = "sandbox" | "production";
+/** `simulated` (PV-D41): the in-process simulator, review stage only; its base URL comes from configuration. */
+export type MidtransEnvironment = "sandbox" | "production" | "simulated";
 
-/** The four hosts this adapter may ever call. Nothing else is reachable from here (egress-inventory.test.ts). */
-export const MIDTRANS_HOSTS: Record<MidtransEnvironment, { snap: string; api: string }> = {
+/** The simulated hosted page lives in the portal, under this path (the simulator answers it as Snap's redirect_url). */
+export const SIMULATED_PAGE_PREFIX = "/portal/pay/simulated/";
+
+/** The four hosts this adapter may ever call on the internet. Nothing else is reachable from here
+ *  (egress-inventory.test.ts); `simulated` reaches only the configured loopback simulator. */
+export const MIDTRANS_HOSTS: Record<"sandbox" | "production", { snap: string; api: string }> = {
   sandbox: { snap: "https://app.sandbox.midtrans.com", api: "https://api.sandbox.midtrans.com" },
   production: { snap: "https://app.midtrans.com", api: "https://api.midtrans.com" },
 };
@@ -70,6 +75,8 @@ export interface MidtransOptions {
   serverKey: string;
   environment: MidtransEnvironment;
   fetchImpl?: FetchLike;
+  /** Required for `simulated`: the simulator's base URL (Snap and API are both served there). */
+  simulatorBaseUrl?: string;
   /** Per-call timeout. Midtrans wants the webhook answered within 5 s, but no call here runs on the webhook path. */
   timeoutMs?: number;
 }
@@ -159,7 +166,12 @@ export class MidtransSnapProvider implements PaymentProvider {
   constructor(private readonly opts: MidtransOptions) {
     if (!opts.serverKey) throw new Error("MidtransSnapProvider: no server key");
     this.environment = opts.environment;
-    this.hosts = MIDTRANS_HOSTS[opts.environment];
+    if (opts.environment === "simulated") {
+      if (!opts.simulatorBaseUrl) throw new Error("MidtransSnapProvider: simulated needs a simulator base URL");
+      this.hosts = { snap: opts.simulatorBaseUrl, api: opts.simulatorBaseUrl };
+    } else {
+      this.hosts = MIDTRANS_HOSTS[opts.environment];
+    }
     if (!this.hosts) throw new Error(`MidtransSnapProvider: unknown environment ${String(opts.environment)}`);
     this.fetchImpl = opts.fetchImpl ?? (fetch as unknown as FetchLike);
     this.timeoutMs = opts.timeoutMs ?? 10_000;
@@ -224,6 +236,13 @@ export class MidtransSnapProvider implements PaymentProvider {
     }
     const url = str(r.json?.redirect_url);
     if (!url) throw new ProviderRequestError("midtrans snap answered without a redirect_url");
+    // PV-D41: the simulator's "hosted page" is our own portal page, a same-origin path, and nothing else.
+    if (this.environment === "simulated") {
+      if (!url.startsWith(`${SIMULATED_PAGE_PREFIX}${encodeURIComponent(req.orderId)}`)) {
+        throw new ProviderRequestError("the simulator answered with an unexpected redirect_url");
+      }
+      return { providerCheckoutId: req.orderId, checkoutUrl: url };
+    }
     // The payer is sent to this URL, so it must be the provider's own hosted page and nothing else.
     let parsed: URL;
     try {

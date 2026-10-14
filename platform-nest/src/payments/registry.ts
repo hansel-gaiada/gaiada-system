@@ -45,9 +45,24 @@ export function setPaymentFetchForTests(f: FetchLike | null): void {
 
 function midtransEnvironment(raw: string): MidtransEnvironment | null {
   const v = raw.trim().toLowerCase();
+  // PV-D41: `simulated` exists only while the simulation flag is on; with the flag on, nothing else does.
+  if (config.payments.simulationEnabled) return v === "simulated" ? "simulated" : null;
   if (v === "" || v === "sandbox") return "sandbox";
   if (v === "production") return "production";
   return null;
+}
+
+/** PV-D41: the in-process Midtrans simulator's base URL (the adapter's Snap and API base in `simulated` mode). */
+export function simulatorBaseUrl(): string {
+  return `${config.payments.simulatorInternalUrl}${SIMULATOR_PATH}`;
+}
+
+/** Where the simulator's routes live on platform-nest (internal: nginx sends only /api/ paths here). */
+export const SIMULATOR_PATH = "/internal/payments/midtrans-sim";
+
+/** PV-D41: true only while the simulated Midtrans is the configured provider (flag on AND environment simulated). */
+export function simulationActive(): boolean {
+  return configuredProvider("midtrans")?.provider.environment === "simulated";
 }
 
 /** The provider behind `/api/webhooks/payments/:provider`, or null when it is unknown or switched off. */
@@ -58,7 +73,10 @@ export function configuredProvider(name: string): ConfiguredProvider | null {
   const environment = midtransEnvironment(m.environment);
   if (!environment) return null;
   return {
-    provider: new MidtransSnapProvider({ serverKey: m.serverKey, environment, fetchImpl: fetchOverride ?? undefined }),
+    provider: new MidtransSnapProvider({
+      serverKey: m.serverKey, environment, fetchImpl: fetchOverride ?? undefined,
+      simulatorBaseUrl: environment === "simulated" ? simulatorBaseUrl() : undefined,
+    }),
     tenantId: m.tenantId.toLowerCase(),
     principalId: PROVIDER_PRINCIPALS.midtrans,
   };
@@ -87,7 +105,18 @@ export function providerForTenant(tenantId: string): ConfiguredProvider | null {
  */
 export function describePaymentsConfig(): string {
   const m = config.payments.midtrans;
+  const sim = config.payments.simulationEnabled;
+  const wantsSim = m.environment.trim().toLowerCase() === "simulated";
+  // PV-D41: the simulation flag and `simulated` come together or not at all, so a real key can never be paired with the
+  // simulator, and the simulator can never be switched on by the environment word alone.
+  if (sim && !wantsSim) {
+    throw new Error(`PAYMENTS_SIMULATION_ENABLED=1 needs MIDTRANS_ENVIRONMENT=simulated (it is "${m.environment}"): the simulated Midtrans never runs beside sandbox or production`);
+  }
+  if (wantsSim && !sim) {
+    throw new Error("MIDTRANS_ENVIRONMENT=simulated needs PAYMENTS_SIMULATION_ENABLED=1 (review stage only, PV-D41)");
+  }
   if (!m.serverKey) {
+    if (sim) throw new Error("PAYMENTS_SIMULATION_ENABLED=1 needs MIDTRANS_SERVER_KEY (any value; use SIM- plus random)");
     return "online payment is off: MIDTRANS_SERVER_KEY is not set (no Pay online, checkout and webhook answer 404)";
   }
   const environment = midtransEnvironment(m.environment);
@@ -99,6 +128,9 @@ export function describePaymentsConfig(): string {
       "MIDTRANS_SERVER_KEY is set but MIDTRANS_TENANT_ID is not a company id: online payment needs the company that owns " +
         "the Midtrans merchant account (set it, or unset the key to keep online payment off)",
     );
+  }
+  if (environment === "simulated") {
+    return `[payments:simulation-enabled] online payment is SIMULATED (PV-D41, review stage, no real money): midtrans simulator at ${simulatorBaseUrl()}, merchant company ${m.tenantId.toLowerCase()}`;
   }
   // A sandbox key starts "SB-" [UNVERIFIED until the sandbox drive]; a mismatch is said, not refused.
   const sandboxKey = m.serverKey.startsWith("SB-");

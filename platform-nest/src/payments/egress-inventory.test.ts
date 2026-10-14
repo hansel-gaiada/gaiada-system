@@ -11,6 +11,9 @@ import { MIDTRANS_HOSTS } from "./midtrans";
 const ROOT = __dirname;
 
 const APPROVED_EGRESS: Record<string, string[]> = {
+  // PV-D41: the simulated Midtrans delivers its notices to OUR webhook, at config.payments.simulatorInternalUrl
+  // (loopback by default). It names no host at all.
+  "simulator.ts": [],
   "midtrans.ts": [
     "https://app.sandbox.midtrans.com", "https://api.sandbox.midtrans.com",
     "https://app.midtrans.com", "https://api.midtrans.com",

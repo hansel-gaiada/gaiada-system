@@ -1680,6 +1680,16 @@ const configBase = {
     checkoutExpiryMinutes: numericEnv("PAYMENTS_CHECKOUT_EXPIRY_MINUTES", { default: 1440, min: PAYMENTS_REUSE_MARGIN_MINUTES, max: 10080 }),
     sweepIntervalMs: readIntervalMs(process.env.PAYMENTS_SWEEP_INTERVAL_MS, 30_000, 10_000),
     reconcileDays: numericEnv("PAYMENTS_RECONCILE_DAYS", { default: 7, min: 0, max: 60 }),
+    // PV-D41 (owner, 2026-10-14): the SIMULATED Midtrans for the review stage, in the spirit of PV-D40's simulated second
+    // factor. `MIDTRANS_ENVIRONMENT=simulated` works ONLY with this flag on, and the flag only with `simulated` (boot
+    // refuses either half alone). On, the real Midtrans adapter talks to the in-process simulator
+    // (src/payments/simulator*.ts) at `simulatorInternalUrl` + /internal/payments/midtrans-sim, and the simulator delivers
+    // its notices to `simulatorInternalUrl` + /api/webhooks/payments/midtrans: loopback by default, never the internet.
+    // No real money moves; every simulated payment is labelled SIMULATED. Must be OFF before the ERP holds real data.
+    // Needs the compose passthrough row (`PAYMENTS_SIMULATION_ENABLED: ${PAYMENTS_SIMULATION_ENABLED:-0}`).
+    simulationEnabled:
+      process.env.PAYMENTS_SIMULATION_ENABLED === "1" || process.env.PAYMENTS_SIMULATION_ENABLED === "true",
+    simulatorInternalUrl: (process.env.PAYMENTS_SIMULATOR_INTERNAL_URL || `http://127.0.0.1:${Number(process.env.PLATFORM_PORT ?? 3004)}`).replace(/\/$/, ""),
   },
   // LMS L5 — the lab runner (`lab-runner/`), the sidecar that executes a learner's submission in a
   // capped, unprivileged, network-less container and returns a graded result. Same fail-soft shape

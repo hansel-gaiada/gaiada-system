@@ -254,3 +254,21 @@ describe("review fixes", () => {
     expect(provider(new FakeMidtrans(KEY).fetch, "production").environment).toBe("production");
   });
 });
+
+describe("simulated environment (PV-D41)", () => {
+  it("calls the configured simulator base, and accepts only the portal's simulated page as the hosted page", async () => {
+    const seen: string[] = [];
+    const ok: FetchLike = async (url) => {
+      seen.push(url);
+      return { status: 201, text: async () => JSON.stringify({ token: "t", redirect_url: "/portal/pay/simulated/ck-s1" }) };
+    };
+    const p = new MidtransSnapProvider({ serverKey: KEY, environment: "simulated", fetchImpl: ok, simulatorBaseUrl: "http://127.0.0.1:3004/internal/payments/midtrans-sim" });
+    const out = await p.createCheckout({ orderId: "ck-s1", amount: "10", currency: "IDR", finishUrl: null, expiryMinutes: 60 });
+    expect(seen).toEqual(["http://127.0.0.1:3004/internal/payments/midtrans-sim/snap/v1/transactions"]);
+    expect(out.checkoutUrl).toBe("/portal/pay/simulated/ck-s1");
+    const evil: FetchLike = async () => ({ status: 201, text: async () => JSON.stringify({ token: "t", redirect_url: "https://evil.example/pay" }) });
+    await expect(new MidtransSnapProvider({ serverKey: KEY, environment: "simulated", fetchImpl: evil, simulatorBaseUrl: "http://127.0.0.1:1/x" })
+      .createCheckout({ orderId: "ck-s2", amount: "10", currency: "IDR", finishUrl: null, expiryMinutes: 60 })).rejects.toBeInstanceOf(ProviderRequestError);
+    expect(() => new MidtransSnapProvider({ serverKey: KEY, environment: "simulated" })).toThrow(/simulator base URL/);
+  });
+});

@@ -48,7 +48,7 @@ import type { OutboxEvent } from "../events/types";
 import { notifyBestEffort, resolveClientRecipients } from "../core/client-notify";
 import { writeActivity } from "../core/http";
 import { postConfirmedPayment, withBilling } from "../modules/invoice/issue";
-import { configuredProvider, configuredProviders, PROVIDER_PRINCIPALS, type ConfiguredProvider } from "./registry";
+import { configuredProvider, configuredProviders, PROVIDER_PRINCIPALS, simulationActive, type ConfiguredProvider } from "./registry";
 import { ProviderRequestError, ProviderUnavailableError, type ProviderPaymentStatus } from "./provider";
 
 /** The outbox event the webhook emits with each claim, and its stream (entity type). */
@@ -127,10 +127,14 @@ export async function financeRecipients(tenantId: string): Promise<string[]> {
   return [];
 }
 
+/** PV-D41: every word about a simulated payment says so. */
+const SIMULATED_PREFIX = "SIMULATED: ";
+const simTitle = (title: string) => (simulationActive() ? `${SIMULATED_PREFIX}${title}` : title);
+
 async function tellFinance(tenantId: string, principalId: string | null, eventId: string, title: string, body: string): Promise<void> {
   const recipients = await financeRecipients(tenantId);
   await notifyBestEffort(tenantId, principalId, recipients, "payment.online.needs_attention", {
-    title,
+    title: simTitle(title),
     body: body.slice(0, 500),
     href: "/finance",
     entityType: "provider_event",
@@ -335,8 +339,9 @@ async function writePayment(
     return { status: "ignored", reason, outcome };
   };
 
-  const ck = (await c.query<{ id: string; invoiceId: string; clientId: string; amount: string; currency: string; status: string }>(
-    `SELECT id, invoice_id AS "invoiceId", client_id AS "clientId", amount::text AS amount, currency_code AS currency, status
+  const ck = (await c.query<{ id: string; invoiceId: string; clientId: string; amount: string; currency: string; status: string; environment: string }>(
+    `SELECT id, invoice_id AS "invoiceId", client_id AS "clientId", amount::text AS amount, currency_code AS currency, status,
+            environment
        FROM payment_checkouts WHERE provider = $1 AND provider_checkout_id = $2 FOR UPDATE`,
     [ev.provider, ev.ref],
   )).rows[0];
@@ -388,14 +393,18 @@ async function writePayment(
   const paymentId = newId();
   const today = (await c.query<{ d: string }>(`SELECT to_char(current_date, 'YYYY-MM-DD') AS d`)).rows[0].d;
   const paidOn = st.paidOn ?? today;
-  const reference = `Online payment ${ev.ref}${st.method ? ` (${st.method})` : ""}`.slice(0, 200);
+  // PV-D41: a checkout opened against the SIMULATED Midtrans is labelled on the payment (reference and note) and therefore
+  // on its AR receipt (whose reference is the payment's), so no reader of either can mistake it for money.
+  const simulated = ck.environment === "simulated";
+  const reference = `${simulated ? "SIMULATED " : ""}Online payment ${ev.ref}${st.method ? ` (${st.method})` : ""}`.slice(0, 200);
+  const note = simulated ? "SIMULATED payment (review stage, PV-D41): no real money moved." : null;
   await c.query(
     `INSERT INTO invoice_payments
        (id, tenant_id, invoice_id, client_id, amount, currency, paid_on, method, reference, status,
-        recorded_by, confirmed_by, confirmed_at, source, provider, provider_payment_id, origin_site, checkout_id)
-     VALUES ($1, $2, $3, $4, $5::numeric, $6, $7::date, 'online', $8, 'confirmed', $9, $9, now(), 'gateway', $10, $11, $12, $13)`,
+        recorded_by, confirmed_by, confirmed_at, source, provider, provider_payment_id, origin_site, checkout_id, note)
+     VALUES ($1, $2, $3, $4, $5::numeric, $6, $7::date, 'online', $8, 'confirmed', $9, $9, now(), 'gateway', $10, $11, $12, $13, $14)`,
     [paymentId, tenantId, ck.invoiceId, inv.clientId ?? ck.clientId, ck.amount, ck.currency, paidOn, reference,
-     principalId, ev.provider, st.paymentId, config.originSite, ck.id],
+     principalId, ev.provider, st.paymentId, config.originSite, ck.id, note],
   );
   const posted = await postConfirmedPayment(c, tenantId, {
     paymentId, invoiceId: ck.invoiceId, amount: ck.amount, currency: ck.currency, paidOn, reference,
@@ -442,7 +451,7 @@ async function announcePayment(
     });
     const amountText = facts.p ? `${facts.p.currency} ${Number(facts.p.amount).toLocaleString("en-US")}` : "";
     await notifyBestEffort(tenantId, principalId, facts.clientRecipients, "invoice.payment.confirmed", {
-      title: "Payment received, thank you",
+      title: simTitle("Payment received, thank you"),
       body: out.invoicePaid ? "Your invoice is now fully settled." : "Your balance has been updated.",
       href: `/portal/invoices/${out.invoiceId}`,
       entityType: "invoice",
@@ -451,7 +460,7 @@ async function announcePayment(
     });
     const staff = [...new Set([...facts.owners, ...(await financeRecipients(tenantId))])];
     await notifyBestEffort(tenantId, principalId, staff, "invoice.payment.received_online", {
-      title: `Online payment received${amountText ? `: ${amountText}` : ""}`,
+      title: simTitle(`Online payment received${amountText ? `: ${amountText}` : ""}`),
       body: "Confirmed by the payment provider and booked to the gateway clearing account. The provider's payout and fee are posted by Finance.",
       href: `/invoices/${out.invoiceId}`,
       entityType: "invoice_payment",
