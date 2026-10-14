@@ -11,6 +11,7 @@ import "server-only";
 // optional and graceful.
 import { platformFetch, PlatformError, type Me } from "./platform";
 import { isElevated } from "./rbac";
+import { readResult, type ReadResult } from "./readResult";
 
 export type SystemKey = "bot" | "gateway" | "hub" | "agents" | "knowledge" | "automation";
 
@@ -527,6 +528,42 @@ export async function triggerAgentGoal(
 
 export const getKnowledgeSources = (userId: string, tenantId: string) =>
   skipUnavailable(platformFetch<KnowledgeSource[]>(`/api/${tenantId}/knowledge/sources`, userId), [] as KnowledgeSource[]);
+
+// DW-8i (BFF contract section 46): knowledge search for staff. The backend re-checks every hit against the
+// caller's read right on its source record and drops what they cannot open, so an empty `results` is
+// evidence ("nothing you can open matches"), while a refusal or an outage is NOT an empty list. A 400
+// (query outside 2..200 characters) comes back as `unavailable` with reason `query_invalid`.
+export type KnowledgeSearchFamily = "client" | "project" | "task" | "pmtask" | "deliverable" | "meeting" | "pmdoc" | "file";
+export interface KnowledgeSearchHit {
+  sourceRef: string;
+  family: KnowledgeSearchFamily;
+  title: string;
+  snippet: string;
+  href: string;
+  score: number;
+}
+export interface KnowledgeSearchResponse {
+  query: string;
+  results: KnowledgeSearchHit[];
+  /** Last successful sweep finish (ISO), or null (held in memory; null after a restart). */
+  indexedAt: string | null;
+}
+export const KNOWLEDGE_QUERY_INVALID = "query_invalid";
+
+export async function searchKnowledge(
+  userId: string,
+  tenantId: string,
+  q: string,
+  limit?: number,
+): Promise<ReadResult<KnowledgeSearchResponse>> {
+  const qs = `q=${encodeURIComponent(q)}${limit != null ? `&limit=${limit}` : ""}`;
+  try {
+    return { kind: "ok", data: await platformFetch<KnowledgeSearchResponse>(`/api/${tenantId}/knowledge/search?${qs}`, userId) };
+  } catch (e) {
+    if (e instanceof PlatformError && e.status === 400) return { kind: "unavailable", reason: KNOWLEDGE_QUERY_INVALID };
+    return readResult(Promise.reject(e));
+  }
+}
 
 // ---- Bot chat viewer + logs (frozen nest contract, all GET/isElevated-gated) ----
 // One row in the /chats list — a WhatsApp/Telegram conversation summary,
