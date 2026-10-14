@@ -9,6 +9,7 @@ import { authorize, writeActivity } from "./http";
 import { storage } from "./storage";
 import { sha256Hex } from "./content-hash";
 import { scrubText, isScrubbableText } from "./scrub";
+import { insertReferenceFile } from "./file-reference";
 import { AuthGuard } from "../auth/guards";
 
 const MAX_BYTES = 25 * 1024 * 1024;
@@ -64,22 +65,19 @@ export class FilesController {
     await authorize(req.principal, { kind: "file", tenantId }, "create");
     await authorize(req.principal, { kind: targetType, id: targetId, tenantId }, "read");
 
+    // Reference attach (no binary content): store filename + optional URL, no blob. DW-6i: the write is the shared
+    // `insertReferenceFile` (file-reference.ts), which Google Drive's attach also uses; called with no options it does exactly
+    // what this branch always did (scrub, 2048 cap, one INSERT, one `attached` activity row).
+    if (!content) {
+      const out = await insertReferenceFile({
+        tenantId, uploaderId: req.principal.userId, targetType, targetId, filename, contentType, url: url ?? null,
+      });
+      if (out.duplicate) throw new ConflictException("duplicate reference"); // unreachable: rejectDuplicateUrl is not set here
+      return { id: out.file.id, scrubbed: false, byteSize: 0 };
+    }
+
     const cleanName = scrubText(filename).text;
     const id = newId();
-
-    // Reference attach (no binary content): store filename + optional URL, no blob.
-    if (!content) {
-      const cleanUrl = url ? scrubText(url).text.slice(0, 2048) : null;
-      await withTenants([tenantId], (c) =>
-        c.query(
-          `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, url, scrubbed, origin_site)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 0, NULL, $8, false, $9)`,
-          [id, tenantId, req.principal.userId, targetType, targetId, cleanName, contentType, cleanUrl, config.originSite],
-        ),
-      );
-      await writeActivity(tenantId, req.principal.userId, "attached", targetType, targetId, { fileId: id, filename: cleanName });
-      return { id, scrubbed: false, byteSize: 0 };
-    }
 
     const raw = Buffer.from(content, "base64");
     if (raw.byteLength > MAX_BYTES) throw new BadRequestException("file too large");

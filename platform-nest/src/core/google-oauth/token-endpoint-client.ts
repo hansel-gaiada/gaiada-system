@@ -49,6 +49,11 @@ export interface TokenResponse {
    *  scope-grant semantics are an SM-41G clause; we record what we are told and never assume. */
   scope: string | null;
   tokenType: string | null;
+  /** DW-6i: the OpenID Connect ID token (a signed JWT), present on an exchange when `openid` was among the
+   *  requested scopes (https://developers.google.com/identity/openid-connect/openid-connect, "Exchange code for
+   *  access token and ID token"). NEVER returned over HTTP or persisted: the one consumer reads the account's
+   *  email from it (core/google-oauth/id-token.ts) and drops it. Null on a refresh or when absent. */
+  idToken: string | null;
 }
 
 interface RawTokenBody {
@@ -57,10 +62,26 @@ interface RawTokenBody {
   refresh_token?: string;
   scope?: string;
   token_type?: string;
+  id_token?: string;
   error?: string;
 }
 
-function requireOAuthClient(): { clientId: string; clientSecret: string } {
+/** DW-6i: an OAuth client other than the one in `config.google` (search's). A surface with its OWN Google Cloud
+ *  OAuth client (Drive) passes it explicitly; every existing caller passes nothing and gets `config.google`
+ *  exactly as before. The token/revoke ENDPOINTS are still `config.google`'s: only the client identity differs. */
+export interface OAuthClientCredentials {
+  clientId: string;
+  clientSecret: string;
+}
+
+function requireOAuthClient(override?: OAuthClientCredentials): { clientId: string; clientSecret: string } {
+  if (override) {
+    const missing: string[] = [];
+    if (!override.clientId) missing.push("clientId");
+    if (!override.clientSecret) missing.push("clientSecret");
+    if (missing.length) throw new GoogleOAuthNotConfiguredError(missing);
+    return override;
+  }
   const g = config.google;
   const missing: string[] = [];
   if (!g.clientId) missing.push("GOOGLE_OAUTH_CLIENT_ID");
@@ -124,6 +145,7 @@ function toTokenResponse(body: RawTokenBody, operation: "exchange" | "refresh", 
     refreshToken: body.refresh_token ?? null,
     scope: body.scope ?? null,
     tokenType: body.token_type ?? null,
+    idToken: typeof body.id_token === "string" && body.id_token ? body.id_token : null,
   };
 }
 
@@ -131,10 +153,10 @@ function toTokenResponse(body: RawTokenBody, operation: "exchange" | "refresh", 
  *  what Google documents for a web-server (confidential) client and what Keycloak's `google-dev` realm
  *  client is provisioned to accept. */
 export async function exchangeAuthorizationCode(
-  params: { code: string; codeVerifier: string; redirectUri: string },
+  params: { code: string; codeVerifier: string; redirectUri: string; client?: OAuthClientCredentials },
   fetchImpl?: FetchImpl,
 ): Promise<TokenResponse> {
-  const { clientId, clientSecret } = requireOAuthClient();
+  const { clientId, clientSecret } = requireOAuthClient(params.client);
   const { status, body } = await postForm(
     config.google.tokenUrl,
     {
@@ -156,8 +178,12 @@ export async function exchangeAuthorizationCode(
  *  the issuer sent, and oauth.ts persists a new refresh token when one arrives while keeping the
  *  existing one when it does not. Both behaviours are real — Keycloak rotates by default; Google
  *  historically does not, and its actual behaviour is an SM-41G observation, not a fact we encode. */
-export async function refreshAccessToken(refreshToken: string, fetchImpl?: FetchImpl): Promise<TokenResponse> {
-  const { clientId, clientSecret } = requireOAuthClient();
+export async function refreshAccessToken(
+  refreshToken: string,
+  fetchImpl?: FetchImpl,
+  client?: OAuthClientCredentials,
+): Promise<TokenResponse> {
+  const { clientId, clientSecret } = requireOAuthClient(client);
   const { status, body } = await postForm(
     config.google.tokenUrl,
     {
@@ -186,11 +212,15 @@ export async function refreshAccessToken(refreshToken: string, fetchImpl?: Fetch
  *  unknown token, and whether revoking an access token also invalidates the refresh token (Google's
  *  docs say revoking either revokes the grant; that is a documented claim we have not observed).
  *  `NOT_FOUND_IS_SUCCESS` below encodes the RFC's own guidance, not an observation of Google. */
-export async function revokeToken(token: string, fetchImpl?: FetchImpl): Promise<{ revoked: boolean; status: number }> {
+export async function revokeToken(
+  token: string,
+  fetchImpl?: FetchImpl,
+  client?: OAuthClientCredentials,
+): Promise<{ revoked: boolean; status: number }> {
   const g = config.google;
   const form: Record<string, string> = { token };
   if (!isGoogleHost(g.revokeUrl)) {
-    const { clientId, clientSecret } = requireOAuthClient();
+    const { clientId, clientSecret } = requireOAuthClient(client);
     form.client_id = clientId;
     form.client_secret = clientSecret;
   }
@@ -217,8 +247,10 @@ export function buildAuthorizeUrl(params: {
   redirectUri: string;
   /** Google-only hint; omitted when empty. */
   loginHint?: string | null;
+  /** DW-6i: a surface's own OAuth client (see OAuthClientCredentials); absent = `config.google`. */
+  client?: OAuthClientCredentials;
 }): string {
-  const { clientId } = requireOAuthClient();
+  const { clientId } = requireOAuthClient(params.client);
   const url = new URL(config.google.authorizeUrl);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", clientId);

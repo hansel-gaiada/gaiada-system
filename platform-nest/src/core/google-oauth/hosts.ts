@@ -22,7 +22,8 @@
 
 /** Registrable Google domains whose subdomains host the OAuth issuer + the API surfaces we call:
  *  accounts.google.com (authorize), oauth2.googleapis.com (token/revoke),
- *  {searchconsole,analyticsdata,googleads}.googleapis.com (the three data surfaces). */
+ *  {searchconsole,analyticsdata,googleads}.googleapis.com (the three data surfaces), and (DW-6i) www.googleapis.com
+ *  (Drive v3; see `isDriveApiUrl` at the foot of this file for the narrower predicate that gates the actual call). */
 const GOOGLE_SUFFIXES = [".google.com", ".googleapis.com"];
 const GOOGLE_EXACT = ["google.com", "googleapis.com"];
 
@@ -48,4 +49,33 @@ export function hostLabel(url: string): string {
   } catch {
     return url;
   }
+}
+
+// DW-6i — Google Drive's API host, allowed DELIBERATELY and by name.
+//
+// `isGoogleHost` above already recognises `www.googleapis.com` (a `.googleapis.com` subdomain), but that predicate only
+// decides a provenance LABEL. Drive's `files.get` is an outbound call that carries a person's access token, so it gets its
+// own, much narrower predicate: an exact host, HTTPS only, and the one path prefix the client uses. `core/google-drive/
+// client.ts` refuses to send a request that fails it, and egress.test.ts pins both the host and its look-alikes.
+// Source (read 2026-10-14): https://developers.google.com/workspace/drive/api/reference/rest/v3/files/get
+// ("GET https://www.googleapis.com/drive/v3/files/{fileId}").
+export const GOOGLE_DRIVE_API_HOST = "www.googleapis.com";
+export const GOOGLE_DRIVE_API_PATH_PREFIX = "/drive/v3/";
+
+/** True iff `url` is HTTPS, on exactly `www.googleapis.com`, under `/drive/v3/`, with no userinfo and the default port. */
+export function isDriveApiUrl(url: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  return (
+    u.protocol === "https:" &&
+    u.hostname.toLowerCase() === GOOGLE_DRIVE_API_HOST &&
+    u.port === "" &&
+    u.username === "" &&
+    u.password === "" &&
+    u.pathname.startsWith(GOOGLE_DRIVE_API_PATH_PREFIX)
+  );
 }
