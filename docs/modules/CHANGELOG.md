@@ -11,6 +11,17 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.132.0` + platform-ui `0.150.0` - DW-4e-3: the department appraisal per cycle (2026-10-15) - PROTOTYPED
+
+Contract: `docs/FRONTEND-BFF-CONTRACT.md` §41 (with §41.6 "as built") and `docs/PERMISSION-CONTRACT.md` §38a. Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.3 and §5.5 (owner ruling DW-Q4).
+- **The read** (`GET /api/:t/dept-appraisals?cycleId=&unitNodeId=`, `reports/dept-appraisals.ts`): the department's KPIs over the appraisal cycle, judged against the target in force for the cycle's last month; the condition history, one entry per calendar month the cycle touches, each against its own month's target (so it equals `GET /dept-kpis` for that month); the people's appraisals as counts only (by status, and the composite distribution by band, withheld below 3 scored rows); the head's commentary and the GM's assessment. The §40 engine is called, not copied (`evaluateUnits` gains an optional `targetsAsOf`, default unchanged).
+- **Who reads:** the unit's heads and the company-wide tiers (HR's people-reader tier included). A unit's staff get 403 (they read the KPI page). Unknown unit or cycle: 404, after the gate.
+- **The writes** (`PUT .../:cycleId/:unitNodeId/commentary` and `.../assessment`): the head's commentary (`appraisal_comment`: the unit's lead or an enclosing one, plus `company_admin`) and the GM's assessment with their own condition, shown beside the computed one and never replacing it (`appraisal_assess`: the approver tier). Both end when the cycle is closed (409 `cycle_closed`, decided under a `FOR SHARE` lock on the cycle). Each write records an activity row without the text. `GET /dept-appraisals/cycles` lists the company's cycles for the picker.
+- **Table** `dept_appraisals` (migration `202610150000`, RLS with the reports module wall). **Permissions:** two actions on the existing kind `dept_kpi_target` (no new kind), keys `reports.dept_kpi_target.appraisal_comment` and `.appraisal_assess`, a perm mirror for assess only (comment is reached by the unit-lead rule, which a flat mirror cannot express), migration `202610150100` seeding the role permissions with self-assertions; pins: catalog 466 pairs, grantable 451, role bundles 2045.
+- **UI** (`/appraisals/department?unit=&cycle=`): a cycle picker through an honest reader; with a cycle chosen, the KPI results over the cycle, the history as a row of months said in words, the people block, and the two halves with their forms while the cycle is open and the capability reaches. A closed cycle is the record. Demo: one open and one closed cycle.
+- **Tests:** `dept-appraisals.test.ts`, `dept-appraisals.controller.db.test.ts` (live Postgres + Cerbos), `cerbos-dept-kpi-target.test.ts`; UI `AppraisalView.test.tsx`, `deptAppraisalFormat.test.ts`, `demoDeptAppraisals.test.ts`, `deptAppraisals.test.ts`, `rbac.test.ts`.
+- **Deploy:** two migrations; Cerbos policy changes (`resource_dept_kpi_target.yaml`, `derived_roles.yaml`), reloaded by the deploy's "Reload Cerbos policies" step.
+
 ### platform-ui `0.149.0` - DW-3k and DW-3i2: the department's condition on the Overview, one KPI vocabulary (2026-10-14) - PROTOTYPED
 
 - **DW-3k: the department's condition on its Overview** (plan §5.5, BFF §40). The Department band opens with **Department condition**, above Pulse, from `getDeptKpis` (`GET dept-kpis?unitNodeId=`), the honest reader DW-4e-2's KPI page uses, for the workspace's own unit and the Overview's period.
