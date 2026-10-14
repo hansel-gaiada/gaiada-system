@@ -171,6 +171,10 @@ describe("the text (§43.8): the lines", () => {
     expect(unavailableSummary([unavailable("a", "no_data"), unavailable("b", "no_data"), unavailable("c", "no_data")])).toBe("3 KPIs have no data");
     expect(unavailableSummary([read({ key: "ok", label: "Ok", value: 1, target: 1, condition: "on_track" })])).toBeNull();
     expect(unavailableSummary([])).toBeNull();
+    // a reason this code does not know is counted in its own words, never dropped and never a crash
+    const odd = { condition: "unavailable", reason: "read_failed" } as unknown as KpiRead;
+    expect(unavailableSummary([odd])).toBe("1 KPI could not be read");
+    expect(unavailableSummary([odd, odd, unavailable("m", "no_reader")])).toBe("1 KPI not measured yet; 2 KPIs could not be read");
   });
 });
 
@@ -256,6 +260,8 @@ describe("behind the miss (§43.8): which KPIs have drivers", () => {
   it("a module KPI has no reader; the company-grain and the derived KPIs have no drivers", () => {
     expect(noDriversReason(defOf("web-dev", "client-site-uptime"))).toBe("no_reader");
     expect(noDriversReason(defOf("hr", "payroll-on-time"))).toBe("no_reader");
+    // a module KPI that has a reader of its own has a value but no drivers
+    expect(noDriversReason({ reader: { kind: "module", readerId: "x" } as unknown as DeptKpiDef["reader"] })).toBe("no_drivers");
     expect(noDriversReason(defOf("gm", "utilization"))).toBe("no_drivers");
     expect(noDriversReason(defOf("gm", "departments-in-good-condition"))).toBe("no_drivers");
   });

@@ -112,16 +112,21 @@ export function digestKpiLine(read: Pick<KpiRead, "label" | "unit" | "value" | "
 /** PURE. The ONE line that sums up the KPIs with no condition, only the non-zero kinds, or null when there are none:
  *  "4 KPIs not measured yet; 2 KPIs have no target; 1 KPI has no data" (reasons `no_reader`, `no_target`, `no_data`). */
 export function unavailableSummary(reads: ReadonlyArray<Pick<KpiRead, "condition" | "reason">>): string | null {
-  const count = { no_reader: 0, no_target: 0, no_data: 0 };
+  const count = { no_reader: 0, no_target: 0, no_data: 0, other: 0 };
   for (const k of reads) {
     if (k.condition !== "unavailable") continue;
-    count[k.reason ?? "no_data"] += 1;
+    // A reason this code does not know (a later engine can add one, e.g. a reader that failed) is counted under its own
+    // generic words, never dropped and never a crash. An absent reason reads as no data, as before.
+    const reason: string = k.reason ?? "no_data";
+    if (reason === "no_reader" || reason === "no_target" || reason === "no_data") count[reason] += 1;
+    else count.other += 1;
   }
   const plural = (n: number) => (n === 1 ? "1 KPI" : `${n} KPIs`);
   const parts: string[] = [];
   if (count.no_reader > 0) parts.push(`${plural(count.no_reader)} not measured yet`);
   if (count.no_target > 0) parts.push(`${plural(count.no_target)} ${count.no_target === 1 ? "has" : "have"} no target`);
   if (count.no_data > 0) parts.push(`${plural(count.no_data)} ${count.no_data === 1 ? "has" : "have"} no data`);
+  if (count.other > 0) parts.push(`${plural(count.other)} could not be read`);
   return parts.length > 0 ? parts.join("; ") : null;
 }
 
