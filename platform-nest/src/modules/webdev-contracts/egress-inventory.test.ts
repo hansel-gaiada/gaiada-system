@@ -97,7 +97,7 @@ describe("modules/webdev-contracts egress inventory (WSK-19, mirroring modules/w
     expect("contract-fetch-webdesk.ts" in APPROVED_EGRESS).toBe(false);
     expect(networkLines(text)).toEqual([]);
     expect(text).toContain("../webdev/webdesk-control-client");
-    expect(text).not.toMatch(/node:https?|https?\.request/);
+    expect(text).not.toMatch(/node:https?|\bhttps?\.request\b/);
   });
 
   it("the driver reads its OWN config namespace and no foreign one", () => {

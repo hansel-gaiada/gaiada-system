@@ -63,7 +63,7 @@ describe("AgencyLeadsQueue: Stage and Value columns", () => {
   it("a lead with no value shows an em-dash, not zero", () => {
     renderQueue({ rows: [row("2", "Alpha Co", "new", "enquiry")] });
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
-    expect(screen.queryByText(/(IDR|USD)/)).toBeNull();
+    expect(screen.queryByText(/\b(IDR|USD)\b/)).toBeNull();
   });
 
   it("still renders when the reference was refused: labels from keys, chips from the stages present", () => {

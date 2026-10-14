@@ -351,7 +351,7 @@ const KNOWN_NON_DRIFT: RegisterEntry[] = [
   },
 ];
 
-const knownNonDriftKey = (role: string, capability: Capability) => `${role} ${capability}`;
+const knownNonDriftKey = (role: string, capability: Capability) => `${role}\x00${capability}`;
 const KNOWN_NON_DRIFT_KEYS = new Set(KNOWN_NON_DRIFT.map((e) => knownNonDriftKey(e.role, e.capability)));
 
 // ─────────────────────────────────── section 1: well-formedness ───────────────────────────────────

@@ -101,7 +101,7 @@ function hash32(s: string): number {
 /** A deterministic value in [0,1) from any list of seed parts (mulberry32 finalizer over FNV-1a, so
  *  neighbouring seeds like "kw|1" / "kw|2" decorrelate instead of producing adjacent outputs). */
 function unit(...parts: Array<string | number>): number {
-  let t = (hash32(parts.join("")) + 0x6d2b79f5) >>> 0;
+  let t = (hash32(parts.join("\x01")) + 0x6d2b79f5) >>> 0;
   t = Math.imul(t ^ (t >>> 15), 1 | t);
   t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;

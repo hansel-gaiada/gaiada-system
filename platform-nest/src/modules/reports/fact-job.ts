@@ -121,7 +121,7 @@ export function factRowId(
   projectId: string | null,
   unitNodeId: string | null,
 ): string {
-  const key = [tenantId, factDate, userId ?? " ", projectId ?? " ", unitNodeId ?? " "].join("|");
+  const key = [tenantId, factDate, userId ?? "\x00", projectId ?? "\x00", unitNodeId ?? "\x00"].join("|");
   return uuidv5(key, FACT_ID_NAMESPACE);
 }
 
@@ -367,7 +367,7 @@ export function computeFactRows(inputs: FactSliceInputs): { rows: FactRow[]; key
 
   const bucketFor = (userId: string | null, projectId: string | null, attribution: UnitAttribution): Bucket => {
     // The key is EXACTLY the table's UNIQUE NULLS NOT DISTINCT tuple (ruling 7).
-    const key = `${userId ?? " "}|${projectId ?? " "}|${attribution.unitNodeId ?? " "}`;
+    const key = `${userId ?? "\x00"}|${projectId ?? "\x00"}|${attribution.unitNodeId ?? "\x00"}`;
     const existing = buckets.get(key);
     if (existing) {
       if (

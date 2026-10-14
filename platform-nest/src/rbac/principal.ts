@@ -327,7 +327,7 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
     const filtered = new Map<string, PermissionGrant>();
     for (const row of permsRes.rows) {
       if (!isGrantScopeReachable(row.roleName, row.scopeType)) continue; // IAM-SEC-06
-      const dedupeKey = `${row.key} ${row.scopeType} ${row.scopeId ?? ""}`;
+      const dedupeKey = `${row.key}\x00${row.scopeType}\x00${row.scopeId ?? ""}`;
       if (!filtered.has(dedupeKey)) {
         filtered.set(dedupeKey, { key: row.key, scopeType: row.scopeType, scopeId: row.scopeId });
       }

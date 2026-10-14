@@ -98,7 +98,7 @@ describe("mail/templates", () => {
       "JaVaScRiPt:alert(1)",
       "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
       "vbscript:msgbox(1)",
-      "javascript:alert(1)",
+      "\x01javascript:alert(1)",
     ]) {
       const out = renderTemplate("approval.actionable", { href: hostile, subjectTitle: "t" });
       expect(out.html).not.toContain(`href="${hostile}"`);
