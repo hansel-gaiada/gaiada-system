@@ -8,7 +8,7 @@ import { CompanyCampaigns } from "./CompanyCampaigns";
 import { CompanyLearning } from "./CompanyLearning";
 import { CompanyAppraisals } from "./CompanyAppraisals";
 import { COMPANY_OVERVIEW } from "@/lib/workspaces";
-import { me as meFixture } from "@/lib/workspaceFixtures";
+import { AGENCY, HOTEL, me as meFixture } from "@/lib/workspaceFixtures";
 import { PlatformError } from "@/lib/platform";
 import * as queue from "@/lib/queue";
 import * as reports from "@/lib/reports-data";
@@ -103,13 +103,24 @@ describe("Decisions (widget)", () => {
     expect(screen.getByText(/This list is incomplete: agency approvals could not be read/)).toBeInTheDocument();
   });
 
-  it("says Unavailable when this company's leg was not read, and never an empty list", async () => {
-    getQueue.mockResolvedValue(envelope([], { included: false }) as never);
-    render(await Decisions(props("decisions")));
+  it("says Unavailable when this company's leg was not read although another company's was, and never an empty list", async () => {
+    const twoCompanies = meFixture([{ role: "company_admin", scopeType: "company", scopeId: T }, { role: "member", scopeType: "company", scopeId: "co-h" }], [AGENCY, HOTEL]);
+    getQueue.mockResolvedValue({
+      items: [item("h1", { companyId: "co-h", company: "Hotel" })],
+      companies: [{ id: T, name: "Agency", included: false }, { id: "co-h", name: "Hotel", included: true }],
+    } as never);
+    render(await Decisions(props("decisions", twoCompanies)));
     const block = screen.getByRole("region", { name: "Needs you: decisions" });
     expect(block).toHaveAttribute("data-state", "unavailable");
     expect(within(block).getByText("Unavailable")).toBeInTheDocument();
     expect(within(block).queryByText(/Nothing is waiting/)).toBeNull();
+    // The other company's decision is not this company's, and is not shown.
+    expect(within(block).queryByText("Approve h1")).toBeNull();
+  });
+
+  it("throws, so the frame's boundary says Unavailable, when no company could be read at all", async () => {
+    getQueue.mockResolvedValue(envelope([], { included: false }) as never);
+    await expect(Decisions(props("decisions"))).rejects.toThrow("The work queue could not be read.");
   });
 });
 
