@@ -403,6 +403,6 @@ export class WorkRequestsController {
 }
 
 /** The Cerbos resource for an action on one request: the three attributes come from the DB read, never from the body. */
-function factsResource(tenantId: string, f: svc.AuthFacts): Resource {
+export function factsResource(tenantId: string, f: svc.AuthFacts): Resource {
   return resource(tenantId, { id: f.id, requestedBy: f.requestedBy, assigneeIds: f.assigneeIds, unitAncestors: f.unitAncestors });
 }
