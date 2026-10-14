@@ -2,6 +2,9 @@ import { render, screen, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { WorkspaceTabStrip } from "./WorkspaceTabStrip";
 import { inShell } from "./workspaceShellTestKit";
+import { buildShellModel } from "@/lib/shellModel";
+import { resolveMyWorkspaces } from "@/lib/workspaceAccess";
+import { HOTEL, agencyTree, me, member } from "@/lib/workspaceFixtures";
 
 const nav = vi.hoisted(() => ({ pathname: "/" }));
 vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname }));
@@ -48,6 +51,42 @@ describe("WorkspaceTabStrip", () => {
   it("draws nothing in the classic shell", () => {
     nav.pathname = "/departments/d-web/repositories";
     const { container } = render(<WorkspaceTabStrip />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  // DW-8c: the You block's Calendar row, Calendar and Meetings, on the calendar and meetings pages.
+  it("draws Calendar and Meetings on /calendar, with Calendar current", () => {
+    nav.pathname = "/calendar";
+    render(inShell(<WorkspaceTabStrip />));
+    const strip = screen.getByRole("navigation", { name: "Calendar sections" });
+    expect(within(strip).getAllByRole("link").map((a) => a.textContent?.trim())).toEqual(["Calendar", "Meetings"]);
+    const current = within(strip).getByRole("link", { current: "page" });
+    expect(current).toHaveTextContent("Calendar");
+    expect(current).toHaveAttribute("href", "/calendar");
+  });
+
+  it.each(["/meetings", "/meetings/abc123"])("draws the same two tabs on %s, with Meetings current", (path) => {
+    nav.pathname = path;
+    render(inShell(<WorkspaceTabStrip />));
+    const strip = screen.getByRole("navigation", { name: "Calendar sections" });
+    expect(within(strip).getAllByRole("link").map((a) => a.textContent?.trim())).toEqual(["Calendar", "Meetings"]);
+    const current = within(strip).getByRole("link", { current: "page" });
+    expect(current).toHaveTextContent("Meetings");
+    expect(current).toHaveAttribute("href", "/meetings");
+  });
+
+  it("omits Meetings for a company whose pack has no meetings row", () => {
+    // A hotel (hospitality pack) member: the agencyRow gate for `meetings` is false for her company.
+    const hotelMe = me([member("co-h")], [HOTEL]);
+    const model = buildShellModel({
+      me: hotelMe,
+      tenantId: "co-h",
+      workspaces: resolveMyWorkspaces({ me: hotelMe, tenantId: "co-h", root: agencyTree() }),
+    });
+    nav.pathname = "/calendar";
+    // The gate removes Meetings, which leaves the row with one tab; the strip then draws nothing (a one-tab row).
+    const { container } = render(inShell(<WorkspaceTabStrip />, model));
+    expect(screen.queryByRole("link", { name: "Meetings" })).not.toBeInTheDocument();
     expect(container).toBeEmptyDOMElement();
   });
 });
