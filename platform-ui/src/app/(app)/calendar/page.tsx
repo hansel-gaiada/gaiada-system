@@ -6,6 +6,10 @@ import { getMe } from "@/lib/platform";
 import { accessibleCompanies } from "@/lib/rbac";
 import { listAllPmTasks, computeTimeline, type PmTask } from "@/lib/pm";
 import { listMyTasks } from "@/lib/agenda";
+import { listMyEvents } from "@/lib/calendarEvents-data";
+import { gridDays, mergeCalItems, type CalendarEventRow } from "@/lib/calendarEvents";
+import { windowForDays } from "@/lib/zoneTime";
+import { todayIsoInDisplayZone } from "@/lib/format";
 import {
   CAL_VIEWS, counts, parseAnchor, parseView, rangeLabel, shiftAnchor, startOfMonth,
   type CalItem, type CalView,
@@ -28,6 +32,11 @@ import "@/components/calendar/calendar.css";
 //
 // Views: Month · Week · Day (all-day grids — a task carries a due DATE with no time, so hour rows
 // would be empty scaffolding) and Timeline (read-only bars, one per task).
+//
+// DW-8g: calendar events (BFF §47) join the three grids next to the tasks, read for the visible window only. Every
+// day boundary is the display zone's (`lib/zoneTime.ts`), including "today". The Timeline stays tasks only. Busy times
+// (§47.4) are not built (owner ruling pending), so nothing is drawn for other people's availability: when they land they
+// belong in the Day view, beside the events, from `GET /:t/calendar/busy`.
 //
 // All state lives in the URL (?scope=&view=&date=), so every view is shareable and the page stays
 // server-rendered with no client JS beyond the Gantt itself.
@@ -56,7 +65,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
   const companies = accessibleCompanies(me);
   const scope = sp.scope && companies.some((c) => c.id === sp.scope) ? sp.scope : "all";
   const view: CalView = parseView(sp.view);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIsoInDisplayZone();
   const anchor = parseAnchor(sp.date, today);
 
   if (companies.length === 0) {
@@ -64,6 +73,9 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
   }
 
   const items: CalItem[] = [];
+  let events: CalendarEventRow[] = [];
+  let eventsUnavailable = false;
+  let eventsExcluded = 0;
   let ganttTasks: PmTask[] = [];
   let undated = 0;
   let envelopeBanner: ReactNode = null;
@@ -101,6 +113,18 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
   items.sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title));
   const c = counts(items, today);
 
+  // Events for the days the grid draws (never more than 42, inside the endpoint's 92-day cap). Unreadable is its own
+  // state: the grid still draws the tasks, and a line says the events could not be read, never "no events".
+  const grid = view === "timeline" ? null : gridDays(view, anchor);
+  if (grid) {
+    const w = windowForDays(grid.firstDay, grid.lastDay);
+    const read = await listMyEvents(userId, { from: w.from, to: w.to, scope });
+    events = read.envelope.items;
+    eventsUnavailable = read.unavailable;
+    eventsExcluded = read.envelope.companies.filter((x) => !x.included).length;
+  }
+  const gridItems = grid ? mergeCalItems(items, events, grid) : items;
+
   const href = (next: { view?: CalView; date?: string; scope?: string }) => {
     const p = new URLSearchParams();
     const s = next.scope ?? scope;
@@ -124,9 +148,21 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
       <PageHeader
         eyebrow="Workspace"
         title="My calendar"
-        actions={<ScopePill companies={companies} value={scope} onChangeHref={(v) => href({ scope: v })} />}
+        actions={(
+          <>
+            <ScopePill companies={companies} value={scope} onChangeHref={(v) => href({ scope: v })} />
+            <Link href="/calendar/new" className="lux-btn lux-btn--solid lux-btn--sm">Schedule a meeting</Link>
+          </>
+        )}
       />
       {envelopeBanner}
+      {eventsUnavailable ? (
+        <p className="cal-events-note" role="status">Your calendar events couldn&apos;t be read right now, so only tasks are shown. Try again shortly.</p>
+      ) : eventsExcluded > 0 ? (
+        <p className="cal-events-note" role="status">
+          Events from {eventsExcluded === 1 ? "one company" : `${eventsExcluded} companies`} couldn&apos;t be read, so this view may be missing some.
+        </p>
+      ) : null}
 
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", marginBottom: 20 }}>
         <KpiTile label="Assigned to me" value={String(c.total)} hint="Your own open, dated tasks. Work you have finished is excluded, and so is everyone else's — this page is personal." />
@@ -167,15 +203,17 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
         )}
       </div>
 
-      {items.length === 0 ? (
+      {view === "timeline" && items.length === 0 ? (
         <EmptyNote>Nothing of yours is scheduled. Tasks assigned to you appear here once they have a date.</EmptyNote>
+      ) : view !== "timeline" && gridItems.length === 0 && !eventsUnavailable ? (
+        <EmptyNote>Nothing of yours is scheduled in this view. Tasks assigned to you and meetings you are invited to appear here once they have a date.</EmptyNote>
       ) : view === "month" ? (
-        <MonthView anchor={anchor} today={today} items={items} dayHref={dayHref} />
+        <MonthView anchor={anchor} today={today} items={gridItems} dayHref={dayHref} />
       ) : view === "week" ? (
-        <WeekView anchor={anchor} today={today} items={items} dayHref={dayHref} />
+        <WeekView anchor={anchor} today={today} items={gridItems} dayHref={dayHref} />
       ) : view === "day" ? (
         <Card title={rangeLabel(anchor, "day")}>
-          <DayView anchor={anchor} today={today} items={items} />
+          <DayView anchor={anchor} today={today} items={gridItems} />
         </Card>
       ) : timeline ? (
         <Card title="Timeline">
