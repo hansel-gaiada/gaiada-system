@@ -3414,6 +3414,16 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     const since = Number(url.searchParams.get("since") ?? 0) || 0;
     return ok({ events: demoAgentRunEvents(runEventsMatch[2], since) });
   }
+  if (p.match(/^\/api\/[^/]+\/knowledge\/search$/) && m === "GET") {
+    const q = (url.searchParams.get("q") ?? "").trim();
+    if (q.length < 2 || q.length > 200) return { status: 400, json: { error: "query_invalid" } };
+    const results = q.toLowerCase().includes("nothing") ? [] : [
+      { sourceRef: "client:demo-1", family: "client", title: "Demo client (sample result)", snippet: `Sample snippet that matches "${q}". Demo data only.`, href: "/clients", score: 0.91 },
+      { sourceRef: "project:demo-1", family: "project", title: "Demo project (sample result)", snippet: "Sample project notes from the demo fixture.", href: "/projects", score: 0.84 },
+      { sourceRef: "meeting:demo-1", family: "meeting", title: "Demo meeting (sample result)", snippet: "Sample meeting summary from the demo fixture.", href: "/meetings", score: 0.77 },
+    ];
+    return ok({ query: q, results, indexedAt: "2026-10-14T06:00:00.000Z" });
+  }
   const sourcesMatch = p.match(/^\/api\/([^/]+)\/knowledge\/sources$/);
   if (sourcesMatch) return ok(KNOWLEDGE_SOURCES[sourcesMatch[1]] ?? []);
   if (p.match(/^\/api\/[^/]+\/knowledge\/sources\/[^/]+\/review$/) && m === "POST") return ok({ ok: true });

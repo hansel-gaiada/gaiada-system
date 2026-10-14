@@ -8249,7 +8249,7 @@ Built exactly as §45.1 to §45.5 specify, with these points the text left open:
 - **Placement.** `/clients/[clientId]/details` is only a redirect to `contacts` since CC-D8, so PV placed the card on the Internal Notes tab ("notes and files"): staff-only material lives there (PV-D4), and a staff-only card on People could be mistaken for something the portal's People list shows.
 - **Demo mode.** `demoFixtures` seeds a labelled placeholder file on each of the four kinds (`wr-demo-1`, `cmp-demo-1`, `part-demo-1`, `cl-1`) and its POST takes the new body and answers `{id, scrubbed, byteSize}`. The demo has no request or campaign pages to show them on.
 
-## 46. Knowledge search for staff (DW-8i, 2026-10-14) — `platform-nest/src/modules/knowledge/search.controller.ts` (new), `modules/knowledge/search-filter.ts` (new); UI `/knowledge` — **STATUS: BACKEND BUILT, PROTOTYPED (unit suite `search-filter.test.ts` run locally; the HTTP suite `search.controller.test.ts` is written for the Linux CI gate against real Postgres + Cerbos and has NOT been run yet); UI PLANNED (a second ticket)**
+## 46. Knowledge search for staff (DW-8i, 2026-10-14) — `platform-nest/src/modules/knowledge/search.controller.ts` (new), `modules/knowledge/search-filter.ts` (new); UI `/knowledge` — **STATUS: BACKEND AND UI BUILT, PROTOTYPED (backend unit suite `search-filter.test.ts` run locally; the HTTP suite `search.controller.test.ts` is written for the Linux CI gate against real Postgres + Cerbos and has NOT been run yet; UI: vitest, `tsc` and the demo-mode `next build` gate run locally, not yet driven in a browser or against a live platform)**
 
 **Why.** Plan §8.1 (row 8i) and §14.2 ("Find a company document"). The knowledge store (WS8, `ai-agents/src/knowledge/`) indexes ERP records every 6 hours, but staff cannot search it. `/knowledge` lists sources only, and `/search` is a client-side substring match over a few lists.
 
@@ -8348,6 +8348,13 @@ The hub's `knowledge.search` tool and the assistant's retrieval (`config.knowled
 - **Acting for someone.** When the principal acts for a human (`actFor`), every read must also be allowed for that human, as `authorize()` does. This only narrows.
 
 **Who the filter actually narrows.** Every v1 family except `file` is readable by every `company_admin`, `manager`, `member` and `viewer` of the company (and by the matching `core.*.read` permission arm), so for those the filter matters for outsiders, for principals without the role, for the module switch, and for deleted rows. The genuinely narrower case is a `file` whose parent has a narrower read, such as a contract (`contract` read is `company_admin` and `manager`; the member and viewer bundles hold no `core.contract.read`). The HTTP suite drives that case.
+
+### 46.8 As built (UI, DW-8i)
+
+- **Reader.** `searchKnowledge(userId, tenantId, q, limit?)` in `platform-ui/src/lib/admin.ts` returns a `ReadResult`: 200 is `ok`, 403 `forbidden`, 503 or an unreachable platform `unavailable`. A 400 is `unavailable` with reason `query_invalid`, which the page words as "Type at least 2 characters." A failure is never folded into "no results".
+- **Page.** `/knowledge` has a GET form (`?q=`) at the top. The page checks the 2-character floor before calling. States and wording are exactly §46.4's, plus "You can't search company knowledge." for 403. Family labels: Client, Project, Task (also for `pmtask`), Deliverable, Meeting, Document (`pmdoc`), File. The line "Indexed every 6 hours" shows always, with "(last: ...)" in the pinned display zone when `indexedAt` is set. The source list and quarantine card are unchanged.
+- **Palette.** With 2 or more typed characters the palette adds a "Knowledge" group holding "Search company knowledge for '<text>'", opening `/knowledge?q=<encoded text>`. It is reachable by arrows and click but is never the default highlight, so Enter with nothing else matching still goes to `/search` (DW-2c).
+- **DEMO_MODE.** `demoFixtures.ts` answers the route with three labelled sample results for any query of 2 or more characters, an empty list for a query containing "nothing", and 400 `query_invalid` otherwise.
 
 ## 47. Calendar events and meeting scheduling (DW-8g, 2026-10-14) — `platform-nest/src/core/calendar-events.{controller,service}.ts` (new), migration `<next free>_calendar_events.sql`; UI `/calendar` — **STATUS: PLANNED**
 
