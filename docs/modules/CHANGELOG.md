@@ -11,6 +11,14 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.138.0` - PV5-13: issued-invoice PDFs and sealed copies render again (2026-10-14) - PROTOTYPED
+
+- **The bug (measured on live 1.0.0-alpha.382 by the PV-5 Release A drive).** Every `invoice_pdf` and `contract_signed_copy` job failed with `render_unverified`. With the renderer sidecar's own Chromium: `DocumentTitle` set `document.title` to the render nonce, then Next 16.3 committed the streamed metadata title (`Invoice`) after the effect, so the PDF /Title was never the nonce and platform-nest rightly refused every PDF. PV5-07 had only been tested against a stubbed renderer, and the Next 16 upgrade changed when metadata commits.
+- **The fix.** `components/documents/print/DocumentTitle.tsx` keeps the nonce: a `MutationObserver` on `<head>` puts it back after any later title commit (and after a replaced `<title>` element). The nonce still appears only once the document has mounted on the client, which is what the check proves. Proven against the live build before the change: title = nonce at `networkidle` and 3 s later.
+- **Test.** `documents-print.test.tsx`: a title committed after the effect, and a replaced `<title>`, both end as the nonce; after unmount the page's title is left alone. Teeth: the old one-shot effect fails it (run 38424222756: 1 failed, 468 passed).
+- **After deploy.** The document-job sweep retries the waiting jobs by itself (hourly and at boot); nothing to run by hand.
+- **Also in this landing (platform-nest, test only).** `invoice-numbering.test.ts` "a PRE-ASSIGNED code is the one the number carries" no longer hard-codes `PR3`, which a random generated code could already hold (the one-off 409 `code_taken` in CI run 38353788175): its own client and a free code. Proven by a forced collision (old test red in 38422270500, fixed green in 38422276215).
+
 ### platform-ui `0.137.0` - DW-4c: department analytics offer only pages that exist (2026-10-13) - PROTOTYPED
 
 - Three planned Analytics tabs pointed at pages that do not exist. Web Dev's "Sites" goes (`/sites` redirects to Run › Portfolio; live health is Monitoring). SEO's "Rankings trend" goes (the rank tracker and its trend are one page, Optimize › Rankings: one page, one row). Finance's "Revenue, AR and cash" has no page yet and stays planned under DW-7b, with the Finance workspace.
