@@ -26,6 +26,14 @@ export interface CalItem {
   href: string;
   company?: string;
   projectName?: string;
+  /** DW-8g: absent means a task. An event occupies one item per day it spans (`lib/calendarEvents.ts`). */
+  kind?: "task" | "event";
+  /** An event's state: cancelled ones are struck through, ones the caller declined are dimmed. */
+  state?: "cancelled" | "declined";
+  /** An event's time on this day, in the display zone, e.g. "09:00–10:30" or "All day". */
+  time?: string;
+  /** `HH:mm` start on this day for a timed event; absent for an all-day event or a task. Ordering only. */
+  startTime?: string;
 }
 
 const DAY = 86_400_000;
