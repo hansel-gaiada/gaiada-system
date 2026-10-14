@@ -419,8 +419,9 @@ describe.skipIf(!TEST_URL)("DW-4j-3 the weekly digest and the drivers (live PG +
   });
 
   it("no digest carries a person's name or a person-level number", async () => {
-    const all = JSON.stringify(await notes()).toLowerCase();
-    expect((await notes()).length).toBeGreaterThan(0);
+    const sent = await notes();
+    expect(sent.length).toBeGreaterThan(0);
+    const all = JSON.stringify(sent.map((n) => n.payload)).toLowerCase(); // the payloads: the recipient column is the head's own id, by design
     for (const name of Object.values(NAMES)) {
       expect(all).not.toContain(name.toLowerCase());
       for (const part of name.split(" ").filter((x) => x.length >= 4)) expect(all).not.toContain(part.toLowerCase());
