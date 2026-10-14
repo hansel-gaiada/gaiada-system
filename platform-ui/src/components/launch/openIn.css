@@ -1,0 +1,6 @@
+/* DW-6c2: the "Open in" menu. Reuses the shared Menu panel (overlay.css); only the link row needs its own rules. */
+.open-in__item { text-decoration: none; }
+.open-in__glyph { width: 16px; text-align: center; color: var(--ink-muted); flex: none; }
+.open-in__text { display: flex; flex-direction: column; min-width: 0; }
+.open-in__detail { font: 400 12px var(--font-body); color: var(--ink-muted); overflow-wrap: anywhere; }
+.open-in__empty { padding: 8px 10px; font: 400 12px var(--font-body); color: var(--ink-muted); }

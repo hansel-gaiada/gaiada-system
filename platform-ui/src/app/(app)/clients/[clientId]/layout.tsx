@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/ui";
 import { ClientHubTabs, type ClientHubTab } from "@/components/clients/ClientHubTabs";
 import { ConfirmSubmitButton } from "@/components/clients/ConfirmSubmitButton";
+import { OpenInSlot } from "@/components/launch/OpenInSlot";
 import "@/components/clients/clientHub.css";
 
 // CC-3 — the client hub shell.
@@ -105,6 +106,8 @@ export default async function ClientHubLayout({
             {canWrite && (
               <Link href={`/clients/${clientId}/edit`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit</Link>
             )}
+            {/* DW-6c2 — pilot only: renders nothing on the classic shell. */}
+            <OpenInSlot scope="client" clientId={clientId} />
             {canWrite && (
               <form action={toggleArchive}>
                 <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">{isArchived ? "Restore" : "Archive"}</button>

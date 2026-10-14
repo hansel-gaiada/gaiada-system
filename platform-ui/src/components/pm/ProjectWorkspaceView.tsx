@@ -46,6 +46,7 @@ import { DocEditor } from "@/components/pm/DocEditor";
 import { TagChip } from "@/components/pm/TagChip";
 import { TagManager } from "@/components/pm/TagManager";
 import { DuplicateProject } from "@/components/pm/DuplicateProject";
+import { OpenInSlot } from "@/components/launch/OpenInSlot";
 import {
   assigneeColumns, priorityColumns, ballColumns, filterTasksByBall, filterTasksByResponsible,
   ballFacetOptions, responsibleFacetOptions, type BoardSwimlane,
@@ -291,6 +292,8 @@ export async function ProjectWorkspaceView({
         actions={
           <>
             <Link href={`/projects/${projectId}/edit`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit</Link>
+            {/* DW-6c2 — pilot only: renders nothing on the classic shell. */}
+            <OpenInSlot scope="project" projectId={projectId} />
             <DuplicateProject projectId={projectId} projectName={name} canManage={canManageStatuses} />
             <form action={archiveProject.bind(null, projectId)}><button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Archive</button></form>
           </>

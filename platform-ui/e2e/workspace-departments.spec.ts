@@ -270,6 +270,46 @@ test.describe("Tools & connections (superadmin, DW-6c)", () => {
   });
 });
 
+// 6c2, "Open in": the demo project `p-web-1` ("Client site redesign") belongs to Web Dev (dept-1, lib/demoFixtures.ts).
+// The menu lists Web Dev's tools in registry order. Whether GitHub and VS Code carry a repository depends on the demo
+// repository registry, so only the tool names are asserted here, never the links' targets or the "home" notes.
+test.describe("Open in (superadmin, DW-6c2)", () => {
+  const WEB_DEV_PROJECT = "/projects/p-web-1";
+  const openIn = (page: Page) => page.getByRole("button", { name: "Open in", exact: true });
+
+  test("a Web Dev project page opens a menu of Web Dev's tools, each link opening in a new tab", async ({ page, context }) => {
+    await signInSuperadmin(page, context);
+    await page.goto(WEB_DEV_PROJECT);
+    const btn = openIn(page);
+    await expect(btn).toBeVisible();
+    await hydrated(btn);
+    await expect(btn).toHaveAttribute("aria-expanded", "false");
+    await btn.click();
+    await expect(btn).toHaveAttribute("aria-expanded", "true");
+
+    const list = page.getByRole("menu", { name: "Open in" });
+    await expect(list).toBeVisible();
+    await expectSubsequence(list.locator(".open-in__text > span:first-child"), ["Claude Code", "Claude", "Claude Design", "GitHub", "Figma", "VS Code"]);
+    const links = list.getByRole("menuitem");
+    for (const a of await links.all()) {
+      await expect(a).toHaveAttribute("target", "_blank");
+      await expect(a).toHaveAttribute("rel", "noopener noreferrer");
+    }
+
+    await page.keyboard.press("Escape");
+    await expect(btn).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByRole("menu", { name: "Open in" })).toHaveCount(0);
+  });
+
+  test("without the pilot cookie the same project page has no Open in menu", async ({ page, context }) => {
+    await loginAsPersona(page, "superadmin");
+    await context.addCookies([tenantCookie(page.url())]);
+    await page.goto(WEB_DEV_PROJECT);
+    await expect(page.getByRole("heading", { name: "Client site redesign" })).toBeVisible();
+    await expect(openIn(page)).toHaveCount(0);
+  });
+});
+
 // 6e, the generic workspace (any department with no bespoke workspace): the demo data gives no such department in
 // the browser. Only the agency company has an org tree in demo mode (lib/org.ts `defaultStructure` seeds departments
 // for vertical "agency" only, so the hospitality company Viceroy has none, and the fixtures may not grow). The
