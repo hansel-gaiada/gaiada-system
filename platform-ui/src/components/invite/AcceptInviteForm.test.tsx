@@ -49,9 +49,14 @@ describe("AcceptInviteForm", () => {
   it("existing account: says to sign in with it, and never mentions the password just chosen", async () => {
     fetchMock.mockResolvedValue(okResponse({ existingAccount: true }));
     await submit();
-    expect(await screen.findByText(/You already have an account\. Sign in with it to open your portal\./)).toBeTruthy();
+    expect(await screen.findByText(/You already have an account\. Sign in with it to open your portal\. If you have forgotten its password, ask\s+your project manager to reset it\./)).toBeTruthy();
     expect(screen.queryByText(/password you just chose/i)).toBeNull();
     expect(screen.getByRole("link", { name: "Sign in" }).getAttribute("href")).toBe("/login");
+  });
+
+  it("the form no longer hints that an existing account's password can be set here", async () => {
+    render(<AcceptInviteForm token="inv1.tok" clientName="Acme" />);
+    expect(screen.queryByText(/keeps its\s+current password/i)).toBeNull();
   });
 
   it("new account: still says to sign in with the password just chosen", async () => {
