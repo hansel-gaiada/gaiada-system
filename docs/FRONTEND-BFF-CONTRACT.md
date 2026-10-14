@@ -7680,7 +7680,7 @@ Files: `dept-kpis.ts` (catalogue, slug resolution, condition rules; pure), `dept
 - staff of the unit may read and staff of another unit may not;
 - the overview is company-wide tiers only, worst first.
 
-### 40.5 Delivery-department readers (DW-6n, 2026-10-14) — **STATUS: CONTRACT (nothing built)**
+### 40.5 Delivery-department readers (DW-6n, 2026-10-14) — **STATUS: BUILT, PROTOTYPED (all twelve readers and the seam, each with a live-Postgres test on the Linux CI gate; see §40.5.8)**
 
 **Why.** DW-D25 moved the delivery departments' twelve `module` KPIs to DW-6. Today each one reads `unavailable` (`no_reader`). This section gives each a reader over data the modules already write, so the §40 engine, targets, conditions, the §41 appraisal and the §43 watch pick the numbers up with no other change. DW-D27 (owner, 2026-10-14) settles the four definitions the data could not settle on its own.
 
@@ -7726,7 +7726,7 @@ Files: `dept-kpis.ts` (catalogue, slug resolution, condition rules; pure), `dept
 | n3 | seo · `clients-ranking-growth` | `search.clients_ranking_growth` | numerator ÷ denominator | For each client in C(u) with a `search_properties` row: the keywords `(keyword_id, engine, device)` ranked (position not null) both in the last non-simulated `search_rank_snapshots` at or before the window's first instant AND in the last one before its end. A client "grew" when its mean position over those keywords fell (a lower number is better). Denominator: clients with at least one such keyword. Numerator: those that grew. | denominator 0 | `search` |
 | n4 | seo · `client-reports-on-time` | `search.client_reports_on_time` | numerator ÷ denominator | `search_reports` of engagements whose client is in C(u), with period `YYYY-MM`, due on **the 5th of the following month** (DW-D27, end of that day in `REPORTS_TZ`), the due date inside the window, and delivered or already due. Numerator: `delivered_at` on or before the due date. | denominator 0 | `search` |
 | n5 | seo · `ad-budgets-on-pace` | `search.ad_budgets_on_pace` | numerator ÷ denominator | **DW-D27: a campaign's `budget_minor` is a MONTHLY budget.** Judged in the month that contains `asOf`, from its 1st to `asOf`. Over campaigns `live` in that month, with a budget above 0, of engagements whose client is in C(u), and at least one non-simulated daily metrics row in that month: spend is the sum of `cost_minor` from the 1st to the as-of day, and expected is `budget_minor × days elapsed ÷ days in the month`. **On pace: 0.9 ≤ spend ÷ expected ≤ 1.1.** A campaign whose metrics currency differs from its budget currency is left out. | denominator 0 | `search` |
-| n6 | seo · `client-retention` | `clients.retention` | numerator ÷ denominator | **The cohort:** clients in C(u) that were active on the window's first day. Active on a day D means one of: a `signed` contract with `starts_on ≤ D` and `ends_on` null or `≥ D`; or a project in S(u) with `start_date ≤ D` and status `active`, `planned` or `on_hold`. **Retained:** active on `asOf`. A superseding contract continues its predecessor. | empty cohort | tenant |
+| n6 | seo · `client-retention` | `clients.retention` | numerator ÷ denominator | **The cohort:** clients in C(u) that were active on the window's first day. Active on a day D means one of: a `signed` contract with its start `≤ D` and `ends_on` null or `≥ D`; or a project in S(u) with its start `≤ D` and status `active`, `planned` or `on_hold`. A project with no `start_date` starts on its `created_at` date, and a contract with no `starts_on` on its `signed_at` date (most projects are created without a start date). **Retained:** active on `asOf`. A superseding contract continues its predecessor. | empty cohort | tenant |
 | n7 | social-media · `posts-on-schedule` | `social.posts_on_schedule` | numerator ÷ denominator | `social_post_variants` not deleted, not `native_import`, not `cancelled`, with `scheduled_at` inside the window, whose engagement's client is in C(u), and published or already due. Numerator: `published_at ≤ scheduled_at + 15 minutes`. The 15 minutes is a documented default, not a ruling. | denominator 0 | `social` |
 | n8 | social-media · `client-approval-turnaround` | `social.client_approval_turnaround` | the mean of `decided_at − requested_at`, in minutes | No numerator or denominator (an average, not a share). Over `social_post_client_reviews` with status `approved` or `changes_requested`, `decided_at` inside the window, and the client in C(u). | no decided review | `social` (variant join) |
 | n9 | social-media · `engagement-growth` | `social.engagement_growth` | `(cur − prev) ÷ prev` (can be negative) | Over `social_accounts` whose client is in C(u): `cur` is the sum of `social_metrics_daily.engagements` over the dates `[start, asOf]`, and `prev` the sum over the same number of days just before `start`. So a running month is compared like for like, never month-to-date against a whole month. Counts only accounts with a non-null `engagements` value in both windows; the sums are pooled across them. | no such account, or `prev` = 0 | `social` |
@@ -7742,6 +7742,8 @@ Files: `dept-kpis.ts` (catalogue, slug resolution, condition rules; pure), `dept
 - **n8** sees only each variant's LATEST approval round. A re-request overwrites the earlier one (`UNIQUE (variant_id)`), so a turnaround series over a period that included re-requests is understated. Logging the rounds would fix it; that is a later ticket.
 - **n9:** each network defines "engagement" its own way, so this is growth on each network's own measure, pooled.
 - **n12:** an asset never sent for review is not counted as delivered.
+- **n6:** a window that has not begun (`asOf` before `start`) reads `null`.
+- **n7:** a variant whose post was deleted is not counted.
 
 #### 40.5.5 Labels
 Only n1's label changes, and its key stays `requests-within-sla`, so stored targets, conditions and alerts carry over. The label changes in:
@@ -7773,6 +7775,32 @@ One reader per ticket, in this order:
 3. **Then:** n2, n1, n3, n4, n6, n5, n9, n8.
 
 Each lands as its own fast-forward with green CI on its exact sha.
+
+#### 40.5.8 As built (DW-6n, 2026-10-14)
+Built by three agents in parallel, each from `dw/6n-base`, reviewed and wired by the integrator. Code is in `platform-nest/src/modules/reports/`.
+- **The seam:**
+  - `dept-kpi-readers.ts`: the registry, `setModuleKpiReadersForTests` and `readerParityProblems`.
+  - `dept-kpi-readers/types.ts` and `scope.ts`: S(u), C(u) and the window.
+  - The engine change in `dept-kpi-targets.ts`, as reviewed by DW-4:
+    - `evaluateUnits(…, targetsAsOf, today)`, where the §43 watch passes the day of its own `now`;
+    - a unit's module readers run concurrently, and one that throws reads `read_failed`.
+  - Migration `202610150400_dept_kpi_conditions_read_failed.sql`.
+  - The UI's reason words; `overviewDepartments`' allow-list also needed `read_failed`.
+- **The readers** are in `dept-kpi-readers/delivery/`, registered in `delivery/index.ts`. Each one's test is a `*.db.test.ts` beside it, run on live Postgres:
+  - `work-requests-on-time.ts` (n1, n10);
+  - `monitoring-uptime.ts` (n2);
+  - `search.ts` (n3, n4, n5);
+  - `client-retention.ts` (n6);
+  - `social.ts` (n7, n8, n9);
+  - `creative-reviews.ts` (n11, n12).
+- **The module gate.** Readers over a module's tables (n2 `monitoring`; n3, n4 and n5 `search`; n7, n8 and n9 `social`) are wrapped by `gated()` in `delivery/index.ts`. Its test is `delivery/index.test.ts`.
+- **Decisions made while building:**
+  - **n11** counts only the current approval cycle: the `changes_requested` rounds after the group's previous approved round and before this one.
+  - **n11 and n12** take the department from the approved version's own asset, and a deleted approved version is not counted.
+  - **n3** compares the last real (non-simulated) snapshot at or before the window's first instant with the last one before its end. Keywords are keyed `(keyword_id, engine, device)`.
+  - **n5** uses exact integer arithmetic for the 0.9 to 1.1 band. A NULL metrics currency counts as a mismatch.
+  - **n9** compares `[start, asOf]` with the same number of days before `start`.
+- **Tests:** shared seeding for the social and uptime tests is `src/testing/dept-kpi-seed.ts`. Every timestamp test builds its boundaries from `REPORTS_TZ` (Asia/Makassar in the suites), so nothing assumes UTC.
 
 ## 41. The department appraisal per cycle (DW-4e-3, 2026-10-15) — `platform-nest/src/modules/reports/dept-appraisals*.ts` — **STATUS: BUILT, PROTOTYPED (backend: dept-appraisals.test.ts, dept-appraisals.controller.db.test.ts and src/rbac/cerbos-dept-kpi-target.test.ts on the Linux CI gate; UI: platform-ui deptAppraisalFormat.test.ts, demoDeptAppraisals.test.ts, deptAppraisals.test.ts, AppraisalView.test.tsx and rbac.test.ts on the CI gate)**
 

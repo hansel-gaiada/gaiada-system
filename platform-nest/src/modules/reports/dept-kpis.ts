@@ -73,7 +73,7 @@ export const DEPT_KPI_SETS: Readonly<Record<WorkspaceSlug, readonly DeptKpiDef[]
     pct("clients-ranking-growth", "Clients with ranking growth", "up_good", read("search.clients_ranking_growth"), 0.7, 0.1),
     pct("client-reports-on-time", "Client reports delivered on time", "up_good", read("search.client_reports_on_time"), 0.95, 0.05),
     pct("ad-budgets-on-pace", "Ad budgets on pace", "up_good", read("search.ad_budgets_on_pace"), 0.9, 0.05),
-    pct("client-retention", "Client retention", "up_good", MODULE, 0.9, 0.05),
+    pct("client-retention", "Client retention", "up_good", read("clients.retention"), 0.9, 0.05),
   ],
   "social-media": [
     pct("posts-on-schedule", "Posts published on schedule", "up_good", read("social.posts_on_schedule"), 0.95, 0.05),

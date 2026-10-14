@@ -8,6 +8,7 @@
 import { isModuleEnabled } from "../../../registry";
 import type { ModuleKpiReader } from "../types";
 import { assetsDelivered, revisionRounds } from "./creative-reviews";
+import { clientRetention } from "./client-retention";
 import { clientSiteUptime } from "./monitoring-uptime";
 import { adBudgetsOnPace, clientReportsOnTime, clientsRankingGrowth } from "./search";
 import { clientApprovalTurnaround, engagementGrowth, postsOnSchedule } from "./social";
@@ -27,6 +28,7 @@ export const DELIVERY_READERS: Record<string, ModuleKpiReader> = {
   "search.clients_ranking_growth": gated("search", clientsRankingGrowth),
   "search.client_reports_on_time": gated("search", clientReportsOnTime),
   "search.ad_budgets_on_pace": gated("search", adBudgetsOnPace),
+  "clients.retention": clientRetention,
   // Social Media
   "social.posts_on_schedule": gated("social", postsOnSchedule),
   "social.client_approval_turnaround": gated("social", clientApprovalTurnaround),
