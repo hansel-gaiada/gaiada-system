@@ -115,6 +115,50 @@ describe("toolContextLinks · Search Console", () => {
   });
 });
 
+// DW-6k: Figma links to each linked file or frame by its stored (normalised) url; no link, or none usable, opens the home page.
+describe("toolContextLinks · Figma", () => {
+  const FRAME = "https://www.figma.com/design/abc123?node-id=1-2";
+  const FILE = "https://www.figma.com/design/def456";
+
+  it("opens the home page, marked not contextual, when the task has no links", () => {
+    expect(toolContextLinks([FIGMA], {})).toEqual([{ key: "figma", label: "Figma", href: "https://www.figma.com", contextual: false }]);
+    expect(toolContextLinks([FIGMA], { figmaLinks: [] })[0].contextual).toBe(false);
+  });
+
+  it("links the file or frame for one link, with the title as the detail", () => {
+    expect(toolContextLinks([FIGMA], { figmaLinks: [{ url: FRAME, title: "Brand / Hero" }] })).toEqual([
+      { key: "figma", label: "Figma", href: FRAME, contextual: true, detail: "Brand / Hero" },
+    ]);
+  });
+
+  it("gives one entry per link, in the order given, expanding in place", () => {
+    const links = toolContextLinks([CLAUDE, FIGMA, VSCODE], { figmaLinks: [{ url: FRAME, title: "Hero" }, { url: FILE, title: "Brand" }] });
+    expect(links.map((l) => [l.key, l.href])).toEqual([["claude", "https://claude.ai/new"], ["figma", FRAME], ["figma", FILE], ["vscode", "vscode://"]]);
+  });
+
+  it("names a link whose title Figma has not given yet, and lists a repeated address once", () => {
+    const links = toolContextLinks([FIGMA], { figmaLinks: [{ url: FRAME, title: null }, { url: FRAME, title: "Again" }, { url: FILE, title: "  " }] });
+    expect(links.map((l) => l.detail)).toEqual(["linked Figma file", "linked Figma file"]);
+    expect(links).toHaveLength(2);
+  });
+
+  it("never links an address that is not a Figma https one; with none left it opens the home page", () => {
+    const links = toolContextLinks([FIGMA], { figmaLinks: [{ url: "javascript:alert(1)", title: "x" }, { url: "https://evil.example/design/a", title: "y" }] });
+    expect(links).toEqual([{ key: "figma", label: "Figma", href: "https://www.figma.com", contextual: false }]);
+  });
+
+  it("is not changed by the other tools' context, and does not change theirs", () => {
+    const ctx = { repos: [{ fullName: "a/b" }], taskKey: "A-1", figmaLinks: [{ url: FRAME, title: "Hero" }] };
+    const links = toolContextLinks([GITHUB, FIGMA], ctx);
+    expect(links.map((l) => l.href)).toEqual(["https://github.com/a/b/pulls?q=A-1", FRAME]);
+  });
+
+  it("reads as what it opens in the accessible name", () => {
+    const [l] = toolContextLinks([FIGMA], { figmaLinks: [{ url: FRAME, title: "Brand / Hero" }] });
+    expect(toolLinkName(l)).toBe("Figma, Brand / Hero");
+  });
+});
+
 describe("toolContextLinks · the rest", () => {
   it("opens every other tool at its home, even with a full context", () => {
     const ctx = { repos: [{ fullName: "a/b" }], taskKey: "A-1", searchProperties: [{ domain: "x.com", kind: "domain" as const }] };

@@ -194,7 +194,7 @@ const DRIVE: DeptLauncher = { key: "drive", label: "Shared Drive", desc: "The de
 // Connections (§4.1). Figma is DW-6k (DW-Q6); bank feeds and the IT admin consoles are not built.
 const CONN = {
   github: { key: "github", label: "GitHub" },
-  figma: { key: "figma", label: "Figma", ticket: "DW-6k" },
+  figma: { key: "figma", label: "Figma" },
   drive: { key: "drive", label: "Google Drive" },
   claudeSeats: { key: "claude-seats", label: "Claude seats" },
   googleAccounts: { key: "google-accounts", label: "Google accounts (Search Console, GA4, Ads)" },

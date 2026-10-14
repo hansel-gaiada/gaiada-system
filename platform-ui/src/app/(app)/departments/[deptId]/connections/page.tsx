@@ -17,6 +17,8 @@ import { ConnectionsPanel, AccountMappingNote } from "@/components/departments/C
 import { ToolsSection } from "@/components/departments/ToolsSection";
 import { ConnectionBlocks, visibleConnections } from "@/components/departments/ConnectionBlocks";
 import { SocialAccountsBlock } from "@/components/departments/SocialAccountsBlock";
+import { FigmaConnectionBlock } from "@/components/departments/FigmaConnectionBlock";
+import { readFigmaConnection } from "@/lib/figma-data";
 import { getPrefs } from "@/lib/prefs";
 import { togglePinnedToolAction } from "@/lib/prefsActions";
 import { workspaceFor } from "@/lib/workspaces";
@@ -156,6 +158,8 @@ export default async function DepartmentConnectionsPage({ params, searchParams }
         socialAccounts = null;
       }
     }
+    // DW-6k: the company's Figma connection (BFF §36.8). A failed read is a ReadResult the block says in words, never "not connected".
+    const figmaConnection = kinds.has("figma") ? await readFigmaConnection(userId, tenant) : null;
     const panelActions = { connect, update, revoke, mapSeat, updateSeat, unmapSeat };
     const githubBlock = (
       <>
@@ -189,6 +193,7 @@ export default async function DepartmentConnectionsPage({ params, searchParams }
         />
       ),
       "social-accounts": <SocialAccountsBlock accounts={socialAccounts} forbidden={socialForbidden} />,
+      figma: figmaConnection ? <FigmaConnectionBlock result={figmaConnection} canManage={isAdmin} /> : null,
     };
     return (
       <>

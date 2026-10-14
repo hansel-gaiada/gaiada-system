@@ -1,0 +1,36 @@
+/* DW-6k — the Designs section (BFF §36.6). Prefix `fg`. Tokens only, so light and dark both work. */
+.fg { display: grid; gap: 14px; }
+.fg-note { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); max-width: 70ch; }
+.fg-empty { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); }
+.fg-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 14px; }
+.fg-link { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 14px; align-items: start; }
+.fg-thumb {
+  width: 160px; min-height: 100px; display: grid; place-items: center;
+  border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-page); overflow: hidden;
+}
+.fg-thumb img { display: block; width: 100%; height: auto; max-height: 160px; object-fit: contain; }
+.fg-thumb__none { padding: 8px; text-align: center; font: 400 12px/1.4 var(--font-body); color: var(--ink-muted); }
+.fg-body { min-width: 0; display: grid; gap: 6px; }
+.fg-title { margin: 0; font: 600 14px var(--font-body); color: var(--text-primary); word-break: break-word; }
+.fg-meta { margin: 0; font: 400 12px/1.5 var(--font-body); color: var(--ink-muted); }
+.fg-stale { margin: 0; font: 400 12px/1.5 var(--font-body); color: var(--status-critical-fg); }
+.fg-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.fg-open { font: 600 12px var(--font-body); }
+.fg-format select {
+  font: 400 12px var(--font-body); padding: 5px 8px; color: var(--text-primary);
+  background: var(--surface-card-solid); border: 1px solid var(--line); border-radius: var(--radius-md);
+}
+.fg-done { margin: 0; font: 400 12px/1.5 var(--font-body); color: var(--text-primary); }
+.fg-error { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--status-critical-fg); }
+.fg-add { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+.fg-add__label { display: grid; gap: 4px; flex: 1 1 280px; font: 600 11px var(--font-body); color: var(--ink-subtle); }
+.fg-add__label input {
+  font: 400 13px var(--font-body); padding: 7px 10px; color: var(--text-primary);
+  background: var(--surface-card-solid); border: 1px solid var(--line); border-radius: var(--radius-md);
+}
+.fg-add .fg-error { flex-basis: 100%; }
+.fg-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+@media (max-width: 640px) {
+  .fg-link { grid-template-columns: 1fr; }
+  .fg-thumb { width: 100%; }
+}

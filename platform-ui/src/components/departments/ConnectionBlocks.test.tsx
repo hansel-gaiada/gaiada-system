@@ -24,8 +24,8 @@ function headings(vertical: string | null, dept: string): string[] {
 }
 
 describe("ConnectionBlocks: the kinds each workspace draws", () => {
-  it("Web Dev: GitHub, Google Drive, Claude seats (Figma is ticketed, so hidden)", () => {
-    expect(headings("agency", "Web Dev")).toEqual(["GitHub", "Google Drive", "Claude seats"]);
+  it("Web Dev: GitHub, Figma, Google Drive, Claude seats (Figma is built, DW-6k)", () => {
+    expect(headings("agency", "Web Dev")).toEqual(["GitHub", "Figma", "Google Drive", "Claude seats"]);
   });
   it("SEO: Google accounts, Drive, seats", () => {
     expect(headings("agency", "SEO")).toEqual(["Google accounts (Search Console, GA4, Ads)", "Google Drive", "Claude seats"]);
@@ -33,8 +33,8 @@ describe("ConnectionBlocks: the kinds each workspace draws", () => {
   it("Social Media: social accounts, Drive, seats", () => {
     expect(headings("agency", "Social Media")).toEqual(["Social accounts", "Google Drive", "Claude seats"]);
   });
-  it("Creatives: Drive, seats (Figma is hidden)", () => {
-    expect(headings("agency", "Creatives")).toEqual(["Google Drive", "Claude seats"]);
+  it("Creatives: Figma, Drive, seats", () => {
+    expect(headings("agency", "Creatives")).toEqual(["Figma", "Google Drive", "Claude seats"]);
   });
   it("Office of the GM: Drive, seats", () => {
     expect(headings("agency", "GM")).toEqual(["Google Drive", "Claude seats"]);
@@ -44,8 +44,10 @@ describe("ConnectionBlocks: the kinds each workspace draws", () => {
   });
 
   it("never draws a ticketed kind, even when a block is supplied for it", () => {
-    render(<ConnectionBlocks workspace={workspaceFor("agency", "Web Dev")} blocks={ALL_BLOCKS} />);
-    expect(screen.queryByText("figma block")).toBeNull();
+    const planned = { connections: [{ key: "bank-feeds", label: "Bank feeds", ticket: "DW-7e" }, { key: "figma", label: "Figma" }] };
+    render(<ConnectionBlocks workspace={planned} blocks={{ ...ALL_BLOCKS, "bank-feeds": <p>bank block</p> }} />);
+    expect(screen.queryByText("bank block")).toBeNull();
+    expect(screen.getByText("figma block")).toBeTruthy();
   });
 
   it("skips a kind the page has no block for rather than drawing an empty one", () => {

@@ -9,7 +9,9 @@ import { workspaceFor } from "@/lib/workspaces";
 import { myWorkspaces } from "@/lib/workspaces-data";
 import { listGithubRepos } from "@/lib/githubRepos-data";
 import { listProperties } from "@/lib/searchMarketing";
-import { toolContextLinks, type RepoRef, type SearchPropertyRef } from "@/lib/toolContext";
+import { toolContextLinks, type FigmaLinkRef, type RepoRef, type SearchPropertyRef } from "@/lib/toolContext";
+import type { ReadResult } from "@/lib/readResult";
+import type { FigmaLinks } from "@/lib/figma";
 import type { DeptLauncher } from "@/lib/deptToolkits";
 import { OpenInMenu } from "./OpenInMenu";
 
@@ -21,7 +23,11 @@ import { OpenInMenu } from "./OpenInMenu";
 //                   department name -> workspaceFor). No department, no menu.
 //   client          the tools of the viewer's home workspace. A Company home, or no tools, no menu.
 export type OpenInScope =
-  | { scope: "task"; projectId: string; /** `ABC-12`, from the task's `displayCode`. */ taskKey?: string | null }
+  | {
+      scope: "task"; projectId: string; /** `ABC-12`, from the task's `displayCode`. */ taskKey?: string | null;
+      /** DW-6k: the task's Figma links, read ONCE by the page for its Designs section and passed here, never read twice. */
+      figma?: ReadResult<FigmaLinks>;
+    }
   | { scope: "project"; projectId: string }
   | { scope: "client"; clientId: string };
 
@@ -48,6 +54,7 @@ export async function OpenInSlot(props: OpenInScope) {
   let repos: RepoRef[] | undefined;
   let searchProperties: SearchPropertyRef[] | undefined;
   let taskKey: string | null = null;
+  let figmaLinks: FigmaLinkRef[] | undefined;
 
   if (props.scope === "client") {
     const mine = await myWorkspaces(me, tenant);
@@ -67,11 +74,15 @@ export async function OpenInSlot(props: OpenInScope) {
     if (!dept) return null;
     tools = workspaceFor(activeCompany(me, tenant)?.vertical, dept.name).tools;
     if (tools.some((t) => t.key === "github" || t.key === "vscode")) repos = await linkedRepos(userId, tenant, props.projectId);
-    if (props.scope === "task") taskKey = props.taskKey ?? null;
+    if (props.scope === "task") {
+      taskKey = props.taskKey ?? null;
+      // A failed or refused links read is "cannot say": Figma then opens its home, never "no links".
+      if (props.figma?.kind === "ok") figmaLinks = props.figma.data.items.map((l) => ({ url: l.url, title: l.title }));
+    }
   }
 
   if (tools.length === 0) return null;
   const glyphs = new Map(tools.map((t) => [t.key, t.glyph]));
-  const entries = toolContextLinks(tools, { repos, taskKey, searchProperties }).map((l) => ({ ...l, glyph: glyphs.get(l.key) }));
+  const entries = toolContextLinks(tools, { repos, taskKey, searchProperties, figmaLinks }).map((l) => ({ ...l, glyph: glyphs.get(l.key) }));
   return <OpenInMenu entries={entries} />;
 }

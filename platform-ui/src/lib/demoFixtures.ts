@@ -2236,6 +2236,11 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const p = url.pathname;
   const m = method.toUpperCase();
 
+  // DW-6k — Figma (BFF §36.8). Demo mode has no Figma data: the company is not connected and nothing is linked, which is the
+  // Designs section's honest empty state and the connection block's "not connected". Reads only; a write falls through to a miss.
+  if (m === "GET" && /^\/api\/[^/]+\/figma-links$/.test(p)) return { status: 200, json: { figmaConnected: false, items: [] } };
+  if (m === "GET" && /^\/api\/[^/]+\/integrations\/figma$/.test(p)) return { status: 200, json: { connected: false, tokenType: null } };
+
   // WSK-49f — client website access (§16i): staff Contacts list + grants, portal People grants.
   // Stateful (lib/demoWebsiteAccess.ts) and placed first so no generic `/clients/:id/…` matcher below
   // can answer one of these paths with an empty list or a bare {ok:true}.
