@@ -1010,17 +1010,16 @@ test.describe("the Overview's frame: someone whose home is the Company area", ()
     await expect(company.getByRole("link", { name: "Company report" })).toBeVisible();
     await expect(company.getByRole("link", { name: "Finance" })).toHaveAttribute("href", "/finance/reports");
 
-    // Departments by condition: `dept-kpis/overview` has no demo fixture until DW-4e-2, so the honest demo state is Unavailable;
-    // once it has one this is the worst-first list. Either way, never an empty list that reads as "no departments".
+    // Departments by condition, read from DW-4e-2's demo `dept-kpis/overview` (lib/demoDeptKpis.ts, the §40 shape the server
+    // sends): worst first. Pinned to "ok" on purpose: a shape this block's normalizer could not read would quietly say
+    // "Unavailable", and a test that accepted that would hide the mismatch. Creatives is the demo's off-track department and
+    // Social Media its one with no condition.
     const departments = main.getByRole("region", { name: "Departments by condition", exact: true });
-    await expect(departments).toBeVisible();
-    await expect(departments).toHaveAttribute("data-state", /^(unavailable|ok)$/);
-    if ((await departments.getAttribute("data-state")) === "unavailable") {
-      await expect(departments.getByText("Unavailable")).toBeVisible();
-      await expect(departments.getByRole("listitem")).toHaveCount(0);
-    } else {
-      await expect(departments.getByRole("listitem").first()).toBeVisible();
-    }
+    await expect(departments).toHaveAttribute("data-state", "ok");
+    const deptRows = departments.getByRole("listitem");
+    await expect(deptRows.first()).toHaveAttribute("data-condition", "off_track");
+    await expect(deptRows.first()).toContainText("Creatives");
+    await expect(deptRows.last()).toHaveAttribute("data-condition", "unavailable");
 
     // Campaigns across departments: the demo's two campaigns, undated, so by name; no department part yet.
     const campaigns = main.getByRole("region", { name: "Campaigns", exact: true });
