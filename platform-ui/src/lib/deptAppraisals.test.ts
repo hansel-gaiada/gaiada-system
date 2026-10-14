@@ -41,18 +41,19 @@ describe("honest readers (against the demo fixtures)", () => {
     expect(await getDeptAppraisal("dept-manager", T, { unit: "dept-1", cycleId: "demo-cycle-h2" })).toEqual({ kind: "forbidden" });
   });
 
-  it("getCyclePicks lists the company's cycles newest first for an appraisal administrator", async () => {
+  it("getCyclePicks lists the company's cycles newest first for the company-wide tiers and a head", async () => {
     const { getCyclePicks } = await import("./deptAppraisals");
     const res = await getCyclePicks("demo-hansel", T);
     expect(res.kind).toBe("ok");
     if (res.kind !== "ok") return;
     expect(res.data.map((c) => [c.id, c.status])).toEqual([["demo-cycle-h2", "open"], ["demo-cycle-h1", "closed"]]);
     expect(Object.keys(res.data[0]).sort()).toEqual(["id", "name", "periodEnd", "periodStart", "status"]);
+    expect((await getCyclePicks("dept-manager", T)).kind).toBe("ok");
   });
 
-  it("getCyclePicks says forbidden, not 'no cycles', for anyone else", async () => {
+  it("getCyclePicks says forbidden, not 'no cycles', for a unit's staff and anyone else", async () => {
     const { getCyclePicks } = await import("./deptAppraisals");
-    expect(await getCyclePicks("dept-manager", T)).toEqual({ kind: "forbidden" });
+    expect(await getCyclePicks("seo-staff", T)).toEqual({ kind: "forbidden" });
     expect(await getCyclePicks("u-dev", T)).toEqual({ kind: "forbidden" });
   });
 });

@@ -41,8 +41,8 @@ function todayIso(): string {
 //
 // With `?cycle=` (DW-4e-3, BFF §41.5) the page is the department's APPRAISAL for that cycle instead of the KPIs for a period: the
 // KPI results over the cycle, the condition month by month, the people's appraisals as counts, the head's commentary and the GM's
-// assessment, each with the same honest reader (ok / forbidden / not found / failed). The picker lists the company's cycles, which
-// the server gives to the appraisal administrators; anyone else is told so and can still open a cycle by its link.
+// assessment, each with the same honest reader (ok / forbidden / not found / failed). The picker lists the company's cycles from
+// `GET /dept-appraisals/cycles` (no drafts), for a head and the company-wide tiers; a refusal is said, never an empty picker.
 export default async function DepartmentKpiPage({
   searchParams,
 }: {
@@ -77,9 +77,17 @@ export default async function DepartmentKpiPage({
   }
 
   const cycleId = typeof sp.cycle === "string" && sp.cycle !== "" ? sp.cycle : null;
-  // The cycle list is the appraisal administrators' (`cycle_admin`): everyone else is told so instead of being sent to a refusal.
-  const cyclesRes = can(me, "appraisal.cycle.admin", tenant) ? await getCyclePicks(userId, tenant) : ({ kind: "forbidden" } as const);
-  const picker = (
+  // The cycles list (`GET /dept-appraisals/cycles`) is for a head and the company-wide tiers. The page asks for it only when the
+  // viewer holds one of the appraisal capabilities (the head over this unit, or the approver tier), runs the appraisal cycles, or has opened a cycle link,
+  // so a unit's staff reading their KPIs are not sent to a refusal. The server decides: a refusal is said, never an empty picker.
+  const treeRoot = await readOrgRoot(me, tenant);
+  const canComment =
+    can(me, "reports.dept_kpi_target.appraisal_comment", tenant) ||
+    canInUnit(me, "reports.dept_kpi_target.appraisal_comment", tenant, treeRoot ? unitPathOf(treeRoot, unit) : []);
+  const canAssess = can(me, "reports.dept_kpi_target.appraisal_assess", tenant);
+  const showPicker = canComment || canAssess || can(me, "appraisal.cycle.admin", tenant) || cycleId !== null;
+  const cyclesRes = showPicker ? await getCyclePicks(userId, tenant) : null;
+  const picker = cyclesRes === null ? null : (
     <CyclePicker
       unitId={unit}
       cycles={cyclesRes.kind === "ok" ? cyclesRes.data : null}
@@ -119,11 +127,6 @@ export default async function DepartmentKpiPage({
     }
     // The two forms mirror `reports.dept_kpi_target.appraisal_comment` (the head over this unit, or company_admin) and
     // `.appraisal_assess` (company_admin, which owner mirrors); the server decides again and ends both when the cycle closes.
-    const treeRoot = await readOrgRoot(me, tenant);
-    const canComment =
-      can(me, "reports.dept_kpi_target.appraisal_comment", tenant) ||
-      canInUnit(me, "reports.dept_kpi_target.appraisal_comment", tenant, treeRoot ? unitPathOf(treeRoot, unit) : []);
-    const canAssess = can(me, "reports.dept_kpi_target.appraisal_assess", tenant);
     return (
       <>
         <PageHeader eyebrow="Appraisals" title={`${appraisal.data.unit.name} · ${TITLE}`} />

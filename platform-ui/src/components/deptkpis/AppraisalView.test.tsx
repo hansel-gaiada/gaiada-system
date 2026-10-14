@@ -154,9 +154,11 @@ describe("CyclePicker", () => {
   });
   it("says the list is not theirs to read instead of showing an empty picker, and an unreadable list as unreadable", () => {
     const { rerender } = render(<CyclePicker unitId="dept-1" cycles={null} chosenId={null} reason="forbidden" />);
-    expect(screen.getByText(/list of cycles is for the appraisal administrators/)).toBeTruthy();
+    expect(screen.getByText(/list of cycles is for department heads and the company-wide tiers/)).toBeTruthy();
+    expect(screen.queryByText(/cycle link/)).toBeNull();
     rerender(<CyclePicker unitId="dept-1" cycles={null} chosenId={null} reason="boom" />);
     expect(screen.getByText(/could not be read: boom/)).toBeTruthy();
+    expect(screen.getByText(/A cycle link still opens its department appraisal/)).toBeTruthy();
   });
   it("says there are no cycles only when the read was allowed and empty", () => {
     render(<CyclePicker unitId="dept-1" cycles={[]} chosenId={null} />);

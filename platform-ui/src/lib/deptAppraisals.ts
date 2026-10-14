@@ -1,6 +1,5 @@
 import "server-only";
 import { platformFetch, PlatformError } from "./platform";
-import { getAppraisalCycles } from "./appraisals-data";
 import { sortCyclesNewestFirst, type CyclePick, type DeptAppraisalView } from "./deptAppraisalFormat";
 
 export * from "./deptAppraisalFormat";
@@ -11,9 +10,9 @@ export * from "./deptAppraisalFormat";
 // failure: "you may not read this", "this department / cycle does not exist" and "the read failed" are different answers, and
 // a department appraisal that looks blank because the read failed is the confident wrong answer this surface must never give.
 //
-// THE CYCLE LIST is the existing appraisal cycles reader (`GET /appraisals/cycles`), which the server gives to the
-// appraisal administrators only (`cycle_admin`). Anyone else gets `forbidden` here, and the page says so rather than showing
-// an empty picker; a cycle they can read is still reachable by its `?cycle=` link.
+// THE CYCLE LIST is this surface's own (`GET /dept-appraisals/cycles`, §41.4): the company's cycles without drafts, for a head
+// and the company-wide tiers. A member or a unit's staff get `forbidden`, and the page says so rather than showing an empty
+// picker; a failed read is `error`. "No cycles yet" is said only for an allowed, empty answer.
 
 export type DeptAppraisalReadResult<T> =
   | { kind: "ok"; data: T }
@@ -55,11 +54,12 @@ export async function getDeptAppraisal(u: string, t: string, q: { unit: string; 
   }
 }
 
-/** The company's cycles, newest first, for the picker. `forbidden` for anyone who is not an appraisal administrator. */
+/** §41.4 cycles list for the picker (never a draft). `forbidden` for anyone who may not read a department appraisal. */
 export async function getCyclePicks(u: string, t: string): Promise<CycleListResult> {
   try {
-    const res = await getAppraisalCycles(t, u);
-    if (!res || !Array.isArray(res.cycles)) return { kind: "error", reason: "unexpected answer from the appraisal cycles endpoint" };
+    const res = await platformFetch<{ cycles: CyclePick[] }>(`/api/${t}/dept-appraisals/cycles`, u);
+    if (!res || !Array.isArray(res.cycles)) return { kind: "error", reason: "unexpected answer from the department appraisal cycles endpoint" };
+    // The server sends them newest first; sorting again only makes the picker's order independent of the wire.
     return {
       kind: "ok",
       data: sortCyclesNewestFirst(

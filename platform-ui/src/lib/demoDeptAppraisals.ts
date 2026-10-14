@@ -10,6 +10,9 @@ import "server-only";
 // is seen here: `demo-cycle-h2` is the OPEN cycle and `demo-cycle-h1` the CLOSED one. Only the people block (counts) and the
 // two stored halves are held here.
 //
+// THE CYCLES LIST (`GET /dept-appraisals/cycles`) is the appraisals fixture's cycles without drafts, newest first by period end, for the
+// company-wide tiers and anyone who leads a unit; a unit's staff and everyone else get 403.
+//
 // WHO (the same wiring as demoDeptKpis): the read is for the unit's heads (`whoReads` = "led") and the company-wide tiers
 // ("wide": `demo-hansel`, `demo-owner`); a unit's staff, and anyone else, get 403 BEFORE any word on whether the unit or cycle
 // exists, exactly as the server orders it. `demo-hansel` (company_admin) comments and assesses; `demo-owner` assesses but cannot
@@ -119,6 +122,21 @@ function kpiRead(tenant: string, unitId: string, q: Record<string, string>): Kpi
   return r && r.status === 200 ? (r.json as KpiView) : null;
 }
 
+const UNIT_IDS = ["dept-1", "dept-2", "dept-3", "dept-4", "dept-5"];
+
+/** The cycles list: company-wide metadata for those who can read an appraisal (company-wide, or leading some unit). */
+function cycles(tenant: string, userId: string): DemoResult {
+  const may = UNIT_IDS.some((u) => whoReads(userId, u) === "wide" || whoReads(userId, u) === "led");
+  if (!may) return err(403, "outside your reporting line");
+  const r = appraisalsDemo("GET", `/api/${tenant}/appraisals/cycles`, new URLSearchParams(), undefined, GM);
+  const all = r && r.status === 200 ? ((r.json as { cycles: Cycle[] }).cycles ?? []) : [];
+  const list = all
+    .filter((c) => c.status !== "draft")
+    .map((c) => ({ id: c.id, name: c.name, periodStart: c.periodStart, periodEnd: c.periodEnd, status: c.status }))
+    .sort((a, b) => (a.periodEnd < b.periodEnd ? 1 : a.periodEnd > b.periodEnd ? -1 : 0) || a.name.localeCompare(b.name));
+  return ok({ cycles: list });
+}
+
 const parse = (body?: string): Record<string, unknown> => {
   try {
     const v = body ? JSON.parse(body) : {};
@@ -217,6 +235,7 @@ export function deptAppraisalsDemo(
   const verb = method.toUpperCase();
 
   if (verb === "GET" && rest === "") return read(tenant, qs, userId);
+  if (verb === "GET" && rest === "cycles") return cycles(tenant, userId);
   const w = rest.match(/^([^/]+)\/([^/]+)\/(commentary|assessment)$/);
   if (verb === "PUT" && w) return write(tenant, w[3] as "commentary" | "assessment", decodeURIComponent(w[1]), decodeURIComponent(w[2]), body, userId);
   return err(404, "not_found");

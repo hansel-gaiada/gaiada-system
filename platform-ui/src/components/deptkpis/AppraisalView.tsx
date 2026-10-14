@@ -14,7 +14,7 @@ const day = (iso: string) => iso.slice(0, 10);
 
 /**
  * The cycle picker (BFF §41.5): the company's cycles, newest first, as links that keep the department. `cycles` is null when the
- * cycle list is not the viewer's to read (it belongs to the appraisal administrators), which is said, never shown as "no cycles".
+ * cycle list is not the viewer's to read (a head or the company-wide tiers only), which is said, never shown as "no cycles".
  */
 export function CyclePicker({
   unitId, cycles, chosenId, reason,
@@ -46,8 +46,8 @@ export function CyclePicker({
       {cycles === null && (
         <p className="da-picker__note">
           {reason === "forbidden"
-            ? "The list of cycles is for the appraisal administrators. A cycle link opens its department appraisal."
-            : `The list of cycles could not be read${reason ? `: ${reason}` : ""}.`}
+            ? "The list of cycles is for department heads and the company-wide tiers."
+            : `The list of cycles could not be read${reason ? `: ${reason}` : ""}. A cycle link still opens its department appraisal.`}
         </p>
       )}
       {cycles !== null && cycles.length === 0 && <p className="da-picker__note">There are no appraisal cycles yet.</p>}

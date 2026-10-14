@@ -51,6 +51,29 @@ describe("routing", () => {
   });
 });
 
+describe("GET dept-appraisals/cycles (the picker's list)", () => {
+  const list = (user = "demo-hansel") => deptAppraisalsDemo("GET", `${base}/cycles`, q({}), undefined, user)!;
+  type Pick = { id: string; name: string; periodStart: string; periodEnd: string; status: string };
+  it("lists the open and the closed cycle, newest first, with only the picker's fields", () => {
+    const r = list();
+    expect(r.status).toBe(200);
+    const cycles = (r.json as { cycles: Pick[] }).cycles;
+    expect(cycles.map((c) => [c.id, c.status])).toEqual([[OPEN, "open"], [CLOSED, "closed"]]);
+    expect(Object.keys(cycles[0]).sort()).toEqual(["id", "name", "periodEnd", "periodStart", "status"]);
+  });
+  it("is for the company-wide tiers and a unit's head; a unit's staff and anyone else get 403", () => {
+    expect(list("demo-owner").status).toBe(200);
+    expect(list("dept-manager").status).toBe(200);
+    expect(list("u-dev").status).toBe(403);
+    expect(list("seo-staff").status).toBe(403);
+    expect(list("someone-else").status).toBe(403);
+  });
+  it("is reached through getDemoResponse", () => {
+    expect(getDemoResponse("GET", `${base}/cycles`, "demo-hansel").status).toBe(200);
+    expect(getDemoResponse("GET", `${base}/cycles`, "u-dev").status).toBe(403);
+  });
+});
+
 describe("GET dept-appraisals: the open cycle", () => {
   it("serves Web Dev's appraisal with every block the page renders", () => {
     const r = get({ cycleId: OPEN, unitNodeId: "dept-1" });
