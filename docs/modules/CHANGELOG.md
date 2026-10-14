@@ -11,6 +11,26 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.143.0` - DW-6c2: every outside tool opens with its context (2026-10-14) - PROTOTYPED
+
+- **What.** For people on "Try the new layout", the PM task page, the project page (and the task drawer) and the client hub have an **Open in** menu. Plan §4.2 and §14.1, "launch and return".
+- **Which tools it lists.** The menu lists the workspace's tools in registry order:
+  - for a task or project, the tools of the project's department;
+  - for a client, the tools of the viewer's home workspace.
+- **Context links.** A tool gets a context link only where the exact identifier exists (`lib/toolContext.ts`, `toolContextLinks`, pure):
+  - **GitHub:** each repository linked to the project. On a task with a key, it opens that repository's pull requests filtered by the key, the same key DW-6f links pull requests by.
+  - **VS Code:** `vscode://vscode.git/clone?url=…` for each linked repository.
+  - **Search Console:** built for a client's property. It opens the home page today, because the property row does not yet say whether it is a domain or a URL-prefix property, and the menu does not guess.
+  - **Every other tool** opens its home page, marked "home". No vendor parameters are invented.
+- **Reads.** The repository registry is read once per page and filtered by project. A failed or truncated read falls back to home links, never "no repo".
+- **The menu.** An accessible disclosure: the button carries `aria-expanded`, Escape and an outside click close it, and every link opens a new tab with a name that says what it opens.
+- **Classic is unchanged.** The slot reads nothing outside the pilot.
+- **Proof.**
+  - `toolContext.test.ts`, `OpenInMenu.test.tsx` and `OpenInSlot.test.tsx`.
+  - `e2e/workspace-departments.spec.ts` gains the Open in menu on a Web Dev project, plus classic with no menu.
+  - Branch gates on `1fcbb50c`: CI 38501441815 green (platform-ui 477 files); sumopod 13/13 twice.
+  - The landing sha's own runs are on the board.
+
 ### platform-nest `0.128.0` - client contacts: revoke no longer locks people out; an invite can no longer take over an account (2026-10-14) - PROTOTYPED
 
 Found by the PV-5 Release A live drive (2026-10-13). Contract: `docs/FRONTEND-BFF-CONTRACT.md`, the revoke note and the `invites/accept` row.
