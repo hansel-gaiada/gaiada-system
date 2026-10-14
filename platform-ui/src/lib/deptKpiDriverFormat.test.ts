@@ -32,7 +32,7 @@ describe("driverReading: the value in the KPI's unit and the parts, per metric",
   it("a KPI this does not know says only the numbers when it has a ratio, and nothing when it has none", () => {
     expect(driverParts("something-new", "percent", project({ numerator: 3, denominator: 5 }))).toBe("3 of 5");
     expect(driverReading("something-new", "count", project({ value: 7, numerator: undefined, denominator: undefined }))).toEqual({ value: "7", parts: null });
-    expect(driverParts("asset-requests-on-time", "percent", person({ numerator: 5, denominator: 9 }))).toBe("5 of 9 requests on time");
+    expect(driverParts("asset-requests-on-time", "percent", person({ numerator: 5, denominator: 9 }))).toBe("5 of 9");
   });
   it("a minutes KPI is worded as a duration, through the one formatter", () => {
     expect(driverReading("something-new", "minutes", person({ value: 200, numerator: undefined, denominator: undefined })).value).toBe("3h 20m");

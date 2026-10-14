@@ -348,13 +348,13 @@ function acknowledge(id: string, userId: string, body?: string): DemoResult {
 // ── "BEHIND THE MISS" (DW-4j-3, BFF §43.8 and §43.8a) ─────────────────────────────────────────────────────────────────────────────
 // `GET dept-kpis/drivers?unitNodeId=&kpiKey=&periodKind=&start=[&end=]`: the projects or people behind one KPI's miss, worst first, at most 5.
 // The gate is the head-only unit read's (`authorizeUnitHeadRead`): the company-wide demo users and the unit's demo head; a unit's staff, another
-// unit's head and everyone else are 403 (departments are never ranked to their own staff, plan §5.5). The fixture holds the drivers of the two KPIs
-// that are in trouble above, so the demo's two miss panels are real: Web Dev's "Projects on time" (at risk, 17 of 21 milestones: the two projects
-// below missed 2 each, so they add up to the department's four misses) and Creatives' off-track "Asset requests delivered on time" (18 of 25;
-// DEMO LIBERTY: the server has no reader for it, so a real Creatives read answers `no_reader`; the two people below missed 7 between them and a
-// third person hit all 6 of theirs, so 18 of 25 is whole). Web Dev's on-track "Reopened work rate" has one person with a reopen. Any other KPI answers
-// as the server does: a KPI with no reader `no_reader`, one with a reader and no breakdown (the derived one, utilization) `no_drivers`. Nothing here
-// changes a condition, value, lead or target above.
+// unit's head and everyone else are 403 (departments are never ranked to their own staff, plan §5.5). The demo never shows what the real server cannot
+// answer, so the fixture holds drivers ONLY for the report-fact KPIs that have them: Web Dev's at-risk "Projects on time" (17 of 21 milestones: the two
+// projects below missed 2 each, so they add up to the department's four misses) and Web Dev's on-track "Reopened work rate" (one person with a reopen).
+// Every other KPI answers as the server does. Creatives' off-track "Asset requests delivered on time" is a module KPI: it has a value in this fixture
+// (a demo liberty, see the top of the file) and no breakdown, so it answers `no_drivers` (the server's answer once a module KPI has a reader seam; today
+// `no_reader`). A KPI with no reading at all answers `no_reader`; the derived KPI and utilization answer `no_drivers`. Nothing here changes a condition,
+// value, lead or target above.
 const DRIVERS: Record<string, Record<string, KpiDriver[]>> = {
   "dept-1": {
     "projects-on-time": [
@@ -362,12 +362,6 @@ const DRIVERS: Record<string, Record<string, KpiDriver[]>> = {
       { kind: "project", id: "p-web-2", name: "Mobile app revamp", value: 4 / 6, numerator: 4, denominator: 6 },
     ],
     "reopened-work-rate": [{ kind: "person", id: "u-dev", name: "Made Putra", value: 2 / 18, numerator: 2, denominator: 18 }],
-  },
-  "dept-2": {
-    "asset-requests-on-time": [
-      { kind: "person", id: "demo-cr-1", name: "Putu Ayu Lestari", value: 5 / 9, numerator: 5, denominator: 9 },
-      { kind: "person", id: "demo-cr-2", name: "Komang Adi Wirawan", value: 7 / 10, numerator: 7, denominator: 10 },
-    ],
   },
 };
 
