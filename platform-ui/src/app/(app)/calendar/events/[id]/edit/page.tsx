@@ -56,8 +56,8 @@ export default async function EditEventPage({ params, searchParams }: Props) {
 
   const [members, clients, projects] = await Promise.all([
     listMembers(userId, ev.tenantId).then((m) => m, () => null),
-    listClients(userId, ev.tenantId).then((c) => c, () => []),
-    listProjects(userId, ev.tenantId).then((p) => p, () => []),
+    listClients(userId, ev.tenantId).then((c) => c, () => null),
+    listProjects(userId, ev.tenantId).then((p) => p, () => null),
   ]);
   if (!members) {
     return (
@@ -76,8 +76,9 @@ export default async function EditEventPage({ params, searchParams }: Props) {
           mode="edit"
           initial={formInputOf(ev)}
           members={members.map((m) => ({ id: m.user_id, name: m.name }))}
-          clients={clients.map((c) => ({ id: c.id, name: c.name }))}
-          projects={projects.map((p) => ({ id: p.id, name: p.name, clientId: p.client_id }))}
+          clients={(clients ?? []).map((c) => ({ id: c.id, name: c.name }))}
+          projects={(projects ?? []).map((p) => ({ id: p.id, name: p.name, clientId: p.client_id }))}
+          linksUnavailable={clients === null || projects === null}
           canRecord={false}
           hiddenPersonId={ev.organizer.id}
           zoneLabel={DISPLAY_TZ}
