@@ -46,7 +46,7 @@ afterEach(() => vi.restoreAllMocks());
 describe("the Work blocks are wired into the host (DW-3f)", () => {
   it("has a component for each of the three", () => {
     for (const k of ["projects", "campaigns", "requests"]) expect(hasOverviewWidget(k, OVERVIEW_WIDGETS)).toBe(true);
-    expect(hasOverviewWidget("learning", OVERVIEW_WIDGETS)).toBe(false);
+    expect(hasOverviewWidget("condition", OVERVIEW_WIDGETS)).toBe(false);
   });
 
   it("draws nothing for a workspace with no unit to scope to", async () => {

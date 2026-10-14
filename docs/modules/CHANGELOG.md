@@ -11,6 +11,14 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.141.0` - DW-3g: the Overview's Learning and Appraisal (2026-10-14) - PROTOTYPED
+
+- **What.** The Growth band, two blocks about the signed-in person, behind the pilot switch like DW-3a to 3f. Both are in every workspace's Overview where the registry lists them (the department workspaces, HR, Finance and IT); the Company frame lists none of them (its Growth blocks are DW-3i).
+  - **Learning** (`GET lms/me`): outstanding (assigned or in progress), in progress, overdue (flagged), and "next due", the soonest-due outstanding item with its date, or "Nothing due". There is no per-course progress in the type, so "next course" is "next due". Links to `/me/learning`.
+  - **Appraisal** (`GET appraisals/mine`): the current pack (the latest not finalized) in words, "My next step" only for `submitted` (acknowledge or dispute; every other status gives the subject none), and the last finalized result (composite of 5 and cycle name). With no pack, a successful read says "No appraisal yet". The cycle's stage is not shown (HR-only endpoint). Links to `/appraisals/mine`.
+- **How.** `lib/overviewGrowth.ts` holds the pure models; `widgets/{Learning,Appraisal,GrowthBlocks}.tsx` read through `readResult`, so a 403 says "No access" and any other failure "Unavailable", never "nothing assigned" or "no appraisal yet". The registry's `ticket: "DW-3g"` is removed from both entries.
+- **Tests.** `overviewGrowth.test.ts` (read states, empty vs filled, next due, overdue, current vs last pack, next step per status, registry placement), `widgets/growth.test.tsx` (the widgets, three read states each); the pinned widget lists in `nowBand.test.tsx`, `WorkspaceOverview.test.tsx` and `work.test.tsx` now include the two blocks. e2e `workspace-shell.spec.ts`: Web Dev's Growth band in its DEMO_MODE state, and a classic user sees none of it.
+
 ### platform-ui `0.140.0` - DW-3a2: a pilot user's home is a real redirect (2026-10-13) - PROTOTYPED
 
 - **What.** `/` for a pilot user whose home is a workspace is now a real HTTP 307 to that Overview. Before, `(app)/page.tsx` threw `redirect()` under `(app)/loading.tsx`, so Next had streamed the shell and `/`'s skeleton and emitted `<meta id="__next-page-redirect">`; while that tag exists the client router turns every navigation into a full page load. The result was a 200, a skeleton and a reload on every visit.

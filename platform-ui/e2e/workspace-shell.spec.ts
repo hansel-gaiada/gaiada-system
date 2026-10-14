@@ -424,7 +424,7 @@ test.describe("search_staff (seo-staff@gaiada.com)", () => {
 
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
 // DW-3a/3b/3c: the Overview's frame and its Now band. A placed employee (webdev@gaiada.com = u-dev, Web Dev >
-// Frontend) lands on their department's Overview from `/`. Needs you, Today, Your numbers, My activity, Pulse and the Work band (Projects, Campaigns, Requests) are built; every other
+// Frontend) lands on their department's Overview from `/`. Needs you, Today, Your numbers, My activity, Pulse, the Work band (Projects, Campaigns, Requests) and the Growth band (Learning, Appraisal) are built; every other
 // block is still planned, so under them is today's page body (nothing is removed, plan §2.6 rule 1); never an invented
 // number.
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -467,7 +467,7 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     await expect(page.getByRole("heading", { name: "Project health" })).toBeVisible();
     await expect(page.getByText(/Overview is being built/)).toHaveCount(0);
     await expect(page.getByRole("heading", { level: 2, name: "Work", exact: true })).toBeVisible();
-    await expect(page.getByRole("heading", { level: 2, name: "Growth", exact: true })).toHaveCount(0);
+    await expect(page.locator("#main-content").getByRole("heading", { level: 2, name: "Growth", exact: true })).toBeVisible();
   });
 
   // DW-3c: what `/` showed before it redirected (the queue, the check-in) is on the Overview, so a pilot user
@@ -660,6 +660,37 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     await expect(requests.getByText(/^\d+$/)).toHaveCount(0);
   });
 
+  // DW-3g: the Growth band, for the signed-in person (Made Putra, u-dev). The DEMO_MODE build gives each block this state:
+  //  - Learning: `lms/me` is the demo's one fixture for everyone: 2 outstanding (one in progress), 1 overdue, and the next
+  //    due is "Security awareness" on 18 Aug 2026, which the backend flags overdue;
+  //  - Appraisal: u-dev's H1 pack is DISPUTED, so it is the current pack, with no next step for the subject, and no pack is
+  //    finalized, so there is no last result.
+  test("the Growth band has Learning and Appraisal, each in its honest demo state", async ({ page, context }) => {
+    await signInWebDev(page, context);
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/departments\/dept-1$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
+
+    const main = page.locator("#main-content");
+    await expect(main.getByRole("heading", { level: 2, name: "Growth", exact: true })).toBeVisible();
+
+    const learning = main.getByRole("region", { name: "Learning", exact: true });
+    await expect(learning).toBeVisible();
+    await expect(learning.getByText("2 outstanding, 1 in progress")).toBeVisible();
+    await expect(learning.getByText("1 overdue")).toBeVisible();
+    await expect(learning.getByText("Next due: Security awareness, 18 Aug 2026 (overdue)")).toBeVisible();
+    await expect(learning.getByText("Unavailable")).toHaveCount(0);
+    await expect(learning.getByRole("link", { name: "My learning" })).toHaveAttribute("href", "/me/learning");
+
+    const appraisal = main.getByRole("region", { name: "Appraisal", exact: true });
+    await expect(appraisal).toBeVisible();
+    await expect(appraisal.getByText("2026 H1 Performance Review: Disputed")).toBeVisible();
+    await expect(appraisal.getByText(/My next step/)).toHaveCount(0);
+    await expect(appraisal.getByText(/Last result/)).toHaveCount(0);
+    await expect(appraisal.getByText(/No appraisal yet|Unavailable|No access/)).toHaveCount(0);
+    await expect(appraisal.getByRole("link", { name: "My appraisals" })).toHaveAttribute("href", "/appraisals/mine");
+  });
+
   test("the department's own header is not doubled on the Overview, and stays on its other pages", async ({ page, context }) => {
     await signInWebDev(page, context);
     await page.goto("/departments/dept-1");
@@ -721,6 +752,9 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     // None of the Overview's Work band (DW-3f) reaches a classic user.
     await expect(page.getByRole("heading", { level: 2, name: "Work", exact: true })).toHaveCount(0);
     for (const name of ["Projects", "Campaigns", "Requests"]) await expect(page.getByRole("region", { name, exact: true })).toHaveCount(0);
+    // Nor the Growth band (DW-3g).
+    await expect(page.getByRole("heading", { level: 2, name: "Growth", exact: true })).toHaveCount(0);
+    for (const name of ["Learning", "Appraisal"]) await expect(page.getByRole("region", { name, exact: true })).toHaveCount(0);
   });
 });
 

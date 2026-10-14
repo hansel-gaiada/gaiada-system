@@ -78,12 +78,14 @@ describe("WorkspaceOverview: with no block to draw", () => {
     expect(screen.getByText(/The Company Overview is being built/)).toBeInTheDocument();
   });
 
-  it("hosts the Now band's two blocks, Your numbers, My activity, Pulse and the Work blocks, and no other (DW-3c, DW-3d, DW-3j, DW-3e, DW-3f)", () => {
-    expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual(["campaigns", "my-activity", "needs-you", "projects", "pulse", "requests", "today", "your-numbers"]);
+  it("hosts the Now band's two blocks, Your numbers, My activity, Pulse, the Work blocks and the Growth blocks, and no other (DW-3c, DW-3d, DW-3j, DW-3e, DW-3f, DW-3g)", () => {
+    expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual(["appraisal", "campaigns", "learning", "my-activity", "needs-you", "projects", "pulse", "requests", "today", "your-numbers"]);
     expect(hasOverviewWidget("needs-you")).toBe(true);
     expect(hasOverviewWidget("pulse")).toBe(true);
     expect(hasOverviewWidget("projects")).toBe(true);
-    expect(hasOverviewWidget("learning")).toBe(false);
+    expect(hasOverviewWidget("learning")).toBe(true);
+    expect(hasOverviewWidget("appraisal")).toBe(true);
+    expect(hasOverviewWidget("condition")).toBe(false);
   });
 });
 

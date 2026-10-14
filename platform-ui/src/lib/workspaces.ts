@@ -223,8 +223,8 @@ const DEPARTMENT_OVERVIEW: readonly OverviewWidget[] = [
   { key: "projects", band: "work", label: "Projects" },
   { key: "campaigns", band: "work", label: "Campaigns", gate: AGENCY_ONLY },
   { key: "requests", band: "work", label: "Requests", gate: AGENCY_ONLY },
-  { key: "learning", band: "growth", label: "Learning", ticket: "DW-3g" },
-  { key: "appraisal", band: "growth", label: "Appraisal", ticket: "DW-3g" },
+  { key: "learning", band: "growth", label: "Learning" },
+  { key: "appraisal", band: "growth", label: "Appraisal" },
 ];
 
 /** The Office of the GM's company Overview (§3.5), same band order. */

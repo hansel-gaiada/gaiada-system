@@ -21,6 +21,8 @@ import { Pulse } from "./Pulse";
 import { Projects } from "./Projects";
 import { Campaigns } from "./Campaigns";
 import { Requests } from "./Requests";
+import { Learning } from "./Learning";
+import { Appraisal } from "./Appraisal";
 
 export interface OverviewWidgetProps {
   me: Me;
@@ -50,6 +52,8 @@ export const OVERVIEW_WIDGETS: Readonly<Record<string, OverviewWidgetComponent>>
   projects: Projects,
   campaigns: Campaigns,
   requests: Requests,
+  learning: Learning,
+  appraisal: Appraisal,
 };
 
 export function hasOverviewWidget(key: string, widgets: Readonly<Record<string, OverviewWidgetComponent>> = OVERVIEW_WIDGETS): boolean {
