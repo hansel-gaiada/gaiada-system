@@ -328,14 +328,15 @@ describe("ContractRow · tier, content fingerprint and the sealed signed copy (P
   });
 });
 
-describe("ContractRow · Mark certified (PV-D25: parked)", () => {
-  it("🔴 a draft shows Mark certified DISABLED, with the reason beside it, and pressing it calls nothing", () => {
-    row(k({ status: "draft", bodyMd: "Terms." }));
-    const btn = screen.getByRole("button", { name: "Mark certified" });
-    expect(btn).toBeDisabled();
-    expect(screen.getByText("Certified signing isn't set up yet. Every contract is signed by typed name and sealed by our company for now.")).toBeInTheDocument();
-    expect(btn.getAttribute("aria-describedby")).toBeTruthy();
-    fireEvent.click(btn);
+describe("ContractRow · Mark certified (PV-D44: simple signing only, hidden when unavailable)", () => {
+  it("🔴 PV5-F4: a draft shows NO Mark certified control at all (not even disabled) when the server omits certifiedSigning or says unavailable", () => {
+    const { unmount } = row(k({ status: "draft", bodyMd: "Terms." }));
+    expect(screen.queryByRole("button", { name: "Mark certified" })).toBeNull();
+    expect(screen.queryByText(/isn't set up/)).toBeNull();
+    unmount();
+    row(k({ status: "draft", bodyMd: "Terms.", certifiedSigning: { available: false, provider: null, label: null, simulated: false } }));
+    expect(screen.queryByRole("button", { name: "Mark certified" })).toBeNull();
+    expect(screen.queryByText(/isn't set up/)).toBeNull();
     expect(markCertified).not.toHaveBeenCalled();
   });
 
@@ -375,6 +376,13 @@ describe("ContractRow · certified signing (PV5-11)", () => {
 
     row(certifiedSent({ canCountersignAtProvider: false, countersignUrl: "/simulated-psre/simenv_1" }));
     expect(screen.queryByRole("link", { name: /Countersign at/ })).toBeNull();
+  });
+
+  it("🔴 PV5-F4: Countersign at <provider> is not rendered when the backend says certified signing is unavailable; the tier stays visible", () => {
+    row(certifiedSent({ canCountersignAtProvider: true, countersignUrl: "/simulated-psre/simenv_1", certifiedSigning: { ...CS, available: false } }));
+    expect(screen.queryByRole("link", { name: /Countersign at/ })).toBeNull();
+    // History stays: the certified tier is still shown, read-only.
+    expect(screen.getByText("Certified (simulated: not a real PSrE signature)", { exact: false })).toBeInTheDocument();
   });
 
   it("a countersign link needs a URL: the flag alone shows nothing, and the label falls back to plain words", () => {

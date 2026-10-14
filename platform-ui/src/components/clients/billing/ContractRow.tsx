@@ -24,8 +24,9 @@ import "./billing.css";
 //   - Countersign: ONLY when the backend said `canCountersign`. No role is read in the browser; a company
 //     admin never sees the button, and a stale page cannot offer it for a row that is no longer waiting on us.
 //   - Void: any state but void, behind a confirm.
-//   - Mark certified (PV5-09): a draft only, and DISABLED WITH ITS REASON while certified signing is parked (PV-D25),
-//     the same pattern as Send. The server answers 409 `no_certified_provider` if it is ever called.
+//   - Mark certified (PV5-09): a draft only, and ONLY while the backend says `certifiedSigning.available` (PV5-F4, owner
+//     ruling PV-D44: simple signing only). Unavailable: nothing is rendered, no disabled button. The server answers 409
+//     `no_certified_provider` if it is ever called.
 //
 // PV5-09 also shows what the contract IS: its signing tier, the content fingerprint (the SHA-256 fixed when it was sent, in
 // short form with a copy button) and, once both parties have signed, the sealed signed copy (or "being prepared": the
@@ -195,7 +196,7 @@ export function ContractRow({
           </form>
         )}
         {a.markCertified.shown && a.markCertified.reason && <span className="bl-reason" id={certReasonId}>{a.markCertified.reason}</span>}
-        {contract.canCountersignAtProvider === true && contract.countersignUrl && (
+        {a.countersignAtProvider && contract.countersignUrl && (
           <Link href={contract.countersignUrl} className="lux-btn lux-btn--solid lux-btn--sm">
             {`Countersign at ${providerLabel ?? "the signing provider"}`}
           </Link>

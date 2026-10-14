@@ -8,7 +8,7 @@ import { tenantCookie } from "./appCookies";
 //   - the billing profile (the bank block is its own section, masked by default),
 //   - accounting settings (which now links to the billing profile),
 //   - tax (PV5-F2: tax codes, the standard PPN action and the add form, beside the PPN position),
-//   - the client's Contracts & billing page (tier, content fingerprint, Mark certified disabled with its reason).
+//   - the client's Contracts & billing page (tier, content fingerprint, no Mark certified while certified signing is unavailable).
 //   - PV5-11: the simulated PSrE's countersign page (review stage, labelled simulated).
 //
 // Modelled on `a11y-axe-client-hub.spec.ts`. Runs in the default `chromium` project on the shared staff session and, like
@@ -110,12 +110,12 @@ test.describe("billing screens: what they say", () => {
     await expect(page.getByRole("button", { name: "Save billing profile" })).toBeVisible();
   });
 
-  test("a draft contract shows Mark certified disabled, with the reason", async ({ page }) => {
+  test("a draft contract shows no Mark certified control while certified signing is unavailable (PV-D44)", async ({ page }) => {
     await page.goto("/");
     await page.context().addCookies([tenantCookie(page.url())]);
     await page.goto("/clients/cl-1/billing");
     const draft = page.getByRole("listitem").filter({ hasText: "Master services agreement 2026" });
-    await expect(draft.getByRole("button", { name: "Mark certified" })).toBeDisabled();
-    await expect(draft.getByText(/Certified signing isn't set up yet/)).toBeVisible();
+    await expect(draft.getByRole("button", { name: "Mark certified" })).toHaveCount(0);
+    await expect(draft.getByText(/Certified signing isn't set up yet/)).toHaveCount(0);
   });
 });
