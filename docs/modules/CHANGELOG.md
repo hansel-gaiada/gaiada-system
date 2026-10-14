@@ -11,6 +11,11 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.137.0` - DW-4c: department analytics offer only pages that exist (2026-10-13) - PROTOTYPED
+
+- Three planned Analytics tabs pointed at pages that do not exist. Web Dev's "Sites" goes (`/sites` redirects to Run › Portfolio; live health is Monitoring). SEO's "Rankings trend" goes (the rank tracker and its trend are one page, Optimize › Rankings: one page, one row). Finance's "Revenue, AR and cash" has no page yet and stays planned under DW-7b, with the Finance workspace.
+- All three were hidden (ticketed), so nothing visible moves. A registry test pins the result. Plan §5.2's table says so.
+
 ### platform-ui `0.136.0` - DW-5 polish found in the live browser drive (2026-10-13) - PROTOTYPED
 
 - **Web Dev's triage queue, Origin column.** In the classic department shell beside the My-work rail, the cell ("From <dept> · <person> Open request") wrapped over five lines and squeezed the request titles. It is now one link, the department, with the person in its tooltip and its accessible name, and the column is narrower (`components/departments/ChangeRequestsPanel.tsx`; its test asserts the link's name, text, title and href).
