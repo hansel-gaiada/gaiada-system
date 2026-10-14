@@ -6856,8 +6856,8 @@ Six artifacts, as in §31.2.
 
 ### 32.8 Known limits (each on the board, none hidden)
 
-- **Same company only.** Routing through the group's service assignments (ORG-13) is a later ticket.
-- **Deleting a linked PM task** from the board leaves the ask `open` with `work: null`. The receiver should decline instead. A guard on PM delete is a follow-up.
+- **Same company only.** Routing through the group's service assignments (ORG-13) is out of DW-5 (owner, 2026-10-14): requests are offered to agency-pack companies only, and only the agency company has Creatives and Web Dev today. It is recorded as a later item under DW-10 on the board.
+- **Deleting a linked PM task is refused (guard built, 2026-10-14).** `DELETE /api/:t/pm/tasks/:id` answers **409 `task_has_open_request`** with `detail: {requestId}` while an `open` ask points at the task, so the receiver declines or delivers instead. Closed asks (delivered, declined, cancelled) do not hold the task. The task page's Delete now shows that refusal in place (`components/pm/DeleteTaskButton.tsx`); it used to redirect as if the delete had worked. Proof: `work-requests.test.ts` "PM delete guard". A task removed before the guard, or by a direct database change, still reads `work: null`.
 - **No attachments on the request itself.** References are links (`form.references`). File attachments come with DW-8h.
 - **Asset versions and review rounds** are DW-6h. Delivery here links finished library assets.
 

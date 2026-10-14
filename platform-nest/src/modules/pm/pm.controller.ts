@@ -2610,6 +2610,21 @@ export class PmController {
   async deleteTask(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("taskId") taskId: string) {
     await authorize(req.principal, { kind: "pm_task", tenantId, id: taskId }, "delete");
     const clearedDependents = await withTenants([tenantId], async (c) => {
+      // DW-5 (FRONTEND-BFF-CONTRACT §32.8): a task that carries an OPEN request between departments is the receiver's
+      // work on someone else's ask. Deleting it would leave the ask open with "work removed", so it is refused: the
+      // receiver declines or delivers the request instead, and the request closes the task. FOR SHARE takes the ask row
+      // first, then the task row below: the same order the requests service uses, so a concurrent deliver cannot deadlock.
+      const ask = await c.query<{ id: string }>(
+        `SELECT id FROM work_requests WHERE pm_task_id = $1 AND status = 'open' AND deleted_at IS NULL LIMIT 1 FOR SHARE`,
+        [taskId],
+      );
+      if (ask.rows[0]) {
+        throw new ConflictException({
+          message: "This task carries an open request from another department. Decline or deliver the request instead of deleting its task.",
+          reason: "task_has_open_request",
+          detail: { requestId: ask.rows[0].id },
+        });
+      }
       const res = await c.query(`UPDATE pm_tasks SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, [taskId]);
       if (res.rowCount === 0) throw new NotFoundException("task not found");
       // P4-I2/decision 17 — a deleted blocker counts as "closed" for every task that named it:

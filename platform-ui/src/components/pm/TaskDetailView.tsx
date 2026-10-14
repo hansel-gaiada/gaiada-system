@@ -18,7 +18,7 @@ import {
 } from "@/lib/pm";
 import {
   setTaskProgress, toggleSubtask, addSubtask, setAssignee, postTaskComment,
-  runTracker, confirmSuggestion, dismissSuggestion, addDependency, removeDependency, logTime, deleteTaskAction,
+  runTracker, confirmSuggestion, dismissSuggestion, addDependency, removeDependency, logTime,
   setTaskTags, createTag, updateTaskCustomFields, setTaskStatus, undoRecurrenceSpawn,
   duplicateTaskAction, saveTaskAsTemplateAction, followTask, unfollowTask, addReaction, removeReaction,
   addContributor, removeContributor, reassignResponsible, setBallToMe, rescheduleTask,
@@ -44,6 +44,7 @@ import { TimeLog } from "@/components/pm/TimeLog";
 import { TagEditor } from "@/components/pm/TagEditor";
 import { TaskCustomFields } from "@/components/pm/TaskCustomFields";
 import { Prop, Section } from "@/components/pm/Section";
+import { DeleteTaskButton } from "@/components/pm/DeleteTaskButton";
 import "./task-detail.css";
 
 // The full task detail body (extracted out of the standalone `/tasks/[taskId]`
@@ -201,7 +202,7 @@ export async function TaskDetailView({
           <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Save as template</button>
         </form>
       )}
-      {canEdit && <form action={deleteTaskAction.bind(null, task.id, task.projectId)}><button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Delete</button></form>}
+      {canEdit && <DeleteTaskButton taskId={task.id} projectId={task.projectId} />}
     </>
   );
 

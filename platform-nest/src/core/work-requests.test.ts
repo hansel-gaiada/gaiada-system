@@ -959,4 +959,31 @@ describe.skipIf(!TEST_URL)("DW-5c requests between departments (HTTP, real Postg
       expect((await call("DELETE", `/api/${A}/modules/agency/campaigns/${campaign}/parts/${lone}`, manager)).statusCode).toBe(409);
     });
   });
+
+  // ═══════════════════════════════════════════ PM DELETE GUARD (§32.8) ═══════════════════════════════════════════
+  describe("PM delete guard", () => {
+    it("a task carrying an OPEN request cannot be deleted (409 task_has_open_request); once the ask is closed it can", async () => {
+      const r = await mkAssets();
+      const taskId = r.work.id;
+      const del = await call("DELETE", `/api/${A}/pm/tasks/${taskId}`, manager);
+      expect([del.statusCode, reasonOf(del)], del.body).toEqual([409, "task_has_open_request"]);
+      expect(del.json().detail).toEqual({ requestId: r.id });
+      // nothing moved: the task is live and the ask is still open with its work
+      const { rows } = await q().query(`SELECT deleted_at FROM pm_tasks WHERE id = $1`, [taskId]);
+      expect(rows[0].deleted_at).toBeNull();
+      expect((await row(r.id)).status).toBe("open");
+      expect((await call("GET", `${base()}/${r.id}`, memberSeo)).json().work).not.toBeNull();
+
+      // the receiver declines instead; the closed ask no longer holds the task, so the delete now succeeds
+      expect((await call("POST", `${base()}/${r.id}/decline`, manager, { reason: "Out of scope" })).statusCode).toBe(200);
+      const ok = await call("DELETE", `/api/${A}/pm/tasks/${taskId}`, manager);
+      expect(ok.statusCode, ok.body).toBe(200);
+    });
+
+    it("a task with no request is deleted exactly as before (the guard only reads work_requests)", async () => {
+      const plain = await call("POST", `/api/${A}/pm/tasks`, manager, { projectId: projectA, title: "A plain task, no request" });
+      expect(plain.statusCode, plain.body).toBe(201);
+      expect((await call("DELETE", `/api/${A}/pm/tasks/${plain.json().id}`, manager)).statusCode).toBe(200);
+    });
+  });
 });

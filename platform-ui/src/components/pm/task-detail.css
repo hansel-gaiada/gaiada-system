@@ -287,3 +287,6 @@
 .pm-pr__ci--passing { color: var(--pm-urgency-on-track-fg); }
 .pm-pr__ci--running { color: var(--pm-urgency-due-soon-fg); }
 .pm-pr__ci--failing { color: var(--pm-urgency-overdue-fg); }
+
+/* The task page's Delete, refused (DW-5: a task that carries an open request between departments). */
+.pm-task-delete-error { margin: 6px 0 0; color: var(--status-critical-fg, var(--status-danger)); font: 500 13px/1.5 var(--font-body); }
