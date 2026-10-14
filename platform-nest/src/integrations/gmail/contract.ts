@@ -14,7 +14,13 @@
 // add it to `GmailClientContractHarness`, not as an inline literal.
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { GmailNotFoundError, GmailRateLimitedError, GmailRevokedError, GmailUnauthorizedError } from "./errors";
+import {
+  GmailInvalidMessageError,
+  GmailNotFoundError,
+  GmailRateLimitedError,
+  GmailRevokedError,
+  GmailUnauthorizedError,
+} from "./errors";
 import type { GmailClient } from "./types";
 
 export interface GmailClientContractHarness {
@@ -39,6 +45,10 @@ export interface GmailClientContractHarness {
   createUnauthorizedClient?: () => GmailClient;
   createRevokedClient?: () => GmailClient;
   createRateLimitedClient?: () => GmailClient;
+  /** DW-8j. An address the harness may safely send to (the fixture's own; a live harness supplies a staging mailbox it owns). Optional so
+   *  an implementation without a send path can document the gap: the send cases REPORT a skip rather than being silently omitted. A
+   *  live adapter at staging supplies it, and `sendMessage` then runs these cases unmodified (§48.6). */
+  sendRecipient?: string;
 }
 
 function isIsoDate(v: unknown): boolean {
@@ -171,6 +181,95 @@ export function runGmailClientContractTests(
           expect(["system", "user"]).toContain(l.type);
         }
         expect(labels.some((l) => l.name === harness.knownLabelName)).toBe(true);
+      });
+    });
+
+    // DW-8j (DW-D24, §48.6): the send path. Like every case above, nothing here names fixture data: the recipient, the thread and the
+    // message answered all come from the harness or from the client's own answers.
+    describe("sendMessage (DW-8j)", () => {
+      it("returns { messageId, threadId } and the sent message is readable by id, from the account, with the body as plain text", async () => {
+        if (!harness.sendRecipient) {
+          console.warn(`[contract:${implementationName}] sendRecipient not supplied — send cases skipped`);
+          return;
+        }
+        const sent = await harness.client.sendMessage({ to: [harness.sendRecipient], subject: "contract send", body: "contract body" });
+        expect(typeof sent.messageId).toBe("string");
+        expect(sent.messageId.length).toBeGreaterThan(0);
+        expect(typeof sent.threadId).toBe("string");
+        expect(sent.threadId.length).toBeGreaterThan(0);
+        const msg = await harness.client.getMessage(sent.messageId);
+        expect(msg.id).toBe(sent.messageId);
+        expect(msg.threadId).toBe(sent.threadId);
+        expect(msg.headers.subject).toBe("contract send");
+        expect(msg.parts.some((p) => p.mimeType === "text/plain" && p.body.includes("contract body"))).toBe(true);
+      });
+
+      it("a reply keeps the thread and carries the threading headers (In-Reply-To, and References that include it)", async () => {
+        if (!harness.sendRecipient) return;
+        const thread = await harness.client.getThread(harness.knownThreadId);
+        const answered = thread.messages[thread.messages.length - 1];
+        const sent = await harness.client.sendMessage({
+          to: [harness.sendRecipient], subject: "Re: contract reply", body: "contract reply body",
+          inReplyTo: { threadId: harness.knownThreadId, messageId: answered.id },
+        });
+        expect(sent.threadId).toBe(harness.knownThreadId);
+        const msg = await harness.client.getMessage(sent.messageId);
+        expect(msg.threadId).toBe(harness.knownThreadId);
+        expect(typeof msg.headers.inReplyTo).toBe("string");
+        expect((msg.headers.inReplyTo ?? "").length).toBeGreaterThan(0);
+        expect(msg.headers.references ?? "").toContain(msg.headers.inReplyTo as string);
+      });
+
+      it("a reply to a thread or a message that does not exist raises GmailNotFoundError", async () => {
+        if (!harness.sendRecipient) return;
+        await expect(
+          harness.client.sendMessage({
+            to: [harness.sendRecipient], subject: "s", body: "b",
+            inReplyTo: { threadId: harness.unknownId, messageId: harness.unknownId },
+          }),
+        ).rejects.toBeInstanceOf(GmailNotFoundError);
+      });
+
+      it("recipients are validated: none, a malformed address, a header-injection attempt, a display name, or more than 20 all raise GmailInvalidMessageError", async () => {
+        if (!harness.sendRecipient) return;
+        const ok = harness.sendRecipient;
+        const bad: Array<[string, { to: string[]; cc?: string[] }]> = [
+          ["no recipient", { to: [] }],
+          ["malformed", { to: ["not-an-address"] }],
+          ["header injection", { to: [`${ok}\r\nBcc: victim@example.test`] }],
+          ["display name", { to: [`Someone <${ok}>`] }],
+          ["a comma list in one entry", { to: [`${ok},${ok}`] }],
+          ["a malformed cc", { to: [ok], cc: ["nope"] }],
+          ["more than 20 in all", { to: [ok], cc: Array.from({ length: 20 }, (_, i) => `person${i}@example.test`) }],
+        ];
+        for (const [label, r] of bad) {
+          await expect(harness.client.sendMessage({ ...r, subject: "s", body: "b" }), label).rejects.toBeInstanceOf(GmailInvalidMessageError);
+        }
+        try {
+          await harness.client.sendMessage({ to: ["nope"], subject: "s", body: "b" });
+          expect.unreachable("sendMessage should have thrown");
+        } catch (err) {
+          expect((err as GmailInvalidMessageError).status).toBe(400);
+          expect((err as GmailInvalidMessageError).field).toBe("to");
+        }
+      });
+
+      it("unauthorized / revoked / rate-limited: sendMessage raises the same errors as every read (401, 403, 429 with retryAfterSeconds)", async () => {
+        const send = { to: [harness.sendRecipient ?? "someone@example.test"], subject: "s", body: "b" };
+        if (!harness.createUnauthorizedClient || !harness.createRevokedClient || !harness.createRateLimitedClient) {
+          console.warn(`[contract:${implementationName}] an error-state client not supplied — send error cases skipped`);
+          return;
+        }
+        await expect(harness.createUnauthorizedClient().sendMessage(send)).rejects.toBeInstanceOf(GmailUnauthorizedError);
+        await expect(harness.createRevokedClient().sendMessage(send)).rejects.toBeInstanceOf(GmailRevokedError);
+        try {
+          await harness.createRateLimitedClient().sendMessage(send);
+          expect.unreachable("sendMessage should have thrown");
+        } catch (err) {
+          expect(err).toBeInstanceOf(GmailRateLimitedError);
+          expect((err as GmailRateLimitedError).status).toBe(429);
+          expect((err as GmailRateLimitedError).retryAfterSeconds).toBeGreaterThan(0);
+        }
       });
     });
 

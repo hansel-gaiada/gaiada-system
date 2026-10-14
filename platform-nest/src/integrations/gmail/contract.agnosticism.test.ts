@@ -6,9 +6,10 @@
 // import against it. If the suite needed to know anything fixture-specific to pass, this file
 // would fail; it does not change contract.ts, only supplies a different harness, which is exactly
 // the shape MAIL-16's live adapter will use at staging.
-import { GmailNotFoundError, GmailRateLimitedError, GmailRevokedError, GmailUnauthorizedError } from "./errors";
+import { GmailInvalidMessageError, GmailNotFoundError, GmailRateLimitedError, GmailRevokedError, GmailUnauthorizedError } from "./errors";
 import { runGmailClientContractTests } from "./contract";
-import type { GmailClient, GmailLabel, GmailMessage, GmailThread, GmailThreadPage } from "./types";
+import { validateSendRequest } from "./send-validation";
+import type { GmailClient, GmailLabel, GmailMessage, GmailSendRequest, GmailSendResult, GmailThread, GmailThreadPage } from "./types";
 
 // A tiny, self-contained corpus with NOTHING in common with fixture-client.ts's ids/snippets/dates —
 // proving the suite never leaked a fixture-specific literal into its assertions.
@@ -66,13 +67,40 @@ class AlternateGmailClient implements GmailClient {
   }
 
   async getMessage(messageId: string): Promise<GmailMessage> {
-    const m = ALT_MESSAGES.get(messageId);
+    const m = ALT_MESSAGES.get(messageId) ?? this.outbox.get(messageId);
     if (!m) throw new GmailNotFoundError("message", messageId);
     return m;
   }
 
   async listLabels(): Promise<GmailLabel[]> {
     return ALT_LABELS;
+  }
+
+  /** DW-8j: a second, differently-built send path (a Map-keyed store, its own id scheme and its own header encoding), so the contract's send
+   *  cases are proved not to lean on the fixture client's own choices. */
+  private readonly outbox = new Map<string, GmailMessage>();
+  async sendMessage(input: GmailSendRequest): Promise<GmailSendResult> {
+    const req = validateSendRequest(input);
+    let threadId = `alt-thread-new-${this.outbox.size + 1}`;
+    let inReplyTo: string | undefined;
+    if (req.inReplyTo) {
+      const parent = ALT_MESSAGES.get(req.inReplyTo.messageId) ?? this.outbox.get(req.inReplyTo.messageId);
+      if (!parent) throw new GmailNotFoundError("message", req.inReplyTo.messageId);
+      if (parent.threadId !== req.inReplyTo.threadId) throw new GmailInvalidMessageError("inReplyTo", "not in that thread");
+      threadId = parent.threadId;
+      inReplyTo = `<${parent.id}@alt.invalid>`;
+    }
+    const id = `alt-sent-${this.outbox.size + 1}`;
+    this.outbox.set(id, {
+      id, threadId, labelIds: ["lbl-primary"],
+      headers: {
+        from: "me@alt.invalid", to: req.to.join(","), subject: req.subject, date: "2026-02-02T00:00:00.000Z",
+        ...(inReplyTo ? { inReplyTo, references: inReplyTo } : {}),
+      },
+      parts: [{ mimeType: "text/plain", body: req.body }],
+      attachments: [],
+    });
+    return { messageId: id, threadId };
   }
 }
 
@@ -90,6 +118,9 @@ class AlternateThrowingClient implements GmailClient {
   async listLabels(): Promise<GmailLabel[]> {
     throw this.make();
   }
+  async sendMessage(): Promise<GmailSendResult> {
+    throw this.make();
+  }
 }
 
 runGmailClientContractTests("AlternateGmailClient (proof of implementation-agnosticism)", () => ({
@@ -102,4 +133,5 @@ runGmailClientContractTests("AlternateGmailClient (proof of implementation-agnos
   createUnauthorizedClient: () => new AlternateThrowingClient(() => new GmailUnauthorizedError({ simulated: true })),
   createRevokedClient: () => new AlternateThrowingClient(() => new GmailRevokedError({ simulated: true })),
   createRateLimitedClient: () => new AlternateThrowingClient(() => new GmailRateLimitedError(15, { simulated: true })),
+  sendRecipient: "someone@alt.invalid",
 }));

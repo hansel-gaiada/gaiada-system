@@ -30,4 +30,6 @@ runGmailClientContractTests("GmailFixtureClient", () => ({
   createUnauthorizedClient: createUnauthorizedFixtureGmailClient,
   createRevokedClient: createRevokedFixtureGmailClient,
   createRateLimitedClient: createRateLimitedFixtureGmailClient,
+  // DW-8j: the send cases (the simulated mailbox's own send path, memory only).
+  sendRecipient: "recipient@example.invalid",
 }));
