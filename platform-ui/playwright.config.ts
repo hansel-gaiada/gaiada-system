@@ -29,7 +29,7 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ".auth/user.json" },
       dependencies: ["setup"],
-      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, /workspace-shell\.spec\.ts/, /workspace-departments\.spec\.ts/, /workspace-functional\.spec\.ts/, WEBDESK_STUB_SPECS],
+      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, /workspace-shell\.spec\.ts/, /me-performance\.spec\.ts/, /workspace-departments\.spec\.ts/, /workspace-functional\.spec\.ts/, WEBDESK_STUB_SPECS],
     },
     {
       // CP-17 client portal. Its OWN project with NO stored session, because every test here signs in as
@@ -108,7 +108,7 @@ export default defineConfig({
       // project: that one selects by FILE (smoke.spec.ts) as well as by tag.
       name: "workspace-shell",
       use: { ...devices["Desktop Chrome"] },
-      testMatch: /workspace-shell\.spec\.ts/,
+      testMatch: /(workspace-shell|me-performance)\.spec\.ts/, // PV7-06: My performance signs in as the placed Web Dev employee the same way
     },
     {
       // DW-6a/6b/6e: the department workspaces' Work menus against the registry, per agency department. Same

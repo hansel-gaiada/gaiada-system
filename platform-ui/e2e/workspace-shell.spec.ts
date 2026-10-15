@@ -111,7 +111,7 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
     const nav = menu(page, "Office of the GM");
 
     for (const group of ["Work", "Performance", "You"]) await expect(nav.getByRole("group", { name: group })).toBeVisible();
-    await expect(nav.getByRole("group", { name: "Performance" }).getByRole("link")).toHaveText(["Reports", "Analytics", "Appraisals", "Learning"]);
+    await expect(nav.getByRole("group", { name: "Performance" }).getByRole("link")).toHaveText(["My performance", "Reports", "Analytics", "Appraisals", "Learning"]);
     await expect(nav.getByRole("group", { name: "You" }).getByRole("link")).toHaveText(["My tasks", "Inbox", "Calendar", /^Approvals/, "Me"]); // DW-8a added My tasks; DW-8m: a decider's Approvals row may carry its pending count
     const work = nav.getByRole("group", { name: "Work" });
     for (const row of ["Project Management", "Command", "Oversight", "Tools & connections"]) {
@@ -1312,7 +1312,7 @@ test.describe("phone viewport", () => {
     await expect(nav.getByRole("link", { name: "Overview", exact: true })).toBeVisible();
     await expect(nav.getByRole("link", { name: "AI Assistant" })).toBeVisible();
     await expect(nav.getByRole("group", { name: "Work" })).toBeVisible();
-    await expect(nav.getByRole("group", { name: "Performance" }).getByRole("link")).toHaveText(["Reports", "Analytics", "Appraisals", "Learning"]);
+    await expect(nav.getByRole("group", { name: "Performance" }).getByRole("link")).toHaveText(["My performance", "Reports", "Analytics", "Appraisals", "Learning"]);
     await expect(nav.getByRole("group", { name: "You" }).getByRole("link")).toHaveText(["My tasks", "Inbox", "Calendar", /^Approvals/, "Me"]); // DW-8a added My tasks; DW-8m: a decider's Approvals row may carry its pending count
 
     await page.keyboard.press("Escape");
