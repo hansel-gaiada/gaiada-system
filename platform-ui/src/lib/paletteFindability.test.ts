@@ -52,6 +52,13 @@ describe.each(PERSONAS)("the workspace shell's palette finds everything: %s", (_
     for (const href of modelHrefs(model)) expect(hrefs, href).toContain(href);
   });
 
+  it("finds the client health board and the client report wherever the person is offered them (PV7-05)", () => {
+    for (const href of ["/clients/health", "/reports/client"]) {
+      const offered = nav.some((g) => g.items.some((i) => i.href === href)) || modelHrefs(model).includes(href);
+      if (offered) expect(entries.filter((e) => e.href === href), href).toHaveLength(1);
+    }
+  });
+
   it("finds My performance (PV7-06), once, under Performance", () => {
     const mine = entries.filter((e) => e.href === "/me/performance");
     expect(mine).toHaveLength(1);

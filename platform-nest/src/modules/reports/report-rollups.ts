@@ -79,6 +79,40 @@ const SUM_SELECT_F = FACT_SUM_COLUMNS.map((c) => `COALESCE(SUM(f.${c}), 0) AS ${
  *  anything soft-deleted. Callers alias `projects p` and `clients c`. */
 export const CLIENT_PROJECT_ELIGIBLE_SQL = `p.deleted_at IS NULL AND c.deleted_at IS NULL AND NOT p.is_internal AND NOT c.is_internal`;
 
+/** PV7-05 — delivery on time per client for a date range, as ONE set query over `clientIds[]` (the health board's seam,
+ *  `deliveryOnTimeFor` in clients/client-health.ts). It is the client-grain regroup `computeOwnFactRollups` does, narrowed
+ *  to the one metric and to the clients asked for, so the board's query count stays fixed. The columns come from the
+ *  metric's own catalog entry, so a change to what "on time" means moves this with the report. `client` must carry the
+ *  tenant's `reports` scope (a missed wall reads ZERO rows, silently). A client with no completions that carried a due date
+ *  has no answer: its entry is `null`, never 0. */
+export async function loadClientOnTimeRates(
+  client: PoolClient, tenantId: string, start: string, end: string, clientIds: string[],
+): Promise<Map<string, number | null>> {
+  const cols = SEEDED_REPORT_METRICS.find((m) => m.metricKey === "delivery.on_time_rate")?.factColumns;
+  const num = cols?.numerator as FactSumColumn | undefined;
+  const den = cols?.denominator as FactSumColumn | undefined;
+  if (!num || !den || !FACT_SUM_COLUMNS.includes(num) || !FACT_SUM_COLUMNS.includes(den)) {
+    throw new Error("delivery.on_time_rate has no fact columns in the metric catalog");
+  }
+  const out = new Map<string, number | null>(clientIds.map((id) => [id, null]));
+  if (clientIds.length === 0) return out;
+  const { rows } = await client.query<{ client_id: string; num: string; den: string }>(
+    `SELECT p.client_id, COALESCE(SUM(f.${num}), 0) AS num, COALESCE(SUM(f.${den}), 0) AS den
+       FROM report_work_facts f
+       JOIN projects p ON p.id = f.project_id AND p.tenant_id = f.tenant_id
+       JOIN clients c ON c.id = p.client_id AND c.tenant_id = p.tenant_id
+      WHERE f.tenant_id = $1 AND f.fact_date BETWEEN $2::date AND $3::date
+        AND p.client_id = ANY($4::uuid[]) AND ${CLIENT_PROJECT_ELIGIBLE_SQL}
+      GROUP BY p.client_id`,
+    [tenantId, start, end, clientIds],
+  );
+  for (const r of rows) {
+    const d = Number(r.den);
+    out.set(r.client_id, d > 0 ? Number(r.num) / d : null);
+  }
+  return out;
+}
+
 /** project id -> client id for every project that counts toward a client (see
  *  `CLIENT_PROJECT_ELIGIBLE_SQL`). Milestone, flow and overdue rows regroup through this map the
  *  way flow already maps project -> department. Reads the CURRENT `projects.client_id`, so a live

@@ -2,9 +2,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { StatusBadge } from "@/components/ui";
+import { ClientHealthChip } from "@/components/clients/ClientHealthChip";
 import { Menu, MenuItem } from "@/components/overlay/Menu";
 import { Pagination } from "./Pagination";
 import { formatDate, formatDateTime } from "@/lib/format";
+import type { HealthState } from "@/lib/clientHealth";
 import "./data.css";
 
 // Reusable, data-driven table: search + sortable columns + pagination + CSV
@@ -20,7 +22,8 @@ import "./data.css";
 // shell.css — no new prop needed here, the row just has to consume the token), and
 // loading/error states alongside the pre-existing empty state. Every new prop is optional and
 // every existing call site (9 pages) is unaffected.
-type Fmt = "text" | "status" | "date" | "datetime" | "number";
+// `health` (PV7-05): the cell value is a client health state key (`on_track` ...), drawn as the shared state chip.
+type Fmt = "text" | "status" | "date" | "datetime" | "number" | "health";
 export interface Column {
   key: string;
   header: string;
@@ -28,6 +31,10 @@ export interface Column {
   sortable?: boolean;
   format?: Fmt;
   width?: string;
+  /** Sort by another field of the row instead of this one (a composite cell such as "3 · oldest 9 days" sorts by its
+   *  count). `sortAs: "number"` compares that field as a number; without it the comparison is textual. */
+  sortBy?: string;
+  sortAs?: "number";
 }
 
 /** Row-selection wiring for a bulk-action bar. Selection is a controlled Set owned by the
@@ -146,10 +153,11 @@ export function DataTable({
     if (needle) out = rows.filter((r) => keys.some((k) => String(r[k] ?? "").toLowerCase().includes(needle)));
     if (sortKey) {
       const col = columns.find((c) => c.key === sortKey);
-      const numeric = col?.format === "number";
+      const numeric = col?.format === "number" || col?.sortAs === "number";
       const dated = col?.format === "date" || col?.format === "datetime";
+      const field = col?.sortBy ?? sortKey;
       out = [...out].sort((a, b) => {
-        const av = a[sortKey], bv = b[sortKey];
+        const av = a[field], bv = b[field];
         let cmp: number;
         if (numeric) cmp = Number(av ?? 0) - Number(bv ?? 0);
         else if (dated) cmp = Date.parse(String(av ?? 0)) - Date.parse(String(bv ?? 0));
@@ -304,7 +312,9 @@ export function DataTable({
                       const isLink = link && c.key === link.labelKey && r[link.idKey] != null;
                       const content = c.format === "status" && r[c.key]
                         ? <StatusBadge label={String(r[c.key])} />
-                        : cellText(r[c.key], c.format);
+                        : c.format === "health" && r[c.key]
+                          ? <ClientHealthChip state={String(r[c.key]) as HealthState} />
+                          : cellText(r[c.key], c.format);
                       return (
                         <td key={c.key} className={[rightAlign ? "dt--right" : "", numeric ? "dt--num" : ""].filter(Boolean).join(" ") || undefined}>
                           {isLink ? <Link href={`${link!.base}/${r[link!.idKey]}`} className="dt__link">{content}</Link> : content}

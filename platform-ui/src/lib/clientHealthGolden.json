@@ -1,0 +1,761 @@
+{
+  "_about": "Golden table for client-health-rules.ts (BFF section 54.3). Run by client-health-rules.test.ts; the UI demo mirror copies this file and runs the same cases. For each case the input is `base` with the keys of the case input replaced, `unavailable` is the failed sources, and `expect` is the exact verdict. Ages are whole days (hours for the site rule) from `now`.",
+  "now": "2026-10-15T12:00:00.000Z",
+  "thresholds": {
+    "atRiskWaitingOnUsDays": 7,
+    "offTrackWaitingOnUsDays": 14,
+    "atRiskWaitingOnClientDays": 14,
+    "offTrackLateWorkDays": 14,
+    "offTrackInvoiceOverdueDays": 30,
+    "offTrackSiteIncidentHours": 24
+  },
+  "base": {
+    "waitingOnUs": {
+      "count": 0,
+      "oldestSince": null
+    },
+    "waitingOnClient": {
+      "count": 0,
+      "oldestSince": null
+    },
+    "lateDeliverables": {
+      "count": 0,
+      "oldestDue": null
+    },
+    "lateMilestones": {
+      "count": 0,
+      "oldestDue": null
+    },
+    "overdueInvoices": {
+      "count": 0,
+      "oldestDue": null
+    },
+    "site": {
+      "openIncidents": 0,
+      "oldestOpenSince": null
+    },
+    "activeProjects": 1,
+    "activeServices": 0
+  },
+  "cases": [
+    {
+      "name": "on track: nothing waiting, nothing late, one active project",
+      "input": {},
+      "unavailable": [],
+      "expect": {
+        "state": "on_track",
+        "reasons": []
+      }
+    },
+    {
+      "name": "waiting on us 6 days 23 hours is not yet at risk",
+      "input": {
+        "waitingOnUs": {
+          "count": 2,
+          "oldestSince": "2026-10-08T12:00:01.000Z"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "on_track",
+        "reasons": []
+      }
+    },
+    {
+      "name": "waiting on us exactly 7 days is at risk",
+      "input": {
+        "waitingOnUs": {
+          "count": 2,
+          "oldestSince": "2026-10-08T12:00:00.000Z"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "at_risk",
+        "reasons": [
+          {
+            "code": "waiting_on_us_7d",
+            "count": 2,
+            "since": "2026-10-08T12:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "waiting on us 13 days is still at risk",
+      "input": {
+        "waitingOnUs": {
+          "count": 1,
+          "oldestSince": "2026-10-02T12:00:00.000Z"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "at_risk",
+        "reasons": [
+          {
+            "code": "waiting_on_us_7d",
+            "count": 1,
+            "since": "2026-10-02T12:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "waiting on us exactly 14 days is off track and is reported once",
+      "input": {
+        "waitingOnUs": {
+          "count": 1,
+          "oldestSince": "2026-10-01T12:00:00.000Z"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "off_track",
+        "reasons": [
+          {
+            "code": "waiting_on_us_14d",
+            "count": 1,
+            "since": "2026-10-01T12:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "waiting on the client 13 days is fine",
+      "input": {
+        "waitingOnClient": {
+          "count": 3,
+          "oldestSince": "2026-10-02T12:00:00.000Z"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "on_track",
+        "reasons": []
+      }
+    },
+    {
+      "name": "waiting on the client exactly 14 days is at risk, never off track",
+      "input": {
+        "waitingOnClient": {
+          "count": 1,
+          "oldestSince": "2026-10-01T12:00:00.000Z"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "at_risk",
+        "reasons": [
+          {
+            "code": "waiting_on_client_14d",
+            "count": 1,
+            "since": "2026-10-01T12:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a deliverable one day late is at risk",
+      "input": {
+        "lateDeliverables": {
+          "count": 1,
+          "oldestDue": "2026-10-14"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "at_risk",
+        "reasons": [
+          {
+            "code": "late_work",
+            "count": 1,
+            "since": "2026-10-14"
+          }
+        ]
+      }
+    },
+    {
+      "name": "work 13 days late is at risk",
+      "input": {
+        "lateMilestones": {
+          "count": 2,
+          "oldestDue": "2026-10-02"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "at_risk",
+        "reasons": [
+          {
+            "code": "late_work",
+            "count": 2,
+            "since": "2026-10-02"
+          }
+        ]
+      }
+    },
+    {
+      "name": "work 14 days late is off track",
+      "input": {
+        "lateMilestones": {
+          "count": 1,
+          "oldestDue": "2026-10-01"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "off_track",
+        "reasons": [
+          {
+            "code": "late_work_14d",
+            "count": 1,
+            "since": "2026-10-01"
+          }
+        ]
+      }
+    },
+    {
+      "name": "late deliverables and late milestones are one family",
+      "input": {
+        "lateDeliverables": {
+          "count": 2,
+          "oldestDue": "2026-10-10"
+        },
+        "lateMilestones": {
+          "count": 1,
+          "oldestDue": "2026-10-05"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "at_risk",
+        "reasons": [
+          {
+            "code": "late_work",
+            "count": 3,
+            "since": "2026-10-05"
+          }
+        ]
+      }
+    },
+    {
+      "name": "the oldest late item decides the tier across both",
+      "input": {
+        "lateDeliverables": {
+          "count": 1,
+          "oldestDue": "2026-10-14"
+        },
+        "lateMilestones": {
+          "count": 1,
+          "oldestDue": "2026-10-01"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "off_track",
+        "reasons": [
+          {
+            "code": "late_work_14d",
+            "count": 2,
+            "since": "2026-10-01"
+          }
+        ]
+      }
+    },
+    {
+      "name": "an overdue issued invoice is at risk",
+      "input": {
+        "overdueInvoices": {
+          "count": 1,
+          "oldestDue": "2026-10-14"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "at_risk",
+        "reasons": [
+          {
+            "code": "invoice_overdue",
+            "count": 1,
+            "since": "2026-10-14"
+          }
+        ]
+      }
+    },
+    {
+      "name": "an invoice 29 days overdue is still at risk",
+      "input": {
+        "overdueInvoices": {
+          "count": 2,
+          "oldestDue": "2026-09-16"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "at_risk",
+        "reasons": [
+          {
+            "code": "invoice_overdue",
+            "count": 2,
+            "since": "2026-09-16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "an invoice 30 days overdue is off track",
+      "input": {
+        "overdueInvoices": {
+          "count": 1,
+          "oldestDue": "2026-09-15"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "off_track",
+        "reasons": [
+          {
+            "code": "invoice_overdue_30d",
+            "count": 1,
+            "since": "2026-09-15"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a site incident open 23 hours is at risk",
+      "input": {
+        "site": {
+          "openIncidents": 1,
+          "oldestOpenSince": "2026-10-14T13:00:00.000Z"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "at_risk",
+        "reasons": [
+          {
+            "code": "site_incident_open",
+            "count": 1,
+            "since": "2026-10-14T13:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a site incident open 24 hours is off track",
+      "input": {
+        "site": {
+          "openIncidents": 1,
+          "oldestOpenSince": "2026-10-14T12:00:00.000Z"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "off_track",
+        "reasons": [
+          {
+            "code": "site_incident_open_24h",
+            "count": 1,
+            "since": "2026-10-14T12:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a site incident with no start time cannot be aged and is at risk",
+      "input": {
+        "site": {
+          "openIncidents": 1,
+          "oldestOpenSince": null
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "at_risk",
+        "reasons": [
+          {
+            "code": "site_incident_open",
+            "count": 1,
+            "since": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "off track lists every reason, the off-track one first",
+      "input": {
+        "waitingOnUs": {
+          "count": 1,
+          "oldestSince": "2026-10-08T12:00:00.000Z"
+        },
+        "site": {
+          "openIncidents": 1,
+          "oldestOpenSince": "2026-10-14T12:00:00.000Z"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "off_track",
+        "reasons": [
+          {
+            "code": "site_incident_open_24h",
+            "count": 1,
+            "since": "2026-10-14T12:00:00.000Z"
+          },
+          {
+            "code": "waiting_on_us_7d",
+            "count": 1,
+            "since": "2026-10-08T12:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "waiting on both sides for 14 days is off track",
+      "input": {
+        "waitingOnUs": {
+          "count": 1,
+          "oldestSince": "2026-10-01T12:00:00.000Z"
+        },
+        "waitingOnClient": {
+          "count": 2,
+          "oldestSince": "2026-10-01T12:00:00.000Z"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "off_track",
+        "reasons": [
+          {
+            "code": "waiting_on_us_14d",
+            "count": 1,
+            "since": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "code": "waiting_on_client_14d",
+            "count": 2,
+            "since": "2026-10-01T12:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "reason order inside a tier is fixed",
+      "input": {
+        "waitingOnUs": {
+          "count": 1,
+          "oldestSince": "2026-10-08T12:00:00.000Z"
+        },
+        "lateDeliverables": {
+          "count": 1,
+          "oldestDue": "2026-10-14"
+        },
+        "overdueInvoices": {
+          "count": 1,
+          "oldestDue": "2026-10-14"
+        },
+        "site": {
+          "openIncidents": 1,
+          "oldestOpenSince": "2026-10-15T00:00:00.000Z"
+        },
+        "waitingOnClient": {
+          "count": 1,
+          "oldestSince": "2026-10-01T12:00:00.000Z"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "at_risk",
+        "reasons": [
+          {
+            "code": "waiting_on_us_7d",
+            "count": 1,
+            "since": "2026-10-08T12:00:00.000Z"
+          },
+          {
+            "code": "late_work",
+            "count": 1,
+            "since": "2026-10-14"
+          },
+          {
+            "code": "invoice_overdue",
+            "count": 1,
+            "since": "2026-10-14"
+          },
+          {
+            "code": "site_incident_open",
+            "count": 1,
+            "since": "2026-10-15T00:00:00.000Z"
+          },
+          {
+            "code": "waiting_on_client_14d",
+            "count": 1,
+            "since": "2026-10-01T12:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a future instant has no age",
+      "input": {
+        "waitingOnUs": {
+          "count": 1,
+          "oldestSince": "2026-10-20T00:00:00.000Z"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "on_track",
+        "reasons": []
+      }
+    },
+    {
+      "name": "a count of zero is ignored whatever its date says",
+      "input": {
+        "waitingOnUs": {
+          "count": 0,
+          "oldestSince": "2026-09-01T00:00:00.000Z"
+        },
+        "overdueInvoices": {
+          "count": 0,
+          "oldestDue": "2026-08-01"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "on_track",
+        "reasons": []
+      }
+    },
+    {
+      "name": "quiet: no active project and no active service",
+      "input": {
+        "activeProjects": 0,
+        "activeServices": 0
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "quiet",
+        "reasons": [
+          {
+            "code": "no_active_work",
+            "count": 0,
+            "since": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "an active service alone is not quiet",
+      "input": {
+        "activeProjects": 0,
+        "activeServices": 1
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "on_track",
+        "reasons": []
+      }
+    },
+    {
+      "name": "two active projects are not quiet",
+      "input": {
+        "activeProjects": 2,
+        "activeServices": 0
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "on_track",
+        "reasons": []
+      }
+    },
+    {
+      "name": "nothing active but an overdue invoice is at risk, not quiet",
+      "input": {
+        "activeProjects": 0,
+        "activeServices": 0,
+        "overdueInvoices": {
+          "count": 1,
+          "oldestDue": "2026-10-14"
+        }
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "at_risk",
+        "reasons": [
+          {
+            "code": "invoice_overdue",
+            "count": 1,
+            "since": "2026-10-14"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown: a source failed and the rest says on track",
+      "input": {},
+      "unavailable": [
+        "site"
+      ],
+      "expect": {
+        "state": "unknown",
+        "reasons": [
+          {
+            "code": "source_unavailable",
+            "count": 1,
+            "since": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown beats quiet",
+      "input": {
+        "activeProjects": 0,
+        "activeServices": 0
+      },
+      "unavailable": [
+        "projects",
+        "ball"
+      ],
+      "expect": {
+        "state": "unknown",
+        "reasons": [
+          {
+            "code": "source_unavailable",
+            "count": 2,
+            "since": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "the same failed source listed twice counts once",
+      "input": {},
+      "unavailable": [
+        "site",
+        "site"
+      ],
+      "expect": {
+        "state": "unknown",
+        "reasons": [
+          {
+            "code": "source_unavailable",
+            "count": 1,
+            "since": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "a failure never hides a real finding",
+      "input": {
+        "waitingOnUs": {
+          "count": 1,
+          "oldestSince": "2026-10-01T12:00:00.000Z"
+        }
+      },
+      "unavailable": [
+        "invoices"
+      ],
+      "expect": {
+        "state": "off_track",
+        "reasons": [
+          {
+            "code": "waiting_on_us_14d",
+            "count": 1,
+            "since": "2026-10-01T12:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "at risk with a failed source adds no reason for it",
+      "input": {
+        "overdueInvoices": {
+          "count": 1,
+          "oldestDue": "2026-10-14"
+        }
+      },
+      "unavailable": [
+        "site"
+      ],
+      "expect": {
+        "state": "at_risk",
+        "reasons": [
+          {
+            "code": "invoice_overdue",
+            "count": 1,
+            "since": "2026-10-14"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a signal that does not apply is null and is not a failure",
+      "input": {
+        "site": null,
+        "activeServices": null
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "on_track",
+        "reasons": []
+      }
+    },
+    {
+      "name": "every signal null and nothing unavailable reads as quiet",
+      "input": {
+        "waitingOnUs": null,
+        "waitingOnClient": null,
+        "lateDeliverables": null,
+        "lateMilestones": null,
+        "overdueInvoices": null,
+        "site": null,
+        "activeProjects": null,
+        "activeServices": null
+      },
+      "unavailable": [],
+      "expect": {
+        "state": "quiet",
+        "reasons": [
+          {
+            "code": "no_active_work",
+            "count": 0,
+            "since": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "every signal null with sources unavailable reads as unknown",
+      "input": {
+        "waitingOnUs": null,
+        "waitingOnClient": null,
+        "lateDeliverables": null,
+        "lateMilestones": null,
+        "overdueInvoices": null,
+        "site": null,
+        "activeProjects": null,
+        "activeServices": null
+      },
+      "unavailable": [
+        "projects",
+        "ball",
+        "milestones"
+      ],
+      "expect": {
+        "state": "unknown",
+        "reasons": [
+          {
+            "code": "source_unavailable",
+            "count": 3,
+            "since": null
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -15,7 +15,8 @@ import "server-only";
 // client has no work, no money owed and nobody waiting — the single most expensive wrong answer this
 // screen can give. An empty state must mean "empty", never "we could not ask".
 import { platformFetch, PlatformError } from "./platform";
-import type { ClientHealthDetail } from "./clientHealth";
+import type { ClientHealthBoard, ClientHealthDetail } from "./clientHealth";
+import { readResult, type ReadResult } from "./readResult";
 
 /** One outstanding item, on either side of the relationship. */
 export interface ClientBallItem {
@@ -89,3 +90,10 @@ export async function getClientHealth(userId: string, tenant: string, clientId: 
     return null;
   }
 }
+
+/** PV7-05 — the staff health board, `GET /api/:t/clients/health` (BFF §54.2): one row per live client from ONE set read.
+ *  A `ReadResult`, so a refused or failed read is a refusal the page can name ("Could not be loaded"), never an empty
+ *  board: a board with no rows would say the company has no clients. A 404 (a server that predates §54, or the clients
+ *  module off) is `unavailable`, not "no clients". */
+export const getClientHealthBoard = (userId: string, tenant: string): Promise<ReadResult<ClientHealthBoard>> =>
+  readResult((async () => platformFetch<ClientHealthBoard>(`/api/${tenant}/clients/health`, userId))());

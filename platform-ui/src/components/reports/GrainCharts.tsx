@@ -219,6 +219,31 @@ export function ProjectCharts({ document }: { document: ReportDocument }) {
   );
 }
 
+/** PV7-05 — the client grain: the project grain's charts, then the client's own Projects table (which of its eligible
+ *  projects carried the work; always present for a client with a project, 0 where a project had no facts: BFF §53). It
+ *  has no overdue-tasks table: project documents are internal and a client document draws on the same facts, not task titles. */
+export function ClientCharts({ document }: { document: ReportDocument }) {
+  const { header } = document;
+  const throughput = findSeries(document, "throughput_weighted");
+  const projects = findTable(document, "client_projects");
+  return (
+    <div className="rc-sections-grid">
+      <CommonCharts document={document} />
+      {throughput && (
+        <Section title="Throughput (weighted)">
+          <GroupedBars kind="time" series={[throughput]} dayCount={header.dayCount} title="Throughput" />
+        </Section>
+      )}
+      {projects && (
+        <Section title={projects.label}>
+          <ReportTableView table={projects} />
+        </Section>
+      )}
+      <RemainingSections document={document} consumed={{ series: ["throughput_weighted"], dists: [], tables: ["client_projects"] }} />
+    </div>
+  );
+}
+
 export function DepartmentCharts({ document }: { document: ReportDocument }) {
   const { header } = document;
   const throughput = findSeries(document, "throughput_weighted");
