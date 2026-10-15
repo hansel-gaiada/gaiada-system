@@ -194,6 +194,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/admin/employees.controller.ts` |
 | `/api` | `platform-nest/src/admin/intelligence.controller.ts` |
 | `/api` | `platform-nest/src/admin/it-accounts.controller.ts` |
+| `/api` | `platform-nest/src/admin/it-security.controller.ts` |
 | `/api` | `platform-nest/src/admin/positions.controller.ts` |
 | `/api` | `platform-nest/src/admin/role-grants.controller.ts` |
 | `/api` | `platform-nest/src/admin/service-assignments.controller.ts` |
@@ -705,7 +706,7 @@ Declared `id` is load-bearing (sub-workflow references). Import with the CLI, ne
 
 Contracts + top-level docs (`docs/`): `BLUEPRINTS.md`, `FRONTEND-BFF-CONTRACT.md`, `PERMISSION-CONTRACT.md`, `PLACEHOLDER-PRINCIPALS.md`, `a11y-manual-checklist.md`, `sidebar-nav-map.md`, `ui-work-split.md`
 
-Runbooks (`infra/runbooks/`): `ai-crawler-log.md`, `alerting-wire-a-real-receiver.md`, `certified-signing-simulated.md`, `company-seal-keys.md`, `db-topology-cutover.md`, `deploy-vps.md`, `drive-and-figma-connections.md`, `enable-estate-blackbox-and-alert-routing.md`, `enable-mfa.md`, `erp-edge-sumopod.md`, `erp-name-cutover.md`, `erp-offsite-backup.md`, `internal-ca.md`, `keycloak-production-mode.md`, `local-model-serving.md`, `m5-phase3-go-live.md`, `midtrans-payments.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `restore-drill.md`, `umami-sumopod.md`, `webdesk-control-channel.md`, `webdesk-domain-dns.md`, `webdesk-editorial-keys.md`, `webdesk-live-swap.md`, `webdesk-site-delivery.md`, `webdesk-staging-rebuild.md`, `webdesk-ws4-keys.md`, `webdesk-zoneb-backups.md`, `webdesk-zoneb-box-hardening.md`, `webdesk-zoneb-otel.md`, `webdesk-zoneb-status-page.md`
+Runbooks (`infra/runbooks/`): `ai-crawler-log.md`, `alerting-wire-a-real-receiver.md`, `certified-signing-simulated.md`, `company-seal-keys.md`, `db-topology-cutover.md`, `deploy-vps.md`, `drive-and-figma-connections.md`, `enable-estate-blackbox-and-alert-routing.md`, `enable-mfa.md`, `erp-edge-sumopod.md`, `erp-name-cutover.md`, `erp-offsite-backup.md`, `internal-ca.md`, `keycloak-production-mode.md`, `keycloak-security-events.md`, `local-model-serving.md`, `m5-phase3-go-live.md`, `midtrans-payments.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `restore-drill.md`, `umami-sumopod.md`, `webdesk-control-channel.md`, `webdesk-domain-dns.md`, `webdesk-editorial-keys.md`, `webdesk-live-swap.md`, `webdesk-site-delivery.md`, `webdesk-staging-rebuild.md`, `webdesk-ws4-keys.md`, `webdesk-zoneb-backups.md`, `webdesk-zoneb-box-hardening.md`, `webdesk-zoneb-otel.md`, `webdesk-zoneb-status-page.md`
 
 Ops scripts (`infra/scripts/`): `backup-cron.sh`, `backup.sh`, `client-targets-forced-command.sh`, `erp-backup-read.sh`, `erp-offsite-pull.sh`, `healthcheck.sh`, `lint-observability.sh`, `pull-client-property-targets.sh`, `restore-drill.sh`, `rollback-to.sh`, `sync-client-property-targets.sh`, `test-all.sh`, `wire-env.sh`
 
