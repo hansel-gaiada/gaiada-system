@@ -31,6 +31,7 @@ const readTime = vi.fn();
 vi.mock("@/lib/entities", () => ({ readMyTimeEntries: (...a: unknown[]) => readTime(...a) }));
 
 import Page from "./page";
+import { MY_ACTIVITY_HREF } from "@/components/overview/widgets/MyActivityBlock";
 import { PlatformError } from "@/lib/platform";
 import type { ReportDocument, ReportKpi } from "@/lib/reports";
 
@@ -121,7 +122,8 @@ describe("/me/performance", () => {
     expect(href("Appraisal", "My appraisals")).toBe("/appraisals/mine");
     expect(href("Learning", "My learning")).toBe("/me/learning");
     expect(href("Your time", "My timesheet")).toBe("/timesheets");
-    expect(href("Activity", "Open my activity")).toBe("/pm?view=productivity");
+    // The link follows MY_ACTIVITY_HREF (DW-4i moved My activity to /analytics/activity), never a pinned literal.
+    expect(href("Activity", "Open my activity")).toBe(MY_ACTIVITY_HREF);
   });
 
   it("the appraisal section shows no effort or hours figure, and no score", async () => {
