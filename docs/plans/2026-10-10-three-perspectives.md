@@ -631,7 +631,7 @@ sumopod. MAP is regenerated from a clean worktree.
 | 3 | **PV-4: Conversation** (tickets: `2026-10-12-pv4-conversation-tickets.md`) | threads and messages tables; the new Cerbos kind (six artifacts); portal and hub UI; SSE topic; notifications; MCP tool; the billing-landing rule enforced on price-changing change requests | D5, PV-2, PV-3 |
 | 4 | **PV-5: Contracts & billing depth** (tickets: `2026-10-12-pv5-contracts-billing-tickets.md`) | invoice of record (number, issue and due dates, tax, issuer legal details from company settings); **intercompany tagging** of invoices to group clients (F9-04); a client document library; signature tiers; gateway | D7, D8, D9; Finance |
 | 5 | **PV-6: Client Business re-cut** (tickets: `2026-10-13-pv6-business-areas-tickets.md`) | Business areas with Setup · Connections · Services & results; service KPIs by `client_id`; placeholder leaves removed; reconcile with AD-3 (CC-D6) | D6 |
-| 6 | **PV-7: Performance surfaces** (tickets: `2026-10-15-pv7-performance-views-tickets.md`) | the client grain; the agency client health board; the client Overview KPIs; client report publication; My performance for employees | PV-6, the reports program |
+| 6 | **PV-7: Performance surfaces** (tickets: `2026-10-15-pv7-performance-views-tickets.md`; COMPLETE 2026-10-15, live in 407, 409 and 411) | the client grain; the agency client health board; the client Overview KPIs; client report publication; My performance for employees | PV-6, the reports program |
 | — | **PV-8: Viceroy HMS and F&B** | **DEFERRED** (PV-D3, §5.2) | owner reopens it |
 | — | **PV-9: Group tier** | the group dashboard with per-vertical cards; sum vs consolidated money | PV-1; a second company with books; F9 eliminations |
 

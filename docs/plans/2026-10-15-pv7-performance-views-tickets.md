@@ -1,6 +1,31 @@
 # PV-7: Performance views (tickets)
 
-**Status: PLANNED (2026-10-15).** Started by the owner ("start pv7"). Nothing is built yet.
+**Status: COMPLETE, DEV-VERIFIED live (2026-10-15).** Started by the owner ("start pv7") and finished the same day
+("proceed to finish it"). All nine tickets are live:
+
+- **1.0.0-alpha.407:** PV7-01 (client grain), PV7-02 (client health backend), PV7-06 (My performance).
+- **1.0.0-alpha.409:** PV7-03 (health on the client Overview), PV7-04a and PV7-04b (client reports), PV7-05 (the health
+  board and Reports › Client).
+- **1.0.0-alpha.411:** PV7-07 (the monthly account summary), PV7-08 (agent tools).
+- **PV7-09, the live drive (on 411, review data):**
+  - **Access, probed against the live policy:** `read_client` 7/7 and `client_report` 9/9 (automation and bot
+    principals cannot publish or withdraw).
+  - **As the owner:** the board for 70 clients in about 1 s; one client's health; the client document with its project
+    list.
+  - **One labelled test summary** ("ZZ TEST PV7-09"): drafted with an AI narrative, edited, published (the PDF rendered
+    in 4.7 s) and withdrawn with a reason.
+  - **As the placeholder contact `portal@hubble-bali.test`:**
+    - the portal health view, with no forbidden field;
+    - the staff reads refused (403);
+    - the report listed with New, downloaded as a 148 KB PDF, and New cleared on read;
+    - after the withdraw, the report gone from the list and its file and read marker 404.
+  - **Backfill:** a dry run found nothing to back-fill.
+  - **e2e and axe on sumopod:** portal 28/28, the staff client pages and the board 21/21, My performance 3/3 (after a
+    stale e2e expectation for the activity link was fixed, `ad4c8db5`).
+- **Teardown:** the test summary stays as a withdrawn row, hidden from the client: one report, its file, one read marker,
+  one notification and four activity rows.
+- **Still open, non-blocking:** owner questions PV7-Q1 to Q4 and Q6 (the lead's defaults are in force). PV7-Q5 was
+  answered by DW-D29.
 
 - **Parent plan:** `docs/plans/2026-10-10-three-perspectives.md` §3.4 (the client's performance view),
   §4.3 (the employee's productivity view), §5.1 (the client health board), §5.4 (the client grain),
