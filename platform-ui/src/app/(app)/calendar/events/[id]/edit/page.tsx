@@ -6,7 +6,7 @@ import { getActiveTenant } from "@/lib/tenant";
 import { listClients, listMembers, listProjects } from "@/lib/entities";
 import { EVENT_NOT_FOUND, getEvent } from "@/lib/calendarEvents-data";
 import { formInputOf } from "@/lib/calendarEvents";
-import { updateEventAction } from "@/lib/calendarEventsActions";
+import { loadBusyExcludingEventAction, updateEventAction } from "@/lib/calendarEventsActions";
 import { DISPLAY_TZ } from "@/lib/format";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui";
@@ -16,6 +16,7 @@ import { EventForm } from "@/components/calendar/EventForm";
 
 // DW-8g: edit an event (BFF §47.3 PATCH): the organizer and a company admin, which is the backend's `canEdit`. The form
 // here is the schedule form with the event's values; "Record this meeting" is chosen when the event is made, so it is not offered.
+// Busy times (§47.4) leave THIS event out (`excludeEventId`), so it never shows as busy against itself.
 type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ company?: string }> };
 
 export default async function EditEventPage({ params, searchParams }: Props) {
@@ -81,8 +82,10 @@ export default async function EditEventPage({ params, searchParams }: Props) {
           linksUnavailable={clients === null || projects === null}
           canRecord={false}
           hiddenPersonId={ev.organizer.id}
+          viewerId={me.userId}
           zoneLabel={DISPLAY_TZ}
           save={updateEventAction.bind(null, ev.tenantId, ev.id)}
+          loadBusy={loadBusyExcludingEventAction.bind(null, ev.tenantId, ev.id)}
           cancelHref={back}
         />
       </Card>

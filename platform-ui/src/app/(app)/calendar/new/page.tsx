@@ -7,7 +7,7 @@ import { gateAllows } from "@/lib/workspaceAccess";
 import { DISPLAY_TZ, todayIsoInDisplayZone } from "@/lib/format";
 import { zoneTime } from "@/lib/zoneTime";
 import { defaultFormInput } from "@/lib/calendarEvents";
-import { createEventAction } from "@/lib/calendarEventsActions";
+import { createEventAction, loadBusyAction } from "@/lib/calendarEventsActions";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -15,7 +15,7 @@ import { EventForm } from "@/components/calendar/EventForm";
 
 // DW-8g: schedule a meeting (BFF §47.5). The event is created in the ACTIVE company. The people to invite are that
 // company's members (`GET /:t/members`). "Record this meeting" is offered only where the Meetings row is, the same gate the
-// nav and the workspaces use. Busy times for the chosen people (§47.4) are not built, so none are shown.
+// nav and the workspaces use. The chosen people's busy times for the picked day (§47.4, DW-D28) come from `loadBusyAction`.
 export default async function NewEventPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
@@ -56,8 +56,10 @@ export default async function NewEventPage() {
           linksUnavailable={clients === null || projects === null}
           canRecord={canRecord}
           hiddenPersonId={me.userId}
+          viewerId={me.userId}
           zoneLabel={DISPLAY_TZ}
           save={createEventAction.bind(null, tenant)}
+          loadBusy={loadBusyAction.bind(null, tenant)}
           cancelHref="/calendar"
         />
       </Card>

@@ -4,7 +4,7 @@
 import { DISPLAY_TZ } from "./format";
 import type { CalItem } from "./calendar";
 import { monthGrid, weekDays } from "./calendar";
-import { allDayEventDays, timedEventDays, zoneDay, zoneTime, zonedToInstant } from "./zoneTime";
+import { allDayEventDays, timedEventDays, windowForDays, zoneDay, zoneTime, zonedToInstant, zonedToMs } from "./zoneTime";
 
 export type EventStatus = "confirmed" | "cancelled";
 export type EventResponse = "needs_action" | "accepted" | "declined" | "tentative";
@@ -360,3 +360,53 @@ export type EventActionResult = { ok: true; id?: string; href?: string } | { ok:
 /** The event page's address. `company` carries the event's company, so a link from another company's calendar opens it
  *  where it lives. */
 export const eventHref = (tenantId: string, id: string): string => `/calendar/events/${encodeURIComponent(id)}?company=${encodeURIComponent(tenantId)}`;
+
+// ───────────────────────────────────────── busy times (§47.4, DW-D28) ─────────────────────────────────────────
+
+/** `GET /api/:t/calendar/busy` (§47.4): times only, one entry per person asked, in the order asked. */
+export interface BusyPerson { userId: string; intervals: { startsAt: string; endsAt: string }[] }
+/** What the form's `loadBusy` and the action return: a value, never a thrown refusal. `{ ok: false }` means "unknown", which
+ *  the form says in words and never draws as "everyone is free". */
+export type BusyResult = { ok: true; busy: BusyPerson[] } | { ok: false };
+export type LoadBusy = (userIds: string[], fromIso: string, toIso: string) => Promise<BusyResult>;
+/** The most people one busy read takes (the backend's limit). */
+export const BUSY_PEOPLE_MAX = 20;
+
+/** The window `[00:00, 24:00)` of a day in `tz`, as ISO instants; null for a date that is not real. */
+export function busyDayWindow(day: string, tz: string = DISPLAY_TZ): { from: string; to: string } | null {
+  if (Number.isNaN(zonedToMs(day, "00:00", tz))) return null;
+  return windowForDays(day, day, tz);
+}
+
+/** The busy intervals of one person, cut to the picked day for DISPLAY (the answer itself is never clipped: an interval
+ *  that began the day before reads here as "00:00-..."). Each is `[startMs, endMs)`; `end24` marks an end at the day's end. */
+function onDay(intervals: BusyPerson["intervals"], day: string, tz: string): { s: number; e: number; end24: boolean }[] {
+  const w = busyDayWindow(day, tz);
+  if (!w) return [];
+  const from = Date.parse(w.from), to = Date.parse(w.to);
+  const out: { s: number; e: number; end24: boolean }[] = [];
+  for (const i of intervals) {
+    const s = Date.parse(i.startsAt), e = Date.parse(i.endsAt);
+    if (Number.isNaN(s) || Number.isNaN(e) || !(s < to && e > from)) continue;
+    out.push({ s: Math.max(s, from), e: Math.min(e, to), end24: e >= to });
+  }
+  return out.sort((a, b) => a.s - b.s || a.e - b.e);
+}
+
+/** A person's busy times on a day, in `tz`: "09:00-10:30, 14:00-15:00", or "Free". A block that runs to the end of the day
+ *  reads "-24:00", never "-00:00". */
+export function busyText(intervals: BusyPerson["intervals"], day: string, tz: string = DISPLAY_TZ): string {
+  const list = onDay(intervals, day, tz);
+  if (list.length === 0) return "Free";
+  return list.map((i) => `${zoneTime(i.s, tz)}-${i.end24 ? "24:00" : zoneTime(i.e, tz)}`).join(", ");
+}
+
+/** Whether any busy interval overlaps the chosen `[start, end)` on `day` (typed in `tz`). False while the chosen time is not
+ *  a real range, so a half-typed time never flags a clash. */
+export function busyClashes(
+  intervals: BusyPerson["intervals"], day: string, startTime: string, endTime: string, tz: string = DISPLAY_TZ,
+): boolean {
+  const s = zonedToMs(day, startTime, tz), e = zonedToMs(day, endTime, tz);
+  if (Number.isNaN(s) || Number.isNaN(e) || e <= s) return false;
+  return intervals.some((i) => Date.parse(i.startsAt) < e && Date.parse(i.endsAt) > s);
+}

@@ -1,9 +1,12 @@
 "use client";
-import { useMemo, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui";
-import { validateEventForm, type EventActionResult, type EventFormInput } from "@/lib/calendarEvents";
+import {
+  BUSY_PEOPLE_MAX, busyClashes, busyDayWindow, busyText, validateEventForm,
+  type BusyPerson, type EventActionResult, type EventFormInput, type LoadBusy,
+} from "@/lib/calendarEvents";
 import "@/components/forms/forms.css";
 import "./calendar.css";
 
@@ -13,6 +16,10 @@ import "./calendar.css";
 //
 // The actions are passed in (not imported) so a test can drive the form with a mock, and so the page decides which
 // event and which company a save belongs to.
+//
+// DW-8o (§47.4, DW-D28): with `loadBusy`, a timed event, a picked day and at least one person, the form shows the chosen
+// people's busy TIMES for that day ("Busy that day"), in the display zone, and calls out a clash with the chosen time in
+// words. Times only: the answer carries no title, place or organizer. A failed or unknown read says so, never "all free".
 
 export interface PickMember { id: string; name: string }
 export interface PickClient { id: string; name: string }
@@ -21,7 +28,7 @@ export interface PickProject { id: string; name: string; clientId: string | null
 export type SaveEventAction = (input: EventFormInput, names: Record<string, string>) => Promise<EventActionResult>;
 
 export function EventForm({
-  mode, initial, members, clients, projects, linksUnavailable = false, canRecord, hiddenPersonId, zoneLabel, save, cancelHref,
+  mode, initial, members, clients, projects, linksUnavailable = false, canRecord, hiddenPersonId, viewerId, zoneLabel, save, cancelHref, loadBusy,
 }: {
   mode: "create" | "edit";
   initial: EventFormInput;
@@ -35,10 +42,15 @@ export function EventForm({
   canRecord: boolean;
   /** The organizer: always invited, so not listed as a choice. */
   hiddenPersonId: string;
+  /** Who is using the form, so their own row reads "You". Defaults to the organizer (right on the schedule page; on the edit
+   *  page a company admin editing someone else's event passes their own id). */
+  viewerId?: string;
   /** The display zone, in words, e.g. "Asia/Singapore". */
   zoneLabel: string;
   save: SaveEventAction;
   cancelHref: string;
+  /** Busy times of the chosen people for a window (BFF §47.4). Without it, no "Busy that day" block is drawn. */
+  loadBusy?: LoadBusy;
 }) {
   const router = useRouter();
   const [v, setV] = useState<EventFormInput>(initial);
@@ -54,6 +66,36 @@ export function EventForm({
   const others = members.filter((m) => m.id !== hiddenPersonId);
   const needle = filter.trim().toLowerCase();
   const listed = others.filter((m) => !needle || m.name.toLowerCase().includes(needle) || v.attendeeIds.includes(m.id));
+
+  // ── busy times: who (the organizer and the invited, in the order shown), which day, and the fetch ──────────────────────
+  const people = useMemo(() => [hiddenPersonId, ...v.attendeeIds.filter((id) => id !== hiddenPersonId)], [hiddenPersonId, v.attendeeIds]);
+  const busyWindow = !v.allDay ? busyDayWindow(v.date) : null;
+  const busyWanted = !!loadBusy && !!busyWindow && people.length > 0;
+  const tooMany = busyWanted && people.length > BUSY_PEOPLE_MAX;
+  const busyKey = busyWanted && !tooMany ? `${v.date}|${people.join(",")}` : "";
+  type BusyState = { kind: "loading" } | { kind: "unavailable"; key: string } | { kind: "ready"; key: string; busy: BusyPerson[] };
+  const [busyState, setBusyState] = useState<BusyState>({ kind: "loading" });
+  const loadBusyRef = useRef(loadBusy);
+  loadBusyRef.current = loadBusy;
+  useEffect(() => {
+    if (!busyKey) return;
+    const w = busyDayWindow(v.date);
+    const fn = loadBusyRef.current;
+    if (!w || !fn) return;
+    let stale = false;
+    setBusyState({ kind: "loading" });
+    const timer = setTimeout(() => {
+      fn(people, w.from, w.to).then(
+        (r) => { if (!stale) setBusyState(r.ok ? { kind: "ready", key: busyKey, busy: r.busy } : { kind: "unavailable", key: busyKey }); },
+        () => { if (!stale) setBusyState({ kind: "unavailable", key: busyKey }); },
+      );
+    }, 400);
+    return () => { stale = true; clearTimeout(timer); };
+    // `people` and `v.date` are what `busyKey` is made of.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busyKey]);
+  const youId = viewerId ?? hiddenPersonId;
+  const busyName = (id: string) => (id === youId ? "You" : names[id] ?? "Someone");
 
   function toggle(id: string) {
     set("attendeeIds", v.attendeeIds.includes(id) ? v.attendeeIds.filter((x) => x !== id) : [...v.attendeeIds, id]);
@@ -140,6 +182,35 @@ export function EventForm({
         </span>
         {err("attendeeIds") && <span className="lux-field__error" role="alert">{err("attendeeIds")}</span>}
       </fieldset>
+
+      {busyWanted && (
+        <section className="cal-busy" aria-labelledby="cal-busy-h">
+          <h3 id="cal-busy-h" className="lux-field__label">Busy that day</h3>
+          {tooMany ? (
+            <p className="lux-field__hint" role="status">Busy times are shown for up to {BUSY_PEOPLE_MAX} people at a time.</p>
+          ) : busyState.kind === "loading" || busyState.key !== busyKey ? (
+            <p className="lux-field__hint" role="status">Checking busy times...</p>
+          ) : busyState.kind === "unavailable" ? (
+            <p className="lux-field__hint" role="status">Busy times are unavailable right now.</p>
+          ) : (
+            <ul className="cal-busy__list">
+              {people.map((id) => {
+                const p = busyState.busy.find((b) => b.userId === id);
+                // A person the answer left out is UNKNOWN, not free.
+                const text = p ? busyText(p.intervals, v.date) : "Not available";
+                const clash = !!p && busyClashes(p.intervals, v.date, v.startTime, v.endTime);
+                return (
+                  <li key={id} className="cal-busy__row">
+                    <span className="cal-busy__who">{busyName(id)}</span>{" "}
+                    <span className="cal-busy__times">{text}</span>
+                    {clash && <>{" "}<strong className="cal-busy__clash">Clashes with the chosen time</strong></>}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      )}
 
       <div className="lux-form-grid">
         {Row({ id: "location", label: "Place", children: (

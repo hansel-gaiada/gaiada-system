@@ -13,7 +13,7 @@ vi.mock("./platform", async () => {
 });
 
 import { platformFetch, PlatformError } from "./platform";
-import { cancelEventAction, createEventAction, respondEventAction, updateEventAction } from "./calendarEventsActions";
+import { cancelEventAction, createEventAction, loadBusyAction, loadBusyExcludingEventAction, respondEventAction, updateEventAction } from "./calendarEventsActions";
 import { getEvent, listMyEvents, EVENT_NOT_FOUND } from "./calendarEvents-data";
 import { defaultFormInput } from "./calendarEvents";
 
@@ -125,5 +125,54 @@ describe("readers", () => {
     expect(await getEvent("u1", "co-a", "e1")).toEqual({ kind: "unavailable", reason: "socket hang up" });
     fetchMock.mockResolvedValueOnce({ id: "e1" });
     expect(await getEvent("u1", "co-a", "e1")).toEqual({ kind: "ok", data: { id: "e1" } });
+  });
+});
+
+describe("loadBusyAction (DW-8o, BFF §47.4)", () => {
+  const U1 = "0190a000-0000-7000-8000-000000000001", U2 = "0190a000-0000-7000-8000-000000000002";
+  const FROM = "2026-10-13T16:00:00.000Z", TO = "2026-10-14T16:00:00.000Z";
+  const answer = { busy: [{ userId: U1, intervals: [{ startsAt: "2026-10-14T02:00:00.000Z", endsAt: "2026-10-14T03:00:00.000Z" }] }, { userId: U2, intervals: [] }] };
+
+  it("GETs /api/<company>/calendar/busy with the comma list and the window, and returns the people's times", async () => {
+    fetchMock.mockResolvedValueOnce(answer);
+    const r = await loadBusyAction("co-a", [U1, U2], FROM, TO);
+    expect(r).toEqual({ ok: true, busy: answer.busy });
+    const [url, , init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`/api/co-a/calendar/busy?userIds=${U1},${U2}&from=${encodeURIComponent(FROM)}&to=${encodeURIComponent(TO)}`);
+    expect(init).toBeUndefined(); // a plain GET: no method, no body
+  });
+
+  it("passes excludeEventId when given (the edit page), and the bound edit action puts the event id there", async () => {
+    fetchMock.mockResolvedValue(answer);
+    await loadBusyAction("co-a", [U1], FROM, TO, "ev-1");
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/&excludeEventId=ev-1$/);
+    await loadBusyExcludingEventAction("co-a", "ev-2", [U1], FROM, TO);
+    expect(String(fetchMock.mock.calls[1][0])).toMatch(/&excludeEventId=ev-2$/);
+  });
+
+  it("never throws into the form: a refusal, a failure, a malformed answer, a company the caller is not in and a bad list are each { ok: false }", async () => {
+    fetchMock.mockRejectedValueOnce(refused(403, "forbidden"));
+    expect(await loadBusyAction("co-a", [U1], FROM, TO)).toEqual({ ok: false });
+    fetchMock.mockRejectedValueOnce(new Error("socket hang up"));
+    expect(await loadBusyAction("co-a", [U1], FROM, TO)).toEqual({ ok: false });
+    fetchMock.mockRejectedValueOnce(refused(422, "user_not_member", { error: "user_not_member", detail: { userId: U2 } }));
+    expect(await loadBusyAction("co-a", [U1, U2], FROM, TO)).toEqual({ ok: false });
+    for (const bad of [null, {}, { busy: "x" }, { busy: [{ userId: U1 }] }, { busy: [{ userId: U1, intervals: [{ startsAt: 1, endsAt: "x" }] }] }]) {
+      fetchMock.mockResolvedValueOnce(bad);
+      expect(await loadBusyAction("co-a", [U1], FROM, TO), JSON.stringify(bad)).toEqual({ ok: false });
+    }
+    fetchMock.mockClear();
+    expect(await loadBusyAction("co-zzz", [U1], FROM, TO)).toEqual({ ok: false });
+    expect(await loadBusyAction("co-a", [], FROM, TO)).toEqual({ ok: false });
+    expect(await loadBusyAction("co-a", Array.from({ length: 21 }, (_, i) => `u${i}`), FROM, TO)).toEqual({ ok: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("is a read: it revalidates nothing", async () => {
+    const { revalidatePath } = await import("next/cache");
+    vi.mocked(revalidatePath).mockClear();
+    fetchMock.mockResolvedValueOnce(answer);
+    await loadBusyAction("co-a", [U1], FROM, TO);
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });
