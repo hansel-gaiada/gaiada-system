@@ -477,6 +477,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/finance`
 - `/finance/[...unbuilt]`
 - `/finance/accounts`
+- `/finance/analytics`
 - `/finance/assets`
 - `/finance/close`
 - `/finance/consolidation`

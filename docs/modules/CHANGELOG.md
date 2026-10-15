@@ -11,6 +11,19 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.176.0` - DW-7e-3 + DW-7b-2: what the new Pulse tiles cover; Finance's "Revenue, AR and cash" page (2026-10-15) - PROTOTYPED
+
+Plan §3.8 (DW-7e-3 verdicts) and §4.3. UI only: no backend change, no new route.
+- **DW-7e-3.** By §3.8's test, only Finance's "Can this period close?" card leaves "More from Finance": the Close progress tile reads the same current period and links Close. Each verdict is in `overviewCoverage.ts` and plan §3.8:
+  - HR's counts card stays: People and Departments have no tile.
+  - Finance's totals and Integrity stay (the card is the only list of failing checks).
+  - IT's device counts stay: only "offline" has a tile.
+- **DW-7b-2.** `/finance/analytics` (Finance › Analytics › "Revenue, AR and cash", gated on `finance.statement.view`). Three sections, each reading on its own (`lib/finance-data.ts`); a refused or failed read says so, never 0:
+  - Revenue by month: 12 months of the P&L, with revenue, net and margin, and a bar chart (`MonthBars`; a failed month draws a dashed stub, not a zero bar).
+  - Receivables: the aging buckets, the overdue share, and the top 5 overdue customers.
+  - Cash: asset accounts named kas, bank or cash in today's trial balance. That is the books' figure, said in the card; a proper cash/bank flag is later work.
+- **Tests:** `financeAnalytics.test.ts`, `analytics/page.test.tsx`, `finance-data.test.ts`, `overviewCoverage.test.ts`, the registry pins; e2e `workspace-functional` gains the analytics walk, and `workspace-shell` expects the close card hidden in the pilot on `/finance`.
+
 ### platform-nest `0.152.0` + platform-ui `0.175.0` + mcp-hub `0.16.0` - DW-8o busy times, DW-8p time entries by tier, DW-8i-2 the assistant and the hub use the knowledge filter (2026-10-15) - PROTOTYPED
 
 Owner rulings DW-D26, DW-D28 and DW-D29 (plan §11.4 and its decision log, 2026-10-15). Contracts: `docs/FRONTEND-BFF-CONTRACT.md` §46.9, §47.4 and §48a; `docs/PERMISSION-CONTRACT.md` §39 and §40a. No migration, no Cerbos policy change, no compose change.
