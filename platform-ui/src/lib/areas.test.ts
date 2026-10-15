@@ -146,6 +146,15 @@ describe("areaFor", () => {
     expect(areaFor("/me/performance?x=1")).toEqual({ kind: "performance" });
   });
 
+  it("PV7-05: the health board keeps the Clients list's area, and the client report is Performance like the other grains", () => {
+    expect(areaFor("/clients")).toEqual({ kind: "shared" });
+    expect(areaFor("/clients/health")).toEqual({ kind: "shared" });
+    expect(areaFor("/clients/health?state=at_risk")).toEqual({ kind: "shared" });
+    expect(areaFor("/clients/cl-1")).toEqual({ kind: "shared" }); // a client record is not swallowed by the static rule
+    for (const g of ["person", "project", "client"]) expect(areaFor(`/reports/${g}`)).toEqual({ kind: "performance" });
+    expect(areaFor("/reports/client?scopeRef=c-1")).toEqual({ kind: "performance" });
+  });
+
   it("returns shared for a path no rule covers", () => {
     expect(areaFor("/nope")).toEqual({ kind: "shared" });
   });

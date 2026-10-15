@@ -32,6 +32,7 @@ import { NETWORK_FIXTURES } from "./demoNetwork";
 import { websiteAccessDemo } from "./demoWebsiteAccess";
 import { billingDemo, demoBillingNeedsClient, demoBillingNeedsUs, demoBillingPendingTotal } from "./demoBilling";
 import { buildDemoClientHealth } from "./demoClientHealth";
+import { buildDemoClientHealthBoard } from "./demoClientHealthBoard";
 
 export interface DemoResult {
   status: number;
@@ -3144,6 +3145,10 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       conversationsAwaitingReply,
     });
   }
+  // PV7-05 — the staff health board (BFF §54.2). A static segment, matched BEFORE the `clients/:id` routes so "health" is
+  // never read as a client id. `co-resort` gets the degraded variant (the site source unreadable) so Unknown is drivable.
+  const healthBoard = p.match(/^\/api\/([^/]+)\/clients\/health$/);
+  if (healthBoard && m === "GET") return ok(buildDemoClientHealthBoard(new Date(), { degraded: healthBoard[1] === "co-resort" }));
   // PV7-03 — client health for ONE client (BFF §54.2), built from the same stores as the overview above. The board
   // (`/clients/health`, PV7-05) is a different route: a static segment, never read as a client id.
   const clientHealth = p.match(/^\/api\/([^/]+)\/clients\/([^/]+)\/health$/);
@@ -3277,6 +3282,15 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       CLIENTS.push(c);
       demoCentreRegisterClient(c.id, c.name, c.status, b.businessType, userId);
       return { status: 201, json: { id: c.id } };
+    }
+    // DW-6d / PV7-05: mirror the `departmentId` facet (BFF §33): the clients with a live project that department owns.
+    // The demo tree is flat, so equality on `projects.department_id` is the whole rule; omitted is unchanged.
+    const deptFacet = url.searchParams.get("departmentId");
+    if (deptFacet) {
+      const owned = new Set(Object.values(PROJECTS).flat()
+        .filter((pr) => (pr as { department_id?: string }).department_id === deptFacet && !["completed", "complete", "done", "archived", "cancelled"].includes(String((pr as { status?: string }).status)))
+        .map((pr) => (pr as { client_id?: string | null }).client_id));
+      return ok(CLIENTS.filter((c) => owned.has(c.id as string)));
     }
     return ok(CLIENTS);
   }

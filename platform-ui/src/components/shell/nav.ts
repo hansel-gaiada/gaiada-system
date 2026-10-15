@@ -59,8 +59,6 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     // CC-D8 — no separate "Client Centre" row: a client's profile is the Profile tab of the client
     // hub, so one client has one page (the old `/client-centre` routes redirect there).
     ...rowIf("clients", { label: "Clients", href: "/clients", icon: "finance" }),
-    // PV7-05: the staff health board, a sibling of the list (same gate).
-    ...rowIf("clients", { label: "Client health", href: "/clients/health", icon: "pulse" }),
     ...rowIf("deliverables", { label: "Deliverables", href: "/deliverables", icon: "box" }),
     ...rowIf("timesheets", { label: "Timesheets", href: "/timesheets", icon: "clock" }),
     ...rowIf("invoices", { label: "Invoices", href: "/invoices", icon: "wallet" }, can(me, "company.manage", tenantId)),
@@ -193,7 +191,6 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     { label: "Reports", icon: "chart", items: [
       { label: "My Report", href: "/reports/person", icon: "pulse" },
       { label: "Project Reports", href: "/reports/project", icon: "pulse" },
-      { label: "Client Reports", href: "/reports/client", icon: "pulse" },
       { label: "Department Reports", href: "/reports/department", icon: "pulse" },
     ] },
     // TR-26: `/appraisals/mine` is self-service (every principal reads their own record, always —

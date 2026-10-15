@@ -161,6 +161,20 @@ describe("gates are carried as data, unchanged (plan §2.6 rule 4)", () => {
     return { row, tab: row.tabs.find((t) => t.key === tabKey)! };
   };
 
+  it("PV7-05: every Clients row (the GM's Clients & sales and the department Clients row) has a Health tab at /clients/health under the same gate, and the Clients tab is unchanged", () => {
+    const rows = everyRow().filter((r) => r.tabs.some((t) => t.href === "/clients"));
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    for (const row of rows) {
+      const clients = row.tabs.find((t) => t.href === "/clients")!;
+      const health = row.tabs.find((t) => t.href === "/clients/health");
+      expect(health, `${row.key} has a Health tab`).toBeDefined();
+      expect(health!.label).toBe("Health");
+      expect(clients.label).toBe("Clients");
+      // The same gate as the Clients tab: on the tab, or inherited from the row it sits in.
+      expect(health!.gate ?? row.gate).toEqual(clients.gate ?? row.gate);
+    }
+  });
+
   it("keeps nav.ts's agency-row gate on every row it gates today", () => {
     const AGENCY_ROWS: Record<string, string> = {
       "/clients": "clients", "/deliverables": "deliverables", "/timesheets": "timesheets", "/invoices": "invoices",
@@ -203,6 +217,11 @@ describe("gates are carried as data, unchanged (plan §2.6 rule 4)", () => {
     // DW-4g: a head's two tabs open the page for THEIR department (BFF §38), not the company-wide one.
     expect(learning.tabs.find((t) => t.key === "add")!.href).toBe("/learning/authoring?unit={dept}");
     expect(learning.tabs.find((t) => t.key === "team")!.href).toBe("/learning/compliance?unit={dept}");
+    // PV7-05: the Reports row gains a Client tab (the project report's read tiers, and only where the company has clients).
+    const reportsClient = PERFORMANCE_ROWS.find((r) => r.key === "reports")!.tabs.find((t) => t.key === "client")!;
+    expect(reportsClient.href).toBe("/reports/client");
+    expect(reportsClient.gate).toEqual({ kind: "all", gates: [{ kind: "cap", cap: "reports.project.view" }, { kind: "agencyRow", row: "clients" }] });
+    expect(PERFORMANCE_ROWS.find((r) => r.key === "reports")!.tabs.map((t) => t.key)).toEqual(["mine", "team", "department", "client"]);
     const reportsTeam = PERFORMANCE_ROWS.find((r) => r.key === "reports")!.tabs.find((t) => t.key === "team")!;
     expect(reportsTeam.gate).toEqual({ kind: "unitCap", cap: "reports.department.view" });
     expect(reportsTeam.href).toBe("/reports/team?unit={dept}");
