@@ -11,6 +11,13 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.153.0` + platform-ui `0.177.0` - PV7-07, PV7-08: the monthly account summary and the agent tools (2026-10-15) - PROTOTYPED
+
+Plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`; contract FRONTEND-BFF-CONTRACT §56 (and agent-tool notes in §54 to §56).
+- **PV7-07, the monthly account summary.** One client, one calendar month, safe to show the client: built only from what a client-wide contact may see (project health, what waits on each side, milestones and deliverables completed in the month, turnaround, the Services & results numbers with every money-like figure stripped, the reports published that month). No tasks, time, people, internal gates or money. `POST /clients/:clientId/reports/summary {period}` drafts it (one live draft per client and month; an AI narrative grounded in the snapshot, else a deterministic one); `PATCH /client-reports/:id {narrativeMd}` edits it; the existing publish renders the PDF and publishes in one step. Frozen once published. The staff client page's Reports tab drafts, previews, edits and publishes it; the portal shows it in Overview › Reports (client-wide contacts). Migration `202610151740_client_report_summary`.
+- **PV7-08, agent tools.** `clients.getHealthBoard`, `clients.getHealth`, `clientReports.list` (read) and `clientReports.draftSummary` (low impact: a draft only). No tool publishes or withdraws a client report.
+- **Deploy.** Migration `202610151740`. No Cerbos change (the `client_report` kind already has `draft`). The PDF renderer sidecar must be up for Publish of a summary (a render failure leaves the draft).
+
 ### platform-ui `0.176.0` - DW-7e-3 + DW-7b-2: what the new Pulse tiles cover; Finance's "Revenue, AR and cash" page (2026-10-15) - PROTOTYPED
 
 Plan §3.8 (DW-7e-3 verdicts) and §4.3. UI only: no backend change, no new route.
