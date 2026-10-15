@@ -8794,11 +8794,26 @@ Tests:
 - **Withheld families** are never returned, because the platform route withholds them (§46.2).
 - Tests: `mcp-hub/src/knowledge-search-tool.test.ts`; `platform-nest/src/modules/assistant/context-knowledge-filter.test.ts`.
 
-**A further finding (DW-8i-3, for the owner).** Two more platform paths read the store's internal tier with only its own rule:
+**A further finding (DW-8i-3).** Two more platform paths read the store's internal tier with only its own rule:
 - the SEO property brief's grounding (`modules/search/search.controller.ts`, `queryPropertyKnowledge` with the property id as scope);
 - social's brand-corpus drafts (`modules/social/knowledge-client.ts`, `queryBrandKnowledge`).
 
-Both pass a scope, but the store matches an empty ACL (`acl = '{}'`, which every internal ERP chunk carries) for ANY scope, so semantically close ERP chunks, such as a meeting transcript, can reach an AI draft. They are not part of DW-D26, which named the assistant and the hub. The likely fix is that each keeps only its own corpus's refs (or goes through the same filter). It is recorded on the DW-8 board for the owner.
+Both pass a scope, but the store matches an empty ACL (`acl = '{}'`, which every internal ERP chunk carries) for ANY scope, so semantically close ERP chunks, such as a meeting transcript, can reach an AI draft. They are not part of DW-D26, which named the assistant and the hub. **Ruled DW-D31 (owner, 2026-10-15): own corpus only, built as §46.10.**
+
+### 46.10 The SEO property brief and social's brand drafts keep only their own corpus (DW-D31, owner 2026-10-15; DW-8i-3) — STATUS: BUILT, PROTOTYPED (the unit suite `modules/knowledge/own-corpus.test.ts` runs anywhere; the DB suites below run on the Linux CI gate)
+
+**Why.** The knowledge store's pre-filter is `tenant_id = ANY(callerTenantSet) AND (acl = '{}' OR scope = ANY(acl))`. Every internal ERP chunk is ingested with an empty ACL, so it matches ANY scope. A lookup scoped to one property's grounding, or to one client's brand corpus, could get back a close ERP chunk (a meeting transcript, a contract file) from any company the caller belongs to, and an AI draft could quote it.
+
+**The rule.** Each lookup keeps only the hits whose `sourceRef` IS the ref its corpus was ingested under. The store returns each chunk's `source_ref` exactly as ingested (`ai-agents/src/knowledge/store.ts`), so this is an exact match:
+- **The SEO property brief** (`modules/search/search.controller.ts`): the grounding is ingested as `search-property:<propertyId>:grounding` and `queryPropertyKnowledge` now takes that ref (`ownRef`) and keeps only its hits.
+- **Social's brand drafts** (`queryBrandKnowledge`, every caller: content briefs, AI drafts, social reports): the corpus is ingested under `sourceRef = brandCorpusScope(company, client)`, so only that ref's hits are kept. The scope string carries the company and the client, so another client's or another company's corpus never matches either.
+- ERP records and the public tier are dropped. Both functions ask the store for `min(topK × 4, 80)` hits so the corpus's own hits are not crowded out, then cut to `topK` (`modules/knowledge/own-corpus.ts`: `ownCorpusTopK`, `keepOwnCorpus`).
+- Nothing else changes: the scope sent, the fail-soft contract (any failure gives no grounding, never a failed draft) and the ingest calls.
+
+**Tests.**
+- `modules/knowledge/own-corpus.test.ts`: a brand lookup returns only its own corpus and never an ERP record, the public tier, another client or another company; a property lookup returns only its own grounding; both ask for the wider candidate count.
+- `modules/search/search-ai-drafts.test.ts`: the brief's fake store now also returns a higher-scored ERP chunk, which reaches neither the brief nor the model prompt.
+- The social suites' fake stores (`content-brief`, `social-ai-drafts`, `social-reports`, `content-brief-sweep-job`) now answer with each chunk's ingested ref, as the real store does. They used to append `#<n>`, a shape the real store never produces.
 
 ## 47. Calendar events and meeting scheduling (DW-8g, 2026-10-14) — `platform-nest/src/core/calendar-events.{controller,service}.ts` (new), migrations `202610151100_calendar_events.sql` and `202610151110_iam_calendar_event_permissions.sql`; UI `/calendar` — **STATUS: BACKEND AND UI BUILT, PROTOTYPED (UI: `/calendar`, `/calendar/new`, `/calendar/events/[id]` and its `/edit`, the Overview Today block and the DEMO_MODE store, tested with vitest and `next build`, not yet driven against a live backend; the backend rules `calendar-events.service.test.ts`, the scheduler pin `meeting-schedule.test.ts` and the Cerbos static pin run anywhere; the HTTP suite `calendar-events.test.ts`, the migration suite `calendar-events-migration.db.test.ts` and the live Cerbos matrix `src/rbac/cerbos-calendar-event.test.ts` are written for the Linux CI gate and have not run yet); busy times (§47.4, DW-D28) BUILT, PROTOTYPED on 2026-10-15 (DW-8o): `GET /:t/calendar/busy` and the "Busy that day" block on the meeting form, tested with vitest and `next build`; the backend HTTP cases in `calendar-events.test.ts` are written for the Linux CI gate and have not run yet)**
 
