@@ -138,6 +138,42 @@ describe("the coverage inventory (plan §3.8)", () => {
   });
 });
 
+describe("DW-7e-3: what the new Pulse tiles cover", () => {
+  const tiles = (slug: string) => bySlug(slug).pulse.filter((t) => t.source);
+  const sources = (slug: string) => tiles(slug).map((t) => t.source);
+  const PULSE = readFileSync(resolve(APP, "../../components/overview/widgets/Pulse.tsx"), "utf8");
+
+  it("only the Finance close gate leaves: Pulse's Close progress reads the current period and links the Close tab", () => {
+    const e = COVERAGE.find((x) => x.page === "finance" && x.section === "close-readiness")!;
+    expect(e.verdict).toBe("covered");
+    expect(e.widget).toBe("pulse");
+    const tile = bySlug("finance").pulse.find((t) => t.source === "finance-close-progress")!;
+    expect(tile.ticket).toBeUndefined();
+    expect(e.hrefs).toContain(tile.href);
+    // The tile's reader takes the period that contains today, as the card did.
+    expect(PULSE).toMatch(/"finance-close-progress":[\s\S]*?currentPeriod\(/);
+    expect(keepsSection("finance", "close-readiness", { framed: true })).toBe(false);
+    expect(keepsSection("finance", "close-readiness", { framed: false })).toBe(true);
+  });
+
+  it("everything else the tiles touch stays: no tile shows the same information as a whole section", () => {
+    // Every section below is something a tile only partly shows: HR's four counts (two have no tile), Finance's four totals
+    // (no tile shows one), the Integrity verdicts (the tile is the number of failures), IT's five counts (only Offline).
+    expect(sources("hr")).toEqual(expect.arrayContaining(["hr-leave-pending", "hr-cases-open"]));
+    expect(sources("it")).toContain("it-devices-offline");
+    expect(sources("finance")).toContain("finance-integrity-findings");
+    for (const [page, section] of [["hr", "kpis"], ["finance", "kpis"], ["finance", "integrity"], ["it", "kpis"]] as const) {
+      const e = COVERAGE.find((x) => x.page === page && x.section === section)!;
+      expect(e.verdict, `${page}/${section}`).toBe("stays");
+      expect(e.by, `${page}/${section}`).toContain("DW-7e-3");
+    }
+  });
+
+  it("the Integrity tile links to /finance, the page that is the only place listing the failing checks", () => {
+    expect(bySlug("finance").pulse.find((t) => t.source === "finance-integrity-findings")!.href).toBe("/finance");
+  });
+});
+
 describe("keepsSection", () => {
   it("keeps everything for a classic page, whatever the inventory says", () => {
     for (const e of COVERAGE) expect(keepsSection(e.page, e.section, { framed: false, access: { numbers: true, money: true } }), `${e.page}/${e.section}`).toBe(true);
@@ -149,9 +185,9 @@ describe("keepsSection", () => {
     expect(keepsSection("department-home", "something-new", { framed: true })).toBe(true);
   });
 
-  it("keeps the HR counts and note, the Finance verdicts and totals, the IT page whole, the Home's Team and KPIs", () => {
+  it("keeps the HR counts and note, the Finance integrity verdicts and totals, the IT page whole, the Home's Team and KPIs", () => {
     for (const [page, section] of [
-      ["hr", "kpis"], ["hr", "scope-note"], ["finance", "kpis"], ["finance", "integrity"], ["finance", "close-readiness"],
+      ["hr", "kpis"], ["hr", "scope-note"], ["finance", "kpis"], ["finance", "integrity"],
       ["it", "kpis"], ["it", "device-events"], ["department-home", "kpis"], ["department-home", "team"], ["department-home", "serviced"],
       ["gm-cockpit", "monitoring"], ["gm-cockpit", "narrowed-notice"],
     ] as const) expect(keepsSection(page, section, { framed: true, access: { numbers: true, money: true } }), `${page}/${section}`).toBe(true);

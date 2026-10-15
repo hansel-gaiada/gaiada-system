@@ -433,23 +433,23 @@ that leaves is not read either.
 | | Client monitoring | **Not covered.** No block shows it (the GM's Pulse tiles stay planned) and the Office of the GM has no Monitoring tab: that row is Web Dev's |
 | | Money (revenue, net margin, overdue receivables) | **Covered by Company's money part**, which has the card's own gate and rules: revenue with its net amount, overdue receivables with the 90+ days line, the no-books note, and a Finance link. The net margin rate (net over revenue) is drawn too, since DW-D22 (DW-3z2); see the decision below |
 | HR | "You serve HR for N companies" note | **Not covered.** No block or tab says which companies the person serves |
-| | People, Departments, Leave pending, Open cases | **Not covered.** HR's Pulse tiles are DW-7e |
+| | People, Departments, Leave pending, Open cases | **Not covered.** HR's Pulse tiles are DW-7e. *DW-7e-3: still not covered.* Pulse now shows Leave pending and Open cases, but People and Departments have no tile and the card is one grid of four, so the counts stay |
 | | Leave, Attendance, Onboarding, Cases cards | **Reachable at** Time > Leave, Time > Attendance, People > Onboarding, Cases & compliance > Cases. Each card is a link and one line |
 | | People directory | **Reachable at** People > Directory and People > Org structure. The card is two links and a paragraph |
-| Finance | Total assets, Receivables, Payables, Trial balance | **Not covered.** Finance's Pulse tiles are DW-7e |
-| | Integrity | **Not covered.** The ledger-chain check has no other page, and the verdicts are the page's design rule (never an unearned green) |
-| | Can this period close? | **Not covered.** Close > Period close answers for the latest OPEN period, the card for the current one, so it is not the same reading; the Pulse tile is DW-7e |
+| Finance | Total assets, Receivables, Payables, Trial balance | **Not covered.** Finance's Pulse tiles are DW-7e. *DW-7e-3: still not covered.* No tile shows a ledger total: Overdue receivables is the overdue part of the aging, not the outstanding total |
+| | Integrity | **Not covered.** The ledger-chain check has no other page, and the verdicts are the page's design rule (never an unearned green). *DW-7e-3: still not covered.* The Integrity findings tile is the number of failed checks and links to /finance, this very section, the only place that lists which checks fail |
+| | Can this period close? | **Not covered.** Close > Period close answers for the latest OPEN period, the card for the current one, so it is not the same reading; the Pulse tile is DW-7e. *DW-7e-3: covered by Pulse's Close progress*, which reads the same CURRENT period and close-readiness route and shows the blocker count (or Ready to close) with the period's name, and links Close > Period close for the blocker rows (its Periods table has a check link for each period; the default is the latest OPEN one, so the current period can take a click) |
 | | Receivables aging, Payables aging | **Reachable at** Receivables > Aging, Payables > Aging: the same table at the same default date, with its tie-out verdict. The totals stay in the KPI tiles |
 | | Configuration | **Reachable at** Close > Ownership and Close > Settings. The card is two links |
 | | Fiscal periods | **Reachable at** Close > Period close, whose Periods table has the same columns |
-| IT | Devices, Online, Degraded, Offline, Open alerts | **Not covered.** IT's devices-offline and threat-alert tiles are DW-7e |
+| IT | Devices, Online, Degraded, Offline, Open alerts | **Not covered.** IT's devices-offline and threat-alert tiles are DW-7e. *DW-7e-3: still not covered.* Pulse shows Devices offline only; Devices, Online, Degraded and Open alerts have no tile (threat alerts have no backend, 7h) |
 | | Recent device events | **Not covered.** Read only here; a device page lists its own |
 
 **What this leaves.**
 - Department Home: "More from <department>" holds the KPI strip, the Team roster and the serviced companies.
 - The Office of the GM: for a person with the company figures, only client monitoring; for a department lead, the notice, the period line, the strip and monitoring.
-- HR: the note and the four counts. Finance: the four totals, Integrity and the close gate. IT: its whole page, which is why `/it` is left alone.
-- No page's "More from" section disappears whole. DW-7e's Pulse tiles are what let HR's counts, Finance's verdicts and IT's page go.
+- HR: the note and the four counts. Finance: the four totals and Integrity (the close gate left with DW-7e-3). IT: its whole page, which is why `/it` is left alone.
+- No page's "More from" section disappears whole. DW-7e's Pulse tiles were to let HR's counts, Finance's verdicts and IT's page go; DW-7e-3 found only the close gate fully covered by what they show, so the rest stay until a tile or a page shows the whole of each.
 
 **Decided (DW-D22, owner 2026-10-14).** The cockpit's Money card drew a **net margin rate**. The Company block now draws it as its own
 "Net margin" tile (DW-3z2), net over revenue from the same P&L read, and "No data" when revenue is zero.

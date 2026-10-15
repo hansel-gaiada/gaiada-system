@@ -82,7 +82,9 @@ async function FinanceOverviewBody({ userId, tenant, framed }: { userId: string;
   // Inside the Overview the page's own title steps down, so the page keeps one h1 (the Overview's greeting).
   const Title = framed ? "h3" : "h1";
   // DW-3z: inside the Overview, the cards that are the Receivables, Payables and Close tabs' own content, or only links to them,
-  // go (plan §3.8). The totals, the integrity verdicts and the close gate stay: no block shows them yet (DW-7e).
+  // go (plan §3.8). DW-7e-3: so does the close gate, which Pulse's Close progress tile now shows for the same current period.
+  // The totals and the integrity verdicts stay: no tile shows them (the Integrity tile is only the count of failures).
+  // A section that leaves is not read either (the close-readiness read is skipped).
   const keeps = (section: string) => keepsSection("finance", section, { framed });
   const periods = await listPeriods(userId, tenant);
 
@@ -124,7 +126,7 @@ async function FinanceOverviewBody({ userId, tenant, framed }: { userId: string;
     reconcileAr(userId, tenant, asOf),
     reconcileAp(userId, tenant, asOf),
     verifyLedger(userId, tenant),
-    current ? getCloseReadiness(userId, tenant, current.id) : Promise.resolve(null),
+    current && keeps("close-readiness") ? getCloseReadiness(userId, tenant, current.id) : Promise.resolve(null),
   ]);
 
   const arTotal = arAging.reduce((a, r) => a + Number(r.totalOutstanding), 0);
@@ -215,7 +217,7 @@ async function FinanceOverviewBody({ userId, tenant, framed }: { userId: string;
         )}
       </Card>
 
-      <Card title="Can this period close?">
+      {keeps("close-readiness") && <Card title="Can this period close?">
         {close == null ? (
           <p className="fin-muted">
             Close readiness could not be checked{current ? "" : " — there is no current period"}. That
@@ -238,7 +240,7 @@ async function FinanceOverviewBody({ userId, tenant, framed }: { userId: string;
             />
           </>
         )}
-      </Card>
+      </Card>}
 
       {keeps("ar-aging") && <Card
         title="Receivables aging"

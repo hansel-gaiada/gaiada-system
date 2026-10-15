@@ -99,7 +99,7 @@ export const COVERAGE: readonly CoverageEntry[] = [
   },
   {
     page: "hr", section: "kpis", label: "People, Departments, Leave pending, Open cases", verdict: "stays",
-    by: "HR's Pulse tiles (leave pending, open cases) are DW-7e and not built, so no block shows these counts.",
+    by: "DW-7e-3: Pulse shows Leave pending and Open cases, but People and Departments have no tile, and the card is one grid of four, not four sections. So the counts stay as they are.",
   },
   { page: "hr", section: "card-leave", label: "Leave card", verdict: "reachable", hrefs: ["/hr/leave"], by: "Time > Leave. The card is a link and one line of words." },
   { page: "hr", section: "card-attendance", label: "Attendance card", verdict: "reachable", hrefs: ["/hr/attendance"], by: "Time > Attendance. The card is a link and one line of words." },
@@ -113,15 +113,15 @@ export const COVERAGE: readonly CoverageEntry[] = [
   // ── Finance (`/finance`) ───────────────────────────────────────────────────────────────────────
   {
     page: "finance", section: "kpis", label: "Total assets, Receivables, Payables, Trial balance", verdict: "stays",
-    by: "Finance's Pulse tiles (overdue receivables, close progress, integrity findings) are DW-7e and not built, so no block shows these totals.",
+    by: "DW-7e-3: no tile shows a ledger total. Pulse's Overdue receivables is the overdue part of the aging, not the outstanding total, and Total assets, Payables and the Trial balance have no tile.",
   },
   {
     page: "finance", section: "integrity", label: "Integrity", verdict: "stays",
-    by: "The ledger-chain check has no other page, and the verdict rows are the landing page's design rule (never an unearned green); the Pulse tile for it is DW-7e.",
+    by: "DW-7e-3: the Integrity findings tile shows only the NUMBER of failed checks, and links to /finance, this very section, the one place that lists which checks fail and their problems. The ledger-chain check has no other page, and the verdict rows are the landing page's design rule (never an unearned green).",
   },
   {
-    page: "finance", section: "close-readiness", label: "Can this period close?", verdict: "stays",
-    by: "Close > Period close answers the same question, but for the latest OPEN period, not the current one, so it is not the same reading; the Pulse tile is DW-7e.",
+    page: "finance", section: "close-readiness", label: "Can this period close?", verdict: "covered", widget: "pulse", hrefs: ["/finance/close"],
+    by: "DW-7e-3: Pulse's Close progress reads the same CURRENT period (the one containing today) and the same close-readiness route, and shows its blocker count, or Ready to close, with the period's name. The blocker rows are what the card shows beyond it, and they live at Close > Period close (the tile's link), which lists every period with a check link; its default is the latest OPEN period, so the current one can take a click.",
   },
   {
     page: "finance", section: "ar-aging", label: "Receivables aging", verdict: "reachable", hrefs: ["/finance/receivables"],
@@ -143,7 +143,7 @@ export const COVERAGE: readonly CoverageEntry[] = [
   // ── IT (`/it`) ─────────────────────────────────────────────────────────────────────────────────
   {
     page: "it", section: "kpis", label: "Devices, Online, Degraded, Offline, Open alerts", verdict: "stays",
-    by: "IT's devices-offline and threat-alert tiles are DW-7e and not built; the Account requests tile is a different count.",
+    by: "DW-7e-3: Pulse shows Devices offline only. Devices, Online and Degraded have no tile, Open alerts reads device events (warn and critical) that no tile counts, and threat alerts have no backend (7h). The card is one grid, so the counts stay.",
   },
   {
     page: "it", section: "device-events", label: "Recent device events", verdict: "stays",

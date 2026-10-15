@@ -1116,13 +1116,13 @@ test.describe("the Overview's frame: the functional workspaces keep their page b
     for (const name of ["Leave", "Attendance", "Onboarding", "Cases", "People directory"]) await expect(heading(page, name).first(), name).toBeVisible();
   });
 
-  test("/finance under the Overview: the aging, configuration and period cards are gone, the totals, integrity and close gate stay, and a classic user keeps every card (DW-3z)", async ({ page, context }) => {
+  test("/finance under the Overview: the aging, configuration, period and close-gate cards are gone, the totals and integrity stay, and a classic user keeps every card (DW-3z, DW-7e-3)", async ({ page, context }) => {
     await signIn(page, context, "superadmin");
     await page.goto("/finance");
     await expect(page.getByRole("heading", { name: "More from Finance" })).toBeVisible();
-    for (const name of ["Integrity", "Can this period close?"]) await expect(heading(section(page), name), name).toBeVisible();
+    await expect(heading(section(page), "Integrity")).toBeVisible();
     await expect(section(page).getByText("Total assets")).toBeVisible();
-    for (const name of ["Receivables aging", "Payables aging", "Configuration", "Fiscal periods"]) {
+    for (const name of ["Can this period close?", "Receivables aging", "Payables aging", "Configuration", "Fiscal periods"]) {
       await expect(heading(page.locator("#main-content"), name), name).toHaveCount(0);
     }
 
