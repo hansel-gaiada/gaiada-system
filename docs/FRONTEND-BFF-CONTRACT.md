@@ -8661,6 +8661,19 @@ The hub's `knowledge.search` tool and the assistant's retrieval (`config.knowled
 - **Palette.** With 2 or more typed characters the palette adds a "Knowledge" group holding "Search company knowledge for '<text>'", opening `/knowledge?q=<encoded text>`. It is reachable by arrows and click but is never the default highlight, so Enter with nothing else matching still goes to `/search` (DW-2c).
 - **DEMO_MODE.** `demoFixtures.ts` answers the route with three labelled sample results for any query of 2 or more characters, an empty list for a query containing "nothing", and 400 `query_invalid` otherwise.
 
+### 46.9 The assistant and the hub use the same filter (DW-D26, owner 2026-10-15) — PLANNED
+
+DW-D26 closes the finding in §46.6:
+- **The assistant's retrieval.** `modules/assistant/context.ts` (ASST-18) asks the store for internal chunks as the thread's owner. Its candidates now go through `filterReadableHits` (§46.2) for that owner and the thread's company before any chunk enters the prompt. A dropped chunk is never cited. If the filter fails, the turn proceeds with no knowledge, because grounding is additive.
+- **The hub's `knowledge.search` tool.**
+  - With a resolved identity and a company, its internal hits come from the platform's `GET /api/:t/knowledge/search` (§46.1), which filters; the tool keeps its own answer shape, mapping `title` and `snippet` into `text`.
+  - With no identity (a lead or a client on WhatsApp), only the public tier is searched, as today.
+- **Withheld for every caller, as in §46.2:** reports, people and org.
+
+Tests:
+- the assistant prompt carries no chunk of a record the owner cannot read;
+- the hub tool returns only filtered internal hits and still answers the public tier anonymously.
+
 ## 47. Calendar events and meeting scheduling (DW-8g, 2026-10-14) — `platform-nest/src/core/calendar-events.{controller,service}.ts` (new), migrations `202610151100_calendar_events.sql` and `202610151110_iam_calendar_event_permissions.sql`; UI `/calendar` — **STATUS: BACKEND AND UI BUILT, PROTOTYPED (UI: `/calendar`, `/calendar/new`, `/calendar/events/[id]` and its `/edit`, the Overview Today block and the DEMO_MODE store, tested with vitest and `next build`, not yet driven against a live backend; the backend rules `calendar-events.service.test.ts`, the scheduler pin `meeting-schedule.test.ts` and the Cerbos static pin run anywhere; the HTTP suite `calendar-events.test.ts`, the migration suite `calendar-events-migration.db.test.ts` and the live Cerbos matrix `src/rbac/cerbos-calendar-event.test.ts` are written for the Linux CI gate and have not run yet); busy times (§47.4) NOT built, waiting for an owner ruling, so the UI draws none)**
 
 **Why.** Plan §8.1 (row 8g) and §14.2 ("Meetings: schedule a meeting, see events, not only tasks").
@@ -8783,6 +8796,8 @@ Body `{response: "accepted" | "declined" | "tentative"}`. Attendees only, for th
 - **Limits:** at most 20 users and a window of at most 14 days. Each user must be an active member of the company, else 422.
 - **Gate:** `calendar_event` · `create` on the tenant, the same people who can schedule.
 - **To confirm with the owner when 8g starts.** Busy times show only when someone is busy, never what they are doing. This is the scheduling aid every calendar offers, but it is new people data, so it is asked, not assumed (compare DW-D19).
+
+**Ruled DW-D28 (owner, 2026-10-15): build it, times only.** The UI shows the chosen attendees' busy blocks for the picked day on `/calendar/new` and on the edit page.
 
 ### 47.5 UI
 
@@ -9041,6 +9056,33 @@ Built as §48.1 to §48.4 and §48.6 specify. The simulated mode is what runs; *
 - **Stores nothing.** No cache, no storage of message content; every page is a fresh request.
 - **"Email this client".** `components/clients/EmailClientButton.tsx`, placed on the client Overview in a "Primary contact" row above the ball lists (the Overview showed no contact before, so the row is new; the People tab keeps the full contact details). Per PV: the label is "Email (Gmail)" (it is outside the portal; the portal Conversation stays the client channel of record), the secondary ghost style, after any "Message in portal" action (there is none on the Overview today). With no contact email the button is disabled and its `aria-describedby` points at the visible text "This client has no contact email". The "emailed" activity row is staff-only: the UI adds nothing to the Conversation thread and renders nothing client-visible.
 - **DEMO_MODE.** `demoFixtures.ts` answers the routes in simulated mode: two inbox threads (one HTML with a script, to show the sandbox), send appends to Sent in memory, disconnect and connect work, and `demo-client` gets 403.
+
+## 48a. Time entries read by tier (DW-D29, owner 2026-10-15) — `platform-nest/src/core/client-work.controller.ts` (`listTime`) — **STATUS: PLANNED**
+
+**Why.** DW-8n's finding: `GET /api/:t/time-entries` answered every member and viewer with the whole company's entries (up to 500). It authorized only `time_entry` · `read` on the tenant, which every staff role holds. DW-D29 narrows it in line with DW-D19.
+
+**The rule** is the shared person-axis gate, `core/person-axis-gate.ts` (`personAxisTier`, `assertPersonAxisReadAllowed`). Activity, the day read and PM productivity already use it.
+
+| Who asks | No `userId` filter | `?userId=X` | `?mine=me` |
+|---|---|---|---|
+| `unrestricted` or `company_wide` tier (company admins, HR's people readers, platform_admin) | every entry, as today | X's entries | own entries |
+| `unit_scoped` (a head or a manager) | own entries plus those of every person in their led-unit subtree (TR-25, the `/reports` scope) | X's entries when X is in scope, else 403 `outside your reporting line` | own entries |
+| `self_only` (a member or a viewer) | **own entries only** | own entries when X is the caller, else 403 | own entries |
+
+**Details:**
+- `?projectId` and `?taskId` still narrow within what the caller may read.
+- The 500-row cap and the order are unchanged.
+- Writes are unchanged: update and delete stay owner-or-manager (`resource_time_entry.yaml`).
+- There is no Cerbos policy change, because the kind-level `read` stays the entry gate and the narrowing happens in the handler (PERMISSION-CONTRACT §40a), exactly as `GET /work-activity?personId=` does.
+- **The UI already defaults** to the caller's own (DW-8n). A member's "Everyone" request now returns their own entries from the server too.
+
+**Tests:** an HTTP suite on the Linux CI gate.
+- A member's unfiltered list holds only their own rows, even when colleagues logged time.
+- A member asking for a colleague's `userId` gets 403.
+- A head's list holds their unit's people and not a sibling unit's.
+- A company admin and an HR people reader see everyone.
+- `mine=me` is unchanged for every tier.
+- `projectId` still narrows.
 
 ## 53. The client grain in reports (PV7-01, 2026-10-15) — `platform-nest/src/modules/reports/` — **STATUS: BUILT, PROTOTYPED (backend: the DB and HTTP suite report-client-grain.db.test.ts and the Cerbos matrix reports-cerbos.test.ts are written for the Linux CI gate; no page yet, PV7-05)**
 

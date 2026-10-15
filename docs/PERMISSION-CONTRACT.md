@@ -2258,6 +2258,17 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §48 (ruling DW-D24, plan `docs/plans/20
 - **Proof:** `src/rbac/cerbos-personal-mailbox.test.ts` (7 static always; 30 live with `CERBOS_URL`: every role against its own and someone else's mailbox, an unfed owner, a bot and an automation principal, low assurance, cross-tenant, an unlisted action, an owner id that merely resembles the caller's, and the absence of a permission arm) and the HTTP suite `src/core/gmail/gmail.http.test.ts`. **Restart `gaiada-test-cerbos` and the live sidecar after deploying the policy file** (nothing hot-reloads), then probe: `GET /api/:t/integrations/gmail` answers `{connected: false}` for a fresh person.
 - **One reach that no policy can express, noted for the client-context gate** (FRONTEND-BFF-CONTRACT §48.4): every role that may `send` also reads `client`, so "send about a client you cannot read" is refused by no role combination today; the controller still asks for the client's read, so a future narrowing of `client` read takes effect here without a change.
 
+## 40a. DW-D29 — the `time_entry` list narrowed by the person-axis gate (2026-10-15, PLANNED): no new kind, no new action, no policy change
+
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §48a (ruling DW-D29).
+- **What changes.** `time_entry` · `read` on the tenant stays the kind-level entry gate. `GET /time-entries` then narrows the rows by the shared person-axis gate (`core/person-axis-gate.ts`):
+  - yourself;
+  - the `unrestricted` and `company_wide` tiers: everyone;
+  - `unit_scoped`: the led-unit subtree (TR-25);
+  - `self_only`: yourself only.
+- **Why there is no policy change.** The list carries no subject, so Cerbos cannot filter it. The gate is the single rule that `/pm/productivity`, the activity series and `GET /work-activity?personId=` already use (§38c). A narrower policy row would only duplicate it.
+- **Unchanged:** `create`, `update`, `delete`.
+
 ## 45. PV7-01 — `read_client` on `report_document` (2026-10-15, PROTOTYPED)
 
 Design: `docs/FRONTEND-BFF-CONTRACT.md` §53 (plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`, PV7-01). Status: **PROTOTYPED** (policy, catalog, group, bundles, migration and tests are in the repo; the live Cerbos probe after a restart is the deploy step).
