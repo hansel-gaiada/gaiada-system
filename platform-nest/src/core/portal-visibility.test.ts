@@ -536,6 +536,8 @@ const SWITCHED = [
   "src/core/portal-health.controller.ts",
   // PV7-04a: the client's Reports list and read marker, written on the builders from day one (clientReportInPortalScope).
   "src/core/portal-reports.controller.ts",
+  // PV7-07: the account summary's snapshot reads through a synthetic client-wide scope, written on the builders from day one.
+  "src/modules/clients/account-summary/snapshot.ts",
   // PV5-11: the certified-signing start route and the simulated PSrE's portal pages, written on the builders from day one.
   "src/signatures/certified-signing.controller.ts",
   "src/signatures/simulated-psre.controller.ts",

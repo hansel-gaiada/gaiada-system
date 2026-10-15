@@ -226,6 +226,55 @@ test.describe("client hub", () => {
     expect(confirms.some((m) => m.startsWith("Withdraw this report"))).toBe(true);
   });
 
+  // PV7-07 — the monthly account summary (BFF §56). The demo store is shared with the portal spec, so this publishes the summary and
+  // then withdraws that same one, leaving the portal's Northwind reports as the portal spec reads them.
+  test("PV7-07: drafts an account summary, edits its narrative, publishes it (the PDF is made then) and withdraws it", async ({ page }) => {
+    const confirms: string[] = [];
+    page.on("dialog", (d) => { confirms.push(d.message()); void d.accept(); });
+    await openAsAgency(page, "/clients/cl-1/reports");
+    await expect(page.locator("h1")).toHaveCount(1);
+
+    // The control: a month picker that defaults to last month, and one button.
+    const form = page.getByRole("form", { name: "Draft account summary" });
+    await expect(form).toBeVisible();
+    const month = form.getByLabel("Month");
+    await expect(month).toHaveValue(/^\d{4}-\d{2}$/);
+    await month.fill("2026-08");
+    await form.getByRole("button", { name: "Draft account summary" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Draft made for August 2026" })).toBeVisible({ timeout: 15_000 });
+
+    // The draft: its narrative editor and the frozen figures, no money anywhere, and no file yet (Publish makes it).
+    const row = page.locator("li", { hasText: "Account summary, August 2026" });
+    await expect(row).toContainText("Draft");
+    await expect(row).toContainText("The PDF is made when you publish");
+    await expect(row.getByRole("heading", { level: 3, name: "Projects" })).toBeVisible();
+    await expect(row.getByRole("heading", { level: 3, name: "Completed in August 2026" })).toBeVisible();
+    await expect(row).not.toContainText(/invoice|payment|conversion value|USD|IDR/i);
+
+    // Edit the words and save: the source becomes "Written by staff".
+    const narrative = row.getByLabel(/Narrative/);
+    await narrative.fill("August in plain words: the design was approved and the audit delivered.");
+    await expect(row.getByText("Unsaved changes. Save before you publish.")).toBeVisible();
+    await row.getByRole("button", { name: "Save narrative" }).click();
+    await expect(row.getByText("Saved.")).toBeVisible({ timeout: 15_000 });
+    await expect(row.getByText("Written by staff")).toBeVisible();
+
+    // Publish: after the confirm the summary is published with a PDF and in front of the client.
+    await row.getByRole("button", { name: "Publish" }).click();
+    await expect(row).toContainText("Published", { timeout: 15_000 });
+    await expect(row).toContainText("Client sees this");
+    await expect(row.getByRole("link", { name: /PDF/ })).toBeVisible();
+    expect(confirms.some((m) => m.startsWith("Publish to the client?"))).toBe(true);
+    // Frozen: the editor is gone, the words stay.
+    await expect(row.getByLabel(/Narrative/)).toHaveCount(0);
+    await expect(row).toContainText("August in plain words");
+
+    // Withdraw it again, so the portal's reports are as the portal spec expects.
+    await row.getByLabel(/Reason for withdrawing/).fill("Removed after the summary test");
+    await row.getByRole("button", { name: "Withdraw" }).click();
+    await expect(row).toContainText("Withdrawn", { timeout: 15_000 });
+  });
+
   test("a client with no outstanding items says so instead of rendering an empty box", async ({ page }) => {
     // cl-2 gets no ball items in the fixture — the empty state has to be a sentence, because a blank
     // card reads as a broken fetch.

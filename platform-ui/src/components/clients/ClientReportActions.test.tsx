@@ -124,3 +124,22 @@ describe("ClientReportActions: Withdraw", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/not published/);
   });
 });
+
+// PV7-07: an account summary has no file until Publish renders it, so a file-less summary draft is publishable with no warning.
+describe("ClientReportActions: an account summary draft", () => {
+  it("shows Publish with no 'no file yet' reason, while a file-less module draft still does", () => {
+    const { unmount } = render(<ClientReportActions report={{ ...draft, file: null, source: "account_summary" }} clientId="cl-1" />);
+    expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
+    expect(screen.queryByText(/no file yet/)).toBeNull();
+    unmount();
+    render(<ClientReportActions report={{ ...draft, file: null, source: "social_report" }} clientId="cl-1" />);
+    expect(screen.getByText(/no file yet/)).toBeInTheDocument();
+  });
+
+  it("says a render failure in words, and that the summary stays a draft", async () => {
+    publish.mockResolvedValue({ ok: false, error: "The PDF could not be made right now. The summary stays a draft; try again in a moment." });
+    render(<ClientReportActions report={{ ...draft, file: null, source: "account_summary" }} clientId="cl-1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/stays a draft/);
+  });
+});

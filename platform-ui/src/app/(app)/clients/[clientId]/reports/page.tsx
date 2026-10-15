@@ -4,13 +4,18 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { readResult } from "@/lib/readResult";
 import { listClientReports } from "@/lib/clientReports-data";
-import { REPORT_SOURCE_LABEL, REPORT_STATUS_LABEL, staffReportDownloadLabel, type StaffClientReport } from "@/lib/clientReports";
+import {
+  REPORT_SOURCE_LABEL, REPORT_STATUS_LABEL, lastMonth, staffReportDownloadLabel, summaryPeriodLabel, thisMonth, type StaffClientReport,
+} from "@/lib/clientReports";
 import { formatDate } from "@/lib/format";
 import { Card, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { ClientVisibilityMarker } from "@/components/clients/ClientVisibilityMarker";
 import { ClientReportActions } from "@/components/clients/ClientReportActions";
+import { AccountSummaryDraftForm } from "@/components/clients/AccountSummaryDraftForm";
+import { AccountSummaryEditor } from "@/components/clients/AccountSummaryEditor";
+import { AccountSummaryPreview } from "@/components/clients/AccountSummaryPreview";
 import { FileLink } from "@/components/clients/billing/FileLink";
 import "@/components/clients/billing/billing.css";
 
@@ -20,6 +25,11 @@ import "@/components/clients/billing/billing.css";
 // Published (delivery publishes them), and drafts (an account summary, an agent's draft) wait for a person to Publish
 // them. A published report says whether the client sees it ("Client sees this", the backend's `clientVisible`, never
 // guessed); a withdrawn one keeps its reason, which is for staff only. Download goes through the staff file route.
+//
+// PV7-07: the monthly ACCOUNT SUMMARY. "Draft account summary" (a month picker, last month by default) freezes the client's figures
+// for that month and drafts a narrative; the draft's row opens to the narrative editor and the frozen figures, and Publish renders
+// the PDF (the backend does that) and puts it in front of the client's main contacts. A published or withdrawn summary shows its
+// narrative and figures read-only: they never change once it leaves draft.
 //
 // The read refuses explicitly: a denied or failed read is a `<ReadRefusal>`, never "no reports". The hub layout renders the
 // client's name as the page's one `<h1>`, so this page starts at `<h2>`.
@@ -42,14 +52,19 @@ export default async function ClientReportsPage({ params }: { params: Promise<{ 
       </p>
       {res.kind !== "ok" ? (
         <ReadRefusal subject="this client's reports" kind={res.kind} reason={res.kind === "unavailable" ? res.reason : undefined} />
-      ) : res.data.length === 0 ? (
-        <EmptyNote>No report has been made for this client yet. Delivered social and search reports appear here, published to the client.</EmptyNote>
       ) : (
-        <Card>
-          <ul style={{ margin: 0, padding: 0 }}>
-            {res.data.map((r) => <ReportRow key={r.id} report={r} clientId={clientId} />)}
-          </ul>
-        </Card>
+        <>
+          <AccountSummaryDraftForm clientId={clientId} defaultMonth={lastMonth()} maxMonth={thisMonth()} />
+          {res.data.length === 0 ? (
+            <EmptyNote>No report has been made for this client yet. Delivered social and search reports appear here, published to the client.</EmptyNote>
+          ) : (
+            <Card>
+              <ul style={{ margin: 0, padding: 0 }}>
+                {res.data.map((r) => <ReportRow key={r.id} report={r} clientId={clientId} />)}
+              </ul>
+            </Card>
+          )}
+        </>
       )}
     </section>
   );
@@ -68,7 +83,9 @@ function ReportRow({ report: r, clientId }: { report: StaffClientReport; clientI
       </div>
       <p className="bl-payment__meta">
         {REPORT_SOURCE_LABEL[r.source]} · {formatDate(r.periodStart)} to {formatDate(r.periodEnd)} · {r.projectName ?? "Whole account"}
-        {r.file ? <>{" · "}<FileLink fileId={r.file.id} label={staffReportDownloadLabel(r.file.contentType)} /></> : " · No file yet"}
+        {r.file
+          ? <>{" · "}<FileLink fileId={r.file.id} label={staffReportDownloadLabel(r.file.contentType)} /></>
+          : r.source === "account_summary" ? " · The PDF is made when you publish" : " · No file yet"}
       </p>
       <p className="bl-payment__meta">
         {r.status === "draft" && <>Draft since {formatDate(r.createdAt)}. The client cannot see it.</>}
@@ -86,6 +103,19 @@ function ReportRow({ report: r, clientId }: { report: StaffClientReport; clientI
         )}
       </p>
       {r.status === "withdrawn" && r.withdrawnReason && <p className="bl-payment__meta">Reason (staff only): {r.withdrawnReason}</p>}
+      {r.source === "account_summary" && r.snapshot && typeof r.narrativeMd === "string" && (
+        <details className="as-details" open={r.status === "draft"}>
+          <summary>{summaryPeriodLabel(r.period ?? r.snapshot.period)}: narrative and figures</summary>
+          {r.status === "draft" ? (
+            <AccountSummaryEditor reportId={r.id} clientId={clientId} narrativeMd={r.narrativeMd} narrativeSource={r.narrativeSource ?? "deterministic"} />
+          ) : (
+            <div className="as-narrative">
+              <p className="as-narrative__text">{r.narrativeMd}</p>
+            </div>
+          )}
+          <AccountSummaryPreview snapshot={r.snapshot} />
+        </details>
+      )}
       <ClientReportActions report={r} clientId={clientId} />
     </li>
   );

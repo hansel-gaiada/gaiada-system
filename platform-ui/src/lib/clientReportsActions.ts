@@ -12,7 +12,10 @@ import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
-import { WITHDRAW_REASON_MAX, publishErrorText, withdrawErrorText, withdrawReasonState } from "./clientReports";
+import {
+  WITHDRAW_REASON_MAX, draftSummaryErrorText, narrativeState, publishErrorText, saveNarrativeErrorText, summaryPeriodLabel, validSummaryMonth,
+  withdrawErrorText, withdrawReasonState,
+} from "./clientReports";
 
 export interface ClientReportActionState {
   ok: boolean;
@@ -76,6 +79,62 @@ export async function withdrawClientReportAction(_prev: ClientReportActionState 
     return { ok: true, id: reportId, notice: "Withdrawn. The client no longer sees it." };
   } catch (e) {
     if (e instanceof PlatformError) return { ok: false, error: withdrawErrorText(e.status, e.message), ...(e.field ? { field: e.field } : {}) };
+    throw e;
+  }
+}
+
+// ── PV7-07: the monthly account summary (BFF §56.3) ────────────────────────────────────────────────
+//   draftAccountSummaryAction     POST  /clients/:clientId/reports/summary {period}
+//   saveSummaryNarrativeAction    PATCH /client-reports/:id {narrativeMd}
+// Publish is `publishClientReportAction` above: for an account summary the backend renders the PDF first.
+
+export async function draftAccountSummaryAction(_prev: ClientReportActionState | null, formData: FormData): Promise<ClientReportActionState> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  const clientId = str(formData, "clientId");
+  const period = str(formData, "period");
+  if (!clientId) return { ok: false, error: "Missing client." };
+  // The same check the server makes: a missing or future month is answered here without a round trip.
+  if (!validSummaryMonth(period)) return { ok: false, error: draftSummaryErrorText(400, "invalid_period"), field: "period" };
+  try {
+    const r = await platformFetch<{ created: boolean; report: { id: string } }>(
+      `/api/${c.tenant}/clients/${encodeURIComponent(clientId)}/reports/summary`, c.userId,
+      { method: "POST", body: JSON.stringify({ period }) },
+    );
+    refresh(clientId);
+    const label = summaryPeriodLabel(period);
+    return {
+      ok: true,
+      id: r.report.id,
+      notice: r.created
+        ? `Draft made for ${label}. Read it, edit the words if you want to, then publish.`
+        : `A draft for ${label} already exists. It is open below.`,
+    };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: draftSummaryErrorText(e.status, e.message), ...(e.field ? { field: e.field } : {}) };
+    throw e;
+  }
+}
+
+export async function saveSummaryNarrativeAction(_prev: ClientReportActionState | null, formData: FormData): Promise<ClientReportActionState> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  const clientId = str(formData, "clientId");
+  const reportId = str(formData, "reportId");
+  // The text is NOT trimmed by `str`: the backend trims, and the editor keeps what staff typed until it is saved.
+  const narrativeMd = String(formData.get("narrativeMd") ?? "");
+  if (!clientId || !reportId) return { ok: false, error: "Missing report." };
+  const state = narrativeState(narrativeMd);
+  if (!state.canSave) return { ok: false, error: state.hint ?? "The narrative can't be saved.", field: "narrativeMd" };
+  try {
+    await platformFetch<{ report: { id: string } }>(
+      `/api/${c.tenant}/client-reports/${encodeURIComponent(reportId)}`, c.userId,
+      { method: "PATCH", body: JSON.stringify({ narrativeMd }) },
+    );
+    refresh(clientId);
+    return { ok: true, id: reportId, notice: "Saved." };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: saveNarrativeErrorText(e.status, e.message), ...(e.field ? { field: e.field } : {}) };
     throw e;
   }
 }
