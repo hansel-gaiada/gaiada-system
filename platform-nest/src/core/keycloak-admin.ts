@@ -11,6 +11,13 @@
 //   PUT    /admin/realms/{realm}/users/{id}/reset-password  -> 204
 //   PUT    /admin/realms/{realm}/users/{id}   (enabled:false) -> 204
 //   DELETE /admin/realms/{realm}/users/{id}                 -> 204
+// DW-7h (BFF §52) adds four calls that were NOT part of that 2026-08-03 probe. They follow Keycloak's documented admin
+// REST API and are covered here by an injected fetch only; they are proven live when the server steps of §52.9 are done
+// (infra/runbooks/keycloak-security-events.md):
+//   GET    /admin/realms/{realm}/events?type=&dateFrom=&dateTo=&max=  -> 200 [ { time, type, userId, ipAddress, ... } ]  (view-events)
+//   GET    /admin/realms/{realm}/events/config                         -> 200 { eventsEnabled, enabledEventTypes, ... }  (view-events)
+//   DELETE /admin/realms/{realm}/sessions/{sid}                        -> 204, or 404 for a session that is already gone
+//   POST   /admin/realms/{realm}/users/{id}/logout                     -> 204  (covered by manage-users)
 // Boundary probed at the same time: creating a client -> 403, and mapping realm-admin onto a user it
 // had just created -> 403 (the mapping verifiably did not stick). It CAN read realm config and list
 // roles read-only, so the accurate description is "cannot modify anything but users and cannot
@@ -60,6 +67,20 @@ export class KeycloakAdminError extends Error {
   ) {
     super(`Keycloak admin ${operation} failed (HTTP ${httpStatus})${detail ? `: ${detail}` : ""}`);
     this.name = "KeycloakAdminError";
+  }
+}
+
+/** The admin API answered 403: the service account lacks a realm-management role. Distinct from the generic failure
+ *  because the fix is a role grant, not a retry, and the sign-ins read turns it into `state: "unavailable"` with the role
+ *  named (BFF §52.6, §52.9). Extends KeycloakAdminError so every existing `catch` and the 502 mapping keep working. */
+export class KeycloakForbiddenError extends KeycloakAdminError {
+  constructor(
+    operation: string,
+    /** The realm-management role the call needs, e.g. `view-events`. */
+    readonly missingRole: string,
+  ) {
+    super(operation, 403, `the service account lacks the realm-management role ${missingRole}`);
+    this.name = "KeycloakForbiddenError";
   }
 }
 
@@ -247,7 +268,9 @@ export async function createUser(input: CreateUserInput, fetchImpl: FetchImpl = 
 
 /** Set a permanent password. `temporary: false` on purpose — a temporary credential forces Keycloak's
  *  own UPDATE_PASSWORD screen on first login, which for an external client is an extra unexplained
- *  step immediately after they just chose a password on our own accept screen. */
+ *  step immediately after they just chose a password on our own accept screen. This is the invite and
+ *  portal path (`createUser`, the client-portal seeds). It is NOT the IT reset-password route any more:
+ *  that serves staff only and uses `setPasswordTemporary` (BFF §52.8). */
 export async function setPassword(userId: string, password: string, fetchImpl: FetchImpl = fetch): Promise<void> {
   const res = await adminFetch(
     `/users/${encodeURIComponent(userId)}/reset-password`,
@@ -265,11 +288,15 @@ export async function setPassword(userId: string, password: string, fetchImpl: F
 
 /** Set a TEMPORARY password — Keycloak raises its own UPDATE_PASSWORD screen at first login.
  *
- *  ⚠ THE OPPOSITE CHOICE FROM `setPassword()` ABOVE, AND BOTH ARE CORRECT. That one is for the IT
- *  reset-password flow, where an admin reads a generated one-off to someone (often mid-support-call)
- *  and a forced reset screen is an unexplained extra step. This one is for BOOTSTRAP credentials: a
- *  value that is shared, known to more than one person, or written down somewhere. There, surviving
- *  first use is the defect — so the forced change is the entire point.
+ *  Used for every credential that is shared, known to more than one person, or written down: the staff
+ *  bootstrap roster and (DW-7h, BFF §52.8) the IT reset-password route, where IT reads a generated
+ *  one-off to a colleague in person. There, surviving first use is the defect, so the forced change is
+ *  the point: IT never learns the password the person keeps. Most staff addresses are Google Workspace
+ *  aliases, so email recovery is off and this is how a locked-out person gets back in.
+ *
+ *  ⚠ THE OPPOSITE CHOICE FROM `setPassword()` ABOVE, AND BOTH ARE CORRECT. That one is for an external
+ *  client who has just chosen their own password on our accept screen, where a forced reset screen
+ *  would be an unexplained extra step.
  *
  *  Deliberately a separate function rather than a `temporary` flag on `setPassword`: a boolean
  *  parameter at the call site reads as a detail, and the existing callers would all have had to pass
@@ -320,6 +347,105 @@ export async function enableUser(userId: string, fetchImpl: FetchImpl = fetch): 
 export async function deleteUser(userId: string, fetchImpl: FetchImpl = fetch): Promise<void> {
   const res = await adminFetch(`/users/${encodeURIComponent(userId)}`, { method: "DELETE" }, "deleteUser", fetchImpl);
   if (!res.ok && res.status !== 404) throw new KeycloakAdminError("deleteUser", res.status);
+}
+
+// ── DW-7h: events, sessions and logout (BFF §52.6, §52.7) ───────────────────────────────────────────
+
+/** The event types the ERP asks for. The realm records only these (§52.9), so asking for others returns nothing. */
+export type KeycloakEventType = "LOGIN" | "LOGIN_ERROR" | "LOGOUT";
+
+export interface KeycloakEvent {
+  /** Epoch milliseconds, as Keycloak stores it. */
+  time: number;
+  type: string;
+  /** The Keycloak user id; null on a failed login with an unknown username. */
+  userId: string | null;
+  ipAddress: string | null;
+  /** The failure code of a `LOGIN_ERROR` (`invalid_user_credentials`, `user_not_found`, ...), else null. */
+  error: string | null;
+  /** `details.username`: the typed username, which in this realm is the email. Never sent to a browser for an unknown account. */
+  username: string | null;
+  sessionId: string | null;
+}
+
+export interface ListEventsInput {
+  types: KeycloakEventType[];
+  /** Keycloak filters by DAY (`yyyy-MM-dd`), so these are cut to a UTC date. The caller still filters by the exact time. */
+  dateFrom?: Date | string;
+  dateTo?: Date | string;
+  /** Rows to ask for (Keycloak's own default is 100). */
+  max?: number;
+}
+
+const utcDay = (d: Date | string): string => (typeof d === "string" ? d.slice(0, 10) : d.toISOString().slice(0, 10));
+
+/** Read the realm's events, newest first. A 403 is the missing `view-events` role and is typed so the sign-ins read can say
+ *  so; any other failure is a plain `KeycloakAdminError`. */
+export async function listEvents(input: ListEventsInput, fetchImpl: FetchImpl = fetch): Promise<KeycloakEvent[]> {
+  const q = new URLSearchParams();
+  for (const t of input.types) q.append("type", t);
+  if (input.dateFrom !== undefined) q.set("dateFrom", utcDay(input.dateFrom));
+  if (input.dateTo !== undefined) q.set("dateTo", utcDay(input.dateTo));
+  q.set("max", String(input.max ?? 1000));
+  const res = await adminFetch(`/events?${q}`, { method: "GET" }, "listEvents", fetchImpl);
+  if (res.status === 403) throw new KeycloakForbiddenError("listEvents", "view-events");
+  if (!res.ok) throw new KeycloakAdminError("listEvents", res.status);
+  const rows = (await res.json().catch(() => [])) as Array<Record<string, unknown>>;
+  if (!Array.isArray(rows)) return [];
+  const str = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
+  const out: KeycloakEvent[] = [];
+  for (const r of rows) {
+    if (typeof r.time !== "number" || typeof r.type !== "string") continue;
+    const details = r.details && typeof r.details === "object" ? (r.details as Record<string, unknown>) : {};
+    out.push({
+      time: r.time,
+      type: r.type,
+      userId: str(r.userId),
+      ipAddress: str(r.ipAddress),
+      error: str(r.error),
+      username: str(details.username),
+      sessionId: str(r.sessionId),
+    });
+  }
+  return out;
+}
+
+export interface KeycloakEventsConfig {
+  eventsEnabled: boolean;
+  enabledEventTypes: string[];
+}
+
+/** Whether the realm records events at all. It is how the sign-ins read tells "events are off" from "there were no events":
+ *  an empty list says neither on its own (BFF §52.6). Needs `view-events`, like the events themselves. */
+export async function getEventsConfig(fetchImpl: FetchImpl = fetch): Promise<KeycloakEventsConfig> {
+  const res = await adminFetch("/events/config", { method: "GET" }, "getEventsConfig", fetchImpl);
+  if (res.status === 403) throw new KeycloakForbiddenError("getEventsConfig", "view-events");
+  if (!res.ok) throw new KeycloakAdminError("getEventsConfig", res.status);
+  const b = (await res.json().catch(() => ({}))) as { eventsEnabled?: unknown; enabledEventTypes?: unknown };
+  return {
+    eventsEnabled: b.eventsEnabled === true,
+    enabledEventTypes: Array.isArray(b.enabledEventTypes)
+      ? b.enabledEventTypes.filter((t): t is string => typeof t === "string")
+      : [],
+  };
+}
+
+/** End one Keycloak session. `not_found` is a normal answer (the person signed out, or the session expired, already) and is
+ *  not an error: the ERP row that cuts the access token is written either way. Anything else throws. */
+export async function deleteSession(sessionId: string, fetchImpl: FetchImpl = fetch): Promise<"ended" | "not_found"> {
+  const res = await adminFetch(`/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" }, "deleteSession", fetchImpl);
+  if (res.status === 404) return "not_found";
+  if (res.status === 403) throw new KeycloakForbiddenError("deleteSession", "manage-users");
+  if (!res.ok) throw new KeycloakAdminError("deleteSession", res.status);
+  return "ended";
+}
+
+/** End EVERY Keycloak session of one user. It is what "Block login" adds to disabling the account (§52.7): disabling alone
+ *  leaves an existing session refreshable until it expires. */
+export async function logoutUser(keycloakUserId: string, fetchImpl: FetchImpl = fetch): Promise<void> {
+  const res = await adminFetch(`/users/${encodeURIComponent(keycloakUserId)}/logout`, { method: "POST" }, "logoutUser", fetchImpl);
+  if (res.status === 403) throw new KeycloakForbiddenError("logoutUser", "manage-users");
+  if (!res.ok) throw new KeycloakAdminError("logoutUser", res.status);
 }
 
 /** A reasonable initial password for flows that must mint one (not used when the contact chooses their

@@ -10,7 +10,11 @@
   "verifyEmail": true,
   "loginWithEmailAllowed": true,
   "registrationAllowed": false,
-  "resetPasswordAllowed": true,
+  "resetPasswordAllowed": false,
+
+  "eventsEnabled": true,
+  "eventsExpiration": 2592000,
+  "enabledEventTypes": ["LOGIN", "LOGIN_ERROR", "LOGOUT"],
 
   "smtpServer": {
     "host": "mailpit",

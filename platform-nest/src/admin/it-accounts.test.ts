@@ -315,9 +315,9 @@ describe.skipIf(!TEST_URL || !live)("P2-13 · /api/:t/it/accounts over the real 
   it("disable is idempotent and reports whether it actually acted", async () => {
     realm.set("plain.member@ex.com", { id: "kc-d", enabled: true });
     const first = await act(plainMember, "disable", asUser(itAdmin));
-    expect(first.json()).toEqual({ ok: true, alreadyDisabled: false });
+    expect(first.json()).toEqual({ ok: true, alreadyDisabled: false, sessionsEnded: true });
     const second = await act(plainMember, "disable", asUser(itAdmin));
-    expect(second.json()).toEqual({ ok: true, alreadyDisabled: true });
+    expect(second.json()).toEqual({ ok: true, alreadyDisabled: true, sessionsEnded: false });
     // The second call issues no PUT — "nothing to do" rather than a redundant upstream write.
     expect(kcCalls.filter((c) => c.method === "PUT")).toHaveLength(1);
   });
