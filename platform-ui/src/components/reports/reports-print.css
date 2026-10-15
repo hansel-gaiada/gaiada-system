@@ -1,0 +1,77 @@
+/* DW-4k — Export / Print on the report pages.
+
+   Screen: the `.rp-actions` row above a report (Export as PDF / XLSX / CSV, Print, and the note that an
+   unsealed period's file is marked AD HOC).
+
+   Print (`window.print()` on any report page): the page prints as shown, minus the application. Hidden: the
+   shell (sidebar, top bar, access banner, assistant button, command palette, section tabs), the period
+   controls and the action buttons. Kept: the page title, the scope name and period (also stated by the
+   print-only `.rp-printonly` line, because the sidebar that names the company is gone), the warnings, the
+   figures and the charts. No KPI tile, section, highlight or table row is split across two pages; the charts
+   keep their colours (`print-color-adjust: exact`); the on-screen two-up chart grid prints as one column,
+   for the reason `app/print/print.css` gives (a narrow card squeezes the bar labels into each other).
+
+   Every shell rule hangs off `.erp-app:has(.rp-reports)`, so this file can never touch another route that
+   happens to share a CSS chunk with it. `.rp-reports` is the wrapper the reports layout and
+   `ReportPageClient` render. Colour is not set here: `styles/tokens/colors.css` and `charts.css` already
+   force the light palette under `@media print`. This is NOT the sidecar's print route (`app/print/`): that
+   one renders a minted document with no session and no shell. */
+
+/* ---- screen ---- */
+.rp-actions { display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; }
+.rp-actions__row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.rp-actions__group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rp-actions__label { font: 600 13px var(--font-body); color: var(--ink-muted); }
+.rp-actions__note { margin: 0; font: 400 12px var(--font-body); color: var(--ink-muted); }
+.rp-actions__status { margin: 0; font: 400 12px var(--font-body); color: var(--ink-muted); }
+.rp-actions__status:empty { display: none; }
+.rp-actions__error { margin: 0; font: 400 13px var(--font-body); color: var(--status-critical-fg); }
+.rp-printonly { display: none; }
+
+/* ---- print ---- */
+@media print {
+  /* The shell: everything in the app grid except the main column. */
+  .erp-app:has(.rp-reports) > :not(.erp-main) { display: none !important; }
+  .erp-app:has(.rp-reports) .erp-main > :not(.erp-main__inner) { display: none !important; }
+  .erp-app:has(.rp-reports) .ws-tabs { display: none !important; }
+  .erp-app:has(.rp-reports)::before { display: none !important; }
+
+  /* The app grid is a viewport-high window with a scrolling main column; a printed page needs flow. */
+  html:has(.rp-reports),
+  html:has(.rp-reports) body { height: auto !important; overflow: visible !important; background: none; }
+  .erp-app:has(.rp-reports) { display: block; height: auto; width: auto; padding: 0; background: none; }
+  .erp-app:has(.rp-reports) .erp-main { overflow: visible; height: auto; }
+  .erp-app:has(.rp-reports) .erp-main__inner { padding: 0 !important; max-width: none !important; margin: 0 !important; }
+
+  /* The controls: nothing to click on paper. */
+  .rp-reports .rp-noprint,
+  .rp-reports .page-header__actions,
+  .rp-reports .rc-period,
+  .rp-reports .rc-revision { display: none !important; }
+
+  /* The header stays; the print-only line states the scope and the period. */
+  .rp-reports .rp-printonly { display: block; margin: 0 0 8px; font: 600 14px var(--font-body); color: var(--ink-strong); }
+
+  /* Charts and tiles keep their colours. */
+  .rp-reports,
+  .rp-reports * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+
+  /* One column of charts at the printable width. */
+  .rp-reports .rc-sections-grid { grid-template-columns: 1fr !important; }
+
+  /* Nothing atomic is cut across a page break; a heading never ends a page alone. */
+  .rp-reports .rc-kpi,
+  .rp-reports .rc-section,
+  .rp-reports .rc-highlight,
+  .rp-reports .rc-warning,
+  .rp-reports .rc-rtable__row,
+  .rp-reports .lux-table__row,
+  .rp-reports .lux-card,
+  .rp-reports .lux-stat { break-inside: avoid; page-break-inside: avoid; }
+  .rp-reports h1,
+  .rp-reports h2,
+  .rp-reports h3,
+  .rp-reports .rc-section__title,
+  .rp-reports .rc-rtable__head,
+  .rp-reports .lux-table__head { break-after: avoid; page-break-after: avoid; }
+}

@@ -4,13 +4,15 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getReportOverview, isForbidden, isNotFound, isRangeTooLarge } from "@/lib/reports-data";
-import { dayCountOf, type ReportPeriodKind } from "@/lib/reports";
+import { dayCountOf, formatDateRange, type ReportPeriodKind } from "@/lib/reports";
+import { formatPeriodLabel } from "@/lib/reportCalendar";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, HairlineTable } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReportAccessDenied } from "@/components/reports/ReportAccessDenied";
 import { ReportRangeError } from "@/components/reports/ReportRangeError";
 import { ReportPeriodBar } from "@/components/reports/ReportPeriodBar";
+import { PrintButton } from "@/components/reports/PrintButton";
 import { formatTeamKpi, NO_DATA } from "@/lib/teamReport";
 
 function todayIso(): string {
@@ -20,6 +22,16 @@ function todayIso(): string {
 function teamHref(periodKind: string, start: string, end: string, unit: string): string {
   const qs = new URLSearchParams({ unit, periodKind, start, end });
   return `/reports/team?${qs.toString()}`;
+}
+
+function departmentReportHref(periodKind: string, start: string, end: string, scopeRef: string): string {
+  const qs = new URLSearchParams({ periodKind, start, end, scopeRef });
+  return `/reports/department?${qs.toString()}`;
+}
+
+// The period as the page's text, for the printed copy (the period bar does not print).
+function periodText(periodKind: ReportPeriodKind, start: string, end: string): string {
+  return periodKind === "custom" ? formatDateRange(start, end) : formatPeriodLabel(periodKind, start, end);
 }
 
 function personHref(periodKind: string, start: string, end: string, scopeRef: string): string {
@@ -64,7 +76,8 @@ export default async function TeamReportPage({
       const overview = await getReportOverview(tenant, userId, { grain: "department", periodKind, start, end });
       return (
         <>
-          <PageHeader eyebrow="Reports" title={TITLE} subtitle="Choose a department to see its people's reports." />
+          <PageHeader eyebrow="Reports" title={TITLE} subtitle="Choose a department to see its people's reports." actions={<PrintButton />} />
+          <p className="rp-printonly">{periodText(overview.periodKind, overview.start, overview.end)}</p>
           <ReportPeriodBar value={{ kind: overview.periodKind, start: overview.start, end: overview.end }} todayIso={today} />
           {overview.scopes.length === 0 ? (
             <EmptyNote>No department you may read has activity in this period.</EmptyNote>
@@ -138,8 +151,19 @@ export default async function TeamReportPage({
           eyebrow="Reports"
           title={TITLE}
           subtitle="Everyone in the department, with their headline numbers for the selected period."
-          actions={<Link href={`/reports/team?${changeQs.toString()}`} className="lux-btn lux-btn--ghost lux-btn--sm">Change department</Link>}
+          actions={
+            <>
+              {/* DW-4k: a roster is not one document, so there is no team export (the server builds none). The
+                  department's own report is the document that exports, for the same unit and period. */}
+              <Link href={departmentReportHref(overview.periodKind, overview.start, overview.end, sp.unit)} className="lux-btn lux-btn--ghost lux-btn--sm">
+                Export the department report
+              </Link>
+              <PrintButton />
+              <Link href={`/reports/team?${changeQs.toString()}`} className="lux-btn lux-btn--ghost lux-btn--sm">Change department</Link>
+            </>
+          }
         />
+        <p className="rp-printonly">{periodText(overview.periodKind, overview.start, overview.end)}</p>
         <ReportPeriodBar value={{ kind: overview.periodKind, start: overview.start, end: overview.end }} todayIso={today} />
         {scopes.length === 0 ? (
           <EmptyNote>Nobody is placed in this department.</EmptyNote>

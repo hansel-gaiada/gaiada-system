@@ -6,6 +6,8 @@ import { PeriodSelector, type PeriodSelectorValue } from "./PeriodSelector";
 // `ReportDocument` (DW-4b's /reports/team). It is `ReportPageClient`'s wiring without the viewer:
 // the next {kind, start, end} goes into the URL (shareable, bookmarkable) and every other search
 // param, notably `unit`, is kept, so changing the period never loses which department is open.
+// DW-4k: `rp-noprint` (reports-print.css, loaded by the reports layout): the controls do not print; the
+// page prints the period as text instead (`.rp-printonly`).
 export function ReportPeriodBar({ value, todayIso }: { value: PeriodSelectorValue; todayIso: string }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -20,7 +22,7 @@ export function ReportPeriodBar({ value, todayIso }: { value: PeriodSelectorValu
   }
 
   return (
-    <div style={{ margin: "0 0 16px" }}>
+    <div className="rp-noprint" style={{ margin: "0 0 16px" }}>
       <PeriodSelector value={value} onChange={onChange} todayIso={todayIso} />
     </div>
   );

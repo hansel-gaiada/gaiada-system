@@ -292,3 +292,25 @@ describe("demoReports — DW-4m comparison honesty (previous, omitted delta, com
     for (const s of scopes) for (const k of s.kpis) expect("previous" in k).toBe(false);
   });
 });
+
+// DW-4k — `POST reports/export` in the demo: a job id for a placeholder download, with the controller's refusals.
+describe("demoReports — POST reports/export (DW-4k)", () => {
+  const post = (body: Record<string, string>, userId = "demo-hansel") =>
+    reportsDemo("POST", "/api/co-agency/reports/export", new URLSearchParams(), JSON.stringify(body), userId);
+  const OK = { grain: "department", scopeRef: "dept-1", periodKind: "month", start: "2026-07-01", end: "2026-07-31", format: "csv" };
+
+  it("answers a job whose id carries the format (the download is a labelled placeholder, never a document)", () => {
+    const res = post(OK);
+    expect(res?.status).toBe(200);
+    expect(res?.json).toEqual({ jobId: "demo-csv" });
+  });
+
+  it("refuses a bad format with 400 and the field", () => {
+    expect(post({ ...OK, format: "docx" })).toEqual({ status: 400, json: { error: "format must be one of xlsx, csv, pdf", field: "format" } });
+  });
+
+  it("refuses the same callers the document read refuses (403), and a too-wide custom range (422)", () => {
+    expect(post(OK, "gede-ic")?.status).toBe(403);
+    expect(post({ ...OK, periodKind: "custom", start: "2020-01-01", end: "2026-07-01" })?.status).toBe(422);
+  });
+});

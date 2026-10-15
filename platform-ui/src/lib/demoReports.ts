@@ -528,5 +528,25 @@ export function reportsDemo(method: string, p: string, params: URLSearchParams, 
     return ok({ periodKind: range.periodKind, start: range.start, end: range.end, scopes });
   }
 
+  // DW-4k: `POST reports/export`. The demo does NOT render a document: it validates and authorizes like the
+  // controller (format, range, scope, then the same read check as `document`) and answers a job whose download
+  // (`app/api/reports/exports/[jobId]/route.ts`) is a small text file that says it is a demo placeholder.
+  const exportMatch = p.match(/^\/api\/([^/]+)\/reports\/export$/);
+  if (exportMatch && method === "POST") {
+    let b: { grain?: string; scopeRef?: string; periodKind?: string; start?: string; end?: string; format?: string } = {};
+    try { b = _body ? JSON.parse(_body) : {}; } catch { return err(400, "invalid json body"); }
+    if (!b.grain || !["person", "project", "department", "company"].includes(b.grain)) {
+      return err(400, "grain must be one of person, project, department, company", "grain");
+    }
+    const grain = b.grain as ReportGrain;
+    const range = validateRange(b.periodKind ?? "", b.start ?? null, b.end ?? null);
+    if ("status" in range) return range;
+    const scopeRef = grain === "company" ? (b.scopeRef || exportMatch[1]) : b.scopeRef;
+    if (!scopeRef) return err(400, "scopeRef is required", "scopeRef");
+    if (!b.format || !["pdf", "xlsx", "csv"].includes(b.format)) return err(400, "format must be one of xlsx, csv, pdf", "format");
+    if (!isAuthorized(userId, grain, scopeRef)) return err(403, "forbidden");
+    return ok({ jobId: `demo-${b.format}` });
+  }
+
   return null;
 }

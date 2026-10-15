@@ -642,6 +642,7 @@ Browser-facing route handlers (`route.ts`) — these exist only where the browse
 - `/api/meetings/[id]/audio`
 - `/api/meetings/[id]/status`
 - `/api/portal/stream`
+- `/api/reports/exports/[jobId]`
 - `/api/search/change-proposals/[id]/export-file`
 - `/api/search/google/callback`
 - `/api/search/palette`

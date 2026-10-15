@@ -45,7 +45,7 @@ export function PageHeader({ title, actions, breadcrumbs }: {
           {title}
         </h1>
       </div>
-      {actions && <div style={{ display: "flex", gap: 12, alignItems: "center" }}>{actions}</div>}
+      {actions && <div className="page-header__actions" style={{ display: "flex", gap: 12, alignItems: "center" }}>{actions}</div>}
     </div>
   );
 }
