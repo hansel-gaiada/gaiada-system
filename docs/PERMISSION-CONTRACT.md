@@ -2035,7 +2035,7 @@ Each attribute-dependent rule stands alone (the HIER-2 authoring rule): `org_uni
 
 ## 36. DW-5c — the `work_request` kind (2026-10-14, PROTOTYPED)
 
-Design: `docs/FRONTEND-BFF-CONTRACT.md` §32 (plan `docs/plans/2026-10-13-department-workspaces.md` §7.2 and §7.3, ruling DW-D14). Status: **PROTOTYPED** (policy, catalog, bundles and tests are in the repo; the live Cerbos probe after a restart is the deploy step).
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §32 (plan `docs/plans/2026-10-13-department-workspaces.md` §7.2 and §7.3, ruling DW-D14). Status: **PROTOTYPED** (policy, catalog, bundles and tests are in the repo; the live Cerbos probe after a restart is the deploy step). Requests to another group company add one action, `send_across`, and change nothing below: §49 (DW-10e, PLANNED).
 
 **A new core kind, `work_request` (no module), with five actions.** `resource_work_request.yaml`, keys `core.work_request.{read,create,cancel,deliver,decline}`: one REQUEST between departments (a department asks another for assets, or asks Web Dev for engineering work).
 
@@ -2465,3 +2465,63 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §59 (plan `docs/plans/2026-10-13-depart
 - `read_calendar` allowed for a member, denied for a client-portal principal;
 - a department event readable by a member of the tenant through Cerbos (the handler narrows);
 - an attendee-only event still refused to a non-attendee.
+
+## 49. DW-10e — `send_across` on `work_request`: requests across group companies (2026-10-15, PLANNED)
+
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §60 (ruling DW-D35; plan `docs/plans/2026-10-13-department-workspaces.md` §11.4 and §12.1). Status: **PLANNED** (contract only; nothing is in the repo yet).
+
+**Two independent walls decide a request sent to another group company.**
+- **Cerbos decides who may send on behalf of a company:** one new action on the existing `work_request` kind, checked on the REQUESTING company.
+- **The route decides where:** an active service assignment with a routing key (BFF §60.2). The handler resolves it, and a database trigger enforces it (BFF §60.3).
+- The route never reaches Cerbos. No rule, attribute or `inTenant` condition of §36 changes.
+
+**One new action, `send_across`**, key `core.work_request.send_across` ("Send a request to another group company's department, through one of the company's routes"). The handler sends `{kind: "work_request", tenantId: <requesting company>}`.
+
+| Action | Reach | What it is |
+|---|---|---|
+| `send_across` | `company_admin`, `manager`, `member` of the requesting company (`inTenant && notLow`); `platform_admin` (the wildcard) | send a request through one of the company's routes |
+
+- **The same reach as `create`, as its own action,** so that every cross-company send is its own line in the decision log, and so that the owner can narrow it later without touching same-company asks.
+- **`EFFECT_DENY` for `principal.attr.kind in ["automation","bot"]`.** `send_across` joins the action list of the existing DENY rule in `resource_work_request.yaml` (`roles: ["user"]`, `has()`-guarded), so it beats every ALLOW, the `platform_admin` wildcard and the mirrors under deny-overrides.
+- **The permission arm:** `perm_work_request_send_across`, the generic global-or-company mirror, under `variables.inTenant && variables.notLow && variables.inRoot`. It is safe to mirror: the ALLOW names scope roles only and reads no attribute (no self-scope, no lead rule, so neither permission-arm-hazard-scan Pattern B nor the mirror-reach invariant applies).
+- **Bundles:** `company_admin`, `owner`, `manager`, `platform_admin` and `member` hold it. `viewer`, `org_unit_lead` and every module role do not. It is not self-scoped (the sender acts for their company, not on their own record), not sensitive (like `create`) and `uiGrantable` (like `create`).
+
+**The sender's other actions reuse §36's, on the requesting company.**
+- `read` on `{kind: "work_request", tenantId: <requesting company>}` gates the routes list, the list and summary of what the company sent, one request and its downloads. Every company_admin, manager, member and viewer of the requesting company reads what it sent: §36's reach (BFF §60.4 says why).
+- `cancel` on `{kind: "work_request", tenantId: <requesting company>, id, requestedBy}` (from the row): company_admin and manager of the requesting company, and the requester's own `member` rule. The bot and automation DENY applies.
+- **No new resource attribute.** `resourcePayload()` and the `Resource` type do not change.
+
+**The receiving company: no change.**
+- Its people read, deliver and decline a cross request under their own company, with §36's rules and attributes: `unitAncestors` from their own tree, `assigneeIds` from their own task.
+- A sender holds no right in the receiving company and gets 403 on its routes.
+- The receiving company's `cancel` on a cross row is refused by the handler (409 `requester_side_only`), not by policy: the requester cancels, the receiver declines.
+
+**Why the route is not a Cerbos input.**
+- A rule letting a grant in company A act on a resource of company B would need a derived role keyed on a tenant other than `resource.attr.tenantId`. The permission-arm hazard scan, the mirror-reach invariant and the bundle generator do not model that shape.
+- Its facts (is the route active, does it match) would be computed by the same handler, so it would add surface and no independent check.
+- The independent check is the database. `work_requests_route_guard` refuses (`PD060`) any cross row whose route is not active, is not of the request's kind, does not lead to that department, does not join those two companies, or crosses roots. `work_requests_freeze_requester` keeps those columns from moving (`PD061`).
+
+**`service_assignment`: no policy change.**
+- A route is proposed, accepted, suspended, resumed, revoked and relinked with today's rules: company_admin on the right side, and `platform_admin` creates it active.
+- A routing key has no `<key>_staff`, `_manager` or `_approver` role, so the module-role `read` rule never matches it, and the reconciler materialises nothing for it (BFF §60.2).
+
+**The six artifacts** (the §36 template):
+- the policy: `send_across` in a new ALLOW rule for `company_admin`, `manager` and `member`, in the DENY rule's action list, and in a new mirror rule;
+- `derived_roles.yaml`: `perm_work_request_send_across`;
+- `cerbos.ts`: no change;
+- `permission-catalog.json` (+1 key) and `permission-groups.json` (the key joins `work_requests`);
+- migration `<prefix+1>_iam_work_request_send_across.sql`: the key and its five `role_permissions` rows, with a DO-block self-assertion (exactly those five roles, none self-scoped, `owner` == `company_admin` over the kind in both directions);
+- `role-permission-bundles.json`, regenerated from a clean worktree.
+
+Also the UI mirror: the capability `work_request.send_across` in `platform-ui/src/lib/rbac.ts` (company_admin, manager, member, platform_admin).
+
+**Pinned literals** move by one pair and one grantable key; the number of kinds and the sensitive count do not move. At `98295f10` the catalog holds 479 pairs, 464 grantable keys, 213 sensitive and 111 kinds. Take the numbers from main at landing: DW-10a's `dept_notice` kind may land first.
+
+**Proof.**
+- `src/rbac/cerbos-work-request.test.ts` gains the `send_across` matrix:
+  - allowed: company_admin, manager and member of the requesting company; `platform_admin`; the permission-native `owner` through the mirror;
+  - denied: its viewer, a member of another company, an `org_unit_lead` with no scope role, a low-assurance session and a portal contact;
+  - denied even as company_admin and as `platform_admin`: bot and automation;
+  - and every §36 decision unchanged (a replay of the existing matrix).
+- The static alignment suites, and BFF §60.11's HTTP suite.
+- **Restart the Cerbos test container and the live sidecar after the policy deploy** (nothing hot-reloads), then probe `send_across`.
