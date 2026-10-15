@@ -52,6 +52,12 @@ describe.each(PERSONAS)("the workspace shell's palette finds everything: %s", (_
     for (const href of modelHrefs(model)) expect(hrefs, href).toContain(href);
   });
 
+  it("finds My performance (PV7-06), once, under Performance", () => {
+    const mine = entries.filter((e) => e.href === "/me/performance");
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ label: "My performance", section: "Performance" });
+  });
+
   it("offers no unfilled placeholder", () => {
     for (const e of entries) expect(e.href, e.id).not.toMatch(/[{}]/);
   });

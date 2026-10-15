@@ -62,7 +62,7 @@ describe("the registry's shape", () => {
       const m = sidebarRows(ws);
       expect(m.top.map((r) => r.key), ws.key).toEqual(["overview", "assistant"]);
       expect(m.work.at(-1), ws.key).toBe(TOOLS_ROW);
-      expect(m.performance.map((r) => r.key), ws.key).toEqual(["reports", "analytics", "appraisals", "learning"]);
+      expect(m.performance.map((r) => r.key), ws.key).toEqual(["performance", "reports", "analytics", "appraisals", "learning"]);
       expect(m.you, ws.key).toBe(YOU_ROWS);
     }
   });
@@ -277,6 +277,18 @@ describe("department analytics (DW-4c)", () => {
 });
 
 describe("the Overview, Performance and tools data", () => {
+  it("opens the Performance block with an ungated My performance row (PV7-06), and moves no other href", () => {
+    const [first, ...rest] = PERFORMANCE_ROWS;
+    expect(first.key).toBe("performance");
+    expect(first.tabs).toEqual([{ key: "mine", label: "My performance", href: "/me/performance", icon: "pulse" }]);
+    expect(first.gate).toBeUndefined();
+    expect(first.tabs[0].gate).toBeUndefined();
+    expect(rest.map((r) => r.key)).toEqual(["reports", "analytics", "appraisals", "learning"]);
+    expect(rest.find((r) => r.key === "reports")!.tabs[0].href).toBe("/reports/person");
+    expect(rest.find((r) => r.key === "appraisals")!.tabs[0].href).toBe("/appraisals/mine");
+    expect(rest.find((r) => r.key === "learning")!.tabs[0].href).toBe("/me/learning");
+  });
+
   it("lists Overview widgets in the fixed band order (plan §3.1)", () => {
     for (const ws of ALL) {
       const order = ws.overview.map((w) => OVERVIEW_BANDS.indexOf(w.band));

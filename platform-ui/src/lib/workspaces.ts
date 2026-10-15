@@ -947,6 +947,9 @@ export const REPORT_PERIODS: readonly { key: string; label: string; ticket?: str
 /** The Performance block, the same in every workspace (§5, DW-D10). `sidebarRows` adds each workspace's
  *  own analytics and report tabs. */
 export const PERFORMANCE_ROWS: readonly WorkspaceRow[] = [
+  // PV7-06: the person's own picture, first in the block; it links to the full pages below and copies none of them. Ungated:
+  // each section is withheld by its own module on the page.
+  { key: "performance", label: "My performance", icon: "pulse", tabs: [{ key: "mine", label: "My performance", href: "/me/performance", icon: "pulse" }] },
   {
     key: "reports", label: "Reports", icon: "chart",
     tabs: [
