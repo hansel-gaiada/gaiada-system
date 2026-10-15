@@ -6,9 +6,9 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 171,
-      "grantablePermissionsInCatalog": 464,
-      "permissionsCoveredByGroups": 425,
+      "groups": 172,
+      "grantablePermissionsInCatalog": 468,
+      "permissionsCoveredByGroups": 429,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
       "sensitiveGroups": 115
@@ -1986,6 +1986,19 @@
         "core.client_report.withdraw"
       ],
       "sensitive": true
+    },
+    {
+      "key": "notices",
+      "name": "Department notice boards",
+      "domain": "core",
+      "description": "Notices on a department's board and company-wide notices. DW-10a: the people placed in a department, the heads over it and the company-wide tiers read a department's notices, and every member reads the company-wide ones; the head of a department posts, edits and withdraws their unit's notices (company admins post and withdraw any, and company-wide notices are theirs alone). Agents and automation read notices and never post, edit or withdraw them.",
+      "permissions": [
+        "core.dept_notice.read",
+        "core.dept_notice.post",
+        "core.dept_notice.edit",
+        "core.dept_notice.withdraw"
+      ],
+      "sensitive": false
     }
   ],
   "advancedOnly": [

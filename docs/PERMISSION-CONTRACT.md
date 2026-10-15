@@ -2376,9 +2376,9 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §55 (plan `docs/plans/2026-10-15-pv7-pe
 
 **Proof.** `platform-nest/src/rbac/cerbos-client-report.test.ts` (static pin always; the live matrix on the Linux gate: the tiers, the owner rule and its fail-closed cases, the bot and automation DENY beating company_admin, manager and the platform_admin wildcard, the read-only permission arm, the permission-native owner), the HTTP suite `src/core/client-reports.db.test.ts` (the same rules through the routes), and the static alignment suites. **Restart the Cerbos test container and the live sidecar after the policy deploy.**
 
-## 47. DW-10a — the `dept_notice` kind (2026-10-15, PLANNED)
+## 47. DW-10a — the `dept_notice` kind (2026-10-15, BUILT, PROTOTYPED)
 
-Design: `docs/FRONTEND-BFF-CONTRACT.md` §57 (plan `docs/plans/2026-10-13-department-workspaces.md` §12.2, row 10a; owner ruling DW-D32). Status: **PLANNED**.
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §57 (plan `docs/plans/2026-10-13-department-workspaces.md` §12.2, row 10a; owner ruling DW-D32). Status: **BUILT, PROTOTYPED (backend, DW-10a-1: the policy, `perm_dept_notice_read`, the `scope` attribute, catalog, group, bundles, migration `202610152110_iam_dept_notice_permissions.sql` and the suites are in the repo. The live Cerbos matrix and the HTTP suite are written for the Linux CI gate and skip without Postgres and Cerbos; the static pins, the catalogue and parity suites run anywhere. The UI mirror `notices.post` is DW-10a-2 and is still PLANNED. The live Cerbos probe after a restart is the deploy step)**.
 
 **A new core kind, `dept_notice` (no module), with four actions.** The policy is `resource_dept_notice.yaml`, with keys `core.dept_notice.{read,post,edit,withdraw}`. One resource is one notice: a unit notice (on one org unit of the company) or a company-wide notice.
 
@@ -2423,6 +2423,13 @@ No key is `sensitive`.
 - the bundles, regenerated from a clean worktree.
 
 Plus the static pins and the live matrix (`cerbos-dept-notice.test.ts`), and the UI mirror in `platform-ui/src/lib/rbac.ts` with its parity register. **Restart Cerbos at the deploy and probe it:** a head's `post` on their own unit is allowed, and on a sibling unit denied.
+
+**As built (DW-10a-1, 2026-10-15).**
+- **Counts:** 112 kinds, 483 pairs, 468 grantable; 20 bundled pairs on global roles (3 x 4 for `platform_admin`, `company_admin`, `owner`; 5 reads; 3 head writes). The group is `notices`; none of the four keys is sensitive or advanced-only.
+- **The bundles table above is completed, not changed:** `hr_staff` and `hr_manager` also hold `read` (the `hr_people_reader` rule, which the policy gives its own rule), and `owner`'s bundle holds **all four** keys, because `owner` mirrors `company_admin` exactly (`owner-role.db.test.ts`). Cerbos honours only `read` for a permission-native `owner`: it posts, edits and withdraws only when it also holds `company_admin` or leads the unit. The live matrix pins both halves.
+- **The lead rules** are three separate rules (post, edit, withdraw), each `inTenant && notLow && has(scope) && scope == "unit"`. `org_unit_lead` alone (with no scope role) holds the three writes and not `read`: a real head also carries `member` and `manager`.
+- **`scope`** is in the `Resource` type and the `resourcePayload()` allow-list with the default `"unit"`. The live matrix proves it reaches the policy: the same ancestry allows a head with `scope: "unit"` and denies with `scope: "company"` (a dropped attribute could only deny, through `has()`).
+- **The tenant trap** is pinned twice: every ALLOW rule keeps `variables.inTenant` (static pin), and the HTTP suite runs the same node ids (`d-web`, `d-corp`, ...) in two companies: the head of A's `d-web` neither posts to, lists, reads, edits nor withdraws B's, and the other way round.
 
 ## 48. DW-10c — the department calendar: `org_structure · read_calendar` and department-visible events (2026-10-15, PLANNED)
 

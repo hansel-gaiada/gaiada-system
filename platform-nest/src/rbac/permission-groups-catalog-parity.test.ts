@@ -136,7 +136,8 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // DW-8j (2026-10-15): +3 grantable (core.personal_mailbox.{connect,read,send} on the NEW personal_mailbox kind, in 1 NEW authoring group `personal_mailbox`, not advancedOnly). 456 -> 459.
     // PV7-01 (2026-10-15): +1 grantable (reports.document.read_client on the EXISTING report_document kind, added to the existing `team_project_reports` group). 459 -> 460.
     // PV7-04a (2026-10-15): +4 grantable (core.client_report.{read,draft,publish,withdraw} on the NEW client_report kind, in 1 NEW authoring group `client_reports`, sensitive, not advancedOnly). 460 -> 464.
-    expect(grantable.length).toBe(464);
+    // DW-10a (2026-10-15): +4 grantable (core.dept_notice.{read,post,edit,withdraw} on the NEW dept_notice kind, in 1 NEW authoring group `notices`, not sensitive, not advancedOnly). 464 -> 468.
+    expect(grantable.length).toBe(468);
     expect(relationshipKeys.size).toBe(15);
   });
 

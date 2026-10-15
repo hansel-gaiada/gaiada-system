@@ -150,6 +150,13 @@ export interface Resource {
    *  (`ownerUserId == principal.id`). Read by the handler from the client row, never from a body. Omitted -> "" -> the
    *  rule's `has() && != ""` guard and the equality both fail closed (a client with no owner confers nothing). */
   ownerUserId?: string;
+  /** DW-10a (docs/FRONTEND-BFF-CONTRACT.md §57.3, PERMISSION-CONTRACT §47) -- a `dept_notice`'s scope, `unit` or `company`. Backs the
+   *  head's `post` / `edit` / `withdraw` rules, which carry `scope == "unit"` so a head never reaches a company-wide notice. Derived by
+   *  the handler from the validated request scope (post) or the STORED row (edit, withdraw), never trusted from a body. Omitted ->
+   *  "unit": an unfed resource reads as a unit notice, which on its own confers nothing (the lead rule still needs a
+   *  `unitAncestors` match, and an unfed list is empty). An attribute dropped from the allow-list below makes the rule's `has()`
+   *  false, which DENIES. */
+  scope?: string;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -286,6 +293,9 @@ function resourcePayload(r: Resource) {
       // PV7-04a. Listed here or it never reaches resource_client_report.yaml (this is an allow-list). Fails closed: ""
       // equals no principal id.
       ownerUserId: r.ownerUserId ?? "",
+      // DW-10a. Listed here or it never reaches resource_dept_notice.yaml (this is an allow-list; the handler builds the Resource
+      // through an object spread, where TypeScript's excess-property check does not fire). Defaults to "unit": see the type's note.
+      scope: r.scope ?? "unit",
     },
   };
 }

@@ -86,7 +86,23 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
       "meetings.getMinutes",
       "meetings.saveMinutes",
       "meetings.shareMinutes",
+      // DW-10a: the department notice board, READ ONLY (DW-D32: agents read notices and never post them). Pinned below.
+      "notices.list",
     ]);
+  });
+
+  it("DW-10a: notices.list is a plain GET read with no write twin, and its template names the route's own query keys", () => {
+    const t = byName.get("notices.list")!;
+    expect(t.method).toBe("GET");
+    expect(t.write).toBeUndefined();
+    expect(t.impact).toBeUndefined();
+    expect(t.pathTemplate).toBe("/api/:tenantId/notices?unitNodeId=:unitNodeId&scope=:scope&state=:state");
+    // no notices.* write tool exists: agents never post, edit or withdraw (Cerbos denies bot/automation writes as well)
+    expect(tools.filter((x) => x.name.startsWith("notices.") && x.name !== "notices.list")).toEqual([]);
+    const props = (t.inputSchema as { properties: Record<string, { default?: string }> }).properties;
+    expect(props.unitNodeId.default).toBe("home");
+    expect(props.scope.default).toBe("all");
+    expect(props.state.default).toBe("current");
   });
 
   it("rejects a duplicate registration rather than overwriting silently", () => {
