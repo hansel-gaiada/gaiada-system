@@ -1297,6 +1297,10 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 | DW-D29 | DW-8n's finding: every member and viewer can read the whole company's time entries through `GET /time-entries` | **Owner (2026-10-15): narrow it, in line with DW-D19.** A person reads their own time; a head reads their unit's people; HR's people readers and the company-wide tiers read the company. The list goes through the shared person-axis gate (`core/person-axis-gate.ts`), the rule activity and productivity already use (BFF §48a, PERMISSION-CONTRACT §40a) |
 | DW-D30 | DW-7j: the functional departments' and the GM's KPI readers (BFF §40.6). The data could not settle five definitions: there is no revenue plan; payroll has no "published" time and the close no deadline; IT has no request log or threat backend; and turnaround could count calendar or working days | **Owner (2026-10-15):** build the GM's monthly revenue plan now (§40.6.4). Payroll is on time when a regular run is paid by its pay date. A period is closed on time when soft-locked within 10 calendar days of its end. The IT KPIs use proxies now: leavers' logins closed within 1 working day, and devices offline or degraded. Leave-decided and payments-confirmed count working days. |
 | DW-D31 | DW-8i-3 (a finding of DW-8i-2): the SEO property brief's grounding and social's brand drafts search the knowledge store with a scope, but every internal ERP chunk carries an empty ACL and so matches any scope; a meeting transcript or a contract file could ground an AI draft | **Owner (2026-10-15): own corpus only.** Each lookup keeps only the hits of the corpus it searches: the property's grounding chunks (`search-property:<id>:grounding`) or the client's brand corpus (`social-brand:<company>:<client>`). ERP records and the public tier never reach those drafts (BFF §46.10) |
+| DW-D32 | DW-10a: who posts to a department's notice board, and who reads it? | **Owner (2026-10-15): heads post, the department reads.** The head of a department (`org_unit_lead` on it or on a unit above it) and company admins post, edit and withdraw a department's notices. The department's people (placed in it or in a unit below it) and the heads above it read them. Company admins also post company-wide notices that every member reads. A posted notice lands in its readers' Inbox. Agents read notices and never post them (§12.1) |
+| DW-D33 | DW-10c: may people see which colleagues in their department are away on leave? | **Owner (2026-10-15): yes, with the leave type.** The department calendar shows its people's approved leave as "away" with the dates and the leave type (vacation, sick, unpaid, other) to the department's people. The note, the minutes and pending, denied or cancelled leave stay with HR and the person. Heads and HR keep their full views (BFF §59, PERMISSION-CONTRACT §48) |
+| DW-D34 | DW-10d: what may each person change on their Overview, and where is it saved? | **Owner (2026-10-15): show and hide, saved in the browser.** A person hides the blocks they do not want and switches on optional ones (Client health first); the order never changes (§3), and Needs you and a head's condition banner cannot be hidden. The choice is kept in the `gaiada_prefs` cookie per workspace, like pinned tools (DW-6c), so it does not follow the person to another browser |
+| DW-D35 | DW-10e (moved from DW-5, BFF §32.8): may a group company that is not an agency (the holding, a hotel company) ask the agency company's Creatives and Web Dev? | **Owner (2026-10-15): build it now.** Group companies send asset and engineering requests to another group company's departments through the group's service assignments (ORG-13), contract first (BFF §60, PERMISSION-CONTRACT §49) |
 
 ---
 
@@ -1442,6 +1446,46 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 - A department calendar.
 - Personalising the Overview.
 - The PV-7 "My performance" depth.
+- Requests across group companies (moved here from DW-5 by the owner, 2026-10-14).
+
+### 12.1 Build notes (DW-10, 2026-10-15)
+
+**Evidence.** `origin/main` at `5722ec9a` (release 412), read from a clean worktree, plus four read-only
+surveys (notice board, department calendar, targets against actuals, personalising the Overview) and a
+fifth for requests across group companies. The owner ruled DW-D32 to DW-D35 at the start (§11.4).
+
+**Already delivered.** "My performance" depth is PV7-06 (`/me/performance`, live since 407; PV-7 plan L4).
+DW-10 drove it live on 2026-10-15 and ticked the box.
+
+| Ticket | Today (`5722ec9a`) | DW-10 adds |
+|---|---|---|
+| 10a Notice board (DW-D32) | Nothing like it: no table, route, page, Cerbos kind or flow. `notify()` (`PN/core/http.ts`) sends to ONE recipient and skips non-members; nothing fans out to a unit. The unit roster is `loadUnitRoster` + `loadUnitDescendants` (`PN/modules/reports/person-scope.ts`, `PN/core/org-unit-closure.ts`), inside `withTenants` | Contract first (BFF §57, PERMISSION-CONTRACT §47, a new kind `dept_notice`). Table `dept_notices` (a unit notice, or a company-wide one with no unit): title, plain-text body, pinned, an optional end date, author, withdrawn. Heads post, edit and withdraw (an `org_unit_lead` rule on the notice's `unitAncestors`, its own rule per the derived-roles authoring rule); company admins too, and only they post company-wide. Reads narrow in the handler like `authorizeUnitRead`: placed in the unit's subtree, a head above it, or a company-wide tier; company-wide notices to every member. Posting notifies each reader (`notice.posted`, a loop over `notify()`). Agents read through a hub tool and never write (Cerbos denies `bot` and `automation`). UI: the Overview row gains a **Notices** tab (`/departments/[deptId]/notices`, list and post form) and the Overview a `notices` block in the Now band (current notices, pinned first; shown when there is one or when you may post; "unavailable" on a failed read). The company Overview shows company-wide notices |
+| 10b Targets against actuals | Targets are effective-dated per month (`dept_kpi_targets.effective_from`, one approved row per unit, KPI and month), so a different target each month already works, one propose-and-approve at a time. `GET /dept-kpis` answers ONE period. Only the department appraisal loops months, and it returns conditions only. The KPI page shows the current period with no trend. No charting library: hand-rolled SVG (`UI/components/reports/charts/TrendLine.tsx`, `UI/components/finance/MonthBars.tsx`) | Contract first (BFF §58, no new kind). `GET /dept-kpis/months?unitNodeId&from&to` (at most 12 months): per KPI and month the value, its parts, the target in force that month and the condition, one `evaluateUnits` call per month with `targetsAsOf` = the month's start (the appraisal's rule), under `GET /dept-kpis`' read gate. The department KPI page gains a **By month** view: a KPI × month table and a trend line with the target as a step line. Then the plan side: a head proposes targets for several coming months in one go and the approver decides them together (`POST /dept-kpis/targets/batch`, `/targets/decide-batch`; each row keeps every single-row check, including "never your own proposal") |
+| 10c Department calendar (DW-D33) | No event belongs to a department: `calendar_events.visibility` is `attendees` or `company`. Leave lives in `hr_leave_requests` with no unit; a plain member's leave read silently narrows to their own rows; no head path. Holidays are per company (`hr_holiday_calendars`, one default). Milestone reads are per project; `pm/tasks` has no department filter. `/departments/[deptId]/calendar` is Social Media's posts calendar | Contract first (BFF §59, PERMISSION-CONTRACT §48). One read `GET /departments/:unitNodeId/calendar?from&to` (at most 42 days) in four legs, each `{included, items}` or `{included: false, reason}`, never a fake empty: **holidays** (the company's default calendar), **away** (approved leave of the people placed in the unit's subtree: name, dates, leave type, nothing else), **deadlines** (open milestones and tasks due in the unit's projects via `departmentFilterSql`, each project re-checked for `pm_project` read in batches of at most 50) and **events** (what the viewer may read). The same narrowing as the KPI read: placed in the subtree, a head above, HR scope or a company-wide tier. Then a `department` visibility for events (with `unit_node_id`) in the five places DW-8 listed: the CHECK (re-declared whole), the Cerbos attrs and rule, the `mine` and detail SQL mirrors, the form and the demo store; busy times unchanged. UI: the Overview row's **Department calendar** tab (`/departments/[deptId]/schedule`), a month grid and an agenda |
+| 10d Personalise the Overview (DW-D34) | The Overview's widgets come from the registry in a fixed band order; `?period=` and `?view=team` live in the URL. Personal choices live in the `gaiada_prefs` cookie (`UI/lib/prefs.ts`), pins with caps (`UI/lib/pinnedTools.ts`) and a no-JS form action (`togglePinnedToolAction`). No server store | UI only. Each `OverviewWidget` gains `placement`: `fixed` (Needs you, the condition banner, Notices), `default` (shown, may be hidden) or `optional` (off until switched on). Prefs gain `overview: {[workspaceKey]: {hide, show}}`, validated against the registry on read, with caps like pins. A **Customise** link on the Overview opens a checklist per band (a form post that works without JavaScript); the order stays the registry's. The first optional block is **Client health** for agency staff who can read clients (`GET :t/clients/health`, BFF §54; reuse `UI/lib/clientHealth.ts` and `ClientHealthChip`; the PV-7 plan handed it here) |
+| 10e Requests across group companies (DW-D35) | §32.8: same company only; requests are offered to agency-pack companies only | Contract first (BFF §60, PERMISSION-CONTRACT §49), written from the fifth survey (below) |
+
+**Order and tiers.** One Sonnet agent at a time, reviewed by the orchestrating session; contracts are
+written by the orchestrating session.
+1. 10d (UI only, Sonnet senior-fe), while the 10a contract is written.
+2. 10a-1 backend (Sonnet senior-be), then 10a-2 UI (Sonnet senior-fe).
+3. 10b-1 series read, 10b-2 By month view, 10b-3 targets for several months.
+4. 10c-1 the calendar read (privacy core: reviewed line by line), 10c-2 department events, 10c-3 the page.
+5. 10e after its contract (cross-company authorization: the orchestrating session reviews every line,
+   and the core may take an Opus implementer).
+
+**Numbers.** Rulings DW-D32 to DW-D35. BFF §57 (10a), §58 (10b), §59 (10c), §60 (10e). PERMISSION-CONTRACT
+§47 (10a), §48 (10c), §49 (10e). Migrations take the next free prefix after main's newest at landing
+(`lint-migration-names.mjs` after every rebase). Branches `dw/10*`.
+
+**Traps to carry.**
+- `org_unit` grants carry no tenant and node ids are unique only per company: compute `unitAncestors` with
+  the tenant, inside `withTenants`, and keep `inTenant` in every rule.
+- A Cerbos kind is six artifacts (policy, catalogue, bundles, pins, live matrix, UI mirror); restart and
+  probe Cerbos at the deploy.
+- Many HR readers degrade a refusal to `[]` or to the viewer's own rows; the calendar's away leg must read
+  through its own query, never `listLeave`.
+- An empty notice list or calendar leg is a claim: draw it only from a read that succeeded.
 
 ---
 
@@ -1627,6 +1671,7 @@ These are built in code but give no real data until someone outside engineering 
 
 ## Decision log
 
+- **2026-10-15 (owner, at DW-10's start):** DW-D32 (notice board: heads post, the department reads), DW-D33 (the department calendar shows colleagues' approved leave with its type), DW-D34 (Overview: show and hide blocks, saved in the browser) and DW-D35 (requests across group companies are built now), all §11.4; the DW-10 build notes are §12.1.
 - **2026-10-15 (owner, during the build):** DW-D31: the SEO property brief's and social's brand-draft knowledge lookups keep only their own corpus, never ERP records (§11.4, BFF §46.10), for DW-8i-3.
 - **2026-10-15 (owner, during the build):** DW-D26 (the assistant's and the hub's knowledge lookups go through DW-8i's per-record filter), DW-D28 (calendar busy times, times only) and DW-D29 (time entries read by tier, as DW-D19), all §11.4, for DW-8i-2, DW-8g and DW-8n's finding.
 - **2026-10-15 (owner, during the build):** DW-D30: the definitions behind DW-7j's KPI readers (§11.4, BFF §40.6). The GM's revenue plan is built now; payroll is on time when paid by the pay date; the close is on time within 10 days; the IT KPIs use proxies; turnarounds count working days.
