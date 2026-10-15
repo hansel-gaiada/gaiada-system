@@ -1,0 +1,124 @@
+# DW-10a (docs/FRONTEND-BFF-CONTRACT.md §57; docs/PERMISSION-CONTRACT.md §47; plan docs/plans/2026-10-13-department-workspaces.md §11.4
+# and §12.1, row 10a; owner ruling DW-D32: heads post, the department reads) — authz for the NEW `dept_notice` resource kind (core, no
+# module): one NOTICE on a department's board (a unit notice, on one org unit of the company) or a company-wide notice. Four actions:
+#   read     — see and list notices. company_admin, manager, member, viewer, and the HR read tier (hr_people_reader). Deliberately
+#              TENANT-WIDE here: the per-unit narrowing ("placed in the unit or below it today, a head whose led scope holds it, or a
+#              company-wide tier") needs the caller's PLACEMENT as of today, which Cerbos cannot read. The handler
+#              (dept-notices.controller.ts, through core/unit-reach.ts) applies it after this check, as dept_kpi_target's `read` does.
+#              Cerbos bounds the tier; the service bounds the unit.
+#   post     — put up a notice. company_admin (a unit notice or a company-wide one); and an `org_unit_lead` of the unit or an enclosing
+#              one, for a UNIT notice only (its own rule, `unitAncestors`, `scope == "unit"`). A company-wide notice
+#              (`scope == "company"`) is company_admin only.
+#   edit     — change title, body, pin or end date. As `post`, on the STORED row's scope and unit.
+#   withdraw — take a notice down (there is no delete). As `post`, on the stored row's scope and unit.
+# `manager` gets NO write: every head's lead position also carries `manager` company-wide, so `manager` cannot mean "the head of this
+# department" (the dept_kpi_target `approve` reasoning).
+# Restart `gaiada-test-cerbos` after editing this file; the bind-mount does not hot-reload.
+#
+# ── EVERY ATTRIBUTE-DEPENDENT RULE STANDS ALONE (the HIER-2 authoring rule) ──────────────────────
+# `org_unit_lead` is its own rule on each of `post`, `edit` and `withdraw`, never mixed with a scope role and never with another
+# action. Containment is the derived role's: the grant's scopeId must be in `resource.attr.unitAncestors` (the notice's unit and every
+# ancestor of it, `loadUnitAncestors`), fed by the HANDLER from the request's `unitNodeId` (post) or from the STORED row (edit,
+# withdraw). A company-wide notice is fed `unitAncestors: []`, and `scope: "company"`, so no lead rule can match it. An id that is not
+# in the org tree has no closure rows, so its ancestors are [] and no lead grant matches: a head is refused (403) before anything says
+# whether the unit exists.
+#
+# ── THE TENANT TRAP ─────────────────────────────────────────────────────────────────────────────
+# An `org_unit` grant carries NO tenant, and node ids are unique only per company (seed ids such as `d-webdev` repeat across
+# companies). So EVERY rule keeps `variables.inTenant` (the resource's tenant must be in the principal's companies), and the handler
+# always computes `unitAncestors` WITH the tenant (the closure is per tenant). The head of company A's `d-webdev` therefore cannot
+# post to company B's `d-webdev`: B is not in that head's companies.
+#
+# ── THE `scope` ATTRIBUTE ───────────────────────────────────────────────────────────────────────
+# New attribute, `"unit"` or `"company"`, fed by the handler (never from a body as a trusted value: the handler derives it from the
+# validated `scope` field on post and from the stored row on edit and withdraw). It is in the Resource type AND the resourcePayload()
+# allow-list in src/rbac/cerbos.ts: an attribute missing from that allow-list is silently dropped, and `has()` then makes the lead
+# rule DENY (it never allows). The payload default is "unit" so an unfed resource reads as a unit notice, which on its own confers
+# nothing: the lead rule still needs an `unitAncestors` match.
+#
+# ── NO AUTOMATION OR BOT PRINCIPAL POSTS, EDITS OR WITHDRAWS (after the work_request / calendar_event precedent) ──
+# Agents READ notices (DW-D32) and never post them. The DENY is shaped exactly like resource_work_request.yaml's: `roles: ["user"]`,
+# which every principal carries, so under deny-overrides it beats every ALLOW below, the platform_admin wildcard and the perm mirror
+# included. It reads `principal.attr.kind` (users.kind, sent by principalPayload()); `has()` makes a raw caller that omits the
+# attribute evaluate to false. `read` is deliberately NOT listed.
+#
+# ── THE PERMISSION ARM COVERS `read` ONLY ───────────────────────────────────────────────────────
+# `post`, `edit` and `withdraw` are reachable by `org_unit_lead` through an attribute-dependent rule, and a flat `perms` mirror cannot
+# tell "holds the key through company_admin" from "holds it through a lead grant over ONE unit": a mirror would let a head post to
+# EVERY unit (iam-04-reg1-mirror-reach-invariant). Same call as dept_kpi_target's `propose` and work_request's `decline`. `read` is
+# reached only through scope-only rules, so its mirror grants no more than the role arm. Consequence: the permission-native `owner`
+# role (zero role-arm rules) reads through its bundle, but posts, edits and withdraws only if it also holds company_admin or leads
+# the unit.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: dept_notice
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # The HR read tier (hr_staff, hr_manager). Its own rule so the HR tier stays visible as a decision rather than folding into the
+    # scope roles above: the HR people tier reads every unit's notices (BFF §57.2, the company-wide tiers).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_reader"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # company_admin posts, edits and withdraws every notice: a unit's, and the company-wide ones nobody else may touch.
+    - actions: ["post", "edit", "withdraw"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Department head of the unit or an enclosing one — OWN rule per action, never mixed (HIER-2 §1.4). UNIT notices only: the
+    # `scope == "unit"` test (guarded by has()) is what keeps a head off a company-wide notice, and an unfed `scope` denies.
+    - actions: ["post"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.scope) && request.resource.attr.scope == "unit"
+    - actions: ["edit"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.scope) && request.resource.attr.scope == "unit"
+    - actions: ["withdraw"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.scope) && request.resource.attr.scope == "unit"
+
+    # ══════════ automation and bot principals never post, edit or withdraw ══════════════
+    # Same `roles: ["user"]` DENY shape as resource_work_request.yaml, so it beats the platform_admin wildcard and every ALLOW
+    # (the perm mirror too) under deny-overrides. `read` is deliberately NOT listed: agents read notices.
+    - actions: ["post", "edit", "withdraw"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot"]
+
+    # =========== permission-matching arm: read ONLY (see the header) =====================================
+    # Generic global-or-company mirror. The platform_admin wildcard is deliberately NOT mirrored (IAM-04c: the tier bypass never
+    # enters the permission catalog).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_dept_notice_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

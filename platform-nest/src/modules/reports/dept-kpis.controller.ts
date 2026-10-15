@@ -61,17 +61,15 @@ import { withTenants } from "../../db";
 import { config } from "../../config";
 import { loadUnitAncestors } from "../../core/org-unit-closure";
 import { isUuidShaped } from "../../core/dept-resolution";
+import { callerReachesUnit, isCompanyWide } from "../../core/unit-reach";
 import type { Principal } from "../../rbac/principal";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { resolveRange } from "./reports.controller";
 import {
   OUT_OF_LINE_MESSAGE,
-  collectUnitSubtree,
   loadLedUnitScope,
   loadOrgStructure,
-  personAxisTier,
   requiresUnitNarrowing,
-  resolveSubjectUnit,
   todayIsoInTz,
 } from "./person-scope";
 import { compareByConditionThenName, departmentUnits, findOrgUnit, kpiDefFor, workspaceSlugFor, type OrgUnitRef } from "./dept-kpis";
@@ -89,13 +87,9 @@ import {
 const MONTH_START_RE = /^\d{4}-(0[1-9]|1[0-2])-01$/;
 const MAX_NOTE = 2000;
 
-/** The company-wide tiers of this surface (see the header): personAxisTier's two top tiers, plus `owner` of this
- *  company. Reads only `principal.roles` (server-assembled at auth time), never request input. */
-export function isCompanyWide(principal: Principal, tenantId: string): boolean {
-  const tier = personAxisTier(principal, tenantId);
-  if (tier === "unrestricted" || tier === "company_wide") return true;
-  return principal.roles.some((g) => g.role === "owner" && g.scopeType === "company" && g.scopeId === tenantId);
-}
+// DW-10a: `isCompanyWide` and the "placed, leads, or company-wide" predicate moved to core/unit-reach.ts, which the notice board
+// shares. Re-exported so the appraisal and watch controllers keep importing it from here.
+export { isCompanyWide };
 
 function requireUnitParam(raw: unknown): string {
   if (typeof raw !== "string" || raw.trim() === "") {
@@ -117,21 +111,12 @@ export async function unitAncestorsOf(tenantId: string, unitNodeId: string): Pro
 export async function authorizeUnitRead(principal: Principal, tenantId: string, unitNodeId: string): Promise<{ unit: OrgUnitRef; structure: unknown }> {
   const unitAncestors = await unitAncestorsOf(tenantId, unitNodeId);
   await authorize(principal, { kind: "dept_kpi_target", tenantId, module: "reports", unitAncestors }, "read");
-  const companyWide = isCompanyWide(principal, tenantId);
   const asOf = todayIsoInTz(config.reportsTz);
   return withTenants(
     [tenantId],
     async (c) => {
       const structure = await loadOrgStructure(c, tenantId);
-      if (!companyWide) {
-        const own = principal.userId ? await resolveSubjectUnit(c, tenantId, principal.userId, asOf) : null;
-        const placed = !!own && collectUnitSubtree(structure, unitNodeId).includes(own);
-        const leads =
-          !placed &&
-          requiresUnitNarrowing(principal, tenantId) &&
-          (await loadLedUnitScope(c, tenantId, principal.userId, asOf, principal)).has(unitNodeId);
-        if (!placed && !leads) throw new ForbiddenException(OUT_OF_LINE_MESSAGE);
-      }
+      if (!(await callerReachesUnit(c, principal, tenantId, structure, unitNodeId, asOf))) throw new ForbiddenException(OUT_OF_LINE_MESSAGE);
       const unit = findOrgUnit(structure, unitNodeId);
       if (!unit) throw new NotFoundException({ message: "unit_not_found", field: "unitNodeId" });
       return { unit, structure };

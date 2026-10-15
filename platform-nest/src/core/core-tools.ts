@@ -1328,6 +1328,48 @@ export function registerMeetingMinutesCoreTools(): void {
   registerCoreTools(MEETING_MINUTES_CORE_TOOLS);
 }
 
+// =================================================================================================
+// DW-10a - `notices.list`, the department notice board for an agent (docs/FRONTEND-BFF-CONTRACT.md section 57.7, owner ruling
+// DW-D32: agents READ notices and never post them). Route: core/dept-notices.controller.ts. READ ONLY, and there is deliberately
+// NO write tool: Cerbos denies post, edit and withdraw to `bot` and `automation` principals anyway.
+//
+// It returns the rows `GET /notices` does. The route's own authority applies unchanged: Cerbos `read`, then the unit narrowing (an
+// agent that is not placed in a unit and holds no company-wide tier reads the company-wide notices only; a 403 on a unit is a
+// refusal, never an empty list). `home` is the agent form of "the caller's own department": the route resolves it from the caller's
+// primary unit today, and answers 400 when the caller has none. `all` means "not given", the same sentinel `conversation.listThreads`
+// uses, so the hub can send every key.
+// =================================================================================================
+const NOTICES_CORE_TOOLS: McpToolDef[] = [
+  {
+    name: "notices.list",
+    description:
+      "The notices on a department's notice board, as the caller may read them. `unitNodeId` (default `home`: the caller's own " +
+      "department) lists that unit's notices, those of every unit above it and the company-wide ones; `scope: company` lists the " +
+      "company-wide notices only. `state` is `current` (default; pinned first, then newest) or `past` (ended; newest first). Each " +
+      "row has `id`, `scope`, `unitNodeId`, `unitName`, `title`, `body` (plain text), `pinned`, `endsOn`, `state`, `author`, " +
+      "`createdAt`, `editedAt` and `canEdit`; the answer is `{items, nextCursor}`. A 403 is a refusal (`outside your reporting " +
+      "line`), never an empty list; 404 `unit_not_found` for a unit that is not in the org tree. Read only: agents never post.",
+    minAssurance: "verified",
+    method: "GET",
+    pathTemplate: "/api/:tenantId/notices?unitNodeId=:unitNodeId&scope=:scope&state=:state",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        unitNodeId: { type: "string", default: "home", description: "an org-tree node id, or `home` for the caller's own department" },
+        scope: { type: "string", enum: ["all", "company"], default: "all", description: "`company` = the company-wide notices only" },
+        state: { type: "string", enum: ["current", "past"], default: "current" },
+      },
+      required: ["tenantId", "unitNodeId", "scope", "state"],
+    },
+  },
+];
+
+/** DW-10a: `notices.list`; exported so a suite can restore exactly this area. */
+export function registerNoticesCoreTools(): void {
+  registerCoreTools(NOTICES_CORE_TOOLS);
+}
+
 /**
  * The ONE aggregate, mirroring `approval-executables.ts`'s `registerAllExecutableApprovals()` doctrine
  * — that file's own header names the exact failure mode a hand-maintained list of "call these to
@@ -1345,6 +1387,7 @@ export function registerAllCoreTools(): void {
   registerContractBillingCoreTools();
   registerConversationCoreTools();
   registerMeetingMinutesCoreTools();
+  registerNoticesCoreTools();
 }
 
 // =================================================================================================

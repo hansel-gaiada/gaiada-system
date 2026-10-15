@@ -700,6 +700,19 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.calendar_event.create" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_dept_notice_read — DW-10a (2026-10-15, docs/FRONTEND-BFF-CONTRACT.md §57, docs/PERMISSION-CONTRACT.md §47). One generic
+    # global-or-company mirror for `read` ONLY. NO post / edit / withdraw mirror, on purpose: each is reachable by an org_unit_lead
+    # rule (attribute-dependent: the grant's one unit, via unitAncestors), and a flat `perms` mirror cannot tell "holds the key through
+    # company_admin" from "holds it through a lead grant over ONE unit" (permission-arm-hazard-scan Pattern B,
+    # iam-04-reg1-mirror-reach-invariant). Same call as dept_kpi_target's propose and work_request's decline.
+    - name: perm_dept_notice_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.dept_notice.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_creative_asset_* — DW-6h (2026-10-13, docs/FRONTEND-BFF-CONTRACT.md §35.4). One generic global-or-company
     # mirror for read and request_review. NO decide_review / withdraw_review mirror, on purpose: decide_review is
     # reachable by an org_unit_lead rule (attribute-dependent) and a requester rule (self-scoped), and withdraw_review by
