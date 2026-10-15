@@ -656,6 +656,99 @@ function timeline() {
   return events.sort((a, b) => (a.at === null ? 1 : b.at === null ? -1 : b.at.localeCompare(a.at)));
 }
 
+// ── PV7-03: project health (BFF §54.5) ────────────────────────────────────────────────────────────
+// Field names are the contract's, exactly. It is DERIVED from the stores above wherever they hold the fact (milestones,
+// deliverables, unsigned agreements, the pending gate, recorded payments, the open conversation), so the Overview agrees
+// with the Projects page, the timeline and the "Waiting for you" card in the same demo session.
+//
+// Per identity (follows `PORTAL_SCOPE` in demoClientCentre.ts):
+//   demo-client         Northwind client-wide, AND Demo Harbour Hotel through ONE project only (the project-scoped
+//                       contact: no client-wide items, `wide: false`, a turnaround counted on that project alone).
+//   every other portal identity  Northwind client-wide only.
+// What the payload never carries (internal gates, tasks, people, money, a state label) is not here either.
+const HEALTH_SETTLED = ["delivered", "approved", "done"];
+interface HealthBallItem { kind: string; id: string; context: string | null; since: string | null }
+function healthBall(items: HealthBallItem[]) {
+  const sorted = [...items].sort((a, b) => String(a.since).localeCompare(String(b.since)));
+  return { count: sorted.length, oldestSince: sorted[0]?.since ?? null, items: sorted.slice(0, 25) };
+}
+/** Items for one scope: `projectId` for a project, `null` for the client-wide part (items with no project). */
+function healthBalls(projectId: string | null) {
+  const you: HealthBallItem[] = [];
+  const us: HealthBallItem[] = [];
+  if (projectId === "proj-nw-site") you.push({ kind: "gate", id: "gate-demo-2", context: "Northwind — website relaunch", since: stamp(-3) });
+  for (const k of CONTRACTS) {
+    if (k.status === "sent" && k.projectId === projectId && !k.signatures.some((x) => x.party === "client")) {
+      you.push({ kind: "contract", id: k.id, context: k.title, since: k.sentAt });
+    }
+  }
+  if (projectId === null) {
+    // A recorded payment is the client's own, so it is client-wide, and its context is null (no amount, PV-D38).
+    for (const list of Object.values(PAYMENTS)) {
+      for (const pay of list) if (pay.status === "pending") us.push({ kind: "payment", id: pay.id, context: null, since: pay.recordedAt });
+    }
+  }
+  // A thread whose last message is the client's is waiting for our reply.
+  for (const t of CONV.threads) {
+    if (t.status !== "open" || t.projectId !== projectId) continue;
+    const msgs = CONV.messages.filter((x) => x.threadId === t.id);
+    const last = msgs[msgs.length - 1];
+    if (last && last.authorSide === "client") us.push({ kind: "conversation", id: t.id, context: t.subject ?? "General conversation", since: last.createdAt });
+  }
+  return { waitingOnYou: healthBall(you), waitingOnUs: healthBall(us) };
+}
+function northwindHealth() {
+  const today = day(0);
+  const projects = PROJECTS.map((pr) => {
+    const ms = MILESTONES.filter((x) => x.projectId === pr.id);
+    const dl = DELIVERABLES.filter((x) => x.projectId === pr.id);
+    const open = ms.filter((x) => x.status !== "done");
+    const next = open.filter((x) => x.dueDate >= today).sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
+    return {
+      projectId: pr.id, name: pr.name, status: pr.status,
+      milestones: {
+        total: ms.length, done: ms.length - open.length,
+        upcoming: open.filter((x) => x.dueDate >= today).length, late: open.filter((x) => x.dueDate < today).length, undated: 0,
+      },
+      deliverables: {
+        total: dl.length, delivered: dl.filter((x) => HEALTH_SETTLED.includes(x.status)).length,
+        late: dl.filter((x) => x.dueDate < today && !HEALTH_SETTLED.includes(x.status)).length,
+      },
+      nextMilestone: next ? { id: next.id, name: next.name, dueDate: next.dueDate } : null,
+      ...healthBalls(pr.id),
+    };
+  });
+  return {
+    clientId: CLIENT_ID, name: "Northwind Traders", wide: true, projects,
+    clientWide: healthBalls(null),
+    turnaround: { windowDays: 90 as const, client: { medianDays: 2.5, n: 7, withheld: false }, ours: { medianDays: 1.5, n: 9, withheld: false } },
+  };
+}
+/** The project-scoped contact's client: one project, no client-wide part, and a turnaround from that project alone, so
+ *  our side is below 3 samples and is withheld. */
+function harbourHealth() {
+  return {
+    clientId: "cl-harbour", name: "Demo Harbour Hotel", wide: false,
+    projects: [{
+      projectId: "proj-hb-spa", name: "Spa booking page", status: "active",
+      milestones: { total: 3, done: 1, upcoming: 2, late: 0, undated: 0 },
+      deliverables: { total: 2, delivered: 1, late: 0 },
+      nextMilestone: { id: "ms-hb-2", name: "Booking form live", dueDate: day(14) },
+      waitingOnYou: healthBall([{ kind: "gate", id: "gate-hb-1", context: "Spa booking page", since: stamp(-6) }]),
+      waitingOnUs: healthBall([]),
+    }],
+    clientWide: null,
+    turnaround: { windowDays: 90 as const, client: { medianDays: 3, n: 4, withheld: false }, ours: { medianDays: null, n: 2, withheld: true } },
+  };
+}
+function portalHealth(userId: string) {
+  return {
+    asOf: new Date().toISOString(),
+    clients: userId === DEMO_CLIENT_USER ? [northwindHealth(), harbourHealth()] : [northwindHealth()],
+    unavailable: [] as string[],
+  };
+}
+
 // ── Dispatch ──────────────────────────────────────────────────────────────────────────────────────
 
 export function portalDashboardDemo(method: string, p: string, userId: string, body?: string): DemoResult | null {
@@ -664,7 +757,7 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
   // Route table FIRST, identity check second — but only for routes this module owns, so unmatched
   // portal routes still fall through to `portalDemo` (runs/gates) rather than being 403'd here.
   const seg = p.replace(/^\/api\/[^/]+\/portal\//, "");
-  const OWNED = /^(overview|projects|milestones|timeline|deliverables|invoices|contracts|documents|profile|stream|files|change-requests|conversation|meetings|payments|simulated-psre)(\/|\?|$)/;
+  const OWNED = /^(overview|projects|milestones|timeline|deliverables|invoices|contracts|documents|profile|stream|files|change-requests|conversation|meetings|payments|simulated-psre|health)(\/|\?|$)/;
   if (!OWNED.test(seg)) return null;
   if (!isDemoPortalClient(userId)) return { status: 403, json: { error: "not a portal client" } };
 
@@ -700,6 +793,9 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
       conversationUnread: CONV.threads.filter((t) => t.unread > 0).length,
     });
   }
+
+  // ── project health (PV7-03, BFF §54.5) ──
+  if (seg === "health" && m === "GET") return ok(portalHealth(userId));
 
   // ── projects ──
   if (seg === "projects" && m === "GET") return ok(PROJECTS);
