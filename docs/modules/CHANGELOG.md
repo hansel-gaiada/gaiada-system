@@ -11,6 +11,23 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.160.0` + platform-ui `0.183.0` - DW-7h: IT security on the ERP side (DW-D36, BFF §52, PERMISSION §42) (2026-10-15) - PROTOTYPED
+
+The UniFi controller is shared with a private house, so no API key can be issued. IT now sees and controls what reaches the ERP. Migration `202610152130_security_access` (`security_access_seen`, `security_session_revocations`, `security_ip_blocks`). No Cerbos change: the routes reuse `it_account` `read` and `disable`.
+- **The request hook (7h-1)** runs in `AuthGuard`, after the principal:
+  - a session IT signed out, or a token from before "Block login", gets 401 `session_revoked` within 10 seconds;
+  - an address blocked for a company gets 403 `ip_blocked`;
+  - each connection is recorded per (company, user, session, address), throttled.
+  - platform-ui forwards the browser's address and user agent (`x-gaiada-client-*`). These are trusted only when the request did not pass nginx (`clientContextOf`).
+  - A `session_revoked` refusal lands on `/auth/ended`, which clears the cookie (same-site navigations only) and leads to `/login` with "Your session was ended by IT."
+- **The routes (7h-2)** live at `/api/:t/it/security/`:
+  - reads: connections, sign-ins (Keycloak events, `on`/`off`/`unavailable`, never a zero for off), alerts (failed sign-in bursts per account and per address, new devices, blocked-address hits) and blocks;
+  - writes: sign out a session, block an address and lift a block, with self-protection (`revokes_yourself`, `blocks_yourself`, `shared_address`, and private addresses refused).
+  - "Block login" now also ends the person's sessions, including on an account already disabled.
+  - IT's reset gives a TEMPORARY password, because most staff addresses are Google Workspace aliases.
+- **The pages (7h-3):** IT › Network's four sample-data tabs are now Connected, Sign-ins, Alerts and Blocks (`it.manage`). IT's Threat alerts tile reads the alerts. The IT accounts page shows the temporary password and the ended sessions. The network fixtures are gone; the demo layer answers the new routes.
+- **Server (7h-4):** live Keycloak now records LOGIN, LOGIN_ERROR and LOGOUT for 30 days, the provisioner has `view-events`, and email reset is off. Runbook `infra/runbooks/keycloak-security-events.md`.
+
 ### platform-ui `0.182.0` - DW-7: wrong-shape reads no longer crash four pages; HR effective dates shown as days; DW-7h and DW-7i planned (2026-10-15) - PROTOTYPED
 
 - **Reader shape checks.**

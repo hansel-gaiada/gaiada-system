@@ -2286,7 +2286,7 @@ DW-D30 (owner, 2026-10-15) has the revenue plan built now, so that the GM's "Rev
 - Whether the Office of the GM's lead seat should also set the plan follows §38's open owner decision on who approves targets.
 - **As built.** `platform-nest/src/modules/finance/revenue-plan.controller.ts` authorizes with `{kind: "dept_kpi_target", module: "reports", unitAncestors: []}`, `read` and `approve`; no policy, catalog or bundle changed. The UI mirrors `approve` with `company.manage` (or elevated), which a `manager` also holds, so the server's 403 is the refusal and the page shows it as a sentence. Tested in `revenue-plan.controller.db.test.ts` (a manager, a member and an org_unit_lead are refused 403 on PUT and DELETE; read passes for the tenant's tiers; another tenant's approver is refused).
 
-## 42. DW-7h — IT security, BFF §52 (2026-10-15, PLANNED): no new kind, no new action
+## 42. DW-7h — IT security, BFF §52 (2026-10-15, BUILT, PROTOTYPED): no new kind, no new action
 
 DW-D36 (owner, 2026-10-15) moves IT's security work to the ERP side. The people who may see who is connected and sign someone out are the people who already run logins in IT accounts, so the routes reuse `it_account`:
 

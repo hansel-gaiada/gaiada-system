@@ -47,7 +47,7 @@ unfalsifiable after.
 | finance | `finance` | 4 |
 | hr | `hr` | 13 |
 | invoice | `invoices` | 13 |
-| it | `it` | 4 |
+| it | `it` | 5 |
 | knowledge | `knowledge` | 3 |
 | monitoring | `monitoring` | 3 |
 | pm | `pm` | 15 |
