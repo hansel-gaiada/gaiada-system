@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { listPayrollRunsResult, getPayrollRunResult, listEmployeesResult, listPayrollInputsResult } from "./hr-full-data";
+import {
+  listPayrollRunsResult, getPayrollRunResult, listEmployeesResult, listPayrollInputsResult,
+  listRequisitionsResult, listCandidatesResult, listApplicationsResult, listPipelineStagesResult, getFunnelResult, getApplicationResult,
+} from "./hr-full-data";
 
 // DW-7e: the honest payroll-run list. The route needs the payroll read right, so a 403 is common and must read as a refusal.
 const answer = (status: number, body: unknown) => vi.fn(async () => new Response(JSON.stringify(body), { status }));
@@ -96,5 +99,57 @@ describe("listPayrollInputsResult", () => {
       vi.stubGlobal("fetch", answer(status, { error: "nope" }));
       expect(await listPayrollInputsResult("u1", "co-a")).toMatchObject({ kind: "unavailable" });
     }
+  });
+});
+
+// DW-7f-2: the honest recruitment reads. A refusal is a refusal, never an empty list.
+describe("recruitment reads", () => {
+  const urlOf = (f: ReturnType<typeof answer>, i = 0) => String((f.mock.calls[i] as unknown[])[0]);
+
+  it("read from the recruitment routes and return the server's rows", async () => {
+    const f = answer(200, [{ id: "x" }]);
+    vi.stubGlobal("fetch", f);
+    expect(await listRequisitionsResult("u1", "co-a")).toEqual({ kind: "ok", data: [{ id: "x" }] });
+    await listCandidatesResult("u1", "co-a");
+    await listPipelineStagesResult("u1", "co-a");
+    await listApplicationsResult("u1", "co-a", { requisitionId: "rq 1", status: "active" });
+    await listApplicationsResult("u1", "co-a");
+    await getFunnelResult("u1", "co-a", "rq1");
+    await getFunnelResult("u1", "co-a");
+    expect([0, 1, 2, 3, 4, 5, 6].map((i) => urlOf(f, i))).toEqual([
+      "http://p.test/api/co-a/modules/hr/requisitions",
+      "http://p.test/api/co-a/modules/hr/candidates",
+      "http://p.test/api/co-a/modules/hr/pipeline-stages",
+      "http://p.test/api/co-a/modules/hr/applications?requisitionId=rq+1&status=active",
+      "http://p.test/api/co-a/modules/hr/applications",
+      "http://p.test/api/co-a/modules/hr/recruitment/funnel?requisitionId=rq1",
+      "http://p.test/api/co-a/modules/hr/recruitment/funnel",
+    ]);
+  });
+
+  it("an empty 200 is the server's own answer; 403 is forbidden; 404 and 5xx are unavailable", async () => {
+    vi.stubGlobal("fetch", answer(200, []));
+    expect(await listRequisitionsResult("u1", "co-a")).toEqual({ kind: "ok", data: [] });
+    vi.stubGlobal("fetch", answer(403, { error: "forbidden" }));
+    for (const read of [listRequisitionsResult, listCandidatesResult, listApplicationsResult, listPipelineStagesResult, getFunnelResult]) {
+      expect(await read("u1", "co-a")).toEqual({ kind: "forbidden" });
+    }
+    for (const status of [404, 500, 503]) {
+      vi.stubGlobal("fetch", answer(status, { error: "nope" }));
+      expect(await listRequisitionsResult("u1", "co-a")).toMatchObject({ kind: "unavailable", reason: "nope" });
+    }
+  });
+
+  it("getApplicationResult: a 404 is a real answer (null), 403 forbidden, anything else unavailable", async () => {
+    const f = answer(200, { id: "ap1", interviews: [] });
+    vi.stubGlobal("fetch", f);
+    expect(await getApplicationResult("u1", "co-a", "ap1")).toEqual({ kind: "ok", data: { id: "ap1", interviews: [] } });
+    expect(urlOf(f)).toBe("http://p.test/api/co-a/modules/hr/applications/ap1");
+    vi.stubGlobal("fetch", answer(404, { error: "application not found" }));
+    expect(await getApplicationResult("u1", "co-a", "ap1")).toEqual({ kind: "ok", data: null });
+    vi.stubGlobal("fetch", answer(403, { error: "forbidden" }));
+    expect(await getApplicationResult("u1", "co-a", "ap1")).toEqual({ kind: "forbidden" });
+    vi.stubGlobal("fetch", answer(500, { error: "boom" }));
+    expect(await getApplicationResult("u1", "co-a", "ap1")).toMatchObject({ kind: "unavailable" });
   });
 });

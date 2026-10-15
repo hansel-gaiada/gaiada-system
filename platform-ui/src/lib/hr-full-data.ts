@@ -5,7 +5,10 @@ import "server-only";
 // The route needs the payroll read right (`hr_payroll`), so an HR person without it is told "No access".
 import { platformFetch, PlatformError } from "./platform";
 import { readResult, type ReadResult } from "./readResult";
-import type { PayrollInput, PayrollRun, PayrollRunDetail, PayrollRunStatus } from "./hr-full";
+import type {
+  Application, ApplicationDetail, Candidate, FunnelStage, PayrollInput, PayrollRun, PayrollRunDetail, PayrollRunStatus,
+  PipelineStage, Requisition,
+} from "./hr-full";
 import type { Employee } from "./iam";
 
 export function listPayrollRunsResult(u: string, t: string, status?: PayrollRunStatus): Promise<ReadResult<PayrollRun[]>> {
@@ -47,4 +50,41 @@ export function listPayrollInputsResult(
   if (filter.consumed !== undefined) qs.set("consumed", String(filter.consumed));
   const q = qs.toString();
   return readResult(platformFetch<PayrollInput[]>(`/api/${t}/modules/hr/payroll-inputs${q ? `?${q}` : ""}`, u));
+}
+
+// DW-7f-2: the honest recruitment reads. The soft readers in lib/hr-full.ts (listRequisitions, listApplications, ...) turn a
+// 403 and a 404 into [], which on a recruitment console reads "no requisitions" about a viewer who is simply not allowed to
+// see any. These keep the refusal: 403 is `forbidden`, 404 and 5xx are `unavailable`; an empty `data` is the server's own
+// answer. The routes are authorized as `hr_recruitment` read; for the requisition and application lists the server narrows
+// a hiring manager, recruiter or panelist to their own, so an empty list for them is their own pipeline being empty.
+const hrBase = (t: string) => `/api/${t}/modules/hr`;
+
+export const listRequisitionsResult = (u: string, t: string): Promise<ReadResult<Requisition[]>> =>
+  readResult(platformFetch<Requisition[]>(`${hrBase(t)}/requisitions`, u));
+
+export const listCandidatesResult = (u: string, t: string): Promise<ReadResult<Candidate[]>> =>
+  readResult(platformFetch<Candidate[]>(`${hrBase(t)}/candidates`, u));
+
+export function listApplicationsResult(
+  u: string, t: string, params: { requisitionId?: string; stageKey?: string; status?: string } = {},
+): Promise<ReadResult<Application[]>> {
+  const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
+  return readResult(platformFetch<Application[]>(`${hrBase(t)}/applications${qs ? `?${qs}` : ""}`, u));
+}
+
+export const listPipelineStagesResult = (u: string, t: string): Promise<ReadResult<PipelineStage[]>> =>
+  readResult(platformFetch<PipelineStage[]>(`${hrBase(t)}/pipeline-stages`, u));
+
+export const getFunnelResult = (u: string, t: string, requisitionId?: string): Promise<ReadResult<FunnelStage[]>> =>
+  readResult(platformFetch<FunnelStage[]>(`${hrBase(t)}/recruitment/funnel${requisitionId ? `?requisitionId=${encodeURIComponent(requisitionId)}` : ""}`, u));
+
+// One application with its timeline, interviews, scorecards and latest offer. A 404 on the single item is a real answer
+// (`ok` with null: no such application, or not one this viewer can see; the page calls notFound()).
+export async function getApplicationResult(u: string, t: string, id: string): Promise<ReadResult<ApplicationDetail | null>> {
+  try {
+    return { kind: "ok", data: await platformFetch<ApplicationDetail>(`${hrBase(t)}/applications/${encodeURIComponent(id)}`, u) };
+  } catch (err) {
+    if (err instanceof PlatformError && err.status === 404) return { kind: "ok", data: null };
+    return readResult(Promise.reject(err));
+  }
 }
