@@ -9520,7 +9520,7 @@ An always-on Raspberry Pi in the office sweeps the client network (ARP, names, v
 - a new source, `'collector'`;
 - a stable key, the MAC address, accepting that about 60% of phones randomize theirs per network.
 
-### 52.12 Failing workflows (DW-7i-1, DW-D37, 2026-10-16) — **STATUS: BUILT, PROTOTYPED (code and tests on dw/7i1; the DB and HTTP suites run on CI only)**
+### 52.12 Failing workflows (DW-7i-1, DW-D37, 2026-10-16) — **STATUS: BUILT, PROTOTYPED (`automation-failures-audience.db.test.ts` and `automation-failures.controller.db.test.ts` on the Linux CI gate; pure: the audience and paging suites; UI: reader, Pulse tile, page)**
 
 **Who sees them.** One n8n serves the whole group, and its workflows carry no company. DW-D37 (owner, 2026-10-16) names who may see its failures: "me (superadmin) and Anthony (Boss), PM, GM". As a rule, with no names hard-wired:
 - a **platform operator** (`platform_admin`), anywhere;
@@ -9541,9 +9541,9 @@ Nobody else may see failures, IT staff included. Whether the module is on is rea
 - **`FailedRun`:** `{executionId, workflowId, workflowName, startedAt, stoppedAt | null, mode | null}`. `workflowName` falls back to the id when the workflows list cannot be read.
 - n8n's public API is asked for `GET /api/v1/executions?status=error&limit=250`, paging with its cursor until the window is covered or 5 pages have been read. When the cap cuts the window short, `reason` says so and `count` is "at least".
 
-**The tile.** "Failing workflows" (source `automation-failures`) appears on IT's Pulse and on the Office of the GM's Pulse.
+**The tile.** "Failing workflows" (source `automation-failures`) appears on IT's Pulse. The company Overview that the owner and the GM see has no Pulse widget (DW-3), so they reach it through IT's Overview or the page itself.
 - It counts `count` in `24h` and links to `/workflows/failures`.
-- A 403 HIDES the tile, because it is not meant for everyone; it does not say "No access".
+- A 403 HIDES the tile, because it is not meant for everyone; it does not say "No access". A 404 (this company does not run the shared automation) hides it too, so IT staff of such a company never see an "Unavailable" tile meant for others.
 - `not_configured` and `unavailable` read "Unavailable" with the reason, never 0.
 
 **The page `/workflows/failures`.** It lists the failed runs (workflow, started, stopped, mode) for `24h` or `7d`.

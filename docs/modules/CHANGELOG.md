@@ -11,6 +11,15 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.161.0` + platform-ui `0.184.0` - DW-7i-1: failing workflows for the superadmin, the owner, the GM and the PM (DW-D37, BFF §52.12, PERMISSION §42a) (2026-10-16) - PROTOTYPED
+
+- **Who sees them (DW-D37):** the shared n8n's failures are visible to the platform operator, and in a company with `automation-console` on, to its `owner`, the seated lead of its Office of the GM, and the holder of a Project Manager seat (vacant today). The rule is in code (`core/automation-failures-audience.ts`): seats come from `positions`/`position_assignments`, never from job titles typed on users. IT staff are not in it.
+- **The read:** `GET /api/:t/automation/failures?window=24h|7d` returns n8n's failed runs in the window (paged, capped at 200 listed, with the full `count`). It answers `not_configured` or `unavailable` in words, never `[]` for a failure.
+- **The UI:**
+  - IT's Pulse tile "Failing workflows" counts the last 24 h. It hides for anyone outside the audience, and in a company without automation.
+  - The page `/workflows/failures` lists the runs, with links to the n8n editor.
+- No migration. No Cerbos change.
+
 ### platform-nest `0.160.0` + platform-ui `0.183.0` - DW-7h: IT security on the ERP side (DW-D36, BFF §52, PERMISSION §42) (2026-10-15) - PROTOTYPED
 
 The UniFi controller is shared with a private house, so no API key can be issued. IT now sees and controls what reaches the ERP. Migration `202610152130_security_access` (`security_access_seen`, `security_session_revocations`, `security_ip_blocks`). No Cerbos change: the routes reuse `it_account` `read` and `disable`.

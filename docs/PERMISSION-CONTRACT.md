@@ -2302,7 +2302,7 @@ DW-D36 (owner, 2026-10-15) moves IT's security work to the ERP side. The people 
 - **The hot-path refusals (BFF §52.4, §52.5) are not authorization decisions.** They run before Cerbos and do not audit as decisions. A refused request is the 401 or 403 itself.
 - The UI mirrors `it_account` `read` and `disable` with `it.manage`, exactly as the IT accounts page does.
 
-## 42a. DW-7i-1 — failing workflows, BFF §52.12 (2026-10-16, PLANNED): no Cerbos kind, a rule in code
+## 42a. DW-7i-1 — failing workflows, BFF §52.12 (2026-10-16, BUILT, PROTOTYPED): no Cerbos kind, a rule in code
 
 DW-D37 (owner, 2026-10-16): the shared n8n's failures are for the platform operator, the owner, the GM and the PM. The rule is in code, `core/automation-failures-audience.ts`, the same way the automation console keeps its in-code check (`automation-console/index.ts` explains why that console has no Cerbos kind):
 

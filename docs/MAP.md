@@ -189,6 +189,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | _(root)_ | `platform-nest/src/modules/webdev/console-reads.controller.ts` |
 | _(root)_ | `platform-nest/src/modules/webdev/zoneb-events.controller.ts` |
 | `/api` | `platform-nest/src/admin/admin-identity.controller.ts` |
+| `/api` | `platform-nest/src/admin/automation-failures.controller.ts` |
 | `/api` | `platform-nest/src/admin/company-admin.controller.ts` |
 | `/api` | `platform-nest/src/admin/company-crud.controller.ts` |
 | `/api` | `platform-nest/src/admin/employees.controller.ts` |
@@ -637,6 +638,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/tasks/[taskId]/edit`
 - `/tasks/new`
 - `/timesheets`
+- `/workflows/failures`
 
 Browser-facing route handlers (`route.ts`) — these exist only where the browser itself must hit a URL:
 
