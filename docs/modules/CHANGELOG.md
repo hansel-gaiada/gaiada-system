@@ -11,6 +11,25 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.155.0` + platform-ui `0.178.0` - DW-7j-5 + f1: the GM's monthly revenue plan, and "Revenue against plan" (2026-10-15) - PROTOTYPED
+
+Contract BFF §40.6.4 and the f1 row of §40.6.2; PERMISSION-CONTRACT §41 (no new kind, no policy change); owner ruling DW-D30 ("build the plan now"). With this, every department KPI in the catalogue has a reader.
+- **Migration `202610152000_finance_revenue_plans`:**
+  - `finance_revenue_plans` holds one row per company and month (a month start), with `amount_minor` ≥ 0 in the company's base currency, a note, and who set it and when.
+  - RLS is the tenant wall plus `app_module_allowed('finance')`.
+- **Routes** (`modules/finance/revenue-plan.controller.ts`, finance module guard):
+  - `GET /api/:t/revenue-plan?from&to` returns every month in the range, at most 36, with `currency` and `minorUnit`.
+  - `PUT /api/:t/revenue-plan/:month` is an upsert in the base currency; a company with no finance settings gets 409.
+  - `DELETE /api/:t/revenue-plan/:month` returns 204.
+  - Read authorizes as `dept_kpi_target` read, and writes as `approve` (company_admin), on the company. Every write leaves an activity row.
+- **Reader `gm.revenue_vs_plan`:** actual revenue (P&L `TOTAL_REVENUE`) ÷ the months' plans, a partial month pro-rated by days. It reads null when any month has no plan, the plan sums to 0, or a plan is in another currency.
+- **UI:**
+  - The Office of the GM's Command row gains "Revenue plan" (`/departments/{gm}/revenue-plan?year=`): 12 months of plan, actual revenue and actual ÷ plan.
+  - The approver can set or clear a month; a refusal is shown in words.
+  - The one P&L reader in `lib/finance-data.ts` is shared with Finance's analytics page.
+- **Tests (live Postgres + Cerbos on the CI gate):** `revenue-plan.controller.db.test.ts` 17, `gm-revenue-plan.db.test.ts`, `finance/revenue-plan.test.ts`, `dept-kpi-digest.test.ts` (no KPI is `no_reader` any more); UI `revenuePlan*.test.ts`, `RevenuePlanView.test.tsx`.
+- **Server step after the deploy:** the migration applies with the deploy; check `applied: 202610152000_finance_revenue_plans.sql` in the deploy log.
+
 ### platform-nest `0.154.0` + platform-ui `0.177.0` - PV7-07, PV7-08: the monthly account summary and the agent tools (2026-10-15) - PROTOTYPED
 
 Plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`; contract FRONTEND-BFF-CONTRACT §56 (and agent-tool notes in §54 to §56).

@@ -169,11 +169,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610151740_client_report_summary.sql`
+- Head: `202610152000_finance_revenue_plans.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 316 (121 legacy `NNNN_`, 195 timestamped)
+- Applied files on disk: 317 (121 legacy `NNNN_`, 196 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -308,6 +308,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/reports` | `platform-nest/src/modules/reports/reports.controller.ts` |
 | `/api/:tenantId/reports/group` | `platform-nest/src/modules/reports/group-report.controller.ts` |
 | `/api/:tenantId/requests` | `platform-nest/src/core/work-requests.controller.ts` |
+| `/api/:tenantId/revenue-plan` | `platform-nest/src/modules/finance/revenue-plan.controller.ts` |
 | `/api/admin` | `platform-nest/src/admin/admin-systems.controller.ts` |
 | `/api/admin/bot` | `platform-nest/src/admin/bot-admin.controller.ts` |
 | `/api/admin/mail` | `platform-nest/src/mail/admin-mail.controller.ts` |
@@ -435,6 +436,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/requests`
 - `/departments/[deptId]/requests/delivered`
 - `/departments/[deptId]/requests/sent`
+- `/departments/[deptId]/revenue-plan`
 - `/departments/[deptId]/review`
 - `/departments/[deptId]/search-terms`
 - `/departments/[deptId]/sites`
