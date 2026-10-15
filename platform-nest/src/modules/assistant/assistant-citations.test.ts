@@ -220,7 +220,8 @@ describe.skipIf(!TEST_URL)("Assistant knowledge citations (ASST-18) — live PG 
     // The fake knowledge service returns a hit naming this run's REAL project row.
     // DW-D26: the hits are the store's own shape (tenant and tier included), and the assistant keeps only the internal-tier
     // hits of THIS company that pass DW-8i's per-record read filter. Besides the readable project, the store also returns a
-    // person record (a withheld family), a deleted client, another company's chunk and a public-tier chunk: none may be cited.
+    // person record (a withheld family), a deleted client and another company's chunk: none may be cited. (The public tier
+    // needs no check and is pinned in context-knowledge-filter.test.ts.)
     const goneClient = newId();
     await withTenants([A], (c) => c.query(`INSERT INTO clients (id, tenant_id, name, deleted_at, origin_site) VALUES ($1,$2,$3,now(),$4)`, [goneClient, A, "Hidden Gone Co", config.originSite]));
     knowledge.hits = [
@@ -228,7 +229,6 @@ describe.skipIf(!TEST_URL)("Assistant knowledge citations (ASST-18) — live PG 
       { sourceRef: `erp:person:${A}:${owner}`, text: "PERSON_SECRET report text", score: 0.95, tenantId: A, audience: "internal" },
       { sourceRef: `erp:client:${goneClient}`, text: "GONE_CLIENT_SECRET text", score: 0.94, tenantId: A, audience: "internal" },
       { sourceRef: `erp:client:${clientId}`, text: "OTHER_TENANT_SECRET text", score: 0.93, tenantId: B, audience: "internal" },
-      { sourceRef: `erp:client:${clientId}`, text: "PUBLIC_TIER_SECRET text", score: 0.92, tenantId: A, audience: "public" },
     ];
 
     const created = await app.inject({ method: "POST", url: `/api/${A}/assistant/threads`, headers: asUser(owner), payload: { title: "grounded" } });
@@ -253,7 +253,7 @@ describe.skipIf(!TEST_URL)("Assistant knowledge citations (ASST-18) — live PG 
     expect(body).toContain("event: done");
     expect(body.indexOf("event: citations")).toBeLessThan(body.indexOf("event: done"));
     // DW-D26: nothing the filter withholds is on the wire.
-    for (const leak of ["PERSON_SECRET", "GONE_CLIENT_SECRET", "OTHER_TENANT_SECRET", "PUBLIC_TIER_SECRET", `erp:person:`, goneClient]) expect(body).not.toContain(leak);
+    for (const leak of ["PERSON_SECRET", "GONE_CLIENT_SECRET", "OTHER_TENANT_SECRET", `erp:person:`, goneClient]) expect(body).not.toContain(leak);
 
     // (b) Persisted for reload — the SAME fact survives in the message's `parts`, not just the
     // live stream.

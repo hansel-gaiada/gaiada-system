@@ -81,7 +81,10 @@ describe("assistant retrieval goes through the DW-8i read filter (DW-D26)", () =
     expect(principalFor).toHaveBeenCalledWith(OWNER, "low");
     expect(tenant).toBe(T);
     expect(cands.map((c: { hit: StoreHit }) => c.hit.sourceRef)).toEqual([hit(1).sourceRef]);
-    expect(out.citations.map((c) => c.sourceRef)).toEqual([hit(1).sourceRef]);
+    // the public chunk is published: it needs no check and stays cited, as before DW-D26
+    expect(out.citations.map((c) => c.sourceRef)).toEqual([hit(1).sourceRef, hit(3).sourceRef]);
+    expect(out.prompt).not.toContain("CHUNK_TEXT_2");
+    expect(out.prompt).not.toContain("CHUNK_TEXT_4");
     // the store is asked as the owner, for more candidates than are kept (min(topK * 4, 80))
     expect(strict).toHaveBeenCalledWith(OWNER, "what did we decide about Acme?", 16);
   });
@@ -132,6 +135,21 @@ describe("assistant retrieval goes through the DW-8i read filter (DW-D26)", () =
     expect(out.citations.map((c) => c.sourceRef)).toEqual([hit(4).sourceRef, hit(5).sourceRef]);
     expect(out.prompt).not.toContain("CHUNK_TEXT_6");
     expect(strict).toHaveBeenCalledWith(OWNER, expect.any(String), 8); // 2 * 4
+  });
+
+  it("public-tier chunks are cited without a record check, merged with the readable internal ones by score", async () => {
+    const pub = (n: number) => hit(n, { audience: "public", sourceRef: `web:gaiada.com/page-${n}` });
+    strict.mockResolvedValue([pub(1), pub(1), pub(5)]); // no internal candidates at all; a duplicate public chunk
+    const onlyPublic = await assembleContext(fakeClient(), "t", thread, 2, { tenantId: T, knowledgeTopK: 4 });
+    expect(onlyPublic.citations.map((c) => c.sourceRef)).toEqual([pub(1).sourceRef, pub(5).sourceRef]);
+    expect(filter).not.toHaveBeenCalled();
+    expect(principalFor).not.toHaveBeenCalled();
+
+    strict.mockResolvedValue([pub(1), hit(2), hit(3), pub(4)]);
+    allowOnly([hit(3).sourceRef]);
+    const mixed = await assembleContext(fakeClient(), "t", thread, 2, { tenantId: T, knowledgeTopK: 2 });
+    expect(mixed.citations.map((c) => c.sourceRef)).toEqual([pub(1).sourceRef, hit(3).sourceRef]);
+    expect(mixed.prompt).not.toContain("CHUNK_TEXT_2");
   });
 
   it("knowledgeTopK 0 skips retrieval entirely", async () => {

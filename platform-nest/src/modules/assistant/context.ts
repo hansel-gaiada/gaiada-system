@@ -183,7 +183,8 @@ async function summarizeExcerpt(excerpt: string, existingSummary: string | null,
 // "Every member of this tenant" is wider than the ERP's own reads (a meeting transcript, a file under
 // a contract, ...). So the store's candidates NEVER go to the prompt as they come: they are collapsed
 // to one per record and run through DW-8i's `filterReadableHits` for the thread OWNER's principal and
-// THIS thread's company, and only the internal-tier hits of that company that pass are cited. A hit
+// THIS thread's company, and only the internal-tier hits of that company that pass are cited (the public
+// tier, the published website corpus, is kept as it was: it needs no record check). A hit
 // the owner cannot open is dropped silently, before the prompt is built, so it can be neither quoted
 // nor cited. Reports, people and org are withheld for everyone (§46.2). Any failure on this path (no
 // tenant, owner unresolvable, knowledge service down, Cerbos down) leaves the turn with NO knowledge:
@@ -214,9 +215,9 @@ export interface AssembledContext {
 }
 
 /** DW-D26. Ask the store for more candidates than will be kept (`searchTopK`, the §46.1 arithmetic), keep the
- *  internal-tier hits of THIS company (one per record), pass them through the read filter as the thread OWNER, then cut to
- *  `topK`. THROWS on any failure; the caller turns a throw into "no knowledge". With no company in scope nothing can be
- *  checked, so nothing is returned. */
+ *  internal-tier hits of THIS company (one per record), pass them through the read filter as the thread OWNER, add the
+ *  public-tier hits (no check: published), then cut to `topK` by score. THROWS on any failure; the caller turns a throw into
+ *  "no knowledge". With no company in scope nothing can be checked, so nothing is returned. */
 async function retrieveReadableKnowledge(
   ownerUserId: string,
   tenantId: string | undefined,
@@ -228,13 +229,23 @@ async function retrieveReadableKnowledge(
   const queryFn = opts?.queryKnowledge ?? searchKnowledgeStrict;
   const filterFn = opts?.filterKnowledge ?? filterReadableHits;
   const hits = await queryFn(ownerUserId, query, searchTopK(topK));
+  // The public tier is the published corpus (the website): anyone may read it, so it needs no record check and stays in
+  // the grounding as before DW-D26 ("the public tier is unchanged"). Its refs resolve to no ERP page, so they render as
+  // plain chips (citations.ts).
+  const seen = new Set<string>();
+  const publicHits = hits.filter((h) => h?.audience === "public" && !seen.has(h.sourceRef) && !!seen.add(h.sourceRef));
   const candidates = collapseHits(hits, tenantId);
-  if (candidates.length === 0) return [];
-  const principal =
-    opts?.principal && opts.principal.userId === ownerUserId ? opts.principal : await assemblePrincipal(ownerUserId, "low");
-  if (!principal) return []; // an unresolvable owner can open nothing
-  const allowed = await filterFn(principal, tenantId, candidates);
-  return allowed.slice(0, topK).map((a) => ({ sourceRef: a.candidate.hit.sourceRef, text: a.candidate.hit.text, score: a.candidate.hit.score }));
+  let internal: KnowledgeStoreHit[] = [];
+  if (candidates.length > 0) {
+    const principal =
+      opts?.principal && opts.principal.userId === ownerUserId ? opts.principal : await assemblePrincipal(ownerUserId, "low");
+    // an unresolvable owner can open nothing internal
+    if (principal) internal = (await filterFn(principal, tenantId, candidates)).map((a) => a.candidate.hit);
+  }
+  return [...internal, ...publicHits]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK)
+    .map((h) => ({ sourceRef: h.sourceRef, text: h.text, score: h.score }));
 }
 
 /** Assemble the prompt for a new generation in `threadId`, folding older messages into the
