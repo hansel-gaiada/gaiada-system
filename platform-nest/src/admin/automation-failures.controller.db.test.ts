@@ -40,6 +40,8 @@ describe.skipIf(!TEST_URL)("DW-7i-1 failing workflows route (live PG)", () => {
   let executions: (cursor: string | null) => { status: number; body: unknown };
   let workflows: { status: number; body: unknown };
   let executionCalls: string[];
+  // The stub's address, kept here: cases blank `config.services.automation.url`, so restoring from config would restore a blank.
+  let stubUrl = "";
 
   beforeAll(async () => {
     await initTestDb();
@@ -61,7 +63,8 @@ describe.skipIf(!TEST_URL)("DW-7i-1 failing workflows route (live PG)", () => {
       return send(404, {});
     });
     await new Promise<void>((r) => stub.listen(0, "127.0.0.1", r));
-    config.services.automation = { url: `http://127.0.0.1:${(stub.address() as AddressInfo).port}`, token: "n8n-key" };
+    stubUrl = `http://127.0.0.1:${(stub.address() as AddressInfo).port}`;
+    config.services.automation = { url: stubUrl, token: "n8n-key" };
     config.automationPublicUrl = "https://erp.example.test/n8n";
 
     on = await createCompany("DW-7i-1 On", ["automation-console"]);
@@ -112,7 +115,7 @@ describe.skipIf(!TEST_URL)("DW-7i-1 failing workflows route (live PG)", () => {
     executionCalls = [];
     workflows = { status: 200, body: { data: [{ id: "wf1", name: "Chase invoices" }] } };
     executions = () => ({ status: 200, body: { data: [run(1, 2 * H)] } });
-    config.services.automation = { url: config.services.automation.url, token: "n8n-key" };
+    config.services.automation = { url: stubUrl, token: "n8n-key" };
   });
 
   const get = (tenant: string, as: string, qs = "") =>
@@ -185,7 +188,7 @@ describe.skipIf(!TEST_URL)("DW-7i-1 failing workflows route (live PG)", () => {
   });
 
   it("not_configured when the automation service has no key or no url (never 0 failures)", async () => {
-    config.services.automation = { url: config.services.automation.url, token: "" };
+    config.services.automation = { url: stubUrl, token: "" };
     const a = (await get(on, owner)).json<Answer>();
     expect(a).toMatchObject({ state: "not_configured", failed: [], count: 0 });
     expect(a.reason).toBeTruthy();
@@ -199,10 +202,10 @@ describe.skipIf(!TEST_URL)("DW-7i-1 failing workflows route (live PG)", () => {
     expect(down).toMatchObject({ state: "unavailable", failed: [], count: 0 });
     expect(down.reason).toBeTruthy();
 
-    config.services.automation = { url: config.services.automation.url, token: "wrong-key" };
+    config.services.automation = { url: stubUrl, token: "wrong-key" };
     expect((await get(on, owner)).json<Answer>().state).toBe("unavailable");
 
-    config.services.automation = { url: config.services.automation.url, token: "n8n-key" };
+    config.services.automation = { url: stubUrl, token: "n8n-key" };
     executions = () => ({ status: 200, body: { oops: true } });
     expect((await get(on, owner)).json<Answer>().state).toBe("unavailable");
   });
