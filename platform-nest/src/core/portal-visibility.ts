@@ -469,3 +469,33 @@ export function wideClientOnly(alias: string, params: PortalScopeParams): string
 export function wideOrOwnProject(alias: string, params: PortalScopeParams): string {
   return inCallerProjects(alias, col(alias, "project_id"), params, false);
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// Client reports (PV7-04a, BFF §55.4): a published report reaches the contacts of its project and the client-wide ones
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Plan: docs/plans/2026-10-15-pv7-performance-views-tickets.md (PV7-04, findings 5 and 6, lead's call L5). A report is
+// visible once PUBLISHED: a `draft` is the agency's working copy (an agent's or a colleague's), and a `withdrawn` report has
+// been taken back, so neither is ever listed, counted or downloadable in the portal.
+//
+// THE STRICT SHAPE (`wideOrOwnProject`, PV7-02): a report on a project reaches that project's contacts and the client's
+// client-wide contacts; a report with NO project is client-wide material (PV-D33, PV-D37) and reaches the client-wide
+// contacts only, the shape of runs, conversation threads and minutes. A contact limited to some projects may be someone
+// outside the client's organisation (an agency the client hired for one site), and an account-wide report is not theirs.
+
+/** A client report is visible once published, and only while published. */
+export function clientReportClientVisible(alias: string): string {
+  return `${col(alias, "status")} = 'published'`;
+}
+
+/** The full portal predicate for a client report: the caller's clients, published, and for a project-scoped contact their
+ *  own projects only (NO project-less admission; see the section header). */
+export function clientReportInPortalScope(alias: string, params: PortalScopeParams): string {
+  return `${inCallerClients(alias, params.clients)} AND ${clientReportClientVisible(alias)} AND ${wideOrOwnProject(alias, params)}`;
+}
+
+/** Staff `clientVisible` for a client report: a client-wide contact of the report's client reads it (published). Every row
+ *  has a client (NOT NULL), so this is the row-state alone behind the usual `client_id IS NOT NULL` guard. */
+export function staffClientReportClientVisible(alias: string): string {
+  return staffClientVisible(alias, clientReportClientVisible(alias));
+}
