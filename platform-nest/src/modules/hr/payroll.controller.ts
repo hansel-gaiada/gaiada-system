@@ -1178,7 +1178,9 @@ export class PayrollController {
       const s = given(v, field);
       if (s === undefined) return undefined;
       // The shape alone lets 2026-02-30 through to the ::date cast, which is a 500, not a 400.
-      const real = ISO_DATE.test(s) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
+      // A month or day out of range (2026-13-01) is an Invalid Date, whose toISOString() THROWS: check getTime first.
+      const d = ISO_DATE.test(s) ? new Date(`${s}T00:00:00Z`) : null;
+      const real = d !== null && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
       if (!real) throw bad(field, `${field} must be an ISO date (YYYY-MM-DD)`);
       return s;
     };
