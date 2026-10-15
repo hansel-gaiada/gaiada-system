@@ -50,9 +50,10 @@ export function readCentres(
 }
 
 /** The `/clients` URL for a combination of the page's filters, keeping the others. */
-export function clientsHref(f: { status?: string; archived?: boolean; review?: boolean }): string {
+export function clientsHref(f: { status?: string; archived?: boolean; review?: boolean; health?: string }): string {
   const q = new URLSearchParams();
   if (f.status) q.set("status", f.status);
+  if (f.health) q.set("health", f.health);
   if (f.archived) q.set("archived", "1");
   if (f.review) q.set("review", REVIEW_BUSINESS_TYPE);
   const s = q.toString();

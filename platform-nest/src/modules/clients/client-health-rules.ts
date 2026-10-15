@@ -44,7 +44,8 @@ export interface HealthReason { code: HealthReasonCode; count: number; since: st
 /** The reads the board makes, each on its own. A failed one is named in `unavailable[]`, never counted as zero. */
 export type HealthSource =
   | "projects" | "ball" | "milestones" | "deliverables" | "requests" | "invoices"
-  | "site" | "services" | "modules" | "projectHealth" | "turnaround";
+  | "site" | "services" | "modules" | "projectHealth" | "turnaround"
+  | "reports"; // PV7-05: the delivery-on-time display figure. Listed when it fails, but it never feeds the rules (see client-health.ts).
 
 /** Items waiting, with the oldest one's instant (ISO). */
 export interface Aged { count: number; oldestSince: string | null }

@@ -84,6 +84,18 @@ describe("ReportActions · exporting", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("PV7-05: a CLIENT report exports as grain client, with the client's id as the scope, and the platform names the file", async () => {
+    createMock.mockResolvedValue({ ok: true, jobId: "job-7" });
+    fetchMock.mockResolvedValue(file(`attachment; filename="client-acme-hospitality-2026-07-01-to-2026-07-31.pdf"`));
+    render(<ReportActions header={{ ...SEALED, grain: "client", scopeRef: "c-acme", scopeName: "Acme Hospitality" }} />);
+    expect(screen.getByRole("button", { name: "Print this report" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Export this report as PDF" }));
+    await waitFor(() => expect(screen.getByText("Saved client-acme-hospitality-2026-07-01-to-2026-07-31.pdf.")).toBeInTheDocument());
+    expect(createMock).toHaveBeenCalledWith({
+      grain: "client", scopeRef: "c-acme", periodKind: "month", start: "2026-07-01", end: "2026-07-31", format: "pdf",
+    });
+  });
+
   it("falls back to report.<format> when the download names no file", async () => {
     createMock.mockResolvedValue({ ok: true, jobId: "job-1" });
     fetchMock.mockResolvedValue(file("attachment"));

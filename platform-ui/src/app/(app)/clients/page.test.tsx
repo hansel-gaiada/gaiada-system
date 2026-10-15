@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 
 // PV3-04: the Clients list's review filter, "Business type: Other or not set", is built on the profile list
 // the page already loads. What is pinned: the filter selects exactly the Other / not-set clients; a profile
@@ -13,16 +13,18 @@ vi.mock("@/lib/tenant", () => ({ getActiveTenant: vi.fn(async () => "co-1") }));
 vi.mock("@/lib/rbac", () => ({ can: vi.fn(() => false) }));
 vi.mock("@/lib/entities", () => ({ listClients: vi.fn() }));
 vi.mock("@/lib/clientCentre-data", () => ({ listClientCentres: vi.fn() }));
+vi.mock("@/lib/clientHub", () => ({ getClientHealthBoard: vi.fn() }));
 vi.mock("@/components/PageHeader", () => ({ PageHeader: ({ title }: { title: string }) => <h1>{title}</h1> }));
 vi.mock("@/components/BackendPending", () => ({ BackendPending: () => null }));
 vi.mock("./ClientsTable", () => ({
-  ClientsTable: ({ rows }: { rows: Record<string, unknown>[] }) => (
-    <ul data-testid="rows">{rows.map((r) => <li key={String(r.id)}>{String(r.name)} | {String(r.businessType)} | {String(r.groupCompany)} | {String(r.badge)}</li>)}</ul>
+  ClientsTable: ({ rows, columns }: { rows: Record<string, unknown>[]; columns: { key: string }[] }) => (
+    <ul data-testid="rows" data-columns={columns.map((c) => c.key).join(",")}>{rows.map((r) => <li key={String(r.id)} data-health={String(r.health ?? "")}>{String(r.name)} | {String(r.businessType)} | {String(r.groupCompany)} | {String(r.badge)}</li>)}</ul>
   ),
 }));
 
 import { listClients } from "@/lib/entities";
 import { listClientCentres } from "@/lib/clientCentre-data";
+import { getClientHealthBoard } from "@/lib/clientHub";
 import ClientsPage from "./page";
 
 const client = (id: string, name: string, groupCompany: { id: string; name: string } | null = null, isInternal = false) =>
@@ -37,6 +39,9 @@ const rowsText = () => [...screen.getByTestId("rows").querySelectorAll("li")].ma
 beforeEach(() => {
   vi.mocked(listClients).mockReset();
   vi.mocked(listClientCentres).mockReset();
+  vi.mocked(getClientHealthBoard).mockReset();
+  // Default: the health read failed, so every older test sees the list as it was before PV7-05.
+  vi.mocked(getClientHealthBoard).mockResolvedValue({ kind: "unavailable", reason: "503" });
   vi.mocked(listClients).mockResolvedValue([
     client("a", "Alpha Hotel"), client("b", "Beta Misc"), client("c", "Gamma Spa"), client("d", "Delta Sibling", { id: "co-sib", name: "Sibling Co" }),
   ] as never);
@@ -119,5 +124,42 @@ describe("Clients list · the internal sentinel client (WSK-D36)", () => {
     expect(screen.getByRole("link", { name: /Business type: Other or not set/ }).textContent).toContain("1");
     // Still listed in the unfiltered list, so staff can reach it.
     expect(rowsText().map((t) => t.split(" | ")[0])).toContain("Gaiada Internal");
+  });
+});
+
+describe("Clients list · the Health column and facet (PV7-05)", () => {
+  const healthRow = (clientId: string, state: string) => ({ clientId, name: clientId, status: "active", ownerUserId: null, ownerName: null, state, reasons: [], signals: {} });
+  const board = (...rows: ReturnType<typeof healthRow>[]) => ({ kind: "ok" as const, data: { asOf: "2026-10-15T12:00:00.000Z", onTimeKnownSince: null, clients: rows, unavailable: [] } });
+  const columns = () => screen.getByTestId("rows").getAttribute("data-columns")!.split(",");
+
+  beforeEach(() => {
+    vi.mocked(listClientCentres).mockResolvedValue([centre("a", "hotel"), centre("b", "other"), centre("c", "spa"), centre("d", "agency")] as never);
+  });
+
+  it("adds a Health column before Status and a state facet, from the board read", async () => {
+    vi.mocked(getClientHealthBoard).mockResolvedValue(board(healthRow("a", "on_track"), healthRow("b", "off_track"), healthRow("c", "off_track"), healthRow("d", "quiet")) as never);
+    await mount();
+    expect(columns().slice(-2)).toEqual(["health", "status"]);
+    const facet = screen.getByRole("group", { name: "Filter by health" });
+    expect(facet.textContent).toContain("Off track");
+    expect(facet.textContent).toContain("Quiet");
+    expect([...screen.getByTestId("rows").querySelectorAll("li")].map((li) => li.getAttribute("data-health"))).toEqual(["on_track", "off_track", "off_track", "quiet"]);
+  });
+
+  it("?health=off_track lists exactly those clients, and the active chip links back", async () => {
+    vi.mocked(getClientHealthBoard).mockResolvedValue(board(healthRow("a", "on_track"), healthRow("b", "off_track"), healthRow("c", "off_track"), healthRow("d", "quiet")) as never);
+    await mount({ health: "off_track" });
+    expect(rowsText().map((t) => t.split(" | ")[0])).toEqual(["Beta Misc", "Gamma Spa"]);
+    const chip = within(screen.getByRole("group", { name: "Filter by health" })).getByRole("link", { name: /Off track/ });
+    expect(chip.getAttribute("href")).toBe("/clients");
+  });
+
+  it("🔴 a failed health read withholds the column and the facet, with no error noise, and keeps the list whole", async () => {
+    vi.mocked(getClientHealthBoard).mockResolvedValue({ kind: "unavailable", reason: "503 upstream" });
+    await mount({ health: "off_track" });
+    expect(columns()).not.toContain("health");
+    expect(screen.queryByRole("group", { name: "Filter by health" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(rowsText()).toHaveLength(4); // a filter on a withheld facet narrows nothing
   });
 });

@@ -82,3 +82,34 @@ describe("DataTable", () => {
     expect(onToggleAll).toHaveBeenCalledWith(["1", "2"], true);
   });
 });
+
+describe("DataTable · PV7-05 extensions (health cells and sortBy)", () => {
+  const cols: Column[] = [
+    { key: "name", header: "Client", sortable: true },
+    { key: "health", header: "Health", format: "health", sortable: true, sortBy: "healthSort" },
+    { key: "waiting", header: "Waiting on us", sortable: true, sortBy: "waitingSort", sortAs: "number" },
+  ];
+  const data = [
+    { id: "a", name: "A", health: "quiet", healthSort: "4", waiting: "10 · oldest 2 days", waitingSort: 10 },
+    { id: "b", name: "B", health: "off_track", healthSort: "0", waiting: "9 · oldest 20 days", waitingSort: 9 },
+    { id: "c", name: "C", health: "at_risk", healthSort: "1", waiting: "—", waitingSort: -1 },
+  ];
+  const order = () => [...document.querySelectorAll("tbody tr")].map((tr) => tr.querySelector("td")?.textContent);
+
+  it("draws a health state as the shared chip (its words and its state), not as a status badge", () => {
+    render(<DataTable columns={cols} rows={data} />);
+    const chip = screen.getByText("Off track");
+    expect(chip.getAttribute("data-state")).toBe("off_track");
+    expect(chip.className).toContain("ch-health-chip");
+  });
+
+  it("sorts a composite cell by its sortBy field: health by rank (worst first), a count as a number, not as words", () => {
+    render(<DataTable columns={cols} rows={data} />);
+    fireEvent.click(screen.getByRole("button", { name: /Health/ }));
+    expect(order()).toEqual(["B", "C", "A"]);
+    fireEvent.click(screen.getByRole("button", { name: /Waiting on us/ }));
+    expect(order()).toEqual(["C", "B", "A"]); // -1, 9, 10 (as words "10 ..." would sort before "9 ...")
+    fireEvent.click(screen.getByRole("button", { name: /Waiting on us/ }));
+    expect(order()).toEqual(["A", "B", "C"]);
+  });
+});

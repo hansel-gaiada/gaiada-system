@@ -85,6 +85,10 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
       {/* PV7-03: Health sits BELOW the two ball lists and never repeats their items: its reasons are counts and dates,
           and it says the items are listed above. The chip is the one new thing; per-project health and reply times follow. */}
       <ClientHealthCard health={health} />
+      {/* PV7-05: the client's delivery report (every project of the client together), for the account team. */}
+      <p style={{ margin: "10px 0 0" }}>
+        <Link href={`/reports/client?scopeRef=${encodeURIComponent(clientId)}`} className="lux-btn lux-btn--ghost lux-btn--sm">Delivery report</Link>
+      </p>
 
       <div className="ch-tiles">
         <KpiTile

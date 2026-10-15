@@ -280,6 +280,39 @@ describe.skipIf(!TEST_URL)("PV7-01 client grain (live PG + RLS + Cerbos)", () =>
       expect(doc.narrative.source).toBe("deterministic");
     });
 
+    it("PV7-05: a client with milestones but NO work facts still lists its eligible projects, with 0 figures (never an absent table)", async () => {
+      // Built here and soft-deleted at the end, so the golden-table tests above and below never see this client.
+      const cedar = await createClient(co, "Cedar Lodges");
+      const c1 = await createProject(co, "Cedar site", undefined, cedar);
+      const c2 = await createProject(co, "Cedar app", undefined, cedar);
+      const cInternal = await createProject(co, "Cedar internal", undefined, cedar);
+      await withTenants([co], (c) => c.query(`UPDATE projects SET is_internal = true WHERE id = $1 AND tenant_id = $2`, [cInternal, co]));
+      await addMilestones(c1, 2, 1); // milestone rows, but no report_work_facts row for either project
+      try {
+        const r = await getDoc(co, params(cedar), admin);
+        expect(r.statusCode).toBe(200);
+        const doc = r.json() as ReportDocument;
+        expect(kpi(doc, "delivery.tasks_completed").value).toBe(0);
+        expect(kpi(doc, "delivery.milestone_hit_rate").denominator).toBe(2); // the client does have milestone figures
+        const projects = doc.tables.find((t) => t.key === "client_projects");
+        expect(projects, "client_projects table is present").toBeTruthy();
+        expect(projects!.rows.map((row) => row.project).sort()).toEqual(["Cedar app", "Cedar site"]); // not the internal one
+        expect(projects!.rows.every((row) => row.throughput === 0 && row.tasksCompleted === 0)).toBe(true);
+        expect(projects!.totalRow).toMatchObject({ throughput: 0, tasksCompleted: 0 });
+        // A project WITH facts in the same range keeps its figures, and the date range narrows the facts, not the projects.
+        await addFact(c2, { tc: 3, est: 90 });
+        const again = (await getDoc(co, params(cedar), admin)).json() as ReportDocument;
+        const rows = again.tables.find((t) => t.key === "client_projects")!.rows;
+        expect(rows.find((row) => row.project === "Cedar app")).toMatchObject({ throughput: 90, tasksCompleted: 3 });
+        expect(rows.find((row) => row.project === "Cedar site")).toMatchObject({ throughput: 0, tasksCompleted: 0 });
+      } finally {
+        await withTenants([co], async (c) => {
+          await c.query(`DELETE FROM report_work_facts WHERE tenant_id = $1 AND project_id = ANY($2::uuid[])`, [co, [c1, c2]]);
+          await c.query(`UPDATE clients SET deleted_at = now() WHERE id = $1 AND tenant_id = $2`, [cedar, co]);
+        }, { modules: ["reports"] });
+      }
+    });
+
     it("an internal (sentinel) client has no figures: an empty but valid document, never the internal work", async () => {
       const r = await getDoc(co, params(hq), admin);
       expect(r.statusCode).toBe(200);

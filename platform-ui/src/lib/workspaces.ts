@@ -577,6 +577,8 @@ const OFFICE_OF_THE_GM: Workspace = {
       key: "clients", label: "Clients & sales", icon: "finance",
       tabs: [
         { key: "clients", label: "Clients", href: "/clients", icon: "finance", gate: { kind: "agencyRow", row: "clients" } },
+        // PV7-05: the health board, one click from the list; a deeper href than /clients, so it is the active tab on its own page.
+        { key: "health", label: "Health", href: "/clients/health", icon: "pulse", gate: { kind: "agencyRow", row: "clients" } },
         { key: "leads", label: "Leads", href: "/agency/leads", icon: "user", gate: { kind: "agencyRow", row: "agency" } },
       ],
     },
@@ -958,6 +960,10 @@ export const PERFORMANCE_ROWS: readonly WorkspaceRow[] = [
         blurb: "Your people's reports for the period." },
       { key: "department", label: "Department", href: "/reports/department", icon: "pulse", gate: { kind: "unitCap", cap: "reports.department.view" },
         blurb: "The department's report for the period. The server narrows it to the units you may read." },
+      // PV7-05: a client's delivery report. The same read tiers as the project report (`read_client`), and only where the company has clients.
+      { key: "client", label: "Client", href: "/reports/client", icon: "pulse",
+        gate: { kind: "all", gates: [{ kind: "cap", cap: "reports.project.view" }, { kind: "agencyRow", row: "clients" }] },
+        blurb: "A client's delivery report: every project of the client, together." },
     ],
   },
   {
@@ -1066,7 +1072,11 @@ export const COMPANY_ROWS: readonly WorkspaceRow[] = [
       { key: "deliverables", label: "Deliverables", href: "/deliverables", icon: "box", gate: { kind: "agencyRow", row: "deliverables" } },
     ],
   },
-  { key: "clients", label: "Clients", icon: "finance", gate: { kind: "agencyRow", row: "clients" }, tabs: [{ key: "clients", label: "Clients", href: "/clients", icon: "finance" }] },
+  { key: "clients", label: "Clients", icon: "finance", gate: { kind: "agencyRow", row: "clients" }, tabs: [
+    { key: "clients", label: "Clients", href: "/clients", icon: "finance" },
+    // PV7-05: the health board (same gate as the row).
+    { key: "health", label: "Health", href: "/clients/health", icon: "pulse" },
+  ] },
   {
     key: "campaigns", label: "Campaigns", icon: "sales", gate: { kind: "agencyRow", row: "agency" },
     tabs: [

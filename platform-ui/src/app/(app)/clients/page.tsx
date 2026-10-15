@@ -6,6 +6,9 @@ import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { listClients } from "@/lib/entities";
 import { listClientCentres } from "@/lib/clientCentre-data";
+import { getClientHealthBoard } from "@/lib/clientHub";
+import { STATE_LABEL, type HealthState } from "@/lib/clientHealth";
+import { STATE_ORDER, healthRank, isHealthState } from "@/lib/clientHealthBoard";
 import { registry, businessTypeLabel } from "@/lib/clientCentre";
 import { INTERNAL_CLIENT_BADGE, REVIEW_BUSINESS_TYPE, clientsHref, inBusinessTypeReview, readCentres } from "@/lib/clientBusinessType";
 import { PageHeader } from "@/components/PageHeader";
@@ -26,7 +29,10 @@ const COLUMNS: Column[] = [
   { key: "status", header: "Status", format: "status", sortable: true, align: "right" },
 ];
 
-type Search = Promise<{ status?: string; archived?: string; review?: string }>;
+// PV7-05: the Health column, drawn from the board read. Inserted before Status when that read succeeded.
+const HEALTH_COLUMN: Column = { key: "health", header: "Health", format: "health", sortable: true, sortBy: "healthSort" };
+
+type Search = Promise<{ status?: string; archived?: string; review?: string; health?: string }>;
 
 export default async function ClientsPage({ searchParams }: { searchParams: Search }) {
   const userId = await getSessionUserId();
@@ -36,14 +42,17 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
   if (!tenant) {
     return (<><PageHeader eyebrow="Business" title="Clients" /><EmptyNote>Select a company from the top bar.</EmptyNote></>);
   }
-  const { status, archived, review } = await searchParams;
+  const { status, archived, review, health } = await searchParams;
 
   // CC-D8 — the former `/client-centre` list folded in as two columns, so there is one client list.
   // The profile read is a second endpoint. PV3-04: when it fails the columns still show "—" ("unknown",
   // never "0%"), but the page now SAYS so and withholds the business-type review filter: the old
   // `.catch(() => [])` let a refused read pass for "no client has a type set".
-  const [clients, centreOutcome] = await Promise.all([
+  // PV7-05: the health state per client, from the same board the Health page reads. WITHHELD when that read failed: the
+  // column and the facet are simply absent (no error noise on a list whose own read worked), never a column of guesses.
+  const [clients, healthRead, centreOutcome] = await Promise.all([
     listClients(userId, tenant),
+    getClientHealthBoard(userId, tenant),
     listClientCentres(userId, tenant).then(
       (items) => ({ items, thrown: undefined as unknown }),
       (e: unknown) => ({ items: null, thrown: e ?? new Error("read failed") }),
@@ -52,9 +61,13 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
   const centreRead = readCentres(clients.length, centreOutcome.items, centreOutcome.thrown);
   // Empty on a failed read, so every profile cell reads "—" (unknown) rather than a guess.
   const centreById = new Map((centreRead.ok ? centreOutcome.items ?? [] : []).map((c) => [c.clientId, c]));
+  const healthById = healthRead.kind === "ok" ? new Map(healthRead.data.clients.map((r) => [r.clientId, r.state] as const)) : null;
   const allRows = clients.map((c) => {
     const centre = centreById.get(c.id);
+    const healthState: HealthState | undefined = healthById?.get(c.id);
     return {
+      // A client the board does not list (archived, or internal) has no state: the cell stays empty ("—").
+      ...(healthById ? { health: healthState ?? "", healthSort: healthState ? String(healthRank(healthState)) : "9" } : {}),
       id: c.id,
       name: c.name,
       // M5-G0b: the internal sentinel client (WSK-D36) is shown to staff, flagged "Internal (our own sites)"; it stays out of the business-type review filter (a type means nothing for it).
@@ -82,16 +95,29 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
   // list (they are still one click away, and picking the "archived" status facet shows them too).
   const showArchived = archived === "1" || activeStatus === "archived";
   const archivedCount = counts.get("archived") ?? 0;
-  const inView = activeStatus
+  const statusView = activeStatus
     ? allRows.filter((r) => r.status === activeStatus)
     : showArchived ? allRows : allRows.filter((r) => r.status !== "archived");
+  // PV7-05: the health facet (withheld with the column). Counts are over the status view, so a chip never promises rows.
+  const healthCounts = new Map<string, number>();
+  for (const r of statusView) {
+    const h = (r as { health?: string }).health;
+    if (h) healthCounts.set(h, (healthCounts.get(h) ?? 0) + 1);
+  }
+  const healthOptions = STATE_ORDER
+    .filter((k) => healthCounts.has(k))
+    .map((k) => ({ key: k, label: STATE_LABEL[k], count: healthCounts.get(k) ?? 0 }));
+  const activeHealth = healthById && isHealthState(health) && healthCounts.has(health) ? health : undefined;
+  const inView = activeHealth ? statusView.filter((r) => (r as { health?: string }).health === activeHealth) : statusView;
   // PV3-04 (PV-D1): the review list, "Business type: Other or not set", over the profile list read above.
   // Withheld when that read failed (the banner below says so); never filtered through an empty stand-in.
   const reviewCount = inView.filter((r) => inBusinessTypeReview(centreRead, r.id, r.isInternal)).length;
   const reviewActive = review === REVIEW_BUSINESS_TYPE && centreRead.ok;
   const rows = reviewActive ? inView.filter((r) => inBusinessTypeReview(centreRead, r.id, r.isInternal)) : inView;
-  const buildStatusHref = (next: string | undefined) => clientsHref({ status: next, review: reviewActive });
-  const buildReviewHref = (next: string | undefined) => clientsHref({ status: activeStatus, archived: archived === "1", review: next === REVIEW_BUSINESS_TYPE });
+  const buildStatusHref = (next: string | undefined) => clientsHref({ status: next, review: reviewActive, health: activeHealth });
+  const buildReviewHref = (next: string | undefined) => clientsHref({ status: activeStatus, archived: archived === "1", review: next === REVIEW_BUSINESS_TYPE, health: activeHealth });
+  const buildHealthHref = (next: string | undefined) => clientsHref({ status: activeStatus, archived: archived === "1", review: reviewActive, health: next });
+  const columns = healthById ? [...COLUMNS.slice(0, -1), HEALTH_COLUMN, COLUMNS[COLUMNS.length - 1]] : COLUMNS;
 
   return (
     <>
@@ -116,6 +142,18 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
                 active={activeStatus}
                 options={statusOptions}
                 buildHref={buildStatusHref}
+              />
+            </div>
+          )}
+          {healthById && healthOptions.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <FilterBar
+                label="Filter by health"
+                allLabel="Any health"
+                totalCount={statusView.length}
+                active={activeHealth}
+                options={healthOptions}
+                buildHref={buildHealthHref}
               />
             </div>
           )}
@@ -145,7 +183,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
           {reviewActive && rows.length === 0 ? (
             <EmptyNote>Every client in this view has a business type.</EmptyNote>
           ) : (
-            <ClientsTable columns={COLUMNS} rows={rows} canManage={can(me, "client.delete", tenant)} viewKey="clients" />
+            <ClientsTable columns={columns} rows={rows} canManage={can(me, "client.delete", tenant)} viewKey="clients" />
           )}
         </>
       )}
