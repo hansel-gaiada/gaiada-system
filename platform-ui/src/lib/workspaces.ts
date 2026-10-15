@@ -123,7 +123,8 @@ export type PulseSource =
   | "social-posts-scheduled" | "social-posts-failed" | "it-account-requests"
   | "hr-leave-pending" | "hr-onboarding-open" | "hr-cases-open" | "hr-payroll-waiting" | "it-devices-offline"
   | "finance-payments-to-confirm" | "finance-overdue-receivables" | "finance-close-progress" | "finance-integrity-findings"
-  | "it-security-alerts";
+  | "it-security-alerts"
+  | "automation-failures";
 
 export interface QuickAction {
   key: string;
@@ -593,6 +594,8 @@ const OFFICE_OF_THE_GM: Workspace = {
   // These four are the numbers the Company block already shows (DW-3i): the company Overview has no Pulse, so they stay planned
   // rather than draw the same figure twice. Project health has no honest company reader.
   pulse: [
+    // DW-7i-1: the GM's own copy of IT's tile (same reader, same page, hidden on a 403 the same way).
+    { key: "failing-workflows", label: "Failing workflows", source: "automation-failures", href: "/workflows/failures" },
     { key: "revenue", label: "Revenue", ticket: "DW-3i" },
     { key: "overdue-receivables", label: "Overdue receivables", ticket: "DW-3i" },
     { key: "project-health", label: "Project health", ticket: "DW-3i" },
@@ -858,7 +861,9 @@ const IT: Workspace = {
     { key: "devices-offline", label: "Devices offline", source: "it-devices-offline", href: "/it/devices" },
     { key: "threat-alerts", label: "Threat alerts", source: "it-security-alerts", href: "/it/network/threats" },
     { key: "account-requests", label: "Account requests", source: "it-account-requests", href: "/it/accounts" },
-    { key: "failing-workflows", label: "Failing workflows", ticket: "DW-7i" },
+    // DW-7i-1 (DW-D37): the shared n8n's failures are for the owner, the GM, the PM and the platform operator, so for anyone
+    // else the reader's 403 HIDES this tile (overviewPulse `PULSE_HIDDEN_WHEN_FORBIDDEN`) rather than saying "No access".
+    { key: "failing-workflows", label: "Failing workflows", source: "automation-failures", href: "/workflows/failures" },
   ],
   creates: ["register-device"],
   quickActions: [{ key: "register-device", label: "Register a device", href: "/it/devices", gate: IT_ON }, ...ASK_ACTIONS],

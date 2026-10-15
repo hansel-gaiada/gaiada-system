@@ -9520,7 +9520,7 @@ An always-on Raspberry Pi in the office sweeps the client network (ARP, names, v
 - a new source, `'collector'`;
 - a stable key, the MAC address, accepting that about 60% of phones randomize theirs per network.
 
-### 52.12 Failing workflows (DW-7i-1, DW-D37, 2026-10-16) — **STATUS: PLANNED (contract written; building)**
+### 52.12 Failing workflows (DW-7i-1, DW-D37, 2026-10-16) — **STATUS: BUILT, PROTOTYPED (code and tests on dw/7i1; the DB and HTTP suites run on CI only)**
 
 **Who sees them.** One n8n serves the whole group, and its workflows carry no company. DW-D37 (owner, 2026-10-16) names who may see its failures: "me (superadmin) and Anthony (Boss), PM, GM". As a rule, with no names hard-wired:
 - a **platform operator** (`platform_admin`), anywhere;
@@ -9551,6 +9551,12 @@ Nobody else may see failures, IT staff included. Whether the module is on is rea
 - It links each run's workflow to the n8n editor when `automationPublicUrl` is set.
 
 **Not changed.** `GET /api/admin/automation/executions` (the IT workflows console) keeps its own access and behaviour.
+
+**As built (2026-10-16).**
+- **Additions to the answer** (both optional for a reader, both always sent): `capped: boolean` (true when the 5-page cap cut the window short, so the UI says "at least" without parsing `reason`) and `editorUrl` (the browser-reachable n8n editor origin, `automationPublicUrl`, omitted when unset; a workflow opens at `<editorUrl>/workflow/<workflowId>`).
+- **Order of answers:** a platform operator is answered for any company; for anyone else a company with `automation-console` off is 404 (before the audience is judged), then 403 `not_in_audience`, then 400 `window`. Authorization never waits on validation.
+- **The audience rule** is `platform-nest/src/core/automation-failures-audience.ts`. The GM unit is the department node of the company's org tree whose name resolves to the `gm` workspace for the company's vertical (`workspaceSlugFor`, so "GM" in an agency; its node id is not assumed). "Seated lead" is an active seat (`positions.status = 'active'`) with `is_lead` at that node, held today (`position_assignments`: `valid_from <= today` and `valid_to` null or not past). The PM is any such seat whose title is "Project Manager" after trimming, collapsing spaces and ignoring case ("Assistant Project Manager" is not). An unreadable workflow list costs the names only; an unreadable page 2 makes the whole answer `unavailable` rather than a half list.
+- **UI:** reader `lib/automationFailures.ts`; Pulse source `automation-failures` on IT's and the Office of the GM's Pulse, hidden on a 403 through `PULSE_HIDDEN_WHEN_FORBIDDEN` (`lib/overviewPulse.ts`), an allow-list that leaves every other source on "No access"; page `/workflows/failures` (area `shared`).
 
 ## 53. The client grain in reports (PV7-01, 2026-10-15) — `platform-nest/src/modules/reports/` — **STATUS: BUILT, PROTOTYPED (backend: the DB and HTTP suite report-client-grain.db.test.ts and the Cerbos matrix reports-cerbos.test.ts are written for the Linux CI gate; no page yet, PV7-05)**
 

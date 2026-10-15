@@ -8,12 +8,13 @@ import type { MonitoringSummary } from "./monitoringShared";
 import type { PipelineGate } from "./pipeline";
 import type { Device } from "./it";
 import type { AlertsAnswer } from "./itSecurity";
+import type { FailuresAnswer } from "./automationFailures";
 import type { PayrollRun } from "./hr-full";
 import { money } from "./finance";
 import type { ArAgingRow, CloseReadiness, FiscalPeriod } from "./finance";
 import type { InvoicePayment } from "./contracts";
 import type { Guarded } from "./socialShared";
-import { WORKSPACES, hrefFor, isPlanned, type PulseTile } from "./workspaces";
+import { WORKSPACES, hrefFor, isPlanned, type PulseSource, type PulseTile } from "./workspaces";
 
 export type PulseReading =
   | { kind: "ok"; value: number; detail?: string }
@@ -167,6 +168,26 @@ export function readingOfAlerts(r: ReadResult<AlertsAnswer>): PulseReading {
     const detail = a.signIns !== "on" ? "Failed sign-ins are not being read" : parts.join(", ");
     return { value: high + medium, ...(detail ? { detail } : {}) };
   });
+}
+
+/** The shared n8n's failed runs in the last 24 hours (DW-7i-1, BFF §52.12). Only `state: "on"` is a count. A service that is not set up or
+ *  did not answer is "Unavailable" with the server's own reason, never 0: "no workflow failed" is a claim only a read n8n may make. When the
+ *  server's page cap cut the window short the count is a lower bound, and the tile says so. */
+export function readingOfFailures(r: ReadResult<FailuresAnswer>): PulseReading {
+  if (r.kind !== "ok") return r.kind === "forbidden" ? { kind: "forbidden" } : UNAVAILABLE_READING;
+  const a = r.data;
+  if (a.state !== "on") return { kind: "unavailable", detail: a.reason };
+  return { kind: "ok", value: a.count, ...(a.capped ? { detail: "At least; the window holds more" } : {}) };
+}
+
+/** Sources whose tile is NOT for everyone: a refused read (403) draws no tile at all instead of "No access", because the viewer is
+ *  simply not in the audience (DW-D37) and a tile saying "No access" would advertise a feature they cannot have. An explicit
+ *  allow-list: every other source keeps "No access". */
+export const PULSE_HIDDEN_WHEN_FORBIDDEN: ReadonlySet<PulseSource> = new Set<PulseSource>(["automation-failures"]);
+
+/** True when the tile should not be drawn for this reading. */
+export function hidesTile(tile: Pick<PulseTile, "source">, reading: PulseReading): boolean {
+  return reading.kind === "forbidden" && !!tile.source && PULSE_HIDDEN_WHEN_FORBIDDEN.has(tile.source);
 }
 
 /** The Social reader's `Guarded` list: a 403 is `forbidden`; a failure threw before this was reached. */

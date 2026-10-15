@@ -10,6 +10,7 @@ import { listLeaveResult, listCasesResult } from "@/lib/hr-data";
 import { listPayrollRunsResult } from "@/lib/hr-full-data";
 import { listDevicesResult } from "@/lib/it-data";
 import { listAlertsResult } from "@/lib/itSecurity";
+import { listFailuresResult } from "@/lib/automationFailures";
 import {
   getArAgingResult, getCloseReadinessResult, getTrialBalanceResult, listPendingPaymentsResult, listPeriodsResult,
   reconcileApResult, reconcileArResult, reconcileAssetsResult, reconcileTreasuryResult, verifyLedgerResult,
@@ -18,7 +19,7 @@ import { todayIsoInDisplayZone } from "@/lib/format";
 import type { Me } from "@/lib/platform";
 import {
   NO_CURRENT_PERIOD, UNAVAILABLE_READING, currentPeriod, everyTileFailed, pulseHref, readingOfAccounts, readingOfAllResults, readingOfClose,
-  readingOfAlerts, readingOfDevices, readingOfGuarded, readingOfIntegrity, readingOfOverdue, readingOfPayrollRuns, readingOfPendingPayments, readingOfResult,
+  readingOfAlerts, readingOfDevices, readingOfFailures, readingOfGuarded, hidesTile, readingOfIntegrity, readingOfOverdue, readingOfPayrollRuns, readingOfPendingPayments, readingOfResult,
   readingOfSummary, runsWaiting, type PulseReading, type PulseTileModel,
 } from "@/lib/overviewPulse";
 import { PulseBlock } from "./PulseBlock";
@@ -58,6 +59,9 @@ const READERS: Record<PulseSource, (userId: string, tenantId: string, me: Me) =>
   "it-devices-offline": async (u, t) => readingOfDevices(await listDevicesResult(u, t)),
   // DW-7h: high plus medium alerts in the last 24 hours. The route is `it_account` `read`, so a viewer without it reads "No access".
   "it-security-alerts": async (u, t) => readingOfAlerts(await listAlertsResult(u, t, "24h")),
+  // DW-7i-1: the shared n8n's failed runs in the last 24 hours. NOT for everyone (DW-D37: the owner, the GM, the PM, the platform
+  // operator): a 403 HIDES this tile (`PULSE_HIDDEN_WHEN_FORBIDDEN`), it never says "No access". Not set up or not answering is "Unavailable".
+  "automation-failures": async (u, t) => readingOfFailures(await listFailuresResult(u, t, "24h")),
   // Finance (DW-7e-2). Every route refuses outright (no own-rows fallback), so no scope check is needed here.
   "finance-payments-to-confirm": async (u, t) => readingOfPendingPayments(await listPendingPaymentsResult(u, t)),
   "finance-overdue-receivables": async (u, t) => readingOfOverdue(await getArAgingResult(u, t)),
@@ -102,9 +106,13 @@ export async function Pulse({ me, tenantId, deptId, pulse }: OverviewWidgetProps
   // A workspace with no built tile draws no Pulse (the frame does not even place it).
   if (tiles.length === 0) return null;
   const readings = await Promise.all(tiles.map((t) => readTile(t, me.userId, tenantId, me)));
-  const models: PulseTileModel[] = tiles.map((t, i) => ({
-    key: t.key, label: t.label, href: pulseHref(t, { deptId, companyId: tenantId }), reading: readings[i],
-  }));
+  // A tile that is not for this viewer (a 403 on a source in PULSE_HIDDEN_WHEN_FORBIDDEN) is not drawn, and the others are.
+  const models: PulseTileModel[] = tiles
+    .map((t, i) => ({ tile: t, reading: readings[i] }))
+    .filter(({ tile, reading }) => !hidesTile(tile, reading))
+    .map(({ tile, reading }) => ({ key: tile.key, label: tile.label, href: pulseHref(tile, { deptId, companyId: tenantId }), reading }));
+  // Nothing left to draw (the one tile was hidden): no Pulse, like a workspace with no built tile.
+  if (models.length === 0) return null;
   if (everyTileFailed(models)) throw new Error("Pulse: every tile failed to read");
   return <PulseBlock tiles={models} />;
 }

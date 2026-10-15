@@ -22,6 +22,7 @@ import * as hrData from "@/lib/hr-data";
 import * as hrFullData from "@/lib/hr-full-data";
 import * as itData from "@/lib/it-data";
 import * as itSecurity from "@/lib/itSecurity";
+import * as automation from "@/lib/automationFailures";
 import * as finData from "@/lib/finance-data";
 import type { MonitoringSummary } from "@/lib/monitoringShared";
 import type { SocialPost } from "@/lib/socialShared";
@@ -37,6 +38,7 @@ vi.mock("@/lib/hr-data", () => ({ listLeaveResult: vi.fn(), listCasesResult: vi.
 vi.mock("@/lib/hr-full-data", () => ({ listPayrollRunsResult: vi.fn() }));
 vi.mock("@/lib/it-data", () => ({ listDevicesResult: vi.fn() }));
 vi.mock("@/lib/itSecurity", () => ({ listAlertsResult: vi.fn() }));
+vi.mock("@/lib/automationFailures", () => ({ listFailuresResult: vi.fn() }));
 vi.mock("@/lib/finance-data", () => ({
   listPendingPaymentsResult: vi.fn(), getArAgingResult: vi.fn(), listPeriodsResult: vi.fn(), getCloseReadinessResult: vi.fn(),
   verifyLedgerResult: vi.fn(), reconcileArResult: vi.fn(), reconcileApResult: vi.fn(), reconcileAssetsResult: vi.fn(),
@@ -54,6 +56,7 @@ const hrCases = vi.mocked(hrData.listCasesResult);
 const payroll = vi.mocked(hrFullData.listPayrollRunsResult);
 const devices = vi.mocked(itData.listDevicesResult);
 const alerts = vi.mocked(itSecurity.listAlertsResult);
+const failures = vi.mocked(automation.listFailuresResult);
 const pendingPayments = vi.mocked(finData.listPendingPaymentsResult);
 const arAging = vi.mocked(finData.getArAgingResult);
 const periodsRead = vi.mocked(finData.listPeriodsResult);
@@ -84,12 +87,12 @@ const props = (pulse: readonly PulseTile[] | undefined, extra: Partial<OverviewW
 const tile = (name: string) => within(screen.getByRole("region", { name: "Pulse" })).getByText(name).closest("li")!;
 
 beforeEach(() => {
-  for (const m of [listRequests, listGates, summary, posts, accounts, leave, hrCases, payroll, devices, alerts, pendingPayments, arAging, periodsRead, closeRead, ...Object.values(integrityReads)]) m.mockReset();
+  for (const m of [listRequests, listGates, summary, posts, accounts, leave, hrCases, payroll, devices, alerts, failures, pendingPayments, arAging, periodsRead, closeRead, ...Object.values(integrityReads)]) m.mockReset();
 });
 afterEach(() => vi.restoreAllMocks());
 
 describe("the registry's built tiles (DW-3e)", () => {
-  it("builds exactly Web Dev's three, Social Media's two, HR's four, Finance's four and IT's three, and no other", () => {
+  it("builds exactly Web Dev's three, Social Media's two, HR's four, Finance's four, IT's four and the GM's one, and no other", () => {
     const built: string[] = [];
     for (const w of [...WORKSPACES, GENERIC_WORKSPACE]) for (const t of w.pulse) if (!isPlanned(t)) built.push(`${w.key}/${t.key}`);
     expect(built.sort()).toEqual([
@@ -97,12 +100,14 @@ describe("the registry's built tiles (DW-3e)", () => {
       "finance/integrity-findings",
       "finance/overdue-receivables",
       "finance/payments-to-confirm",
+      "gm/failing-workflows",
       "hr/leave-pending",
       "hr/onboarding",
       "hr/open-cases",
       "hr/payroll-status",
       "it/account-requests",
       "it/devices-offline",
+      "it/failing-workflows",
       "it/threat-alerts",
       "social-media/failed-posts",
       "social-media/posts-scheduled",
@@ -152,8 +157,9 @@ describe("the registry's built tiles (DW-3e)", () => {
   it("finds the built tiles of the workspace the subject belongs to, and none for Company, SEO, Creatives or a generic department", () => {
     expect(builtPulseTiles(webDev).map((t) => t.key)).toEqual(["requests-waiting", "sites-with-a-problem", "runs-waiting-approval"]);
     expect(tilesOf("social-media").map((t) => t.key)).toEqual(["posts-scheduled", "failed-posts"]);
-    expect(tilesOf("it").map((t) => t.key)).toEqual(["devices-offline", "threat-alerts", "account-requests"]);
+    expect(tilesOf("it").map((t) => t.key)).toEqual(["devices-offline", "threat-alerts", "account-requests", "failing-workflows"]);
     expect(tilesOf("hr").map((t) => t.key)).toEqual(["leave-pending", "onboarding", "open-cases", "payroll-status"]);
+    expect(tilesOf("gm").map((t) => t.key)).toEqual(["failing-workflows"]);
     expect(tilesOf("seo")).toEqual([]);
     expect(tilesOf("creatives")).toEqual([]);
     expect(builtPulseTiles(COMPANY_SUBJECT)).toEqual([]);
@@ -677,5 +683,96 @@ describe("the pure mappers", () => {
   it("counts distinct runs", () => {
     expect(runsWaiting([gate("1", "a"), gate("2", "a"), gate("3", "b")])).toBe(2);
     expect(runsWaiting([])).toBe(0);
+  });
+});
+
+describe("Pulse, Failing workflows (the widget, DW-7i-1, BFF §52.12)", () => {
+  const on = (count: number, over: Record<string, unknown> = {}) =>
+    ({ asOf: "2026-10-16T09:00:00Z", window: "24h", state: "on", failed: [], count, capped: false, ...over }) as never;
+  const readsOnly = () => {
+    devices.mockResolvedValue({ kind: "ok", data: [] });
+    accounts.mockResolvedValue({ kind: "ok", accounts: [] });
+    alerts.mockResolvedValue({ kind: "ok", data: { asOf: "x", window: "24h", signIns: "on", alerts: [] } as never });
+  };
+  const hasTile = (name: string) => within(screen.getByRole("region", { name: "Pulse" })).queryByText(name);
+
+  it("is on IT's Pulse and the Office of the GM's, with the same reader and page", () => {
+    for (const key of ["it", "gm"]) {
+      const t = tilesOf(key).find((x) => x.key === "failing-workflows")!;
+      expect(t, key).toMatchObject({ label: "Failing workflows", source: "automation-failures", href: "/workflows/failures" });
+      expect(t.ticket).toBeUndefined();
+    }
+  });
+
+  it("counts the failed runs of the last 24 hours and links the page", async () => {
+    readsOnly();
+    failures.mockResolvedValue({ kind: "ok", data: on(3) });
+    render(await Pulse(props(tilesOf("it"), { deptId: null })));
+    expect(failures).toHaveBeenCalledWith("u-1", "co-a", "24h");
+    const t = tile("Failing workflows");
+    expect(within(t).getByText("3")).toBeInTheDocument();
+    expect(within(t).getByRole("link")).toHaveAttribute("href", "/workflows/failures");
+  });
+
+  it("a real zero reads 0 (n8n answered), and a capped count says it is a lower bound", async () => {
+    readsOnly();
+    failures.mockResolvedValue({ kind: "ok", data: on(0) });
+    const first = render(await Pulse(props(tilesOf("it"), { deptId: null })));
+    expect(within(tile("Failing workflows")).getByText("0")).toBeInTheDocument();
+    first.unmount();
+    failures.mockResolvedValue({ kind: "ok", data: on(1000, { capped: true }) });
+    render(await Pulse(props(tilesOf("it"), { deptId: null })));
+    expect(within(tile("Failing workflows")).getByText("At least; the window holds more")).toBeInTheDocument();
+  });
+
+  it("a 403 HIDES the tile (it is not for everyone) while every other tile still says No access", async () => {
+    readsOnly();
+    failures.mockResolvedValue({ kind: "forbidden" });
+    const first = render(await Pulse(props(tilesOf("it"), { deptId: null })));
+    expect(hasTile("Failing workflows")).toBeNull();
+    expect(screen.queryByText("No access")).toBeNull();
+    expect(within(tile("Devices offline")).getByText("0")).toBeInTheDocument();
+    first.unmount();
+
+    // the option is the tile's own: a refusal on another source keeps its words
+    alerts.mockResolvedValue({ kind: "forbidden" });
+    render(await Pulse(props(tilesOf("it"), { deptId: null })));
+    expect(within(tile("Threat alerts")).getByText("No access")).toBeInTheDocument();
+    expect(hasTile("Failing workflows")).toBeNull();
+  });
+
+  it("draws no Pulse at all when the only tile is hidden (the GM's, for someone outside the audience)", async () => {
+    failures.mockResolvedValue({ kind: "forbidden" });
+    expect(await Pulse(props(tilesOf("gm"), { deptId: null }))).toBeNull();
+  });
+
+  it("not configured or unavailable reads Unavailable with the reason, never 0", async () => {
+    readsOnly();
+    failures.mockResolvedValue({ kind: "ok", data: { asOf: "x", window: "24h", state: "not_configured", reason: "The automation service has no URL or no API key" } as never });
+    const first = render(await Pulse(props(tilesOf("it"), { deptId: null })));
+    let t = tile("Failing workflows");
+    expect(within(t).getByText("Unavailable")).toBeInTheDocument();
+    expect(within(t).getByText("The automation service has no URL or no API key")).toBeInTheDocument();
+    expect(within(t).queryByText("0")).toBeNull();
+    first.unmount();
+
+    failures.mockResolvedValue({ kind: "ok", data: { asOf: "x", window: "24h", state: "unavailable", reason: "n8n did not answer" } as never });
+    const second = render(await Pulse(props(tilesOf("it"), { deptId: null })));
+    t = tile("Failing workflows");
+    expect(within(t).getByText("Unavailable")).toBeInTheDocument();
+    expect(within(t).getByText("n8n did not answer")).toBeInTheDocument();
+    second.unmount();
+
+    failures.mockResolvedValue({ kind: "unavailable", reason: "500" });
+    render(await Pulse(props(tilesOf("it"), { deptId: null })));
+    expect(within(tile("Failing workflows")).getByText("Unavailable")).toBeInTheDocument();
+  });
+
+  it("a reader that throws is this tile's failure and does not blank the others", async () => {
+    readsOnly();
+    failures.mockRejectedValue(new Error("socket hang up"));
+    render(await Pulse(props(tilesOf("it"), { deptId: null })));
+    expect(within(tile("Failing workflows")).getByText("Unavailable")).toBeInTheDocument();
+    expect(within(tile("Devices offline")).getByText("0")).toBeInTheDocument();
   });
 });

@@ -3476,6 +3476,26 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const itSecurity = itSecurityDemo(method, p, url.searchParams, body);
   if (itSecurity) return itSecurity;
   // ======== /DW-7h ========
+  // ======== DW-7i-1: failing workflows (lib/automationFailures.ts, BFF §52.12) ========
+  // Explicit because the final GET catch-all answers `ok([])`, an array, and the reader checks for an object (a wrong shape is "cannot be
+  // read", correct for a drifted backend, wrong for a demo). Times are relative to now so the 24h window always holds the first two.
+  const failuresMatch = m === "GET" ? p.match(/^\/api\/([^/]+)\/automation\/failures$/) : null;
+  if (failuresMatch) {
+    const win = url.searchParams.get("window") === "7d" ? "7d" : "24h";
+    const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+    const HOUR_MS = 3_600_000;
+    const run = (id: string, wf: string, name: string, startedAgo: number, mode: string | null) => ({
+      executionId: id, workflowId: wf, workflowName: name, startedAt: ago(startedAgo), stoppedAt: startedAgo > 0 ? ago(startedAgo - 4_000) : null, mode,
+    });
+    const recent = [
+      run("9021", "wf-invoice-chaser", "Invoice chaser", 2 * HOUR_MS, "trigger"),
+      run("9017", "wf-lead-intake", "WhatsApp lead intake", 9 * HOUR_MS, "webhook"),
+    ];
+    const older = [run("8874", "wf-seo-digest", "Weekly SEO digest", 52 * HOUR_MS, "trigger")];
+    const failed = win === "7d" ? [...recent, ...older] : recent;
+    return ok({ asOf: new Date().toISOString(), window: win, state: "on", failed, count: failed.length, capped: false, editorUrl: "https://n8n.example.test" });
+  }
+  // ======== /DW-7i-1 ========
   const devEventsMatch = p.match(/^\/api\/([^/]+)\/it\/events$/);
   if (devEventsMatch) {
     const rows = DEVICE_EVENTS[devEventsMatch[1]] ?? [];

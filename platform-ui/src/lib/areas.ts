@@ -92,6 +92,7 @@ const SHARED: AreaRule[] = [
   rule("/learning/courses", "shared", true),
   rule("/learning/paths", "shared", true),
   rule("/search", "shared"),
+  rule("/workflows/failures", "shared", false, "DW-7i-1: the shared n8n's failures, linked from IT's and the Office of the GM's Pulse, so it keeps the area you came from"),
   rule("/companies/[companyId]/org", "shared", false, "HR's Org structure tab and Company > Organization both link it"),
 ];
 
