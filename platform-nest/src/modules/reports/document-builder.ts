@@ -39,7 +39,7 @@
 import { withGlobal, withTenants } from "../../db";
 import { addDaysIso, resolveMembershipAsOf, todayIso, type MembershipInterval } from "../../core/dept-resolution";
 import { effectiveStatuses } from "../pm/pm.controller";
-import { reportRollups } from "./report-rollups";
+import { CLIENT_PROJECT_ELIGIBLE_SQL, reportRollups } from "./report-rollups";
 import { recomputeFactSlice, REPORT_JOB_MODULES } from "./fact-job";
 import { REPORT_METRICS, formatPeriodRange, inclusiveDayCount, type ReportMetricDef } from "./metrics";
 import { mondayOnOrBefore, resolveCalendarRange, previousPeriodRange, formatPeriodLabel } from "./report-calendar";
@@ -73,12 +73,13 @@ export { mondayOnOrBefore, resolveCalendarRange, previousPeriodRange, formatPeri
 
 /** Does this rollup row's `dimensions` belong to the requested grain/scopeRef (+ optional
  *  servedTenant slice)? Every rollup function in report-rollups.ts emits an EXACT single-key (or
- *  empty) dimensions shape per grain — `{userId}` / `{projectId}` / `{unit}` or `{unit,
- *  servedTenant}` / `{}` — so an exact-key match is sufficient; there is no ambiguity to resolve
- *  (see report-rollups.ts's own dimension literals at every `rows.push(...)` call site). */
+ *  empty) dimensions shape per grain — `{userId}` / `{projectId}` / `{clientId}` / `{unit}` or
+ *  `{unit, servedTenant}` / `{}` — so an exact-key match is sufficient; there is no ambiguity to
+ *  resolve (see report-rollups.ts's own dimension literals at every `rows.push(...)` call site). */
 export function matchesScope(grain: ReportGrain, dims: Record<string, unknown>, scopeRef: string, servedTenantId?: string): boolean {
   if (grain === "person") return dims.userId === scopeRef;
   if (grain === "project") return dims.projectId === scopeRef;
+  if (grain === "client") return dims.clientId === scopeRef;
   if (grain === "department") {
     if (dims.unit !== scopeRef) return false;
     return servedTenantId ? dims.servedTenant === servedTenantId : dims.servedTenant === undefined;
@@ -245,6 +246,10 @@ export async function resolveScopeNamesBulk(tenantId: string, grain: Exclude<Rep
     const { rows } = await withTenants([tenantId], (c) => c.query<{ id: string; name: string }>(`SELECT id, name FROM projects WHERE tenant_id = $1 AND id = ANY($2::uuid[])`, [tenantId, scopeRefs]));
     return new Map(rows.map((r) => [r.id, r.name]));
   }
+  if (grain === "client") {
+    const { rows } = await withTenants([tenantId], (c) => c.query<{ id: string; name: string }>(`SELECT id, name FROM clients WHERE tenant_id = $1 AND id = ANY($2::uuid[])`, [tenantId, scopeRefs]));
+    return new Map(rows.map((r) => [r.id, r.name]));
+  }
   // department: one org-blob fetch, then a label lookup per node id.
   const { rows } = await withTenants([tenantId], (c) => c.query<{ structure: { root?: OrgLabelNode } }>(`SELECT structure FROM company_org_structure WHERE tenant_id = $1`, [tenantId]));
   const root = rows[0]?.structure?.root;
@@ -282,6 +287,9 @@ async function computeSourceDiversity(
   start: string,
   end: string,
 ): Promise<number> {
+  // PV7-01: `evidence.source_diversity` has no project grain, so the client grain (which offers the
+  // project grain's metrics) does not offer it either; `buildKpis` never reads this value for it.
+  if (grain === "client") return 0;
   const readTenant = servedTenantId ?? tenantId;
   return withTenants(
     [readTenant],
@@ -457,6 +465,10 @@ async function resolveScopeName(tenantId: string, grain: ReportGrain, scopeRef: 
     const { rows } = await withTenants([tenantId], (c) => c.query<{ name: string }>(`SELECT name FROM projects WHERE id = $1 AND tenant_id = $2`, [scopeRef, tenantId]));
     return rows[0]?.name ?? scopeRef;
   }
+  if (grain === "client") {
+    const { rows } = await withTenants([tenantId], (c) => c.query<{ name: string }>(`SELECT name FROM clients WHERE id = $1 AND tenant_id = $2`, [scopeRef, tenantId]));
+    return rows[0]?.name ?? scopeRef;
+  }
   // department: resolve via the org blob (no dedicated name table for org-tree node ids, 0029 convention).
   const { rows } = await withTenants([tenantId], (c) => c.query<{ structure: { root?: OrgLabelNode } }>(`SELECT structure FROM company_org_structure WHERE tenant_id = $1`, [tenantId]));
   const root = rows[0]?.structure?.root;
@@ -483,6 +495,13 @@ function scopeFilter(tenantId: string, grain: ReportGrain, scopeRef: string, ser
     params.push(scopeRef);
   } else if (grain === "project") {
     clause = `project_id = $${paramOffset}`;
+    params.push(scopeRef);
+  } else if (grain === "client") {
+    // PV7-01: the client's eligible projects, by CURRENT `projects.client_id` (a live range follows
+    // a moved project). Both shapes of internal work are out, exactly as the rollups regroup. Every
+    // caller binds the reading tenant at $1.
+    clause = `project_id IN (SELECT p.id FROM projects p JOIN clients c ON c.id = p.client_id AND c.tenant_id = p.tenant_id
+      WHERE p.tenant_id = $1 AND p.client_id = $${paramOffset} AND ${CLIENT_PROJECT_ELIGIBLE_SQL})`;
     params.push(scopeRef);
   } else if (grain === "department") {
     if (servedTenantId) {
@@ -753,6 +772,40 @@ async function buildTables(
     }
   }
 
+  if (grain === "client") {
+    // PV7-01: which of the client's projects carried the work in the range (the same eligible set the
+    // KPIs sum: no internal project, no sentinel client, nothing soft-deleted).
+    const { rows } = await withTenants(
+      [tenantId],
+      (c) =>
+        c.query<{ name: string; throughput: string; completed: string }>(
+          `SELECT p.name, COALESCE(SUM(f.estimate_minutes_completed), 0) AS throughput, COALESCE(SUM(f.tasks_completed), 0) AS completed
+             FROM report_work_facts f
+             JOIN projects p ON p.id = f.project_id AND p.tenant_id = f.tenant_id
+             JOIN clients c ON c.id = p.client_id AND c.tenant_id = p.tenant_id
+            WHERE f.tenant_id = $1 AND f.fact_date BETWEEN $2::date AND $3::date AND p.client_id = $4 AND ${CLIENT_PROJECT_ELIGIBLE_SQL}
+            GROUP BY p.id, p.name
+            ORDER BY throughput DESC, p.name ASC`,
+          [tenantId, start, end, scopeRef],
+        ),
+      { modules: [...REPORT_JOB_MODULES] },
+    );
+    if (rows.length > 0) {
+      const tableRows = rows.map((r) => ({ project: r.name, throughput: Number(r.throughput), tasksCompleted: Number(r.completed) }));
+      tables.push({
+        key: "client_projects",
+        label: "Projects",
+        columns: [
+          { key: "project", label: "Project", unit: "text", align: "left" },
+          { key: "throughput", label: "Throughput (min)", unit: "minutes", align: "right" },
+          { key: "tasksCompleted", label: "Tasks completed", unit: "count", align: "right" },
+        ],
+        rows: tableRows,
+        totalRow: { project: "Total", throughput: tableRows.reduce((s, r) => s + r.throughput, 0), tasksCompleted: tableRows.reduce((s, r) => s + r.tasksCompleted, 0) },
+      });
+    }
+  }
+
   if (grain === "department" && !servedTenantId) {
     // Per-person table: members as-of range END whose as-of unit rolls to this department.
     const { rows: memberships } = await withTenants(
@@ -997,6 +1050,7 @@ export type { RollupRow };
 export function rowGrainShape(dims: Record<string, unknown>): ReportGrain {
   if ("userId" in dims) return "person";
   if ("projectId" in dims) return "project";
+  if ("clientId" in dims) return "client";
   if ("unit" in dims) return "department";
   return "company";
 }

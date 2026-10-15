@@ -43,6 +43,8 @@ const PROJECT_NAMES: Record<string, string> = {
   "p-web-1": "Client site redesign", "p-web-2": "Mobile app revamp",
   "p-seo-1": "SEO audit — Q3", "p-int-1": "Internal brand refresh",
 };
+// PV7-01: demo clients (the client grain sums a client's projects; staff-only).
+const CLIENT_NAMES: Record<string, string> = { "c-acme": "Acme Hospitality", "c-sunrise": "Sunrise Resorts" };
 const DEPARTMENT_NAMES: Record<string, string> = {
   "dept-1": "Web Dev", "dept-2": "Design Graphic", "dept-3": "SEO", "dept-4": "SMM", "dept-5": "Video Editor",
 };
@@ -53,6 +55,7 @@ const COMPANY_NAMES: Record<string, string> = {
 function scopeName(grain: ReportGrain, scopeRef: string, tenantId: string): string {
   if (grain === "person") return PERSON_NAMES[scopeRef] ?? scopeRef;
   if (grain === "project") return PROJECT_NAMES[scopeRef] ?? scopeRef;
+  if (grain === "client") return CLIENT_NAMES[scopeRef] ?? scopeRef;
   if (grain === "department") return DEPARTMENT_NAMES[scopeRef] ?? scopeRef;
   return COMPANY_NAMES[tenantId] ?? tenantId;
 }
@@ -182,7 +185,9 @@ function buildKpis(grain: ReportGrain, days: string[], comparisonNoFacts = false
     // someone on it rewards whoever assigns the billable work, not how well they did it.
     kpis.push({ metricKey: "effort.billable_share", label: "Billable share", unit: "percent", value: 0.64, numerator: Math.round(completed * 0.64), denominator: completed, appraisalSafe: false });
   }
-  return kpis.map((k) => withBaseline(k, comparisonNoFacts));
+  // PV7-01: the client grain offers the project grain's metrics, and `evidence.source_diversity` is not one of them.
+  const offered = grain === "client" ? kpis.filter((k) => k.metricKey !== "evidence.source_diversity") : kpis;
+  return offered.map((k) => withBaseline(k, comparisonNoFacts));
 }
 
 function buildDocument(tenantId: string, grain: ReportGrain, scopeRef: string, periodKind: ReportPeriodKind, start: string, end: string, servedTenantId?: string): ReportDocument {
@@ -242,6 +247,22 @@ function buildDocument(tenantId: string, grain: ReportGrain, scopeRef: string, p
       key: "overdue_tasks", label: "Overdue tasks (as of range end)",
       columns: [{ key: "title", label: "Task", unit: "text", align: "left" }, { key: "dueDate", label: "Due", unit: "text", align: "left" }],
       rows: [{ title: "QA checkout flow", dueDate: addDaysIso(end, -6) }, { title: "Wire homepage hero", dueDate: addDaysIso(end, -2) }],
+    });
+  }
+  if (grain === "client") {
+    // PV7-01: which of the client's projects carried the work (matches the real builder's `client_projects` table).
+    tables.push({
+      key: "client_projects", label: "Projects",
+      columns: [
+        { key: "project", label: "Project", unit: "text", align: "left" },
+        { key: "throughput", label: "Throughput (min)", unit: "minutes", align: "right" },
+        { key: "tasksCompleted", label: "Tasks completed", unit: "count", align: "right" },
+      ],
+      rows: [
+        { project: PROJECT_NAMES["p-web-1"], throughput: 1240, tasksCompleted: 31 },
+        { project: PROJECT_NAMES["p-web-2"], throughput: 720, tasksCompleted: 18 },
+      ],
+      totalRow: { project: "Total", throughput: 1960, tasksCompleted: 49 },
     });
   }
   if (grain === "department" && !servedTenantId) {
@@ -367,6 +388,7 @@ const DEMO_QUIET = new Set(["u-pm", "seo-staff"]);
 function isAuthorized(userId: string, grain: ReportGrain, scopeRef: string): boolean {
   const elevated = userId === "demo-hansel";
   if (grain === "person") return elevated || scopeRef === userId;
+  if (grain === "client") return true; // demo: staff-only, the same tiers as project (read_client, PERMISSION §45)
   if (grain === "project") return true; // demo: project membership isn't modelled finely enough to deny here
   if (grain === "department") {
     if (elevated) return true;
@@ -467,8 +489,8 @@ export function reportsDemo(method: string, p: string, params: URLSearchParams, 
   if (docMatch && method === "GET") {
     const tenantId = docMatch[1];
     const grainRaw = params.get("grain");
-    if (!grainRaw || !["person", "project", "department", "company"].includes(grainRaw)) {
-      return err(400, "grain must be one of person, project, department, company", "grain");
+    if (!grainRaw || !["person", "project", "client", "department", "company"].includes(grainRaw)) {
+      return err(400, "grain must be one of person, project, client, department, company", "grain");
     }
     const grain = grainRaw as ReportGrain;
     const range = validateRange(params.get("periodKind") ?? "", params.get("start"), params.get("end"));
@@ -484,8 +506,8 @@ export function reportsDemo(method: string, p: string, params: URLSearchParams, 
   if (overviewMatch && method === "GET") {
     const tenantId = overviewMatch[1];
     const grainRaw = params.get("grain");
-    if (!grainRaw || !["person", "project", "department", "company"].includes(grainRaw)) {
-      return err(400, "grain must be one of person, project, department, company", "grain");
+    if (!grainRaw || !["person", "project", "client", "department", "company"].includes(grainRaw)) {
+      return err(400, "grain must be one of person, project, client, department, company", "grain");
     }
     const grain = grainRaw as ReportGrain;
     // DW-4b (§37): same validation order as the server — unit-vs-grain, range, authorization (a plain
@@ -514,7 +536,7 @@ export function reportsDemo(method: string, p: string, params: URLSearchParams, 
     // comment: "a plain self/member principal is correctly denied by Cerbos... which this call
     // never sets"). Approximated here as "would the caller be denied for ANY scope of this grain".
     if ((grain === "department" || grain === "company") && !isAuthorized(userId, grain, "*")) return err(403, "forbidden");
-    const catalog: Record<string, Record<string, string>> = { project: PROJECT_NAMES, department: DEPARTMENT_NAMES, person: PERSON_NAMES };
+    const catalog: Record<string, Record<string, string>> = { project: PROJECT_NAMES, client: CLIENT_NAMES, department: DEPARTMENT_NAMES, person: PERSON_NAMES };
     let names = grain === "company" ? { [tenantId]: COMPANY_NAMES[tenantId] ?? tenantId } : catalog[grain] ?? {};
     // THE narrowing, mirrored. A unit lead asking for department grain gets their led subtree, not the
     // whole company — so a consumer that renders "every department" for a lead is visibly wrong here

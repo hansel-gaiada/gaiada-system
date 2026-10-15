@@ -47,6 +47,9 @@ function chartsFor(document: ReportDocument): ReactNode {
   switch (document.header.grain) {
     case "person": return <PersonCharts document={document} />;
     case "project": return <ProjectCharts document={document} />;
+    // PV7-01: a client document has the project grain's charts (its extra Projects table renders through RemainingSections).
+    // PV7-05 builds the real Reports > Client page; until then the PDF export of a client document must not fail here.
+    case "client": return <ProjectCharts document={document} />;
     case "department": return <DepartmentCharts document={document} />;
     case "company": return <CompanyCharts document={document} />;
     default: {

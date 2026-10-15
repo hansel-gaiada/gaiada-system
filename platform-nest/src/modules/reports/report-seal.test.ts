@@ -3,7 +3,7 @@
 // live Postgres + Cerbos in report-seal.db.test.ts; this file pins only the hash's own contract:
 // order-independence and change-sensitivity.
 import { describe, it, expect } from "vitest";
-import { computeSealHash, type SealedDocumentEntry } from "./report-seal";
+import { computeSealHash, enumerateInScope, narrativeModeForGrain, type SealedDocumentEntry } from "./report-seal";
 import type { ReportDocument } from "./report-document";
 
 function fakeDoc(v: number): ReportDocument {
@@ -112,5 +112,36 @@ describe("TR-15 computeSealHash (pure)", () => {
     const withDate = { ...doc, header: { ...doc.header, generatedAt: new Date("2026-08-01T00:00:00.000Z") as unknown as string } };
     const entries: SealedDocumentEntry[] = [{ grain: "person", scopeRef: "u1", document: withDate }];
     expect(computeSealHash(roundTrip(entries))).toBe(computeSealHash(entries));
+  });
+});
+
+// PV7-01 — the client grain's two pure rules in the seal: which scopes a seal enumerates, and which
+// narrative a sealed document of each grain gets (lead's call L2: client documents never call the gateway).
+describe("PV7-01 client grain in the seal (pure)", () => {
+  const CLIENT_A = "c1111111-1111-4111-8111-111111111111";
+  const CLIENT_B = "c2222222-2222-4222-8222-222222222222";
+  const TENANT = "t0000000-0000-4000-8000-000000000000";
+
+  it("narrativeModeForGrain: client is deterministic only, every other grain keeps the AI attempt", () => {
+    expect(narrativeModeForGrain("client")).toBe("deterministic");
+    for (const g of ["person", "project", "department", "company"] as const) expect(narrativeModeForGrain(g)).toBe("ai");
+  });
+
+  it("enumerateInScope adds every client that has a rollup row, once, beside the other grains", () => {
+    const rows = [
+      { metricKey: "delivery.tasks_completed", numerator: 3, dimensions: { clientId: CLIENT_A } },
+      { metricKey: "delivery.on_time_rate", numerator: 1, denominator: 2, dimensions: { clientId: CLIENT_A } },
+      { metricKey: "delivery.tasks_completed", numerator: 5, dimensions: { clientId: CLIENT_B } },
+      { metricKey: "delivery.tasks_completed", numerator: 8, dimensions: { projectId: "p1" } },
+      { metricKey: "delivery.tasks_completed", numerator: 8, dimensions: { userId: "u1" } },
+      { metricKey: "delivery.tasks_completed", numerator: 8, dimensions: {} },
+    ];
+    const scopes = enumerateInScope(TENANT, rows);
+    const clients = scopes.filter((s) => s.grain === "client").map((s) => s.scopeRef).sort();
+    expect(clients).toEqual([CLIENT_A, CLIENT_B]);
+    expect(scopes).toContainEqual({ grain: "project", scopeRef: "p1" });
+    expect(scopes).toContainEqual({ grain: "person", scopeRef: "u1" });
+    expect(scopes).toContainEqual({ grain: "company", scopeRef: TENANT });
+    expect(scopes).toHaveLength(5); // 2 clients + 1 project + 1 person + the company
   });
 });
