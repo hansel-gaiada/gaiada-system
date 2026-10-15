@@ -107,6 +107,61 @@ test.describe("client portal", () => {
     await expect(page.getByRole("link", { name: /review & sign/i }).first()).toBeVisible();
   });
 
+  // PV7-03 — "Project health" and "Results at a glance" on the Overview. `dana@northwind.example` is `demo-client`: a
+  // client-wide contact of Northwind AND a contact of Demo Harbour Hotel through one project only (demoClientCentre.ts
+  // PORTAL_SCOPE), so one login drives both the client-wide and the project-limited rendering.
+  test("PV7-03: project health lists facts per client, links waiting items to where the client acts, and draws no verdict @portal", async ({ page }) => {
+    await signInAsClient(page);
+    const health = page.locator("section").filter({ has: page.getByRole("heading", { name: "Project health" }) });
+    await expect(health).toBeVisible();
+
+    // Two clients, so each has a heading.
+    await expect(health.getByRole("heading", { name: "Northwind Traders" })).toBeVisible();
+    await expect(health.getByRole("heading", { name: "Demo Harbour Hotel" })).toBeVisible();
+
+    const nw = health.locator('[data-client="cl-1"]');
+    const site = nw.locator('[data-project="proj-nw-site"]');
+    await expect(site.getByRole("link", { name: "Website relaunch" })).toHaveAttribute("href", "/portal/projects/proj-nw-site");
+    await expect(site.getByText(/\d+ done · \d+ coming up ·/)).toBeVisible();
+    await expect(site.getByText(/Waiting on you: \d+, oldest since/)).toBeVisible();
+    // A gate id is not a run id, so the gate links to the approvals list; an agreement links to itself.
+    await expect(site.getByRole("link", { name: "An approval for you" })).toHaveAttribute("href", "/portal/approvals");
+    await expect(site.getByRole("link", { name: "An agreement to sign" })).toHaveAttribute("href", "/portal/contracts/ctr-sow-site");
+    await expect(nw.getByText(/You usually reply in 2\.5 days · We usually reply in 1\.5 days \(last 90 days\)/)).toBeVisible();
+    // Client-wide items (a client-wide contact only).
+    await expect(nw.locator('[data-scope="client-wide"]')).toBeVisible();
+
+    // L3: the portal never says how a project "is doing".
+    await expect(health.getByText(/on track|at risk|off track/i)).toHaveCount(0);
+  });
+
+  test("PV7-03: a contact limited to some projects sees that project's health, nothing client-wide, and the PV-D37 results line @portal", async ({ page }) => {
+    await signInAsClient(page);
+    const hb = page.locator("section").filter({ has: page.getByRole("heading", { name: "Project health" }) }).locator('[data-client="cl-harbour"]');
+    await expect(hb.getByRole("link", { name: "Spa booking page" })).toBeVisible();
+    await expect(hb.locator('[data-scope="client-wide"]')).toHaveCount(0);
+    // Turnaround on their own project alone: our side has too few samples.
+    await expect(hb.getByText(/You usually reply in 3 days · Not enough yet to say how quickly we reply/)).toBeVisible();
+
+    const glance = page.locator("section").filter({ has: page.getByRole("heading", { name: "Results at a glance" }) });
+    await expect(glance.locator('[data-client="cl-harbour"]').getByText("Results are shared with your organisation's main contacts.")).toBeVisible();
+    // The client-wide client gets up to four headline figures and never the money-like one.
+    const nwResults = glance.locator('[data-client="cl-1"]');
+    await expect(nwResults.getByText("Followers")).toBeVisible();
+    await expect(glance.getByText(/Conversion value/)).toHaveCount(0);
+    await expect(glance.getByRole("link", { name: /Services & results/ })).toHaveAttribute("href", "/portal/company");
+  });
+
+  test("PV7-03: a client of one company only gets no client heading clutter @portal", async ({ page }) => {
+    await page.goto("/login");
+    await page.getByLabel("Email").fill("admin@northwind.example");
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await page.waitForURL("**/portal");
+    const health = page.locator("section").filter({ has: page.getByRole("heading", { name: "Project health" }) });
+    await expect(health.getByRole("link", { name: "Website relaunch" })).toBeVisible();
+    await expect(health.getByRole("heading", { name: "Northwind Traders" })).toHaveCount(0);
+  });
+
   test("a client reads an agreement and signs it @portal", async ({ page }) => {
     await signInAsClient(page);
     await page.goto("/portal/contracts");
