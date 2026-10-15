@@ -294,9 +294,10 @@ describe.skipIf(!RUN)("DW-7f-1c — payroll inputs: the read, over HTTP", () => 
     for (const [qs, field] of cases) {
       const res = await get(A, hrMgr, qs);
       expect(res.statusCode, qs).toBe(400);
-      const body = res.json() as { message: string; field: string };
+      // The error filter puts a thrown `{message, field}` on the wire as `{error, field}`.
+      const body = res.json() as { error?: string; message?: string; field: string };
       expect(body.field, qs).toBe(field);
-      expect(typeof body.message).toBe("string");
+      expect(typeof (body.error ?? body.message), qs).toBe("string");
     }
   });
 });

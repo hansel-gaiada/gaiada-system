@@ -504,6 +504,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/hr/leave`
 - `/hr/onboarding`
 - `/hr/payroll`
+- `/hr/payroll/[runId]`
 - `/hr/people`
 - `/hr/recruitment`
 - `/hr/reviews`
