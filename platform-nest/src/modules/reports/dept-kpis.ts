@@ -50,7 +50,6 @@ export interface DeptKpiDef {
 export const WORKSPACE_SLUGS = ["web-dev", "seo", "social-media", "creatives", "gm", "hr", "finance", "it", "generic"] as const;
 export type WorkspaceSlug = (typeof WORKSPACE_SLUGS)[number];
 
-const MODULE: KpiReader = { kind: "module" };
 /** A module KPI whose reader exists: `readerId` names it in dept-kpi-readers.ts (§40.5.1). */
 const read = (readerId: string): KpiReader => ({ kind: "module", readerId });
 const dept = (metricKey: string): KpiReader => ({ kind: "report_fact", metricKey, grain: "department" });
@@ -86,7 +85,7 @@ export const DEPT_KPI_SETS: Readonly<Record<WorkspaceSlug, readonly DeptKpiDef[]
     { key: "assets-delivered", label: "Assets delivered", unit: "count", direction: "up_good", reader: read("creatives.assets_delivered"), suggestedTarget: null, suggestedTolerance: null },
   ],
   gm: [
-    pct("revenue-vs-plan", "Revenue against plan", "up_good", MODULE, 1, 0.05),
+    pct("revenue-vs-plan", "Revenue against plan", "up_good", read("gm.revenue_vs_plan"), 1, 0.05),
     pct("margin", "Margin", "up_good", read("gm.margin"), 0.3, 0.05),
     pct("utilization", "Utilization", "up_good", { kind: "report_fact", metricKey: "effort.capacity_utilization", grain: "company" }, 0.8, 0.1),
     pct("departments-in-good-condition", "Departments in good condition", "up_good", { kind: "derived", source: "departments_in_good_condition" }, 0.8, 0.2),

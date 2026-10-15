@@ -388,6 +388,8 @@ const GM: DeptToolkit = {
       tabs: [
         { key: "review", label: "Business Review", path: "review", icon: "chart", blurb: "The recurring review: inputs, then outputs, then money — same shape every period." },
         { key: "decisions", label: "Decisions", path: "decisions", icon: "check", blurb: "What is waiting on the GM, and what has been waiting too long." },
+        // DW-7j-5 (BFF §40.6.4): the monthly revenue plan the "Revenue against plan" KPI reads.
+        { key: "revenue-plan", label: "Revenue plan", path: "revenue-plan", icon: "wallet", blurb: "The plan for each month, against the revenue the books show." },
       ],
     },
     {

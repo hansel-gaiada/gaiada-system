@@ -12,7 +12,7 @@ import { gated } from "../gated";
 
 const ctx = { tenantId: "t-1", unitId: "u-1", periodKind: "month" as const, start: "2026-10-01", end: "2026-10-31", asOf: "2026-10-14" };
 /** The readers over the finance module's tables (the payments reader reads a core table and is not gated). */
-const FINANCE_GATED = ["gm.margin", "finance.close_on_time", "finance.overdue_receivables_share"];
+const FINANCE_GATED = ["gm.revenue_vs_plan", "gm.margin", "finance.close_on_time", "finance.overdue_receivables_share"];
 /** HR's readers: f3 to f5 read HR's tables, f6 reads the LMS module's (its walls also open hr). */
 const HR_GATED = ["hr.leave_decided_2d", "hr.payroll_on_time", "hr.time_to_hire"];
 const LMS_GATED = ["hr.mandatory_learning"];
@@ -26,7 +26,7 @@ describe("functional readers: registration and the module gate", () => {
   it("registers the DW-7j readers under their catalogue ids", () => {
     expect(Object.keys(FUNCTIONAL_READERS).sort()).toEqual(
       [
-        "finance.close_on_time", "finance.overdue_receivables_share", "finance.payments_confirmed_1d", "gm.margin",
+        "finance.close_on_time", "finance.overdue_receivables_share", "finance.payments_confirmed_1d", "gm.margin", "gm.revenue_vs_plan",
         "hr.leave_decided_2d", "hr.mandatory_learning", "hr.payroll_on_time", "hr.time_to_hire",
         "it.devices_alerting", "it.leaver_access_closed", "it.uptime",
       ],

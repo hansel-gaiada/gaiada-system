@@ -125,6 +125,8 @@ import { AgencyController } from "./modules/agency/agency.controller";
 import { PmController } from "./modules/pm/pm.controller";
 import { ItController } from "./modules/it/it.controller";
 import { FinanceController } from "./modules/finance/finance.controller";
+// DW-7j-5: the GM's monthly revenue plan, /api/:t/revenue-plan (BFF §40.6.4; finance module wall, dept_kpi_target authz).
+import { RevenuePlanController } from "./modules/finance/revenue-plan.controller";
 import { ClientsController } from "./modules/clients/clients.controller";
 import { ClientReportsController } from "./modules/clients/client-reports.controller";
 import { ClientsCentreController } from "./modules/clients/centre/clients-centre.controller";
@@ -317,6 +319,8 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     DeptKpisController,
     DeptAppraisalsController,
     DeptKpiWatchController,
+    // DW-7j-5: the GM's revenue plan, /api/:t/revenue-plan (finance module wall; no MCP tool).
+    RevenuePlanController,
     // TR-21: the internal, token-only PDF payload fetch — root-level, no `/api` prefix, no
     // guards (identity.controller.ts's precedent). See print-payload.controller.ts's own header.
     PrintPayloadController,

@@ -567,7 +567,7 @@ const OFFICE_OF_THE_GM: Workspace = {
   overviewHref: deptPath(""),
   work: [
     PM_ROW,
-    { key: "command", label: "Command", icon: "chart", tabs: [fromToolkit("gm", "review"), fromToolkit("gm", "decisions")] },
+    { key: "command", label: "Command", icon: "chart", tabs: [fromToolkit("gm", "review"), fromToolkit("gm", "decisions"), fromToolkit("gm", "revenue-plan")] },
     { key: "oversight", label: "Oversight", icon: "sitemap", tabs: ["depts", "money", "people"].map((k) => fromToolkit("gm", k)) },
     { key: "requests", label: "Requests", icon: "bell", gate: AGENCY_ONLY, tabs: [SENT_REQUESTS] },
     {

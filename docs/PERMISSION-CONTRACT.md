@@ -2271,7 +2271,7 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §48a (ruling DW-D29).
 - **Why there is no policy change.** The list carries no subject, so Cerbos cannot filter it. The gate is the single rule that `/pm/productivity`, the activity series and `GET /work-activity?personId=` already use (§38c). A narrower policy row would only duplicate it.
 - **Unchanged:** `create`, `update`, `delete`.
 
-## 41. DW-7j — the GM's revenue plan, BFF §40.6.4 (2026-10-15, PLANNED): no new kind, no new action
+## 41. DW-7j — the GM's revenue plan, BFF §40.6.4 (2026-10-15, BUILT, PROTOTYPED): no new kind, no new action
 
 DW-D30 (owner, 2026-10-15) has the revenue plan built now, so that the GM's "Revenue against plan" KPI has a plan to read. It reuses `dept_kpi_target`, because the people who set the plan are the people who put KPI targets in force:
 
@@ -2284,6 +2284,7 @@ DW-D30 (owner, 2026-10-15) has the revenue plan built now, so that the GM's "Rev
 - The resource is the company: `unitAncestors` is `[]`, so `org_unit_lead` never passes `approve` here.
 - The functional-department readers (BFF §40.6.2) are not routes. They run inside the §40 engine, under the reads that the department KPIs already authorize.
 - Whether the Office of the GM's lead seat should also set the plan follows §38's open owner decision on who approves targets.
+- **As built.** `platform-nest/src/modules/finance/revenue-plan.controller.ts` authorizes with `{kind: "dept_kpi_target", module: "reports", unitAncestors: []}`, `read` and `approve`; no policy, catalog or bundle changed. The UI mirrors `approve` with `company.manage` (or elevated), which a `manager` also holds, so the server's 403 is the refusal and the page shows it as a sentence. Tested in `revenue-plan.controller.db.test.ts` (a manager, a member and an org_unit_lead are refused 403 on PUT and DELETE; read passes for the tenant's tiers; another tenant's approver is refused).
 
 ## 45. PV7-01 — `read_client` on `report_document` (2026-10-15, PROTOTYPED)
 

@@ -133,7 +133,7 @@ describe("the GM toolkit", () => {
     // console points at 404s. These five are the bespoke paths added under
     // app/(app)/departments/[deptId]/ by GM-01.
     const paths = deptTabs(toolkitFor("agency", "GM")).map((t) => t.path);
-    for (const p of ["review", "decisions", "depts", "money", "people"]) {
+    for (const p of ["review", "decisions", "revenue-plan", "depts", "money", "people"]) {
       expect(paths, `${p} tab must be declared`).toContain(p);
     }
   });

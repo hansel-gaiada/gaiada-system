@@ -258,11 +258,16 @@ describe("behind the miss (§43.8): which KPIs have drivers", () => {
   });
 
   it("a module KPI without a reader has no reader; one with a reader, the company-grain and the derived KPIs have no drivers", () => {
-    // Web Dev's client site uptime has a reader since DW-6n (06db3f0b); HR's payroll has one since DW-7j f4, IT's uptime since f10; only the GM's revenue against plan waits (f1).
+    // Web Dev's client site uptime has a reader since DW-6n (06db3f0b); HR's payroll has one since DW-7j f4, IT's uptime since f10, the GM's revenue against plan since f1.
     expect(noDriversReason(defOf("web-dev", "client-site-uptime"))).toBe("no_drivers");
     expect(noDriversReason(defOf("hr", "payroll-on-time"))).toBe("no_drivers");
     expect(noDriversReason(defOf("it", "uptime"))).toBe("no_drivers");
-    expect(noDriversReason(defOf("gm", "revenue-vs-plan"))).toBe("no_reader");
+    expect(noDriversReason(defOf("gm", "revenue-vs-plan"))).toBe("no_drivers");
+    // DW-7j f1 was the last: every module KPI in the catalogue now names a reader, so none is `no_reader` any more
+    // (a module KPI without a readerId still is, which is pinned just below and in dept-kpis.test.ts).
+    const noReader = Object.entries(DEPT_KPI_SETS).flatMap(([slug, defs]) => defs.filter((d) => noDriversReason(d) === "no_reader").map((d) => `${slug}/${d.key}`));
+    expect(noReader).toEqual([]);
+    expect(noDriversReason({ reader: { kind: "module" } as unknown as DeptKpiDef["reader"] })).toBe("no_reader");
     // a module KPI that has a reader of its own has a value but no drivers
     expect(noDriversReason({ reader: { kind: "module", readerId: "x" } as unknown as DeptKpiDef["reader"] })).toBe("no_drivers");
     expect(noDriversReason(defOf("gm", "utilization"))).toBe("no_drivers");

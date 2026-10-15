@@ -50,7 +50,12 @@ export const reconcileTreasuryResult = (u: string, t: string): Promise<ReadResul
 export const getTrialBalanceResult = (u: string, t: string): Promise<ReadResult<TrialBalance>> =>
   readResult(platformFetch<TrialBalance>(`/api/${t}/finance/trial-balance`, u));
 
-/** DW-7b-2: one window of the profit and loss, for the analytics page's revenue by month. `from` and `to` are required by the route
- *  and inclusive. The totals come back as `section: "total"` rows (`gmMoney.summarizePnl`). Authorized as `finance_statement` read. */
+/** DW-7b-2 (analytics) and DW-7j-5 (revenue plan): the P&L over `[from, to]` (both inclusive ISO dates), as rows. `finance_statement` read. The totals come back as `section: "total"` rows
+ *  (`gmMoney.summarizePnl`). A 200 that is not a list is a broken read, never "no rows". */
 export const getProfitAndLossResult = (u: string, t: string, from: string, to: string): Promise<ReadResult<StatementRow[]>> =>
-  readResult(platformFetch<StatementRow[]>(`/api/${t}/finance/profit-and-loss?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, u));
+  readResult(
+    platformFetch<StatementRow[]>(`/api/${t}/finance/profit-and-loss?${new URLSearchParams({ from, to }).toString()}`, u).then((rows) => {
+      if (!Array.isArray(rows)) throw new Error("The finance read returned an unexpected answer.");
+      return rows;
+    }),
+  );

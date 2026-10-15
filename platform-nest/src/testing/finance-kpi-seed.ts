@@ -1,4 +1,4 @@
-// Test seeding shared by the functional readers' database tests (DW-7j: f2, f7, f8). Not a test file.
+// Test seeding shared by the functional readers' database tests (DW-7j: f1, f2, f7, f8). Not a test file.
 // A finance company is: the company row with the `finance` module, its settings row (IDR), the PSAK chart of accounts and fiscal
 // year FY2026 (2026-01-01 .. 2027-01-01). Periods are either cut monthly (all OPEN, so journals and invoices can post) or left
 // for the test to insert by hand, which is the only way to seed a period the state machine would refuse to reach.
@@ -42,4 +42,15 @@ export async function postJournal(tenant: string, date: string, tag: string, lin
 /** Turn the company's modules off (its rows stay): what a reader's gate must answer `null` for. */
 export async function turnModulesOff(tenant: string): Promise<void> {
   await withGlobal((c) => c.query(`UPDATE companies SET enabled_modules = '{}' WHERE id = $1`, [tenant]));
+}
+
+/** One month of the GM's revenue plan (`finance_revenue_plans`, BFF §40.6.4). `month` is `YYYY-MM`; `amountMinor` is in the currency's minor unit. */
+export async function seedRevenuePlan(
+  tenant: string, month: string, amountMinor: number, setBy: string, currency = "IDR",
+): Promise<void> {
+  await withFinance(tenant, (c) =>
+    c.query(`INSERT INTO finance_revenue_plans (tenant_id, month, amount_minor, currency, set_by) VALUES ($1, $2::date, $3, $4, $5)`, [
+      tenant, `${month}-01`, String(amountMinor), currency, setBy,
+    ]),
+  );
 }
