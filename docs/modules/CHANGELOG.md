@@ -11,6 +11,27 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.185.0` - DW-9a + DW-9b: the workspace shell proved for twelve kinds of person, and an axe pass in light and dark, desktop and phone (2026-10-16) - PROTOTYPED
+
+Plan §12.1. Everything here runs under DEMO_MODE on sumopod (`qa/e2e-gate.sh`); CI's Playwright step runs only `smoke`. The new layout is still the per-person pilot, so nobody's screen changes.
+- **Seven demo logins (9a-1)**, one grant each:
+  - placed employees `seo-specialist@`, `social@` and `creative@` (SEO, Social Media, Creatives);
+  - the functional staff `hr-staff@` (`hr_staff`), `finance-staff@` (`finance_staff`) and `it-admin@` (`it_admin`);
+  - `resort-staff@`, a member of Viceroy placed in Front Office.
+- **The org seed:** `lib/org.ts` now seeds by vertical. Hospitality gets Front Office, HR, Finance and IT (`hosp-dept-1`..`4`), so a department without a bespoke workspace exists in demo and the generic workspace is driven end to end. Holding, general and catering stay empty.
+- **The persona e2e (9a-2):** `e2e/workspace-personas.spec.ts`, project `workspace-personas`, 58 tests over twelve kinds of person (the seven above, the Web Dev employee and head, the unplaced group owner, `platform_admin`, the client). For each it checks:
+  - the home and the switcher;
+  - the Work, Performance and You rows, pinned;
+  - Company and Admin in the footer;
+  - every sidebar link opens: under 400, no "Page not found", no error boundary, the shell around it;
+  - three Admin URLs answer as `lib/adminAccess.ts` rules (DW-D20);
+  - the client stays in `/portal`.
+- **What the walk found:** `/it/topology` crashed in demo, because the catch-all's `[]` reached `getTopology`. A demo route now answers 404, the "predates the endpoint" state; DW-7k also made the reader tolerate the wrong shape.
+- **The axe sweep (9b-1):** `e2e/a11y-axe-workspaces.spec.ts`, project `workspace-a11y`, 42 cells (11 surfaces, light and dark, desktop and phone), WCAG 2.0/2.1 A and AA, no exclusions. It found one violation: `aria-required-children` on the avatar menu, in all four cells. That was new-shell only; the classic menu is clean. Contrast came back clean everywhere.
+- **The fix (9b-2):** the avatar menu's Theme choices are `menuitemradio` under the menu's own `group` (ThemeToggle `inMenu`). The top bar's standalone toggle keeps its radiogroup.
+- **Gate on sumopod:** `workspace-personas` 58/58 ×2 and `workspace-a11y` 42/42 ×2 on `d3d2f2c2`, with `workspace-shell` 51, `me-performance` 3, `workspace-departments` 13, `workspace-functional` 9, `company-context` 3, `pm-unified` 10, `portal` 26 and smoke green on the same build. The run on the rebased landing branch is noted at landing.
+- No migration. No Cerbos change. No backend change.
+
 ### platform-nest `0.161.0` + platform-ui `0.184.0` - DW-7i-1: failing workflows for the superadmin, the owner, the GM and the PM (DW-D37, BFF §52.12, PERMISSION §42a) (2026-10-16) - PROTOTYPED
 
 - **Who sees them (DW-D37):** the shared n8n's failures are visible to the platform operator, and in a company with `automation-console` on, to its `owner`, the seated lead of its Office of the GM, and the holder of a Project Manager seat (vacant today). The rule is in code (`core/automation-failures-audience.ts`): seats come from `positions`/`position_assignments`, never from job titles typed on users. IT staff are not in it.
