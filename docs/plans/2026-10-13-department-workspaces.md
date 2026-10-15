@@ -1567,6 +1567,19 @@ through `gaiada_prefs`, as in `a11y-axe.spec.ts`. A green run is evidence of no 
   (trap 8). `/approvals` stays in the palette for everyone (`paletteFindability.test.ts`).
 - **9d-2, the removal.** Two releases after 9d-1, the classic shell and the switch are deleted.
 
+**9a and 9b as built (on main `d711b208`, 2026-10-16).**
+- **Gate:** 58 persona tests and 42 axe cells, each green twice on sumopod on the landing sha.
+- **One axe finding, fixed:** the avatar menu held a radiogroup (`aria-required-children`), so its Theme choices are now `menuitemradio`.
+- **One demo crash, fixed:** the walk found `/it/topology` crashing in DEMO_MODE.
+
+**The pilot week (9c)** started on 2026-10-16 at the owner's word. It runs to 2026-10-23 at the earliest.
+
+**9d-1 as built (on `dw/9d`; it lands only after the owner closes the pilot week).**
+- **A trap in the prefs cookie.** Every prefs writer spreads the current prefs. So anyone who changed their theme, zoom, rail or pins since DW-1d already has `shell: "classic"` stored, though they never chose it. A bare default flip would have left all of them on classic.
+- **The fix.** `Prefs.shellChosen` is written only by the avatar-menu switch (`setShellLayoutAction`). `getPrefs` honours a stored `shell` only when that flag is `true`; otherwise the default applies.
+- **The e2e tests (trap 8):** a test of a classic-shell element now plants the explicit choice (`classicLayoutCookie`, `classicTest`), and says "classic until DW-9d-2". The GM console's cockpit tests are among them; 9d-2 rewrites them against the Overview. A test of a page's content runs under the new default.
+- **Streaming under the new shell:** for about 150 ms after `load`, its pages hold the finished content twice: in place, and in React's hidden streaming copy (`div#S:n[hidden]`). A strict locator in that window throws, and `toBeVisible` does not retry the error. Users see nothing, so this is a test-robustness matter. Specs on streaming pages import `test` from `e2e/settledPage.ts`, whose `goto` and `reload` wait for the hidden copies to clear.
+
 ### 12.2 Build notes (DW-10, 2026-10-15)
 
 **Evidence.** `origin/main` at `5722ec9a` (release 412), read from a clean worktree, plus four read-only
