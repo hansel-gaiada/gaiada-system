@@ -7815,6 +7815,81 @@ Built by three agents in parallel, each from `dw/6n-base`, reviewed and wired by
   - **n9** compares `[start, asOf]` with the same number of days before `start`.
 - **Tests:** shared seeding for the social and uptime tests is `src/testing/dept-kpi-seed.ts`. Every timestamp test builds its boundaries from `REPORTS_TZ` (Asia/Makassar in the suites), so nothing assumes UTC.
 
+### 40.6 Functional-department and GM readers (DW-7j, 2026-10-15) — **STATUS: PLANNED (contract)**
+
+**Why.** DW-D25 moved the functional departments' and the GM's twelve `module` KPIs to DW-7. Today each one reads `unavailable` (`no_reader`). This section gives each a reader on the §40.5.1 seam, unchanged. **DW-D30** (owner, 2026-10-15) settles the definitions the data could not settle:
+- the GM's revenue plan is built now (§40.6.4);
+- payroll on time means paid by the pay date;
+- the close is on time when soft-locked within 10 calendar days of the period's end;
+- the IT KPIs with no data source use the proxies below;
+- turnaround windows count working days.
+
+#### 40.6.1 Registration and scope
+- **Registration.** The readers live in `modules/reports/dept-kpi-readers/functional/`. They are registered only in `functional/index.ts` (`FUNCTIONAL_READERS`), and each catalogue entry in `dept-kpis.ts` names its id with `read(id)`. Readers over a module's tables are wrapped in `gated(module, reader)`, lifted from `delivery/index.ts` into a shared file so both registries use one copy. The parity test in `dept-kpi-readers.test.ts` covers them as it covers DW-6's.
+- **Scope: the company, not the unit.** HR, Finance and IT serve the whole company: HR decides everyone's leave, Finance closes the company's books, IT runs its estate. A functional reader therefore reads the TENANT, never S(u). The GM's readers are company-grain by definition. The unit in `ReaderCtx` is used only to recognise which department is asking. A served company's numbers (a service assignment) are out of v1; that is a later ticket.
+- **Working days (DW-D30).** "Within N working days of X" means: on or before the end of the Nth working day after the calendar day of X, in `REPORTS_TZ`. Working days come from `modules/hr/working-days.ts` with the company's calendar: its working weekdays and its holiday calendar from HR › Settings. A company with no HR calendar uses Monday to Friday, no holidays.
+- **Already due** keeps §40.5.1's meaning: a deadline on or before `asOf`.
+
+#### 40.6.2 The twelve readers
+
+| # | Workspace · key | Reader id | Value | Numerator / denominator | `null` (no data) when | Walls |
+|---|---|---|---|---|---|---|
+| f1 | gm · `revenue-vs-plan` | `gm.revenue_vs_plan` | actual ÷ plan | Actual: `finance_profit_and_loss(company, start, end)`, the row `section='total', code='TOTAL_REVENUE'`. Plan: the sum of the §40.6.4 monthly plans over the window. A month partly inside the window counts its plan × (days inside ÷ days in the month). | any month in the window has no plan, or the plan sums to 0 | `finance` |
+| f2 | gm · `margin` | `gm.margin` | net ÷ revenue | The same P&L read: `NET_PROFIT` ÷ `TOTAL_REVENUE` (the UI's `marginRate`, `lib/gmMoney.ts`, so the Company block and the KPI agree). | revenue is 0, or a total row is missing | `finance` |
+| f3 | hr · `leave-decided-2d` | `hr.leave_decided_2d` | numerator ÷ denominator | `hr_leave_requests`, not deleted, not `cancelled`, `created_at` inside the window. Denominator: those decided (`approved`/`denied`) plus those still `pending` whose deadline (2 working days after the creation day) is already due. Numerator: decided with `decided_at` on or before the deadline. | denominator 0 | `hr` |
+| f4 | hr · `payroll-on-time` | `hr.payroll_on_time` | numerator ÷ denominator | `hr_payroll_runs` of kind `regular`, not `cancelled`, with a `pay_date` inside the window that is already due or paid. Numerator: `status = 'paid'` and `paid_at`'s date (`REPORTS_TZ`) on or before `pay_date` (DW-D30: "published" is "paid"). A run with no `pay_date` is not counted. | denominator 0 | `hr` |
+| f5 | hr · `time-to-hire` | `hr.time_to_hire` | the mean of `converted_at − hr_requisitions.opened_at`, in minutes (`approved_at` when `opened_at` is null) | Over `hr_offers` converted into a hire (`converted_at` inside the window), joined to their requisition. No numerator or denominator (an average). | no hire in the window | `hr` |
+| f6 | hr · `mandatory-learning` | `hr.mandatory_learning` | completed ÷ required | Point in time at `asOf`, the company's people with an active membership on `asOf`: their `lms_enrollments` on published, `is_mandatory` paths. Required: assigned minus `waived`. Completed: `completed` with `completed_at` on or before the end of `asOf`. `expired` counts as not complete. The roster helper is DW-4g's (`loadUnitRoster`, at company grain). | required 0 | `lms` + `hr` |
+| f7 | finance · `close-on-time` | `finance.close_on_time` | numerator ÷ denominator | `finance_fiscal_periods` whose `end_date` is inside the window, with a deadline of `end_date` + 10 calendar days (DW-D30) that is already due or met. Numerator: `soft_locked_at`'s date (`REPORTS_TZ`) on or before the deadline. A period hard-locked without a soft lock counts its `hard_locked_at`. | denominator 0 | `finance` |
+| f8 | finance · `overdue-receivables-share` | `finance.overdue_receivables_share` | overdue ÷ outstanding | `finance_ar_aging(company, asOf)`: the sum of `d1_30 + d31_60 + d61_90 + d90_plus` over the sum of `total_outstanding`, across customers. A point-in-time balance: the window's start plays no part. | outstanding ≤ 0 | `finance` |
+| f9 | finance · `payments-confirmed-1d` | `finance.payments_confirmed_1d` | numerator ÷ denominator | `invoice_payments` not deleted, `created_at` inside the window. Denominator: decided (`confirmed`/`rejected`) plus `pending` whose deadline (1 working day after the creation day) is already due. Numerator: decided on or before the deadline. The decision time is `confirmed_at`, or `updated_at` for a rejection (there is no `rejected_at`; §40.6.3). | denominator 0 | tenant (core) |
+| f10 | it · `uptime` | `it.uptime` | up-time ÷ device-time | `it_devices` not deleted, over the window clipped to each device's life (from `created_at`): a device is DOWN while its last state change (`it_device_events` of type `online`/`offline`/`degraded`) at that instant is `offline`, and up otherwise (`degraded` is up). The state at the window's start is the last event before it, else `online` from registration. | no device-time in the window | `it` |
+| f11 | it · `requests-within-sla` | `it.leaver_access_closed` | numerator ÷ denominator | **Proxy (DW-D30).** Leavers: `hr_separations` approved, with `effective_on` inside the window and already due. Numerator: the leaver's login disabled (an activity `it.account.disable` on `it_account` for that user) on or before the end of the 1st working day after `effective_on`. The label stays; the UI note says what it measures. | no leaver in the window | `hr` + tenant |
+| f12 | it · `open-threat-alerts` | `it.devices_alerting` | a count | **Proxy (DW-D30).** The devices whose last state change at or before the end of `asOf` is `offline` or `degraded`. A real 0 when the company has devices. | the company has no device | `it` |
+
+#### 40.6.3 What the numbers cannot say (said in the UI's notes, never hidden)
+- **f1** compares accounting revenue with a plan the GM typed. A month with no plan makes the KPI "no data", never 100%.
+- **f5** measures from when the requisition opened to when the offer became a hire. It does not include time before the requisition, and a hire made outside the recruitment module is not counted.
+- **f6** is a point-in-time share. A window in the past reads completions up to its end, but the enrollments as they stand today.
+- **f9** uses `updated_at` as the time of a rejection, so a rejected payment edited later counts as decided later. A `rejected_at` column would fix it; that is a later ticket.
+- **f10** reconstructs uptime from state changes. The heartbeat writes an event only when the state changes, so a device that went silent without a recorded `offline` reads up. Network links have no availability series, so "network" uptime is the devices'.
+- **f11** is a proxy: it measures how quickly a leaver's login is closed, not every IT request. A real request log with an SLA would replace it; that is later work (DW-7i).
+- **f12** is a proxy: devices offline or degraded, not threats. The threat backend is DW-7h; when it exists, the reader switches to open threat alerts and the key stays.
+- **f3, f9** count working days from the company's HR calendar. A company that never set one gets Monday to Friday.
+
+#### 40.6.4 The GM's revenue plan (DW-D30: "build the plan now")
+- **Table** `finance_revenue_plans`: `tenant_id, month (a month start), amount_minor bigint ≥ 0, currency, note, set_by, set_at`, with UNIQUE (tenant, month) and origin_site, tenant-scoped with RLS under the `finance` module wall. Its currency must be the company's base currency (the P&L's): a different currency → 400.
+- **Who may act.** No new Cerbos kind. Reading the plan authorizes as `dept_kpi_target` `read`, and setting or clearing a month as `dept_kpi_target` `approve`. These are the same people who put KPI targets in force: the `company_admin` tier, which `owner` mirrors (PERMISSION-CONTRACT §41).
+- **Endpoints:**
+  - `GET /api/:t/revenue-plan?from=YYYY-MM&to=YYYY-MM` returns `{ currency, months: [{ month, amountMinor | null, note, setBy, setAt }] }`, every month in the range, with `null` where none is set. The range is at most 36 months.
+  - `PUT /api/:t/revenue-plan/:month {amountMinor, note?}` returns 200 `{month, amountMinor}`. `:month` is `YYYY-MM`, and `amountMinor` is an integer ≥ 0.
+  - `DELETE /api/:t/revenue-plan/:month` returns 204.
+  - Each write leaves an activity row.
+- **The screen.** The Office of the GM's Company row gains a "Revenue plan" tab (`/finance/revenue-plan`, owned by the GM workspace's registry entry): a 12-month grid with the year selector, each month's plan and its actual revenue (the same P&L read), editable by the approver. Everyone else who may read it sees it read-only.
+
+#### 40.6.5 Proof (live Postgres + Cerbos on the Linux CI gate)
+As §40.5.6, with company scope:
+- rows inside and outside the window at each boundary;
+- another tenant's rows (never counted);
+- the `null` case;
+- the walled module turned off (`null`, never an error).
+
+Plus:
+- **f3, f9:** a weekend and a company holiday between creation and decision, and a pending request past and before its deadline.
+- **f4:** a non-regular run (not counted) and a run with no `pay_date`.
+- **f7:** a period hard-locked without a soft lock.
+- **f10:** a device registered mid-window, and one that was down across the window's start.
+- **f11:** a leaver disabled on day 1 and on day 2, and one never disabled.
+- **f1:** a partial month, and a month with no plan.
+- **The revenue plan routes:** read, set and clear, a currency mismatch → 400, and a non-approver → 403.
+
+#### 40.6.6 Tickets
+One reader per ticket, each landing as its own fast-forward with green CI on its exact sha:
+1. **j0:** lift `gated()` into a shared file; register `FUNCTIONAL_READERS`.
+2. **The READY readers:** f2, f8, f4, f7, f3, f9, f6.
+3. **Then:** f5, f10, f12, f11.
+4. **f1 last,** after the revenue plan (table, routes, the GM's tab; one ticket, contract above).
+
 ## 41. The department appraisal per cycle (DW-4e-3, 2026-10-15) — `platform-nest/src/modules/reports/dept-appraisals*.ts` — **STATUS: BUILT, PROTOTYPED (backend: dept-appraisals.test.ts, dept-appraisals.controller.db.test.ts and src/rbac/cerbos-dept-kpi-target.test.ts on the Linux CI gate; UI: platform-ui deptAppraisalFormat.test.ts, demoDeptAppraisals.test.ts, deptAppraisals.test.ts, AppraisalView.test.tsx and rbac.test.ts on the CI gate)**
 
 **Why.** Plan §5.3 and §5.5 (owner ruling DW-Q4): each department has its own appraisal. The cycle's department appraisal is the department's KPIs over the appraisal period, with the result against each target, the condition history, the head's commentary and the GM's assessment. The Appraisals › Department tab shows it next to how the people's appraisals went. It is not a person's score, and a department KPI is never pinned on one person.

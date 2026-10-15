@@ -2271,6 +2271,20 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §48a (ruling DW-D29).
 - **Why there is no policy change.** The list carries no subject, so Cerbos cannot filter it. The gate is the single rule that `/pm/productivity`, the activity series and `GET /work-activity?personId=` already use (§38c). A narrower policy row would only duplicate it.
 - **Unchanged:** `create`, `update`, `delete`.
 
+## 41. DW-7j — the GM's revenue plan, BFF §40.6.4 (2026-10-15, PLANNED): no new kind, no new action
+
+DW-D30 (owner, 2026-10-15) has the revenue plan built now, so that the GM's "Revenue against plan" KPI has a plan to read. It reuses `dept_kpi_target`, because the people who set the plan are the people who put KPI targets in force:
+
+| Route | Authorizes as | Who passes |
+|---|---|---|
+| `GET /api/:t/revenue-plan` | `dept_kpi_target` `read` | as §38: `company_admin`, `manager`, `member`, `viewer`, and the HR read tier |
+| `PUT /api/:t/revenue-plan/:month` | `dept_kpi_target` `approve` | `company_admin` only (which `owner` mirrors) |
+| `DELETE /api/:t/revenue-plan/:month` | `dept_kpi_target` `approve` | `company_admin` only |
+
+- The resource is the company: `unitAncestors` is `[]`, so `org_unit_lead` never passes `approve` here.
+- The functional-department readers (BFF §40.6.2) are not routes. They run inside the §40 engine, under the reads that the department KPIs already authorize.
+- Whether the Office of the GM's lead seat should also set the plan follows §38's open owner decision on who approves targets.
+
 ## 45. PV7-01 — `read_client` on `report_document` (2026-10-15, PROTOTYPED)
 
 Design: `docs/FRONTEND-BFF-CONTRACT.md` §53 (plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`, PV7-01). Status: **PROTOTYPED** (policy, catalog, group, bundles, migration and tests are in the repo; the live Cerbos probe after a restart is the deploy step).

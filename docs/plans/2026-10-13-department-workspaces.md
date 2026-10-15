@@ -780,6 +780,15 @@ where a ticket says the classic shell changes too.
   the seam DW-6 and DW-4 agreed in §40.5.1; one reader per ticket, each plugging into the §40 catalogue
   (`{value, numerator?, denominator?}` or null). The targets, the condition and the DW-4j watch then pick
   it up unchanged.
+  - **Contract written (2026-10-15): BFF §40.6, with PERMISSION-CONTRACT §41.**
+    - The readers read the COMPANY, not the unit, because HR, Finance and IT serve the whole company.
+    - DW-D30 settled the five definitions the data could not:
+      - the GM's monthly revenue plan is built now (a table, three routes and a "Revenue plan" tab, with no new Cerbos kind);
+      - payroll on time means paid by the pay date;
+      - the close is on time when soft-locked within 10 days of the period's end;
+      - the two IT KPIs with no source use proxies (leavers' logins closed, devices offline or degraded);
+      - the turnarounds count working days.
+    - Order: the seam's shared `gated()`, then the seven ready readers, the four that need care, and the revenue plan with its reader last.
 
 **Order, one agent at a time:**
 1. 7d backend (Sonnet, Opus review), then 7d UI (Sonnet), then the release, the live dry run and the apply.
@@ -1286,6 +1295,7 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 | DW-D26 | DW-8i-2 (a finding of DW-8i): the AI Assistant's knowledge retrieval and the hub's `knowledge.search` quote internal chunks on the whole-company rule, so any member can be quoted a colleague's report document, people entries or files under contracts and invoices that they cannot open in the ERP | **Owner (2026-10-15): filter both paths.** Both go through DW-8i's per-record filter (`filterReadableHits`, BFF §46.2): a hit is kept only when the caller may read its source record, and reports, people and org stay withheld until each has its own check. The public tier is unchanged |
 | DW-D28 | DW-8g: show the invited people's busy times when scheduling a meeting (BFF §47.4)? | **Owner (2026-10-15): yes, times only.** Busy blocks (start and end) of the people's confirmed timed events they have not declined; never a title, a place or an organizer; at most 20 people and 14 days a lookup; only people who can schedule may ask |
 | DW-D29 | DW-8n's finding: every member and viewer can read the whole company's time entries through `GET /time-entries` | **Owner (2026-10-15): narrow it, in line with DW-D19.** A person reads their own time; a head reads their unit's people; HR's people readers and the company-wide tiers read the company. The list goes through the shared person-axis gate (`core/person-axis-gate.ts`), the rule activity and productivity already use (BFF §48a, PERMISSION-CONTRACT §40a) |
+| DW-D30 | DW-7j: the functional departments' and the GM's KPI readers (BFF §40.6). The data could not settle five definitions: there is no revenue plan; payroll has no "published" time and the close no deadline; IT has no request log or threat backend; and turnaround could count calendar or working days | **Owner (2026-10-15):** build the GM's monthly revenue plan now (§40.6.4). Payroll is on time when a regular run is paid by its pay date. A period is closed on time when soft-locked within 10 calendar days of its end. The IT KPIs use proxies now: leavers' logins closed within 1 working day, and devices offline or degraded. Leave-decided and payments-confirmed count working days. |
 
 ---
 
@@ -1617,6 +1627,7 @@ These are built in code but give no real data until someone outside engineering 
 ## Decision log
 
 - **2026-10-15 (owner, during the build):** DW-D26 (the assistant's and the hub's knowledge lookups go through DW-8i's per-record filter), DW-D28 (calendar busy times, times only) and DW-D29 (time entries read by tier, as DW-D19), all §11.4, for DW-8i-2, DW-8g and DW-8n's finding.
+- **2026-10-15 (owner, during the build):** DW-D30: the definitions behind DW-7j's KPI readers (§11.4, BFF §40.6). The GM's revenue plan is built now; payroll is on time when paid by the pay date; the close is on time within 10 days; the IT KPIs use proxies; turnarounds count working days.
 - **2026-10-14 (owner, during the build):** DW-D23: Approvals in You shows when it concerns you (§11.4), for DW-8k. DW-D24: email from the ERP means reading and sending through your own Gmail (§11.4), for DW-8j; the mail design's §8C gains a pointer.
 - **2026-10-13 (owner, during the build):** DW-D20: Admin-area pages 404 for anyone not allowed to use them (§11.4). Built with DW-2g, whose e2e pinned the old empty Admin area.
 - **2026-10-13 (owner, during the build):** DW-D21: the Project Management view is called "Board" again, reversing the 2026-08-10 Board→Overview rename (§11.4). Built as DW-6m.
