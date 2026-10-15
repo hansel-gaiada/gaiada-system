@@ -8763,7 +8763,7 @@ Built as §47.1 to §47.3 and §47.6 specify, except busy times: **§47.4 (`GET 
 - **Cerbos matrix:** `src/rbac/cerbos-personal-mailbox.test.ts`.
 - **UI:** the mailbox states, compose validation, the reply prefill, the "Email this client" prefill and its no-address state, and the simulated label.
 
-## 54. Client health: the board, one client, and the portal's own view (PV7-02, 2026-10-15) — `platform-nest/src/modules/clients/{client-ball,client-health-rules,client-health}.ts`, `src/core/portal-health.controller.ts` (new); migration `202610151710_pm_milestones_completed_at.sql` — **STATUS: PLANNED**
+## 54. Client health: the board, one client, and the portal's own view (PV7-02, 2026-10-15) — `platform-nest/src/modules/clients/{client-ball,client-health-rules,client-health}.ts`, `src/core/portal-health.controller.ts` (new); migration `202610151710_pm_milestones_completed_at.sql` — **STATUS: BUILT, PROTOTYPED (backend only; no page yet, PV7-03 and PV7-05. Run anywhere: `client-health-rules.test.ts` (the golden table) and `portal-visibility.test.ts`. Written for the Linux CI gate against real Postgres and Cerbos: `client-ball-parity.db.test.ts`, `client-health.db.test.ts`, `portal-health.db.test.ts` and `pm-milestones-completed-at.db.test.ts`)**
 
 **Why.** Plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`, ticket PV7-02 (findings 3, 4, 7 and 8; lead's calls L1 and L3; owner questions PV7-Q2 and PV7-Q4, the lead's defaults in force).
 - No client health exists, but its parts do: the hub overview's `needsUs` and `needsClient`, `clientMoney`, `monitors.client_id`.
@@ -8782,7 +8782,7 @@ Built as §47.1 to §47.3 and §47.6 specify, except busy times: **§47.4 (`GET 
 
 - The money signal (overdue invoices) is shown to the same readers as the hub overview's `money`: whoever may read the client.
 - `/clients/health` is a static segment, so it never reads as a `:clientId`.
-- A client that does not exist or is soft-deleted is 404.
+- A client that does not exist, is soft-deleted or is the internal sentinel is 404, and so is a `:clientId` that is not an id (after the authorization decision, never a 500 at the uuid cast).
 
 ### 54.2 Payload types
 
@@ -8821,7 +8821,7 @@ interface ClientHealthRow {
     openChangeRequests: number | null;       // status new, triaged or in_progress
     conversationsAwaitingReply: number | null;
     overdueInvoices: DueAged | null;         // ISSUED (status sent) and past due: clientMoney's own rule
-    site: { openIncidents: number; oldestOpenSince: string | null; uptime30d: number | null } | null;
+    site: { openIncidents: number; oldestOpenSince: string | null; uptime30d: number | null } | null;   // uptime30d is a percent, 0 to 100, two decimals
     deliveryOnTime: null;                    // PV7-01 will supply it; the seam is `deliveryOnTimeFor` in client-health.ts
     activeProjects: number | null;
     activeServices: number | null;           // active social engagements, active search properties, websites
@@ -8831,6 +8831,8 @@ interface ClientHealthRow {
 
 - **`null` means "no answer", never zero.** A signal is `null` when its source failed (the source is then in `unavailable[]`) or does not apply (the module is off for this company, so the source is not in `unavailable[]`). `uptime30d` is `null` for a window with no measured checks.
 - Active project: not `completed`, `archived` or `cancelled`, not soft-deleted, not `projects.is_internal`.
+- A site with no monitor is `{ openIncidents: 0, oldestOpenSince: null, uptime30d: null }`. `site` is `null` when the `monitoring` module is off for the company. Only enabled, non-deleted monitors count.
+- `deliveryOnTime` is always `null` in this section's build: PV7-01's client-grain overview is not on main yet. The seam is one function, `deliveryOnTimeFor` in `client-health.ts`; the payload field already exists, so PV7-05 can render it as "not measured" and light it up when PV7-01 lands.
 - Late deliverable: `due_date` before today and a status other than `delivered`, `approved` or `done`. Late milestone: `due_date` before today and a status other than `done`, on an active project. Non-internal work only. Dates are day-granular (`YYYY-MM-DD`, no time zone shift).
 - Waiting on us and waiting on the client are the hub overview's `needsUs` and `needsClient`, taken from the same code (`client-ball.ts`), so the board and the hub cannot disagree.
 
@@ -8909,14 +8911,15 @@ A pure function in `client-health-rules.ts`: signals, the list of unavailable so
       milestones: { total: number; done: number; upcoming: number; late: number; undated: number };
       deliverables: { total: number; delivered: number; late: number };
       nextMilestone: { id: string; name: string; dueDate: string } | null;
-      waitingOnYou: PortalBall; waitingOnUs: PortalBall;
-    }>;
-    clientWide: { waitingOnYou: PortalBall; waitingOnUs: PortalBall } | null;   // null unless `wide`
+      waitingOnYou: PortalBall | null; waitingOnUs: PortalBall | null;   // null when the ball read failed
+    }> | null;                                                           // null when the projects read failed
+    clientWide: { waitingOnYou: PortalBall | null; waitingOnUs: PortalBall | null } | null;   // null unless `wide` (or the ball read failed)
     turnaround: { windowDays: 90; client: PortalTurnaround; ours: PortalTurnaround } | null;
   }>;
   unavailable: HealthSource[];
 }
-interface PortalBall { count: number; oldestSince: string | null; items: Array<{ kind: string; id: string; context: string | null; since: string }> }
+interface PortalBall { count: number; oldestSince: string | null; items: Array<{ kind: string; id: string; context: string | null; since: string | null }> }
+// `count` is the true total; `items` lists the oldest 25. A payment's `context` is null (no amount).
 interface PortalTurnaround { medianDays: number | null; n: number; withheld: boolean }
 ```
 
@@ -8925,13 +8928,14 @@ interface PortalTurnaround { medianDays: number | null; n: number; withheld: boo
 - **Client-wide parts reach only client-wide contacts (PV-D33, PV-D37):** `clientWide` (ball items with no project), the turnaround samples that have no project, and the payment and post-review samples (they belong to the client, not to a project). For a client the caller reaches only through projects, `clientWide` is `null` and the turnaround counts only samples on their own projects (gates, contracts, change requests and conversation threads with a project in reach). A conversation thread with no project is the client-wide thread: client-wide contacts only (PV4-Q1).
 - **Waiting on you** is `needsClient` as the portal's own to-do knows it: pending client-side gates, contracts sent and not yet signed by the client, post reviews pending. **Waiting on us** is the client-visible part of `needsUs`: client-recorded payments pending confirmation, post reviews sent back for changes, change requests not yet triaged, conversation threads awaiting our reply. A drafted agreement we have not sent is never listed. Items pass the same per-row predicates as the portal's own reads.
 - **Never in this payload:** tasks or any figure derived from them, `blocked`, time entries, activities, internal gates (`actor_side = 'internal'`), people (no names, assignees or owners), money figures (PV-D38), or a state label. Staff-phrased labels and hrefs are not sent either; the UI words each `kind`.
-- A failed source: its figures are `null` where a number is expected, never 0, and it is named in `unavailable[]`.
+- A failed source: the section it feeds is `null` (`projects`, `turnaround`, the two balls), never zero, and the source is named in `unavailable[]`. The scope and the client names are essential reads: if they fail the call fails.
+- Projects that are `projects.is_internal` are never listed. Finished projects are listed with their `status`; the UI decides what to show.
 - **Predicates:** every row predicate comes from `portal-visibility.ts` (new builders there: `wideClientOnly` and `wideOrOwnProject`). The controller is on the SWITCHED list in `portal-visibility.test.ts`.
 
-### 54.6 Tests (the DB and HTTP suites run on the Linux CI gate)
+### 54.6 Tests (the DB and HTTP suites run on the Linux CI gate, never on the laptop)
 - `client-ball-parity.db.test.ts`: the hub overview's `needsUs` and `needsClient` pinned before the refactor and after it; the set-based read for two clients equals the one-client reads.
-- `client-health-rules.test.ts`: the golden table, with both sides of every threshold.
+- `client-health-rules.test.ts`: the golden table (`client-health-golden.json`, 35 cases), with both sides of every threshold.
 - `client-health.db.test.ts`: the board, the one-client read, the query-count pin, a failed source, the module walls.
-- `portal-health.db.test.ts`: isolation with `createMultiClientContact`, and the tooth (an internal gate added to the payload must fail it).
+- `portal-health.db.test.ts`: isolation with `createMultiClientContact` (a contact of two clients gets two sections; the project-scoped one never sees another project's or a client-wide item), a positive control (a client-wide contact of B sees exactly what the limited one must not), a body scan for every banned item and key, and the tooth (an internal gate added to the payload must fail it).
 - `pm-milestones-completed-at.db.test.ts`: the trigger.
 - `portal-visibility.test.ts`: the new builders and the controller on the SWITCHED list.
