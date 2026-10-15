@@ -2278,3 +2278,24 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §53 (plan `docs/plans/2026-10-15-pv7-pe
 - **Not sensitive**, like `read_project`.
 
 **Proof.** `platform-nest/src/modules/reports/reports-cerbos.test.ts` (the `read_client` matrix: exec, admin, lead, both HR halves and member allowed; the served tiers, a project-scope member, a bare membership, another company's manager, low assurance and a portal contact refused; and `read_client` equal to `read_project` role for role except the served arm), plus the static alignment suites (`cerbos-catalog-alignment`, `permission-groups-catalog-parity`, `ui-grantable-catalog`, `permission-arm-hazard-scan`) and the HTTP suite `report-client-grain.db.test.ts`. **Restart the Cerbos test container and the live sidecar after the policy deploy.**
+
+## 46. PV7-04a — the `client_report` kind (2026-10-15, PLANNED)
+
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §55 (plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`, PV7-04, lead's call L6). Status: **PLANNED**.
+
+**A new core kind, `client_report` (no module), with four actions.** `resource_client_report.yaml`, keys `core.client_report.{read,draft,publish,withdraw}`: one report published to a client in the portal (a delivered social or search report, later the account summary).
+
+| Action | Reach | What it is |
+|---|---|---|
+| `read` | `company_admin`, `manager`, `member`, `viewer` (`inTenant && notLow`), the `client` kind's read tiers | see a client's reports, every status, and download their files on the staff side |
+| `draft` | `company_admin`, `manager`; **its own rule** for the client's owner (`ownerUserId == principal.id`, held as `member`) | create or edit a draft (PV7-07, PV7-08). Automation accounts draft through the `manager` or `company_admin` grant every one of them holds |
+| `publish` | `company_admin`, `manager`; **its own rule** for the client's owner | put a draft in front of the client |
+| `withdraw` | `company_admin`, `manager`; **its own rule** for the client's owner | take a published report back, with a reason |
+
+**`EFFECT_DENY` on `publish` and `withdraw` for `principal.attr.kind in ["automation","bot"]`** (L6: agents draft, staff publish; the PV-D23 shape, `roles: ["user"]`, `has()`-guarded), so it beats every ALLOW, the `platform_admin` wildcard and the permission mirrors under deny-overrides.
+
+**One new resource attribute, fed by the handler and never by a body:** `ownerUserId` (from `clients.owner_user_id`), in the `Resource` type and the `resourcePayload()` allow-list, default `""`.
+
+**The permission arm covers `read` only** (`perm_client_report_read`). `draft`, `publish` and `withdraw` each carry a self-scoped owner rule, which a flat `perms` mirror cannot express (permission-arm-hazard-scan Pattern B).
+
+**Portal reads do NOT use this kind.** A client contact reads published reports through `portal · read` and `clientReportInPortalScope` (BFF §55.4), as every portal read does. The `client` derived role appears nowhere in the policy.
