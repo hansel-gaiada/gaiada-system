@@ -416,8 +416,10 @@ describe.skipIf(!TEST_URL)("PV7-04a · client reports: publication, portal isola
     const approvedReport = async (eng: string, period: string) => {
       const id = newId();
       await withTenants([co], (q) => q.query(
-        `INSERT INTO search_reports (id, tenant_id, engagement_id, period, kind, status, narrative_md, approved_by, approved_at, origin_site)
-         VALUES ($1, $2, $3, $4, 'monthly', 'approved', 'Narrative.', $5, now(), 'central')`,
+        // `metrics` is SM-10's frozen snapshot shape (the renderer reads kpiTargets); the column default `{}` is not one.
+        `INSERT INTO search_reports (id, tenant_id, engagement_id, period, kind, status, metrics, narrative_md, approved_by, approved_at, origin_site)
+         VALUES ($1, $2, $3, $4, 'monthly', 'approved', '{"rankTop10": 0, "criticalFindingsOpen": 0, "kpiTargets": []}'::jsonb,
+                 'Narrative.', $5, now(), 'central')`,
         [id, co, eng, period, admin],
       ), { modules: ["search"] });
       return id;
