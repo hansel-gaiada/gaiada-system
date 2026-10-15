@@ -30,7 +30,9 @@ export default async function LoginPage({ searchParams }: { searchParams: SP }) 
   // dev-login path that mode disables, so the most prominent control on the page is the one that
   // cannot work. Render SSO alone rather than offering a broken primary action.
   const ssoOnly = (process.env.AUTH_MODE ?? process.env.PLATFORM_AUTH_MODE ?? "dev") === "oidc";
-  const ssoError = typeof sp.error === "string" ? sp.error : undefined;
+  // DW-7h (BFF §52.4): `?reason=session_revoked` (from /auth/ended) says why this person is here; an `error` wins.
+  const ssoError =
+    typeof sp.error === "string" ? sp.error : sp.reason === "session_revoked" ? "session_revoked" : undefined;
   return (
     <main className="auth-shell">
       <aside className="auth-identity">

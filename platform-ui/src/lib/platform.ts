@@ -1,5 +1,6 @@
 import "server-only";
 import { isDemoMode } from "./demoMode";
+import { SESSION_REVOKED_REASON, withSessionEndedRedirect } from "./sessionEnded";
 // The ONLY backend this UI talks to. Server-side only — tokens never reach the browser.
 export class PlatformError extends Error {
   // `field` is additive (bot admin proxy 400s as {error, field} per doc §2.3/2.4) —
@@ -28,6 +29,46 @@ export class PlatformError extends Error {
   ) {
     super(message);
   }
+}
+
+/** The longest user agent platform-nest keeps (`security_access_seen.user_agent`, BFF §52.2). */
+export const CLIENT_UA_MAX = 512;
+
+/**
+ * DW-7h (FRONTEND-BFF-CONTRACT §52.2): who is really calling. platform-nest is reached from this server, never from the
+ * browser, so without these it would see this container's address and Node's user agent on every request, and IT's
+ * "Connected" page and address blocks would have nothing to go on.
+ *   * `x-gaiada-client-ip`: the incoming request's `x-real-ip` (nginx `location /` sets it to `$remote_addr`), else the
+ *     RIGHTMOST `x-forwarded-for` entry (the one the nearest proxy appended; the leftmost is whatever the client wrote).
+ *   * `x-gaiada-client-ua`: the incoming `user-agent`, cut to 512 characters.
+ * platform-nest believes these only on a request that did NOT pass nginx (core/security/client-context.ts), so a
+ * browser cannot plant them through the one public nginx path into it.
+ *
+ * Empty when there is no request (a test, a build, a background job): `headers()` throws there, and the call goes out
+ * without them, as before.
+ */
+export async function forwardedClientHeaders(): Promise<Record<string, string>> {
+  let incoming: { get(name: string): string | null };
+  try {
+    const { headers } = await import("next/headers");
+    incoming = await headers();
+  } catch {
+    return {};
+  }
+  const out: Record<string, string> = {};
+  const realIp = incoming.get("x-real-ip")?.trim();
+  const rightmost = incoming.get("x-forwarded-for")?.split(",").map((s) => s.trim()).filter(Boolean).pop();
+  const ip = realIp || rightmost;
+  if (ip) out["x-gaiada-client-ip"] = ip;
+  const ua = incoming.get("user-agent")?.trim();
+  if (ua) out["x-gaiada-client-ua"] = ua.slice(0, CLIENT_UA_MAX);
+  return out;
+}
+
+/** BFF §52.4: a refusal of a session IT signed out also redirects to `/auth/ended` (see lib/sessionEnded.ts). Every
+ *  other error, including every other 401, is the plain PlatformError it always was. */
+function refusal(err: PlatformError): PlatformError {
+  return err.status === 401 && err.reason === SESSION_REVOKED_REASON ? withSessionEndedRedirect(err) : err;
 }
 
 export async function platformFetch<T>(path: string, userId: string, init: RequestInit = {}): Promise<T> {
@@ -73,6 +114,7 @@ export async function platformFetch<T>(path: string, userId: string, init: Reque
     ...init,
     headers: {
       ...authHeaders,
+      ...(await forwardedClientHeaders()),
       // Only claim a JSON content-type when a body is actually being sent —
       // Fastify's JSON body parser 400s on an empty body declared as
       // application/json (hit by every bodyless POST, e.g. mark-read /
@@ -96,7 +138,7 @@ export async function platformFetch<T>(path: string, userId: string, init: Reque
       existing = body.existing;
       reason = body.reason;
     } catch { /* keep default */ }
-    throw new PlatformError(res.status, msg, field, existing, reason, rawBody);
+    throw refusal(new PlatformError(res.status, msg, field, existing, reason, rawBody));
   }
   return (await res.json()) as T;
 }
@@ -129,16 +171,20 @@ export async function platformAuthHeaders(userId: string): Promise<Record<string
 export async function platformUpload<T>(path: string, userId: string, form: FormData): Promise<T> {
   const base = process.env.PLATFORM_URL ?? "http://localhost:3004";
   const authHeaders = await platformAuthHeaders(userId);
-  const res = await fetch(`${base}${path}`, { method: "POST", headers: authHeaders, body: form, cache: "no-store" });
+  const res = await fetch(`${base}${path}`, {
+    method: "POST", headers: { ...authHeaders, ...(await forwardedClientHeaders()) }, body: form, cache: "no-store",
+  });
   if (!res.ok) {
     let msg = `platform ${res.status}`;
     let field: string | undefined;
+    let reason: string | undefined;
     try {
-      const body = (await res.json()) as { error?: string; field?: string };
+      const body = (await res.json()) as { error?: string; field?: string; reason?: string };
       msg = body.error ?? msg;
       field = body.field;
+      reason = body.reason;
     } catch { /* keep default */ }
-    throw new PlatformError(res.status, msg, field);
+    throw refusal(new PlatformError(res.status, msg, field, undefined, reason));
   }
   return (await res.json()) as T;
 }

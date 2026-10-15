@@ -22,10 +22,13 @@ export default defineConfig({
   // Nothing in platform-nest imports `server-only`, so this alias is inert everywhere else.
   // `next/navigation` likewise: the same test imports platform-ui's action module, which imports `redirect`, and this
   // package's CI job does not install platform-ui's node_modules (see src/testing/next-navigation-stub.ts).
+  // `next/headers` too (DW-7h): that test drives the UI's real `platformFetch`, which reads the incoming request's
+  // headers to forward the client's address (see src/testing/next-headers-stub.ts).
   resolve: {
     alias: {
       "server-only": path.resolve(__dirname, "src/testing/server-only-stub.ts"),
       "next/navigation": path.resolve(__dirname, "src/testing/next-navigation-stub.ts"),
+      "next/headers": path.resolve(__dirname, "src/testing/next-headers-stub.ts"),
     },
   },
   test: {

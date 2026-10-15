@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
+import { rethrowIfSessionEnded } from "@/lib/sessionEnded";
 import { getActivePortalCompany, getPortalCompanies } from "@/lib/portal-company";
 import { PortalCompanySwitch } from "@/components/portal/PortalCompanySwitch";
 import { getPortalOverview } from "@/lib/portal-data";
@@ -34,7 +35,8 @@ import { websiteEditorClients } from "@/lib/portalWebsiteAccess";
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
-  const me = await getMe(userId).catch(() => null);
+  // DW-7h (BFF §52.4): a session IT ended is let through, so Next redirects it to /auth/ended; see (app)/layout.tsx.
+  const me = await getMe(userId).catch((e: unknown) => { rethrowIfSessionEnded(e); return null; });
   if (!me) redirect("/login");
   const company = await getActivePortalCompany(me);
   const tenant = company?.id ?? null;

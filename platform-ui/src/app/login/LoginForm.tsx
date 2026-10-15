@@ -7,6 +7,8 @@ const SSO_ERRORS: Record<string, string> = {
   sso: "That sign-in attempt expired. Please try again.",
   token: "Couldn't complete sign-in with the identity provider.",
   provision: "Signed in, but no matching account exists on this platform.",
+  // DW-7h (BFF §52.4): app/auth/ended/route.ts lands here after IT signed this session out or blocked the login.
+  session_revoked: "Your session was ended by IT. Sign in again.",
 };
 
 // Shown only once the identity panel itself is hidden at the narrow-viewport

@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
+import { rethrowIfSessionEnded } from "@/lib/sessionEnded";
 import { getActiveTenant } from "@/lib/tenant";
 import { getPrefs } from "@/lib/prefs";
 import { listDepartmentBriefs, type DeptBrief } from "@/lib/departments";
@@ -20,7 +21,9 @@ import { buildShellModel, type ShellModel } from "@/lib/shellModel";
 export default async function AppLayout({ children, drawer }: { children: React.ReactNode; drawer: React.ReactNode }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
-  const me = await getMe(userId).catch(() => null);
+  // DW-7h (BFF §52.4): a session IT ended is let through, so Next redirects it to /auth/ended (which clears the
+  // cookie and says why); any other failure still lands on /login.
+  const me = await getMe(userId).catch((e: unknown) => { rethrowIfSessionEnded(e); return null; });
   if (!me) redirect("/login");
 
   // An external client has no business anywhere in the STAFF group. This lives in the layout, not on

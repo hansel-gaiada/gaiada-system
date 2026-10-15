@@ -9405,7 +9405,9 @@ On every authenticated request, the token is refused with **401** `{error: "Your
 The check is cached per process for at most 10 seconds, so a sign-out or block takes effect within 10 seconds, everywhere.
 
 - **Why not `users.session_version`:** the principal reads `session_version` from `users` on every request, so bumping it does not cut an existing token. The revocation row does.
-- **platform-ui:** a 401 with `reason: "session_revoked"` clears the ERP session cookie and sends the person to `/auth/login?reason=session_revoked`. The login page says "Your session was ended by IT."
+- **platform-ui:** a 401 with `reason: "session_revoked"` clears the ERP session cookie and sends the person to `/login?reason=session_revoked`. The login page says "Your session was ended by IT. Sign in again."
+  - `platformFetch` throws a `PlatformError` that also carries Next's redirect digest for `/auth/ended` (`lib/sessionEnded.ts`). Uncaught, Next redirects; a caller that catches it as a `PlatformError` shows the message. The app and portal layouts let it through their `getMe` catch.
+  - `/auth/ended` (route handler) clears the cookie, because a Server Component cannot. It lands on `/login`, not `/auth/login`, which has no page and goes straight to Keycloak.
 - **Keycloak:** a sign-out also ends the Keycloak session (§52.7), so the ERP cannot refresh it. The revocation row covers the access token still in hand (it lives up to 1 hour).
 
 ### 52.5 Blocked addresses
