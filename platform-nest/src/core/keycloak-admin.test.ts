@@ -10,6 +10,12 @@ import { config } from "../config";
 import {
   createUser,
   setPassword,
+  setPasswordTemporary,
+  listEvents,
+  getEventsConfig,
+  deleteSession,
+  logoutUser,
+  KeycloakForbiddenError,
   disableUser,
   enableUser,
   deleteUser,
@@ -253,5 +259,108 @@ describe("generateInitialPassword", () => {
     const b = generateInitialPassword();
     expect(a).not.toBe(b);
     expect(a.length).toBeGreaterThan(20);
+  });
+});
+
+describe("DW-7h: events, sessions and logout (BFF §52.6, §52.7)", () => {
+  const eventRow = (over: Record<string, unknown> = {}) => ({
+    time: 1_760_000_000_000, type: "LOGIN_ERROR", realmId: "gaiada", clientId: "gaiada-ui", userId: NEW_ID,
+    ipAddress: "203.0.113.9", error: "invalid_user_credentials", sessionId: "sess-1",
+    details: { username: "a@b.test", auth_method: "openid-connect" },
+    ...over,
+  });
+
+  it("listEvents asks for each type, cuts the dates to a UTC day and normalises the rows", async () => {
+    const { impl, calls } = fakeFetch([TOKEN_OK, { method: "GET", match: "/events?", status: 200, json: [eventRow()] }]);
+    const rows = await listEvents(
+      { types: ["LOGIN", "LOGIN_ERROR", "LOGOUT"], dateFrom: new Date("2026-10-14T23:59:59Z"), dateTo: "2026-10-15T08:00:00Z", max: 500 },
+      impl,
+    );
+    const url = new URL(calls.find((c) => c.url.includes("/events?"))!.url);
+    expect(url.pathname).toBe("/idp/admin/realms/gaiada/events");
+    expect(url.searchParams.getAll("type")).toEqual(["LOGIN", "LOGIN_ERROR", "LOGOUT"]);
+    expect(url.searchParams.get("dateFrom")).toBe("2026-10-14");
+    expect(url.searchParams.get("dateTo")).toBe("2026-10-15");
+    expect(url.searchParams.get("max")).toBe("500");
+    expect(rows).toEqual([
+      {
+        time: 1_760_000_000_000, type: "LOGIN_ERROR", userId: NEW_ID, ipAddress: "203.0.113.9",
+        error: "invalid_user_credentials", username: "a@b.test", sessionId: "sess-1",
+      },
+    ]);
+  });
+
+  it("listEvents keeps an event with no userId (an unknown username) and skips a malformed row", async () => {
+    const { impl } = fakeFetch([
+      TOKEN_OK,
+      { method: "GET", match: "/events?", status: 200, json: [eventRow({ userId: undefined, details: { username: "ghost@x.test" } }), { type: "LOGIN" }, "junk"] },
+    ]);
+    const rows = await listEvents({ types: ["LOGIN_ERROR"] }, impl);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].userId).toBeNull();
+    expect(rows[0].username).toBe("ghost@x.test");
+  });
+
+  it("🔴 a 403 on events is a typed missing-role error naming view-events, not a generic failure", async () => {
+    const { impl } = fakeFetch([TOKEN_OK, { method: "GET", match: "/events?", status: 403 }]);
+    const err = await listEvents({ types: ["LOGIN"] }, impl).catch((e) => e);
+    expect(err).toBeInstanceOf(KeycloakForbiddenError);
+    expect(err).toBeInstanceOf(KeycloakAdminError);
+    expect((err as KeycloakForbiddenError).missingRole).toBe("view-events");
+  });
+
+  it("any other events failure is a plain KeycloakAdminError", async () => {
+    const { impl } = fakeFetch([TOKEN_OK, { method: "GET", match: "/events?", status: 500 }]);
+    const err = await listEvents({ types: ["LOGIN"] }, impl).catch((e) => e);
+    expect(err).toBeInstanceOf(KeycloakAdminError);
+    expect(err).not.toBeInstanceOf(KeycloakForbiddenError);
+  });
+
+  it("getEventsConfig tells events OFF from an empty list, and 403 is typed", async () => {
+    const off = fakeFetch([TOKEN_OK, { method: "GET", match: "/events/config", status: 200, json: { eventsEnabled: false } }]);
+    expect(await getEventsConfig(off.impl)).toEqual({ eventsEnabled: false, enabledEventTypes: [] });
+    resetKeycloakAdminTokenCache();
+    const on = fakeFetch([
+      TOKEN_OK,
+      { method: "GET", match: "/events/config", status: 200, json: { eventsEnabled: true, enabledEventTypes: ["LOGIN", 7] } },
+    ]);
+    expect(await getEventsConfig(on.impl)).toEqual({ eventsEnabled: true, enabledEventTypes: ["LOGIN"] });
+    resetKeycloakAdminTokenCache();
+    const denied = fakeFetch([TOKEN_OK, { method: "GET", match: "/events/config", status: 403 }]);
+    await expect(getEventsConfig(denied.impl)).rejects.toBeInstanceOf(KeycloakForbiddenError);
+  });
+
+  it("deleteSession answers ended for 204 and not_found for 404, and throws on anything else", async () => {
+    const a = fakeFetch([TOKEN_OK, { method: "DELETE", match: "/sessions/sess%2F1", status: 204 }]);
+    expect(await deleteSession("sess/1", a.impl)).toBe("ended");
+    expect(a.calls.find((c) => c.method === "DELETE")!.url).toBe("http://keycloak:8080/idp/admin/realms/gaiada/sessions/sess%2F1");
+    resetKeycloakAdminTokenCache();
+    const b = fakeFetch([TOKEN_OK, { method: "DELETE", match: "/sessions/s2", status: 404 }]);
+    expect(await deleteSession("s2", b.impl)).toBe("not_found");
+    resetKeycloakAdminTokenCache();
+    const c = fakeFetch([TOKEN_OK, { method: "DELETE", match: "/sessions/s3", status: 500 }]);
+    await expect(deleteSession("s3", c.impl)).rejects.toBeInstanceOf(KeycloakAdminError);
+    resetKeycloakAdminTokenCache();
+    const d = fakeFetch([TOKEN_OK, { method: "DELETE", match: "/sessions/s4", status: 403 }]);
+    await expect(deleteSession("s4", d.impl)).rejects.toBeInstanceOf(KeycloakForbiddenError);
+  });
+
+  it("logoutUser POSTs to the user's logout endpoint and throws when it fails", async () => {
+    const ok = fakeFetch([TOKEN_OK, { method: "POST", match: `/users/${NEW_ID}/logout`, status: 204 }]);
+    await expect(logoutUser(NEW_ID, ok.impl)).resolves.toBeUndefined();
+    expect(ok.calls.some((c) => c.method === "POST" && c.url.endsWith(`/users/${NEW_ID}/logout`))).toBe(true);
+    resetKeycloakAdminTokenCache();
+    const bad = fakeFetch([TOKEN_OK, { method: "POST", match: "/logout", status: 502 }]);
+    await expect(logoutUser(NEW_ID, bad.impl)).rejects.toBeInstanceOf(KeycloakAdminError);
+  });
+
+  it("setPasswordTemporary sends temporary:true and setPassword temporary:false", async () => {
+    const t = fakeFetch([TOKEN_OK, { method: "PUT", match: "/reset-password", status: 204 }]);
+    await setPasswordTemporary(NEW_ID, "pw", t.impl);
+    expect((t.calls.find((c) => c.method === "PUT")!.body as Record<string, unknown>).temporary).toBe(true);
+    resetKeycloakAdminTokenCache();
+    const p = fakeFetch([TOKEN_OK, { method: "PUT", match: "/reset-password", status: 204 }]);
+    await setPassword(NEW_ID, "pw", p.impl);
+    expect((p.calls.find((c) => c.method === "PUT")!.body as Record<string, unknown>).temporary).toBe(false);
   });
 });

@@ -37,7 +37,8 @@ import {
   keycloakAdminConfigured,
   findUserByEmail,
   createUser as kcCreateUser,
-  setPassword as kcSetPassword,
+  setPasswordTemporary as kcSetPasswordTemporary,
+  logoutUser as kcLogoutUser,
   disableUser as kcDisableUser,
   enableUser as kcEnableUser,
   generateInitialPassword,
@@ -46,6 +47,10 @@ import {
   KeycloakAdminError,
   type KeycloakUser,
 } from "../core/keycloak-admin";
+
+/** How long a user-level revocation stays (DW-7h, BFF §52.4): past the ERP session's 12 h absolute life, so a row that
+ *  has outlived every token it could refuse costs the request hook nothing. */
+const REVOCATION_HOURS = 13;
 
 /** The provider name for a Keycloak (OIDC) identity link. Matches the enrolment path's own spelling —
  *  a second spelling here would create links the login flow cannot see. */
@@ -270,24 +275,50 @@ export class ItAccountsController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("userId") userId: string,
-  ): Promise<{ ok: true; alreadyDisabled: boolean }> {
+  ): Promise<{ ok: true; alreadyDisabled: boolean; sessionsEnded: boolean }> {
     const member = await this.assertMember(req, tenantId, userId, "disable");
     this.assertConfigured();
     const kc = await this.requireAccount(member.email);
     // Idempotent by construction: disabling a disabled account is a no-op upstream, and reporting
-    // `alreadyDisabled` lets the console say "nothing to do" instead of implying it just acted.
+    // `alreadyDisabled` lets the console say "nothing to do" instead of implying it just acted. Nothing
+    // was ended by THIS call, hence `sessionsEnded: false`.
     if (kc.enabled === false) {
-      return { ok: true, alreadyDisabled: true };
+      return { ok: true, alreadyDisabled: true, sessionsEnded: false };
     }
     try {
       await kcDisableUser(kc.id);
     } catch (err) {
       throw this.upstream(err);
     }
+
+    // DW-7h (BFF §52.7): disabling a Keycloak user stops NEW sign-ins, but a token already issued keeps working for up to an
+    // hour, and the session stays refreshable. So "Block login" also cuts what is already in hand.
+    //  1. A user-level revocation row (session_id NULL): the request hook refuses every token of this person issued before
+    //     `revoked_at` (BFF §52.4), within 10 seconds, everywhere. Written AFTER the disable on purpose: once the account is
+    //     disabled it cannot refresh, so no token can be issued after the row's `revoked_at` and escape it. The row is global
+    //     (a person belongs to no one company); `tenant_id` only says whose IT did it.
+    //  2. Keycloak's own logout of every session of the user, so it cannot refresh either. Best effort: a failure here is
+    //     `sessionsEnded: false` and the row has already done the part that matters for the ERP.
+    await withGlobal((c) =>
+      c.query(
+        `INSERT INTO security_session_revocations (user_id, session_id, revoked_by, revoked_from_company_id, reason, expires_at)
+         VALUES ($1, NULL, $2, $3, $4, now() + make_interval(hours => $5::int))`,
+        [userId, req.principal?.userId ?? null, tenantId, "login blocked by IT", REVOCATION_HOURS],
+      ),
+    );
+    let sessionsEnded = false;
+    try {
+      await kcLogoutUser(kc.id);
+      sessionsEnded = true;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(`[it-accounts] Keycloak logout failed after disable: ${err instanceof Error ? err.name : "error"}`);
+    }
+
     await writeActivity(tenantId, req.principal?.userId ?? null, "it.account.disable", "it_account", userId, {
-      email: member.email, keycloakId: kc.id,
+      email: member.email, keycloakId: kc.id, sessionsEnded,
     });
-    return { ok: true, alreadyDisabled: false };
+    return { ok: true, alreadyDisabled: false, sessionsEnded };
   }
 
   @Post(":tenantId/it/accounts/:userId/enable")
@@ -325,7 +356,15 @@ export class ItAccountsController {
     const kc = await this.requireAccount(member.email);
     const password = generateInitialPassword();
     try {
-      await kcSetPassword(kc.id, password);
+      // TEMPORARY (DW-7h, BFF §52.8): IT reads this one-off to the person, so Keycloak makes them choose their own at the
+      // first sign-in and IT never learns the password they keep. Recovery is by IT because most staff addresses are Google
+      // Workspace ALIASES, where a reset email would reach someone else's inbox (the realm turns email reset off).
+      //
+      // The old comment here argued for a PERMANENT password, because an external client would meet an unexplained extra
+      // screen. That reason does not apply to this route: `assertMember` above only accepts an active `employee` member of
+      // THIS company, so a client contact never reaches it. Client logins keep the permanent `setPassword` (invite accept,
+      // portal seeds).
+      await kcSetPasswordTemporary(kc.id, password);
     } catch (err) {
       throw this.upstream(err);
     }
