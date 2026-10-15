@@ -133,7 +133,8 @@ describe.skipIf(!TEST_URL)("social smm-agent-content-brief flow (SMM-26)", () =>
           searches.push({ scope: body.scope, query: body.query });
           const chunks = ingested[body.scope as string] ?? [];
           res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ hits: chunks.map((text, i) => ({ sourceRef: `${body.scope}#${i}`, text, score: 0.9 })) }));
+          // The real store returns each chunk's source_ref exactly as ingested (ai-agents/src/knowledge/store.ts), and DW-D31 keeps only that ref.
+          res.end(JSON.stringify({ hits: chunks.map((text) => ({ sourceRef: body.scope, text, score: 0.9 })) }));
         } else {
           res.writeHead(404);
           res.end("{}");

@@ -27,6 +27,7 @@
 import { config } from "../../config";
 import type { Assurance } from "../../rbac/principal";
 import { newId, withGlobal } from "../../db";
+import { keepOwnCorpus, ownCorpusTopK } from "../knowledge/own-corpus";
 
 export interface KnowledgeHit {
   sourceRef: string;
@@ -167,14 +168,17 @@ export async function queryBrandKnowledge(
           "x-obo-provider": "platform",
           "x-obo-external-id": userId,
         },
-        body: JSON.stringify({ query, scope, topK }),
+        body: JSON.stringify({ query, scope, topK: ownCorpusTopK(topK) }),
       });
       if (!res.ok) return [];
       const json = (await res.json()) as { hits?: Array<{ sourceRef?: unknown; text?: unknown; score?: unknown }> };
       if (!Array.isArray(json.hits)) return [];
-      return json.hits
+      const hits = json.hits
         .filter((h): h is { sourceRef: string; text: string; score?: unknown } => typeof h.sourceRef === "string" && typeof h.text === "string")
         .map((h) => ({ sourceRef: h.sourceRef, text: h.text, score: typeof h.score === "number" ? h.score : 0 }));
+      // DW-D31: the scope also matches every internal ERP chunk (empty acl) of every company the caller is in. Only this
+      // client's brand corpus, ingested under `sourceRef: scope`, may ground a draft.
+      return keepOwnCorpus(hits, scope, topK);
     } finally {
       clearTimeout(timer);
     }

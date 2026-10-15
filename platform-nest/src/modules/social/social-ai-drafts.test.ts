@@ -146,7 +146,8 @@ describe.skipIf(!TEST_URL)("social brand-voice RAG + AI drafting (SMM-19)", () =
           searches.push({ scope: body.scope, query: body.query });
           const chunks = ingested[body.scope as string] ?? [];
           res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ hits: chunks.map((text, i) => ({ sourceRef: `${body.scope}#${i}`, text, score: 0.9 })) }));
+          // The real store returns each chunk's source_ref exactly as ingested (ai-agents/src/knowledge/store.ts), and DW-D31 keeps only that ref.
+          res.end(JSON.stringify({ hits: chunks.map((text) => ({ sourceRef: body.scope, text, score: 0.9 })) }));
         } else {
           res.writeHead(404);
           res.end("{}");
@@ -208,7 +209,7 @@ describe.skipIf(!TEST_URL)("social brand-voice RAG + AI drafting (SMM-19)", () =
     // groundedOn only ever names client A's own scope-prefixed sourceRefs.
     const refs = draft.json().groundedOn as string[];
     expect(refs.length).toBeGreaterThan(0);
-    for (const ref of refs) expect(ref.startsWith(`social-brand:${A}:${clientA}#`)).toBe(true);
+    for (const ref of refs) expect(ref).toBe(`social-brand:${A}:${clientA}`);
     // The WS8 request itself only ever asked for client A's scope.
     const lastSearch = searches[searches.length - 1];
     expect(lastSearch.scope).toBe(`social-brand:${A}:${clientA}`);

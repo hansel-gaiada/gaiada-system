@@ -2586,8 +2586,9 @@ export class SearchController {
         ? [`Target keywords: ${grounded.keywords.map((k) => k.keyword).join(", ")}`]
         : []),
     ].slice(0, MAX_KNOWLEDGE_INGEST_CHUNKS);
-    await ingestPropertyKnowledge(tenantId, `search-property:${id}:grounding`, id, ingestChunks);
-    const knowledgeHits = await queryPropertyKnowledge(req.principal.userId ?? "", id, topic, MAX_KNOWLEDGE_HITS);
+    const groundingRef = `search-property:${id}:grounding`; // DW-D31: the query keeps only this corpus
+    await ingestPropertyKnowledge(tenantId, groundingRef, id, ingestChunks);
+    const knowledgeHits = await queryPropertyKnowledge(req.principal.userId ?? "", id, groundingRef, topic, MAX_KNOWLEDGE_HITS);
 
     const facts: BriefGroundingFacts = {
       propertyDomain: grounded.domain,

@@ -225,7 +225,13 @@ describe.skipIf(!TEST_URL)("search AI drafting (SM-10)", () => {
           } else if (req.method === "POST" && req.url === "/search") {
             searchHeaders = req.headers as unknown as Record<string, string>;
             res.writeHead(200, { "content-type": "application/json" });
-            res.end(JSON.stringify({ hits: [{ sourceRef: "search-property:x:grounding", text: "crawled excerpt", score: 0.87 }] }));
+            // The real store returns each chunk's source_ref exactly as ingested (ai-agents/src/knowledge/store.ts). DW-D31: an ERP
+            // chunk (empty acl) matches ANY scope, so the store can return one; the brief must never be grounded on it.
+            const own = (ingestBody as { sourceRef?: string } | undefined)?.sourceRef ?? "none";
+            res.end(JSON.stringify({ hits: [
+              { sourceRef: "erp:meeting:01a00000-0000-7000-8000-000000000001", text: "MEETING_TRANSCRIPT_SECRET", score: 0.99 },
+              { sourceRef: own, text: "crawled excerpt", score: 0.87 },
+            ] }));
           } else {
             res.writeHead(404);
             res.end("{}");
@@ -243,7 +249,9 @@ describe.skipIf(!TEST_URL)("search AI drafting (SM-10)", () => {
       });
       expect(res.statusCode).toBe(201);
       const brief = res.json() as { grounding: { knowledgeHits: Array<{ sourceRef: string }> } };
-      expect(brief.grounding.knowledgeHits).toEqual([{ sourceRef: "search-property:x:grounding", score: 0.87 }]);
+      expect(brief.grounding.knowledgeHits).toEqual([{ sourceRef: `search-property:${propertyId}:grounding`, score: 0.87 }]);
+      expect(JSON.stringify(res.json())).not.toContain("MEETING_TRANSCRIPT_SECRET");
+      expect(JSON.stringify(completeMock.mock.calls)).not.toContain("MEETING_TRANSCRIPT_SECRET");
       expect(ingestBody).toMatchObject({ tenantId: A, acl: [propertyId] });
       expect(searchHeaders["x-obo-provider"]).toBe("platform");
       expect(searchHeaders["x-obo-external-id"]).toBe(uA);

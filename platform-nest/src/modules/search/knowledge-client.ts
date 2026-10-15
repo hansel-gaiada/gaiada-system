@@ -15,6 +15,7 @@
 // which is WS8's concern, not this module's.
 import { config } from "../../config";
 import { newId, withGlobal } from "../../db";
+import { keepOwnCorpus, ownCorpusTopK } from "../knowledge/own-corpus";
 
 export interface KnowledgeHit {
   sourceRef: string;
@@ -81,7 +82,14 @@ export async function ingestPropertyKnowledge(
  *  authorized-tenant-set — never a service-wide bypass. Returns [] on ANY failure (unconfigured
  *  service, network error, malformed response): RAG grounding is additive, never a hard dependency
  *  for drafting to proceed. */
-export async function queryPropertyKnowledge(userId: string, aclScope: string, query: string, topK: number): Promise<KnowledgeHit[]> {
+export async function queryPropertyKnowledge(
+  userId: string,
+  aclScope: string,
+  /** DW-D31: the sourceRef the corpus was ingested under. Only its hits are returned (see `knowledge/own-corpus.ts`). */
+  ownRef: string,
+  query: string,
+  topK: number,
+): Promise<KnowledgeHit[]> {
   const svc = config.services.knowledge;
   if (!svc.url || !userId) return [];
   try {
@@ -98,14 +106,17 @@ export async function queryPropertyKnowledge(userId: string, aclScope: string, q
           "x-obo-provider": "platform",
           "x-obo-external-id": userId,
         },
-        body: JSON.stringify({ query, scope: aclScope, topK }),
+        body: JSON.stringify({ query, scope: aclScope, topK: ownCorpusTopK(topK) }),
       });
       if (!res.ok) return [];
       const json = (await res.json()) as { hits?: Array<{ sourceRef?: unknown; text?: unknown; score?: unknown }> };
       if (!Array.isArray(json.hits)) return [];
-      return json.hits
+      const hits = json.hits
         .filter((h): h is { sourceRef: string; text: string; score?: unknown } => typeof h.sourceRef === "string" && typeof h.text === "string")
         .map((h) => ({ sourceRef: h.sourceRef, text: h.text, score: typeof h.score === "number" ? h.score : 0 }));
+      // DW-D31: the scope also matches every internal ERP chunk (empty acl) of every company the caller is in. Only the corpus
+      // ingested under `ownRef` may ground the draft.
+      return keepOwnCorpus(hits, ownRef, topK);
     } finally {
       clearTimeout(timer);
     }
