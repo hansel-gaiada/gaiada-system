@@ -16,6 +16,7 @@
 // `server-only` into the browser bundle.
 import { taskUrgency } from "./pmUrgency";
 import type { UrgencyTier } from "./pmUrgency";
+import type { DeliverableCounts, HealthSource, MilestoneCounts, NextMilestone } from "./clientHealth";
 export type { UrgencyTier };
 
 // ── The BFF contract (mirrors platform-nest src/core/portal-*.controller.ts) ──────────────────────
@@ -982,4 +983,82 @@ export function threadTitle(t: Pick<PortalThread, "subject" | "general" | "proje
   if (t.subject && t.subject.trim()) return t.subject;
   if (t.general) return multiClient && t.clientName ? `General: ${t.clientName}` : "General";
   return t.projectName ?? "Conversation";
+}
+
+// ── PV7-03: project health, as the portal states it (FRONTEND-BFF-CONTRACT §54.5) ─────────────────────
+// Facts only. The payload carries no health state, no tasks, no people and no money (L1, L3, PV-D38), so nothing
+// below can draw a label such as "on track". `null` is "could not be loaded", never zero.
+
+export interface PortalBallItem { kind: string; id: string; context: string | null; since: string | null }
+/** `count` is the true total; `items` lists the oldest 25. A payment's `context` is null (no amount). */
+export interface PortalBall { count: number; oldestSince: string | null; items: PortalBallItem[] }
+
+export interface PortalHealthProject {
+  projectId: string; name: string; status: string;
+  milestones: MilestoneCounts;
+  deliverables: DeliverableCounts;
+  nextMilestone: NextMilestone | null;
+  waitingOnYou: PortalBall | null;
+  waitingOnUs: PortalBall | null;
+}
+
+export interface PortalHealthClient {
+  clientId: string; name: string;
+  /** The caller reaches this client client-wide (not only through some projects). */
+  wide: boolean;
+  projects: PortalHealthProject[] | null;
+  /** Items with no project. `null` unless `wide`, or when the ball read failed: the caller cannot tell which. */
+  clientWide: { waitingOnYou: PortalBall | null; waitingOnUs: PortalBall | null } | null;
+  turnaround: { windowDays: 90; client: PortalTurnaround; ours: PortalTurnaround } | null;
+}
+export interface PortalTurnaround { medianDays: number | null; n: number; withheld: boolean }
+
+/** `GET :t/portal/health`. */
+export interface PortalHealth { asOf: string; clients: PortalHealthClient[]; unavailable: HealthSource[] }
+
+/** Which side of the relationship a waiting item sits on, for wording its kind. */
+export type PortalBallSide = "you" | "us";
+
+/** The plain words for one waiting item. The server sends a `kind`, never a staff-phrased label (§54.5), so the UI words
+ *  it, and says what the CLIENT should expect (for "us") or do (for "you"). An unknown kind (a newer server) still reads
+ *  as a waiting item rather than disappearing. */
+export function ballItemLabel(kind: string, side: PortalBallSide): string {
+  if (side === "you") {
+    switch (kind) {
+      case "gate": return "An approval for you";
+      case "contract": return "An agreement to sign";
+      case "review": return "A post to review";
+    }
+    return "Something waiting for you";
+  }
+  switch (kind) {
+    case "payment": return "A payment we are confirming";
+    case "review": return "A post we are changing for you";
+    case "request": return "A change request we have not picked up yet";
+    case "conversation": return "A message waiting for our reply";
+  }
+  return "Something waiting for us";
+}
+
+/** The portal page where the client acts on (or follows) one item, using only an id the payload really carries.
+ *  A gate is a gate id, not a run id, so it links to the approvals list; a payment is a payment id, so it links to the
+ *  invoices; a request has no page of its own. `null` when the kind is not one this build knows. */
+export function ballItemHref(kind: string, id: string): string | null {
+  const seg = encodeURIComponent(id);
+  switch (kind) {
+    case "gate": return "/portal/approvals";
+    case "contract": return `/portal/contracts/${seg}`;
+    case "review": return `/portal/social-reviews/${seg}`;
+    case "request": return "/portal/requests";
+    case "conversation": return `/portal/conversation/${seg}`;
+    case "payment": return "/portal/invoices";
+  }
+  return null;
+}
+
+/** "Waiting on you: 2, oldest since 12 Oct 2026" / "Waiting on you: nothing". */
+export function ballHeadline(side: PortalBallSide, ball: PortalBall): string {
+  const who = side === "you" ? "Waiting on you" : "Waiting on us";
+  if (ball.count === 0) return `${who}: nothing`;
+  return ball.oldestSince ? `${who}: ${ball.count}, oldest since ${portalDate(ball.oldestSince)}` : `${who}: ${ball.count}`;
 }
