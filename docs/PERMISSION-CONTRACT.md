@@ -2138,7 +2138,7 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §41 (plan `docs/plans/2026-10-13-depart
 - **The scheduled run and the digest** (`POST /dept-kpis/watch` and `/digest`) reuse `report_admin` · `recompute` (company_admin, platform_admin), the gate of `POST /reports/facts/recompute`. The n8n automation account `wf:reports-kpi-watch` holds company_admin, like the other reports flows.
 - **The drivers read** (`GET /dept-kpis/drivers`, 4j-3) uses the unit read's gate, narrowed to heads and the company-wide tier. Placed staff get 403. It is the department appraisal's gate, extracted as one function (`authorizeUnitHeadRead` in `dept-kpis.controller.ts`): Cerbos `dept_kpi_target` · `read` with the unit's ancestry, then `isCompanyWide` or the unit in `loadLedUnitScope`, then 404. A manager placed in the unit and the head of an enclosing unit hold the unit in their led scope and so pass, exactly as for the appraisal.
 
-## 38c. DW-4h — the activity series, the day read and the person filter, BFF §44 (2026-10-15, PROTOTYPED): no new kind, no new action
+## 38c. DW-4h — the activity series, the day read and the person filter, BFF §44 (2026-10-15, PLANNED): no new kind, no new action
 
 - **The series and the day read** (`GET /activity/series`, `/activity/day`) are core reads with no Cerbos kind of their own. They are gated by the person-axis rule `GET /pm/productivity` already applies, moved to a shared helper:
   - yourself;
@@ -2258,7 +2258,7 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §48 (ruling DW-D24, plan `docs/plans/20
 - **Proof:** `src/rbac/cerbos-personal-mailbox.test.ts` (7 static always; 30 live with `CERBOS_URL`: every role against its own and someone else's mailbox, an unfed owner, a bot and an automation principal, low assurance, cross-tenant, an unlisted action, an owner id that merely resembles the caller's, and the absence of a permission arm) and the HTTP suite `src/core/gmail/gmail.http.test.ts`. **Restart `gaiada-test-cerbos` and the live sidecar after deploying the policy file** (nothing hot-reloads), then probe: `GET /api/:t/integrations/gmail` answers `{connected: false}` for a fresh person.
 - **One reach that no policy can express, noted for the client-context gate** (FRONTEND-BFF-CONTRACT §48.4): every role that may `send` also reads `client`, so "send about a client you cannot read" is refused by no role combination today; the controller still asks for the client's read, so a future narrowing of `client` read takes effect here without a change.
 
-## 40a. DW-D29 — the `time_entry` list narrowed by the person-axis gate (2026-10-15, PLANNED): no new kind, no new action, no policy change
+## 40a. DW-D29 — the `time_entry` list narrowed by the person-axis gate (2026-10-15, PROTOTYPED): no new kind, no new action, no policy change
 
 Design: `docs/FRONTEND-BFF-CONTRACT.md` §48a (ruling DW-D29).
 - **What changes.** `time_entry` · `read` on the tenant stays the kind-level entry gate. `GET /time-entries` then narrows the rows by the shared person-axis gate (`core/person-axis-gate.ts`):
