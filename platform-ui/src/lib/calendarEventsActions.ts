@@ -8,8 +8,8 @@ import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError } from "./platform";
 import { accessibleCompanies } from "./rbac";
 import {
-  eventErrorText, eventHref, validateEventForm,
-  type EventActionResult, type EventAnswer, type EventFormInput,
+  BUSY_PEOPLE_MAX, eventErrorText, eventHref, validateEventForm,
+  type BusyPerson, type BusyResult, type EventActionResult, type EventAnswer, type EventFormInput,
 } from "./calendarEvents";
 
 async function ctx(tenantId: string): Promise<{ userId: string; tenant: string } | { error: string }> {
@@ -95,4 +95,55 @@ export async function respondEventAction(tenantId: string, id: string, response:
   } catch (e) {
     return refused(e, {}, "respond");
   }
+}
+
+/** The answer, checked: only a list of `{userId, intervals: [{startsAt, endsAt}]}` counts, and any other shape is "unknown"
+ *  (never an empty list, which would read as "everyone is free"). */
+function readBusy(body: unknown): BusyPerson[] | null {
+  const list = body && typeof body === "object" ? (body as { busy?: unknown }).busy : undefined;
+  if (!Array.isArray(list)) return null;
+  const out: BusyPerson[] = [];
+  for (const p of list) {
+    const o = p && typeof p === "object" ? (p as { userId?: unknown; intervals?: unknown }) : null;
+    if (!o || typeof o.userId !== "string" || !Array.isArray(o.intervals)) return null;
+    const intervals: BusyPerson["intervals"] = [];
+    for (const i of o.intervals) {
+      const iv = i && typeof i === "object" ? (i as { startsAt?: unknown; endsAt?: unknown }) : null;
+      if (!iv || typeof iv.startsAt !== "string" || typeof iv.endsAt !== "string") return null;
+      intervals.push({ startsAt: iv.startsAt, endsAt: iv.endsAt });
+    }
+    out.push({ userId: o.userId, intervals });
+  }
+  return out;
+}
+
+/** DW-8o (BFF §47.4, DW-D28): the busy times of the chosen people for a window, for the schedule form. A READ, so it never
+ *  revalidates anything and never throws into the form: any refusal or failure is `{ ok: false }` ("unknown"). `excludeEventId`
+ *  is the event being edited, so it does not show as busy against itself. */
+export async function loadBusyAction(
+  tenantId: string, userIds: string[], fromIso: string, toIso: string, excludeEventId?: string,
+): Promise<BusyResult> {
+  try {
+    const c = await ctx(tenantId);
+    if ("error" in c) return { ok: false };
+    if (!Array.isArray(userIds) || userIds.length < 1 || userIds.length > BUSY_PEOPLE_MAX) return { ok: false };
+    const q = [
+      `userIds=${userIds.map((u) => encodeURIComponent(String(u))).join(",")}`,
+      `from=${encodeURIComponent(String(fromIso))}`,
+      `to=${encodeURIComponent(String(toIso))}`,
+      ...(excludeEventId ? [`excludeEventId=${encodeURIComponent(excludeEventId)}`] : []),
+    ].join("&");
+    const body = await platformFetch<unknown>(`/api/${encodeURIComponent(c.tenant)}/calendar/busy?${q}`, c.userId);
+    const busy = readBusy(body);
+    return busy ? { ok: true, busy } : { ok: false };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/** The edit page's form: the same read with the event being edited left out (a bound action cannot skip an argument). */
+export async function loadBusyExcludingEventAction(
+  tenantId: string, eventId: string, userIds: string[], fromIso: string, toIso: string,
+): Promise<BusyResult> {
+  return loadBusyAction(tenantId, userIds, fromIso, toIso, eventId);
 }

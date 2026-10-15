@@ -82,3 +82,34 @@ describe("demoCalendarEvents", () => {
     expect(call("GET", "/api/co-agency/meetings/recordings", "demo-hansel")).toBeNull();
   });
 });
+
+describe("demoCalendarEvents: busy times (§47.4)", () => {
+  const busy = (user: string, q: string, tenant = "co-agency") => call("GET", `/api/${tenant}/calendar/busy`, user, undefined, q);
+  const win = `from=${encodeURIComponent(w.from)}&to=${encodeURIComponent(w.to)}`;
+
+  it("answers one entry per person in the order asked, times only: today's seeded events show, a declined one does not", () => {
+    const r = busy("demo-hansel", `userIds=u-pm,demo-hansel,u-dev&${win}`);
+    expect(r?.status).toBe(200);
+    const json = r?.json as { busy: { userId: string; intervals: Record<string, string>[] }[] };
+    expect(json.busy.map((b) => b.userId)).toEqual(["u-pm", "demo-hansel", "u-dev"]);
+    // u-pm: the standup 10:00-10:45 and the Northwind check-in 15:00-16:00 today
+    expect(json.busy[0].intervals).toHaveLength(2);
+    for (const b of json.busy) for (const i of b.intervals) expect(Object.keys(i).sort()).toEqual(["endsAt", "startsAt"]);
+    expect(JSON.stringify(json)).not.toMatch(/Team standup|Northwind check-in|title|location/);
+  });
+
+  it("refuses a non-member (422), a bad list (400), a long window (400) and an outsider caller (403)", () => {
+    expect(busy("demo-hansel", `userIds=u-finance&${win}`)?.status).toBe(422);
+    expect(busy("demo-hansel", `userIds=&${win}`)?.status).toBe(400);
+    expect(busy("demo-hansel", "userIds=u-pm&from=2026-10-01T00:00:00Z&to=2026-10-20T00:00:00Z")?.status).toBe(400);
+    expect(busy("u-finance", `userIds=u-pm&${win}`)?.status).toBe(403);
+  });
+
+  it("excludeEventId drops that event", () => {
+    const items = (mine("demo-hansel")?.json as { items: { id: string; title: string }[] }).items;
+    const standup = items.find((i) => i.title === "Team standup") as { id: string };
+    const all = (busy("demo-hansel", `userIds=gede-ic&${win}`)?.json as { busy: { intervals: unknown[] }[] }).busy[0].intervals;
+    const without = (busy("demo-hansel", `userIds=gede-ic&${win}&excludeEventId=${standup.id}`)?.json as { busy: { intervals: unknown[] }[] }).busy[0].intervals;
+    expect(without.length).toBe(all.length - 1);
+  });
+});

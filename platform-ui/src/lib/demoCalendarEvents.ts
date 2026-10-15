@@ -162,6 +162,40 @@ export function calendarEventsDemo(method: string, p: string, params: URLSearchP
     return ok({ items, companies: ids.map((id) => ({ id, name: COMPANY_NAMES[id] ?? "", included: true })) });
   }
 
+  // §47.4 busy times (DW-D28): times only, merged per person, confirmed timed events, declined answers left out.
+  const busy = p.match(/^\/api\/([^/]+)\/calendar\/busy$/);
+  if (busy && m === "GET") {
+    const tenant = busy[1];
+    if (!(MEMBERS[tenant] ?? []).includes(userId)) return err("forbidden", 403);
+    const ids = (params.get("userIds") ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+    if (ids.length === 0) return err("user_ids_required");
+    if (new Set(ids).size !== ids.length) return err("user_ids_invalid");
+    if (ids.length > 20) return err("user_ids_too_many");
+    const from = Date.parse(params.get("from") ?? ""), to = Date.parse(params.get("to") ?? "");
+    if (Number.isNaN(from) || Number.isNaN(to)) return err("window_required");
+    if (to <= from) return err("window_invalid");
+    if (to - from > 14 * DAY) return err("window_too_large");
+    const outsider = ids.find((id) => !(MEMBERS[tenant] ?? []).includes(id));
+    if (outsider) return { status: 422, json: { error: "user_not_member", reason: "user_not_member", detail: { userId: outsider } } };
+    const exclude = params.get("excludeEventId");
+    return ok({
+      busy: ids.map((userId) => {
+        const list = EVENTS
+          .filter((e) => e.tenantId === tenant && e.id !== exclude && live(e) && e.startsAt && e.endsAt && e.attendees.has(userId) && e.attendees.get(userId) !== "declined")
+          .filter((e) => Date.parse(e.startsAt as string) < to && Date.parse(e.endsAt as string) > from)
+          .map((e) => ({ s: Date.parse(e.startsAt as string), e: Date.parse(e.endsAt as string) }))
+          .sort((x, y) => x.s - y.s);
+        const merged: { s: number; e: number }[] = [];
+        for (const i of list) {
+          const last = merged[merged.length - 1];
+          if (last && i.s <= last.e) last.e = Math.max(last.e, i.e);
+          else merged.push({ ...i });
+        }
+        return { userId, intervals: merged.map((i) => ({ startsAt: new Date(i.s).toISOString(), endsAt: new Date(i.e).toISOString() })) };
+      }),
+    });
+  }
+
   const col = p.match(/^\/api\/([^/]+)\/calendar\/events$/);
   if (col && m === "POST") {
     const tenant = col[1];

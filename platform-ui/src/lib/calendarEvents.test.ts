@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  defaultFormInput, describeWhen, eventButtons, eventErrorText, eventToCalItems, formInputOf, gridDays, mergeCalItems,
+  busyClashes, busyDayWindow, busyText, defaultFormInput, describeWhen, eventButtons, eventErrorText, eventToCalItems, formInputOf, gridDays, mergeCalItems,
   todayEventsOf, validateEventForm,
   type CalendarEventDetail, type CalendarEventRow, type EventFormInput,
 } from "./calendarEvents";
@@ -229,5 +229,46 @@ describe("eventButtons: Cerbos's answer is the only input", () => {
   });
   it("shows nothing on a cancelled event even if the flags say otherwise", () => {
     expect(eventButtons(caps({ status: "cancelled", canEdit: true, canCancel: true, canRespond: true }))).toEqual({ respond: false, edit: false, cancel: false });
+  });
+});
+
+describe("busy times (§47.4, DW-D28)", () => {
+  // The day 2026-10-14 in Singapore (UTC+8) is 2026-10-13T16:00Z to 2026-10-14T16:00Z.
+  it("the day window is 00:00 to 24:00 in the zone, as instants", () => {
+    expect(busyDayWindow("2026-10-14", SG)).toEqual({ from: "2026-10-13T16:00:00.000Z", to: "2026-10-14T16:00:00.000Z" });
+    expect(busyDayWindow("2026-10-14", "UTC")).toEqual({ from: "2026-10-14T00:00:00.000Z", to: "2026-10-15T00:00:00.000Z" });
+    expect(busyDayWindow("2026-02-30", SG)).toBeNull();
+    expect(busyDayWindow("", SG)).toBeNull();
+  });
+
+  it("the times are written in the zone, joined by commas, 'Free' when there are none", () => {
+    const iv = [{ startsAt: "2026-10-14T06:00:00.000Z", endsAt: "2026-10-14T07:00:00.000Z" }, { startsAt: "2026-10-14T01:00:00.000Z", endsAt: "2026-10-14T02:30:00.000Z" }];
+    expect(busyText(iv, "2026-10-14", SG)).toBe("09:00-10:30, 14:00-15:00");
+    expect(busyText(iv, "2026-10-14", "UTC")).toBe("01:00-02:30, 06:00-07:00");
+    expect(busyText([], "2026-10-14", SG)).toBe("Free");
+    // an interval on another day does not read as busy on this one
+    expect(busyText(iv, "2026-10-15", SG)).toBe("Free");
+  });
+
+  it("a block that runs in from the day before or out to the next day is cut to the day for display, and ends '24:00', never '00:00'", () => {
+    const runsIn = [{ startsAt: "2026-10-13T14:00:00.000Z", endsAt: "2026-10-13T17:30:00.000Z" }]; // 22:00 on the 13th to 01:30 on the 14th
+    expect(busyText(runsIn, "2026-10-14", SG)).toBe("00:00-01:30");
+    const runsOut = [{ startsAt: "2026-10-14T14:00:00.000Z", endsAt: "2026-10-14T20:00:00.000Z" }]; // 22:00 to 04:00 next day
+    expect(busyText(runsOut, "2026-10-14", SG)).toBe("22:00-24:00");
+    expect(busyText(runsOut, "2026-10-15", SG)).toBe("00:00-04:00");
+    // one that ends exactly at the day's start is not on that day
+    expect(busyText([{ startsAt: "2026-10-13T15:00:00.000Z", endsAt: "2026-10-13T16:00:00.000Z" }], "2026-10-14", SG)).toBe("Free");
+  });
+
+  it("a clash is an overlap with the chosen start and end; touching is not a clash; a half-typed time never clashes", () => {
+    const iv = [{ startsAt: "2026-10-14T02:00:00.000Z", endsAt: "2026-10-14T03:30:00.000Z" }]; // 10:00-11:30 SG
+    expect(busyClashes(iv, "2026-10-14", "11:00", "12:00", SG)).toBe(true);
+    expect(busyClashes(iv, "2026-10-14", "09:00", "10:01", SG)).toBe(true);
+    expect(busyClashes(iv, "2026-10-14", "10:30", "11:00", SG)).toBe(true);
+    expect(busyClashes(iv, "2026-10-14", "11:30", "12:30", SG)).toBe(false);
+    expect(busyClashes(iv, "2026-10-14", "09:00", "10:00", SG)).toBe(false);
+    expect(busyClashes(iv, "2026-10-14", "11:00", "10:00", SG)).toBe(false);
+    expect(busyClashes(iv, "2026-10-14", "", "12:00", SG)).toBe(false);
+    expect(busyClashes([], "2026-10-14", "10:00", "11:00", SG)).toBe(false);
   });
 });
