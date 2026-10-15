@@ -32,7 +32,10 @@ import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
-import { CYCLE_KINDS, CYCLE_STATUSES, PARTICIPANT_STATUSES, PARTICIPANT_OUTCOMES } from "./hrPolicy";
+import {
+  CYCLE_KINDS, CYCLE_STATUSES, PARTICIPANT_STATUSES, PARTICIPANT_OUTCOMES, LEAVE_TYPES, ACCRUAL_METHODS, HOLIDAY_KINDS,
+  GRADE_TRACKS, PARAMETER_UNITS, RATE_BASES, MINUTES_PER_DAY,
+} from "./hrPolicy";
 
 export type PolicyResult = {
   ok: boolean;
@@ -95,14 +98,45 @@ function str(v: unknown): string | undefined {
 function field(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
 }
+function flag(formData: FormData, key: string): boolean {
+  return formData.get(key) === "on" || formData.get(key) === "true";
+}
+/** An optional number field: "" is absent, anything else must be finite and between `min` and `max`. */
+function num(raw: string, what: string, min: number, max?: number, integer = false): { value?: number; error?: string } {
+  if (!raw) return {};
+  const n = Number(raw);
+  const range = max === undefined ? `${min} or more` : `between ${min} and ${max}`;
+  if (!Number.isFinite(n) || n < min || (max !== undefined && n > max)) return { error: `${what} must be a number ${range}.` };
+  if (integer && !Number.isInteger(n)) return { error: `${what} must be a whole number.` };
+  return { value: n };
+}
+/** At most `places` decimals, judged on the typed text (a float round-trip would call 0.07 * 100 inexact). */
+function tooManyDecimals(raw: string, places: number): boolean {
+  const m = /^-?\d+(?:\.(\d+))?$/.exec(raw);
+  return !!m && (m[1]?.length ?? 0) > places;
+}
 function isoDate(raw: string, what: string, required: boolean): string | undefined {
   if (!raw) return required ? `${what} is required (YYYY-MM-DD).` : undefined;
   return ISO_DATE.test(raw) ? undefined : `${what} must be YYYY-MM-DD.`;
 }
+function currencyCode(raw: string): { value: string; error?: string } {
+  const value = (raw || "IDR").toUpperCase();
+  return /^[A-Z]{3}$/.test(value) ? { value } : { value, error: "Currency must be a 3-letter code such as IDR." };
+}
+function countryCode(raw: string): { value: string; error?: string } {
+  const value = (raw || "ID").toUpperCase();
+  return /^[A-Z]{2}$/.test(value) ? { value } : { value, error: "Country must be a 2-letter code such as ID." };
+}
+
 function revalReviews() {
   revalidatePath("/hr/reviews");
   revalidatePath("/hr/reviews/[cycleId]", "page");
 }
+function revalSettings() {
+  revalidatePath("/hr/settings");
+  revalidatePath("/hr/settings/statutory/[setId]", "page");
+}
+
 // ═══════════════════════════════════════════════════════════ REVIEW CYCLES ══════════════════
 
 // ---- Create a cycle ----
@@ -246,4 +280,390 @@ export async function updateReviewParticipant(tenantId: string, formData: FormDa
     ok: true, id: participantId,
     notice: status === "submitted" ? "Participant updated. The server records the submission time itself." : "Participant updated.",
   };
+}
+
+// ═══════════════════════════════════════════════════════════ CALENDARS ══════════════════════
+
+// ---- Create a calendar ----
+// POST calendars (`create`). `weekendDays` repeats (ISO 1 to 7). The server falls back to Sat+Sun when none survives
+// its filter, so "no weekend" cannot be saved and is refused here rather than silently changed. `isDefault` demotes
+// the current default.
+export async function createCalendar(tenantId: string, formData: FormData): Promise<PolicyResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+
+  const name = field(formData, "name");
+  const country = countryCode(field(formData, "countryCode"));
+  const days = [...new Set(formData.getAll("weekendDays").map((v) => Number(v)))];
+  const isDefault = flag(formData, "isDefault");
+
+  if (!name) return { ok: false, error: "A name is required." };
+  if (country.error) return { ok: false, error: country.error };
+  if (days.length === 0) {
+    return { ok: false, error: "Tick at least one weekend day. The server cannot save a calendar with no weekend and would use Saturday and Sunday instead." };
+  }
+  if (days.some((d) => !Number.isInteger(d) || d < 1 || d > 7)) return { ok: false, error: "Weekend days must be Monday to Sunday." };
+
+  const r = await send<{ id?: string }>(
+    c.tenant, c.userId, "POST", "/calendars",
+    { name, countryCode: country.value, weekendDays: days.sort((a, b) => a - b), isDefault },
+    "create holiday calendars",
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  revalSettings();
+  return {
+    ok: true, id: str(r.body.id),
+    notice: isDefault ? "Calendar created and made the default; the previous default was demoted." : "Calendar created.",
+  };
+}
+
+// ---- Add a holiday ----
+// POST calendars/:id/holidays (`create`), one holiday per call (the route takes a list). Upsert by date: a holiday
+// already on that date is REPLACED. `deductsEntitlement` only means something for joint leave; the server stores null
+// for the other kinds.
+export async function addHoliday(tenantId: string, calendarId: string, formData: FormData): Promise<PolicyResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!calendarId) return { ok: false, error: "No calendar was given." };
+
+  const day = field(formData, "day");
+  const name = field(formData, "name");
+  const kind = field(formData, "kind") || "public";
+  const deductsEntitlement = flag(formData, "deductsEntitlement");
+
+  const e = isoDate(day, "The date", true);
+  if (e) return { ok: false, error: e };
+  if (!name) return { ok: false, error: "A name is required." };
+  if (!HOLIDAY_KINDS.includes(kind)) return { ok: false, error: "Pick a kind from the list." };
+
+  const r = await send<{ calendarId?: string; upserted?: number }>(
+    c.tenant, c.userId, "POST", `/calendars/${encodeURIComponent(calendarId)}/holidays`,
+    { holidays: [{ day, name, kind, ...(kind === "joint_leave" ? { deductsEntitlement } : {}) }] },
+    "add holidays",
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  revalSettings();
+  return { ok: true, id: calendarId, notice: "Holiday saved. A holiday already on that date was replaced, not duplicated." };
+}
+
+// ---- Delete a holiday ----
+// DELETE holidays/:id (`delete`). A hard delete: the server keeps no record of the holiday afterwards, and leave
+// already charged against it is not restated.
+export async function deleteHoliday(tenantId: string, holidayId: string): Promise<PolicyResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!holidayId) return { ok: false, error: "No holiday was given." };
+
+  const r = await send(c.tenant, c.userId, "DELETE", `/holidays/${encodeURIComponent(holidayId)}`, undefined, "delete holidays");
+  if (!r.ok) return { ok: false, error: r.error };
+  revalSettings();
+  return { ok: true, id: holidayId, notice: "Holiday deleted." };
+}
+
+// ═══════════════════════════════════════════════════════════ LEAVE POLICIES ═════════════════
+
+type PolicyFields = { body: Record<string, unknown>; error?: string };
+
+/** The numeric and boolean fields the create and edit forms share. Days become minutes here. */
+function policyFields(formData: FormData, mode: "create" | "edit"): PolicyFields {
+  const body: Record<string, unknown> = {};
+  const name = field(formData, "name");
+  const accrualMethod = field(formData, "accrualMethod") || (mode === "create" ? "upfront" : "");
+
+  if (!name) return { body, error: "A name is required." };
+  body.name = name;
+  if (accrualMethod) {
+    if (!ACCRUAL_METHODS.includes(accrualMethod)) return { body, error: "Pick an accrual method from the list." };
+    body.accrualMethod = accrualMethod;
+  } else if (mode === "edit") {
+    return { body, error: "Pick an accrual method from the list." };
+  }
+
+  const days = (key: string, what: string, min: number): { value?: number; error?: string } => {
+    const n = num(field(formData, key), what, min);
+    if (n.error || n.value === undefined) return n;
+    return { value: Math.round(n.value * MINUTES_PER_DAY) };
+  };
+  const entitlement = days("annualEntitlementDays", "The annual entitlement", 0);
+  if (entitlement.error) return { body, error: entitlement.error };
+  const carryover = days("carryoverMaxDays", "The carry-over limit", 0);
+  if (carryover.error) return { body, error: carryover.error };
+  const waiting = num(field(formData, "waitingPeriodMonths"), "The waiting period", 0, 60, true);
+  if (waiting.error) return { body, error: waiting.error };
+  const expiry = num(field(formData, "carryoverExpiryMonths"), "The carry-over expiry", 0, 24, true);
+  if (expiry.error) return { body, error: expiry.error };
+  const notice = num(field(formData, "minNoticeDays"), "The minimum notice", 0, undefined, true);
+  if (notice.error) return { body, error: notice.error };
+  const escalateRaw = num(field(formData, "escalateOverDays"), "The escalation threshold", 0);
+  if (escalateRaw.error) return { body, error: escalateRaw.error };
+  const escalateMinutes = escalateRaw.value === undefined ? undefined : Math.round(escalateRaw.value * MINUTES_PER_DAY);
+  if (escalateMinutes !== undefined && escalateMinutes < 1) return { body, error: "The escalation threshold must be more than zero days, or blank for no second approver." };
+
+  if (entitlement.value !== undefined) body.annualEntitlementMinutes = entitlement.value;
+  if (carryover.value !== undefined) body.carryoverMaxMinutes = carryover.value;
+  if (waiting.value !== undefined) body.waitingPeriodMonths = waiting.value;
+  if (expiry.value !== undefined) body.carryoverExpiryMonths = expiry.value;
+  if (notice.value !== undefined) body.minNoticeDays = notice.value;
+  body.prorateFirstYear = flag(formData, "prorateFirstYear");
+  body.allowNegativeBalance = flag(formData, "allowNegativeBalance");
+  body.excludesHolidays = flag(formData, "excludesHolidays");
+  if (mode === "edit") {
+    // The edit form is filled with what the server holds, so a blank means "none": null clears the threshold.
+    body.escalateOverMinutes = escalateMinutes ?? null;
+    body.isActive = flag(formData, "isActive");
+    // A blank number on edit would otherwise leave the old value; the form always fills them, so a blank is refused.
+    for (const [key, what] of [
+      ["annualEntitlementDays", "The annual entitlement"], ["waitingPeriodMonths", "The waiting period"],
+      ["carryoverMaxDays", "The carry-over limit"], ["carryoverExpiryMonths", "The carry-over expiry"], ["minNoticeDays", "The minimum notice"],
+    ] as const) {
+      if (!field(formData, key)) return { body, error: `${what} is required (use 0 for none).` };
+    }
+  } else if (escalateMinutes !== undefined) {
+    body.escalateOverMinutes = escalateMinutes;
+  }
+  return { body };
+}
+
+// ---- Create a policy ----
+// POST leave-policies (`create`). The leave type is fixed at creation (it is not an editable field on the server).
+export async function createLeavePolicy(tenantId: string, formData: FormData): Promise<PolicyResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+
+  const leaveType = field(formData, "leaveType");
+  if (!LEAVE_TYPES.includes(leaveType)) return { ok: false, error: "Pick a leave type from the list." };
+  const parsed = policyFields(formData, "create");
+  if (parsed.error) return { ok: false, error: parsed.error };
+
+  const r = await send<{ id?: string }>(
+    c.tenant, c.userId, "POST", "/leave-policies", { ...parsed.body, leaveType }, "create leave policies",
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  revalSettings();
+  return { ok: true, id: str(r.body.id), notice: "Leave policy created. Assign it to people, a unit or the whole company to put it to use." };
+}
+
+// ---- Edit a policy ----
+// PATCH leave-policies/:id (`update`). Allow-listed fields only; the form sends every one of them.
+export async function updateLeavePolicy(tenantId: string, policyId: string, formData: FormData): Promise<PolicyResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!policyId) return { ok: false, error: "No leave policy was given." };
+
+  const parsed = policyFields(formData, "edit");
+  if (parsed.error) return { ok: false, error: parsed.error };
+
+  const r = await send(
+    c.tenant, c.userId, "PATCH", `/leave-policies/${encodeURIComponent(policyId)}`, parsed.body, "edit leave policies",
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  revalSettings();
+  return { ok: true, id: policyId, notice: "Leave policy saved." };
+}
+
+// ---- Assign a policy ----
+// POST leave-policies/:id/assignments (`create`). One target at most: a person (a USER id), an org unit (the org
+// node's id, free text on the server) or neither, the company-wide default. Dated; an end date is optional.
+export async function assignLeavePolicy(tenantId: string, policyId: string, formData: FormData): Promise<PolicyResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!policyId) return { ok: false, error: "No leave policy was given." };
+
+  const target = field(formData, "target") || "tenant";
+  const subjectUserId = field(formData, "subjectUserId");
+  const unitNodeId = field(formData, "unitNodeId");
+  const effectiveFrom = field(formData, "effectiveFrom");
+  const effectiveTo = field(formData, "effectiveTo");
+
+  if (!["tenant", "person", "unit"].includes(target)) return { ok: false, error: "Pick who the policy applies to." };
+  if (target === "person" && !subjectUserId) return { ok: false, error: "Pick the person this policy applies to." };
+  if (target === "unit" && !unitNodeId) return { ok: false, error: "Give the id of the org unit this policy applies to." };
+  const fromError = isoDate(effectiveFrom, "The start date", true);
+  if (fromError) return { ok: false, error: fromError };
+  const toError = isoDate(effectiveTo, "The end date", false);
+  if (toError) return { ok: false, error: toError };
+  if (effectiveTo && effectiveTo < effectiveFrom) return { ok: false, error: "The end date must be on or after the start date." };
+
+  const r = await send<{ id?: string }>(
+    c.tenant, c.userId, "POST", `/leave-policies/${encodeURIComponent(policyId)}/assignments`,
+    {
+      effectiveFrom,
+      ...(effectiveTo ? { effectiveTo } : {}),
+      ...(target === "person" ? { subjectUserId } : {}),
+      ...(target === "unit" ? { unitNodeId } : {}),
+    },
+    "assign leave policies",
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  revalSettings();
+  return { ok: true, id: str(r.body.id), notice: "Assignment saved. The most specific assignment for a person wins." };
+}
+
+// ═══════════════════════════════════════════════════════════ PAY GRADES ═════════════════════
+
+// ---- Create a pay grade ----
+// POST pay-grades (`create`). The band must satisfy min <= mid <= max (a database CHECK); amounts are numeric(14,2),
+// so a third decimal would be rounded without telling anyone and is refused here.
+export async function createPayGrade(tenantId: string, formData: FormData): Promise<PolicyResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+
+  const code = field(formData, "code");
+  const name = field(formData, "name");
+  const track = field(formData, "track") || "individual";
+  const rateBasis = field(formData, "rateBasis") || "monthly";
+  const currency = currencyCode(field(formData, "currency"));
+
+  if (!code) return { ok: false, error: "A code is required." };
+  if (!name) return { ok: false, error: "A name is required." };
+  if (!GRADE_TRACKS.includes(track)) return { ok: false, error: "Pick a track from the list." };
+  if (!RATE_BASES.includes(rateBasis)) return { ok: false, error: "Pick a rate basis from the list." };
+  if (currency.error) return { ok: false, error: currency.error };
+  const level = num(field(formData, "level"), "The level", 1, undefined, true);
+  if (level.error) return { ok: false, error: level.error };
+
+  const minRaw = field(formData, "minAmount");
+  const maxRaw = field(formData, "maxAmount");
+  const midRaw = field(formData, "midAmount");
+  if (!minRaw) return { ok: false, error: "The band minimum is required." };
+  if (!maxRaw) return { ok: false, error: "The band maximum is required." };
+  const min = num(minRaw, "The band minimum", 0);
+  if (min.error) return { ok: false, error: min.error };
+  const max = num(maxRaw, "The band maximum", 0);
+  if (max.error) return { ok: false, error: max.error };
+  const mid = num(midRaw, "The band midpoint", 0);
+  if (mid.error) return { ok: false, error: mid.error };
+  for (const [raw, what] of [[minRaw, "The band minimum"], [maxRaw, "The band maximum"], [midRaw, "The band midpoint"]] as const) {
+    if (raw && tooManyDecimals(raw, 2)) return { ok: false, error: `${what} can have at most 2 decimal places.` };
+  }
+  if ((max.value as number) < (min.value as number)) return { ok: false, error: "The band maximum must be at least the minimum." };
+  if (mid.value !== undefined && (mid.value < (min.value as number) || mid.value > (max.value as number))) {
+    return { ok: false, error: "The midpoint must sit between the minimum and the maximum." };
+  }
+
+  const r = await send<{ id?: string }>(
+    c.tenant, c.userId, "POST", "/pay-grades",
+    {
+      code, name, track, currency: currency.value, rateBasis, minAmount: min.value, maxAmount: max.value,
+      ...(level.value !== undefined ? { level: level.value } : {}),
+      ...(mid.value !== undefined ? { midAmount: mid.value } : {}),
+    },
+    "create pay grades",
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  revalidatePath("/hr/settings");
+  revalidatePath("/hr/compensation");
+  return { ok: true, id: str(r.body.id), notice: "Pay grade created. Compensation outside its band is refused for anyone on this grade." };
+}
+
+// ═══════════════════════════════════════════════════════════ STATUTORY PARAMETERS ═══════════
+
+// ---- Create a parameter set ----
+// POST statutory-parameters (`create`). Created UNRATIFIED. Each parameter needs a key and exactly one of a number or
+// a JSON value (the server and a CHECK both say so); keys are unique within a set; a number is numeric(18,6). The
+// database refuses a set that overlaps another set of the same country in time: that comes back in the server's words.
+// The parameter rows come in as parallel lists (paramKey, paramValueNum, paramValueJson, paramUnit, paramNote).
+export async function createParameterSet(tenantId: string, formData: FormData): Promise<PolicyResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+
+  const name = field(formData, "name");
+  const country = countryCode(field(formData, "countryCode"));
+  const effectiveFrom = field(formData, "effectiveFrom");
+  const effectiveTo = field(formData, "effectiveTo");
+  const sourceNote = field(formData, "sourceNote");
+
+  if (!name) return { ok: false, error: "A name is required." };
+  if (country.error) return { ok: false, error: country.error };
+  const fromError = isoDate(effectiveFrom, "The effective date", true);
+  if (fromError) return { ok: false, error: fromError };
+  const toError = isoDate(effectiveTo, "The end date", false);
+  if (toError) return { ok: false, error: toError };
+  if (effectiveTo && effectiveTo < effectiveFrom) return { ok: false, error: "The end date must be on or after the effective date." };
+
+  const keys = formData.getAll("paramKey").map((v) => String(v).trim());
+  const nums = formData.getAll("paramValueNum").map((v) => String(v).trim());
+  const jsons = formData.getAll("paramValueJson").map((v) => String(v).trim());
+  const units = formData.getAll("paramUnit").map((v) => String(v).trim());
+  const notes = formData.getAll("paramNote").map((v) => String(v).trim());
+
+  const parameters: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < keys.length; i += 1) {
+    const key = keys[i];
+    const rawNum = nums[i] ?? "";
+    const rawJson = jsons[i] ?? "";
+    const unit = units[i] ?? "";
+    const note = notes[i] ?? "";
+    if (!key && !rawNum && !rawJson && !unit && !note) continue; // an unused row
+    const row = `Parameter ${i + 1}`;
+    if (!key) return { ok: false, error: `${row} needs a key.` };
+    if (seen.has(key)) return { ok: false, error: `The key "${key}" is used twice; a key can appear once in a set.` };
+    seen.add(key);
+    if (!!rawNum === !!rawJson) return { ok: false, error: `"${key}" needs exactly one of a number or a JSON value.` };
+    if (unit && !PARAMETER_UNITS.includes(unit)) return { ok: false, error: `"${key}": pick a unit from the list.` };
+    const entry: Record<string, unknown> = { key };
+    if (rawNum) {
+      const n = Number(rawNum);
+      if (!Number.isFinite(n)) return { ok: false, error: `"${key}": the number is not valid.` };
+      if (tooManyDecimals(rawNum, 6)) return { ok: false, error: `"${key}": a number can have at most 6 decimal places.` };
+      if (Math.abs(n) >= 1e12) return { ok: false, error: `"${key}": the number is too large (at most 12 digits before the point).` };
+      entry.valueNum = n;
+    } else {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(rawJson);
+      } catch {
+        return { ok: false, error: `"${key}": the JSON value is not valid JSON.` };
+      }
+      if (parsed === null) return { ok: false, error: `"${key}": a JSON value cannot be null.` };
+      entry.valueJson = parsed;
+    }
+    if (unit) entry.unit = unit;
+    if (note) entry.note = note;
+    parameters.push(entry);
+  }
+
+  const r = await send<{ id?: string; ratified?: boolean }>(
+    c.tenant, c.userId, "POST", "/statutory-parameters",
+    {
+      name, countryCode: country.value, effectiveFrom,
+      ...(effectiveTo ? { effectiveTo } : {}),
+      ...(sourceNote ? { sourceNote } : {}),
+      parameters,
+    },
+    "create statutory parameter sets",
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  revalSettings();
+  const unratified = r.body.ratified !== true;
+  return {
+    ok: true, id: str(r.body.id),
+    notice: `Parameter set created with ${parameters.length} parameter${parameters.length === 1 ? "" : "s"}${unratified ? ", UNRATIFIED" : ""}. ${unratified
+      ? "Approving a payroll run against it needs an explicit override until a company administrator ratifies it."
+      : ""}`.trim(),
+  };
+}
+
+// ---- Ratify a parameter set ----
+// POST statutory-parameters/:id/ratify (`ratify`): company_admin only, at high assurance. Refused when already
+// ratified (the first signature is the one that counts). The optional note REPLACES the set's source note.
+export async function ratifyParameterSet(tenantId: string, setId: string, note?: string): Promise<PolicyResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!setId) return { ok: false, error: "No parameter set was given." };
+
+  const text = (note ?? "").trim();
+  const r = await send<{ ok?: boolean; ratified?: boolean; ratifiedAt?: string }>(
+    c.tenant, c.userId, "POST", `/statutory-parameters/${encodeURIComponent(setId)}/ratify`,
+    text ? { note: text } : {},
+    "ratify statutory parameters", true,
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  revalSettings();
+  if (r.body.ratified !== true) {
+    return { ok: true, id: setId, notice: "The server answered but did not confirm the ratification. Check the set's status below." };
+  }
+  const when = typeof r.body.ratifiedAt === "string" ? ` on ${r.body.ratifiedAt.slice(0, 10)}` : "";
+  return { ok: true, id: setId, notice: `Parameter set ratified${when}. Payroll will use these parameters without an override from now on.` };
 }

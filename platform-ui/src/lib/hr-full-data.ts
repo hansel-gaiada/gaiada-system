@@ -6,8 +6,9 @@ import "server-only";
 import { platformFetch, PlatformError } from "./platform";
 import { readResult, type ReadResult } from "./readResult";
 import type {
-  AllowanceType, Application, ApplicationDetail, BenefitPlan, Candidate, Compensation, FunnelStage, PayGrade, PayrollInput,
-  PayrollRun, PayrollRunDetail, PayrollRunStatus, PipelineStage, Requisition, ReviewCycle, ReviewParticipant,
+  AllowanceType, Application, ApplicationDetail, BenefitPlan, Candidate, Compensation, FunnelStage, Holiday, HolidayCalendar,
+  LeavePolicy, LeavePolicyAssignment, ParameterSet, ParameterSetDetail, PayGrade, PayrollInput, PayrollRun, PayrollRunDetail,
+  PayrollRunStatus, PipelineStage, Requisition, ReviewCycle, ReviewParticipant, WorkingDayBreakdown,
 } from "./hr-full";
 import type { Employee } from "./iam";
 
@@ -114,7 +115,7 @@ export const listBenefitPlansResult = (u: string, t: string): Promise<ReadResult
 export const listPayGradesResult = (u: string, t: string): Promise<ReadResult<PayGrade[]>> =>
   readResult(platformFetch<PayGrade[]>(`${hrBase(t)}/pay-grades`, u));
 
-// DW-7f-4: the honest review-cycle reads, for /hr/reviews. The soft readers in lib/hr-full.ts
+// DW-7f-4 / DW-7f-5: the honest policy reads, for /hr/reviews and /hr/settings. The soft readers in lib/hr-full.ts
 // (listReviewCycles, listCalendars, listLeavePolicies, listParameterSets, ...) turn a 403 and a 404 into [], which on a
 // rules page reads "no calendar, no policy" about a viewer who was simply refused. These keep the refusal: 403 is
 // `forbidden`, 404 and 5xx are `unavailable`; an empty `data` is the server's own answer. Every route is authorized as
@@ -125,3 +126,36 @@ export const listReviewCyclesResult = (u: string, t: string, status?: string): P
 
 export const listReviewParticipantsResult = (u: string, t: string, cycleId: string): Promise<ReadResult<ReviewParticipant[]>> =>
   readResult(platformFetch<ReviewParticipant[]>(`${hrBase(t)}/review-cycles/${encodeURIComponent(cycleId)}/participants`, u));
+
+export const listCalendarsResult = (u: string, t: string): Promise<ReadResult<HolidayCalendar[]>> =>
+  readResult(platformFetch<HolidayCalendar[]>(`${hrBase(t)}/calendars`, u));
+
+export const listHolidaysResult = (u: string, t: string, calendarId: string, year?: number): Promise<ReadResult<Holiday[]>> =>
+  readResult(platformFetch<Holiday[]>(`${hrBase(t)}/calendars/${encodeURIComponent(calendarId)}/holidays${year ? `?year=${year}` : ""}`, u));
+
+// GET working-days answers a 400 for a bad range ("to must be >= from"), which lands as `unavailable` with the server's words.
+export const getWorkingDaysResult = (
+  u: string, t: string, from: string, to: string, calendarId?: string,
+): Promise<ReadResult<WorkingDayBreakdown>> => {
+  const qs = new URLSearchParams({ from, to });
+  if (calendarId) qs.set("calendarId", calendarId);
+  return readResult(platformFetch<WorkingDayBreakdown>(`${hrBase(t)}/working-days?${qs.toString()}`, u));
+};
+
+export const listLeavePoliciesResult = (u: string, t: string): Promise<ReadResult<LeavePolicy[]>> =>
+  readResult(platformFetch<LeavePolicy[]>(`${hrBase(t)}/leave-policies`, u));
+
+export const listPolicyAssignmentsResult = (u: string, t: string, policyId: string): Promise<ReadResult<LeavePolicyAssignment[]>> =>
+  readResult(platformFetch<LeavePolicyAssignment[]>(`${hrBase(t)}/leave-policies/${encodeURIComponent(policyId)}/assignments`, u));
+
+export const listParameterSetsResult = (u: string, t: string): Promise<ReadResult<ParameterSet[]>> =>
+  readResult(platformFetch<ParameterSet[]>(`${hrBase(t)}/statutory-parameters`, u));
+
+export async function getParameterSetResult(u: string, t: string, id: string): Promise<ReadResult<ParameterSetDetail | null>> {
+  try {
+    return { kind: "ok", data: await platformFetch<ParameterSetDetail>(`${hrBase(t)}/statutory-parameters/${encodeURIComponent(id)}`, u) };
+  } catch (err) {
+    if (err instanceof PlatformError && err.status === 404) return { kind: "ok", data: null };
+    return readResult(Promise.reject(err));
+  }
+}

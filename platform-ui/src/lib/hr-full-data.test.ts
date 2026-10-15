@@ -3,7 +3,8 @@ import {
   listPayrollRunsResult, getPayrollRunResult, listEmployeesResult, listPayrollInputsResult,
   listRequisitionsResult, listCandidatesResult, listApplicationsResult, listPipelineStagesResult, getFunnelResult, getApplicationResult,
   listCompensationResult, listAllowanceTypesResult, listBenefitPlansResult, listPayGradesResult,
-  listReviewCyclesResult, listReviewParticipantsResult,
+  listReviewCyclesResult, listReviewParticipantsResult, listCalendarsResult, listHolidaysResult, getWorkingDaysResult,
+  listLeavePoliciesResult, listPolicyAssignmentsResult, listParameterSetsResult, getParameterSetResult,
 } from "./hr-full-data";
 
 // DW-7e: the honest payroll-run list. The route needs the payroll read right, so a 403 is common and must read as a refusal.
@@ -204,14 +205,20 @@ describe("compensation reads", () => {
   });
 });
 
-// DW-7f-4: the honest review-cycle reads. Each goes to its hr_policy route; 200 is the data, 403 is `forbidden`, and a 404 or 5xx is
-// `unavailable` (never an empty list).
-describe("review-cycle readers (DW-7f-4)", () => {
+// DW-7f-4 / DW-7f-5: the honest policy reads. Each goes to its hr_policy route; 200 is the data, 403 is `forbidden`, and a 404 or 5xx
+// is `unavailable` (never an empty list); only the single parameter set reads a 404 as "no such set".
+describe("policy readers (DW-7f-4, DW-7f-5)", () => {
   const url = (m: ReturnType<typeof answer>) => String((m.mock.calls[0] as unknown[])[0]);
   const base = "http://p.test/api/co-a/modules/hr";
   const lists: [string, () => Promise<unknown>, string][] = [
     ["listReviewCyclesResult", () => listReviewCyclesResult("u1", "co-a"), `${base}/review-cycles`],
     ["listReviewParticipantsResult", () => listReviewParticipantsResult("u1", "co-a", "c1"), `${base}/review-cycles/c1/participants`],
+    ["listCalendarsResult", () => listCalendarsResult("u1", "co-a"), `${base}/calendars`],
+    ["listHolidaysResult", () => listHolidaysResult("u1", "co-a", "cal1"), `${base}/calendars/cal1/holidays`],
+    ["listLeavePoliciesResult", () => listLeavePoliciesResult("u1", "co-a"), `${base}/leave-policies`],
+    ["listPolicyAssignmentsResult", () => listPolicyAssignmentsResult("u1", "co-a", "p1"), `${base}/leave-policies/p1/assignments`],
+    ["listParameterSetsResult", () => listParameterSetsResult("u1", "co-a"), `${base}/statutory-parameters`],
+    ["getWorkingDaysResult", () => getWorkingDaysResult("u1", "co-a", "2026-01-01", "2026-01-31"), `${base}/working-days?from=2026-01-01&to=2026-01-31`],
   ];
 
   for (const [name, read, path] of lists) {
@@ -229,10 +236,36 @@ describe("review-cycle readers (DW-7f-4)", () => {
     });
   }
 
-  it("passes the status filter through", async () => {
-    const fetchMock = answer(200, []);
+  it("passes the status filter, the holiday year and the working-days calendar through", async () => {
+    let fetchMock = answer(200, []);
     vi.stubGlobal("fetch", fetchMock);
     await listReviewCyclesResult("u1", "co-a", "open");
     expect(url(fetchMock)).toBe(`${base}/review-cycles?status=open`);
+    fetchMock = answer(200, []);
+    vi.stubGlobal("fetch", fetchMock);
+    await listHolidaysResult("u1", "co-a", "cal1", 2026);
+    expect(url(fetchMock)).toBe(`${base}/calendars/cal1/holidays?year=2026`);
+    fetchMock = answer(200, {});
+    vi.stubGlobal("fetch", fetchMock);
+    await getWorkingDaysResult("u1", "co-a", "2026-01-01", "2026-01-31", "cal1");
+    expect(url(fetchMock)).toBe(`${base}/working-days?from=2026-01-01&to=2026-01-31&calendarId=cal1`);
+  });
+
+  it("getWorkingDaysResult carries the server's words for a bad range", async () => {
+    vi.stubGlobal("fetch", answer(400, { error: "to must be >= from" }));
+    expect(await getWorkingDaysResult("u1", "co-a", "2026-02-01", "2026-01-01")).toEqual({ kind: "unavailable", reason: "to must be >= from" });
+  });
+
+  it("getParameterSetResult reads a 404 as no such set, a 403 as forbidden and a 5xx as unavailable", async () => {
+    const fetchMock = answer(200, { id: "s1", parameters: [] });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await getParameterSetResult("u1", "co-a", "s1")).toEqual({ kind: "ok", data: { id: "s1", parameters: [] } });
+    expect(url(fetchMock)).toBe(`${base}/statutory-parameters/s1`);
+    vi.stubGlobal("fetch", answer(404, { error: "parameter set not found" }));
+    expect(await getParameterSetResult("u1", "co-a", "s1")).toEqual({ kind: "ok", data: null });
+    vi.stubGlobal("fetch", answer(403, { error: "forbidden" }));
+    expect(await getParameterSetResult("u1", "co-a", "s1")).toEqual({ kind: "forbidden" });
+    vi.stubGlobal("fetch", answer(500, { error: "boom" }));
+    expect(await getParameterSetResult("u1", "co-a", "s1")).toMatchObject({ kind: "unavailable" });
   });
 });
