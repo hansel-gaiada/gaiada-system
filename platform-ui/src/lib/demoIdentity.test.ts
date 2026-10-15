@@ -117,6 +117,11 @@ describe("DW-9a: the department persona logins", () => {
     expect(demoIdentityFor("hansel@gaiada.com")).toBe("demo-hansel");
   });
 
+  it("the plain-word tokens match their exact address only, so another tier keeps its addresses", () => {
+    expect(demoIdentityFor("social-manager@gaiada.com")).toBe("dept-manager");
+    expect(demoIdentityFor("creative-manager@gaiada.com")).toBe("dept-manager");
+  });
+
   it("a client address that contains a new token is still a client", () => {
     expect(demoIdentityFor("social-client@northwind.example")).toBe("demo-client");
     expect(demoIdentityFor("creative@northwind.example")).toBe("demo-client");

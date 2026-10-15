@@ -48,8 +48,10 @@ export function demoIdentityFor(email: string): DemoIdentityId {
   // because "ic" hides in many natural words ("office", "service", "viceroy", "clinic", "logic") and none of these may
   // fall to the IC tier by luck. None of the tokens contains "ic" or "client" (the tests pin each address).
   if (lower === "seo-specialist@gaiada.com" || lower.includes("seo-specialist")) return "u-seo";
-  if (lower === "social@gaiada.com" || lower.includes("social")) return "u-social";
-  if (lower === "creative@gaiada.com" || lower.includes("creative")) return "u-creative";
+  // "social" and "creative" are ordinary words, so these two match the exact address only: as substrings they would take a
+  // future "social-manager@" from the manager test below.
+  if (lower === "social@gaiada.com") return "u-social";
+  if (lower === "creative@gaiada.com") return "u-creative";
   if (lower === "hr-staff@gaiada.com" || lower.includes("hr-staff")) return "u-hr";
   if (lower === "finance-staff@gaiada.com" || lower.includes("finance-staff")) return "u-finance-staff";
   if (lower === "it-admin@gaiada.com" || lower.includes("it-admin")) return "u-it";

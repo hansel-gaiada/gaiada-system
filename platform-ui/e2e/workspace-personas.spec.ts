@@ -512,10 +512,10 @@ test.describe("client-only user (client@northwind.example, demo-client)", () => 
     for (const path of ["/", "/departments/dept-1", "/admin/users"]) {
       await page.goto(path);
       await expect(page).toHaveURL(/\/portal/);
-      // The staff shell is absent: neither the switcher nor the search box is drawn, while the portal itself is.
+      // The portal has drawn (the positive, first); then the staff shell is absent: neither the switcher nor the search box.
+      await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
       await expect(switcher(page)).toHaveCount(0);
       await expect(page.getByRole("searchbox", { name: "Search" })).toHaveCount(0);
-      await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
     }
   });
 });
