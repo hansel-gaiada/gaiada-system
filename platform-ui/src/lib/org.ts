@@ -56,15 +56,16 @@ const AGENCY_DEPARTMENTS: { name: string; divisions: { name: string; roles?: Org
     { name: "Backend", roles: [] },
   ] },
   { name: "Creatives", divisions: [
-    { name: "Design", roles: [] },
+    // DW-9a: one placed employee (u-seo/u-creative/u-social below are the persona e2e's logins, e2e/workspace-personas.spec.ts).
+    { name: "Design", roles: [{ id: "d2-r1", name: "Senior Designer", kind: "role", children: [person("d2-p1", "Putu Rani", "u-creative")] }] },
     { name: "Video", roles: [] },
   ] },
   { name: "SEO", divisions: [
-    { name: "On-page", roles: [{ id: "d3-r1", name: "SEO Specialist", kind: "role", children: [] }] },
+    { name: "On-page", roles: [{ id: "d3-r1", name: "SEO Specialist", kind: "role", children: [person("d3-p1", "Luh Ayu", "u-seo")] }] },
     { name: "Off-page", roles: [] },
   ] },
   // Social Media has no divisions — people sit directly under the department.
-  { name: "Social Media", divisions: [], people: [person("d4-p1", "Dewi Santoso", "u-pm")] },
+  { name: "Social Media", divisions: [], people: [person("d4-p1", "Dewi Santoso", "u-pm"), person("d4-p2", "Komang Lestari", "u-social")] },
   // GM (GM-01). Like Social Media it has no divisions — the General Manager sits directly under the
   // department, which mirrors platform-nest's real roster (`seed/roster.ts`: `{ id: "d-gm", name:
   // "GM", divisions: [] }`, with Edward as its lead).
@@ -84,20 +85,40 @@ const AGENCY_DEPARTMENTS: { name: string; divisions: { name: string; roles?: Org
   { name: "IT", divisions: [] },
 ];
 
+// DW-9a: the hospitality vertical's seed (Viceroy in the demo), so a department WITHOUT a bespoke workspace exists in
+// DEMO_MODE and the generic workspace is driven end to end. Keyed by the company's VERTICAL, never a name or an id
+// (PV-D13). "Front Office" slugs to no registry workspace, so it resolves to the generic one. HR, Finance and IT are
+// here because live gives every company them (DW-7d). The ids carry their own prefix: node ids are per company on
+// live, and a shared `dept-N` id would let an org_unit grant for one company's department match another's.
+const HOSPITALITY_DEPARTMENTS: typeof AGENCY_DEPARTMENTS = [
+  { name: "Front Office", divisions: [
+    { name: "Reception", roles: [{ id: "hosp-r1", name: "Front Desk Agent", kind: "role", children: [person("hosp-p1", "Ni Luh Sekar", "u-resort")] }] },
+  ] },
+  { name: "HR", divisions: [] },
+  { name: "Finance", divisions: [] },
+  { name: "IT", divisions: [] },
+];
+
+/** The seed per vertical. Holding, general, catering and an unknown vertical stay EMPTY (`org.test.ts` pins holding). */
+const SEEDS: Record<string, { idPrefix: string; departments: typeof AGENCY_DEPARTMENTS }> = {
+  agency: { idPrefix: "dept-", departments: AGENCY_DEPARTMENTS },
+  hospitality: { idPrefix: "hosp-dept-", departments: HOSPITALITY_DEPARTMENTS },
+};
+
 /** What the default tree needs of a company. `vertical` selects the seed (PV-D13: never a name or an
  *  id); when it is absent the tree is the empty, editable root. */
 export type OrgCompany = { id: string; name: string; type: string | null; vertical?: string | null };
 
 export function defaultStructure(company: OrgCompany): OrgStructure {
-  const isAgency = company.vertical === "agency";
-  const children: OrgNode[] = isAgency
-    ? AGENCY_DEPARTMENTS.map((dept, i) => ({
-        id: `dept-${i + 1}`,
+  const seed = company.vertical && Object.hasOwn(SEEDS, company.vertical) ? SEEDS[company.vertical] : undefined;
+  const children: OrgNode[] = seed
+    ? seed.departments.map((dept, i) => ({
+        id: `${seed.idPrefix}${i + 1}`,
         name: dept.name,
         kind: "department" as const,
         children: [
           ...dept.divisions.map((div, j) => ({
-            id: `dept-${i + 1}-div-${j + 1}`,
+            id: `${seed.idPrefix}${i + 1}-div-${j + 1}`,
             name: div.name,
             kind: "division" as const,
             children: div.roles ?? [],

@@ -55,6 +55,14 @@ const DEMO_USER_IC_ID = "gede-ic";  // IC (Individual Contributor) tier — memb
 const DEMO_USER_SEARCH_STAFF_ID = "seo-staff";
 const DEMO_USER_WEBDEV_ID = "u-dev";  // DW-3a: a member PLACED in Web Dev > Frontend (lib/org.ts), so a department Overview is drivable
 const DEMO_USER_WEBHEAD_ID = "u-webhead";  // DW-3h: the HEAD of Web Dev (`org_unit_lead` on dept-1), so the Overview's Me | Team switch is drivable
+// DW-9a: seven logins for the department workspace persona e2e (e2e/workspace-personas.spec.ts), each with ONE grant.
+const DEMO_USER_SEO_ID = "u-seo";  // placed in SEO > On-page > SEO Specialist (lib/org.ts)
+const DEMO_USER_SOCIAL_ID = "u-social";  // placed in Social Media (lib/org.ts); NOT u-pm, whose directory row says `manager`
+const DEMO_USER_CREATIVE_ID = "u-creative";  // placed in Creatives > Design (lib/org.ts)
+const DEMO_USER_HR_ID = "u-hr";  // `hr_staff` on the agency, unplaced
+const DEMO_USER_FINANCE_STAFF_ID = "u-finance-staff";  // `finance_staff` on the agency, unplaced (u-finance is the holding's manager row)
+const DEMO_USER_IT_ID = "u-it";  // `it_admin` on the agency, unplaced
+const DEMO_USER_RESORT_ID = "u-resort";  // `member` of Viceroy placed in Front Office (a department with no bespoke workspace)
 const DEMO_USER_MANAGER_ID = "dept-manager";  // manager tier — drives the GM console's narrowed view (GM-02b)
 // External-client tier. `client` is the ONLY role: `isClientOnly` keys off "holds no staff role", so
 // adding any second role here would silently turn this identity back into staff and stop exercising
@@ -195,6 +203,49 @@ const ME_WEBHEAD = {
   ],
 };
 
+// DW-9a: seven more logins, one per kind of person the department workspace shell must be right for
+// (e2e/workspace-personas.spec.ts). Each holds EXACTLY ONE grant, like ME_IC / ME_MANAGER / ME_WEBDEV above: a second grant
+// is how a persona stops testing its boundary. `/api/me` gives every identity all three companies; the tenant cookie
+// picks the active one. DEMO_MODE only.
+const ME_SEO = {
+  userId: DEMO_USER_SEO_ID, name: "Luh Ayu", email: "seo-specialist@gaiada.com", title: "SEO Specialist", assurance: "high",
+  companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
+  roles: [{ role: "member", scopeType: "company", scopeId: "co-agency" }],
+};
+const ME_SOCIAL = {
+  userId: DEMO_USER_SOCIAL_ID, name: "Komang Lestari", email: "social@gaiada.com", title: "Social Media Executive", assurance: "high",
+  companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
+  roles: [{ role: "member", scopeType: "company", scopeId: "co-agency" }],
+};
+const ME_CREATIVE = {
+  userId: DEMO_USER_CREATIVE_ID, name: "Putu Rani", email: "creative@gaiada.com", title: "Senior Designer", assurance: "high",
+  companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
+  roles: [{ role: "member", scopeType: "company", scopeId: "co-agency" }],
+};
+// The three functional staff are NOT placed: their home comes from the functional role (lib/workspaceAccess.ts, rule 3).
+const ME_HR = {
+  userId: DEMO_USER_HR_ID, name: "Ayu Wardani", email: "hr-staff@gaiada.com", title: "HR Officer", assurance: "high",
+  companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
+  roles: [{ role: "hr_staff", scopeType: "company", scopeId: "co-agency" }],
+};
+const ME_FINANCE_STAFF = {
+  userId: DEMO_USER_FINANCE_STAFF_ID, name: "Bayu Prasetyo", email: "finance-staff@gaiada.com", title: "Finance Officer", assurance: "high",
+  companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
+  roles: [{ role: "finance_staff", scopeType: "company", scopeId: "co-agency" }],
+};
+const ME_IT = {
+  userId: DEMO_USER_IT_ID, name: "Dika Pratama", email: "it-admin@gaiada.com", title: "IT Administrator", assurance: "high",
+  companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
+  roles: [{ role: "it_admin", scopeType: "company", scopeId: "co-agency" }],
+};
+// Viceroy's vertical is hospitality, which resolves to the GENERIC pack (lib/packs.ts), and "Front Office" slugs to no bespoke
+// workspace, so this person lands on the generic department workspace. Sign in with the tenant cookie set to co-resort.
+const ME_RESORT = {
+  userId: DEMO_USER_RESORT_ID, name: "Ni Luh Sekar", email: "resort-staff@gaiada.com", title: "Front Desk Agent, Viceroy", assurance: "high",
+  companies: [{ id: "co-resort", name: "Viceroy", type: "resort" }],
+  roles: [{ role: "member", scopeType: "company", scopeId: "co-resort" }],
+};
+
 // search_staff-tier identity (SM-38), same company as dept-3 (SEO) so the department itself is
 // reachable — `rbac.ts`'s `can()` has no department-level granularity (a company-scoped grant
 // covers every department in it), so "scoped to dept-3" means "a member of dept-3's company,
@@ -314,8 +365,18 @@ const MEMBERS: Record<string, { user_id: string; name: string; email: string; ti
     { user_id: DEMO_USER_SEARCH_STAFF_ID, name: "Nyoman Ari", email: "seo-staff@gaiada.com", title: "SEO Specialist" },
     { user_id: "u-pm", name: "Dewi Santoso", email: "dewi@gaiada.com", title: "Account Manager" },
     { user_id: "u-dev", name: "Made Putra", email: "made@gaiada.com", title: "Web Developer" },
+    // DW-9a: the persona logins, so the directories know them.
+    { user_id: DEMO_USER_SEO_ID, name: "Luh Ayu", email: "seo-specialist@gaiada.com", title: "SEO Specialist" },
+    { user_id: DEMO_USER_SOCIAL_ID, name: "Komang Lestari", email: "social@gaiada.com", title: "Social Media Executive" },
+    { user_id: DEMO_USER_CREATIVE_ID, name: "Putu Rani", email: "creative@gaiada.com", title: "Senior Designer" },
+    { user_id: DEMO_USER_HR_ID, name: "Ayu Wardani", email: "hr-staff@gaiada.com", title: "HR Officer" },
+    { user_id: DEMO_USER_FINANCE_STAFF_ID, name: "Bayu Prasetyo", email: "finance-staff@gaiada.com", title: "Finance Officer" },
+    { user_id: DEMO_USER_IT_ID, name: "Dika Pratama", email: "it-admin@gaiada.com", title: "IT Administrator" },
   ],
-  "co-resort": [{ user_id: DEMO_USER_ID, name: "Clement Hansel", email: "hansel@gaiada.com", title: "AI Manager" }],
+  "co-resort": [
+    { user_id: DEMO_USER_ID, name: "Clement Hansel", email: "hansel@gaiada.com", title: "AI Manager" },
+    { user_id: DEMO_USER_RESORT_ID, name: "Ni Luh Sekar", email: "resort-staff@gaiada.com", title: "Front Desk Agent, Viceroy" },
+  ],
 };
 
 // WD-28: `shortCode` mirrors the real backend's per-tenant unique per-project code (same
@@ -2257,6 +2318,13 @@ function getCurrentDemoIdentity(userId: string) {
   if (userId === DEMO_USER_IC_ID) return ME_IC;
   if (userId === DEMO_USER_WEBDEV_ID) return ME_WEBDEV;
   if (userId === DEMO_USER_WEBHEAD_ID) return ME_WEBHEAD;
+  if (userId === DEMO_USER_SEO_ID) return ME_SEO;
+  if (userId === DEMO_USER_SOCIAL_ID) return ME_SOCIAL;
+  if (userId === DEMO_USER_CREATIVE_ID) return ME_CREATIVE;
+  if (userId === DEMO_USER_HR_ID) return ME_HR;
+  if (userId === DEMO_USER_FINANCE_STAFF_ID) return ME_FINANCE_STAFF;
+  if (userId === DEMO_USER_IT_ID) return ME_IT;
+  if (userId === DEMO_USER_RESORT_ID) return ME_RESORT;
   if (userId === DEMO_USER_CLIENT_ID) return ME_CLIENT;
   if (userId === DEMO_USER_CLIENT_ADMIN_ID) return ME_CLIENT_ADMIN;
   if (userId === DEMO_USER_CLIENT_VIEWER_ID) return ME_CLIENT_VIEWER;

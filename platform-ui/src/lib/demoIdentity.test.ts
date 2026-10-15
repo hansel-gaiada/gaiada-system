@@ -80,3 +80,45 @@ describe("demoIdentityFor — dev-login identity tiers", () => {
     expect(demoIdentityFor("gede@gaiada.com")).toBe("gede-ic");
   });
 });
+
+describe("DW-9a: the department persona logins", () => {
+  const LOGINS: [string, string][] = [
+    ["seo-specialist@gaiada.com", "u-seo"],
+    ["social@gaiada.com", "u-social"],
+    ["creative@gaiada.com", "u-creative"],
+    ["hr-staff@gaiada.com", "u-hr"],
+    ["finance-staff@gaiada.com", "u-finance-staff"],
+    ["it-admin@gaiada.com", "u-it"],
+    ["resort-staff@gaiada.com", "u-resort"],
+  ];
+
+  it("each new address resolves to its own identity, never the IC tier, and is case-insensitive", () => {
+    for (const [email, id] of LOGINS) {
+      expect(demoIdentityFor(email)).toBe(id);
+      expect(demoIdentityFor(email.toUpperCase())).toBe(id);
+    }
+  });
+
+  it("none of the new addresses contains the IC or client token by accident", () => {
+    for (const [email] of LOGINS) {
+      expect(email.includes("ic")).toBe(false);
+      expect(email.includes("client")).toBe(false);
+    }
+  });
+
+  it("the older addresses still resolve as before", () => {
+    expect(demoIdentityFor("seo-staff@gaiada.com")).toBe("seo-staff");
+    expect(demoIdentityFor("gede@gaiada.com")).toBe("gede-ic");
+    expect(demoIdentityFor("webdev@gaiada.com")).toBe("u-dev");
+    expect(demoIdentityFor("webhead@gaiada.com")).toBe("u-webhead");
+    expect(demoIdentityFor("manager@gaiada.com")).toBe("dept-manager");
+    expect(demoIdentityFor("group-owner@gaiada.com")).toBe("demo-owner");
+    expect(demoIdentityFor("viceroy-marketing@gaiada.com")).toBe("demo-viceroy-marketing");
+    expect(demoIdentityFor("hansel@gaiada.com")).toBe("demo-hansel");
+  });
+
+  it("a client address that contains a new token is still a client", () => {
+    expect(demoIdentityFor("social-client@northwind.example")).toBe("demo-client");
+    expect(demoIdentityFor("creative@northwind.example")).toBe("demo-client");
+  });
+});

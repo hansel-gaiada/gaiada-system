@@ -45,9 +45,63 @@ describe("defaultStructure", () => {
   // PV-D13: the seed follows the VERTICAL. Neither the legacy `type` nor a company id (the old
   // hard-coded "co-agency") may select the agency tree.
   it("keys the agency tree on the vertical alone, not on type or id", () => {
-    expect(defaultStructure({ id: "co-agency", name: "X", type: "agency", vertical: "hospitality" }).root.children).toEqual([]);
+    expect(defaultStructure({ id: "co-agency", name: "X", type: "agency", vertical: "general" }).root.children).toEqual([]);
     expect(defaultStructure({ id: "co-agency", name: "X", type: "agency" }).root.children).toEqual([]);
     expect(defaultStructure({ id: "anything", name: "X", type: null, vertical: "agency" }).root.children).toHaveLength(8);
+  });
+});
+
+// DW-9a: the hospitality vertical gets a small seed so the generic workspace has a department to be driven on.
+describe("defaultStructure: the hospitality seed (DW-9a)", () => {
+  const viceroy = () => defaultStructure({ id: "co-resort", name: "Viceroy", type: "resort", vertical: "hospitality" });
+
+  it("seeds Front Office (no bespoke workspace) and HR, Finance and IT", () => {
+    expect(viceroy().root.children.map((c) => [c.id, c.name])).toEqual([
+      ["hosp-dept-1", "Front Office"], ["hosp-dept-2", "HR"], ["hosp-dept-3", "Finance"], ["hosp-dept-4", "IT"],
+    ]);
+  });
+
+  it("never reuses an agency node id, so an org_unit grant cannot cross companies", () => {
+    const ids = (n: { id: string; children: readonly { id: string; children: readonly unknown[] }[] }): string[] =>
+      [n.id, ...n.children.flatMap((c) => ids(c as never))];
+    const agency = new Set(ids(defaultStructure({ id: "co-agency", name: "A", type: "agency", vertical: "agency" }).root as never));
+    const resort = ids(viceroy().root as never).filter((id) => id !== "root");
+    expect(resort.length).toBeGreaterThan(4);
+    for (const id of resort) expect(agency.has(id)).toBe(false);
+  });
+
+  it("places u-resort in Front Office > Reception > Front Desk Agent, at the canonical depth", () => {
+    const fo = viceroy().root.children[0];
+    expect(fo.children[0].kind).toBe("division");
+    expect(fo.children[0].children[0].kind).toBe("role");
+    expect(fo.children[0].children[0].children[0]).toMatchObject({ kind: "person", assigneeId: "u-resort" });
+  });
+
+  it("is keyed by the vertical alone: the other verticals stay empty, and a prototype key is not a vertical", () => {
+    for (const vertical of ["holding", "general", "catering", "unknown", "constructor", "toString", undefined]) {
+      expect(defaultStructure({ id: "x", name: "X", type: null, vertical }).root.children).toEqual([]);
+    }
+    expect(defaultStructure({ id: "anything", name: "X", type: null, vertical: "hospitality" }).root.children).toHaveLength(4);
+  });
+});
+
+describe("defaultStructure: DW-9a placements in the agency tree", () => {
+  it("places u-seo, u-social and u-creative in SEO, Social Media and Creatives, each exactly once, and moves no positional id", () => {
+    const s = defaultStructure({ id: "co-agency", name: "Gaia Digital Agency", type: "agency", vertical: "agency" });
+    const where = (who: string) => {
+      const hit: string[] = [];
+      const walk = (n: { id: string; assigneeId?: string | null; children: readonly never[] }, dept: string) => {
+        if (n.assigneeId === who) hit.push(dept);
+        for (const c of n.children as never[]) walk(c, dept);
+      };
+      for (const d of s.root.children) walk(d as never, d.id);
+      return hit;
+    };
+    expect(where("u-seo")).toEqual(["dept-3"]);
+    expect(where("u-social")).toEqual(["dept-4"]);
+    expect(where("u-creative")).toEqual(["dept-2"]);
+    expect(where("u-dev")).toEqual(["dept-1"]);
+    expect(s.root.children.map((c) => c.id)).toEqual(["dept-1", "dept-2", "dept-3", "dept-4", "dept-5", "dept-6", "dept-7", "dept-8"]);
   });
 });
 

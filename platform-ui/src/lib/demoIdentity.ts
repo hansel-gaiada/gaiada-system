@@ -10,7 +10,8 @@
 // staff address containing "client").
 export type DemoIdentityId =
   | "seo-staff" | "demo-client" | "dept-manager" | "gede-ic" | "demo-hansel" | "demo-viceroy-marketing"
-  | "demo-two-company-client" | "demo-owner" | "demo-client-admin" | "demo-client-viewer" | "u-dev" | "u-webhead";
+  | "demo-two-company-client" | "demo-owner" | "demo-client-admin" | "demo-client-viewer" | "u-dev" | "u-webhead"
+  | "u-seo" | "u-social" | "u-creative" | "u-hr" | "u-finance-staff" | "u-it" | "u-resort";
 
 export function demoIdentityFor(email: string): DemoIdentityId {
   const lower = email.toLowerCase();
@@ -42,6 +43,17 @@ export function demoIdentityFor(email: string): DemoIdentityId {
   // PV2-02: staff of Viceroy AND a client contact of the agency, for PV2-05/PV2-06. BEFORE the "ic" test:
   // "viceroy" contains "ic", which would otherwise demote this address to the IC tier.
   if (lower === "viceroy-marketing@gaiada.com" || lower.includes("viceroy-marketing")) return "demo-viceroy-marketing";
+  // DW-9a: seven more logins for the department workspace persona e2e (e2e/workspace-personas.spec.ts), each ONE grant.
+  // All sit AFTER the "client" test (a client address is the more specific claim, as above) and BEFORE the "ic" test,
+  // because "ic" hides in many natural words ("office", "service", "viceroy", "clinic", "logic") and none of these may
+  // fall to the IC tier by luck. None of the tokens contains "ic" or "client" (the tests pin each address).
+  if (lower === "seo-specialist@gaiada.com" || lower.includes("seo-specialist")) return "u-seo";
+  if (lower === "social@gaiada.com" || lower.includes("social")) return "u-social";
+  if (lower === "creative@gaiada.com" || lower.includes("creative")) return "u-creative";
+  if (lower === "hr-staff@gaiada.com" || lower.includes("hr-staff")) return "u-hr";
+  if (lower === "finance-staff@gaiada.com" || lower.includes("finance-staff")) return "u-finance-staff";
+  if (lower === "it-admin@gaiada.com" || lower.includes("it-admin")) return "u-it";
+  if (lower === "resort-staff@gaiada.com" || lower.includes("resort-staff")) return "u-resort";
   // GM-02b needs a MANAGER-tier identity: the GM console's narrowed department-lead view is gated on
   // `reports.department.view`, which `manager` holds and `member`/`viewer` do not — so neither
   // `demo-hansel` (platform_admin, full access) nor `gede-ic` (member, refused) can exercise it, and
