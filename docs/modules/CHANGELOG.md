@@ -11,6 +11,16 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.148.0` + platform-ui `0.170.0` - PV7-01: the client grain in reports (2026-10-15) - PROTOTYPED
+
+Plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md` (PV7-01); contract FRONTEND-BFF-CONTRACT §53, PERMISSION-CONTRACT §45.
+- **What it adds.** A fifth report grain, `client`: one client's delivery figures summed across its projects (`projects.client_id`, by join). `GET /reports/document?grain=client&scopeRef=<clientId>`, `GET /reports/overview?grain=client`, `POST /reports/export` and the MCP `reports.getDocument` / `reports.getMetrics` accept it.
+- **The arithmetic.** Ratios are Σnumerator/Σdenominator across the client's projects, never a mean; `flow.wip_open_avg` keeps the day count; `discipline.overdue_open` stays point-in-time; `evidence.source_diversity` is not offered. Internal projects and the sentinel internal client are excluded.
+- **Sealing.** Client documents are sealed with each month like the other grains, with the deterministic narrative only (no gateway call per client).
+- **Access.** New action `report_document · read_client` for exactly the tiers that hold `read_project` (company_admin, owner, HR read tier, manager, company-scope member), not the served-provider arm. Staff only; clients never read it.
+- **Migration** `202610151700_reports_client_grain` (grain CHECK widened by column set; the permission seeded on 7 global roles, with assertions). **Restart Cerbos after the deploy.**
+- **UI.** The grain in the type and demo mirrors and the print route; no page yet (PV7-05).
+
 ### platform-ui `0.169.0` - DW-8n: Me › Timesheet shows your own time (2026-10-15) - PROTOTYPED
 
 Plan §8 (Me is personal admin). Found by PV-7.
