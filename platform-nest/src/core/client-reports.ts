@@ -111,6 +111,15 @@ export async function publishDeliveredReport(c: PoolClient, input: DeliveredRepo
     return { id: e.id, created: false, clientId: e.client_id, projectId: e.project_id, title: e.title };
   }
 
+  // The engagement's project must still be THIS client's (`projects.client_id` can change after an engagement is set up).
+  // If it moved, the report is published client-wide for its own client rather than failing the delivery on the composite
+  // FK: the report is about the engagement's client, and the moved project's contacts now belong to someone else.
+  let projectId = input.projectId;
+  if (projectId) {
+    const own = await c.query(`SELECT 1 FROM projects WHERE id = $1 AND client_id = $2`, [projectId, input.clientId]);
+    if (!own.rows[0]) projectId = null;
+  }
+
   const id = newId();
   const f = input.file;
   // The file first: the report's `file_id` is a foreign key to it. The file's target is the report id chosen above.
@@ -125,15 +134,15 @@ export async function publishDeliveredReport(c: PoolClient, input: DeliveredRepo
     `INSERT INTO client_reports (id, tenant_id, client_id, project_id, source, source_id, deliverable_id, title,
                                  period_start, period_end, file_id, status, published_at, published_by, created_by, origin_site)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10::date, $11, 'published', COALESCE($12::timestamptz, now()), $13, $13, $14)`,
-    [id, tenantId, input.clientId, input.projectId, source, sourceId, input.deliverableId, input.title,
+    [id, tenantId, input.clientId, projectId, source, sourceId, input.deliverableId, input.title,
      input.periodStart, input.periodEnd, f.fileId, input.publishedAt ?? null, input.publishedBy, config.originSite],
   );
   if (input.announce) {
     await emitEvent(c, tenantId, CLIENT_REPORT_ENTITY, id, "client_report.published", {
-      clientId: input.clientId, projectId: input.projectId, source,
+      clientId: input.clientId, projectId, source,
     });
   }
-  return { id, created: true, clientId: input.clientId, projectId: input.projectId, title: input.title };
+  return { id, created: true, clientId: input.clientId, projectId, title: input.title };
 }
 
 /** Tell the client's contacts in reach that a report was published: one notification row each (BFF §55.5). Recipients are
