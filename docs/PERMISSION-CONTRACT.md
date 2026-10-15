@@ -2138,7 +2138,7 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §41 (plan `docs/plans/2026-10-13-depart
 - **The scheduled run and the digest** (`POST /dept-kpis/watch` and `/digest`) reuse `report_admin` · `recompute` (company_admin, platform_admin), the gate of `POST /reports/facts/recompute`. The n8n automation account `wf:reports-kpi-watch` holds company_admin, like the other reports flows.
 - **The drivers read** (`GET /dept-kpis/drivers`, 4j-3) uses the unit read's gate, narrowed to heads and the company-wide tier. Placed staff get 403. It is the department appraisal's gate, extracted as one function (`authorizeUnitHeadRead` in `dept-kpis.controller.ts`): Cerbos `dept_kpi_target` · `read` with the unit's ancestry, then `isCompanyWide` or the unit in `loadLedUnitScope`, then 404. A manager placed in the unit and the head of an enclosing unit hold the unit in their led scope and so pass, exactly as for the appraisal.
 
-## 38c. DW-4h — the activity series, the day read and the person filter, BFF §44 (2026-10-15, PLANNED): no new kind, no new action
+## 38c. DW-4h — the activity series, the day read and the person filter, BFF §44 (2026-10-15, PROTOTYPED): no new kind, no new action
 
 - **The series and the day read** (`GET /activity/series`, `/activity/day`) are core reads with no Cerbos kind of their own. They are gated by the person-axis rule `GET /pm/productivity` already applies, moved to a shared helper:
   - yourself;

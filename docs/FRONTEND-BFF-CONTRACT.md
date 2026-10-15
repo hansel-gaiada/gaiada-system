@@ -9057,7 +9057,7 @@ Built as §48.1 to §48.4 and §48.6 specify. The simulated mode is what runs; *
 - **"Email this client".** `components/clients/EmailClientButton.tsx`, placed on the client Overview in a "Primary contact" row above the ball lists (the Overview showed no contact before, so the row is new; the People tab keeps the full contact details). Per PV: the label is "Email (Gmail)" (it is outside the portal; the portal Conversation stays the client channel of record), the secondary ghost style, after any "Message in portal" action (there is none on the Overview today). With no contact email the button is disabled and its `aria-describedby` points at the visible text "This client has no contact email". The "emailed" activity row is staff-only: the UI adds nothing to the Conversation thread and renders nothing client-visible.
 - **DEMO_MODE.** `demoFixtures.ts` answers the routes in simulated mode: two inbox threads (one HTML with a script, to show the sandbox), send appends to Sent in memory, disconnect and connect work, and `demo-client` gets 403.
 
-## 48a. Time entries read by tier (DW-D29, owner 2026-10-15) — `platform-nest/src/core/client-work.controller.ts` (`listTime`) — **STATUS: PLANNED**
+## 48a. Time entries read by tier (DW-D29, owner 2026-10-15) — `platform-nest/src/core/client-work.controller.ts` (`listTime`) — **STATUS: BUILT, PROTOTYPED (backend: the HTTP suite `platform-nest/src/core/time-entries-tier.test.ts` is written for the Linux CI gate; no UI change)**
 
 **Why.** DW-8n's finding: `GET /api/:t/time-entries` answered every member and viewer with the whole company's entries (up to 500). It authorized only `time_entry` · `read` on the tenant, which every staff role holds. DW-D29 narrows it in line with DW-D19.
 
@@ -9075,6 +9075,12 @@ Built as §48.1 to §48.4 and §48.6 specify. The simulated mode is what runs; *
 - Writes are unchanged: update and delete stay owner-or-manager (`resource_time_entry.yaml`).
 - There is no Cerbos policy change, because the kind-level `read` stays the entry gate and the narrowing happens in the handler (PERMISSION-CONTRACT §40a), exactly as `GET /work-activity?personId=` does.
 - **The UI already defaults** to the caller's own (DW-8n). A member's "Everyone" request now returns their own entries from the server too.
+
+**As built.**
+- `ClientWorkController.timeReadScope` (`core/client-work.controller.ts`) turns the request into the list of user ids the query is limited to (`null` = no limit, for the `unrestricted` and `company_wide` tiers). `listTime` passes it to the SQL as `user_id = ANY($3::uuid[])`.
+- **`unit_scoped` set:** the caller's own id plus `loadUnitRoster(c, tenantId, [...loadLedUnitScope(c, tenantId, userId, asOf, principal)], asOf)` (`modules/reports/person-scope.ts`), under `withTenants([tenantId], …, { modules: PERSON_SCOPE_MODULES })`, with `asOf` = today in `REPORTS_TZ`. A head who leads no unit sees their own entries only.
+- **`?userId=X`:** `assertPersonAxisReadAllowed` (the shared gate) first, then the uuid check. A `self_only` caller naming someone else is refused before the value is inspected, so a non-uuid is a 403 for them and a 400 for the other tiers. `X` equal to the caller is their own entries.
+- **`?mine=me`** wins over `userId` (which is then not read). A caller with no user id (a service call) keeps the old reading, every entry, only on the wide tiers; the other tiers get none.
 
 **Tests:** an HTTP suite on the Linux CI gate.
 - A member's unfiltered list holds only their own rows, even when colleagues logged time.
