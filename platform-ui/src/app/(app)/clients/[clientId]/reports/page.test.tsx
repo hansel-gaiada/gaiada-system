@@ -15,7 +15,10 @@ vi.mock("@/lib/session-server", () => ({ getSessionUserId: vi.fn(async () => "u1
 vi.mock("@/lib/platform", () => ({ getMe: vi.fn(async () => ({})), PlatformError: class PlatformError extends Error { status = 0; } }));
 vi.mock("@/lib/tenant", () => ({ getActiveTenant: vi.fn(async () => "t1") }));
 vi.mock("@/lib/clientReports-data", () => ({ listClientReports: vi.fn() }));
-vi.mock("@/lib/clientReportsActions", () => ({ publishClientReportAction: vi.fn(), withdrawClientReportAction: vi.fn() }));
+vi.mock("@/lib/clientReportsActions", () => ({
+  publishClientReportAction: vi.fn(), withdrawClientReportAction: vi.fn(),
+  draftAccountSummaryAction: vi.fn(), saveSummaryNarrativeAction: vi.fn(),
+}));
 
 import { PlatformError } from "@/lib/platform";
 import { listClientReports } from "@/lib/clientReports-data";
@@ -118,5 +121,83 @@ describe("client hub Reports tab", () => {
     await mount();
     expect(screen.queryByText(/No report has been made/)).toBeNull();
     expect(screen.getByText(/cannot be read right now/i)).toBeInTheDocument();
+  });
+});
+
+// ── PV7-07: the monthly account summary on the Reports tab ─────────────────────────────────────────
+describe("client hub Reports tab: the account summary (PV7-07)", () => {
+  const snap = {
+    version: 1 as const, clientId: "cl-1", clientName: "Northwind", period: "2026-09", periodStart: "2026-09-01", periodEnd: "2026-09-30",
+    generatedAt: "2026-10-03T09:00:00.000Z",
+    projects: [{ projectId: "p1", name: "Website relaunch", status: "active", milestones: { total: 2, done: 1, upcoming: 1, late: 0, undated: 0 }, deliverables: { total: 1, delivered: 1, late: 0 }, nextMilestone: null }],
+    waiting: { onClient: { count: 1, oldestSince: null }, onUs: { count: 0, oldestSince: null } },
+    completed: { milestones: { count: 0, knownSince: "2026-01-01", wholeMonthKnown: true, items: [] }, deliverables: { count: 0, basis: "status_changed_in_month" as const, items: [] } },
+    turnaround: null, results: null, reports: [], unavailable: [],
+  };
+  const summary = (over: Partial<StaffClientReport> = {}): StaffClientReport => ({
+    ...base, id: "s1", title: "Account summary, September 2026", source: "account_summary", status: "draft", file: null,
+    publishedAt: null, publishedByName: null, clientVisible: false, readCount: 0,
+    period: "2026-09", narrativeMd: "In September, one deliverable was delivered.", narrativeSource: "deterministic", generatedAt: snap.generatedAt, snapshot: snap,
+    ...over,
+  });
+
+  it("offers 'Draft account summary' with last month selected, above the list (and on an empty list)", async () => {
+    listMock.mockResolvedValue([]);
+    await mount();
+    const form = screen.getByRole("form", { name: "Draft account summary" });
+    const month = within(form).getByLabelText("Month") as HTMLInputElement;
+    expect(month).toHaveAttribute("type", "month");
+    expect(month.value).toMatch(/^\d{4}-\d{2}$/);
+    expect(month.max).toMatch(/^\d{4}-\d{2}$/);
+    expect(month.value < month.max).toBe(true); // last month, never later than this one
+    expect(screen.getByText(/No report has been made for this client yet/)).toBeInTheDocument();
+  });
+
+  it("a refused read offers no draft control and is still a refusal in words", async () => {
+    const e = new PlatformError(403, "denied") as Error & { status: number };
+    e.status = 403;
+    listMock.mockRejectedValue(e);
+    await mount();
+    expect(screen.queryByRole("form", { name: "Draft account summary" })).toBeNull();
+    expect(screen.getByText(/You don't have access to/)).toBeInTheDocument();
+  });
+
+  it("a draft summary opens to the narrative editor and the frozen figures, and Publish has no 'no file' warning", async () => {
+    listMock.mockResolvedValue([summary()]);
+    await mount();
+    const row = screen.getByRole("listitem");
+    expect(row).toHaveTextContent("Account summary");
+    expect(row).toHaveTextContent("The PDF is made when you publish");
+    expect(row).not.toHaveTextContent("No file yet");
+    expect(row).not.toHaveTextContent(/no file yet, so it cannot be published/);
+    const details = row.querySelector("details")!;
+    expect(details).toHaveAttribute("open");
+    expect(within(row).getByLabelText(/Narrative/)).toHaveValue("In September, one deliverable was delivered.");
+    expect(within(row).getByRole("button", { name: "Save narrative" })).toBeDisabled();
+    expect(within(row).getByRole("heading", { level: 3, name: "Projects" })).toBeInTheDocument();
+    expect(within(row).getByText("Website relaunch", { selector: "td" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Publish" })).toBeEnabled();
+  });
+
+  it("a published or withdrawn summary shows its narrative and figures read-only, with the PDF link", async () => {
+    const file = { id: "pdf1", filename: "account-summary-2026-09.pdf", contentType: "application/pdf", byteSize: 9 };
+    listMock.mockResolvedValue([summary({ id: "s2", status: "published", file, publishedAt: "2026-10-04T00:00:00Z", publishedByName: "Made Prabowo", clientVisible: true, narrativeSource: "human" })]);
+    await mount();
+    const row = screen.getByRole("listitem");
+    expect(row.querySelector("details")).not.toHaveAttribute("open");
+    expect(within(row).queryByLabelText(/Narrative/)).toBeNull();
+    expect(within(row).queryByRole("button", { name: "Save narrative" })).toBeNull();
+    expect(row).toHaveTextContent("In September, one deliverable was delivered.");
+    expect(within(row).getByRole("link", { name: /PDF/ })).toHaveAttribute("href", "/api/files/pdf1");
+    expect(within(row).getByText(/Client sees this/)).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Withdraw" })).toBeInTheDocument();
+  });
+
+  it("a summary row whose payload lacks the snapshot shows no editor (never an empty one), and other sources never get one", async () => {
+    listMock.mockResolvedValue([summary({ id: "s3", snapshot: undefined }), { ...base, id: "p9" }]);
+    await mount();
+    const rows = screen.getAllByRole("listitem");
+    for (const row of rows) expect(row.querySelector("details")).toBeNull();
+    expect(screen.queryByLabelText(/Narrative/)).toBeNull();
   });
 });
