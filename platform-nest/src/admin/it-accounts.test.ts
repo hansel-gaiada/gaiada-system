@@ -312,14 +312,16 @@ describe.skipIf(!TEST_URL || !live)("P2-13 · /api/:t/it/accounts over the real 
 
   // ── disable / enable / reset ───────────────────────────────────────────────────────────────────
 
-  it("disable is idempotent and reports whether it actually acted", async () => {
+  it("disable reports whether it switched the login off, and cuts the sessions either way", async () => {
     realm.set("plain.member@ex.com", { id: "kc-d", enabled: true });
     const first = await act(plainMember, "disable", asUser(itAdmin));
     expect(first.json()).toEqual({ ok: true, alreadyDisabled: false, sessionsEnded: true });
     const second = await act(plainMember, "disable", asUser(itAdmin));
-    expect(second.json()).toEqual({ ok: true, alreadyDisabled: true, sessionsEnded: false });
-    // The second call issues no PUT — "nothing to do" rather than a redundant upstream write.
+    // DW-7h: an account already disabled (by hand, or by the first call) still has its live sessions cut, because that is
+    // exactly when IT needs it; it just issues no second PUT to switch the login off.
+    expect(second.json()).toEqual({ ok: true, alreadyDisabled: true, sessionsEnded: true });
     expect(kcCalls.filter((c) => c.method === "PUT")).toHaveLength(1);
+    expect(kcCalls.filter((c) => c.method === "POST" && c.url.endsWith("/users/kc-d/logout"))).toHaveLength(2);
   });
 
   it("enable is idempotent the same way", async () => {
