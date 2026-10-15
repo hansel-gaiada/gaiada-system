@@ -25,7 +25,7 @@ Ruling DW-D24; plan §8.1 row 8j.
 
 **Cerbos policy change:** the new `resource_personal_mailbox.yaml`. Restart Cerbos after the deploy and probe it: the status route answers `{connected:false}` for a fresh person.
 
-**Compose:** `GMAIL_MODE` (default `simulated`) and the Gmail OAuth client env, both optional.
+**No compose change.** `GMAIL_MODE` defaults to `simulated` in code. Switching to live later (DW-11) needs `GMAIL_MODE` and the Gmail OAuth client env added to the platform service's compose `environment:` block (a `.env` value alone never reaches the container).
 
 **Who can read and send.** Each person links only their own mailbox. Nobody reads or sends as anyone else, company_admin and platform_admin included: the deny for non-owners applies to every action. Automation and bot principals are refused. A viewer holds no mailbox.
 
