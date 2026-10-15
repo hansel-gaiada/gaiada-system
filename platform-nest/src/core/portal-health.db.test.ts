@@ -15,10 +15,15 @@
 // owner or a person.
 //
 // Teeth (recorded in the PV7-02 hand-back, run on a throwaway branch with real red CI):
-//   1. In client-ball.ts, replace the gate predicate `gateClientVisible("g")` with `g.deleted_at IS NULL` (an internal gate
-//      reaches the payload): "internal gates are never listed" and the exact waiting counts fail.
-//   2. In portal-visibility.ts, make `wideOrOwnProject` admit a project-less row (`allowNullProject` true): B's client-wide
-//      contract, request and thread reach the project-scoped contact and the B section assertions fail.
+//   1. An internal gate in the payload. The ball has TWO layers against it: the gate predicate in client-ball.ts
+//      (`gateClientVisible("g")`) and the `clientVisible` filter in portal-health.controller.ts (`portalBall`). Dropping only the
+//      predicate is caught by the hub-ball parity suite (and the filter keeps this payload clean). Dropping BOTH puts the
+//      internal gate on A's and B1's projects into the payload: "internal gates are never listed", the exact waiting counts and
+//      the body scan fail here.
+//   2. In portal-visibility.ts, make `wideOrOwnProject` admit a project-less row (`allowNullProject` true): the project-less
+//      triaged requests reach the project-scoped contact's turnaround (n = 6, not 3) and "our side counts ONLY B1's" fails,
+//      as does portal-visibility.test.ts. The ball's grouping alone would hide this leak (a project-less item belongs to no
+//      project section), which is why the turnaround carries the fixture for it.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
@@ -219,6 +224,22 @@ describe.skipIf(!TEST_URL)("PV7-02 · portal health: isolation, per client and p
       await cr(f.crB1, B, pB1, "B1 request");
       await cr(f.crB2, B, pB2, "B2 request");
 
+      // Change requests we TRIAGED: the "our side" turnaround samples. B1: 3 x 1 day. B2: 3 x 7 days. B with NO project: 3 x 5 days.
+      // The project-less ones are what `wideOrOwnProject` must keep from a project-scoped contact (tooth 2).
+      const triaged = (clientId: string, projectId: string | null, days: number) =>
+        q.query(
+          `INSERT INTO webdev_change_requests (id, tenant_id, source, kind, title, status, route, client_id, project_id, requested_by, triaged_by,
+                                              triaged_at, created_at, origin_site)
+           VALUES ($1, $2, 'portal', 'content', 'Triaged', 'triaged', 'mini_run', $3, $4, $5, $5,
+                   now() - interval '10 days' + make_interval(days => $6::int), now() - interval '10 days', $7)`,
+          [newId(), co, clientId, projectId, admin, days, site()],
+        );
+      for (let i = 0; i < 3; i++) {
+        await triaged(B, pB1, 1);
+        await triaged(B, null, 5);
+        await triaged(B, pB2, 7);
+      }
+
       // ── conversation: client messages waiting for our reply ──────────────────────────────────────
       const thread = (id: string, clientId: string, projectId: string, subject: string) =>
         q.query(
@@ -416,6 +437,12 @@ describe.skipIf(!TEST_URL)("PV7-02 · portal health: isolation, per client and p
       const bSec = section(await health(m.userId), m.clientB);
       expect(bSec.turnaround?.client).toEqual({ medianDays: 2, n: 3, withheld: false });
     });
+
+    it("B (limited to B1): our side counts ONLY B1's triaged requests (n = 3, 1 day), never the project-less ones or B2's", async () => {
+      const bSec = section(await health(m.userId), m.clientB);
+      // 3 on B1 (1 day), 3 with no project (5 days), 3 on B2 (7 days). A reach that admitted the project-less rows would read n = 6.
+      expect(bSec.turnaround?.ours).toEqual({ medianDays: 1, n: 3, withheld: false });
+    });
   });
 
   // ── the positive control ──────────────────────────────────────────────────────────────────────────
@@ -441,6 +468,8 @@ describe.skipIf(!TEST_URL)("PV7-02 · portal health: isolation, per client and p
       const bSec = section(await health(wideB), m.clientB);
       expect(bSec.turnaround?.client.n).toBe(13);
       expect(bSec.turnaround?.client.withheld).toBe(false);
+      // And every triaged request: 3 + 3 + 3, median of [1,1,1,5,5,5,7,7,7] = 5.
+      expect(bSec.turnaround?.ours).toEqual({ medianDays: 5, n: 9, withheld: false });
     });
   });
 

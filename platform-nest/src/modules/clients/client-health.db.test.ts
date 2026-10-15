@@ -6,10 +6,11 @@
 // rules themselves are pinned to the day by the golden table (client-health-rules.test.ts); this suite proves the READS feed
 // them the right signals, per client, with the right scopes.
 //
-// Teeth (recorded in the PV7-02 hand-back):
-//   1. In client-health.ts, drop `["social"]` from the "ball" read: "THE SOCIAL WALL" fails (waitingOnClient reads 0).
-//   2. In client-health.ts, read the milestone `late` count with `<=` instead of `<` ... or add a per-client query to a source:
-//      "a fixed number of queries" fails.
+// Teeth:
+//   * THE SOCIAL WALL is proven load-bearing inside the suite: the same board read with the "ball" source's module scope
+//     dropped (through the injected reader) sees ZERO post reviews and raises nothing. Dropping `["social"]` from the "ball"
+//     read in client-health.ts fails "an unreviewed post counts" the same way.
+//   * "a fixed number of queries": a per-client query added to any source changes the count between the board read and the same read after 40 more clients.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../config";
