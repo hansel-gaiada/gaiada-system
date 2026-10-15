@@ -91,12 +91,12 @@ describe("knowledge.search (DW-D26)", () => {
     expect(JSON.stringify(out)).not.toContain("erp:");
   });
 
-  it("an identity with no tenantId: the same plain-array public answer as before (the request body is unchanged)", async () => {
+  it("an identity with no tenantId: a plain-array answer of the PUBLIC tier only (the store is never asked for its unfiltered internal tier)", async () => {
     const calls = stubFetch({ knowledge: { status: 200, json: { hits: [pubHit(1)] } } });
     const out = JSON.parse(await run({ query: "hello", scope: "chat-1" }));
     expect(out).toEqual([pubHit(1)]);
     expect(calls).toHaveLength(1);
-    expect(bodyOf(calls[0])).toEqual({ query: "hello", scope: "chat-1" });
+    expect(bodyOf(calls[0])).toEqual({ query: "hello", scope: "chat-1", publicOnly: true });
   });
 
   it("publicOnly: true skips the platform even with identity and tenantId", async () => {
