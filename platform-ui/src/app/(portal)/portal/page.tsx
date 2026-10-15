@@ -3,12 +3,15 @@ import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActivePortalCompany } from "@/lib/portal-company";
-import { getPortalOverview } from "@/lib/portal-data";
+import { getPortalHealth, getPortalOverview } from "@/lib/portal-data";
+import { getPortalCentreResults } from "@/lib/clientCentre-data";
 import { money, overallProgress, portalDate, relativeDays } from "@/lib/portal";
 import { isClientOnly } from "@/lib/rbac";
 import { Card, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { PortalLive } from "@/components/portal/PortalLive";
+import { PortalHealthBlock } from "@/components/portal/PortalHealthBlock";
+import { PortalResultsHeadline } from "@/components/portal/PortalResultsHeadline";
 import { PortalBar, PortalFacts, PortalFigure, PortalLink, PortalPageHead } from "@/components/portal/PortalBits";
 
 // CP-8 — the portal's front page. Answers four questions, in this order:
@@ -30,9 +33,12 @@ export default async function PortalOverviewPage() {
   // portal client. They get the same explanation as the BFF's 403 below, never a bare "no workspace":
   // before PV2-05 a staff member reached the 403 through their own employer, and the teach-state was
   // what told them why the page is empty.
-  const { overview, isPortalClient } = tenant
-    ? await getPortalOverview(userId, tenant)
-    : { overview: null, isPortalClient: false };
+  //
+  // PV7-03: the health read rides alongside the overview (one round trip of latency, not two). For anyone who is
+  // not a portal client it is the BFF's 403, which the reader turns into `null` and this page ignores.
+  const [{ overview, isPortalClient }, health] = tenant
+    ? await Promise.all([getPortalOverview(userId, tenant), getPortalHealth(userId, tenant)])
+    : [{ overview: null, isPortalClient: false }, null];
 
   // The BFF answers 403 for TWO different people and they need different words.
   //
@@ -91,6 +97,21 @@ export default async function PortalOverviewPage() {
   }
 
   const now = new Date();
+  // PV7-03: the results headline reads the portal's existing results route once per client the caller reaches. A
+  // failed read is `null` (never an empty result), and the BFF itself says `visible: false` for a contact limited to
+  // some projects (PV-D37), so nothing here decides who may see results.
+  // The clients come from the health read when it succeeded (the same scope, one section each, so a results section lines
+  // up with its health section), else from the overview's own list.
+  const resultClients = health
+    ? health.clients.map((c) => ({ id: c.clientId, name: c.name }))
+    : overview.clients.length > 0 ? overview.clients : overview.client ? [overview.client] : [];
+  const resultSections = await Promise.all(
+    resultClients.map(async (c) => ({
+      clientId: c.id,
+      name: c.name,
+      results: tenant ? await getPortalCentreResults(userId, tenant, c.id) : null,
+    })),
+  );
   const percent = overallProgress(overview);
   const fin = overview.finance.primary;
   const needs = overview.needsYou;
@@ -147,6 +168,12 @@ export default async function PortalOverviewPage() {
               signature items. You can still read everything and send feedback.
             </p>
           )}
+        </Card>
+
+        {/* 1b — Project health (PV7-03): facts per client and project, never a verdict (L3). The blended progress card
+            below is unchanged: it stays the all-clients figure; health is read per client here. */}
+        <Card title="Project health">
+          <PortalHealthBlock health={health} now={now} />
         </Card>
 
         {/* 2 — Progress */}
@@ -251,6 +278,11 @@ export default async function PortalOverviewPage() {
             <PortalLink href="/portal/deliverables">Files &amp; deliverables</PortalLink>
             <PortalLink href="/portal/timeline">Full timeline</PortalLink>
           </div>
+        </Card>
+
+        {/* 5 — Results headline (PV7-03): the first figure of each running service, from the existing results route. */}
+        <Card title="Results at a glance">
+          <PortalResultsHeadline sections={resultSections} />
         </Card>
       </div>
     </>

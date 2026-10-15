@@ -57,6 +57,42 @@ test.describe("client hub", () => {
     await expect(page.locator(".ch-ball__item--stale .ch-ball__since")).toHaveCSS("font-weight", "600");
   });
 
+  // PV7-03 — the Health card, below the two ball lists. cl-1 is late on work 14+ days in the demo (off track), cl-3's reply-time
+  // read "failed" (unknown, and the card says so rather than showing a state it cannot judge).
+  test("PV7-03: the Health card shows the state, its reasons, per-project health, reply times and the markers", async ({ page }) => {
+    await openAsAgency(page, "/clients/cl-1");
+    const card = page.locator("section.lux-card", { has: page.locator(".ch-health-chip") });
+    await expect(card).toBeVisible();
+    await expect(card.locator(".ch-health-chip")).toHaveText("Off track");
+    await expect(card.locator("[data-reason]").first()).toBeVisible();
+    await expect(card.getByText(/late deliverables? and milestones?|late deliverable or milestone/).first()).toBeVisible();
+
+    // It sits below the two lists and does not repeat their items.
+    const order = await page.evaluate(() => {
+      const top = (el: Element | null) => (el ? el.getBoundingClientRect().top : -1);
+      const heading = (t: string) => Array.from(document.querySelectorAll("h3")).find((h) => h.textContent?.trim().startsWith(t)) ?? null;
+      return { us: top(heading("Waiting on us")), health: top(heading("Health")), tiles: top(document.querySelector(".ch-tiles")) };
+    });
+    expect(order.us).toBeLessThan(order.health);
+    expect(order.health).toBeLessThan(order.tiles);
+    await expect(page.getByRole("link", { name: /Triage a new change request/ })).toHaveCount(1);
+
+    // Per-project health with the PV-3 marker, and the reply times of both sides.
+    const row = card.locator('tr[data-project="p-web-1"]');
+    await expect(row.getByText("Client sees this")).toBeVisible();
+    await expect(row.getByText(/\d+ done · \d+ upcoming ·/)).toBeVisible();
+    await expect(card.locator('[data-part="turnaround"]').getByText("Client, all together")).toBeVisible();
+    await expect(card.locator('[data-part="turnaround"]').getByText("Us, all together")).toBeVisible();
+  });
+
+  test("PV7-03: a failed reply-time read is 'Could not be loaded' and the state is Unknown, never On track", async ({ page }) => {
+    await openAsAgency(page, "/clients/cl-3");
+    const card = page.locator("section.lux-card", { has: page.locator(".ch-health-chip") });
+    await expect(card.locator(".ch-health-chip")).toHaveText("Unknown");
+    await expect(card.getByText(/Reply times: Could not be loaded/)).toBeVisible();
+    await expect(card.getByText("On track")).toHaveCount(0);
+  });
+
   test("the hub's tabs are the portal's areas plus Internal (PV3-05)", async ({ page }) => {
     await openAsAgency(page, "/clients/cl-1");
     const tabs = page.getByRole("navigation", { name: "Client sections" }).getByRole("link");

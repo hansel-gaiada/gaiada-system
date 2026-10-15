@@ -587,3 +587,24 @@ export function targetMet(k: Pick<ResultsKpi, "value" | "target" | "unit">): boo
   if (k.value === null || k.target === null) return null;
   return k.unit === "position" ? k.value <= k.target : k.value >= k.target;
 }
+
+// ── The portal Overview's results headline (PV7-03) ──────────────────────────────────────────────────
+
+/** Figures that stay on the full Services & results page and never go into a headline: they are money-like (PV-D38). */
+const HEADLINE_BANNED: ReadonlyArray<{ service: ServiceKey; key: string }> = [{ service: "search_ads", key: "conversion_value" }];
+
+export interface ResultsHeadlineItem { service: ServiceKey; areaId: string; cardTitle: string; kpi: ResultsKpi }
+
+/** Up to `max` headline numbers: the first KPI of each ACTIVE service card, in the payload's order. A card with no KPI
+ *  (the website card) adds nothing, and a banned money-like figure is skipped in favour of the card's next one. An
+ *  unmeasured KPI is kept (its value is `null`): the page says "Not measured yet", never 0. */
+export function portalResultsHeadline(results: BusinessResults, max = 4): ResultsHeadlineItem[] {
+  const out: ResultsHeadlineItem[] = [];
+  for (const card of results.services) {
+    if (out.length >= max) break;
+    if (card.status !== "active") continue;
+    const kpi = card.kpis.find((k) => !HEADLINE_BANNED.some((b) => b.service === card.service && b.key === k.key));
+    if (kpi) out.push({ service: card.service, areaId: card.areaId, cardTitle: card.title, kpi });
+  }
+  return out;
+}

@@ -3,9 +3,10 @@ import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { getClientOverview } from "@/lib/clientHub";
+import { getClientHealth, getClientOverview } from "@/lib/clientHub";
 import { Card, KpiTile, StatusBadge } from "@/components/ui";
 import { ClientBallList } from "@/components/clients/ClientBallList";
+import { ClientHealthCard } from "@/components/clients/ClientHealthCard";
 import { formatDate } from "@/lib/format";
 import { clientContactEmail } from "@/lib/gmail";
 import { EmailClientButton } from "@/components/clients/EmailClientButton";
@@ -33,7 +34,12 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
   const { clientId } = await params;
   if (!tenant) notFound();
 
-  const o = await getClientOverview(userId, tenant, clientId);
+  // PV7-03: the health read rides alongside the overview. It is fail-soft (`null` = "could not be loaded"), unlike the
+  // overview, which throws: the Health card is one block of a page whose other blocks are still true.
+  const [o, health] = await Promise.all([
+    getClientOverview(userId, tenant, clientId),
+    getClientHealth(userId, tenant, clientId),
+  ]);
   if (!o) notFound();
 
   // Resolved ONCE, here, and passed down — never read from the clock inside the list component,
@@ -75,6 +81,10 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
           />
         </Card>
       </div>
+
+      {/* PV7-03: Health sits BELOW the two ball lists and never repeats their items: its reasons are counts and dates,
+          and it says the items are listed above. The chip is the one new thing; per-project health and reply times follow. */}
+      <ClientHealthCard health={health} />
 
       <div className="ch-tiles">
         <KpiTile

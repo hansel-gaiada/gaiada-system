@@ -22,7 +22,7 @@ import type { DocumentItem } from "./documents";
 import type {
   PortalConversationDetail, PortalConversationList, PortalMeetingMinutes,
   PortalChangeRequest, PortalContract, PortalContractDetail, PortalDeliverable, PortalInvoice,
-  PortalInvoiceDetail, PortalSimulatedPayment, PortalMilestone, PortalOverview, PortalProfile, PortalProject, PortalProjectDetail,
+  PortalInvoiceDetail, PortalSimulatedPayment, PortalMilestone, PortalHealth, PortalOverview, PortalProfile, PortalProject, PortalProjectDetail,
   PortalRun, PortalRunDetail, PortalSocialReview, PortalTimelineEvent,
 } from "./portal";
 
@@ -56,6 +56,17 @@ export async function getPortalOverview(
     // BackendPending note rather than 500ing on a version skew.
     if (e instanceof PlatformError && e.status === 404) return { overview: null, isPortalClient: true };
     throw e;
+  }
+}
+
+/** PV7-03 (BFF §54.5): the caller's project health, one section per client. DEGRADE RULE: any failure (including the
+ *  403 a staff member gets and a server that predates §54) returns `null`, and the Overview says "Could not be loaded".
+ *  The block must not take the front page down, and a failed read must never read as an empty or healthy project. */
+export async function getPortalHealth(userId: string, tenant: string): Promise<PortalHealth | null> {
+  try {
+    return await platformFetch<PortalHealth>(`/api/${tenant}/portal/health`, userId);
+  } catch {
+    return null;
   }
 }
 

@@ -32,6 +32,7 @@ import { assistantDemo } from "./demoAssistant";
 import { NETWORK_FIXTURES } from "./demoNetwork";
 import { websiteAccessDemo } from "./demoWebsiteAccess";
 import { billingDemo, demoBillingNeedsClient, demoBillingNeedsUs, demoBillingPendingTotal } from "./demoBilling";
+import { buildDemoClientHealth } from "./demoClientHealth";
 
 export interface DemoResult {
   status: number;
@@ -2035,6 +2036,27 @@ function daysAgoIso(days: number): string {
   return d.toISOString();
 }
 
+/** The hub overview's two ball lists for one demo client, from the stores the other tabs read (extracted in PV7-03 so the
+ *  Health card reads the same lists as the overview). */
+function demoClientBall(cid: string) {
+  const convNeedsUs = demoConversationNeedsUs(cid);
+  const needsUs = [
+    ...convNeedsUs.items,
+    ...demoBillingNeedsUs(cid),
+    ...(cid === "cl-1"
+      ? [{ kind: "request", id: "dcr-1", label: "Triage a new change request", context: "Update the pricing page copy", since: daysAgoIso(2), href: `/clients/${cid}/work`, clientVisible: true }]
+      : []),
+  ];
+  // PV3-05: the review item gives the Projects area's post-review list a reachable state in demo mode.
+  const needsClient = [
+    ...demoBillingNeedsClient(cid),
+    ...(cid === "cl-1"
+      ? [{ kind: "review", id: "drv-1", label: "Awaiting client post approval", context: "Launch announcement", href: `/clients/${cid}/work`, since: daysAgoIso(3), clientVisible: true }]
+      : []),
+  ];
+  return { needsUs, needsClient, conversationsAwaitingReply: convNeedsUs.count };
+}
+
 /** Apply the client facet to a PM-store result for the TASK LIST route only.
  *
  *  This lives here, not in `demoPm.ts`, because the project→client mapping is in THIS file's
@@ -3086,21 +3108,8 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     // billing area reads and writes, so deciding a payment there clears its item here. One untriaged
     // request stays a literal on the first demo client, so "waiting on us" has a non-billing item too.
     // PV4-09: threads waiting on us come from the conversation store, so the thread page and the Overview agree.
-    const convNeedsUs = demoConversationNeedsUs(cid);
-    const needsUs = [
-      ...convNeedsUs.items,
-      ...demoBillingNeedsUs(cid),
-      ...(cid === "cl-1"
-        ? [{ kind: "request", id: "dcr-1", label: "Triage a new change request", context: "Update the pricing page copy", since: daysAgoIso(2), href: `/clients/${cid}/work`, clientVisible: true }]
-        : []),
-    ];
-    // PV3-05: the review item gives the Projects area's post-review list a reachable state in demo mode.
-    const needsClient = [
-      ...demoBillingNeedsClient(cid),
-      ...(cid === "cl-1"
-        ? [{ kind: "review", id: "drv-1", label: "Awaiting client post approval", context: "Launch announcement", href: `/clients/${cid}/work`, since: daysAgoIso(3), clientVisible: true }]
-        : []),
-    ];
+    // PV7-03: the Health read below calls the same function, so the two cannot disagree.
+    const { needsUs, needsClient, conversationsAwaitingReply } = demoClientBall(cid);
     const money = invoices.length
       ? {
           currency: String(invoices[0].currency ?? "USD"),
@@ -3137,8 +3146,32 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       money: { byCurrency: money ? [money] : [], primary: money },
       needsUs,
       needsClient,
-      conversationsAwaitingReply: convNeedsUs.count,
+      conversationsAwaitingReply,
     });
+  }
+  // PV7-03 — client health for ONE client (BFF §54.2), built from the same stores as the overview above. The board
+  // (`/clients/health`, PV7-05) is a different route: a static segment, never read as a client id.
+  const clientHealth = p.match(/^\/api\/([^/]+)\/clients\/([^/]+)\/health$/);
+  if (clientHealth && clientHealth[2] !== "health") {
+    const [, tenantSlug, cid] = clientHealth;
+    const client = CLIENTS.find((c) => c.id === cid);
+    if (!client) return { status: 404, json: { error: "client not found" } };
+    const projects = (PROJECTS[tenantSlug] ?? []).filter((pr) => {
+      const row = pr as { client_id?: string; is_internal?: boolean };
+      return row.client_id === cid && row.is_internal !== true;
+    }) as Array<{ id: string; name: string; status: string }>;
+    const ball = demoClientBall(cid);
+    return ok(buildDemoClientHealth({
+      clientId: cid, name: String(client.name), status: String(client.status ?? "active"), now: new Date(),
+      projects: projects.map((pr) => ({ id: pr.id, name: pr.name, status: pr.status })),
+      deliverables: DELIVERABLES
+        .filter((d) => demoDeliverableClient(d) === cid)
+        .map((d) => ({ projectId: String(d.project_id), status: String(d.status), dueDate: (d.due_date as string | null) ?? null })),
+      invoices: INVOICES
+        .filter((inv) => inv.clientId === cid)
+        .map((inv) => ({ status: String(inv.status), dueDate: (inv.dueDate as string | null) ?? null })),
+      needsUs: ball.needsUs, needsClient: ball.needsClient, conversationsAwaitingReply: ball.conversationsAwaitingReply,
+    }));
   }
   // CC-D10 — notes + history, mirroring clients.controller.ts: notes newest first, history built from
   // what this demo session actually did (the PATCH below appends to it), never a hand-written story.
