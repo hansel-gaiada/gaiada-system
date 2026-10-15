@@ -11,6 +11,14 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.150.0` - DW-4h privacy fix: the member-level activity feed no longer lists person-grain module rows (2026-10-15) - PROTOTYPED
+
+Contract: `docs/FRONTEND-BFF-CONTRACT.md` §44.5 (amended) and `docs/PERMISSION-CONTRACT.md` §38c.
+- Since 1.0.0-alpha.406, the audit-log bridge writes person-grain rows (time logged, check-ins, leave decided, journals, learning, site edits and others) into `work_activity`, and `GET /api/:t/work-activity` without a filter is readable by any member. So a member could list who logged time or decided a leave request across the company, against DW-D19 and DW-D29 (time entries: your own, your unit's for a head, HR and admins by scope).
+- `GET /work-activity` now excludes the bridged sources (`BRIDGED_SOURCES` in `core/activity-kinds.ts`) in every mode. Those rows are read only through the gated `GET /activity/series` and `/activity/day`. The feed lists exactly what it listed before DW-4h (project, GitHub, pipeline, Drive, meetings, manual rows); the hub's `workActivity.feed` likewise.
+- Test: `activity-series.test.ts` asserts a bridged time row is in nobody's feed, unfiltered or by person, while the gated reads still count it.
+
+
 ### platform-ui `0.173.0` - DW-7e-2: Finance's honest Pulse tiles, and the Payments to confirm queue on Receivables (2026-10-15) - PROTOTYPED
 
 Plan §4.3 (7e). UI only: no backend change, no new route.

@@ -8390,6 +8390,7 @@ Files: `core/activity-kinds.ts` (pure: kinds, catalogue, `kindOf`, noon rule, li
 - Today `GET /api/:t/work-activity?personId=` (BFF §11) is gated only by Cerbos `work_activity:read`, which is member-level, so any member can list a colleague's activity. That breaks line-of-sight (blueprint §11: self, own-unit lead, exec, HR; never peers).
 - From 4h-1, a request with `personId` applies the series gate (§44.3) for that person: 403 if the caller may not read that person.
 - Without `personId` (the department and project feeds, the hub's `workActivity.feed` for automation accounts), nothing changes.
+- **The bridged sources never appear in this feed** (amended 2026-10-15, after 406): the rows the audit-log bridge writes (`webdesk`, `social`, `seo`, `creatives`, `finance`, `hr`, `learning`, `time`, `checkins`: `BRIDGED_SOURCES`) are person-grain (who logged time, submitted a check-in, decided a leave request), and this feed is member-level. So `GET /work-activity` excludes them in every mode, with or without a filter, and they are read only through the gated series and day reads (DW-D19, and DW-D29 for time entries). The feed lists exactly what it listed before DW-4h. Found when DW-D29 narrowed the time-entry read.
 
 ### 44.6 The missing emitters (4h-2)
 Three human actions write no audit row today, so they cannot be bridged. 4h-2 adds a `writeActivity` at each, with the acting person:

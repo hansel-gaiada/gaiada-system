@@ -22,6 +22,7 @@ import { withTenants } from "../db";
 import { authorize } from "./http";
 import { AuthGuard } from "../auth/guards";
 import { assertPersonAxisReadAllowed } from "./person-axis-gate";
+import { BRIDGED_SOURCES } from "./activity-kinds";
 import {
   ingestWorkActivity,
   relinkZeroLinkActivities,
@@ -72,6 +73,10 @@ export class WorkActivityController {
 
     const clauses: string[] = [];
     const args: unknown[] = [];
+    // DW-4h (BFF §44.5): the audit-log bridge's sources are person-grain (time logged, check-ins, leave decided, ...). This feed is
+    // member-level, so it never lists them, with or without a filter; they are read through the gated series and day reads only
+    // (DW-D19, DW-D29). The feed keeps exactly what it listed before DW-4h.
+    clauses.push(`wa.source <> ALL($${args.push([...BRIDGED_SOURCES])}::text[])`);
     if (since) clauses.push(`wa.occurred_at >= $${args.push(since)}`);
     if (deptId) {
       clauses.push(

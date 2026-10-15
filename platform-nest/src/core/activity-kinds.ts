@@ -20,6 +20,11 @@ export const ACTIVITY_SOURCES = [
   "webdesk", "social", "seo", "creatives", "finance", "hr", "learning", "time", "checkins",
 ] as const;
 
+/** The sources only the audit-log bridge writes (DW-4h). Their rows are PERSON-GRAIN (who logged time, submitted a check-in,
+ *  decided a leave request), so they are read only through the gated series and day reads (BFF §44.3-44.5, DW-D19, DW-D29),
+ *  never through the member-level `GET /work-activity` feed. */
+export const BRIDGED_SOURCES: readonly string[] = ["webdesk", "social", "seo", "creatives", "finance", "hr", "learning", "time", "checkins"];
+
 export interface ActivityKind {
   key: string;
   label: string;

@@ -2145,7 +2145,7 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §41 (plan `docs/plans/2026-10-13-depart
   - the `unrestricted` or `company_wide` tier (HR's people readers included);
   - a `unit_scoped` caller for a person in their led scope (TR-25);
   - else 403.
-- **`GET /work-activity?personId=`** keeps its Cerbos `work_activity:read`, and from 4h-1 also applies that person-axis rule for the named person. This closes a peer read that broke line-of-sight. The unfiltered feed is unchanged.
+- **`GET /work-activity?personId=`** keeps its Cerbos `work_activity:read`, and from 4h-1 also applies that person-axis rule for the named person. This closes a peer read that broke line-of-sight. The unfiltered feed is unchanged. The feed never lists the bridged, person-grain sources (`BRIDGED_SOURCES`) in any mode; they are read only through the gated series and day reads (amended 2026-10-15, DW-D19, DW-D29).
 
 ## 39. DW-8g — the `calendar_event` kind (2026-10-14, PROTOTYPED)
 

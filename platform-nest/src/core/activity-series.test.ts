@@ -422,6 +422,24 @@ describe.skipIf(!TEST_URL)("the activity series, the day read and the person fil
       expect((await feed("?limit=5", peer)).statusCode).toBe(200);
     });
 
+    it("never lists a bridged, person-grain row (time logged): not unfiltered, not by personId, for anyone; the series still counts it", async () => {
+      await ingestWorkActivity(t, {
+        source: "time", sourceRef: "feed-hide-1", actorUserId: self, verb: "logged", objectKind: "time_entry", objectRef: "te-hide-1",
+        title: "Time logged (feed-hide)", payload: { kind: "time.logged", actorId: self },
+      });
+      for (const who of [peer, self, head, admin, hr]) {
+        const all = await feed("?limit=500", who);
+        expect(all.statusCode).toBe(200);
+        expect(all.json().map((x: { title: string }) => x.title)).not.toContain("Time logged (feed-hide)");
+        expect(all.json().every((x: { source: string }) => x.source !== "time")).toBe(true);
+      }
+      for (const who of [self, head, admin]) {
+        const mine = await feed(`?personId=${self}&limit=500`, who);
+        expect(mine.statusCode).toBe(200);
+        expect(mine.json().map((x: { title: string }) => x.title)).not.toContain("Time logged (feed-hide)");
+      }
+    });
+
     it("the base gate still applies: a caller from another company is 403 with or without personId", async () => {
       expect((await feed(`?personId=${self}`, rivalAdmin)).statusCode).toBe(403);
       expect((await feed("", rivalAdmin)).statusCode).toBe(403);
