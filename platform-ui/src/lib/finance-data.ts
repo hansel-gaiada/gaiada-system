@@ -13,6 +13,7 @@ import type {
   ArAgingRow, CloseReadiness, FiscalPeriod, LedgerVerdict, Problem, ReconcileVerdict, ArPosition, ApPosition, StatementRow, TrialBalance,
 } from "./finance";
 import type { InvoicePayment } from "./contracts";
+import type { TaxReturn, TaxReturnDrift } from "./taxReturns";
 
 type Verdict = { problems: Problem[]; clean: boolean };
 
@@ -59,3 +60,11 @@ export const getProfitAndLossResult = (u: string, t: string, from: string, to: s
       return rows;
     }),
   );
+
+// DW-7g-1: Finance > Tax > Returns. Both are `finance_tax` `read`. A refused or failed read is never a list: "no returns
+// have been prepared" and "no filed return has drifted" are claims about tax, and only a real 200 may make them.
+// `year` and `kind` are left off, so the list is every return the company has (newest period first, as the server orders it).
+export const listTaxReturnsResult = (u: string, t: string): Promise<ReadResult<TaxReturn[]>> =>
+  readResult(platformFetch<TaxReturn[]>(`/api/${t}/finance/tax/returns`, u));
+export const getTaxReturnDriftResult = (u: string, t: string): Promise<ReadResult<TaxReturnDrift>> =>
+  readResult(platformFetch<TaxReturnDrift>(`/api/${t}/finance/tax/returns/drift`, u));

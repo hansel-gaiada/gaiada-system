@@ -771,6 +771,15 @@ where a ticket says the classic shell changes too.
   - 7g-1 VAT return preparation. The backend exists (`GET/POST finance/tax/returns`, `…/file`, `…/drift`);
     the UI has no client for it. Tax gains a Returns section: prepare a period's return, review it, record the
     filing.
+    As built (2026-10-15): Finance › Tax › Returns (`TaxReturns`, `lib/taxReturns.ts`, `lib/financeTaxActions.ts`; readers
+    `listTaxReturnsResult` and `getTaxReturnDriftResult`). No route added. The list shows every return with the figures as
+    filed (a draft stores none; "Show figures" is Prepare again, which answers with the live figure, marked not stored).
+    Prepare takes the five kinds (PPN, PPh 21, 23, 4(2) monthly, PPh Badan annual) and defaults to the last closed month.
+    Record filing and Amend (`amend: true` on a filed or amended return) need a reference and the period typed exactly
+    (`PPN 2026-03`), which the server compares. The drift banner lists every `finance_tax_return_drift` entry verbatim
+    (amend, or carry forward); a failed or refused drift read says so and is never "no drift". The controls show to
+    `company.manage`, operators, and finance staff or manager grants (a superset of Cerbos `prepare` and `file`: no
+    capability mirrors them, and the server refuses in words). The payload has no prepared-at date, so none is shown.
   - 7g-2 accounts. No route creates, renames or deactivates an account. Contract first (BFF §49), then the
     backend and the screen. The contract rules what deactivating an account with postings or a balance means.
 - **7h · IT isolation rules and threat response.** Designed, not built: `lib/network.ts` documents the routes and

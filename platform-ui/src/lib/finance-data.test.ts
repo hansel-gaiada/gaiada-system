@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   getArAgingResult, getCloseReadinessResult, getProfitAndLossResult, getTrialBalanceResult, listPendingPaymentsResult, listPeriodsResult,
   reconcileApResult, reconcileArResult, reconcileAssetsResult, reconcileTreasuryResult, verifyLedgerResult,
+  getTaxReturnDriftResult, listTaxReturnsResult,
 } from "./finance-data";
 
 // DW-7e-2: Finance's honest readers. `financeData` and `financeVerdict` (lib/finance.ts) degrade a 403 and a 404 for their
@@ -28,6 +29,10 @@ const READERS: Array<[string, (u: string, t: string) => Promise<unknown>, string
   ["getTrialBalanceResult", getTrialBalanceResult, "/api/co-a/finance/trial-balance"],
   // DW-7b-2: one month of the profit and loss, both bounds required and sent.
   ["getProfitAndLossResult", (u, t) => getProfitAndLossResult(u, t, "2026-10-01", "2026-10-15"), "/api/co-a/finance/profit-and-loss?from=2026-10-01&to=2026-10-15"],
+
+  // DW-7g-1: the returns list and the drift, read with no year or kind filter.
+  ["listTaxReturnsResult", listTaxReturnsResult, "/api/co-a/finance/tax/returns"],
+  ["getTaxReturnDriftResult", getTaxReturnDriftResult, "/api/co-a/finance/tax/returns/drift"],
 ];
 
 describe.each(READERS)("%s", (_name, read, path) => {
@@ -51,4 +56,16 @@ describe.each(READERS)("%s", (_name, read, path) => {
 it("keeps an empty pending queue as ok, so a real zero is possible", async () => {
   vi.stubGlobal("fetch", answer(200, []));
   expect(await listPendingPaymentsResult("u1", "co-a")).toEqual({ kind: "ok", data: [] });
+});
+
+it("DW-7g-1: an empty returns list and a clean drift are ok, so a real nothing is possible", async () => {
+  vi.stubGlobal("fetch", answer(200, []));
+  expect(await listTaxReturnsResult("u1", "co-a")).toEqual({ kind: "ok", data: [] });
+  vi.stubGlobal("fetch", answer(200, { problems: [], clean: true }));
+  expect(await getTaxReturnDriftResult("u1", "co-a")).toEqual({ kind: "ok", data: { problems: [], clean: true } });
+});
+
+it("DW-7g-1: a failed drift read says why, in the server's words, and is never a clean verdict", async () => {
+  vi.stubGlobal("fetch", answer(500, { error: "ledger function failed" }));
+  expect(await getTaxReturnDriftResult("u1", "co-a")).toEqual({ kind: "unavailable", reason: "ledger function failed" });
 });
