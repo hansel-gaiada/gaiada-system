@@ -194,7 +194,8 @@ export async function markPayrollRunPaid(tenantId: string, runId: string): Promi
 // calculate of any run whose period contains the input's period (and that has not consumed it)
 // picks it up. The server does not check the run's status; the page only offers the form while the
 // run can still be calculated (draft, calculated), because that is the only time it can be consumed.
-export const INPUT_CATEGORIES: readonly string[] = [
+// Not exported: a "use server" file may export only async functions (`next build` refuses anything else).
+const INPUT_CATEGORIES: readonly string[] = [
   "overtime", "bonus", "commission", "reimbursement", "deduction", "advance", "leave_encashment", "other",
 ];
 
