@@ -11,6 +11,50 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.147.0` + platform-ui `0.167.0` - DW-8j: email through your own Gmail (read, reply, send, "Email this client"), simulated mode; the `personal_mailbox` kind (2026-10-15) - PROTOTYPED
+
+Contracts:
+- `docs/FRONTEND-BFF-CONTRACT.md` §48 (as built §48.7 backend, §48.8 UI);
+- `docs/PERMISSION-CONTRACT.md` §40.
+
+Ruling DW-D24; plan §8.1 row 8j.
+
+**Migrations:**
+- `202610151200_integration_connections_gmail_provider`: the `integration_connections` and `google_oauth_states` provider CHECKs gain `google_gmail`, re-declared from their live definitions.
+- `202610151210_iam_personal_mailbox_permissions`.
+
+**Cerbos policy change:** the new `resource_personal_mailbox.yaml`. Restart Cerbos after the deploy and probe it: the status route answers `{connected:false}` for a fresh person.
+
+**Compose:** `GMAIL_MODE` (default `simulated`) and the Gmail OAuth client env, both optional.
+
+**Who can read and send.** Each person links only their own mailbox. Nobody reads or sends as anyone else, company_admin and platform_admin included: the deny for non-owners applies to every action. Automation and bot principals are refused. A viewer holds no mailbox.
+
+**Simulated mode, the default:**
+- Connect links a simulated mailbox with the MAIL-16D fixtures. Sends land in an in-process Sent (memory only), and nothing leaves the box.
+- Every page says "Simulated mailbox: nothing is really sent".
+
+**Live mode:**
+- It uses the person's own token with `gmail.readonly` and `gmail.send`.
+- The adapter is written and tested only against a stubbed `fetch`.
+- It waits for DW-11's Google OAuth client and a UI consent landing like Drive's.
+
+**Backend:**
+- the connection routes, modelled on DW-6i's Drive;
+- reading threads on demand, with HTML sanitized and shown in a `sandbox=""` iframe;
+- send and reply, with a per-person limit of 30 an hour (429 with `Retry-After`);
+- the activity row `emailed` carries only the recipient count and the mode, never the subject, body or addresses.
+
+The shared `HttpErrorFilter` now forwards `retryAfterSeconds` and sets `Retry-After`; this is additive.
+
+**UI:**
+- You › Inbox becomes two tabs: Notifications and Mail.
+- `/me/mail` shows the threads (Inbox and Sent), a thread with Reply, and compose.
+- The client Overview gains "Email (Gmail)" beside the primary contact; PV placed it and set its rules. It is disabled, with an accessible reason, when the client has no contact email. Nothing is added to the client Conversation.
+
+**Verified:**
+- tsc, the lints, the bundle check and the local suites pass. CI on the branch found two wrong test expectations, both fixed.
+- The gate is CI on the landing sha.
+
 ### platform-nest `0.146.0` + platform-ui `0.166.0` - DW-8g: calendar events and meeting scheduling, the `calendar_event` kind (2026-10-14) - PROTOTYPED
 
 Contracts: `docs/FRONTEND-BFF-CONTRACT.md` §47 (as built §47.7 backend, §47.8 UI) and `docs/PERMISSION-CONTRACT.md` §39. Plan §8.1 row 8g. ERP migrations `202610151100_calendar_events` (tables, FORCE RLS, NULL-safe CHECKs) and `202610151110_iam_calendar_event_permissions` (the permissions seed with its self-assertion). **Cerbos policy change:** the new `resource_calendar_event.yaml` and a derived role. Restart Cerbos after the deploy and probe it: a zero-uuid event answers 404. No compose change.
