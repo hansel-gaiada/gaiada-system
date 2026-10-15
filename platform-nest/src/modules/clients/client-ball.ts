@@ -62,7 +62,8 @@ export interface BallRow extends BallItem {
 
 export interface ClientBall { needsUs: BallRow[]; needsClient: BallRow[] }
 
-/** The portal caller's scope arrays, as `scopeValues(scope)` returns them: clients, wide clients, project ids. */
+/** The portal caller's scope arrays, as `scopeValues(scope)` returns them: clients, wide clients, project ids. The first is
+ *  the same set as the `clientIds` argument (the caller's clients), which is bound as $1 and doubles as the clients array. */
 export interface BallPortalOpts { params: [string[], string[], string[]] }
 
 /** The hub overview's item shape: the row without the grouping columns. */
@@ -91,9 +92,16 @@ export async function loadClientBall(
   if (clientIds.length === 0) return out;
 
   const portal = opts.portal;
-  // $1 is always the client set; in portal mode $2/$3/$4 are the caller's clients / wide clients / projects.
-  const params: unknown[] = portal ? [clientIds, ...portal.params] : [clientIds];
-  const S = scopeAt(2);
+  // $1 is always the client set. In portal mode $2 is the caller's wide clients and $3 their projects, and $1 doubles as the
+  // caller's clients (`scopeAt(1)`).
+  //
+  // ⚠ PARAMETERS MUST BE DENSE. Postgres refuses a statement whose text references $3 but not $2 ("could not determine data type
+  // of parameter $2"), and one that is handed more values than it references. So each query gets exactly the prefix it uses:
+  // `params2` for the client-wide-only reads (payments, post reviews: $1, $2), `params3` for every read that also reaches by
+  // project (requests, threads, gates, contracts: $1, $2, $3). The first version bound four and every portal read failed.
+  const params3: unknown[] = portal ? [clientIds, portal.params[1], portal.params[2]] : [clientIds];
+  const params2: unknown[] = portal ? params3.slice(0, 2) : params3;
+  const S = scopeAt(1);
   const only = (sql: string): string => (portal ? ` AND ${sql}` : "");
 
   const [payments, reviews, requests, drafts, threads, gates, contracts, pending] = await Promise.all([
@@ -105,7 +113,7 @@ export async function loadClientBall(
         WHERE pp.client_id = ANY($1::uuid[]) AND pp.status = 'pending' AND pp.deleted_at IS NULL${
           only(`${staffInvoicePaymentClientVisible("pp", "i")} AND ${wideClientOnly("pp", S)}`)}
         ORDER BY pp.created_at ASC, pp.id ASC`,
-      params,
+      params2,
     ),
     // The social third wall applies to this join: see the file header.
     c.query(
@@ -117,7 +125,7 @@ export async function loadClientBall(
         WHERE r.client_id = ANY($1::uuid[]) AND r.status = 'changes_requested'${
           only(`${postReviewClientVisible("r")} AND ${wideClientOnly("r", S)}`)}
         ORDER BY r.decided_at ASC, r.id ASC`,
-      params,
+      params2,
     ),
     c.query(
       `SELECT w.id, w.client_id AS "clientId", w.project_id AS "projectId", w.title, w.kind, w.created_at AS "since",
@@ -126,7 +134,7 @@ export async function loadClientBall(
         WHERE w.client_id = ANY($1::uuid[]) AND w.status = 'new' AND w.deleted_at IS NULL${
           only(`${changeRequestClientVisible("w")} AND ${wideOrOwnProject("w", S)}`)}
         ORDER BY w.created_at ASC, w.id ASC`,
-      params,
+      params3,
     ),
     // A drafted agreement is the agency's own working copy: the portal never shows it, so portal mode skips the read.
     portal
@@ -137,7 +145,7 @@ export async function loadClientBall(
              FROM contracts k
             WHERE k.client_id = ANY($1::uuid[]) AND k.status = 'draft' AND k.deleted_at IS NULL
             ORDER BY k.created_at ASC, k.id ASC`,
-          params,
+          params3,
         ),
     // PV4-06: conversation threads waiting for our reply (open, last live message is the client's). The rule is
     // conversation-core.ts `awaitingReplySql`, the same one the staff Conversation list filters on.
@@ -150,7 +158,7 @@ export async function loadClientBall(
         WHERE t.client_id = ANY($1::uuid[]) AND t.deleted_at IS NULL AND ${awaitingReplySql("t")}${
           only(`${conversationThreadClientVisible("t")} AND ${wideOrOwnProject("t", S)}`)}
         ORDER BY "since" ASC, t.id ASC`,
-      params,
+      params3,
     ),
     // ── needsClient ────────────────────────────────────────────────────────────────────────────────
     c.query(
@@ -161,7 +169,7 @@ export async function loadClientBall(
           AND ${gateClientVisible("g")} AND g.status = 'pending'${
           only(runInPortalScope("r", S))}
         ORDER BY g.created_at ASC, g.id ASC`,
-      params,
+      params3,
     ),
     c.query(
       // Same "already countersigned by that side" exclusion the portal's own query carries: `status` flips only once BOTH
@@ -173,7 +181,7 @@ export async function loadClientBall(
           AND NOT EXISTS (SELECT 1 FROM contract_signatures s WHERE s.contract_id = k.id AND s.party = 'client')${
           only(`${contractClientVisible("k")} AND ${wideOrOwnProject("k", S)}`)}
         ORDER BY k.created_at ASC, k.id ASC`,
-      params,
+      params3,
     ),
     c.query(
       `SELECT r.id, r.client_id AS "clientId", r.requested_at AS "since", pst.title AS "postTitle",
@@ -184,7 +192,7 @@ export async function loadClientBall(
         WHERE r.client_id = ANY($1::uuid[]) AND r.status = 'pending'${
           only(`${postReviewClientVisible("r")} AND ${wideClientOnly("r", S)}`)}
         ORDER BY r.requested_at ASC, r.id ASC`,
-      params,
+      params2,
     ),
   ]);
 
