@@ -279,16 +279,16 @@ export class ItAccountsController {
     const member = await this.assertMember(req, tenantId, userId, "disable");
     this.assertConfigured();
     const kc = await this.requireAccount(member.email);
-    // Idempotent by construction: disabling a disabled account is a no-op upstream, and reporting
-    // `alreadyDisabled` lets the console say "nothing to do" instead of implying it just acted. Nothing
-    // was ended by THIS call, hence `sessionsEnded: false`.
-    if (kc.enabled === false) {
-      return { ok: true, alreadyDisabled: true, sessionsEnded: false };
-    }
-    try {
-      await kcDisableUser(kc.id);
-    } catch (err) {
-      throw this.upstream(err);
+    // Disabling a disabled account is a no-op upstream, and `alreadyDisabled` lets the console say so instead of implying
+    // it just switched the login off. The sessions are still cut below: an account disabled by hand in Keycloak keeps
+    // every token already issued, so "Block login" on it is exactly the case where IT needs the cut (DW-7h).
+    const alreadyDisabled = kc.enabled === false;
+    if (!alreadyDisabled) {
+      try {
+        await kcDisableUser(kc.id);
+      } catch (err) {
+        throw this.upstream(err);
+      }
     }
 
     // DW-7h (BFF §52.7): disabling a Keycloak user stops NEW sign-ins, but a token already issued keeps working for up to an
@@ -296,7 +296,7 @@ export class ItAccountsController {
     //  1. A user-level revocation row (session_id NULL): the request hook refuses every token of this person issued before
     //     `revoked_at` (BFF §52.4), within 10 seconds, everywhere. Written AFTER the disable on purpose: once the account is
     //     disabled it cannot refresh, so no token can be issued after the row's `revoked_at` and escape it. The row is global
-    //     (a person belongs to no one company); `tenant_id` only says whose IT did it.
+    //     (a person belongs to no one company); `revoked_from_company_id` only says whose IT did it.
     //  2. Keycloak's own logout of every session of the user, so it cannot refresh either. Best effort: a failure here is
     //     `sessionsEnded: false` and the row has already done the part that matters for the ERP.
     await withGlobal((c) =>
@@ -316,9 +316,9 @@ export class ItAccountsController {
     }
 
     await writeActivity(tenantId, req.principal?.userId ?? null, "it.account.disable", "it_account", userId, {
-      email: member.email, keycloakId: kc.id, sessionsEnded,
+      email: member.email, keycloakId: kc.id, alreadyDisabled, sessionsEnded,
     });
-    return { ok: true, alreadyDisabled: false, sessionsEnded };
+    return { ok: true, alreadyDisabled, sessionsEnded };
   }
 
   @Post(":tenantId/it/accounts/:userId/enable")
