@@ -9435,3 +9435,72 @@ No new endpoint: the UI consumes §55.3 and §55.4 as written.
 - **Read marker.** The download link is a plain `<a download>` to the existing portal file route; its click fires the `POST portal/reports/:id/read` server action beside the browser's own download (never prevented, a failed marker is swallowed and the report stays New), then refreshes the page and the layout badge. Only a report still New sends it.
 - **Staff.** The client hub gains **Reports** (`/clients/[clientId]/reports`, right after Overview, mirroring the portal's Overview area; no badge). Every status with who and when, "Client sees this" from `clientVisible` on published rows, a staff download (`/api/files/:id`), **Publish** on drafts and **Withdraw** (required reason, at most 2000 characters) on published rows, each behind a confirm. There is no client-report capability in `lib/rbac.ts` (Cerbos owns it), so the buttons follow the status only and a 403 reads "You can't publish reports for this client." / "You can't withdraw reports for this client."; the 409 and 400 codes (`not_a_draft`, `report_has_no_file`, `not_published`, `reason_required`, `reason_too_long`) are said in plain words.
 - **Demo.** `lib/demoClientReports.ts`: one store for both sides (a draft with a file, a draft without, published social and search reports, a withdrawn one, and two for Demo Harbour Hotel, one of them client-wide and so hidden from the project-scoped contact), the controllers' refusals, per-identity reach following `PORTAL_SCOPE`, and `newReports` / `reportId` on the portal payloads.
+
+## 56. The monthly account summary (PV7-07, 2026-10-15) — `platform-nest/src/modules/clients/account-summary/` (new), `src/modules/clients/client-reports.controller.ts` (publish branch); migration `202610151740_client_report_summary.sql` — **STATUS: PLANNED**
+
+**Why.** Plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`, ticket PV7-07 (findings 3 and 6; lead's calls L1 and L6; owner questions PV7-Q1, Q2, Q3 and Q6, the lead's defaults in force). A monthly report per client that is safe to show the client: built ONLY from what a client-wide contact of that client may see, drafted on demand (no schedule, PV7-Q6), edited by staff, published through PV7-04a's publish route. It carries no money at all (PV-D38, PV7-Q3), no tasks or task-derived figures, no time, no people, no internal gates.
+
+### 56.1 What the snapshot holds (frozen at draft time, `client_reports.snapshot`)
+
+```ts
+interface AccountSummarySnapshot {
+  version: 1;
+  clientId: string; clientName: string;
+  period: string;                       // "YYYY-MM"
+  periodStart: string; periodEnd: string;   // YYYY-MM-DD, UTC calendar month, inclusive
+  generatedAt: string;                  // the instant every "current" figure below was read
+  projects: Array<{                     // non-internal, non-deleted projects of the client, finished ones included
+    projectId: string; name: string; status: string;
+    milestones: { total: number; done: number; upcoming: number; late: number; undated: number };   // as of generatedAt
+    deliverables: { total: number; delivered: number; late: number };                                 // as of generatedAt
+    nextMilestone: { name: string; dueDate: string } | null;
+  }> | null;
+  waiting: {                            // as of generatedAt; counts and the oldest instant, never items
+    onClient: { count: number; oldestSince: string | null };
+    onUs: { count: number; oldestSince: string | null };
+  } | null;
+  completed: {
+    milestones: { count: number; knownSince: string | null; wholeMonthKnown: boolean | null;
+                  items: Array<{ projectId: string; projectName: string; name: string; completedOn: string }> } | null;
+    deliverables: { count: number; basis: "status_changed_in_month";
+                    items: Array<{ projectId: string; projectName: string; name: string; status: string; on: string }> } | null;
+  };
+  turnaround: { windowDays: 90; windowEnd: string; client: { medianDays: number | null; n: number; withheld: boolean };
+                ours: { medianDays: number | null; n: number; withheld: boolean } } | null;
+  results: { generatedAt: string; services: ServiceCard[]; unavailable: ServiceKey[] } | null;   // §25's cards, money-like KPIs removed
+  reports: Array<{ id: string; title: string; source: string; periodStart: string; periodEnd: string; publishedOn: string }> | null;
+  unavailable: string[];                // sources whose read failed: the section is null, never zero
+}
+```
+
+- **The client-wide view.** Every read runs with a synthetic portal scope for that one client: `clientIds = wideClientIds = [clientId]`, `projectIds = []`. That is exactly what a client-wide contact of this client resolves to, so the same predicates from `portal-visibility.ts` apply (`projectInPortalScope`, `milestoneClientVisible`, `deliverableClientVisible`, `clientReportInPortalScope`) and PV7-02's `loadProjectHealth`, `loadClientBall` and `loadTurnaround` run in their portal mode. A project that only project-scoped contacts reach is still in the summary (it is the client-wide view); nothing of another client ever is. No new visibility SQL.
+- **Milestones completed in the month:** `pm_milestones.status = 'done'` and `completed_at` within the month. `completed_at` exists from migration `202610151710`; nothing before it was back-filled, so `knownSince` is that migration's applied date (BFF §54.4) and `wholeMonthKnown` is false when the month starts before it (null when the date is unknown). The summary says so; it never presents a partial month as complete.
+- **Deliverables delivered in the month (best available):** status `delivered`, `approved` or `done` and `updated_at` within the month. A deliverable has no delivery timestamp, so this is "its status last changed in the month"; a later edit to a delivered row moves it. `basis` says so, and the PDF carries the same words.
+- **Turnaround:** PV7-02's two-sided median over the 90 days ending at the end of the month (`loadTurnaround` gains an optional `asOf`; without it the window is the 90 days before now, as before).
+- **Services & results:** `composeBusinessResults` as the portal results route calls it for a client-wide contact, frozen. Every KPI that is money (`search_ads.conversion_value`, and any KPI whose key or label names a value, spend, cost, budget, revenue, price, fee or a currency) is removed.
+- **Reports published in the month:** published client reports of the client (client-wide and project) with `published_at` in the month: title, source, period, publish date. Nothing else.
+- **Never in the snapshot or the narrative's facts:** tasks or any figure derived from them, time or effort, people (no names, owners, assignees, authors), internal gates, ball item labels or contexts, money.
+
+### 56.2 Storage (migration `202610151740_client_report_summary.sql`)
+
+`client_reports` gains `snapshot jsonb`, `narrative_md text`, `narrative_source text` (`ai` | `human` | `deterministic`), `generated_at timestamptz`.
+- A CHECK that an `account_summary` row carries all four, and any other source none of them, written over `IS [NOT] NULL` tests so NULL cannot slip through.
+- A partial UNIQUE `(tenant_id, client_id, period_start) WHERE source = 'account_summary' AND status <> 'withdrawn'`: one live summary per client and month.
+- **Frozen once published:** a BEFORE UPDATE trigger refuses a change to `snapshot`, `narrative_md`, `narrative_source` or `generated_at` unless both the old and the new status are `draft` (SQLSTATE `PD056`; the PV-D34 messages guard is the precedent). Withdrawing never rewrites them.
+
+### 56.3 Routes (staff, module `clients`, Cerbos kind `client_report`)
+
+| Method and path | Gate | Answers |
+|---|---|---|
+| `POST /api/:tenantId/clients/:clientId/reports/summary` `{ period: "YYYY-MM" }` | `client_report · read`, then `draft` on the client's owner | 200 `{ created, report }`. `created: false` with the EXISTING draft when one is live for the month (idempotent, so an agent can retry). 404 unknown client; 400 `invalid_period`, `period_in_future`, `internal_client`; 409 `summary_published` when a published summary already covers the month (withdraw it first) |
+| `PATCH /api/:tenantId/client-reports/:id` `{ narrativeMd }` | `read`, then `draft` | 200 `{ report }`, `narrativeSource` becomes `human`. 404; 409 `not_a_draft`; 409 `not_an_account_summary` for a social or search report; 400 `narrative_required` (blank), `narrative_too_long` (over 20 000 characters) |
+| `POST /api/:tenantId/client-reports/:id/publish` (PV7-04a) | `publish` | For an `account_summary` the route FIRST renders the PDF, stores it as the report's `client_report_file` (sha256 recorded), then publishes, in one flow. Social and search sources behave as in §55. 503 `pdf_render_not_configured` / `pdf_render_failed`: the report stays a draft |
+
+The staff list (`GET :t/clients/:clientId/reports`, §55.3) gains, for an `account_summary` row only: `period`, `narrativeMd`, `narrativeSource`, `generatedAt` and `snapshot`. The portal payloads gain nothing: a published summary reaches the client-wide contacts through the existing `GET :t/portal/reports` and its file download (its `project_id` is NULL).
+
+- **The draft's narrative.** One gateway call (`completeViaGateway`) with the snapshot's own numbers as the only facts, parsed by the reports module's `parseNarrative` (the hallucinated-numeral guard: a numeral that is not in the facts rejects the whole text). A gateway failure, an unconfigured gateway or a rejected text gives a deterministic narrative built from the snapshot; a draft never fails because of the model. `narrativeSource` is `ai` or `deterministic`; a staff edit makes it `human`.
+- **The PDF.** `buildAccountSummaryDocument(snapshot, narrative)` is a `ReportDocument` with grain `client` (PV7-01), rendered through `mintPrintJobToken` and `renderPdfViaSidecar`. A staff-edited narrative is shown as a non-AI narrative (the document's source field has two values, model-written or not).
+
+### 56.4 Tests
+
+(named when built)
