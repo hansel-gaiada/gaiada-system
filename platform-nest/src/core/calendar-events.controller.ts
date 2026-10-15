@@ -1,6 +1,7 @@
 // DW-8g (docs/FRONTEND-BFF-CONTRACT.md §47) — calendar events and meeting scheduling:
 //   GET  /api/calendar/events/mine                  the caller's events across their companies (the `tasks/mine` envelope)
 //   GET  /api/:tenantId/calendar/events/:id         one event, with its attendees and the caller's capabilities
+//   GET  /api/:tenantId/calendar/busy               busy times of up to 20 people for a window (§47.4, DW-D28): times only
 //   POST /api/:tenantId/calendar/events             schedule an event (`record: true` also schedules the recording)
 //   PATCH /api/:tenantId/calendar/events/:id        edit an event (the organizer, company_admin)
 //   POST /api/:tenantId/calendar/events/:id/cancel  call it off (idempotent)
@@ -136,6 +137,22 @@ export class CalendarEventsController {
 
     const items = legs.flatMap((l) => l.items).sort((a, b) => svc.mineSortKey(a) - svc.mineSortKey(b));
     return { items, companies: legs.map((l) => l.company) };
+  }
+
+  /** §47.4 busy times, for scheduling: `?userIds=a,b&from=&to=[&excludeEventId=]`. Rides `calendar_event` create (the people who
+   *  can schedule). The decision comes FIRST, before the query is looked at, so a caller without the right always gets 403 and
+   *  never a 400/422 that leaks shape. Times only: no title, place, link, organizer or event id; no activity row and no
+   *  notification (a person is not told who looked). */
+  @Get(":tenantId/calendar/busy")
+  async busy(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query() query: Record<string, unknown>): Promise<svc.BusyAnswer> {
+    await authorize(req.principal, { kind: KIND, tenantId }, "create");
+    const q = await mapRules(async () => svc.parseBusyQuery(query ?? {}));
+    return mapRules(() =>
+      withTenants([tenantId], async (c) => {
+        await svc.assertBusyMembers(c, tenantId, q.userIds);
+        return svc.loadBusy(c, tenantId, q);
+      }),
+    );
   }
 
   @Get(":tenantId/calendar/events/:id")

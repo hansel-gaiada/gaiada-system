@@ -4,7 +4,7 @@
 // the Linux gate.
 import { describe, it, expect } from "vitest";
 import {
-  CalendarRuleError, ATTENDEES_MAX, describeWhen, diffAttendees, eventHref, mineSortKey, parseAttendeeIds, parseCreate, parseDay,
+  CalendarRuleError, ATTENDEES_MAX, BUSY_USERS_MAX, describeWhen, mergeIntervals, parseBusyQuery, diffAttendees, eventHref, mineSortKey, parseAttendeeIds, parseCreate, parseDay,
   parseInstant, parseMineQuery, parsePatch, parseRespond, parseTimeSpec, planPatch, responseAfterTimeChange, timeChanged,
   timeOfFacts, type EventFacts,
 } from "./calendar-events.service";
@@ -281,5 +281,75 @@ describe("the time in words, and the row helpers", () => {
     expect(eventHref(T, ORG)).toBe(`/calendar/events/${ORG}?company=${T}`);
     expect(mineSortKey({ startsAt: "2026-10-20T01:00:00.000Z", startsOn: null })).toBe(Date.parse("2026-10-20T01:00:00Z"));
     expect(mineSortKey({ startsAt: null, startsOn: "2026-10-20" })).toBe(Date.parse("2026-10-20T00:00:00Z"));
+  });
+});
+
+describe("busy times (§47.4, DW-D28): the query and the merge", () => {
+  const WIN = { from: "2027-03-10T00:00:00Z", to: "2027-03-11T00:00:00Z" };
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => `0190a000-0000-7000-8000-${String(i + 1).padStart(12, "0")}`);
+  const d = (iso: string) => new Date(iso);
+
+  it("a good query: a comma list (or a repeated param) of distinct uuids, lower-cased, and a window with offsets", () => {
+    const q = parseBusyQuery({ userIds: `${U1}, ${U2.toUpperCase()}`, ...WIN });
+    expect(q.userIds).toEqual([U1, U2]);
+    expect(q.from.toISOString()).toBe("2027-03-10T00:00:00.000Z");
+    expect(q.to.toISOString()).toBe("2027-03-11T00:00:00.000Z");
+    expect(q.excludeEventId).toBeNull();
+    expect(parseBusyQuery({ userIds: [U1, U2], ...WIN }).userIds).toEqual([U1, U2]);
+    expect(parseBusyQuery({ userIds: U1, ...WIN, excludeEventId: ORG.toUpperCase() }).excludeEventId).toBe(ORG);
+    expect(parseBusyQuery({ userIds: U1, ...WIN, excludeEventId: "" }).excludeEventId).toBeNull();
+    expect(parseBusyQuery({ userIds: U1, from: "2027-03-10T08:00:00+08:00", to: "2027-03-10T09:00:00+08:00" }).from.toISOString()).toBe("2027-03-10T00:00:00.000Z");
+  });
+
+  it("userIds is 1 to 20 distinct uuids: none, a bad one, a repeat, an empty slot and 21 are each a 400", () => {
+    expect(reasonOf(() => parseBusyQuery({ ...WIN }))).toBe("user_ids_required");
+    expect(reasonOf(() => parseBusyQuery({ userIds: "", ...WIN }))).toBe("user_ids_required");
+    expect(reasonOf(() => parseBusyQuery({ userIds: "nope", ...WIN }))).toBe("user_ids_invalid");
+    expect(reasonOf(() => parseBusyQuery({ userIds: `${U1},${U1}`, ...WIN }))).toBe("user_ids_invalid");
+    expect(reasonOf(() => parseBusyQuery({ userIds: `${U1},,${U2}`, ...WIN }))).toBe("user_ids_invalid");
+    expect(reasonOf(() => parseBusyQuery({ userIds: ids(BUSY_USERS_MAX + 1).join(","), ...WIN }))).toBe("user_ids_too_many");
+    expect(parseBusyQuery({ userIds: ids(BUSY_USERS_MAX).join(","), ...WIN }).userIds).toHaveLength(20);
+    expect(refusal(() => parseBusyQuery({ userIds: "nope", ...WIN })).httpStatus).toBe(400);
+  });
+
+  it("the window: required, offsets on both, from before to, at most 14 days (14 exactly is fine, 15 is not)", () => {
+    expect(reasonOf(() => parseBusyQuery({ userIds: U1 }))).toBe("window_required");
+    expect(reasonOf(() => parseBusyQuery({ userIds: U1, from: WIN.from }))).toBe("window_required");
+    expect(reasonOf(() => parseBusyQuery({ userIds: U1, from: "2027-03-10T09:00:00", to: "2027-03-10T10:00:00" }))).toBe("time_invalid");
+    expect(reasonOf(() => parseBusyQuery({ userIds: U1, from: "2027-03-10", to: "2027-03-11" }))).toBe("time_invalid");
+    expect(reasonOf(() => parseBusyQuery({ userIds: U1, from: WIN.to, to: WIN.from }))).toBe("window_invalid");
+    expect(reasonOf(() => parseBusyQuery({ userIds: U1, from: WIN.from, to: WIN.from }))).toBe("window_invalid");
+    expect(parseBusyQuery({ userIds: U1, from: "2027-03-01T00:00:00Z", to: "2027-03-15T00:00:00Z" }).to.getTime()).toBeGreaterThan(0);
+    expect(reasonOf(() => parseBusyQuery({ userIds: U1, from: "2027-03-01T00:00:00Z", to: "2027-03-15T00:00:00.001Z" }))).toBe("window_too_large");
+    expect(reasonOf(() => parseBusyQuery({ userIds: U1, ...WIN, excludeEventId: "nope" }))).toBe("id_invalid");
+  });
+
+  it("mergeIntervals sorts by start and joins overlapping or touching intervals, keeping the real ends (nothing clipped)", () => {
+    expect(mergeIntervals([])).toEqual([]);
+    const m = mergeIntervals([
+      { startsAt: d("2027-03-10T14:00:00Z"), endsAt: d("2027-03-10T15:00:00Z") },
+      { startsAt: d("2027-03-10T10:00:00Z"), endsAt: d("2027-03-10T11:00:00Z") },
+      { startsAt: d("2027-03-10T09:00:00Z"), endsAt: d("2027-03-10T10:00:00Z") }, // touches the next: one block
+      { startsAt: d("2027-03-10T09:30:00Z"), endsAt: d("2027-03-10T09:45:00Z") }, // inside the first
+      { startsAt: d("2027-03-09T23:00:00Z"), endsAt: d("2027-03-10T01:00:00Z") }, // runs in from the day before
+      { startsAt: d("2027-03-10T14:30:00Z"), endsAt: d("2027-03-10T16:00:00Z") }, // overlaps and extends the last
+    ]);
+    expect(m.map((i) => [i.startsAt.toISOString(), i.endsAt.toISOString()])).toEqual([
+      ["2027-03-09T23:00:00.000Z", "2027-03-10T01:00:00.000Z"],
+      ["2027-03-10T09:00:00.000Z", "2027-03-10T11:00:00.000Z"],
+      ["2027-03-10T14:00:00.000Z", "2027-03-10T16:00:00.000Z"],
+    ]);
+    // a gap of one millisecond keeps two blocks
+    expect(mergeIntervals([
+      { startsAt: d("2027-03-10T09:00:00.000Z"), endsAt: d("2027-03-10T10:00:00.000Z") },
+      { startsAt: d("2027-03-10T10:00:00.001Z"), endsAt: d("2027-03-10T11:00:00.000Z") },
+    ])).toHaveLength(2);
+  });
+
+  it("mergeIntervals does not mutate its input", () => {
+    const a = { startsAt: d("2027-03-10T09:00:00Z"), endsAt: d("2027-03-10T10:00:00Z") };
+    const b = { startsAt: d("2027-03-10T09:30:00Z"), endsAt: d("2027-03-10T11:00:00Z") };
+    mergeIntervals([a, b]);
+    expect(a.endsAt.toISOString()).toBe("2027-03-10T10:00:00.000Z");
   });
 });
