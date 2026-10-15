@@ -9350,6 +9350,161 @@ All four writes authorize on the existing `finance_config` kind (PERMISSION-CONT
 - `tax-profile` returns `{current, history}`: `current` is the profile in force today or `null`; `history` is every profile on file (including the current one and a future-dated one), newest first, each `{id, employeeId, hasNpwp, npwp, ptkpStatus, terCategory, taxResident, effectiveFrom, effectiveTo, createdAt}`.
 - The compensation page, with `?employee=`, has an "On file" card: allowances and benefits read with `current=true`, the tax profile, each its own honest read; `&history=allowances,benefits,tax` reads the listed ones without the filter and shows closed rows. The "cannot list" note is replaced. Proof: `compensation-reads.test.ts` (HTTP, Linux CI gate), the page tests and the `hr-full-data` reader tests.
 
+## 52. IT security: who is connected, sign-ins, alerts and blocks (DW-7h, DW-D36, 2026-10-15) — `platform-nest/src/core/security/` (new), `src/admin/it-security.controller.ts` (new), `src/admin/it-accounts.controller.ts`, `src/core/keycloak-admin.ts`; UI `/it/network/*`; migration `202610152130_security_access.sql` — **STATUS: PLANNED (contract written; building)**
+
+**Why it exists.** DW-D36 (owner, 2026-10-15): the office network cannot be read, because the UniFi controller is shared with a private house and no API key can be issued. The network map waits for an office collector on a Raspberry Pi, which the owner prepares after the ERP is done (§52.11). Until then IT sees and controls what reaches the ERP itself:
+- who is connected, from which address and on what device;
+- every sign-in and failed sign-in;
+- alerts;
+- signing a session out, blocking a login, and blocking an address.
+
+Staff sign in with their email address and a password (Keycloak). Most staff addresses are Google Workspace ALIASES, so a password-reset email lands in someone else's inbox. Recovery is therefore by IT (§52.8).
+
+### 52.1 Where things are decided
+
+| Decision | Where | Effect |
+|---|---|---|
+| Which address and browser a request came from | `core/security/client-context.ts` `clientContextOf` (§52.2) | Used by recording, IP blocks and the self-protection rules. |
+| Record the connection | request hook (§52.3) | `security_access_seen` |
+| Refuse a signed-out session or a blocked login | request hook (§52.4) | 401 `session_revoked` |
+| Refuse a blocked address | request hook, on routes with `:tenantId` (§52.5) | 403 `ip_blocked` |
+| Reads and writes for IT | `/api/:t/it/security/*` (§52.6, §52.7) | `it_account` `read` / `disable` (PERMISSION-CONTRACT §42) |
+
+### 52.2 The client's address and browser
+
+**platform-ui** (`lib/platform.ts` `platformFetch`) sends two headers on every call to platform-nest:
+- `x-gaiada-client-ip`: the incoming request's `x-real-ip`, which nginx `location /` sets to `$remote_addr`.
+- `x-gaiada-client-ua`: the incoming `user-agent`, cut to 512 characters.
+
+Both are left off when there is no request context (a test, a build).
+
+**platform-nest** (`clientContextOf(req)` → `{ip, userAgent, via}`) decides as follows:
+- A request carrying `X-Real-IP` or `X-Forwarded-For` came through nginx; the only public nginx path into platform-nest is `/api/webhooks/`.
+  - Its `x-gaiada-client-*` headers are ignored.
+  - The address is `X-Real-IP`, else the RIGHTMOST `X-Forwarded-For` entry.
+- A request with neither header came from platform-ui, and its `x-gaiada-client-*` headers are used.
+- With none of these, the socket peer is used.
+- An address that does not parse is `null`, never a guess. IPv4-mapped IPv6 is unwrapped.
+
+### 52.3 Recording who is connected
+
+Every authenticated request on a route with `:tenantId` and a resolved user upserts one row of `security_access_seen`.
+- **Key:** `(tenant_id, user_id, session_id, ip)`.
+  - `session_id` is the token's `sid` (`principal.sessionId`), or `''` when there is none.
+  - The key is NULLS NOT DISTINCT, so an unknown address is one row, not one per request.
+- **Update:** the latest `user_agent`, `last_seen_at = now()` and `request_count + 1`.
+- **Throttle:** at most one write per key per 60 seconds per process (an in-memory map with a bounded size).
+- **Failure:** a failed write is logged and never fails the request. Requests refused by §52.4 or §52.5 are not recorded as connections.
+
+### 52.4 Signed-out sessions and blocked logins (the hot path)
+
+On every authenticated request, the token is refused with **401** `{error: "Your session was ended by IT. Sign in again.", reason: "session_revoked"}` when `security_session_revocations` holds a row whose `expires_at > now()` and either:
+- its `session_id` equals the token's `sid`; or
+- its `session_id` IS NULL, its `user_id` is the principal's user, and the token was issued (`iat`) before `revoked_at` ("Block login").
+
+The check is cached per process for at most 10 seconds, so a sign-out or block takes effect within 10 seconds, everywhere.
+
+- **Why not `users.session_version`:** the principal reads `session_version` from `users` on every request, so bumping it does not cut an existing token. The revocation row does.
+- **platform-ui:** a 401 with `reason: "session_revoked"` clears the ERP session cookie and sends the person to `/auth/login?reason=session_revoked`. The login page says "Your session was ended by IT."
+- **Keycloak:** a sign-out also ends the Keycloak session (§52.7), so the ERP cannot refresh it. The revocation row covers the access token still in hand (it lives up to 1 hour).
+
+### 52.5 Blocked addresses
+
+On a route with `:tenantId`, a request whose client address (§52.2) equals an active block of that company is refused with **403** `{error: "Access from this network address is blocked for this company.", reason: "ip_blocked"}`.
+- A block is active when `lifted_at IS NULL AND expires_at > now()`.
+- The refusal increments the block's `hit_count` and `last_hit_at`, throttled to one write per block per 60 seconds.
+- The check is cached per process for at most 10 seconds.
+- An unknown address (`null`) is never blocked. Routes without `:tenantId` are not checked, and neither is sign-in itself, which is Keycloak.
+
+### 52.6 Reads (all `it_account` `read`; tenant-scoped; `window` is `15m`, `24h` or `7d`, default `24h`; anything else 400)
+
+| Route | Answer |
+|---|---|
+| `GET /api/:t/it/security/connections?window=` | `{asOf, window, connections: Connection[]}`, newest `lastSeenAt` first, at most 500. |
+| `GET /api/:t/it/security/sign-ins?window=` | `{asOf, window, state, reason?, events: SignInEvent[], summary, unknownAccounts}` (see below). `window` here is `24h` or `7d`. |
+| `GET /api/:t/it/security/alerts?window=` | `{asOf, window, signIns: "on" or "off" or "unavailable", alerts: Alert[]}` (rules below). |
+| `GET /api/:t/it/security/blocks` | `{ipBlocks: IpBlock[], revokedSessions: Revocation[]}`: the company's blocks (active first, then the last 30 days) and the sessions this company's IT ended in the last 7 days. |
+
+**`Connection`:**
+- who: `{userId, displayName, email}`;
+- the session: `sessionId` (the `sid`, or `''`), `ip` (`string | null`), `userAgent`;
+- `device: {browser, os, kind: "desktop" | "mobile" | "tablet" | "unknown"}`, parsed from the user agent on the server with a small rule table and no new dependency;
+- `firstSeenAt`, `lastSeenAt`, `requestCount`;
+- `revoked` (the session or the login is cut, §52.4) and `ipBlocked` (the address has an active block).
+
+**Sign-ins.** They come from Keycloak's admin events (`GET /admin/realms/{realm}/events`, types `LOGIN`, `LOGIN_ERROR`, `LOGOUT`) read by the provisioner client, which needs `view-events` (§52.9).
+- `state: "on"`: the events were read.
+  - A `SignInEvent` is `{at, type: "sign_in" | "failed" | "sign_out", userId | null, email | null, ip, error | null}`.
+  - Only events whose account maps to a member of this company are listed.
+  - `summary: {signIns, failed, failedByAccount: [{userId, email, count}], failedByIp: [{ip, count}]}`.
+  - `unknownAccounts: {failed: number}` counts failed sign-ins with a username that matches no ERP user, without the usernames.
+- `state: "off"`: the realm records no events.
+- `state: "unavailable"`: the read failed, or the role is missing. It carries the reason. Neither `off` nor `unavailable` is ever an empty list.
+
+**Alerts** are computed on read, newest first. An `Alert` is `{kind, severity: "high" | "medium" | "low", at, subject: {userId?, email?, ip?}, detail, count}`. The rules:
+
+| `kind` | Rule | Severity |
+|---|---|---|
+| `failed_signins_account` | 5 or more failed sign-ins for one member's account within any 15 minutes in the window | high |
+| `failed_signins_ip` | 10 or more failed sign-ins from one address within any 15 minutes, counting this company's members and unknown accounts | high |
+| `new_device` | a member's first connection from an (address, device) pair, inside the window, when the member already had connections before the window | medium |
+| `blocked_ip_hits` | an active block of this company with hits inside the window | low |
+
+When sign-ins are `off` or `unavailable`, the two sign-in rules cannot run, and the answer says so in `signIns`.
+
+**IT's Pulse tile "Threat alerts"** (source `it-security-alerts`) counts `high` and `medium` alerts in `24h`. A refused or failed read is "No access" or "Unavailable", never 0.
+
+### 52.7 Writes (all `it_account` `disable`; each writes an activity)
+
+| Route | Body | Answer | Refusals |
+|---|---|---|---|
+| `POST /api/:t/it/security/sessions/:sessionId/revoke` | `{userId, reason?}` | 200 `{revoked: true, keycloak: "ended" or "not_found" or "failed"}` | 404 when that session of that user was never seen in this company; 409 `revokes_yourself` for the caller's own session |
+| `POST /api/:t/it/security/blocks` | `{ip, reason, hours?: 1..720 (default 24), confirmShared?: boolean}` | 201 `IpBlock` | 400 for an invalid address, or a private, loopback or link-local one; 409 `blocks_yourself` for the caller's own address; 409 `shared_address` `{detail: {users}}` when 3 or more of this company's members connected from it in the last 24 h and `confirmShared` is not true; 409 `already_blocked` |
+| `POST /api/:t/it/security/blocks/:blockId/lift` | — | 200 `IpBlock` | 404; 409 `not_active` |
+
+- **Revoke:** inserts a revocation `{user_id, session_id, revoked_by, tenant_id, reason, expires_at: now() + 13 h}` and asks Keycloak to delete the session (`DELETE /admin/realms/{realm}/sessions/{sid}`). It is `revoked: true` even when Keycloak fails, because the row alone cuts the ERP. The answer says what Keycloak did.
+- **Create block:** marks this company's expired, unlifted blocks lifted (`lifted_at = expires_at`) before inserting.
+- **Activities:** `it.security.session_revoke`, `it.security.ip_block`, `it.security.ip_unblock`.
+
+**Changed: `POST /api/:t/it/accounts/:userId/disable` ("Block login")** keeps disabling the Keycloak user and also:
+- inserts a user-level revocation (`session_id` NULL, `expires_at: now() + 13 h`), which cuts every token issued before it (§52.4);
+- calls Keycloak's `POST /admin/realms/{realm}/users/{id}/logout`.
+
+The answer adds `sessionsEnded: boolean`. `enable` does not lift the revocation; the person signs in again and gets a token issued after it.
+
+### 52.8 Accounts on a Google Workspace alias (DW-D36)
+
+`POST /api/:t/it/accounts/:userId/reset-password` still answers `{ok, initialPassword}` once, for IT to hand over in person. The password is now TEMPORARY (`setPasswordTemporary`), so Keycloak makes the person choose their own at the first sign-in.
+
+Realm `gaiada` sets `resetPasswordAllowed: false`: there is no "Forgot password?" by email for anyone, because a reset email to an alias reaches the alias owner. The login page's help text points to IT.
+
+### 52.9 Keycloak (server steps; the repo realm file mirrors them for a new install)
+- Realm `gaiada`: `eventsEnabled: true`, `eventsExpiration: 2592000` (30 days), `enabledEventTypes: ["LOGIN", "LOGIN_ERROR", "LOGOUT"]`, `resetPasswordAllowed: false`.
+- The service account of `gaiada-provisioner` gains realm-management `view-events`. It already holds `manage-users`, which covers ending a user's sessions.
+
+Until these are done, sign-ins read `off` or `unavailable` (§52.6), and everything else works.
+
+### 52.10 Pages (IT › Network)
+
+The four tabs that showed sample network data now show the ERP side:
+
+| Tab | Path | Shows |
+|---|---|---|
+| Topology | `/it/topology` | unchanged: registered devices; the office collector later (§52.11) |
+| Connected | `/it/network/presence` | `connections`, with Sign out and Block address |
+| Sign-ins | `/it/network` | `sign-ins` |
+| Alerts | `/it/network/threats` | `alerts` |
+| Blocks | `/it/network/rules` | `blocks`, with Lift and a Block address form |
+
+- The four tabs are gated like IT accounts (`it.manage`, not module-gated). The registry and page reads mirror each other.
+- The sample-data fixtures for these four are gone. DEMO_MODE answers the new routes from `demoFixtures.ts`, in a DW-7 block.
+
+### 52.11 Later: the office collector (7h-P, the owner's Raspberry Pi)
+
+An always-on Raspberry Pi in the office sweeps the client network (ARP, names, vendor) and pushes to `POST /api/:t/it/discovery/report`. That route accepts only UniFi-keyed devices today: `discovery_source` allows `'manual'` and `'unifi'`, and the upsert keys on the UniFi client id. So the collector needs a migration first:
+- a new source, `'collector'`;
+- a stable key, the MAC address, accepting that about 60% of phones randomize theirs per network.
+
 ## 53. The client grain in reports (PV7-01, 2026-10-15) — `platform-nest/src/modules/reports/` — **STATUS: BUILT, PROTOTYPED (backend: the DB and HTTP suite report-client-grain.db.test.ts and the Cerbos matrix reports-cerbos.test.ts are written for the Linux CI gate; no page yet, PV7-05)**
 
 **Why.**

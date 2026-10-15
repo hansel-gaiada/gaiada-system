@@ -2286,6 +2286,22 @@ DW-D30 (owner, 2026-10-15) has the revenue plan built now, so that the GM's "Rev
 - Whether the Office of the GM's lead seat should also set the plan follows §38's open owner decision on who approves targets.
 - **As built.** `platform-nest/src/modules/finance/revenue-plan.controller.ts` authorizes with `{kind: "dept_kpi_target", module: "reports", unitAncestors: []}`, `read` and `approve`; no policy, catalog or bundle changed. The UI mirrors `approve` with `company.manage` (or elevated), which a `manager` also holds, so the server's 403 is the refusal and the page shows it as a sentence. Tested in `revenue-plan.controller.db.test.ts` (a manager, a member and an org_unit_lead are refused 403 on PUT and DELETE; read passes for the tenant's tiers; another tenant's approver is refused).
 
+## 42. DW-7h — IT security, BFF §52 (2026-10-15, PLANNED): no new kind, no new action
+
+DW-D36 (owner, 2026-10-15) moves IT's security work to the ERP side. The people who may see who is connected and sign someone out are the people who already run logins in IT accounts, so the routes reuse `it_account`:
+
+| Route | Authorizes as | Who passes (`resource_it_account.yaml`) |
+|---|---|---|
+| `GET /api/:t/it/security/connections`, `/sign-ins`, `/alerts`, `/blocks` | `it_account` `read` | `platform_admin`; `company_admin` and `it_managers` with `inTenant && notLow` |
+| `POST /api/:t/it/security/sessions/:sessionId/revoke` | `it_account` `disable` | as above |
+| `POST /api/:t/it/security/blocks`, `/blocks/:blockId/lift` | `it_account` `disable` | as above |
+| `POST /api/:t/it/accounts/:userId/disable` (now also ends sessions) | `it_account` `disable` (unchanged) | as above |
+
+- **Why `disable`.** Ending a session and blocking an address stop access the way disabling a login does, and they are undone the same way (sign in again, lift the block). A separate action would need a policy change, the catalog and bundles, and a Cerbos restart (cerbos-new-kind-is-six-artifacts), for the same set of people.
+- **Self-protection is in the routes, not the policy.** The routes refuse ending your own session, blocking your own address, a private address, and an address 3 or more members share, unless `confirmShared` is set (BFF §52.7).
+- **The hot-path refusals (BFF §52.4, §52.5) are not authorization decisions.** They run before Cerbos and do not audit as decisions. A refused request is the 401 or 403 itself.
+- The UI mirrors `it_account` `read` and `disable` with `it.manage`, exactly as the IT accounts page does.
+
 ## 45. PV7-01 — `read_client` on `report_document` (2026-10-15, PROTOTYPED)
 
 Design: `docs/FRONTEND-BFF-CONTRACT.md` §53 (plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`, PV7-01). Status: **PROTOTYPED** (policy, catalog, group, bundles, migration and tests are in the repo; the live Cerbos probe after a restart is the deploy step).

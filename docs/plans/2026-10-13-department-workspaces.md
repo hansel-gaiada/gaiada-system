@@ -795,40 +795,13 @@ where a ticket says the classic shell changes too.
     Archive or Restore behind a "Show archived" switch. Archive is refused for a balance, an active child, a control account,
     or an account a posting rule, tax code, asset class, loan or the billing profile still names (the 409 lists them). The DB
     and HTTP suite `finance-accounts.test.ts` ran green on CI 38711400868 (real Postgres). LIVE in 413 (BFF §49 as built).
-- **7h · IT isolation rules and threat response.** PLANNED (2026-10-15). It is blocked on the owner, not on code.
-  - *Today:*
-    - The Network pages (Topology, Traffic, Threats, Isolation, Occupancy) read labelled fixtures.
-    - `lib/network.ts` documents five routes and the isolate write (a D14 approval); no backend serves them.
-    - Device discovery has an ingest route (`POST it/discovery/report`), but nothing feeds it.
-    - The design is `docs/superpowers/specs/2026-08-25-network-security-console-design.md`.
-  - *Why the ERP cannot do it alone:* the ERP server cannot reach the office network (`10.10.0.0/22` is behind
-    NAT; checked in the design, §1). Every reading has to be pushed from a collector inside the office
-    (`it-site-collector`, not written yet).
-  - *Needs from the owner, in this order:*
-    1. A read-only UniFi API key for the office gateway (design B1, O1). It is stored as a secret, never in the
-       ERP database. The 7i network-controller connection uses the same key.
-    2. An always-on office host to run the collector (B2, O2). A workstation that sleeps makes the readings flap.
-    3. From the UniFi console: is Threat Management blocking (IPS) or only detecting (IDS) (O7)? This decides
-       whether the Threats page may say "blocked".
-    4. Confirm the gateway before it is trusted as the boundary: it is named "ENZO Villa" and reports state
-       "setup" (O8).
-    5. Before isolation, network work rather than ERP code: split managed devices from personal ones and add a
-       quarantine segment (O4). Isolation needs a place to move a device to.
-  - *Then, one ticket each:*
-    - 7h-1, the collector. Sites, devices and clients go to the existing discovery ingest. The topology goes live
-      and the seeded fixture devices are purged (discovery design §12).
-    - 7h-2, threats, read only:
-      - the collector's threat feed;
-      - tables and retention;
-      - `GET it/network/threats` and `network.threat.*` events;
-      - the Threat alerts tile on IT's Pulse;
-      - IT's "Open threat alerts" KPI reads it instead of the DW-D30 proxy.
-    - 7h-3, isolation (after item 5):
-      - `POST it/network/isolate` files a D14 approval, and approving executes it;
-      - a server-side deny-list keeps the gateway, the infrastructure, the collector host and the approver's own
-        device from being isolated;
-      - automatic expiry and a kill switch;
-      - `/it/network/rules` shows what is isolated, who approved it and when it ends.
+- **7h · IT security on the ERP side (DW-D36, BFF §52, PERMISSION §42).** REPLANNED 2026-10-15. The UniFi controller is shared with a private house, so no API key can be issued. The owner's ruling:
+  - The network map waits for an office collector on a Raspberry Pi that the owner prepares after the ERP is done (7h-P).
+  - Now, IT sees and controls what reaches the ERP itself: who is connected, sign-ins, alerts, signing a session out, blocking a login, and blocking an address.
+  - The four sample-data Network tabs are reworked to show it.
+  - Built by three agents in parallel on one spec: 7h-1 the request hook and session cut-off, 7h-2 the routes, Keycloak and alias recovery, 7h-3 the pages. They land together in one gate.
+  - *Server steps (BFF §52.9):* Keycloak events on, `view-events` for the provisioner, and email reset off.
+  - *7h-P, later:* the collector needs the discovery ingest to accept a non-UniFi source and a MAC key (BFF §52.11).
 - **7i · Connections with nothing to connect yet.** PLANNED (2026-10-15). There are four items. Only one needs a
   ruling and no credential.
   - *7i-1, the Failing workflows tile (IT's Pulse).*
@@ -851,27 +824,16 @@ where a ticket says the classic shell changes too.
       - for an API or an aggregator, the credentials, held per company as secrets.
     - *Then:* a statement import route on the F6 tables, then the connection.
     - A file upload needs no credential and can be built first if the owner chooses it.
-  - *7i-3, the network controller (IT).* Lands with 7h-1, because it uses the same UniFi key.
-  - *7i-4, Google Workspace admin (IT).*
-    - *Needs from the owner:* a Workspace super-admin grants a read-only service account. It uses domain-wide
-      delegation for the Admin SDK's directory user and device read scopes.
-    - *Also needs a ruling:* one connection for the group, or one per company's domain.
-    - *Then:* IT's accounts and devices can be checked against Workspace. That includes the leavers' logins
-      that the DW-D30 proxy approximates today.
-- **7j · Department KPI readers (DW-D25, owner 2026-10-14).** DW-4e left the functional departments' and the
-  GM's 12 KPIs reading "unavailable (no reader)": GM 2, HR 4, Finance 3, IT 3. Contract first in BFF §40.6, on
-  the seam DW-6 and DW-4 agreed in §40.5.1; one reader per ticket, each plugging into the §40 catalogue
-  (`{value, numerator?, denominator?}` or null). The targets, the condition and the DW-4j watch then pick
-  it up unchanged.
-  - **Contract written (2026-10-15): BFF §40.6, with PERMISSION-CONTRACT §41.**
-    - The readers read the COMPANY, not the unit, because HR, Finance and IT serve the whole company.
-    - DW-D30 settled the five definitions the data could not:
-      - the GM's monthly revenue plan is built now (a table, three routes and a "Revenue plan" tab, with no new Cerbos kind);
-      - payroll on time means paid by the pay date;
-      - the close is on time when soft-locked within 10 days of the period's end;
-      - the two IT KPIs with no source use proxies (leavers' logins closed, devices offline or degraded);
-      - the turnarounds count working days.
-    - Order: the seam's shared `gated()`, then the seven ready readers, the four that need care, and the revenue plan with its reader last.
+  - *7i-3, the network controller (IT).* Dropped by DW-D36: no UniFi key will be issued. The office view comes from the Raspberry Pi collector (7h-P).
+  - *7i-4, Google Workspace admin (IT).* The company has Workspace. Only the HODs have accounts of their own; every other staff address is an ALIAS on one of them (owner, 2026-10-15).
+    - ERP sign-in stays email and password for everyone (Keycloak), so an alias is no obstacle.
+    - Recovery is by IT, never by email (DW-D36, BFF §52.8).
+    - The read-only connection lists users and their aliases, and flags:
+      - an ERP login whose address is in no account;
+      - an alias still live for someone who has left;
+      - a HOD account without 2-step verification, since those inboxes hold everyone's mail.
+    - Removing a leaver's alias stays a manual step in Google Admin, raised as a task.
+    - *Needs from the owner:* a Workspace super-admin grants a read-only service account (domain-wide delegation, directory user read). One connection for the company's domain.
 
 **Order, one agent at a time:**
 1. 7d backend (Sonnet, Opus review), then 7d UI (Sonnet), then the release, the live dry run and the apply.
@@ -1380,6 +1342,7 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 | DW-D29 | DW-8n's finding: every member and viewer can read the whole company's time entries through `GET /time-entries` | **Owner (2026-10-15): narrow it, in line with DW-D19.** A person reads their own time; a head reads their unit's people; HR's people readers and the company-wide tiers read the company. The list goes through the shared person-axis gate (`core/person-axis-gate.ts`), the rule activity and productivity already use (BFF §48a, PERMISSION-CONTRACT §40a) |
 | DW-D30 | DW-7j: the functional departments' and the GM's KPI readers (BFF §40.6). The data could not settle five definitions: there is no revenue plan; payroll has no "published" time and the close no deadline; IT has no request log or threat backend; and turnaround could count calendar or working days | **Owner (2026-10-15):** build the GM's monthly revenue plan now (§40.6.4). Payroll is on time when a regular run is paid by its pay date. A period is closed on time when soft-locked within 10 calendar days of its end. The IT KPIs use proxies now: leavers' logins closed within 1 working day, and devices offline or degraded. Leave-decided and payments-confirmed count working days. |
 | DW-D31 | DW-8i-3 (a finding of DW-8i-2): the SEO property brief's grounding and social's brand drafts search the knowledge store with a scope, but every internal ERP chunk carries an empty ACL and so matches any scope; a meeting transcript or a contract file could ground an AI draft | **Owner (2026-10-15): own corpus only.** Each lookup keeps only the hits of the corpus it searches: the property's grounding chunks (`search-property:<id>:grounding`) or the client's brand corpus (`social-brand:<company>:<client>`). ERP records and the public tier never reach those drafts (BFF §46.10) |
+| DW-D36 | DW-7h: the UniFi controller is shared with a private house, so no API key can be issued; and most staff addresses are Google Workspace aliases on an HOD account | **Owner (2026-10-15):** build the ERP side now, and the Raspberry Pi collector later. The ERP side means who is connected, sign-ins, alerts, ending a session, blocking a login and blocking an address (BFF §52). The four sample Network tabs are reworked to show it. Control is ERP-side. Sign-in stays email and password. On the owner's question about aliases, the DW-7 session proposed, and the owner then said to proceed: recovery is by IT with a temporary password, and email reset is off, because a reset email to an alias reaches the alias owner; no personal content goes by email to an alias. | DW-7h, DW-7i-4 |
 
 ---
 
@@ -1710,6 +1673,7 @@ These are built in code but give no real data until someone outside engineering 
 
 ## Decision log
 
+- **2026-10-15 (owner, during the build):** DW-D36: no UniFi key, so IT security moves to the ERP side now and the office collector waits for a Raspberry Pi; staff addresses are mostly Workspace aliases, so recovery is by IT and email reset is off (§11.4, BFF §52), for DW-7h and DW-7i-4.
 - **2026-10-15 (owner, during the build):** DW-D31: the SEO property brief's and social's brand-draft knowledge lookups keep only their own corpus, never ERP records (§11.4, BFF §46.10), for DW-8i-3.
 - **2026-10-15 (owner, during the build):** DW-D26 (the assistant's and the hub's knowledge lookups go through DW-8i's per-record filter), DW-D28 (calendar busy times, times only) and DW-D29 (time entries read by tier, as DW-D19), all §11.4, for DW-8i-2, DW-8g and DW-8n's finding.
 - **2026-10-15 (owner, during the build):** DW-D30: the definitions behind DW-7j's KPI readers (§11.4, BFF §40.6). The GM's revenue plan is built now; payroll is on time when paid by the pay date; the close is on time within 10 days; the IT KPIs use proxies; turnarounds count working days.
