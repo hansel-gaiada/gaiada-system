@@ -8762,3 +8762,70 @@ Built as §47.1 to §47.3 and §47.6 specify, except busy times: **§47.4 (`GET 
   - the provider CHECK accepts `google_gmail` and still refuses an unknown provider.
 - **Cerbos matrix:** `src/rbac/cerbos-personal-mailbox.test.ts`.
 - **UI:** the mailbox states, compose validation, the reply prefill, the "Email this client" prefill and its no-address state, and the simulated label.
+
+## 53. The client grain in reports (PV7-01, 2026-10-15) — `platform-nest/src/modules/reports/` — **STATUS: PLANNED**
+
+**Why.**
+- Plan: `docs/plans/2026-10-15-pv7-performance-views-tickets.md`, PV7-01 and findings 1 to 3. The Reports pages and the client Health board (PV7-05) need one document per client, summed across that client's projects.
+- It is a **staff-only** document (lead's call L1, PV7-Q1). It carries task- and time-derived numbers, so it is never shown to a client. What a client sees is built from records the client can already see (PV7-02, PV7-04, PV7-07), never from this document.
+- It is **sealed with each month like every other grain** (L2), so a project moved to another client does not rewrite history.
+
+### 53.1 The grain
+- `client` joins `person | project | department | company` wherever the grain is named: the document, overview, metrics and export routes, the sealed store, the MCP enums and the UI type mirror.
+- **`scopeRef`** is the client id. A value that is not a uuid is 400 `scopeRef` (never a 500 at the uuid cast).
+- **The `header`** is the usual one: `grain: "client"`, `scopeRef` the client id, `scopeName` the client's name (the id when the client no longer exists).
+- **KPI set:** the project grain's metrics, in the same order. `evidence.source_diversity` has no project grain, so it is not offered here either.
+
+### 53.2 What is in a client's numbers
+A client's figures are the sum of its projects' figures. The sources are the same rows the project grain reads, regrouped through `projects.client_id`:
+- **Fact-backed metrics:** `report_work_facts` joined to `projects` (same tenant) and `clients`.
+- **Milestones, flow and overdue:** regrouped through a project to client map, the way flow already maps a project to its department.
+
+**Excluded, both shapes of "internal":**
+- a project with `is_internal` (internal work);
+- a project whose client is the sentinel internal client (`clients.is_internal`);
+- a soft-deleted project or client.
+
+These are the same two shapes the department KPI readers exclude (`dept-kpi-readers/scope.ts`).
+
+### 53.3 The arithmetic (what the tests pin)
+- **Additive metrics:** the sum of the projects' values.
+- **Ratios:** sum of numerators over sum of denominators across the client's projects. **Never a mean of the projects' ratios.**
+- **`flow.wip_open_avg`:** the numerator is the sum of open counts and the **denominator stays the range's day count**. Summing per-project day counts would multiply the days.
+- **`discipline.overdue_open`:** a count at the range end. It keeps `pointInTime` and is summed across projects, never across days.
+
+### 53.4 Moved projects
+`projects.client_id` can change.
+- **A live range** (any open period, a custom range, today) uses the project's **current** client.
+- **A sealed period** serves the stored document, so it keeps the attribution of the day it was sealed. Amending and re-sealing re-attributes at that moment, as for every grain.
+
+### 53.5 Routes
+All of these are existing routes; only the accepted `grain` value is new.
+- `GET /api/:t/reports/document?grain=client&scopeRef=<clientId>&periodKind&start&end[&revision]` returns the usual `ReportDocument`. A sealed calendar period serves the stored client document at the latest revision, else it falls back to a live build.
+- `GET /api/:t/reports/overview?grain=client&periodKind&start&end` returns `{periodKind, start, end, scopes: [{scopeRef, scopeName, kpis}]}`: one headline row per client that has any rollup row in the range (the same three headline KPIs as the project overview, no deltas), for the board. A client with no work in the range is not listed.
+- `POST /api/:t/reports/export {grain: "client", scopeRef, periodKind, start, end, format}` exports through the same fetch and the same check as the read, so an export never widens access.
+- `GET /api/:t/reports/metrics?grain=client` returns the raw rows whose dimensions are `{clientId}`.
+- `servedTenant` stays valid for `department` only (400 otherwise). `unit` stays valid for `person` only.
+
+### 53.6 Narrative
+A client document's narrative is the **deterministic** one, in a live read and in a sealed one. The seal makes no AI call per client (one call per client would add about 71 calls to every monthly seal). `narrative.source` is `"deterministic"`, and so is `report_documents.narrative_source`.
+
+### 53.7 Access
+- **Cerbos:** `report_document` · `read_client` (PERMISSION-CONTRACT §45). The routes above call it for every `grain=client` read, listing and export.
+- **Who:** the derived roles that hold `read_project`, without the served-provider arm. A served company's staff read their own department's slice only.
+- **Nobody gains reach:** anyone who can read every project document could already compute the sum.
+
+### 53.8 MCP
+`reports.getDocument` and `reports.getMetrics` accept `grain: "client"`. Their text says the client document is staff-only.
+
+### 53.9 Migration
+`202610151700_reports_client_grain.sql`:
+- widens the `report_documents.grain` CHECK to the five grains (found by its column set, never by text);
+- seeds the `reports.document.read_client` permission and its role grants (PERMISSION-CONTRACT §45).
+
+### 53.10 Not here
+- Any page (PV7-05 builds Reports > Client and the Health board on this).
+- Client health states (PV7-02, §54).
+- Anything a client can see (PV7-04, PV7-07).
+
+**Proof (to be named when built).**

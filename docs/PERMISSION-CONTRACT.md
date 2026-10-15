@@ -2232,3 +2232,27 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §48 (ruling DW-D24, plan `docs/plans/20
 - No key is `sensitive`: it reaches only the holder's own data.
 
 **The six artifacts** follow §36, plus the four pinned literals. **Restart Cerbos and probe after the deploy:** the status route answers `{connected: false}` for a fresh person.
+
+## 45. PV7-01 — `read_client` on `report_document` (2026-10-15, PLANNED)
+
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §53 (plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`, PV7-01). Status: **PLANNED**.
+
+**One more action on the existing kind, no new kind.** The key is `reports.document.read_client`: read a client-grain report document (one client's figures summed across its projects), its overview listing and its export. It sits beside `read_person`, `read_project`, `read_department` and `read_company`.
+
+| Action | Reach | What it is |
+|---|---|---|
+| `read_client` | the derived roles that hold `read_project`: `company_admin`, `hr_people_reader`, `manager` and `member`. **Not** the served-provider arm (`module_staff`, `module_manager`) | read a client's report document |
+
+**The served arm is left out on purpose.** A served slice is department only (§8's fifth column). A provider's staff never read a served company's client numbers.
+
+**Nobody gains reach.** Anyone who can read every project document in the tenant can already compute the client sum. A `member` holding only a project-scope grant matches no client resource (the derived role needs a company or global grant when the resource carries no `projectId`), so it reads its own project and no client.
+
+**No `perm_*` rule.** The IAM-04-B5 note at the end of `resource_report_document.yaml` still holds: any `perm_*` rule on this kind fails `permission-arm-hazard-scan.test.ts` for `org_unit_lead`. The key therefore has no permission-arm mirror, and the permission-native `owner` holds it in its bundle without reaching it through Cerbos unless it also holds `company_admin` (the same under-claim as `read_project`).
+
+**Resource attributes:** none new. The handler sends `{kind: "report_document", id: <clientId>, module: "reports"}` for a client-grain read, and none of `ownerId`, `projectId` or `teamId`.
+
+**Not narrowed in the handler.** The person-axis and department narrowing (`requiresUnitNarrowing`) does not apply: the client grain is neither of those, as for `project`.
+
+**Artifacts** (a new action on an existing kind): the policy (`read_client` joins the four rules above), `permission-catalog.json` (+1 key), `permission-groups.json`, `role-permission-bundles.json`, and migration `202610151700_reports_client_grain.sql` (seeds the permission and its grants). **Restart the Cerbos test container and the live sidecar after the deploy**: nothing hot-reloads.
+
+**Proof (to be named when built).**
