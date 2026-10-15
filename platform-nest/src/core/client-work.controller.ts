@@ -13,6 +13,10 @@ import { AuthGuard } from "../auth/guards";
 import { clientFilterSql, parseClientFilter } from "./client-filter";
 import { departmentFilterSql, parseDepartmentFilter } from "./department-filter";
 import { staffDeliverableClientVisible } from "./portal-visibility";
+import { assertPersonAxisReadAllowed } from "./person-axis-gate";
+import { PERSON_SCOPE_MODULES, loadLedUnitScope, loadUnitRoster, personAxisTier, todayIsoInTz } from "../modules/reports/person-scope";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 @Controller("api")
 @UseGuards(AuthGuard)
@@ -114,16 +118,58 @@ export class ClientWorkController {
   }
 
   // ---- Time entries (owned by the logger) ----
+  /**
+   * DW-D29 (BFF §48a, PERMISSION-CONTRACT §40a): who may read whose entries on the list. `time_entry` · `read` on the tenant is
+   * the kind-level gate (every staff role holds it) and carries no subject, so the rows are narrowed here by the shared
+   * person-axis gate (`core/person-axis-gate.ts`), the rule activity, the day read and PM productivity use. Returns the user
+   * ids the list is limited to, or `null` for "every entry" (the `unrestricted` and `company_wide` tiers, no filter).
+   *   - `?mine=me` is the caller's own entries for every tier (`userId` is not read then).
+   *   - `?userId=X`: the gate (self, the wide tiers, a head for the led scope, else 403 `outside your reporting line`) THEN the
+   *     uuid check, so a denial is never turned into a 400. A `self_only` caller naming someone else is refused before the uuid check.
+   *   - no filter: the wide tiers see all; `unit_scoped` sees own plus the led-unit subtree's roster as of TODAY in REPORTS_TZ
+   *     (`loadLedUnitScope` then `loadUnitRoster`, the TR-25 scope `/reports` uses); `self_only` sees own only.
+   */
+  private async timeReadScope(req: FastifyRequest, tenantId: string, mine?: string, userIdQ?: string): Promise<string[] | null> {
+    const p = req.principal;
+    const me = p.userId ?? null;
+    const tier = personAxisTier(p, tenantId);
+    const wide = tier === "unrestricted" || tier === "company_wide";
+    const own = (): string[] | null => (me ? [me] : wide ? null : []);
+    if (mine === "me") return own();
+    if (typeof userIdQ === "string" && userIdQ !== "") {
+      if (me && userIdQ.toLowerCase() === me.toLowerCase()) return [me];
+      // A self_only caller naming anyone else is denied before the value is inspected (the gate throws without a query).
+      if (tier === "self_only") await assertPersonAxisReadAllowed(p, tenantId, userIdQ);
+      if (!UUID_RE.test(userIdQ)) throw new BadRequestException({ message: "userId must be a valid uuid", field: "userId" });
+      await assertPersonAxisReadAllowed(p, tenantId, userIdQ);
+      return [userIdQ];
+    }
+    if (wide) return null;
+    if (tier === "self_only") return own();
+    // unit_scoped: own entries plus everyone whose primary unit today is in the caller's led-unit subtree.
+    const asOf = todayIsoInTz(config.reportsTz);
+    const roster = await withTenants(
+      [tenantId],
+      async (c) => {
+        const units = await loadLedUnitScope(c, tenantId, me, asOf, p);
+        return loadUnitRoster(c, tenantId, [...units], asOf);
+      },
+      { modules: PERSON_SCOPE_MODULES },
+    );
+    return [...new Set([...(me ? [me] : []), ...roster])];
+  }
+
   @Get(":tenantId/time-entries")
-  async listTime(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("projectId") projectId?: string, @Query("taskId") taskId?: string, @Query("mine") mine?: string) {
+  async listTime(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("projectId") projectId?: string, @Query("taskId") taskId?: string, @Query("mine") mine?: string, @Query("userId") userIdQ?: string) {
     await authorize(req.principal, { kind: "time_entry", tenantId }, "read");
+    const userIds = await this.timeReadScope(req, tenantId, mine, userIdQ);
     const rows = await withTenants([tenantId], (c) =>
       c.query(
         `SELECT id, user_id, project_id, task_id, minutes, billable, entry_date, notes FROM time_entries
          WHERE deleted_at IS NULL AND ($1::uuid IS NULL OR project_id = $1) AND ($2::uuid IS NULL OR task_id = $2)
-           AND ($3::uuid IS NULL OR user_id = $3)
+           AND ($3::uuid[] IS NULL OR user_id = ANY($3::uuid[]))
          ORDER BY entry_date DESC, created_at DESC LIMIT 500`,
-        [projectId ?? null, taskId ?? null, mine === "me" ? req.principal.userId : null],
+        [projectId ?? null, taskId ?? null, userIds],
       ),
     );
     return rows.rows;
