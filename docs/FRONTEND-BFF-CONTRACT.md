@@ -9328,6 +9328,18 @@ All four writes authorize on the existing `finance_config` kind (PERMISSION-CONT
 
 **As built (2026-10-15).** `GET payroll-inputs` in `payroll.controller.ts` authorizes first (`hr_payroll` `read`), then validates: `runId`/`employeeId` must be uuids, `periodStart`/`periodEnd` real ISO dates, `consumed` `true`|`false`, else 400 `{message, field}`; filters combine with AND, the period filter is overlap, `periodStart`/`periodEnd` come back as `YYYY-MM-DD` text, newest first (`created_at DESC`), limit 500. The run page lists "Consumed by this run" and, while the run is `draft` or `calculated`, "Waiting for the next calculate", each from its own read (`listPayrollInputsResult`), so a refused or failed read is said in words and never shown as an empty list. Proof: `payroll-inputs-read.test.ts` (HTTP, Linux CI gate) and `[runId]/page.test.tsx`.
 
+## 51. An employee's allowances, benefits and tax profile: the reads (DW-7f-3b, 2026-10-15) — `platform-nest/src/modules/hr/payroll.controller.ts` — **STATUS: PLANNED (contract)**
+
+**Why.** HR can assign an allowance, enrol a benefit and set a tax profile (`POST employees/:id/allowances|benefits|tax-profile`), but cannot see what is already on file. The compensation screen (DW-7f-3) says so in a note. The tables hold everything (`202608240142_hr_compensation_benefits.sql`: `hr_employee_allowances`, `hr_benefit_enrollments`, `hr_tax_profiles`). So this section adds three reads only: no migration and no new kind.
+
+- **Routes** (base `api/:tenantId/modules/hr`):
+  - `GET employees/:id/allowances?current=true|false`: each row's allowance type (code and label joined), amount or percent, the effective dates and the note. `current=true` keeps the rows in force today (REPORTS_TZ). Newest first.
+  - `GET employees/:id/benefits?current=true|false`: each row's plan (code and name joined), member number, dependants, status and effective dates.
+  - `GET employees/:id/tax-profile`: the profile in force today, plus the history (newest first). Fields: `hasNpwp`, `npwp`, `ptkpStatus`, `terCategory`, and the effective dates.
+- **Who may read: `hr_payroll` `read`, exactly as `GET compensation`.** The NPWP is a tax identifier, so it stays behind the payroll reader tier and is never widened. Authorization runs before validation. A malformed id is a 400. An employee of another company, or one that does not exist, is a 404.
+- **The screen.** The compensation page's per-employee card lists the three: allowances and benefits in force, with "show history", and the current tax profile. This replaces the note that said none could be listed. A refused or failed read says so in words.
+- **Proof** (live Postgres + Cerbos, Linux CI): rows in force against closed ones; `current` at both edges; another tenant's employee gives 404; `hr_staff` without payroll read gets 403; the NPWP is returned only to a payroll reader.
+
 ## 53. The client grain in reports (PV7-01, 2026-10-15) — `platform-nest/src/modules/reports/` — **STATUS: BUILT, PROTOTYPED (backend: the DB and HTTP suite report-client-grain.db.test.ts and the Cerbos matrix reports-cerbos.test.ts are written for the Linux CI gate; no page yet, PV7-05)**
 
 **Why.**
