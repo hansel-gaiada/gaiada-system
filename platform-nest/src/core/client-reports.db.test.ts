@@ -96,7 +96,7 @@ describe.skipIf(!TEST_URL)("PV7-04a · client reports: publication, portal isola
         `INSERT INTO client_reports (id, tenant_id, client_id, project_id, source, source_id, deliverable_id, title, period_start,
                                      period_end, file_id, status, published_at, published_by, withdrawn_at, withdrawn_by,
                                      withdrawn_reason, created_by, origin_site)
-         VALUES ($1, $2, $3, $4, 'account_summary', NULL, $5, $6, '2026-09-01', '2026-09-30', $7, $8,
+         VALUES ($1, $2, $3, $4, 'social_report', gen_random_uuid(), $5, $6, '2026-09-01', '2026-09-30', $7, $8,
                  CASE WHEN $9 THEN now() - make_interval(days => $10::int) END, CASE WHEN $9 THEN $11::uuid END,
                  CASE WHEN $8 = 'withdrawn' THEN now() END, CASE WHEN $8 = 'withdrawn' THEN $11::uuid END,
                  CASE WHEN $8 = 'withdrawn' THEN 'figures were wrong' END, $11, $12)`,
@@ -597,7 +597,7 @@ describe.skipIf(!TEST_URL)("PV7-04a · client reports: publication, portal isola
       `INSERT INTO client_reports (id, tenant_id, client_id, project_id, source, source_id, title, period_start, period_end, file_id,
                                    status, published_at, published_by, withdrawn_at, withdrawn_by, withdrawn_reason, origin_site)
        VALUES ($1, $2, $3, $4, $5, $6, 'T', '2026-09-01', '2026-09-30', $7, $8, $9, $10, $11, $12, $13, $14)`,
-      [newId(), co, o.clientId ?? m.clientA, o.projectId ?? null, o.source ?? "account_summary", o.sourceId ?? null,
+      [newId(), co, o.clientId ?? m.clientA, o.projectId ?? null, o.source ?? "social_report", "sourceId" in o ? o.sourceId : newId(),
        o.fileId ?? null, o.status ?? "draft", o.publishedAt ?? null, o.publishedBy ?? null, o.withdrawnAt ?? null,
        o.withdrawnBy ?? null, o.withdrawnReason ?? null, site()],
     ));
@@ -616,7 +616,7 @@ describe.skipIf(!TEST_URL)("PV7-04a · client reports: publication, portal isola
       // a withdrawal stamp on a published row
       expect(await pgCode(() => insertReport({ status: "published", publishedAt: now, publishedBy: admin, fileId: file, withdrawnReason: "x" }))).toBe("23514");
       // a module report must name its source
-      expect(await pgCode(() => insertReport({ source: "social_report" }))).toBe("23514");
+      expect(await pgCode(() => insertReport({ source: "social_report", sourceId: null }))).toBe("23514");
       // the project must be THIS client's (B1 is client B's)
       expect(await pgCode(() => insertReport({ clientId: m.clientA, projectId: m.projectB1 }))).toBe("23503");
       // one live row per source; a withdrawn one does not block a re-draft
