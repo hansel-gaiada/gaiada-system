@@ -50,7 +50,7 @@ export default async function PortalLayout({ children }: { children: React.React
     ? (await getPortalOverview(userId, tenant).catch(() => null))?.overview ?? null
     : null;
 
-  const { projectsBadge, billingBadge } = portalBadges(overview);
+  const { projectsBadge, billingBadge, overviewBadge } = portalBadges(overview);
   // WSK-49d: the Website tab is offered only to a holder of `client_website_editor` for one of THIS company's clients.
   // Cosmetic: the Website pages and the BFF refuse everyone else themselves.
   const showWebsite = websiteEditorClients(me.roles, (overview?.clients ?? []).map((c) => c.id)).length > 0;
@@ -70,6 +70,7 @@ export default async function PortalLayout({ children }: { children: React.React
       userInitials={initials}
       projectsBadge={projectsBadge}
       billingBadge={billingBadge}
+      overviewBadge={overviewBadge}
       staff={isStaff(me)}
       showWebsite={showWebsite}
     >

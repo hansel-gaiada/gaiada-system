@@ -545,3 +545,24 @@ export async function portalPostMessage(_prev: PortalActionResult | null, formDa
     return fail(e);
   }
 }
+
+// ── PV7-04b: client reports (BFF §55.4) ───────────────────────────────────────────────────────────
+
+/** Mark a published report as opened by this contact (`POST portal/reports/:id/read`; the first read is kept). Called when
+ *  the contact clicks Download, ALONGSIDE the browser's own navigation to the file, so a failure here never touches the
+ *  download: it returns a result and never throws. A 404 (withdrawn since the page loaded, or out of reach) is a
+ *  plain `{ ok: false }`; the next refresh drops the row. Revalidates the portal layout too, because the Overview badge
+ *  (`newReports`) is drawn there. */
+export async function markPortalReportRead(reportId: string): Promise<PortalActionResult> {
+  const c = await ctx();
+  if (!c) return { ok: false, error: "Your session has expired. Please sign in again." };
+  if (!reportId) return { ok: false, error: "Missing report." };
+  try {
+    await platformFetch<{ id: string; readAt: string }>(`/api/${c.tenant}/portal/reports/${encodeURIComponent(reportId)}/read`, c.userId, { method: "POST" });
+    revalidatePath("/portal", "layout");
+    return { ok: true, id: reportId };
+  } catch (e) {
+    if (e instanceof PlatformError) return { ok: false, error: e.message };
+    return { ok: false, error: "The report could not be marked as read." };
+  }
+}

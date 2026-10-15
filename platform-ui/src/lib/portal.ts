@@ -83,6 +83,9 @@ export interface PortalOverview {
   /** PV4-06 (§29d): threads in the caller's scope with at least one unread message from staff. Optional: an older
    *  server does not send it, and the Projects badge then adds nothing. */
   conversationUnread?: number;
+  /** PV7-04 (§55.4): published reports in reach, from the last 30 days, this user has not opened. Optional: an older
+   *  server does not send it, and the Overview badge then adds nothing. */
+  newReports?: number;
 }
 
 export interface PortalProject {
@@ -133,6 +136,8 @@ export interface PortalDeliverable {
   projectName: string;
   fileCount?: number;
   files?: PortalDeliverableFile[];
+  /** PV7-04 (§55.4): the published, in-reach client report that links this deliverable; null or absent otherwise. */
+  reportId?: string | null;
 }
 
 export interface PortalProjectDetail extends PortalProject {
@@ -1061,4 +1066,40 @@ export function ballHeadline(side: PortalBallSide, ball: PortalBall): string {
   const who = side === "you" ? "Waiting on you" : "Waiting on us";
   if (ball.count === 0) return `${who}: nothing`;
   return ball.oldestSince ? `${who}: ${ball.count}, oldest since ${portalDate(ball.oldestSince)}` : `${who}: ${ball.count}`;
+}
+
+// ── PV7-04b: client reports (BFF §55.4) ───────────────────────────────────────────────────────────
+// A published social or search report, as the portal's `GET portal/reports` lists it. Never carries a status, a source id,
+// who published or withdrew it, or a reason: the portal only ever sees published reports in reach.
+export interface PortalReport {
+  id: string;
+  title: string;
+  source: "social_report" | "search_report" | "account_summary";
+  periodStart: string;
+  periodEnd: string;
+  clientId: string;
+  clientName: string;
+  projectId: string | null;
+  /** null = "Whole account" (a client-wide report). */
+  projectName: string | null;
+  publishedAt: string;
+  file: { id: string; filename: string; contentType: string; byteSize: number };
+  /** null = new for this user. */
+  readAt: string | null;
+}
+
+/** The download link's label, from the FILE's content type, never hard-coded to PDF: search reports are Markdown
+ *  (`text/markdown`), social reports are PDF (BFF §55 as-built note). */
+export function reportDownloadLabel(contentType: string | null | undefined): string {
+  const t = (contentType ?? "").split(";")[0].trim().toLowerCase();
+  if (t === "application/pdf") return "Download PDF";
+  if (t === "text/markdown" || t === "text/x-markdown") return "Download (Markdown)";
+  return "Download";
+}
+
+/** "01 Sep 2026 to 30 Sep 2026", or one date when the period is a single day. Dates are pinned to UTC by `portalDate`. */
+export function portalPeriod(start: string | null | undefined, end: string | null | undefined): string {
+  const a = portalDate(start);
+  const b = portalDate(end);
+  return a === b ? a : `${a} to ${b}`;
 }
