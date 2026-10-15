@@ -43,6 +43,11 @@ export interface Account {
   /** Once true, code/type/normal-balance are frozen in the database. The UI must not offer to edit
    *  them — a disabled field with a reason beats a form that submits and fails. */
   hasPostings: boolean;
+  /** DW-7g-2 (BFF §49), additive: what the rename form prefills, and which headers an account sits under. `parentCode` is
+   *  the parent's CODE (null for a top-level account). Optional because an older platform build does not send them. */
+  description?: string | null;
+  parentCode?: string | null;
+  currencyCode?: string | null;
 }
 
 export interface FiscalPeriod {

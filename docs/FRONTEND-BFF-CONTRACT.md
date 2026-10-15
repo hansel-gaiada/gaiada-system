@@ -9240,7 +9240,7 @@ Built as §48.1 to §48.4 and §48.6 specify. The simulated mode is what runs; *
 - `mine=me` is unchanged for every tier.
 - `projectId` still narrows.
 
-## 49. Chart of accounts: add, rename, archive and restore (DW-7g-2, 2026-10-15) — `platform-nest/src/modules/finance/finance.controller.ts` — **STATUS: PLANNED (contract)**
+## 49. Chart of accounts: add, rename, archive and restore (DW-7g-2, 2026-10-15) — `platform-nest/src/modules/finance/finance.controller.ts` — **STATUS: BUILT, PROTOTYPED (backend: the DB and HTTP suite `finance-accounts.test.ts` is written for the Linux CI gate; pure: `http-error.filter.usedby.test.ts`; UI: `financeAccountActions.test.ts`, `chartOfAccounts.test.ts`, `ChartOfAccounts.test.tsx`, the page's `page.test.tsx`)**
 
 **Why.** Finance can read its chart of accounts (`GET /api/:t/finance/accounts`) but cannot change it: no route creates, renames or retires an account (DW-7g). The schema and its guards already exist (`202608241011_finance_coa_and_dimensions.sql`):
 - codes are unique among live rows;
@@ -9294,6 +9294,22 @@ All four writes authorize on the existing `finance_config` kind (PERMISSION-CONT
 - **Archive:** refused for a balance, a child, a control account and a posting rule; allowed for an unused zero-balance account. A journal posted to it afterwards is refused by `finance_post_journal`.
 - **Restore:** refused under an archived parent.
 - **Authorization:** `finance_staff` is refused every write (403) and may still read.
+
+**As built (2026-10-15).**
+- **Routes:** `FinanceAccountsController` (`finance-accounts.controller.ts`, registered beside `FinanceController`). `authorize` runs first, then the body is validated, so a refused caller learns nothing about the shape (`finance_staff` with an empty body is 403, not 400). The database path is `withFinance`. Every write leaves an activity row (`created`, `updated`, `archived`, `restored` on `finance_account`, the account's id, the code in the metadata).
+- **Refusals** are `{error, reason, ...}`. `HttpErrorFilter` now also forwards `usedBy` and `hint` (additive, like `reason` and `detail`). 409 reasons: `code_taken`, `account_frozen` (the trigger's own sentence and hint, caught from `FINANCE_ACCOUNT_FROZEN`), `account_has_balance`, `account_has_children`, `account_is_control`, `account_in_use` (with `usedBy: [{table, count}]`), `parent_archived`, plus `already_archived` and `not_archived` for a repeat. The archive checks run in that order and the first one that fails is the answer.
+- **Balance:** the net of every posted line of the account, all dates: `sum(debit) - sum(credit)` over `finance_journal_lines`, tested on the transaction `amount` (what the statements sum) and on `base_amount`; archive is refused if either is not 0. An account whose postings net to zero archives, and its history stays. The archive takes the per-company ledger advisory lock, so a journal being posted waits and then meets the archived account (`FINANCE_ACCOUNT_ARCHIVED`).
+- **`account_in_use` referrers**, from every column in the finance migrations that names a chart account. Counted when live and active, since only those can post again:
+  - `finance_posting_rules` (lines name an account by CODE; rule `status = 'active'`, not ended);
+  - `finance_tax_codes` (`account_id`; not ended);
+  - `finance_asset_classes` (asset, accumulated and expense codes; active, not deleted);
+  - `finance_instruments` (liability, interest and accrual codes; draft or active, not deleted);
+  - `company_billing_profiles` (bank ledger and default revenue codes).
+- **Not counted**, being history or documents and not a way to post again: journal lines (the balance check), AR and AP documents and their lines (`finance_ar_invoice_lines`, `finance_ar_receipts`, credit note lines, `finance_ap_bills`, bill lines, payments, vendor credits and write-offs), `finance_bank_statements`, `finance_opening_balances`, `finance_consolidation_entries`, and `finance_account_dimension_rules`. There is no separate bank or cash account table: a bank account is a chart account, so it is covered by the balance check, the posting rules and the billing profile. An AR or AP configuration is a control account, which is already `account_is_control`.
+- **Not blocked:** a re-code (`newCode`) of an unposted account that a posting rule or the billing profile names by code. The rule then fails loudly at post time (`FINANCE_UNKNOWN_ACCOUNT`), by design of F2; a follow-up could refuse it here.
+- **Choices the contract left open:** a parent must also be active (an archived header is 400 on `parentCode`); `parentCode: null` on PATCH moves an account to the top level; a PATCH naming `accountType`, `normalBalance`, `isControl`, `allowManualPosting`, `isPostable`, `currencyCode`, `status` or an unknown field is 400 with that `field`; "the company's currencies in use" means an active currency that is the company's functional or presentation currency, one it has an exchange rate for, or one another of its accounts is pinned to.
+- **`GET finance/accounts`** also returns `description`, `parentCode` (the parent's code, null at the top level) and `currencyCode` (additive), so the rename form prefills and the parent select lists headers without a second read.
+- **The screen** (`ChartOfAccounts`, `lib/chartOfAccounts.ts`, `lib/financeAccountActions.ts`, reader `listAccountsResult`): the chart is read through `ReadResult`, so a refused or failed read is said in words and is never "no chart". The controls show to `company.manage`, an elevated role, or a `finance_manager` grant in the company (global too), a superset of the Cerbos rule; the server refuses the rest in words. The code field locks once `hasPostings` is true, with the reason. Every refusal is shown as the server's sentence with `Reason: <reason>`, and `usedBy` in words ("Still used by: posting rules (2), tax codes (1)").
 
 ## 50. Payroll inputs: the read (DW-7f-1c, 2026-10-15) — `platform-nest/src/modules/hr/payroll.controller.ts` — **STATUS: BUILT, PROTOTYPED (backend: payroll-inputs-read.test.ts; UI: the run page, PayrollInputList and the hr-full-data reader tests; the backend HTTP suite is written for the Linux CI gate)**
 

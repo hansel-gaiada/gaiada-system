@@ -10,7 +10,7 @@ import "server-only";
 import { platformFetch } from "./platform";
 import { readResult, type ReadResult } from "./readResult";
 import type {
-  ArAgingRow, CloseReadiness, FiscalPeriod, LedgerVerdict, Problem, ReconcileVerdict, ArPosition, ApPosition, StatementRow, TrialBalance,
+  ArAgingRow, CloseReadiness, FiscalPeriod, LedgerVerdict, Problem, ReconcileVerdict, ArPosition, ApPosition, StatementRow, TrialBalance, Account,
 } from "./finance";
 import type { InvoicePayment } from "./contracts";
 import type { TaxReturn, TaxReturnDrift } from "./taxReturns";
@@ -68,3 +68,9 @@ export const listTaxReturnsResult = (u: string, t: string): Promise<ReadResult<T
   readResult(platformFetch<TaxReturn[]>(`/api/${t}/finance/tax/returns`, u));
 export const getTaxReturnDriftResult = (u: string, t: string): Promise<ReadResult<TaxReturnDrift>> =>
   readResult(platformFetch<TaxReturnDrift>(`/api/${t}/finance/tax/returns/drift`, u));
+
+// DW-7g-2: the chart of accounts, read honestly. `listAccounts` in `finance.ts` folds a refusal and a failure into `[]` (its
+// other callers are pickers that rely on it), which on the chart page would read as "this company has no chart, run the
+// seed". This is `finance_config` `read`, and only a real 200 may say a chart is empty. `q` filters on code and name.
+export const listAccountsResult = (u: string, t: string, q?: string): Promise<ReadResult<Account[]>> =>
+  readResult(platformFetch<Account[]>(`/api/${t}/finance/accounts${q ? `?q=${encodeURIComponent(q)}` : ""}`, u));

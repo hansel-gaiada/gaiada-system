@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   getArAgingResult, getCloseReadinessResult, getProfitAndLossResult, getTrialBalanceResult, listPendingPaymentsResult, listPeriodsResult,
   reconcileApResult, reconcileArResult, reconcileAssetsResult, reconcileTreasuryResult, verifyLedgerResult,
-  getTaxReturnDriftResult, listTaxReturnsResult,
+  getTaxReturnDriftResult, listAccountsResult, listTaxReturnsResult,
 } from "./finance-data";
 
 // DW-7e-2: Finance's honest readers. `financeData` and `financeVerdict` (lib/finance.ts) degrade a 403 and a 404 for their
@@ -68,4 +68,19 @@ it("DW-7g-1: an empty returns list and a clean drift are ok, so a real nothing i
 it("DW-7g-1: a failed drift read says why, in the server's words, and is never a clean verdict", async () => {
   vi.stubGlobal("fetch", answer(500, { error: "ledger function failed" }));
   expect(await getTaxReturnDriftResult("u1", "co-a")).toEqual({ kind: "unavailable", reason: "ledger function failed" });
+});
+
+it("DW-7g-2: the chart read is ok when empty, forbidden on 403 and unavailable on a failure, and carries the filter", async () => {
+  const f = answer(200, []);
+  vi.stubGlobal("fetch", f);
+  expect(await listAccountsResult("u1", "co-a")).toEqual({ kind: "ok", data: [] });
+  expect(urlOf(f)).toBe("http://p.test/api/co-a/finance/accounts");
+  const g = answer(200, []);
+  vi.stubGlobal("fetch", g);
+  await listAccountsResult("u1", "co-a", "bank & cash");
+  expect(urlOf(g)).toBe("http://p.test/api/co-a/finance/accounts?q=bank%20%26%20cash");
+  vi.stubGlobal("fetch", answer(403, { error: "forbidden" }));
+  expect(await listAccountsResult("u1", "co-a")).toEqual({ kind: "forbidden" });
+  vi.stubGlobal("fetch", answer(500, { error: "ledger down" }));
+  expect(await listAccountsResult("u1", "co-a")).toEqual({ kind: "unavailable", reason: "ledger down" });
 });

@@ -29,12 +29,15 @@ export class HttpErrorFilter implements ExceptionFilter {
     let blockers: unknown[] | undefined;
     let detail: Record<string, unknown> | undefined;
     let retryAfterSeconds: number | undefined;
+    let usedBy: unknown[] | undefined;
+    let hint: string | undefined;
     if (typeof res === "string") {
       error = res;
     } else {
       const r = res as {
         message?: string | string[]; field?: string; existing?: unknown; site?: unknown;
         reason?: string; blockers?: unknown; detail?: unknown; retryAfterSeconds?: unknown;
+        usedBy?: unknown; hint?: unknown;
       };
       const m = r.message;
       error = Array.isArray(m) ? m.join(", ") : m ?? exception.message;
@@ -61,6 +64,11 @@ export class HttpErrorFilter implements ExceptionFilter {
       if (typeof r.retryAfterSeconds === "number" && Number.isFinite(r.retryAfterSeconds) && r.retryAfterSeconds > 0) {
         retryAfterSeconds = Math.ceil(r.retryAfterSeconds);
       }
+      // DW-7g-2 (BFF §49.4): `usedBy` and `hint`, same additive rule. Archiving a chart account that something still posts
+      // to is 409 `account_in_use` and lists WHICH tables (`[{table, count}]`), so the screen can say what to repoint; a
+      // frozen account (`account_frozen`) carries the database's own hint ("archive it and create a new one").
+      if (Array.isArray(r.usedBy)) usedBy = r.usedBy;
+      if (typeof r.hint === "string" && r.hint) hint = r.hint;
       if (r.existing && typeof r.existing === "object" && !Array.isArray(r.existing)) {
         existing = r.existing as Record<string, unknown>;
       }
@@ -87,6 +95,8 @@ export class HttpErrorFilter implements ExceptionFilter {
       ...(site ? { site } : {}),
       ...(blockers ? { blockers } : {}),
       ...(detail ? { detail } : {}),
+      ...(usedBy ? { usedBy } : {}),
+      ...(hint ? { hint } : {}),
       ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
     });
   }

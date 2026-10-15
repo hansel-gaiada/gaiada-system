@@ -782,6 +782,11 @@ where a ticket says the classic shell changes too.
     capability mirrors them, and the server refuses in words). The payload has no prepared-at date, so none is shown.
   - 7g-2 accounts. No route creates, renames or deactivates an account. Contract first (BFF §49), then the
     backend and the screen. The contract rules what deactivating an account with postings or a balance means.
+    As built (2026-10-15): four routes (`POST/PATCH finance/accounts[/:code]`, `.../archive`, `.../restore`), no migration and no
+    new Cerbos kind (`finance_config` create and update); the screen has New account, Rename (the code locks once posted) and
+    Archive or Restore behind a "Show archived" switch. Archive is refused for a balance, an active child, a control account,
+    or an account a posting rule, tax code, asset class, loan or the billing profile still names (the 409 lists them). The DB
+    and HTTP suite `finance-accounts.test.ts` is written for the Linux gate and has not run yet (BFF §49 as built).
 - **7h · IT isolation rules and threat response.** Designed, not built: `lib/network.ts` documents the routes and
   the isolate write (a D14 approval), but no backend serves them and the pages read fixtures. Later.
 - **7j · Department KPI readers (DW-D25, owner 2026-10-14).** DW-4e left the functional departments' and the

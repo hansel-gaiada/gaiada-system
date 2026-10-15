@@ -303,15 +303,19 @@ export class FinanceController {
     await authorize(req.principal, { kind: "finance_config", tenantId, module: "finance" }, "read");
     const rows = await withFinance(tenantId, (c) =>
       c.query(
-        `SELECT code, name, account_type AS "accountType", normal_balance AS "normalBalance",
-                is_postable AS "isPostable", is_control AS "isControl",
-                control_subledger AS "controlSubledger",
-                allow_manual_posting AS "allowManualPosting", status,
-                (first_posted_at IS NOT NULL) AS "hasPostings"
-           FROM finance_accounts
-          WHERE tenant_id = $1 AND deleted_at IS NULL
-            AND ($2::text IS NULL OR code ILIKE '%' || $2 || '%' OR name ILIKE '%' || $2 || '%')
-          ORDER BY code`,
+        // DW-7g-2 (BFF §49): `description`, `parentCode` and `currencyCode` are additive, so the screen can prefill a rename and
+        // offer the headers of a type as parents. `parentCode` is the parent's CODE (null for a top-level account).
+        `SELECT a.code, a.name, a.account_type AS "accountType", a.normal_balance AS "normalBalance",
+                a.is_postable AS "isPostable", a.is_control AS "isControl",
+                a.control_subledger AS "controlSubledger",
+                a.allow_manual_posting AS "allowManualPosting", a.status,
+                (a.first_posted_at IS NOT NULL) AS "hasPostings",
+                a.description, p.code AS "parentCode", a.currency_code AS "currencyCode"
+           FROM finance_accounts a
+           LEFT JOIN finance_accounts p ON p.id = a.parent_id AND p.tenant_id = a.tenant_id
+          WHERE a.tenant_id = $1 AND a.deleted_at IS NULL
+            AND ($2::text IS NULL OR a.code ILIKE '%' || $2 || '%' OR a.name ILIKE '%' || $2 || '%')
+          ORDER BY a.code`,
         [tenantId, q?.trim() || null],
       ),
     );

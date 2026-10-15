@@ -3,9 +3,12 @@ import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { listAccounts, type Account, type AccountType } from "@/lib/finance";
-import { Card, HairlineTable, Eyebrow } from "@/components/ui";
+import { listAccountsResult } from "@/lib/finance-data";
+import { canEditChart } from "@/lib/chartOfAccounts";
+import { Card, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
+import { ChartOfAccounts } from "@/components/finance/ChartOfAccounts";
 
 // The chart of accounts — the vocabulary every figure in this workspace is expressed in.
 //
@@ -30,6 +33,12 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 //     subledger and REFUSES a hand-written journal — that refusal is what lets the aging be trusted
 //     to tie to the balance sheet. Somebody who does not know which those are will keep trying and
 //     keep being refused with no idea why, so the owning subledger is named.
+//
+// ── EDITING (DW-7g-2, BFF §49) ──────────────────────────────────────────────────────────────────
+// New account, Rename and Archive or Restore are drawn for `company.manage`, an elevated role or a `finance_manager` grant in the
+// company (a superset of the Cerbos `finance_config` write rule, which `lib/rbac.ts` has no capability for); the server
+// refuses anyone else in words. The chart is read through `ReadResult`, so a refused or failed read is said as such and is
+// never "this company has no chart". Archived accounts are hidden by default behind a "Show archived" switch.
 export default async function FinanceAccountsPage({
   searchParams,
 }: {
@@ -43,22 +52,19 @@ export default async function FinanceAccountsPage({
   if (!tenant) return <EmptyNote>Select a company from the top bar.</EmptyNote>;
 
   const q = sp.q?.trim() || undefined;
-  const accounts = await listAccounts(userId, tenant, q);
-  if (accounts == null) {
-    return <EmptyNote>You do not have finance access for this company.</EmptyNote>;
+  const read = await listAccountsResult(userId, tenant, q);
+  if (read.kind !== "ok") {
+    return (
+      <div className="fin-page">
+        <header className="fin-page__head">
+          <Eyebrow>Finance &amp; Accounting</Eyebrow>
+          <h1 className="fin-page__title">Chart of accounts</h1>
+        </header>
+        <ReadRefusal subject="the chart of accounts" kind={read.kind} reason={read.kind === "unavailable" ? read.reason : undefined} inline />
+      </div>
+    );
   }
-
-  // Statement order, which is what an accountant expects — not alphabetical by type name.
-  const GROUPS: Array<{ type: AccountType; label: string }> = [
-    { type: "asset", label: "Assets" },
-    { type: "liability", label: "Liabilities" },
-    { type: "equity", label: "Equity" },
-    { type: "revenue", label: "Revenue" },
-    { type: "expense", label: "Expenses" },
-  ];
-  const sorted = [...accounts].sort((a, b) => a.code.localeCompare(b.code));
-  const grouped = GROUPS.map((g) => ({ ...g, rows: sorted.filter((a) => a.accountType === g.type) }))
-    .filter((g) => g.rows.length > 0);
+  const accounts = read.data;
   const postable = accounts.filter((a) => a.allowManualPosting).length;
   const archived = accounts.filter((a) => a.status === "archived").length;
 
@@ -91,46 +97,20 @@ export default async function FinanceAccountsPage({
           </div>
         </form>
 
-        {sorted.length === 0 ? (
-          <EmptyNote>
-            {q
-              ? `No account matches "${q}". The filter is on code and name; it does not search balances.`
-              : "This company has no chart of accounts yet. Run the finance configuration seed to instantiate one from the Indonesian template."}
-          </EmptyNote>
-        ) : (
-          grouped.map((g) => (
-            <section key={g.type} style={{ marginBottom: 26 }}>
-              <Eyebrow>{g.label}</Eyebrow>
-              <HairlineTable
-                columns={[
-                  { label: "Code" }, { label: "Name" }, { label: "Normal balance" },
-                  { label: "Manual posting" }, { label: "Control" },
-                ]}
-                rows={g.rows.map((a: Account) => [
-                  a.code,
-                  a.status === "archived" ? `${a.name} (archived)` : a.name,
-                  a.normalBalance,
-                  // Stated as a refusal, not left blank — a blank would read as "unknown" when it
-                  // actually means "the subledger owns this account".
-                  a.allowManualPosting ? "allowed" : "subledger only",
-                  a.isControl ? (a.controlSubledger ?? "control") : "—",
-                ])}
-              />
-            </section>
-          ))
-        )}
+        <ChartOfAccounts accounts={accounts} canEdit={canEditChart(me, tenant)} query={q} />
       </Card>
 
-      <Card title="Editing the chart" style={{ marginTop: 22 }}>
+      <Card title="Changing the chart" style={{ marginTop: 22 }}>
         <p className="fin-muted">
-          Adding, renaming and deactivating an account is <strong>not built here yet</strong>. The
-          chart is instantiated from the Indonesian template by the finance configuration seed, and
-          changing it is deliberately not a casual edit: a code that appears in a posted journal can
-          never be removed, because the entry that used it is immutable. What an edit surface has to
-          offer instead is deactivation and re-parenting, and neither is wired.
+          A code that appears in a posted journal can never change, because the entry that used it is immutable: the code field
+          locks once an account has postings, and the way to retire it is to <strong>archive</strong> it and add a new one. An
+          archived account refuses new postings and keeps its history. It cannot be archived while it still holds a balance, has
+          active child accounts, is a control account, or is still named by a posting rule, tax code, asset class, loan or the
+          billing profile. Restoring one needs its parent to be active.
         </p>
         <p className="fin-muted">
-          Everything else on this page is live — this is the real chart, read from the ledger.
+          Control accounts (receivables, payables, inventory, fixed assets) come from the template and their subledgers; they
+          are not added or archived here. Everything on this page is live: this is the real chart, read from the ledger.
         </p>
       </Card>
     </div>
