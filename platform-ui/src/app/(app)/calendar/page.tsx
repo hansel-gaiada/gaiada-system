@@ -35,8 +35,8 @@ import "@/components/calendar/calendar.css";
 //
 // DW-8g: calendar events (BFF §47) join the three grids next to the tasks, read for the visible window only. Every
 // day boundary is the display zone's (`lib/zoneTime.ts`), including "today". The Timeline stays tasks only. Busy times
-// (§47.4) are not built (owner ruling pending), so nothing is drawn for other people's availability: when they land they
-// belong in the Day view, beside the events, from `GET /:t/calendar/busy`.
+// (§47.4, built as DW-8o) show on the schedule form only ("Busy that day"), never on this page: nothing here is drawn for
+// other people's availability.
 //
 // All state lives in the URL (?scope=&view=&date=), so every view is shareable and the page stays
 // server-rendered with no client JS beyond the Gantt itself.

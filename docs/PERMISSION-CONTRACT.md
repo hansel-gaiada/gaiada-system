@@ -2196,6 +2196,8 @@ No key is `sensitive`.
 
 Then move the four pinned literals.
 
+**Busy times (DW-8o, DW-D28, 2026-10-15):** `GET /api/:t/calendar/busy` rides `calendar_event` · `create` on the tenant, decided before the query is looked at, so a viewer or an agent always gets 403. No policy, catalog or bundle change.
+
 **Proof:** `src/rbac/cerbos-calendar-event.test.ts` (a static pin, plus the live matrix with `CERBOS_URL`). **Restart Cerbos after the deploy, then probe:** on a fresh tenant, a GET of a zero-uuid event answers 404.
 
 **As built (2026-10-14).** The policy `resource_calendar_event.yaml` follows the tables above, with these points the design left open or that moved:
