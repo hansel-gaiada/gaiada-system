@@ -12,7 +12,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 // DW-10d (DW-D34): the Customise control. A closed disclosure at the end of the header row: each band's blocks the person could see, the
-// state each is in, one form button to change it, and "Always shown" with no control for a fixed block.
+// state each is in and one form button to change it. A fixed block is not a choice, so it is not listed (the intro says Needs you stays).
 
 const made = { ...me([member()]), name: "Made Putra" };
 const placed = resolveMyWorkspaces({ me: made, tenantId: "co-a", root: agencyTree({ frontend: ["u-1"] }) });
@@ -50,7 +50,13 @@ describe("CustomiseOverview: the control", () => {
   it("lists each band's blocks in the Overview's own order, under the band's label", () => {
     draw();
     expect([...document.querySelectorAll(".ov-custom__band-label")].map((e) => e.textContent)).toEqual(["band now", "band you", "band work"]);
-    expect([...document.querySelectorAll("li[data-widget]")].map((e) => e.getAttribute("data-widget"))).toEqual(["needs-you", "today", "my-activity", "client-health"]);
+    expect([...document.querySelectorAll("li[data-widget]")].map((e) => e.getAttribute("data-widget"))).toEqual(["today", "my-activity", "client-health"]);
+  });
+
+  it("drops a band whose blocks are all fixed", () => {
+    const fixedOnlyBand = selectCustomisable([SUBJECT.widgets[0], SUBJECT.widgets[2]], ctx);
+    draw(undefined, fixedOnlyBand);
+    expect([...document.querySelectorAll(".ov-custom__band-label")].map((e) => e.textContent)).toEqual(["band you"]);
   });
 
   it("draws nothing at all when every block is fixed (nothing to choose)", () => {
@@ -61,12 +67,11 @@ describe("CustomiseOverview: the control", () => {
 });
 
 describe("CustomiseOverview: a fixed block", () => {
-  it("says 'Always shown' and has no button and no form", () => {
+  it("is not listed, even when a forged cookie names it in hide, and the intro says Needs you stays", () => {
     draw({ hide: ["needs-you"], show: [] });
-    const row = item("needs-you");
-    expect(within(row).getByText("Always shown")).toBeInTheDocument();
-    expect(row.querySelector("button")).toBeNull();
-    expect(row.querySelector("form")).toBeNull();
+    expect(item("needs-you")).toBeNull();
+    expect(screen.queryByText("Always shown")).toBeNull();
+    expect(screen.getByText(/Needs you always stays/)).toBeInTheDocument();
   });
 });
 
