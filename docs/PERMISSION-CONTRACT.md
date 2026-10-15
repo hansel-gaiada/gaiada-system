@@ -2345,3 +2345,51 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §55 (plan `docs/plans/2026-10-15-pv7-pe
 - **The handler feeds** `{ kind: "client_report", id, tenantId, clientId, ownerUserId }` for publish and withdraw (`ownerUserId` from `clients.owner_user_id`), and `{ kind: "client_report", tenantId }` for the kind-level read that comes first. The staff file download (`GET :t/files/:fileId/content`) sends `{ kind: "client_report", id: <report id>, tenantId }` read, which the read rule admits without attributes.
 
 **Proof.** `platform-nest/src/rbac/cerbos-client-report.test.ts` (static pin always; the live matrix on the Linux gate: the tiers, the owner rule and its fail-closed cases, the bot and automation DENY beating company_admin, manager and the platform_admin wildcard, the read-only permission arm, the permission-native owner), the HTTP suite `src/core/client-reports.db.test.ts` (the same rules through the routes), and the static alignment suites. **Restart the Cerbos test container and the live sidecar after the policy deploy.**
+
+## 47. DW-10a — the `dept_notice` kind (2026-10-15, PLANNED)
+
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §57 (plan `docs/plans/2026-10-13-department-workspaces.md` §12.1, row 10a; owner ruling DW-D32). Status: **PLANNED**.
+
+**A new core kind, `dept_notice` (no module), with four actions.** The policy is `resource_dept_notice.yaml`, with keys `core.dept_notice.{read,post,edit,withdraw}`. One resource is one notice: a unit notice (on one org unit of the company) or a company-wide notice.
+
+| Action | Reach | What it is |
+|---|---|---|
+| `read` | `company_admin`, `manager`, `member`, `viewer`; **its own rule** for the HR read tier (`hr_people_reader`). All with `inTenant && notLow`. **Tenant-wide here on purpose:** the per-unit narrowing (placed under the unit today, a head whose led scope holds it, or a company-wide tier) needs the caller's placement as of today, which Cerbos cannot read, so the handler applies it after this check (BFF §57.2), as `dept_kpi_target · read` does | list and open notices |
+| `post` | `company_admin`. **Its own rule** for `org_unit_lead` when `scope == "unit"` (the grant's scopeId in `unitAncestors`) | post a notice. A company-wide notice (`scope == "company"`) is `company_admin` only: the lead rule carries `request.resource.attr.scope == "unit"` |
+| `edit` | as `post`, on the stored row's scope and unit | change title, body, pin or end date |
+| `withdraw` | as `post`, on the stored row's scope and unit | take a notice down (no delete exists) |
+
+**Authoring rules:**
+- Each attribute-dependent rule stands alone (HIER-2): the `org_unit_lead` rules for `post`, `edit` and `withdraw` are separate rules, never mixed with a scope role.
+- **`EFFECT_DENY` on `post`, `edit` and `withdraw`** for `principal.attr.kind in ["automation","bot"]`, shaped like `resource_work_request.yaml`'s (`roles: ["user"]`, `has()`-guarded). `read` stays allowed: agents read notices (DW-D32).
+- **`platform_admin`** keeps the house wildcard.
+- `manager` gets no write. Every head's lead position also carries `manager` company-wide, so `manager` cannot mean "the head of this department" (the `dept_kpi_target` reasoning).
+
+**Resource attributes**, fed by the handler and never from a body:
+- `unitAncestors`: the existing attribute, from `loadUnitAncestors(c, tenantId, unitNodeId)` inside `withTenants([tenantId])`. It comes from the request's `unitNodeId` on `post`, from the stored row on `edit` and `withdraw`, and is `[]` for a company-wide notice.
+- `scope`: **new**, `"unit"` or `"company"`, default `"unit"`. It goes in the `Resource` type and the `resourcePayload()` allow-list in `src/rbac/cerbos.ts`. An attribute missing from that allow-list is silently dropped, and the lead rule must then deny (test it).
+
+**The tenant trap.** An `org_unit` grant carries no tenant, and node ids are unique only per company (seed ids such as `d-webdev` repeat across companies). Every rule keeps `variables.inTenant`, and `unitAncestors` is always computed with the tenant. A proof must show that the head of company A's `d-webdev` cannot post to company B's `d-webdev`.
+
+**The permission arm covers `read` only.** `post`, `edit` and `withdraw` are reachable by `org_unit_lead` through an attribute-dependent rule. A flat `perms` mirror cannot tell "holds the key through company_admin" from "holds it through a lead grant over ONE unit", so a mirror would let a head post to EVERY unit (iam-04-reg1-mirror-reach-invariant). This is the same call as `dept_kpi_target · propose` and `work_request · decline`. Consequence: the permission-native `owner` role reads through its bundle, but posts only if it also holds `company_admin` or leads the unit.
+
+**Bundles:**
+
+| Role | Holds |
+|---|---|
+| `company_admin`, `platform_admin` | all four keys |
+| `owner` | `read` (writes through `company_admin` or a lead grant, above) |
+| `manager`, `member`, `viewer` | `read` |
+| `org_unit_lead` | `post`, `edit`, `withdraw`, unit-scoped (the UI capability `notices.post` in `ROLE_CAPS.org_unit_lead`, answered by `canInUnit`) |
+
+No key is `sensitive`.
+
+**The six artifacts** are as in §36:
+- the policy;
+- `cerbos.ts` (the `scope` attribute);
+- the catalog;
+- the groups (a `notices` group);
+- a migration seeding `permissions` and `role_permissions`, with the DO-block self-assertion;
+- the bundles, regenerated from a clean worktree.
+
+Plus the static pins and the live matrix (`cerbos-dept-notice.test.ts`), and the UI mirror in `platform-ui/src/lib/rbac.ts` with its parity register. **Restart Cerbos at the deploy and probe it:** a head's `post` on their own unit is allowed, and on a sibling unit denied.

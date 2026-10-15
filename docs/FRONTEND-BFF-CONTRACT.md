@@ -9765,3 +9765,178 @@ No new endpoint beyond §56.3.
 - **Demo** (`lib/demoClientReports.ts`): `POST clients/:id/reports/summary`, `PATCH client-reports/:id` and Publish-makes-the-file, with the controller's order of refusals; one seeded September draft for Northwind (`rep-8`); the two 04b drafts (`rep-3`, `rep-7`) are now module-source drafts, since a real account summary never has a file before Publish.
 
 **Agent tools (PV7-08).** `clientReports.draftSummary` (`POST :t/clients/:clientId/reports/summary`, body `{period: "YYYY-MM"}`, impact `low`): creates a DRAFT only, nothing reaches the client, and a second call for the month returns the same draft with `created: false`. Test: `src/modules/clients/client-agent-tools.db.test.ts`.
+
+## 57. The department notice board (DW-10a, 2026-10-15) — `platform-nest/src/core/dept-notices.{controller,service}.ts` (new); migrations `<prefix>_dept_notices.sql` and `<prefix>_iam_dept_notice_permissions.sql` (prefixes: the next free after main's newest at landing); UI `/departments/[deptId]/notices`, `/notices`, the Overview's Notices block — **STATUS: PLANNED**
+
+**Why.** Plan §12 (DW-10) and §12.1 (row 10a); owner ruling **DW-D32** (plan §11.4): heads post, the department reads. Nothing like it exists: there is no table, route, page, Cerbos kind or flow for notices, and `notify()` (`src/core/http.ts`) sends to one recipient at a time. The Cerbos kind is PERMISSION-CONTRACT §47.
+
+**Out of scope (v1):** comments and reactions (conversation lives elsewhere); attachments (a link in the body is enough for now); "must acknowledge" read receipts; scheduled posting; email (system mail stays approvals and risk only); agent writes (DW-D32: agents read and never post).
+
+### 57.1 Data
+
+**`dept_notices`** (core, no module; FORCE RLS on `tenant_id` with `app_current_tenants()`, the usual single isolation policy):
+
+| Column | Type and rule |
+|---|---|
+| `id` | uuid (v7), PK |
+| `tenant_id` | the company |
+| `scope` | `unit` or `company` |
+| `unit_node_id` | text, an org-tree node of this tenant. **Required when `scope = 'unit'`, NULL when `scope = 'company'`** (CHECK). No FK: org nodes live in the org blob, as `dept_kpi_targets.unit_node_id` |
+| `title` | 1 to 120 characters, trimmed |
+| `body` | 1 to 4,000 characters, plain text (line breaks kept; never rendered as HTML or Markdown), scrubbed like other free text |
+| `pinned` | boolean, default false |
+| `ends_on` | date, nullable. The last day the notice is current |
+| `author_id` | `users` |
+| `created_at` | |
+| `edited_at`, `edited_by` | nullable; set by every edit |
+| `withdrawn_at`, `withdrawn_by` | nullable; set once by a withdrawal and never cleared |
+| `origin_site` | no default |
+
+**CHECKs:** the scope/unit pairing above; `char_length(title) between 1 and 120`; `char_length(body) between 1 and 4000`; `withdrawn_by is null = (withdrawn_at is null)`.
+
+**Index:** `(tenant_id, unit_node_id, created_at desc) where withdrawn_at is null`, and `(tenant_id, created_at desc) where scope = 'company' and withdrawn_at is null`.
+
+**There is no delete.** A notice is withdrawn: it leaves every list and every read (57.4), and the row stays for the record.
+
+**Current and past.** A notice is **current** while it is not withdrawn and `ends_on` is null or on or after today. Today is the company's report day (`todayIsoInTz(config.reportsTz)`, the same day the KPI pages use). Otherwise it is **past**.
+
+**Pins.** At most **3 current pinned notices** per unit, and 3 per company scope. A fourth pin answers **409 `pin_limit`**. A pinned notice that becomes past stops counting.
+
+### 57.2 Who reads what (DW-D32)
+
+Cerbos `dept_notice · read` is tenant-wide (PERMISSION-CONTRACT §47), and the handler narrows each notice, as `GET /dept-kpis` does (`authorizeUnitRead`), because "placed in the unit as of today" is not something Cerbos can read.
+
+| Notice | Who reads it |
+|---|---|
+| `scope = 'unit'`, unit U | (a) a person **placed** in U or in a unit below it today (`resolveSubjectUnit` as of today, inside `collectUnitSubtree(structure, U)`); (b) a **head** whose led scope holds U (`loadLedUnitScope(...).has(U)`: the head of U or of a unit above it); (c) the **company-wide tiers** (`isCompanyWide`: platform_admin, company_admin, owner, the HR and reports staff and managers) |
+| `scope = 'company'` | every person with `read` in the company (company_admin, manager, member, viewer, and the HR read tier) |
+
+- **Never:** a client contact (portal), a person of another department who is neither placed under U nor leads it, or anyone in another company.
+- **Withdrawn** notices are read by nobody (404).
+- **An unreadable notice answers 404, never 403**, so a list or link never tells a stranger that a notice exists (the calendar's rule, §47.2).
+
+### 57.3 Who writes (DW-D32)
+
+| Action | Unit notice (unit U) | Company-wide notice |
+|---|---|---|
+| `post` | `company_admin`; **its own rule** for `org_unit_lead` with U in `unitAncestors` (the head of U or of a unit above it) | `company_admin` only |
+| `edit` (title, body, pin, end date) | the same as `post`, on the stored row's unit | `company_admin` only |
+| `withdraw` | the same as `post`, on the stored row's unit | `company_admin` only |
+
+- Any person who may post to U may edit or withdraw any of U's notices, not only the author: a new head manages what the last one posted.
+- **Bots and automation principals are denied every write** (EFFECT_DENY, the `work_request` shape). Agents read through the hub (57.7).
+- `unitAncestors` comes from `loadUnitAncestors(c, tenantId, U)` inside `withTenants([tenantId])`, from the request's `unitNodeId` on `post` and from the STORED row on `edit` and `withdraw`. An id with no closure rows has no ancestors, so no lead grant matches.
+- **The scope is decided by the caller's right, never widened by the server.** A head posting `scope: 'company'` gets 403, not a unit notice.
+- **Authorization comes before validation.** Only `scope` and `unitNodeId` are read before the Cerbos check (they are needed to build the resource). Title, body, pin and date are validated after it, so a refused caller always gets 403 and never 400 (the "validation pre-empts authz" trap).
+- **The unit must exist** in this tenant's org tree, and must not be the tree's root (company-wide is `scope: 'company'`). Otherwise 404 `unit_not_found`, checked after authorization. A head naming an unknown unit therefore gets 403 (no ancestors), and a company_admin gets 404.
+
+### 57.4 Routes (`api/:tenantId/notices`, `AuthGuard`, no module guard)
+
+**Reads**
+
+- **`GET /notices?unitNodeId=U&state=current|past&limit=&cursor=`**: the notices that reach U's people. These are U's own, those of every unit above U (each kept only if the caller may read it, 57.2), and the company-wide ones.
+  - The gate first: Cerbos `read`, then the caller must pass 57.2's unit rule for U itself (placed under U, leads U, or company-wide). Otherwise **403** `outside your reporting line`; an unknown U is **404** `unit_not_found`.
+  - `state` defaults to `current`; `limit` from 1 to 50, default 20; an opaque `cursor`.
+  - Order: for `current`, pinned first, then newest first; for `past`, newest first.
+- **`GET /notices?scope=company&state=…`**: company-wide notices only (any person with `read`). It serves the company Overview and the `/notices` page.
+- **`GET /notices/:id`**: one notice, or **404** `notice_not_found` (not found, withdrawn, or not readable).
+- With neither `unitNodeId` nor `scope=company`, the answer is **400** `{field: "unitNodeId"}`.
+
+**Writes**
+
+- **`POST /notices`** with `{scope, unitNodeId?, title, body, pinned?, endsOn?}` answers **201** with the row (57.5). The fan-out follows the commit (57.6).
+- **`PATCH /notices/:id`** with `{title?, body?, pinned?, endsOn?}` (`endsOn: null` clears it) answers **200**. It sends no new notification. A withdrawn notice is **404**.
+- **`POST /notices/:id/withdraw`** answers **200**. It sends no notification. A second withdrawal is **404**.
+
+**Errors:**
+- **400** `{field}` for `title`, `body`, `pinned`, `endsOn` (format `YYYY-MM-DD`, not before today on `post`), `scope` and `unitNodeId`. Unknown keys are refused.
+- **403** for a refused right.
+- **404** `unit_not_found` or `notice_not_found`.
+- **409** `pin_limit`.
+- The error filter puts `field` beside `error` on the wire.
+
+### 57.5 The row
+
+`NoticeRow`:
+
+```
+{ id, scope: 'unit'|'company', unitNodeId: string|null, unitName: string|null,
+  title, body, pinned, endsOn: string|null, state: 'current'|'past',
+  author: {id, name}, createdAt, editedAt: string|null,
+  canEdit: boolean }
+```
+
+- `unitName` is read from the org tree at read time. A node that has left the tree reads `null`, and the UI says "a former unit".
+- `canEdit` is the caller's `edit` right on that row, decided by the same check as `PATCH` (a Cerbos batch of at most 50 per call, as the house limit requires). The UI shows Edit and Withdraw only when it is true. The server still decides on the write.
+
+### 57.6 Notifications
+
+On a successful `post`, after the commit, one notification of type **`notice.posted`** goes to each recipient with `notify()`. The payload is `{noticeId, title, scope, unitNodeId, unitName}`.
+
+| Notice | Recipients |
+|---|---|
+| unit U | the people placed in U or below it today, plus the heads who lead U itself |
+| company | every active member of the company |
+
+- **Never the author.** `notify()` already skips non-members.
+- **Heads above U and the company-wide tiers are not pinged.** They read the notice (57.2), but a company admin is not paged for every department's notice. This is how DW-D32's "lands in its readers' Inbox" is read for the people the notice is for.
+- **A failed notification never undoes the post.** It is logged with the notice id, and the post still answers 201.
+- The Inbox renders `notice.posted` as "<unit or Whole company>: <title>". It links to `/departments/<unit>/notices#<id>`, or to `/notices#<id>` for a company-wide notice.
+
+### 57.7 Agents and automation
+
+- **One read tool, `notices.list`**, returns the same rows as `GET /notices`. Its input is `{unitNodeId?, scope?, state?}`, and with no unit it uses the caller's home department. It is registered where core read tools are registered, so the hub picks it up from `GET /mcp/tool-defs`.
+- There is **no write tool** (DW-D32), and Cerbos denies writes to `bot` and `automation` principals anyway.
+- n8n reads through the same route.
+
+### 57.8 UI
+
+- **Notices tab on the Overview row:**
+  - Every department workspace's Overview row gains a **Notices** tab after Overview, at `/departments/{dept}/notices`. HR, Finance and IT are org nodes since DW-7d, so they get it too.
+  - The Company workspace's Overview row gains **Notices** at `/notices`, for company-wide notices only.
+  - Both pages need `AREA_RULES` entries: the department page is in the department's workspace area, and `/notices` is in the Company area.
+- **The Notices page:**
+  - It lists Current notices (pinned first, a "Pinned" marker), with a link to Past.
+  - Each notice shows the title, the body as text, the unit ("Whole company" for company-wide; "From <unit>" when posted to a unit above), the author and the time, and "until <date>" when there is an end date.
+  - Edit and Withdraw appear when `canEdit` is true. Withdraw asks for confirmation.
+  - A **Post a notice** form appears when the caller may post: title, body, pin and end date. On `/notices` the scope is always the whole company, and the form shows only to company admins.
+  - The UI mirror for "may post" is `canInUnit(me, "notices.post", companyId, unitPath)` or company_admin. The server stays the authority.
+- **The Overview's Notices block:**
+  - Widget `notices`, band **now**, after Today, placement **fixed** (DW-D34: it cannot be hidden).
+  - It shows at most 3 current notices, pinned first: title, unit label, age, and the first 140 characters.
+  - "All notices" links to the tab.
+  - It is drawn when the read succeeded and either returned at least one current notice, or the viewer may post (then "No current notices" and "Post a notice").
+  - A failed or refused read says "Unavailable". An empty list is drawn only from a read that succeeded.
+- **The company Overview** gains `company-notices`: band now, fixed, company-wide notices only, with the same rules.
+- **Classic layout:** the pages are reachable by URL and ⌘K. No classic nav entry.
+- **Demo mode:** a demo store with one pinned and one plain notice for Web Dev, and one company-wide notice.
+
+### 57.9 Proofs required before DW-10a is ticked (Linux CI gate, real Postgres and Cerbos)
+
+- **Reading:**
+  - A person placed in U, or in a unit below U, lists U's notices and the company-wide ones.
+  - A person placed in another department lists none of U's, and `GET /notices/:id` answers 404 for them.
+  - A head of an enclosing unit reads U's notices; a head of a sibling unit does not.
+  - Company admin and the HR tier read every unit's notices.
+- **Posting:**
+  - A member of U cannot post (403).
+  - The head of a sibling unit cannot post to U (403).
+  - The head of U posts to U and to a unit below it.
+  - A head cannot post company-wide (403); a company admin can.
+  - Edit and withdraw follow the same rules.
+- **Ordering of checks:**
+  - An unknown unit gives the head 403 and the company admin 404.
+  - A viewer posting an invalid body gets 403, not 400.
+- **Bots and automation** are denied post, edit and withdraw, and may read.
+- **Pins and dates:**
+  - A fourth current pin answers 409.
+  - An end date in the past moves a notice to `past`.
+  - A withdrawn notice is in no list and answers 404.
+- **Tenants:**
+  - The same node id in two companies (seed ids such as `d-webdev` repeat): the head of company A's `d-webdev` can neither post to company B's `d-webdev` nor read its notices (the org_unit grant carries no tenant; `inTenant` and the per-tenant ancestry hold).
+  - RLS keeps every row in its own tenant.
+- **Notifications:**
+  - A unit post notifies the placed people and U's own heads, never the author, and never a head above.
+  - A company post notifies every active member except the author.
+  - A notify failure still answers 201.
+- **Cerbos:** the static pins and the live matrix for `dept_notice` (PERMISSION-CONTRACT §47).
