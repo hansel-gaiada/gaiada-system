@@ -362,3 +362,62 @@ describe("buildHighlights + buildNarrative — deterministic, never AI", () => {
     expect(narrative.text).toBe("No activity recorded for this period.");
   });
 });
+
+// PV7-01 — the client grain: scope matching, the KPI set, and the arithmetic the shell must not redo.
+describe("PV7-01 client grain (pure)", () => {
+  const CLIENT = "c1111111-1111-4111-8111-111111111111";
+  const OTHER_CLIENT = "c2222222-2222-4222-8222-222222222222";
+
+  it("matchesScope and rowGrainShape key a client row on {clientId} exactly", () => {
+    expect(matchesScope("client", { clientId: CLIENT }, CLIENT)).toBe(true);
+    expect(matchesScope("client", { clientId: OTHER_CLIENT }, CLIENT)).toBe(false);
+    expect(matchesScope("client", { projectId: CLIENT }, CLIENT)).toBe(false); // a project row never matches a client scope
+    expect(matchesScope("project", { clientId: CLIENT }, CLIENT)).toBe(false); // nor the reverse
+    expect(matchesScope("company", { clientId: CLIENT }, CLIENT)).toBe(false); // company is the empty shape only
+    expect(rowGrainShape({ clientId: CLIENT })).toBe("client");
+  });
+
+  it("the client KPI set is exactly the project grain's metrics, in order, and never source_diversity", () => {
+    const forGrain = (grain: "project" | "client") => buildKpis(grain, "x", [], [], undefined, { current: 0, previous: 0 }, false).map((k) => k.metricKey);
+    const project = forGrain("project");
+    const client = forGrain("client");
+    expect(client).toEqual(project.filter((k) => k !== "evidence.source_diversity"));
+    expect(client).toHaveLength(16);
+    expect(client).not.toContain("evidence.source_diversity");
+  });
+
+  it("a ratio is the sum of numerators over the sum of denominators, not the mean of per-project ratios", () => {
+    // Two projects of one client, already summed by the rollup into ONE {clientId} row: 6/8 and 4/4
+    // sum to 10/12 = 0.8333; the mean of the two project rates would be 0.875.
+    const rows: RollupRow[] = [{ metricKey: "delivery.on_time_rate", numerator: 10, denominator: 12, dimensions: { clientId: CLIENT } }];
+    const onTime = buildKpis("client", CLIENT, rows, [], undefined, { current: 0, previous: 0 }, false).find((k) => k.metricKey === "delivery.on_time_rate")!;
+    expect(onTime.numerator).toBe(10);
+    expect(onTime.denominator).toBe(12);
+    expect(onTime.value).toBeCloseTo(10 / 12, 10);
+    expect(onTime.value).not.toBeCloseTo((6 / 8 + 4 / 4) / 2, 3);
+  });
+
+  it("wip_open_avg keeps the day count as its denominator, and overdue_open stays point-in-time", () => {
+    const rows: RollupRow[] = [
+      { metricKey: "flow.wip_open_avg", numerator: 16, denominator: 7, dimensions: { clientId: CLIENT } },
+      { metricKey: "discipline.overdue_open", numerator: 3, dimensions: { clientId: CLIENT } },
+    ];
+    const kpis = buildKpis("client", CLIENT, rows, [], undefined, { current: 0, previous: 0 }, false);
+    const wip = kpis.find((k) => k.metricKey === "flow.wip_open_avg")!;
+    expect(wip.denominator).toBe(7); // the range's days, never 7 + 7 (one per project)
+    expect(wip.value).toBeCloseTo(16 / 7, 10);
+    const overdue = kpis.find((k) => k.metricKey === "discipline.overdue_open")!;
+    expect(overdue.pointInTime).toBe(true);
+    expect(overdue.value).toBe(3);
+  });
+
+  it("another client's rows never leak into this client's KPIs", () => {
+    const rows: RollupRow[] = [
+      { metricKey: "delivery.tasks_completed", numerator: 14, dimensions: { clientId: CLIENT } },
+      { metricKey: "delivery.tasks_completed", numerator: 6, dimensions: { clientId: OTHER_CLIENT } },
+      { metricKey: "delivery.tasks_completed", numerator: 99, dimensions: { projectId: PROJECT } },
+    ];
+    const completed = buildKpis("client", CLIENT, rows, [], undefined, { current: 0, previous: 0 }, false).find((k) => k.metricKey === "delivery.tasks_completed")!;
+    expect(completed.value).toBe(14);
+  });
+});

@@ -115,3 +115,17 @@ describe("TR-08 period-range convention ('YYYY-MM-DD:YYYY-MM-DD')", () => {
     expect(() => parsePeriodRange("2026-07-20:2026-07-14")).toThrow(/precedes/);
   });
 });
+
+describe("PV7-01 client grain in the catalog", () => {
+  it("client offers exactly the project grain's metrics: every project metric, and nothing the project grain lacks", () => {
+    const project = REPORT_METRICS.filter((m) => m.grains.includes("project")).map((m) => m.metricKey);
+    const client = REPORT_METRICS.filter((m) => m.grains.includes("client")).map((m) => m.metricKey);
+    expect(client).toEqual(project);
+    expect(client).toHaveLength(16);
+  });
+
+  it("evidence.source_diversity is not offered at client grain, and flow.avg_progress is", () => {
+    expect(getReportMetric("evidence.source_diversity").grains).not.toContain("client");
+    expect(getReportMetric("flow.avg_progress").grains).toContain("client");
+  });
+});

@@ -148,7 +148,8 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // DW-4e-1 (2026-10-14): +4 pairs / +1 kind: `dept_kpi_target` (read/propose/approve/reject, NEW kind, module reports). On top of DW-6h: 460 -> 464, kinds 107 -> 108.
     // DW-4e-3 (2026-10-15): +2 pairs, no new kind: `reports.dept_kpi_target.{appraisal_comment,appraisal_assess}`. 464 -> 466, kinds stay 108.
     // DW-8g (2026-10-14): +5 pairs / +1 kind: `calendar_event` (read/create/update/cancel/respond, NEW core kind: an event on the company calendar). 466 -> 471, kinds 108 -> 109.
-    expect(catalog.length).toBe(471);
+    // PV7-01 (2026-10-15): +1 pair on the EXISTING report_document kind (`read_client`, no new kind). 471 -> 472, kinds stay 109.
+    expect(catalog.length).toBe(472);
     expect(catalogKindSet.size).toBe(109);
   });
 

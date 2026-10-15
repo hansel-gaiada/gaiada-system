@@ -25,7 +25,7 @@
 // registry is classified `unit: "text"`, so it isn't blocking; flagging so
 // whoever seeds a text-unit metric later doesn't have to reverse-engineer intent.
 
-export type ReportGrain = "person" | "project" | "department" | "company";
+export type ReportGrain = "person" | "project" | "client" | "department" | "company";
 // DW-4a (2026-10-13): quarter, semester and year are calendar kinds like month (§15, DW-4a entry).
 export type ReportPeriodKind = "day" | "week" | "month" | "quarter" | "semester" | "year" | "custom";
 export type ReportUnit = "count" | "minutes" | "percent" | "score" | "text";
@@ -33,7 +33,7 @@ export type ReportUnit = "count" | "minutes" | "percent" | "score" | "text";
 export interface ReportHeader {
   tenantId: string;
   grain: ReportGrain;
-  scopeRef: string;            // userId | projectId | dept node id | tenantId
+  scopeRef: string;            // userId | projectId | clientId | dept node id | tenantId
   scopeName: string;           // display name resolved at build time
   periodKind: ReportPeriodKind;
   periodStart: string;         // ISO date (inclusive)

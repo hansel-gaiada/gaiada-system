@@ -7,8 +7,8 @@
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
       "groups": 169,
-      "grantablePermissionsInCatalog": 456,
-      "permissionsCoveredByGroups": 417,
+      "grantablePermissionsInCatalog": 457,
+      "permissionsCoveredByGroups": 418,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
       "sensitiveGroups": 114
@@ -891,10 +891,11 @@
       "key": "team_project_reports",
       "name": "Team & Project Reports",
       "domain": "reports",
-      "description": "Read person-, project-, and department-grain report documents. What a department head needs to see their own unit's numbers.",
+      "description": "Read person-, project-, client- and department-grain report documents. What a department head needs to see their own unit's numbers (the client grain is one client's figures summed across its projects, staff only).",
       "permissions": [
         "reports.document.read_person",
         "reports.document.read_project",
+        "reports.document.read_client",
         "reports.document.read_department"
       ],
       "sensitive": true

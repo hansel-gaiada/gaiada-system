@@ -20,7 +20,7 @@
 //   1. Cerbos — `report_admin` (recompute, §8's "facts recompute" row) / `report_document`
 //      (document/overview/metrics, §8's per-grain read matrix — cerbos/policies/
 //      resource_report_document.yaml, one action per grain: `read_person`/`read_project`/
-//      `read_department`/`read_company`).
+//      `read_client`/`read_department`/`read_company`).
 //   2. The tenant choke-point — every query inside document-builder.ts/fact-job.ts runs
 //      `withTenants([oneTenant], …)`.
 //   3. Module-sliced RLS — `{modules:['reports','pm','hr']}`; a handler that forgot it would read
@@ -85,7 +85,8 @@ import {
 import { loadUnitAncestors } from "../../core/org-unit-closure";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const GRAINS = new Set(["person", "project", "department", "company"]);
+const GRAINS = new Set(["person", "project", "client", "department", "company"]);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // DW-4a: every calendar kind (day, week, month, quarter, semester, year) plus `custom`.
 const PERIOD_KINDS = new Set<string>([...CALENDAR_KINDS, "custom"]);
 
@@ -100,7 +101,7 @@ const PERIOD_KINDS = new Set<string>([...CALENDAR_KINDS, "custom"]);
 /** §6.2's grain validation, shared by document/overview/metrics/export. */
 function resolveGrain(raw?: string): ReportGrain {
   if (!raw || !GRAINS.has(raw)) {
-    throw new BadRequestException({ message: "grain must be one of person, project, department, company", field: "grain" });
+    throw new BadRequestException({ message: "grain must be one of person, project, client, department, company", field: "grain" });
   }
   return raw as ReportGrain;
 }
@@ -140,6 +141,11 @@ function resolveScopeRefForGrain(grain: ReportGrain, scopeRefRaw: string | undef
   if (grain === "company" && scopeRef !== tenantId) {
     throw new BadRequestException({ message: "company-grain scopeRef must equal the route tenantId", field: "scopeRef" });
   }
+  // PV7-01: the client id is bound into a uuid comparison, so a malformed one is a 400 here rather
+  // than a 500 at the cast (BFF §53.1).
+  if (grain === "client" && !UUID_RE.test(scopeRef)) {
+    throw new BadRequestException({ message: "client-grain scopeRef must be a client id", field: "scopeRef" });
+  }
   return scopeRef;
 }
 
@@ -168,6 +174,11 @@ async function authorizeReportDocumentRead(principal: Principal, tenantId: strin
   // `person`/`project` grains carry no org-unit id at all today (`ownerId`/`projectId` are not
   // unit ids), so no unitAncestors can be supplied for them — deliberately NOT wired; the Cerbos
   // rule itself only lists `read_department` for exactly this reason (see that rule's comment).
+  //
+  // PV7-01: `client` grain asks `read_client` for `{id: <clientId>}` with no `ownerId`/`projectId`/
+  // `teamId`. A project-scope `member` therefore matches nothing (the derived role needs a company or
+  // global grant when no projectId is set); the tiers that read every project document read every
+  // client. No narrowing below applies to it, as for `project`.
   const unitAncestors =
     grain === "department"
       ? await withTenants([tenantId], (c) => loadUnitAncestors(c, tenantId, scopeRef), { modules: PERSON_SCOPE_MODULES })
@@ -401,7 +412,7 @@ export class ReportsController {
           .filter((r) => rowGrainShape(r.dimensions ?? {}) === grain)
           .map((r) => {
             const dims = r.dimensions ?? {};
-            return String(grain === "person" ? dims.userId : grain === "project" ? dims.projectId : dims.unit);
+            return String(grain === "person" ? dims.userId : grain === "project" ? dims.projectId : grain === "client" ? dims.clientId : dims.unit);
           }),
       ),
     ];

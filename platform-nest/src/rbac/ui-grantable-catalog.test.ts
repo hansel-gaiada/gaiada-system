@@ -106,8 +106,9 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // DW-4e-1 (2026-10-14): +4 grantable / +4 total on the NEW dept_kpi_target kind (all uiGrantable TRUE). On top of DW-6h: 460 -> 464 / 445 -> 449.
     // DW-4e-3 (2026-10-15): +2 grantable / +2 total on the existing dept_kpi_target kind (both uiGrantable TRUE). 464 -> 466 / 449 -> 451.
     // DW-8g (2026-10-14): +5 grantable / +5 total on the NEW calendar_event kind (all uiGrantable TRUE). 466 -> 471 / 451 -> 456.
-    expect(permissions.length).toBe(471);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(456);
+    // PV7-01 (2026-10-15): +1 grantable / +1 total on the existing report_document kind (`read_client`, uiGrantable TRUE). 471 -> 472 / 456 -> 457.
+    expect(permissions.length).toBe(472);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(457);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 
