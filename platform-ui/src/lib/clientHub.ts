@@ -15,6 +15,7 @@ import "server-only";
 // client has no work, no money owed and nobody waiting — the single most expensive wrong answer this
 // screen can give. An empty state must mean "empty", never "we could not ask".
 import { platformFetch, PlatformError } from "./platform";
+import type { ClientHealthDetail } from "./clientHealth";
 
 /** One outstanding item, on either side of the relationship. */
 export interface ClientBallItem {
@@ -72,5 +73,19 @@ export async function getClientOverview(
   } catch (err) {
     if (err instanceof PlatformError && err.status === 404) return null;
     throw err;
+  }
+}
+
+/** PV7-03 (BFF §54.1): the staff health of ONE client, for the hub's Health card.
+ *
+ *  DEGRADE RULE, deliberately the opposite of `getClientOverview`: a failed read (404, 403, 500, a network error, a
+ *  server that predates §54) returns `null`, and the card says "Health could not be loaded". The Health card is one
+ *  block of a page whose other blocks are fine, so it must not take the hub down; what it must never do is turn a failed
+ *  read into a state, a zero or an empty list. */
+export async function getClientHealth(userId: string, tenant: string, clientId: string): Promise<ClientHealthDetail | null> {
+  try {
+    return await platformFetch<ClientHealthDetail>(`/api/${tenant}/clients/${encodeURIComponent(clientId)}/health`, userId);
+  } catch {
+    return null;
   }
 }

@@ -118,3 +118,26 @@ describe("demo · clientVisible by kind (the backend's rule)", () => {
     expect(o.needsClient.find((i) => i.kind === "review")?.clientVisible).toBe(true);
   });
 });
+
+// PV7-03 — the Health card's markers come from the health read's own `clientVisible` (BFF §54.2). The demo's per-project flag
+// must be the SAME answer the projects list gives for that project (a project with a client is visible to a client-wide
+// contact, internal work never is), so a DEMO_MODE hub shows the markers the live one will.
+describe("demo client health · clientVisible follows the projects rule", () => {
+  it("every project in a client's health carries the same clientVisible as the projects list, and internal work is never listed", () => {
+    const listed = rows("/projects");
+    for (const cid of ["cl-1", "cl-2", "cl-3"]) {
+      const h = get(`/clients/${cid}/health`).json as { projects: Array<{ projectId: string; clientVisible: boolean }> };
+      expect(h.projects.length, cid).toBeGreaterThan(0);
+      for (const p of h.projects) {
+        expect(p.clientVisible, `${cid}/${p.projectId}`).toBe(listed.find((x) => x.id === p.projectId)?.clientVisible);
+      }
+    }
+    const all = (["cl-1", "cl-2", "cl-3", "cl-4"].flatMap((cid) => (get(`/clients/${cid}/health`).json as { projects: Array<{ projectId: string }> }).projects));
+    expect(all.some((p) => p.projectId === "p-int-1")).toBe(false);
+  });
+
+  it("every turnaround part says whether the client sees it, as a boolean (never omitted)", () => {
+    const h = get("/clients/cl-1/health").json as { turnaround: { client: { parts: Array<{ clientVisible: unknown }> }; ours: { parts: Array<{ clientVisible: unknown }> } } };
+    for (const part of [...h.turnaround.client.parts, ...h.turnaround.ours.parts]) expect(typeof part.clientVisible).toBe("boolean");
+  });
+});

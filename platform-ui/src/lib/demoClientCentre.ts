@@ -358,6 +358,13 @@ const PORTAL_SCOPE: Record<string, Array<{ clientId: string; canEdit: boolean }>
     { clientId: "cl-1", canEdit: true },
     { clientId: "cl-harbour", canEdit: false },
   ],
+  // PV7-03: the other demo portal identities (demoPortalClients.ts) are contacts of Northwind and nothing else, so the
+  // portal Overview's results headline reads a real answer for them too, not a failed read. The viewer is view-only
+  // (`canEdit: false`), which the demo reads as "results hidden" (PV-D37), the project-scoped state.
+  "demo-client-admin": [{ clientId: "cl-1", canEdit: true }],
+  "demo-client-viewer": [{ clientId: "cl-1", canEdit: false }],
+  "demo-viceroy-marketing": [{ clientId: "cl-1", canEdit: true }],
+  "demo-two-company-client": [{ clientId: "cl-1", canEdit: true }],
 };
 
 // ── PV6-03 · Services & results ───────────────────────────────────────────────────────────────────────
