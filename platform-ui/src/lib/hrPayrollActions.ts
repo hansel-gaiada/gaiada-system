@@ -66,8 +66,9 @@ async function send<T extends Record<string, unknown>>(
   }
 }
 
-function reval() {
+function reval(runId?: string) {
   revalidatePath("/hr/payroll");
+  if (runId) revalidatePath(`/hr/payroll/${runId}`); // the run's own page (DW-7f-1b)
   revalidatePath("/hr"); // the Pulse tile reads the latest run
 }
 
@@ -115,7 +116,7 @@ export async function calculatePayrollRun(tenantId: string, runId: string): Prom
     skipped?: { name?: string; reason?: string }[];
   }>(c.tenant, c.userId, `/payroll-runs/${encodeURIComponent(runId)}/calculate`, undefined, "calculate payroll runs", false);
   if (!r.ok) return { ok: false, error: r.error };
-  reval();
+  reval(runId);
 
   // The server's own account of what it did. Skipped employees are NOT a footnote: a skipped person
   // gets no payslip, and the owner has to see that before approving.
@@ -149,7 +150,7 @@ export async function approvePayrollRun(
     "approve payroll runs", true,
   );
   if (!r.ok) return { ok: false, error: r.error };
-  reval();
+  reval(runId);
   return {
     ok: true, id: runId, status: str(r.body.status),
     notice: r.body.overrodeUnratified
@@ -168,7 +169,7 @@ export async function publishPayrollRun(tenantId: string, runId: string): Promis
     c.tenant, c.userId, `/payroll-runs/${encodeURIComponent(runId)}/publish`, undefined, "publish payslips", true,
   );
   if (!r.ok) return { ok: false, error: r.error };
-  reval();
+  reval(runId);
   const n = typeof r.body.published === "number" ? r.body.published : null;
   return { ok: true, id: runId, notice: n === null ? "Payslips published." : `${n} payslip(s) published to their employees.` };
 }
@@ -183,6 +184,69 @@ export async function markPayrollRunPaid(tenantId: string, runId: string): Promi
     c.tenant, c.userId, `/payroll-runs/${encodeURIComponent(runId)}/paid`, undefined, "mark payroll runs paid", true,
   );
   if (!r.ok) return { ok: false, error: r.error };
-  reval();
+  reval(runId);
   return { ok: true, id: runId, status: str(r.body.status), notice: "Marked paid." };
+}
+
+// ---- Payroll input (DW-7f-1b) ----
+// POST payroll-inputs (payroll.controller.ts addPayrollInput, authorize hr_payroll `create`; the UI
+// mirror is hr.payroll.manage). An input belongs to an EMPLOYEE and a PERIOD, not to a run: the next
+// calculate of any run whose period contains the input's period (and that has not consumed it)
+// picks it up. The server does not check the run's status; the page only offers the form while the
+// run can still be calculated (draft, calculated), because that is the only time it can be consumed.
+export const INPUT_CATEGORIES: readonly string[] = [
+  "overtime", "bonus", "commission", "reimbursement", "deduction", "advance", "leave_encashment", "other",
+];
+
+function money(raw: string, what: string): { value?: number; error?: string } {
+  if (!raw) return {};
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return { error: `${what} must be a number, zero or more.` };
+  return { value: n };
+}
+
+export async function addPayrollInput(tenantId: string, runId: string, formData: FormData): Promise<PayrollResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!runId) return { ok: false, error: "No payroll run selected." };
+
+  const employeeId = String(formData.get("employeeId") ?? "").trim();
+  const category = String(formData.get("category") ?? "").trim();
+  const label = String(formData.get("label") ?? "").trim();
+  const periodStart = String(formData.get("periodStart") ?? "").trim();
+  const periodEnd = String(formData.get("periodEnd") ?? "").trim();
+  const note = String(formData.get("note") ?? "").trim();
+  const code = String(formData.get("code") ?? "").trim();
+  const taxable = formData.get("taxable") === "on" || formData.get("taxable") === "true";
+
+  if (!employeeId) return { ok: false, error: "Pick the employee this input is for." };
+  if (!INPUT_CATEGORIES.includes(category)) return { ok: false, error: "Pick a category from the list." };
+  if (!label) return { ok: false, error: "A label is required (it prints on the payslip)." };
+  if (!ISO_DATE.test(periodStart) || !ISO_DATE.test(periodEnd)) return { ok: false, error: "The period is required (YYYY-MM-DD)." };
+  if (periodEnd < periodStart) return { ok: false, error: "The period must end on or after the day it starts." };
+  const amount = money(String(formData.get("amount") ?? "").trim(), "The amount");
+  if (amount.error) return { ok: false, error: amount.error };
+  const quantity = money(String(formData.get("quantity") ?? "").trim(), "The quantity");
+  if (quantity.error) return { ok: false, error: quantity.error };
+  if (amount.value === undefined && quantity.value === undefined) {
+    return { ok: false, error: "Give an amount, or a quantity (hours, for overtime)." };
+  }
+
+  const r = await send<{ id?: string }>(
+    c.tenant, c.userId, "/payroll-inputs",
+    {
+      employeeId, category, label, periodStart, periodEnd, taxable,
+      ...(code ? { code } : {}),
+      ...(note ? { note } : {}),
+      ...(amount.value !== undefined ? { amount: amount.value } : {}),
+      ...(quantity.value !== undefined ? { quantity: quantity.value } : {}),
+    },
+    "add payroll inputs", false,
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  reval(runId);
+  return {
+    ok: true, id: str(r.body.id),
+    notice: "Input recorded. It is counted the next time this run is calculated (recalculate to include it).",
+  };
 }

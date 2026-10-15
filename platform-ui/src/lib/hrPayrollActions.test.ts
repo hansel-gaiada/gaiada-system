@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "./session-server";
 import { platformFetch, PlatformError } from "./platform";
 import {
-  createPayrollRun, calculatePayrollRun, approvePayrollRun, publishPayrollRun, markPayrollRunPaid,
+  createPayrollRun, calculatePayrollRun, approvePayrollRun, publishPayrollRun, markPayrollRunPaid, addPayrollInput,
 } from "./hrPayrollActions";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -222,5 +222,87 @@ describe("markPayrollRunPaid", () => {
     vi.mocked(getSessionUserId).mockResolvedValue(null as unknown as string);
     expect((await markPayrollRunPaid("co-a", "run-1")).ok).toBe(false);
     expect(platformFetch).not.toHaveBeenCalled();
+  });
+});
+
+// DW-7f-1b — POST payroll-inputs. The route takes employee, period, category, label and an amount or a
+// quantity; it never looks at the run's status. The page decides when to offer the form.
+function inputForm(over: Record<string, string> = {}): FormData {
+  const f = new FormData();
+  const base: Record<string, string> = {
+    employeeId: "emp-1", category: "overtime", label: "Overtime Oct", periodStart: "2026-10-01",
+    periodEnd: "2026-10-31", quantity: "6", taxable: "on", ...over,
+  };
+  for (const [k, v] of Object.entries(base)) if (v !== "") f.set(k, v);
+  return f;
+}
+
+describe("addPayrollInput", () => {
+  it("posts the input, sending numbers as numbers, and revalidates the run page and the list", async () => {
+    vi.mocked(platformFetch).mockResolvedValue({ id: "in-1" });
+    const r = await addPayrollInput("co-a", "run-1", inputForm({ amount: "150000", note: "approved by Dewi" }));
+    expect(r).toMatchObject({ ok: true, id: "in-1" });
+    expect(r.notice).toMatch(/recalculate/i);
+    const c = lastCall();
+    expect(c.path).toBe("/api/co-a/modules/hr/payroll-inputs");
+    expect(c.init.method).toBe("POST");
+    expect(c.body).toEqual({
+      employeeId: "emp-1", category: "overtime", label: "Overtime Oct", periodStart: "2026-10-01",
+      periodEnd: "2026-10-31", taxable: true, amount: 150000, quantity: 6, note: "approved by Dewi",
+    });
+    expect(revalidated()).toEqual(expect.arrayContaining(["/hr/payroll/run-1", "/hr/payroll"]));
+  });
+
+  it("sends taxable false when the box is unticked and omits empty optional fields", async () => {
+    vi.mocked(platformFetch).mockResolvedValue({ id: "in-2" });
+    await addPayrollInput("co-a", "run-1", inputForm({ taxable: "", quantity: "", amount: "50000", category: "reimbursement" }));
+    const b = lastCall().body;
+    expect(b.taxable).toBe(false);
+    expect(b).not.toHaveProperty("quantity");
+    expect(b).not.toHaveProperty("note");
+    expect(b).not.toHaveProperty("code");
+  });
+
+  it("refuses bad input without calling the server", async () => {
+    for (const over of <Record<string, string>[]>[
+      { employeeId: "" }, { category: "salary" }, { label: " " }, { periodStart: "" }, { periodEnd: "2026-09-01" },
+      { quantity: "", amount: "" }, { quantity: "-2" }, { quantity: "", amount: "abc" },
+    ]) {
+      expect((await addPayrollInput("co-a", "run-1", inputForm(over))).ok).toBe(false);
+    }
+    expect((await addPayrollInput("co-a", "", inputForm())).ok).toBe(false);
+    expect(platformFetch).not.toHaveBeenCalled();
+  });
+
+  it("words a 403 and passes the server's 400 and 409 sentences back as sent, revalidating nothing", async () => {
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(403, "forbidden"));
+    expect(await addPayrollInput("co-a", "run-1", inputForm())).toEqual({ ok: false, error: "You don't have permission to add payroll inputs." });
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(400, "employeeId, category and label required"));
+    expect((await addPayrollInput("co-a", "run-1", inputForm())).error).toBe("employeeId, category and label required");
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(409, "an identical input already exists"));
+    expect((await addPayrollInput("co-a", "run-1", inputForm())).error).toBe("an identical input already exists");
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("does nothing without a session", async () => {
+    vi.mocked(getSessionUserId).mockResolvedValue(null as unknown as string);
+    expect((await addPayrollInput("co-a", "run-1", inputForm())).ok).toBe(false);
+    expect(platformFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("run actions also revalidate the run's own page", () => {
+  it("calculate, approve, publish and paid revalidate /hr/payroll/<id>", async () => {
+    for (const call of [
+      () => calculatePayrollRun("co-a", "run-9"),
+      () => approvePayrollRun("co-a", "run-9", {}),
+      () => publishPayrollRun("co-a", "run-9"),
+      () => markPayrollRunPaid("co-a", "run-9"),
+    ]) {
+      vi.mocked(revalidatePath).mockReset();
+      vi.mocked(platformFetch).mockResolvedValue({ status: "x" });
+      await call();
+      expect(revalidated()).toContain("/hr/payroll/run-9");
+    }
   });
 });
