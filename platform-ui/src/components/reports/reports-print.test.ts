@@ -1,10 +1,11 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 
 // DW-4k — the print stylesheet for the report pages. jsdom has no print layout, so this pins the rules that make a printed
 // report clean (the shell and the controls are hidden; the header, KPI tiles and table rows stay whole; charts keep their
 // colours), and that every one of them is scoped to report pages so no other route can be affected.
-const css = readFileSync(new URL("./reports-print.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+const css = readFileSync(resolve(process.cwd(), "src/components/reports/reports-print.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 const print = css.slice(css.indexOf("@media print"));
 
 describe("reports-print.css", () => {
