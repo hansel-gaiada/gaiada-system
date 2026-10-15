@@ -2423,3 +2423,38 @@ No key is `sensitive`.
 - the bundles, regenerated from a clean worktree.
 
 Plus the static pins and the live matrix (`cerbos-dept-notice.test.ts`), and the UI mirror in `platform-ui/src/lib/rbac.ts` with its parity register. **Restart Cerbos at the deploy and probe it:** a head's `post` on their own unit is allowed, and on a sibling unit denied.
+
+## 48. DW-10c — the department calendar: `org_structure · read_calendar` and department-visible events (2026-10-15, PLANNED)
+
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §59 (plan `docs/plans/2026-10-13-department-workspaces.md` §12.1, row 10c; owner ruling DW-D33). Status: **PLANNED**.
+
+**1. A new action on an existing kind: `org_structure · read_calendar`.**
+- **Key:** `core.org_structure.read_calendar`, in `resource_org_structure.yaml`.
+- **Reach:** `company_admin`, `manager`, `member` and `viewer`, with `inTenant && notLow`, plus **its own rule** for the HR read tier (`hr_people_reader`).
+- **Why a new action, not plain `read`:**
+  - It gates the department calendar (BFF §59). That read discloses colleagues' approved leave and its type to the department's people (DW-D33), which no other read does.
+  - A distinct key keeps that disclosure visible in the catalogue, and lets a company withhold it without touching the org chart.
+- **Narrowing:** the per-unit narrowing (placed in the unit or below it today, a head whose led scope holds it, or a company-wide tier) is the handler's, as for `dept_kpi_target · read`. It needs placement as of today, which Cerbos cannot read.
+- **The permission arm mirrors it** (`perm_org_structure_read_calendar`, with `inTenant && notLow && inRoot`). The action is reached only through scope-only rules, so a mirror grants no more than the role arm.
+- **Bundles:** `company_admin`, `owner`, `platform_admin`, `manager`, `member` and `viewer` hold it. It is not `sensitive`.
+- **Artifacts:**
+  - the policy rule;
+  - the catalogue entry;
+  - the groups (the `org` group);
+  - a migration seeding `permissions` and `role_permissions`, with the DO-block self-assertion;
+  - the bundles, regenerated from a clean worktree;
+  - the static pins and the live matrix (`cerbos-org-structure*.test.ts`, or a new `cerbos-dept-calendar.test.ts`).
+- **Bots and automation** may read; there is no write.
+
+**2. `calendar_event · read` for department-visible events (extends §39).**
+- **New rule:** read for `member`, `viewer` and `manager` when `request.resource.attr.visibility == "department"`, with `inTenant && notLow`. It is its own rule, never mixed with the organizer, attendee or company rules (HIER-2).
+- **Narrowing:** Cerbos keeps the tier; the handler and the SQL mirrors (`mine`, the detail read) narrow to the unit's placed people, its heads and the company-wide tiers (BFF §59.3).
+- **New resource attribute:** `unitNodeId`, from the stored row and never from a body. It goes in the `Resource` type and `resourcePayload()` in `src/rbac/cerbos.ts`. `visibility` already exists (§39).
+- **`create` and `update` are unchanged in Cerbos.** Creating or moving an event to `department` also requires the unit narrowing, which is the handler's, and it is checked before the body's other fields are validated.
+- **The automation and bot DENY on writes stays.**
+- **No new key**, and the bundles are unchanged.
+
+**Deploy:** restart Cerbos and probe it:
+- `read_calendar` allowed for a member, denied for a client-portal principal;
+- a department event readable by a member of the tenant through Cerbos (the handler narrows);
+- an attendee-only event still refused to a non-attendee.
