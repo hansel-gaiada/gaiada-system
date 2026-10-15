@@ -2,9 +2,10 @@ import Link from "next/link";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ClientVisibilityMarker } from "./ClientVisibilityMarker";
+import { ClientHealthChip } from "./ClientHealthChip";
 import { formatDate } from "@/lib/format";
 import {
-  CLIENT_SIDE_KINDS, COULD_NOT_BE_LOADED, SOURCE_LABEL, STATE_LABEL, STATE_MEANING, TURNAROUND_KIND_LABEL,
+  CLIENT_SIDE_KINDS, COULD_NOT_BE_LOADED, SOURCE_LABEL, STATE_MEANING, TURNAROUND_KIND_LABEL,
   describeReason, healthDate, turnaroundValue,
   type ClientHealthDetail, type HealthReason, type ProjectHealth, type Turnaround,
 } from "@/lib/clientHealth";
@@ -79,9 +80,7 @@ export function ClientHealthCard({ health }: { health: ClientHealthDetail | null
     <Card
       title="Health"
       headerRight={
-        <span className={`ch-health-chip ch-health-chip--${health.state}`} data-state={health.state}>
-          {STATE_LABEL[health.state]}
-        </span>
+        <ClientHealthChip state={health.state} />
       }
       hint="A summary for the account team, worked out from what is waiting, late, overdue or down. It is never shown to the client, who sees the facts instead."
     >

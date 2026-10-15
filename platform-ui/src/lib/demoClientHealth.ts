@@ -6,12 +6,11 @@ import "server-only";
 // Contract-exact: the field names and null rules are §54.2's. A pure function of its input, so it is unit-tested directly
 // (`demoClientHealth.test.ts`) without the dispatch chain.
 //
-// THE STATE. `verdict` mirrors `platform-nest/src/modules/clients/client-health-rules.ts` for the signals the demo has
-// (waiting on us and on the client, late work, overdue invoices). It is NOT the shared rules mirror: PV7-05 adds that (the
-// golden table copied into the UI, run by the same cases) and should replace this function with it. Site incidents are
-// not modelled (`site: null`, "monitoring off for this company").
+// THE STATE comes from `clientHealthRules.ts`, the UI mirror of the backend rules that the same golden table pins (PV7-05).
+// Site incidents are not modelled here (`site: null`, "monitoring off for this company").
+import { evaluateClientHealth } from "./clientHealthRules";
 import type {
-  ClientHealthDetail, DueAged, HealthReason, HealthSource, HealthState, ProjectHealth, Turnaround, TurnaroundKind, TurnaroundPart,
+  ClientHealthDetail, DueAged, HealthSource, ProjectHealth, Turnaround, TurnaroundKind, TurnaroundPart,
 } from "./clientHealth";
 
 const DAY_MS = 86_400_000;
@@ -54,47 +53,6 @@ function aged(items: Array<{ since: string | null }>): { count: number; oldestSi
   return { count: items.length, oldestSince: dated[0] ?? null };
 }
 const dueAged = (dates: string[]): DueAged => ({ count: dates.length, oldestDue: [...dates].sort()[0] ?? null });
-
-function ageDays(from: string | null, now: Date): number {
-  if (!from) return 0;
-  const t = Date.parse(from);
-  return Number.isNaN(t) ? 0 : Math.floor((now.getTime() - t) / DAY_MS);
-}
-
-interface Found { reason: HealthReason; off: boolean }
-
-/** §54.3 for the signals the demo has. A family is reported once, at its highest tier. */
-function verdict(
-  s: { waitingOnUs: ReturnType<typeof aged>; waitingOnClient: ReturnType<typeof aged>; lateWork: DueAged; overdue: DueAged; active: number },
-  unavailable: HealthSource[],
-  now: Date,
-): { state: HealthState; reasons: HealthReason[] } {
-  const found: Found[] = [];
-  if (s.waitingOnUs.count > 0) {
-    const off = ageDays(s.waitingOnUs.oldestSince, now) >= 14;
-    if (off || ageDays(s.waitingOnUs.oldestSince, now) >= 7) {
-      found.push({ off, reason: { code: off ? "waiting_on_us_14d" : "waiting_on_us_7d", count: s.waitingOnUs.count, since: s.waitingOnUs.oldestSince } });
-    }
-  }
-  if (s.lateWork.count > 0) {
-    const off = ageDays(s.lateWork.oldestDue, now) >= 14;
-    found.push({ off, reason: { code: off ? "late_work_14d" : "late_work", count: s.lateWork.count, since: s.lateWork.oldestDue } });
-  }
-  if (s.overdue.count > 0) {
-    const off = ageDays(s.overdue.oldestDue, now) >= 30;
-    found.push({ off, reason: { code: off ? "invoice_overdue_30d" : "invoice_overdue", count: s.overdue.count, since: s.overdue.oldestDue } });
-  }
-  if (s.waitingOnClient.count > 0 && ageDays(s.waitingOnClient.oldestSince, now) >= 14) {
-    found.push({ off: false, reason: { code: "waiting_on_client_14d", count: s.waitingOnClient.count, since: s.waitingOnClient.oldestSince } });
-  }
-  // Off-track reasons first, each tier in the order found.
-  const reasons = [...found.filter((f) => f.off), ...found.filter((f) => !f.off)].map((f) => f.reason);
-  if (found.some((f) => f.off)) return { state: "off_track", reasons };
-  if (found.length > 0) return { state: "at_risk", reasons };
-  if (unavailable.length > 0) return { state: "unknown", reasons: [{ code: "source_unavailable", count: unavailable.length, since: null }] };
-  if (s.active === 0) return { state: "quiet", reasons: [{ code: "no_active_work", count: 0, since: null }] };
-  return { state: "on_track", reasons: [] };
-}
 
 type PartSpec = [TurnaroundKind, number | null, number, boolean];
 function side(pooled: [number | null, number], parts: PartSpec[]): Turnaround {
@@ -153,11 +111,10 @@ export function buildDemoClientHealth(i: DemoHealthInput): ClientHealthDetail {
   const waitingOnUs = aged(i.needsUs);
   const waitingOnClient = aged(i.needsClient);
 
-  const v = verdict(
+  const v = evaluateClientHealth(
     {
-      waitingOnUs, waitingOnClient,
-      lateWork: dueAged([...lateDeliverableDates, ...lateMilestoneDates]),
-      overdue: overdueInvoices, active: active.length,
+      waitingOnUs, waitingOnClient, lateDeliverables, lateMilestones, overdueInvoices,
+      site: null, activeProjects: active.length, activeServices: 0,
     },
     unavailable,
     now,

@@ -26,7 +26,8 @@ export interface HealthReason { code: HealthReasonCode; count: number; since: st
 
 export type HealthSource =
   | "projects" | "ball" | "milestones" | "deliverables" | "requests" | "invoices"
-  | "site" | "services" | "modules" | "projectHealth" | "turnaround";
+  | "site" | "services" | "modules" | "projectHealth" | "turnaround"
+  | "reports";
 
 export interface Aged { count: number; oldestSince: string | null }
 export interface DueAged { count: number; oldestDue: string | null }
@@ -61,8 +62,9 @@ export interface ClientHealthSignals {
   conversationsAwaitingReply: number | null;
   overdueInvoices: DueAged | null;
   site: { openIncidents: number; oldestOpenSince: string | null; uptime30d: number | null } | null;
-  /** Always `null` until PV7-01's client-grain overview supplies it. */
-  deliveryOnTime: null;
+  /** Delivery on time, month to date: a ratio from 0 to 1 (PV7-05, the client grain's `delivery.on_time_rate`). `null` with
+   *  no due-dated completion this month, with the reports module off, or when the read failed. Print it with `onTimePercent`. */
+  deliveryOnTime: number | null;
   activeProjects: number | null;
   activeServices: number | null;
 }
@@ -73,6 +75,14 @@ export interface ClientHealthRow {
   ownerUserId: string | null; ownerName: string | null;
   state: HealthState; reasons: HealthReason[];
   signals: ClientHealthSignals;
+}
+
+/** `GET :t/clients/health` (staff board, PV7-05): one row per live client, plus the sources that could not be read. */
+export interface ClientHealthBoard {
+  asOf: string;
+  onTimeKnownSince: string | null;
+  clients: ClientHealthRow[];
+  unavailable: HealthSource[];
 }
 
 /** `GET :t/clients/:clientId/health` (staff, one client). */
@@ -118,6 +128,7 @@ export const SOURCE_LABEL: Record<HealthSource, string> = {
   modules: "module settings",
   projectHealth: "per-project health",
   turnaround: "reply times",
+  reports: "delivery on time",
 };
 
 function plural(n: number, one: string, many: string): string {
@@ -160,6 +171,12 @@ export function reasonLabel(r: HealthReason): string {
 export function describeReason(r: HealthReason): string {
   const label = reasonLabel(r);
   return r.since ? `${label} (oldest ${healthDate(r.since)})` : label;
+}
+
+/** Delivery on time as a whole percent: `75%`; `—` for no answer (`null`), never `0%`. */
+export function onTimePercent(ratio: number | null | undefined): string {
+  if (ratio === null || ratio === undefined || Number.isNaN(ratio)) return "—";
+  return `${Math.round(ratio * 100)}%`;
 }
 
 /** A turnaround in days, one decimal at most: `1 day`, `2.5 days`, `0.4 days`. */

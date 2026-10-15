@@ -180,23 +180,8 @@
 }
 
 /* ── Health card (PV7-03) ───────────────────────────────────────────────────────────────────────────
-   The state chip carries its words and its shape (the edge is solid or dashed), never colour alone; the text is always
-   --ink-strong so contrast holds in both themes (the same lesson as .ch-vis). No literal colours, no literal radii. */
-.ch-health-chip {
-  display: inline-block;
-  padding: 2px 10px;
-  border-radius: var(--radius-pill);
-  font: 600 12px/1.5 var(--font-body);
-  color: var(--ink-strong);
-  border: 1px solid var(--line);
-  background: var(--wash);
-  white-space: nowrap;
-}
-.ch-health-chip--on_track { background: var(--status-ok-bg); border-color: var(--status-ok); }
-.ch-health-chip--at_risk { background: var(--status-warning-bg); border-color: var(--status-warning); border-style: dashed; }
-.ch-health-chip--off_track { background: var(--status-critical-bg); border-color: var(--status-critical); border-width: 2px; }
-.ch-health-chip--quiet { border-style: dotted; }
-.ch-health-chip--unknown { border-style: dashed; }
+   The state chip (.ch-health-chip) lives in clientHealthChip.css, imported by ClientHealthChip.tsx, because the Clients
+   list and the health board draw it too and neither sits under the hub layout that imports this file. */
 .ch-health { display: grid; gap: 20px; }
 .ch-health__h { margin: 0 0 8px; font: 600 13px/1.4 var(--font-body); color: var(--ink-strong); }
 .ch-health__meaning { margin: 0 0 6px; font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); }
