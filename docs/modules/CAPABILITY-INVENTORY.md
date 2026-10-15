@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **269** capabilities across **16** owners
-- **143** writes · 126 reads
-- Writes by impact: **high 26** · medium 41 · low 76
+- **273** capabilities across **16** owners
+- **144** writes · 129 reads
+- Writes by impact: **high 26** · medium 41 · low 77
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -42,8 +42,8 @@ unfalsifiable after.
 | agency | `agency` | 22 |
 | assistant | `assistant` | 15 |
 | automation-console | `admin/automation` | 3 |
-| clients | `clients` | 24 |
-| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `positions` · `role-grants` | 74 |
+| clients | `clients` | 25 |
+| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `positions` · `role-grants` | 75 |
 | finance | `finance` | 3 |
 | hr | `hr` | 11 |
 | invoice | `invoices` | 13 |
@@ -51,7 +51,7 @@ unfalsifiable after.
 | knowledge | `knowledge` | 3 |
 | monitoring | `monitoring` | 3 |
 | pm | `pm` | 15 |
-| reports | `checkins` · `reports` | 22 |
+| reports | `checkins` · `reports` | 23 |
 | search | `search` | 30 |
 | social | `social` | 13 |
 | webdev | `webdev` | 36 |
@@ -64,8 +64,12 @@ unfalsifiable after.
 | agency | `agency.pendingApprovals` | `GET` | `/api/:tenantId/modules/agency/approvals/pending` | read | — |
 | assistant | `orchestrator.ask` | `POST` | `/api/:tenantId/assistant/ask` | write | `low` |
 | automation-console | `automation.listWorkflows` | `GET` | `/api/admin/automation/workflows` | read | — |
+| clients | `clientReports.draftSummary` | `POST` | `/api/:tenantId/clients/:clientId/reports/summary` | write | `low` |
+| clients | `clientReports.list` | `GET` | `/api/:tenantId/clients/:clientId/reports` | read | — |
 | clients | `clients.getBusinessProfile` | `GET` | `/api/:tenantId/clients/:clientId/centre` | read | — |
 | clients | `clients.getBusinessResults` | `GET` | `/api/:tenantId/clients/:clientId/centre/results` | read | — |
+| clients | `clients.getHealth` | `GET` | `/api/:tenantId/clients/:clientId/health` | read | — |
+| clients | `clients.getHealthBoard` | `GET` | `/api/:tenantId/clients/health` | read | — |
 | clients | `clients.listClients` | `GET` | `/api/:tenantId/clients` | read | — |
 | clients | `clients.updateBusinessProfile` | `PATCH` | `/api/:tenantId/clients/:clientId/centre` | write | `low` |
 | core | `agency_intake.convert` | `POST` | `/api/:tenantId/agency/leads/:leadId/convert` | write | `medium` |

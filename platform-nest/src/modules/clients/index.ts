@@ -107,6 +107,74 @@ export const clientsModule: ModuleContract = {
         required: ["tenantId", "clientId"],
       },
     },
+    {
+      name: "clients.getHealthBoard",
+      description:
+        "Read the client health board (BFF 54): one row per client that is not archived and not internal, with its signals and its " +
+        "state. A source that failed is named in unavailable[] and its signals are null, never 0.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/clients/health",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string", description: "Company id (route scope)." } },
+        required: ["tenantId"],
+      },
+    },
+    {
+      name: "clients.getHealth",
+      description:
+        "Read one client's health (BFF 54): the board row, per-project health and the 90-day turnaround on both sides.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/clients/:clientId/health",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          clientId: { type: "string", description: "The client." },
+        },
+        required: ["tenantId", "clientId"],
+      },
+    },
+    {
+      name: "clientReports.list",
+      description:
+        "List every report of one client, every status (draft, published, withdrawn), with the staff clientVisible flag (BFF 55). " +
+        "Read only: publishing and withdrawing a report are staff actions and are not agent tools.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/clients/:clientId/reports",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          clientId: { type: "string", description: "The client." },
+        },
+        required: ["tenantId", "clientId"],
+      },
+    },
+    {
+      name: "clientReports.draftSummary",
+      description:
+        "Draft the monthly account summary of one client for one month (BFF 56). Creates a DRAFT only: nothing reaches the client " +
+        "until a staff member publishes it. Idempotent per client and month: a second call returns the existing draft with created=false. " +
+        "Requires the draft permission on the client (its owner or a manager). Refused for a future month and for the internal client.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/clients/:clientId/reports/summary",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          clientId: { type: "string", description: "The client." },
+          period: { type: "string", description: "The month, YYYY-MM (not in the future)." },
+        },
+        required: ["tenantId", "clientId", "period"],
+      },
+    },
   ],
   rollupProviders: [],
   uiManifest: [{ label: "Clients", path: "/clients" }],
