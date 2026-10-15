@@ -122,7 +122,8 @@ export type PulseSource =
   | "change-requests-new" | "pipeline-gates-pending" | "monitoring-problem-sites"
   | "social-posts-scheduled" | "social-posts-failed" | "it-account-requests"
   | "hr-leave-pending" | "hr-onboarding-open" | "hr-cases-open" | "hr-payroll-waiting" | "it-devices-offline"
-  | "finance-payments-to-confirm" | "finance-overdue-receivables" | "finance-close-progress" | "finance-integrity-findings";
+  | "finance-payments-to-confirm" | "finance-overdue-receivables" | "finance-close-progress" | "finance-integrity-findings"
+  | "it-security-alerts";
 
 export interface QuickAction {
   key: string;
@@ -811,9 +812,10 @@ const FINANCE: Workspace = {
 };
 
 const IT_ON: Gate = { kind: "module", module: "it" };
-// Devices and Topology read `device`, open to members and viewers; the network pages have no route behind them yet (labelled
-// fixtures). Accounts (`it_account` read: company_admin, it_admin, it_manager) and Workflows (`isItOrPlatformOperator`: the IT
-// roles or a platform operator) are narrower, so `it.manage` stands in, a superset that hides nobody the server admits.
+// Devices and Topology read `device`, open to members and viewers. Accounts (`it_account` read: company_admin, it_admin, it_manager)
+// and Workflows (`isItOrPlatformOperator`: the IT roles or a platform operator) are narrower, so `it.manage` stands in, a superset
+// that hides nobody the server admits. The four security tabs of Network (DW-7h, BFF §52) read and write `it_account` too, so they
+// carry the same gate.
 const IT_MANAGE: Gate = { kind: "cap", cap: "it.manage" };
 
 const IT: Workspace = {
@@ -826,13 +828,15 @@ const IT: Workspace = {
     PM_ROW,
     { key: "devices", label: "Devices", icon: "inventory", gate: IT_ON, tabs: [{ key: "devices", label: "Devices", href: "/it/devices", icon: "inventory" }] },
     {
-      key: "network", label: "Network", icon: "gateway", gate: IT_ON,
+      // The row has no gate of its own: Topology keeps the `it` module's, and the four ERP-side security tabs are NOT module-gated
+      // (`/api/:t/it/security/*` works with the module off, like IT accounts), so a row gate would hide them with it.
+      key: "network", label: "Network", icon: "gateway",
       tabs: [
-        { key: "topology", label: "Topology", href: "/it/topology", icon: "hub" },
-        { key: "traffic", label: "Traffic", href: "/it/network", icon: "pulse" },
-        { key: "threats", label: "Threats", href: "/it/network/threats", icon: "bell" },
-        { key: "isolation", label: "Isolation", href: "/it/network/rules", icon: "settings" },
-        { key: "occupancy", label: "Occupancy", href: "/it/network/presence", icon: "user" },
+        { key: "topology", label: "Topology", href: "/it/topology", icon: "hub", gate: IT_ON },
+        { key: "connected", label: "Connected", href: "/it/network/presence", icon: "user", gate: IT_MANAGE },
+        { key: "sign-ins", label: "Sign-ins", href: "/it/network", icon: "pulse", gate: IT_MANAGE },
+        { key: "alerts", label: "Alerts", href: "/it/network/threats", icon: "bell", gate: IT_MANAGE },
+        { key: "blocks", label: "Blocks", href: "/it/network/rules", icon: "settings", gate: IT_MANAGE },
       ],
     },
     // NOT module-gated: `/api/:t/it/accounts` works with the `it` module off (P2-14, ITModuleGate), so leavers' logins stay
@@ -852,7 +856,7 @@ const IT: Workspace = {
   overview: DEPARTMENT_OVERVIEW,
   pulse: [
     { key: "devices-offline", label: "Devices offline", source: "it-devices-offline", href: "/it/devices" },
-    { key: "threat-alerts", label: "Threat alerts", ticket: "DW-7h" },
+    { key: "threat-alerts", label: "Threat alerts", source: "it-security-alerts", href: "/it/network/threats" },
     { key: "account-requests", label: "Account requests", source: "it-account-requests", href: "/it/accounts" },
     { key: "failing-workflows", label: "Failing workflows", ticket: "DW-7i" },
   ],

@@ -2,111 +2,142 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { getTraffic, topTalkers, egressByCountry, formatBytes } from "@/lib/network";
+import { canManageIT } from "@/components/shell/nav";
+import { listSignInsResult } from "@/lib/itSecurity";
+import { SIGN_IN_WINDOWS, WINDOW_LABEL, parseWindow, signInsStateWords } from "@/lib/itSecurityView";
+import { formatTimestamp } from "@/lib/format";
 import { Card, KpiTile, HairlineTable } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
-import { ProvenanceBanner, FeedBanner } from "@/components/it/NetworkBanners";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
+import { WindowChoice } from "@/components/it/WindowChoice";
+import "@/components/it/network.css";
 
-export const metadata = { title: "Network traffic" };
+export const metadata = { title: "Sign-ins" };
 export const dynamic = "force-dynamic";
 
-export default async function NetworkTrafficPage() {
+// DW-7h (BFF §52.6): every sign-in, failed sign-in and sign-out of this company's people, from the sign-in service's own events.
+//
+// ⚠ THREE STATES, NEVER TWO. `on` (the events were read), `off` (the sign-in service records none) and `unavailable` (the read
+// failed, or the role that reads events is missing). The last two are worded as what they are and draw NO figures: a "0 failed
+// sign-ins" under a service that records nothing would read as an all-clear, which is the one thing this page must not say.
+const SHOWN = 200;
+const TYPE_LABEL = { sign_in: "Signed in", failed: "Failed", sign_out: "Signed out" } as const;
+type SearchParams = Promise<{ window?: string | string[] }>;
+
+export default async function NetworkSignInsPage({ searchParams }: { searchParams: SearchParams }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
   if (!tenant) return <EmptyNote>Select a company from the top bar.</EmptyNote>;
+  if (!canManageIT(me, tenant)) {
+    return <ReadRefusal subject="the sign-in record for this company" kind="forbidden" detail="IT managers and company admins can see it." />;
+  }
 
-  const traffic = await getTraffic(userId, tenant);
-  const talkers = topTalkers(traffic.rollups);
-  const egress = egressByCountry(traffic.rollups);
-  const totalIn = traffic.rollups.reduce((n, r) => n + r.bytesIn, 0);
-  const totalOut = traffic.rollups.reduce((n, r) => n + r.bytesOut, 0);
-  const countries = egress.length;
-  // Scale every bar against the loudest host so the lengths are comparable across rows. Guard the
-  // zero case: an empty feed would otherwise divide by zero and render NaN-width bars.
-  const peak = talkers.length ? talkers[0].total : 1;
+  const win = parseWindow((await searchParams).window, SIGN_IN_WINDOWS, "24h");
+  const result = await listSignInsResult(userId, tenant, win);
+  if (result.kind === "forbidden") return <ReadRefusal subject="the sign-in record for this company" kind="forbidden" />;
+  if (result.kind === "unavailable") {
+    return (
+      <ReadRefusal
+        subject="The sign-in record"
+        kind="unavailable"
+        reason={result.reason}
+        detail="Zero failed sign-ins is a claim; it cannot be made while the record is unreadable."
+      />
+    );
+  }
+
+  const a = result.data;
+  const choice = <WindowChoice base="/it/network" options={SIGN_IN_WINDOWS} current={win} />;
+
+  if (a.state !== "on") {
+    const words = signInsStateWords(a.state, a.reason);
+    return (
+      <>
+        {choice}
+        <Card title={words.title}>
+          <div className="nw-banner nw-banner--warn" role="note" style={{ marginBottom: 0 }}>
+            <span className="nw-banner__label">{a.state === "off" ? "Not recorded" : "Cannot be read"}</span>
+            <span className="nw-banner__text">{words.body}</span>
+          </div>
+        </Card>
+      </>
+    );
+  }
+
+  const { summary, unknownAccounts } = a;
+  // Newest first; the page does not rely on the order the server happened to send.
+  const events = [...a.events].sort((x, y) => y.at.localeCompare(x.at));
+  const shown = events.slice(0, SHOWN);
 
   return (
     <>
-      <ProvenanceBanner source={traffic.source} />
-      <FeedBanner run={traffic.lastRun} label="Traffic feed" />
+      {choice}
 
       <div className="nw-kpis">
+        <KpiTile label="Sign-ins" value={String(summary.signIns)} foot={WINDOW_LABEL[win]} hint="Successful sign-ins of this company's people." />
+        <KpiTile label="Failed" value={String(summary.failed)} foot={`${summary.failedByAccount.length} account${summary.failedByAccount.length === 1 ? "" : "s"}`} hint="Wrong passwords and refused sign-ins for this company's people." />
         <KpiTile
-          label="Inbound"
-          value={formatBytes(totalIn)}
-          foot={`last ${traffic.windowHours}h`}
-          hint="Total bytes pulled in by all hosts in the window, summed from hourly rollups. Not packet capture — the collector aggregates before sending."
-        />
-        <KpiTile
-          label="Outbound"
-          value={formatBytes(totalOut)}
-          foot={`last ${traffic.windowHours}h`}
-          hint="Total bytes sent out. The number to watch: sustained outbound volume from a host that should be quiet is what exfiltration looks like."
-        />
-        <KpiTile
-          label="Destination countries"
-          value={String(countries)}
-          foot="distinct"
-          hint="Distinct destination countries seen this window. One unexpected entry here is worth more than a hundred rows of normal volume."
-        />
-        <KpiTile
-          label="Hosts with traffic"
-          value={String(talkers.length)}
-          foot={`${traffic.rollups.filter((r) => !r.deviceId).length} unregistered`}
-          hint="Hosts that moved traffic. 'Unregistered' means the device registry has never seen them — a host nobody registered but that is actively talking is more interesting than a known one, not less."
+          label="Unknown accounts"
+          value={String(unknownAccounts.failed)}
+          foot="failed sign-ins"
+          hint="Failed sign-ins using a username that matches nobody in the ERP. The usernames are not shown. A run of these is someone guessing."
         />
       </div>
 
-      <Card title="Top talkers" hint="Ranked by inbound + outbound combined. Sorting on outbound alone would hide a compromised host pulling a payload; sorting on inbound alone would hide a camera streaming out. Both columns are shown so you decide which shape is wrong.">
-        {talkers.length === 0 ? (
-          <EmptyNote>No traffic recorded in this window.</EmptyNote>
-        ) : (
-          <HairlineTable
-            // Column ORDER is load-bearing here. HairlineTable's grid has no column gap, so a
-            // right-aligned header sits flush against the next left-aligned one and the two render
-            // as a single word ("OUTSHARE OF TRAFFIC"). Keeping every right-aligned column at the
-            // END is the fix that preserves numeric alignment; shortening labels or flipping one
-            // column's alignment only moves the seam. The destination count rides inside the share
-            // cell for the same reason — one fewer boundary — and reads better next to the bar it
-            // qualifies anyway.
-            columns={[
-              { label: "Host" }, { label: "IP" }, { label: "Share of traffic" },
-              { label: "In", align: "right" }, { label: "Out", align: "right" },
-            ]}
-            tcols="1.5fr 1fr 1.6fr 0.8fr 0.8fr"
-            rows={talkers.map((t) => [
-              t.deviceId ? t.deviceName : `${t.deviceName} (unregistered)`,
-              t.ip ?? "—",
-              <span className="nw-share" key="share">
-                <span className="nw-bar" aria-label={`${formatBytes(t.total)} total`}>
-                  <span className="nw-bar__fill" style={{ width: `${Math.max(2, (t.total / peak) * 100)}%` }} />
-                </span>
-                <span className="nw-share__n">{t.destinations} dest{t.destinations === 1 ? "" : "s"}</span>
-              </span>,
-              formatBytes(t.bytesIn),
-              formatBytes(t.bytesOut),
-            ])}
-          />
-        )}
-      </Card>
+      {summary.failed > 0 ? (
+        <div className="nw-twocol">
+          <Card title="Failed sign-ins by account" hint="The people whose accounts were tried and failed most often in this window.">
+            {summary.failedByAccount.length === 0 ? (
+              <EmptyNote>None of the failures were for a person in this company.</EmptyNote>
+            ) : (
+              <HairlineTable
+                columns={[{ label: "Account" }, { label: "Failed", align: "right" }]}
+                tcols="2fr 0.6fr"
+                rows={[...summary.failedByAccount].sort((x, y) => y.count - x.count).map((r) => [r.email ?? r.userId, String(r.count)])}
+              />
+            )}
+          </Card>
+          <Card title="Failed sign-ins by address" hint="Where the failures came from. One address with many failures is worth blocking from Blocks.">
+            {summary.failedByIp.length === 0 ? (
+              <EmptyNote>No address was recorded for the failures.</EmptyNote>
+            ) : (
+              <HairlineTable
+                columns={[{ label: "Address" }, { label: "Failed", align: "right" }]}
+                tcols="2fr 0.6fr"
+                rows={[...summary.failedByIp].sort((x, y) => y.count - x.count).map((r) => [
+                  <span key="ip" className="nw-mono">{r.ip ?? "Unknown"}</span>, String(r.count),
+                ])}
+              />
+            )}
+          </Card>
+        </div>
+      ) : null}
 
       <div style={{ marginTop: 20 }}>
-        <Card title="Where traffic leaves to" hint="Destination country by total volume. This is the 'what goes out of our network' half of the question — the device registry cannot answer it, because knowing a device exists says nothing about who it talks to.">
-          {egress.length === 0 ? (
-            <EmptyNote>No egress recorded in this window.</EmptyNote>
+        <Card title="Sign-in events" hint="Newest first. Only people who belong to this company are listed.">
+          {events.length === 0 ? (
+            <EmptyNote>
+              No sign-ins, failures or sign-outs in this window ({WINDOW_LABEL[win].toLowerCase()}), as of {formatTimestamp(a.asOf)}. The sign-in service is recording events, so this is a real zero.
+            </EmptyNote>
           ) : (
-            <div className="nw-egress">
-              {egress.map((e) => (
-                <div className="nw-egress__row" key={e.country}>
-                  <span className="nw-egress__country">{e.country}</span>
-                  <span className="nw-egress__meta">
-                    {formatBytes(e.bytes)} · {e.devices} host{e.devices === 1 ? "" : "s"} · {e.sessions.toLocaleString()} sessions
-                  </span>
-                </div>
-              ))}
-            </div>
+            <>
+              <HairlineTable
+                columns={[{ label: "When" }, { label: "What" }, { label: "Account" }, { label: "Address" }, { label: "Detail" }]}
+                tcols="1.2fr 0.8fr 1.6fr 1fr 1.4fr"
+                rows={shown.map((e) => [
+                  formatTimestamp(e.at),
+                  <span key="t" className={`nw-chip nw-chip--${e.type}`}>{TYPE_LABEL[e.type]}</span>,
+                  e.email ?? "—",
+                  <span key="ip" className="nw-mono">{e.ip ?? "—"}</span>,
+                  e.error ? e.error.replaceAll("_", " ") : "",
+                ])}
+              />
+              {events.length > shown.length ? (
+                <p className="nw-more">Showing the newest {shown.length} of {events.length} events.</p>
+              ) : null}
+            </>
           )}
         </Card>
       </div>

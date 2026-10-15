@@ -33,7 +33,7 @@ const IT_TABS = [
   tab("workflows", "/it/workflows"), tab("accounts", "/it/accounts"),
 ];
 const NETWORK_TABS = [
-  tab("traffic", "/it/network"), tab("threats", "/it/network/threats"), tab("rules", "/it/network/rules"), tab("presence", "/it/network/presence"),
+  tab("connected", "/it/network/presence"), tab("sign-ins", "/it/network"), tab("alerts", "/it/network/threats"), tab("blocks", "/it/network/rules"),
 ];
 const ME_TABS = [
   tab("summary", "/me"), tab("leave", "/me/leave"), tab("loans", "/me/loans"), tab("pay", "/me/pay"),

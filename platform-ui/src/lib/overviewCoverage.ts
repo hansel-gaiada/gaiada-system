@@ -143,7 +143,7 @@ export const COVERAGE: readonly CoverageEntry[] = [
   // ── IT (`/it`) ─────────────────────────────────────────────────────────────────────────────────
   {
     page: "it", section: "kpis", label: "Devices, Online, Degraded, Offline, Open alerts", verdict: "stays",
-    by: "DW-7e-3: Pulse shows Devices offline only. Devices, Online and Degraded have no tile, Open alerts reads device events (warn and critical) that no tile counts, and threat alerts have no backend (7h). The card is one grid, so the counts stay.",
+    by: "DW-7e-3: Pulse shows Devices offline, and since DW-7h Threat alerts (the ERP's security alerts: high and medium, last 24 hours). Devices, Online and Degraded have no tile, and Open alerts reads device events (warn and critical), which the Threat alerts tile does not count. The card is one grid, so the counts stay.",
   },
   {
     page: "it", section: "device-events", label: "Recent device events", verdict: "stays",

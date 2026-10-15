@@ -21,6 +21,7 @@ import * as itAccounts from "@/lib/it-accounts";
 import * as hrData from "@/lib/hr-data";
 import * as hrFullData from "@/lib/hr-full-data";
 import * as itData from "@/lib/it-data";
+import * as itSecurity from "@/lib/itSecurity";
 import * as finData from "@/lib/finance-data";
 import type { MonitoringSummary } from "@/lib/monitoringShared";
 import type { SocialPost } from "@/lib/socialShared";
@@ -35,6 +36,7 @@ vi.mock("@/lib/it-accounts", async (orig) => ({ ...(await orig<typeof import("@/
 vi.mock("@/lib/hr-data", () => ({ listLeaveResult: vi.fn(), listCasesResult: vi.fn() }));
 vi.mock("@/lib/hr-full-data", () => ({ listPayrollRunsResult: vi.fn() }));
 vi.mock("@/lib/it-data", () => ({ listDevicesResult: vi.fn() }));
+vi.mock("@/lib/itSecurity", () => ({ listAlertsResult: vi.fn() }));
 vi.mock("@/lib/finance-data", () => ({
   listPendingPaymentsResult: vi.fn(), getArAgingResult: vi.fn(), listPeriodsResult: vi.fn(), getCloseReadinessResult: vi.fn(),
   verifyLedgerResult: vi.fn(), reconcileArResult: vi.fn(), reconcileApResult: vi.fn(), reconcileAssetsResult: vi.fn(),
@@ -51,6 +53,7 @@ const leave = vi.mocked(hrData.listLeaveResult);
 const hrCases = vi.mocked(hrData.listCasesResult);
 const payroll = vi.mocked(hrFullData.listPayrollRunsResult);
 const devices = vi.mocked(itData.listDevicesResult);
+const alerts = vi.mocked(itSecurity.listAlertsResult);
 const pendingPayments = vi.mocked(finData.listPendingPaymentsResult);
 const arAging = vi.mocked(finData.getArAgingResult);
 const periodsRead = vi.mocked(finData.listPeriodsResult);
@@ -81,12 +84,12 @@ const props = (pulse: readonly PulseTile[] | undefined, extra: Partial<OverviewW
 const tile = (name: string) => within(screen.getByRole("region", { name: "Pulse" })).getByText(name).closest("li")!;
 
 beforeEach(() => {
-  for (const m of [listRequests, listGates, summary, posts, accounts, leave, hrCases, payroll, devices, pendingPayments, arAging, periodsRead, closeRead, ...Object.values(integrityReads)]) m.mockReset();
+  for (const m of [listRequests, listGates, summary, posts, accounts, leave, hrCases, payroll, devices, alerts, pendingPayments, arAging, periodsRead, closeRead, ...Object.values(integrityReads)]) m.mockReset();
 });
 afterEach(() => vi.restoreAllMocks());
 
 describe("the registry's built tiles (DW-3e)", () => {
-  it("builds exactly Web Dev's three, Social Media's two, HR's four, Finance's four and IT's two, and no other", () => {
+  it("builds exactly Web Dev's three, Social Media's two, HR's four, Finance's four and IT's three, and no other", () => {
     const built: string[] = [];
     for (const w of [...WORKSPACES, GENERIC_WORKSPACE]) for (const t of w.pulse) if (!isPlanned(t)) built.push(`${w.key}/${t.key}`);
     expect(built.sort()).toEqual([
@@ -100,6 +103,7 @@ describe("the registry's built tiles (DW-3e)", () => {
       "hr/payroll-status",
       "it/account-requests",
       "it/devices-offline",
+      "it/threat-alerts",
       "social-media/failed-posts",
       "social-media/posts-scheduled",
       "web-dev/requests-waiting",
@@ -148,7 +152,7 @@ describe("the registry's built tiles (DW-3e)", () => {
   it("finds the built tiles of the workspace the subject belongs to, and none for Company, SEO, Creatives or a generic department", () => {
     expect(builtPulseTiles(webDev).map((t) => t.key)).toEqual(["requests-waiting", "sites-with-a-problem", "runs-waiting-approval"]);
     expect(tilesOf("social-media").map((t) => t.key)).toEqual(["posts-scheduled", "failed-posts"]);
-    expect(tilesOf("it").map((t) => t.key)).toEqual(["devices-offline", "account-requests"]);
+    expect(tilesOf("it").map((t) => t.key)).toEqual(["devices-offline", "threat-alerts", "account-requests"]);
     expect(tilesOf("hr").map((t) => t.key)).toEqual(["leave-pending", "onboarding", "open-cases", "payroll-status"]);
     expect(tilesOf("seo")).toEqual([]);
     expect(tilesOf("creatives")).toEqual([]);
@@ -410,6 +414,57 @@ describe("Pulse, HR and IT devices (the widget, DW-7e)", () => {
     const t = tile("Devices offline");
     expect(within(t).getByText("0")).toBeInTheDocument();
     expect(within(t).getByText("No devices registered yet")).toBeInTheDocument();
+  });
+});
+
+describe("Pulse, IT threat alerts (the widget, DW-7h)", () => {
+  const alert = (severity: string) => ({ kind: "new_device", severity, at: "2026-10-15T08:00:00Z", subject: {}, detail: "", count: 1 }) as never;
+  const answer = (signIns: "on" | "off" | "unavailable", list: string[]) => ({ asOf: "2026-10-15T09:00:00Z", window: "24h", signIns, alerts: list.map(alert) }) as never;
+  const readsOnly = () => {
+    devices.mockResolvedValue({ kind: "ok", data: [] });
+    accounts.mockResolvedValue({ kind: "ok", accounts: [] });
+  };
+
+  it("counts high plus medium alerts in the last 24 hours (not low), and links the Alerts tab", async () => {
+    readsOnly();
+    alerts.mockResolvedValue({ kind: "ok", data: answer("on", ["high", "high", "medium", "low", "low", "low"]) });
+    render(await Pulse(props(tilesOf("it"), { deptId: null })));
+    expect(alerts).toHaveBeenCalledWith("u-1", "co-a", "24h");
+    const t = tile("Threat alerts");
+    expect(within(t).getByText("3")).toBeInTheDocument();
+    expect(within(t).getByText("2 high, 1 medium")).toBeInTheDocument();
+    expect(within(t).getByRole("link")).toHaveAttribute("href", "/it/network/threats");
+  });
+
+  it("does not read 0 under sign-in rules that could not run as an all-clear", async () => {
+    readsOnly();
+    alerts.mockResolvedValue({ kind: "ok", data: answer("off", []) });
+    render(await Pulse(props(tilesOf("it"), { deptId: null })));
+    const t = tile("Threat alerts");
+    expect(within(t).getByText("0")).toBeInTheDocument();
+    expect(within(t).getByText("Failed sign-ins are not being read")).toBeInTheDocument();
+  });
+
+  it("a refused read is No access and a failed one is Unavailable, never 0", async () => {
+    readsOnly();
+    alerts.mockResolvedValue({ kind: "forbidden" });
+    const first = render(await Pulse(props(tilesOf("it"), { deptId: null })));
+    expect(within(tile("Threat alerts")).getByText("No access")).toBeInTheDocument();
+    first.unmount();
+
+    alerts.mockResolvedValue({ kind: "unavailable", reason: "500" });
+    render(await Pulse(props(tilesOf("it"), { deptId: null })));
+    const failed = tile("Threat alerts");
+    expect(within(failed).getByText("Unavailable")).toBeInTheDocument();
+    expect(within(failed).queryByText("0")).toBeNull();
+  });
+
+  it("a reader that throws is this tile's failure and does not blank the others", async () => {
+    readsOnly();
+    alerts.mockRejectedValue(new Error("socket hang up"));
+    render(await Pulse(props(tilesOf("it"), { deptId: null })));
+    expect(within(tile("Threat alerts")).getByText("Unavailable")).toBeInTheDocument();
+    expect(within(tile("Devices offline")).getByText("0")).toBeInTheDocument();
   });
 });
 

@@ -2,111 +2,133 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { getIsolations, describeExpiry } from "@/lib/network";
+import { canManageIT } from "@/components/shell/nav";
+import { listBlocksResult } from "@/lib/itSecurity";
+import { blockEndedAs, personOf, revocationOf } from "@/lib/itSecurityView";
+import { formatTimestamp } from "@/lib/format";
 import { Card, KpiTile, HairlineTable } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
-import { ProvenanceBanner, NotBuiltNote } from "@/components/it/NetworkBanners";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
+import { BlockAddressControl, LiftBlockControl } from "@/components/it/SecurityControls";
+import "@/components/it/network.css";
 
-export const metadata = { title: "Network isolation" };
+export const metadata = { title: "Blocks" };
 export const dynamic = "force-dynamic";
 
-export default async function NetworkRulesPage() {
+// DW-7h (BFF §52.5, §52.6): the addresses IT has blocked from this company's data, and the sessions it has ended. A block
+// refuses every request from that address to this company's pages for as long as it lasts (it never touches sign-in itself,
+// which is the sign-in service's), takes effect within about 10 seconds, and is lifted from here.
+//
+// The read is `it_account` `read`; Lift, the form and the per-row controls on Connected are `it_account` `disable`.
+export default async function NetworkBlocksPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
   if (!tenant) return <EmptyNote>Select a company from the top bar.</EmptyNote>;
+  if (!canManageIT(me, tenant)) {
+    return <ReadRefusal subject="address blocks for this company" kind="forbidden" detail="IT managers and company admins can see and change them." />;
+  }
 
-  const feed = await getIsolations(userId, tenant);
-  const active = feed.isolations.filter((i) => i.state === "active");
-  const pending = feed.isolations.filter((i) => i.state === "pending_approval");
-  const history = feed.isolations.filter((i) => i.state === "expired" || i.state === "reverted");
+  const result = await listBlocksResult(userId, tenant);
+  if (result.kind === "forbidden") return <ReadRefusal subject="address blocks for this company" kind="forbidden" />;
+  if (result.kind === "unavailable") {
+    return (
+      <ReadRefusal
+        subject="The list of blocks"
+        kind="unavailable"
+        reason={result.reason}
+        detail="An empty list would say no address is blocked; that cannot be said while the list is unreadable."
+      />
+    );
+  }
+
+  const { ipBlocks, revokedSessions } = result.data;
+  const active = ipBlocks.filter((b) => b.active);
+  const past = ipBlocks.filter((b) => !b.active);
+  const stopped = active.reduce((sum, b) => sum + b.hitCount, 0);
 
   return (
     <>
-      <ProvenanceBanner source={feed.source} />
-
-      {!feed.enforcementEnabled && (
-        <div className="nw-banner nw-banner--info" role="note">
-          <span className="nw-banner__label">Read-only</span>
-          <span className="nw-banner__text">
-            Enforcement is designed but not built, and the ERP currently has no write path to the
-            gateway. This page shows the shape of the control, not a live one.
-          </span>
-        </div>
-      )}
-
       <div className="nw-kpis">
-        <KpiTile
-          label="Active isolations"
-          value={String(active.length)}
-          foot="in force now"
-          hint="Hosts currently moved into the quarantine group. Every one has an expiry — an isolation that outlives its incident is an outage nobody remembers causing."
-        />
-        <KpiTile
-          label="Awaiting approval"
-          value={String(pending.length)}
-          foot="proposed, not applied"
-          hint="Proposing is not executing. These sit until an approver decides; approving is what executes them."
-        />
-        <KpiTile
-          label="History"
-          value={String(history.length)}
-          foot="expired or reverted"
-          hint="Isolations no longer in force. Kept so an incident can be reconstructed afterwards."
-        />
+        <KpiTile label="Blocked addresses" value={String(active.length)} foot="active now" />
+        <KpiTile label="Requests stopped" value={String(stopped)} foot="by the active blocks" hint="Requests turned away because they came from a blocked address. Counted at most once a minute per block." />
+        <KpiTile label="Sessions ended" value={String(revokedSessions.length)} foot="last 7 days" hint="Sign-outs and blocked logins by this company's IT in the last 7 days." />
       </div>
 
-      <Card title="Current state" hint="Everything the ERP believes is quarantined. UniFi remains the authority — this is a record of what we asked for and when it was applied, not a mirror the ERP reconciles.">
-        {feed.isolations.length === 0 ? (
-          <EmptyNote>No host has ever been isolated.</EmptyNote>
-        ) : (
-          <HairlineTable
-            columns={[
-              { label: "Host" }, { label: "IP" }, { label: "Reason" },
-              { label: "Requested by" }, { label: "Approved by" }, { label: "State" }, { label: "Expires" },
-            ]}
-            tcols="1fr 0.9fr 2fr 1fr 1fr 0.9fr 0.9fr"
-            rows={feed.isolations.map((i) => [
-              i.deviceName,
-              i.ip ?? "—",
-              i.reason,
-              i.requestedBy,
-              i.approvedBy ?? "—",
-              <span key="st" className={`nw-chip nw-chip--${i.state}`}>{i.state.replace("_", " ")}</span>,
-              // An applied isolation shows time remaining; an unapplied one has no clock to show,
-              // because the window only starts when the collector actually applies it.
-              i.appliedAt ? describeExpiry(i.expiresAt) : "not applied",
-            ])}
-          />
-        )}
+      <Card title="Block an address" hint="Everyone at that address is turned away from this company's pages until the block ends or you lift it. Private office addresses and your own are refused.">
+        <BlockAddressControl />
       </Card>
 
-      <div style={{ marginTop: 20, display: "grid", gap: 16 }}>
-        <NotBuiltNote title="How isolation will work">
-          A proposal names one host and a reason, and files an approval. <strong>Approving executes
-          it</strong> — there is no second confirm step, which is deliberate: a decision that does
-          nothing until someone presses another button is a decision nobody trusts. The approved
-          action is then picked up by the office collector on its next poll, so an isolation is
-          <strong> not instant</strong>; it lands within about a minute. The page will say so, because
-          an operator who believes a block already took effect will act on that during the one moment
-          it matters.
-        </NotBuiltNote>
+      <div style={{ marginTop: 20 }}>
+        <Card title="Blocked now">
+          {active.length === 0 ? (
+            <EmptyNote>No address is blocked right now.</EmptyNote>
+          ) : (
+            <HairlineTable
+              columns={[{ label: "Address" }, { label: "Reason" }, { label: "Until" }, { label: "Stopped" }, { label: "Actions" }]}
+              tcols="1fr 2fr 1.2fr 1fr 1.6fr"
+              rows={active.map((b) => [
+                <span key="ip" className="nw-mono">{b.ip}</span>,
+                <span key="r" className="nw-who">
+                  <span className="nw-who__name">{b.reason}</span>
+                  <span className="nw-who__sub">Blocked {formatTimestamp(b.createdAt)}{` by ${b.createdBy.displayName}`}</span>
+                </span>,
+                formatTimestamp(b.expiresAt),
+                b.hitCount === 0 ? "Nothing yet" : `${b.hitCount.toLocaleString("en")} request${b.hitCount === 1 ? "" : "s"}${b.lastHitAt ? `, last ${formatTimestamp(b.lastHitAt)}` : ""}`,
+                <LiftBlockControl key="a" blockId={b.id} ip={b.ip} />,
+              ])}
+            />
+          )}
+        </Card>
+      </div>
 
-        <NotBuiltNote title="What the ERP will never be able to do">
-          It can move a host into a pre-created quarantine group and nothing else — it cannot author,
-          reorder or delete firewall rules. A bug therefore costs one device its internet, never the
-          office its firewall. Four targets are refused server-side regardless of who asks: the
-          gateway, any adopted infrastructure device, the collector host, and <strong>the host the
-          approver is connected from</strong>. Without that last one, the first real incident response
-          ends with the responder locked out mid-response.
-        </NotBuiltNote>
+      <div style={{ marginTop: 20 }}>
+        <Card title="Earlier blocks" hint="Blocks that ended in the last 30 days, lifted or run out.">
+          {past.length === 0 ? (
+            <EmptyNote>No block has ended in the last 30 days.</EmptyNote>
+          ) : (
+            <HairlineTable
+              columns={[{ label: "Address" }, { label: "Reason" }, { label: "Ended" }, { label: "How" }, { label: "Stopped" }]}
+              tcols="1fr 2fr 1.2fr 0.8fr 1fr"
+              rows={past.map((b) => {
+                const how = blockEndedAs(b);
+                return [
+                  <span key="ip" className="nw-mono">{b.ip}</span>,
+                  b.reason,
+                  formatTimestamp(b.liftedAt ?? b.expiresAt),
+                  <span key="h" className={`nw-chip nw-chip--${how}`}>{how === "lifted" ? "Lifted" : "Ran out"}</span>,
+                  String(b.hitCount),
+                ];
+              })}
+            />
+          )}
+        </Card>
+      </div>
 
-        <NotBuiltNote title="Prerequisite">
-          Quarantine needs somewhere to put a host. The office currently runs one flat
-          10.10.0.0/22 for clients, so the VLAN work has to land before any of this can be switched
-          on.
-        </NotBuiltNote>
+      <div style={{ marginTop: 20 }}>
+        <Card title="Sessions ended recently" hint="Sign-outs from Connected and blocked logins from IT accounts, last 7 days.">
+          {revokedSessions.length === 0 ? (
+            <EmptyNote>IT has not ended any session in the last 7 days.</EmptyNote>
+          ) : (
+            <HairlineTable
+              columns={[{ label: "Person" }, { label: "What" }, { label: "When" }, { label: "Reason" }]}
+              tcols="1.4fr 1.8fr 1.2fr 1.6fr"
+              rows={[...revokedSessions].sort((a, b) => b.revokedAt.localeCompare(a.revokedAt)).map((r) => [
+                <span key={`p${r.id}`} className="nw-who">
+                  <span className="nw-who__name">{personOf(r.who)}</span>
+                  <span className="nw-who__sub">{r.who.email}</span>
+                </span>,
+                revocationOf(r),
+                <span key={`w${r.id}`} className="nw-who">
+                  <span className="nw-who__name">{formatTimestamp(r.revokedAt)}</span>
+                  {r.revokedBy ? <span className="nw-who__sub">by {r.revokedBy.displayName}</span> : null}
+                </span>,
+                r.reason ?? "—",
+              ])}
+            />
+          )}
+        </Card>
       </div>
     </>
   );

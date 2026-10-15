@@ -9,6 +9,7 @@ import { hrScopeCompanies } from "@/lib/hr";
 import { listLeaveResult, listCasesResult } from "@/lib/hr-data";
 import { listPayrollRunsResult } from "@/lib/hr-full-data";
 import { listDevicesResult } from "@/lib/it-data";
+import { listAlertsResult } from "@/lib/itSecurity";
 import {
   getArAgingResult, getCloseReadinessResult, getTrialBalanceResult, listPendingPaymentsResult, listPeriodsResult,
   reconcileApResult, reconcileArResult, reconcileAssetsResult, reconcileTreasuryResult, verifyLedgerResult,
@@ -17,7 +18,7 @@ import { todayIsoInDisplayZone } from "@/lib/format";
 import type { Me } from "@/lib/platform";
 import {
   NO_CURRENT_PERIOD, UNAVAILABLE_READING, currentPeriod, everyTileFailed, pulseHref, readingOfAccounts, readingOfAllResults, readingOfClose,
-  readingOfDevices, readingOfGuarded, readingOfIntegrity, readingOfOverdue, readingOfPayrollRuns, readingOfPendingPayments, readingOfResult,
+  readingOfAlerts, readingOfDevices, readingOfGuarded, readingOfIntegrity, readingOfOverdue, readingOfPayrollRuns, readingOfPendingPayments, readingOfResult,
   readingOfSummary, runsWaiting, type PulseReading, type PulseTileModel,
 } from "@/lib/overviewPulse";
 import { PulseBlock } from "./PulseBlock";
@@ -55,6 +56,8 @@ const READERS: Record<PulseSource, (userId: string, tenantId: string, me: Me) =>
     inHrScope(me, t) ? readingOfResult(await listCasesResult(u, t, { status: "open" }), (rows) => ({ value: rows.length })) : FORBIDDEN_READING,
   "hr-payroll-waiting": async (u, t) => readingOfPayrollRuns(await listPayrollRunsResult(u, t)),
   "it-devices-offline": async (u, t) => readingOfDevices(await listDevicesResult(u, t)),
+  // DW-7h: high plus medium alerts in the last 24 hours. The route is `it_account` `read`, so a viewer without it reads "No access".
+  "it-security-alerts": async (u, t) => readingOfAlerts(await listAlertsResult(u, t, "24h")),
   // Finance (DW-7e-2). Every route refuses outright (no own-rows fallback), so no scope check is needed here.
   "finance-payments-to-confirm": async (u, t) => readingOfPendingPayments(await listPendingPaymentsResult(u, t)),
   "finance-overdue-receivables": async (u, t) => readingOfOverdue(await getArAgingResult(u, t)),

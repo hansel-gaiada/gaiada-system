@@ -13,7 +13,7 @@ import { getActiveTenant } from "@/lib/tenant";
 import { canManageIT } from "@/components/shell/nav";
 
 export type ActionResult =
-  | { ok: true; message: string; password?: string; email?: string }
+  | { ok: true; message: string; password?: string; email?: string; sessionsEnded?: boolean }
   | { ok: false; error: string };
 
 /** The typed tokens P2-13 leads its `error` string with, mapped to something an operator can act on.
@@ -81,16 +81,26 @@ export async function disableAccount(formData: FormData): Promise<ActionResult> 
   const targetUserId = String(formData.get("userId") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
   try {
-    const res = await platformFetch<{ ok: true; alreadyDisabled: boolean }>(
+    // DW-7h (BFF §52.7): "Block login" also cuts the person's open sessions and asks the sign-in service to end its own.
+    // `sessionsEnded` says whether that worked; the page shows it, because "disabled" alone reads as "they are out".
+    const res = await platformFetch<{ ok: true; alreadyDisabled: boolean; sessionsEnded?: boolean }>(
       `/api/${g.tenant}/it/accounts/${targetUserId}/disable`,
       g.userId,
       { method: "POST", body: "{}" },
     );
     revalidatePath("/it/accounts");
-    return {
-      ok: true,
-      message: res.alreadyDisabled ? `${email} was already disabled — nothing changed.` : `${email} disabled.`,
-    };
+    if (res.alreadyDisabled) return { ok: true, message: `${email} was already disabled — nothing changed.` };
+    if (res.sessionsEnded === true) {
+      return { ok: true, message: `${email} disabled, and every session they had open was ended. They are signed out now.`, sessionsEnded: true };
+    }
+    if (res.sessionsEnded === false) {
+      return {
+        ok: true,
+        message: `${email} disabled, but the sign-in service did not confirm ending their open sessions. Check that they are signed out, and sign them out from Network > Connected if not.`,
+        sessionsEnded: false,
+      };
+    }
+    return { ok: true, message: `${email} disabled.` };
   } catch (err) {
     return { ok: false, error: humanize(err) };
   }

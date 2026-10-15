@@ -115,13 +115,13 @@ const WORKSPACES: readonly WorkspaceSpec[] = [
     ],
   },
   {
-    // IT. The network strip's pages are labelled fixtures in demo mode; only the routes are asserted.
+    // IT. The network strip's four security tabs (DW-7h) answer from demoFixtures in demo mode; only the routes are asserted here.
     path: "/it",
     title: "IT",
     rows: [
       PM,
       { row: "Devices" },
-      { row: "Network", tabs: ["Topology", "Traffic", "Threats", "Isolation", "Occupancy"], click: { tab: "Threats", url: /\/it\/network\/threats$/ } },
+      { row: "Network", tabs: ["Topology", "Connected", "Sign-ins", "Alerts", "Blocks"], click: { tab: "Alerts", url: /\/it\/network\/threats$/ } },
       { row: "IT accounts" },
       { row: "Workflows" },
       TOOLS,

@@ -1,22 +1,16 @@
-/* Network security console — traffic, threats, isolation rules, presence.
+/* IT > Network, the ERP side (DW-7h, BFF §52): Connected, Sign-ins, Alerts, Blocks.
    Same design rules as it.css / org.css / systems.css: radius 0, hairlines,
-   no shadow, opacity/tint hovers. Nothing here introduces a new visual idiom;
-   the section is a sibling of Topology, not a new product. */
+   no shadow, opacity/tint hovers. Nothing here introduces a new visual idiom. */
 
-/* ---- provenance + feed banners ----------------------------------------
-   Load-bearing, not decoration. Two failure modes these exist to prevent:
-   a FIXTURE feed reading as live (the "Bali Office" devices that sat in the
-   live tenant for months), and a DEAD collector reading as a quiet network.
-   Both render as silence unless something says otherwise, so something does. */
+/* ---- banners ----------------------------------------------------------
+   Load-bearing, not decoration: a state that is NOT "nothing happened" (sign-in events off,
+   a read that failed, a page that is only part of the picture) must read differently from a
+   quiet company, so it says so in a bar above the figures. */
 .nw-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; border: 0.5px solid var(--erp-hairline); margin-bottom: 18px; }
 .nw-banner__label { font: 700 10px var(--font-body); letter-spacing: 0.01em; }
 .nw-banner__text { font: 400 12px var(--font-body); color: var(--ink-muted); }
-.nw-banner--fixture { border-left: 2px solid var(--status-critical); background: var(--tint-hover); }
-.nw-banner--fixture .nw-banner__label { color: var(--status-critical-fg); }
-.nw-banner--stale { border-left: 2px solid var(--status-critical); }
-.nw-banner--stale .nw-banner__label { color: var(--status-critical-fg); }
-.nw-banner--ok { border-left: 2px solid var(--status-ok); }
-.nw-banner--ok .nw-banner__label { color: var(--erp-ink-60); }
+.nw-banner--warn { border-left: 2px solid var(--status-critical); }
+.nw-banner--warn .nw-banner__label { color: var(--status-critical-fg); }
 .nw-banner--info { border-left: 2px solid var(--erp-accent); }
 .nw-banner--info .nw-banner__label { color: var(--erp-accent); }
 
@@ -25,51 +19,53 @@
 
 /* ---- severity + state chips ---- */
 .nw-chip { font: 700 9px var(--font-body); letter-spacing: 0.01em; padding: 2px 6px; border: 0.5px solid var(--erp-hairline); color: var(--erp-ink-60); white-space: nowrap; }
-.nw-chip--critical { border-color: var(--status-critical); color: var(--status-critical-fg); }
-.nw-chip--high { border-color: var(--status-critical); color: var(--status-critical-fg); opacity: 0.8; }
+.nw-chip--high { border-color: var(--status-critical); color: var(--status-critical-fg); }
 .nw-chip--medium { border-color: var(--status-idle); color: var(--erp-ink-60); }
 .nw-chip--low { color: var(--erp-ink-50); }
-/* blocked vs detected is the IDS-vs-IPS distinction — the most consequential
-   word on the page, so it gets colour, not just text. */
-.nw-chip--blocked { border-color: var(--status-ok); color: var(--status-ok-fg); }
-.nw-chip--detected { border-color: var(--status-critical); color: var(--status-critical-fg); }
-.nw-chip--new { border-color: var(--erp-accent); color: var(--erp-accent); }
-.nw-chip--investigating { border-color: var(--status-idle); color: var(--erp-ink-60); }
-.nw-chip--resolved { color: var(--erp-ink-50); }
-.nw-chip--false_positive { color: var(--erp-ink-50); text-decoration: line-through; }
 .nw-chip--active { border-color: var(--status-critical); color: var(--status-critical-fg); }
-.nw-chip--pending_approval { border-color: var(--erp-accent); color: var(--erp-accent); }
-.nw-chip--expired, .nw-chip--reverted { color: var(--erp-ink-50); }
+.nw-chip--lifted, .nw-chip--expired { color: var(--erp-ink-50); }
+.nw-chip--failed { border-color: var(--status-critical); color: var(--status-critical-fg); }
+.nw-chip--sign_in { border-color: var(--status-ok); color: var(--status-ok-fg); }
+.nw-chip--sign_out { color: var(--erp-ink-50); }
 
-/* ---- direction arrow ---- */
-.nw-dir { font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); white-space: nowrap; }
-
-/* ---- volume bar (top talkers) ----
-   A bar rather than a sparkline: the comparison here is between ROWS, not over
-   time, and a length shared against one scale reads faster than 10 shapes. */
-.nw-share { display: flex; align-items: center; gap: 10px; }
-.nw-share__n { font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); white-space: nowrap; }
-.nw-bar { display: block; height: 4px; background: var(--erp-hairline); position: relative; min-width: 60px; flex: 1 1 auto; }
-.nw-bar__fill { position: absolute; inset: 0 auto 0 0; background: var(--erp-accent); }
-.nw-bar__fill--out { background: var(--status-critical); }
-
-/* ---- egress list ---- */
-.nw-egress { display: flex; flex-direction: column; gap: 0; }
-.nw-egress__row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; padding: 9px 0; border-top: 0.5px solid var(--erp-hairline-soft); }
-.nw-egress__row:first-child { border-top: 0; }
-.nw-egress__country { font: 400 13px var(--font-body); color: var(--text-primary); }
-.nw-egress__meta { font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
-
-/* ---- presence zones ---- */
-.nw-zones { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
-.nw-zone { border: 0.5px solid var(--erp-hairline); border-left-width: 2px; border-left-color: var(--status-ok); background: var(--surface-card-solid); padding: 14px; display: flex; flex-direction: column; gap: 6px; }
-.nw-zone--offline { border-left-color: var(--status-idle); opacity: 0.7; }
-.nw-zone__name { font: 400 13px var(--font-body); color: var(--text-primary); }
-.nw-zone__count { font: 400 30px var(--font-display, var(--font-body)); color: var(--text-primary); line-height: 1; }
-.nw-zone__meta { font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
-
-/* ---- disabled-action note ----
-   Phase 4 is not built. Rather than render a button that would 404, the page
-   states plainly what is missing and what it would do. */
+/* ---- a plain statement ----
+   Used where a state needs its own sentence (sign-in events off or unreadable): a dashed box, never an empty table. */
 .nw-note { border: 0.5px dashed var(--erp-hairline); padding: 12px 14px; font: 400 12px var(--font-body); color: var(--ink-muted); }
 .nw-note strong { color: var(--text-primary); font-weight: 700; }
+
+/* ---- window choice (links, so it works with no script and survives a reload) ---- */
+.nw-windows { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+.nw-windows__label { font: 400 12px var(--font-body); color: var(--erp-ink-50); margin-right: 4px; }
+.nw-windows__link { font: 400 12px var(--font-body); padding: 4px 10px; border: 0.5px solid var(--erp-hairline); color: var(--text-primary); text-decoration: none; }
+.nw-windows__link:hover { background: var(--tint-hover); }
+.nw-windows__link[aria-current="true"] { border-color: var(--erp-accent); color: var(--erp-accent); }
+
+/* ---- a person + a line under them ---- */
+.nw-who { display: grid; gap: 2px; }
+.nw-who__name { font: 400 13px var(--font-body); color: var(--text-primary); }
+.nw-who__sub { font: 400 11px var(--font-body); color: var(--erp-ink-50); overflow-wrap: anywhere; }
+.nw-mono { font: 400 12px var(--font-mono, monospace); }
+.nw-flag { font: 700 9px var(--font-body); letter-spacing: 0.01em; padding: 2px 6px; border: 0.5px solid var(--status-critical); color: var(--status-critical-fg); white-space: nowrap; }
+
+/* ---- alert rows ---- */
+.nw-rules { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.nw-rules__item { font: 400 12px var(--font-body); color: var(--ink-muted); }
+.nw-rules__item strong { color: var(--text-primary); font-weight: 700; }
+
+/* ---- per-row actions and the forms behind them ---- */
+.nw-action { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.nw-action__ask { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.nw-action__q { font: 400 12px var(--font-body); color: var(--text-primary); max-width: 38ch; }
+.nw-action__note { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+.nw-action__error { font: 400 12px var(--font-body); color: var(--status-critical-fg); }
+.nw-form { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.nw-form--inline { margin-top: 8px; }
+.nw-form__field { display: grid; gap: 4px; min-width: 150px; }
+.nw-form__field--wide { flex: 1 1 260px; }
+.nw-form__label { font: 400 12px var(--font-body); color: var(--text-primary); }
+.nw-form__buttons { display: inline-flex; gap: 8px; align-items: center; }
+.nw-form__confirm { flex: 1 1 100%; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 12px; border: 0.5px solid var(--status-critical); font: 400 12px var(--font-body); color: var(--text-primary); }
+
+/* ---- two cards side by side, one under the other on a narrow screen ---- */
+.nw-twocol { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-bottom: 4px; }
+.nw-more { font: 400 12px var(--font-body); color: var(--erp-ink-50); margin: 10px 0 0; }

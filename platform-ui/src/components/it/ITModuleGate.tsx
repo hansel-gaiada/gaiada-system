@@ -16,12 +16,19 @@ import { ModuleDisabled } from "@/components/ModuleDisabled";
 // exactly the restriction the backend was built to avoid — and it would have failed in the reassuring
 // direction: "IT module disabled" instead of "three leavers can still log in".
 //
+// DW-7h adds the second exemption: IT > Network (Connected, Sign-ins, Alerts, Blocks). `/api/:t/it/security/*` is not module-gated
+// either (BFF §52, migration 202610152130): who is signed in and which addresses are blocked are about the company's people and
+// its data, not about the IT module's device estate, and a company with the module off still needs to sign someone out.
+//
 // So the gate becomes per-tool rather than per-console. `usePathname` is the only thing a layout can
 // reasonably consult for this (a server layout is not handed its own route), and the check is a prefix
-// so `/it/accounts` and any future child of it stay exempt.
+// so `/it/accounts`, `/it/network` and any future child of them stay exempt.
+/** The tools whose routes work with the `it` module off. */
+const EXEMPT_PREFIXES = ["/it/accounts", "/it/network"];
+
 export function ITModuleGate({ moduleOn, children }: { moduleOn: boolean; children: React.ReactNode }) {
   const pathname = usePathname() ?? "";
-  const exempt = pathname.startsWith("/it/accounts");
+  const exempt = EXEMPT_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
   if (moduleOn || exempt) return <>{children}</>;
   return <ModuleDisabled module="it" label="IT" />;
 }

@@ -123,10 +123,10 @@ describe("Finance rows (DW-7b)", () => {
 });
 
 describe("IT rows (DW-7c)", () => {
-  it("gives a plain member the device and network rows (`device` read is open to members; the network has fixtures), and no accounts or workflows", () => {
+  it("gives a plain member the Devices row and Topology only (`device` read is open to members); the four security tabs read `it_account`, so no accounts, workflows or security", () => {
     const rows = itRows(plainMember);
     expect(rows.devices).toEqual(["Devices"]);
-    expect(rows.network).toEqual(["Topology", "Traffic", "Threats", "Isolation", "Occupancy"]);
+    expect(rows.network).toEqual(["Topology"]);
     expect(rows.accounts).toBeUndefined();
     expect(rows.workflows).toBeUndefined();
   });
@@ -136,6 +136,8 @@ describe("IT rows (DW-7c)", () => {
     expect(rows.devices).toEqual(["Devices"]);
     expect(rows.accounts).toEqual(["IT accounts"]);
     expect(rows.workflows).toEqual(["Workflows"]);
+    // DW-7h: Topology plus the four ERP-side security tabs, gated like IT accounts (BFF §52.10).
+    expect(rows.network).toEqual(["Topology", "Connected", "Sign-ins", "Alerts", "Blocks"]);
   });
 
   it("offers an HR or finance role neither accounts nor workflows", () => {
@@ -148,8 +150,10 @@ describe("IT rows (DW-7c)", () => {
 
   it("keeps the it module gate, except on IT accounts, which works with the module off (P2-14)", () => {
     const rows = itRows(moduleOff("it_admin"));
-    for (const key of ["devices", "network", "workflows"]) expect(rows[key], key).toBeUndefined();
+    for (const key of ["devices", "workflows"]) expect(rows[key], key).toBeUndefined();
     expect(rows.accounts).toEqual(["IT accounts"]);
+    // DW-7h: the security tabs are not module-gated (`/it/security/*` works with the module off); Topology is.
+    expect(rows.network).toEqual(["Connected", "Sign-ins", "Alerts", "Blocks"]);
   });
 });
 

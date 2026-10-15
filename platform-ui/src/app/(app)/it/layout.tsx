@@ -11,9 +11,9 @@ const TABS = [
   { key: "overview", label: "Overview", href: "/it", icon: "home" as const },
   { key: "devices", label: "Devices", href: "/it/devices", icon: "inventory" as const },
   { key: "topology", label: "Topology", href: "/it/topology", icon: "hub" as const },
-  // Sits next to Topology on purpose: that tab answers "what exists on the network", this one
-  // answers "what moves across it, and can we stop it". They read the same estate and are
-  // constantly confused for each other, so they are adjacent and named for their question.
+  // Sits next to Topology on purpose: that tab answers "what devices exist", this one answers "who is
+  // reaching the ERP, and can we stop it" (DW-7h: connected, sign-ins, alerts, blocks). Like Accounts it
+  // works with the `it` module off (ITModuleGate).
   { key: "network", label: "Network", href: "/it/network", icon: "gateway" as const },
   { key: "workflows", label: "Workflows", href: "/it/workflows", icon: "automation" as const },
   // P2-14. Last because it is the newest, not because it matters least — a leaver who can still log in

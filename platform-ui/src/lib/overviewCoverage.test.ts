@@ -158,9 +158,9 @@ describe("DW-7e-3: what the new Pulse tiles cover", () => {
 
   it("everything else the tiles touch stays: no tile shows the same information as a whole section", () => {
     // Every section below is something a tile only partly shows: HR's four counts (two have no tile), Finance's four totals
-    // (no tile shows one), the Integrity verdicts (the tile is the number of failures), IT's five counts (only Offline).
+    // (no tile shows one), the Integrity verdicts (the tile is the number of failures), IT's five counts (only Offline; the Threat alerts tile counts security alerts, not device events).
     expect(sources("hr")).toEqual(expect.arrayContaining(["hr-leave-pending", "hr-cases-open"]));
-    expect(sources("it")).toContain("it-devices-offline");
+    expect(sources("it")).toEqual(expect.arrayContaining(["it-devices-offline", "it-security-alerts"]));
     expect(sources("finance")).toContain("finance-integrity-findings");
     for (const [page, section] of [["hr", "kpis"], ["finance", "kpis"], ["finance", "integrity"], ["it", "kpis"]] as const) {
       const e = COVERAGE.find((x) => x.page === page && x.section === section)!;

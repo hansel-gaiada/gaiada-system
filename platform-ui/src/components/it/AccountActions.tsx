@@ -19,7 +19,7 @@ import { Button } from "@/components/ui";
 // questioned later and the reason is what answers it.
 
 type ActionResult =
-  | { ok: true; message: string; password?: string; email?: string }
+  | { ok: true; message: string; password?: string; email?: string; sessionsEnded?: boolean }
   | { ok: false; error: string };
 
 type Action = (formData: FormData) => Promise<ActionResult>;
@@ -40,12 +40,18 @@ export function AccountActions({ userId, email, state, provision, disable, enabl
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [password, setPassword] = useState<string | null>(null);
+  // DW-7h: what Disable answered about the person's sessions. Held until dismissed, for the same reason as the password: the row
+  // changes state on refresh and can leave this list, taking an inline note with it.
+  const [held, setHeld] = useState<{ message: string; ended: boolean } | null>(null);
   const [askReason, setAskReason] = useState(false);
   const [reason, setReason] = useState("");
+  // Which action produced the held password: only a reset is temporary (§52.8); a new account's keeps its own wording.
+  const [resetFor, setResetFor] = useState(false);
 
   const run = (action: Action, extra?: Record<string, string>) => {
     setError(null);
     setNote(null);
+    setResetFor(action === resetPassword);
     startTransition(async () => {
       const fd = new FormData();
       fd.set("userId", userId);
@@ -60,6 +66,8 @@ export function AccountActions({ userId, email, state, provision, disable, enabl
       if (res.password) {
         // Hold it. Do NOT refresh — see the header.
         setPassword(res.password);
+      } else if (res.sessionsEnded !== undefined) {
+        setHeld({ message: res.message, ended: res.sessionsEnded });
       } else {
         router.refresh();
       }
@@ -68,21 +76,47 @@ export function AccountActions({ userId, email, state, provision, disable, enabl
 
   const dismissPassword = () => {
     setPassword(null);
+    setResetFor(false);
     setNote(null);
     router.refresh();
   };
 
+  const dismissHeld = () => {
+    setHeld(null);
+    setNote(null);
+    router.refresh();
+  };
+
+  if (held) {
+    return (
+      <div className="acct-password" role="status" aria-label={`Sessions for ${email}`}>
+        <div className="acct-password__label">
+          <strong>{held.ended ? "Signed out everywhere" : "Check their sessions"}</strong>
+        </div>
+        <div className="acct-password__hint">{held.message}</div>
+        <Button size="sm" onClick={dismissHeld}>OK</Button>
+      </div>
+    );
+  }
+
   if (password) {
     return (
-      <div className="acct-password" role="group" aria-label={`Initial password for ${email}`}>
+      <div className="acct-password" role="group" aria-label={`${resetFor ? "Temporary" : "Initial"} password for ${email}`}>
         <div className="acct-password__label">
-          Initial password for <strong>{email}</strong> — <em>shown once, not stored anywhere</em>
+          {resetFor ? "Temporary" : "Initial"} password for <strong>{email}</strong> — <em>shown once, not stored anywhere</em>
         </div>
         <code className="acct-password__value">{password}</code>
         <div className="acct-password__hint">
           Give this to the person directly. It is not written to the audit trail and cannot be retrieved;
           if it is lost, reset the password again.
         </div>
+        {/* DW-7h (BFF §52.8): a reset password is TEMPORARY. Most staff addresses are aliases, so no reset email can reach the
+            person; IT hands this over and the person replaces it at their first sign-in. */}
+        {resetFor ? (
+          <div className="acct-password__hint">
+            They choose their own password at their first sign-in (accounts on an email alias get no reset email).
+          </div>
+        ) : null}
         <Button size="sm" onClick={dismissPassword}>I have shared it</Button>
       </div>
     );

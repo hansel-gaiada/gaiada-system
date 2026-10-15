@@ -7,6 +7,7 @@ import { summarize } from "./it-accounts";
 import type { MonitoringSummary } from "./monitoringShared";
 import type { PipelineGate } from "./pipeline";
 import type { Device } from "./it";
+import type { AlertsAnswer } from "./itSecurity";
 import type { PayrollRun } from "./hr-full";
 import { money } from "./finance";
 import type { ArAgingRow, CloseReadiness, FiscalPeriod } from "./finance";
@@ -154,6 +155,18 @@ export function readingOfDevices(r: ReadResult<Device[]>): PulseReading {
     value: devices.filter((d) => d.status === "offline").length,
     detail: devices.length === 0 ? "No devices registered yet" : `of ${devices.length} devices`,
   }));
+}
+
+/** IT's security alerts (DW-7h, BFF §52.6): `high` plus `medium` in the window. The two failed-sign-in rules need the sign-in record, so
+ *  when it is off or unreadable the count is only the rules that could run, and the tile says so rather than reading as a clean 0. */
+export function readingOfAlerts(r: ReadResult<AlertsAnswer>): PulseReading {
+  return readingOfResult(r, (a) => {
+    const high = a.alerts.filter((x) => x.severity === "high").length;
+    const medium = a.alerts.filter((x) => x.severity === "medium").length;
+    const parts = [high > 0 ? `${high} high` : "", medium > 0 ? `${medium} medium` : ""].filter(Boolean);
+    const detail = a.signIns !== "on" ? "Failed sign-ins are not being read" : parts.join(", ");
+    return { value: high + medium, ...(detail ? { detail } : {}) };
+  });
 }
 
 /** The Social reader's `Guarded` list: a 403 is `forbidden`; a failure threw before this was reached. */
