@@ -11,6 +11,14 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.169.0` - DW-8n: Me › Timesheet shows your own time (2026-10-15) - PROTOTYPED
+
+Plan §8 (Me is personal admin). Found by PV-7.
+- **The problem.** `/timesheets` is also Me › Timesheet, a personal tab, but it asked `GET /:t/time-entries` without `mine=me`, so it listed the whole company's entries.
+- **The fix.** The page now reads your own entries by default. People who read department-level reports (heads, managers, company admins) get a Mine | Everyone switch. A member asking for `?view=everyone` still gets their own.
+- **Not changed.** The server-side `time_entry` read is unchanged: it is tenant-wide for members and viewers. It is recorded on the board as a finding for the owner (DW-D19).
+- **Scope.** UI only; no backend change.
+
 ### platform-ui `0.168.0` - DW-7a/7b/7c + DW-7e-1: HR, Finance and IT rows gate on what their pages read, one strip for everyone; honest Pulse tiles for HR and IT (2026-10-15) - PROTOTYPED
 
 Plan §4.3 (7a-7c, "As built"). Pilot layout only; the classic shell is unchanged. No backend change.
