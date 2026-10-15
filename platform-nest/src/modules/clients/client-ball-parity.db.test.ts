@@ -27,6 +27,7 @@ import { createCompany, createUser, addMembership, createRole, grantRole, create
 import { newId, withTenants } from "../../db";
 import { createIssuedInvoice, ensureBillingSetup } from "../../seed/billing-setup";
 import { staffThreadHref } from "../../core/conversation-notify";
+import { loadClientBall, toHubItem } from "./client-ball";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -285,6 +286,46 @@ describe.skipIf(!TEST_URL)("PV7-02 · the hub overview's ball is pinned (needsUs
       for (const hidden of [f.payB, f.crDeleted, f.crB, f.kSentB, f.threadAnswered, f.threadB, f.gateInternal, f.gateDecided, f.gateB, f.reviewB]) {
         expect(ids, `${hidden} must not be in client A's ball`).not.toContain(hidden);
       }
+    });
+  });
+
+  // ── AFTER the refactor: the hub overview calls client-ball.ts for one client; the board calls it for many ──────────
+  describe("the set-based read (client-ball.ts)", () => {
+    const wire = (rows: ReturnType<typeof toHubItem>[]) => JSON.parse(JSON.stringify(rows)) as Item[];
+
+    it("one call for both clients gives each client exactly what the hub overview gives it", async () => {
+      const both = await withTenants([co], (c) => loadClientBall(c, [clientA, clientB]), SOCIAL);
+      for (const id of [clientA, clientB]) {
+        const o = await overview(id);
+        expect(wire(both.get(id)!.needsUs.map(toHubItem)), `needsUs for ${id}`).toEqual(o.needsUs);
+        expect(wire(both.get(id)!.needsClient.map(toHubItem)), `needsClient for ${id}`).toEqual(o.needsClient);
+      }
+    });
+
+    it("a client with nothing outstanding maps to two empty lists, and an id that was not asked for is absent", async () => {
+      const quiet = await createClient(co, "Ball Quiet Client");
+      const r = await withTenants([co], (c) => loadClientBall(c, [quiet]), SOCIAL);
+      expect(r.get(quiet)).toEqual({ needsUs: [], needsClient: [] });
+      expect(r.has(clientA)).toBe(false);
+      expect((await withTenants([co], (c) => loadClientBall(c, []), SOCIAL)).size).toBe(0);
+    });
+
+    it("each row names its client and its project, and the hub item drops both", async () => {
+      const r = await withTenants([co], (c) => loadClientBall(c, [clientA]), SOCIAL);
+      const thread = r.get(clientA)!.needsUs.find((i) => i.id === f.threadProject)!;
+      expect(thread.clientId).toBe(clientA);
+      expect(thread.projectId).toBe(projA);
+      expect(Object.keys(toHubItem(thread)).sort()).toEqual(["clientVisible", "context", "href", "id", "kind", "label", "since"]);
+      expect(r.get(clientA)!.needsUs.find((i) => i.id === f.payA1)!.projectId).toBeNull();
+    });
+
+    it("THE SOCIAL WALL: without { modules: [\"social\"] } the post reviews read ZERO rows and nothing raises", async () => {
+      // The trap the hub overview documents. The two review items vanish, every other kind is untouched.
+      const without = await withTenants([co], (c) => loadClientBall(c, [clientA]));
+      const kinds = [...without.get(clientA)!.needsUs, ...without.get(clientA)!.needsClient].filter((i) => i.kind === "review");
+      expect(kinds).toEqual([]);
+      const withScope = await withTenants([co], (c) => loadClientBall(c, [clientA]), SOCIAL);
+      expect([...withScope.get(clientA)!.needsUs, ...withScope.get(clientA)!.needsClient].filter((i) => i.kind === "review")).toHaveLength(2);
     });
   });
 });
