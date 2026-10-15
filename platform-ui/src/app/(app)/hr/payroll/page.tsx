@@ -7,6 +7,11 @@ import { can } from "@/lib/rbac";
 import { listPayrollRuns, listParameterSets, listSeparations, formatMoney } from "@/lib/hr-full";
 import { Card, KpiTile, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { PayrollRunActions } from "@/components/hr/PayrollRunActions";
+import { PayrollRunForm } from "@/components/hr/PayrollRunForm";
+import {
+  createPayrollRun, calculatePayrollRun, approvePayrollRun, publishPayrollRun, markPayrollRunPaid,
+} from "@/lib/hrPayrollActions";
 
 // HR › Payroll — runs, and the statutory gate that governs them (HR-FULL wave D).
 //
@@ -42,6 +47,12 @@ export default async function HrPayrollPage() {
   ]);
 
   const canApprove = can(me, "hr.payroll.approve", tenant);
+  // Cosmetic mirrors of the server: hr.payroll.manage creates and calculates, hr.payroll.approve
+  // approves, publishes and marks paid. Maker-checker and the high-assurance sign-in are NOT
+  // expressible here; the controls show and the server refuses in words.
+  const canManage = can(me, "hr.payroll.manage", tenant);
+  const runApi = { calculate: calculatePayrollRun, approve: approvePayrollRun, publish: publishPayrollRun, markPaid: markPayrollRunPaid };
+  const ratifiedSetIds = new Set(parameterSets.filter((s) => s.ratifiedAt).map((s) => s.id));
   const today = new Date().toISOString().slice(0, 10);
   const inForce = parameterSets.find(
     (s) => s.effectiveFrom <= today && (!s.effectiveTo || s.effectiveTo >= today),
@@ -110,6 +121,10 @@ export default async function HrPayrollPage() {
         />
       </div>
 
+      {canManage && (
+        <PayrollRunForm create={createPayrollRun} companyId={tenant} defaultCurrency={lastRun?.currency ?? "IDR"} />
+      )}
+
       <Card title="Payroll runs" style={{ marginBottom: 22 }}>
         {runs.length === 0 ? (
           <EmptyNote>
@@ -119,9 +134,11 @@ export default async function HrPayrollPage() {
           </EmptyNote>
         ) : (
           <HairlineTable
+            tcols="1.3fr 0.8fr 1.4fr 0.9fr 0.7fr 1fr 1.6fr 2.2fr"
             columns={[
               { label: "Reference" }, { label: "Kind" }, { label: "Period" }, { label: "Status" },
               { label: "Employees", align: "right" }, { label: "Net", align: "right" },
+              { label: "Timeline" }, { label: "Actions" },
             ]}
             rows={runs.map((r) => [
               <Link key={r.id} href={`/hr/payroll/${r.id}`} style={{ color: "var(--erp-accent)" }}>
@@ -144,6 +161,26 @@ export default async function HrPayrollPage() {
               // A draft run has no total. "—" is the honest render; 0 would look like a run that
               // computed nothing, which is a different and much worse thing.
               r.totalNet ? formatMoney(r.totalNet, r.currency) : "—",
+              // The payload carries no status history, only the three stamps the server sets. A step
+              // with no stamp has not happened; it is left out rather than shown as a blank.
+              <span key={`${r.id}-t`} style={{ font: "400 12px/1.5 var(--font-body)", color: "var(--erp-ink-60)" }}>
+                {[
+                  r.calculatedAt && `calculated ${r.calculatedAt.slice(0, 10)}`,
+                  r.approvedAt && `approved ${r.approvedAt.slice(0, 10)}`,
+                  r.paidAt && `paid ${r.paidAt.slice(0, 10)}`,
+                ].filter(Boolean).join(" · ") || "—"}
+              </span>,
+              <PayrollRunActions
+                key={`${r.id}-a`}
+                tenantId={tenant}
+                runId={r.id}
+                reference={r.reference}
+                status={r.status}
+                canManage={canManage}
+                canApprove={canApprove}
+                needsOverride={!(r.parameterSetId && ratifiedSetIds.has(r.parameterSetId))}
+                api={runApi}
+              />,
             ])}
           />
         )}
