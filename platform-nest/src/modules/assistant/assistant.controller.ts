@@ -669,7 +669,7 @@ export class AssistantController {
 
       const assembled = await withTenants(
         [tenantId],
-        (c) => assembleContext(c, id, thread, placeholder!.seq, { tenantId }),
+        (c) => assembleContext(c, id, thread, placeholder!.seq, { tenantId, principal: req.principal }),
         { modules: ["assistant"] },
       );
       prompt = assembled.prompt;
@@ -1402,7 +1402,7 @@ export class AssistantController {
     try {
       const assembled = await withTenants(
         [tenantId],
-        (c) => assembleContext(c, threadId, thread, turn.seq, { tenantId }),
+        (c) => assembleContext(c, threadId, thread, turn.seq, { tenantId, principal: req.principal }),
         { modules: ["assistant"] },
       );
       citations = assembled.citations;

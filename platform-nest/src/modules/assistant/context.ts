@@ -34,7 +34,9 @@
 // assistant would start treating unverified guesses as user facts).
 import type { PoolClient } from "pg";
 import { config } from "../../config";
-import { queryPropertyKnowledge, type KnowledgeHit } from "../search/knowledge-client";
+import { searchKnowledgeStrict, type KnowledgeHit, type KnowledgeStoreHit } from "../search/knowledge-client";
+import { collapseHits, filterReadableHits, searchTopK } from "../knowledge/search-filter";
+import { assemblePrincipal, type Principal } from "../../rbac/principal";
 
 /** The assistant's fixed system preamble. Deliberately generic in Phase 1 — no per-department
  *  persona (blueprint D-B: "one Hermes front door", personas deferred), no tool-capability list
@@ -171,20 +173,30 @@ async function summarizeExcerpt(excerpt: string, existingSummary: string | null,
 }
 
 // ── ASST-18: RAG retrieval + citations, fail-soft ──────────────────────────────────────────────────
-// One retrieval per generation, against the live pgvector tiers (WS8's knowledge service), scoped to
-// the thread OWNER's own authorized-tenant-set (the SAME `queryPropertyKnowledge` the search module
-// already uses — reused verbatim, not reimplemented: it self-links the owner's OBO envelope and
-// fails soft to `[]` on ANY error, so an unreachable/unconfigured knowledge service degrades this
-// turn's GROUNDING, never the turn itself). `aclScope: ""` matches erp-source.ts's own convention —
-// every internal-tier ERP document is ingested with an EMPTY acl (`acl = '{}'`), which the store
-// reads as "every member of this tenant"; `""` is the scope value that condition matches (D9.1:
-// `acl = '{}' OR $2 = ANY(acl)`), not a magic empty string.
+// One retrieval per generation, against the live pgvector tiers (WS8's knowledge service), as the
+// thread OWNER (`searchKnowledgeStrict` self-links the owner's OBO envelope, so the store's tenant
+// pre-filter is the owner's own authorized-tenant-set). `aclScope: ""` matches erp-source.ts's own
+// convention — every internal-tier ERP document is ingested with an EMPTY acl (`acl = '{}'`), which
+// the store reads as "every member of this tenant".
+//
+// ── DW-D26 (BFF §46.9): THE STORE'S RULE IS NOT THE ERP'S RULE ─────────────────────────────────────
+// "Every member of this tenant" is wider than the ERP's own reads (a meeting transcript, a file under
+// a contract, ...). So the store's candidates NEVER go to the prompt as they come: they are collapsed
+// to one per record and run through DW-8i's `filterReadableHits` for the thread OWNER's principal and
+// THIS thread's company, and only the internal-tier hits of that company that pass are cited. A hit
+// the owner cannot open is dropped silently, before the prompt is built, so it can be neither quoted
+// nor cited. Reports, people and org are withheld for everyone (§46.2). Any failure on this path (no
+// tenant, owner unresolvable, knowledge service down, Cerbos down) leaves the turn with NO knowledge:
+// grounding is additive, so it never fails the turn, and it NEVER falls back to the unfiltered chunks.
 export type ContextCitation = KnowledgeHit;
 
-/** A citation source, injectable for tests (default: the live `queryPropertyKnowledge`). Same shape
- *  `../search/knowledge-client.ts` already exports — kept as its own type alias here so this file's
- *  signatures don't have to spell out the import at every call site. */
-export type KnowledgeQueryFn = typeof queryPropertyKnowledge;
+/** The candidate source, injectable for tests (default: the live `searchKnowledgeStrict`). It returns the
+ *  store's hits WHOLE (tenant and tier included, which the filter keys on) and throws when the service
+ *  cannot answer. Its output is only ever a candidate list: see the DW-D26 note above. */
+export type KnowledgeQueryFn = (userId: string, query: string, topK: number) => Promise<KnowledgeStoreHit[]>;
+
+/** The per-record read filter, injectable for tests (default: DW-8i's `filterReadableHits`). */
+export type KnowledgeFilterFn = typeof filterReadableHits;
 
 export interface AssembledContext {
   /** The full prompt to send to `/complete(/stream)`. */
@@ -201,6 +213,30 @@ export interface AssembledContext {
   citations: ContextCitation[];
 }
 
+/** DW-D26. Ask the store for more candidates than will be kept (`searchTopK`, the §46.1 arithmetic), keep the
+ *  internal-tier hits of THIS company (one per record), pass them through the read filter as the thread OWNER, then cut to
+ *  `topK`. THROWS on any failure; the caller turns a throw into "no knowledge". With no company in scope nothing can be
+ *  checked, so nothing is returned. */
+async function retrieveReadableKnowledge(
+  ownerUserId: string,
+  tenantId: string | undefined,
+  query: string,
+  topK: number,
+  opts?: { queryKnowledge?: KnowledgeQueryFn; filterKnowledge?: KnowledgeFilterFn; principal?: Principal },
+): Promise<ContextCitation[]> {
+  if (!tenantId || !ownerUserId) return [];
+  const queryFn = opts?.queryKnowledge ?? searchKnowledgeStrict;
+  const filterFn = opts?.filterKnowledge ?? filterReadableHits;
+  const hits = await queryFn(ownerUserId, query, searchTopK(topK));
+  const candidates = collapseHits(hits, tenantId);
+  if (candidates.length === 0) return [];
+  const principal =
+    opts?.principal && opts.principal.userId === ownerUserId ? opts.principal : await assemblePrincipal(ownerUserId, "low");
+  if (!principal) return []; // an unresolvable owner can open nothing
+  const allowed = await filterFn(principal, tenantId, candidates);
+  return allowed.slice(0, topK).map((a) => ({ sourceRef: a.candidate.hit.sourceRef, text: a.candidate.hit.text, score: a.candidate.hit.score }));
+}
+
 /** Assemble the prompt for a new generation in `threadId`, folding older messages into the
  *  thread's rolling summary if the recent-messages window (everything with `seq < excludeFromSeq`,
  *  i.e. everything up to and including the just-sent user message) overflows `charBudget`.
@@ -215,8 +251,14 @@ export async function assembleContext(
   opts?: SummarizeOptions & {
     charBudget?: number;
     memoryCharBudget?: number;
-    /** ASST-18 test seam — default is the live `queryPropertyKnowledge`. */
+    /** ASST-18 test seam — default is the live `searchKnowledgeStrict`. */
     queryKnowledge?: KnowledgeQueryFn;
+    /** DW-D26 test seam — default is DW-8i's `filterReadableHits`. */
+    filterKnowledge?: KnowledgeFilterFn;
+    /** DW-D26 — the requester's own principal (the session's real assurance). Used for the read filter only
+     *  when it IS the thread owner; otherwise (or when absent) the owner's principal is assembled at `low`
+     *  assurance, which can only narrow. */
+    principal?: Principal;
     /** ASST-18 — how many chunks to ask for. Default `config.assistant.knowledgeTopK`; `0` (or a
      *  negative override) skips retrieval entirely rather than asking for none. */
     knowledgeTopK?: number;
@@ -261,15 +303,14 @@ export async function assembleContext(
   // ASST-18: retrieve against the LATEST user message in `kept` — the one this generation is
   // actually replying to. Never against `excerpt`/the folded prefix: what was just asked is the
   // right retrieval query, not the running summary of everything asked before it.
-  const queryFn = opts?.queryKnowledge ?? queryPropertyKnowledge;
   const knowledgeTopK = opts?.knowledgeTopK ?? config.assistant.knowledgeTopK;
   let citations: ContextCitation[] = [];
   const lastUserMessage = [...kept].reverse().find((m) => m.role === "user" && m.content);
   if (lastUserMessage?.content && knowledgeTopK > 0) {
     try {
-      citations = await queryFn(thread.ownerUserId, "", lastUserMessage.content, knowledgeTopK);
+      citations = await retrieveReadableKnowledge(thread.ownerUserId, opts?.tenantId, lastUserMessage.content, knowledgeTopK, opts);
     } catch {
-      citations = []; // grounding is additive — see this section's header; never fails the turn.
+      citations = []; // grounding is additive — see this section's header; never fails the turn, never unfiltered.
     }
   }
 
