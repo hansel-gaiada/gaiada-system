@@ -767,6 +767,14 @@ where a ticket says the classic shell changes too.
   - 7f-4 review cycles and their participants;
   - 7f-5 policies: leave policies and their assignments, holiday calendars, pay grades, statutory parameters
     and their ratification (all on HR › Settings).
+  - As built (2026-10-15):
+    - 7f-1 and 7f-2 are live in 412.
+    - 7f-3 is on `/hr/compensation`. It covers setting compensation (effective-dated), allowance types and
+      benefit plans, and per employee an allowance, a benefit enrolment and the tax profile. BFF §51 adds the
+      reads of what an employee has on file. A benefit is in force only when it is active and in date.
+    - 7f-4 is on `/hr/reviews` and `/hr/reviews/[cycleId]`.
+    - 7f-5 is the HR › Settings tabs, with Ratify on `/hr/settings/statutory/[setId]`.
+    - No migration and no Cerbos change.
 - **7g · Finance.**
   - 7g-1 VAT return preparation. The backend exists (`GET/POST finance/tax/returns`, `…/file`, `…/drift`);
     the UI has no client for it. Tax gains a Returns section: prepare a period's return, review it, record the
@@ -787,8 +795,69 @@ where a ticket says the classic shell changes too.
     Archive or Restore behind a "Show archived" switch. Archive is refused for a balance, an active child, a control account,
     or an account a posting rule, tax code, asset class, loan or the billing profile still names (the 409 lists them). The DB
     and HTTP suite `finance-accounts.test.ts` is written for the Linux gate and has not run yet (BFF §49 as built).
-- **7h · IT isolation rules and threat response.** Designed, not built: `lib/network.ts` documents the routes and
-  the isolate write (a D14 approval), but no backend serves them and the pages read fixtures. Later.
+- **7h · IT isolation rules and threat response.** PLANNED (2026-10-15). It is blocked on the owner, not on code.
+  - *Today:*
+    - The Network pages (Topology, Traffic, Threats, Isolation, Occupancy) read labelled fixtures.
+    - `lib/network.ts` documents five routes and the isolate write (a D14 approval); no backend serves them.
+    - Device discovery has an ingest route (`POST it/discovery/report`), but nothing feeds it.
+    - The design is `docs/superpowers/specs/2026-08-25-network-security-console-design.md`.
+  - *Why the ERP cannot do it alone:* the ERP server cannot reach the office network (`10.10.0.0/22` is behind
+    NAT; checked in the design, §1). Every reading has to be pushed from a collector inside the office
+    (`it-site-collector`, not written yet).
+  - *Needs from the owner, in this order:*
+    1. A read-only UniFi API key for the office gateway (design B1, O1). It is stored as a secret, never in the
+       ERP database. The 7i network-controller connection uses the same key.
+    2. An always-on office host to run the collector (B2, O2). A workstation that sleeps makes the readings flap.
+    3. From the UniFi console: is Threat Management blocking (IPS) or only detecting (IDS) (O7)? This decides
+       whether the Threats page may say "blocked".
+    4. Confirm the gateway before it is trusted as the boundary: it is named "ENZO Villa" and reports state
+       "setup" (O8).
+    5. Before isolation, network work rather than ERP code: split managed devices from personal ones and add a
+       quarantine segment (O4). Isolation needs a place to move a device to.
+  - *Then, one ticket each:*
+    - 7h-1, the collector. Sites, devices and clients go to the existing discovery ingest. The topology goes live
+      and the seeded fixture devices are purged (discovery design §12).
+    - 7h-2, threats, read only:
+      - the collector's threat feed;
+      - tables and retention;
+      - `GET it/network/threats` and `network.threat.*` events;
+      - the Threat alerts tile on IT's Pulse;
+      - IT's "Open threat alerts" KPI reads it instead of the DW-D30 proxy.
+    - 7h-3, isolation (after item 5):
+      - `POST it/network/isolate` files a D14 approval, and approving executes it;
+      - a server-side deny-list keeps the gateway, the infrastructure, the collector host and the approver's own
+        device from being isolated;
+      - automatic expiry and a kill switch;
+      - `/it/network/rules` shows what is isolated, who approved it and when it ends.
+- **7i · Connections with nothing to connect yet.** PLANNED (2026-10-15). There are four items. Only one needs a
+  ruling and no credential.
+  - *7i-1, the Failing workflows tile (IT's Pulse).*
+    - A read exists: `GET /api/admin/automation/executions`, for IT or a platform operator.
+    - It cannot feed a tile as it is, for three reasons:
+      - it answers `[]` when n8n is not configured or cannot be reached, so a failure reads as "no failures";
+      - it is the last N runs, not a time window;
+      - it has no company, because one n8n serves every company and its workflows carry no company.
+    - *Needs from the owner:* a ruling on which companies' IT workspace may count failures from the shared n8n.
+      No credential is needed, because the n8n key is already configured.
+    - *Then:* the read reports a failure as a failure (503, never `[]`); the tile counts failed runs in the last
+      24 hours on a `readResult` reader.
+  - *7i-2, bank feeds (Finance).*
+    - F6 built the statement tables (`finance_bank_statements`, `_transactions`, `_matches`) and the automatch
+      and reconcile functions.
+    - No route imports a statement, and nothing connects to a bank.
+    - *Needs from the owner:*
+      - which banks and accounts, per company;
+      - the route: the bank's own corporate API, an aggregator, or a statement file upload first;
+      - for an API or an aggregator, the credentials, held per company as secrets.
+    - *Then:* a statement import route on the F6 tables, then the connection.
+    - A file upload needs no credential and can be built first if the owner chooses it.
+  - *7i-3, the network controller (IT).* Lands with 7h-1, because it uses the same UniFi key.
+  - *7i-4, Google Workspace admin (IT).*
+    - *Needs from the owner:* a Workspace super-admin grants a read-only service account. It uses domain-wide
+      delegation for the Admin SDK's directory user and device read scopes.
+    - *Also needs a ruling:* one connection for the group, or one per company's domain.
+    - *Then:* IT's accounts and devices can be checked against Workspace. That includes the leavers' logins
+      that the DW-D30 proxy approximates today.
 - **7j · Department KPI readers (DW-D25, owner 2026-10-14).** DW-4e left the functional departments' and the
   GM's 12 KPIs reading "unavailable (no reader)": GM 2, HR 4, Finance 3, IT 3. Contract first in BFF §40.6, on
   the seam DW-6 and DW-4 agreed in §40.5.1; one reader per ticket, each plugging into the §40 catalogue

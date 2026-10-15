@@ -207,7 +207,7 @@ function launchersOf(slug: string): readonly DeptLauncher[] {
 const CLAUDE: DeptLauncher = { key: "claude", label: "Claude", desc: "Chat, reason, and draft with Claude.", url: "https://claude.ai/new", glyph: "✳", icon: "claude" };
 const DRIVE: DeptLauncher = { key: "drive", label: "Shared Drive", desc: "The department's shared files.", url: "https://drive.google.com", glyph: "▲" };
 
-// Connections (§4.1). Figma is DW-6k (DW-Q6); bank feeds and the IT admin consoles are not built.
+// Connections (§4.1). Figma is DW-6k (DW-Q6); bank feeds and the IT admin consoles are not built (DW-7i, plan §4.3).
 const CONN = {
   github: { key: "github", label: "GitHub" },
   figma: { key: "figma", label: "Figma" },
@@ -215,9 +215,9 @@ const CONN = {
   claudeSeats: { key: "claude-seats", label: "Claude seats" },
   googleAccounts: { key: "google-accounts", label: "Google accounts (Search Console, GA4, Ads)" },
   socialAccounts: { key: "social-accounts", label: "Social accounts" },
-  bankFeeds: { key: "bank-feeds", label: "Bank feeds", ticket: "DW-7e" },
-  networkController: { key: "network-controller", label: "Network controller", ticket: "DW-7e" },
-  workspaceAdmin: { key: "workspace-admin", label: "Google Workspace admin", ticket: "DW-7e" },
+  bankFeeds: { key: "bank-feeds", label: "Bank feeds", ticket: "DW-7i" },
+  networkController: { key: "network-controller", label: "Network controller", ticket: "DW-7i" },
+  workspaceAdmin: { key: "workspace-admin", label: "Google Workspace admin", ticket: "DW-7i" },
 } satisfies Record<string, ConnectionKind>;
 
 // ── The Overview (plan §3) ────────────────────────────────────────────────────────────────────────
@@ -779,7 +779,7 @@ const FINANCE: Workspace = {
   // Revenue, AR and cash (DW-7b-2): the page's first read is the profit and loss (`finance_statement` read), so the tab takes
   // the same gate as the statements. Its Receivables and Cash sections read for themselves and say so when refused.
   analytics: [{ key: "money", label: "Revenue, AR and cash", href: "/finance/analytics", icon: "pulse", gate: FIN_STATEMENT }],
-  // A bank portal is per company, so it is configured with the company (DW-7e), never written here.
+  // A bank portal is per company, so it is configured with the company (DW-7i), never written here.
   tools: [DRIVE, CLAUDE],
   connections: [CONN.bankFeeds, CONN.drive, CONN.claudeSeats],
   overview: DEPARTMENT_OVERVIEW,
