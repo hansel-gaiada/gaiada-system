@@ -10,7 +10,7 @@ import "server-only";
 import { platformFetch } from "./platform";
 import { readResult, type ReadResult } from "./readResult";
 import type {
-  ArAgingRow, CloseReadiness, FiscalPeriod, LedgerVerdict, Problem, ReconcileVerdict, ArPosition, ApPosition, TrialBalance,
+  ArAgingRow, CloseReadiness, FiscalPeriod, LedgerVerdict, Problem, ReconcileVerdict, ArPosition, ApPosition, StatementRow, TrialBalance,
 } from "./finance";
 import type { InvoicePayment } from "./contracts";
 
@@ -49,3 +49,8 @@ export const reconcileTreasuryResult = (u: string, t: string): Promise<ReadResul
   readResult(platformFetch<Verdict>(`/api/${t}/finance/treasury/reconcile`, u));
 export const getTrialBalanceResult = (u: string, t: string): Promise<ReadResult<TrialBalance>> =>
   readResult(platformFetch<TrialBalance>(`/api/${t}/finance/trial-balance`, u));
+
+/** DW-7b-2: one window of the profit and loss, for the analytics page's revenue by month. `from` and `to` are required by the route
+ *  and inclusive. The totals come back as `section: "total"` rows (`gmMoney.summarizePnl`). Authorized as `finance_statement` read. */
+export const getProfitAndLossResult = (u: string, t: string, from: string, to: string): Promise<ReadResult<StatementRow[]>> =>
+  readResult(platformFetch<StatementRow[]>(`/api/${t}/finance/profit-and-loss?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, u));

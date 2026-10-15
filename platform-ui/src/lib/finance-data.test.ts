@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
-  getArAgingResult, getCloseReadinessResult, getTrialBalanceResult, listPendingPaymentsResult, listPeriodsResult,
+  getArAgingResult, getCloseReadinessResult, getProfitAndLossResult, getTrialBalanceResult, listPendingPaymentsResult, listPeriodsResult,
   reconcileApResult, reconcileArResult, reconcileAssetsResult, reconcileTreasuryResult, verifyLedgerResult,
 } from "./finance-data";
 
@@ -26,6 +26,8 @@ const READERS: Array<[string, (u: string, t: string) => Promise<unknown>, string
   ["reconcileAssetsResult", reconcileAssetsResult, "/api/co-a/finance/assets/reconcile"],
   ["reconcileTreasuryResult", reconcileTreasuryResult, "/api/co-a/finance/treasury/reconcile"],
   ["getTrialBalanceResult", getTrialBalanceResult, "/api/co-a/finance/trial-balance"],
+  // DW-7b-2: one month of the profit and loss, both bounds required and sent.
+  ["getProfitAndLossResult", (u, t) => getProfitAndLossResult(u, t, "2026-10-01", "2026-10-15"), "/api/co-a/finance/profit-and-loss?from=2026-10-01&to=2026-10-15"],
 ];
 
 describe.each(READERS)("%s", (_name, read, path) => {

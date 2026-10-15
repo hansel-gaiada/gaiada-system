@@ -290,8 +290,8 @@ describe("department analytics (DW-4c)", () => {
     // Web Dev's site health is Run › Portfolio and Monitoring; SEO's rankings trend is Optimize › Rankings.
     expect(workspaceBySlug("web-dev")!.analytics.map((t) => t.key)).toEqual(["website"]);
     expect(workspaceBySlug("seo")!.analytics.map((t) => t.key)).toEqual(["gsc-ga4"]);
-    // Finance has no money-analytics page yet: it stays planned, built with the Finance workspace.
-    expect(workspaceBySlug("finance")!.analytics.map((t) => [t.key, t.ticket])).toEqual([["money", "DW-7b"]]);
+    // Finance's money analytics (DW-7b-2) is built: no ticket, and gated like the statements, the page's first read.
+    expect(workspaceBySlug("finance")!.analytics.map((t) => [t.key, t.ticket, t.gate])).toEqual([["money", undefined, { kind: "cap", cap: "finance.statement.view" }]]);
   });
 });
 

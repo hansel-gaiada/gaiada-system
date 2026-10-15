@@ -10,8 +10,8 @@ import { tenantCookie } from "./appCookies";
 // platform_admin) holds every capability, so every capability-gated row and tab shows.
 //
 // The expected labels are copied from the registry (`lib/workspaces.ts`: HR, FINANCE, IT), in order, WITHOUT anything
-// that carries a `ticket` (the shell does not draw those: Finance's "Revenue, AR and cash" analytics tab, and the Pulse
-// tiles). Every list is matched as an ORDERED SUBSEQUENCE, never as equality, so a row or tab added later (DW-7e..7k)
+// that carries a `ticket` (the shell does not draw those: the Pulse tiles; Finance's "Revenue, AR and cash" analytics tab was
+// ticketed until DW-7b-2 and is now a built, gated tab). Every list is matched as an ORDERED SUBSEQUENCE, never as equality, so a row or tab added later (DW-7e..7k)
 // does not break this file, and nothing here asserts that a ticketed item is absent.
 
 async function hydrated(loc: Locator) {
@@ -100,7 +100,7 @@ const WORKSPACES: readonly WorkspaceSpec[] = [
     ],
   },
   {
-    // FINANCE. The money analytics tab is ticketed (DW-7b), so it is not listed; Financial statements is in Reports, below.
+    // FINANCE. The money analytics tab (DW-7b-2) sits in the Analytics row, not walked here; Financial statements is in Reports, below.
     path: "/finance",
     title: "Finance",
     rows: [
@@ -188,6 +188,25 @@ test.describe("HR, Finance and IT workspaces (superadmin, pilot shell)", () => {
     await expect(statements).toHaveAttribute("aria-current", "page");
     await expect(performanceGroup(menu(page, "Finance")).getByRole("link", { name: "Reports", exact: true })).toHaveAttribute("aria-current", "page");
     await expectNoConsoleStrip(page, "Finance › Reports");
+  });
+
+  test("Finance's Analytics row includes Revenue, AR and cash, and its page opens (DW-7b-2)", async ({ page, context }) => {
+    await signIn(page, context, "superadmin");
+    await page.goto("/finance");
+    const analytics = performanceGroup(menu(page, "Finance")).getByRole("link", { name: "Analytics", exact: true });
+    await hydrated(analytics);
+    await analytics.click();
+    const tabStrip = strip(page, "Analytics");
+    await expect(tabStrip).toBeVisible();
+    await expectSubsequence(tabStrip.getByRole("link"), ["Revenue, AR and cash"]);
+
+    const money = tabStrip.getByRole("link", { name: "Revenue, AR and cash", exact: true });
+    await hydrated(money);
+    await money.click();
+    await expect(page).toHaveURL(/\/finance\/analytics$/);
+    await expect(money).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("heading", { level: 1, name: "Revenue, AR and cash" })).toBeVisible();
+    await expectNoConsoleStrip(page, "Finance › Analytics");
   });
 
   test("HR's Analytics row includes People analytics (the old Analytics tab, DW-7a)", async ({ page, context }) => {

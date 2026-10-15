@@ -91,6 +91,8 @@ describe("Finance rows (DW-7b)", () => {
     expect(rows.receivables).toBeUndefined();
     expect(rows.close).not.toContain("Consolidation");
     expect(rows.reports).not.toContain("Financial statements");
+    // DW-7b-2: Revenue, AR and cash opens with the profit and loss, so it takes the statements' gate.
+    expect(rows.analytics).not.toContain("Revenue, AR and cash");
   });
 
   it("gives finance_staff and finance_manager the receivables, the consolidation and the financial statements, but not Invoices", () => {
@@ -99,6 +101,7 @@ describe("Finance rows (DW-7b)", () => {
       expect(rows.receivables, r).toEqual(["Receivables"]);
       expect(rows.close, r).toEqual(["Period close", "Consolidation", "Ownership", "Cutover", "Settings", "Billing profile"]);
       expect(rows.reports, r).toContain("Financial statements");
+      expect(rows.analytics, r).toContain("Revenue, AR and cash");
     }
   });
 
@@ -107,10 +110,7 @@ describe("Finance rows (DW-7b)", () => {
     expect(rows.receivables).toEqual(["Receivables", "Invoices"]);
     expect(rows.close).toContain("Consolidation");
     expect(rows.reports).toContain("Financial statements");
-  });
-
-  it("does not draw the ticketed money analytics tab", () => {
-    expect(finance(as("company_admin")).analytics).not.toContain("Revenue, AR and cash");
+    expect(rows.analytics).toContain("Revenue, AR and cash");
   });
 
   it("offers an HR or IT role nothing the finance reads would refuse", () => {

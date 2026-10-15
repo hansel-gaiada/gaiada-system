@@ -776,9 +776,9 @@ const FINANCE: Workspace = {
   ],
   // Finance's own Reports tab (the financial statements) joins the Reports row (§4).
   reports: [{ key: "statements", label: "Financial statements", href: "/finance/reports", icon: "chart", gate: FIN_STATEMENT }],
-  // No money-analytics page exists yet (Receivables and Treasury are Work tabs); it is built with the
-  // Finance workspace (DW-7b) and stays planned until then (DW-4c).
-  analytics: [{ key: "money", label: "Revenue, AR and cash", href: "/finance/analytics", icon: "pulse", ticket: "DW-7b" }],
+  // Revenue, AR and cash (DW-7b-2): the page's first read is the profit and loss (`finance_statement` read), so the tab takes
+  // the same gate as the statements. Its Receivables and Cash sections read for themselves and say so when refused.
+  analytics: [{ key: "money", label: "Revenue, AR and cash", href: "/finance/analytics", icon: "pulse", gate: FIN_STATEMENT }],
   // A bank portal is per company, so it is configured with the company (DW-7e), never written here.
   tools: [DRIVE, CLAUDE],
   connections: [CONN.bankFeeds, CONN.drive, CONN.claudeSeats],

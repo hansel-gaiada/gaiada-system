@@ -852,7 +852,7 @@ then adds its own existing analytics pages, gathered here in one place:
 | SEO | Search Console & GA4 (the rankings trend is on Optimize › Rankings, one page in one row, DW-4c) |
 | Social Media | Reach and engagement |
 | HR | People analytics |
-| Finance | Revenue, AR and cash (no page yet; built with the Finance workspace, DW-7b) |
+| Finance | Revenue, AR and cash (`/finance/analytics`, DW-7b-2: revenue by month from the P&L, the receivables aging, and the ledger's cash and bank balances; gated on `finance.statement.view`) |
 
 ### 5.3 Appraisals
 
