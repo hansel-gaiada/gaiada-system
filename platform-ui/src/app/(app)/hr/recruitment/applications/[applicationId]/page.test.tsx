@@ -17,7 +17,9 @@ vi.mock("@/lib/platform", () => ({ getMe: vi.fn(async () => me) }));
 vi.mock("@/lib/tenant", () => ({ getActiveTenant: vi.fn(async () => "co-a") }));
 vi.mock("@/lib/hrRecruitmentActions", () => ({
   moveApplicationStage: vi.fn(), scheduleInterview: vi.fn(), updateInterview: vi.fn(),
+  fileScorecard: vi.fn(), createOffer: vi.fn(), setOfferStatus: vi.fn(), convertOffer: vi.fn(),
 }));
+vi.mock("@/lib/hr-full", () => ({ formatMoney: (v: string, c: string) => `${c} ${v}` }));
 
 type Read = { kind: "ok"; data: unknown } | { kind: "forbidden" } | { kind: "unavailable"; reason: string };
 let appRead: Read; let stagesRead: Read; let employeesRead: Read;
@@ -132,5 +134,103 @@ describe("/hr/recruitment/applications/[applicationId] — controls", () => {
     await renderPage();
     expect(screen.getByText("employees down")).toBeInTheDocument();
     expect(screen.getByText(/a colleague \(interviewer, pending\)/)).toBeInTheDocument();
+  });
+});
+
+const offer = (over: Record<string, unknown> = {}) => ({
+  id: "of-1", baseAmount: "11000000", currency: "IDR", rateBasis: "monthly", employmentType: "permanent",
+  startOn: "2026-12-01T00:00:00.000Z", expiresOn: null, status: "sent", employeeId: null, ...over,
+});
+const scorecard = (over: Record<string, unknown> = {}) => ({
+  id: "sc-1", interviewId: "iv-1", reviewerUserId: "u-pan", scores: [], overall: "4.50", recommendation: "strong_yes", notes: "Sharp.", submittedAt: "2026-10-20T05:00:00Z", ...over,
+});
+
+describe("/hr/recruitment/applications/[applicationId] — scorecards", () => {
+  it("lists each scorecard with the reviewer by name, the interview, the score and the recommendation", async () => {
+    as("hr_manager");
+    appRead = { kind: "ok", data: detail({ scorecards: [scorecard()] }) };
+    await renderPage();
+    const card = screen.getByRole("heading", { name: "Scorecards" }).closest("section, div")!;
+    expect(within(card.parentElement!).getByText("Made")).toBeInTheDocument();
+    expect(screen.getByText(/technical interview/, { selector: "span" })).toBeInTheDocument();
+    expect(screen.getByText(/Overall 4\.5/)).toBeInTheDocument();
+    expect(screen.getByText(/strong yes/)).toBeInTheDocument();
+    expect(screen.getByText("Sharp.")).toBeInTheDocument();
+  });
+
+  it("says plainly when there are none", async () => {
+    as("hr_manager");
+    await renderPage();
+    expect(screen.getByText("No scorecards filed yet.")).toBeInTheDocument();
+  });
+
+  it("an HR manager can add one; a view-only reader cannot", async () => {
+    as("hr_manager");
+    await renderPage();
+    expect(buttons()).toContain("Add scorecard");
+    cleanup();
+    as("hr_staff");
+    await renderPage();
+    expect(buttons()).not.toContain("Add scorecard");
+  });
+
+  it("a panelist (named in an interview) is shown the scorecard form even as a view-only reader, but not the update controls", async () => {
+    as("hr_staff");
+    me.userId = "u-pan";
+    await renderPage();
+    expect(buttons()).toEqual(["Add scorecard"]);
+  });
+});
+
+describe("/hr/recruitment/applications/[applicationId] — the offer", () => {
+  it("with no offer, says so and offers Make offer to a manager only", async () => {
+    as("hr_manager");
+    await renderPage();
+    expect(screen.getByText("No offer has been made.")).toBeInTheDocument();
+    expect(buttons()).toContain("Make offer");
+    cleanup();
+    as("hr_staff");
+    await renderPage();
+    expect(buttons()).not.toContain("Make offer");
+  });
+
+  it("shows a sent offer with its status moves, and no second offer form while it is live", async () => {
+    as("hr_manager");
+    appRead = { kind: "ok", data: detail({ offer: offer() }) };
+    await renderPage();
+    expect(screen.getByText("IDR 11000000 (monthly)")).toBeInTheDocument();
+    expect(buttons()).toEqual(expect.arrayContaining(["Candidate accepted", "Candidate declined"]));
+    expect(buttons()).not.toContain("Make offer");
+    expect(screen.getByText(/one live offer at a time/)).toBeInTheDocument();
+  });
+
+  it("an accepted offer offers Convert to a holder of the approve capability", async () => {
+    as("hr_manager");
+    appRead = { kind: "ok", data: detail({ offer: offer({ status: "accepted" }) }) };
+    await renderPage();
+    expect(buttons()).toContain("Convert to employee");
+  });
+
+  it("a declined offer allows a new one", async () => {
+    as("hr_manager");
+    appRead = { kind: "ok", data: detail({ offer: offer({ status: "declined" }) }) };
+    await renderPage();
+    expect(buttons()).toContain("Make offer");
+  });
+
+  it("a converted offer says an employee record exists and offers nothing", async () => {
+    as("hr_manager");
+    appRead = { kind: "ok", data: detail({ status: "hired", offer: offer({ status: "converted", employeeId: "emp-1" }) }) };
+    await renderPage();
+    expect(screen.getByText(/an employee record exists for Budi Santoso/)).toBeInTheDocument();
+    expect(buttons()).not.toContain("Convert to employee");
+    expect(buttons()).not.toContain("Make offer");
+  });
+
+  it("a closed application is not offered a new offer", async () => {
+    as("hr_manager");
+    appRead = { kind: "ok", data: detail({ status: "rejected" }) };
+    await renderPage();
+    expect(buttons()).not.toContain("Make offer");
   });
 });

@@ -5,14 +5,20 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { getApplicationResult, listEmployeesResult, listPipelineStagesResult } from "@/lib/hr-full-data";
-import { recruitmentControls, formatInZone } from "@/lib/hrRecruitment";
+import { recruitmentControls, formatInZone, LIVE_OFFER_STATUSES } from "@/lib/hrRecruitment";
+import { formatMoney } from "@/lib/hr-full";
 import { Card, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { ApplicationStageMove } from "@/components/hr/ApplicationStageMove";
 import { InterviewForm, InterviewEditor } from "@/components/hr/InterviewForm";
 import type { PersonOption } from "@/components/hr/RequisitionForm";
-import { moveApplicationStage, scheduleInterview, updateInterview } from "@/lib/hrRecruitmentActions";
+import { ScorecardForm } from "@/components/hr/ScorecardForm";
+import { OfferForm } from "@/components/hr/OfferForm";
+import { OfferActions } from "@/components/hr/OfferActions";
+import {
+  moveApplicationStage, scheduleInterview, updateInterview, fileScorecard, createOffer, setOfferStatus, convertOffer,
+} from "@/lib/hrRecruitmentActions";
 
 type Params = Promise<{ applicationId: string }>;
 
@@ -139,6 +145,73 @@ export default async function HrApplicationPage({ params }: { params: Params }) 
             <ReadRefusal inline subject={employeesRead.kind === "forbidden" ? "the employee list" : "The employee list"} kind={employeesRead.kind}
               reason={employeesRead.kind === "unavailable" ? employeesRead.reason : undefined}
               detail="Panelists cannot be picked or named without it." />
+          ) : null}
+        </div>
+      </Card>
+
+      <Card title="Scorecards" style={{ marginBottom: 22 }}>
+        <div style={{ display: "grid", gap: 14 }}>
+          {app.scorecards.length === 0 ? (
+            <EmptyNote>No scorecards filed yet.</EmptyNote>
+          ) : (
+            <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 10 }}>
+              {app.scorecards.map((sc) => {
+                const iv = app.interviews.find((i) => i.id === sc.interviewId);
+                return (
+                  <li key={sc.id} style={{ font: "400 13px/1.5 var(--font-body)", paddingBottom: 10, borderBottom: "1px solid var(--erp-line)" }}>
+                    <strong>{nameOf(sc.reviewerUserId)}</strong>
+                    <span style={dim}> · {iv ? `${iv.kind} interview` : "not tied to an interview"}{sc.submittedAt ? ` · ${sc.submittedAt.slice(0, 10)}` : ""}</span>
+                    <div>
+                      Overall {sc.overall ? Number(sc.overall).toFixed(1) : "—"}
+                      {sc.recommendation ? <> · {sc.recommendation.replace(/_/g, " ")}</> : null}
+                    </div>
+                    {sc.notes ? <div style={dim}>{sc.notes}</div> : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {ctl.score && (
+            <ScorecardForm
+              file={fileScorecard} tenantId={tenant} applicationId={app.id}
+              interviews={app.interviews.map((i) => ({ id: i.id, label: `${i.kind}, ${formatInZone(i.scheduledStart, i.timezone)}` }))}
+            />
+          )}
+        </div>
+      </Card>
+
+      <Card title="Offer" style={{ marginBottom: 22 }}>
+        <div style={{ display: "grid", gap: 14 }}>
+          {!app.offer ? (
+            <EmptyNote>No offer has been made.</EmptyNote>
+          ) : (
+            <>
+              <dl style={{ display: "grid", gap: "8px 24px", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", margin: 0, font: "400 13px/1.5 var(--font-body)" }}>
+                <Fact label="Status" value={<StatusBadge label={app.offer.status} />} />
+                <Fact label="Base" value={`${formatMoney(app.offer.baseAmount, app.offer.currency)} (${app.offer.rateBasis})`} />
+                <Fact label="Employment" value={app.offer.employmentType} />
+                <Fact label="Start" value={app.offer.startOn ? app.offer.startOn.slice(0, 10) : "—"} />
+                <Fact label="Expires" value={app.offer.expiresOn ? app.offer.expiresOn.slice(0, 10) : "—"} />
+              </dl>
+              {app.offer.status === "converted" ? (
+                <p style={{ margin: 0, font: "400 13px/1.5 var(--font-body)" }}>
+                  Converted: an employee record exists for {app.candidateName}.{" "}
+                  <Link href="/hr/people" style={{ color: "var(--erp-accent)" }}>Open People</Link>
+                </p>
+              ) : (
+                <OfferActions
+                  tenantId={tenant} applicationId={app.id} offerId={app.offer.id} status={app.offer.status}
+                  startOn={app.offer.startOn} candidateName={app.candidateName} canManage={ctl.manage} canConvert={ctl.convert}
+                  api={{ setStatus: setOfferStatus, convert: convertOffer }}
+                />
+              )}
+            </>
+          )}
+          {ctl.manage && movable && (!app.offer || !LIVE_OFFER_STATUSES.includes(app.offer.status)) ? (
+            <OfferForm create={createOffer} tenantId={tenant} applicationId={app.id} defaultCurrency={app.offer?.currency ?? "IDR"} />
+          ) : null}
+          {ctl.manage && app.offer && LIVE_OFFER_STATUSES.includes(app.offer.status) ? (
+            <p style={{ margin: 0, ...dim }}>An application can have one live offer at a time. Withdraw this one to make another.</p>
           ) : null}
         </div>
       </Card>

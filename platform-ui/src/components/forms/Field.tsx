@@ -16,7 +16,7 @@ import "./forms.css";
 //   - a visible focus treatment and a hover state (before: one 0.5px line changing colour)
 //   - a caret on selects, which had appearance:none and so looked identical to a text input
 export function Field({
-  name, label, type = "text", defaultValue, options, optionItems, placeholder, required, disabled, hint, error,
+  name, label, type = "text", defaultValue, options, optionItems, placeholder, required, disabled, hint, error, step,
 }: {
   name: string;
   label: string;
@@ -29,6 +29,9 @@ export function Field({
   placeholder?: string;
   required?: boolean;
   disabled?: boolean;
+  /** Number inputs only: the browser rejects a value that is not a multiple of the step (default 1), so a decimal
+   *  field (money, a 0 to 5 score) passes "any". */
+  step?: string;
   /** Format or meaning the label cannot carry on its own. Shown under the control, quietly. */
   hint?: string;
   /** Validation message. Its presence also sets aria-invalid, so the state is announced rather than
@@ -113,7 +116,7 @@ export function Field({
   return (
     <label className={`lux-field${disabled ? " lux-field--disabled" : ""}`}>
       {labelEl}
-      <input {...shared} type={type} defaultValue={value} placeholder={placeholder} />
+      <input {...shared} type={type} defaultValue={value} placeholder={placeholder} step={type === "number" ? step : undefined} />
       {below}
     </label>
   );

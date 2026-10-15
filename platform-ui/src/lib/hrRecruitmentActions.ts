@@ -23,6 +23,7 @@ import { getActiveTenant } from "./tenant";
 import {
   EMPLOYMENT_TYPES, WORK_MODES, CANDIDATE_SOURCES, PATCHABLE_REQUISITION_STATUSES,
   INTERVIEW_KINDS, INTERVIEW_STATUSES, INTERVIEW_OUTCOMES, zonedLocalToIso,
+  RECOMMENDATIONS, RATE_BASES, OFFER_SET_STATUSES,
 } from "./hrRecruitment";
 
 export type RecruitmentResult = {
@@ -35,6 +36,8 @@ export type RecruitmentResult = {
   notice?: string;
   /** Submit: the approval the server raised, so the screen can link to the approvals queue. */
   approvalId?: string;
+  /** Convert: the employee record the server created. */
+  employeeId?: string;
 };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -480,4 +483,149 @@ export async function upsertPipelineStage(formData: FormData): Promise<Recruitme
   revalApplication();
   revalidatePath("/hr/settings");
   return { ok: true, id: key, notice: `Stage ${label} saved.` };
+}
+
+// ═════════════════════════════════════════════════════════ SCORECARDS ═══════════════════════
+
+// POST applications/:id/scorecards (authorize `create` with the application's panel: a panelist can, and so can the
+// manage tier). The reviewer is the signed-in person; the server pins it and never reads it from the body. Filing
+// again for the same interview replaces your earlier scorecard, but a scorecard with NO interview is not
+// de-duplicated by the database (a NULL does not collide), so each filing without one is a new row: the form asks
+// for the interview. 400 recommendation not one of the five, overall outside 0 to 5.
+export async function fileScorecard(tenantId: string, applicationId: string, formData: FormData): Promise<RecruitmentResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!applicationId) return { ok: false, error: "No application selected." };
+
+  const interviewId = field(formData, "interviewId");
+  const recommendation = field(formData, "recommendation");
+  const notes = field(formData, "notes");
+  if (recommendation && !RECOMMENDATIONS.includes(recommendation)) return { ok: false, error: "Pick a recommendation from the list." };
+  const overall = num(field(formData, "overall"), "The overall score", 0);
+  if (overall.error) return { ok: false, error: overall.error };
+  if (overall.value !== undefined && overall.value > 5) return { ok: false, error: "The overall score must be between 0 and 5." };
+  if (overall.value === undefined && !recommendation && !notes) {
+    return { ok: false, error: "Give an overall score, a recommendation or notes." };
+  }
+
+  const r = await send<{ id?: string; applicationRating?: string | null }>(
+    c.tenant, c.userId, "POST", `/applications/${encodeURIComponent(applicationId)}/scorecards`,
+    {
+      ...(interviewId ? { interviewId } : {}),
+      ...(overall.value !== undefined ? { overall: overall.value } : {}),
+      ...(recommendation ? { recommendation } : {}),
+      ...(notes ? { notes } : {}),
+    },
+    "file scorecards on this application",
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  revalApplication(applicationId);
+  const rating = r.body.applicationRating;
+  return {
+    ok: true, id: str(r.body.id),
+    notice: rating ? `Scorecard filed. The application's rating is now ${Number(rating).toFixed(2)}.` : "Scorecard filed.",
+  };
+}
+
+// ═════════════════════════════════════════════════════════ OFFERS ═══════════════════════════
+
+// POST applications/:id/offers (authorize `create`, manage tier). Always a draft. The server refuses an offer above
+// the requisition's approved maximum, in words ("offer of X exceeds the requisition's approved maximum of Y — raise
+// the requisition band first"), and the database allows one live offer per application and an expiry on or before the
+// start date, so the screen checks the latter and offers the form only when no live offer exists.
+export async function createOffer(tenantId: string, applicationId: string, formData: FormData): Promise<RecruitmentResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!applicationId) return { ok: false, error: "No application selected." };
+
+  const baseAmount = num(field(formData, "baseAmount"), "The base amount", 0);
+  if (baseAmount.error) return { ok: false, error: baseAmount.error };
+  if (baseAmount.value === undefined || baseAmount.value <= 0) return { ok: false, error: "The base amount must be more than zero." };
+  const currency = (field(formData, "currency") || "IDR").toUpperCase();
+  if (!/^[A-Z]{3}$/.test(currency)) return { ok: false, error: "Currency must be a 3-letter code such as IDR." };
+  const rateBasis = field(formData, "rateBasis") || "monthly";
+  if (!RATE_BASES.includes(rateBasis)) return { ok: false, error: "Pick a rate basis from the list." };
+  const employmentType = field(formData, "employmentType");
+  if (employmentType && !EMPLOYMENT_TYPES.includes(employmentType)) return { ok: false, error: "Pick an employment type from the list." };
+  const probation = num(field(formData, "probationMonths"), "Probation months", 0, true);
+  if (probation.error) return { ok: false, error: probation.error };
+  if (probation.value !== undefined && probation.value > 12) return { ok: false, error: "Probation months must be between 0 and 12." };
+  const contract = num(field(formData, "contractMonths"), "Contract months", 1, true);
+  if (contract.error) return { ok: false, error: contract.error };
+  if (contract.value !== undefined && contract.value > 60) return { ok: false, error: "Contract months must be between 1 and 60." };
+  const startOn = field(formData, "startOn");
+  const expiresOn = field(formData, "expiresOn");
+  if (startOn && !ISO_DATE.test(startOn)) return { ok: false, error: "The start date must be YYYY-MM-DD." };
+  if (expiresOn && !ISO_DATE.test(expiresOn)) return { ok: false, error: "The expiry date must be YYYY-MM-DD." };
+  if (startOn && expiresOn && expiresOn > startOn) return { ok: false, error: "The offer must expire on or before the start date." };
+
+  const r = await send<{ id?: string; status?: string }>(
+    c.tenant, c.userId, "POST", `/applications/${encodeURIComponent(applicationId)}/offers`,
+    {
+      baseAmount: baseAmount.value, currency, rateBasis,
+      ...(employmentType ? { employmentType } : {}),
+      ...(probation.value !== undefined ? { probationMonths: probation.value } : {}),
+      ...(contract.value !== undefined ? { contractMonths: contract.value } : {}),
+      ...(startOn ? { startOn } : {}), ...(expiresOn ? { expiresOn } : {}),
+    },
+    "make offers",
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  revalApplication(applicationId);
+  return { ok: true, id: str(r.body.id), status: str(r.body.status), notice: "Offer drafted. Mark it as sent when it goes to the candidate." };
+}
+
+// POST offers/:id/status (authorize `update` with no attribute arm, so the manage tier). sent, accepted, declined,
+// expired or withdrawn. The server does not check the move (any of those from any status except converted), so the
+// screen offers only the sensible ones. `converted` is only reachable through convertOffer. 404 "offer not found (or
+// already converted)". A decline reason is stored when given.
+export async function setOfferStatus(
+  tenantId: string, applicationId: string, offerId: string, status: string, declineReason?: string,
+): Promise<RecruitmentResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!offerId) return { ok: false, error: "No offer selected." };
+  if (!OFFER_SET_STATUSES.includes(status)) return { ok: false, error: "Pick a status from the list. Converting an offer is its own step." };
+  const reason = (declineReason ?? "").trim();
+
+  const r = await send<{ status?: string }>(
+    c.tenant, c.userId, "POST", `/offers/${encodeURIComponent(offerId)}/status`,
+    { status, ...(status === "declined" && reason ? { declineReason: reason } : {}) },
+    "change this offer's status",
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  revalApplication(applicationId || undefined);
+  return { ok: true, id: offerId, status: str(r.body.status) ?? status, notice: `Offer marked ${status}.` };
+}
+
+// POST offers/:id/convert (authorize `convert`: the manage tier AND a high-assurance sign-in; the UI mirror is
+// hr.recruitment.approve). THIS CREATES AN EMPLOYEE. In one transaction the server inserts the employee (status
+// pending_start), the opening `hire` job event, a compensation record from the offer's amount, marks the offer
+// converted, the application hired and counts the requisition's filled seats. 400 "offer is 'sent' — only an accepted
+// offer can be converted", 400 "hireDate required (the offer carries no startOn)", 409 "offer is already converted".
+export async function convertOffer(tenantId: string, applicationId: string, offerId: string, formData: FormData): Promise<RecruitmentResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!offerId) return { ok: false, error: "No offer selected." };
+
+  const hireDate = field(formData, "hireDate");
+  const workEmail = field(formData, "workEmail");
+  if (hireDate && !ISO_DATE.test(hireDate)) return { ok: false, error: "The hire date must be YYYY-MM-DD." };
+  if (workEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(workEmail)) return { ok: false, error: "That work email does not look right." };
+
+  const r = await send<{ employeeId?: string; hireDate?: string; employmentStatus?: string }>(
+    c.tenant, c.userId, "POST", `/offers/${encodeURIComponent(offerId)}/convert`,
+    { ...(hireDate ? { hireDate } : {}), ...(workEmail ? { workEmail } : {}) },
+    "convert offers into employees", true,
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  revalApplication(applicationId || undefined);
+  revalidatePath("/hr/people");
+  revalidatePath("/hr");
+  const when = str(r.body.hireDate);
+  return {
+    ok: true, id: offerId, employeeId: str(r.body.employeeId), status: str(r.body.employmentStatus),
+    notice: `Employee record created${when ? `, starting ${when.slice(0, 10)}` : ""}, with the status ${(str(r.body.employmentStatus) ?? "pending_start").replace("_", " ")}. `
+      + "The offer's pay is recorded as their opening compensation.",
+  };
 }

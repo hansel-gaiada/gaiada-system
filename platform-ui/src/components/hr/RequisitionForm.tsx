@@ -30,8 +30,8 @@ function RequisitionFields({ people, initial }: { people: PersonOption[]; initia
       <Field name="workMode" label="Work mode" type="select" options={[...WORK_MODES]} defaultValue={initial?.workMode ?? ""} placeholder="Not set" />
       <Field name="location" label="Location" defaultValue={initial?.location ?? ""} />
       <Field name="targetStartOn" label="Target start" type="date" defaultValue={initial?.targetStartOn?.slice(0, 10) ?? ""} />
-      <Field name="salaryMin" label="Salary minimum" type="number" defaultValue={initial?.salaryMin ?? ""} />
-      <Field name="salaryMax" label="Salary maximum" type="number" defaultValue={initial?.salaryMax ?? ""}
+      <Field name="salaryMin" label="Salary minimum" type="number" step="any" defaultValue={initial?.salaryMin ?? ""} />
+      <Field name="salaryMax" label="Salary maximum" type="number" step="any" defaultValue={initial?.salaryMax ?? ""}
         hint="The approved ceiling: the server refuses an offer above it" />
       {people.length > 0 && (
         <>
