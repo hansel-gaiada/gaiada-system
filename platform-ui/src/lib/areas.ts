@@ -64,6 +64,8 @@ const PERFORMANCE: AreaRule[] = [
   rule("/reports/department", "performance"),
   rule("/reports/team", "performance"),
   rule("/reports/project", "performance"),
+  rule("/analytics/activity", "performance", false, "DW-4i: Analytics > My activity, the year map of all work (BFF section 44.9)"),
+  rule("/analytics/activity/team", "performance", false, "DW-4i: Analytics > Team activity, for a head"),
   rule("/appraisals", "performance"),
   rule("/appraisals/mine", "performance"),
   rule("/appraisals/department", "performance"),

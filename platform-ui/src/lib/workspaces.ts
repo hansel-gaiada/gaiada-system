@@ -960,7 +960,15 @@ export const PERFORMANCE_ROWS: readonly WorkspaceRow[] = [
   {
     key: "analytics", label: "Analytics", icon: "pulse",
     // Project Management's Charts: flow, burndown and tag breakdown across the department's projects.
-    tabs: [fromToolkit("web-dev", "charts", { key: "work", label: "Work" })],
+    tabs: [
+      fromToolkit("web-dev", "charts", { key: "work", label: "Work" }),
+      // DW-4i (BFF section 44.9): the year map of ALL the person's work, by kind, and a day's detail. Ungated: self is always
+      // allowed. Project Management > Productivity stays, with the PM-only components this series does not carry.
+      { key: "activity", label: "My activity", href: "/analytics/activity", icon: "pulse", blurb: "Everything you did, by day and by kind." },
+      // DW-4i: a head's Team activity for THIS department (the same gate as the Team report); the server gates every person.
+      { key: "team-activity", label: "Team activity", href: "/analytics/activity/team?unit={dept}", icon: "pulse", gate: { kind: "unitCap", cap: "reports.department.view" },
+        blurb: "What each person on your team did, by kind." },
+    ],
   },
   {
     key: "appraisals", label: "Appraisals", icon: "award",
