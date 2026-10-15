@@ -11,6 +11,22 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.173.0` - DW-7e-2: Finance's honest Pulse tiles, and the Payments to confirm queue on Receivables (2026-10-15) - PROTOTYPED
+
+Plan §4.3 (7e). UI only: no backend change, no new route.
+- **Tiles** (new honest readers in `lib/finance-data.ts`; the degrading `lib/finance.ts` readers are unchanged):
+  - Client payments to confirm: pending `invoice-payments` company-wide (no `clientId`); "300 or more" at the server's cap.
+  - Overdue receivables: customers with a balance in any overdue aging bucket, with the overdue amount.
+  - Close progress: blockers on the period containing today, "Ready to close" at 0; "No current period" reads Unavailable, never 0.
+  - Integrity findings: the failed checks among the ledger verify, the AR, AP, assets and treasury reconciliations and the trial balance. Any unreadable check makes the tile Unavailable, so it never shows an unearned all-clear.
+  - `PulseReading`'s `unavailable` takes an optional `detail`, drawn by `PulseBlock`.
+- **Payments to confirm** (`#payments-to-confirm` on `/finance/receivables`; the Confirm payments quick action and the tile point there):
+  - It lists the company's pending client payments, with Confirm and Reject (Reject needs a reason) through the existing decide route.
+  - It is shown to `company.manage` or elevated people, the Invoices pages' `canBill`. That is a superset of the server's `invoice` `update` rule, so a manager sees it and Confirm answers 403 in words.
+  - A failed read says "Could not load payments to confirm", never "none".
+  - `decidePaymentAction` no longer needs a client (the client hub still passes one), and it refreshes the Finance pages.
+- **Tests:** `finance-data.test.ts`, `PaymentsToConfirm.test.tsx`, `receivables/page.test.tsx`, `contractsActions.decide.test.ts` (new), and `pulse.test.tsx`.
+
 ### platform-ui `0.172.0` - DW-4h-3 and DW-4i: My activity counts all work, and heads see Team activity (2026-10-15) - PROTOTYPED
 
 Contract: `docs/FRONTEND-BFF-CONTRACT.md` §44 (§44.9 "The UI"). Plan §5.6, 4h and 4i; DW-D19 (no single score).
