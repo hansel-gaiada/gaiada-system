@@ -382,6 +382,8 @@ export class FinanceAccountsController {
         throw new ConflictException({
           message: `${label} still holds a balance (net ${Math.abs(shown)} ${shown > 0 ? "debit" : "credit"}); archiving it would hide the money from every statement. Move the balance with a journal first`,
           reason: "account_has_balance",
+          // The figure itself, so a client never parses the sentence: the signed net (debit positive), in each amount basis.
+          detail: { net, baseNet: base, side: shown > 0 ? "debit" : "credit" },
         });
       }
 

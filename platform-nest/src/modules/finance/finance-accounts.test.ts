@@ -285,8 +285,10 @@ describe.skipIf(!TEST_URL)("DW-7g-2 — chart of accounts: add, rename, archive,
     it("★ refused for a balance: 1120 Bank holds money", async () => {
       const r = await archive("1120");
       expect(r.statusCode, r.body).toBe(409);
-      expect(r.json()).toMatchObject({ reason: "account_has_balance" });
-      expect(r.json().error).toMatch(/250000000 debit/);
+      // 250,000,000 posted in the seed, less the 1,000 the frozen-code test credited to Bank: the structured figure is asserted
+      // exactly, and the sentence carries the same number.
+      expect(r.json()).toMatchObject({ reason: "account_has_balance", detail: { net: 249_999_000, baseNet: 249_999_000, side: "debit" } });
+      expect(r.json().error).toMatch(/249999000 debit/);
       expect((await find("1120"))?.status).toBe("active");
     });
 
