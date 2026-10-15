@@ -7,7 +7,7 @@
 //   sendContractAction       POST  /contracts/:id/send       (draft -> sent, notifies the client's portal contacts)
 //   voidContractAction       PATCH /contracts/:id {status:"void"}
 //   countersignContractAction POST /contracts/:id/countersign
-//   decidePaymentAction      POST  /invoice-payments/:id/decide
+//   decidePaymentAction      POST  /invoice-payments/:id/decide   (client hub, and Finance's queue on Receivables: no clientId there)
 //
 // ── NO CAPABILITY GATE HERE, AND WHY ─────────────────────────────────────────────────────────────
 // `lib/rbac.ts` has no contract or payment-decision capability, and inventing a mirror would be a second,
@@ -284,7 +284,8 @@ export async function decidePaymentAction(_prev: BillingActionState | null, form
   const paymentId = str(formData, "paymentId");
   const decision = str(formData, "decision");
   const reason = str(formData, "reason");
-  if (!clientId || !paymentId) return { ok: false, error: "Missing payment." };
+  // The client hub names its client; the company-wide queue on Receivables (DW-7e-2) does not, so only the payment is required.
+  if (!paymentId) return { ok: false, error: "Missing payment." };
   if (decision !== "confirm" && decision !== "reject") return { ok: false, error: "Choose confirm or reject." };
   const state = paymentDecisionState(decision, reason);
   if (!state.canSubmit) return { ok: false, error: state.reason ?? "A reason is required.", field: "reason" };
@@ -293,9 +294,11 @@ export async function decidePaymentAction(_prev: BillingActionState | null, form
       `/api/${c.tenant}/invoice-payments/${encodeURIComponent(paymentId)}/decide`, c.userId,
       { method: "POST", body: JSON.stringify({ decision, ...(decision === "reject" ? { reason } : {}) }) },
     );
-    refresh(clientId);
-    // The invoice page shows the balance too.
+    if (clientId) refresh(clientId);
+    // The invoice page shows the balance too, and the Finance queue and Overview count what is still pending.
     revalidatePath("/invoices");
+    revalidatePath("/finance/receivables");
+    revalidatePath("/finance");
     return {
       ok: true, id: paymentId,
       notice: decision === "reject" ? "Rejected. The client has been told why." : r.invoicePaid ? "Confirmed. The invoice is now settled." : "Confirmed. The balance is updated.",

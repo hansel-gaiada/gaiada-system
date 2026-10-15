@@ -121,7 +121,8 @@ export interface PulseTile {
 export type PulseSource =
   | "change-requests-new" | "pipeline-gates-pending" | "monitoring-problem-sites"
   | "social-posts-scheduled" | "social-posts-failed" | "it-account-requests"
-  | "hr-leave-pending" | "hr-onboarding-open" | "hr-cases-open" | "hr-payroll-waiting" | "it-devices-offline";
+  | "hr-leave-pending" | "hr-onboarding-open" | "hr-cases-open" | "hr-payroll-waiting" | "it-devices-offline"
+  | "finance-payments-to-confirm" | "finance-overdue-receivables" | "finance-close-progress" | "finance-integrity-findings";
 
 export interface QuickAction {
   key: string;
@@ -781,14 +782,14 @@ const FINANCE: Workspace = {
   connections: [CONN.bankFeeds, CONN.drive, CONN.claudeSeats],
   overview: DEPARTMENT_OVERVIEW,
   pulse: [
-    { key: "payments-to-confirm", label: "Client payments to confirm", ticket: "DW-7e" },
-    { key: "overdue-receivables", label: "Overdue receivables", ticket: "DW-7e" },
-    { key: "close-progress", label: "Close progress", ticket: "DW-7e" },
-    { key: "integrity-findings", label: "Integrity findings", ticket: "DW-7e" },
+    { key: "payments-to-confirm", label: "Client payments to confirm", source: "finance-payments-to-confirm", href: "/finance/receivables#payments-to-confirm" },
+    { key: "overdue-receivables", label: "Overdue receivables", source: "finance-overdue-receivables", href: "/finance/receivables" },
+    { key: "close-progress", label: "Close progress", source: "finance-close-progress", href: "/finance/close" },
+    { key: "integrity-findings", label: "Integrity findings", source: "finance-integrity-findings", href: "/finance" },
   ],
   creates: ["record-journal"],
   quickActions: [
-    { key: "confirm-payments", label: "Confirm payments", href: "/finance/receivables" },
+    { key: "confirm-payments", label: "Confirm payments", href: "/finance/receivables#payments-to-confirm" },
     { key: "record-journal", label: "Record a journal", href: "/finance/journals" },
     ...ASK_ACTIONS,
   ],

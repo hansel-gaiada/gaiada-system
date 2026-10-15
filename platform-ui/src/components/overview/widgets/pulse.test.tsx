@@ -6,7 +6,10 @@ import { OVERVIEW_WIDGETS, hasOverviewWidget, type OverviewWidgetProps } from ".
 import { Pulse } from "./Pulse";
 import { WidgetBoundary } from "../WidgetBoundary";
 import { COMPANY_SUBJECT, subjectOfRef } from "@/lib/overview";
-import { builtPulseTiles, payrollRunsWaiting, readingOfAllResults, readingOfPayrollRuns, readingOfSummary, runsWaiting } from "@/lib/overviewPulse";
+import {
+  builtPulseTiles, currentPeriod, overdueOfAging, payrollRunsWaiting, readingOfAllResults, readingOfIntegrity, readingOfPayrollRuns, readingOfSummary,
+  runsWaiting,
+} from "@/lib/overviewPulse";
 import { GENERIC_WORKSPACE, WORKSPACES, isPlanned, type PulseTile } from "@/lib/workspaces";
 import { resolveMyWorkspaces } from "@/lib/workspaceAccess";
 import { agencyTree, me as meFixture, member } from "@/lib/workspaceFixtures";
@@ -18,6 +21,7 @@ import * as itAccounts from "@/lib/it-accounts";
 import * as hrData from "@/lib/hr-data";
 import * as hrFullData from "@/lib/hr-full-data";
 import * as itData from "@/lib/it-data";
+import * as finData from "@/lib/finance-data";
 import type { MonitoringSummary } from "@/lib/monitoringShared";
 import type { SocialPost } from "@/lib/socialShared";
 import type { PipelineGate } from "@/lib/pipeline";
@@ -31,6 +35,11 @@ vi.mock("@/lib/it-accounts", async (orig) => ({ ...(await orig<typeof import("@/
 vi.mock("@/lib/hr-data", () => ({ listLeaveResult: vi.fn(), listCasesResult: vi.fn() }));
 vi.mock("@/lib/hr-full-data", () => ({ listPayrollRunsResult: vi.fn() }));
 vi.mock("@/lib/it-data", () => ({ listDevicesResult: vi.fn() }));
+vi.mock("@/lib/finance-data", () => ({
+  listPendingPaymentsResult: vi.fn(), getArAgingResult: vi.fn(), listPeriodsResult: vi.fn(), getCloseReadinessResult: vi.fn(),
+  verifyLedgerResult: vi.fn(), reconcileArResult: vi.fn(), reconcileApResult: vi.fn(), reconcileAssetsResult: vi.fn(),
+  reconcileTreasuryResult: vi.fn(), getTrialBalanceResult: vi.fn(),
+}));
 
 const person = meFixture([member()]);
 const listRequests = vi.mocked(cr.listChangeRequests);
@@ -42,6 +51,14 @@ const leave = vi.mocked(hrData.listLeaveResult);
 const hrCases = vi.mocked(hrData.listCasesResult);
 const payroll = vi.mocked(hrFullData.listPayrollRunsResult);
 const devices = vi.mocked(itData.listDevicesResult);
+const pendingPayments = vi.mocked(finData.listPendingPaymentsResult);
+const arAging = vi.mocked(finData.getArAgingResult);
+const periodsRead = vi.mocked(finData.listPeriodsResult);
+const closeRead = vi.mocked(finData.getCloseReadinessResult);
+const integrityReads = {
+  ledger: vi.mocked(finData.verifyLedgerResult), ar: vi.mocked(finData.reconcileArResult), ap: vi.mocked(finData.reconcileApResult),
+  assets: vi.mocked(finData.reconcileAssetsResult), treasury: vi.mocked(finData.reconcileTreasuryResult), tb: vi.mocked(finData.getTrialBalanceResult),
+};
 
 const rows = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `r${i}` })) as never;
 const gate = (id: string, run: string) => ({ id, run_id: run }) as unknown as PipelineGate;
@@ -64,15 +81,19 @@ const props = (pulse: readonly PulseTile[] | undefined, extra: Partial<OverviewW
 const tile = (name: string) => within(screen.getByRole("region", { name: "Pulse" })).getByText(name).closest("li")!;
 
 beforeEach(() => {
-  for (const m of [listRequests, listGates, summary, posts, accounts, leave, hrCases, payroll, devices]) m.mockReset();
+  for (const m of [listRequests, listGates, summary, posts, accounts, leave, hrCases, payroll, devices, pendingPayments, arAging, periodsRead, closeRead, ...Object.values(integrityReads)]) m.mockReset();
 });
 afterEach(() => vi.restoreAllMocks());
 
 describe("the registry's built tiles (DW-3e)", () => {
-  it("builds exactly Web Dev's three, Social Media's two, HR's four and IT's two, and no other", () => {
+  it("builds exactly Web Dev's three, Social Media's two, HR's four, Finance's four and IT's two, and no other", () => {
     const built: string[] = [];
     for (const w of [...WORKSPACES, GENERIC_WORKSPACE]) for (const t of w.pulse) if (!isPlanned(t)) built.push(`${w.key}/${t.key}`);
     expect(built.sort()).toEqual([
+      "finance/close-progress",
+      "finance/integrity-findings",
+      "finance/overdue-receivables",
+      "finance/payments-to-confirm",
       "hr/leave-pending",
       "hr/onboarding",
       "hr/open-cases",
@@ -105,7 +126,7 @@ describe("the registry's built tiles (DW-3e)", () => {
     const app = resolve(__dirname, "../../../app/(app)");
     for (const w of WORKSPACES) {
       for (const t of w.pulse.filter((p) => !isPlanned(p))) {
-        const path = t.href!.replaceAll("{dept}", "[deptId]");
+        const path = t.href!.split(/[?#]/)[0].replaceAll("{dept}", "[deptId]");
         expect(existsSync(resolve(app, `.${path}`, "page.tsx")), `${w.key}/${t.key} -> ${t.href}`).toBe(true);
       }
     }
@@ -389,6 +410,188 @@ describe("Pulse, HR and IT devices (the widget, DW-7e)", () => {
     const t = tile("Devices offline");
     expect(within(t).getByText("0")).toBeInTheDocument();
     expect(within(t).getByText("No devices registered yet")).toBeInTheDocument();
+  });
+});
+
+describe("Pulse, Finance (the widget, DW-7e-2)", () => {
+  const fin = () => tilesOf("finance");
+  const finProps = () => props(fin(), { deptId: null });
+  const pay = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `p${i}` })) as never;
+  const aging = (...rowsOwed: Array<[string, string, string, string, string]>) =>
+    rowsOwed.map(([current, a, b, c, d], i) => ({ customerCode: `C${i}`, customerName: `C${i}`, current, d1To30: a, d31To60: b, d61To90: c, d90Plus: d, totalOutstanding: "0" })) as never;
+  const period = (over: Record<string, unknown> = {}) =>
+    ({ id: "per-10", periodNo: 10, name: "Oct 2026", startDate: "2000-01-01", endDate: "2999-12-31", state: "OPEN", signedOff: false, fiscalYear: "FY2026", ...over }) as never;
+  const verdict = (clean: boolean) => ({ kind: "ok", data: { problems: [], clean } }) as never;
+  const allIntegrity = (clean: boolean) => {
+    for (const r of Object.values(integrityReads)) r.mockResolvedValue(r === integrityReads.tb ? ({ kind: "ok", data: { balanced: clean } } as never) : verdict(clean));
+  };
+  const happy = () => {
+    pendingPayments.mockResolvedValue({ kind: "ok", data: pay(3) });
+    arAging.mockResolvedValue({ kind: "ok", data: aging(["100", "0", "0", "0", "0"]) });
+    periodsRead.mockResolvedValue({ kind: "ok", data: [period()] });
+    closeRead.mockResolvedValue({ kind: "ok", data: { blockers: [], ready: true } });
+    allIntegrity(true);
+  };
+
+  it("counts each tile from its own read, as the signed-in person, with the page it links to", async () => {
+    pendingPayments.mockResolvedValue({ kind: "ok", data: pay(4) });
+    // Two customers owe something overdue (40M + 25M); a third owes only what is not yet due.
+    arAging.mockResolvedValue({ kind: "ok", data: aging(["120000000", "0", "0", "0", "0"], ["0", "40000000", "0", "0", "0"], ["0", "0", "0", "0", "25000000"]) });
+    periodsRead.mockResolvedValue({ kind: "ok", data: [period({ id: "per-9", name: "Sep 2026", startDate: "2000-01-01", endDate: "2000-01-31" }), period()] });
+    closeRead.mockResolvedValue({ kind: "ok", data: { blockers: [{ blocker: "NO_ACCOUNTANT_SIGNOFF", detail: "x" }, { blocker: "AP_RECONCILIATION", detail: "y" }], ready: false } });
+    integrityReads.ledger.mockResolvedValue(verdict(true));
+    integrityReads.ar.mockResolvedValue(verdict(true));
+    integrityReads.ap.mockResolvedValue(verdict(false));
+    integrityReads.assets.mockResolvedValue(verdict(true));
+    integrityReads.treasury.mockResolvedValue(verdict(false));
+    integrityReads.tb.mockResolvedValue({ kind: "ok", data: { balanced: true } } as never);
+    render(await Pulse(finProps()));
+
+    expect(pendingPayments).toHaveBeenCalledWith("u-1", "co-a");
+    expect(arAging).toHaveBeenCalledWith("u-1", "co-a");
+    // Only the period today falls in is asked about, by its id.
+    expect(closeRead).toHaveBeenCalledTimes(1);
+    expect(closeRead).toHaveBeenCalledWith("u-1", "co-a", "per-10");
+
+    expect(within(tile("Client payments to confirm")).getByText("4")).toBeInTheDocument();
+    const overdue = tile("Overdue receivables");
+    expect(within(overdue).getByText("2")).toBeInTheDocument();
+    expect(within(overdue).getByText(/customers · .*65,000,000 overdue/)).toBeInTheDocument();
+    const close = tile("Close progress");
+    expect(within(close).getByText("2")).toBeInTheDocument();
+    expect(within(close).getByText("Oct 2026")).toBeInTheDocument();
+    const integrity = tile("Integrity findings");
+    expect(within(integrity).getByText("2")).toBeInTheDocument();
+    expect(within(integrity).getByText("Payables, Treasury")).toBeInTheDocument();
+
+    expect(within(tile("Client payments to confirm")).getByRole("link")).toHaveAttribute("href", "/finance/receivables#payments-to-confirm");
+    expect(within(overdue).getByRole("link")).toHaveAttribute("href", "/finance/receivables");
+    expect(within(close).getByRole("link")).toHaveAttribute("href", "/finance/close");
+    expect(within(integrity).getByRole("link")).toHaveAttribute("href", "/finance");
+  });
+
+  it("says a real zero: nothing waiting, nothing overdue, ready to close, every check tying", async () => {
+    pendingPayments.mockResolvedValue({ kind: "ok", data: [] });
+    arAging.mockResolvedValue({ kind: "ok", data: aging(["100", "0", "0", "0", "0"]) });
+    periodsRead.mockResolvedValue({ kind: "ok", data: [period()] });
+    closeRead.mockResolvedValue({ kind: "ok", data: { blockers: [], ready: true } });
+    allIntegrity(true);
+    render(await Pulse(finProps()));
+    for (const name of ["Client payments to confirm", "Overdue receivables", "Close progress", "Integrity findings"]) {
+      expect(within(tile(name)).getByText("0"), name).toBeInTheDocument();
+    }
+    expect(within(tile("Close progress")).getByText("Ready to close")).toBeInTheDocument();
+    expect(within(tile("Integrity findings")).getByText("6 of 6 checks tie")).toBeInTheDocument();
+  });
+
+  it("says No access for a refusal and Unavailable for a failure on every tile, never 0", async () => {
+    pendingPayments.mockResolvedValue({ kind: "forbidden" });
+    arAging.mockResolvedValue({ kind: "unavailable", reason: "404" });
+    periodsRead.mockResolvedValue({ kind: "forbidden" });
+    allIntegrity(true);
+    integrityReads.ledger.mockResolvedValue({ kind: "forbidden" });
+    render(await Pulse(finProps()));
+    expect(within(tile("Client payments to confirm")).getByText("No access")).toBeInTheDocument();
+    expect(within(tile("Overdue receivables")).getByText("Unavailable")).toBeInTheDocument();
+    expect(within(tile("Close progress")).getByText("No access")).toBeInTheDocument();
+    expect(within(tile("Integrity findings")).getByText("No access")).toBeInTheDocument();
+    expect(closeRead).not.toHaveBeenCalled();
+    expect(screen.queryByText("0")).toBeNull();
+  });
+
+  it("maps a failed pending-payments and aging read to Unavailable, and the other tiles still read", async () => {
+    happy();
+    pendingPayments.mockResolvedValue({ kind: "unavailable", reason: "502" });
+    arAging.mockRejectedValue(new Error("boom"));
+    render(await Pulse(finProps()));
+    expect(within(tile("Client payments to confirm")).getByText("Unavailable")).toBeInTheDocument();
+    expect(within(tile("Overdue receivables")).getByText("Unavailable")).toBeInTheDocument();
+    expect(within(tile("Close progress")).getByText("Ready to close")).toBeInTheDocument();
+  });
+
+  it("is Unavailable with 'No current period' when today is in no period, and reads no readiness", async () => {
+    happy();
+    periodsRead.mockResolvedValue({ kind: "ok", data: [period({ startDate: "2000-01-01", endDate: "2000-01-31" })] });
+    render(await Pulse(finProps()));
+    const close = tile("Close progress");
+    expect(within(close).getByText("Unavailable")).toBeInTheDocument();
+    expect(within(close).getByText("No current period")).toBeInTheDocument();
+    expect(within(close).queryByText("Ready to close")).toBeNull();
+    expect(within(close).queryByText("0")).toBeNull();
+    expect(closeRead).not.toHaveBeenCalled();
+  });
+
+  it("is Unavailable, never 'Ready to close', when the periods list is empty or the readiness read fails", async () => {
+    happy();
+    periodsRead.mockResolvedValue({ kind: "ok", data: [] });
+    const first = render(await Pulse(finProps()));
+    expect(within(tile("Close progress")).getByText("Unavailable")).toBeInTheDocument();
+    first.unmount();
+
+    periodsRead.mockResolvedValue({ kind: "ok", data: [period()] });
+    closeRead.mockResolvedValue({ kind: "unavailable", reason: "500" });
+    const second = render(await Pulse(finProps()));
+    const failed = tile("Close progress");
+    expect(within(failed).getByText("Unavailable")).toBeInTheDocument();
+    expect(within(failed).queryByText("Ready to close")).toBeNull();
+    second.unmount();
+
+    closeRead.mockResolvedValue({ kind: "forbidden" });
+    render(await Pulse(finProps()));
+    expect(within(tile("Close progress")).getByText("No access")).toBeInTheDocument();
+  });
+
+  it("never counts an unreadable integrity check as passed: one failed read makes the tile Unavailable", async () => {
+    happy();
+    integrityReads.treasury.mockResolvedValue({ kind: "unavailable", reason: "404" });
+    integrityReads.ap.mockResolvedValue(verdict(false));
+    render(await Pulse(finProps()));
+    const t = tile("Integrity findings");
+    expect(within(t).getByText("Unavailable")).toBeInTheDocument();
+    // Not "1": the Payables failure is real but the tile cannot say how many findings there are.
+    expect(within(t).queryByText("1")).toBeNull();
+    expect(within(t).queryByText(/checks tie/)).toBeNull();
+  });
+
+  it("is Unavailable when a check's payload has no verdict", async () => {
+    happy();
+    integrityReads.tb.mockResolvedValue({ kind: "ok", data: {} } as never);
+    render(await Pulse(finProps()));
+    expect(within(tile("Integrity findings")).getByText("Unavailable")).toBeInTheDocument();
+  });
+
+  it("flags a full page of pending payments as '300 or more', not a total", async () => {
+    happy();
+    pendingPayments.mockResolvedValue({ kind: "ok", data: pay(300) });
+    render(await Pulse(finProps()));
+    const t = tile("Client payments to confirm");
+    expect(within(t).getByText("300")).toBeInTheDocument();
+    expect(within(t).getByText("300 or more")).toBeInTheDocument();
+  });
+});
+
+describe("the Finance mappers", () => {
+  it("counts a customer as overdue by any bucket past current, and ignores current", () => {
+    expect(overdueOfAging([
+      { current: "9", d1To30: "0", d31To60: "0", d61To90: "0", d90Plus: "0" },
+      { current: "0", d1To30: "5", d31To60: "0", d61To90: "0", d90Plus: "0" },
+      { current: "1", d1To30: "0", d31To60: "2", d61To90: "3", d90Plus: "4" },
+    ] as never)).toEqual({ customers: 2, amount: 14 });
+  });
+
+  it("finds the period today falls in, inclusive of both ends, and none outside", () => {
+    const periods = [{ id: "a", startDate: "2026-09-01", endDate: "2026-09-30" }, { id: "b", startDate: "2026-10-01", endDate: "2026-10-31" }] as never;
+    expect(currentPeriod(periods, "2026-10-01")?.id).toBe("b");
+    expect(currentPeriod(periods, "2026-09-30")?.id).toBe("a");
+    expect(currentPeriod(periods, "2026-11-01")).toBeNull();
+  });
+
+  it("counts failed integrity checks; a refusal outranks a failure; a non-boolean verdict is no verdict", () => {
+    const ok = (clean: unknown) => ({ kind: "ok", data: { clean } }) as never;
+    expect(readingOfIntegrity([{ label: "A", result: ok(true) }, { label: "B", result: ok(false) }])).toEqual({ kind: "ok", value: 1, detail: "B" });
+    expect(readingOfIntegrity([{ label: "A", result: ok(true) }])).toEqual({ kind: "ok", value: 0, detail: "1 of 1 checks tie" });
+    expect(readingOfIntegrity([{ label: "A", result: { kind: "unavailable", reason: "x" } }, { label: "B", result: { kind: "forbidden" } }])).toEqual({ kind: "forbidden" });
+    expect(readingOfIntegrity([{ label: "A", result: ok(undefined) }])).toEqual({ kind: "unavailable" });
   });
 });
 

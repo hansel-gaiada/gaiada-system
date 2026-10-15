@@ -9,10 +9,16 @@ import { hrScopeCompanies } from "@/lib/hr";
 import { listLeaveResult, listCasesResult } from "@/lib/hr-data";
 import { listPayrollRunsResult } from "@/lib/hr-full-data";
 import { listDevicesResult } from "@/lib/it-data";
+import {
+  getArAgingResult, getCloseReadinessResult, getTrialBalanceResult, listPendingPaymentsResult, listPeriodsResult,
+  reconcileApResult, reconcileArResult, reconcileAssetsResult, reconcileTreasuryResult, verifyLedgerResult,
+} from "@/lib/finance-data";
+import { todayIsoInDisplayZone } from "@/lib/format";
 import type { Me } from "@/lib/platform";
 import {
-  UNAVAILABLE_READING, everyTileFailed, pulseHref, readingOfAccounts, readingOfAllResults, readingOfDevices, readingOfGuarded,
-  readingOfPayrollRuns, readingOfResult, readingOfSummary, runsWaiting, type PulseReading, type PulseTileModel,
+  NO_CURRENT_PERIOD, UNAVAILABLE_READING, currentPeriod, everyTileFailed, pulseHref, readingOfAccounts, readingOfAllResults, readingOfClose,
+  readingOfDevices, readingOfGuarded, readingOfIntegrity, readingOfOverdue, readingOfPayrollRuns, readingOfPendingPayments, readingOfResult,
+  readingOfSummary, runsWaiting, type PulseReading, type PulseTileModel,
 } from "@/lib/overviewPulse";
 import { PulseBlock } from "./PulseBlock";
 
@@ -49,6 +55,32 @@ const READERS: Record<PulseSource, (userId: string, tenantId: string, me: Me) =>
     inHrScope(me, t) ? readingOfResult(await listCasesResult(u, t, { status: "open" }), (rows) => ({ value: rows.length })) : FORBIDDEN_READING,
   "hr-payroll-waiting": async (u, t) => readingOfPayrollRuns(await listPayrollRunsResult(u, t)),
   "it-devices-offline": async (u, t) => readingOfDevices(await listDevicesResult(u, t)),
+  // Finance (DW-7e-2). Every route refuses outright (no own-rows fallback), so no scope check is needed here.
+  "finance-payments-to-confirm": async (u, t) => readingOfPendingPayments(await listPendingPaymentsResult(u, t)),
+  "finance-overdue-receivables": async (u, t) => readingOfOverdue(await getArAgingResult(u, t)),
+  // The CURRENT period only. No period today is "Unavailable: No current period", never a count and never "Ready to close".
+  "finance-close-progress": async (u, t) => {
+    const periods = await listPeriodsResult(u, t);
+    if (periods.kind !== "ok") return periods.kind === "forbidden" ? FORBIDDEN_READING : UNAVAILABLE_READING;
+    const period = currentPeriod(periods.data, todayIsoInDisplayZone());
+    return period ? readingOfClose(period, await getCloseReadinessResult(u, t, period.id)) : NO_CURRENT_PERIOD;
+  },
+  // The number of integrity checks that FAILED. Every check is read; one that could not be is never counted as passed.
+  "finance-integrity-findings": async (u, t) => {
+    const [ledger, ar, ap, assets, treasury, tb] = await Promise.all([
+      verifyLedgerResult(u, t), reconcileArResult(u, t), reconcileApResult(u, t), reconcileAssetsResult(u, t),
+      reconcileTreasuryResult(u, t), getTrialBalanceResult(u, t),
+    ]);
+    return readingOfIntegrity([
+      { label: "Ledger chain", result: ledger },
+      { label: "Receivables", result: ar },
+      { label: "Payables", result: ap },
+      { label: "Fixed assets", result: assets },
+      { label: "Treasury", result: treasury },
+      // A trial balance's verdict is `balanced`; a payload without it is not a verdict.
+      { label: "Trial balance", result: tb.kind === "ok" ? { kind: "ok", data: { clean: tb.data.balanced } } : tb },
+    ]);
+  },
 };
 
 /** One tile's reading. A reader that throws (a 5xx, a timeout) is this tile's failure, not the block's. */

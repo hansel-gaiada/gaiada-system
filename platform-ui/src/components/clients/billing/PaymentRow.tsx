@@ -21,7 +21,10 @@ import "./billing.css";
 // guessing from an id here would be a second copy of a rule the server owns.
 const METHOD_LABEL: Record<string, string> = { bank_transfer: "Bank transfer", card: "Card", cash: "Cash", other: "Other" };
 
-export function PaymentRow({ payment, clientId }: { payment: InvoicePayment; clientId: string }) {
+// `clientId` is the client hub's own client. The company-wide queue on Receivables (DW-7e-2) has none, and passes
+// `showClient` instead: a payment whose invoice names no client has a null `clientId`, which is why the decide action
+// does not need one, and the row names the client so a queue of many clients can be told apart.
+export function PaymentRow({ payment, clientId, showClient = false }: { payment: InvoicePayment; clientId?: string | null; showClient?: boolean }) {
   const [state, action, pending] = useActionState<BillingActionState | null, FormData>(decidePaymentAction, null);
   const [reason, setReason] = useState("");
   // Which button submitted. Set imperatively on click, before the browser's own submit follows it, rather than
@@ -42,6 +45,14 @@ export function PaymentRow({ payment, clientId }: { payment: InvoicePayment; cli
           <ClientVisibilityMarker clientVisible={payment.clientVisible} />
         </span>
       </div>
+      {showClient && (
+        <p className="bl-payment__meta">
+          Client:{" "}
+          {payment.clientId && payment.clientName
+            ? <Link href={`/clients/${payment.clientId}/billing`}>{payment.clientName}</Link>
+            : payment.clientName ?? "Internal (no client)"}
+        </p>
+      )}
       <p className="bl-payment__meta">
         {[
           METHOD_LABEL[payment.method ?? ""] ?? payment.method,
@@ -56,7 +67,7 @@ export function PaymentRow({ payment, clientId }: { payment: InvoicePayment; cli
       {payment.note && <p className="bl-payment__meta">Client&apos;s note: {payment.note}</p>}
 
       <form action={action} className="bl-payment__decide" aria-label="Decide this payment">
-        <input type="hidden" name="clientId" value={clientId} />
+        {clientId && <input type="hidden" name="clientId" value={clientId} />}
         <input type="hidden" name="paymentId" value={payment.id} />
         <input type="hidden" name="decision" defaultValue="" ref={decision} />
         <label className="lux-field">

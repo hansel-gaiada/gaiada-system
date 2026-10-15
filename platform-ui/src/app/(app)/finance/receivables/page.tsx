@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
+import { can, isElevated } from "@/lib/rbac";
+import { listPendingPaymentsResult } from "@/lib/finance-data";
 import { getActiveTenant } from "@/lib/tenant";
 import {
   getArAging, reconcileAr, listPeriods, listArCustomers, listArOpenInvoices, listAccounts,
@@ -9,6 +11,7 @@ import {
 import { Card, KpiTile, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { AgingTable } from "@/components/finance/AgingTable";
+import { PaymentsToConfirm } from "@/components/finance/PaymentsToConfirm";
 import { IssueInvoiceForm, RecordReceiptForm, CreateCustomerForm } from "@/components/finance/ArForms";
 import { IssueCreditNoteForm, CreditNotesTable, WriteOffInvoiceForm } from "@/components/finance/CreditNotesForms";
 
@@ -44,13 +47,21 @@ export default async function FinanceReceivablesPage({
   const current = periods.find((p) => p.startDate <= today && p.endDate >= today);
   const asOf = sp.asOf ?? current?.endDate ?? periods[periods.length - 1]?.endDate ?? today;
 
-  const [rows, rec, customers, openInvoices, accounts, creditNotes] = await Promise.all([
+  // DW-7e-2: the payment queue is offered to whoever may DECIDE a payment. The server rule is Cerbos `invoice` update
+  // (company_admin, the platform operator and the group executive). No capability mirrors it exactly, so this uses the one the
+  // Invoices pages already use for invoice writes (`canBill`): `company.manage` or an elevated role. That is a superset: a
+  // `manager` holds `company.manage` (rbac.ts) yet may only READ invoices, so a manager sees the queue and a Confirm answers
+  // 403 in words ("You don't have permission to decide payments"). Hidden from everyone else, and nothing is read for them.
+  const canDecidePayments = can(me, "company.manage", tenant) || isElevated(me);
+
+  const [rows, rec, customers, openInvoices, accounts, creditNotes, pendingPayments] = await Promise.all([
     getArAging(userId, tenant, asOf),
     reconcileAr(userId, tenant, asOf),
     listArCustomers(userId, tenant),
     listArOpenInvoices(userId, tenant),
     listAccounts(userId, tenant),
     listArCreditNotes(userId, tenant),
+    canDecidePayments ? listPendingPaymentsResult(userId, tenant) : Promise.resolve(null),
   ]);
 
   // The pickers are built from the REAL chart, not a hardcoded list of codes. A form offering `4100`
@@ -98,6 +109,8 @@ export default async function FinanceReceivablesPage({
           <KpiTile label="Net receivable" value={money(rec.position.netReceivable)} foot="what is actually owed" />
         </div>
       ) : null}
+
+      {pendingPayments && <PaymentsToConfirm result={pendingPayments} />}
 
       <Card
         title="Aging"

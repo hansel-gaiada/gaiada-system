@@ -8,13 +8,17 @@ import type { MonitoringSummary } from "./monitoringShared";
 import type { PipelineGate } from "./pipeline";
 import type { Device } from "./it";
 import type { PayrollRun } from "./hr-full";
+import { money } from "./finance";
+import type { ArAgingRow, CloseReadiness, FiscalPeriod } from "./finance";
+import type { InvoicePayment } from "./contracts";
 import type { Guarded } from "./socialShared";
 import { WORKSPACES, hrefFor, isPlanned, type PulseTile } from "./workspaces";
 
 export type PulseReading =
   | { kind: "ok"; value: number; detail?: string }
   | { kind: "forbidden" }
-  | { kind: "unavailable" };
+  /** `detail` says why there is no reading when the cause is known and is not a fault (no current period). */
+  | { kind: "unavailable"; detail?: string };
 
 export interface PulseTileModel {
   key: string;
@@ -73,6 +77,74 @@ export function readingOfPayrollRuns(r: ReadResult<PayrollRun[]>): PulseReading 
     const detail = [toApprove > 0 ? `${toApprove} to approve` : "", toPay > 0 ? `${toPay} to pay` : ""].filter(Boolean).join(", ");
     return { value: toApprove + toPay, ...(detail ? { detail } : {}) };
   });
+}
+
+// ── Finance (DW-7e-2) ───────────────────────────────────────────────────────────────────────────────────────────
+
+/** The most rows `GET invoice-payments` returns (its SQL `LIMIT`). */
+export const PENDING_PAYMENTS_LIMIT = 300;
+
+/** The company-wide pending client payments. The server lists at most 300, so a full page is "300 or more", never a total. */
+export function readingOfPendingPayments(r: ReadResult<Pick<InvoicePayment, "id">[]>): PulseReading {
+  return readingOfResult(r, (rows) => ({
+    value: rows.length,
+    ...(rows.length >= PENDING_PAYMENTS_LIMIT ? { detail: `${PENDING_PAYMENTS_LIMIT} or more` } : {}),
+  }));
+}
+
+const OVERDUE_BUCKETS = ["d1To30", "d31To60", "d61To90", "d90Plus"] as const;
+
+/** The aging is per CUSTOMER (the payload has no invoice count), bucketed by days past due, so the overdue part of a row is
+ *  every bucket after `current`. A presentation total over rows the server computed, as the Finance Overview's own tile. */
+export function overdueOfAging(rows: readonly ArAgingRow[]): { customers: number; amount: number } {
+  let customers = 0;
+  let amount = 0;
+  for (const row of rows) {
+    const owed = OVERDUE_BUCKETS.reduce((n, b) => n + (Number(row[b]) || 0), 0);
+    if (owed > 0) { customers += 1; amount += owed; }
+  }
+  return { customers, amount };
+}
+
+/** Customers with an overdue balance as at today. The aging carries no currency; the ledger's figures are in its own
+ *  currency and every Finance page formats them as `money()` does. */
+export function readingOfOverdue(r: ReadResult<ArAgingRow[]>): PulseReading {
+  return readingOfResult(r, (rows) => {
+    const { customers, amount } = overdueOfAging(rows);
+    return { value: customers, ...(customers > 0 ? { detail: `customers · ${money(amount)} overdue` } : {}) };
+  });
+}
+
+/** The fiscal period today falls in. Dates are `YYYY-MM-DD`, compared as text. */
+export function currentPeriod(periods: readonly FiscalPeriod[], today: string): FiscalPeriod | null {
+  return periods.find((p) => p.startDate <= today && p.endDate >= today) ?? null;
+}
+
+export const NO_CURRENT_PERIOD: PulseReading = { kind: "unavailable", detail: "No current period" };
+
+/** Blockers on closing the CURRENT period. No period today, or a payload that is not `{blockers: []}`, is no reading. */
+export function readingOfClose(period: FiscalPeriod, r: ReadResult<CloseReadiness>): PulseReading {
+  return readingOfResult(r, (c) => c.blockers.length === 0
+    ? { value: 0, detail: period.state === "HARD_LOCK" ? "Already closed" : "Ready to close" }
+    : { value: c.blockers.length, detail: period.name });
+}
+
+export interface IntegrityCheck {
+  label: string;
+  /** Each check's own verdict: `clean` is true when it found nothing. Anything else is not a verdict. */
+  result: ReadResult<{ clean: boolean }>;
+}
+
+/** The ledger and tie-out verdicts, as the number that FAILED. A check that could not be read is never counted as passed:
+ *  one refusal makes the tile "No access" (it outranks a failure, the more precise answer), and one failure, or a payload
+ *  whose `clean` is not a boolean, makes it unavailable. */
+export function readingOfIntegrity(checks: readonly IntegrityCheck[]): PulseReading {
+  if (checks.some((c) => c.result.kind === "forbidden")) return { kind: "forbidden" };
+  if (checks.some((c) => c.result.kind === "unavailable")) return UNAVAILABLE_READING;
+  const verdicts = checks.map((c) => (c.result.kind === "ok" ? c.result.data.clean : undefined));
+  if (verdicts.some((v) => typeof v !== "boolean")) return UNAVAILABLE_READING;
+  const failed = checks.filter((_, i) => verdicts[i] === false).map((c) => c.label);
+  return { kind: "ok", value: failed.length, detail: failed.length === 0 ? `${checks.length} of ${checks.length} checks tie` : failed.join(", ") };
 }
 
 /** The IT device list: devices whose status is `offline` (the registry's own status, written by the heartbeat and the

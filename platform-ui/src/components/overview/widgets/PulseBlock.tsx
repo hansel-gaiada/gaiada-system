@@ -14,7 +14,7 @@ export function PulseBlock({ tiles }: { tiles: readonly PulseTileModel[] }) {
             <>
               <span className="ov-nums__label">{t.label}</span>
               <span className={`ov-nums__value${t.reading.kind === "ok" ? "" : " ov-nums__value--none"}`}>{pulseValueText(t.reading)}</span>
-              {t.reading.kind === "ok" && t.reading.detail && <span className="ov-nums__detail">{t.reading.detail}</span>}
+              {(t.reading.kind === "ok" || t.reading.kind === "unavailable") && t.reading.detail && <span className="ov-nums__detail">{t.reading.detail}</span>}
             </>
           );
           return (
