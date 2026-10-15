@@ -3537,6 +3537,11 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     if (m === "POST") return { status: 201, json: { id: `dev-new-${Date.now()}` } };
     return ok(DEVICES[devListMatch[1]] ?? []);
   }
+  // DW-9a: the topology read (`lib/it.ts::getTopology`) wants an OBJECT, and the final GET catch-all answers an ARRAY. That crashed
+  // `/it/topology` ("a is not iterable"), a row of the IT workspace's Network menu, until DW-7k made the reader treat a wrong-shape 200 like
+  // its 404. Kept explicit all the same, as this file's rule asks: the demo has no discovery collector, so it answers what a backend that
+  // predates the endpoint answers (a 404), and the page shows its honest "never synced" state.
+  if (/^\/api\/[^/]+\/it\/topology$/.test(p)) return { status: 404, json: { error: "not found" } };
   // ======== DW-7h: IT security on the ERP side (lib/itSecurity.ts, BFF §52; data in lib/demoItSecurity.ts) ========
   // The four GETs (connections, sign-ins, alerts, blocks) and the three POSTs (revoke a session, block an address, lift a block).
   // These MUST be explicit: the final GET catch-all answers `ok([])`, an array, and each reader checks for an object. The sample

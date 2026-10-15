@@ -124,3 +124,45 @@ export async function loginAsWebDevHead(page: Page): Promise<void> {
   await page.getByRole("button", { name: /sign in/i }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
+
+/**
+ * DW-9a: seven more DEMO_MODE-only logins for the department workspace persona e2e (e2e/workspace-personas.spec.ts), each
+ * with exactly ONE grant (src/lib/demoFixtures.ts, ME_SEO .. ME_RESORT; src/lib/demoIdentity.ts maps the address). None is a
+ * PersonaKey, for the reason `DEMO_PLACED_WEBDEV_EMAIL` is not: the real-backend personas hold no placed SEO, Social Media,
+ * Creatives or Viceroy employee, and a key here would silently log in as nobody against a real backend. DEMO_MODE only.
+ *
+ *   seo       u-seo            `member` of the agency, placed in SEO > On-page > SEO Specialist
+ *   social    u-social         `member` of the agency, placed in Social Media
+ *   creative  u-creative       `member` of the agency, placed in Creatives > Design
+ *   hr        u-hr             `hr_staff` on the agency, unplaced
+ *   finance   u-finance-staff  `finance_staff` on the agency, unplaced
+ *   it        u-it             `it_admin` on the agency, unplaced
+ *   resort    u-resort         `member` of Viceroy (generic pack), placed in Front Office; plant the `co-resort` tenant cookie
+ */
+export const DEMO_DEPT_EMAILS = {
+  seo: "seo-specialist@gaiada.com",
+  social: "social@gaiada.com",
+  creative: "creative@gaiada.com",
+  hr: "hr-staff@gaiada.com",
+  finance: "finance-staff@gaiada.com",
+  it: "it-admin@gaiada.com",
+  resort: "resort-staff@gaiada.com",
+} as const;
+
+async function loginAsEmail(page: Page, email: string): Promise<void> {
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(email);
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
+}
+
+export const loginAsPlacedSeo = (page: Page) => loginAsEmail(page, DEMO_DEPT_EMAILS.seo);
+export const loginAsPlacedSocial = (page: Page) => loginAsEmail(page, DEMO_DEPT_EMAILS.social);
+export const loginAsPlacedCreative = (page: Page) => loginAsEmail(page, DEMO_DEPT_EMAILS.creative);
+export const loginAsHrStaff = (page: Page) => loginAsEmail(page, DEMO_DEPT_EMAILS.hr);
+export const loginAsFinanceStaff = (page: Page) => loginAsEmail(page, DEMO_DEPT_EMAILS.finance);
+export const loginAsItAdmin = (page: Page) => loginAsEmail(page, DEMO_DEPT_EMAILS.it);
+export const loginAsResortStaff = (page: Page) => loginAsEmail(page, DEMO_DEPT_EMAILS.resort);
+
+/** The group owner (`owner` on every company, unplaced): `group-owner@gaiada.com` -> demo-owner (PV1-01). Not a PersonaKey: no seeded persona is an owner. */
+export const loginAsGroupOwner = (page: Page) => loginAsEmail(page, "group-owner@gaiada.com");
