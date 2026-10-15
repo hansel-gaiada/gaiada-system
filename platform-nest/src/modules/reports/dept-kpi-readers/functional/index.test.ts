@@ -16,6 +16,9 @@ const FINANCE_GATED = ["gm.margin", "finance.close_on_time", "finance.overdue_re
 /** HR's readers: f3 to f5 read HR's tables, f6 reads the LMS module's (its walls also open hr). */
 const HR_GATED = ["hr.leave_decided_2d", "hr.payroll_on_time", "hr.time_to_hire"];
 const LMS_GATED = ["hr.mandatory_learning"];
+/** IT's readers: f10 and f12 read the IT tables, f11 reads HR's separations (so it is gated on hr, not it). */
+const IT_GATED = ["it.uptime", "it.devices_alerting"];
+const IT_HR_GATED = ["it.leaver_access_closed"];
 
 describe("functional readers: registration and the module gate", () => {
   beforeEach(() => isModuleEnabled.mockReset());
@@ -25,6 +28,7 @@ describe("functional readers: registration and the module gate", () => {
       [
         "finance.close_on_time", "finance.overdue_receivables_share", "finance.payments_confirmed_1d", "gm.margin",
         "hr.leave_decided_2d", "hr.mandatory_learning", "hr.payroll_on_time", "hr.time_to_hire",
+        "it.devices_alerting", "it.leaver_access_closed", "it.uptime",
       ],
     );
   });
@@ -47,6 +51,14 @@ describe("functional readers: registration and the module gate", () => {
     expect(isModuleEnabled).toHaveBeenCalledTimes(HR_GATED.length + LMS_GATED.length);
     expect(new Set(isModuleEnabled.mock.calls.map(([t, k]) => `${t}/${k}`))).toEqual(new Set(["t-1/hr", "t-1/lms"]));
     expect(isModuleEnabled.mock.calls.filter(([, k]) => k === "lms")).toHaveLength(LMS_GATED.length);
+  });
+
+  it("IT's readers answer null without running when the company lacks the module they read (it for f10 and f12, hr for f11)", async () => {
+    isModuleEnabled.mockResolvedValue(false);
+    for (const id of [...IT_GATED, ...IT_HR_GATED]) expect(await FUNCTIONAL_READERS[id](ctx), id).toBeNull();
+    expect(isModuleEnabled).toHaveBeenCalledTimes(IT_GATED.length + IT_HR_GATED.length);
+    expect(new Set(isModuleEnabled.mock.calls.map(([t, k]) => `${t}/${k}`))).toEqual(new Set(["t-1/it", "t-1/hr"]));
+    expect(isModuleEnabled.mock.calls.filter(([, k]) => k === "it")).toHaveLength(IT_GATED.length);
   });
 
   it("runs the reader when the company has the module", async () => {

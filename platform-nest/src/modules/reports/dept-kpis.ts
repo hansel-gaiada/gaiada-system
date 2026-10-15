@@ -103,9 +103,9 @@ export const DEPT_KPI_SETS: Readonly<Record<WorkspaceSlug, readonly DeptKpiDef[]
     pct("payments-confirmed-1d", "Client payments confirmed within 1 day", "up_good", read("finance.payments_confirmed_1d"), 0.95, 0.05),
   ],
   it: [
-    pct("uptime", "Device and network uptime", "up_good", MODULE, 0.995, 0.005),
-    pct("requests-within-sla", "Account and device requests resolved within the SLA", "up_good", MODULE, 0.9, 0.05),
-    { key: "open-threat-alerts", label: "Open threat alerts", unit: "count", direction: "down_good", reader: MODULE, suggestedTarget: 0, suggestedTolerance: 2 },
+    pct("uptime", "Device and network uptime", "up_good", read("it.uptime"), 0.995, 0.005),
+    pct("requests-within-sla", "Account and device requests resolved within the SLA", "up_good", read("it.leaver_access_closed"), 0.9, 0.05),
+    { key: "open-threat-alerts", label: "Open threat alerts", unit: "count", direction: "down_good", reader: read("it.devices_alerting"), suggestedTarget: 0, suggestedTolerance: 2 },
   ],
   generic: [
     pct("projects-on-time", "Projects on time", "up_good", dept("delivery.milestone_hit_rate"), 0.85, 0.05),

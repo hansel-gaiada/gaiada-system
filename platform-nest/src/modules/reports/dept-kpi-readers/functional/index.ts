@@ -11,6 +11,8 @@ import { timeToHire } from "./hr-hiring";
 import { leaveDecided2d } from "./hr-leave";
 import { mandatoryLearning } from "./hr-learning";
 import { payrollOnTime } from "./hr-payroll";
+import { itLeaverAccessClosed } from "./it-access";
+import { itDevicesAlerting, itUptime } from "./it-devices";
 import { paymentsConfirmed1d } from "./payments-confirmed";
 
 export const FUNCTIONAL_READERS: Record<string, ModuleKpiReader> = {
@@ -25,4 +27,8 @@ export const FUNCTIONAL_READERS: Record<string, ModuleKpiReader> = {
   "finance.close_on_time": gated("finance", closeOnTime),
   "finance.overdue_receivables_share": gated("finance", overdueReceivablesShare),
   "finance.payments_confirmed_1d": paymentsConfirmed1d,
+  // IT (f10 and f12 read the IT tables, tenant wall only; f11 reads HR's separations, so it is gated on `hr`)
+  "it.uptime": gated("it", itUptime),
+  "it.leaver_access_closed": gated("hr", itLeaverAccessClosed),
+  "it.devices_alerting": gated("it", itDevicesAlerting),
 };
