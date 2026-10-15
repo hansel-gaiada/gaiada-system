@@ -79,6 +79,8 @@ test.describe("My performance (PV7-06)", () => {
     await expect(link("Appraisal", "My appraisals")).toHaveAttribute("href", "/appraisals/mine");
     await expect(link("Learning", "My learning")).toHaveAttribute("href", "/me/learning");
     await expect(link("Your time", "My timesheet")).toHaveAttribute("href", "/timesheets");
-    await expect(link("Activity", "Open my activity")).toHaveAttribute("href", "/pm?view=productivity");
+    // MY_ACTIVITY_HREF (components/overview/widgets/MyActivityBlock.tsx): DW-4i moved the year map to Analytics › My
+    // activity, and the page follows that constant. Keep this literal in step with it.
+    await expect(link("Activity", "Open my activity")).toHaveAttribute("href", "/analytics/activity");
   });
 });
