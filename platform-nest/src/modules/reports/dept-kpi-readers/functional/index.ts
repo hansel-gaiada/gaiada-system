@@ -7,11 +7,20 @@ import { gated } from "../gated";
 import type { ModuleKpiReader } from "../types";
 import { closeOnTime, overdueReceivablesShare } from "./finance";
 import { gmMargin } from "./gm";
+import { timeToHire } from "./hr-hiring";
+import { leaveDecided2d } from "./hr-leave";
+import { mandatoryLearning } from "./hr-learning";
+import { payrollOnTime } from "./hr-payroll";
 import { paymentsConfirmed1d } from "./payments-confirmed";
 
 export const FUNCTIONAL_READERS: Record<string, ModuleKpiReader> = {
   // GM
   "gm.margin": gated("finance", gmMargin),
+  // HR (f6 reads the LMS module's tables, so it is gated on `lms`; its walls also open `hr`)
+  "hr.leave_decided_2d": gated("hr", leaveDecided2d),
+  "hr.payroll_on_time": gated("hr", payrollOnTime),
+  "hr.time_to_hire": gated("hr", timeToHire),
+  "hr.mandatory_learning": gated("lms", mandatoryLearning),
   // Finance
   "finance.close_on_time": gated("finance", closeOnTime),
   "finance.overdue_receivables_share": gated("finance", overdueReceivablesShare),

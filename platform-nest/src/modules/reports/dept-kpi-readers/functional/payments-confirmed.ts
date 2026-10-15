@@ -15,13 +15,11 @@ import { withTenants } from "../../../../db";
 import { addDays } from "../../../hr/working-days";
 import type { ModuleKpiReader } from "../types";
 import { localDateSql, windowEndSql, windowStartSql } from "../scope";
-import { loadWorkingCalendar } from "./working-calendar";
+import { HOLIDAY_LOOKAHEAD_DAYS, loadWorkingCalendar } from "./working-calendar";
 import { deadlineResolver } from "./working-deadline";
 
 /** Working days allowed for a decision (DW-D30: "1 day"). */
 export const PAYMENT_DECISION_WORKING_DAYS = 1;
-/** Holidays are read this far past the window's end, enough for any deadline a payment created in the window can have. */
-const HOLIDAY_LOOKAHEAD_DAYS = 60;
 
 interface Group {
   created_day: string;

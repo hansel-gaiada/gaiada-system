@@ -10,6 +10,9 @@
 import { withTenants } from "../../../../db";
 import type { WorkingCalendar } from "../../../hr/working-days";
 
+/** Holidays are read this far past a window's end: enough for any "within N working days" deadline of a row created in the window. */
+export const HOLIDAY_LOOKAHEAD_DAYS = 60;
+
 /** The calendar for holidays between `fromIso` and `toIso` (inclusive ISO dates). */
 export async function loadWorkingCalendar(tenantId: string, fromIso: string, toIso: string): Promise<WorkingCalendar> {
   return withTenants(

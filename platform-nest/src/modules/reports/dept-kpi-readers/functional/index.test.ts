@@ -13,13 +13,19 @@ import { gated } from "../gated";
 const ctx = { tenantId: "t-1", unitId: "u-1", periodKind: "month" as const, start: "2026-10-01", end: "2026-10-31", asOf: "2026-10-14" };
 /** The readers over the finance module's tables (the payments reader reads a core table and is not gated). */
 const FINANCE_GATED = ["gm.margin", "finance.close_on_time", "finance.overdue_receivables_share"];
+/** HR's readers: f3 to f5 read HR's tables, f6 reads the LMS module's (its walls also open hr). */
+const HR_GATED = ["hr.leave_decided_2d", "hr.payroll_on_time", "hr.time_to_hire"];
+const LMS_GATED = ["hr.mandatory_learning"];
 
 describe("functional readers: registration and the module gate", () => {
   beforeEach(() => isModuleEnabled.mockReset());
 
-  it("registers the four DW-7j readers under their catalogue ids", () => {
+  it("registers the DW-7j readers under their catalogue ids", () => {
     expect(Object.keys(FUNCTIONAL_READERS).sort()).toEqual(
-      ["finance.close_on_time", "finance.overdue_receivables_share", "finance.payments_confirmed_1d", "gm.margin"],
+      [
+        "finance.close_on_time", "finance.overdue_receivables_share", "finance.payments_confirmed_1d", "gm.margin",
+        "hr.leave_decided_2d", "hr.mandatory_learning", "hr.payroll_on_time", "hr.time_to_hire",
+      ],
     );
   });
 
@@ -33,6 +39,14 @@ describe("functional readers: registration and the module gate", () => {
     for (const id of FINANCE_GATED) expect(await FUNCTIONAL_READERS[id](ctx), id).toBeNull();
     expect(isModuleEnabled).toHaveBeenCalledTimes(FINANCE_GATED.length);
     expect(new Set(isModuleEnabled.mock.calls.map(([t, k]) => `${t}/${k}`))).toEqual(new Set(["t-1/finance"]));
+  });
+
+  it("HR's readers answer null without running when the company lacks the module they read (hr for f3 to f5, lms for f6)", async () => {
+    isModuleEnabled.mockResolvedValue(false);
+    for (const id of [...HR_GATED, ...LMS_GATED]) expect(await FUNCTIONAL_READERS[id](ctx), id).toBeNull();
+    expect(isModuleEnabled).toHaveBeenCalledTimes(HR_GATED.length + LMS_GATED.length);
+    expect(new Set(isModuleEnabled.mock.calls.map(([t, k]) => `${t}/${k}`))).toEqual(new Set(["t-1/hr", "t-1/lms"]));
+    expect(isModuleEnabled.mock.calls.filter(([, k]) => k === "lms")).toHaveLength(LMS_GATED.length);
   });
 
   it("runs the reader when the company has the module", async () => {

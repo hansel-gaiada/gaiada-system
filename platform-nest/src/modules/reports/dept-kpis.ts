@@ -92,10 +92,10 @@ export const DEPT_KPI_SETS: Readonly<Record<WorkspaceSlug, readonly DeptKpiDef[]
     pct("departments-in-good-condition", "Departments in good condition", "up_good", { kind: "derived", source: "departments_in_good_condition" }, 0.8, 0.2),
   ],
   hr: [
-    pct("leave-decided-2d", "Leave decided within 2 days", "up_good", MODULE, 0.95, 0.05),
-    pct("payroll-on-time", "Payroll published on time", "up_good", MODULE, 1, 0),
-    { key: "time-to-hire", label: "Time to hire", unit: "minutes", direction: "down_good", reader: MODULE, suggestedTarget: 30 * DAY, suggestedTolerance: 10 * DAY },
-    pct("mandatory-learning", "Mandatory learning complete", "up_good", MODULE, 1, 0.05),
+    pct("leave-decided-2d", "Leave decided within 2 days", "up_good", read("hr.leave_decided_2d"), 0.95, 0.05),
+    pct("payroll-on-time", "Payroll published on time", "up_good", read("hr.payroll_on_time"), 1, 0),
+    { key: "time-to-hire", label: "Time to hire", unit: "minutes", direction: "down_good", reader: read("hr.time_to_hire"), suggestedTarget: 30 * DAY, suggestedTolerance: 10 * DAY },
+    pct("mandatory-learning", "Mandatory learning complete", "up_good", read("hr.mandatory_learning"), 1, 0.05),
   ],
   finance: [
     pct("close-on-time", "Period closed on time", "up_good", read("finance.close_on_time"), 1, 0),
