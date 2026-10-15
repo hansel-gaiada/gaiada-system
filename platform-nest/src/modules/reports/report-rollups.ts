@@ -69,6 +69,29 @@ function toFactSums(row: Record<string, string | null>): FactSums {
 }
 
 const SUM_SELECT = FACT_SUM_COLUMNS.map((c) => `COALESCE(SUM(${c}), 0) AS ${c}`).join(", ");
+/** The same sums with the columns qualified by the `report_work_facts` alias `f`, for the client
+ *  regroup that joins `projects` and `clients` (PV7-01). */
+const SUM_SELECT_F = FACT_SUM_COLUMNS.map((c) => `COALESCE(SUM(f.${c}), 0) AS ${c}`).join(", ");
+
+/** PV7-01 — which projects count toward a client, in SQL. A project joins a client only through
+ *  `projects.client_id`, and BOTH shapes of internal work are out: `projects.is_internal` and the
+ *  sentinel `clients.is_internal` (the two shapes `dept-kpi-readers/scope.ts` excludes), plus
+ *  anything soft-deleted. Callers alias `projects p` and `clients c`. */
+export const CLIENT_PROJECT_ELIGIBLE_SQL = `p.deleted_at IS NULL AND c.deleted_at IS NULL AND NOT p.is_internal AND NOT c.is_internal`;
+
+/** project id -> client id for every project that counts toward a client (see
+ *  `CLIENT_PROJECT_ELIGIBLE_SQL`). Milestone, flow and overdue rows regroup through this map the
+ *  way flow already maps project -> department. Reads the CURRENT `projects.client_id`, so a live
+ *  range follows a moved project; a sealed period keeps its stored documents. */
+async function loadProjectClientMap(client: PoolClient, tenantId: string): Promise<Map<string, string>> {
+  const { rows } = await client.query<{ id: string; client_id: string }>(
+    `SELECT p.id, p.client_id FROM projects p
+       JOIN clients c ON c.id = p.client_id AND c.tenant_id = p.tenant_id
+      WHERE p.tenant_id = $1 AND ${CLIENT_PROJECT_ELIGIBLE_SQL}`,
+    [tenantId],
+  );
+  return new Map(rows.map((r) => [r.id, r.client_id]));
+}
 
 /** Metrics whose numerator/denominator are plain `report_work_facts` column sums (§5.4 class A/R
  *  metrics 1,2,3,4,6,9,11,12,13,15,16,17,21 — 13 of the 21 seeded rows). Everything else (5,7,8,10,
@@ -123,6 +146,23 @@ async function computeOwnFactRollups(client: PoolClient, tenantId: string, start
   );
   for (const r of project.rows) {
     rows.push(...rowsFromFactSums(metricsForGrain("project"), toFactSums(r), { projectId: r.project_id }));
+  }
+
+  // Client grain (PV7-01): the same fact sums regrouped through `projects.client_id`. The sums are
+  // taken over ALL of a client's project rows at once, so a ratio is Sum(numerator) / Sum(denominator)
+  // across the projects, never a mean of per-project ratios. Rows with no project (non-project work)
+  // have no client and are not in any client's figures.
+  const byClient = await client.query<{ client_id: string } & Record<FactSumColumn, string>>(
+    `SELECT p.client_id, ${SUM_SELECT_F}
+       FROM report_work_facts f
+       JOIN projects p ON p.id = f.project_id AND p.tenant_id = f.tenant_id
+       JOIN clients c ON c.id = p.client_id AND c.tenant_id = p.tenant_id
+      WHERE f.tenant_id = $1 AND f.fact_date BETWEEN $2::date AND $3::date AND ${CLIENT_PROJECT_ELIGIBLE_SQL}
+      GROUP BY p.client_id`,
+    [tenantId, start, end],
+  );
+  for (const r of byClient.rows) {
+    rows.push(...rowsFromFactSums(metricsForGrain("client"), toFactSums(r), { clientId: r.client_id }));
   }
 
   // Department grain: grouped by the ROLLED `department_node_id` (§3.1 — divisions roll to their
@@ -217,6 +257,21 @@ async function computeMilestoneHitRate(client: PoolClient, tenantId: string, sta
     rows.push({ metricKey: "delivery.milestone_hit_rate", numerator: Number(r.hit), denominator: Number(r.due), dimensions: { projectId: r.project_id } });
   }
 
+  // Client grain (PV7-01): Sum(hit) / Sum(due) across the client's projects, never a mean of rates.
+  const byClient = await client.query<{ client_id: string; due: string; hit: string }>(
+    `SELECT p.client_id, count(*) AS due, count(*) FILTER (WHERE m.status = 'done') AS hit
+       FROM pm_milestones m
+       JOIN projects p ON p.id = m.project_id AND p.tenant_id = m.tenant_id
+       JOIN clients c ON c.id = p.client_id AND c.tenant_id = p.tenant_id
+      WHERE m.tenant_id = $1 AND m.deleted_at IS NULL AND m.due_date BETWEEN $2::date AND $3::date
+        AND ${CLIENT_PROJECT_ELIGIBLE_SQL}
+      GROUP BY p.client_id`,
+    [tenantId, start, end],
+  );
+  for (const r of byClient.rows) {
+    rows.push({ metricKey: "delivery.milestone_hit_rate", numerator: Number(r.hit), denominator: Number(r.due), dimensions: { clientId: r.client_id } });
+  }
+
   const byDept = await client.query<{ department_node_id: string | null; due: string; hit: string }>(
     `SELECT p.department_id AS department_node_id, count(*) AS due, count(*) FILTER (WHERE m.status = 'done') AS hit
        FROM pm_milestones m JOIN projects p ON p.id = m.project_id AND p.tenant_id = m.tenant_id
@@ -275,6 +330,8 @@ async function computeFlowMetrics(client: PoolClient, tenantId: string, start: s
   }
 
   const deptOf = new Map(projects.rows.map((p) => [p.id, p.department_id]));
+  const clientOf = await loadProjectClientMap(client, tenantId);
+  const clientTotals = new Map<string, { open: number; blocked: number; progressWeighted: number }>();
   const deptTotals = new Map<string, { open: number; blocked: number }>();
   let companyOpen = 0;
   let companyBlocked = 0;
@@ -296,6 +353,15 @@ async function computeFlowMetrics(client: PoolClient, tenantId: string, start: s
     rows.push({ metricKey: "flow.blocked_share", numerator: blockedSum, denominator: openSum, dimensions: { projectId } });
     rows.push({ metricKey: "flow.avg_progress", numerator: progressWeighted, denominator: openSum, dimensions: { projectId } });
 
+    const clientId = clientOf.get(projectId);
+    if (clientId) {
+      const t = clientTotals.get(clientId) ?? { open: 0, blocked: 0, progressWeighted: 0 };
+      t.open += openSum;
+      t.blocked += blockedSum;
+      t.progressWeighted += progressWeighted;
+      clientTotals.set(clientId, t);
+    }
+
     const dept = deptOf.get(projectId);
     if (dept) {
       const t = deptTotals.get(dept) ?? { open: 0, blocked: 0 };
@@ -305,6 +371,15 @@ async function computeFlowMetrics(client: PoolClient, tenantId: string, start: s
     }
     companyOpen += openSum;
     companyBlocked += blockedSum;
+  }
+
+  // Client grain (PV7-01). wip_open_avg keeps the range's DAY COUNT as its denominator (summing the
+  // per-project day counts would multiply the days); the two ratios divide summed numerators by the
+  // summed open counts, never a mean of per-project ratios.
+  for (const [clientId, t] of clientTotals) {
+    rows.push({ metricKey: "flow.wip_open_avg", numerator: t.open, denominator: days, dimensions: { clientId } });
+    rows.push({ metricKey: "flow.blocked_share", numerator: t.blocked, denominator: t.open, dimensions: { clientId } });
+    rows.push({ metricKey: "flow.avg_progress", numerator: t.progressWeighted, denominator: t.open, dimensions: { clientId } });
   }
 
   for (const [dept, t] of deptTotals) {
@@ -585,6 +660,8 @@ async function computeOverdueOpen(client: PoolClient, tenantId: string, end: str
   const byPerson = new Map<string, number>();
   const byProject = new Map<string, number>();
   const byDept = new Map<string, number>();
+  const byClient = new Map<string, number>();
+  const clientOf = await loadProjectClientMap(client, tenantId);
   let company = 0;
 
   const doneIdsByProject = new Map<string, Set<string>>();
@@ -599,12 +676,17 @@ async function computeOverdueOpen(client: PoolClient, tenantId: string, end: str
     if (person) byPerson.set(person, (byPerson.get(person) ?? 0) + 1);
     byProject.set(r.project_id, (byProject.get(r.project_id) ?? 0) + 1);
     if (r.department_id) byDept.set(r.department_id, (byDept.get(r.department_id) ?? 0) + 1);
+    const clientId = clientOf.get(r.project_id);
+    if (clientId) byClient.set(clientId, (byClient.get(clientId) ?? 0) + 1);
     company += 1;
   }
 
   const out: RollupRow[] = [];
   for (const [userId, n] of byPerson) out.push({ metricKey: "discipline.overdue_open", numerator: n, dimensions: { userId } });
   for (const [projectId, n] of byProject) out.push({ metricKey: "discipline.overdue_open", numerator: n, dimensions: { projectId } });
+  // Client grain (PV7-01): a point-in-time count at the range end, summed across the client's
+  // projects (never across days).
+  for (const [clientId, n] of byClient) out.push({ metricKey: "discipline.overdue_open", numerator: n, dimensions: { clientId } });
   for (const [unit, n] of byDept) out.push({ metricKey: "discipline.overdue_open", numerator: n, dimensions: { unit } });
   out.push({ metricKey: "discipline.overdue_open", numerator: company, dimensions: {} });
   return out;
