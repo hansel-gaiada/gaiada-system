@@ -1,6 +1,10 @@
 # Runbook — Keycloak security events, no email reset, and the `view-events` role (DW-7h)
 
-**Ticket:** DW-7h, BFF contract `docs/FRONTEND-BFF-CONTRACT.md` §52.8 and §52.9. **Status of this document: PLANNED, not applied.**
+**Ticket:** DW-7h, BFF contract `docs/FRONTEND-BFF-CONTRACT.md` §52.8 and §52.9. **Status: APPLIED on the live realm 2026-10-15** by the DW-7 session.
+It used one kcadm sign-in with the container's own `KC_BOOTSTRAP_ADMIN_*` env, so the password never left the container. A backup was taken first
+(`~/gaiada-realm-backups/*-before-dw7h-20261015-144600.json` on gda-aicenter). Every check below passed: the events API answers 200, and the live
+login page has no "Forgot password?". Before: events off (all types listed, jboss-logging listener), `resetPasswordAllowed: true`, and the provisioner
+held `view-users` and `manage-users`.
 Every command below is a **live Keycloak change** on gda-aicenter. Nothing here has been run against any server. The owner (or whoever holds
 `KEYCLOAK_ADMIN_PASSWORD`) reviews and runs each step. The repo realm file `infra/compose/keycloak/gaiada-realm.json` already carries the same
 settings for a fresh install; a running realm is not changed by it (the importer runs once, on first boot).
