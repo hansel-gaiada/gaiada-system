@@ -20,6 +20,64 @@ async function platformGet(path: string, principal: Principal): Promise<string> 
   return JSON.stringify(await res.json());
 }
 
+const KNOWLEDGE_LIMIT_DEFAULT = 5; // the knowledge store's own default topK
+const KNOWLEDGE_LIMIT_MAX = 20; // the platform route's maximum
+const TENANT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+interface InternalKnowledge {
+  status: "ok" | "unavailable" | "not_permitted";
+  hits: unknown[];
+  note?: string;
+}
+
+/** DW-D26: the internal tier, from the platform's `GET /api/:tenantId/knowledge/search` (BFF §46.1), which re-checks every hit
+ *  against the caller's read right on its source record. Never throws: a refusal or an outage is REPORTED, as a status and a note,
+ *  and never reads as "no internal hits". */
+async function internalKnowledge(tenantId: string, query: string, limit: number, principal: Principal): Promise<InternalKnowledge> {
+  const unavailable = (why: string): InternalKnowledge => ({
+    status: "unavailable",
+    hits: [],
+    note: `Internal knowledge was unavailable (${why}); only public knowledge is shown.`,
+  });
+  let res: Response;
+  try {
+    res = await fetch(`${config.platformUrl}/api/${tenantId}/knowledge/search?q=${encodeURIComponent(query)}&limit=${limit}`, {
+      headers: { ...oboHeaders(principal, config.platformToken) },
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    return unavailable("the platform did not answer");
+  }
+  if (res.status === 401 || res.status === 403) {
+    return { status: "not_permitted", hits: [], note: "Internal knowledge is not permitted for this identity in this company; only public knowledge is shown." };
+  }
+  if (!res.ok) return unavailable(res.status === 400 ? "the query is too short or too long for an internal search" : `the platform answered ${res.status}`);
+  let body: { results?: unknown };
+  try {
+    body = (await res.json()) as { results?: unknown };
+  } catch {
+    return unavailable("unreadable answer");
+  }
+  if (!Array.isArray(body.results)) return unavailable("unreadable answer");
+  const hits = (body.results as Array<Record<string, unknown>>)
+    .filter((r) => r && typeof r.sourceRef === "string")
+    .map((r) => {
+      const title = typeof r.title === "string" ? r.title : "";
+      const snippet = typeof r.snippet === "string" ? r.snippet : "";
+      return {
+        tenantId,
+        sourceRef: r.sourceRef as string,
+        kind: typeof r.family === "string" ? r.family : "doc",
+        text: title && snippet ? `${title}\n${snippet}` : title || snippet,
+        score: typeof r.score === "number" ? r.score : 0,
+        audience: "internal",
+        title,
+        ...(typeof r.href === "string" ? { href: r.href } : {}),
+      };
+    });
+  return { status: "ok", hits };
+}
+
 export function registerPlatformTools(): void {
   registerTool({
     name: "projects.list",
@@ -171,16 +229,24 @@ export function registerPlatformTools(): void {
   registerTool({
     name: "knowledge.search",
     description:
-      "Search company knowledge (WS8 RAG store). Returns two tiers, and each hit says which it is: " +
+      "Search company knowledge. Two tiers, and each hit says which it is: " +
       "`public` — published company information from gaiada.com, available to anyone; " +
-      "`internal` — projects, tasks, clients, meetings, reports, files, people and org structure, " +
-      "returned ONLY when your identity resolves to a company you belong to. Never assume an empty " +
-      "result means the fact does not exist — it may mean you are not authorized to see it.",
-    minAssurance: "low", // the knowledge service resolves the envelope and pre-filters (D9)
+      "`internal` — company records (clients, projects, tasks, deliverables, meetings, documents, files), " +
+      "searched ONLY when you pass `tenantId` AND your identity resolves to a member of that company. " +
+      "Internal hits are only records you could open in the ERP: each one is re-checked against your read " +
+      "right on its source record, and reports, people and org structure are never returned. " +
+      "Without `tenantId` (or with no identity) only the public tier is searched and the answer is a plain " +
+      "array of hits. With `tenantId` the answer is `{ hits, internal, public }`, where `internal` says " +
+      "`ok`, `unavailable` or `not_permitted` (with a note): when it is not `ok`, the hits are public-tier " +
+      "only, and an absence of internal hits then means nothing. Never assume an empty result means the " +
+      "fact does not exist — it may mean you are not authorized to see it.",
+    minAssurance: "low", // the platform route (internal) and the knowledge service (public) both resolve the envelope (D9)
     inputSchema: {
       type: "object",
       properties: {
         query: { type: "string" },
+        tenantId: { type: "string", description: "Company id. Optional; required to search that company's internal knowledge." },
+        limit: { type: "number", description: "Most hits to return, 1 to 20 (default 5)." },
         // Optional since D9.4: the public tier is not scope-gated, so a caller with no meaningful
         // scope (an agent, a web widget) can search without inventing one.
         scope: { type: "string", description: "Your current scope, e.g. group chat id. Optional; only narrows internal results." },
@@ -189,20 +255,51 @@ export function registerPlatformTools(): void {
       required: ["query"],
     },
     handler: async (args, principal) => {
-      const res = await fetch(`${config.knowledgeUrl}/search`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...oboHeaders(principal, config.knowledgeToken),
-        },
-        body: JSON.stringify({
-          query: String(args.query ?? ""),
-          scope: String(args.scope ?? ""),
-          ...(args.publicOnly === true ? { publicOnly: true } : {}),
-        }),
+      const query = String(args.query ?? "");
+      const tenantId = typeof args.tenantId === "string" ? args.tenantId.trim() : "";
+      const hasLimit = args.limit !== undefined && args.limit !== null && args.limit !== "";
+      const limit = hasLimit ? Math.min(Math.max(Math.trunc(Number(args.limit)) || KNOWLEDGE_LIMIT_DEFAULT, 1), KNOWLEDGE_LIMIT_MAX) : KNOWLEDGE_LIMIT_DEFAULT;
+      if (tenantId && !TENANT_ID_RE.test(tenantId)) throw new Error("tenantId is not a valid company id");
+
+      // DW-D26 (BFF §46.9). The internal tier is NOT read from the knowledge service here: the store's rule is "every member of
+      // the company", wider than the ERP's own reads. It comes from the platform's per-record-filtered search route instead.
+      // Only a caller with an identity AND a company gets it; everyone else (a lead or client on WhatsApp) gets the public tier
+      // exactly as before.
+      const askInternal = tenantId !== "" && principal.assurance !== "anonymous" && args.publicOnly !== true;
+
+      const publicCall = async (): Promise<unknown[]> => {
+        const res = await fetch(`${config.knowledgeUrl}/search`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...oboHeaders(principal, config.knowledgeToken),
+          },
+          body: JSON.stringify({
+            query,
+            scope: String(args.scope ?? ""),
+            // When the internal tier is asked for it comes from the platform (above), so this call is the public tier only.
+            ...(args.publicOnly === true || askInternal ? { publicOnly: true } : {}),
+            ...(hasLimit ? { topK: limit } : {}),
+          }),
+        });
+        if (!res.ok) throw new Error(`knowledge /search ${res.status}`);
+        return ((await res.json()) as { hits: unknown[] }).hits;
+      };
+
+      if (!askInternal) return JSON.stringify(await publicCall());
+
+      const [internal, pub] = await Promise.allSettled([internalKnowledge(tenantId, query, limit, principal), publicCall()]);
+      const internalOut: InternalKnowledge =
+        internal.status === "fulfilled" ? internal.value : { status: "unavailable", hits: [], note: "Internal knowledge was unavailable; only public knowledge is shown." };
+      // The public tier failing is an error, as it always was, unless the internal tier answered: then its hits are not thrown away.
+      if (pub.status === "rejected" && internalOut.status !== "ok") throw pub.reason;
+      const publicHits = pub.status === "fulfilled" ? pub.value : [];
+      return JSON.stringify({
+        // Internal first, then public, never more than the requested limit.
+        hits: [...internalOut.hits, ...publicHits].slice(0, limit),
+        internal: { status: internalOut.status, ...(internalOut.note ? { note: internalOut.note } : {}) },
+        public: { status: pub.status === "fulfilled" ? "ok" : "unavailable" },
       });
-      if (!res.ok) throw new Error(`knowledge /search ${res.status}`);
-      return JSON.stringify(((await res.json()) as { hits: unknown[] }).hits);
     },
   });
 
