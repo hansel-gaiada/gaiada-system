@@ -11,6 +11,14 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.167.0` - DW-7a/7b/7c: HR, Finance and IT rows gate on what their pages read; one strip for everyone (2026-10-14) - PROTOTYPED
+
+Plan §4.3 (7a-7c, "As built"). Pilot layout only; the classic shell is unchanged. No backend change.
+- **What.** HR, Finance and IT's Work rows were offered to anyone with the module on (Finance: to everyone). Each row or tab now mirrors its page's backend read through an existing UI capability, so the pilot sidebar no longer offers a page that only refuses. Gates only narrow. Where no UI capability mirrors a finance read, the row keeps its old gate and the server stays the authority (plan §4.3 lists them).
+- **One strip.** `ShellWorkspace.withheld` (`withheldTabPaths` in `lib/workspaceAccess.ts`) lists the tabs a gate drops for this person, never the ticketed ones. `covers` counts them as covered, so the HR, IT and Finance console strips hide inside the shell for people who lack a gated tab too.
+- **IT accounts** is no longer module-gated in the registry: its API works with the `it` module off (P2-14).
+- **Tests:** `workspaceFunctional.test.ts` (new: what each role sees, and the withheld paths), `consoleStrips.test.tsx` (plain members' strips hide), `overviewCoverage.test.ts` (pins the three tabs now read-gated), `paletteFindability.test.ts`. New e2e project `workspace-functional` (`e2e/workspace-functional.spec.ts`), sumopod 8/8 x2.
+
 ### platform-nest `0.146.0` + platform-ui `0.166.0` - DW-8g: calendar events and meeting scheduling, the `calendar_event` kind (2026-10-14) - PROTOTYPED
 
 Contracts: `docs/FRONTEND-BFF-CONTRACT.md` §47 (as built §47.7 backend, §47.8 UI) and `docs/PERMISSION-CONTRACT.md` §39. Plan §8.1 row 8g. ERP migrations `202610151100_calendar_events` (tables, FORCE RLS, NULL-safe CHECKs) and `202610151110_iam_calendar_event_permissions` (the permissions seed with its self-assertion). **Cerbos policy change:** the new `resource_calendar_event.yaml` and a derived role. Restart Cerbos after the deploy and probe it: a zero-uuid event answers 404. No compose change.
