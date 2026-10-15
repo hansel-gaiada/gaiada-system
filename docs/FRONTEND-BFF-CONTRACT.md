@@ -8262,6 +8262,114 @@ Files: `platform-ui/src/lib/deptKpiDrivers.ts` (the honest reader, server-only),
 - acknowledging: a head 200, another unit's head 403, twice 409, a resolved alert 409;
 - `watch` by a non-admin is 403.
 
+## 44. The activity series counts all work (DW-4h, 2026-10-15) — `platform-nest/src/core/work-activity*.ts`, `platform-nest/src/core/activity-series*.ts` — **STATUS: PLANNED (contract first)**
+
+**Why.** Plan §5.6's 4h row and §14.5 "My activity": the activity series counts all work, not only project management. Each module's work lands in the activity series: GitHub, WebDesk, Social, SEO, Creatives, Finance, HR, meetings, learning, time and check-ins. DW-D19 holds throughout: no single score; show what was done, by kind. Activity is never an appraisal signal on its own. The reporting blueprint §11 limits apply too: day grain only, no message contents, counts by kind.
+
+It ships in three tickets:
+- **4h-1**, the core: §44.1 to §44.5 and §44.7;
+- **4h-2**, the missing emitters: §44.6;
+- **4h-3**, the Overview's My activity switches to the series. DW-4i builds Analytics › My activity and Team activity on the same reads.
+
+### 44.1 One spine: `work_activity`, filled from the audit log
+- **The spine is `work_activity`** (BFF §11, migration 0030). It is the evidence table the PM series and the nightly facts already read: `activity_events` and `activity_by_source`.
+- **Its `source` CHECK widens** from `pm, pipeline, github, google_drive, claude, manual, system` to add `webdesk, social, seo, creatives, finance, hr, meetings, learning, time, checkins`. The migration re-declares the full list, and the TS mirror `WORK_ACTIVITY_SOURCES` follows.
+- **Rows come from the audit log, not from 285 emit sites.** Almost every human action already calls `writeActivity(tenant, actor, verb, entity, id, metadata)` with its acting user, while most modules' outbox events carry no actor. So:
+  - `writeActivity` gains a **bridge**: after its insert, it looks the `(entity, verb)` pair up in a curated, pure catalogue `ACTIVITY_BRIDGE` (§44.2);
+  - on a match, it calls `ingestWorkActivity` with `source`, `objectKind`, `verb`, the actor, a title from the entity's name if the metadata carries one (else a fixed phrase), `occurredAt` (§44.2), and `sourceRef = "act:" + <the activities row id>`;
+  - it never ingests a pair that is not in the catalogue.
+- **Best effort, never in the way.** The bridge runs after the audit insert and outside the caller's transaction. A failure is logged with the pair and the message only, and never fails the action. It is idempotent through `UNIQUE(tenant_id, source, source_ref)`.
+- **Only real people.** A row with `actor = null` (a job or a scheduler) is not bridged. The facts already keep unattributed rows off the person axis.
+- **Outcomes, not attempts.** Where an action writes an attempt row and a result row (WebDesk commands, the GitHub ledger), the catalogue matches only a successful outcome (`metadata.outcome = "succeeded"`), so one piece of work is one row.
+- **GitHub stays as it is.** Webhooks already ingest `source: "github"` rows. The known gap stays recorded: work done outside the ERP has `actor_external` only and counts for nobody.
+- **The PM rows stay as they are.** The outbox consumer (`work-activity-consumer.ts`) keeps writing `source: "pm"`. The bridge must not double them, so no `pm_*` pair is in the catalogue.
+
+### 44.2 The catalogue: what counts, and as which kind
+The catalogue is a pure TS table in `core/activity-kinds.ts`. Each entry maps an audit `(entity, verb[, metadata predicate])` to `{source, objectKind, verb, kind}`. The **kinds** are what the series counts. Each has a key, a label and a source:
+
+| Kind key | Label | Source | Comes from |
+|---|---|---|---|
+| `pm.tasks_completed` | Tasks completed | pm | the existing PM rows (verb `completed`) |
+| `pm.comments` | Comments | pm | the existing PM rows (`commented`) |
+| `pm.docs` | Notes and docs | pm | the existing PM rows (doc `created` / `updated` / `restored`) |
+| `github.commits` | Commits | github | the existing GitHub rows (`committed`) |
+| `github.pull_requests` | Pull requests | github | the existing GitHub rows (`opened`, `merged`) |
+| `webdesk.edits` | Site edits | webdesk | `webdesk.content.*` commands with outcome succeeded |
+| `webdesk.publishes` | Publishes | webdesk | a build or publish request decided (`automation_approval` with `origin=webdesk`, approved), and `webdev_site provisioned` |
+| `social.posts` | Posts scheduled or sent | social | `social_post created`, `social_post_variant dispatched` |
+| `seo.audits` | Audits | seo | `search_audit ingested` |
+| `seo.briefs` | Content briefs | seo | `search_content_brief drafted` / `polished` |
+| `seo.reports` | Client reports | seo | `search_report drafted` / `delivered` |
+| `creatives.versions` | Asset versions | creatives | `creative_asset graded` (a saved version) |
+| `creatives.reviews` | Review decisions | creatives | `creative_asset review_approved` / `review_changes_requested` |
+| `finance.journals` | Journals posted | finance | `finance_journal posted` (new, §44.6) |
+| `finance.payments` | Payments confirmed | finance | `invoice_payment confirmed` |
+| `hr.leave_decided` | Leave decided | hr | `hr_leave_request decided` (new, §44.6) |
+| `meetings.recorded` | Meetings recorded | meetings | `meeting_recording ingested`, `meeting_recording shared_minutes` |
+| `learning.completed` | Learning completed | learning | `lms_completion completed` (new, §44.6) |
+| `time.logged` | Time logged | time | `time_entry logged` |
+| `checkins.submitted` | Check-ins | checkins | `report_checkin submitted` |
+
+- **`occurredAt` is when the action happened**, with two exceptions where the work belongs to a calendar day:
+  - `time.logged` counts on the entry's own day (`entry_date`, at noon in `REPORTS_TZ`), not the day it was typed;
+  - `checkins.submitted` counts on its `checkin_date`.
+- **A kind counts rows, never minutes.** Time logged is the number of entries. Hours are context, not score (blueprint §11).
+- **Changing the catalogue is a code change with a test.** A golden table test pins every entry, and a parity test checks that every kind's source is in the CHECK.
+
+### 44.3 The series read
+- **`GET /api/:t/activity/series?userId=&from=&to=`** → `{userId, from, to, timezone, kinds: [{key, label, source}], days: [{date, counts: {<kindKey>: n}}], totals: {<kindKey>: n}}`.
+  - `kinds` lists only the kinds of modules the tenant has enabled.
+  - Every day of the window is present (zero-filled spine). `counts` lists only non-zero kinds.
+  - No `total` and no score: a UI that shades a heatmap sums the counts itself and labels the shade as volume, never as a rating (DW-D19).
+- **Days** are calendar days in `REPORTS_TZ`. `to` defaults to **today in `REPORTS_TZ`**, which fixes the UTC "today" of `GET /pm/productivity`, and `from` defaults to `to` minus 364 days. The window is at most 400 days. A bad date is 400 `field`.
+- **The source** is `work_activity` rows with `actor_user_id = userId`, mapped to kinds by `(source, object_kind, verb)` through the same catalogue. No other table is read, so the series and the facts can never disagree on what happened.
+- **Who may read** is the `GET /pm/productivity` rule, `assertProductivityReadAllowed`, moved to a shared helper:
+  - yourself;
+  - the `unrestricted` or `company_wide` person-axis tier (HR's people readers included);
+  - a `unit_scoped` caller (a head, or a manager) for a person in their led scope;
+  - anyone else gets 403 `outside your reporting line`.
+  - No `pm` module guard: the series is core.
+- **`GET /pm/productivity` is unchanged** (PM › Productivity keeps its eight PM components), except that its default `to` also becomes today in `REPORTS_TZ`.
+
+### 44.4 The day read
+- **`GET /api/:t/activity/day?userId=&date=`** → `{userId, date, items: [{kind, title, at, link?}]}`, newest first, up to 200, with the series' gate. It powers DW-4i's "a day's detail".
+- `title` is the work's own name: a task, a site, a post, a report, an asset, a course. It is **never message contents, comment text or a note's body** (blueprint §11).
+- `link` is the object's page when the ERP has one, else absent.
+
+### 44.5 Closing the person filter on `GET /work-activity`
+- Today `GET /api/:t/work-activity?personId=` (BFF §11) is gated only by Cerbos `work_activity:read`, which is member-level, so any member can list a colleague's activity. That breaks line-of-sight (blueprint §11: self, own-unit lead, exec, HR; never peers).
+- From 4h-1, a request with `personId` applies the series gate (§44.3) for that person: 403 if the caller may not read that person.
+- Without `personId` (the department and project feeds, the hub's `workActivity.feed` for automation accounts), nothing changes.
+
+### 44.6 The missing emitters (4h-2)
+Three human actions write no audit row today, so they cannot be bridged. 4h-2 adds a `writeActivity` at each, with the acting person:
+- **leave decided**: in `applyLeaveDecision` (`modules/hr/leave-decision.ts`), actor `decided_by`, entity `hr_leave_request`, verb `decided`, metadata `{decision}`;
+- **learning completed**: where `lms_completions` rows are inserted (`modules/lms/lms-learn.controller.ts`), actor the learner, entity `lms_completion`, verb `completed`, metadata `{courseId | pathId}`;
+- **a journal posted**: where `finance_journal_entries` are posted, actor `posted_by`, entity `finance_journal`, verb `posted`.
+Each gets a test that the audit row exists, and that the bridge turns it into exactly one `work_activity` row.
+
+### 44.7 History
+- A one-time backfill (an admin CLI, `node dist/core/work-activity-backfill-bridge.js --since=<date>`, a server step) replays the last 400 days of `activities` through the same catalogue.
+- It is idempotent: the same `sourceRef`, so re-running it adds nothing. It reports counts per kind.
+- The nightly facts pick the rows up on their next run. Past sealed periods do not change, because their documents are stored.
+
+### 44.8 Not in DW-4h
+- A score, a ranking, or any use in appraisals (DW-D19).
+- Attributing GitHub work done outside the ERP. It stays `actor_external`, and a mapping from GitHub login to user is a separate ticket.
+- Changing the facts schema: `activity_events` and `activity_by_source` already count by source.
+- Team activity, which is DW-4i, read from the same series per person under the same gate.
+
+**Proof (live Postgres + Cerbos on the CI gate):**
+- the catalogue golden table, and the parity between kinds and the CHECK;
+- a catalogued action creates exactly one `work_activity` row with the right source, kind, actor and `occurredAt` (time on its `entry_date`, a check-in on its date);
+- an uncatalogued pair, a `pm_*` pair, a null actor and an attempt row create none;
+- a bridge failure never fails the action;
+- the series is zero-filled in `REPORTS_TZ` and ends on today there; its counts equal the rows; no `total` and no score field;
+- who may read: self, a head for their led scope, company-wide and HR yes; a peer and another unit's head 403;
+- `GET /work-activity?personId=` by a peer is 403 and by a head 200; the unfiltered feed is unchanged;
+- the day read never carries comment or message text;
+- the backfill is idempotent.
+
 ## 45. Attachments on requests, campaign parts, campaigns and the staff client page (DW-8h, 2026-10-14) — `platform-nest/src/core/files.controller.ts`; UI `platform-ui/src/components/Attachments.tsx` — **STATUS: BACKEND AND UI BUILT, PROTOTYPED (HTTP suite `files-targets.test.ts` written for the Linux CI gate; UI tested in vitest and built in demo mode, not yet driven live)**
 
 **Why.** Plan §8.1 (row 8h) and §14.2. Today only the task and project pages show files. A request between departments, a campaign, a department's part of a campaign and a client cannot carry a brief, a spec or a delivered file, so that work leaves the ERP.

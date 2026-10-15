@@ -2138,6 +2138,15 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §41 (plan `docs/plans/2026-10-13-depart
 - **The scheduled run and the digest** (`POST /dept-kpis/watch` and `/digest`) reuse `report_admin` · `recompute` (company_admin, platform_admin), the gate of `POST /reports/facts/recompute`. The n8n automation account `wf:reports-kpi-watch` holds company_admin, like the other reports flows.
 - **The drivers read** (`GET /dept-kpis/drivers`, 4j-3) uses the unit read's gate, narrowed to heads and the company-wide tier. Placed staff get 403. It is the department appraisal's gate, extracted as one function (`authorizeUnitHeadRead` in `dept-kpis.controller.ts`): Cerbos `dept_kpi_target` · `read` with the unit's ancestry, then `isCompanyWide` or the unit in `loadLedUnitScope`, then 404. A manager placed in the unit and the head of an enclosing unit hold the unit in their led scope and so pass, exactly as for the appraisal.
 
+## 38c. DW-4h — the activity series, the day read and the person filter, BFF §44 (2026-10-15, PLANNED): no new kind, no new action
+
+- **The series and the day read** (`GET /activity/series`, `/activity/day`) are core reads with no Cerbos kind of their own. They are gated by the person-axis rule `GET /pm/productivity` already applies, moved to a shared helper:
+  - yourself;
+  - the `unrestricted` or `company_wide` tier (HR's people readers included);
+  - a `unit_scoped` caller for a person in their led scope (TR-25);
+  - else 403.
+- **`GET /work-activity?personId=`** keeps its Cerbos `work_activity:read`, and from 4h-1 also applies that person-axis rule for the named person. This closes a peer read that broke line-of-sight. The unfiltered feed is unchanged.
+
 ## 39. DW-8g — the `calendar_event` kind (2026-10-14, PROTOTYPED)
 
 Design: `docs/FRONTEND-BFF-CONTRACT.md` §47 (plan `docs/plans/2026-10-13-department-workspaces.md` §8.1, row 8g). Status: **PROTOTYPED** (policy, catalog, bundles and tests are in the repo; the live Cerbos probe after a restart is the deploy step).
