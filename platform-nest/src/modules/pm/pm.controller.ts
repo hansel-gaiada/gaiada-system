@@ -4,7 +4,7 @@
 // deterministic baseline (progress-from-subtasks + status coupling); the WS8 PM specialist
 // agent replaces the analysis later behind the same contract.
 import {
-  BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, Res, UseGuards,
+  BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, Res, UseGuards,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { PoolClient } from "pg";
@@ -27,7 +27,8 @@ import { staffNeverClientVisible } from "../../core/portal-visibility";
 // FROM this file) already exists, so this is not a new circular-dependency shape — both directions
 // are call-time-only (inside request-handler bodies, never at module-init top level), which is the
 // property that makes a two-way import between these two modules safe in practice.
-import { PERSON_SCOPE_MODULES, assertPersonInLedScope, personAxisTier, todayIsoInTz } from "../reports/person-scope";
+import { todayIsoInTz } from "../reports/person-scope";
+import { assertPersonAxisReadAllowed } from "../../core/person-axis-gate";
 
 type Assignee = {
   kind: "person" | "department" | "division";
@@ -1340,28 +1341,6 @@ export async function closePmTaskInTx(
 
 // ---------------- P4-E2 helpers ----------------
 
-/** Who may read whose productivity series. See `getProductivity`'s header for the full reasoning;
- *  this is deliberately its own function (not a bare call to `assertPersonInLedScope`) because that
- *  function's `self_only` branch assumes CERBOS already denied a foreign-subject read for that tier
- *  (true for `report_document`, which has its own `owns` policy condition — see person-scope.ts's
- *  own header). No such resource-specific policy exists for "someone's PM productivity", and this
- *  ticket's base gate (`pm_task:read`) carries no ownerId/subject at all, so Cerbos cannot have
- *  already filtered self_only here. The self_only branch is therefore enforced explicitly, in-app,
- *  rather than assumed. */
-async function assertProductivityReadAllowed(principal: Parameters<typeof personAxisTier>[0], tenantId: string, targetUserId: string): Promise<void> {
-  if (principal.userId && principal.userId === targetUserId) return;
-  const tier = personAxisTier(principal, tenantId);
-  if (tier === "unrestricted" || tier === "company_wide") return;
-  if (tier === "self_only") throw new ForbiddenException("outside your reporting line");
-  // unit_scoped: narrowed to the caller's own led-unit subtree, exactly as `/reports` does.
-  const asOf = todayIsoInTz(config.reportsTz);
-  await withTenants(
-    [tenantId],
-    (c) => assertPersonInLedScope(c, tenantId, principal, targetUserId, asOf),
-    { modules: PERSON_SCOPE_MODULES },
-  );
-}
-
 interface ProductivityDayRow {
   date: string;
   completedTasks: number;
@@ -2071,7 +2050,7 @@ export class PmController {
   // (`self_only`) may read ONLY themselves — never a colleague, however innocuous the ask feels. This
   // is stricter than `assertPersonInLedScope`'s own default (that function assumes Cerbos already
   // denied the self_only case via a resource-specific policy, which does not exist for "someone's
-  // productivity" — see `assertProductivityReadAllowed` below for why the self_only branch is
+  // productivity" — see `assertPersonAxisReadAllowed` (core/person-axis-gate.ts, moved out of this file by DW-4h-1) for why the self_only branch is
   // re-implemented explicitly here rather than trusted to the reused function alone).
   //
   // DATE DISCIPLINE (this file's own recurring trap, hit twice already on this module). Every date
@@ -2092,7 +2071,8 @@ export class PmController {
     const targetUserId = typeof query.userId === "string" && query.userId ? query.userId : req.principal.userId;
     if (!targetUserId || !UUID_RE.test(targetUserId)) throw new BadRequestException("userId must be a valid uuid");
 
-    const today = todayIso();
+    // DW-4h-1 (BFF §44.3): "today" is today in REPORTS_TZ, the zone this endpoint buckets days in, not UTC today.
+    const today = todayIsoInTz(config.reportsTz);
     const from = typeof query.from === "string" && query.from ? query.from : addDaysIso(today, -(PmController.PRODUCTIVITY_DEFAULT_WINDOW_DAYS - 1));
     const to = typeof query.to === "string" && query.to ? query.to : today;
     if (!DATE_RE.test(from)) throw new BadRequestException("from must be a YYYY-MM-DD date");
@@ -2108,7 +2088,7 @@ export class PmController {
     // getTask). This is the wall that makes cross-tenant access impossible: a principal with no
     // grant covering `tenantId` is denied here, before any query touches the DB.
     await authorize(req.principal, { kind: "pm_task", tenantId }, "read");
-    await assertProductivityReadAllowed(req.principal, tenantId, targetUserId);
+    await assertPersonAxisReadAllowed(req.principal, tenantId, targetUserId);
 
     const tz = config.reportsTz;
     const series = await withTenants([tenantId], (c) => queryProductivitySeries(c, tenantId, targetUserId, from, to, tz));

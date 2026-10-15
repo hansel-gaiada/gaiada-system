@@ -21,12 +21,15 @@ import type { FastifyRequest } from "fastify";
 import { withTenants } from "../db";
 import { authorize } from "./http";
 import { AuthGuard } from "../auth/guards";
+import { assertPersonAxisReadAllowed } from "./person-axis-gate";
 import {
   ingestWorkActivity,
   relinkZeroLinkActivities,
   WORK_ACTIVITY_SOURCES as SOURCES,
   type WorkActivityDbRow,
 } from "./work-activity-ingest.service";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface IngestBody {
   source?: string;
@@ -57,6 +60,14 @@ export class WorkActivityController {
     @Query("limit") limitQ?: string,
   ) {
     await authorize(req.principal, { kind: "work_activity", tenantId }, "read");
+    // DW-4h-1 (BFF §44.5, PERMISSION-CONTRACT §38c): `work_activity:read` is member-level, so on its own it let any member list
+    // a colleague's activity. A request that names a person now also passes the person-axis gate (self, company-wide tiers,
+    // a head for their led scope; else 403 `outside your reporting line`). Without `personId` (the department and project
+    // feeds, the hub's `workActivity.feed`) nothing changes.
+    if (personId) {
+      if (!UUID_RE.test(personId)) throw new BadRequestException({ message: "personId must be a valid uuid", field: "personId" });
+      await assertPersonAxisReadAllowed(req.principal, tenantId, personId);
+    }
     const limit = Math.max(1, Math.min(Number(limitQ ?? 100) || 100, 500));
 
     const clauses: string[] = [];

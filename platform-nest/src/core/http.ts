@@ -10,6 +10,8 @@ import { assemblePrincipal, auditDecision, sessionVersionCurrent, type Principal
 import { check, type Resource } from "../rbac/cerbos";
 import { mailIntake } from "../mail/intake";
 import { deniedOnlyForAssurance } from "../auth/step-up";
+import { bridgeEntryFor } from "./activity-kinds";
+import { bridgeActivityBestEffort } from "./activity-bridge";
 
 /**
  * ── NAMING THE CAUSE WHEN AN UNRESOLVED ENVELOPE IS THE CAUSE (2026-08-24) ───────────────────────
@@ -212,6 +214,13 @@ export async function writeActivity(
        appr?.approvedBy ?? null, appr?.channel ?? null, appr?.executedBy ?? null],
     ),
   );
+  // DW-4h-1 (BFF §44.1): the audit-log bridge. A person's catalogued action also becomes a `work_activity` row, so the
+  // activity series counts all work. AFTER the audit insert (already committed in its own transaction), best effort, and
+  // never in the way: `bridgeActivityBestEffort` swallows and logs. The pre-check is one Map lookup, so the ~442 callers
+  // whose pair is not catalogued pay nothing else.
+  if (actorId && bridgeEntryFor(entityType, verb, withVia)) {
+    await bridgeActivityBestEffort({ tenantId, activityId: id, actorId, verb, entityType, entityId, metadata: withVia });
+  }
   return id;
 }
 

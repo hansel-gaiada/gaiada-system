@@ -203,12 +203,16 @@ export function composeCheckinPrefill(inputs: PrefillGatherInputs): CheckinPrefi
   const tasksMoved = uniqueTaskRefs(inputs.activities, ["status_changed", "reopened"]).filter(
     (t) => !tasksCompleted.some((c) => c.taskId === t.taskId), // "completed" already tells that story
   );
-  const commentsAuthored = inputs.activities.filter((a) => a.objectKind === "pm_task" && a.verb === "commented").length;
+  // DW-4h-1: PM-derived counts are keyed on source = 'pm' (a module's audit-log bridge row, BFF §44, can carry any verb).
+  const commentsAuthored = inputs.activities.filter((a) => a.source === "pm" && a.objectKind === "pm_task" && a.verb === "commented").length;
   const docsUpdated = inputs.activities.filter(
-    (a) => a.objectKind === "doc" && (a.verb === "created" || a.verb === "updated" || a.verb === "restored"),
+    (a) => a.source === "pm" && a.objectKind === "doc" && (a.verb === "created" || a.verb === "updated" || a.verb === "restored"),
   ).length;
   const accountedForKinds = new Set(["pm_task", "doc"]);
-  const otherActivityEvents = inputs.activities.filter((a) => !accountedForKinds.has(a.objectKind)).length;
+  // The bridge's `time` and `checkins` rows are the time entries and the check-in this prefill already is (its minutes line,
+  // and the submitted summary itself); counting them as "other activity" would also change the prefill after a submit, and
+  // so flip `edited` on an unedited re-submit.
+  const otherActivityEvents = inputs.activities.filter((a) => !accountedForKinds.has(a.objectKind) && a.source !== "time" && a.source !== "checkins").length;
 
   const parts: string[] = [];
   if (minutesLogged > 0) {

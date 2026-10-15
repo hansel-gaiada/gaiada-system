@@ -74,6 +74,24 @@ describe("TR-09 composeCheckinPrefill (the <30s flow's actual content)", () => {
     expect(out.summaryText).toMatch(/1 other activity event/);
   });
 
+  it("DW-4h-1: a module's bridge row never counts as a PM comment or doc update; time and check-in bridge rows are not 'other' work", () => {
+    const out = composeCheckinPrefill({
+      timeEntries: [],
+      activities: [
+        { verb: "commented", objectKind: "pm_task", objectRef: "t1", title: "X", source: "pm" },
+        { verb: "commented", objectKind: "pm_task", objectRef: "t2", title: "Y", source: "webdesk" },
+        { verb: "updated", objectKind: "doc", objectRef: "d1", title: "Spec", source: "social" },
+        { verb: "logged", objectKind: "time_entry", objectRef: "te1", title: "Time logged", source: "time" },
+        { verb: "submitted", objectKind: "report_checkin", objectRef: "c1", title: "Check-in", source: "checkins" },
+      ],
+    });
+    expect(out.commentsAuthored).toBe(1);
+    expect(out.docsUpdated).toBe(0);
+    // the webdesk pm_task-shaped row and the social doc-shaped row are in an accounted-for object kind; the time and
+    // check-in rows are excluded by source, so no "other activity" is claimed for work this prefill already is
+    expect(out.otherActivityEvents).toBe(0);
+  });
+
   it("status_changed / reopened (without a same-day completion) surfaces as 'moved'", () => {
     const inputs: PrefillGatherInputs = {
       timeEntries: [],

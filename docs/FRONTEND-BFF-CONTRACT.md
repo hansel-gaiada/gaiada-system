@@ -8262,7 +8262,7 @@ Files: `platform-ui/src/lib/deptKpiDrivers.ts` (the honest reader, server-only),
 - acknowledging: a head 200, another unit's head 403, twice 409, a resolved alert 409;
 - `watch` by a non-admin is 403.
 
-## 44. The activity series counts all work (DW-4h, 2026-10-15) — `platform-nest/src/core/work-activity*.ts`, `platform-nest/src/core/activity-series*.ts` — **STATUS: PLANNED (contract first)**
+## 44. The activity series counts all work (DW-4h, 2026-10-15) — `platform-nest/src/core/work-activity*.ts`, `platform-nest/src/core/activity-series*.ts` — **STATUS: BUILT, PROTOTYPED (4h-1: activity-kinds.test.ts, activity-bridge.db.test.ts and activity-series.test.ts, with additions to fact-job.test.ts, checkins.controller.test.ts and pm.test.ts, on the Linux CI gate; 4h-2 emitters and 4h-3 UI not built)**
 
 **Why.** Plan §5.6's 4h row and §14.5 "My activity": the activity series counts all work, not only project management. Each module's work lands in the activity series: GitHub, WebDesk, Social, SEO, Creatives, Finance, HR, meetings, learning, time and check-ins. DW-D19 holds throughout: no single score; show what was done, by kind. Activity is never an appraisal signal on its own. The reporting blueprint §11 limits apply too: day grain only, no message contents, counts by kind.
 
@@ -8330,6 +8330,56 @@ The catalogue is a pure TS table in `core/activity-kinds.ts`. Each entry maps an
   - anyone else gets 403 `outside your reporting line`.
   - No `pm` module guard: the series is core.
 - **`GET /pm/productivity` is unchanged** (PM › Productivity keeps its eight PM components), except that its default `to` also becomes today in `REPORTS_TZ`.
+
+### 44.3a As built (4h-1, 2026-10-15)
+Files: `core/activity-kinds.ts` (pure: kinds, catalogue, `kindOf`, noon rule, links), `core/activity-bridge.ts` (the bridge, shared by the live path and the backfill), `core/activity-series.controller.ts` (both reads), `core/person-axis-gate.ts`, `core/work-activity-backfill-bridge.ts`, and migration `202610151300_work_activity_module_sources.sql`. The migration looks the CHECK up in `pg_constraint`, drops it, adds `work_activity_source_check` with the full list of 17 sources, and asserts the new definition. `WORK_ACTIVITY_SOURCES` mirrors it, and the parity test reads the migration file.
+
+**The gate helper** is `assertPersonAxisReadAllowed(principal, tenantId, targetUserId)` in `core/person-axis-gate.ts`: the old `assertProductivityReadAllowed` moved verbatim (same tiers, same 403 `outside your reporting line`). `GET /pm/productivity`, both new reads and `GET /work-activity?personId=` call it.
+
+**The final catalogue** (audit `entity | verb` becomes `source | objectKind | verb`, counted as `kind`; "landed" = `metadata.outcome` is `succeeded` or `reconciled`, and not `replayed`):
+
+| Audit pair | Becomes | Kind |
+|---|---|---|
+| `webdesk_content_item` `webdesk.content.create` / `.update` / `.restoreVersion`, landed | `webdesk` / `webdesk_content_item` / `created` / `updated` / `restored` | `webdesk.edits` |
+| `automation_approval` `webdesk.content.publish` / `.schedule` / `.rebuild` / `webdesk.site.promote`, landed | `webdesk` / `webdesk_publish` / `published` / `scheduled` / `rebuilt` / `promoted` | `webdesk.publishes` |
+| `webdev_provisioned_site` `provisioned` | `webdesk` / `webdev_provisioned_site` / `provisioned` | `webdesk.publishes` |
+| `social_post` `created`; `social_post_variant` `dispatched` | `social` / same object kind / same verb | `social.posts` |
+| `search_audit` `ingested` | `seo` / `search_audit` / `ingested` | `seo.audits` |
+| `search_content_brief` `drafted`, `polished` | `seo` / `search_content_brief` | `seo.briefs` |
+| `search_report` `drafted`, `delivered` | `seo` / `search_report` | `seo.reports` |
+| `creative_asset` `graded` | `creatives` / `creative_asset` / `graded` | `creatives.versions` |
+| `creative_asset` `review_approved`, `review_changes_requested` | `creatives` / `creative_asset` | `creatives.reviews` |
+| `finance_journal` `posted` (4h-2 adds the call) | `finance` / `finance_journal` / `posted` | `finance.journals` |
+| `invoice_payment` `confirmed` | `finance` / `invoice_payment` / `confirmed` | `finance.payments` |
+| `hr_leave_request` `decided` (4h-2 adds the call) | `hr` / `hr_leave_request` / `decided` | `hr.leave_decided` |
+| `meeting_recording` `ingested`, `shared_minutes` | `meetings` / `meeting_recording` | `meetings.recorded` |
+| `lms_completion` `completed` (4h-2 adds the call) | `learning` / `lms_completion` / `completed` | `learning.completed` |
+| `time_entry` `logged` | `time` / `time_entry` / `logged` | `time.logged` |
+| `report_checkin` `submitted` | `checkins` / `report_checkin` / `submitted` | `checkins.submitted` |
+
+**Rows of §44.2's table that changed, and why:**
+- `webdesk.edits`. The table said "`webdesk.content.*` commands with outcome succeeded". The audit rows are written by the WebDesk egress seam with entity `webdesk_content_item` and verbs `webdesk.content.create`, `.update` and `.restoreVersion`. A write whose first answer was ambiguous and which a re-read proved landed is `reconciled`, so that counts too. A replay (`replayed: true`) is the same work again and does not. Takedowns (`unpublish`, `delete`), preview tokens, media and the editorial review commands are not edits and are not bridged.
+- `webdesk.publishes`. The table named "an `automation_approval` with `origin=webdesk`, approved". The decision row (verb `approved`) carries no origin on the main path and is written before anything ran. The row that truly marks a person publishing or building is the executor's result row, written after the call: entity `automation_approval`, verb `webdesk.<command>` for `content.publish`, `content.schedule`, `content.rebuild` and `site.promote`, outcome `succeeded` or `reconciled`, and the actor is the DECIDER. Key minting, archiving and a domain change are administration and are not bridged. `webdev_site provisioned` does not exist: the real pair is `webdev_provisioned_site provisioned`.
+- `finance.payments`. The pair exists, but its actor is the payment provider's service principal (`payments/process.ts`), not a person. It is bridged as the table says, so it lands on that service user and never shows on a person's series. A person's payment kind needs its own emitter (a follow-up).
+- `social.posts`, `seo.*`, `creatives.*`, `meetings.recorded`, `time.logged` and `checkins.submitted` pairs were confirmed as written. `search_audit ingest_noop` is not bridged. A `social_post_variant dispatched` by the scheduler has no actor and is not bridged.
+- `time.logged`: the audit metadata carries no entry date, so the bridge reads `time_entries.entry_date` (one query, only for this pair). An entry that is not there is not work and writes nothing.
+- `checkins.submitted`: the sourceRef is `act:report_checkin:<checkin id>` instead of `act:<activities id>`, so a re-submitted check-in is still ONE row (the audit row is written on every submit). Its `occurredAt` is `metadata.date` at noon in REPORTS_TZ.
+- Titles come from the object's own name where the audit metadata has one (`social_post` title, `search_content_brief` topic, `creative_asset` name, `webdev_provisioned_site` slug) and a fixed phrase otherwise. The payload is `{kind}` and nothing else.
+
+**kindOf for the existing rows** (from their real verbs): PM `pm_task completed` = `pm.tasks_completed`; `pm_task commented` = `pm.comments`; `doc created`/`updated`/`restored` = `pm.docs`; GitHub `commit committed` = `github.commits`; `pull_request opened`/`merged` = `github.pull_requests`.
+
+**Source to module** (for `kinds`, "any of"): `pm` = pm; `webdesk` = webdev; `social` = social; `seo` = search; `finance` = finance or invoice; `hr` = hr; `learning` = lms; `checkins` = reports. Core, always listed: `github`, `creatives`, `meetings`, `time`.
+
+**The reads.**
+- The tenant wall is the caller's own membership of the company (the `GET /modules-enabled` wall), not a Cerbos kind. A client-portal principal is refused (403). The order is: wall, `userId` (400 `field: "userId"`), the person-axis gate, then the dates.
+- `date` on the day read defaults to today in REPORTS_TZ. Bad dates are 400 with `field` `from`, `to` or `date`.
+- Links exist only for `pm_task` (`/tasks/<id>`), `meeting_recording` (`/meetings/<id>`) and `finance_journal` (`/finance/journals/<id>`). The day read selects no `payload`. A GitHub commit's title is its subject line (the existing row's title).
+- `GET /work-activity?personId=` is also 400 `field: "personId"` when the value is not a uuid (it was an empty list). Without `personId` nothing changed. The hub's `workActivity.feed` and `wd-digests.json` pass only `tenantId`, `since` and `limit`, so the automation account's unfiltered use is untouched. Bridged rows carry no `actorId` hint, so they have no person link and a `personId` feed does not list them; the series and the day read use `actor_user_id`.
+- `GET /pm/productivity`: the default `to` and the default `from` both start from today in REPORTS_TZ.
+
+**PM-derived columns.** `fact-job.ts` derives `comments_authored` and `docs_updated` only from `source = 'pm'` rows, and so does the check-in prefill. The prefill's "other activity" count also leaves out the bridge's `time` and `checkins` rows (they are the minutes line and the check-in itself, and counting them would flip `edited` on an unedited re-submit). Bridged rows count in `activity_events` and `activity_by_source` like any other.
+
+**History.** `node dist/core/work-activity-backfill-bridge.js [--since=YYYY-MM-DD] [--tenant=<company uuid>]`, or `npm run backfill:activity-bridge -- --since=...`. It is a server step, not a boot hook. The default `--since` is today minus 400 days. It reads each company inside `withTenants`, refuses to continue if the tenant GUC is not the one it set, skips rows already bridged, and prints counts per kind.
 
 ### 44.4 The day read
 - **`GET /api/:t/activity/day?userId=&date=`** → `{userId, date, items: [{kind, title, at, link?}]}`, newest first, up to 200, with the series' gate. It powers DW-4i's "a day's detail".

@@ -7,6 +7,8 @@ import { buildApp } from "../../main";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/setup";
 import { newId, withTenants } from "../../db";
 import { createCompany, createUser, addMembership, createRole, grantRole, createProject, defineCustomField } from "../../testing/fixtures";
+import { todayIsoInTz } from "../reports/person-scope";
+import { addDaysIso } from "../../core/dept-resolution";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -2791,6 +2793,30 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
 
       const outOfLine = await iso.get(`?userId=${outsider}`, asUser(lead));
       expect(outOfLine.statusCode).toBe(403);
+    });
+
+    it("DW-4h-1: the default `to` is today in REPORTS_TZ (the zone the days are bucketed in), not UTC today", async () => {
+      const iso = await isoE2("default to in tz");
+      const utcToday = new Date().toISOString().slice(0, 10);
+      // a zone whose calendar day is not the UTC day right now (one of the two always differs)
+      const tz = todayIsoInTz("Pacific/Kiritimati") !== utcToday ? "Pacific/Kiritimati" : "Pacific/Pago_Pago";
+      const saved = config.reportsTz;
+      config.reportsTz = tz;
+      try {
+        const r = await iso.get("");
+        expect(r.statusCode).toBe(200);
+        const body = r.json() as ProductivityResponse;
+        const today = todayIsoInTz(tz);
+        expect(today).not.toBe(utcToday);
+        expect(body.to).toBe(today);
+        expect(body.from).toBe(addDaysIso(today, -364));
+        expect(body.days).toBe(365);
+        expect(body.series[body.series.length - 1].date).toBe(today);
+        // an explicit `to` is still honoured as given
+        expect(((await iso.get("?from=2026-02-01&to=2026-02-03")).json() as ProductivityResponse).to).toBe("2026-02-03");
+      } finally {
+        config.reportsTz = saved;
+      }
     });
 
     it("validates from/to/userId and rejects an oversized window", async () => {

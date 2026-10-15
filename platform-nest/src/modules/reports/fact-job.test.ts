@@ -274,6 +274,35 @@ describe("TR-07 ruling 1 · actor_user_id IS NULL is excluded from person attrib
   });
 });
 
+// ══════════════════════ DW-4h-1 — a module's bridge row never inflates the PM-derived columns ══════════════════════
+
+describe("DW-4h-1 · comments_authored / docs_updated are keyed on source = 'pm'", () => {
+  it("a bridge row with a PM-looking verb counts in activity_events and activity_by_source, and in NEITHER derived column", () => {
+    const { rows } = computeFactRows(
+      baseInputs({
+        activities: [
+          // the same shapes the PM consumer writes: they DO count
+          { activityId: "a1", source: "pm", actorUserId: ALICE, projectId: PROJECT, verb: "commented", objectKind: "pm_task", hasExactLink: true },
+          { activityId: "a2", source: "pm", actorUserId: ALICE, projectId: PROJECT, verb: "updated", objectKind: "doc", hasExactLink: true },
+          // a module's bridge rows with the SAME verb and object kind spelled like PM's: they must not
+          { activityId: "b1", source: "webdesk", actorUserId: ALICE, projectId: null, verb: "commented", objectKind: "pm_task", hasExactLink: false },
+          { activityId: "b2", source: "webdesk", actorUserId: ALICE, projectId: null, verb: "updated", objectKind: "doc", hasExactLink: false },
+          { activityId: "b3", source: "social", actorUserId: ALICE, projectId: null, verb: "created", objectKind: "doc", hasExactLink: false },
+        ],
+      }),
+    );
+    const alice = rows.filter((r) => r.userId === ALICE);
+    expect(alice.reduce((n, r) => n + r.activityEvents, 0)).toBe(5);
+    expect(alice.reduce((n, r) => n + r.commentsAuthored, 0)).toBe(1);
+    expect(alice.reduce((n, r) => n + r.docsUpdated, 0)).toBe(1);
+    const bySource = alice.reduce<Record<string, number>>((acc, r) => {
+      for (const [k, v] of Object.entries(r.activityBySource)) acc[k] = (acc[k] ?? 0) + v;
+      return acc;
+    }, {});
+    expect(bySource).toEqual({ pm: 2, webdesk: 2, social: 1 });
+  });
+});
+
 // ══════════════════════ ruling 2 — cross-company resolution vs the provider stamp ══════════════
 
 describe("TR-07 ruling 2 · cross-company unit resolves regardless of assignment state; only the STAMP needs ACTIVE", () => {

@@ -12,6 +12,7 @@
     "seed:departments": "node dist/seed/departments.js",
     "seed:automation": "node dist/seed/automation.js",
     "iam:backfill": "node dist/seed/iam-phase2-backfill.js",
+    "backfill:activity-bridge": "node dist/core/work-activity-backfill-bridge.js",
     "seed:claude-seats": "node dist/seed/claude-seats.js",
     "seed:github-apps": "node dist/seed/github-app-credentials.js",
     "seed:github-sync": "node dist/seed/github-repo-sync.js",

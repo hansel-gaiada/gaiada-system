@@ -461,8 +461,10 @@ export function computeFactRows(inputs: FactSliceInputs): { rows: FactRow[]; key
     bucket.activityEvents += 1;
     if (activity.hasExactLink) bucket.activityLinkedExact += 1;
     bucket.activityBySource[activity.source] = (bucket.activityBySource[activity.source] ?? 0) + 1;
-    if (activity.objectKind === "pm_task" && activity.verb === "commented") bucket.commentsAuthored += 1;
-    if (activity.objectKind === "doc" && (activity.verb === "created" || activity.verb === "updated" || activity.verb === "restored")) {
+    // DW-4h-1: these two are PM-derived columns, so they are keyed on source = 'pm'. A module's audit-log bridge row (BFF
+    // §44) can carry a verb like `updated` or `commented`; it counts in activity_events / activity_by_source, never here.
+    if (activity.source === "pm" && activity.objectKind === "pm_task" && activity.verb === "commented") bucket.commentsAuthored += 1;
+    if (activity.source === "pm" && activity.objectKind === "doc" && (activity.verb === "created" || activity.verb === "updated" || activity.verb === "restored")) {
       bucket.docsUpdated += 1;
     }
   }
