@@ -127,7 +127,7 @@ describe.skipIf(!TEST_URL)("PV7-02 · the hub overview's ball is pinned (needsUs
       await contract(f.kSent, clientA, "sent", "Master agreement", at(2));
       await contract(f.kSentB, clientB, "sent", "B master agreement", at(2));
 
-      // Conversation: one thread awaiting our reply, one we already answered, one on a project with no subject, and B's.
+      // Conversation: one client-wide thread awaiting our reply (a client has ONE: ux_conv_threads_client_wide), one project thread we already answered, one on a project with no subject, and B's.
       const thread = (id: string, clientId: string, projectId: string | null, subject: string | null) =>
         c.query(
           `INSERT INTO conversation_threads (id, tenant_id, client_id, project_id, subject, created_by, created_side, origin_site)
@@ -142,7 +142,7 @@ describe.skipIf(!TEST_URL)("PV7-02 · the hub overview's ball is pinned (needsUs
         );
       await thread(f.threadAwaiting, clientA, null, "Logo question");
       await message(f.threadAwaiting, "client", at(8));
-      await thread(f.threadAnswered, clientA, null, "Answered already");
+      await thread(f.threadAnswered, clientA, projA, "Answered already");
       await message(f.threadAnswered, "client", at(8));
       await message(f.threadAnswered, "staff", at(9));
       await thread(f.threadProject, clientA, projA, null);
