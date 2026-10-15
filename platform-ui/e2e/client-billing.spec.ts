@@ -36,12 +36,13 @@ test.describe("client billing", () => {
   test("the tab sits between Business and People, with a badge, and the page keeps one h1", async ({ page }) => {
     await openAsAgency(page, CLIENT);
     const tabs = page.getByRole("navigation", { name: "Client sections" }).getByRole("link");
-    await expect(tabs.nth(2)).toHaveText(/^Business/);
-    await expect(tabs.nth(3)).toHaveText(/^Contracts & billing/);
-    await expect(tabs.nth(3)).toHaveAttribute("aria-current", "page");
-    await expect(tabs.nth(4)).toHaveText(/^People/);
+    // PV7-04b put Reports right after Overview, so every tab after it moved one place along.
+    await expect(tabs.nth(3)).toHaveText(/^Business/);
+    await expect(tabs.nth(4)).toHaveText(/^Contracts & billing/);
+    await expect(tabs.nth(4)).toHaveAttribute("aria-current", "page");
+    await expect(tabs.nth(5)).toHaveText(/^People/);
     // Two pending payments plus one contract waiting for our countersignature.
-    await expect(tabs.nth(3)).toHaveText("Contracts & billing3");
+    await expect(tabs.nth(4)).toHaveText("Contracts & billing3");
     // The layout owns the one <h1> (the client's name); the page's sections are <h2>.
     await expect(page.locator("h1")).toHaveCount(1);
     for (const name of ["Contracts", "Payments to confirm", "Invoices"]) {

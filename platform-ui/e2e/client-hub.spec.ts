@@ -96,16 +96,18 @@ test.describe("client hub", () => {
   test("the hub's tabs are the portal's areas plus Internal (PV3-05)", async ({ page }) => {
     await openAsAgency(page, "/clients/cl-1");
     const tabs = page.getByRole("navigation", { name: "Client sections" }).getByRole("link");
-    // Order matters: Overview · Projects · Business · Contracts & billing · People · Internal. The
+    // Order matters: Overview · Reports · Projects · Business · Contracts & billing · People · Internal. The
     // Overview, Projects and Contracts & billing tabs carry count badges (their accessible name starts
     // with the label), and Internal says "Staff only".
-    await expect(tabs).toHaveCount(6);
+    // PV7-04b: Reports sits right after Overview, mirroring the portal's Overview area (Overview + Reports).
+    await expect(tabs).toHaveCount(7);
     await expect(tabs.nth(0)).toHaveText(/^Overview/);
-    await expect(tabs.nth(1)).toHaveText(/^Projects/);
-    await expect(tabs.nth(2)).toHaveText(/^Business/);
-    await expect(tabs.nth(3)).toHaveText(/^Contracts & billing/);
-    await expect(tabs.nth(4)).toHaveText(/^People/);
-    await expect(tabs.nth(5)).toHaveText(/^InternalStaff only/);
+    await expect(tabs.nth(1)).toHaveText("Reports");
+    await expect(tabs.nth(2)).toHaveText(/^Projects/);
+    await expect(tabs.nth(3)).toHaveText(/^Business/);
+    await expect(tabs.nth(4)).toHaveText(/^Contracts & billing/);
+    await expect(tabs.nth(5)).toHaveText(/^People/);
+    await expect(tabs.nth(6)).toHaveText(/^InternalStaff only/);
     // PV3-08: the one new route. Its page and flows are pinned by client-billing.spec.ts.
     await expect(hubTab(page, /^Work/)).toHaveCount(0);
   });

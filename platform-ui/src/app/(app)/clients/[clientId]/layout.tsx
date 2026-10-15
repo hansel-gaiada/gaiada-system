@@ -66,6 +66,10 @@ export default async function ClientHubLayout({
   // reach zero for a healthy client and would therefore stop meaning anything.
   const tabs: ClientHubTab[] = [
     { segment: "", label: "Overview", badge: overview.needsUs.length },
+    // PV7-04b — the portal's Overview area has a second tab, Reports (the reports we publish to the client, BFF §55), so
+    // the hub's mirror of it sits right after Overview. A new route; every other path is unchanged. No badge: a draft
+    // waiting to be published is not an outstanding item of the ball lists above.
+    { segment: "reports", label: "Reports" },
     // PV3-05 — the hub mirrors the portal's areas (PV-D4). "Work" is now Projects (it also holds
     // deliverables, approvals, requests and meetings); Profile is Business; "Contacts & meetings" is
     // People (meetings moved to Projects). Every path is unchanged; `billing` is the one new route.

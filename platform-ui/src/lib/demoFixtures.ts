@@ -31,6 +31,7 @@ import { assistantDemo } from "./demoAssistant";
 import { NETWORK_FIXTURES } from "./demoNetwork";
 import { websiteAccessDemo } from "./demoWebsiteAccess";
 import { billingDemo, demoBillingNeedsClient, demoBillingNeedsUs, demoBillingPendingTotal } from "./demoBilling";
+import { clientReportsDemo } from "./demoClientReports";
 import { buildDemoClientHealth } from "./demoClientHealth";
 
 export interface DemoResult {
@@ -2358,6 +2359,11 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // (lib/demoBilling.ts), and placed before the generic matchers so none of them answers one of these paths.
   const billing = billingDemo(method, p, url.searchParams, body, userId);
   if (billing) return billing;
+
+  // PV7-04b — the staff Reports tab: `clients/:id/reports` and `client-reports/:id/publish|withdraw` (BFF §55.3). Stateful
+  // (lib/demoClientReports.ts, shared with the portal's Reports page) and placed before the generic matchers.
+  const clientReports = clientReportsDemo(method, p, body, userId);
+  if (clientReports) return clientReports;
 
   // PM surface + task comments — stateful in-memory store (lib/demoPm.ts).
   const pm = pmDemo(method, p, url.searchParams, body);
