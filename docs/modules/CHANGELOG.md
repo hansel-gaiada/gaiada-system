@@ -11,6 +11,14 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.149.0` + platform-ui `0.171.0` - PV7-01, PV7-02, PV7-06: the client grain, client health, and My performance (2026-10-15) - PROTOTYPED
+
+Plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`; contract FRONTEND-BFF-CONTRACT §53 and §54, PERMISSION-CONTRACT §45.
+- **PV7-01, the client grain in reports.** A fifth report grain, `client`: one client's delivery figures summed across its projects (`projects.client_id`, by join). `GET /reports/document?grain=client&scopeRef=<clientId>`, `GET /reports/overview?grain=client`, `POST /reports/export` and the MCP `reports.getDocument` / `reports.getMetrics` accept it. Ratios are Σnumerator/Σdenominator, never a mean; `flow.wip_open_avg` keeps the day count; `discipline.overdue_open` stays point-in-time; `evidence.source_diversity` is not offered; internal projects and the sentinel internal client are excluded. Sealed with each month, deterministic narrative only (no gateway call per client). New action `report_document · read_client` for exactly the `read_project` tiers, not the served-provider arm; staff only. Migration `202610151700_reports_client_grain`.
+- **PV7-02, client health (backend).** The shared "who holds the ball" read (`client-ball.ts`, set-based; the hub overview now uses it, output pinned by a parity test). Health rules as a pure function with a golden table (on track, at risk, off track, quiet, unknown). `GET /clients/health` (the staff board, a fixed 18 queries whatever the client count), `GET /clients/:clientId/health` (per-project health and the 90-day turnaround on both sides), and `GET /portal/health` (the client's own view: facts and who holds the ball, never a verdict; no tasks, time, people, internal gates or money; project-less and client-wide material for client-wide contacts only). `pm_milestones.completed_at` stamped by a trigger from now on (migration `202610151710`; nothing back-filled).
+- **PV7-06, My performance.** `/me/performance`, the first row of the Performance block: this month's numbers, check-ins, the latest appraisal, learning and your own logged time ("context, not a score"), each read on its own and linking to its full page. No composite score; nothing next to the appraisal.
+- **Deploy.** Two migrations (`202610151700`, `202610151710`). **Restart Cerbos after the deploy** (new action `read_client`) and probe it.
+
 ### platform-nest `0.148.0` - DW-4h-1 and DW-4h-2: the activity series counts all work, and a peer can no longer read a colleague's activity (2026-10-15) - PROTOTYPED
 
 Contract: `docs/FRONTEND-BFF-CONTRACT.md` §44 (with §44.3a "as built") and `docs/PERMISSION-CONTRACT.md` §38c. Plan §5.6, 4h, and §14.5.
