@@ -21,12 +21,9 @@ import {
 } from "./client-input";
 import { assertGroupCompany } from "./group-company";
 import { emptyProfileState, loadProfileRow, saveProfileRow } from "./centre/store";
-import {
-  changeRequestClientVisible, contractClientVisible, postReviewClientVisible, staffClientVisible,
-  staffConversationThreadClientVisible, staffGateClientVisible, staffInvoicePaymentClientVisible,
-} from "../../core/portal-visibility";
-import { awaitingReplySql } from "../../core/conversation-core";
-import { staffThreadHref } from "../../core/conversation-notify";
+import { loadClientBall, toHubItem } from "./client-ball";
+import { loadClientHealthBoard, loadClientHealthDetail } from "./client-health";
+import { isUuid } from "../../core/conversation-core";
 
 // CC-D10: every read of a client row carries its owner (account manager) and the owner's name. The
 // users join is LEFT so an ownerless client, or one whose owner was hard-deleted, still reads.
@@ -79,6 +76,26 @@ export class ClientsController {
       ),
     );
     return rows.rows;
+  }
+
+  // PV7-02 (BFF §54.1): the client health BOARD. One row per client that is not archived and not internal, with its signals
+  // and its state. Gated exactly like the list above (`client · read` on the company, module `clients`). `health` is a static
+  // segment, so it never reads as a `:clientId`. A fixed number of queries whatever the client count; a source that fails is
+  // named in `unavailable[]` and its signals are null, never 0 (client-health.ts).
+  @Get(":tenantId/clients/health")
+  async clientHealthBoard(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "client", tenantId }, "read");
+    return loadClientHealthBoard(tenantId);
+  }
+
+  // PV7-02 (BFF §54.1): one client's health: the board row, per-project health and the 90-day turnaround on both sides.
+  @Get(":tenantId/clients/:clientId/health")
+  async clientHealth(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("clientId") clientId: string) {
+    await authorize(req.principal, { kind: "client", id: clientId, tenantId }, "read");
+    // Shape only, after the decision: a malformed id is a 404 (there is no such client), not a 500 at the uuid cast.
+    const detail = isUuid(clientId) ? await loadClientHealthDetail(tenantId, clientId) : null;
+    if (!detail) throw new NotFoundException("client not found");
+    return detail;
   }
 
   @Get(":tenantId/clients/:clientId")
@@ -362,6 +379,10 @@ export class ClientsController {
   //   request      a change request nobody has triaged
   //   contract     drafted but never sent — we are sitting on our own paperwork
   //
+  // PV7-02: the two lists are built by `client-ball.ts` (`loadClientBall`), set-based over `clientIds[]` so the client
+  // health board can ask for every client in a fixed number of queries; this endpoint asks it for ONE client and its
+  // output is pinned unchanged by `client-ball-parity.db.test.ts`. The scope note below still applies to THIS transaction.
+  //
   // ⚠ MODULE SCOPE. `social_post_client_reviews` carries the `social` third wall
   // (`app_module_allowed('social')`), so this whole transaction runs with `{ modules: ["social"] }`.
   // Without it that one SELECT returns ZERO ROWS AND RAISES NOTHING — the hub would report "no post
@@ -383,7 +404,7 @@ export class ClientsController {
       if (!client.rows[0]) throw new NotFoundException("client not found");
       const a = [clientId];
 
-      const [projects, tasks, deliverables, milestone, money, needsUs, needsClient] = await Promise.all([
+      const [projects, tasks, deliverables, milestone, money, ball] = await Promise.all([
         c.query<{ total: string; active: string; done: string; percent: string | null }>(
           // Portfolio progress is the MEAN OF PROJECT progress, not of all tasks pooled — the same
           // choice `portal/overview` makes, for the same reason: pooling lets a 200-task project drown
@@ -430,9 +451,11 @@ export class ClientsController {
           a,
         ),
         this.clientMoney(c, clientId),
-        this.needsUs(c, clientId),
-        this.needsClient(c, clientId),
+        // PV7-02: the ball moved to client-ball.ts (set-based over clientIds[]); this asks it for ONE client.
+        loadClientBall(c, [clientId]),
       ]);
+      const needsUs = (ball.get(clientId)?.needsUs ?? []).map(toHubItem);
+      const needsClient = (ball.get(clientId)?.needsClient ?? []).map(toHubItem);
 
       const p = projects.rows[0];
       const t = tasks.rows[0];
@@ -469,7 +492,9 @@ export class ClientsController {
   /** Money for one client, per currency.
    *
    *  Per-currency and never one total: `invoices.currency` is per-row, and summing across currencies
-   *  produces a number wrong in a way nobody notices until it is quoted back at you. Mirrors
+   *  produces a number wrong in a way nobody notices until it is quoted back at you. PV7-02: the health board counts
+   *  OVERDUE ISSUED invoices set-based in `client-health.ts` (`status = 'sent'` and past `COALESCE(due_date, period_end)`):
+   *  if the `overdue` rule below changes, change that read too. Mirrors
    *  `portal-workspace.controller.ts:finance` so the two sides of the relationship cannot disagree
    *  about the balance — if that query changes, change this one.
    *
@@ -516,163 +541,5 @@ export class ClientsController {
       openCount: Number(row.open),
     }));
     return { byCurrency, primary: byCurrency[0] ?? null };
-  }
-
-  /** Outstanding items only WE can clear. See the endpoint header for why this list exists.
-   *
-   *  PV3-07: every item carries `clientVisible` (a client-wide contact of this client can read the row in
-   *  the portal), computed in each SELECT from portal-visibility.ts. A payment's travels through its
-   *  invoice, hence the LEFT JOIN below: a payment whose invoice is a draft reads `false`. */
-  private async needsUs(c: PoolClient, clientId: string) {
-    const [payments, reviews, requests, drafts, threads] = await Promise.all([
-      c.query(
-        `SELECT pp.id, pp.invoice_id AS "invoiceId", pp.amount::float8 AS amount, pp.currency,
-                pp.created_at AS "since", ${staffInvoicePaymentClientVisible("pp", "i")} AS "clientVisible"
-           FROM invoice_payments pp LEFT JOIN invoices i ON i.id = pp.invoice_id
-          WHERE pp.client_id = $1 AND pp.status = 'pending' AND pp.deleted_at IS NULL
-          ORDER BY pp.created_at ASC`,
-        [clientId],
-      ),
-      // The social third wall applies to this join — see the endpoint header.
-      c.query(
-        `SELECT r.id, r.comment, r.decided_at AS "since", pst.title AS "postTitle",
-                ${staffClientVisible("r", postReviewClientVisible("r"))} AS "clientVisible"
-           FROM social_post_client_reviews r
-           JOIN social_post_variants v ON v.id = r.variant_id AND v.tenant_id = r.tenant_id
-           JOIN social_posts pst       ON pst.id = v.post_id  AND pst.tenant_id = v.tenant_id
-          WHERE r.client_id = $1 AND r.status = 'changes_requested'
-          ORDER BY r.decided_at ASC`,
-        [clientId],
-      ),
-      c.query(
-        `SELECT w.id, w.title, w.kind, w.created_at AS "since",
-                ${staffClientVisible("w", changeRequestClientVisible("w"))} AS "clientVisible"
-           FROM webdev_change_requests w
-          WHERE w.client_id = $1 AND w.status = 'new' AND w.deleted_at IS NULL
-          ORDER BY w.created_at ASC`,
-        [clientId],
-      ),
-      c.query(
-        `SELECT k.id, k.title, k.created_at AS "since",
-                ${staffClientVisible("k", contractClientVisible("k"))} AS "clientVisible"
-           FROM contracts k
-          WHERE k.client_id = $1 AND k.status = 'draft' AND k.deleted_at IS NULL
-          ORDER BY k.created_at ASC`,
-        [clientId],
-      ),
-      // PV4-06: conversation threads waiting for our reply (open, last live message is the client's). The rule is
-      // conversation-core.ts `awaitingReplySql`, the same one the staff Conversation list filters on.
-      c.query(
-        `SELECT t.id, t.subject, p.name AS "projectName",
-                (SELECT max(um.created_at) FROM conversation_messages um
-                  WHERE um.thread_id = t.id AND um.author_side = 'client' AND um.retracted_at IS NULL) AS "since",
-                ${staffConversationThreadClientVisible("t")} AS "clientVisible"
-           FROM conversation_threads t LEFT JOIN projects p ON p.id = t.project_id
-          WHERE t.client_id = $1 AND t.deleted_at IS NULL AND ${awaitingReplySql("t")}
-          ORDER BY "since" ASC, t.id ASC`,
-        [clientId],
-      ),
-    ]);
-    return [
-      ...payments.rows.map((r: Record<string, unknown>) => ({
-        kind: "payment" as const, id: r.id as string,
-        label: "Confirm a client-recorded payment",
-        context: `${r.currency as string} ${r.amount as number}`,
-        // PV3-07: payments are confirmed on the client's Contracts & billing page (PV3-08).
-        href: `/clients/${clientId}/billing`, since: r.since, clientVisible: r.clientVisible === true,
-      })),
-      ...reviews.rows.map((r: Record<string, unknown>) => ({
-        kind: "review" as const, id: r.id as string,
-        label: "Client asked for changes on a post",
-        context: (r.postTitle as string) ?? "Social post",
-        href: `/clients/${clientId}/requests`, since: r.since, clientVisible: r.clientVisible === true,
-      })),
-      ...requests.rows.map((r: Record<string, unknown>) => ({
-        kind: "request" as const, id: r.id as string,
-        label: "Triage a new change request",
-        context: r.title as string,
-        href: `/clients/${clientId}/requests`, since: r.since, clientVisible: r.clientVisible === true,
-      })),
-      ...drafts.rows.map((r: Record<string, unknown>) => ({
-        kind: "contract" as const, id: r.id as string,
-        label: "Send a drafted agreement",
-        context: r.title as string,
-        href: `/clients/${clientId}/billing`, since: r.since, clientVisible: r.clientVisible === true,
-      })),
-      ...threads.rows.map((r: Record<string, unknown>) => ({
-        kind: "conversation" as const, id: r.id as string,
-        label: "A client message is waiting for our reply",
-        context: (r.subject as string | null) ?? (r.projectName as string | null) ?? "General conversation",
-        href: staffThreadHref(clientId, r.id as string), since: r.since, clientVisible: r.clientVisible === true,
-      })),
-    ];
-  }
-
-  /** Outstanding items only the CLIENT can clear — the staff-side view of what the portal is asking of
-   *  them. Kept in step with `portal-workspace.controller.ts:needsYou`: same two sources (pending
-   *  client-side gates, sent-but-unsigned contracts) plus pending post reviews, which that method
-   *  deliberately omits because its own tab carries no badge.
-   *
-   *  PV3-07: each item carries `clientVisible`, computed from portal-visibility.ts (a gate's through its
-   *  run). Everything here should read `true`, since it is what the portal asks of the client; the flag
-   *  is computed rather than assumed, so a drift between this list and the portal shows as `false`. */
-  private async needsClient(c: PoolClient, clientId: string) {
-    const [gates, contracts, reviews] = await Promise.all([
-      c.query(
-        `SELECT g.id, g.kind, g.created_at AS "since", r.id AS "runId", r.title AS "runTitle",
-                ${staffGateClientVisible("g", "r")} AS "clientVisible"
-           FROM pipeline_gates g JOIN pipeline_runs r ON r.id = g.run_id
-          WHERE r.client_id = $1 AND r.deleted_at IS NULL
-            AND g.actor_side = 'client' AND g.status = 'pending' AND g.deleted_at IS NULL
-          ORDER BY g.created_at ASC`,
-        [clientId],
-      ),
-      c.query(
-        // Same "already countersigned by that side" exclusion the portal's own query carries: `status`
-        // flips only once BOTH parties are in, so a row can read 'sent' while the client has signed.
-        `SELECT k.id, k.title, k.created_at AS "since",
-                ${staffClientVisible("k", contractClientVisible("k"))} AS "clientVisible"
-           FROM contracts k
-          WHERE k.client_id = $1 AND k.deleted_at IS NULL AND k.status = 'sent'
-            AND NOT EXISTS (SELECT 1 FROM contract_signatures s WHERE s.contract_id = k.id AND s.party = 'client')
-          ORDER BY k.created_at ASC`,
-        [clientId],
-      ),
-      c.query(
-        `SELECT r.id, r.requested_at AS "since", pst.title AS "postTitle",
-                ${staffClientVisible("r", postReviewClientVisible("r"))} AS "clientVisible"
-           FROM social_post_client_reviews r
-           JOIN social_post_variants v ON v.id = r.variant_id AND v.tenant_id = r.tenant_id
-           JOIN social_posts pst       ON pst.id = v.post_id  AND pst.tenant_id = v.tenant_id
-          WHERE r.client_id = $1 AND r.status = 'pending'
-          ORDER BY r.requested_at ASC`,
-        [clientId],
-      ),
-    ]);
-    const GATE_LABEL: Record<string, string> = {
-      prd_sign: "Sign off the project requirements",
-      scope_signoff: "Sign the Scope Agreement",
-      customer_feedback: "Share feedback",
-    };
-    return [
-      ...gates.rows.map((g: Record<string, unknown>) => ({
-        kind: "gate" as const, id: g.id as string,
-        label: GATE_LABEL[g.kind as string] ?? "Client input needed",
-        context: (g.runTitle as string) ?? "Delivery run",
-        href: `/pipeline/${g.runId as string}`, since: g.since, clientVisible: g.clientVisible === true,
-      })),
-      ...contracts.rows.map((k: Record<string, unknown>) => ({
-        kind: "contract" as const, id: k.id as string,
-        label: "Awaiting client signature",
-        context: k.title as string,
-        href: `/clients/${clientId}/billing`, since: k.since, clientVisible: k.clientVisible === true,
-      })),
-      ...reviews.rows.map((r: Record<string, unknown>) => ({
-        kind: "review" as const, id: r.id as string,
-        label: "Awaiting client post approval",
-        context: (r.postTitle as string) ?? "Social post",
-        href: `/clients/${clientId}/requests`, since: r.since, clientVisible: r.clientVisible === true,
-      })),
-    ];
   }
 }
