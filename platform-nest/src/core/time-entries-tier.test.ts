@@ -33,6 +33,7 @@ describe.skipIf(!TEST_URL)("GET /time-entries is read by person-axis tier (DW-D2
   let viewer: string; // viewer, no unit
   let admin: string; // company_admin
   let hr: string; // hr_staff (+ member)
+  let unitLead: string; // member + org_unit_lead on d-b, no primary unit
   let rivalAdmin: string;
   let rivalUser: string;
   const stranger = "00000000-0000-4000-8000-000000000001"; // a well-formed uuid that is nobody
@@ -81,6 +82,9 @@ describe.skipIf(!TEST_URL)("GET /time-entries is read by person-axis tier (DW-D2
     hr = await mk("hr", "hr_staff");
     // HR's people readers also hold the everyday member grant (time_entry read is a member-level grant)
     await grantRole(hr, await createRole("member"), "company", t);
+    // A head by the org_unit_lead GRANT on d-b (how live heads are seated), with no primary unit of their own and no entries.
+    unitLead = await mk("unitlead", "member");
+    await grantRole(unitLead, await createRole("org_unit_lead", null), "org_unit", "d-b");
     rivalAdmin = await mk("rivaladmin", "company_admin", rival);
     rivalUser = await mk("rivaluser", "member", rival);
     await setUnit(t, a, "d-a");
@@ -174,6 +178,16 @@ describe.skipIf(!TEST_URL)("GET /time-entries is read by person-axis tier (DW-D2
       const bad = await list("?userId=not-a-uuid", head);
       expect(bad.statusCode).toBe(400);
       expect(bad.json()).toMatchObject({ field: "userId" });
+    });
+
+    it("a head by the org_unit_lead grant reads the granted unit's people, and no one outside it", async () => {
+      const r = await list("", unitLead);
+      expect(r.statusCode).toBe(200);
+      expect(owners(r)).toEqual(sorted(c, otherHead));
+      expect(owners(await list(`?userId=${c}`, unitLead))).toEqual([c]);
+      const out = await list(`?userId=${a}`, unitLead);
+      expect(out.statusCode).toBe(403);
+      expect(JSON.stringify(out.json())).toContain("outside your reporting line");
     });
 
     it("mine=me is the head's own entries only", async () => {
