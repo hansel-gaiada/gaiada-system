@@ -794,7 +794,7 @@ where a ticket says the classic shell changes too.
     new Cerbos kind (`finance_config` create and update); the screen has New account, Rename (the code locks once posted) and
     Archive or Restore behind a "Show archived" switch. Archive is refused for a balance, an active child, a control account,
     or an account a posting rule, tax code, asset class, loan or the billing profile still names (the 409 lists them). The DB
-    and HTTP suite `finance-accounts.test.ts` is written for the Linux gate and has not run yet (BFF §49 as built).
+    and HTTP suite `finance-accounts.test.ts` ran green on CI 38711400868 (real Postgres). LIVE in 413 (BFF §49 as built).
 - **7h · IT isolation rules and threat response.** PLANNED (2026-10-15). It is blocked on the owner, not on code.
   - *Today:*
     - The Network pages (Topology, Traffic, Threats, Isolation, Occupancy) read labelled fixtures.
