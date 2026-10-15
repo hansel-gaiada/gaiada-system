@@ -9940,3 +9940,234 @@ On a successful `post`, after the commit, one notification of type **`notice.pos
   - A company post notifies every active member except the author.
   - A notify failure still answers 201.
 - **Cerbos:** the static pins and the live matrix for `dept_notice` (PERMISSION-CONTRACT §47).
+
+## 58. Monthly targets against actuals (DW-10b, 2026-10-15) — `platform-nest/src/modules/reports/dept-kpis.controller.ts`, `dept-kpi-targets.ts`; UI `/appraisals/department?unit=…&view=months` — **STATUS: PLANNED**
+
+**Why.** Plan §12 (DW-10) and §12.1 (row 10b). Targets are already effective-dated per month (§40.2: one approved row per unit, KPI and `effective_from` month), so a department can have a different target each month, but:
+- every read answers ONE period (`GET /dept-kpis`);
+- the department appraisal loops months, but returns conditions only;
+- the KPI page shows the current period with no trend;
+- a target for each of the next months is one propose and one approve per month.
+
+No new Cerbos kind, action or migration: both reads use `dept_kpi_target · read` and the writes use `propose`, `approve` and `reject`, each with every check of §40.2.
+
+### 58.1 The series: `GET /api/:tenantId/dept-kpis/months?unitNodeId=U&from=YYYY-MM&to=YYYY-MM`
+
+- **Gate:** `authorizeUnitRead`, the exact gate of `GET /dept-kpis` (Cerbos `read` with the unit's ancestry, then placed in U's subtree, a head whose led scope holds U, or a company-wide tier, else 403; then 404 `unit_not_found`).
+- **Window:**
+  - `from` and `to` are calendar months, `from <= to`, at most **12 months**, and `to` no later than the current month (today in `REPORTS_TZ`).
+  - Without both, the window is the 12 months ending with the current month.
+  - A bad value answers **400** `{field: "from"|"to"}`.
+- **Computation:**
+  - One `evaluateUnits(tenantId, vertical, [unit], departmentUnits(structure), {periodKind: "month", start, end})` per month.
+  - `targetsAsOf` is the month's start, the default and the appraisal history's rule (§41.1). Each month is judged against the target in force for that month.
+  - Months are evaluated **one after another**, never in parallel, so one request cannot fan out readers across 12 months at once on the 2-vCPU box.
+  - A sealed month serves its stored document for the report-fact KPIs (`fetchReportDocumentForRead`), as every read does. Module-reader KPIs recompute (§40.5.1).
+- **Response:**
+
+```
+{ unit: {id, name}, workspace,
+  months: [ {month: "YYYY-MM", start, end, partial: boolean, condition} ],      // oldest first
+  kpis:   [ {key, label, unit, direction,
+             cells: [ {month, value, numerator?, denominator?, target, tolerance,
+                       targetSource, condition, reason?} ] } ] }                   // catalogue order, one cell per month
+```
+
+- `partial` is true for the current month (month to date).
+- A cell is exactly that month's `KpiRead` (§40.3): `unavailable` with its reason when there is no data, no reader or a failed read. It is never 0 and never carried over from another month.
+- A month before the company's fact history reads `unavailable`/`no_data`, as `GET /dept-kpis` does.
+- **Budget:** measured at the live check. The 12-month read of the largest department should answer within 10 seconds on gda-aicenter. If it does not, the next step is to store each closed month's values. That is a later ticket, not v1.
+- **Agents:** if `GET /dept-kpis` has a hub tool, the series gets a read tool beside it; otherwise none (same reach as the page).
+
+### 58.2 Targets for several months: `POST /api/:tenantId/dept-kpis/targets/batch`
+
+- **Body:**
+  - `{unitNodeId, items: [{kpiKey, effectiveFrom, target, tolerance, note?}]}`, with 1 to 36 items.
+  - At most one item per `(kpiKey, effectiveFrom)`, or 400 `{field: "items[i].effectiveFrom"}`.
+- **Order of checks (the single propose's, §40.2):**
+  1. the unit's ancestry, then Cerbos `propose`, before any body validation;
+  2. then each item validated exactly as a single proposal (month start, KPI of the unit's workspace, percent as a fraction);
+  3. then the unit's existence.
+  - The first invalid item answers 400 with its index in `field` (for example `items[3].target`).
+- **All or nothing:** the proposals are inserted in one transaction; a failure inserts none. Each proposal writes its own `proposed` activity row.
+- **Answer:** **201** `{ids: [...]}`, in item order.
+
+### 58.3 Deciding several proposals: `POST /api/:tenantId/dept-kpis/targets/decide-batch`
+
+- **Body:** `{decision: "approve"|"reject", ids: [...], note?}`, with 1 to 36 distinct ids.
+- **Checks:** the single decide's, per id, in this order:
+  1. the tenant `read` gate once, before any row is looked up;
+  2. then, for each id, it must exist (else 404 `{failedId}`) and be `proposed` (else 409 `not_proposed` with `{failedId}`);
+  3. an approval of the caller's own proposal is 409 `cannot_approve_own_proposal` with `{failedId}`;
+  4. Cerbos `approve` or `reject` with that row's `unitAncestors` (else 403 `{failedId}`).
+- **All or nothing:** every decision and every supersession happen in ONE transaction. `decideTarget` takes the caller's transaction client for this. Any refusal decides none.
+- **Answer:** **200** `{decided: [{id, status, superseded}]}`. Each decision writes its own `approved` or `rejected` activity row, as the single route does.
+
+### 58.4 UI
+
+- **The department KPI page** (`/appraisals/department?unit=U`) gains a **This period | By month** switch. `view=months` is a URL parameter, like `?cycle=`.
+- **By month:**
+  - A table: one row per KPI and one column per month, the current month marked "so far".
+  - Each cell shows the value in the KPI's unit, the target in force under it in muted text ("target 85%", or "no target"), and the condition as a word plus a dot. Colour never carries the meaning alone.
+  - `unavailable` cells say why, in short words.
+  - Under the table, each KPI can open a **trend line**: the values, with the target as a step line. Use the existing hand-rolled SVG charts (`components/reports/charts/TrendLine.tsx`) and their no-data fallback; there is no chart library.
+  - A failed series read says "Unavailable" in place of the table, never an empty table.
+- **Plan the coming months** (shown when the viewer may propose for U; `canInUnit` mirror):
+  - Choose a KPI and the next 1 to 12 months. Target and tolerance per month are pre-filled with the target in force.
+  - Submitting sends one batch (58.2). The page then lists them as proposals.
+- **The approver's view** (shown when the viewer may approve):
+  - The Targets card groups open proposals by KPI, with a checkbox per proposal and "Approve selected" and "Reject selected" (58.3).
+  - A proposal of the viewer's own is shown without a checkbox, with "You proposed this".
+- **Demo mode:** the demo store answers the series with 12 months for Web Dev.
+
+### 58.5 Proofs required before DW-10b is ticked (Linux CI gate, real Postgres and Cerbos)
+
+- **The series:**
+  - Two months with different approved targets yield cells with each month's own target and condition.
+  - A month with no data is `unavailable`, never 0.
+  - The current month is `partial`.
+  - 13 months, `from > to` or a future `to` answer 400.
+  - The read gate equals `GET /dept-kpis`': a staff member of another unit gets 403; a head of an enclosing unit and the company-wide tiers pass.
+  - A sealed month reads its stored document. It returns the same value after a later fact change, when a live recompute would differ.
+- **The batch propose:**
+  - A non-head gets 403, never 400, even with an invalid body.
+  - An invalid item names its index; nothing is inserted.
+  - A duplicate month is 400.
+  - 37 items is 400.
+  - A head of a sibling unit gets 403.
+- **The batch decide:**
+  - Own proposal in the set: 409 and nothing decided.
+  - A rejected or superseded id: 409.
+  - Approving two months supersedes each month's earlier approved row only.
+  - The activity rows are written per id.
+- **No regression:** the single propose, approve and reject routes and their tests are unchanged.
+
+## 59. The department calendar (DW-10c, 2026-10-15) — `platform-nest/src/core/dept-calendar.{controller,service}.ts` (new), `src/core/calendar-events.{controller,service}.ts` (the `department` visibility); migration `<prefix>_calendar_events_department.sql` (the next free prefix at landing); UI `/departments/[deptId]/schedule` — **STATUS: PLANNED**
+
+**Why.** Plan §12 (DW-10) and §12.1 (row 10c); owner ruling **DW-D33** (plan §11.4): the department's people see its people's approved leave with the leave type. Today nothing is department-shaped:
+- `calendar_events.visibility` is `attendees` or `company`;
+- leave (`hr_leave_requests`) has no unit, and a plain member's leave read silently narrows to their own rows;
+- holidays are per company;
+- milestones are read one project at a time.
+
+The Cerbos change is PERMISSION-CONTRACT §48.
+
+**Out of scope (v1):**
+- tasks due (the department's Board shows them; milestones are the department's deadlines here);
+- pending leave;
+- birthdays and anniversaries;
+- recurring events;
+- writing from the department calendar (events are made on `/calendar/new`, 59.4);
+- a person's private events (they stay on their own Calendar).
+
+### 59.1 The read: `GET /api/:tenantId/departments/:unitNodeId/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD`
+
+**Gate** (in this order):
+1. Cerbos `org_structure · read_calendar` on the company (PERMISSION-CONTRACT §48).
+2. The unit narrowing of `GET /dept-kpis` (`authorizeUnitRead`'s rule, shared, never copied): the caller is placed in U or a unit below it today, or a head whose led scope holds U, or a company-wide tier (which includes the HR staff and managers). Otherwise **403** `outside your reporting line`.
+3. U must exist in this tenant's org tree, else **404** `unit_not_found`.
+
+**Window:** `from <= to`, at most **42 days** (a six-week month grid), dates as `YYYY-MM-DD`. A bad value answers **400** `{field}`.
+
+**Answer:** four legs, each either `{included: true, items: [...]}` or `{included: false, reason: "module_off"|"read_failed"}`. A leg is never a fake empty: `items: []` only from a read that succeeded. A failed leg is logged and does not fail the others.
+
+```
+{ unit: {id, name}, from, to,
+  holidays:  {included, items: [{day, name, kind: "public"|"joint_leave"|"company"}]},
+  away:      {included, items: [{userId, name, startsOn, endsOn, leaveType: "vacation"|"sick"|"unpaid"|"other"}]},
+  deadlines: {included, items: [{milestoneId, name, dueDate, projectId, projectName}]},
+  events:    {included, items: [{id, title, startsAt|null, endsAt|null, startsOn|null, endsOn|null,
+                                 visibility: "company"|"department", unitNodeId|null}]} }
+```
+
+**The legs:**
+
+| Leg | Source and rule |
+|---|---|
+| `holidays` | The company's **default** holiday calendar (`hr_holiday_calendars.is_default`), days in the window. It is read with its own query under the `hr` module wall, never through `listLeave`-style readers. The `hr` module switched off gives `{included: false, reason: "module_off"}`. No default calendar gives `items: []` |
+| `away` | **DW-D33.** Approved leave (`hr_leave_requests.status = 'approved'`, `deleted_at is null`) overlapping the window, for the people placed in U or below it today. The roster is `loadUnitRoster` over `collectUnitSubtree` as of today. The fields are exactly `userId`, the person's display name, `startsOn`, `endsOn` and `leaveType`. **Never** minutes, the note, the approver or pending, denied or cancelled leave. It uses its own query under the `hr` module wall, never `listLeave`: that reader degrades a refusal to the caller's own rows. `hr` off gives `module_off` |
+| `deadlines` | Open milestones (`pm_milestones.due_date` in the window, `status <> 'done'`, `deleted_at is null`) of the projects whose `department_id` is U or below it (`departmentFilterSql`, which carries the tenant). Each project is re-checked for `pm_project · read` with the caller, in Cerbos batches of **at most 50**. A project the caller cannot read drops its milestones silently. `pm` off gives `module_off` |
+| `events` | Confirmed events in the window that are company-visible, or department-visible for U or a unit above U (59.3). The caller's private and attendee-only events are NOT here; they stay on the personal Calendar. Busy times are not shown |
+
+- **Order:** holidays and away by date, then name; deadlines by due date; events by start.
+- **Caps:** at most 200 items per leg, with `truncated: true` on the leg when cut.
+
+### 59.2 Who sees the away leg (DW-D33)
+
+| Viewer | Sees |
+|---|---|
+| A person placed in U or below it | name, dates and type of the colleagues placed in U or below it |
+| A head whose led scope holds U | the same fields (their full leave view stays on the HR pages they can already open) |
+| HR staff and managers, the company-wide tiers | the same fields (their full view stays on the HR pages) |
+| Anyone else | nothing: the whole read answers 403 |
+
+- A person sees their own leave the same way.
+- A colleague's leave read here never widens any HR route: `GET /modules/hr/leave` keeps its rules.
+
+### 59.3 Department-visible events (the second change)
+
+**Data:**
+- `calendar_events.visibility` gains **`department`**.
+- A new column **`unit_node_id`** (text, nullable, an org-tree node of this tenant) is **required when `visibility = 'department'` and NULL otherwise** (CHECK).
+- The visibility CHECK is dropped and re-added WHOLE, keeping `attendees` and `company`: a DROP+ADD re-declares everything.
+
+**Who reads a department event:**
+- the organizer and attendees (as today);
+- `company_admin` (as today);
+- a person placed in the unit or below it today;
+- a head whose led scope holds the unit;
+- the company-wide tiers.
+
+Cerbos `calendar_event · read` gains a rule for `visibility == "department"` held as `member`, `viewer` or `manager` (tenant-wide, PERMISSION-CONTRACT §48). The handler applies the placement narrowing, as for `dept_notice` (§57.2).
+
+**Who creates or moves an event to `department`:** anyone who may create an event (`calendar_event · create`) AND passes the unit narrowing for that unit (placed in it or below, leads it, or company-wide). Otherwise **403**, checked before the body's other fields are validated.
+
+**The places this must reach** (DW-8's list, or it half-works):
+1. the visibility CHECK and the new column (migration);
+2. the Cerbos rule, and the `visibility` and new `unitNodeId` attributes in `resourcePayload()` (an attribute missing from the allow-list is dropped and the rule must then deny);
+3. the SQL mirrors in `GET /calendar/events/mine` and the detail read: a department branch matching the caller's placement or led scope, or a department event never lists even when Cerbos allows it;
+4. the form's visibility select in `components/calendar/EventForm.tsx` ("My department: <unit>", offered for the caller's own unit and the units they lead) and the DEMO_MODE store `lib/demoCalendarEvents.ts`;
+5. busy times (§47.4) unchanged: they count attended events whatever their visibility, times only.
+
+**The `calendar.invited` notification** is unchanged: attendees only. A department event does not page the whole department.
+
+### 59.4 UI
+
+- **The page:**
+  - The Overview row gains a **Department calendar** tab, after Notices, at `/departments/{dept}/schedule`. `/departments/[deptId]/calendar` stays Social Media's posts calendar.
+  - The page needs an `AREA_RULES` entry in the department's workspace area.
+  - It shows a **month grid** (six weeks, Monday first, the period from the URL `?month=YYYY-MM`) with a chip per item: holidays (name), away (name and type, for example "Andre · vacation"), milestones (project · milestone) and events (time · title).
+  - Below the grid is an **agenda list** of the same items, day by day. It is the accessible reading order; the grid is visual.
+  - A legend explains the chips.
+  - A leg that is not included shows a one-line note ("Leave could not be loaded", "The HR module is off for this company"). Its chips are simply absent, and the page never implies "nobody is away".
+  - "Add an event" links to `/calendar/new?visibility=department&unit=<dept>`.
+- **The Overview:** no new block in v1. The Today block is unchanged.
+- **Demo mode:** a demo store for Web Dev with a holiday, two away colleagues, a milestone and a department event.
+
+### 59.5 Proofs required before DW-10c is ticked (Linux CI gate, real Postgres and Cerbos)
+
+- **The gate:**
+  - A person placed in U, a head above U, HR and company admin read.
+  - A person of a sibling department gets 403.
+  - A client contact is refused.
+  - An unknown unit gives 404 to a company admin.
+  - Bots and automation may read.
+- **The away leg:**
+  - Only approved leave.
+  - Only people placed in U or below it.
+  - The exact five fields (a body scan: no `minutes`, `note` or `status`).
+  - A member who is not HR still sees colleagues' leave here.
+  - `GET /modules/hr/leave` is unchanged for that member.
+- **Module walls:** with `hr` off, holidays and away are `module_off`, not empty; the same for `pm` and deadlines.
+- **Deadlines:**
+  - Only open milestones of projects in U's subtree.
+  - A project the caller cannot read contributes nothing.
+  - 60 projects still check in batches of at most 50.
+- **Department events:**
+  - The CHECK keeps `attendees` and `company` working.
+  - A department event lists for the unit's people and heads, and not for a sibling department.
+  - Creating one for a unit you are not in gives 403, and gives 403 (not 400) with an invalid body.
+  - The `mine` list and the detail read agree with Cerbos.
+  - Busy times are unchanged.
+- **Tenants:** the same node id in two companies leaks nothing across them.
+- **Caps:** a 43-day window answers 400; a leg over 200 items is `truncated`.
