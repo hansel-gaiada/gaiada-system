@@ -169,11 +169,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610151210_iam_personal_mailbox_permissions.sql`
+- Head: `202610151710_pm_milestones_completed_at.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 311 (121 legacy `NNNN_`, 190 timestamped)
+- Applied files on disk: 313 (121 legacy `NNNN_`, 192 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -232,6 +232,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/portal-commerce.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-conversation.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-documents.controller.ts` |
+| `/api` | `platform-nest/src/core/portal-health.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-profile.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-stream.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-workspace.controller.ts` |
@@ -534,6 +535,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/me/mail/[threadId]`
 - `/me/mail/new`
 - `/me/pay`
+- `/me/performance`
 - `/me/tasks`
 - `/meetings`
 - `/meetings/[id]`
