@@ -100,6 +100,8 @@ describe.skipIf(!TEST_URL)("PV7-08 · client health and client reports agent too
     await teardownTestDb();
   });
 
+  // `asOf` is the read's own clock, so two reads a few ms apart differ in it and in nothing else.
+  const noClock = (v: unknown): unknown => JSON.parse(JSON.stringify(v, (k, x) => (k === "asOf" ? undefined : x)));
   const ids = () => ({ tenantId: co, clientId: clientA });
   const call = (name: string, user: string, payload?: unknown) => {
     const t = tool(name);
@@ -113,7 +115,7 @@ describe.skipIf(!TEST_URL)("PV7-08 · client health and client reports agent too
     const r = await call("clients.getHealthBoard", admin);
     expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
     const direct = await app.inject({ method: "GET", url: `/api/${co}/clients/health`, headers: asUser(admin) });
-    expect(r.json()).toEqual(direct.json());
+    expect(noClock(r.json())).toEqual(noClock(direct.json()));
     expect(JSON.stringify(r.json())).toContain(clientA);
     for (const u of [outsider, contact]) {
       const d = await call("clients.getHealthBoard", u);
@@ -126,7 +128,7 @@ describe.skipIf(!TEST_URL)("PV7-08 · client health and client reports agent too
     const r = await call("clients.getHealth", admin);
     expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
     const direct = await app.inject({ method: "GET", url: `/api/${co}/clients/${clientA}/health`, headers: asUser(admin) });
-    expect(r.json()).toEqual(direct.json());
+    expect(noClock(r.json())).toEqual(noClock(direct.json()));
     expect((await call("clients.getHealth", outsider)).statusCode).toBe(403);
   });
 
