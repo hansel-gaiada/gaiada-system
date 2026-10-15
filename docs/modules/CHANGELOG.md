@@ -11,6 +11,22 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.159.0` + platform-ui `0.181.0` - DW-7f-3, 3b, 4, 5: HR compensation, review cycles and policies become writable; an employee's pay items on file (2026-10-15) - PROTOTYPED
+
+Plan §4.3 (7f). The remaining HR write screens over the complete HR backend, plus one read contract (BFF §51). No migration, no Cerbos change.
+- **Compensation (7f-3)** on `/hr/compensation`:
+  - set an employee's compensation (effective-dated; the record in force is closed the day before);
+  - allowance types and benefit plans: list, and add (an upsert by code, said so);
+  - per employee: assign an allowance, enrol a benefit (the rate is entered in percent), and set the tax profile.
+- **On file (7f-3b, BFF §51):** `GET /api/:t/modules/hr/employees/:id/allowances|benefits|tax-profile`, authorized as `hr_payroll` read before validation. The NPWP stays behind the payroll reader tier. A benefit is in force only when it is active and in date. The per-employee card lists what is in force, with history.
+- **Review cycles (7f-4):** `/hr/reviews` (list, create) and `/hr/reviews/[cycleId]` (edit, participants added from the employee list, participant status and outcome).
+- **Policies (7f-5)** on `/hr/settings` (tabs):
+  - holiday calendars and holidays, with a delete confirmation;
+  - leave policies (days in the form, minutes on the wire) and their assignments;
+  - pay grades;
+  - statutory parameter sets, with Ratify on `/hr/settings/statutory/[setId]` behind its own capability and a confirmation.
+- **Tests:** `compensation-reads.test.ts` (live Postgres + Cerbos); action, reader, component and page tests for compensation, review cycles and policies. The capability inventory is regenerated.
+
 ### platform-nest `0.158.0` + platform-ui `0.180.0` - DW-7g-1 + DW-7g-2: VAT and PPh returns on Tax; the chart of accounts becomes editable (2026-10-15) - PROTOTYPED
 
 Plan §4.3 (7g). Contract BFF §49 for the accounts. No migration, no Cerbos change.
