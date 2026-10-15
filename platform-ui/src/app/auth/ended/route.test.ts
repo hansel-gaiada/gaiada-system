@@ -19,6 +19,22 @@ describe("GET /auth/ended", () => {
     expect(cookie?.path).toBe("/");
   });
 
+  it("signs out on a same-origin navigation (the platformFetch redirect) and on a typed URL", () => {
+    for (const site of ["same-origin", "none"]) {
+      const res = GET(new NextRequest("http://localhost/auth/ended", { headers: { "sec-fetch-site": site } }));
+      expect(new URL(res.headers.get("location")!).pathname, site).toBe("/login");
+      expect(res.cookies.get("gaiada_session")?.maxAge, site).toBe(0);
+    }
+  });
+
+  it("keeps the session when another site links here, and only lands on the home page", () => {
+    for (const site of ["cross-site", "same-site"]) {
+      const res = GET(new NextRequest("http://localhost/auth/ended", { headers: { "sec-fetch-site": site } }));
+      expect(new URL(res.headers.get("location")!).pathname, site).toBe("/");
+      expect(res.cookies.get("gaiada_session"), site).toBeUndefined();
+    }
+  });
+
   it("clears the __Host- cookie in production", () => {
     vi.stubEnv("NODE_ENV", "production");
     const res = GET(new NextRequest("https://erp.example.test/auth/ended"));
