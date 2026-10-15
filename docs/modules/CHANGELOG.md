@@ -11,6 +11,18 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.168.0` - DW-7a/7b/7c + DW-7e-1: HR, Finance and IT rows gate on what their pages read, one strip for everyone; honest Pulse tiles for HR and IT (2026-10-15) - PROTOTYPED
+
+Plan §4.3 (7a-7c, "As built"). Pilot layout only; the classic shell is unchanged. No backend change.
+- **What.** HR, Finance and IT's Work rows were offered to anyone with the module on (Finance: to everyone). Each row or tab now mirrors its page's backend read through an existing UI capability, so the pilot sidebar no longer offers a page that only refuses. Gates only narrow. Where no UI capability mirrors a finance read, the row keeps its old gate and the server stays the authority (plan §4.3 lists them).
+- **One strip.** `ShellWorkspace.withheld` (`withheldTabPaths` in `lib/workspaceAccess.ts`) lists the tabs a gate drops for this person, never the ticketed ones. `covers` counts them as covered, so the HR, IT and Finance console strips hide inside the shell for people who lack a gated tab too.
+- **IT accounts** is no longer module-gated in the registry: its API works with the `it` module off (P2-14).
+- **Tests:** `workspaceFunctional.test.ts` (new: what each role sees, and the withheld paths), `consoleStrips.test.tsx` (plain members' strips hide), `overviewCoverage.test.ts` (pins the three tabs now read-gated), `paletteFindability.test.ts`. New e2e project `workspace-functional` (`e2e/workspace-functional.spec.ts`), sumopod 8/8 x2.
+- **DW-7e-1, Pulse tiles.** HR's Overview gains four built tiles and IT's one, each read through a new honest `ReadResult` reader (`lib/hr-data.ts`, `lib/hr-full-data.ts`, `lib/it-data.ts`; the old degrading readers are unchanged):
+  - Leave pending (`leave?status=pending`), Onboarding (onboarding cases `open` + `in_progress`, a failed leg never counted as 0), Open cases (`status=open`, as the HR page's own figure), Payroll runs waiting (`calculated` + `pending_approval` + `approved`; detail "N to approve, M to pay"), Devices offline (`status === "offline"`, "of N devices", or "No devices registered yet").
+  - The leave and case lists fall back to the viewer's OWN rows on the server, so those three tiles say "No access" for a viewer outside the HR scope (`hrScopeCompanies`), never a personal count under a department label.
+  - Threat alerts stays planned under DW-7h, Failing workflows under DW-7i. Tests: `hr-data.test.ts`, `hr-full-data.test.ts`, `it-data.test.ts` (new), `pulse.test.tsx`.
+
 ### platform-nest `0.147.0` + platform-ui `0.167.0` - DW-8j: email through your own Gmail (read, reply, send, "Email this client"), simulated mode; the `personal_mailbox` kind (2026-10-15) - PROTOTYPED
 
 Contracts:
