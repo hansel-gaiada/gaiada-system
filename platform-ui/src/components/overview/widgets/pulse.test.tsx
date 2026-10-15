@@ -92,7 +92,7 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("the registry's built tiles (DW-3e)", () => {
-  it("builds exactly Web Dev's three, Social Media's two, HR's four, Finance's four, IT's four and the GM's one, and no other", () => {
+  it("builds exactly Web Dev's three, Social Media's two, HR's four, Finance's four and IT's four, and no other", () => {
     const built: string[] = [];
     for (const w of [...WORKSPACES, GENERIC_WORKSPACE]) for (const t of w.pulse) if (!isPlanned(t)) built.push(`${w.key}/${t.key}`);
     expect(built.sort()).toEqual([
@@ -100,7 +100,6 @@ describe("the registry's built tiles (DW-3e)", () => {
       "finance/integrity-findings",
       "finance/overdue-receivables",
       "finance/payments-to-confirm",
-      "gm/failing-workflows",
       "hr/leave-pending",
       "hr/onboarding",
       "hr/open-cases",
@@ -159,7 +158,8 @@ describe("the registry's built tiles (DW-3e)", () => {
     expect(tilesOf("social-media").map((t) => t.key)).toEqual(["posts-scheduled", "failed-posts"]);
     expect(tilesOf("it").map((t) => t.key)).toEqual(["devices-offline", "threat-alerts", "account-requests", "failing-workflows"]);
     expect(tilesOf("hr").map((t) => t.key)).toEqual(["leave-pending", "onboarding", "open-cases", "payroll-status"]);
-    expect(tilesOf("gm").map((t) => t.key)).toEqual(["failing-workflows"]);
+    // The company Overview the GM sees has no Pulse widget, so the GM reaches failing workflows through IT's tile and the page.
+    expect(tilesOf("gm").map((t) => t.key)).toEqual([]);
     expect(tilesOf("seo")).toEqual([]);
     expect(tilesOf("creatives")).toEqual([]);
     expect(builtPulseTiles(COMPANY_SUBJECT)).toEqual([]);
@@ -696,12 +696,10 @@ describe("Pulse, Failing workflows (the widget, DW-7i-1, BFF §52.12)", () => {
   };
   const hasTile = (name: string) => within(screen.getByRole("region", { name: "Pulse" })).queryByText(name);
 
-  it("is on IT's Pulse and the Office of the GM's, with the same reader and page", () => {
-    for (const key of ["it", "gm"]) {
-      const t = tilesOf(key).find((x) => x.key === "failing-workflows")!;
-      expect(t, key).toMatchObject({ label: "Failing workflows", source: "automation-failures", href: "/workflows/failures" });
-      expect(t.ticket).toBeUndefined();
-    }
+  it("is on IT's Pulse, with its reader and page", () => {
+    const t = tilesOf("it").find((x) => x.key === "failing-workflows")!;
+    expect(t).toMatchObject({ label: "Failing workflows", source: "automation-failures", href: "/workflows/failures" });
+    expect(t.ticket).toBeUndefined();
   });
 
   it("counts the failed runs of the last 24 hours and links the page", async () => {

@@ -594,8 +594,6 @@ const OFFICE_OF_THE_GM: Workspace = {
   // These four are the numbers the Company block already shows (DW-3i): the company Overview has no Pulse, so they stay planned
   // rather than draw the same figure twice. Project health has no honest company reader.
   pulse: [
-    // DW-7i-1: the GM's own copy of IT's tile (same reader, same page, hidden on a 403 the same way).
-    { key: "failing-workflows", label: "Failing workflows", source: "automation-failures", href: "/workflows/failures" },
     { key: "revenue", label: "Revenue", ticket: "DW-3i" },
     { key: "overdue-receivables", label: "Overdue receivables", ticket: "DW-3i" },
     { key: "project-health", label: "Project health", ticket: "DW-3i" },

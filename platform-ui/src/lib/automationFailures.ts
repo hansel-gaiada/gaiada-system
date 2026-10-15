@@ -10,7 +10,7 @@ import "server-only";
 //
 // `not_configured` and `unavailable` are carried as states with their reason, and their `failed` and `count` are dropped here, so
 // a zero can never be drawn from a service that was not read.
-import { platformFetch } from "./platform";
+import { platformFetch, PlatformError } from "./platform";
 import { readResult, type ReadResult } from "./readResult";
 
 export type FailuresWindow = "24h" | "7d";
@@ -75,6 +75,14 @@ function toFailures(d: unknown): FailuresAnswer {
   };
 }
 
-/** The failed runs inside the window. A 403 is `forbidden` (not for everyone), any other failure or a wrong shape is `unavailable`. */
-export const listFailuresResult = (u: string, t: string, window: FailuresWindow = "24h"): Promise<ReadResult<FailuresAnswer>> =>
-  readResult(platformFetch<unknown>(`/api/${t}/automation/failures?window=${window}`, u).then(toFailures));
+/** The failed runs inside the window. A 403 (not in the audience) and a 404 (this company does not run the shared automation)
+ *  are both `forbidden`: the tile is not for this viewer here, so it hides rather than reading "Unavailable" to IT staff of a
+ *  company without automation. Any other failure, or a wrong shape, is `unavailable`. */
+export const listFailuresResult = async (u: string, t: string, window: FailuresWindow = "24h"): Promise<ReadResult<FailuresAnswer>> => {
+  try {
+    return { kind: "ok", data: toFailures(await platformFetch<unknown>(`/api/${t}/automation/failures?window=${window}`, u)) };
+  } catch (err) {
+    if (err instanceof PlatformError && err.status === 404) return { kind: "forbidden" };
+    return readResult(Promise.reject(err));
+  }
+};

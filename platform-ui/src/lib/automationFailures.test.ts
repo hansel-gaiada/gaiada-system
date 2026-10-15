@@ -72,13 +72,16 @@ describe("listFailuresResult", () => {
 });
 
 describe("listFailuresResult refusals", () => {
-  it("is forbidden on 403", async () => {
+  it("is forbidden on 403 (not in the audience) and on 404 (this company does not run the shared automation)", async () => {
     vi.stubGlobal("fetch", answer(403, { error: "forbidden", reason: "not_in_audience" }));
+    expect(await listFailuresResult("u1", "co-a")).toEqual({ kind: "forbidden" });
+    // A 404 hides the tile too, so IT staff of a company without automation never see an "Unavailable" tile meant for others.
+    vi.stubGlobal("fetch", answer(404, { error: "not found" }));
     expect(await listFailuresResult("u1", "co-a")).toEqual({ kind: "forbidden" });
   });
 
-  it("is unavailable, in the server's words, on 400, 404 (module off) and 5xx", async () => {
-    for (const status of [400, 404, 500, 503]) {
+  it("is unavailable, in the server's words, on 400 and 5xx", async () => {
+    for (const status of [400, 500, 503]) {
       vi.stubGlobal("fetch", answer(status, { error: `failed ${status}` }));
       expect(await listFailuresResult("u1", "co-a")).toEqual({ kind: "unavailable", reason: `failed ${status}` });
     }
