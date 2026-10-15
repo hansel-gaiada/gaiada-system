@@ -11,6 +11,23 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.158.0` + platform-ui `0.180.0` - DW-7g-1 + DW-7g-2: VAT and PPh returns on Tax; the chart of accounts becomes editable (2026-10-15) - PROTOTYPED
+
+Plan §4.3 (7g). Contract BFF §49 for the accounts. No migration, no Cerbos change.
+- **VAT/PPh returns (7g-1)** on Finance › Tax › Returns, over the existing routes (`GET/POST finance/tax/returns`, `…/file`, `…/drift`):
+  - list the returns and prepare one for a period;
+  - record the filing: the user types the period label the server requires as confirmation, and amends need `amend`;
+  - a drift banner when a filed return no longer matches the ledger. A failed drift read is never "no drift".
+- **Chart of accounts (7g-2, BFF §49)** adds four routes on `finance_config`:
+  - `POST finance/accounts` adds an account;
+  - `PATCH …/:code` renames it. The code changes only before postings, and never while a live posting rule, asset class, instrument or the billing profile names it by code.
+  - `POST …/:code/archive` and `…/restore`.
+  - Archive is refused with a reason for a non-zero balance (`detail: {net, baseNet, side}`), children, a control account, or a live referrer (`usedBy`).
+  - Archived accounts refuse new postings, as `finance_post_journal` already did.
+  - The screen has New account, Rename, Archive/Restore and Show archived.
+  - The error filter forwards `usedBy` and `hint`.
+- **Tests:** `finance-accounts.test.ts` (live Postgres + Cerbos), `http-error.filter.usedby.test.ts`, and the UI tests for tax returns and the chart of accounts. The capability inventory is regenerated.
+
 ### platform-nest `0.157.0` + platform-ui `0.179.0` - DW-7f-1/1b/1c + DW-7f-2: HR payroll and recruitment become writable (2026-10-15) - PROTOTYPED
 
 Plan §4.3 (7f). The payroll and recruitment backends were complete and view-only in the UI; this adds the screens, one read route (BFF §50) and fixes found on the way. No migration, no Cerbos change.
