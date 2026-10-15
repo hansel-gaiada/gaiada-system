@@ -62,6 +62,7 @@ import "server-only";
 //   GET       /payslips[?runId&employeeId]                -> PayslipSummary[]
 //   GET       /payslips/:id                               -> PayslipDetail
 //   POST      /payroll-inputs                             -> {id}
+//   GET       /payroll-inputs[?runId&employeeId&periodStart&periodEnd&consumed] -> PayrollInput[]
 //   GET/POST  /separations                                -> Separation[] / {id}
 //   GET       /separations/preview?employeeId&ground&effectiveOn -> SeverancePreview
 //   POST      /separations/:id/approve                    -> {ok}
@@ -268,6 +269,13 @@ export interface PayrollRunDetail extends PayrollRun {
   unratifiedOverrideBy: string | null; unratifiedOverrideReason: string | null;
   parameterSetRatifiedAt: string | null; parameterSetName: string | null;
   payslips: { id: string; employeeId: string; employeeName: string; gross: string; taxableGross: string; employeeDeductions: string; taxWithheld: string; net: string; employerCost: string; status: string; publishedAt: string | null }[];
+}
+// DW-7f-1c (BFF §50): one payroll input. `quantity` and `amount` are numeric strings (the column is numeric); either may be
+// null, never both. `consumedByRunId` is null while the input waits for the next calculate.
+export interface PayrollInput {
+  id: string; employeeId: string; employeeName: string; periodStart: string; periodEnd: string;
+  category: string; code: string | null; label: string; quantity: string | null; amount: string | null;
+  taxable: boolean; note: string | null; consumedByRunId: string | null; createdBy: string; createdAt: string;
 }
 export interface PayslipSummary {
   id: string; runId: string; runReference: string; runKind: string;

@@ -5,12 +5,13 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { listParameterSets, formatMoney } from "@/lib/hr-full";
-import { getPayrollRunResult, listEmployeesResult } from "@/lib/hr-full-data";
+import { getPayrollRunResult, listEmployeesResult, listPayrollInputsResult } from "@/lib/hr-full-data";
 import { Card, KpiTile, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { PayrollRunActions } from "@/components/hr/PayrollRunActions";
 import { PayrollInputForm } from "@/components/hr/PayrollInputForm";
+import { PayrollInputList } from "@/components/hr/PayrollInputList";
 import {
   addPayrollInput, calculatePayrollRun, approvePayrollRun, publishPayrollRun, markPayrollRunPaid,
 } from "@/lib/hrPayrollActions";
@@ -25,8 +26,10 @@ type Params = Promise<{ runId: string }>;
 //   - The run and its payslips come from ONE read, so a refusal refuses both. It is rendered as a
 //     refusal in words; there is never an empty table that could mean "no payslips" when the truth is
 //     "you may not read them" or "the read failed".
-//   - Inputs: the server has NO read for payroll inputs (only `POST payroll-inputs`), so the entered
-//     inputs cannot be listed and the page says so. The form is offered only while the run can still be
+//   - Inputs (DW-7f-1c, BFF §50): two honest lists from `GET payroll-inputs`. "Consumed by this run" is the
+//     inputs the run took (`runId`). "Waiting for the next calculate" is the inputs in the run's period no run
+//     has consumed (`consumed=false`), shown only while the run can still be calculated. A refused or failed
+//     read is said in words, never an empty list. The form is offered only while the run can still be
 //     calculated (draft, calculated): that is the only time the server can pick an input up. The
 //     route itself does not check the run's status.
 const ACCEPTS_INPUTS = ["draft", "calculated"];
@@ -74,7 +77,13 @@ export default async function HrPayrollRunPage({ params }: { params: Params }) {
   const payslips = run.payslips ?? [];
 
   const acceptsInputs = ACCEPTS_INPUTS.includes(run.status);
-  const employeesRead = canManage && acceptsInputs ? await listEmployeesResult(userId, tenant) : null;
+  const [employeesRead, consumedRead, waitingRead] = await Promise.all([
+    canManage && acceptsInputs ? listEmployeesResult(userId, tenant) : null,
+    listPayrollInputsResult(userId, tenant, { runId: run.id }),
+    acceptsInputs
+      ? listPayrollInputsResult(userId, tenant, { periodStart: run.periodStart, periodEnd: run.periodEnd, consumed: false })
+      : null,
+  ]);
 
   const stamps = [
     run.calculatedAt && `calculated ${run.calculatedAt.slice(0, 10)}`,
@@ -160,9 +169,23 @@ export default async function HrPayrollRunPage({ params }: { params: Params }) {
         <div style={{ display: "grid", gap: 12 }}>
           <p style={{ margin: 0, ...dim }}>
             Inputs (overtime, bonuses, reimbursements, deductions) belong to an employee and a period. A run
-            counts the ones inside its period when it is calculated. The server offers no read of the inputs
-            already entered, so they cannot be listed here; what a run counted shows on its payslips.
+            counts the ones inside its period when it is calculated, and each input is counted once.
           </p>
+          <PayrollInputList
+            title="Consumed by this run"
+            subject="the payroll inputs this run consumed"
+            read={consumedRead}
+            currency={run.currency}
+          />
+          {waitingRead ? (
+            <PayrollInputList
+              title="Waiting for the next calculate"
+              subject="the payroll inputs waiting for the next calculate"
+              intro="Inputs in this run's period that no run has counted yet. The next calculate takes them in."
+              read={waitingRead}
+              currency={run.currency}
+            />
+          ) : null}
           {!canManage ? null : !acceptsInputs ? (
             <p style={{ margin: 0, ...dim }}>
               This run is {run.status}, so it can no longer be calculated and would not count a new input.

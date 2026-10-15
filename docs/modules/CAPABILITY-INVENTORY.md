@@ -45,7 +45,7 @@ unfalsifiable after.
 | clients | `clients` | 23 |
 | core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `positions` · `role-grants` | 73 |
 | finance | `finance` | 3 |
-| hr | `hr` | 11 |
+| hr | `hr` | 12 |
 | invoice | `invoices` | 13 |
 | it | `it` | 4 |
 | knowledge | `knowledge` | 3 |

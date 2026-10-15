@@ -850,7 +850,7 @@ argument, including why `member` IS seeded (it is the `hr_case` precedent) and t
 | POST | `/payroll-runs/:id/paid` | `{ok}` |
 | GET | `/payslips[?runId&employeeId]` | `PayslipSummary[]` |
 | GET | `/payslips/:id` | `PayslipDetail` (itemized lines) |
-| POST | `/payroll-inputs` | `{id}` |
+| GET / POST | `/payroll-inputs[?runId&employeeId&periodStart&periodEnd&consumed]` | `PayrollInput[]` (BFF §50) / `{id}` |
 | GET / POST | `/separations` | `Separation[]` / `{id, ...components}` |
 | GET | `/separations/preview?employeeId&ground&effectiveOn` | `SeverancePreview` |
 | POST | `/separations/:id/approve` | `{ok}` |
@@ -9127,7 +9127,7 @@ Built as §48.1 to §48.4 and §48.6 specify. The simulated mode is what runs; *
 - `mine=me` is unchanged for every tier.
 - `projectId` still narrows.
 
-## 50. Payroll inputs: the read (DW-7f-1c, 2026-10-15) — `platform-nest/src/modules/hr/payroll.controller.ts` — **STATUS: PLANNED (contract)**
+## 50. Payroll inputs: the read (DW-7f-1c, 2026-10-15) — `platform-nest/src/modules/hr/payroll.controller.ts` — **STATUS: BUILT, PROTOTYPED (backend: payroll-inputs-read.test.ts; UI: the run page, PayrollInputList and the hr-full-data reader tests; the backend HTTP suite is written for the Linux CI gate)**
 
 **Why.** HR can add a payroll input (`POST /api/:t/modules/hr/payroll-inputs`) but cannot see the inputs already entered, or which run consumed them. The run detail page (DW-7f-1b) therefore cannot list them. The table already holds everything: `hr_payroll_inputs` (`202608240143_hr_payroll.sql`), with `consumed_by_run_id` set when a run's calculate consumes an input. So this section adds a read only: no migration, no new kind.
 
@@ -9141,6 +9141,8 @@ Built as §48.1 to §48.4 and §48.6 specify. The simulated mode is what runs; *
   - **Waiting:** while the run is `draft` or `calculated`, the inputs in its period that no run has consumed yet, listed with `periodStart`/`periodEnd` and `consumed=false`. The next calculate will take them in.
   - A refused or failed read says so in words.
 - **Proof** (live Postgres + Cerbos, Linux CI): inputs consumed by one run and not by another; the period overlap at both edges; another tenant's inputs never listed; a reader without `hr_payroll` `read` refused with 403.
+
+**As built (2026-10-15).** `GET payroll-inputs` in `payroll.controller.ts` authorizes first (`hr_payroll` `read`), then validates: `runId`/`employeeId` must be uuids, `periodStart`/`periodEnd` real ISO dates, `consumed` `true`|`false`, else 400 `{message, field}`; filters combine with AND, the period filter is overlap, `periodStart`/`periodEnd` come back as `YYYY-MM-DD` text, newest first (`created_at DESC`), limit 500. The run page lists "Consumed by this run" and, while the run is `draft` or `calculated`, "Waiting for the next calculate", each from its own read (`listPayrollInputsResult`), so a refused or failed read is said in words and never shown as an empty list. Proof: `payroll-inputs-read.test.ts` (HTTP, Linux CI gate) and `[runId]/page.test.tsx`.
 
 ## 53. The client grain in reports (PV7-01, 2026-10-15) — `platform-nest/src/modules/reports/` — **STATUS: BUILT, PROTOTYPED (backend: the DB and HTTP suite report-client-grain.db.test.ts and the Cerbos matrix reports-cerbos.test.ts are written for the Linux CI gate; no page yet, PV7-05)**
 

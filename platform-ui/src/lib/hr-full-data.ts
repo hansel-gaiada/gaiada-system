@@ -5,7 +5,7 @@ import "server-only";
 // The route needs the payroll read right (`hr_payroll`), so an HR person without it is told "No access".
 import { platformFetch, PlatformError } from "./platform";
 import { readResult, type ReadResult } from "./readResult";
-import type { PayrollRun, PayrollRunDetail, PayrollRunStatus } from "./hr-full";
+import type { PayrollInput, PayrollRun, PayrollRunDetail, PayrollRunStatus } from "./hr-full";
 import type { Employee } from "./iam";
 
 export function listPayrollRunsResult(u: string, t: string, status?: PayrollRunStatus): Promise<ReadResult<PayrollRun[]>> {
@@ -29,4 +29,22 @@ export async function getPayrollRunResult(u: string, t: string, id: string): Pro
 // payroll gate), so a payroll manager can be refused here while allowed everything else.
 export function listEmployeesResult(u: string, t: string): Promise<ReadResult<Employee[]>> {
   return readResult(platformFetch<{ employees?: Employee[] }>(`/api/${t}/hr/employees`, u).then((r) => r.employees ?? []));
+}
+
+// DW-7f-1c (BFF §50): the payroll inputs already entered. Route `GET /api/:t/modules/hr/payroll-inputs`, authorized as
+// `hr_payroll` read like the run list, so a refusal is common and must read as one: 403 is `forbidden`, 404 and 5xx are
+// `unavailable`. An empty `data` is the server's own answer "no such inputs". `consumed: false` is "waiting for the next
+// calculate"; `runId` is what that run consumed. Absent filters are left off the query.
+export function listPayrollInputsResult(
+  u: string, t: string,
+  filter: { runId?: string; employeeId?: string; periodStart?: string; periodEnd?: string; consumed?: boolean } = {},
+): Promise<ReadResult<PayrollInput[]>> {
+  const qs = new URLSearchParams();
+  if (filter.runId) qs.set("runId", filter.runId);
+  if (filter.employeeId) qs.set("employeeId", filter.employeeId);
+  if (filter.periodStart) qs.set("periodStart", filter.periodStart);
+  if (filter.periodEnd) qs.set("periodEnd", filter.periodEnd);
+  if (filter.consumed !== undefined) qs.set("consumed", String(filter.consumed));
+  const q = qs.toString();
+  return readResult(platformFetch<PayrollInput[]>(`/api/${t}/modules/hr/payroll-inputs${q ? `?${q}` : ""}`, u));
 }

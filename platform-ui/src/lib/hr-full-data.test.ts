@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { listPayrollRunsResult, getPayrollRunResult, listEmployeesResult } from "./hr-full-data";
+import { listPayrollRunsResult, getPayrollRunResult, listEmployeesResult, listPayrollInputsResult } from "./hr-full-data";
 
 // DW-7e: the honest payroll-run list. The route needs the payroll read right, so a 403 is common and must read as a refusal.
 const answer = (status: number, body: unknown) => vi.fn(async () => new Response(JSON.stringify(body), { status }));
@@ -60,5 +60,41 @@ describe("listEmployeesResult", () => {
     expect(await listEmployeesResult("u1", "co-a")).toEqual({ kind: "ok", data: [{ id: "e1" }] });
     vi.stubGlobal("fetch", answer(403, { error: "forbidden" }));
     expect(await listEmployeesResult("u1", "co-a")).toEqual({ kind: "forbidden" });
+  });
+});
+
+// DW-7f-1c: the payroll inputs read. A refusal is common (hr_payroll read), so it must read as one.
+describe("listPayrollInputsResult", () => {
+  it("returns the inputs on 200 from the payroll-inputs route, with no query when no filter is given", async () => {
+    const fetchMock = answer(200, [{ id: "i1", label: "Overtime" }]);
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await listPayrollInputsResult("u1", "co-a")).toEqual({ kind: "ok", data: [{ id: "i1", label: "Overtime" }] });
+    expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toBe("http://p.test/api/co-a/modules/hr/payroll-inputs");
+  });
+
+  it("passes the filters through, and consumed=false is sent (not dropped as falsy)", async () => {
+    const fetchMock = answer(200, []);
+    vi.stubGlobal("fetch", fetchMock);
+    await listPayrollInputsResult("u1", "co-a", { runId: "r1" });
+    await listPayrollInputsResult("u1", "co-a", { periodStart: "2026-10-01", periodEnd: "2026-10-31", consumed: false });
+    await listPayrollInputsResult("u1", "co-a", { employeeId: "e1", consumed: true });
+    const urls = fetchMock.mock.calls.map((c) => String((c as unknown[])[0]));
+    expect(urls[0]).toBe("http://p.test/api/co-a/modules/hr/payroll-inputs?runId=r1");
+    expect(urls[1]).toBe("http://p.test/api/co-a/modules/hr/payroll-inputs?periodStart=2026-10-01&periodEnd=2026-10-31&consumed=false");
+    expect(urls[2]).toBe("http://p.test/api/co-a/modules/hr/payroll-inputs?employeeId=e1&consumed=true");
+  });
+
+  it("an empty 200 is an ok empty list (the server's own answer)", async () => {
+    vi.stubGlobal("fetch", answer(200, []));
+    expect(await listPayrollInputsResult("u1", "co-a", { runId: "r1" })).toEqual({ kind: "ok", data: [] });
+  });
+
+  it("is forbidden on 403 and unavailable on 404 or 5xx, never an empty list", async () => {
+    vi.stubGlobal("fetch", answer(403, { error: "forbidden" }));
+    expect(await listPayrollInputsResult("u1", "co-a")).toEqual({ kind: "forbidden" });
+    for (const status of [404, 500, 503]) {
+      vi.stubGlobal("fetch", answer(status, { error: "nope" }));
+      expect(await listPayrollInputsResult("u1", "co-a")).toMatchObject({ kind: "unavailable" });
+    }
   });
 });
