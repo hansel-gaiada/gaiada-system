@@ -1,6 +1,5 @@
 // DW-8g (docs/FRONTEND-BFF-CONTRACT.md §47) — calendar events and meeting scheduling, driven end-to-end over HTTP against real
-// Postgres (RLS on) and real Cerbos. Covers every bullet of §47.6 except busy times (§47.4: not built, it waits for an owner
-// ruling): create (timed, all-day, and `record: true` with both rows written and linked), attendee validation (422),
+// Postgres (RLS on) and real Cerbos. Covers every bullet of §47.6, busy times (§47.4, DW-D28, DW-8o) included: create (timed, all-day, and `record: true` with both rows written and linked), attendee validation (422),
 // read (200 for the organizer, an attendee and a member of a company-visible event; 404 for an uninvited member and a
 // manager), update (200 for the organizer, 403 for an attendee, the time change that resets answers and moves a scheduled
 // recording), cancel (idempotent), respond (200 for an attendee, 403/404 for anyone else, 409 on a cancelled event), `mine`
@@ -797,6 +796,173 @@ describe.skipIf(!TEST_URL)("DW-8g calendar events (HTTP, real Postgres + Cerbos)
     it("an unauthenticated call is refused", async () => {
       const r = await app.inject({ method: "GET", url: `/api/calendar/events/mine?${WINDOW}` });
       expect([401, 403]).toContain(r.statusCode);
+    });
+  });
+
+  // ═══════════════════════════════════════════ BUSY TIMES (§47.4, DW-D28) ═══════════════════════════════════════════
+  describe("busy", () => {
+    const FROM = "2027-03-10T00:00:00Z";
+    const TO = "2027-03-11T00:00:00Z";
+    const WIN = `from=${FROM}&to=${TO}`;
+    const busy = (as: string, userIds: string[], extra = WIN, t = A) => call("GET", `/api/${t}/calendar/busy?userIds=${userIds.join(",")}&${extra}`, as);
+    const z = (hhmm: string, day = "10") => `2027-03-${day}T${hhmm}:00.000Z`;
+    const SECRETS = ["Secret board meeting", "Hidden title two", "Vault Room 9", "https://meet.example.com/secret-link", "Confidential agenda"];
+    let e1: string; // orgz organizes, att1 invited: 09:00-10:00
+    let e2: string; // orgz organizes, att1 invited: 10:00-11:00 (touches e1: one block 09:00-11:00)
+    let e3: string; // att1 organizes alone: 14:00-15:00
+    let e4: string; // orgz organizes, mem invited and DECLINES: 12:00-13:00
+    let e5: string; // orgz organizes, att1 invited, then CANCELLED: 16:00-17:00
+    let e6: string; // all day on the 10th, att1 invited
+    let eOther: string; // company B, `both` invited: 09:00-10:00
+    let e7: string; // starts before the window and runs into it, att2 invited
+    let e8: string; // ends exactly at the window start, adm invited
+    let e9: string; // starts exactly at the window end, adm invited
+
+    beforeAll(async () => {
+      const at = (from: string, to: string, day = "10") => ({ startsAt: z(from, day), endsAt: z(to, day) });
+      const secret = (title: string) => ({ title, description: "Confidential agenda", location: "Vault Room 9", videoUrl: "https://meet.example.com/secret-link" });
+      e1 = (await mk({ ...secret("Secret board meeting"), ...at("09:00", "10:00"), attendeeIds: [att1] }, orgz)).id;
+      e2 = (await mk({ ...secret("Hidden title two"), ...at("10:00", "11:00"), attendeeIds: [att1] }, orgz)).id;
+      e3 = (await mk({ title: "Solo block", ...at("14:00", "15:00"), attendeeIds: [] }, att1)).id;
+      e4 = (await mk({ title: "Declined one", ...at("12:00", "13:00"), attendeeIds: [mem] }, orgz)).id;
+      expect((await call("POST", `${ev()}/${e4}/respond`, mem, { response: "declined" })).statusCode).toBe(200);
+      e5 = (await mk({ title: "Called off", ...at("16:00", "17:00"), attendeeIds: [att1] }, orgz)).id;
+      expect((await call("POST", `${ev()}/${e5}/cancel`, orgz)).statusCode).toBe(200);
+      e6 = (await mk({ title: "All day", allDay: true, startsOn: "2027-03-10", endsOn: "2027-03-10", attendeeIds: [att1] }, orgz)).id;
+      eOther = (await mk({ title: "In company B", ...at("09:00", "10:00"), attendeeIds: [both] }, attB, B)).id;
+      e7 = (await mk({ title: "Runs in", startsAt: z("23:00", "09"), endsAt: z("01:00"), attendeeIds: [att2] }, mgr)).id;
+      e8 = (await mk({ title: "Ends at the start", startsAt: z("23:00", "09"), endsAt: z("00:00"), attendeeIds: [adm] }, mgr)).id;
+      e9 = (await mk({ title: "Starts at the end", startsAt: z("00:00", "11"), endsAt: z("01:00", "11"), attendeeIds: [adm] }, mgr)).id;
+    });
+
+    it("a member who can schedule gets one entry per person in the order asked: merged intervals, [] when free", async () => {
+      const r = await busy(orgz, [mem, att1, orgz, adm]);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(r.json()).toEqual({
+        busy: [
+          { userId: mem, intervals: [] }, // declined e4
+          { userId: att1, intervals: [{ startsAt: z("09:00"), endsAt: z("11:00") }, { startsAt: z("14:00"), endsAt: z("15:00") }] },
+          { userId: orgz, intervals: [{ startsAt: z("09:00"), endsAt: z("11:00") }, { startsAt: z("12:00"), endsAt: z("13:00") }] },
+          { userId: adm, intervals: [] },
+        ],
+      });
+      // a manager and a company_admin can schedule too
+      expect((await busy(mgr, [att1])).statusCode).toBe(200);
+      expect((await busy(adm, [att1])).statusCode).toBe(200);
+    });
+
+    it("the real start and end are returned, never clipped to the window; touching events are one block", async () => {
+      const r = await busy(orgz, [att2]);
+      expect(r.json().busy).toEqual([{ userId: att2, intervals: [{ startsAt: z("23:00", "09"), endsAt: z("01:00") }] }]);
+    });
+
+    it("an event that only ends at the window start, or starts at the window end, is not in it", async () => {
+      expect((await busy(orgz, [adm])).json().busy[0].intervals).toEqual([]);
+    });
+
+    it("declined, cancelled, all-day and other-company events are absent", async () => {
+      const r = await busy(orgz, [att1, mem, both]);
+      const by = Object.fromEntries(r.json().busy.map((b: any) => [b.userId, b.intervals]));
+      expect(by[att1], "no 16:00 (cancelled e5), no all-day e6").toEqual([{ startsAt: z("09:00"), endsAt: z("11:00") }, { startsAt: z("14:00"), endsAt: z("15:00") }]);
+      expect(by[mem], "declined").toEqual([]);
+      expect(by[both], "company B's event is not this company's").toEqual([]);
+      // the same person IS busy in B, asked in B
+      const inB = await busy(attB, [both], WIN, B);
+      expect(inB.statusCode, inB.body).toBe(200);
+      expect(inB.json().busy[0].intervals).toEqual([{ startsAt: z("09:00"), endsAt: z("10:00") }]);
+      // and a person who answers `tentative` or has not answered is still busy
+      expect((await call("POST", `${ev()}/${e2}/respond`, att1, { response: "tentative" })).statusCode).toBe(200);
+      expect((await busy(orgz, [att1])).json().busy[0].intervals[0]).toEqual({ startsAt: z("09:00"), endsAt: z("11:00") });
+      expect((await call("POST", `${ev()}/${e2}/respond`, att1, { response: "declined" })).statusCode).toBe(200);
+      expect((await busy(orgz, [att1])).json().busy[0].intervals[0], "e2 declined: only e1 is left").toEqual({ startsAt: z("09:00"), endsAt: z("10:00") });
+      expect((await call("POST", `${ev()}/${e2}/respond`, att1, { response: "accepted" })).statusCode).toBe(200);
+    });
+
+    it("excludeEventId drops that event (the edit page does not clash with itself)", async () => {
+      const r = await busy(orgz, [att1], `${WIN}&excludeEventId=${e3}`);
+      expect(r.json().busy[0].intervals).toEqual([{ startsAt: z("09:00"), endsAt: z("11:00") }]);
+      const r2 = await busy(orgz, [att1, orgz], `${WIN}&excludeEventId=${e1}`);
+      expect(r2.json().busy.map((b: any) => b.intervals)).toEqual([
+        [{ startsAt: z("10:00"), endsAt: z("11:00") }, { startsAt: z("14:00"), endsAt: z("15:00") }],
+        [{ startsAt: z("10:00"), endsAt: z("11:00") }, { startsAt: z("12:00"), endsAt: z("13:00") }],
+      ]);
+    });
+
+    it("an interval's keys are EXACTLY {startsAt, endsAt}, an entry's exactly {userId, intervals}, and nothing else is in the body", async () => {
+      const r = await busy(orgz, [att1, orgz]);
+      const body = r.json();
+      expect(Object.keys(body)).toEqual(["busy"]);
+      for (const b of body.busy) {
+        expect(Object.keys(b).sort()).toEqual(["intervals", "userId"]);
+        expect(b.intervals.length).toBeGreaterThan(0);
+        for (const i of b.intervals) expect(Object.keys(i).sort()).toEqual(["endsAt", "startsAt"]);
+      }
+      const text = JSON.stringify(body);
+      for (const s of SECRETS) expect(text, s).not.toContain(s);
+      for (const id of [e1, e2, e3, e4, e5, e6, eOther, e7]) expect(text).not.toContain(id);
+      for (const word of ["title", "location", "video", "organizer", "description", "attendee"]) expect(text.toLowerCase(), word).not.toContain(word);
+    });
+
+    it("a caller who cannot schedule is 403 even with an invalid query: the decision comes before the validation", async () => {
+      for (const u of [view, att2, botU, autoU]) {
+        for (const query of [WIN, "", "from=x&to=y", `${WIN}&excludeEventId=nope`]) {
+          const r = await call("GET", `/api/${A}/calendar/busy?userIds=${query ? `${att1}&${query}` : "zzz"}`, u);
+          expect(r.statusCode, `${u} ${query}`).toBe(403);
+        }
+        expect((await call("GET", `/api/${A}/calendar/busy?userIds=${Array.from({ length: 25 }, () => NIL).join(",")}&${WIN}`, u)).statusCode).toBe(403);
+      }
+      // a member of ANOTHER company has no right here either
+      expect((await busy(outsider, [att1])).statusCode).toBe(403);
+      // an unauthenticated call is refused
+      const anon = await app.inject({ method: "GET", url: `/api/${A}/calendar/busy?userIds=${att1}&${WIN}` });
+      expect([401, 403]).toContain(anon.statusCode);
+    });
+
+    it("userIds: 1 to 20 distinct uuids, else 400", async () => {
+      const ids21 = Array.from({ length: 21 }, (_, i) => `0190a000-0000-7000-8000-${String(i + 1).padStart(12, "0")}`);
+      const ids20 = ids21.slice(0, 20);
+      const r21 = await busy(orgz, ids21);
+      expect([r21.statusCode, reasonOf(r21)]).toEqual([400, "user_ids_too_many"]);
+      // 20 is within the limit: it reaches the membership check and is refused THERE (422), not for its count
+      expect((await busy(orgz, ids20)).statusCode).toBe(422);
+      for (const [userIds, reason] of [["", "user_ids_required"], ["not-a-uuid", "user_ids_invalid"], [`${att1},${att1}`, "user_ids_invalid"], [`${att1},,${mem}`, "user_ids_invalid"]] as const) {
+        const r = await call("GET", `/api/${A}/calendar/busy?userIds=${userIds}&${WIN}`, orgz);
+        expect([r.statusCode, reasonOf(r)], userIds).toEqual([400, reason]);
+      }
+      const none = await call("GET", `/api/${A}/calendar/busy?${WIN}`, orgz);
+      expect([none.statusCode, reasonOf(none)]).toEqual([400, "user_ids_required"]);
+    });
+
+    it("the window: both instants with an offset, from before to, at most 14 days, else 400", async () => {
+      for (const [query, reason] of [
+        ["", "window_required"], [`from=${FROM}`, "window_required"], [`from=${TO}&to=${FROM}`, "window_invalid"], [`from=${FROM}&to=${FROM}`, "window_invalid"],
+        ["from=2027-03-01T00:00:00Z&to=2027-03-16T00:00:01Z", "window_too_large"], ["from=2027-03-10T09:00:00&to=2027-03-11T09:00:00", "time_invalid"],
+        ["from=2027-03-10&to=2027-03-11", "time_invalid"],
+      ] as const) {
+        const r = await busy(orgz, [att1], query);
+        expect([r.statusCode, reasonOf(r)], query).toEqual([400, reason]);
+      }
+      // exactly 14 days is allowed
+      expect((await busy(orgz, [att1], "from=2027-03-01T00:00:00Z&to=2027-03-15T00:00:00Z")).statusCode).toBe(200);
+      const bad = await busy(orgz, [att1], `${WIN}&excludeEventId=nope`);
+      expect([bad.statusCode, reasonOf(bad)]).toEqual([400, "id_invalid"]);
+    });
+
+    it("every person must be an active employee member of THIS company, else 422 user_not_member naming the first one asked", async () => {
+      for (const bad of [outsider, former, botU, clientUser, NIL]) {
+        const r = await busy(orgz, [att1, bad, mem]);
+        expect(r.statusCode, `${bad}: ${r.body}`).toBe(422);
+        expect(r.json()).toMatchObject({ error: "user_not_member", reason: "user_not_member", detail: { userId: bad } });
+      }
+    });
+
+    it("looking is not an event: no activity row, no notification, no outbox event, no change to any event (a refusal is audited elsewhere, so only the answers are counted)", async () => {
+      const tables = ["activities", "notifications", "outbox_events", "calendar_events", "calendar_event_attendees"];
+      const before = await Promise.all(tables.map((t) => count(`SELECT count(*)::int AS n FROM ${t}`)));
+      expect((await busy(orgz, [att1, mem])).statusCode).toBe(200);
+      expect((await busy(orgz, [att1], `${WIN}&excludeEventId=${e1}`)).statusCode).toBe(200);
+      expect((await busy(orgz, [outsider])).statusCode).toBe(422);
+      expect(await Promise.all(tables.map((t) => count(`SELECT count(*)::int AS n FROM ${t}`)))).toEqual(before);
     });
   });
 

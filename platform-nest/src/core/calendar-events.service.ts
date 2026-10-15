@@ -654,3 +654,105 @@ export function mineSortKey(r: Pick<MineRow, "startsAt" | "startsOn">): number {
   if (r.startsAt) return new Date(r.startsAt).getTime();
   return r.startsOn ? new Date(`${r.startsOn}T00:00:00.000Z`).getTime() : 0;
 }
+
+// ───────────────────────────────────────── busy times (§47.4, DW-D28) ─────────────────────────────────────────
+
+/** `GET /calendar/busy`: at most 20 people and a window of at most 14 days (the same span a timed event may have). */
+export const BUSY_USERS_MAX = 20;
+export const BUSY_WINDOW_MAX_MS = TIMED_SPAN_MAX_MS;
+/** A hard row cap on the busy read (20 people over 14 days never gets near it). */
+const BUSY_ROW_LIMIT = 5_000;
+
+export interface BusyQuery { userIds: string[]; from: Date; to: Date; excludeEventId: string | null }
+export interface BusyInterval { startsAt: string; endsAt: string }
+export interface BusyAnswer { busy: Array<{ userId: string; intervals: BusyInterval[] }> }
+
+/** `userIds` is a comma list (a repeated `userIds=` param is read the same way). 1 to 20 DISTINCT uuids, else 400; `from` and
+ *  `to` are instants WITH an offset, `from` before `to`, at most 14 days apart; `excludeEventId` is an optional uuid. Run only
+ *  AFTER the `calendar_event` create decision, so a caller without the right never sees which of these is wrong. */
+export function parseBusyQuery(q: Record<string, unknown>): BusyQuery {
+  const raw = q.userIds;
+  const parts = (Array.isArray(raw) ? raw : [raw])
+    .filter((v): v is string => typeof v === "string")
+    .flatMap((s) => s.split(","))
+    .map((s) => s.trim());
+  if (parts.length === 0 || parts.every((p) => p === "")) throw bad("user_ids_required", "userIds is required: 1 to 20 comma-separated user ids", "userIds");
+  if (parts.some((p) => !isUuidShaped(p))) throw bad("user_ids_invalid", "userIds must be user ids (uuids)", "userIds");
+  const ids = parts.map((p) => p.toLowerCase());
+  if (new Set(ids).size !== ids.length) throw bad("user_ids_invalid", "userIds must not repeat a person", "userIds");
+  if (ids.length > BUSY_USERS_MAX) throw bad("user_ids_too_many", `userIds takes at most ${BUSY_USERS_MAX} people`, "userIds");
+
+  const one = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+  const fromRaw = one(q.from);
+  const toRaw = one(q.to);
+  if (!fromRaw || !toRaw) throw bad("window_required", "from and to are required", "from");
+  const from = parseInstant(fromRaw, "from");
+  const to = parseInstant(toRaw, "to");
+  if (to.getTime() <= from.getTime()) throw bad("window_invalid", "to must be after from", "to");
+  if (to.getTime() - from.getTime() > BUSY_WINDOW_MAX_MS) throw bad("window_too_large", "the window is at most 14 days", "to");
+
+  const exRaw = q.excludeEventId;
+  let excludeEventId: string | null = null;
+  if (exRaw !== undefined && exRaw !== "") {
+    if (typeof exRaw !== "string" || !isUuidShaped(exRaw)) throw bad("id_invalid", "excludeEventId must be an event id (uuid)", "excludeEventId");
+    excludeEventId = exRaw.toLowerCase();
+  }
+  return { userIds: ids, from, to, excludeEventId };
+}
+
+/** Sorts by start and joins intervals that overlap or touch (`[a, b)` then `[b, c)` is one block), so a person's answer carries
+ *  as few boundaries as possible. The real start and end of each block are kept; nothing is clipped to the window. */
+export function mergeIntervals(list: ReadonlyArray<{ startsAt: Date; endsAt: Date }>): Array<{ startsAt: Date; endsAt: Date }> {
+  const sorted = [...list].sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime() || a.endsAt.getTime() - b.endsAt.getTime());
+  const out: Array<{ startsAt: Date; endsAt: Date }> = [];
+  for (const i of sorted) {
+    const last = out[out.length - 1];
+    if (last && i.startsAt.getTime() <= last.endsAt.getTime()) {
+      if (i.endsAt.getTime() > last.endsAt.getTime()) last.endsAt = i.endsAt;
+    } else {
+      out.push({ startsAt: i.startsAt, endsAt: i.endsAt });
+    }
+  }
+  return out;
+}
+
+/** Every requested person must be an active employee member of the company (the attendee rule, `firstNonMember`), else the 422
+ *  names the first one asked for that is not. */
+export async function assertBusyMembers(c: PoolClient, tenantId: string, userIds: readonly string[]): Promise<void> {
+  const outsider = await firstNonMember(c, tenantId, userIds);
+  if (outsider) throw new CalendarRuleError(422, "user_not_member", "user_not_member", "userIds", { userId: outsider });
+}
+
+/** The busy answer: one entry per requested person, in the order asked. An interval is a CONFIRMED, TIMED event of THIS company
+ *  that overlaps `[from, to)` and that the person attends with any answer but `declined` (the organizer is an attendee row, so
+ *  the same read covers them). Cancelled and all-day events are out. The SELECT names no title, place, link, organizer or id:
+ *  the answer cannot carry what the read never fetched. */
+export async function loadBusy(c: PoolClient, tenantId: string, q: BusyQuery): Promise<BusyAnswer> {
+  const { rows } = await c.query<{ user_id: string; starts_at: Date; ends_at: Date }>(
+    `SELECT a.user_id, e.starts_at, e.ends_at
+       FROM calendar_event_attendees a
+       JOIN calendar_events e ON e.id = a.event_id AND e.tenant_id = a.tenant_id
+      WHERE e.tenant_id = $1
+        AND a.user_id = ANY($2::uuid[])
+        AND a.response <> 'declined'
+        AND e.status = 'confirmed'
+        AND e.starts_at IS NOT NULL AND e.ends_at IS NOT NULL
+        AND e.starts_at < $4 AND e.ends_at > $3
+        AND ($5::uuid IS NULL OR e.id <> $5::uuid)
+      ORDER BY a.user_id, e.starts_at
+      LIMIT ${BUSY_ROW_LIMIT}`,
+    [tenantId, q.userIds, q.from.toISOString(), q.to.toISOString(), q.excludeEventId],
+  );
+  const byUser = new Map<string, Array<{ startsAt: Date; endsAt: Date }>>();
+  for (const r of rows) {
+    const list = byUser.get(r.user_id) ?? [];
+    list.push({ startsAt: r.starts_at, endsAt: r.ends_at });
+    byUser.set(r.user_id, list);
+  }
+  return {
+    busy: q.userIds.map((userId) => ({
+      userId,
+      intervals: mergeIntervals(byUser.get(userId) ?? []).map((i) => ({ startsAt: i.startsAt.toISOString(), endsAt: i.endsAt.toISOString() })),
+    })),
+  };
+}
