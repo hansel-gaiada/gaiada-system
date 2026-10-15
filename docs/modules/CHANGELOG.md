@@ -11,6 +11,21 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.182.0` - DW-7: wrong-shape reads no longer crash four pages; DW-7h and DW-7i planned (2026-10-15) - PROTOTYPED
+
+- **Reader shape checks.**
+  - The demo layer answers `[]` to any GET it has no fixture for. That crashed three server renders, logged in every `workspace-functional` gate run:
+    - HR compliance (`documents.filter`);
+    - IT topology (`for…of` over undefined devices);
+    - HR analytics (`Object.entries` of undefined).
+  - Each reader now checks the shape of a 200:
+    - compliance says it could not read the documents (never "nothing expiring");
+    - analytics shows its unavailable note;
+    - topology takes its existing devices-only fallback with no run, so the stale-discovery banner stays up.
+  - The DW-7g reads (tax returns, the drift check and the chart of accounts) turn a wrong shape into "unavailable".
+  - Tests: `reader-shape.test.ts` and `finance-data.test.ts`. Found by DW-9.
+- **Planned, not built:** DW-7h (threats and isolation) and DW-7i (failing workflows, bank feeds, network controller, Google Workspace admin) are written up in plan §4.3 with what each needs from the owner. The registry's planned connections now point at DW-7i.
+
 ### platform-nest `0.159.0` + platform-ui `0.181.0` - DW-7f-3, 3b, 4, 5: HR compensation, review cycles and policies become writable; an employee's pay items on file (2026-10-15) - PROTOTYPED
 
 Plan §4.3 (7f). The remaining HR write screens over the complete HR backend, plus one read contract (BFF §51). No migration, no Cerbos change.
