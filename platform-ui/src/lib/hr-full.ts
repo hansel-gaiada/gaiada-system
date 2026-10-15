@@ -393,10 +393,14 @@ export const listJobEvents = (u: string, t: string, employeeId: string) =>
   soft(() => platformFetch<JobEvent[]>(`${base(t)}/employees/${employeeId}/history`, u), []);
 export const listCaseEvents = (u: string, t: string, caseId: string) =>
   soft(() => platformFetch<CaseEvent[]>(`${base(t)}/cases/${caseId}/events`, u), []);
+// A 200 in the wrong shape is a broken read: `null`, which the page says it could not read. It is never "nothing is expiring"
+// and never a crash (the demo layer answers `[]` to any GET it has no fixture for; a drifted backend could do the same).
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 export const listExpiringDocuments = (u: string, t: string, days = 90) =>
   soft(
-    () => platformFetch<{ windowDays: number; documents: ExpiringDocument[] }>(`${base(t)}/compliance/expiring?days=${days}`, u),
-    { windowDays: days, documents: [] as ExpiringDocument[] },
+    () => platformFetch<{ windowDays: number; documents: ExpiringDocument[] }>(`${base(t)}/compliance/expiring?days=${days}`, u)
+      .then((r) => (isRecord(r) && Array.isArray(r.documents) ? r : null)),
+    { windowDays: days, documents: [] as ExpiringDocument[] } as { windowDays: number; documents: ExpiringDocument[] } | null,
   );
 export const getLeaveLedger = (u: string, t: string, subjectUserId?: string, year?: number) => {
   const qs = new URLSearchParams();
@@ -413,7 +417,13 @@ export const getAnalytics = (u: string, t: string, from?: string, to?: string) =
   const qs = new URLSearchParams();
   if (from) qs.set("from", from);
   if (to) qs.set("to", to);
-  return soft(() => platformFetch<HrAnalytics>(`${base(t)}/analytics${qs.toString() ? `?${qs}` : ""}`, u), null as HrAnalytics | null);
+  return soft(
+    () => platformFetch<HrAnalytics>(`${base(t)}/analytics${qs.toString() ? `?${qs}` : ""}`, u).then((a) =>
+      isRecord(a) && isRecord(a.window) && isRecord(a.headcountByStatus) && isRecord(a.movementByType)
+        && isRecord(a.attendanceByStatus) && isRecord(a.openCasesByKind) && Array.isArray(a.absenceByType) && isRecord(a.tenureYears)
+        ? a : null),
+    null as HrAnalytics | null,
+  );
 };
 
 // ════════════════════════════════════════════════════════════════════ FORMATTING ══════════════

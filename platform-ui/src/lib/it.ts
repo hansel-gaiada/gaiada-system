@@ -133,10 +133,14 @@ export const listDevices = (u: string, t: string, q: { deviceClass?: string; q?:
 };
 
 // Server-computed graph. Falls back to a devices-only shape so the page still renders (grouped, via
-// buildTopology) against a backend that predates the endpoint.
+// buildTopology) against a backend that predates the endpoint. A 200 in the wrong shape (the demo layer
+// answers `[]` to any GET it has no fixture for) takes the same fallback rather than crashing the page:
+// `lastRun: null` keeps the "discovery has not run" banner up, so nothing claims a live graph.
 export async function getTopology(u: string, t: string): Promise<TopologyResponse> {
   try {
-    return await platformFetch<TopologyResponse>(`/api/${t}/it/topology`, u);
+    const r = await platformFetch<TopologyResponse>(`/api/${t}/it/topology`, u);
+    if (r && Array.isArray(r.devices) && Array.isArray(r.links)) return r;
+    return { devices: await listDevices(u, t), links: [], lastRun: null };
   } catch (e) {
     if (!(e instanceof PlatformError && (e.status === 404 || e.status === 403 || e.status === 405))) throw e;
     return { devices: await listDevices(u, t), links: [], lastRun: null };

@@ -30,9 +30,8 @@ const READERS: Array<[string, (u: string, t: string) => Promise<unknown>, string
   // DW-7b-2: one month of the profit and loss, both bounds required and sent.
   ["getProfitAndLossResult", (u, t) => getProfitAndLossResult(u, t, "2026-10-01", "2026-10-15"), "/api/co-a/finance/profit-and-loss?from=2026-10-01&to=2026-10-15"],
 
-  // DW-7g-1: the returns list and the drift, read with no year or kind filter.
+  // DW-7g-1: the returns list, read with no year or kind filter. The drift is an object, so it has its own tests below.
   ["listTaxReturnsResult", listTaxReturnsResult, "/api/co-a/finance/tax/returns"],
-  ["getTaxReturnDriftResult", getTaxReturnDriftResult, "/api/co-a/finance/tax/returns/drift"],
 ];
 
 describe.each(READERS)("%s", (_name, read, path) => {
@@ -83,4 +82,30 @@ it("DW-7g-2: the chart read is ok when empty, forbidden on 403 and unavailable o
   expect(await listAccountsResult("u1", "co-a")).toEqual({ kind: "forbidden" });
   vi.stubGlobal("fetch", answer(500, { error: "ledger down" }));
   expect(await listAccountsResult("u1", "co-a")).toEqual({ kind: "unavailable", reason: "ledger down" });
+});
+
+it("DW-7g-1: the drift is read from its own route; forbidden on 403, unavailable on 404 or 5xx", async () => {
+  const f = answer(200, { problems: [], clean: true });
+  vi.stubGlobal("fetch", f);
+  await getTaxReturnDriftResult("u1", "co-a");
+  expect(urlOf(f)).toBe("http://p.test/api/co-a/finance/tax/returns/drift");
+  vi.stubGlobal("fetch", answer(403, { error: "forbidden" }));
+  expect(await getTaxReturnDriftResult("u1", "co-a")).toEqual({ kind: "forbidden" });
+  for (const status of [404, 503]) {
+    vi.stubGlobal("fetch", answer(status, { error: "nope" }));
+    expect(await getTaxReturnDriftResult("u1", "co-a")).toMatchObject({ kind: "unavailable" });
+  }
+});
+
+// The demo layer answers `[]` to any GET it has no fixture for; a drifted backend could answer the wrong shape too. Either
+// is a broken read: never "no returns", "no drift" or "no accounts", and never a crash on the page.
+it("a 200 in the wrong shape is unavailable for the returns list, the drift and the chart", async () => {
+  vi.stubGlobal("fetch", answer(200, { returns: [] }));
+  expect(await listTaxReturnsResult("u1", "co-a")).toEqual({ kind: "unavailable", reason: "The finance read returned an unexpected answer." });
+  for (const body of [[], {}, { clean: true }, { clean: "yes", problems: [] }, { clean: false, problems: null }]) {
+    vi.stubGlobal("fetch", answer(200, body));
+    expect(await getTaxReturnDriftResult("u1", "co-a"), JSON.stringify(body)).toEqual({ kind: "unavailable", reason: "The finance read returned an unexpected answer." });
+  }
+  vi.stubGlobal("fetch", answer(200, { accounts: [] }));
+  expect(await listAccountsResult("u1", "co-a")).toEqual({ kind: "unavailable", reason: "The finance read returned an unexpected answer." });
 });

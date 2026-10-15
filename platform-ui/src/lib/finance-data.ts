@@ -64,13 +64,24 @@ export const getProfitAndLossResult = (u: string, t: string, from: string, to: s
 // DW-7g-1: Finance > Tax > Returns. Both are `finance_tax` `read`. A refused or failed read is never a list: "no returns
 // have been prepared" and "no filed return has drifted" are claims about tax, and only a real 200 may make them.
 // `year` and `kind` are left off, so the list is every return the company has (newest period first, as the server orders it).
+// A 200 in the wrong shape is a broken read, never "none" and never a crash: the demo layer answers `[]` to any GET it has no
+// fixture for, and a drifted backend could do the same. Thrown inside `readResult`, it renders as unavailable.
 export const listTaxReturnsResult = (u: string, t: string): Promise<ReadResult<TaxReturn[]>> =>
-  readResult(platformFetch<TaxReturn[]>(`/api/${t}/finance/tax/returns`, u));
+  readResult(platformFetch<TaxReturn[]>(`/api/${t}/finance/tax/returns`, u).then((rows) => {
+    if (!Array.isArray(rows)) throw new Error("The finance read returned an unexpected answer.");
+    return rows;
+  }));
 export const getTaxReturnDriftResult = (u: string, t: string): Promise<ReadResult<TaxReturnDrift>> =>
-  readResult(platformFetch<TaxReturnDrift>(`/api/${t}/finance/tax/returns/drift`, u));
+  readResult(platformFetch<TaxReturnDrift>(`/api/${t}/finance/tax/returns/drift`, u).then((d) => {
+    if (!d || typeof d.clean !== "boolean" || !Array.isArray(d.problems)) throw new Error("The finance read returned an unexpected answer.");
+    return d;
+  }));
 
 // DW-7g-2: the chart of accounts, read honestly. `listAccounts` in `finance.ts` folds a refusal and a failure into `[]` (its
 // other callers are pickers that rely on it), which on the chart page would read as "this company has no chart, run the
 // seed". This is `finance_config` `read`, and only a real 200 may say a chart is empty. `q` filters on code and name.
 export const listAccountsResult = (u: string, t: string, q?: string): Promise<ReadResult<Account[]>> =>
-  readResult(platformFetch<Account[]>(`/api/${t}/finance/accounts${q ? `?q=${encodeURIComponent(q)}` : ""}`, u));
+  readResult(platformFetch<Account[]>(`/api/${t}/finance/accounts${q ? `?q=${encodeURIComponent(q)}` : ""}`, u).then((rows) => {
+    if (!Array.isArray(rows)) throw new Error("The finance read returned an unexpected answer.");
+    return rows;
+  }));

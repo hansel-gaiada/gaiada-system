@@ -28,7 +28,16 @@ export default async function HrCompliancePage({
 
   const { days } = await searchParams;
   const window = Math.max(1, Math.min(365, Number(days ?? 90) || 90));
-  const { documents } = await listExpiringDocuments(userId, tenant, window);
+  const read = await listExpiringDocuments(userId, tenant, window);
+  if (!read) {
+    return (
+      <EmptyNote>
+        The expiring documents could not be read right now. This is not a statement that none are expiring; it means we
+        cannot tell.
+      </EmptyNote>
+    );
+  }
+  const { documents } = read;
 
   const expired = documents.filter((d) => d.expired);
   const soon = documents.filter((d) => !d.expired && d.daysRemaining <= 30);
