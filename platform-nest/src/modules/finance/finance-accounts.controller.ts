@@ -170,7 +170,9 @@ async function requireCurrencyInUse(c: PoolClient, tenantId: string, currency: s
  * balance check covers them), AR and AP documents and their lines, bank statements, opening balances, consolidation
  * entries, and accounting-dimension rules (they describe the account, they do not post to it).
  */
-async function referrers(c: PoolClient, tenantId: string, accountId: string, code: string): Promise<Array<{ table: string; count: number }>> {
+async function referrers(
+  c: PoolClient, tenantId: string, accountId: string, code: string, opts: { byCodeOnly?: boolean } = {},
+): Promise<Array<{ table: string; count: number }>> {
   const r = await c.query<{ tbl: string; n: string }>(
     `SELECT 'finance_posting_rules' AS tbl, count(DISTINCT r.id)::text AS n
        FROM finance_posting_rule_lines l
@@ -198,7 +200,11 @@ async function referrers(c: PoolClient, tenantId: string, accountId: string, cod
       WHERE b.tenant_id = $1 AND $3 IN (b.bank_ledger_account_code, b.default_revenue_account_code)`,
     [tenantId, accountId, code],
   );
-  return r.rows.filter((x) => Number(x.n) > 0).map((x) => ({ table: x.tbl, count: Number(x.n) }));
+  // A re-code only breaks the referrers that name the account BY CODE; a tax code holds the account id and follows the new code.
+  const byId = new Set(["finance_tax_codes"]);
+  return r.rows
+    .filter((x) => Number(x.n) > 0 && !(opts.byCodeOnly && byId.has(x.tbl)))
+    .map((x) => ({ table: x.tbl, count: Number(x.n) }));
 }
 
 @Controller("api")
@@ -300,6 +306,16 @@ export class FinanceAccountsController {
         if (newCode !== undefined && newCode !== cur.code) {
           const dup = await c.query(`SELECT 1 FROM finance_accounts WHERE tenant_id = $1 AND code = $2 AND deleted_at IS NULL AND id <> $3`, [tenantId, newCode, cur.id]);
           if (dup.rows[0]) throw codeTaken(newCode);
+          // A live referrer that names this account BY CODE (posting rules, asset classes, instruments, the billing profile) would
+          // silently point at nothing, or at another account later given the code. Refused: change those first.
+          const byCode = await referrers(c, tenantId, cur.id, cur.code, { byCodeOnly: true });
+          if (byCode.length > 0) {
+            throw new ConflictException({
+              message: `The code ${cur.code} is used by ${byCode.map((u) => `${u.table} (${u.count})`).join(", ")}; change those first, then re-code the account`,
+              reason: "account_in_use",
+              usedBy: byCode,
+            });
+          }
           // With postings the freeze trigger raises FINANCE_ACCOUNT_FROZEN on this UPDATE; the catch below maps it.
           set("code", newCode); changed.push("code"); from.code = cur.code;
         }

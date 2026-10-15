@@ -218,6 +218,30 @@ describe.skipIf(!TEST_URL)("DW-7g-2 — chart of accounts: add, rename, archive,
       expect(await find("T101")).toMatchObject({ name: "Still renamable" });
     });
 
+    it("★ re-coding is refused while a live referrer names the code, allowed once the rule has ended; a rename of the name still works", async () => {
+      expect((await add({ code: "RC100", name: "Named by a rule", accountType: "expense" })).statusCode).toBe(201);
+      const ruleId = newId();
+      await inFinance(async (c) => {
+        await c.query(
+          `INSERT INTO finance_posting_rules (id, tenant_id, event_type, name, status, activated_at) VALUES ($1,$2,'dw7g.test.recode','DW-7g-2 recode rule','active', now())`, [ruleId, tenant]);
+        await c.query(
+          `INSERT INTO finance_posting_rule_lines (tenant_id, rule_id, line_no, account_code, side, amount_path) VALUES ($1,$2,1,'RC100','debit','amount')`, [tenant, ruleId]);
+      });
+      const r = await patch("RC100", { newCode: "RC101" });
+      expect(r.statusCode, r.body).toBe(409);
+      expect(r.json()).toMatchObject({ reason: "account_in_use", usedBy: [{ table: "finance_posting_rules", count: 1 }] });
+      expect(r.json().error).toMatch(/change those first/);
+      expect(await find("RC100")).toBeDefined();
+      expect(await find("RC101")).toBeUndefined();
+      expect((await patch("RC100", { name: "Renamed, still named by the rule", description: "d" })).statusCode).toBe(200);
+
+      await inFinance((c) => c.query(`UPDATE finance_posting_rules SET status = 'retired', activated_at = NULL WHERE id = $1`, [ruleId]));
+      const ok = await patch("RC100", { newCode: "RC101" });
+      expect(ok.statusCode, ok.body).toBe(200);
+      expect(ok.json()).toEqual({ code: "RC101" });
+      expect(await find("RC101")).toBeDefined();
+    });
+
     it("a code another live account holds is 409 code_taken", async () => {
       const r = await patch("T101", { newCode: "4910" });
       expect(r.statusCode, r.body).toBe(409);
