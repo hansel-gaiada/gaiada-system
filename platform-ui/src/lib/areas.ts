@@ -50,6 +50,7 @@ const PERSONAL: AreaRule[] = [
   rule("/timesheets", "personal"),
   rule("/me", "personal"),
   rule("/me/inbox", "personal"),
+  rule("/me/mail", "personal", true, "DW-8j: your own Gmail; /me/mail/new and a thread"),
   rule("/me/leave", "personal"),
   rule("/me/loans", "personal", true),
   rule("/me/pay", "personal"),

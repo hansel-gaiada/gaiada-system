@@ -7,6 +7,8 @@ import { getClientOverview } from "@/lib/clientHub";
 import { Card, KpiTile, StatusBadge } from "@/components/ui";
 import { ClientBallList } from "@/components/clients/ClientBallList";
 import { formatDate } from "@/lib/format";
+import { clientContactEmail } from "@/lib/gmail";
+import { EmailClientButton } from "@/components/clients/EmailClientButton";
 
 // CC-3 — the client hub Overview: who is holding the ball, and what shape the relationship is in.
 //
@@ -38,9 +40,16 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
   // which would render one value on the server and another in the browser.
   const today = new Date();
   const money = o.money.primary;
+  const contactEmail = clientContactEmail(o.client.contact);
 
   return (
     <div style={{ display: "grid", gap: 20 }}>
+      {/* DW-8j: "Email this client" sits by the primary contact (the PV owner confirmed the placement). It is the quiet, secondary action
+          and reads as OUTSIDE the portal: the portal Conversation stays the client channel of record (PV-D5). Move it by moving this one line. */}
+      <div className="gm-contact" role="group" aria-label="Primary contact">
+        <span>Primary contact: {contactEmail ?? "no email on file"}</span>
+        <EmailClientButton clientId={clientId} email={contactEmail} />
+      </div>
       <div className="ch-ball">
         <Card
           title="Waiting on us"

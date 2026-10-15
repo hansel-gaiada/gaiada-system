@@ -137,6 +137,8 @@ describe("areaFor", () => {
     expect(areaFor("/me/learning")).toEqual({ kind: "performance" });
     expect(areaFor("/me/leave")).toEqual({ kind: "personal" });
     expect(areaFor("/me/loans/l-1")).toEqual({ kind: "personal" });
+    // DW-8j: Mail is personal, a thread and the compose page too.
+    for (const p of ["/me/mail", "/me/mail/t-1", "/me/mail/new?to=a@b.c"]) expect(areaFor(p)).toEqual({ kind: "personal" });
   });
 
   it("returns shared for a path no rule covers", () => {

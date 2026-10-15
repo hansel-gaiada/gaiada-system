@@ -27,7 +27,7 @@ describe("showMeStrip (DW-8d)", () => {
     "shows on %s", (path) => expect(showMeStrip(path, tabs)).toBe(true),
   );
 
-  it.each(["/me/inbox", "/me/tasks", "/me/learning", "/me/inbox?filter=unread", "/approvals"])(
+  it.each(["/me/inbox", "/me/tasks", "/me/learning", "/me/inbox?filter=unread", "/approvals", "/me/mail", "/me/mail/t-1", "/me/mail/new?client=c-1"])(
     "does not show on %s", (path) => expect(showMeStrip(path, tabs)).toBe(false),
   );
 

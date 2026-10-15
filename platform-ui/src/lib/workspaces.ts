@@ -975,7 +975,14 @@ const DECIDER: Gate = { kind: "decider" };
 /** The You block (plan §8). Personal pages keep the current workspace's sidebar. */
 export const YOU_ROWS: readonly WorkspaceRow[] = [
   { key: "tasks", label: "My tasks", icon: "check", tabs: [{ key: "tasks", label: "My tasks", href: "/me/tasks", icon: "check" }] },
-  { key: "inbox", label: "Inbox", icon: "bell", tabs: [{ key: "inbox", label: "Inbox", href: "/me/inbox", icon: "bell" }] },
+  // DW-8j: the row stays "Inbox"; its two tabs are the bell's Notifications and your own Gmail (BFF section 48).
+  {
+    key: "inbox", label: "Inbox", icon: "bell",
+    tabs: [
+      { key: "inbox", label: "Notifications", href: "/me/inbox", icon: "bell" },
+      { key: "mail", label: "Mail", href: "/me/mail", icon: "mail" },
+    ],
+  },
   {
     key: "calendar", label: "Calendar", icon: "clock",
     tabs: [

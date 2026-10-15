@@ -2238,6 +2238,67 @@ function getCurrentDemoIdentity(userId: string) {
   return ME;
 }
 
+// ── DW-8j: the simulated Gmail mailbox for DEMO_MODE (BFF §48). Memory only. ────────────────────────────────────────────────────────
+const DEMO_GMAIL = {
+  linked: true,
+  sent: [] as Array<{ id: string; threadId: string; to: string; subject: string; body: string; date: string }>,
+};
+const DEMO_GMAIL_ME = "me.demo0001@simulated.invalid";
+const DEMO_GMAIL_INBOX = [
+  { id: "sim-in-1", date: "2026-10-12T03:15:00.000Z", from: "Dewi Lestari <dewi@northwind.example>", subject: "Kickoff agenda", unread: true,
+    text: "Hi, could you send the agenda for Thursday's kickoff? Thanks, Dewi", html: null as string | null },
+  { id: "sim-in-2", date: "2026-10-10T08:40:00.000Z", from: "Billing <billing@vendor.example>", subject: "Your October statement", unread: false,
+    text: "Your statement is attached.", html: "<p>Your <b>October</b> statement is ready.</p><script>window.top.location='https://evil.example'</script>" },
+];
+
+function gmailDemoResponse(m: string, p: string, q: URLSearchParams, userId: string, body?: string): DemoResult | null {
+  const status = p.match(/^\/api\/[^/]+\/integrations\/gmail$/);
+  const start = p.match(/^\/api\/[^/]+\/integrations\/gmail\/oauth\/start$/);
+  const threads = p.match(/^\/api\/[^/]+\/mail\/me\/threads$/);
+  const thread = p.match(/^\/api\/[^/]+\/mail\/me\/threads\/([^/]+)$/);
+  const send = p.match(/^\/api\/[^/]+\/mail\/me\/send$/);
+  if (!status && !start && !threads && !thread && !send) return null;
+  if (userId === "demo-client") return { status: 403, json: { error: "forbidden" } };
+  const mode = "simulated";
+  if (status && m === "GET") return { status: 200, json: { configured: true, connected: DEMO_GMAIL.linked, needsReconnect: false, accountEmail: DEMO_GMAIL.linked ? DEMO_GMAIL_ME : null, mode } };
+  if (status && m === "DELETE") { DEMO_GMAIL.linked = false; DEMO_GMAIL.sent.length = 0; return { status: 200, json: { disconnected: true, revokedAtGoogle: null, mode } }; }
+  if (start && m === "GET") { DEMO_GMAIL.linked = true; return { status: 200, json: { mode, linked: true, accountEmail: DEMO_GMAIL_ME } }; }
+  if (!DEMO_GMAIL.linked) return { status: 409, json: { error: "gmail_not_connected", reason: "gmail_not_connected" } };
+  const msgOf = (i: (typeof DEMO_GMAIL_INBOX)[number]) => ({
+    id: i.id, threadId: i.id.replace("sim-in", "sim-t"), labelIds: i.unread ? ["INBOX", "UNREAD"] : ["INBOX"], from: i.from, to: DEMO_GMAIL_ME, cc: null,
+    subject: i.subject, date: i.date, inReplyTo: null, text: i.text, html: i.html, attachments: i.html ? [{ attachmentId: "a1", filename: "statement-oct.pdf", mimeType: "application/pdf", sizeBytes: 48211 }] : [],
+  });
+  const sentMsg = (s: (typeof DEMO_GMAIL.sent)[number]) => ({
+    id: s.id, threadId: s.threadId, labelIds: ["SENT"], from: DEMO_GMAIL_ME, to: s.to, cc: null, subject: s.subject, date: s.date, inReplyTo: null, text: s.body, html: null, attachments: [],
+  });
+  if (threads && m === "GET") {
+    const label = q.get("label") === "SENT" ? "SENT" : "INBOX";
+    const rows = label === "SENT"
+      ? DEMO_GMAIL.sent.map((s) => ({ id: s.threadId, snippet: s.body.slice(0, 80), subject: s.subject, from: DEMO_GMAIL_ME, lastMessageDate: s.date, unread: false })).reverse()
+      : DEMO_GMAIL_INBOX.map((i) => ({ id: i.id.replace("sim-in", "sim-t"), snippet: i.text.slice(0, 80), subject: i.subject, from: i.from, lastMessageDate: i.date, unread: i.unread }));
+    return { status: 200, json: { mode, threads: rows, nextPageToken: null } };
+  }
+  if (thread && m === "GET") {
+    const id = decodeURIComponent(thread[1]);
+    const inbox = DEMO_GMAIL_INBOX.find((i) => i.id.replace("sim-in", "sim-t") === id);
+    const sent = DEMO_GMAIL.sent.filter((s) => s.threadId === id);
+    const messages = [...(inbox ? [msgOf(inbox)] : []), ...sent.map(sentMsg)];
+    if (messages.length === 0) return { status: 404, json: { error: "gmail_not_found", reason: "gmail_not_found" } };
+    return { status: 200, json: { mode, id, labelIds: [], messages } };
+  }
+  if (send && m === "POST") {
+    let b: { to?: string[]; subject?: string; body?: string; inReplyTo?: { threadId: string } } = {};
+    try { b = body ? JSON.parse(body) : {}; } catch { /* a malformed body is a validation failure below */ }
+    if (!Array.isArray(b.to) || b.to.length === 0 || !b.subject || !b.body) return { status: 400, json: { error: "gmail_send_invalid", reason: "gmail_send_invalid", field: !Array.isArray(b.to) || b.to.length === 0 ? "to" : !b.subject ? "subject" : "body" } };
+    const n = DEMO_GMAIL.sent.length + 1;
+    const threadId = b.inReplyTo?.threadId ?? `sim-t-s${n}`;
+    const id = `sim-sent-${n}`;
+    DEMO_GMAIL.sent.push({ id, threadId, to: b.to.join(", "), subject: b.subject, body: b.body, date: new Date().toISOString() });
+    return { status: 202, json: { mode, messageId: id, threadId } };
+  }
+  return null;
+}
+
 export function getDemoResponse(method: string, fullPath: string, userId: string = DEMO_USER_ID, body?: string): DemoResult {
   const url = new URL(fullPath, "http://demo");
   const p = url.pathname;
@@ -2256,6 +2317,11 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   if (m === "GET" && /^\/api\/[^/]+\/integrations\/google-drive\/picker$/.test(p)) {
     return { status: 200, json: { configured: false, connected: false, needsReconnect: false, accountEmail: null, accessToken: null, expiresAt: null, apiKey: null, appId: null } };
   }
+
+  // DW-8j — Gmail (BFF §48). Demo mode is the SIMULATED mailbox: a couple of threads, "send" appends to Sent in memory (lost on restart,
+  // like the backend's simulated mode). `demo-client` has no mailbox (403), which makes the "Your role has no mailbox here." state drivable.
+  const gmailDemo = gmailDemoResponse(m, p, url.searchParams, userId, body);
+  if (gmailDemo) return gmailDemo;
 
   // WSK-49f — client website access (§16i): staff Contacts list + grants, portal People grants.
   // Stateful (lib/demoWebsiteAccess.ts) and placed first so no generic `/clients/:id/…` matcher below
