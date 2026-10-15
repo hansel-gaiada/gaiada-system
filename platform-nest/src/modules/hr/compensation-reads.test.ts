@@ -174,6 +174,7 @@ describe.skipIf(!RUN)("DW-7f-3b — an employee's allowances, benefits and tax p
     types.B_TRANSPORT = await allowanceType(hrMgrB, B, "TRANSPORT", "Transport (B)");
     for (const [code, name, kind] of [
       ["BPJS-KES", "BPJS Kesehatan", "statutory"], ["PRIV-INS", "Private insurance", "insurance"], ["WELL", "Wellness", "wellness"],
+      ["PENS", "Pension", "pension"],
     ]) {
       plans[code] = await benefitPlan(hrMgr, A, code, name, kind);
     }
@@ -191,8 +192,12 @@ describe.skipIf(!RUN)("DW-7f-3b — an employee's allowances, benefits and tax p
     // ── Benefits.
     await seedBenefit("kes", A, ayu, plans["BPJS-KES"], shift(T, -100), null, { memberNumber: "0001234567890", dependants: 2 });
     await seedBenefit("insEndedYesterday", A, ayu, plans["PRIV-INS"], shift(T, -50), shift(T, -1), { status: "terminated", note: "Policy lapsed" });
-    await seedBenefit("wellStartsToday", A, ayu, plans.WELL, T, null, { status: "pending" });
+    await seedBenefit("wellStartsToday", A, ayu, plans.WELL, T, null, { status: "active" });
     await seedBenefit("budiKes", A, budi, plans["BPJS-KES"], shift(T, -5), null);
+    // Budi's other enrolments have an OPEN range but are not active: they are not in force.
+    await seedBenefit("budiTerminated", A, budi, plans["PRIV-INS"], shift(T, -5), null, { status: "terminated" });
+    await seedBenefit("budiSuspended", A, budi, plans.WELL, shift(T, -5), null, { status: "suspended" });
+    await seedBenefit("budiPending", A, budi, plans.PENS, shift(T, -5), null, { status: "pending" });
     await seedBenefit("foreignKes", B, citra, plans.B_KES, shift(T, -5), null);
 
     // ── Tax profiles. Ayu: a closed one then the open one. Dewi: only one that starts in the future.
@@ -298,8 +303,24 @@ describe.skipIf(!RUN)("DW-7f-3b — an employee's allowances, benefits and tax p
     const res = await get(A, hrMgr, ayu, "benefits", "?current=true");
     expect(res.statusCode).toBe(200);
     expect(idsOf(res)).toEqual([ids.wellStartsToday, ids.kes]);
-    expect(idsOf(await get(A, hrMgr, budi, "benefits"))).toEqual([ids.budiKes]);
     expect(await (await get(A, hrMgr, eka, "benefits")).json()).toEqual([]);
+  });
+
+  it("benefits: in force means active AND in date — a terminated, suspended or pending enrolment with an open range is not current, but is in the history", async () => {
+    const current = await get(A, hrMgr, budi, "benefits", "?current=true");
+    expect(current.statusCode).toBe(200);
+    expect(idsOf(current)).toEqual([ids.budiKes]);
+    for (const qs of ["", "?current=false"]) {
+      const all = await get(A, hrMgr, budi, "benefits", qs);
+      expect(new Set(idsOf(all)), qs).toEqual(new Set([ids.budiKes, ids.budiTerminated, ids.budiSuspended, ids.budiPending]));
+      const byId = new Map((all.json() as { id: string; status: string; effectiveTo: string | null }[]).map((r) => [r.id, r]));
+      expect(byId.get(ids.budiTerminated)).toMatchObject({ status: "terminated", effectiveTo: null });
+      expect(byId.get(ids.budiSuspended)?.status).toBe("suspended");
+      expect(byId.get(ids.budiPending)?.status).toBe("pending");
+    }
+    // A terminated enrolment whose range has also ended stays out of current and in the history (ayu's lapsed insurance).
+    expect(idsOf(await get(A, hrMgr, ayu, "benefits", "?current=true"))).not.toContain(ids.insEndedYesterday);
+    expect(idsOf(await get(A, hrMgr, ayu, "benefits"))).toContain(ids.insEndedYesterday);
   });
 
   it("benefits: an enrolment made through the POST reads back", async () => {

@@ -9334,7 +9334,7 @@ All four writes authorize on the existing `finance_config` kind (PERMISSION-CONT
 
 - **Routes** (base `api/:tenantId/modules/hr`):
   - `GET employees/:id/allowances?current=true|false`: each row's allowance type (code and label joined), amount or percent, the effective dates and the note. `current=true` keeps the rows in force today (REPORTS_TZ). Newest first.
-  - `GET employees/:id/benefits?current=true|false`: each row's plan (code and name joined), member number, dependants, status and effective dates.
+  - `GET employees/:id/benefits?current=true|false`: each row's plan (code and name joined), member number, dependants, status and effective dates. `current=true` keeps the enrolments in force: within their dates today AND `status = 'active'`.
   - `GET employees/:id/tax-profile`: the profile in force today, plus the history (newest first). Fields: `hasNpwp`, `npwp`, `ptkpStatus`, `terCategory`, and the effective dates.
 - **Who may read: `hr_payroll` `read`, exactly as `GET compensation`.** The NPWP is a tax identifier, so it stays behind the payroll reader tier and is never widened. Authorization runs before validation. A malformed id is a 400. An employee of another company, or one that does not exist, is a 404.
 - **The screen.** The compensation page's per-employee card lists the three: allowances and benefits in force, with "show history", and the current tax profile. This replaces the note that said none could be listed. A refused or failed read says so in words.
@@ -9345,7 +9345,8 @@ All four writes authorize on the existing `finance_config` kind (PERMISSION-CONT
 - Rows come back newest first by `effective_from` (limit 500), dates as `YYYY-MM-DD` text, `amount`/`percent` as numeric strings.
   - An allowance row is `{id, employeeId, allowanceTypeId, allowanceCode, allowanceLabel, direction, amount, percent, effectiveFrom, effectiveTo, note, createdAt}`.
   - A benefit row is `{id, employeeId, planId, planCode, planName, planKind, memberNumber, dependants, status, effectiveFrom, effectiveTo, note, createdAt}`.
-- `current=true` keeps `effective_from <= today AND (effective_to IS NULL OR effective_to >= today)` with today from `todayIsoInTz(config.reportsTz)`, both ends inclusive; `current=false` or omitted returns every row. Benefits are filtered by date only, so a `terminated` or `pending` enrolment with an open range still lists as in force and its `status` says what it is.
+- `current=true` keeps `effective_from <= today AND (effective_to IS NULL OR effective_to >= today)` with today from `todayIsoInTz(config.reportsTz)`, both ends inclusive; `current=false` or omitted returns every row.
+- For benefits, in force is the date range AND `status = 'active'` (owner ruling, 2026-10-15): a `pending`, `suspended` or `terminated` enrolment is not in force even with an open range, and still lists in the full history.
 - `tax-profile` returns `{current, history}`: `current` is the profile in force today or `null`; `history` is every profile on file (including the current one and a future-dated one), newest first, each `{id, employeeId, hasNpwp, npwp, ptkpStatus, terCategory, taxResident, effectiveFrom, effectiveTo, createdAt}`.
 - The compensation page, with `?employee=`, has an "On file" card: allowances and benefits read with `current=true`, the tax profile, each its own honest read; `&history=allowances,benefits,tax` reads the listed ones without the filter and shows closed rows. The "cannot list" note is replaced. Proof: `compensation-reads.test.ts` (HTTP, Linux CI gate), the page tests and the `hr-full-data` reader tests.
 

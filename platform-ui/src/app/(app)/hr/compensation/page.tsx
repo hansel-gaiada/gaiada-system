@@ -41,7 +41,7 @@ const ON_FILE_KEYS: readonly OnFileKey[] = ["allowances", "benefits", "tax"];
 //   - Layout: ONE page in sections (in force, history and what is on file on `?employee=`, grades, allowance types,
 //     benefit plans, and the per-employee forms) rather than a detail route.
 //   - What is on file (DW-7f-3b, BFF §51): with `?employee=` the page reads that person's allowances and benefit
-//     enrolments in force (`current=true`) and their tax profile, each as its own honest read. `&history=` is a
+//     enrolments in force (`current=true`; for a benefit that is active AND within its dates) and their tax profile, each as its own honest read. `&history=` is a
 //     comma list of allowances, benefits and tax: a listed one is read WITHOUT the in-force filter, so closed rows
 //     show. "In force today" is the server's call (REPORTS_TZ), never this page's clock.
 //   - Controls follow the capability mirror: hr.payroll.view reads; hr.payroll.manage shows every form (all six

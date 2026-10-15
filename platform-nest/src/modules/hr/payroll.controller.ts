@@ -560,7 +560,9 @@ export class PayrollController {
         let inForce = "";
         if (onlyCurrent) {
           params.push(today);
-          inForce = `AND b.effective_from <= $2::date AND (b.effective_to IS NULL OR b.effective_to >= $2::date)`;
+          // In force is the date range AND status 'active': a pending, suspended or terminated enrolment is not in force
+          // even with an open range. It still lists when `current` is not true.
+          inForce = `AND b.status = 'active' AND b.effective_from <= $2::date AND (b.effective_to IS NULL OR b.effective_to >= $2::date)`;
         }
         const rows = await c.query(
           `SELECT b.id, b.employee_id AS "employeeId", b.plan_id AS "planId",

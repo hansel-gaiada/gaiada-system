@@ -344,7 +344,7 @@ describe("/hr/compensation", () => {
       onFileTaxRead = { kind: "ok", data: { current: null, history: [] } };
       await renderPage("e1");
       expect(screen.getByText("No allowance is in force for this employee today.")).toBeInTheDocument();
-      expect(screen.getByText("No benefit enrolment is in force for this employee today.")).toBeInTheDocument();
+      expect(screen.getByText("No active benefit enrolment is in force for this employee today.")).toBeInTheDocument();
       expect(screen.getByText("No tax profile is on file for this employee.")).toBeInTheDocument();
       cleanup();
       await renderPage("e1", "allowances,benefits,tax");
@@ -390,7 +390,7 @@ describe("/hr/compensation", () => {
       expect(screen.getByText("employee not found")).toBeInTheDocument();
       expect(screen.getByText(/This person's allowances cannot be read right now/)).toBeInTheDocument();
       expect(screen.getByText("platform 500")).toBeInTheDocument();
-      expect(screen.queryByText("No benefit enrolment is in force for this employee today.")).toBeNull();
+      expect(screen.queryByText("No active benefit enrolment is in force for this employee today.")).toBeNull();
     });
 
     it("is shown to a view-only payroll reader too (the reads need hr.payroll.view, not manage)", async () => {

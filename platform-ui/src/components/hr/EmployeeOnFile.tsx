@@ -14,7 +14,8 @@ import { ReadRefusal } from "@/components/systems/ReadRefusal";
 //   - Each of the three is its own honest read. A refused or failed read is said in words (ReadRefusal); it is never an
 //     empty table that could mean "nothing is assigned". An empty list is shown as empty only when the server answered [].
 //   - "In force today" is decided by the SERVER (REPORTS_TZ), never by this browser's or this server's clock: the default
-//     lists are read with current=true and the history lists without it.
+//     lists are read with current=true and the history lists without it. A benefit enrolment is in force when it is within its
+//     dates AND active; the others are only in the history, where the Status column says what each is.
 //   - The NPWP is shown as the server returned it, to a viewer who may read payroll. Nothing is derived or masked here.
 //   - History is a link (a query parameter), not client state, so the card stays a server component and a link can be shared.
 const dim = { font: "400 12px/1.5 var(--font-body)", color: "var(--erp-ink-60)" } as const;
@@ -85,7 +86,7 @@ export function EmployeeOnFile({
   return (
     <Card
       title={`On file${employeeName ? ` — ${employeeName}` : ""}`}
-      hint="What the server holds for this person: the allowances and benefit enrolments in force today, and the tax profile payroll withholds on. Closed rows stay under “Show history”."
+      hint="What the server holds for this person: the allowances in force today, the benefit enrolments that are active today, and the tax profile payroll withholds on. Closed rows, and enrolments that are pending, suspended or terminated, stay under “Show history”."
       style={{ marginBottom: 22 }}
     >
       <div style={{ display: "grid", gap: 18 }}>
@@ -116,7 +117,7 @@ export function EmployeeOnFile({
           {benefitsRead.kind !== "ok" ? (
             <Refused read={benefitsRead} subject="this person's benefit enrolments" />
           ) : benefitsRead.data.length === 0 ? (
-            <EmptyNote>{shown.benefits ? "The server holds no benefit enrolment for this employee." : "No benefit enrolment is in force for this employee today."}</EmptyNote>
+            <EmptyNote>{shown.benefits ? "The server holds no benefit enrolment for this employee." : "No active benefit enrolment is in force for this employee today."}</EmptyNote>
           ) : (
             <HairlineTable
               columns={[
