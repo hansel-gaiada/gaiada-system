@@ -320,6 +320,11 @@ export const listTimeEntries = (u: string, t: string, q: { projectId?: string; m
     [] as TimeEntry[],
   );
 
+/** PV7-06: the caller's OWN entries (`mine=me`) with a refusal or a failure kept distinct from "none". `listTimeEntries`
+ *  folds a 403/404 into [], which on My performance would read as "0 h logged". */
+export const readMyTimeEntries = (u: string, t: string): Promise<ReadResult<TimeEntry[]>> =>
+  readResult(platformFetch<TimeEntry[]>(`/api/${t}/time-entries?${new URLSearchParams({ mine: "me" })}`, u));
+
 // ---- Collaboration: comments + notifications (5c.3 — endpoints exist) ----
 export interface Comment { id: string; author_id: string | null; author_name: string | null; body: string; parent_comment_id: string | null; created_at: string }
 // WSUX-4 typed contract (platform-nest src/core/http.ts NotificationPayload,

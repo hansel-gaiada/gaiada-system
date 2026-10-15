@@ -164,13 +164,14 @@ describe("concreteRows", () => {
 
   // Plan §0: a Web Dev employee goes from 38 rows to 19. The 19 count the Company door and not
   // Approvals, which stays ungated as today until DW-8 rules on it; so 19 here (Campaigns landed with
-  // DW-5b, Clients with DW-6d, My tasks with DW-8a, so no planned row is left hidden in this list).
-  it("gives a Web Dev employee 19 rows, the same with the planned rows included", () => {
+  // DW-5b, Clients with DW-6d, My tasks with DW-8a, so no planned row is left hidden in this list). PV7-06 added
+  // "My performance" at the head of the Performance block: 20.
+  it("gives a Web Dev employee 20 rows, the same with the planned rows included", () => {
     expect(rowsFor(employee).map((r) => r.key)).toEqual([
       "overview", "assistant", "pm", "build", "run", "website", "requests", "campaigns", "clients", "tools",
-      "reports", "analytics", "appraisals", "learning", "tasks", "inbox", "calendar", "approvals", "me",
+      "performance", "reports", "analytics", "appraisals", "learning", "tasks", "inbox", "calendar", "approvals", "me",
     ]);
-    expect(rowsFor(employee, true)).toHaveLength(19);
+    expect(rowsFor(employee, true)).toHaveLength(20);
   });
 
   it("fills the department id and drops planned and gated tabs", () => {

@@ -762,6 +762,9 @@ const TIME_ENTRIES: Record<string, unknown>[] = [
   { id: "te-3", user_id: "u-dev", project_id: "p-web-1", task_id: "t-4", minutes: 240, billable: true, entry_date: "2026-07-05", notes: "Homepage hero" },
   { id: "te-4", user_id: "u-dev", project_id: "p-web-1", task_id: "t-5", minutes: 180, billable: true, entry_date: "2026-07-04", notes: "Checkout QA" },
   { id: "te-5", user_id: "u-finance", project_id: "p-fin-1", task_id: "t-3", minutes: 120, billable: false, entry_date: "2026-06-25", notes: "Q2 reconciliation" },
+  // PV7-06: two of the signed-in person's own, dated from today, so My performance's "Your time" has a current month to show.
+  { id: "te-6", user_id: DEMO_USER_ID, project_id: "p-web-1", task_id: null, minutes: 105, billable: true, entry_date: new Date().toISOString().slice(0, 10), notes: "Homepage polish" },
+  { id: "te-7", user_id: DEMO_USER_ID, project_id: "p-seo-1", task_id: null, minutes: 60, billable: false, entry_date: new Date(Date.now() - 86_400_000).toISOString().slice(0, 10), notes: "Rank report review" },
 ];
 
 // ORG-13 service assignments — session-only in-memory store (matches every

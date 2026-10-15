@@ -45,7 +45,7 @@ describe("the generic workspace (DW-6e)", () => {
     expect(i, `expected ${JSON.stringify(wanted)} in order within ${JSON.stringify(all)}`).toBe(wanted.length);
 
     expect(labels("Work")).toEqual(expect.arrayContaining(["Project Management", "Tools & connections"]));
-    expect(labels("Performance").slice(0, 4)).toEqual(["Reports", "Analytics", "Appraisals", "Learning"]);
+    expect(labels("Performance").slice(0, 5)).toEqual(["My performance", "Reports", "Analytics", "Appraisals", "Learning"]);
     expect(within(menu).getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
   });
 });

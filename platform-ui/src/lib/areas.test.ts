@@ -141,6 +141,11 @@ describe("areaFor", () => {
     for (const p of ["/me/mail", "/me/mail/t-1", "/me/mail/new?to=a@b.c"]) expect(areaFor(p)).toEqual({ kind: "personal" });
   });
 
+  it("puts My performance in performance, with its query string, not in You (PV7-06)", () => {
+    expect(areaFor("/me/performance")).toEqual({ kind: "performance" });
+    expect(areaFor("/me/performance?x=1")).toEqual({ kind: "performance" });
+  });
+
   it("returns shared for a path no rule covers", () => {
     expect(areaFor("/nope")).toEqual({ kind: "shared" });
   });
