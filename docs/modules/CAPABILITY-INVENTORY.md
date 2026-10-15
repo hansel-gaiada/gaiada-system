@@ -42,8 +42,8 @@ unfalsifiable after.
 | agency | `agency` | 22 |
 | assistant | `assistant` | 15 |
 | automation-console | `admin/automation` | 3 |
-| clients | `clients` | 23 |
-| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `positions` · `role-grants` | 73 |
+| clients | `clients` | 24 |
+| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `positions` · `role-grants` | 74 |
 | finance | `finance` | 3 |
 | hr | `hr` | 11 |
 | invoice | `invoices` | 13 |
@@ -51,7 +51,7 @@ unfalsifiable after.
 | knowledge | `knowledge` | 3 |
 | monitoring | `monitoring` | 3 |
 | pm | `pm` | 15 |
-| reports | `checkins` · `reports` | 21 |
+| reports | `checkins` · `reports` | 22 |
 | search | `search` | 30 |
 | social | `social` | 13 |
 | webdev | `webdev` | 36 |
