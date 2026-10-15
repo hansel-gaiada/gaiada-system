@@ -1,4 +1,7 @@
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
+import { test } from "./settledPage";
+import { classicTest } from "./classicLayout";
+import { tenantCookie } from "./appCookies";
 
 function sidebar(page: Page) {
   return page.locator(".erp-side");
@@ -9,7 +12,7 @@ test("My Work dashboard loads", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 });
 
-test("sidebar navigates the business modules", async ({ page }) => {
+classicTest("sidebar navigates the business modules", async ({ page }) => {
   // 2026-10-11 (commit d609d7c3, PV1-04): the agency rows (Deliverables, Agency, ...) follow the ACTIVE
   // company's vertical pack; the demo opens on the holding root, whose generic menu has none of them,
   // so this test works as the agency company.
@@ -37,7 +40,7 @@ test("sidebar navigates the business modules", async ({ page }) => {
   await expect(sidebar(page).getByRole("link", { name: "Calendar", exact: true })).toBeVisible();
 });
 
-test("global search returns cross-entity results", async ({ page }) => {
+classicTest("global search returns cross-entity results", async ({ page }) => {
   await page.goto("/");
   // "gaia" matches companies, which are searched across every tenant the
   // user can access (independent of the active company).
@@ -48,7 +51,7 @@ test("global search returns cross-entity results", async ({ page }) => {
   await expect(page.getByRole("link", { name: /Gaia Digital Agency/i }).first()).toBeVisible();
 });
 
-test("notifications surface shows items and unread badge", async ({ page }) => {
+classicTest("notifications surface shows items and unread badge", async ({ page }) => {
   await page.goto("/");
   // Scoped to the top bar: a demo task is titled "Push notifications spike".
   const bell = page.locator(".erp-top").getByRole("link", { name: /notifications/i });
@@ -121,16 +124,13 @@ test("account links to own employee page", async ({ page }) => {
 
 async function switchToAgency(page: Page) {
   await page.goto("/");
-  // The switcher auto-submits a server action (no URL change, so waitForURL/
-  // networkidle are both unreliable signals here — Next dev's HMR socket
-  // keeps the connection non-idle). Wait for the action's own POST instead.
-  await Promise.all([
-    page.waitForResponse((r) => r.request().method() === "POST"),
-    page.getByLabel("Active company").selectOption({ label: "Gaia Digital Agency" }),
-  ]);
+  // The tenant cookie, not the classic top bar's "Active company" switcher: the default workspace shell (DW-9d-1) has no such
+  // control in the same place, and these tests are about the pages, not the switcher.
+  await page.context().addCookies([tenantCookie(page.url())]);
+  await page.reload(); // the page already open was rendered for the holding company
 }
 
-test("department Home shows live KPIs, a project health ring, activity feed, and the rail", async ({ page }) => {
+classicTest("department Home shows live KPIs, a project health ring, activity feed, and the rail", async ({ page }) => {
   await switchToAgency(page);
   await page.goto("/departments/dept-1");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/web dev/i);
@@ -511,7 +511,7 @@ test("a meeting recording links to its ingested pipeline run", async ({ page }) 
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/northwind/i);
 });
 
-test("the sidebar collapses to a labelled icon rail and stays collapsed", async ({ page }) => {
+classicTest("the sidebar collapses to a labelled icon rail and stays collapsed", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("link", { name: "Dashboard" })).toContainText("Dashboard");
 
@@ -528,7 +528,7 @@ test("the sidebar collapses to a labelled icon rail and stays collapsed", async 
   await expect(page.locator("html")).not.toHaveAttribute("data-sidebar", "collapsed");
 });
 
-test("rail categories open a flyout by click, hover and keyboard", async ({ page }) => {
+classicTest("rail categories open a flyout by click, hover and keyboard", async ({ page }) => {
   // 2026-10-11 (commit d609d7c3, PV1-04): Business has more than one row (so is a flyout
   // category, not a lone link) only in a company whose pack lists the agency rows, and "Systems" became "Platform".
   await switchToAgency(page);
@@ -570,7 +570,7 @@ test("sign out returns to login", async ({ page }) => {
   await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
 });
 
-test("the mobile drawer keeps labels even when the desktop rail is collapsed", async ({ page }) => {
+classicTest("the mobile drawer keeps labels even when the desktop rail is collapsed", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Close sidebar" }).click();
   await page.setViewportSize({ width: 420, height: 820 });

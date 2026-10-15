@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
-import { test, expect, type Browser, type Locator, type Page } from "@playwright/test";
+import { expect, type Browser, type Locator, type Page } from "@playwright/test";
+import { test } from "./settledPage";
 
 // WSK-49d — the client portal's Website area, as an EXTERNAL CLIENT EDITOR, against the STUBBED client website BFF
 // (e2e/webdesk-stub/portal.mjs: FRONTEND-BFF-CONTRACT §16j), run by playwright.webdesk.config.ts.

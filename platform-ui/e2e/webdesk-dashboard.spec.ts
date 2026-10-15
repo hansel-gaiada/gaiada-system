@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
-import { test, expect, type BrowserContext, type Page } from "@playwright/test";
+import { expect, type BrowserContext, type Page } from "@playwright/test";
+import { test } from "./settledPage";
 import { tenantCookie } from "./appCookies";
 
 // M5-W8 — the writer dashboard, against the STUBBED dashboard BFF (e2e/webdesk-stub/dashboard.mjs, run by playwright.webdesk.config.ts, no

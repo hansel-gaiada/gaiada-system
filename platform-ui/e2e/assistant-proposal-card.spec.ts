@@ -1,4 +1,5 @@
-import { test, expect } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { test } from "./settledPage";
 
 // ASST-23/T4 — FE-verification gap #1 (2026-08-06): the propose -> confirm -> executed flow was
 // previously driven in a real browser only once, by a THROWAWAY Playwright script that was deleted

@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
-import { test, expect, type BrowserContext, type Page } from "@playwright/test";
+import { expect, type BrowserContext, type Page } from "@playwright/test";
+import { test } from "./settledPage";
 import { tenantCookie } from "./appCookies";
 
 // M5-W5 — the writers' room calendar and workflow board, against the STUBBED BFF (e2e/webdesk-stub/editorial.mjs, run by

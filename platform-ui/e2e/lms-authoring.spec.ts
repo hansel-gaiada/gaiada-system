@@ -1,4 +1,5 @@
-import { test, expect } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { test } from "./settledPage";
 import { tenantCookie } from "./appCookies";
 
 // LMS L3 — the HOD authoring surface, driven against the rendered app under DEMO_MODE.
@@ -95,6 +96,6 @@ test.describe("Learning authoring (LMS L3)", () => {
     await page.goto("/learning/authoring");
     await expect(page.getByText(/for department heads, HR and company administrators/i)).toBeVisible();
     // Refused, not hidden — and pointed at the thing they CAN use.
-    await expect(page.getByRole("link", { name: "catalogue" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "catalogue", exact: true })).toBeVisible(); // the page's own link; the workspace shell's sidebar row is "Learning catalogue"
   });
 });

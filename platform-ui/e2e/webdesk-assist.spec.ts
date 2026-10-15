@@ -1,4 +1,5 @@
-import { test, expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { test } from "./settledPage";
 import { tenantCookie } from "./appCookies";
 
 // M5-W6 — the editor's AI assist drawer, against the STUBBED assist BFF (e2e/webdesk-stub/assist.mjs, run by playwright.webdesk.config.ts,

@@ -1,4 +1,5 @@
-import { test, expect } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { test } from "./settledPage";
 import { tenantCookie } from "./appCookies";
 
 // LMS L1c. Drives the four learning surfaces against the real rendered app under DEMO_MODE, because

@@ -1,14 +1,15 @@
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
+import { test } from "./settledPage";
+import { tenantCookie } from "./appCookies";
 
 // Mirrors app.spec.ts's own helper — the default active tenant is the HOLDING company
 // (co-holding, type 'holding', empty org tree), so any /departments/* route 404s until the
-// switcher moves the session to the agency.
+// tenant cookie moves the session to the agency.
 async function switchToAgency(page: Page) {
   await page.goto("/");
-  await Promise.all([
-    page.waitForResponse((r) => r.request().method() === "POST"),
-    page.getByLabel("Active company").selectOption({ label: "Gaia Digital Agency" }),
-  ]);
+  // The tenant cookie, not the classic top bar's "Active company" switcher (DW-9d-1: the default workspace shell has none there).
+  await page.context().addCookies([tenantCookie(page.url())]);
+  await page.reload(); // the page already open was rendered for the holding company
 }
 
 // SM-22 verification smoke check (temporary — author will fold into app.spec.ts or remove after

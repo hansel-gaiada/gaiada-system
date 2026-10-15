@@ -1,5 +1,7 @@
-import { test, expect } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { test } from "./settledPage";
 import { loginAsPersona } from "./personas";
+import { classicLayoutCookie } from "./appCookies";
 
 // IAM-06b — reference example for the persona fixture, run in DEMO_MODE (this project's default —
 // see playwright.config.ts). Demonstrates BOTH directions with the exact copy-paste shape the
@@ -10,11 +12,17 @@ import { loginAsPersona } from "./personas";
 test.describe("IAM-06b persona fixture — reference example", () => {
   test("ALLOW — superadmin sees the Settings nav item (admin.access)", async ({ page }) => {
     await loginAsPersona(page, "superadmin");
+    // The "Settings" item is a CLASSIC sidebar row: a person who chose classic (classic until DW-9d-2).
+    await page.context().addCookies([classicLayoutCookie(page.url())]);
+    await page.goto("/");
     await expect(page.getByRole("link", { name: "Settings" })).toBeVisible();
   });
 
   test("DENY — member does NOT see the Settings nav item (admin.access)", async ({ page }) => {
     await loginAsPersona(page, "member");
+    // The "Settings" item is a CLASSIC sidebar row: a person who chose classic (classic until DW-9d-2).
+    await page.context().addCookies([classicLayoutCookie(page.url())]);
+    await page.goto("/");
     await expect(page.getByRole("link", { name: "Settings" })).toHaveCount(0);
   });
 

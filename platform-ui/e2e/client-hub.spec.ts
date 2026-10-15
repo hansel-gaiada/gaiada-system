@@ -1,4 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
+import { test } from "./settledPage";
 import { tenantCookie } from "./appCookies";
 
 // ⚠ EVERY test here pins `gaiada_tenant` to `co-agency` before navigating, and it is load-bearing.

@@ -1,4 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
+import { test } from "./settledPage";
 import { tenantCookie } from "./appCookies";
 
 // PV3-08 — drives the hub's Contracts & billing area in a real browser, on DEMO_MODE fixtures.

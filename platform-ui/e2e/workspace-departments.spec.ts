@@ -20,8 +20,8 @@ async function hydrated(loc: Locator) {
 }
 
 /** The pilot switch, written the way lib/prefs.ts reads it (see workspace-shell.spec.ts). */
-function pilotCookie(at: string) {
-  return { name: "gaiada_prefs", value: encodeURIComponent(JSON.stringify({ shell: "workspaces" })), url: new URL("/", at).toString() };
+function pilotCookie(at: string, shell: "workspaces" | "classic" = "workspaces") {
+  return { name: "gaiada_prefs", value: encodeURIComponent(JSON.stringify({ shell, shellChosen: true })), url: new URL("/", at).toString() };
 }
 
 async function signInSuperadmin(page: Page, context: BrowserContext) {
@@ -264,9 +264,9 @@ test.describe("Tools & connections (superadmin, DW-6c)", () => {
     await expect(page.getByRole("region", { name: "Today", exact: true }).getByRole("link", { name: /^Figma/ })).toBeVisible();
   });
 
-  test("without the pilot cookie the same URL is the classic page: no Tools section", async ({ page, context }) => {
+  test("for a person who chose classic the same URL is the classic page: no Tools section (classic until DW-9d-2)", async ({ page, context }) => {
     await loginAsPersona(page, "superadmin");
-    await context.addCookies([tenantCookie(page.url())]);
+    await context.addCookies([tenantCookie(page.url()), pilotCookie(page.url(), "classic")]);
     await page.goto(WEB_DEV_CONNECTIONS);
     await expect(page.getByRole("heading", { name: "My connections" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Tools", exact: true })).toHaveCount(0);
@@ -305,9 +305,9 @@ test.describe("Open in (superadmin, DW-6c2)", () => {
     await expect(page.getByRole("menu", { name: "Open in" })).toHaveCount(0);
   });
 
-  test("without the pilot cookie the same project page has no Open in menu", async ({ page, context }) => {
+  test("for a person who chose classic the same project page has no Open in menu (classic until DW-9d-2)", async ({ page, context }) => {
     await loginAsPersona(page, "superadmin");
-    await context.addCookies([tenantCookie(page.url())]);
+    await context.addCookies([tenantCookie(page.url()), pilotCookie(page.url(), "classic")]);
     await page.goto(WEB_DEV_PROJECT);
     await expect(page.getByRole("heading", { name: "Client site redesign" })).toBeVisible();
     await expect(openIn(page)).toHaveCount(0);

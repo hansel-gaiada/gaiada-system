@@ -1,4 +1,5 @@
-import { test, expect, type Page, type BrowserContext } from "@playwright/test";
+import { expect, type Page, type BrowserContext } from "@playwright/test";
+import { test } from "./settledPage";
 import { tenantCookie } from "./appCookies";
 
 // MI-05 — Web Dev console Requests tab (Build group), over the demo fixture

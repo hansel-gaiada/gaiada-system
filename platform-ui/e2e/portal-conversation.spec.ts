@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
+import { test } from "./settledPage";
 
 // PV4-08 — the client portal's Conversation, as a VIEWER-capability contact, against the STUBBED client conversation BFF
 // (e2e/webdesk-stub/portal.mjs: FRONTEND-BFF-CONTRACT §29a), run by playwright.webdesk.config.ts:

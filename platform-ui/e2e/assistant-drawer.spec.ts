@@ -1,4 +1,5 @@
-import { test, expect, type Locator } from "@playwright/test";
+import { expect, type Locator } from "@playwright/test";
+import { classicTest as test } from "./classicLayout"; // the FAB is the classic floating button (classic until DW-9d-2); the workspace shell opens the same drawer from its sidebar row
 
 // The FAB is a link to /assistant that the @drawer intercepting route turns into a drawer. Clicked before React
 // hydrates, it is a plain link and does a full navigation to /assistant: the right no-JavaScript fallback, and the

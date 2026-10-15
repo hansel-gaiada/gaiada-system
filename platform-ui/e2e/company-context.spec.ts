@@ -1,4 +1,6 @@
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
+import { test } from "./settledPage";
+import { classicLayoutCookie } from "./appCookies";
 
 // PV1-07 — the staff menu follows the company, end to end, in DEMO_MODE (PV-D11, PV-D15, PV-D18).
 //
@@ -10,6 +12,8 @@ import { test, expect, type Page } from "@playwright/test";
 // (hospitality). The active company starts as the first one, co-holding.
 async function signIn(page: Page, email: string): Promise<void> {
   await page.goto("/login");
+  // The staff menu under test is the CLASSIC sidebar (`.erp-side`), so this signs in as a person who chose classic (classic until DW-9d-2).
+  await page.context().addCookies([classicLayoutCookie(page.url())]);
   await page.getByLabel("Email").fill(email);
   await page.getByRole("button", { name: /sign in/i }).click();
   await page.waitForURL("**/");

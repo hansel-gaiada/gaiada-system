@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
-import { test, expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { test } from "./settledPage";
 import { tenantCookie } from "./appCookies";
 
 // M5-W2e — the writers' room UI, against the STUBBED review BFF (e2e/webdesk-stub/editorial.mjs, run by playwright.webdesk.config.ts,
@@ -197,7 +198,7 @@ test("the item list shows each item's review state and filters by it", async ({ 
 
 test("the Writers' room tab opens the board, grouped by state with the site's counts; withheld counts are said in words", async ({ page }) => {
   await page.goto(DEPT);
-  await page.getByRole("navigation", { name: "Department sections" }).getByRole("link", { name: "Website" }).click();
+  await page.getByRole("navigation", { name: "Web Dev menu" }).getByRole("link", { name: "Website" }).click();
   await page.goto(WRITERS);
   await expect(page).toHaveURL(/\/website\/writers\/gaiada\/site-gaiada-com$/); // one site: straight in
   await expect(page.getByTestId("writers-board")).toBeVisible();

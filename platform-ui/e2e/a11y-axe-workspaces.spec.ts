@@ -57,7 +57,7 @@ async function press(loc: Locator) {
 
 /** The pilot switch and the theme in ONE cookie, the way lib/prefs.ts reads it. */
 function prefsCookie(at: string, theme: Theme) {
-  return { name: "gaiada_prefs", value: encodeURIComponent(JSON.stringify({ shell: SHELL, theme })), url: new URL("/", at).toString() };
+  return { name: "gaiada_prefs", value: encodeURIComponent(JSON.stringify({ shell: SHELL, shellChosen: true, theme })), url: new URL("/", at).toString() };
 }
 
 const menu = (page: Page, title: string) => page.getByRole("navigation", { name: `${title} menu` });

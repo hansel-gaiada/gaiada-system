@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
-import { test, expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { test } from "./settledPage";
 import { tenantCookie } from "./appCookies";
 import zlib from "node:zlib";
 
@@ -74,9 +75,10 @@ test.beforeEach(async ({ page, context }) => {
 
 // ── navigation / structure ─────────────────────────────────────────────────────────────────────────
 
-test("the Website group sits in the Web Dev strip; one site redirects straight into it", async ({ page }) => {
+test("the Website row sits in the Web Dev menu; one site redirects straight into it", async ({ page }) => {
   await page.goto(DEPT);
-  const strip = page.getByRole("navigation", { name: "Department sections" });
+  // DW-9d-1: the default workspace shell's sidebar menu replaces the classic "Department sections" strip.
+  const strip = page.getByRole("navigation", { name: "Web Dev menu" });
   await expect(strip.getByRole("link", { name: "Website" })).toBeVisible();
   await strip.getByRole("link", { name: "Website" }).click();
   await expect(page).toHaveURL(/\/website\/content\/gaiada\/site-gaiada-com$/);
@@ -94,7 +96,7 @@ test("STATE loading: a skeleton shows while the content API is slow, then the pa
   // stays up with no skeleton: that was the flake. Wait for the prefetch response first. (`next dev` does not prefetch.)
   const prefetched = page.waitForResponse((r) => /\/website\/content\?_rsc=/.test(r.url()) && !!r.request().headers()["next-router-prefetch"], { timeout: 20_000 }).catch(() => null);
   await page.goto(DEPT);
-  const link = page.getByRole("navigation", { name: "Department sections" }).getByRole("link", { name: "Website" });
+  const link = page.getByRole("navigation", { name: "Web Dev menu" }).getByRole("link", { name: "Website" });
   await hydrated(link); // a click before hydration is a full page load, not the soft navigation under test
   if (process.env.WD_E2E_BUILT === "1") expect(await prefetched, "the Website link was prefetched").not.toBeNull();
   await page.waitForLoadState("networkidle"); // the router has finished filing every prefetch it started
@@ -1031,9 +1033,9 @@ const seedMedia = async (o: Record<string, unknown>) => ((await stub.post("seed-
 
 test("the Website group has a Media tab next to Content; a library with nothing in it says it is empty", async ({ page }) => {
   await page.goto(DEPT);
-  await page.getByRole("navigation", { name: "Department sections" }).getByRole("link", { name: "Website" }).click();
-  // the group's own tab strip ("Website tools"): Content and Media
-  const tabs = page.getByRole("navigation", { name: "Website tools" });
+  await page.getByRole("navigation", { name: "Web Dev menu" }).getByRole("link", { name: "Website" }).click();
+  // the group's own tab strip: Content and Media ("Website sections" in the workspace shell, "Website tools" in classic)
+  const tabs = page.getByRole("navigation", { name: "Website sections" });
   await expect(tabs.getByRole("link", { name: "Content" })).toBeVisible();
   await tabs.getByRole("link", { name: "Media" }).click();
   await expect(page).toHaveURL(/\/website\/media\/gaiada\/site-gaiada-com$/); // one site: straight in, as Content does

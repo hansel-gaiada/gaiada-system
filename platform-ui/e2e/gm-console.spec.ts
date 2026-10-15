@@ -1,6 +1,7 @@
-import { test, expect, type Page, type BrowserContext } from "@playwright/test";
+import { expect, type Page, type BrowserContext } from "@playwright/test";
+import { test } from "./settledPage";
 import { loginAsPersona } from "./personas";
-import { tenantCookie } from "./appCookies";
+import { classicLayoutCookie, tenantCookie } from "./appCookies";
 
 // GM-10 — the GM console suite (`docs/plans/2026-08-24-gm-console-PROGRESS.md`), over DEMO_MODE.
 //
@@ -67,6 +68,8 @@ async function login(page: Page, context: BrowserContext, persona: "superadmin" 
 test.describe("GM cockpit (GM-03)", () => {
   test("renders the three tiers, and the provenance line refuses to imply a seal state", async ({ page, context }) => {
     await login(page, context, "superadmin");
+    // The cockpit is the CLASSIC department home; the workspace shell shows the Overview there (DW-3z). Classic until DW-9d-2.
+    await context.addCookies([classicLayoutCookie(page.url())]);
     await page.goto(GM);
 
     // The console spine — proves the `gm` toolkit resolved, not the Home-only generic fallback.
@@ -87,6 +90,8 @@ test.describe("GM cockpit (GM-03)", () => {
 
   test("the period toggle actually changes the period, not just the highlighted button", async ({ page, context }) => {
     await login(page, context, "superadmin");
+    // The cockpit is the CLASSIC department home; the workspace shell shows the Overview there (DW-3z). Classic until DW-9d-2.
+    await context.addCookies([classicLayoutCookie(page.url())]);
 
     await page.goto(GM);
     await expect(page.getByText(/this week/i)).toBeVisible();
@@ -99,6 +104,8 @@ test.describe("GM cockpit (GM-03)", () => {
 
   test("an unrecognised period falls back to the week instead of reaching the backend", async ({ page, context }) => {
     await login(page, context, "superadmin");
+    // The cockpit is the CLASSIC department home; the workspace shell shows the Overview there (DW-3z). Classic until DW-9d-2.
+    await context.addCookies([classicLayoutCookie(page.url())]);
     // `day` and `custom` are real ReportPeriodKinds the console deliberately does not offer.
     await page.goto(`${GM}?period=day`);
     await expect(page.getByText(/this week/i)).toBeVisible();
@@ -252,6 +259,8 @@ test.describe("the money tier (GM-09)", () => {
 
   test("money sits BELOW the operating tiers, not above them", async ({ page, context }) => {
     await login(page, context, "superadmin");
+    // The cockpit is the CLASSIC department home; the workspace shell shows the Overview there (DW-3z). Classic until DW-9d-2.
+    await context.addCookies([classicLayoutCookie(page.url())]);
     await page.goto(GM);
     // Amazon's cadence rule, and the reason the card is ordered where it is: inputs and outputs
     // first, financials last. Asserted on the CARD HEADINGS rather than on raw page text — the first
@@ -305,6 +314,8 @@ test.describe("client monitoring (B3)", () => {
 
   test("the cockpit carries client health, above the money tier", async ({ page, context }) => {
     await login(page, context, "superadmin");
+    // The cockpit is the CLASSIC department home; the workspace shell shows the Overview there (DW-3z). Classic until DW-9d-2.
+    await context.addCookies([classicLayoutCookie(page.url())]);
     await page.goto(GM);
     await expect(page.getByRole("heading", { name: "Client monitoring" })).toBeVisible();
     await expect(page.getByText("Needs attention")).toBeVisible();

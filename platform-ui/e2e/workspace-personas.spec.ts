@@ -47,7 +47,7 @@ async function press(loc: Locator) {
 
 /** The pilot switch, written the way lib/prefs.ts reads it: JSON in `gaiada_prefs`, URL-encoded. */
 function pilotCookie(at: string, shell: "workspaces" | "classic" = "workspaces") {
-  return { name: "gaiada_prefs", value: encodeURIComponent(JSON.stringify({ shell })), url: new URL("/", at).toString() };
+  return { name: "gaiada_prefs", value: encodeURIComponent(JSON.stringify({ shell, shellChosen: true })), url: new URL("/", at).toString() };
 }
 
 const sidebar = (page: Page) => page.locator("aside#app-nav");

@@ -1,4 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
+import { test } from "./settledPage";
 import AxeBuilder from "@axe-core/playwright";
 import { tenantCookie } from "./appCookies";
 

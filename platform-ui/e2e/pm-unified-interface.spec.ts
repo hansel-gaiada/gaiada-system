@@ -1,5 +1,6 @@
-import { test, expect, type Page, type BrowserContext } from "@playwright/test";
-import { tenantCookie } from "./appCookies";
+import { expect, type Page, type BrowserContext } from "@playwright/test";
+import { test } from "./settledPage";
+import { classicLayoutCookie, tenantCookie } from "./appCookies";
 
 // Coverage for commit c89fed6 ("one project-management interface, on every surface that shows
 // it") — deliberately deferred and flagged in that commit's own message: "e2e specs don't yet
@@ -118,7 +119,8 @@ test.describe("/project-management resolves with the full tab set, no scope swit
     // truth: PM_TERMS in src/lib/pmVocabulary.ts — a future rename there updates this UI in one
     // place, and this assertion is what proves it actually reached this surface).
     for (const label of ["Board", "Ball", "Timeline", "Charts", "Productivity", "Projects", "Tasks"]) {
-      await expect(page.getByRole("link", { name: label, exact: true })).toBeVisible();
+      // In the page's own tab strip: the workspace shell's sidebar has a "Projects" row too (DW-9d-1).
+      await expect(page.locator("#main-content").getByRole("link", { name: label, exact: true })).toBeVisible();
     }
 
     // Fixed whole-company scope: unlike /pm, this surface has no department/project drill-down,
@@ -161,6 +163,8 @@ test.describe("Deep links are preserved (explicitly NOT redirected)", () => {
 test.describe("Department console primary group reads 'Project Management', not 'Work'", () => {
   test("dept-1 (Web Dev) primary strip + sub-tabs", async ({ page, context }) => {
     await loginAs(page, context, HANSEL);
+    // The department console strips are the CLASSIC shell (the workspace shell hides them: its rows own the tabs). Classic until DW-9d-2.
+    await context.addCookies([classicLayoutCookie(page.url())]);
     await page.goto("/departments/dept-1");
 
     const primaryStrip = page.getByRole("navigation", { name: "Department sections" });
