@@ -43,7 +43,11 @@ export interface VerifiedToken {
   // client/realm was never configured to say so" — see infra/runbooks/enable-mfa.md.
   sessionId: string | null; // PV5-14: the IdP SESSION this token belongs to (`sid`, else `session_state`),
   // read from inside the signature. The simulated step-up (./step-up.ts) is bound to it; null => the token
-  // cannot be stepped up at all. Never logged or stored raw (only hashed with the user id).
+  // cannot be stepped up at all. The step-up keeps only a hash of it with the user id. DW-7h (BFF §52.3, §52.4)
+  // stores it RAW in `security_access_seen` and `security_session_revocations`, because IT must name that exact
+  // Keycloak session to sign it out; it is still never logged.
+  issuedAt: number | null; // DW-7h (BFF §52.4): the token's `iat`, epoch seconds; null when absent. A "Block login"
+  // cuts every token of the user issued before the block.
 }
 
 export async function verifyToken(token: string): Promise<VerifiedToken> {
@@ -75,6 +79,7 @@ export async function verifyToken(token: string): Promise<VerifiedToken> {
     amr: amrClaimPresent ? (p.amr as string[]) : [],
     amrClaimPresent,
     sessionId: sessionIdFromClaims(p as Record<string, unknown>),
+    issuedAt: typeof p.iat === "number" && Number.isFinite(p.iat) ? p.iat : null,
   };
 }
 
@@ -184,5 +189,11 @@ export async function sessionPrincipalFromToken(
   const principal = await assemblePrincipal(userId, assuranceFor(tok));
   const sessionRef = tok.sessionId ? sessionRefFor(userId, tok.sessionId) : null;
   if (!principal) return { principal: null, sessionRef };
-  return { principal: await applySimulatedStepUp(principal, sessionRef), sessionRef };
+  const stepped = await applySimulatedStepUp(principal, sessionRef);
+  // DW-7h (BFF §52.4): what the request hook needs to refuse a session IT signed out or a login IT blocked. Only this
+  // path sets them; see `Principal.sessionId`.
+  return {
+    principal: { ...stepped, sessionId: tok.sessionId, ...(tok.issuedAt !== null ? { tokenIssuedAt: tok.issuedAt } : {}) },
+    sessionRef,
+  };
 }

@@ -9,6 +9,7 @@ import { assemblePrincipal, ANONYMOUS } from "../rbac/principal";
 import { setRequestVia } from "../core/request-context";
 import { sessionPrincipalFromToken } from "./oidc";
 import { withGlobal } from "../db";
+import { enforceRequestSecurity } from "../core/security/request-guard";
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -41,6 +42,16 @@ export class ServiceGuard implements CanActivate {
 export class AuthGuard implements CanActivate {
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const req = ctx.switchToHttp().getRequest<FastifyRequest>();
+    await this.authenticate(req);
+    // DW-7h (BFF §52.3 to §52.5): IT's sign-outs, login blocks and address blocks, then the connection record. Here,
+    // once, after whichever path below resolved the principal, and OUTSIDE the OIDC branch's try/catch, which turns
+    // anything but a 401 into "not a JWT, try the service token" and would swallow the 403 `ip_blocked`.
+    await enforceRequestSecurity(req);
+    return true;
+  }
+
+  /** Resolves `req.principal` from the presented credential, or throws 401. */
+  private async authenticate(req: FastifyRequest): Promise<boolean> {
     const bearer = bearerOf(req);
 
     // OIDC user path — a valid IdP token authenticates the user directly.

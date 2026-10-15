@@ -144,6 +144,15 @@ export interface Principal {
   perms?: PermissionGrant[];
   sessionVersion: number; // D11
 
+  /** DW-7h (FRONTEND-BFF-CONTRACT §52.3, §52.4): the IdP session the bearer token belongs to (`sid`, else
+   *  `session_state`) and the token's `iat` in epoch seconds. Set by `sessionPrincipalFromToken` (auth/oidc.ts) on the
+   *  OIDC bearer path ONLY; every service-token path (dev x-user-id, OBO envelope) leaves both undefined, because no
+   *  token of the user's own was presented. The request hook (core/security/request-guard.ts) matches them against
+   *  IT's sign-outs and login blocks, and records the session on the "Connected" page. Authorization-neutral: Cerbos
+   *  never sees them (rbac/cerbos.ts sends an explicit allow-list of attributes). */
+  sessionId?: string | null;
+  tokenIssuedAt?: number;
+
   /**
    * ── THE CO-AUTHOR (2026-08-20) — the interim half of [agent-attribution-gate] ──────────────────
    *
