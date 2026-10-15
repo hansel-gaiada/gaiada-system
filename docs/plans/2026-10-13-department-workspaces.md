@@ -1606,6 +1606,42 @@ written by the orchestrating session.
   through its own query, never `listLeave`.
 - An empty notice list or calendar leg is a claim: draw it only from a read that succeeded.
 
+**10e design (contract written 2026-10-15: BFF §60 and PERMISSION-CONTRACT §49, both PLANNED).**
+- **The request and its work live in the receiving company** (the agency). Its Incoming, board, Needs you, triage
+  and KPIs count the request, and nobody becomes a member of the other company. The row records the requesting
+  company (`requester_tenant_id`), which keeps a sender's view through its own URLs
+  (`api/<own company>/requests/outbound`).
+- **A route is a service assignment with a routing key**, `asset_requests` or `engineering_requests`, on the
+  receiving department itself. ORG-13 creates it: a `platform_admin` directly, or the provider proposes and the
+  target accepts. It materialises nothing. The reconciler, the module gate, the fact job and the provider rollups
+  all leave routing keys out, in code: otherwise the reconciler would make the department's people members of the
+  target.
+- **Two walls.** Cerbos decides who may send for a company: a new action, `send_across`, on the requesting company
+  (company_admin, manager, member; bots and automation denied). The route decides where: the handler resolves an
+  active route, and a `BEFORE INSERT` trigger on `work_requests` refuses any cross-company row without one. No
+  existing rule or attribute changes.
+- **Reach inside the requesting company is §32's:** everyone in it reads what it sent; the requester, its
+  company_admin and its manager cancel. The receiving company declines rather than cancels.
+- **Not in v1:** campaign parts across companies, attachments from the sender (links only; the sender downloads),
+  the sender's say in asset review rounds (DW-6h), and billing.
+
+**10e tickets, one at a time** (the orchestrating session reviews every line):
+
+| Ticket | Seat and model | Scope | Done when |
+|---|---|---|---|
+| 10e-1 The data and the route | senior-db, Sonnet | Migration `…_work_requests_across.sql`: four columns, the per-company backfill, NOT NULL, four CHECKs, three indexes, the route-guard and freeze triggers, assertions. `core/request-routes.ts`. Routing keys left out of the reconciler, `enabledModuleKeys`, `gatherForeignContext` and `computeProviderViewRollups`. ORG-7's propose, relink and dry run for routing keys | BFF §60.11 "The route wall", "A route grants nothing" and "The migration" green on the Linux gate |
+| 10e-2 The permission, the sender routes and the receiving side (the core) | senior-be, **Opus high**: cross-company authorization and tenancy, where one mistake is a leak between companies | `send_across` (six artifacts and the literals); `work-requests-outbound.controller.ts` (§60.5); the receiving-side changes (§60.6); notifications, activity and events (§60.7) | §60.11 "Sending", "Reading", "The lifecycle", "Notifications and events", "IAM" and "Tenancy" green on the Linux gate; Cerbos probed |
+| 10e-3 The UI | senior-fe, Sonnet | §60.9: the routes read and `hasRoutes`, the quick actions, `/requests/new?route=`, the merged My requests and Sent, `/requests/outbound/[id]` and its download proxies, the receiving side's labels, ORG-13's picker, DEMO_MODE | vitest, `next build` and the demo e2e green; then driven live after §60.12's steps |
+
+**Owner questions for 10e:**
+1. May `SERVICE_ASSIGNMENTS_ENABLED` go on in live, in both services? Routing honours it, and it also wakes the
+   reconciler for every other assignment (none recorded live). Without it 10e stays dark.
+2. Which companies get routes, to which departments: the holding, and which hotel companies (§60.12)?
+3. Reach: the contract mirrors §32, so everyone in the requesting company reads what it sent. Narrow it to the
+   requester and the company's admins and managers?
+4. Is a request from a group company that is also the agency's client internal work (v1: yes, unbilled, no client
+   on the task) or client work?
+
 ---
 
 ## 13. Traps, ranked
