@@ -2233,9 +2233,9 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §48 (ruling DW-D24, plan `docs/plans/20
 
 **The six artifacts** follow §36, plus the four pinned literals. **Restart Cerbos and probe after the deploy:** the status route answers `{connected: false}` for a fresh person.
 
-## 45. PV7-01 — `read_client` on `report_document` (2026-10-15, PLANNED)
+## 45. PV7-01 — `read_client` on `report_document` (2026-10-15, PROTOTYPED)
 
-Design: `docs/FRONTEND-BFF-CONTRACT.md` §53 (plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`, PV7-01). Status: **PLANNED**.
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §53 (plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`, PV7-01). Status: **PROTOTYPED** (policy, catalog, group, bundles, migration and tests are in the repo; the live Cerbos probe after a restart is the deploy step).
 
 **One more action on the existing kind, no new kind.** The key is `reports.document.read_client`: read a client-grain report document (one client's figures summed across its projects), its overview listing and its export. It sits beside `read_person`, `read_project`, `read_department` and `read_company`.
 
@@ -2255,4 +2255,10 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §53 (plan `docs/plans/2026-10-15-pv7-pe
 
 **Artifacts** (a new action on an existing kind): the policy (`read_client` joins the four rules above), `permission-catalog.json` (+1 key), `permission-groups.json`, `role-permission-bundles.json`, and migration `202610151700_reports_client_grain.sql` (seeds the permission and its grants). **Restart the Cerbos test container and the live sidecar after the deploy**: nothing hot-reloads.
 
-**Proof (to be named when built).**
+**As built (2026-10-15).** The policy `resource_report_document.yaml` adds `read_client` to four existing rules (`company_admin`, the HR read tier, `manager`, and `member`) and to none of the served-provider, `org_unit_lead` or `owner` rules.
+- **Bundles** (`role-permission-bundles.json`, `totalPairs` 2072 -> 2079): `platform_admin` 456 -> 457, `company_admin` 419 -> 420, `owner` 419 -> 420, `manager` 211 -> 212, `member` 109 -> 110, `hr_staff` 19 -> 20, `hr_manager` 60 -> 61. `reports_staff`, `reports_manager`, `viewer`, `org_unit_lead` and `client` are unchanged.
+- **Migration** `202610151700_reports_client_grain.sql` seeds the key and its 7 `role_permissions` rows with a DO-block self-assertion (exactly those seven roles, none self-scoped, `owner` == `company_admin` over the whole kind).
+- **Catalog and pinned literals:** `permission-catalog.json` 471 -> 472 pairs and 456 -> 457 grantable (kinds stay 109), `permission-groups.json` (the key joins `team_project_reports`: 456 -> 457 grantable, 417 -> 418 covered), `cerbos-catalog-alignment` 471 -> 472, `permission-groups-catalog-parity` 456 -> 457, `ui-grantable-catalog` 471 -> 472 and 456 -> 457.
+- **Not sensitive**, like `read_project`.
+
+**Proof.** `platform-nest/src/modules/reports/reports-cerbos.test.ts` (the `read_client` matrix: exec, admin, lead, both HR halves and member allowed; the served tiers, a project-scope member, a bare membership, another company's manager, low assurance and a portal contact refused; and `read_client` equal to `read_project` role for role except the served arm), plus the static alignment suites (`cerbos-catalog-alignment`, `permission-groups-catalog-parity`, `ui-grantable-catalog`, `permission-arm-hazard-scan`) and the HTTP suite `report-client-grain.db.test.ts`. **Restart the Cerbos test container and the live sidecar after the policy deploy.**

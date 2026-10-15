@@ -8763,7 +8763,7 @@ Built as §47.1 to §47.3 and §47.6 specify, except busy times: **§47.4 (`GET 
 - **Cerbos matrix:** `src/rbac/cerbos-personal-mailbox.test.ts`.
 - **UI:** the mailbox states, compose validation, the reply prefill, the "Email this client" prefill and its no-address state, and the simulated label.
 
-## 53. The client grain in reports (PV7-01, 2026-10-15) — `platform-nest/src/modules/reports/` — **STATUS: PLANNED**
+## 53. The client grain in reports (PV7-01, 2026-10-15) — `platform-nest/src/modules/reports/` — **STATUS: BUILT, PROTOTYPED (backend: the DB and HTTP suite report-client-grain.db.test.ts and the Cerbos matrix reports-cerbos.test.ts are written for the Linux CI gate; no page yet, PV7-05)**
 
 **Why.**
 - Plan: `docs/plans/2026-10-15-pv7-performance-views-tickets.md`, PV7-01 and findings 1 to 3. The Reports pages and the client Health board (PV7-05) need one document per client, summed across that client's projects.
@@ -8828,4 +8828,14 @@ A client document's narrative is the **deterministic** one, in a live read and i
 - Client health states (PV7-02, §54).
 - Anything a client can see (PV7-04, PV7-07).
 
-**Proof (to be named when built).**
+**As built (2026-10-15).**
+- **`flow.avg_progress`** is the one project metric with no department or company rollup. It is emitted at client grain too, as Sum(progress x open) / Sum(open) over the client's projects (the 16th metric).
+- **The Projects table** (`client_projects`: project, throughput, tasks completed, with a total row) lists which of the client's eligible projects carried the work. It is built from the same facts and the same eligible set as the KPIs.
+- **The print route** (`/print/reports/:jobToken`, the PDF export) renders a client document with the project grain's charts until PV7-05 builds the real page.
+- **Demo mode** serves two demo clients (`c-acme`, `c-sunrise`) from `lib/demoReports.ts`.
+- **The IAM artifacts** a new action on an existing kind needs are in the same change: the catalog key, the `team_project_reports` group, the regenerated bundles and the seed in the migration (PERMISSION-CONTRACT §45).
+
+**Proof.**
+- `platform-nest/src/modules/reports/report-client-grain.db.test.ts` (DB and HTTP, on the CI gate): the golden table (two clients, six projects of four kinds), Sum/Sum ratios that differ from the mean of ratios, `wip_open_avg` on the day count, overdue summed point-in-time, internal work absent in all four shapes, the document, overview, metrics and export routes, the access check, and the moved project (sealed keeps the old client, live shows the new one, no AI call for a client document).
+- Pure: `metrics.test.ts`, `document-builder.test.ts`, `report-seal.test.ts` (run anywhere).
+- UI demo: `platform-ui/src/lib/demoReports.test.ts`.
