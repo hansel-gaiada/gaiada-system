@@ -368,7 +368,10 @@ Tests:
     and the palette. Run `areas.test.ts` and `paletteFindability.test.ts`.
 - **The clients list:** a Health column and a state facet, withheld if the health read failed.
 - **`/reports/client?scopeRef=`:** `ReportPageClient` with grain `client`, six periods and a client
-  picker. A "Delivery report" link goes on the hub Overview, and Reports gains the tab.
+  picker. A "Delivery report" link goes on the hub Overview, and Reports gains the tab. Export and
+  print reuse DW-4k's shared Export control and Print button (branch `dw/4k`, building
+  2026-10-15). Build no second export control; if 4k has not landed yet, leave the page without
+  export and say so.
 - **Tests:** demo fixtures that mirror the golden rules table, unit tests, and an e2e of the board.
 
 ### PV7-06: My performance (UI only)
@@ -390,7 +393,10 @@ Tests:
   - **Your time:** hours logged in the period from `GET time-entries?mine=me`, labelled "context,
     not a score" (blueprint §11 principle 5).
   - **Activity:** a link to the year map through the existing `MY_ACTIVITY_HREF` constant. DW-4i
-    re-points that constant when it moves the map; this ticket moves nothing.
+    re-points that constant when it moves the map; this ticket moves nothing. If the page ever
+    shows activity counts, they come from DW-4h's core `GET /activity/series` (BFF §44: counts by
+    kind, no total, no score, gated by the person-axis rule), never from a reader of its own
+    (DW-D19).
 - **Never on the page:** a composite score; utilization or hours next to the appraisal; or another
   person's data. A test asserts the appraisal section renders no `effort.*` figure.
 - **Tests:** demo fixtures, unit tests, and an e2e that opens the page from the sidebar and the
