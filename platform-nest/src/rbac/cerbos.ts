@@ -145,6 +145,11 @@ export interface Resource {
    *  `read` rule for member and viewer. Read from the row by the handler, never from a body. Omitted -> "attendees" (never
    *  "company"), so an unfed resource never opens to the whole company. */
   visibility?: string;
+  /** PV7-04a (docs/FRONTEND-BFF-CONTRACT.md §55, PERMISSION-CONTRACT §46) -- the CLIENT'S OWNER (`clients.owner_user_id`)
+   *  of the client a `client_report` belongs to. Backs the owner's self-scoped `draft` / `publish` / `withdraw` rule
+   *  (`ownerUserId == principal.id`). Read by the handler from the client row, never from a body. Omitted -> "" -> the
+   *  rule's `has() && != ""` guard and the equality both fail closed (a client with no owner confers nothing). */
+  ownerUserId?: string;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -278,6 +283,9 @@ function resourcePayload(r: Resource) {
       // nobody, and "attendees" is the narrow visibility (the company-visibility rule reads exactly "company").
       attendeeIds: r.attendeeIds ?? [],
       visibility: r.visibility ?? "attendees",
+      // PV7-04a. Listed here or it never reaches resource_client_report.yaml (this is an allow-list). Fails closed: ""
+      // equals no principal id.
+      ownerUserId: r.ownerUserId ?? "",
     },
   };
 }

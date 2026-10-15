@@ -108,8 +108,9 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // DW-8g (2026-10-14): +5 grantable / +5 total on the NEW calendar_event kind (all uiGrantable TRUE). 466 -> 471 / 451 -> 456.
     // DW-8j (2026-10-15): +3 grantable / +3 total on the NEW personal_mailbox kind (all uiGrantable TRUE). 471 -> 474 / 456 -> 459.
     // PV7-01 (2026-10-15): +1 grantable / +1 total on the existing report_document kind (`read_client`, uiGrantable TRUE). 474 -> 475 / 459 -> 460.
-    expect(permissions.length).toBe(475);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(460);
+    // PV7-04a (2026-10-15): +4 grantable / +4 total on the NEW client_report kind (all uiGrantable TRUE). 475 -> 479 / 460 -> 464.
+    expect(permissions.length).toBe(479);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(464);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

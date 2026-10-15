@@ -6,12 +6,12 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 170,
-      "grantablePermissionsInCatalog": 460,
-      "permissionsCoveredByGroups": 421,
+      "groups": 171,
+      "grantablePermissionsInCatalog": 464,
+      "permissionsCoveredByGroups": 425,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
-      "sensitiveGroups": 114
+      "sensitiveGroups": 115
     }
   },
   "groups": [
@@ -1973,6 +1973,19 @@
         "reports.dept_kpi_target.appraisal_assess"
       ],
       "sensitive": false
+    },
+    {
+      "key": "client_reports",
+      "name": "Client reports",
+      "domain": "core",
+      "description": "Reports a client reads in their portal: delivered social and search reports, later the account summary. PV7-04a: staff who read clients read them; managers and the client's owner draft, publish and withdraw them. Agents and automation may draft but never publish or withdraw. Publishing and withdrawing put figures in front of a client, so they are sensitive.",
+      "permissions": [
+        "core.client_report.read",
+        "core.client_report.draft",
+        "core.client_report.publish",
+        "core.client_report.withdraw"
+      ],
+      "sensitive": true
     }
   ],
   "advancedOnly": [
