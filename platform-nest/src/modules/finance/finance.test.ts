@@ -20,6 +20,7 @@ import { withTenants, newId } from "../../db";
 import { buildApp } from "../../main";
 import { initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole } from "../../testing/fixtures";
+import { auditRows, bridgedRows, bridgedCount, type SeriesBody } from "../../testing/activity-probe";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -250,6 +251,81 @@ describe.skipIf(!TEST_URL)("Finance module BFF", () => {
         headers: asUser(controller), payload: { reason: "oops" },
       });
       expect(r.statusCode).toBe(400);
+    });
+  });
+
+  // ── DW-4h-2 (BFF §44.6): a posted journal is the poster's work ───────────────────────────────
+  describe("a posted journal is audited and counted in the activity series", () => {
+    const post = (sourceEventId: string, amount: number, as = controller) =>
+      app.inject({
+        method: "POST", url: `/api/${tenant}/finance/journals`, headers: asUser(as),
+        payload: {
+          date: "2026-03-14", sourceEventId, description: "Secret client retainer true-up",
+          lines: [
+            { accountCode: "6200", side: "debit", amount },
+            { accountCode: "1120", side: "credit", amount },
+          ],
+        },
+      });
+
+    it("one POST writes exactly one audit row and exactly one work_activity row, for the poster", async () => {
+      const before = Date.now();
+      const r = await post("act-1", 7_654_321);
+      expect(r.statusCode).toBe(201);
+      const id = (r.json() as { id: string }).id;
+
+      const audit = await auditRows(tenant, "finance_journal", "posted", id);
+      expect(audit).toHaveLength(1);
+      expect(audit[0].actor_id).toBe(controller);
+      // the entry number and nothing else: no amount, no description
+      const seq = (await withTenants([tenant], (c) =>
+        c.query<{ n: string }>(`SELECT ledger_sequence::text AS n FROM finance_journal_entries WHERE id = $1`, [id]), { modules: ["finance"] })).rows[0].n;
+      expect(audit[0].metadata).toEqual({ entryNumber: Number(seq) });
+      expect(JSON.stringify(audit[0].metadata)).not.toContain("7654321");
+      expect(JSON.stringify(audit[0].metadata)).not.toContain("Secret");
+
+      const wa = await bridgedRows(tenant, "finance", "finance_journal", id);
+      expect(wa).toHaveLength(1);
+      expect(wa[0]).toMatchObject({ actor_user_id: controller, verb: "posted", source_ref: `act:${audit[0].id}` });
+      expect(wa[0].payload).toEqual({ kind: "finance.journals" });
+      expect(JSON.stringify(wa[0])).not.toContain("Secret");
+      // occurred_at is when it happened (the post), not the journal's entry date
+      expect(wa[0].occurred_at.getTime()).toBeGreaterThanOrEqual(before - 5_000);
+      expect(wa[0].occurred_at.getTime()).toBeLessThanOrEqual(Date.now() + 5_000);
+    });
+
+    it("posting the same source event again is the same journal and adds nothing", async () => {
+      const first = (await post("act-2", 1_000)).json() as { id: string };
+      const again = await post("act-2", 1_000);
+      expect((again.json() as { id: string }).id).toBe(first.id);
+      expect(await auditRows(tenant, "finance_journal", "posted", first.id)).toHaveLength(1);
+      expect(await bridgedRows(tenant, "finance", "finance_journal", first.id)).toHaveLength(1);
+    });
+
+    it("a refused post (unbalanced) writes no audit row", async () => {
+      const n = async () => (await withTenants([tenant], (c) =>
+        c.query<{ n: number }>(`SELECT count(*)::int AS n FROM activities WHERE tenant_id = $1 AND target_entity_type = 'finance_journal'`, [tenant]))).rows[0].n;
+      const before = await n();
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/journals`, headers: asUser(controller),
+        payload: {
+          date: "2026-03-14", sourceEventId: "act-bad", description: "Unbalanced",
+          lines: [{ accountCode: "6200", side: "debit", amount: 100 }, { accountCode: "1120", side: "credit", amount: 90 }],
+        },
+      });
+      expect(r.statusCode).toBe(400);
+      expect(await n()).toBe(before);
+    });
+
+    it("the series counts the posted journals for that person, today", async () => {
+      const r = await get(`/api/${tenant}/activity/series?userId=${controller}`, controller);
+      expect(r.statusCode).toBe(200);
+      const body = r.json() as SeriesBody;
+      expect(body.kinds.map((k) => k.key)).toContain("finance.journals");
+      const posted = await bridgedCount(tenant, controller, "finance");
+      expect(posted).toBeGreaterThanOrEqual(2);
+      expect(body.totals["finance.journals"]).toBe(posted);
+      expect(body.days[body.days.length - 1].counts["finance.journals"]).toBeGreaterThanOrEqual(1);
     });
   });
 

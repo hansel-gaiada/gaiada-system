@@ -30,6 +30,9 @@ import { recomputeRollups, syncMetricDefinitions, resetCoreRollupProviders } fro
 import { relayBatch } from "../../events/relay";
 import { consumeOnce } from "../../events/consumer.service";
 import { setRedis, closeRedis } from "../../events/redis";
+import type { OutboxEvent } from "../../events/types";
+import { applyLeaveDecision } from "./leave-decision";
+import { auditRows, bridgedRows, bridgedCount, type SeriesBody } from "../../testing/activity-probe";
 
 const REDIS_TEST_URL = process.env.REDIS_URL_TEST ?? "";
 const svc = { authorization: "Bearer svc-token" };
@@ -274,6 +277,51 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("HR module (WSD-4)", () => {
       c.query<{ payload: { href?: string; decision?: string } }>(`SELECT payload FROM notifications WHERE tenant_id=$1 AND user_id=$2 AND type='hr.leave.decided'`, [B, member]),
     );
     expect(notif.rows[0].payload).toMatchObject({ decision: "approved", href: `/hr/leave/${leaveId}` });
+  });
+
+  it("DW-4h-2 (BFF §44.6): the decision is audited once, bridged once, counted in the series, and a redelivered event adds nothing", async () => {
+    const before = Date.now();
+    // the decision applied in the previous test: actor = the decider, entity = the leave request, metadata = the decision only
+    const audit = await auditRows(B, "hr_leave_request", "decided", leaveId);
+    expect(audit).toHaveLength(1);
+    expect(audit[0].actor_id).toBe(admin);
+    expect(audit[0].metadata).toMatchObject({ decision: "approved" });
+    expect(audit[0].metadata).not.toHaveProperty("reason");
+    expect(audit[0].metadata).not.toHaveProperty("note");
+
+    const wa = await bridgedRows(B, "hr", "hr_leave_request", leaveId);
+    expect(wa).toHaveLength(1);
+    expect(wa[0]).toMatchObject({ actor_user_id: admin, verb: "decided", source_ref: `act:${audit[0].id}` });
+    expect(wa[0].payload).toEqual({ kind: "hr.leave_decided" });
+    // occurred_at is when the decision was applied (a moment ago in this test), not the leave's own dates
+    expect(wa[0].occurred_at.getTime()).toBeLessThanOrEqual(Date.now() + 5_000);
+    expect(wa[0].occurred_at.getTime()).toBeGreaterThan(before - 120_000);
+
+    // the outbox redelivers the SAME event: the request is no longer pending, so nothing transitions and nothing is written
+    const event: OutboxEvent = {
+      id: newId(), tenantId: B, entityType: "automation_approval", entityId: approvalId, eventType: "automation_approval.decided",
+      payload: { decision: "approved", origin: "hr", decidedBy: admin, toolArgs: { leaveRequestId: leaveId } },
+      originSite: config.originSite, schemaVersion: 1, createdAt: new Date().toISOString(),
+    };
+    await applyLeaveDecision(event);
+    await applyLeaveDecision(event);
+    expect(await auditRows(B, "hr_leave_request", "decided", leaveId)).toHaveLength(1);
+    expect(await bridgedRows(B, "hr", "hr_leave_request", leaveId)).toHaveLength(1);
+    const balance = await withTenants(
+      [B],
+      (c) => c.query<{ used_minutes: number }>(`SELECT used_minutes FROM hr_leave_balances WHERE tenant_id=$1 AND subject_user_id=$2 AND leave_type='vacation' AND year=2026`, [B, member]),
+      { modules: ["hr"] },
+    );
+    expect(balance.rows[0].used_minutes).toBe(960); // and the balance did not move twice either
+
+    // the series counts it for the decider, on today
+    const r = await app.inject({ method: "GET", url: `/api/${B}/activity/series?userId=${admin}`, headers: asUser(admin) });
+    expect(r.statusCode).toBe(200);
+    const body = r.json() as SeriesBody;
+    expect(body.kinds.map((k) => k.key)).toContain("hr.leave_decided");
+    expect(body.totals["hr.leave_decided"]).toBe(await bridgedCount(B, admin, "hr"));
+    expect(body.totals["hr.leave_decided"]).toBeGreaterThanOrEqual(1);
+    expect(body.days[body.days.length - 1].counts["hr.leave_decided"]).toBeGreaterThanOrEqual(1);
   });
 
   it("hr_manager (module_manager) can ALSO decide an hr-origin approval via the same endpoint", async () => {

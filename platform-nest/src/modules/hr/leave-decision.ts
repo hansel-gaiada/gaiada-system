@@ -5,7 +5,7 @@
 // a deep-link href. Every non-hr-origin decided event is a harmless no-op here (design §2.2's
 // tight module=='hr' scoping is mirrored on the write side by this origin check).
 import { withTenants } from "../../db";
-import { notify } from "../../core/http";
+import { notify, writeActivity } from "../../core/http";
 import type { OutboxEvent } from "../../events/types";
 
 interface DecidedPayload {
@@ -57,6 +57,18 @@ export async function applyLeaveDecision(event: OutboxEvent): Promise<void> {
     { modules: ["hr"] },
   );
   if (!decided) return;
+
+  // DW-4h-2 (BFF §44.6): the decision is a person's work, so it is audited: actor = the decider, entity = the request,
+  // metadata = the decision only (never a reason). Written ONLY on the transition (`decided` is null on a redelivery, on
+  // a request somebody cancelled in between, and on any second pass), so the outbox redelivering this event cannot add a
+  // second row. AFTER the transaction has committed, and best effort: a failed audit write must not cost the subject
+  // their notification (a redelivery would find the row already decided and could not send it).
+  try {
+    await writeActivity(tenantId, payload.decidedBy ?? null, "decided", "hr_leave_request", leaveRequestId, { decision });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`[HR] leave decided audit write failed: ${(err as Error)?.message ?? "error"}`);
+  }
 
   await notify(tenantId, decided.subject_user_id, null, "hr.leave.decided", {
     title: newStatus === "approved" ? "Your leave request was approved" : "Your leave request was denied",

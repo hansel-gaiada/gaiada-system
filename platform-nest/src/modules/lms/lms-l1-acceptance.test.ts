@@ -28,6 +28,7 @@ import { lmsModule } from "./index";
 import { hrModule } from "../hr";
 import { resetCoreRollupProviders, syncMetricDefinitions } from "../../rollups/engine";
 import { setRedis, closeRedis } from "../../events/redis";
+import { auditRows, bridgedRows, bridgedCount, type SeriesBody } from "../../testing/activity-probe";
 
 const REDIS_TEST_URL = process.env.REDIS_URL_TEST ?? "";
 const RUN = !!(TEST_URL && REDIS_TEST_URL);
@@ -490,6 +491,62 @@ describe.skipIf(!RUN)("LMS L1 — the learning catalogue, driven end-to-end over
     const snoop = await call("GET", `${base()}/enrollments?subjectUserId=${learner}`, other);
     if (snoop.statusCode === 200) expect(snoop.json()).toEqual([]);
     else expect(snoop.statusCode).toBe(403);
+  });
+
+  it("7d · DW-4h-2 (BFF §44.6): each NEW completion is audited once for the LEARNER, bridged once, counted in the series, and a repeat adds nothing", async () => {
+    const before = Date.now();
+    const comps = await withTenants(
+      [A],
+      (c) => c.query<{ id: string; course_id: string | null; path_id: string | null }>(
+        `SELECT id, course_id, path_id FROM lms_completions WHERE subject_user_id = $1 ORDER BY completed_at, id`, [learner],
+      ),
+      { modules: ["lms"] },
+    );
+    const course = comps.rows.filter((r) => r.course_id !== null);
+    const path = comps.rows.filter((r) => r.path_id !== null);
+    expect(course).toHaveLength(1);
+    expect(path).toHaveLength(1);
+
+    // the actor is the learner, never the reviewer (webLead) whose grade completed the last activity
+    const courseAudit = await auditRows(A, "lms_completion", "completed", course[0].id);
+    expect(courseAudit).toHaveLength(1);
+    expect(courseAudit[0].actor_id).toBe(learner);
+    expect(courseAudit[0].metadata).toMatchObject({ courseId: course[0].course_id });
+    const pathAudit = await auditRows(A, "lms_completion", "completed", path[0].id);
+    expect(pathAudit).toHaveLength(1);
+    expect(pathAudit[0].actor_id).toBe(learner);
+    expect(pathAudit[0].metadata).toMatchObject({ pathId });
+
+    for (const [comp, audit] of [[course[0], courseAudit[0]], [path[0], pathAudit[0]]] as const) {
+      const wa = await bridgedRows(A, "learning", "lms_completion", comp.id);
+      expect(wa).toHaveLength(1);
+      expect(wa[0]).toMatchObject({ actor_user_id: learner, verb: "completed", source_ref: `act:${audit.id}` });
+      expect(wa[0].payload).toEqual({ kind: "learning.completed" });
+      expect(wa[0].occurred_at.getTime()).toBeLessThanOrEqual(Date.now() + 5_000);
+      expect(wa[0].occurred_at.getTime()).toBeGreaterThan(before - 300_000);
+    }
+    expect(await bridgedCount(A, learner, "learning")).toBe(2);
+    expect(await bridgedCount(A, webLead, "learning")).toBe(0);
+
+    // a repeat: the learner submits the reviewed activity again. The course is already complete, so no completion row is
+    // inserted, so nothing is audited.
+    const again = await call("POST", `${base()}/activities/${reviewActivityId}/attempts`, learner, {
+      enrollmentId, submission: { critique: "A second look." },
+    });
+    expect(again.statusCode).toBe(201);
+    expect(again.json().standing).not.toHaveProperty("newCompletionId"); // an internal flag, never in the response
+    expect((await withTenants([A], (c) => c.query(`SELECT 1 FROM lms_completions WHERE subject_user_id = $1`, [learner]), { modules: ["lms"] })).rowCount).toBe(2);
+    expect(await auditRows(A, "lms_completion", "completed", course[0].id)).toHaveLength(1);
+    expect(await auditRows(A, "lms_completion", "completed", path[0].id)).toHaveLength(1);
+    expect(await bridgedCount(A, learner, "learning")).toBe(2);
+
+    // the series counts both for the learner, today
+    const r = await call("GET", `/api/${A}/activity/series?userId=${learner}`, learner);
+    expect(r.statusCode).toBe(200);
+    const body = r.json() as SeriesBody;
+    expect(body.kinds.map((k) => k.key)).toContain("learning.completed");
+    expect(body.totals["learning.completed"]).toBe(2);
+    expect(body.days[body.days.length - 1].counts["learning.completed"]).toBe(2);
   });
 
   // ══════════════════════════════════════════════════════════ 8 · COMPLY ══════════════════════

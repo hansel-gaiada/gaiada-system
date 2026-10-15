@@ -63,7 +63,7 @@ async function enrolmentStaffOrSelf(
  */
 async function recomputeStanding(
   c: PoolClient, tenantId: string, subjectUserId: string, courseId: string, enrollmentId: string | null,
-): Promise<{ courseCompleted: boolean; pathCompleted: boolean; pathId: string | null; finalScore: number | null }> {
+): Promise<{ courseCompleted: boolean; pathCompleted: boolean; pathId: string | null; finalScore: number | null; newCompletionId: string | null }> {
   // A course is complete when every REQUIRED activity is passed (or waived).
   const req = await c.query<{ total: string; done: string; avg: string | null }>(
     `SELECT count(*)::text AS total,
@@ -82,33 +82,37 @@ async function recomputeStanding(
   // complete would certify somebody for nothing, which is why publish refuses an empty course.
   const courseCompleted = total > 0 && done === total;
 
-  if (!courseCompleted) return { courseCompleted: false, pathCompleted: false, pathId: null, finalScore: avg };
+  if (!courseCompleted) return { courseCompleted: false, pathCompleted: false, pathId: null, finalScore: avg, newCompletionId: null };
 
   const already = await c.query<{ n: string }>(
     `SELECT count(*)::text AS n FROM lms_completions WHERE subject_user_id = $1 AND course_id = $2`,
     [subjectUserId, courseId],
   );
+  // DW-4h-2: the id of a completion row THIS call inserted (null on an idempotent re-completion), so the caller can
+  // audit it once the transaction has committed.
+  let newCompletionId: string | null = null;
   if (Number(already.rows[0].n) === 0) {
     const meta = await c.query<{ course_key: string; version: number }>(
       `SELECT course_key, version FROM lms_courses WHERE id = $1`, [courseId],
     );
+    newCompletionId = newId();
     await c.query(
       `INSERT INTO lms_completions (id, tenant_id, subject_user_id, course_id, enrollment_id,
                                     course_key, course_version, final_score)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [newId(), tenantId, subjectUserId, courseId, enrollmentId,
+      [newCompletionId, tenantId, subjectUserId, courseId, enrollmentId,
        meta.rows[0]?.course_key ?? null, meta.rows[0]?.version ?? null, avg],
     );
   }
 
-  if (!enrollmentId) return { courseCompleted: true, pathCompleted: false, pathId: null, finalScore: avg };
+  if (!enrollmentId) return { courseCompleted: true, pathCompleted: false, pathId: null, finalScore: avg, newCompletionId };
 
   // Is the whole PATH done? Every non-optional course in it must have a completion for this person.
   const pathRow = await c.query<{ path_id: string }>(
     `SELECT path_id FROM lms_enrollments WHERE id = $1`, [enrollmentId],
   );
   const pathId = pathRow.rows[0]?.path_id ?? null;
-  if (!pathId) return { courseCompleted: true, pathCompleted: false, pathId: null, finalScore: avg };
+  if (!pathId) return { courseCompleted: true, pathCompleted: false, pathId: null, finalScore: avg, newCompletionId };
 
   const pc = await c.query<{ required: string; completed: string; avg: string | null }>(
     `SELECT count(*)::text AS required,
@@ -127,6 +131,7 @@ async function recomputeStanding(
   return {
     courseCompleted: true, pathCompleted, pathId,
     finalScore: pc.rows[0].avg === null ? avg : Number(pc.rows[0].avg),
+    newCompletionId,
   };
 }
 
@@ -565,10 +570,17 @@ export class LmsLearnController {
         }
 
         const standing = await recomputeStanding(c, tenantId, subjectUserId, act.course_id, body?.enrollmentId ?? null);
-        return { attemptId, attemptNo, score, passed, result, standing };
+        return { attemptId, attemptNo, score, passed, result, standing, courseId: act.course_id };
       },
       { modules: ["lms"] },
     );
+
+    // DW-4h-2 (BFF §44.6): a NEW course completion is the learner's work, audited once the transaction has committed
+    // (`newCompletionId` is null when the completion already existed, so an extra attempt adds nothing).
+    const { newCompletionId, ...standing } = out.standing;
+    if (newCompletionId) {
+      await writeActivity(tenantId, subjectUserId, "completed", "lms_completion", newCompletionId, { courseId: out.courseId });
+    }
 
     // Path completion writes the certification — the ONE cross-module write. Kept OUT of the
     // transaction above deliberately: an hr_records failure must not roll back a legitimately
@@ -577,7 +589,7 @@ export class LmsLearnController {
     if (out.standing.pathCompleted && out.standing.pathId) {
       certification = await this.certifyPath(tenantId, subjectUserId, out.standing.pathId, body?.enrollmentId ?? null, out.standing.finalScore, req.principal.userId);
     }
-    return { ...out, certification };
+    return { attemptId: out.attemptId, attemptNo: out.attemptNo, score: out.score, passed: out.passed, result: out.result, standing, certification };
   }
 
   /**
@@ -595,7 +607,7 @@ export class LmsLearnController {
     tenantId: string, subjectUserId: string, pathId: string, enrollmentId: string | null,
     finalScore: number | null, actorUserId: string | null,
   ): Promise<{ hrRecordId: string; expiresOn: string | null } | null> {
-    return withTenants(
+    const made = await withTenants(
       [tenantId],
       async (c) => {
         const p = await c.query<{ path_key: string; title: string; months: number | null; label: string | null }>(
@@ -644,11 +656,16 @@ export class LmsLearnController {
         await emitEvent(c, tenantId, "lms_completion", completionId, "lms.path.completed", {
           subjectUserId, pathKey: path.path_key, hrRecordId, expiresOn,
         });
-        return { hrRecordId, expiresOn };
+        return { hrRecordId, expiresOn, completionId };
       },
       // ⚠ BOTH scopes — see the doc comment. This is the only call in the module that does this.
       { modules: ["lms", "hr"] },
     );
+    if (!made) return null;
+    // DW-4h-2 (BFF §44.6): a NEW path completion, audited with the learner as the actor once the transaction has
+    // committed. The concurrent-submit guard above returns null, so a repeated completion never reaches here.
+    await writeActivity(tenantId, subjectUserId, "completed", "lms_completion", made.completionId, { pathId });
+    return { hrRecordId: made.hrRecordId, expiresOn: made.expiresOn };
   }
 
   /** Grade a submitted attempt for a REVIEWED activity. Never reachable by the learner. */
@@ -728,10 +745,16 @@ export class LmsLearnController {
         const standing = await recomputeStanding(
           c, tenantId, at.subject_user_id, at.course_id, prog.rows[0]?.enrollment_id ?? null,
         );
-        return { subjectUserId: at.subject_user_id, standing, enrollmentId: prog.rows[0]?.enrollment_id ?? null };
+        return { subjectUserId: at.subject_user_id, standing, enrollmentId: prog.rows[0]?.enrollment_id ?? null, courseId: at.course_id };
       },
       { modules: ["lms"] },
     );
+
+    // DW-4h-2 (BFF §44.6): the actor of a completion is the LEARNER, not the reviewer who graded the last activity.
+    const { newCompletionId, ...standing } = out.standing;
+    if (newCompletionId) {
+      await writeActivity(tenantId, out.subjectUserId, "completed", "lms_completion", newCompletionId, { courseId: out.courseId });
+    }
 
     let certification = null;
     if (out.standing.pathCompleted && out.standing.pathId) {
@@ -740,7 +763,7 @@ export class LmsLearnController {
       );
     }
     await writeActivity(tenantId, req.principal.userId, "updated", "lms_attempt", attemptId, { passed: body.passed });
-    return { ok: true, passed: body.passed, standing: out.standing, certification };
+    return { ok: true, passed: body.passed, standing, certification };
   }
 
   /** Excuse somebody from mandatory training. Admin tier only — never a department head. */

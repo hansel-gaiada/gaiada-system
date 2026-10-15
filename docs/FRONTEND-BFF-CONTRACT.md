@@ -8262,7 +8262,7 @@ Files: `platform-ui/src/lib/deptKpiDrivers.ts` (the honest reader, server-only),
 - acknowledging: a head 200, another unit's head 403, twice 409, a resolved alert 409;
 - `watch` by a non-admin is 403.
 
-## 44. The activity series counts all work (DW-4h, 2026-10-15) — `platform-nest/src/core/work-activity*.ts`, `platform-nest/src/core/activity-series*.ts` — **STATUS: BUILT, PROTOTYPED (4h-1: activity-kinds.test.ts, activity-bridge.db.test.ts and activity-series.test.ts, with additions to fact-job.test.ts, checkins.controller.test.ts and pm.test.ts, on the Linux CI gate; 4h-2 emitters and 4h-3 UI not built)**
+## 44. The activity series counts all work (DW-4h, 2026-10-15) — `platform-nest/src/core/work-activity*.ts`, `platform-nest/src/core/activity-series*.ts` — **STATUS: BUILT, PROTOTYPED (4h-1: activity-kinds.test.ts, activity-bridge.db.test.ts and activity-series.test.ts, with additions to fact-job.test.ts, checkins.controller.test.ts and pm.test.ts, on the Linux CI gate; 4h-2 emitters BUILT, §44.6a; 4h-3 UI not built)**
 
 **Why.** Plan §5.6's 4h row and §14.5 "My activity": the activity series counts all work, not only project management. Each module's work lands in the activity series: GitHub, WebDesk, Social, SEO, Creatives, Finance, HR, meetings, learning, time and check-ins. DW-D19 holds throughout: no single score; show what was done, by kind. Activity is never an appraisal signal on its own. The reporting blueprint §11 limits apply too: day grain only, no message contents, counts by kind.
 
@@ -8397,6 +8397,25 @@ Three human actions write no audit row today, so they cannot be bridged. 4h-2 ad
 - **learning completed**: where `lms_completions` rows are inserted (`modules/lms/lms-learn.controller.ts`), actor the learner, entity `lms_completion`, verb `completed`, metadata `{courseId | pathId}`;
 - **a journal posted**: where `finance_journal_entries` are posted, actor `posted_by`, entity `finance_journal`, verb `posted`.
 Each gets a test that the audit row exists, and that the bridge turns it into exactly one `work_activity` row.
+
+### 44.6a As built (4h-2, 2026-10-15)
+The three call sites, each ONE `writeActivity(tenantId, actor, verb, entity, id, metadata)` AFTER the state change has committed. The catalogue in `activity-kinds.ts` and §44.6 agree on all three pairs, so nothing was changed there. Tests: `modules/hr/hr.test.ts` (the leave test), `modules/lms/lms-l1-acceptance.test.ts` (7d) and `modules/finance/finance.test.ts` ("a posted journal is audited and counted in the activity series"), with the shared reads in `testing/activity-probe.ts`.
+
+| Action | Call site | Actor | Entity / verb / entityId | Metadata |
+|---|---|---|---|---|
+| Leave decided | `applyLeaveDecision` (`modules/hr/leave-decision.ts`), after the transaction | `payload.decidedBy` (the decider) | `hr_leave_request` / `decided` / the leave request id | `{decision}`: `approved` or `rejected` (never a reason) |
+| Course completed | `submitAttempt` and `gradeAttempt` (`modules/lms/lms-learn.controller.ts`), after the attempt transaction | the learner (`subject_user_id`; on a grade, NOT the reviewer) | `lms_completion` / `completed` / the new completion row id | `{courseId}` |
+| Path completed | `certifyPath` (same file), after its own transaction | the learner | `lms_completion` / `completed` / the new completion row id | `{pathId}` |
+| Journal posted | `postJournal` (`POST /api/:t/finance/journals`, `modules/finance/finance.controller.ts`), after `finance_post_journal` | the caller (`posted_by`) | `finance_journal` / `posted` / the entry id | `{entryNumber}`: the ledger sequence, no amount, no description |
+
+**Once per real event.**
+- *Leave.* The handler's `UPDATE ... WHERE status = 'pending' RETURNING` is the guard: `decided` is null on a redelivered event (and on a request cancelled in between), and the handler returns before the audit write. The write is in a try/catch that logs the pair and the message: a failed audit write must not cost the subject their notification, because a redelivery could not send it (the row is no longer pending). Tested by calling the handler twice more with the same event.
+- *Learning.* `recomputeStanding` now also returns `newCompletionId`, set only when THIS call inserted the course completion row (null when one already existed). The controllers strip it from `standing` before they respond, so the response shape is unchanged. For a path, `certifyPath` returns null on its one-minute concurrent-submit guard and writes nothing then.
+- *Journal.* `finance_post_journal` is idempotent on `source_event_id` and returns the existing entry on a repeat. The controller reads `posted_at = now()` in the same transaction: `posted_at` defaults to the transaction's start, so only an entry this transaction inserted matches. A repeat is not audited.
+
+**What posts journals.** `finance_post_journal` is called from the controller's manual `POST /finance/journals` (a person: `req.principal.userId`; an automation account is a `users` row and is written the same way, and a null user writes the audit row with no actor, which the bridge does not count), from the posting engine and the subledgers (invoices, payments, accruals, fixed assets, year-end: system postings, no person, so no audit row and no activity), and from the demo seed. Only the manual post is a person's work and only it is emitted. `finance_reverse_journal` (a reversal entry) is NOT emitted: the catalogue has no pair for it and §44.6 does not list it.
+
+**Known gap (pre-existing, not changed).** A path completion repeated more than a minute after the first inserts a second `lms_completions` row and a second `hr_records` row (the guard in `certifyPath` is a one-minute window, not a uniqueness rule), and each new row is audited and counted. A uniqueness rule on a person's path completion is a separate ticket.
 
 ### 44.7 History
 - A one-time backfill (an admin CLI, `node dist/core/work-activity-backfill-bridge.js --since=<date>`, a server step) replays the last 400 days of `activities` through the same catalogue.

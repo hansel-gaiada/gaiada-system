@@ -21,7 +21,7 @@ import {
 import type { FastifyRequest } from "fastify";
 import type { PoolClient } from "pg";
 import { withTenants } from "../../db";
-import { authorize } from "../../core/http";
+import { authorize, writeActivity } from "../../core/http";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 
@@ -538,7 +538,7 @@ export class FinanceController {
       return { account_code: l.accountCode, side: l.side, amount, memo: l.memo ?? null };
     });
 
-    const entryId = await withFinance(tenantId, async (c) => {
+    const posted = await withFinance(tenantId, async (c) => {
       const r = await c.query<{ id: string }>(
         `SELECT finance_post_journal($1, $2::date, $3, $4, $5::jsonb, $6) AS id`,
         // userId may be null for an unresolved external identity. It lands in
@@ -547,9 +547,23 @@ export class FinanceController {
         // still ties the entry to what caused it.
         [tenantId, date, sourceEventId, description, JSON.stringify(lines), req.principal.userId],
       );
-      return r.rows[0].id;
+      // DW-4h-2 (BFF §44.6): was this entry created by THIS call? `finance_post_journal` is idempotent on the source event
+      // and hands back the existing entry on a repeat. `posted_at` defaults to `now()`, which is the transaction's start,
+      // so only an entry this very transaction inserted has `posted_at = now()`. Race-free: two concurrent posts of one
+      // source event serialise inside the function, and the loser's entry is older than its own `now()`.
+      const e = await c.query<{ seq: string; fresh: boolean }>(
+        `SELECT ledger_sequence::text AS seq, (posted_at = now()) AS fresh FROM finance_journal_entries WHERE id = $1`,
+        [r.rows[0].id],
+      );
+      return { id: r.rows[0].id, entryNumber: e.rows[0]?.seq ?? null, fresh: e.rows[0]?.fresh === true };
     });
-    return { id: entryId };
+    // The audit row, once the posting transaction has committed (never inside it: a rollback must not leave a "posted"
+    // row behind). The actor is the poster (`posted_by`); an automation account is a users row and is written the same
+    // way. Metadata is the entry number only: no amounts, no description.
+    if (posted.fresh) {
+      await writeActivity(tenantId, req.principal.userId, "posted", "finance_journal", posted.id, { entryNumber: Number(posted.entryNumber) });
+    }
+    return { id: posted.id };
   }
 
   @Post(":tenantId/finance/journals/:entryId/reverse")
