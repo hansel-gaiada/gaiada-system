@@ -6,6 +6,8 @@ import type { AccountsResult } from "./it-accounts";
 import { summarize } from "./it-accounts";
 import type { MonitoringSummary } from "./monitoringShared";
 import type { PipelineGate } from "./pipeline";
+import type { Device } from "./it";
+import type { PayrollRun } from "./hr-full";
 import type { Guarded } from "./socialShared";
 import { WORKSPACES, hrefFor, isPlanned, type PulseTile } from "./workspaces";
 
@@ -45,6 +47,41 @@ export const UNAVAILABLE_READING: PulseReading = { kind: "unavailable" };
 export function readingOfResult<T>(r: ReadResult<T>, count: (data: T) => Omit<Extract<PulseReading, { kind: "ok" }>, "kind">): PulseReading {
   if (r.kind === "ok") return { kind: "ok", ...count(r.data) };
   return r.kind === "forbidden" ? { kind: "forbidden" } : UNAVAILABLE_READING;
+}
+
+/** Several `ReadResult` lists that make ONE count (onboarding is two statuses): a refusal or a failure in any leg is the
+ *  tile's, so a leg that failed can never be summed as 0. A refusal wins over a failure: it is the more precise answer. */
+export function readingOfAllResults<T>(rs: readonly ReadResult<T[]>[]): PulseReading {
+  if (rs.some((r) => r.kind === "forbidden")) return { kind: "forbidden" };
+  if (rs.some((r) => r.kind === "unavailable")) return UNAVAILABLE_READING;
+  return { kind: "ok", value: rs.reduce((n, r) => n + (r.kind === "ok" ? r.data.length : 0), 0) };
+}
+
+/** Payroll runs that wait on someone (DW-7e). `calculated` and `pending_approval` wait for approval (the approve route
+ *  accepts exactly those two); `approved` waits for its payslips to be published and the run marked paid. A `draft` is
+ *  still being built and `paid` and `cancelled` are over, so none of them waits on anyone. */
+export function payrollRunsWaiting(runs: readonly Pick<PayrollRun, "status">[]): { toApprove: number; toPay: number } {
+  return {
+    toApprove: runs.filter((r) => r.status === "calculated" || r.status === "pending_approval").length,
+    toPay: runs.filter((r) => r.status === "approved").length,
+  };
+}
+
+export function readingOfPayrollRuns(r: ReadResult<PayrollRun[]>): PulseReading {
+  return readingOfResult(r, (runs) => {
+    const { toApprove, toPay } = payrollRunsWaiting(runs);
+    const detail = [toApprove > 0 ? `${toApprove} to approve` : "", toPay > 0 ? `${toPay} to pay` : ""].filter(Boolean).join(", ");
+    return { value: toApprove + toPay, ...(detail ? { detail } : {}) };
+  });
+}
+
+/** The IT device list: devices whose status is `offline` (the registry's own status, written by the heartbeat and the
+ *  discovery run). `degraded` and `unknown` are not offline. A zero with nothing registered is no all-clear. */
+export function readingOfDevices(r: ReadResult<Device[]>): PulseReading {
+  return readingOfResult(r, (devices) => ({
+    value: devices.filter((d) => d.status === "offline").length,
+    detail: devices.length === 0 ? "No devices registered yet" : `of ${devices.length} devices`,
+  }));
 }
 
 /** The Social reader's `Guarded` list: a 403 is `forbidden`; a failure threw before this was reached. */

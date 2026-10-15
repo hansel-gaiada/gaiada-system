@@ -120,7 +120,8 @@ export interface PulseTile {
 /** The readers a Pulse tile can draw from: one per tile, each with its own failure semantics. */
 export type PulseSource =
   | "change-requests-new" | "pipeline-gates-pending" | "monitoring-problem-sites"
-  | "social-posts-scheduled" | "social-posts-failed" | "it-account-requests";
+  | "social-posts-scheduled" | "social-posts-failed" | "it-account-requests"
+  | "hr-leave-pending" | "hr-onboarding-open" | "hr-cases-open" | "hr-payroll-waiting" | "it-devices-offline";
 
 export interface QuickAction {
   key: string;
@@ -687,10 +688,10 @@ const HR: Workspace = {
   connections: [CONN.drive, CONN.claudeSeats],
   overview: DEPARTMENT_OVERVIEW,
   pulse: [
-    { key: "leave-pending", label: "Leave pending", ticket: "DW-7e" },
-    { key: "onboarding", label: "Onboarding", ticket: "DW-7e" },
-    { key: "open-cases", label: "Open cases", ticket: "DW-7e" },
-    { key: "payroll-status", label: "Payroll status", ticket: "DW-7e" },
+    { key: "leave-pending", label: "Leave pending", source: "hr-leave-pending", href: "/hr/leave" },
+    { key: "onboarding", label: "Onboarding", source: "hr-onboarding-open", href: "/hr/onboarding" },
+    { key: "open-cases", label: "Open cases", source: "hr-cases-open", href: "/hr/cases" },
+    { key: "payroll-status", label: "Payroll runs waiting", source: "hr-payroll-waiting", href: "/hr/payroll" },
   ],
   creates: ["new-hire"],
   quickActions: [
@@ -847,10 +848,10 @@ const IT: Workspace = {
   connections: [CONN.networkController, CONN.workspaceAdmin],
   overview: DEPARTMENT_OVERVIEW,
   pulse: [
-    { key: "devices-offline", label: "Devices offline", ticket: "DW-7e" },
-    { key: "threat-alerts", label: "Threat alerts", ticket: "DW-7e" },
+    { key: "devices-offline", label: "Devices offline", source: "it-devices-offline", href: "/it/devices" },
+    { key: "threat-alerts", label: "Threat alerts", ticket: "DW-7h" },
     { key: "account-requests", label: "Account requests", source: "it-account-requests", href: "/it/accounts" },
-    { key: "failing-workflows", label: "Failing workflows", ticket: "DW-7e" },
+    { key: "failing-workflows", label: "Failing workflows", ticket: "DW-7i" },
   ],
   creates: ["register-device"],
   quickActions: [{ key: "register-device", label: "Register a device", href: "/it/devices", gate: IT_ON }, ...ASK_ACTIONS],
