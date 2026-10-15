@@ -61,7 +61,8 @@ const SEPARATION_GROUNDS = new Set([
   "efficiency", "misconduct", "prolonged_illness", "death", "probation_fail", "other",
 ]);
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const requireIsoDate = (v: unknown, field: string): string => {
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const requireIsoDate =(v: unknown, field: string): string => {
   if (typeof v !== "string" || !ISO_DATE.test(v)) throw new BadRequestException(`${field} must be an ISO date (YYYY-MM-DD)`);
   return v;
 };
@@ -1141,6 +1142,81 @@ export class PayrollController {
       { modules: ["hr"] },
     );
     return { id };
+  }
+
+  /**
+   * The READ for payroll inputs (BFF §50, DW-7f-1c). Authorized as `hr_payroll` `read`, exactly like
+   * `GET payroll-runs`: an input is salary-adjacent money, so `hr_staff` is refused.
+   *
+   * Authorize FIRST, validate second, so a refused caller learns nothing about the filter shape and a
+   * denial test cannot be pre-empted by a 400.
+   *
+   * Filters combine with AND. The period filter is OVERLAP, not containment: an input whose period
+   * touches `[periodStart, periodEnd]` at either edge is listed; one given bound is a half-open
+   * overlap. `consumed` is `true` (taken by some run), `false` (waiting) or omitted (both).
+   */
+  @Get("payroll-inputs")
+  async listPayrollInputs(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Query("runId") runId?: string, @Query("employeeId") employeeId?: string,
+    @Query("periodStart") periodStart?: string, @Query("periodEnd") periodEnd?: string,
+    @Query("consumed") consumed?: string,
+  ) {
+    await authorize(req.principal, { kind: "hr_payroll", tenantId, module: "hr" }, "read");
+    const bad = (field: string, message: string) => new BadRequestException({ message, field });
+    const given = (v: unknown, field: string): string | undefined => {
+      if (v === undefined || v === "") return undefined;
+      if (typeof v !== "string") throw bad(field, `${field} must be a single value`);
+      return v;
+    };
+    const uuid = (v: unknown, field: string): string | undefined => {
+      const s = given(v, field);
+      if (s !== undefined && !UUID_SHAPE.test(s)) throw bad(field, `${field} must be a uuid`);
+      return s;
+    };
+    const isoDate = (v: unknown, field: string): string | undefined => {
+      const s = given(v, field);
+      if (s === undefined) return undefined;
+      // The shape alone lets 2026-02-30 through to the ::date cast, which is a 500, not a 400.
+      const real = ISO_DATE.test(s) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
+      if (!real) throw bad(field, `${field} must be an ISO date (YYYY-MM-DD)`);
+      return s;
+    };
+    const run = uuid(runId, "runId");
+    const employee = uuid(employeeId, "employeeId");
+    const start = isoDate(periodStart, "periodStart");
+    const end = isoDate(periodEnd, "periodEnd");
+    const consumedRaw = given(consumed, "consumed");
+    if (consumedRaw !== undefined && consumedRaw !== "true" && consumedRaw !== "false") {
+      throw bad("consumed", "consumed must be true or false");
+    }
+
+    const params: unknown[] = [];
+    const clauses = ["1=1"];
+    if (run) { params.push(run); clauses.push(`i.consumed_by_run_id = $${params.length}`); }
+    if (employee) { params.push(employee); clauses.push(`i.employee_id = $${params.length}`); }
+    // Overlap of [i.period_start, i.period_end] with [start, end].
+    if (start) { params.push(start); clauses.push(`i.period_end >= $${params.length}::date`); }
+    if (end) { params.push(end); clauses.push(`i.period_start <= $${params.length}::date`); }
+    if (consumedRaw === "true") clauses.push("i.consumed_by_run_id IS NOT NULL");
+    if (consumedRaw === "false") clauses.push("i.consumed_by_run_id IS NULL");
+    const rows = await withTenants(
+      [tenantId],
+      (c) => c.query(
+        `SELECT i.id, i.employee_id AS "employeeId", e.display_name AS "employeeName",
+                i.period_start::text AS "periodStart", i.period_end::text AS "periodEnd",
+                i.category, i.code, i.label, i.quantity, i.amount, i.taxable, i.note,
+                i.consumed_by_run_id AS "consumedByRunId", i.created_by AS "createdBy",
+                i.created_at AS "createdAt"
+         FROM hr_payroll_inputs i
+         JOIN employees e ON e.id = i.employee_id AND e.tenant_id = i.tenant_id
+         WHERE ${clauses.join(" AND ")}
+         ORDER BY i.created_at DESC, i.id DESC LIMIT 500`,
+        params,
+      ),
+      { modules: ["hr"] },
+    );
+    return rows.rows;
   }
 
   // ═══════════════════════════════════════════════════════════ SEPARATIONS ════════════════════

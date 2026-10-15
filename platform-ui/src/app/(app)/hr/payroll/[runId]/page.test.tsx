@@ -1,9 +1,11 @@
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // DW-7f-1b — /hr/payroll/[runId]: the run header and timeline, the payslips from the server, an honest
 // refusal instead of an empty table, the input form only for an accepting status and the manage
 // capability, and a 404 run.
+// DW-7f-1c — the two input lists (consumed by this run, waiting for the next calculate) from the inputs
+// read, an empty list saying "No inputs", and a refused or failed read said in words.
 
 vi.mock("next/navigation", () => ({
   redirect: vi.fn(() => { throw new Error("redirect"); }),
@@ -29,16 +31,28 @@ vi.mock("@/lib/hrPayrollActions", () => ({
 type Read = { kind: "ok"; data: unknown } | { kind: "forbidden" } | { kind: "unavailable"; reason: string };
 let runRead: Read;
 let employeesRead: Read;
+let consumedInputsRead: Read;
+let waitingInputsRead: Read;
 const employeesSpy = vi.fn();
+const inputsSpy = vi.fn();
 vi.mock("@/lib/hr-full-data", () => ({
   getPayrollRunResult: vi.fn(async () => runRead),
   listEmployeesResult: vi.fn(async () => { employeesSpy(); return employeesRead; }),
+  listPayrollInputsResult: vi.fn(async (_u: string, _t: string, filter: { runId?: string; consumed?: boolean }) => {
+    inputsSpy(filter);
+    return filter.runId ? consumedInputsRead : waitingInputsRead;
+  }),
 }));
 vi.mock("@/lib/hr-full", () => ({
   listParameterSets: vi.fn(async () => [{ id: "set-ok", ratifiedAt: "2026-02-01T00:00:00Z" }]),
   formatMoney: (v: string) => `Rp ${v}`,
 }));
 
+const input = (over: Record<string, unknown>) => ({
+  id: "i1", employeeId: "e1", employeeName: "Budi", periodStart: "2026-09-01", periodEnd: "2026-09-30",
+  category: "overtime", code: null, label: "Overtime September", quantity: "12.500", amount: null,
+  taxable: true, note: null, consumedByRunId: null, createdBy: "u-1", createdAt: "2026-09-20T00:00:00Z", ...over,
+});
 const slip = (over: Record<string, unknown>) => ({
   id: "p1", employeeId: "e1", employeeName: "Budi", gross: "10000000", taxableGross: "10000000",
   employeeDeductions: "400000", taxWithheld: "250000", net: "9350000", employerCost: "11000000",
@@ -64,6 +78,9 @@ async function renderPage() {
 
 beforeEach(() => {
   employeesSpy.mockReset();
+  inputsSpy.mockReset();
+  consumedInputsRead = { kind: "ok", data: [] };
+  waitingInputsRead = { kind: "ok", data: [] };
   denied.clear();
   runRead = { kind: "ok", data: run() };
   employeesRead = {
@@ -146,12 +163,13 @@ describe("/hr/payroll/[runId]", () => {
 });
 
 describe("/hr/payroll/[runId] — add input", () => {
-  it("offers Add input for a manager on a calculated run and says the inputs cannot be listed", async () => {
+  it("offers Add input for a manager on a calculated run", async () => {
     as("hr_manager");
     await renderPage();
     expect(screen.getByRole("button", { name: "Add input" })).toBeInTheDocument();
     expect(employeesSpy).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/offers no read of the inputs/)).toBeInTheDocument();
+    // The old "the server offers no read of the inputs" note is gone: the lists replace it.
+    expect(screen.queryByText(/offers no read of the inputs/)).toBeNull();
   });
 
   it("the picker lists only the employees a run can calculate (active, on leave), by name", async () => {
@@ -202,5 +220,93 @@ describe("/hr/payroll/[runId] — add input", () => {
     expect(screen.getByText(/cannot be read right now/)).toBeInTheDocument();
     expect(screen.getByText("db down")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add input" })).toBeNull();
+  });
+});
+
+describe("/hr/payroll/[runId] — payroll inputs lists", () => {
+  const list = (name: string) => within(screen.getByRole("region", { name }));
+
+  it("shows both lists, each from its own filter, with employee, category, label, quantity or amount, taxable and note", async () => {
+    as("hr_manager");
+    consumedInputsRead = { kind: "ok", data: [
+      input({ id: "c1", employeeName: "Budi", label: "Overtime September", quantity: "12.500", amount: null, note: "Month-end close", consumedByRunId: "r1" }),
+      input({ id: "c2", employeeName: "Sari", category: "bonus", label: "Spot bonus", quantity: null, amount: "250000", taxable: false, periodStart: "2026-09-15", periodEnd: "2026-09-15", consumedByRunId: "r1" }),
+    ] };
+    waitingInputsRead = { kind: "ok", data: [
+      input({ id: "w1", employeeName: "Dewi", category: "reimbursement", label: "Taxi claim", quantity: null, amount: "75000", note: "Receipt 14" }),
+    ] };
+    await renderPage();
+
+    expect(inputsSpy).toHaveBeenCalledWith({ runId: "r1" });
+    expect(inputsSpy).toHaveBeenCalledWith({ periodStart: "2026-09-01", periodEnd: "2026-09-30", consumed: false });
+
+    const consumed = list("Consumed by this run");
+    expect(consumed.getByText("Overtime September")).toBeInTheDocument();
+    expect(consumed.getByText("overtime")).toBeInTheDocument();
+    expect(consumed.getByText("Qty 12.5")).toBeInTheDocument();      // numeric(12,3) "12.500" reads 12.5
+    expect(consumed.getByText("Month-end close")).toBeInTheDocument();
+    expect(consumed.getByText("Sari")).toBeInTheDocument();
+    expect(consumed.getByText("Rp 250000")).toBeInTheDocument();
+    expect(consumed.getByText("2026-09-15")).toBeInTheDocument();    // a one-day period is one date
+    expect(consumed.getByText("No")).toBeInTheDocument();            // Sari's bonus is not taxable
+    expect(consumed.queryByText("Taxi claim")).toBeNull();
+
+    const waiting = list("Waiting for the next calculate");
+    expect(waiting.getByText("Taxi claim")).toBeInTheDocument();
+    expect(waiting.getByText("Dewi")).toBeInTheDocument();
+    expect(waiting.getByText("Rp 75000")).toBeInTheDocument();
+    expect(waiting.getByText("Receipt 14")).toBeInTheDocument();
+    expect(waiting.queryByText("Overtime September")).toBeNull();
+    expect(waiting.getByText(/The next calculate takes them in/)).toBeInTheDocument();
+  });
+
+  it("an empty list says No inputs (the server answered that there are none)", async () => {
+    as("hr_manager");
+    await renderPage();
+    expect(list("Consumed by this run").getByText("No inputs")).toBeInTheDocument();
+    expect(list("Waiting for the next calculate").getByText("No inputs")).toBeInTheDocument();
+  });
+
+  it("shows the waiting list only while the run can still be calculated", async () => {
+    as("hr_manager");
+    runRead = { kind: "ok", data: run({ status: "draft", payslips: [] }) };
+    await renderPage();
+    expect(screen.getByRole("region", { name: "Waiting for the next calculate" })).toBeInTheDocument();
+    cleanup();
+    inputsSpy.mockReset();
+    for (const status of ["approved", "paid", "pending_approval", "cancelled"]) {
+      runRead = { kind: "ok", data: run({ status }) };
+      await renderPage();
+      expect(screen.queryByRole("region", { name: "Waiting for the next calculate" }), status).toBeNull();
+      expect(screen.getByRole("region", { name: "Consumed by this run" }), status).toBeInTheDocument();
+      cleanup();
+    }
+    // Only the consumed read was made for the non-accepting statuses.
+    expect(inputsSpy).toHaveBeenCalledTimes(4);
+    expect(inputsSpy.mock.calls.every(([f]) => (f as { runId?: string }).runId === "r1")).toBe(true);
+  });
+
+  it("a refused inputs read is said in words, not shown as an empty list", async () => {
+    as("hr_manager");
+    consumedInputsRead = { kind: "forbidden" };
+    waitingInputsRead = { kind: "forbidden" };
+    await renderPage();
+    expect(screen.getByText(/You don't have access to the payroll inputs this run consumed/)).toBeInTheDocument();
+    expect(screen.getByText(/You don't have access to the payroll inputs waiting for the next calculate/)).toBeInTheDocument();
+    expect(screen.queryByText("No inputs")).toBeNull();
+    // The run itself still renders: only the inputs read was refused.
+    expect(screen.getByText("PAY-2026-09")).toBeInTheDocument();
+  });
+
+  it("a failed inputs read says it cannot tell, with the server's reason, and does not say No inputs", async () => {
+    as("hr_manager");
+    consumedInputsRead = { kind: "unavailable", reason: "inputs upstream timeout" };
+    await renderPage();
+    const consumed = list("Consumed by this run");
+    expect(consumed.getByText(/not a statement that there is nothing/)).toBeInTheDocument();
+    expect(consumed.getByText("inputs upstream timeout")).toBeInTheDocument();
+    expect(consumed.queryByText("No inputs")).toBeNull();
+    // The other list is its own read and still answers.
+    expect(list("Waiting for the next calculate").getByText("No inputs")).toBeInTheDocument();
   });
 });
