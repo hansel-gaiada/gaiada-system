@@ -11,6 +11,15 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.151.0` + platform-ui `0.174.0` - PV7-03, PV7-04a, PV7-04b, PV7-05: client health on both sides, client reports, the health board (2026-10-15) - PROTOTYPED
+
+Plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`; contract FRONTEND-BFF-CONTRACT §54.7 and §55, PERMISSION-CONTRACT §46.
+- **PV7-03, health on the client Overview.** The portal's Overview gains a Project health block per client (milestones, late work, what waits on you and on us, turnaround on both sides; facts only, never a state label) and a Results at a glance card. The staff client page gains a Health card with the state, its reasons, per-project health and the client-sees-this markers.
+- **PV7-04a, client reports (backend).** `client_reports` and `client_report_reads` (migration `202610151720`, which also re-declares the files role CHECK whole with every earlier role kept). Delivering a social or search report now publishes it to the client in the same transaction (before this, the client got an empty deliverable). Staff list, publish and withdraw; portal list, read marker and download (`client_report` joins the portal download kinds; a project-less report reaches client-wide contacts only); `newReports` on the portal overview; a notice and the `reports` live topic. New Cerbos kind `client_report`; publish and withdraw are denied to automation and bot principals. A dry-run backfill tool for reports delivered earlier (`client-reports:backfill`; run only on the owner's go).
+- **PV7-04b, client reports (UI).** Portal Overview › Reports with a "New" badge; staff client page › Reports with Publish and Withdraw.
+- **PV7-05, the health board.** Clients › Health (every client worst first, with its reasons; filters by state, owner and department), a Health column and facet on the clients list, and Reports › Client (the client grain with Export and Print). Delivery on time on the board reads the client grain (month to date). A client document always lists its eligible projects.
+- **Deploy.** Migration `202610151720`. **Restart Cerbos after the deploy** (new kind `client_report`) and probe it. The backfill waits for the owner.
+
 ### platform-nest `0.150.0` - DW-4h privacy fix: the member-level activity feed no longer lists person-grain module rows (2026-10-15) - PROTOTYPED
 
 Contract: `docs/FRONTEND-BFF-CONTRACT.md` §44.5 (amended) and `docs/PERMISSION-CONTRACT.md` §38c.
