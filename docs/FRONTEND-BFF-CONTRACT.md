@@ -7890,6 +7890,14 @@ One reader per ticket, each landing as its own fast-forward with green CI on its
 3. **Then:** f5, f10, f12, f11.
 4. **f1 last,** after the revenue plan (table, routes, the GM's tab; one ticket, contract above).
 
+**As built so far (DW-7j: j0, f2, f7, f8, f9; BUILT, PROTOTYPED, the live-Postgres tests on the Linux CI gate).**
+- **j0.** `gated()` lives in `dept-kpi-readers/gated.ts`; `delivery/index.ts` re-exports it. `FUNCTIONAL_READERS` registers `gm.margin`, `finance.close_on_time` and `finance.overdue_receivables_share` under `gated("finance", …)`, and `finance.payments_confirmed_1d` ungated (core table).
+- **f2** `gm.margin`: the `TOTAL_REVENUE` and `NET_PROFIT` total rows of `finance_profit_and_loss` over `[start, end]`; `null` when a row is missing or revenue is 0.
+- **f8** `finance.overdue_receivables_share`: `finance_ar_aging(company, asOf)` summed across customers; `null` when outstanding is not above 0.
+- **f7** `finance.close_on_time`: a period counts when its `end_date` is in the window and either `end_date + 10` is `<= asOf` or it is already locked (soft or hard). The lock's date is `soft_locked_at`, else `hard_locked_at`.
+- **f9** `finance.payments_confirmed_1d`: the decision time of a confirmed payment with no `confirmed_at` falls back to `updated_at`. The HR calendar is the company's default, not-deleted `hr_holiday_calendars` row, read under the `hr` scope by `functional/working-calendar.ts`; the 1st-working-day deadline is `functional/working-deadline.ts` (shared with f3).
+- **Not built:** the UI's "what the numbers cannot say" notes (§40.5.4's notes have no UI mechanism in `platform-ui` to extend); f1, f3 to f6 and f10 to f12.
+
 ## 41. The department appraisal per cycle (DW-4e-3, 2026-10-15) — `platform-nest/src/modules/reports/dept-appraisals*.ts` — **STATUS: BUILT, PROTOTYPED (backend: dept-appraisals.test.ts, dept-appraisals.controller.db.test.ts and src/rbac/cerbos-dept-kpi-target.test.ts on the Linux CI gate; UI: platform-ui deptAppraisalFormat.test.ts, demoDeptAppraisals.test.ts, deptAppraisals.test.ts, AppraisalView.test.tsx and rbac.test.ts on the CI gate)**
 
 **Why.** Plan §5.3 and §5.5 (owner ruling DW-Q4): each department has its own appraisal. The cycle's department appraisal is the department's KPIs over the appraisal period, with the result against each target, the condition history, the head's commentary and the GM's assessment. The Appraisals › Department tab shows it next to how the people's appraisals went. It is not a person's score, and a department KPI is never pinned on one person.

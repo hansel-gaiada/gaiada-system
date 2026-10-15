@@ -87,7 +87,7 @@ export const DEPT_KPI_SETS: Readonly<Record<WorkspaceSlug, readonly DeptKpiDef[]
   ],
   gm: [
     pct("revenue-vs-plan", "Revenue against plan", "up_good", MODULE, 1, 0.05),
-    pct("margin", "Margin", "up_good", MODULE, 0.3, 0.05),
+    pct("margin", "Margin", "up_good", read("gm.margin"), 0.3, 0.05),
     pct("utilization", "Utilization", "up_good", { kind: "report_fact", metricKey: "effort.capacity_utilization", grain: "company" }, 0.8, 0.1),
     pct("departments-in-good-condition", "Departments in good condition", "up_good", { kind: "derived", source: "departments_in_good_condition" }, 0.8, 0.2),
   ],
@@ -98,9 +98,9 @@ export const DEPT_KPI_SETS: Readonly<Record<WorkspaceSlug, readonly DeptKpiDef[]
     pct("mandatory-learning", "Mandatory learning complete", "up_good", MODULE, 1, 0.05),
   ],
   finance: [
-    pct("close-on-time", "Period closed on time", "up_good", MODULE, 1, 0),
-    pct("overdue-receivables-share", "Overdue receivables share", "down_good", MODULE, 0.1, 0.05),
-    pct("payments-confirmed-1d", "Client payments confirmed within 1 day", "up_good", MODULE, 0.95, 0.05),
+    pct("close-on-time", "Period closed on time", "up_good", read("finance.close_on_time"), 1, 0),
+    pct("overdue-receivables-share", "Overdue receivables share", "down_good", read("finance.overdue_receivables_share"), 0.1, 0.05),
+    pct("payments-confirmed-1d", "Client payments confirmed within 1 day", "up_good", read("finance.payments_confirmed_1d"), 0.95, 0.05),
   ],
   it: [
     pct("uptime", "Device and network uptime", "up_good", MODULE, 0.995, 0.005),

@@ -5,7 +5,7 @@
 // (`no_data`) and the reader never runs. The module wall alone is not enough, because `app_module_allowed()` checks only the
 // scopes a query declares, not whether the company has the module, so a company that turned a module off would still read
 // its old rows. Readers over core tables (work requests, creative assets and reviews, clients) are not gated.
-import { isModuleEnabled } from "../../../registry";
+import { gated } from "../gated";
 import type { ModuleKpiReader } from "../types";
 import { assetsDelivered, revisionRounds } from "./creative-reviews";
 import { clientRetention } from "./client-retention";
@@ -14,11 +14,8 @@ import { adBudgetsOnPace, clientReportsOnTime, clientsRankingGrowth } from "./se
 import { clientApprovalTurnaround, engagementGrowth, postsOnSchedule } from "./social";
 import { assetRequestsOnTime, webdevRequestsDeliveredByNeeded } from "./work-requests-on-time";
 
-/** The reader, run only when the company has `module` (own `enabled_modules` or an active service assignment). */
-export const gated =
-  (module: string, read: ModuleKpiReader): ModuleKpiReader =>
-  async (ctx) =>
-    (await isModuleEnabled(ctx.tenantId, module)) ? read(ctx) : null;
+// `gated` lives in ../gated (shared with the functional readers, DW-7j j0); re-exported so this import path keeps working.
+export { gated };
 
 export const DELIVERY_READERS: Record<string, ModuleKpiReader> = {
   // Web Dev
