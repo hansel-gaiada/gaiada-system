@@ -2279,9 +2279,9 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §53 (plan `docs/plans/2026-10-15-pv7-pe
 
 **Proof.** `platform-nest/src/modules/reports/reports-cerbos.test.ts` (the `read_client` matrix: exec, admin, lead, both HR halves and member allowed; the served tiers, a project-scope member, a bare membership, another company's manager, low assurance and a portal contact refused; and `read_client` equal to `read_project` role for role except the served arm), plus the static alignment suites (`cerbos-catalog-alignment`, `permission-groups-catalog-parity`, `ui-grantable-catalog`, `permission-arm-hazard-scan`) and the HTTP suite `report-client-grain.db.test.ts`. **Restart the Cerbos test container and the live sidecar after the policy deploy.**
 
-## 46. PV7-04a — the `client_report` kind (2026-10-15, PLANNED)
+## 46. PV7-04a — the `client_report` kind (2026-10-15, PROTOTYPED)
 
-Design: `docs/FRONTEND-BFF-CONTRACT.md` §55 (plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`, PV7-04, lead's call L6). Status: **PLANNED**.
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §55 (plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`, PV7-04, lead's call L6). Status: **BUILT, PROTOTYPED** (policy, catalog, group, bundles, migration and tests are in the repo and green on the Linux CI gate; the live Cerbos probe after a restart is the deploy step).
 
 **A new core kind, `client_report` (no module), with four actions.** `resource_client_report.yaml`, keys `core.client_report.{read,draft,publish,withdraw}`: one report published to a client in the portal (a delivered social or search report, later the account summary).
 
@@ -2299,3 +2299,12 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §55 (plan `docs/plans/2026-10-15-pv7-pe
 **The permission arm covers `read` only** (`perm_client_report_read`). `draft`, `publish` and `withdraw` each carry a self-scoped owner rule, which a flat `perms` mirror cannot express (permission-arm-hazard-scan Pattern B).
 
 **Portal reads do NOT use this kind.** A client contact reads published reports through `portal · read` and `clientReportInPortalScope` (BFF §55.4), as every portal read does. The `client` derived role appears nowhere in the policy.
+
+**As built (2026-10-15).**
+- **Bundles** (`role-permission-bundles.json`, `totalPairs` 2094 -> 2115): `platform_admin` 460 -> 464, `company_admin` 423 -> 427, `owner` 423 -> 427, `manager` 215 -> 219, `member` 113 -> 117 (read, plus draft/publish/withdraw marked `selfScoped`; `selfScopedPairs` 49 -> 52), `viewer` 38 -> 39. No other role changes.
+- **Catalog and pinned literals:** `permission-catalog.json` 475 -> 479 pairs, 460 -> 464 grantable, 211 -> 213 sensitive (`publish` and `withdraw`, like `share_minutes`: they put figures in front of a client), kinds 110 -> 111. `permission-groups.json` +1 group `client_reports` (sensitive, not `advancedOnly`: publishing is not D14-gated, the precedent is `meeting_minutes_share`), 421 -> 425 covered. Moved: `cerbos-catalog-alignment` 475 -> 479 and 110 -> 111, `permission-groups-catalog-parity` 460 -> 464, `ui-grantable-catalog` 475/460 -> 479/464, `iam-215-boundary-pin` 110 -> 111 kinds and 106 -> 107 non-exempt.
+- **Migration** `202610151720_client_reports.sql` (the same file as the tables; one prefix for the ticket) seeds the four keys and 21 `role_permissions` rows with a DO-block self-assertion: exact counts per role, the three self-scoped member pairs and no others, viewer read only, `owner` == `company_admin` over the kind in both directions.
+- **No automation-only `draft` rule** (see BFF §55.7): automation accounts hold `manager` or `company_admin`.
+- **The handler feeds** `{ kind: "client_report", id, tenantId, clientId, ownerUserId }` for publish and withdraw (`ownerUserId` from `clients.owner_user_id`), and `{ kind: "client_report", tenantId }` for the kind-level read that comes first. The staff file download (`GET :t/files/:fileId/content`) sends `{ kind: "client_report", id: <report id>, tenantId }` read, which the read rule admits without attributes.
+
+**Proof.** `platform-nest/src/rbac/cerbos-client-report.test.ts` (static pin always; the live matrix on the Linux gate: the tiers, the owner rule and its fail-closed cases, the bot and automation DENY beating company_admin, manager and the platform_admin wildcard, the read-only permission arm, the permission-native owner), the HTTP suite `src/core/client-reports.db.test.ts` (the same rules through the routes), and the static alignment suites. **Restart the Cerbos test container and the live sidecar after the policy deploy.**

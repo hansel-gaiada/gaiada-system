@@ -9084,7 +9084,7 @@ interface PortalTurnaround { medianDays: number | null; n: number; withheld: boo
 - `pm-milestones-completed-at.db.test.ts`: the trigger.
 - `portal-visibility.test.ts`: the new builders and the controller on the SWITCHED list.
 
-## 55. Client reports: publication (PV7-04a, 2026-10-15) — `platform-nest/src/core/client-reports.ts` (new), `src/modules/clients/client-reports.controller.ts` (new), `src/core/portal-reports.controller.ts` (new); migration `202610151720_client_reports.sql` — **STATUS: PLANNED**
+## 55. Client reports: publication (PV7-04a, 2026-10-15) — `platform-nest/src/core/client-reports.ts` (new), `src/modules/clients/client-reports.controller.ts` (new), `src/core/portal-reports.controller.ts` (new), `src/ops/client-reports-backfill.ts` (new); migration `202610151720_client_reports.sql` — **STATUS: BUILT, PROTOTYPED (backend only; the pages are PV7-04b. On the Linux CI gate against real Postgres and Cerbos: `src/core/client-reports.db.test.ts`, `src/rbac/cerbos-client-report.test.ts` (live matrix), `src/modules/social/social-reports.test.ts`; run anywhere: `portal-visibility.test.ts`, `portal-live.test.ts`, the IAM alignment suites. Not driven live; the backfill has not been run anywhere)**
 
 **Why.** Plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`, ticket PV7-04 (04a, the backend; findings 5, 6 and 9; lead's calls L5 and L6; owner question PV7-Q3, the lead's default in force).
 - A delivered social or search report reaches the client today as an empty `delivered` deliverable, and only when the engagement has a project. The PDF is a `files` row targeting `social_report` or `search_report`, which the portal's download route cannot serve.
@@ -9185,9 +9185,25 @@ Never in a portal payload: the status, the source id, who published or withdrew 
 - **On publish** (delivery and the publish route): one notification row per recipient from `resolveClientRecipients(c, { clientId, projectId, kind: "report" })` (active contacts of the client, client-wide or on the report's project, viewers included), type `client_report.published`, `href: "/portal/reports"`. Best effort, after the commit. No mail.
 - **SSE:** a new topic `reports`. Events `client_report.published` and `client_report.withdrawn` (entity type `client_report`, payload `{ clientId, projectId, source }`) map to it, and `client_report` joins the tailed streams. The UI's hand-copied union (`platform-ui/src/lib/portal.ts` `PortalTopic`) gains `"reports"`.
 
-### 55.6 Tests (planned)
+### 55.6 Tests
 
 - `src/core/client-reports.db.test.ts`: portal isolation (project-scoped vs client-wide, `createMultiClientContact`), withdrawn and draft never visible (list and download), a guessed file id 404, the read marker and `newReports`, the deliverables `reportId`, staff/portal parity of `clientVisible`, the publish/withdraw state machine, search delivery publishing exactly one report, the files CHECK keeping every earlier role.
 - `src/modules/social/social-reports.test.ts`: social delivery publishes exactly one report.
 - `src/rbac/cerbos-client-report.test.ts`: the Cerbos matrix with the bot and automation deny.
 - `src/core/portal-visibility.test.ts`: the new builders and the controller on the SWITCHED list.
+- `src/core/portal-live.test.ts`: the `reports` topic, narrowed to the report's client, with no payload content.
+- `platform-ui/src/lib/portal-links.guard.test.ts`: `/portal/reports` (the notice's link) sits in the awaiting-page ledger until PV7-04b builds the page; that test fails the moment the page exists, so the entry cannot outlive it.
+
+**The tooth (seen red, then green, not committed).** An inline `cr.status = 'published' AND cr.client_id = ANY($2::uuid[]) AND (cr.client_id = ANY($3::uuid[]) OR cr.project_id = ANY($4::uuid[]))` in place of `clientReportInPortalScope` in `portal-reports.controller.ts` failed "no portal-facing file (other than the ratchet list) contains an old literal" with both literals named (`published client report`, the project-scope arm). The `published` pattern is new in the scan's FORBIDDEN list; no other portal-facing file carried it.
+
+### 55.7 As built (2026-10-15)
+
+- **Deviations from the ticket text, with reasons.**
+  - The file role is `client_report_file`, not `client_report_pdf`: search delivery renders Markdown (`text/markdown`). Pages read `file.contentType` and label the download from it.
+  - The client report's file has its **own storage key** (same bytes, same `sha256`), not the module file's key: the staff `DELETE /files/:id` removes the bytes behind a deleted row, so a shared key would let a deleted module file take the client's copy with it.
+  - `draft` has no automation-only rule: every automation account is seeded at `manager` or `company_admin` (`seed/automation.ts`), which already holds `draft`; a `member`-tier rule keyed on the principal kind would put `draft` in every human member's bundle (the generator cannot read that condition).
+  - When an engagement's project no longer belongs to its client (`projects.client_id` changed), the report is published **client-wide** for the engagement's client instead of failing the delivery on the composite FK.
+- **Titles** are deterministic: `Social media report, August 2026`, `Social media campaign report, …`, `Search report, …`, `Search audit report, …`; a period that is not `YYYY-MM` reads `<start> to <end>`.
+- **Deliver responses** (social and search) gain `clientReportId` (additive); the delivery's activity row records it too.
+- **Backfill:** `node dist/ops/client-reports-backfill.js [--company <uuid>] [--apply]` (npm `client-reports:backfill`). A report is skipped, with the reason printed, for an internal client, a delivered report with no stored file, or no deliverer or approver on record. Published with the original `delivered_at`, no notice, no event.
+- **Deploy:** the migration runs on boot. Restart Cerbos (the live sidecar and the test container) so `resource_client_report.yaml` and the new derived role load; nothing hot-reloads. Then probe `client_report · read` as a staff user and `publish` as an automation principal (must deny).
