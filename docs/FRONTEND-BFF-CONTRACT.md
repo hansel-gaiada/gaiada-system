@@ -838,10 +838,10 @@ argument, including why `member` IS seeded (it is the `hr_case` precedent) and t
 | GET / POST | `/compensation[?employeeId&current]` | `Compensation[]` / `{id, supersededRows}` |
 |  | ⚠ **`payPeriod` no longer exists.** POST takes `rateBasis` **and** `payFrequency`; GET returns both. | see §below |
 | GET / POST | `/allowance-types` | `AllowanceType[]` / `{id}` |
-| POST | `/employees/:id/allowances` | `{id}` |
+| GET / POST | `/employees/:id/allowances[?current]` | `EmployeeAllowance[]` (BFF §51) / `{id}` |
 | GET / POST | `/benefit-plans` | `BenefitPlan[]` / `{id}` |
-| POST | `/employees/:id/benefits` | `{id}` |
-| POST | `/employees/:id/tax-profile` | `{id}` |
+| GET / POST | `/employees/:id/benefits[?current]` | `EmployeeBenefit[]` (BFF §51) / `{id}` |
+| GET / POST | `/employees/:id/tax-profile` | `{current, history}` (BFF §51) / `{id}` |
 | GET / POST | `/payroll-runs[?status]` | `PayrollRun[]` / `{id}` |
 | GET | `/payroll-runs/:id` | `PayrollRunDetail` |
 | POST | `/payroll-runs/:id/calculate` | `CalculateResult` (see below) |
@@ -9328,7 +9328,7 @@ All four writes authorize on the existing `finance_config` kind (PERMISSION-CONT
 
 **As built (2026-10-15).** `GET payroll-inputs` in `payroll.controller.ts` authorizes first (`hr_payroll` `read`), then validates: `runId`/`employeeId` must be uuids, `periodStart`/`periodEnd` real ISO dates, `consumed` `true`|`false`, else 400 `{message, field}`; filters combine with AND, the period filter is overlap, `periodStart`/`periodEnd` come back as `YYYY-MM-DD` text, newest first (`created_at DESC`), limit 500. The run page lists "Consumed by this run" and, while the run is `draft` or `calculated`, "Waiting for the next calculate", each from its own read (`listPayrollInputsResult`), so a refused or failed read is said in words and never shown as an empty list. Proof: `payroll-inputs-read.test.ts` (HTTP, Linux CI gate) and `[runId]/page.test.tsx`.
 
-## 51. An employee's allowances, benefits and tax profile: the reads (DW-7f-3b, 2026-10-15) — `platform-nest/src/modules/hr/payroll.controller.ts` — **STATUS: PLANNED (contract)**
+## 51. An employee's allowances, benefits and tax profile: the reads (DW-7f-3b, 2026-10-15) — `platform-nest/src/modules/hr/payroll.controller.ts` — **STATUS: BUILT, PROTOTYPED (backend: compensation-reads.test.ts; UI: the compensation page and the hr-full-data reader tests; the backend HTTP suite is written for the Linux CI gate)**
 
 **Why.** HR can assign an allowance, enrol a benefit and set a tax profile (`POST employees/:id/allowances|benefits|tax-profile`), but cannot see what is already on file. The compensation screen (DW-7f-3) says so in a note. The tables hold everything (`202608240142_hr_compensation_benefits.sql`: `hr_employee_allowances`, `hr_benefit_enrollments`, `hr_tax_profiles`). So this section adds three reads only: no migration and no new kind.
 
@@ -9339,6 +9339,15 @@ All four writes authorize on the existing `finance_config` kind (PERMISSION-CONT
 - **Who may read: `hr_payroll` `read`, exactly as `GET compensation`.** The NPWP is a tax identifier, so it stays behind the payroll reader tier and is never widened. Authorization runs before validation. A malformed id is a 400. An employee of another company, or one that does not exist, is a 404.
 - **The screen.** The compensation page's per-employee card lists the three: allowances and benefits in force, with "show history", and the current tax profile. This replaces the note that said none could be listed. A refused or failed read says so in words.
 - **Proof** (live Postgres + Cerbos, Linux CI): rows in force against closed ones; `current` at both edges; another tenant's employee gives 404; `hr_staff` without payroll read gets 403; the NPWP is returned only to a payroll reader.
+
+**As built (2026-10-15).**
+- `GET employees/:employeeId/allowances|benefits|tax-profile` in `payroll.controller.ts` authorize first (`hr_payroll` `read`, no self arm), then validate: the id must be a uuid and `current` `true`|`false`, else 400 `{message, field}` (`id` or `current`); then, in one `withTenants({modules:["hr"]})` transaction, an employee that is not in this tenant or is soft-deleted is a 404.
+- Rows come back newest first by `effective_from` (limit 500), dates as `YYYY-MM-DD` text, `amount`/`percent` as numeric strings.
+  - An allowance row is `{id, employeeId, allowanceTypeId, allowanceCode, allowanceLabel, direction, amount, percent, effectiveFrom, effectiveTo, note, createdAt}`.
+  - A benefit row is `{id, employeeId, planId, planCode, planName, planKind, memberNumber, dependants, status, effectiveFrom, effectiveTo, note, createdAt}`.
+- `current=true` keeps `effective_from <= today AND (effective_to IS NULL OR effective_to >= today)` with today from `todayIsoInTz(config.reportsTz)`, both ends inclusive; `current=false` or omitted returns every row. Benefits are filtered by date only, so a `terminated` or `pending` enrolment with an open range still lists as in force and its `status` says what it is.
+- `tax-profile` returns `{current, history}`: `current` is the profile in force today or `null`; `history` is every profile on file (including the current one and a future-dated one), newest first, each `{id, employeeId, hasNpwp, npwp, ptkpStatus, terCategory, taxResident, effectiveFrom, effectiveTo, createdAt}`.
+- The compensation page, with `?employee=`, has an "On file" card: allowances and benefits read with `current=true`, the tax profile, each its own honest read; `&history=allowances,benefits,tax` reads the listed ones without the filter and shows closed rows. The "cannot list" note is replaced. Proof: `compensation-reads.test.ts` (HTTP, Linux CI gate), the page tests and the `hr-full-data` reader tests.
 
 ## 53. The client grain in reports (PV7-01, 2026-10-15) — `platform-nest/src/modules/reports/` — **STATUS: BUILT, PROTOTYPED (backend: the DB and HTTP suite report-client-grain.db.test.ts and the Cerbos matrix reports-cerbos.test.ts are written for the Linux CI gate; no page yet, PV7-05)**
 

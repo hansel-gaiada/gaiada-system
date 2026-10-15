@@ -7,12 +7,14 @@ import { can } from "@/lib/rbac";
 import { formatMoney, monthlyEquivalent } from "@/lib/hr-full";
 import {
   listCompensationResult, listPayGradesResult, listAllowanceTypesResult, listBenefitPlansResult, listEmployeesResult,
+  listEmployeeAllowancesResult, listEmployeeBenefitsResult, getEmployeeTaxProfileResult,
 } from "@/lib/hr-full-data";
 import type { ReadResult } from "@/lib/readResult";
 import { PICKABLE_EMPLOYEE_STATUSES, label } from "@/lib/hrCompensation";
 import { Card, KpiTile, HairlineTable } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
+import { EmployeeOnFile, type OnFileKey } from "@/components/hr/EmployeeOnFile";
 import {
   SetCompensationForm, AllowanceTypeForm, AssignAllowanceForm, BenefitPlanForm, EnrolBenefitForm, TaxProfileForm,
 } from "@/components/hr/CompensationForms";
@@ -20,7 +22,8 @@ import {
   setCompensation, saveAllowanceType, assignAllowance, saveBenefitPlan, enrolBenefit, setTaxProfile,
 } from "@/lib/hrCompensationActions";
 
-type SearchParams = Promise<{ employee?: string | string[] }>;
+type SearchParams = Promise<{ employee?: string | string[]; history?: string | string[] }>;
+const ON_FILE_KEYS: readonly OnFileKey[] = ["allowances", "benefits", "tax"];
 
 // HR › Compensation — the effective-dated pay record, the grade structure, allowances and benefits
 // (HR-FULL wave C; the write screens are DW-7f-3).
@@ -35,12 +38,12 @@ type SearchParams = Promise<{ employee?: string | string[] }>;
 //     empty table that could mean "nobody has a pay record". Figures are the server's strings, formatted only.
 //   - The page is re-read after every write (router.refresh plus the action's revalidatePath), so what shows
 //     after a save is what the server holds.
-//   - Layout: ONE page in sections (in force, history on `?employee=`, grades, allowance types, benefit plans, and
-//     the per-employee forms) rather than a detail route. The server has a per-employee compensation read, which the
-//     history section uses, but no read for an employee's allowances, enrolments or tax profile, so a detail route
-//     would have had nothing more to show than this page does.
-//   - BLOCKED (no GET route): an employee's current allowances, benefit enrolments and tax profile cannot be listed.
-//     Their forms are offered, and the page says so; a save is confirmed only by the server's reply.
+//   - Layout: ONE page in sections (in force, history and what is on file on `?employee=`, grades, allowance types,
+//     benefit plans, and the per-employee forms) rather than a detail route.
+//   - What is on file (DW-7f-3b, BFF §51): with `?employee=` the page reads that person's allowances and benefit
+//     enrolments in force (`current=true`) and their tax profile, each as its own honest read. `&history=` is a
+//     comma list of allowances, benefits and tax: a listed one is read WITHOUT the in-force filter, so closed rows
+//     show. "In force today" is the server's call (REPORTS_TZ), never this page's clock.
 //   - Controls follow the capability mirror: hr.payroll.view reads; hr.payroll.manage shows every form (all six
 //     routes are Cerbos `hr_payroll` create). The server still decides.
 const dim = { font: "400 12px/1.5 var(--font-body)", color: "var(--erp-ink-60)" } as const;
@@ -71,16 +74,34 @@ export default async function HrCompensationPage({ searchParams }: { searchParam
 
   const sp = await searchParams;
   const employeeParam = Array.isArray(sp?.employee) ? sp.employee[0] : sp?.employee;
+  const historyParam = Array.isArray(sp?.history) ? sp.history[0] : sp?.history;
+  const shownKeys = new Set((historyParam ?? "").split(",").filter((k): k is OnFileKey => (ON_FILE_KEYS as readonly string[]).includes(k)));
   const canManage = can(me, "hr.payroll.manage", tenant);
 
-  const [currentRead, gradesRead, allowancesRead, plansRead, employeesRead, historyRead] = await Promise.all([
+  const [
+    currentRead, gradesRead, allowancesRead, plansRead, employeesRead, historyRead,
+    onFileAllowancesRead, onFileBenefitsRead, onFileTaxRead,
+  ] = await Promise.all([
     listCompensationResult(userId, tenant, { current: true }),
     listPayGradesResult(userId, tenant),
     listAllowanceTypesResult(userId, tenant),
     listBenefitPlansResult(userId, tenant),
     canManage ? listEmployeesResult(userId, tenant) : null,
     employeeParam ? listCompensationResult(userId, tenant, { employeeId: employeeParam }) : null,
+    employeeParam ? listEmployeeAllowancesResult(userId, tenant, employeeParam, { current: !shownKeys.has("allowances") }) : null,
+    employeeParam ? listEmployeeBenefitsResult(userId, tenant, employeeParam, { current: !shownKeys.has("benefits") }) : null,
+    employeeParam ? getEmployeeTaxProfileResult(userId, tenant, employeeParam) : null,
   ]);
+
+  // The link that toggles one list's history, keeping the others as they are.
+  const onFileHref = (key: OnFileKey) => {
+    const next = new Set(shownKeys);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    const keep = ON_FILE_KEYS.filter((k) => next.has(k));
+    return `/hr/compensation?employee=${encodeURIComponent(employeeParam as string)}${keep.length ? `&history=${keep.join(",")}` : ""}`;
+  };
+  const onFileName = (currentRead.kind === "ok" ? currentRead.data.find((c) => c.employeeId === employeeParam)?.employeeName : undefined)
+    ?? (historyRead?.kind === "ok" ? historyRead.data[0]?.employeeName : undefined) ?? null;
 
   const current = currentRead.kind === "ok" ? currentRead.data : [];
   const grades = gradesRead.kind === "ok" ? gradesRead.data : [];
@@ -229,6 +250,19 @@ export default async function HrCompensationPage({ searchParams }: { searchParam
         </Card>
       )}
 
+      {employeeParam && onFileAllowancesRead && onFileBenefitsRead && onFileTaxRead && (
+        <EmployeeOnFile
+          employeeName={onFileName}
+          closeHref="/hr/compensation"
+          hrefFor={onFileHref}
+          shown={{ allowances: shownKeys.has("allowances"), benefits: shownKeys.has("benefits"), tax: shownKeys.has("tax") }}
+          currency={currency}
+          allowancesRead={onFileAllowancesRead}
+          benefitsRead={onFileBenefitsRead}
+          taxRead={onFileTaxRead}
+        />
+      )}
+
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", marginBottom: 22 }}>
         <Card title="Pay grades" hint="Optional. Where grades exist, an offer or a raise outside the band is refused.">
           {gradesRead.kind !== "ok" ? (
@@ -312,9 +346,9 @@ export default async function HrCompensationPage({ searchParams }: { searchParam
         >
           <div style={{ display: "grid", gap: 12 }}>
             <p role="note" style={{ margin: 0, ...dim }}>
-              The server has no read for an employee&apos;s allowances, benefit enrolments or tax profile, so this page
-              cannot list what is already assigned or on file. A save is confirmed only by the server&apos;s reply, and
-              the effect shows on the payslips when a run is calculated.
+              What is already assigned or on file for a person is listed under their name: choose View in the
+              compensation table above. A save is confirmed by the server&apos;s reply and the lists are re-read after
+              it; the effect shows on the payslips when a run is calculated.
             </p>
             {needsEmployees(
               <>

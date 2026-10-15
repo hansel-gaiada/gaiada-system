@@ -6,7 +6,8 @@ import "server-only";
 import { platformFetch, PlatformError } from "./platform";
 import { readResult, type ReadResult } from "./readResult";
 import type {
-  AllowanceType, Application, ApplicationDetail, BenefitPlan, Candidate, Compensation, FunnelStage, Holiday, HolidayCalendar,
+  AllowanceType, Application, ApplicationDetail, BenefitPlan, Candidate, Compensation, EmployeeAllowance, EmployeeBenefit,
+  EmployeeTaxProfile, FunnelStage, Holiday, HolidayCalendar,
   LeavePolicy, LeavePolicyAssignment, ParameterSet, ParameterSetDetail, PayGrade, PayrollInput, PayrollRun, PayrollRunDetail,
   PayrollRunStatus, PipelineStage, Requisition, ReviewCycle, ReviewParticipant, WorkingDayBreakdown,
 } from "./hr-full";
@@ -95,7 +96,7 @@ export async function getApplicationResult(u: string, t: string, id: string): Pr
 // "nobody has a pay record" about a viewer who may simply not read it. These keep the refusal: 403 is `forbidden`, 404
 // and 5xx are `unavailable`; an empty `data` is the server's own answer. The first three routes are authorized as
 // `hr_payroll` read; pay grades are `hr_policy` read (a different gate), so a payroll reader can be refused only that.
-// There is NO route that lists an employee's allowances, benefit enrolments or tax profile: those cannot be read here.
+// The per-employee reads of DW-7f-3b follow below.
 export function listCompensationResult(
   u: string, t: string, params: { employeeId?: string; current?: boolean } = {},
 ): Promise<ReadResult<Compensation[]>> {
@@ -114,6 +115,27 @@ export const listBenefitPlansResult = (u: string, t: string): Promise<ReadResult
 
 export const listPayGradesResult = (u: string, t: string): Promise<ReadResult<PayGrade[]>> =>
   readResult(platformFetch<PayGrade[]>(`${hrBase(t)}/pay-grades`, u));
+
+// DW-7f-3b (BFF §51): what is on file for ONE employee. Routes `GET employees/:id/allowances|benefits|tax-profile`, authorized
+// as `hr_payroll` read with no self arm (the NPWP stays behind the payroll reader tier). 403 is `forbidden`; 404 (the employee
+// is not in this company), 400 and 5xx are `unavailable`, carrying the server's words; an empty list is the server's own
+// answer "nothing on file". `current: true` keeps the rows in force today (REPORTS_TZ, decided by the server); without it
+// every row is returned, newest first. The tax profile has no filter: it returns the profile in force and the history.
+const employeeBase = (t: string, employeeId: string) => `${hrBase(t)}/employees/${encodeURIComponent(employeeId)}`;
+const currentQs = (current?: boolean) => (current ? "?current=true" : "");
+
+export const listEmployeeAllowancesResult = (
+  u: string, t: string, employeeId: string, opts: { current?: boolean } = {},
+): Promise<ReadResult<EmployeeAllowance[]>> =>
+  readResult(platformFetch<EmployeeAllowance[]>(`${employeeBase(t, employeeId)}/allowances${currentQs(opts.current)}`, u));
+
+export const listEmployeeBenefitsResult = (
+  u: string, t: string, employeeId: string, opts: { current?: boolean } = {},
+): Promise<ReadResult<EmployeeBenefit[]>> =>
+  readResult(platformFetch<EmployeeBenefit[]>(`${employeeBase(t, employeeId)}/benefits${currentQs(opts.current)}`, u));
+
+export const getEmployeeTaxProfileResult = (u: string, t: string, employeeId: string): Promise<ReadResult<EmployeeTaxProfile>> =>
+  readResult(platformFetch<EmployeeTaxProfile>(`${employeeBase(t, employeeId)}/tax-profile`, u));
 
 // DW-7f-4 / DW-7f-5: the honest policy reads, for /hr/reviews and /hr/settings. The soft readers in lib/hr-full.ts
 // (listReviewCycles, listCalendars, listLeavePolicies, listParameterSets, ...) turn a 403 and a 404 into [], which on a

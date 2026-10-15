@@ -45,6 +45,7 @@ import {
 import { computeSeverance, DEFAULT_SEVERANCE_UNRATIFIED, type SeveranceParams } from "./severance";
 import { countWorkingDays, completedMonths, serviceYears } from "./working-days";
 import { loadCalendar } from "./hr-policy.controller";
+import { todayIsoInTz } from "../reports/person-scope";
 
 // Two independent dimensions, not one list. RATE_BASES is the unit the amount is QUOTED in — HR's
 // fact about the contract. PAY_FREQUENCIES is how often a payslip is produced — Finance's
@@ -66,6 +67,21 @@ const requireIsoDate =(v: unknown, field: string): string => {
   if (typeof v !== "string" || !ISO_DATE.test(v)) throw new BadRequestException(`${field} must be an ISO date (YYYY-MM-DD)`);
   return v;
 };
+
+/**
+ * Shared front of the three per-employee reads (BFF §51): the id and the `current` flag are validated, as
+ * `{message, field}` 400s, AFTER the caller has been authorized. The caller authorizes first so a refused
+ * reader learns nothing about the shape and a denial test cannot be pre-empted by a 400.
+ */
+function employeeReadArgs(employeeId: string, current?: string, withCurrent = true): { id: string; onlyCurrent: boolean } {
+  const bad = (field: string, message: string) => new BadRequestException({ message, field });
+  if (typeof employeeId !== "string" || !UUID_SHAPE.test(employeeId)) throw bad("id", "id must be a uuid");
+  if (!withCurrent) return { id: employeeId, onlyCurrent: false };
+  if (current !== undefined && current !== "" && current !== "true" && current !== "false") {
+    throw bad("current", "current must be true or false");
+  }
+  return { id: employeeId, onlyCurrent: current === "true" };
+}
 
 /**
  * Staff-or-self on the payroll kind.
@@ -482,6 +498,119 @@ export class PayrollController {
       { modules: ["hr"] },
     );
     return { id };
+  }
+
+  // ═══════════════════════════════════ AN EMPLOYEE'S ALLOWANCES, BENEFITS, TAX PROFILE (READ) ═══
+  // DW-7f-3b (BFF §51). Authorized as `hr_payroll` `read` with NO self arm: the NPWP is a tax identifier and
+  // stays behind the payroll reader tier. Authorize FIRST, validate second. An employee that is not in this
+  // tenant (RLS hides the row) or is soft-deleted is a 404. "In force today" is today in REPORTS_TZ, the same
+  // calendar day the reports bucket on, not the server's UTC day; both ends are inclusive (the tables'
+  // `daterange(effective_from, effective_to, '[]')`). Dates leave as `YYYY-MM-DD` text.
+  @Get("employees/:employeeId/allowances")
+  async listEmployeeAllowances(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("employeeId") employeeId: string,
+    @Query("current") current?: string,
+  ) {
+    await authorize(req.principal, { kind: "hr_payroll", tenantId, module: "hr" }, "read");
+    const { id, onlyCurrent } = employeeReadArgs(employeeId, current);
+    const today = todayIsoInTz(config.reportsTz);
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        const emp = await c.query(`SELECT 1 FROM employees WHERE id = $1 AND deleted_at IS NULL`, [id]);
+        if (!emp.rows[0]) throw new NotFoundException("employee not found");
+        const params: unknown[] = [id];
+        let inForce = "";
+        if (onlyCurrent) {
+          params.push(today);
+          inForce = `AND a.effective_from <= $2::date AND (a.effective_to IS NULL OR a.effective_to >= $2::date)`;
+        }
+        const rows = await c.query(
+          `SELECT a.id, a.employee_id AS "employeeId", a.allowance_type_id AS "allowanceTypeId",
+                  t.code AS "allowanceCode", t.label AS "allowanceLabel", t.direction,
+                  a.amount, a.percent,
+                  a.effective_from::text AS "effectiveFrom", a.effective_to::text AS "effectiveTo",
+                  a.note, a.created_at AS "createdAt"
+           FROM hr_employee_allowances a
+           JOIN hr_allowance_types t ON t.id = a.allowance_type_id AND t.tenant_id = a.tenant_id
+           WHERE a.employee_id = $1 ${inForce}
+           ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC LIMIT 500`,
+          params,
+        );
+        return rows.rows;
+      },
+      { modules: ["hr"] },
+    );
+  }
+
+  @Get("employees/:employeeId/benefits")
+  async listEmployeeBenefits(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("employeeId") employeeId: string,
+    @Query("current") current?: string,
+  ) {
+    await authorize(req.principal, { kind: "hr_payroll", tenantId, module: "hr" }, "read");
+    const { id, onlyCurrent } = employeeReadArgs(employeeId, current);
+    const today = todayIsoInTz(config.reportsTz);
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        const emp = await c.query(`SELECT 1 FROM employees WHERE id = $1 AND deleted_at IS NULL`, [id]);
+        if (!emp.rows[0]) throw new NotFoundException("employee not found");
+        const params: unknown[] = [id];
+        let inForce = "";
+        if (onlyCurrent) {
+          params.push(today);
+          inForce = `AND b.effective_from <= $2::date AND (b.effective_to IS NULL OR b.effective_to >= $2::date)`;
+        }
+        const rows = await c.query(
+          `SELECT b.id, b.employee_id AS "employeeId", b.plan_id AS "planId",
+                  p.code AS "planCode", p.name AS "planName", p.kind AS "planKind",
+                  b.member_number AS "memberNumber", b.dependants, b.status,
+                  b.effective_from::text AS "effectiveFrom", b.effective_to::text AS "effectiveTo",
+                  b.note, b.created_at AS "createdAt"
+           FROM hr_benefit_enrollments b
+           JOIN hr_benefit_plans p ON p.id = b.plan_id AND p.tenant_id = b.tenant_id
+           WHERE b.employee_id = $1 ${inForce}
+           ORDER BY b.effective_from DESC, b.created_at DESC, b.id DESC LIMIT 500`,
+          params,
+        );
+        return rows.rows;
+      },
+      { modules: ["hr"] },
+    );
+  }
+
+  /** The tax profile in force today (or null) and every profile on file, newest first. */
+  @Get("employees/:employeeId/tax-profile")
+  async getEmployeeTaxProfile(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("employeeId") employeeId: string,
+  ) {
+    await authorize(req.principal, { kind: "hr_payroll", tenantId, module: "hr" }, "read");
+    const { id } = employeeReadArgs(employeeId, undefined, false);
+    const today = todayIsoInTz(config.reportsTz);
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        const emp = await c.query(`SELECT 1 FROM employees WHERE id = $1 AND deleted_at IS NULL`, [id]);
+        if (!emp.rows[0]) throw new NotFoundException("employee not found");
+        const rows = await c.query<{ effectiveFrom: string; effectiveTo: string | null }>(
+          `SELECT t.id, t.employee_id AS "employeeId", t.has_npwp AS "hasNpwp", t.npwp,
+                  t.ptkp_status AS "ptkpStatus", t.ter_category AS "terCategory", t.tax_resident AS "taxResident",
+                  t.effective_from::text AS "effectiveFrom", t.effective_to::text AS "effectiveTo",
+                  t.created_at AS "createdAt"
+           FROM hr_tax_profiles t
+           WHERE t.employee_id = $1
+           ORDER BY t.effective_from DESC, t.created_at DESC, t.id DESC LIMIT 200`,
+          [id],
+        );
+        // ISO dates compare correctly as strings.
+        const current = rows.rows.find(
+          (r) => r.effectiveFrom <= today && (r.effectiveTo === null || r.effectiveTo >= today),
+        ) ?? null;
+        return { current, history: rows.rows };
+      },
+      { modules: ["hr"] },
+    );
   }
 
   // ════════════════════════════════════════════════════════════ PAYROLL RUNS ══════════════════

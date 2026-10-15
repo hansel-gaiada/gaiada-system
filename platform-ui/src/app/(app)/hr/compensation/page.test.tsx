@@ -36,6 +36,12 @@ let gradesRead: Read;
 let allowancesRead: Read;
 let plansRead: Read;
 let employeesRead: Read;
+let onFileAllowancesRead: Read;
+let onFileBenefitsRead: Read;
+let onFileTaxRead: Read;
+const allowanceSpy = vi.fn();
+const benefitSpy = vi.fn();
+const taxSpy = vi.fn();
 const employeesSpy = vi.fn();
 const compensationSpy = vi.fn();
 vi.mock("@/lib/hr-full-data", () => ({
@@ -47,6 +53,9 @@ vi.mock("@/lib/hr-full-data", () => ({
   listAllowanceTypesResult: vi.fn(async () => allowancesRead),
   listBenefitPlansResult: vi.fn(async () => plansRead),
   listEmployeesResult: vi.fn(async () => { employeesSpy(); return employeesRead; }),
+  listEmployeeAllowancesResult: vi.fn(async (_u: string, _t: string, id: string, opts: unknown) => { allowanceSpy(id, opts); return onFileAllowancesRead; }),
+  listEmployeeBenefitsResult: vi.fn(async (_u: string, _t: string, id: string, opts: unknown) => { benefitSpy(id, opts); return onFileBenefitsRead; }),
+  getEmployeeTaxProfileResult: vi.fn(async (_u: string, _t: string, id: string) => { taxSpy(id); return onFileTaxRead; }),
 }));
 
 const row = (over: Record<string, unknown> = {}) => ({
@@ -72,9 +81,24 @@ import HrCompensationPage from "./page";
 function as(role: string) {
   me.roles = [{ role, scopeType: "company", scopeId: "co-a" }];
 }
-async function renderPage(employee?: string) {
-  render(await HrCompensationPage({ searchParams: Promise.resolve(employee ? { employee } : {}) }));
+async function renderPage(employee?: string, history?: string) {
+  render(await HrCompensationPage({
+    searchParams: Promise.resolve({ ...(employee ? { employee } : {}), ...(history ? { history } : {}) }),
+  }));
 }
+const allowance = (over: Record<string, unknown> = {}) => ({
+  id: "a1", employeeId: "e1", allowanceTypeId: "t1", allowanceCode: "TRANSPORT", allowanceLabel: "Transport", direction: "allowance",
+  amount: "500000.00", percent: null, effectiveFrom: "2026-09-01", effectiveTo: null, note: "Jakarta commute", createdAt: "2026-09-01T00:00:00Z", ...over,
+});
+const benefit = (over: Record<string, unknown> = {}) => ({
+  id: "b1", employeeId: "e1", planId: "p1", planCode: "BPJS-KES", planName: "BPJS Kesehatan", planKind: "statutory",
+  memberNumber: "0001234567890", dependants: 2, status: "active", effectiveFrom: "2026-01-01", effectiveTo: null, note: null,
+  createdAt: "2026-01-01T00:00:00Z", ...over,
+});
+const profile = (over: Record<string, unknown> = {}) => ({
+  id: "x1", employeeId: "e1", hasNpwp: true, npwp: "09.254.294.3-407.000", ptkpStatus: "K/1", terCategory: "B", taxResident: true,
+  effectiveFrom: "2026-03-01", effectiveTo: null, createdAt: "2026-03-01T00:00:00Z", ...over,
+});
 const buttons = () => screen.queryAllByRole("button").map((b) => b.textContent);
 const FORM_BUTTONS = [
   "Set compensation", "Add allowance type", "Add benefit plan", "Assign an allowance", "Enrol in a benefit plan", "Set a tax profile",
@@ -83,6 +107,18 @@ const FORM_BUTTONS = [
 beforeEach(() => {
   employeesSpy.mockReset();
   compensationSpy.mockReset();
+  allowanceSpy.mockReset();
+  benefitSpy.mockReset();
+  taxSpy.mockReset();
+  onFileAllowancesRead = { kind: "ok", data: [allowance()] };
+  onFileBenefitsRead = { kind: "ok", data: [benefit()] };
+  onFileTaxRead = {
+    kind: "ok",
+    data: {
+      current: profile(),
+      history: [profile(), profile({ id: "x0", hasNpwp: false, npwp: null, ptkpStatus: "TK/0", terCategory: "A", effectiveFrom: "2025-01-01", effectiveTo: "2026-02-28" })],
+    },
+  };
   denied.clear();
   currentRead = { kind: "ok", data: [row()] };
   historyRead = { kind: "ok", data: [] };
@@ -150,7 +186,8 @@ describe("/hr/compensation", () => {
     as("hr_manager");
     await renderPage();
     expect(buttons()).toEqual(expect.arrayContaining(FORM_BUTTONS));
-    expect(screen.getByRole("note")).toHaveTextContent("no read for an employee's allowances, benefit enrolments or tax profile");
+    expect(screen.getByRole("note")).toHaveTextContent("listed under their name");
+    expect(screen.getByRole("note")).not.toHaveTextContent("cannot list");
   });
 
   it("offers none of them to a view-only reader, and does not even read the employee list", async () => {
@@ -214,5 +251,161 @@ describe("/hr/compensation", () => {
     await renderPage("e1");
     expect(screen.getByText(/You don't have access to this person's pay history/)).toBeInTheDocument();
     expect(screen.queryByText(/holds no compensation record/)).toBeNull();
+  });
+
+  // DW-7f-3b: what is on file for the chosen employee.
+  describe("on file for the chosen employee", () => {
+    const section = (name: string) => screen.getByRole("region", { name });
+
+    it("reads nothing about an employee until one is chosen", async () => {
+      as("hr_manager");
+      await renderPage();
+      expect(allowanceSpy).not.toHaveBeenCalled();
+      expect(benefitSpy).not.toHaveBeenCalled();
+      expect(taxSpy).not.toHaveBeenCalled();
+      expect(screen.queryByText(/^On file/)).toBeNull();
+    });
+
+    it("lists the allowances and benefits in force (read with current=true) and the current tax profile", async () => {
+      as("hr_manager");
+      await renderPage("e1");
+      expect(allowanceSpy).toHaveBeenCalledWith("e1", { current: true });
+      expect(benefitSpy).toHaveBeenCalledWith("e1", { current: true });
+      expect(taxSpy).toHaveBeenCalledWith("e1");
+      expect(screen.getByText(/On file — Budi/)).toBeInTheDocument();
+
+      const allowances = section("Allowances and deductions in force");
+      expect(within(allowances).getByText("TRANSPORT · Transport")).toBeInTheDocument();
+      expect(within(allowances).getByText("Rp 500000.00")).toBeInTheDocument();
+      expect(within(allowances).getByText("Jakarta commute")).toBeInTheDocument();
+      expect(within(allowances).getByText("no end date")).toBeInTheDocument();
+
+      const benefits = section("Benefit enrolments in force");
+      expect(within(benefits).getByText("BPJS-KES · BPJS Kesehatan")).toBeInTheDocument();
+      expect(within(benefits).getByText("0001234567890")).toBeInTheDocument();
+      expect(within(benefits).getByText("active")).toBeInTheDocument();
+
+      const tax = section("Tax profile");
+      expect(within(tax).getByText("09.254.294.3-407.000")).toBeInTheDocument();
+      expect(within(tax).getByText("K/1")).toBeInTheDocument();
+      expect(within(tax).getByText("B")).toBeInTheDocument();
+      // History stays folded away until asked for.
+      expect(within(tax).queryByText("TK/0")).toBeNull();
+    });
+
+    it("shows a percent allowance as a percent of base and marks a deduction", async () => {
+      as("hr_manager");
+      onFileAllowancesRead = {
+        kind: "ok",
+        data: [
+          allowance({ amount: null, percent: "2.500", allowanceCode: "MEAL", allowanceLabel: "Meal" }),
+          allowance({ id: "a2", allowanceCode: "LOAN", allowanceLabel: "Loan", direction: "deduction" }),
+        ],
+      };
+      await renderPage("e1");
+      expect(screen.getByText("2.5% of base")).toBeInTheDocument();
+      expect(screen.getByText("LOAN · Loan (deduction)")).toBeInTheDocument();
+    });
+
+    it("links Show history per list, keeping the others as they are", async () => {
+      as("hr_manager");
+      await renderPage("e1");
+      expect(screen.getByRole("link", { name: "Show allowance history" })).toHaveAttribute("href", "/hr/compensation?employee=e1&history=allowances");
+      expect(screen.getByRole("link", { name: "Show benefit history" })).toHaveAttribute("href", "/hr/compensation?employee=e1&history=benefits");
+      expect(screen.getByRole("link", { name: "Show tax profile history" })).toHaveAttribute("href", "/hr/compensation?employee=e1&history=tax");
+    });
+
+    it("with history on, the list is read without the in-force filter and closed rows show with their end date", async () => {
+      as("hr_manager");
+      onFileAllowancesRead = {
+        kind: "ok",
+        data: [allowance(), allowance({ id: "a0", effectiveFrom: "2026-01-01", effectiveTo: "2026-08-31", amount: "400000.00" })],
+      };
+      await renderPage("e1", "allowances,tax");
+      // Only the listed one drops the in-force filter.
+      expect(allowanceSpy).toHaveBeenCalledWith("e1", { current: false });
+      expect(benefitSpy).toHaveBeenCalledWith("e1", { current: true });
+      const allowances = section("Allowances and deductions, all");
+      expect(within(allowances).getByText("2026-08-31")).toBeInTheDocument();
+      expect(within(allowances).getByText("Rp 400000.00")).toBeInTheDocument();
+      expect(within(allowances).getByRole("link", { name: "Hide allowance history" })).toHaveAttribute("href", "/hr/compensation?employee=e1&history=tax");
+      expect(screen.getByRole("link", { name: "Show benefit history" })).toHaveAttribute("href", "/hr/compensation?employee=e1&history=allowances,benefits,tax");
+      // The tax history lists the closed profile with its end date.
+      const tax = section("Tax profile");
+      expect(within(tax).getByText("TK/0")).toBeInTheDocument();
+      expect(within(tax).getByText("2026-02-28")).toBeInTheDocument();
+      expect(within(tax).getByRole("link", { name: "Hide tax profile history" })).toHaveAttribute("href", "/hr/compensation?employee=e1&history=allowances");
+    });
+
+    it("says an empty list only when the server answered an empty list, in words that differ for in force and history", async () => {
+      as("hr_manager");
+      onFileAllowancesRead = { kind: "ok", data: [] };
+      onFileBenefitsRead = { kind: "ok", data: [] };
+      onFileTaxRead = { kind: "ok", data: { current: null, history: [] } };
+      await renderPage("e1");
+      expect(screen.getByText("No allowance is in force for this employee today.")).toBeInTheDocument();
+      expect(screen.getByText("No benefit enrolment is in force for this employee today.")).toBeInTheDocument();
+      expect(screen.getByText("No tax profile is on file for this employee.")).toBeInTheDocument();
+      cleanup();
+      await renderPage("e1", "allowances,benefits,tax");
+      expect(screen.getByText("The server holds no allowance for this employee.")).toBeInTheDocument();
+      expect(screen.getByText("The server holds no benefit enrolment for this employee.")).toBeInTheDocument();
+      expect(screen.getByText("The server holds no tax profile for this employee.")).toBeInTheDocument();
+    });
+
+    it("a tax profile that exists but is not in force today is said so, not shown as none", async () => {
+      as("hr_manager");
+      onFileTaxRead = { kind: "ok", data: { current: null, history: [profile({ effectiveFrom: "2099-01-01" })] } };
+      await renderPage("e1");
+      expect(screen.getByText(/No tax profile is in force today/)).toBeInTheDocument();
+      expect(screen.queryByText("No tax profile is on file for this employee.")).toBeNull();
+    });
+
+    it("a profile without an NPWP says none on file", async () => {
+      as("hr_manager");
+      onFileTaxRead = { kind: "ok", data: { current: profile({ hasNpwp: false, npwp: null }), history: [] } };
+      await renderPage("e1");
+      expect(within(section("Tax profile")).getByText("none on file")).toBeInTheDocument();
+    });
+
+    it("a refused read is a sentence of refusal in its own list, and the other lists still show", async () => {
+      as("hr_manager");
+      onFileAllowancesRead = { kind: "forbidden" };
+      onFileTaxRead = { kind: "forbidden" };
+      await renderPage("e1");
+      expect(screen.getByText(/You don't have access to this person's allowances/)).toBeInTheDocument();
+      expect(screen.getByText(/You don't have access to this person's tax profile/)).toBeInTheDocument();
+      expect(screen.queryByText("No allowance is in force for this employee today.")).toBeNull();
+      expect(screen.queryByText(/No tax profile is/)).toBeNull();
+      expect(screen.queryByText("09.254.294.3-407.000")).toBeNull();
+      expect(within(section("Benefit enrolments in force")).getByText("BPJS-KES · BPJS Kesehatan")).toBeInTheDocument();
+    });
+
+    it("a failed read says nobody can tell, with the server's words, never an empty list", async () => {
+      as("hr_manager");
+      onFileBenefitsRead = { kind: "unavailable", reason: "employee not found" };
+      onFileAllowancesRead = { kind: "unavailable", reason: "platform 500" };
+      await renderPage("e1");
+      expect(screen.getByText(/This person's benefit enrolments cannot be read right now/)).toBeInTheDocument();
+      expect(screen.getByText("employee not found")).toBeInTheDocument();
+      expect(screen.getByText(/This person's allowances cannot be read right now/)).toBeInTheDocument();
+      expect(screen.getByText("platform 500")).toBeInTheDocument();
+      expect(screen.queryByText("No benefit enrolment is in force for this employee today.")).toBeNull();
+    });
+
+    it("is shown to a view-only payroll reader too (the reads need hr.payroll.view, not manage)", async () => {
+      as("hr_manager");
+      denied.add("hr.payroll.manage");
+      await renderPage("e1");
+      expect(within(section("Allowances and deductions in force")).getByText("TRANSPORT · Transport")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Close" })).toHaveAttribute("href", "/hr/compensation");
+    });
+
+    it("a reader without hr.payroll.view reads nothing about an employee", async () => {
+      as("hr_staff");
+      await renderPage("e1");
+      expect(allowanceSpy).not.toHaveBeenCalled();
+      expect(taxSpy).not.toHaveBeenCalled();
+    });
   });
 });

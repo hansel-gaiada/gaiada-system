@@ -514,7 +514,9 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/hr/recruitment/[requisitionId]`
 - `/hr/recruitment/applications/[applicationId]`
 - `/hr/reviews`
+- `/hr/reviews/[cycleId]`
 - `/hr/settings`
+- `/hr/settings/statutory/[setId]`
 - `/invite/[token]`
 - `/invoices`
 - `/invoices/[invoiceId]`

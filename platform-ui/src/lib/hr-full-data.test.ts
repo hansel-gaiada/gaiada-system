@@ -3,6 +3,7 @@ import {
   listPayrollRunsResult, getPayrollRunResult, listEmployeesResult, listPayrollInputsResult,
   listRequisitionsResult, listCandidatesResult, listApplicationsResult, listPipelineStagesResult, getFunnelResult, getApplicationResult,
   listCompensationResult, listAllowanceTypesResult, listBenefitPlansResult, listPayGradesResult,
+  listEmployeeAllowancesResult, listEmployeeBenefitsResult, getEmployeeTaxProfileResult,
   listReviewCyclesResult, listReviewParticipantsResult, listCalendarsResult, listHolidaysResult, getWorkingDaysResult,
   listLeavePoliciesResult, listPolicyAssignmentsResult, listParameterSetsResult, getParameterSetResult,
 } from "./hr-full-data";
@@ -200,6 +201,62 @@ describe("compensation reads", () => {
       for (const status of [404, 500]) {
         vi.stubGlobal("fetch", answer(status, { error: "nope" }));
         expect(await read()).toMatchObject({ kind: "unavailable" });
+      }
+    }
+  });
+});
+
+// DW-7f-3b (BFF §51): what is on file for one employee. hr_payroll read; a refusal must read as one, and a 404 (the employee is
+// not in this company) or a 5xx is `unavailable` with the server's words, never an empty list.
+describe("employee allowance, benefit and tax-profile readers (DW-7f-3b)", () => {
+  const url = (m: ReturnType<typeof answer>) => String((m.mock.calls[0] as unknown[])[0]);
+  const base = "http://p.test/api/co-a/modules/hr/employees";
+  const taxBody = { current: null, history: [] };
+
+  it("read from the per-employee routes, with the id encoded", async () => {
+    const reads: [() => Promise<unknown>, string, unknown][] = [
+      [() => listEmployeeAllowancesResult("u1", "co-a", "e1"), `${base}/e1/allowances`, [{ id: "a1" }]],
+      [() => listEmployeeBenefitsResult("u1", "co-a", "e1"), `${base}/e1/benefits`, [{ id: "b1" }]],
+      [() => getEmployeeTaxProfileResult("u1", "co-a", "e1"), `${base}/e1/tax-profile`, taxBody],
+      [() => listEmployeeAllowancesResult("u1", "co-a", "e 1/x"), `${base}/e%201%2Fx/allowances`, []],
+    ];
+    for (const [read, expected, body] of reads) {
+      const fetchMock = answer(200, body);
+      vi.stubGlobal("fetch", fetchMock);
+      expect(await read()).toEqual({ kind: "ok", data: body });
+      expect(url(fetchMock)).toBe(expected);
+    }
+  });
+
+  it("asks for what is in force only when told to (current=true), and leaves the flag off otherwise", async () => {
+    let fetchMock = answer(200, []);
+    vi.stubGlobal("fetch", fetchMock);
+    await listEmployeeAllowancesResult("u1", "co-a", "e1", { current: true });
+    expect(url(fetchMock)).toBe(`${base}/e1/allowances?current=true`);
+    fetchMock = answer(200, []);
+    vi.stubGlobal("fetch", fetchMock);
+    await listEmployeeBenefitsResult("u1", "co-a", "e1", { current: true });
+    expect(url(fetchMock)).toBe(`${base}/e1/benefits?current=true`);
+    fetchMock = answer(200, []);
+    vi.stubGlobal("fetch", fetchMock);
+    await listEmployeeBenefitsResult("u1", "co-a", "e1", { current: false });
+    expect(url(fetchMock)).toBe(`${base}/e1/benefits`);
+  });
+
+  it("an empty 200 is the server's own answer; 403 is forbidden; 404 and 5xx are unavailable and carry the server's words", async () => {
+    const readers: [() => Promise<unknown>, unknown][] = [
+      [() => listEmployeeAllowancesResult("u1", "co-a", "e1"), []],
+      [() => listEmployeeBenefitsResult("u1", "co-a", "e1"), []],
+      [() => getEmployeeTaxProfileResult("u1", "co-a", "e1"), taxBody],
+    ];
+    for (const [read, empty] of readers) {
+      vi.stubGlobal("fetch", answer(200, empty));
+      expect(await read()).toEqual({ kind: "ok", data: empty });
+      vi.stubGlobal("fetch", answer(403, { error: "forbidden" }));
+      expect(await read()).toEqual({ kind: "forbidden" });
+      for (const status of [404, 500, 503]) {
+        vi.stubGlobal("fetch", answer(status, { message: "employee not found" }));
+        expect(await read()).toMatchObject({ kind: "unavailable", reason: expect.any(String) });
       }
     }
   });

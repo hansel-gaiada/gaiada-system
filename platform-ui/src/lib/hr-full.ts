@@ -49,10 +49,10 @@ import "server-only";
 //   ── compensation + payroll (hr_payroll) ──
 //   GET/POST  /compensation[?employeeId&current]          -> Compensation[] / {id}
 //   GET/POST  /allowance-types                            -> AllowanceType[] / {id}
-//   POST      /employees/:id/allowances                   -> {id}
+//   GET/POST  /employees/:id/allowances[?current]         -> EmployeeAllowance[] / {id}
 //   GET/POST  /benefit-plans                              -> BenefitPlan[] / {id}
-//   POST      /employees/:id/benefits                     -> {id}
-//   POST      /employees/:id/tax-profile                  -> {id}
+//   GET/POST  /employees/:id/benefits[?current]           -> EmployeeBenefit[] / {id}
+//   GET/POST  /employees/:id/tax-profile                  -> EmployeeTaxProfile / {id}
 //   GET/POST  /payroll-runs[?status]                      -> PayrollRun[] / {id}
 //   GET       /payroll-runs/:id                           -> PayrollRunDetail
 //   POST      /payroll-runs/:id/calculate                 -> CalculateResult
@@ -256,6 +256,24 @@ export interface BenefitPlan {
   provider: string | null; employerRate: string | null; employeeRate: string | null;
   wageCap: string | null; wageFloor: string | null; currency: string; isActive: boolean;
 }
+// DW-7f-3b (BFF §51): what is on file for ONE employee. `amount` and `percent` are numeric strings (one of them is null);
+// dates are `YYYY-MM-DD`; `effectiveTo` null is open-ended. Routes need `hr_payroll` read: the NPWP is a tax identifier.
+export interface EmployeeAllowance {
+  id: string; employeeId: string; allowanceTypeId: string; allowanceCode: string; allowanceLabel: string;
+  direction: "allowance" | "deduction"; amount: string | null; percent: string | null;
+  effectiveFrom: string; effectiveTo: string | null; note: string | null; createdAt: string;
+}
+export interface EmployeeBenefit {
+  id: string; employeeId: string; planId: string; planCode: string; planName: string; planKind: string;
+  memberNumber: string | null; dependants: number; status: "pending" | "active" | "suspended" | "terminated";
+  effectiveFrom: string; effectiveTo: string | null; note: string | null; createdAt: string;
+}
+export interface TaxProfile {
+  id: string; employeeId: string; hasNpwp: boolean; npwp: string | null; ptkpStatus: string;
+  terCategory: string | null; taxResident: boolean; effectiveFrom: string; effectiveTo: string | null; createdAt: string;
+}
+/** `current` is the profile in force today (REPORTS_TZ) or null; `history` is every profile on file, newest first. */
+export interface EmployeeTaxProfile { current: TaxProfile | null; history: TaxProfile[] }
 export type PayrollRunStatus = "draft" | "calculated" | "pending_approval" | "approved" | "paid" | "cancelled";
 export interface PayrollRun {
   id: string; reference: string; kind: "regular" | "thr" | "bonus" | "final" | "correction";
