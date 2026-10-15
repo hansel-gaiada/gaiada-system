@@ -7,7 +7,7 @@ import { platformFetch, PlatformError } from "./platform";
 import { readResult, type ReadResult } from "./readResult";
 import type {
   AllowanceType, Application, ApplicationDetail, BenefitPlan, Candidate, Compensation, FunnelStage, PayGrade, PayrollInput,
-  PayrollRun, PayrollRunDetail, PayrollRunStatus, PipelineStage, Requisition,
+  PayrollRun, PayrollRunDetail, PayrollRunStatus, PipelineStage, Requisition, ReviewCycle, ReviewParticipant,
 } from "./hr-full";
 import type { Employee } from "./iam";
 
@@ -113,3 +113,15 @@ export const listBenefitPlansResult = (u: string, t: string): Promise<ReadResult
 
 export const listPayGradesResult = (u: string, t: string): Promise<ReadResult<PayGrade[]>> =>
   readResult(platformFetch<PayGrade[]>(`${hrBase(t)}/pay-grades`, u));
+
+// DW-7f-4: the honest review-cycle reads, for /hr/reviews. The soft readers in lib/hr-full.ts
+// (listReviewCycles, listCalendars, listLeavePolicies, listParameterSets, ...) turn a 403 and a 404 into [], which on a
+// rules page reads "no calendar, no policy" about a viewer who was simply refused. These keep the refusal: 403 is
+// `forbidden`, 404 and 5xx are `unavailable`; an empty `data` is the server's own answer. Every route is authorized as
+// `hr_policy` read, which is wide (any member of the company), so a refusal is rare but must still read as one. There is
+// no single-cycle read: a cycle is found in the list. A 404 on the single parameter set is a real answer (`ok` with null).
+export const listReviewCyclesResult = (u: string, t: string, status?: string): Promise<ReadResult<ReviewCycle[]>> =>
+  readResult(platformFetch<ReviewCycle[]>(`${hrBase(t)}/review-cycles${status ? `?status=${encodeURIComponent(status)}` : ""}`, u));
+
+export const listReviewParticipantsResult = (u: string, t: string, cycleId: string): Promise<ReadResult<ReviewParticipant[]>> =>
+  readResult(platformFetch<ReviewParticipant[]>(`${hrBase(t)}/review-cycles/${encodeURIComponent(cycleId)}/participants`, u));

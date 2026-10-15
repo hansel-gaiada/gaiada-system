@@ -3,6 +3,7 @@ import {
   listPayrollRunsResult, getPayrollRunResult, listEmployeesResult, listPayrollInputsResult,
   listRequisitionsResult, listCandidatesResult, listApplicationsResult, listPipelineStagesResult, getFunnelResult, getApplicationResult,
   listCompensationResult, listAllowanceTypesResult, listBenefitPlansResult, listPayGradesResult,
+  listReviewCyclesResult, listReviewParticipantsResult,
 } from "./hr-full-data";
 
 // DW-7e: the honest payroll-run list. The route needs the payroll read right, so a 403 is common and must read as a refusal.
@@ -200,5 +201,38 @@ describe("compensation reads", () => {
         expect(await read()).toMatchObject({ kind: "unavailable" });
       }
     }
+  });
+});
+
+// DW-7f-4: the honest review-cycle reads. Each goes to its hr_policy route; 200 is the data, 403 is `forbidden`, and a 404 or 5xx is
+// `unavailable` (never an empty list).
+describe("review-cycle readers (DW-7f-4)", () => {
+  const url = (m: ReturnType<typeof answer>) => String((m.mock.calls[0] as unknown[])[0]);
+  const base = "http://p.test/api/co-a/modules/hr";
+  const lists: [string, () => Promise<unknown>, string][] = [
+    ["listReviewCyclesResult", () => listReviewCyclesResult("u1", "co-a"), `${base}/review-cycles`],
+    ["listReviewParticipantsResult", () => listReviewParticipantsResult("u1", "co-a", "c1"), `${base}/review-cycles/c1/participants`],
+  ];
+
+  for (const [name, read, path] of lists) {
+    it(`${name}: 200 is the data from ${path.replace(base, "")}, 403 is forbidden, 404 and 5xx are unavailable`, async () => {
+      const fetchMock = answer(200, [{ id: "x" }]);
+      vi.stubGlobal("fetch", fetchMock);
+      expect(await read()).toEqual({ kind: "ok", data: [{ id: "x" }] });
+      expect(url(fetchMock)).toBe(path);
+      vi.stubGlobal("fetch", answer(403, { error: "forbidden" }));
+      expect(await read()).toEqual({ kind: "forbidden" });
+      for (const status of [404, 500, 503]) {
+        vi.stubGlobal("fetch", answer(status, { error: "nope" }));
+        expect(await read()).toMatchObject({ kind: "unavailable", reason: "nope" });
+      }
+    });
+  }
+
+  it("passes the status filter through", async () => {
+    const fetchMock = answer(200, []);
+    vi.stubGlobal("fetch", fetchMock);
+    await listReviewCyclesResult("u1", "co-a", "open");
+    expect(url(fetchMock)).toBe(`${base}/review-cycles?status=open`);
   });
 });
