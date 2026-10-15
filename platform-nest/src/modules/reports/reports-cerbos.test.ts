@@ -81,6 +81,8 @@ const personDoc = (owned: boolean): Resource => ({
 });
 const projectDoc: Resource = { kind: "report_document", tenantId: T1, module: "reports", id: "p1", projectId: "p1" };
 const deptDoc: Resource = { kind: "report_document", tenantId: T1, module: "reports", id: "d-seo", teamId: "d-seo" };
+/** PV7-01: the client grain sends only `id` (the client id) - no ownerId, projectId or teamId. */
+const clientDoc: Resource = { kind: "report_document", tenantId: T1, module: "reports", id: "c1" };
 const companyDoc: Resource = { kind: "report_document", tenantId: T1, module: "reports", id: T1 };
 /** `overview`/`metrics`: NO ownerId/projectId/teamId — there is no single scope. */
 const listing: Resource = { kind: "report_document", tenantId: T1, module: "reports" };
@@ -94,7 +96,7 @@ const appraisalSelf: Resource = { kind: "appraisal", tenantId: T1, subjectUserId
 const appraisalOther: Resource = { kind: "appraisal", tenantId: T1, subjectUserId: OTHER };
 const appraisalNoSubject: Resource = { kind: "appraisal", tenantId: T1 };
 
-const GRAIN_ACTIONS = ["read_person", "read_project", "read_department", "read_company"] as const;
+const GRAIN_ACTIONS = ["read_person", "read_project", "read_client", "read_department", "read_company"] as const;
 
 describe.skipIf(!live)("⚡ TR-25 Cerbos policy parity — tracker/reporting §8 matrix", () => {
   // ═════════════════════════ platform_admin: unconditional, every kind ═════════════════════════
@@ -157,6 +159,62 @@ describe.skipIf(!live)("⚡ TR-25 Cerbos policy parity — tracker/reporting §8
       // ...while the broader tiers, gated on inTenant rather than `owns`, are unaffected.
       expect(await allow(lead, listing, "read_person")).toBe(true);
       expect(await allow(hrReader, listing, "read_person")).toBe(true);
+    });
+  });
+
+  // ═════════════════════════ PV7-01: the client grain (read_client) ═════════════════════════
+  // The same derived roles that hold read_project, MINUS the served-provider arm. PERMISSION-CONTRACT §45.
+  describe("report_document — read_client (PV7-01): the same tiers as read_project, without the served arm", () => {
+    it("exec, the tenant's admin, a dept lead, both HR halves and a company member read a client document", async () => {
+      for (const p of [exec, admin, lead, hrReader, hrOps, member]) {
+        expect(await allow(p, clientDoc, "read_client")).toBe(true);
+      }
+    });
+
+    it("matches read_project role for role: every role that reads a project document reads a client one, and no other does", async () => {
+      const roles: Record<string, Principal> = { owner, exec, admin, lead, member, hrReader, hrOps, servedLead, servedStaff };
+      for (const [name, p] of Object.entries(roles)) {
+        const project = await allow(p, projectDoc, "read_project");
+        const client = await allow(p, clientDoc, "read_client");
+        if (name === "servedLead" || name === "servedStaff") {
+          expect(project, `${name} reads a project`).toBe(true);
+          expect(client, `${name} must NOT read a client (the served arm is department only)`).toBe(false);
+        } else {
+          expect(client, `${name}: read_client must equal read_project`).toBe(project);
+        }
+      }
+    });
+
+    it("the served-provider tier is DENIED client grain, as is a module tier of another module", async () => {
+      expect(await allow(servedLead, clientDoc, "read_client")).toBe(false);
+      expect(await allow(servedStaff, clientDoc, "read_client")).toBe(false);
+      const searchServed = principal([{ role: "search_manager", scopeType: "company", scopeId: T1 }], [T1, T2]);
+      expect(await allow(searchServed, clientDoc, "read_client")).toBe(false);
+    });
+
+    it("a project-scope member matches no client resource (no projectId on it), though it reads its own project", async () => {
+      const projectMember = principal([{ role: "member", scopeType: "project", scopeId: "p1" }]);
+      expect(await allow(projectMember, projectDoc, "read_project")).toBe(true);
+      expect(await allow(projectMember, clientDoc, "read_client")).toBe(false);
+    });
+
+    it("the listing form (overview/metrics: no id) is allowed to the same tiers", async () => {
+      for (const p of [admin, lead, hrReader, member]) expect(await allow(p, listing, "read_client")).toBe(true);
+      expect(await allow(servedLead, listing, "read_client")).toBe(false);
+    });
+
+    it("a manager of ANOTHER company, a bare membership and a low-assurance tier are all denied", async () => {
+      expect(await allow(wrongCompanyLead, clientDoc, "read_client")).toBe(false);
+      expect(await allow(principal([], [T1, T2]), clientDoc, "read_client")).toBe(false);
+      for (const role of ["company_admin", "manager", "hr_staff", "member"]) {
+        const low = principal([{ role, scopeType: "company", scopeId: T1 }], [T1], "low");
+        expect(await allow(low, clientDoc, "read_client"), `${role} at low assurance`).toBe(false);
+      }
+    });
+
+    it("a client-portal contact (the global client role) reads no client report", async () => {
+      const portal = principal([{ role: "client", scopeType: "company", scopeId: T1 }]);
+      expect(await allow(portal, clientDoc, "read_client")).toBe(false);
     });
   });
 

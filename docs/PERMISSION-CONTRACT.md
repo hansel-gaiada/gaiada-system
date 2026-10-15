@@ -2257,3 +2257,33 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §48 (ruling DW-D24, plan `docs/plans/20
 - **The six artifacts:** the policy (no derived role); `cerbos.ts` (no change); `permission-catalog.json` (+3 keys, `core` domain, grantable, not sensitive, `uiGrantable`: 110 kinds, 474 pairs, 459 grantable, 15 relationship, 211 sensitive); `permission-groups.json` (+1 group, `personal_mailbox`: 170 groups, 420 covered); migration `202610151210_iam_personal_mailbox_permissions.sql` (15 `role_permissions` rows, with a DO-block self-assertion: the owner mirrors `company_admin` in both directions, the nine self-scoped markers, a viewer and every other role holding none); the bundle generator (no resolver change: the kind names only direct roles) and `role-permission-bundles.json`. Pinned literals moved: `cerbos-catalog-alignment` 471 -> 474 pairs and 109 -> 110 kinds, `permission-groups-catalog-parity` 456 -> 459, `ui-grantable-catalog` 471/456 -> 474/459, `iam-215-boundary-pin` 109 -> 110 kinds and 105 -> 106 non-exempt.
 - **Proof:** `src/rbac/cerbos-personal-mailbox.test.ts` (7 static always; 30 live with `CERBOS_URL`: every role against its own and someone else's mailbox, an unfed owner, a bot and an automation principal, low assurance, cross-tenant, an unlisted action, an owner id that merely resembles the caller's, and the absence of a permission arm) and the HTTP suite `src/core/gmail/gmail.http.test.ts`. **Restart `gaiada-test-cerbos` and the live sidecar after deploying the policy file** (nothing hot-reloads), then probe: `GET /api/:t/integrations/gmail` answers `{connected: false}` for a fresh person.
 - **One reach that no policy can express, noted for the client-context gate** (FRONTEND-BFF-CONTRACT §48.4): every role that may `send` also reads `client`, so "send about a client you cannot read" is refused by no role combination today; the controller still asks for the client's read, so a future narrowing of `client` read takes effect here without a change.
+
+## 45. PV7-01 — `read_client` on `report_document` (2026-10-15, PROTOTYPED)
+
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §53 (plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`, PV7-01). Status: **PROTOTYPED** (policy, catalog, group, bundles, migration and tests are in the repo; the live Cerbos probe after a restart is the deploy step).
+
+**One more action on the existing kind, no new kind.** The key is `reports.document.read_client`: read a client-grain report document (one client's figures summed across its projects), its overview listing and its export. It sits beside `read_person`, `read_project`, `read_department` and `read_company`.
+
+| Action | Reach | What it is |
+|---|---|---|
+| `read_client` | the derived roles that hold `read_project`: `company_admin`, `hr_people_reader`, `manager` and `member`. **Not** the served-provider arm (`module_staff`, `module_manager`) | read a client's report document |
+
+**The served arm is left out on purpose.** A served slice is department only (§8's fifth column). A provider's staff never read a served company's client numbers.
+
+**Nobody gains reach.** Anyone who can read every project document in the tenant can already compute the client sum. A `member` holding only a project-scope grant matches no client resource (the derived role needs a company or global grant when the resource carries no `projectId`), so it reads its own project and no client.
+
+**No `perm_*` rule.** The IAM-04-B5 note at the end of `resource_report_document.yaml` still holds: any `perm_*` rule on this kind fails `permission-arm-hazard-scan.test.ts` for `org_unit_lead`. The key therefore has no permission-arm mirror, and the permission-native `owner` holds it in its bundle without reaching it through Cerbos unless it also holds `company_admin` (the same under-claim as `read_project`).
+
+**Resource attributes:** none new. The handler sends `{kind: "report_document", id: <clientId>, module: "reports"}` for a client-grain read, and none of `ownerId`, `projectId` or `teamId`.
+
+**Not narrowed in the handler.** The person-axis and department narrowing (`requiresUnitNarrowing`) does not apply: the client grain is neither of those, as for `project`.
+
+**Artifacts** (a new action on an existing kind): the policy (`read_client` joins the four rules above), `permission-catalog.json` (+1 key), `permission-groups.json`, `role-permission-bundles.json`, and migration `202610151700_reports_client_grain.sql` (seeds the permission and its grants). **Restart the Cerbos test container and the live sidecar after the deploy**: nothing hot-reloads.
+
+**As built (2026-10-15).** The policy `resource_report_document.yaml` adds `read_client` to four existing rules (`company_admin`, the HR read tier, `manager`, and `member`) and to none of the served-provider, `org_unit_lead` or `owner` rules.
+- **Bundles** (`role-permission-bundles.json`, `totalPairs` 2072 -> 2079): `platform_admin` 456 -> 457, `company_admin` 419 -> 420, `owner` 419 -> 420, `manager` 211 -> 212, `member` 109 -> 110, `hr_staff` 19 -> 20, `hr_manager` 60 -> 61. `reports_staff`, `reports_manager`, `viewer`, `org_unit_lead` and `client` are unchanged.
+- **Migration** `202610151700_reports_client_grain.sql` seeds the key and its 7 `role_permissions` rows with a DO-block self-assertion (exactly those seven roles, none self-scoped, `owner` == `company_admin` over the whole kind).
+- **Catalog and pinned literals:** `permission-catalog.json` 471 -> 472 pairs and 456 -> 457 grantable (kinds stay 109), `permission-groups.json` (the key joins `team_project_reports`: 456 -> 457 grantable, 417 -> 418 covered), `cerbos-catalog-alignment` 471 -> 472, `permission-groups-catalog-parity` 456 -> 457, `ui-grantable-catalog` 471 -> 472 and 456 -> 457.
+- **Not sensitive**, like `read_project`.
+
+**Proof.** `platform-nest/src/modules/reports/reports-cerbos.test.ts` (the `read_client` matrix: exec, admin, lead, both HR halves and member allowed; the served tiers, a project-scope member, a bare membership, another company's manager, low assurance and a portal contact refused; and `read_client` equal to `read_project` role for role except the served arm), plus the static alignment suites (`cerbos-catalog-alignment`, `permission-groups-catalog-parity`, `ui-grantable-catalog`, `permission-arm-hazard-scan`) and the HTTP suite `report-client-grain.db.test.ts`. **Restart the Cerbos test container and the live sidecar after the policy deploy.**

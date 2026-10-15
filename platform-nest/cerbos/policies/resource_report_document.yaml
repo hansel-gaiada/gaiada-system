@@ -56,6 +56,16 @@
 #
 # NOT IMPLEMENTED, deliberately: `read_company` for the served tier (§8: ⛔) — a provider never reads
 # the served company's whole-company strategy numbers.
+#
+# ══════════════════ PV7-01 (2026-10-15) — `read_client`: a client's figures, summed over its projects ═════
+# The fifth grain. `read_client` goes to EXACTLY the derived roles that hold `read_project` — company_admin,
+# hr_people_reader, manager, member — and NOT to the served-provider arm (module_staff / module_manager): a
+# served slice is department only, so a provider's staff never read a served company's client numbers.
+# Nobody gains reach: whoever can read every project document can already compute the client sum. A
+# project-scope `member` matches no client resource (no projectId on it), so it reads its own project and no
+# client. The handler (`authorizeReportDocumentRead`) sends `{id: <clientId>, module: "reports"}` and applies
+# no unit narrowing, as for `project`. NO `perm_*` rule, for the IAM-04-B5 reason at the end of this file.
+# Docs: PERMISSION-CONTRACT §45, FRONTEND-BFF-CONTRACT §53. Proof: reports-cerbos.test.ts.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
@@ -70,7 +80,7 @@ resourcePolicy:
 
     # The tenant's own admin: every grain incl. company. §8 restricts the company-grain row against
     # dept-lead/HR/served-dept, not against the company's own administrator.
-    - actions: ["read_person", "read_project", "read_department", "read_company"]
+    - actions: ["read_person", "read_project", "read_client", "read_department", "read_company"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
@@ -99,7 +109,7 @@ resourcePolicy:
     # derived_roles.yaml's split note). Person/project/department (appraisal auto-inputs draw on all
     # three), but NOT company-grain: §8's exact wording for this column is "person data yes, company
     # strategy no".
-    - actions: ["read_person", "read_project", "read_department"]
+    - actions: ["read_person", "read_project", "read_client", "read_department"]
       effect: EFFECT_ALLOW
       derivedRoles: ["hr_people_reader"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
@@ -108,7 +118,7 @@ resourcePolicy:
     # subject's as-of unit being inside this caller's led unit SUBTREE, and `read_department` to the
     # requested unit being inside it. Excluded from company-grain per §8.
     # HIER-3 (2026-08-11): `team_lead` retired — `manager` alone carries this tier now.
-    - actions: ["read_person", "read_project", "read_department"]
+    - actions: ["read_person", "read_project", "read_client", "read_department"]
       effect: EFFECT_ALLOW
       derivedRoles: ["manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
@@ -144,8 +154,10 @@ resourcePolicy:
             request.resource.attr.module == "reports"
 
     # Project member: project-grain read for a project they hold a grant on (gaiada_scopes' own
-    # project-scope cascade — see derived_roles.yaml's `member` definition).
-    - actions: ["read_project"]
+    # project-scope cascade — see derived_roles.yaml's `member` definition). PV7-01: `read_client` rides
+    # along, which a project-scope grant never matches (no projectId on a client resource); only a
+    # company/global-scope `member`, who already reads every project document, reaches it.
+    - actions: ["read_project", "read_client"]
       effect: EFFECT_ALLOW
       derivedRoles: ["member"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }

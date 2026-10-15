@@ -314,3 +314,26 @@ describe("demoReports — POST reports/export (DW-4k)", () => {
     expect(post({ ...OK, periodKind: "custom", start: "2020-01-01", end: "2026-07-01" })?.status).toBe(422);
   });
 });
+
+// PV7-01 — the client grain in the demo store (mirrors the backend's document and overview).
+describe("demoReports — client grain (PV7-01)", () => {
+  it("serves a client document: grain, name, the Projects table, and never source_diversity", () => {
+    const res = call("/api/co-agency/reports/document", { grain: "client", scopeRef: "c-acme", periodKind: "month", start: "2026-07-01" });
+    expect(res!.status).toBe(200);
+    const doc = res!.json as ReportDocument;
+    expect(doc.header.grain).toBe("client");
+    expect(doc.header.scopeName).toBe("Acme Hospitality");
+    expect(doc.kpis.map((k) => k.metricKey)).not.toContain("evidence.source_diversity");
+    expect(doc.tables.map((t) => t.key)).toContain("client_projects");
+  });
+
+  it("lists the demo clients in the overview and names the grain in its 400", () => {
+    const res = call("/api/co-agency/reports/overview", { grain: "client", periodKind: "month", start: "2026-07-01" });
+    expect(res!.status).toBe(200);
+    const scopes = (res!.json as { scopes: { scopeRef: string; scopeName: string }[] }).scopes;
+    expect(scopes.map((s) => s.scopeRef).sort()).toEqual(["c-acme", "c-sunrise"]);
+    const bad = call("/api/co-agency/reports/document", { grain: "account", scopeRef: "x", periodKind: "month", start: "2026-07-01" });
+    expect(bad!.status).toBe(400);
+    expect(JSON.stringify(bad!.json)).toContain("client");
+  });
+});

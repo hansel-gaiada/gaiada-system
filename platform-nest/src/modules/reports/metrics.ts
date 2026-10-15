@@ -32,7 +32,7 @@ export type ReportMetricAxis =
   | "discipline"
   | "evidence";
 
-export type ReportMetricGrain = "person" | "project" | "department" | "company";
+export type ReportMetricGrain = "person" | "project" | "client" | "department" | "company";
 
 /** §5.4's three range-additivity classes. Dictates how a rollup/document-build query must treat
  *  an arbitrary [start, end] window:
@@ -88,7 +88,7 @@ export const REPORT_METRICS: readonly ReportMetricDef[] = [
     registryUnit: "minutes",
     aggregationRule: "sum",
     rangeClass: "additive",
-    grains: ["person", "project", "department", "company"],
+    grains: ["person", "project", "client", "department", "company"],
     appraisalSafe: true,
     seeded: true,
     description: "Estimate-weighted completed throughput (anti-slicing weight; Σ estimate_minutes_completed)",
@@ -102,7 +102,7 @@ export const REPORT_METRICS: readonly ReportMetricDef[] = [
     registryUnit: "count",
     aggregationRule: "sum",
     rangeClass: "additive",
-    grains: ["person", "project", "department", "company"],
+    grains: ["person", "project", "client", "department", "company"],
     appraisalSafe: false,
     seeded: true,
     description: "Raw completed-task count (appraisal-unsafe: rewards task-slicing; see #1)",
@@ -116,7 +116,7 @@ export const REPORT_METRICS: readonly ReportMetricDef[] = [
     registryUnit: "ratio",
     aggregationRule: "ratio_of_sums",
     rangeClass: "ratio",
-    grains: ["person", "project", "department", "company"],
+    grains: ["person", "project", "client", "department", "company"],
     appraisalSafe: true,
     seeded: true,
     description:
@@ -131,7 +131,7 @@ export const REPORT_METRICS: readonly ReportMetricDef[] = [
     registryUnit: "ratio",
     aggregationRule: "ratio_of_sums",
     rangeClass: "ratio",
-    grains: ["person", "project", "department", "company"],
+    grains: ["person", "project", "client", "department", "company"],
     appraisalSafe: true,
     seeded: true,
     description: "Completed tasks that carried an estimate, over all completions (estimation hygiene)",
@@ -145,7 +145,7 @@ export const REPORT_METRICS: readonly ReportMetricDef[] = [
     registryUnit: "ratio",
     aggregationRule: "ratio_of_sums",
     rangeClass: "ratio",
-    grains: ["project", "department", "company"],
+    grains: ["project", "client", "department", "company"],
     appraisalSafe: true,
     seeded: true,
     description:
@@ -159,7 +159,7 @@ export const REPORT_METRICS: readonly ReportMetricDef[] = [
     registryUnit: "count",
     aggregationRule: "sum",
     rangeClass: "additive",
-    grains: ["project", "department", "company"],
+    grains: ["project", "client", "department", "company"],
     appraisalSafe: false,
     seeded: true,
     description: "Net backlog change: Σ tasks_created − Σ tasks_completed (not person-attributable)",
@@ -173,7 +173,7 @@ export const REPORT_METRICS: readonly ReportMetricDef[] = [
     registryUnit: "ratio",
     aggregationRule: "ratio_of_sums",
     rangeClass: "ratio",
-    grains: ["project", "department", "company"],
+    grains: ["project", "client", "department", "company"],
     appraisalSafe: false,
     seeded: true,
     description: "Average daily open task count over the range (pm_progress_snapshots; context, not attributable)",
@@ -186,7 +186,7 @@ export const REPORT_METRICS: readonly ReportMetricDef[] = [
     registryUnit: "ratio",
     aggregationRule: "ratio_of_sums",
     rangeClass: "ratio",
-    grains: ["project", "department", "company"],
+    grains: ["project", "client", "department", "company"],
     appraisalSafe: false,
     seeded: true,
     description: "Daily blocked-status count over daily open count (blocked is often external; pm_progress_snapshots)",
@@ -199,7 +199,7 @@ export const REPORT_METRICS: readonly ReportMetricDef[] = [
     registryUnit: "ratio",
     aggregationRule: "ratio_of_sums",
     rangeClass: "ratio",
-    grains: ["person", "project", "department", "company"],
+    grains: ["person", "project", "client", "department", "company"],
     appraisalSafe: true,
     seeded: true,
     description: "Reopened over completed (quality proxy; owner-attributed)",
@@ -213,7 +213,7 @@ export const REPORT_METRICS: readonly ReportMetricDef[] = [
     registryUnit: "ratio",
     aggregationRule: "ratio_of_sums",
     rangeClass: "ratio",
-    grains: ["project"],
+    grains: ["project", "client"],
     appraisalSafe: false,
     seeded: true,
     description: "Progress·open weighted average over the range (self-reported progress; pm_progress_snapshots)",
@@ -226,7 +226,7 @@ export const REPORT_METRICS: readonly ReportMetricDef[] = [
     registryUnit: "minutes",
     aggregationRule: "sum",
     rangeClass: "additive",
-    grains: ["person", "project", "department", "company"],
+    grains: ["person", "project", "client", "department", "company"],
     appraisalSafe: false,
     seeded: true,
     description: "Raw logged minutes (appraisal-unsafe alone: hours are not value; §5.2)",
@@ -240,7 +240,7 @@ export const REPORT_METRICS: readonly ReportMetricDef[] = [
     registryUnit: "ratio",
     aggregationRule: "ratio_of_sums",
     rangeClass: "ratio",
-    grains: ["person", "project", "department", "company"],
+    grains: ["person", "project", "client", "department", "company"],
     // §5's table marks this "✅ safe at D/C; ⚠ caution at P" — a CONDITIONAL safety, not a plain
     // safe. An appraisal pack is built at PERSON grain, exactly the grain the table cautions
     // against, so `appraisalSafe` is false here. This is also what makes §5's prose count
@@ -261,7 +261,7 @@ export const REPORT_METRICS: readonly ReportMetricDef[] = [
     registryUnit: "ratio",
     aggregationRule: "ratio_of_sums",
     rangeClass: "ratio",
-    grains: ["person", "project", "department"],
+    grains: ["person", "project", "client", "department"],
     appraisalSafe: true,
     seeded: true,
     description:
@@ -306,7 +306,7 @@ export const REPORT_METRICS: readonly ReportMetricDef[] = [
     registryUnit: "count",
     aggregationRule: "sum",
     rangeClass: "additive",
-    grains: ["person", "project", "department"],
+    grains: ["person", "project", "client", "department"],
     appraisalSafe: false,
     seeded: true,
     description: "Raw comment count (chatter is gameable)",
@@ -320,7 +320,7 @@ export const REPORT_METRICS: readonly ReportMetricDef[] = [
     registryUnit: "count",
     aggregationRule: "sum",
     rangeClass: "additive",
-    grains: ["person", "project", "department"],
+    grains: ["person", "project", "client", "department"],
     appraisalSafe: false,
     seeded: true,
     description: "Raw doc-update count (unsafe raw; pack shows cohort band only)",
@@ -360,7 +360,7 @@ export const REPORT_METRICS: readonly ReportMetricDef[] = [
     registryUnit: "count",
     aggregationRule: "last",
     rangeClass: "non_additive",
-    grains: ["person", "project", "department", "company"],
+    grains: ["person", "project", "client", "department", "company"],
     appraisalSafe: false,
     seeded: true,
     description:

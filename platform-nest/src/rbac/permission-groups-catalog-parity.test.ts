@@ -134,7 +134,8 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // DW-4e-3 (2026-10-15): +2 grantable (reports.dept_kpi_target.{appraisal_comment,appraisal_assess}, both added to the existing `dept_kpi_targets` group). 449 -> 451.
     // DW-8g (2026-10-14): +5 grantable (core.calendar_event.{read,create,update,cancel,respond} on the NEW calendar_event kind, in 1 NEW authoring group `calendar`, not advancedOnly). 451 -> 456.
     // DW-8j (2026-10-15): +3 grantable (core.personal_mailbox.{connect,read,send} on the NEW personal_mailbox kind, in 1 NEW authoring group `personal_mailbox`, not advancedOnly). 456 -> 459.
-    expect(grantable.length).toBe(459);
+    // PV7-01 (2026-10-15): +1 grantable (reports.document.read_client on the EXISTING report_document kind, added to the existing `team_project_reports` group). 459 -> 460.
+    expect(grantable.length).toBe(460);
     expect(relationshipKeys.size).toBe(15);
   });
 

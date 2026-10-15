@@ -133,6 +133,14 @@ export function computeSealHash(entries: SealedDocumentEntry[]): string {
   return createHash("sha256").update(canonical).digest("hex");
 }
 
+/** Which narrative a sealed document of this grain gets: `"ai"` tries ONE gateway call (TR-27),
+ *  `"deterministic"` keeps `buildNarrative`'s text with no call. The client grain is deterministic
+ *  only (PV7-01, lead's call L2): a monthly seal covers every client (about 71 today), and one AI
+ *  call each would add 71 calls to every seal. Every other grain is unchanged. */
+export function narrativeModeForGrain(grain: ReportGrain): "ai" | "deterministic" {
+  return grain === "client" ? "deterministic" : "ai";
+}
+
 // ═══════════════════════════════ I/O — in-scope (grain, scopeRef) enumeration ═══════════════════
 
 /** Every (grain, scopeRef) with at least one rollup row in [start,end], plus the single
@@ -140,14 +148,14 @@ export function computeSealHash(entries: SealedDocumentEntry[]): string {
  *  for directly). Reuses the SAME rows the `/reports/overview` listing already derives —
  *  scoping decision ①, see file header. Department-grain servedTenant provider slices are
  *  excluded (scoping decision ②). */
-function enumerateInScope(tenantId: string, rows: RollupRow[]): { grain: ReportGrain; scopeRef: string }[] {
+export function enumerateInScope(tenantId: string, rows: RollupRow[]): { grain: ReportGrain; scopeRef: string }[] {
   const out = new Map<string, { grain: ReportGrain; scopeRef: string }>();
   for (const r of rows) {
     const dims = r.dimensions ?? {};
     const grain = rowGrainShape(dims);
     if (grain === "company") continue; // added once, below
     if (grain === "department" && dims.servedTenant) continue; // scoping decision ②
-    const scopeRef = String(grain === "person" ? dims.userId : grain === "project" ? dims.projectId : dims.unit);
+    const scopeRef = String(grain === "person" ? dims.userId : grain === "project" ? dims.projectId : grain === "client" ? dims.clientId : dims.unit);
     out.set(`${grain}:${scopeRef}`, { grain, scopeRef });
   }
   out.set(`company:${tenantId}`, { grain: "company", scopeRef: tenantId });
@@ -227,12 +235,17 @@ export async function sealPeriod(tenantId: string, periodId: string, actorUserId
     const facts = buildGroundingFacts(doc);
     let completionText: string | null = null;
     let model: string | null = null;
-    try {
-      const completion = await completeViaGateway(buildNarrativePrompt(facts), gatewayOpts);
-      completionText = completion.text;
-      model = completion.provider ?? null;
-    } catch {
-      completionText = null; // gateway unconfigured/down/timeout — fall through, never throw
+    // PV7-01 (lead's call L2): a client document is sealed with the deterministic narrative only, so
+    // no gateway call is made for it. `parseNarrative(null, ...)` below still stamps the grounding
+    // hash on the deterministic text, exactly as it does for any grain that fell back.
+    if (narrativeModeForGrain(grain) === "ai") {
+      try {
+        const completion = await completeViaGateway(buildNarrativePrompt(facts), gatewayOpts);
+        completionText = completion.text;
+        model = completion.provider ?? null;
+      } catch {
+        completionText = null; // gateway unconfigured/down/timeout — fall through, never throw
+      }
     }
     const narrative = parseNarrative(completionText, model, facts, doc.narrative);
 
