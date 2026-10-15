@@ -61,8 +61,8 @@ export function PayrollInputForm({ add, tenantId, runId, periodStart, periodEnd,
       <Field name="category" label="Category" type="select" options={CATEGORIES} required
         hint="Deductions and advances are taken off; enter their amount as a positive number" />
       <Field name="label" label="Label" required hint="Prints on the payslip" />
-      <Field name="amount" label="Amount" type="number" hint="Money, when you know it" />
-      <Field name="quantity" label="Quantity" type="number" hint="Hours, for overtime; the server prices them" />
+      <Field name="amount" label="Amount" type="number" step="any" hint="Money, when you know it" />
+      <Field name="quantity" label="Quantity" type="number" step="any" hint="Hours, for overtime; the server prices them" />
       <Field name="taxable" label="Taxable" type="boolean" defaultValue />
       <Field name="note" label="Note" />
       <p style={{ margin: 0, gridColumn: "1 / -1", font: "400 12px/1.5 var(--font-body)", color: "var(--erp-ink-60)" }}>
