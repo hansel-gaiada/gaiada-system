@@ -773,17 +773,21 @@ async function buildTables(
   }
 
   if (grain === "client") {
-    // PV7-01: which of the client's projects carried the work in the range (the same eligible set the
-    // KPIs sum: no internal project, no sentinel client, nothing soft-deleted).
+    // PV7-01: the client's projects and how much work each carried in the range (the same eligible set the
+    // KPIs sum: no internal project, no sentinel client, nothing soft-deleted). PV7-05: the table lists EVERY
+    // eligible project, with 0 where the project has no facts in the range (a LEFT JOIN, the date range in the
+    // ON clause so it narrows the facts, not the projects). A client with milestone or flow rows but no work
+    // facts used to come back with no table at all, so its report showed no project list. A client with no
+    // eligible project still has no table. Sealed documents are stored and unchanged: this affects new builds only.
     const { rows } = await withTenants(
       [tenantId],
       (c) =>
         c.query<{ name: string; throughput: string; completed: string }>(
           `SELECT p.name, COALESCE(SUM(f.estimate_minutes_completed), 0) AS throughput, COALESCE(SUM(f.tasks_completed), 0) AS completed
-             FROM report_work_facts f
-             JOIN projects p ON p.id = f.project_id AND p.tenant_id = f.tenant_id
+             FROM projects p
              JOIN clients c ON c.id = p.client_id AND c.tenant_id = p.tenant_id
-            WHERE f.tenant_id = $1 AND f.fact_date BETWEEN $2::date AND $3::date AND p.client_id = $4 AND ${CLIENT_PROJECT_ELIGIBLE_SQL}
+             LEFT JOIN report_work_facts f ON f.project_id = p.id AND f.tenant_id = p.tenant_id AND f.fact_date BETWEEN $2::date AND $3::date
+            WHERE p.tenant_id = $1 AND p.client_id = $4 AND ${CLIENT_PROJECT_ELIGIBLE_SQL}
             GROUP BY p.id, p.name
             ORDER BY throughput DESC, p.name ASC`,
           [tenantId, start, end, scopeRef],

@@ -8897,7 +8897,7 @@ A client document's narrative is the **deterministic** one, in a live read and i
 
 **As built (2026-10-15).**
 - **`flow.avg_progress`** is the one project metric with no department or company rollup. It is emitted at client grain too, as Sum(progress x open) / Sum(open) over the client's projects (the 16th metric).
-- **The Projects table** (`client_projects`: project, throughput, tasks completed, with a total row) lists which of the client's eligible projects carried the work. It is built from the same facts and the same eligible set as the KPIs.
+- **The Projects table** (`client_projects`: project, throughput, tasks completed, with a total row) lists EVERY eligible project of the client (the same eligible set as the KPIs) with the throughput and tasks completed the facts give it in the range, and 0 for a project with no facts in the range, so a client that has milestone or flow rows but no work facts still shows its project list (PV7-05, 2026-10-15; before that the table was absent for such a client). A client with no eligible project has no table. Sealed documents are stored and unchanged: the change affects new builds only.
 - **The print route** (`/print/reports/:jobToken`, the PDF export) renders a client document with the project grain's charts until PV7-05 builds the real page.
 - **Demo mode** serves two demo clients (`c-acme`, `c-sunrise`) from `lib/demoReports.ts`.
 - **The IAM artifacts** a new action on an existing kind needs are in the same change: the catalog key, the `team_project_reports` group, the regenerated bundles and the seed in the migration (PERMISSION-CONTRACT §45).
