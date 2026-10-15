@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { readClients } from "@/lib/entities";
+import { readDepartmentClientIds } from "@/lib/clientHealthDepartment-data";
 import { listDepartmentBriefs } from "@/lib/departments";
 import { getClientHealthBoard } from "@/lib/clientHub";
 import {
@@ -74,8 +74,8 @@ export default async function ClientHealthBoardPage({ searchParams }: { searchPa
   let departmentIds: Set<string> | null = null;
   let departmentFailed = false;
   if (department) {
-    const read = await readClients(userId, tenant, department);
-    if (read.kind === "ok") departmentIds = new Set(read.data.map((c) => c.id));
+    const read = await readDepartmentClientIds(userId, tenant, department);
+    if (read.kind === "ok") departmentIds = read.data;
     else departmentFailed = true;
   }
 

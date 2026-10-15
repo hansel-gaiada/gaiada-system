@@ -23,6 +23,7 @@ import { Pulse } from "./Pulse";
 import { Projects } from "./Projects";
 import { Campaigns } from "./Campaigns";
 import { Requests } from "./Requests";
+import { ClientHealth } from "./ClientHealth";
 import { Learning } from "./Learning";
 import { Appraisal } from "./Appraisal";
 import { Decisions } from "./Decisions";
@@ -66,6 +67,8 @@ export const OVERVIEW_WIDGETS: Readonly<Record<string, OverviewWidgetComponent>>
   projects: Projects,
   campaigns: Campaigns,
   requests: Requests,
+  // DW-10d: the first optional block (DW-D34), placed only when the person switches it on.
+  "client-health": ClientHealth,
   learning: Learning,
   appraisal: Appraisal,
   // The company Overview's blocks (DW-3i). Their keys differ from the department blocks' (`campaigns`, `learning`, `appraisal`) on
