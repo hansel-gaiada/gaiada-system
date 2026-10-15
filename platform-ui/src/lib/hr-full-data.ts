@@ -6,8 +6,8 @@ import "server-only";
 import { platformFetch, PlatformError } from "./platform";
 import { readResult, type ReadResult } from "./readResult";
 import type {
-  Application, ApplicationDetail, Candidate, FunnelStage, PayrollInput, PayrollRun, PayrollRunDetail, PayrollRunStatus,
-  PipelineStage, Requisition,
+  AllowanceType, Application, ApplicationDetail, BenefitPlan, Candidate, Compensation, FunnelStage, PayGrade, PayrollInput,
+  PayrollRun, PayrollRunDetail, PayrollRunStatus, PipelineStage, Requisition,
 } from "./hr-full";
 import type { Employee } from "./iam";
 
@@ -88,3 +88,28 @@ export async function getApplicationResult(u: string, t: string, id: string): Pr
     return readResult(Promise.reject(err));
   }
 }
+
+// DW-7f-3: the honest compensation reads, for /hr/compensation. The soft readers in lib/hr-full.ts (listCompensation,
+// listAllowanceTypes, listBenefitPlans, listPayGrades) turn a 403 and a 404 into [], which on the salary book reads
+// "nobody has a pay record" about a viewer who may simply not read it. These keep the refusal: 403 is `forbidden`, 404
+// and 5xx are `unavailable`; an empty `data` is the server's own answer. The first three routes are authorized as
+// `hr_payroll` read; pay grades are `hr_policy` read (a different gate), so a payroll reader can be refused only that.
+// There is NO route that lists an employee's allowances, benefit enrolments or tax profile: those cannot be read here.
+export function listCompensationResult(
+  u: string, t: string, params: { employeeId?: string; current?: boolean } = {},
+): Promise<ReadResult<Compensation[]>> {
+  const qs = new URLSearchParams();
+  if (params.employeeId) qs.set("employeeId", params.employeeId);
+  if (params.current) qs.set("current", "true");
+  const q = qs.toString();
+  return readResult(platformFetch<Compensation[]>(`${hrBase(t)}/compensation${q ? `?${q}` : ""}`, u));
+}
+
+export const listAllowanceTypesResult = (u: string, t: string): Promise<ReadResult<AllowanceType[]>> =>
+  readResult(platformFetch<AllowanceType[]>(`${hrBase(t)}/allowance-types`, u));
+
+export const listBenefitPlansResult = (u: string, t: string): Promise<ReadResult<BenefitPlan[]>> =>
+  readResult(platformFetch<BenefitPlan[]>(`${hrBase(t)}/benefit-plans`, u));
+
+export const listPayGradesResult = (u: string, t: string): Promise<ReadResult<PayGrade[]>> =>
+  readResult(platformFetch<PayGrade[]>(`${hrBase(t)}/pay-grades`, u));

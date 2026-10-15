@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   listPayrollRunsResult, getPayrollRunResult, listEmployeesResult, listPayrollInputsResult,
   listRequisitionsResult, listCandidatesResult, listApplicationsResult, listPipelineStagesResult, getFunnelResult, getApplicationResult,
+  listCompensationResult, listAllowanceTypesResult, listBenefitPlansResult, listPayGradesResult,
 } from "./hr-full-data";
 
 // DW-7e: the honest payroll-run list. The route needs the payroll read right, so a 403 is common and must read as a refusal.
@@ -151,5 +152,53 @@ describe("recruitment reads", () => {
     expect(await getApplicationResult("u1", "co-a", "ap1")).toEqual({ kind: "forbidden" });
     vi.stubGlobal("fetch", answer(500, { error: "boom" }));
     expect(await getApplicationResult("u1", "co-a", "ap1")).toMatchObject({ kind: "unavailable" });
+  });
+});
+
+// DW-7f-3: the honest compensation reads.
+describe("compensation reads", () => {
+  const url = (m: ReturnType<typeof answer>) => String((m.mock.calls[0] as unknown[])[0]);
+
+  it("read from the compensation routes and return the server's rows", async () => {
+    const reads: [() => Promise<unknown>, string][] = [
+      [() => listCompensationResult("u1", "co-a"), "http://p.test/api/co-a/modules/hr/compensation"],
+      [() => listAllowanceTypesResult("u1", "co-a"), "http://p.test/api/co-a/modules/hr/allowance-types"],
+      [() => listBenefitPlansResult("u1", "co-a"), "http://p.test/api/co-a/modules/hr/benefit-plans"],
+      [() => listPayGradesResult("u1", "co-a"), "http://p.test/api/co-a/modules/hr/pay-grades"],
+    ];
+    for (const [read, expected] of reads) {
+      const fetchMock = answer(200, [{ id: "x1" }]);
+      vi.stubGlobal("fetch", fetchMock);
+      expect(await read()).toEqual({ kind: "ok", data: [{ id: "x1" }] });
+      expect(url(fetchMock)).toBe(expected);
+    }
+  });
+
+  it("passes the compensation filters through (current, employeeId)", async () => {
+    let fetchMock = answer(200, []);
+    vi.stubGlobal("fetch", fetchMock);
+    await listCompensationResult("u1", "co-a", { current: true });
+    expect(url(fetchMock)).toBe("http://p.test/api/co-a/modules/hr/compensation?current=true");
+    fetchMock = answer(200, []);
+    vi.stubGlobal("fetch", fetchMock);
+    await listCompensationResult("u1", "co-a", { employeeId: "e 1" });
+    expect(url(fetchMock)).toBe("http://p.test/api/co-a/modules/hr/compensation?employeeId=e+1");
+  });
+
+  it("an empty 200 is the server's own answer; 403 is forbidden; 404 and 5xx are unavailable, never an empty list", async () => {
+    const readers = [
+      () => listCompensationResult("u1", "co-a"), () => listAllowanceTypesResult("u1", "co-a"),
+      () => listBenefitPlansResult("u1", "co-a"), () => listPayGradesResult("u1", "co-a"),
+    ];
+    for (const read of readers) {
+      vi.stubGlobal("fetch", answer(200, []));
+      expect(await read()).toEqual({ kind: "ok", data: [] });
+      vi.stubGlobal("fetch", answer(403, { error: "forbidden" }));
+      expect(await read()).toEqual({ kind: "forbidden" });
+      for (const status of [404, 500]) {
+        vi.stubGlobal("fetch", answer(status, { error: "nope" }));
+        expect(await read()).toMatchObject({ kind: "unavailable" });
+      }
+    }
   });
 });
