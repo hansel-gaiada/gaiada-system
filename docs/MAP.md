@@ -510,6 +510,8 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/hr/payroll/[runId]`
 - `/hr/people`
 - `/hr/recruitment`
+- `/hr/recruitment/[requisitionId]`
+- `/hr/recruitment/applications/[applicationId]`
 - `/hr/reviews`
 - `/hr/settings`
 - `/invite/[token]`
