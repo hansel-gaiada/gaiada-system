@@ -5,6 +5,7 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { getParameterSetResult } from "@/lib/hr-full-data";
+import { isoDay } from "@/lib/hr-full";
 import { Card, KpiTile, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
@@ -57,7 +58,7 @@ export default async function HrStatutorySetPage({ params }: { params: Params })
       {back}
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", marginBottom: 22 }}>
         <KpiTile label="Status" value={ratified ? "Ratified" : "Unratified"} foot={ratified && set.ratifiedAt ? set.ratifiedAt.slice(0, 10) : "not signed off"} />
-        <KpiTile label="Effective" value={set.effectiveFrom} foot={`until ${set.effectiveTo ?? "open"}`} />
+        <KpiTile label="Effective" value={isoDay(set.effectiveFrom)} foot={`until ${set.effectiveTo ? isoDay(set.effectiveTo) : "open"}`} />
         <KpiTile label="Country" value={set.countryCode} />
         <KpiTile label="Parameters" value={String(set.parameters.length)} />
       </div>
@@ -69,7 +70,7 @@ export default async function HrStatutorySetPage({ params }: { params: Params })
       >
         <div style={{ display: "grid", gap: 10 }}>
           <p style={{ margin: 0, font: "400 13px var(--font-body)" }}>
-            <StatusBadge label={ratified ? "ratified" : "unratified"} /> {set.countryCode} · {set.effectiveFrom} → {set.effectiveTo ?? "open"}
+            <StatusBadge label={ratified ? "ratified" : "unratified"} /> {set.countryCode} · {isoDay(set.effectiveFrom)} → {set.effectiveTo ? isoDay(set.effectiveTo) : "open"}
           </p>
           {set.sourceNote && (
             <p style={{ margin: 0, font: "400 13px/1.6 var(--font-body)" }}>Source: {set.sourceNote}</p>

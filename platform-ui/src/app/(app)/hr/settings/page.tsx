@@ -5,7 +5,7 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import {
-  minutesToDays, formatMoney, type Holiday, type HolidayCalendar, type LeavePolicy, type LeavePolicyAssignment, type PayGrade,
+  minutesToDays, formatMoney, isoDay, type Holiday, type HolidayCalendar, type LeavePolicy, type LeavePolicyAssignment, type PayGrade,
   type WorkingDayBreakdown,
 } from "@/lib/hr-full";
 import type { Employee } from "@/lib/iam";
@@ -94,7 +94,7 @@ export default async function HrSettingsPage({ searchParams }: { searchParams: S
   const sets = setsRead.kind === "ok" ? setsRead.data : [];
 
   const today = new Date().toISOString().slice(0, 10);
-  const inForce = sets.find((s) => s.effectiveFrom <= today && (!s.effectiveTo || s.effectiveTo >= today));
+  const inForce = sets.find((s) => isoDay(s.effectiveFrom) <= today && (!s.effectiveTo || isoDay(s.effectiveTo) >= today));
   const defaultCalendar = calendars.find((c) => c.isDefault);
   const selectedCalendar = calendarParam ? calendars.find((c) => c.id === calendarParam) : undefined;
   const selectedPolicy = policyParam ? policies.find((p) => p.id === policyParam) : undefined;
@@ -186,7 +186,7 @@ export default async function HrSettingsPage({ searchParams }: { searchParams: S
                     {s.name}
                   </Link>,
                   s.countryCode,
-                  `${s.effectiveFrom} → ${s.effectiveTo ?? "open"}`,
+                  `${isoDay(s.effectiveFrom)} → ${s.effectiveTo ? isoDay(s.effectiveTo) : "open"}`,
                   String(s.parameterCount),
                   <StatusBadge key={`${s.id}-r`} label={s.ratifiedAt ? "ratified" : "unratified"} />,
                 ])}
@@ -423,8 +423,8 @@ function LeaveTab({ tenant, canManage, read, selectedId, selected, assignmentsRe
                   a.subjectUserId ? (nameOf.get(a.subjectUserId) ?? "A person (name not shown)")
                     : a.unitNodeId ? `Org unit ${a.unitNodeId}`
                     : "Everyone in the company (default)",
-                  a.effectiveFrom,
-                  a.effectiveTo ?? "open",
+                  isoDay(a.effectiveFrom),
+                  a.effectiveTo ? isoDay(a.effectiveTo) : "open",
                 ])}
               />
             ))}

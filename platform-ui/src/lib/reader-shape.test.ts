@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { getAnalytics, listExpiringDocuments } from "./hr-full";
+import { getAnalytics, isoDay, listExpiringDocuments } from "./hr-full";
 import { getTopology } from "./it";
 
 // A 200 in the wrong shape must not crash a page. The demo layer answers `[]` to any GET it has no fixture for, and the
@@ -85,5 +85,18 @@ describe("getTopology", () => {
   it("still takes the same fallback on 404", async () => {
     vi.stubGlobal("fetch", routes({ [TOPOLOGY]: () => answer(404, { error: "nope" }), [DEVICES]: () => answer(200, []) }));
     expect(await getTopology("u1", "co-a")).toEqual({ devices: [], links: [], lastRun: null });
+  });
+});
+
+describe("isoDay", () => {
+  it("trims an exact UTC-midnight timestamp to its day and leaves a plain day alone", () => {
+    expect(isoDay("2026-01-01T00:00:00.000Z")).toBe("2026-01-01");
+    expect(isoDay("2026-01-01T00:00:00Z")).toBe("2026-01-01");
+    expect(isoDay("2026-01-01")).toBe("2026-01-01");
+  });
+
+  it("shows any other timestamp as sent, because cutting it could name the wrong day", () => {
+    expect(isoDay("2025-12-31T16:00:00.000Z")).toBe("2025-12-31T16:00:00.000Z");
+    expect(isoDay("not a date")).toBe("not a date");
   });
 });

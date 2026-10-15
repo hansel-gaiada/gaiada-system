@@ -457,6 +457,13 @@ export function formatRate(pct: number | null | undefined): string {
   return pct === null || pct === undefined ? "—" : `${pct.toFixed(1)}%`;
 }
 
+/** An effective date as its calendar day. Some HR routes send a DATE column as a UTC-midnight timestamp
+ *  (`2026-01-01T00:00:00.000Z`), which the statutory, leave-assignment and compensation tables showed raw. Only an exact
+ *  UTC midnight is trimmed; any other value is shown as sent, because cutting a real timestamp could name the wrong day. */
+export function isoDay(value: string): string {
+  return /^\d{4}-\d{2}-\d{2}T00:00:00(\.0+)?Z$/.test(value) ? value.slice(0, 10) : value;
+}
+
 /**
  * Monthly-equivalent of a rate quoted in some other unit.
  *

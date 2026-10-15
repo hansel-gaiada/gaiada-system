@@ -11,7 +11,7 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
-### platform-ui `0.182.0` - DW-7: wrong-shape reads no longer crash four pages; DW-7h and DW-7i planned (2026-10-15) - PROTOTYPED
+### platform-ui `0.182.0` - DW-7: wrong-shape reads no longer crash four pages; HR effective dates shown as days; DW-7h and DW-7i planned (2026-10-15) - PROTOTYPED
 
 - **Reader shape checks.**
   - The demo layer answers `[]` to any GET it has no fixture for. That crashed three server renders, logged in every `workspace-functional` gate run:
@@ -24,6 +24,9 @@ local stack). None of these mean "production-done".
     - topology takes its existing devices-only fallback with no run, so the stale-discovery banner stays up.
   - The DW-7g reads (tax returns, the drift check and the chart of accounts) turn a wrong shape into "unavailable".
   - Tests: `reader-shape.test.ts` and `finance-data.test.ts`. Found by DW-9.
+- **HR effective dates (found on live 413).**
+  - Live sends a statutory set's DATE as a UTC-midnight timestamp, which HR › Settings and the set's page showed raw. `isoDay` (`lib/hr-full.ts`) now shows the day. It is also used on leave assignments and compensation.
+  - A set effective from today did not count as in force, because the timestamp string sorts after the day. The tile now compares days.
 - **Planned, not built:** DW-7h (threats and isolation) and DW-7i (failing workflows, bank feeds, network controller, Google Workspace admin) are written up in plan §4.3 with what each needs from the owner. The registry's planned connections now point at DW-7i.
 
 ### platform-nest `0.159.0` + platform-ui `0.181.0` - DW-7f-3, 3b, 4, 5: HR compensation, review cycles and policies become writable; an employee's pay items on file (2026-10-15) - PROTOTYPED

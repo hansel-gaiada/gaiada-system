@@ -4,7 +4,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
-import { formatMoney, monthlyEquivalent } from "@/lib/hr-full";
+import { formatMoney, isoDay, monthlyEquivalent } from "@/lib/hr-full";
 import {
   listCompensationResult, listPayGradesResult, listAllowanceTypesResult, listBenefitPlansResult, listEmployeesResult,
   listEmployeeAllowancesResult, listEmployeeBenefitsResult, getEmployeeTaxProfileResult,
@@ -201,7 +201,7 @@ export default async function HrCompensationPage({ searchParams }: { searchParam
                 label(c.rateBasis),
                 label(c.payFrequency),
                 Number(c.fte).toFixed(2),
-                c.effectiveFrom,
+                isoDay(c.effectiveFrom),
                 c.changeReason ? label(c.changeReason) : "—",
                 <Link key={c.id} href={`/hr/compensation?employee=${encodeURIComponent(c.employeeId)}`}
                   aria-label={`Pay history for ${c.employeeName}`} style={{ color: "var(--erp-accent)" }}>
@@ -234,8 +234,8 @@ export default async function HrCompensationPage({ searchParams }: { searchParam
                   { label: "FTE", align: "right" }, { label: "Grade" }, { label: "Reason" }, { label: "Note" },
                 ]}
                 rows={historyRead.data.map((h) => [
-                  h.effectiveFrom,
-                  h.effectiveTo ?? "in force",
+                  isoDay(h.effectiveFrom),
+                  h.effectiveTo ? isoDay(h.effectiveTo) : "in force",
                   formatMoney(h.baseAmount, h.currency),
                   label(h.rateBasis),
                   label(h.payFrequency),

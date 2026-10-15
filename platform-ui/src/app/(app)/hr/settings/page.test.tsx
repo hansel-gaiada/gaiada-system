@@ -288,6 +288,20 @@ describe("/hr/settings — statutory tab", () => {
     await renderPage({ tab: "statutory" });
     expect(buttons()).toEqual([]);
   });
+
+  // Live (413) sends the DATE column as a UTC-midnight timestamp. It showed raw, and a set effective from TODAY did not
+  // count as in force, because "YYYY-MM-DDT00:00:00.000Z" sorts after "YYYY-MM-DD".
+  it("shows a timestamp-form effective date as its day, and a set effective from today is in force", async () => {
+    as("hr_manager");
+    const today = new Date().toISOString().slice(0, 10);
+    setsRead = { kind: "ok", data: [set({ effectiveFrom: `${today}T00:00:00.000Z`, ratifiedAt: "2026-08-26T03:00:00.000Z" })] };
+    await renderPage({ tab: "statutory" });
+    expect(screen.getByText(`${today} → open`)).toBeInTheDocument();
+    expect(screen.queryByText(/T00:00:00/)).toBeNull();
+    // In force: the Statutory set tile's foot names the set (beside its link in the table), not "nothing covers today".
+    expect(screen.getAllByText("Indonesia 2026")).toHaveLength(2);
+    expect(screen.queryByText("nothing covers today")).toBeNull();
+  });
 });
 
 describe("/hr/settings — funnel tab", () => {
