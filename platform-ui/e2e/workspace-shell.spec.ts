@@ -246,7 +246,7 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
     await expect(account.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
 
     // The Theme control works from here: pinning dark sets the attribute on <html> at once.
-    await account.getByRole("radio", { name: /dark/i }).click();
+    await account.getByRole("menuitemradio", { name: /dark/i }).click(); // DW-9b-2: menu radios inside the menu
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
     await account.getByRole("menuitem", { name: "Back to the classic layout" }).click();

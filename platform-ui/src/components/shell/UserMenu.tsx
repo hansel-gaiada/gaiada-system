@@ -47,7 +47,7 @@ export function UserMenu({ name, secondary, initials, compact = false, clientVie
           {theme && (
             <div className="erp-usermenu__theme" role="group" aria-label="Theme">
               <span className="erp-usermenu__theme-label" aria-hidden="true">Theme</span>
-              <ThemeToggle theme={theme} />
+              <ThemeToggle theme={theme} inMenu />
             </div>
           )}
           <Link href="/account" role="menuitem" className="erp-usermenu__item" onClick={() => setOpen(false)}>

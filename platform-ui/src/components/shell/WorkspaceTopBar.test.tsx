@@ -130,10 +130,11 @@ describe("WorkspaceTopBar: the avatar menu", () => {
     await draw({ theme: "light" });
     openAvatar();
     const theme = screen.getByRole("group", { name: "Theme" });
-    expect(within(theme).getByRole("radio", { name: "Light" })).toBeChecked();
-    fireEvent.click(within(theme).getByRole("radio", { name: "Dark" }));
+    // Menu radios inside the menu (DW-9b-2: a radiogroup may not sit in role="menu").
+    expect(within(theme).getByRole("menuitemradio", { name: "Light" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(within(theme).getByRole("menuitemradio", { name: "Dark" }));
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
-    expect(within(theme).getByRole("radio", { name: "Dark" })).toBeChecked();
+    expect(within(theme).getByRole("menuitemradio", { name: "Dark" })).toHaveAttribute("aria-checked", "true");
     await waitFor(() => expect(setThemeAction).toHaveBeenCalledWith("dark"));
   });
 });

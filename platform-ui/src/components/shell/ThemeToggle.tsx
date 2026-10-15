@@ -13,13 +13,17 @@ import "./theme-toggle.css";
 // A radiogroup, not three plain buttons: exactly one of the three is ever "the current theme",
 // which is what aria-checked + role="radio" communicates natively (arrow-key roaming is free from
 // the browser's native radiogroup handling once role+tabIndex are set up this way — see onKeyDown).
+//
+// `inMenu` (DW-9b-2): inside the avatar menu (`UserMenu`, role="menu") a radiogroup is not allowed (a menu owns only menu
+// items, groups of them and separators; axe `aria-required-children`, WCAG 1.3.1). There the three choices are
+// `menuitemradio`, held by the menu's own `role="group"` "Theme", and this wrapper takes no role. Same state, same keys.
 const OPTIONS: { value: Theme; label: string; icon: "auto" | "sun" | "moon" }[] = [
   { value: "auto", label: "Match device", icon: "auto" },
   { value: "light", label: "Light", icon: "sun" },
   { value: "dark", label: "Dark", icon: "moon" },
 ];
 
-export function ThemeToggle({ theme }: { theme: Theme }) {
+export function ThemeToggle({ theme, inMenu = false }: { theme: Theme; inMenu?: boolean }) {
   // Local state so the pressed segment updates the instant it's clicked, not on the next
   // navigation — same "optimistic, not awaited for correctness" shape as the assistant rail
   // collapse toggle (`AssistantWorkspace` + `setAssistantRailCollapsedAction`).
@@ -52,13 +56,13 @@ export function ThemeToggle({ theme }: { theme: Theme }) {
   }
 
   return (
-    <div className="erp-theme" role="radiogroup" aria-label="Appearance">
+    <div className="erp-theme" {...(inMenu ? {} : { role: "radiogroup", "aria-label": "Appearance" })}>
       {OPTIONS.map((opt, i) => (
         <button
           key={opt.value}
           id={`theme-opt-${opt.value}`}
           type="button"
-          role="radio"
+          role={inMenu ? "menuitemradio" : "radio"}
           aria-checked={current === opt.value}
           aria-label={opt.label}
           title={opt.label}

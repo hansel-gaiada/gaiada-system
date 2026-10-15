@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { UserMenu } from "./UserMenu";
 import { setShellLayoutAction } from "@/lib/prefsActions";
@@ -77,8 +77,17 @@ describe("UserMenu — the Theme control (DW-2c)", () => {
   it("shows Theme first in the menu, with the current theme checked", () => {
     const menu = open("dark");
     expect(menu.firstElementChild).toBe(screen.getByRole("group", { name: "Theme" }));
-    expect(screen.getByRole("radio", { name: "Dark" })).toBeChecked();
     expect(screen.getByRole("menuitem", { name: "Account settings" })).toBeInTheDocument();
+  });
+
+  it("offers the themes as menu radios inside the menu, never a radiogroup there (DW-9b-2: aria-required-children)", () => {
+    open("dark");
+    const theme = screen.getByRole("group", { name: "Theme" });
+    expect(within(theme).getAllByRole("menuitemradio").map((b) => b.getAttribute("aria-label"))).toEqual(["Match device", "Light", "Dark"]);
+    expect(within(theme).getByRole("menuitemradio", { name: "Dark" })).toHaveAttribute("aria-checked", "true");
+    expect(within(theme).getByRole("menuitemradio", { name: "Light" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect(screen.queryByRole("radio")).toBeNull();
   });
 
   it("shows nothing of it without the prop, so the classic menu is as it was", () => {

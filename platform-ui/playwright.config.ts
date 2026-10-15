@@ -136,7 +136,7 @@ export default defineConfig({
     {
       // DW-9b: the axe sweep of the workspace shell's own surfaces, light and dark, desktop and phone. Same reasoning as
       // `workspace-personas`: every test signs in as its own demo identity and plants the tenant and pilot cookies, so NO stored
-      // session. Not in CI's smoke; gated on sumopod with the other workspace projects. Expected red until DW-9b-2 fixes the findings.
+      // session. Not in CI's smoke; gated on sumopod with the other workspace projects.
       name: "workspace-a11y",
       use: { ...devices["Desktop Chrome"] },
       testMatch: /a11y-axe-workspaces\.spec\.ts/,
