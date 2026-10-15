@@ -11,6 +11,30 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.152.0` + platform-ui `0.175.0` + mcp-hub `0.16.0` - DW-8o busy times, DW-8p time entries by tier, DW-8i-2 the assistant and the hub use the knowledge filter (2026-10-15) - PROTOTYPED
+
+Owner rulings DW-D26, DW-D28 and DW-D29 (plan §11.4 and its decision log, 2026-10-15). Contracts: `docs/FRONTEND-BFF-CONTRACT.md` §46.9, §47.4 and §48a; `docs/PERMISSION-CONTRACT.md` §39 and §40a. No migration, no Cerbos policy change, no compose change.
+
+- **DW-8p (DW-D29): `GET /api/:t/time-entries` is read by person-axis tier.**
+  - Before, every member and viewer could list the whole company's time entries.
+  - Now the list goes through the shared person-axis gate (`core/person-axis-gate.ts`), the rule activity and PM productivity use:
+    - a member or a viewer reads their own entries;
+    - a head (a manager, or an `org_unit_lead`) reads their own and their led-unit subtree's;
+    - company admins and HR's people readers read the company.
+  - `?userId=X` is new: the gate decides first, then the id is checked.
+  - `?mine=me`, `projectId`, `taskId`, the order and the 500 cap are unchanged. Writes are unchanged.
+- **DW-8i-2 (DW-D26): the AI Assistant and the hub quote only records the person may open.**
+  - **The assistant's retrieval** (`modules/assistant/context.ts`) runs its internal-tier candidates through DW-8i's `filterReadableHits` as the thread's owner, for the thread's company. Reports, people and org stay withheld. Any failure leaves the turn with no knowledge, never the unfiltered chunks. The public tier (the published website corpus) stays in the grounding. Several chunks of one record now cite once.
+  - **The hub's `knowledge.search`** takes internal hits only from the platform's filtered `GET /api/:t/knowledge/search`, for a caller with an identity and a `tenantId` (new optional inputs `tenantId` and `limit`). It asks the store for the public tier only, for every caller. Before, an identified caller could get the store's unfiltered internal tier. With `tenantId` the answer is `{hits, internal, public}`, and a refusal or an outage is reported, never shown as "no internal hits". Without it, the answer is the plain array as before, now public hits only.
+- **DW-8o (DW-D28): busy times on the meeting form.**
+  - New `GET /api/:t/calendar/busy?userIds=&from=&to=[&excludeEventId=]`, gated by `calendar_event` · `create` before the query is read.
+  - The answer carries times only: the merged busy blocks of confirmed, timed events each person has not declined. There is no title, place, organizer or event id.
+  - The limits are 20 people and 14 days. A person outside the company is a 422.
+  - No activity row and no notification are written.
+  - `/calendar/new` and the edit page show "Busy that day" for the organizer and the invited people, in the display zone, with "Clashes with the chosen time" in words. The edit page leaves the event itself out. A failed read says so, never "Free".
+- **Finding recorded for the owner (DW-8i-3).** The SEO property brief's grounding and social's brand drafts still read the store's internal tier with only its own rule (BFF §46.9).
+- **Verified.** CI was green on each branch, including the new HTTP suites, before they were combined. The gate is CI on the landing sha.
+
 ### platform-nest `0.151.0` + platform-ui `0.174.0` - PV7-03, PV7-04a, PV7-04b, PV7-05: client health on both sides, client reports, the health board (2026-10-15) - PROTOTYPED
 
 Plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`; contract FRONTEND-BFF-CONTRACT §54.7 and §55, PERMISSION-CONTRACT §46.
