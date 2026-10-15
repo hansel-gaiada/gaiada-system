@@ -29,7 +29,7 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ".auth/user.json" },
       dependencies: ["setup"],
-      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, /workspace-shell\.spec\.ts/, /me-performance\.spec\.ts/, /workspace-departments\.spec\.ts/, /workspace-functional\.spec\.ts/, /workspace-personas\.spec\.ts/, WEBDESK_STUB_SPECS],
+      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, /workspace-shell\.spec\.ts/, /me-performance\.spec\.ts/, /workspace-departments\.spec\.ts/, /workspace-functional\.spec\.ts/, /workspace-personas\.spec\.ts/, /a11y-axe-workspaces\.spec\.ts/, WEBDESK_STUB_SPECS],
     },
     {
       // CP-17 client portal. Its OWN project with NO stored session, because every test here signs in as
@@ -132,6 +132,14 @@ export default defineConfig({
       name: "workspace-personas",
       use: { ...devices["Desktop Chrome"] },
       testMatch: /workspace-personas\.spec\.ts/,
+    },
+    {
+      // DW-9b: the axe sweep of the workspace shell's own surfaces, light and dark, desktop and phone. Same reasoning as
+      // `workspace-personas`: every test signs in as its own demo identity and plants the tenant and pilot cookies, so NO stored
+      // session. Not in CI's smoke; gated on sumopod with the other workspace projects. Expected red until DW-9b-2 fixes the findings.
+      name: "workspace-a11y",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /a11y-axe-workspaces\.spec\.ts/,
     },
     {
       // P3-12 CI build-gate smoke check. Self-contained (does its own login),
