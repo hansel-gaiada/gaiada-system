@@ -11,6 +11,20 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.157.0` + platform-ui `0.179.0` - DW-7f-1/1b/1c + DW-7f-2: HR payroll and recruitment become writable (2026-10-15) - PROTOTYPED
+
+Plan §4.3 (7f). The payroll and recruitment backends were complete and view-only in the UI; this adds the screens, one read route (BFF §50) and fixes found on the way. No migration, no Cerbos change.
+- **Payroll (7f-1):** `/hr/payroll` creates a run, calculates, approves (with the unratified-statutory override and a required reason), publishes payslips, and marks a run paid (with a confirmation). Refusals come through in the server's words, and nothing claims a state the server did not return (`lib/hrPayrollActions.ts`).
+- **Run detail (7f-1b):** `/hr/payroll/[runId]` shows the header, the timeline, the override reason and the payslip summaries, plus "Add input" while a run can still be calculated (the employee picker reads `/hr/employees`).
+- **Payroll inputs read (7f-1c, BFF §50):** `GET /api/:t/modules/hr/payroll-inputs?runId&employeeId&periodStart&periodEnd&consumed`, authorized as `hr_payroll` read before validation. A bad uuid or date (`2026-13-01`) is a 400, never a 500. The run page lists the inputs it consumed and those waiting for the next calculate.
+- **Recruitment (7f-2):**
+  - `/hr/recruitment`: requisitions (create, edit, submit to approval, hold, close, cancel), candidates (add, erasure request), the pipeline by stage, and the stage editor.
+  - `/hr/recruitment/[requisitionId]`: one requisition with its applications.
+  - `/hr/recruitment/applications/[applicationId]`: stage moves, interviews, scorecards, offers and their status, and convert to a hire (with a confirmation naming the employee it creates).
+  - Requisition approval stays in `/approvals`.
+- **Fixes:** a `"use server"` file exports only async functions (`next build`); payroll input amounts accept decimals; the 400 test reads the error filter's `{error, field}`.
+- **Tests:** `payroll-inputs-read.test.ts` (11, live Postgres + Cerbos), the action, reader, component and page tests for payroll and recruitment.
+
 ### platform-nest `0.156.0` - DW-8i-3: the SEO property brief and social's brand drafts keep only their own knowledge corpus (2026-10-15) - PROTOTYPED
 
 Owner ruling DW-D31 (plan §11.4 and its decision log, 2026-10-15). Contract: `docs/FRONTEND-BFF-CONTRACT.md` §46.10. No migration, no Cerbos change, no compose change.
