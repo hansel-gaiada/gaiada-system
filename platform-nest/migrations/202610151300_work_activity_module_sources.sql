@@ -1,7 +1,7 @@
 -- 202610151300_work_activity_module_sources.sql — DW-4h-1 (docs/FRONTEND-BFF-CONTRACT.md §44.1): the activity series counts all work.
 -- The audit-log bridge writes work_activity rows for every module's human actions, so the `source` CHECK widens from
 -- pm, pipeline, github, google_drive, claude, manual, system to also accept webdesk, social, seo, creatives, finance, hr,
--- meetings, learning, time and checkins. No data changes: every existing row already satisfies the wider set.
+-- learning, time and checkins. Meetings need no source of their own: the outbox consumer's `system` / `meeting_recording` rows are the meetings kind. No data changes: every existing row already satisfies the wider set.
 --
 -- The CHECK was created inline and unnamed in 0030, so Postgres named it work_activity_source_check. This looks the real
 -- name up in pg_constraint anyway (a database that was ever hand-edited keeps working), drops whatever CHECK constrains
@@ -23,7 +23,7 @@ ALTER TABLE work_activity DROP CONSTRAINT IF EXISTS work_activity_source_check;
 ALTER TABLE work_activity ADD CONSTRAINT work_activity_source_check
   CHECK (source IN (
     'pm', 'pipeline', 'github', 'google_drive', 'claude', 'manual', 'system',
-    'webdesk', 'social', 'seo', 'creatives', 'finance', 'hr', 'meetings', 'learning', 'time', 'checkins'
+    'webdesk', 'social', 'seo', 'creatives', 'finance', 'hr', 'learning', 'time', 'checkins'
   ));
 
 DO $$

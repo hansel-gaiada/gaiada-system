@@ -41,11 +41,8 @@ const GOLDEN: string[] = [
   "creative_asset|review_approved -> creatives|creative_asset|review_approved|creatives.reviews",
   "creative_asset|review_changes_requested -> creatives|creative_asset|review_changes_requested|creatives.reviews",
   "finance_journal|posted -> finance|finance_journal|posted|finance.journals",
-  "invoice_payment|confirmed -> finance|invoice_payment|confirmed|finance.payments",
   "hr_leave_request|decided -> hr|hr_leave_request|decided|hr.leave_decided",
   "lms_completion|completed -> learning|lms_completion|completed|learning.completed",
-  "meeting_recording|ingested -> meetings|meeting_recording|ingested|meetings.recorded",
-  "meeting_recording|shared_minutes -> meetings|meeting_recording|shared_minutes|meetings.recorded",
   "time_entry|logged -> time|time_entry|logged|time.logged",
   "report_checkin|submitted -> checkins|report_checkin|submitted|checkins.submitted",
 ];
@@ -58,7 +55,7 @@ describe("the catalogue (BFF §44.2)", () => {
     expect(ACTIVITY_BRIDGE.map(line)).toEqual(GOLDEN);
   });
 
-  it("the kinds are exactly §44.2's twenty, with their sources", () => {
+  it("the kinds are §44.2's twenty less finance.payments (dropped: its only audit row is a service principal's), with their sources", () => {
     expect(ACTIVITY_KINDS.map((k) => `${k.key}|${k.label}|${k.source}`)).toEqual([
       "pm.tasks_completed|Tasks completed|pm",
       "pm.comments|Comments|pm",
@@ -74,9 +71,8 @@ describe("the catalogue (BFF §44.2)", () => {
       "creatives.versions|Asset versions|creatives",
       "creatives.reviews|Review decisions|creatives",
       "finance.journals|Journals posted|finance",
-      "finance.payments|Payments confirmed|finance",
       "hr.leave_decided|Leave decided|hr",
-      "meetings.recorded|Meetings recorded|meetings",
+      "meetings.recorded|Meetings recorded|system",
       "learning.completed|Learning completed|learning",
       "time.logged|Time logged|time",
       "checkins.submitted|Check-ins|checkins",
@@ -92,7 +88,8 @@ describe("the catalogue (BFF §44.2)", () => {
       expect(kind!.source).toBe(e.source);
     }
     const bridgedKinds = new Set(ACTIVITY_BRIDGE.map((e) => e.kind));
-    for (const k of ACTIVITY_KINDS.filter((x) => x.source !== "pm" && x.source !== "github")) expect(bridgedKinds.has(k.key), k.key).toBe(true);
+    // pm, github and the meetings kind (the outbox consumer's system rows) are written by other producers, not bridged
+    for (const k of ACTIVITY_KINDS.filter((x) => !["pm", "github", "system"].includes(x.source))) expect(bridgedKinds.has(k.key), k.key).toBe(true);
   });
 
   it("no pm_* entity is ever bridged (the outbox consumer owns PM), and a pm_* pair never matches", () => {
@@ -104,6 +101,14 @@ describe("the catalogue (BFF §44.2)", () => {
 
   it("no entry writes an object kind the deliverable_evidence view reads (doc, file, deliverable)", () => {
     for (const e of ACTIVITY_BRIDGE) expect(["doc", "file", "deliverable"]).not.toContain(e.objectKind);
+  });
+
+  it("meetings and payments are not bridged from the audit log (the consumer owns meetings; a payment's actor is a service principal)", () => {
+    expect(ACTIVITY_BRIDGE.filter((e) => e.entity === "meeting_recording" || e.entity === "invoice_payment")).toEqual([]);
+    expect(bridgeEntryFor("meeting_recording", "ingested", {})).toBeNull();
+    expect(bridgeEntryFor("meeting_recording", "shared_minutes", {})).toBeNull();
+    expect(bridgeEntryFor("invoice_payment", "confirmed", {})).toBeNull();
+    expect(ACTIVITY_KINDS.some((k) => k.key === "finance.payments")).toBe(false);
   });
 
   it("no title can come from a free-text field (comment, message, note, body, text, content)", () => {
@@ -165,6 +170,8 @@ describe("kindOf: the existing PM and GitHub rows, from their real verbs and obj
     ["github", "commit", "committed", "github.commits"],
     ["github", "pull_request", "opened", "github.pull_requests"],
     ["github", "pull_request", "merged", "github.pull_requests"],
+    // the outbox consumer's row for a person starting a recording: ONE per recording
+    ["system", "meeting_recording", "created", "meetings.recorded"],
   ])("%s/%s/%s -> %s", (source, objectKind, verb, kind) => {
     expect(kindOf(source, objectKind, verb)).toBe(kind);
   });
@@ -177,6 +184,9 @@ describe("kindOf: the existing PM and GitHub rows, from their real verbs and obj
     ["github", "pull_request", "closed"],
     ["github", "workflow_run", "ci_run"],
     ["system", "meeting_recording", "ingested"],
+    ["system", "meeting_recording", "transcribed"],
+    ["system", "meeting_recording", "scheduled"],
+    ["meetings", "meeting_recording", "created"],
     ["pipeline", "pipeline_run", "created"],
     // a bridge verb under the wrong source is not a kind
     ["pm", "social_post", "created"],
@@ -261,7 +271,7 @@ describe("occurredAt rules (BFF §44.2)", () => {
 describe("source -> module (the series lists only the kinds of enabled modules)", () => {
   it("core sources are always on; a module source needs its module; finance is any-of finance or invoice", () => {
     const none = new Set<string>();
-    for (const core of ["github", "creatives", "meetings", "time"]) expect(sourceEnabled(core, none), core).toBe(true);
+    for (const core of ["github", "creatives", "system", "time"]) expect(sourceEnabled(core, none), core).toBe(true);
     expect(sourceEnabled("pm", none)).toBe(false);
     expect(sourceEnabled("pm", new Set(["pm"]))).toBe(true);
     expect(sourceEnabled("webdesk", new Set(["webdev"]))).toBe(true);

@@ -9,10 +9,12 @@ import { config } from "../config";
 import { buildApp } from "../main";
 import { resetModules } from "../modules/registry";
 import { resetCoreRollupProviders } from "../rollups/engine";
-import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
+import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole } from "../testing/fixtures";
 import { newId, withTenants } from "../db";
 import { ingestWorkActivity } from "./work-activity-ingest.service";
+import { writeActivity } from "./http";
+import { dispatchWorkActivity } from "../events/work-activity-consumer";
 import { todayIsoInTz } from "../modules/reports/person-scope";
 import { addDaysIso } from "./dept-resolution";
 
@@ -290,7 +292,7 @@ describe.skipIf(!TEST_URL)("the activity series, the day read and the person fil
         payload: { text: "SECRET COMMENT TEXT", body: "SECRET BODY", message: "SECRET MESSAGE" },
       });
       await seed(t, { source: "social", objectKind: "social_post", verb: "created", actor: u, at: "2026-04-01T05:00:00Z", title: "Spring launch", payload: { note: "SECRET NOTE" } });
-      await seed(t, { source: "meetings", objectKind: "meeting_recording", verb: "ingested", actor: u, at: "2026-04-01T06:00:00Z", title: "Weekly sync", objectRef: meetingId });
+      await seed(t, { source: "system", objectKind: "meeting_recording", verb: "created", actor: u, at: "2026-04-01T06:00:00Z", title: "Weekly sync", objectRef: meetingId });
       await seed(t, { source: "time", objectKind: "time_entry", verb: "logged", actor: u, at: "2026-04-01T07:00:00Z", title: null });
       // not on this day, not counted as a kind, someone else's
       await seed(t, { source: "pm", objectKind: "pm_task", verb: "completed", actor: u, at: "2026-04-02T05:00:00Z", title: "Tomorrow" });
@@ -336,6 +338,36 @@ describe.skipIf(!TEST_URL)("the activity series, the day read and the person fil
       const r = await day(`?userId=${u}&date=2026-06-01`, admin);
       expect(r.json().items).toHaveLength(200);
       expect(r.json().items[0].title).toBe("Task 205"); // newest first
+    });
+
+    it("one meeting recording is ONE work_activity row (the consumer's) and counts ONCE in the series; the audit rows add none", async () => {
+      const u = await createUser("meeting-once@activity-series.test");
+      await addMembership(t, u);
+      const rec = newId();
+      const event = (eventType: string, createdAt: string) => ({
+        id: newId(), tenantId: t, entityType: "meeting_recording", entityId: rec, eventType,
+        payload: { actorId: u }, originSite: "central", schemaVersion: 1, createdAt,
+      });
+      const rowsFor = async () =>
+        (await adminPool().query<{ source: string; verb: string }>(
+          `SELECT source, verb FROM work_activity WHERE tenant_id = $1 AND object_ref = $2 ORDER BY verb`, [t, rec],
+        )).rows;
+      await dispatchWorkActivity(event("meeting.recording.created", "2026-07-01T05:00:00.000Z"));
+      // the audit rows the meetings controller writes for the same recording: none of them is bridged
+      for (const verb of ["started", "transcribed", "ingested", "saved_minutes", "shared_minutes"]) await writeActivity(t, u, verb, "meeting_recording", rec, {});
+      expect(await rowsFor()).toEqual([{ source: "system", verb: "created" }]);
+
+      // the recording's later lifecycle events are other rows of the same recording, and are not counted again
+      await dispatchWorkActivity(event("meeting.recording.transcribed", "2026-07-01T05:10:00.000Z"));
+      await dispatchWorkActivity(event("meeting.recording.ingested", "2026-07-01T05:20:00.000Z"));
+      expect((await rowsFor()).map((r) => r.verb)).toEqual(["created", "ingested", "transcribed"]);
+
+      const r = await series(`?userId=${u}&from=2026-07-01&to=2026-07-01`, admin);
+      expect(r.json().totals).toEqual({ "meetings.recorded": 1 });
+      expect(r.json().kinds.find((k: { key: string }) => k.key === "meetings.recorded")).toEqual({ key: "meetings.recorded", label: "Meetings recorded", source: "system" });
+      const d = await day(`?userId=${u}&date=2026-07-01`, admin);
+      expect(d.json().items).toHaveLength(1);
+      expect(d.json().items[0]).toMatchObject({ kind: "meetings.recorded", link: `/meetings/${rec}` });
     });
 
     it("validates userId and date, and applies the same gate as the series", async () => {

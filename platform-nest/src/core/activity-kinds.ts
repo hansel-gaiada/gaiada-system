@@ -17,7 +17,7 @@
 /** The sources `work_activity.source` accepts (mirror of the CHECK in migration 202610151300). */
 export const ACTIVITY_SOURCES = [
   "pm", "pipeline", "github", "google_drive", "claude", "manual", "system",
-  "webdesk", "social", "seo", "creatives", "finance", "hr", "meetings", "learning", "time", "checkins",
+  "webdesk", "social", "seo", "creatives", "finance", "hr", "learning", "time", "checkins",
 ] as const;
 
 export interface ActivityKind {
@@ -42,9 +42,8 @@ export const ACTIVITY_KINDS: readonly ActivityKind[] = [
   { key: "creatives.versions", label: "Asset versions", source: "creatives" },
   { key: "creatives.reviews", label: "Review decisions", source: "creatives" },
   { key: "finance.journals", label: "Journals posted", source: "finance" },
-  { key: "finance.payments", label: "Payments confirmed", source: "finance" },
   { key: "hr.leave_decided", label: "Leave decided", source: "hr" },
-  { key: "meetings.recorded", label: "Meetings recorded", source: "meetings" },
+  { key: "meetings.recorded", label: "Meetings recorded", source: "system" },
   { key: "learning.completed", label: "Learning completed", source: "learning" },
   { key: "time.logged", label: "Time logged", source: "time" },
   { key: "checkins.submitted", label: "Check-ins", source: "checkins" },
@@ -53,7 +52,7 @@ export const ACTIVITY_KINDS: readonly ActivityKind[] = [
 /**
  * Which tenant-enabled module(s) a source belongs to, for the series' `kinds` list ("only the kinds of modules the tenant
  * has enabled", §44.3). The keys are `ModuleContract.key`s from `src/modules/registry.ts`. `null` = CORE: the source is
- * always on (GitHub, creatives, meetings and time entries are core controllers with no `ModuleEnabledGuard`). An array is
+ * always on (GitHub, creatives, meetings (the `system` source: the outbox consumer's meeting_recording rows) and time entries are core controllers with no `ModuleEnabledGuard`). An array is
  * ANY-OF: finance's one bridged payment row is written by the invoice/payments code.
  */
 export const SOURCE_MODULES: Readonly<Record<string, readonly string[] | null>> = {
@@ -65,7 +64,7 @@ export const SOURCE_MODULES: Readonly<Record<string, readonly string[] | null>> 
   creatives: null,
   finance: ["finance", "invoice"],
   hr: ["hr"],
-  meetings: null,
+  system: null,
   learning: ["lms"],
   time: null,
   checkins: ["reports"],
@@ -156,12 +155,9 @@ export const ACTIVITY_BRIDGE: readonly BridgeEntry[] = [
 
   // 4h-2 adds the audit call (BFF §44.6); the entry is here so the bridge turns it into a row the day it lands.
   { entity: "finance_journal", auditVerb: "posted", source: "finance", objectKind: "finance_journal", verb: "posted", kind: "finance.journals", title: "Journal posted" },
-  { entity: "invoice_payment", auditVerb: "confirmed", source: "finance", objectKind: "invoice_payment", verb: "confirmed", kind: "finance.payments", title: "Payment confirmed" },
   { entity: "hr_leave_request", auditVerb: "decided", source: "hr", objectKind: "hr_leave_request", verb: "decided", kind: "hr.leave_decided", title: "Leave decided" },
   { entity: "lms_completion", auditVerb: "completed", source: "learning", objectKind: "lms_completion", verb: "completed", kind: "learning.completed", title: "Course completed" },
 
-  { entity: "meeting_recording", auditVerb: "ingested", source: "meetings", objectKind: "meeting_recording", verb: "ingested", kind: "meetings.recorded", title: "Meeting recorded" },
-  { entity: "meeting_recording", auditVerb: "shared_minutes", source: "meetings", objectKind: "meeting_recording", verb: "shared_minutes", kind: "meetings.recorded", title: "Minutes shared" },
 
   { entity: "time_entry", auditVerb: "logged", source: "time", objectKind: "time_entry", verb: "logged", kind: "time.logged", title: "Time logged", occurredAtFrom: "time_entry_date" },
   { entity: "report_checkin", auditVerb: "submitted", source: "checkins", objectKind: "report_checkin", verb: "submitted", kind: "checkins.submitted", title: "Check-in", occurredAtFrom: "metadata_date", dedupe: "entity" },
@@ -220,6 +216,10 @@ const EXISTING_ROWS: readonly KindMatcher[] = [
   { source: "pm", objectKind: "doc", verb: "created", kind: "pm.docs" },
   { source: "pm", objectKind: "doc", verb: "updated", kind: "pm.docs" },
   { source: "pm", objectKind: "doc", verb: "restored", kind: "pm.docs" },
+  // A person starting a recording: the consumer's `meeting.recording.created` row (it carries the actor). The recording's other
+  // events (transcribed, ingested, scheduled, updated...) are the same recording and are not counted again. Not bridged from the
+  // audit log: the consumer already writes this row, and a second row would double the nightly activity_events.
+  { source: "system", objectKind: "meeting_recording", verb: "created", kind: "meetings.recorded" },
   { source: "github", objectKind: "commit", verb: "committed", kind: "github.commits" },
   { source: "github", objectKind: "pull_request", verb: "opened", kind: "github.pull_requests" },
   { source: "github", objectKind: "pull_request", verb: "merged", kind: "github.pull_requests" },

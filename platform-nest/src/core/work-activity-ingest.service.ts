@@ -17,11 +17,11 @@ import { config } from "../config";
 import { emitEvent } from "../events/outbox.service";
 import { deriveLinks, scanUuids, type LinkerContext, type WorkActivityLink } from "./work-activity-linker";
 
-// DW-4h-1: mirrors the `work_activity.source` CHECK (migration 202610151300), which added the ten module sources the
+// DW-4h-1: mirrors the `work_activity.source` CHECK (migration 202610151300), which added the nine module sources the
 // audit-log bridge writes (core/activity-bridge.ts). The same list is `ACTIVITY_SOURCES` in activity-kinds.ts; a test pins both.
 export const WORK_ACTIVITY_SOURCES = new Set([
   "pm", "pipeline", "github", "google_drive", "claude", "manual", "system",
-  "webdesk", "social", "seo", "creatives", "finance", "hr", "meetings", "learning", "time", "checkins",
+  "webdesk", "social", "seo", "creatives", "finance", "hr", "learning", "time", "checkins",
 ]);
 
 export interface WorkActivityIngestInput {
