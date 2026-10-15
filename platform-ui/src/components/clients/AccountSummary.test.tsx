@@ -129,7 +129,7 @@ const snapshot = (over: Partial<SummarySnapshot> = {}): SummarySnapshot => ({
     generatedAt: "2026-10-03T09:00:00.000Z", unavailable: ["website"],
     services: [{
       service: "search", areaId: "search", title: "Search", status: "active", since: "2026-01-12", items: [],
-      kpis: [{ key: "search.organic_clicks", label: "Organic clicks", value: 4210, unit: "count", period: null, previous: 3890, target: null, asOf: null }],
+      kpis: [{ key: "search.organic_clicks", label: "Organic clicks", value: 4210, unit: "count", period: { from: "2026-09-01", to: "2026-09-28" }, previous: 3890, target: null, asOf: "2026-09-28" }],
       clientVisible: true,
     }],
   },
@@ -152,6 +152,7 @@ describe("AccountSummaryPreview", () => {
     expect(screen.getByText("Design approved")).toBeInTheDocument();
     expect(screen.getByText("Brand guide")).toBeInTheDocument();
     expect(screen.getByText("4,210")).toBeInTheDocument();
+    expect(screen.getByText(/01 Sept? 2026 to 28 Sept? 2026/)).toBeInTheDocument(); // the window each figure covers
     expect(screen.getByText("Social media performance, August 2026")).toBeInTheDocument();
     expect(screen.getByText(/Waiting on the client: 2, the oldest since 12 Sept? 2026/)).toBeInTheDocument();
     expect(screen.getByText(/Waiting on us: 0\./)).toBeInTheDocument();

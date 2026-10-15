@@ -27,6 +27,12 @@ function kpiValue(k: ResultsKpi): string {
   return k.value.toLocaleString("en-US");
 }
 
+/** The window a results figure covers, as the card carries it: "01 Sep 2026 to 28 Sep 2026", else the date it is as of, else nothing. */
+function kpiWindow(k: ResultsKpi): string {
+  if (k.period) return `${formatDate(k.period.from)} to ${formatDate(k.period.to)}`;
+  return k.asOf ? `as of ${formatDate(k.asOf)}` : "—";
+}
+
 function side(label: string, t: { medianDays: number | null; n: number; withheld: boolean }): string {
   if (t.withheld || t.medianDays === null) return `${label}: too few answers in the window to give a typical time (${t.n}).`;
   return `${label}: a typical answer took ${t.medianDays} ${t.medianDays === 1 ? "day" : "days"} (${t.n} ${t.n === 1 ? "answer" : "answers"}).`;
@@ -121,17 +127,18 @@ export function AccountSummaryPreview({ snapshot: s }: { snapshot: SummarySnapsh
 
       <section aria-labelledby={`as-h-results-${s.period}`}>
         <h3 id={`as-h-results-${s.period}`} className="as-preview__h">Services and results</h3>
+        {s.results && <p className="as-note">Read on {when(s.results.generatedAt)}. Each figure says the dates it covers; they are the same figures the client sees under Services and results.</p>}
         {s.results === null ? <Unread what="The services results" /> : s.results.services.length === 0 ? (
           <p className="as-note">No service has results to show.</p>
         ) : (
           s.results.services.map((card) => (
             <table className="as-table" key={`${card.service}-${card.title}`}>
               <caption>{card.title}{card.since ? `, since ${formatDate(card.since)}` : ""}</caption>
-              <thead><tr><th scope="col">Figure</th><th scope="col" className="as-num">Now</th><th scope="col" className="as-num">Before</th></tr></thead>
+              <thead><tr><th scope="col">Figure</th><th scope="col">Covers</th><th scope="col" className="as-num">Now</th><th scope="col" className="as-num">Before</th></tr></thead>
               <tbody>
                 {card.kpis.length === 0
-                  ? <tr><td colSpan={3}>No figure to show for this service.</td></tr>
-                  : card.kpis.map((k) => <tr key={k.key}><td>{k.label}</td><td className="as-num">{kpiValue(k)}</td><td className="as-num">{k.previous === null ? "—" : k.previous.toLocaleString("en-US")}</td></tr>)}
+                  ? <tr><td colSpan={4}>No figure to show for this service.</td></tr>
+                  : card.kpis.map((k) => <tr key={k.key}><td>{k.label}</td><td>{kpiWindow(k)}</td><td className="as-num">{kpiValue(k)}</td><td className="as-num">{k.previous === null ? "—" : k.previous.toLocaleString("en-US")}</td></tr>)}
               </tbody>
             </table>
           ))
