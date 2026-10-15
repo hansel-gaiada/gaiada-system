@@ -249,7 +249,7 @@ export function registerPlatformTools(): void {
         limit: { type: "number", description: "Most hits to return, 1 to 20 (default 5)." },
         // Optional since D9.4: the public tier is not scope-gated, so a caller with no meaningful
         // scope (an agent, a web widget) can search without inventing one.
-        scope: { type: "string", description: "Your current scope, e.g. group chat id. Optional; only narrows internal results." },
+        scope: { type: "string", description: "Your current scope, e.g. group chat id. Optional; passed to the public-tier search. Internal hits are narrowed by `tenantId` and your read rights instead." },
         publicOnly: { type: "boolean", description: "Restrict to the public tier even if you are authorized for more." },
       },
       required: ["query"],
@@ -277,8 +277,9 @@ export function registerPlatformTools(): void {
           body: JSON.stringify({
             query,
             scope: String(args.scope ?? ""),
-            // When the internal tier is asked for it comes from the platform (above), so this call is the public tier only.
-            ...(args.publicOnly === true || askInternal ? { publicOnly: true } : {}),
+            // ALWAYS the public tier only: the store's internal tier is unfiltered ("every member of the company"), so the hub
+            // never takes internal hits from it, for any caller. Internal hits come only from the platform route (above).
+            publicOnly: true,
             ...(hasLimit ? { topK: limit } : {}),
           }),
         });
