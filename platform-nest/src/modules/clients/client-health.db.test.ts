@@ -209,8 +209,8 @@ describe.skipIf(!TEST_URL)("PV7-02 · client health, staff side", () => {
            VALUES ($1, $2, ${dateSql}, $3, $4, $5, $6, $7)`,
           [newId(), co, project, tc, onTime, withDue, site()],
         );
-      await fact(proj.ontrack, "current_date", 3, 2, 3);
-      await fact(proj.ontrack, "current_date", 1, 1, 1);
+      // One row per (date, project): the table's unique key. 4 completed, 3 on time, 4 with a due date: 3/4.
+      await fact(proj.ontrack, "current_date", 4, 3, 4);
       await fact(proj.ontrack, "(date_trunc('month', current_date) - interval '1 day')::date", 5, 0, 5);
       await fact(proj.wait8, "current_date", 2, 0, 0);
     }, { modules: ["reports"] });
