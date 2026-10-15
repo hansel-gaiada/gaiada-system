@@ -9300,3 +9300,126 @@ interface PortalTurnaround { medianDays: number | null; n: number; withheld: boo
 - **Results headline:** "Results at a glance" reads the existing `GET /portal/centre/:clientId/results` once per client in `overview.clients` (no new endpoint): the first KPI of each active service, at most four, never `search_ads.conversion_value`; `visible: false` shows the PV-D37 sentence; a failed read says "Could not be loaded".
 - **Staff hub `/clients/:clientId`:** a "Health" card from `GET /clients/:clientId/health` (`lib/clientHub.ts::getClientHealth`), below the two ball lists and never repeating their items. Fail-soft (`null` = "Could not be loaded"), unlike the overview read. State, reasons and source names come from `lib/clientHealth.ts` (`STATE_LABEL`, `describeReason`, `SOURCE_LABEL`), the one label map PV7-05 reuses. PV-3 markers come from `ProjectHealth.clientVisible` and `TurnaroundPart.clientVisible`, never derived.
 
+## 55. Client reports: publication (PV7-04a, 2026-10-15) — `platform-nest/src/core/client-reports.ts` (new), `src/modules/clients/client-reports.controller.ts` (new), `src/core/portal-reports.controller.ts` (new), `src/ops/client-reports-backfill.ts` (new); migration `202610151720_client_reports.sql` — **STATUS: BUILT, PROTOTYPED (backend only; the pages are PV7-04b. On the Linux CI gate against real Postgres and Cerbos: `src/core/client-reports.db.test.ts`, `src/rbac/cerbos-client-report.test.ts` (live matrix), `src/modules/social/social-reports.test.ts`; run anywhere: `portal-visibility.test.ts`, `portal-live.test.ts`, the IAM alignment suites. Not driven live; the backfill has not been run anywhere)**
+
+**Why.** Plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`, ticket PV7-04 (04a, the backend; findings 5, 6 and 9; lead's calls L5 and L6; owner question PV7-Q3, the lead's default in force).
+- A delivered social or search report reaches the client today as an empty `delivered` deliverable, and only when the engagement has a project. The PDF is a `files` row targeting `social_report` or `search_report`, which the portal's download route cannot serve.
+- Published reports get a home of their own, `client_reports`, with a draft → published → withdrawn step (the meeting-minutes precedent: a scope builder in `portal-visibility.ts`, a notice to the contacts in scope, an SSE topic). Not Documents (legal and money only, PV-5 decision 18) and not Deliverables (no publish flag; any file on one is downloadable at once).
+- PV7-Q3 (lead's default): a published social or search report may carry the client's own ad spend as that report shows it. No new money anywhere else.
+
+**Out of scope (04a):** every page (PV7-04b); mail to the client (needs the mailer); a portal notification inbox (the `client` role cannot read notification rows, finding 9; the "New" count and the SSE hint cover v1); drafting an account summary (PV7-07); agent tools (PV7-08).
+
+### 55.1 Tables (migration `202610151720_client_reports.sql`)
+
+`client_reports` (core table: the plain tenant policy, FORCE RLS, no module wall, so the portal reads it under its own scope):
+
+| Column | Type | Rule |
+|---|---|---|
+| `id`, `tenant_id` | uuid | `UNIQUE (id, tenant_id)` for the reads table |
+| `client_id` | uuid NOT NULL | composite FK `(client_id, tenant_id)` → `clients` |
+| `project_id` | uuid NULL | composite FK `(project_id, client_id, tenant_id)` → `projects`: the project must be this client's (the `conversation_threads` shape). NULL = a client-wide report |
+| `source` | text | `social_report` \| `search_report` \| `account_summary` |
+| `source_id` | uuid NULL | the module report's id. Required for `social_report` and `search_report`; NULL only for `account_summary` (PV7-07 drafts have no module row) |
+| `deliverable_id` | uuid NULL | FK → `deliverables`; set when delivery made the deliverable row |
+| `title` | text NOT NULL | not blank |
+| `period_start`, `period_end` | date NOT NULL | `period_end >= period_start` |
+| `file_id` | uuid NULL | composite FK `(file_id, tenant_id)` → `files`. Required once published |
+| `status` | text NOT NULL | `draft` \| `published` \| `withdrawn`, default `draft` |
+| `published_at`, `published_by` | timestamptz, uuid | both NULL while `draft`; both set, with `file_id`, once `published` or `withdrawn` |
+| `withdrawn_at`, `withdrawn_by`, `withdrawn_reason` | | all three set (reason not blank) when `withdrawn`; all NULL otherwise |
+| `created_at`, `created_by`, `updated_at`, `origin_site` | | house columns |
+
+- The stamp CHECKs are written over `IS [NOT] NULL` tests and the NOT NULL `status`, so no conjunct can evaluate to NULL (a CHECK passes on NULL).
+- One live row per source: a partial `UNIQUE (tenant_id, source, source_id) WHERE source_id IS NOT NULL AND status <> 'withdrawn'`.
+
+`client_report_reads (report_id, user_id, read_at)`: one row per reader, `PRIMARY KEY (report_id, user_id)`, composite FK `(report_id, tenant_id)` → `client_reports`, the plain tenant policy.
+
+`files.role` gains `client_report_file`, pinned to target `client_report`. `files_role_check` and `files_role_target` are re-declared WHOLE (every earlier role is kept: `invoice_pdf`, `contract_signed_copy`, `contract_certified_copy`, `contract_certified_certificate`), and a DO-block asserts it. A role file is a record (`trg_files_guard_role_file`): never deleted, moved or changed.
+
+> The role is `client_report_file`, not `client_report_pdf`: search delivery renders Markdown (`text/markdown`), not a PDF, so a `_pdf` name would be false for one of the two sources. Pages read `contentType`.
+
+### 55.2 How a report is published
+
+1. **Delivery publishes.** Social `POST /api/:t/modules/social/reports/:id/deliver` and search `POST /api/:t/modules/search/reports/:id/deliver` insert, in the same transaction as the delivery, a `published` client report: its own `files` row (role `client_report_file`, target `client_report`, the same bytes and `sha256` as the module's file, stored under its own key), `deliverable_id` when the deliverable row was made, `project_id` = the engagement's project (NULL when the engagement has none: a client-wide report). Re-delivery is refused by the modules already; the insert is also idempotent (one client report per source, under a transaction-scoped advisory lock).
+2. **Publish route** (`draft` → `published`), for drafts (PV7-07's account summary, agents' drafts): needs a file.
+3. **Withdraw** (`published` → `withdrawn`) with a reason. A withdrawn report leaves every portal read and its file is 404 there; staff still see it with its reason. Withdrawal is final for that row.
+4. **Backfill** of reports delivered before this ticket: `node dist/ops/client-reports-backfill.js` (dry run by default, lists them; `--apply` creates them, without notices). Run only on the owner's go.
+
+### 55.3 Staff routes (module `clients`; Cerbos kind `client_report`, PERMISSION-CONTRACT §46)
+
+| Method and path | Gate | Answers |
+|---|---|---|
+| `GET /api/:tenantId/clients/:clientId/reports` | `client_report · read` | `{ reports: StaffClientReport[] }`, every status, newest first. 404 for a client that does not exist |
+| `POST /api/:tenantId/client-reports/:id/publish` | `client_report · publish` (the client's owner through `ownerUserId`) | 200 `{ id, status: "published", publishedAt }`; 404; 409 `not_a_draft`; 409 `report_has_no_file` |
+| `POST /api/:tenantId/client-reports/:id/withdraw` `{ reason }` | `client_report · withdraw` | 200 `{ id, status: "withdrawn", withdrawnAt }`; 404; 400 `reason_required` (checked after the authorization decision); 409 `not_published` |
+| `GET /api/:tenantId/files/:fileId/content` (existing) | `file · read`, then `client_report · read` | the report's file, for staff |
+
+```ts
+interface StaffClientReport {
+  id: string; clientId: string; projectId: string | null; projectName: string | null;
+  source: "social_report" | "search_report" | "account_summary"; sourceId: string | null; deliverableId: string | null;
+  title: string; periodStart: string; periodEnd: string;          // YYYY-MM-DD
+  status: "draft" | "published" | "withdrawn";
+  file: { id: string; filename: string; contentType: string; byteSize: number } | null;
+  createdAt: string; publishedAt: string | null; publishedByName: string | null;
+  withdrawnAt: string | null; withdrawnByName: string | null; withdrawnReason: string | null;
+  clientVisible: boolean;   // a client-wide contact of this client sees it (staffClientReportClientVisible)
+  readCount: number;        // contacts who have opened it
+}
+```
+
+### 55.4 Portal routes (core, not module-guarded; Cerbos `portal · read`, then `resolvePortalScope`)
+
+| Method and path | Answers |
+|---|---|
+| `GET /api/:tenantId/portal/reports` | `PortalReport[]`, published and in reach only, newest first |
+| `POST /api/:tenantId/portal/reports/:id/read` | 200 `{ id, readAt }` (the first read is kept); 404 when not published, not in reach or not an id |
+| `GET /api/:tenantId/portal/files/:fileId` (existing) | `client_report` joins `DOWNLOADABLE`: only the `client_report_file` role file of a published report in reach. Withdrawn, draft, out of reach or a guessed id: 404 |
+
+```ts
+interface PortalReport {
+  id: string; title: string; source: "social_report" | "search_report" | "account_summary";
+  periodStart: string; periodEnd: string;
+  clientId: string; clientName: string;
+  projectId: string | null; projectName: string | null;   // null = "Whole account"
+  publishedAt: string;
+  file: { id: string; filename: string; contentType: string; byteSize: number };
+  readAt: string | null;                                  // null = new for this user
+}
+```
+
+Never in a portal payload: the status, the source id, who published or withdrew it, the withdrawal reason, drafts.
+
+**The reach rule (`clientReportInPortalScope`, the strict shape).** Row-state: `status = 'published'`. Reach: the report's client is one of the caller's clients AND (the report's project is one of the caller's projects OR the caller reaches that client client-wide). A report on a project reaches that project's contacts and the client-wide contacts; a report with no project reaches the client-wide contacts only (PV-D33, PV-D37). The builder reuses `wideOrOwnProject` (PV7-02). Staff mirror: `staffClientReportClientVisible`.
+
+**Additions to existing portal payloads.**
+- `GET /api/:tenantId/portal/overview` gains `newReports: number`: published in the last 30 days, in reach, with no read marker for this user.
+- `GET /api/:tenantId/portal/deliverables` rows gain `reportId: string | null`: the published, in-reach client report that links the deliverable.
+
+### 55.5 Notices and the live topic
+
+- **On publish** (delivery and the publish route): one notification row per recipient from `resolveClientRecipients(c, { clientId, projectId, kind: "report" })` (active contacts of the client, client-wide or on the report's project, viewers included), type `client_report.published`, `href: "/portal/reports"`. Best effort, after the commit. No mail.
+- **SSE:** a new topic `reports`. Events `client_report.published` and `client_report.withdrawn` (entity type `client_report`, payload `{ clientId, projectId, source }`) map to it, and `client_report` joins the tailed streams. The UI's hand-copied union (`platform-ui/src/lib/portal.ts` `PortalTopic`) gains `"reports"`.
+
+### 55.6 Tests
+
+- `src/core/client-reports.db.test.ts`: portal isolation (project-scoped vs client-wide, `createMultiClientContact`), withdrawn and draft never visible (list and download), a guessed file id 404, the read marker and `newReports`, the deliverables `reportId`, staff/portal parity of `clientVisible`, the publish/withdraw state machine, search delivery publishing exactly one report, the files CHECK keeping every earlier role.
+- `src/modules/social/social-reports.test.ts`: social delivery publishes exactly one report.
+- `src/rbac/cerbos-client-report.test.ts`: the Cerbos matrix with the bot and automation deny.
+- `src/core/portal-visibility.test.ts`: the new builders and the controller on the SWITCHED list.
+- `src/core/portal-live.test.ts`: the `reports` topic, narrowed to the report's client, with no payload content.
+- `platform-ui/src/lib/portal-links.guard.test.ts`: `/portal/reports` (the notice's link) sits in the awaiting-page ledger until PV7-04b builds the page; that test fails the moment the page exists, so the entry cannot outlive it.
+
+**The tooth (seen red, then green, not committed).** An inline `cr.status = 'published' AND cr.client_id = ANY($2::uuid[]) AND (cr.client_id = ANY($3::uuid[]) OR cr.project_id = ANY($4::uuid[]))` in place of `clientReportInPortalScope` in `portal-reports.controller.ts` failed "no portal-facing file (other than the ratchet list) contains an old literal" with both literals named (`published client report`, the project-scope arm). The `published` pattern is new in the scan's FORBIDDEN list; no other portal-facing file carried it.
+
+### 55.7 As built (2026-10-15)
+
+- **Deviations from the ticket text, with reasons.**
+  - The file role is `client_report_file`, not `client_report_pdf`: search delivery renders Markdown (`text/markdown`). Pages read `file.contentType` and label the download from it.
+  - The client report's file has its **own storage key** (same bytes, same `sha256`), not the module file's key: the staff `DELETE /files/:id` removes the bytes behind a deleted row, so a shared key would let a deleted module file take the client's copy with it.
+  - `draft` has no automation-only rule: every automation account is seeded at `manager` or `company_admin` (`seed/automation.ts`), which already holds `draft`; a `member`-tier rule keyed on the principal kind would put `draft` in every human member's bundle (the generator cannot read that condition).
+  - When an engagement's project no longer belongs to its client (`projects.client_id` changed), the report is published **client-wide** for the engagement's client instead of failing the delivery on the composite FK.
+- **Titles** are deterministic: `Social media report, August 2026`, `Social media campaign report, …`, `Search report, …`, `Search audit report, …`; a period that is not `YYYY-MM` reads `<start> to <end>`.
+- **Deliver responses** (social and search) gain `clientReportId` (additive); the delivery's activity row records it too.
+- **Backfill:** `node dist/ops/client-reports-backfill.js [--company <uuid>] [--apply]` (npm `client-reports:backfill`). A report is skipped, with the reason printed, for an internal client, a delivered report with no stored file, or no deliverer or approver on record. Published with the original `delivered_at`, no notice, no event.
+- **Deploy:** the migration runs on boot. Restart Cerbos (the live sidecar and the test container) so `resource_client_report.yaml` and the new derived role load; nothing hot-reloads. Then probe `client_report · read` as a staff user and `publish` as an automation principal (must deny).

@@ -60,6 +60,11 @@ import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { GSC_FRESHNESS_LAG_DAYS } from "./google/gsc-client";
+// PV7-04a (BFF §55.2): delivery publishes the report to the client, in the same transaction.
+import {
+  announceClientReportPublished, deliveredReportTitle, discardStoredReportFile, publishDeliveredReport, storeClientReportFile,
+  type PublishedClientReport,
+} from "../../core/client-reports";
 import {
   periodDateRange,
   renderReportMarkdown,
@@ -361,6 +366,9 @@ export class SearchReportsController {
     const storageKey = `${tenantId}/search-reports/${fileId}`;
     const bytes = Buffer.from(rendered.markdown, "utf8");
     await storage().put(storageKey, bytes);
+    // PV7-04a: the client report's own copy of the same bytes, under its own key (core/client-reports.ts header). Markdown,
+    // not a PDF: the client report's file role is `client_report_file` for exactly this reason.
+    const clientCopy = req.principal.userId ? await storeClientReportFile(tenantId, bytes, rendered.filename, "text/markdown") : null;
 
     const result = await withTenants(
       [tenantId],
@@ -397,18 +405,38 @@ export class SearchReportsController {
           engagementId: report.engagementId, period: report.period, kind: report.kind,
           fileId, deliverableId, anySimulated: rendered.anySimulated, allSimulated: rendered.allSimulated,
         });
-        return { deliverableId };
+
+        // PV7-04a (BFF §55.2): publish it to the client in THIS transaction. An engagement with no project gives a client-wide
+        // report (project NULL). Idempotent per source (one client report per search report, ever).
+        let clientReport: PublishedClientReport | null = null;
+        if (clientCopy && req.principal.userId) {
+          const { start, end } = periodDateRange(report.period, new Date(report.createdAt));
+          clientReport = await publishDeliveredReport(c, {
+            tenantId, source: "search_report", sourceId: id, clientId: report.clientId, projectId: report.projectId,
+            deliverableId, title: deliveredReportTitle("search_report", report.kind, report.period, start, end),
+            periodStart: start, periodEnd: end, file: clientCopy, publishedBy: req.principal.userId, announce: true,
+          });
+        }
+        return { deliverableId, clientReport };
       },
       { modules: ["search"] },
-    );
+    ).catch(async (err: unknown) => {
+      // Nothing committed, so the client report's copy is referenced by no row: remove it, then fail as before.
+      if (clientCopy) await discardStoredReportFile(clientCopy);
+      throw err;
+    });
+
+    if (clientCopy && result.clientReport && !result.clientReport.created) await discardStoredReportFile(clientCopy);
+    if (result.clientReport?.created) await announceClientReportPublished(tenantId, req.principal.userId, result.clientReport);
 
     await writeActivity(tenantId, req.principal.userId, "delivered", "search_report", id, {
       fileId, deliverableId: result.deliverableId, filename: rendered.filename,
-      anySimulated: rendered.anySimulated, allSimulated: rendered.allSimulated,
+      anySimulated: rendered.anySimulated, allSimulated: rendered.allSimulated, clientReportId: result.clientReport?.id ?? null,
     });
     return {
       id, status: "delivered", fileId, filename: rendered.filename,
       deliverableId: result.deliverableId, anySimulated: rendered.anySimulated, allSimulated: rendered.allSimulated,
+      clientReportId: result.clientReport?.id ?? null,
     };
   }
 }

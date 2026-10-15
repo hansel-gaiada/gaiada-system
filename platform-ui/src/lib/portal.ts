@@ -427,6 +427,7 @@ export interface PortalProfile {
  *  `PortalTopic` — the two lists must agree, and this one is the browser's copy.
  *  `requests` (MI-02/MI-03) — a webdev change request submitted/triaged/converted.
  *  `conversation` (PV4-03) — a conversation thread opened/updated, a message posted.
+ *  `reports` (PV7-04a, BFF §55.5) — a client report published or withdrawn.
  *
  *  ⚠ SMM-32 does NOT add a `"social_reviews"` member here: `portal-live.service.ts`'s own
  *  `PortalTopic` union was not touched by SMM-31's backend work, so no SSE frame is ever emitted
@@ -435,7 +436,7 @@ export interface PortalProfile {
  *  social-reviews pages render `<PortalLive />` with no `topics` filter instead, so they still
  *  refresh on the unconditional idle poll (and on any OTHER topic's frame) — see that component's
  *  own header for why the poll is never purely a fallback. */
-export type PortalTopic = "approvals" | "projects" | "deliverables" | "invoices" | "contracts" | "profile" | "requests" | "conversation";
+export type PortalTopic = "approvals" | "projects" | "deliverables" | "invoices" | "contracts" | "profile" | "requests" | "conversation" | "reports";
 export interface PortalLiveFrame { topic: PortalTopic; at: string }
 
 // ── SMM-31/32 — the client's own review of a drafted social post (D-16) ───────────────────────────

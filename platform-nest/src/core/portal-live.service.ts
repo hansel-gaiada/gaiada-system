@@ -41,7 +41,8 @@ export type PortalTopic =
   | "contracts"
   | "profile"      // contact added/revoked, capability changed
   | "requests"     // MI-02/MI-03: a webdev change request submitted/triaged/converted
-  | "conversation"; // PV4-03: a conversation thread opened/updated, a message posted
+  | "conversation"  // PV4-03: a conversation thread opened/updated, a message posted
+  | "reports";      // PV7-04a: a client report published or withdrawn (BFF §55.5)
 
 /** event_type -> topic. An event type absent from this map produces NO frame: the portal's realtime
  *  surface is an allowlist, same principle as the timeline query (see portal-workspace.controller.ts).
@@ -83,6 +84,13 @@ const TOPIC_BY_EVENT: Record<string, PortalTopic> = {
   // `clientId` in the payload so the frame is narrowed to that client's connections. Rides the existing `projects` topic
   // (the portal's meetings list refetches with it), so no new topic and no change to the UI's hand-copied union.
   "meeting.minutes.shared": "projects",
+  // PV7-04a (BFF §55.5): a client report was published (delivery or the publish route) or withdrawn. Entity type
+  // `client_report`; every producer puts the report's `clientId` in the payload, so the frame is narrowed to that client's
+  // connections. A project-scoped contact of that client may still get the hint for a client-wide report: the frame carries
+  // no data, and the refetch it triggers re-applies clientReportInPortalScope and returns nothing new (the deliberate
+  // over-delivery described in dispatchPortalFrame). Drafts emit nothing.
+  "client_report.published": "reports",
+  "client_report.withdrawn": "reports",
 };
 
 /** The `events:<entityType>` streams worth tailing — derived from the map above rather than listed
@@ -95,6 +103,7 @@ const TAILED_ENTITY_TYPES = [
   "webdev_change_request",
   "conversation",
   "meeting_minutes",
+  "client_report",
 ] as const;
 
 export interface PortalFrame {

@@ -17,7 +17,11 @@ import { notify, type NotificationPayload } from "./http";
 // dependency on the controller — the controller depends on THIS file, not the other way round.
 const SIGNATURE_GATE_KINDS = new Set(["prd_sign", "scope_signoff"]);
 
-export type ClientNotifyKind = "signature" | "general";
+/** PV7-04a: `report` is a published client report (BFF §55.5). It reaches the same contacts as `general` (every active
+ *  contact, viewers included, client-wide or on the report's project), and it is its own kind so the reach rule is stated
+ *  once here: a report with NO project (`projectId` null) reaches the CLIENT-WIDE contacts only, never a contact limited
+ *  to some project, which is exactly `clientReportInPortalScope` (the strict shape, PV-D33 / PV-D37). */
+export type ClientNotifyKind = "signature" | "general" | "report";
 
 /** A signature request must reach only contacts who can actually act on it — a viewer asked to sign
  *  cannot sign. Everything else (a feedback ask, a "both parties signed" progress note) is 'general'
@@ -37,6 +41,8 @@ export function clientNotifyKindForGate(gateKind: string): ClientNotifyKind {
  *  - kind 'signature' -> only `capability IN ('signer','admin')` contacts, because a viewer cannot act on
  *    a sign request (WSK-49f, owner ruling 2026-10-11: `admin` IMPLIES signer, so an admin is asked too);
  *    kind 'general' -> every active contact in scope (signer, admin AND viewer).
+ *  - kind 'report' (PV7-04a) -> as 'general'. With `projectId` null the `project_id = $2` arm is NULL for every row, so
+ *    only the client-wide contacts (`project_id IS NULL`) are told: the portal's own reach for a client-wide report.
  *
  * Caller must already hold a PoolClient from `withTenants([tenantId], ...)` scoped to the run's
  * tenant — this issues one read-only SELECT on that connection and nothing else.

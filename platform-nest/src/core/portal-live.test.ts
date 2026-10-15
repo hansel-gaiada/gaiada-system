@@ -146,6 +146,20 @@ describe("portal live bus (CP-5)", () => {
     a.off(); b.off();
   });
 
+  it("PV7-04a: client_report.published and .withdrawn reach only the named client's subscribers, on the new 'reports' topic, with no payload content", () => {
+    const a = collector("t1", ["c1"]);
+    const b = collector("t1", ["c2"]);
+    dispatchPortalFrame("t1", "client_report.published", { clientId: "c1", projectId: "p1", source: "social_report", title: "SECRET-TITLE" }, AT);
+    dispatchPortalFrame("t1", "client_report.withdrawn", { clientId: "c1", projectId: null, source: "search_report" }, AT);
+    expect(a.frames).toEqual([{ topic: "reports", at: AT }, { topic: "reports", at: AT }]);
+    expect(b.frames).toEqual([]);
+    expect(JSON.stringify(a.frames)).not.toContain("SECRET-TITLE");
+    // A draft is never announced: no event type for it is mapped.
+    dispatchPortalFrame("t1", "client_report.drafted", { clientId: "c1" }, AT);
+    expect(a.frames).toHaveLength(2);
+    a.off(); b.off();
+  });
+
   it("PV4-03: staff-only draft events never produce a portal frame", () => {
     const a = collector("t1", ["c1"]);
     for (const t of ["conversation.draft.created", "conversation.draft.updated", "conversation.draft.sent"]) {

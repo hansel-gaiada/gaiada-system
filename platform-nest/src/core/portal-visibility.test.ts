@@ -31,6 +31,7 @@ import {
   staffConversationThreadClientVisible,
   meetingMinutesClientVisible, meetingMinutesInPortalScope, staffMeetingMinutesClientVisible,
   wideClientOnly, wideOrOwnProject,
+  clientReportClientVisible, clientReportInPortalScope, staffClientReportClientVisible,
 } from "./portal-visibility";
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -494,6 +495,8 @@ const FORBIDDEN: Array<{ name: string; re: RegExp }> = [
   { name: "revoked-contact exclusion", re: /status\s*<>\s*'revoked'/ },
   // The per-client project arm — the body of PROJECT_SCOPE and every run/contract/request copy of it.
   { name: "project-scope `client_id = ANY($n::uuid[]) OR`", re: /client_id\s*=\s*ANY\(\$\d+::uuid\[\]\)\s+OR/ },
+  // PV7-04a: a client report is visible once published; the literal belongs to clientReportClientVisible alone.
+  { name: "published client report (client reports)", re: /status\s*=\s*'published'/ },
 ];
 
 /** Comment lines are prose, not SQL (SQL comments inside template strings are `--`, which stay scanned). */
@@ -531,6 +534,8 @@ const SWITCHED = [
   "src/core/portal-centre-results.controller.ts",
   // PV7-02: client health for the portal, written on the builders from day one (its reads are client-health.ts and client-ball.ts).
   "src/core/portal-health.controller.ts",
+  // PV7-04a: the client's Reports list and read marker, written on the builders from day one (clientReportInPortalScope).
+  "src/core/portal-reports.controller.ts",
   // PV5-11: the certified-signing start route and the simulated PSrE's portal pages, written on the builders from day one.
   "src/signatures/certified-signing.controller.ts",
   "src/signatures/simulated-psre.controller.ts",
@@ -548,7 +553,7 @@ describe("PV3-02 guard — portal-facing files carry no inline row-visibility li
   it("the forbidden patterns are live: each matches the predicate that now owns it", () => {
     const own = [
       contractClientVisible("k"), invoiceClientVisible("i"), gateClientVisible("g"), runStageClientVisible("s"),
-      clientContactClientVisible("cc"), PROJECT_SCOPE,
+      clientContactClientVisible("cc"), PROJECT_SCOPE, clientReportClientVisible("cr"),
     ].join("\n");
     for (const f of FORBIDDEN) expect(own).toMatch(f.re);
   });
@@ -701,5 +706,51 @@ describe("PV7-02 · the health reach builders", () => {
     const noWide = { clients: 1, projects: 2 } as never;
     expect(() => wideClientOnly("pp", noWide)).toThrow(/invalid parameter index/);
     expect(() => wideOrOwnProject("w", noWide)).toThrow(/invalid parameter index/);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// 6. Client reports (PV7-04a, BFF §55.4): published only, and the strict reach
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// A report on a project reaches that project's contacts and the client-wide ones; a report with no project reaches the
+// client-wide contacts only (PV-D33, PV-D37). The HTTP proof is client-reports.db.test.ts.
+
+describe("PV7-04a · client report predicates", () => {
+  const S = scopeAt(2);
+
+  it("row-state: published, and nothing else (a draft and a withdrawn report are never visible); it binds no parameters", () => {
+    expect(clientReportClientVisible("cr")).toBe("cr.status = 'published'");
+    expect(clientReportClientVisible("cr")).not.toMatch(/\$\d/);
+  });
+
+  it("the portal predicate is the caller's clients AND published AND the STRICT project arm (no project-less admission)", () => {
+    expect(conjuncts(clientReportInPortalScope("cr", S))).toEqual(conjuncts(
+      "cr.client_id = ANY($2::uuid[]) AND cr.status = 'published' AND (cr.client_id = ANY($3::uuid[]) OR cr.project_id = ANY($4::uuid[]))",
+    ));
+    expect(clientReportInPortalScope("cr", S)).toContain(wideOrOwnProject("cr", S));
+    expect(clientReportInPortalScope("cr", S)).not.toMatch(/project_id IS NULL/);
+    // The difference from the looser lists is the point: contracts and change requests admit a project-less row.
+    expect(contractInPortalScope("k", S)).toMatch(/project_id IS NULL/);
+  });
+
+  it("staff flag: the report has a client AND is published, composed from the same row-state builder", () => {
+    expect(staffClientReportClientVisible("cr")).toBe("(cr.client_id IS NOT NULL AND (cr.status = 'published'))");
+  });
+
+  it("refuses an alias that is not a plain identifier and a params object without `wide`", () => {
+    expect(() => clientReportClientVisible("cr; DROP TABLE x")).toThrow(/invalid table alias/);
+    expect(() => clientReportInPortalScope("CR", S)).toThrow(/invalid table alias/);
+    expect(() => clientReportInPortalScope("cr", { clients: 1, projects: 2 } as never)).toThrow(/invalid parameter index/);
+  });
+
+  it("the Reports controller is discovered as portal-facing and is on the SWITCHED list", () => {
+    const files = walk(SRC).filter((f) => !f.endsWith(`${sep}portal-visibility.ts`));
+    const importers = files.filter((f) => importsPortalScope(readFileSync(f, "utf8"))).map(rel);
+    expect(importers).toContain("src/core/portal-reports.controller.ts");
+    expect(SWITCHED).toContain("src/core/portal-reports.controller.ts");
+    // The download kind and the overview/deliverables additions live in two controllers already on the list.
+    expect(SWITCHED).toContain("src/core/portal-commerce.controller.ts");
+    expect(SWITCHED).toContain("src/core/portal-workspace.controller.ts");
   });
 });

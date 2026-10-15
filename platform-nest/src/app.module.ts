@@ -35,6 +35,7 @@ import { PortalController } from "./core/portal.controller";
 // one an external party WRITES through.
 import { PortalWorkspaceController } from "./core/portal-workspace.controller";
 import { PortalHealthController } from "./core/portal-health.controller";
+import { PortalReportsController } from "./core/portal-reports.controller";
 import { PortalCommerceController } from "./core/portal-commerce.controller";
 import { PortalDocumentsController } from "./core/portal-documents.controller";
 import { ClientDocumentsController } from "./core/client-documents.controller";
@@ -125,6 +126,7 @@ import { PmController } from "./modules/pm/pm.controller";
 import { ItController } from "./modules/it/it.controller";
 import { FinanceController } from "./modules/finance/finance.controller";
 import { ClientsController } from "./modules/clients/clients.controller";
+import { ClientReportsController } from "./modules/clients/client-reports.controller";
 import { ClientsCentreController } from "./modules/clients/centre/clients-centre.controller";
 import { CentreDiscoveryController } from "./modules/clients/centre/centre-discovery.controller";
 import { PortalCentreController } from "./core/portal-centre.controller";
@@ -233,10 +235,10 @@ import { MagicLinkController } from "./mail/magic-link/controller";
 @Module({
   controllers: [
     HealthController, IdentityController, StepUpController, CoreController, CustomFieldsController,
-    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, BillingProfileController, BillingProfileAgentController, BillingNumberingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalHealthController, PortalCommerceController, PortalDocumentsController, ClientDocumentsController, PortalProfileController, PortalCentreController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, PortalConversationController, ConversationController, WorkRequestsController, CalendarEventsController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, AgencyPrivacyController, GithubReposController, GithubWebhookController, PaymentWebhookController, PaymentEventsController, SignatureWebhookController, CertifiedSigningController, SimulatedPsreController, MidtransSimulatorController, SimulatedPaymentPortalController, ContractsController, ClientContactsController, ClientInviteAcceptController, ClientWebsiteAccessController, FilesController, CreativeController, WorkActivityController, ActivitySeriesController, IntegrationsController, ClaudeSeatsController, AdminIdentityController, FigmaController, GoogleDriveController, GoogleDriveOauthCallbackController, GmailController, GmailOauthCallbackController,
+    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, BillingProfileController, BillingProfileAgentController, BillingNumberingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalHealthController, PortalReportsController, PortalCommerceController, PortalDocumentsController, ClientDocumentsController, PortalProfileController, PortalCentreController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, PortalConversationController, ConversationController, WorkRequestsController, CalendarEventsController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, AgencyPrivacyController, GithubReposController, GithubWebhookController, PaymentWebhookController, PaymentEventsController, SignatureWebhookController, CertifiedSigningController, SimulatedPsreController, MidtransSimulatorController, SimulatedPaymentPortalController, ContractsController, ClientContactsController, ClientInviteAcceptController, ClientWebsiteAccessController, FilesController, CreativeController, WorkActivityController, ActivitySeriesController, IntegrationsController, ClaudeSeatsController, AdminIdentityController, FigmaController, GoogleDriveController, GoogleDriveOauthCallbackController, GmailController, GmailOauthCallbackController,
     CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, AgentsController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController, KnowledgeSearchController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
-    AgencyController, PmController, ItController, FinanceController, ClientsController, ClientsCentreController, CentreDiscoveryController, HrController, LoansController,
+    AgencyController, PmController, ItController, FinanceController, ClientsController, ClientReportsController, ClientsCentreController, CentreDiscoveryController, HrController, LoansController,
     HrPolicyController, RecruitmentController, PayrollController, HrLifecycleController,
     LmsCatalogueController, LmsLearnController,
     CentreResultsController, PortalCentreResultsController,

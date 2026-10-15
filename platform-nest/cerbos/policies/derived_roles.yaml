@@ -675,6 +675,18 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.work_request.create" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_client_report_read — PV7-04a (2026-10-15, docs/FRONTEND-BFF-CONTRACT.md §55, docs/PERMISSION-CONTRACT.md §46).
+    # One generic global-or-company mirror, for read only. NO draft/publish/withdraw mirror, on purpose: each is reachable
+    # by the client's-owner rule (self-scoped, `ownerUserId == principal.id`), which a flat `perms` mirror cannot express
+    # (permission-arm-hazard-scan Pattern B). Same call as work_request's cancel.
+    - name: perm_client_report_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.client_report.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_calendar_event_create — DW-8g (2026-10-14, docs/FRONTEND-BFF-CONTRACT.md §47, docs/PERMISSION-CONTRACT.md §39). One generic
     # global-or-company mirror for `create` ONLY. NO read / update / cancel / respond mirror, on purpose: read is reachable by the
     # organizer, attendee and company-visibility rules, update and cancel by the organizer rule, and respond by the attendee rule
