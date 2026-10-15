@@ -212,7 +212,12 @@ describe.skipIf(!TEST_URL || !live)("DW-7h · IT security over the real surface"
     // ...and in its OWN company it sees none of T's rows, and cannot reach them by id or by session.
     const own = await get("connections", asUser(itAdmin2), T2);
     expect(own.statusCode).toBe(200);
-    expect(own.json().connections).toEqual([]);
+    // The request hook records the caller's own requests to T2 as connections (§52.3), so T2's IT may see ITSELF here.
+    // What must never appear is anyone else: T's member, or T's session.
+    const others = (own.json().connections as Array<{ who: { userId: string }; sessionId: string }>)
+      .filter((c) => c.who.userId !== itAdmin2);
+    expect(others).toEqual([]);
+    expect(JSON.stringify(own.json())).not.toContain("s-iso-1");
     const ownBlocks = (await get("blocks", asUser(itAdmin2), T2)).json();
     expect(ownBlocks.ipBlocks).toEqual([]);
     expect(ownBlocks.revokedSessions).toEqual([]);
