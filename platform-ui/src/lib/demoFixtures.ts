@@ -32,6 +32,7 @@ import { assistantDemo } from "./demoAssistant";
 import { NETWORK_FIXTURES } from "./demoNetwork";
 import { websiteAccessDemo } from "./demoWebsiteAccess";
 import { billingDemo, demoBillingNeedsClient, demoBillingNeedsUs, demoBillingPendingTotal } from "./demoBilling";
+import { clientReportsDemo } from "./demoClientReports";
 import { buildDemoClientHealth } from "./demoClientHealth";
 
 export interface DemoResult {
@@ -2363,6 +2364,10 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // DW-4h-3 / DW-4i — the all-work activity series and a day's detail (BFF section 44), with the real person-axis gate.
   const activity = activityDemo(m, p, url.searchParams, userId);
   if (activity) return activity;
+  // PV7-04b — the staff Reports tab: `clients/:id/reports` and `client-reports/:id/publish|withdraw` (BFF §55.3). Stateful
+  // (lib/demoClientReports.ts, shared with the portal's Reports page) and placed before the generic matchers.
+  const clientReports = clientReportsDemo(method, p, body, userId);
+  if (clientReports) return clientReports;
 
   // PM surface + task comments — stateful in-memory store (lib/demoPm.ts).
   const pm = pmDemo(method, p, url.searchParams, body);

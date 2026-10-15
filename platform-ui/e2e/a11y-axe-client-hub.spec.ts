@@ -41,6 +41,8 @@ const PAGES = [
   "/clients/cl-1/profile/se/results",
   "/clients/cl-1/profile/mk/results",
   "/clients/cl-1/billing",
+  // PV7-04b: Reports (published with the marker, a draft with Publish, a withdrawn one with its reason).
+  "/clients/cl-1/reports",
   "/clients/cl-1/contacts",
   "/clients/cl-1/notes",
 ];

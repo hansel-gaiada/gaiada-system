@@ -152,6 +152,54 @@ test.describe("client portal", () => {
     await expect(glance.getByRole("link", { name: /Services & results/ })).toHaveAttribute("href", "/portal/company");
   });
 
+  // PV7-04b — the Reports tab (BFF §55). `dana@northwind.example` is `demo-client` (lib/demoClientReports.ts): Northwind client-wide,
+  // and Demo Harbour Hotel through ONE project. Reports that other specs publish or withdraw (rep-3) are not asserted on.
+  // This test reads one report, so it needs a fresh dev server (state is per process, like the contract-signing tests above).
+  test("PV7-04b: Reports lists what we published, marks the unread one New, labels downloads by file type, and opening one marks it read @portal", async ({ page }) => {
+    await signInAsClient(page);
+    // The Overview area carries the new-report count, and Reports is its second tab.
+    const area = page.getByRole("navigation", { name: "Portal sections" }).getByRole("link", { name: /^Overview/ });
+    await expect(area).toContainText(/\d/);
+    await page.getByRole("navigation", { name: "Overview pages" }).getByRole("link", { name: /^Reports/ }).click();
+    await expect(page).toHaveURL(/\/portal\/reports$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Reports" })).toBeVisible();
+    await expect(page.getByText(/something went wrong|application error/i)).toHaveCount(0);
+
+    // The client-wide social report (PDF, never opened): New, "Whole account".
+    const social = page.locator("#rep-1");
+    await expect(social).toContainText("Social media performance, September 2026");
+    await expect(social).toContainText("Whole account");
+    await expect(social.getByText("New", { exact: true })).toBeVisible();
+    await expect(social.getByRole("link", { name: /^Download PDF/ })).toHaveAttribute("href", /\/portal\/files\/file-report-1$/);
+    // The project's search report (Markdown): already opened by this contact, so no New, and not labelled PDF.
+    const search = page.locator("#rep-2");
+    await expect(search).toContainText("Website relaunch");
+    await expect(search.getByText("New", { exact: true })).toHaveCount(0);
+    await expect(search.getByRole("link", { name: /^Download \(Markdown\)/ })).toBeVisible();
+    // Harbour: this contact is limited to one project there, so its project's report shows and the client-wide one does not.
+    await expect(page.locator("#rep-5")).toContainText("Spa booking page");
+    await expect(page.locator("#rep-6")).toHaveCount(0);
+    // Withdrawn and draft reports never appear.
+    await expect(page.locator("#rep-4")).toHaveCount(0);
+
+    // Download: a link click (the file itself is a placeholder in demo mode and the browser's download is not asserted);
+    // what matters is that the click marks the report read and the page refreshes without it.
+    await social.getByRole("link", { name: /^Download PDF/ }).click();
+    await expect(social.getByText("New", { exact: true })).toHaveCount(0);
+  });
+
+  test("PV7-04b: a deliverable a published report links offers Open report, to that report's row @portal", async ({ page }) => {
+    await signInAsClient(page);
+    await page.goto("/portal/deliverables");
+    await expect(page.getByRole("heading", { level: 1, name: "Deliverables" })).toBeVisible();
+    const link = page.getByRole("link", { name: /^Open report/ });
+    await expect(link).toHaveCount(1);
+    await expect(link).toHaveAttribute("href", "/portal/reports#rep-2");
+    await link.click();
+    await expect(page).toHaveURL(/\/portal\/reports#rep-2$/);
+    await expect(page.locator("#rep-2")).toBeVisible();
+  });
+
   test("PV7-03: a client of one company only gets no client heading clutter @portal", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel("Email").fill("admin@northwind.example");

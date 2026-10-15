@@ -23,7 +23,7 @@ import type {
   PortalConversationDetail, PortalConversationList, PortalMeetingMinutes,
   PortalChangeRequest, PortalContract, PortalContractDetail, PortalDeliverable, PortalInvoice,
   PortalInvoiceDetail, PortalSimulatedPayment, PortalMilestone, PortalHealth, PortalOverview, PortalProfile, PortalProject, PortalProjectDetail,
-  PortalRun, PortalRunDetail, PortalSocialReview, PortalTimelineEvent,
+  PortalReport, PortalRun, PortalRunDetail, PortalSocialReview, PortalTimelineEvent,
 } from "./portal";
 
 /** Degrade "not found"/"not yours" to a fallback; let everything else propagate. NOT extended to 403:
@@ -121,6 +121,16 @@ export async function getPortalContract(userId: string, tenant: string, contract
 export async function listPortalDocuments(userId: string, tenant: string): Promise<DocumentItem[] | null> {
   const r = await safe(platformFetch<{ items: DocumentItem[] }>(`/api/${tenant}/portal/documents`, userId), null);
   return r ? r.items : null;
+}
+
+/** PV7-04b (BFF §55.4): the published, in-reach client reports, newest first. `null` = the list could not be read (an older
+ *  server, a refusal, an outage): the page says so in words and never shows "no reports" for a failed read. */
+export async function listPortalReports(userId: string, tenant: string): Promise<PortalReport[] | null> {
+  try {
+    return await platformFetch<PortalReport[]>(`/api/${tenant}/portal/reports`, userId);
+  } catch {
+    return null;
+  }
 }
 
 export async function getPortalProfile(userId: string, tenant: string): Promise<PortalProfile | null> {

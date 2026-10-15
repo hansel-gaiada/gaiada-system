@@ -21,6 +21,7 @@ import "server-only";
 // every navigation.
 import type { DemoResult } from "./demoFixtures";
 import { isDemoPortalClient } from "./demoPortalClients";
+import { demoPortalNewReports, demoPortalReportFile, demoPortalReportIdForDeliverable, portalReportsDemo } from "./demoClientReports";
 import { portalCallerContact, portalProfileContacts } from "./demoWebsiteAccess";
 
 const CLIENT_ID = "cl-1";              // Northwind Traders — the client `demo-client` represents
@@ -757,7 +758,7 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
   // Route table FIRST, identity check second — but only for routes this module owns, so unmatched
   // portal routes still fall through to `portalDemo` (runs/gates) rather than being 403'd here.
   const seg = p.replace(/^\/api\/[^/]+\/portal\//, "");
-  const OWNED = /^(overview|projects|milestones|timeline|deliverables|invoices|contracts|documents|profile|stream|files|change-requests|conversation|meetings|payments|simulated-psre|health)(\/|\?|$)/;
+  const OWNED = /^(overview|projects|milestones|timeline|deliverables|invoices|contracts|documents|profile|stream|files|change-requests|conversation|meetings|payments|simulated-psre|health|reports)(\/|\?|$)/;
   if (!OWNED.test(seg)) return null;
   if (!isDemoPortalClient(userId)) return { status: 403, json: { error: "not a portal client" } };
 
@@ -791,8 +792,14 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
       needsYou: needsYou(),
       finance: financeTotals(),
       conversationUnread: CONV.threads.filter((t) => t.unread > 0).length,
+      // PV7-04b (§55.4): published reports in reach, last 30 days, not yet opened by this user (lib/demoClientReports.ts).
+      newReports: demoPortalNewReports(userId),
     });
   }
+
+  // ── client reports (PV7-04b, BFF §55.4) ──
+  const reportsRes = portalReportsDemo(m, seg, userId);
+  if (reportsRes) return reportsRes;
 
   // ── project health (PV7-03, BFF §54.5) ──
   if (seg === "health" && m === "GET") return ok(portalHealth(userId));
@@ -825,7 +832,10 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
   // ── deliverables ──
   if (seg.startsWith("deliverables") && m === "GET") {
     const q = new URL(p, "http://demo").searchParams.get("projectId");
-    return ok(q ? DELIVERABLES.filter((d) => d.projectId === q) : DELIVERABLES);
+    // PV7-04b: `reportId` = the published, in-reach report that links the deliverable (null otherwise).
+    const rows = (q ? DELIVERABLES.filter((d) => d.projectId === q) : DELIVERABLES)
+      .map((d) => ({ ...d, reportId: demoPortalReportIdForDeliverable(d.id, userId) }));
+    return ok(rows);
   }
 
   // ── documents (PV5-08): signed agreements, issued-invoice PDFs, payment receipts; newest first ──
@@ -1176,7 +1186,11 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
   // A real download streams bytes, which `getDemoResponse` (JSON-only) cannot represent. Answering 404
   // is the honest fixture: the link renders, and clicking it fails visibly instead of appearing to
   // deliver an empty file.
-  if (seg.startsWith("files/")) return notFound("no stored content in demo mode");
+  if (seg.startsWith("files/")) {
+    // A client report's file answers with a labelled placeholder (PV7-04b) rather than a 404; everything else keeps the 404.
+    const report = demoPortalReportFile(decodeURIComponent(seg.slice("files/".length).split(/[?#]/)[0]), userId);
+    return report ?? notFound("no stored content in demo mode");
+  }
 
   // ── stream ──
   // SSE is not representable here either. `mode: "poll"` is exactly what the client falls back to when

@@ -52,7 +52,7 @@ export default async function PortalDeliverablesPage() {
         eyebrow="Your work"
         title="Deliverables"
         lead="Everything we owe you and everything we've handed over, with the files."
-        actions={<PortalLive topics={["deliverables"]} />}
+        actions={<PortalLive topics={["deliverables", "reports"]} />}
       />
 
       {deliverables.length === 0 ? (
@@ -86,6 +86,16 @@ export default async function PortalDeliverablesPage() {
                           {d.dueDate ? `${late ? "Was due" : "Due"} ${portalDate(d.dueDate)}` : "No date set"}
                         </span>
                       </div>
+                      {/* PV7-04b: a deliverable that a published report links (BFF §55.4 `reportId`) points to the report's row on
+                          the Reports page, not straight at the file: the page shows its period and "New" marker, and its
+                          download marks the report read. */}
+                      {d.reportId && (
+                        <div style={{ marginTop: 6 }}>
+                          <Link href={`/portal/reports#${d.reportId}`} style={{ font: "500 13px var(--font-body)", color: "var(--erp-accent)", textDecoration: "none" }}>
+                            Open report →
+                          </Link>
+                        </div>
+                      )}
                       {d.files && d.files.length > 0 ? (
                         <ul style={{ margin: "8px 0 0", padding: 0, listStyle: "none", display: "grid", gap: 5 }}>
                           {d.files.map((f) => (
