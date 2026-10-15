@@ -5,14 +5,17 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { formatMoney } from "@/lib/hr-full";
-import { listRequisitionsResult, listEmployeesResult } from "@/lib/hr-full-data";
+import {
+  listRequisitionsResult, listEmployeesResult, listApplicationsResult, listCandidatesResult, listPipelineStagesResult,
+} from "@/lib/hr-full-data";
 import { recruitmentControls } from "@/lib/hrRecruitment";
-import { Card, StatusBadge } from "@/components/ui";
+import { Card, StatusBadge, HairlineTable } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { RequisitionActions } from "@/components/hr/RequisitionActions";
 import type { PersonOption } from "@/components/hr/RequisitionForm";
-import { updateRequisition, setRequisitionStatus, submitRequisition } from "@/lib/hrRecruitmentActions";
+import { ApplicationForm } from "@/components/hr/ApplicationForm";
+import { updateRequisition, setRequisitionStatus, submitRequisition, createApplication } from "@/lib/hrRecruitmentActions";
 
 type Params = Promise<{ requisitionId: string }>;
 
@@ -62,7 +65,15 @@ export default async function HrRequisitionPage({ params }: { params: Params }) 
   const owner = !!me.userId && (requisition.hiringManagerUserId === me.userId || requisition.recruiterUserId === me.userId);
   const canUpdate = ctl.update || owner;
 
-  const employeesRead = ctl.manage ? await listEmployeesResult(userId, tenant) : null;
+  // Applications on this requisition (every status, so a hired or rejected one is still on the page). The candidate
+  // pool and the stages are only needed to add a candidate, which is the manage tier's.
+  const addable = ctl.manage && (requisition.status === "open" || requisition.status === "on_hold");
+  const [employeesRead, appRead, candRead, stagesRead] = await Promise.all([
+    ctl.manage ? listEmployeesResult(userId, tenant) : null,
+    listApplicationsResult(userId, tenant, { requisitionId }),
+    addable ? listCandidatesResult(userId, tenant) : null,
+    addable ? listPipelineStagesResult(userId, tenant) : null,
+  ]);
   const employees = employeesRead?.kind === "ok" ? employeesRead.data : [];
   const people: PersonOption[] = employees.filter((e) => e.userId).map((e) => ({ userId: e.userId as string, name: e.displayName }));
   const nameOf = (uid: string | null) => (uid ? employees.find((e) => e.userId === uid)?.displayName ?? "assigned" : "—");
@@ -99,6 +110,48 @@ export default async function HrRequisitionPage({ params }: { params: Params }) 
             <ReadRefusal inline subject={employeesRead.kind === "forbidden" ? "the employee list" : "The employee list"} kind={employeesRead.kind}
               reason={employeesRead.kind === "unavailable" ? employeesRead.reason : undefined}
               detail="Hiring managers and recruiters cannot be picked or named without it." />
+          ) : null}
+        </div>
+      </Card>
+
+      <Card title="Applications">
+        <div style={{ display: "grid", gap: 14 }}>
+          {appRead.kind === "forbidden" ? (
+            <ReadRefusal inline subject="the applications on this requisition" kind="forbidden" />
+          ) : appRead.kind === "unavailable" ? (
+            <ReadRefusal inline subject="The applications on this requisition" kind="unavailable" reason={appRead.reason} />
+          ) : appRead.data.length === 0 ? (
+            <EmptyNote>No applications on this requisition yet.</EmptyNote>
+          ) : (
+            <HairlineTable
+              columns={[
+                { label: "Candidate" }, { label: "Stage" }, { label: "Status" },
+                { label: "Rating", align: "right" }, { label: "Days in stage", align: "right" },
+              ]}
+              rows={appRead.data.map((a) => [
+                <Link key={a.id} href={`/hr/recruitment/applications/${a.id}`} style={{ color: "var(--erp-accent)" }}>{a.candidateName}</Link>,
+                a.stageKey,
+                <StatusBadge key={`${a.id}-s`} label={a.status} />,
+                a.rating ? Number(a.rating).toFixed(1) : "—",
+                String(a.daysInStage),
+              ])}
+            />
+          )}
+          {addable && candRead?.kind === "ok" && stagesRead?.kind === "ok" ? (
+            <ApplicationForm
+              create={createApplication} companyId={tenant} requisitionId={r.id}
+              candidates={candRead.data.filter((c) => !c.erasureRequestedAt).map((c) => ({ id: c.id, name: c.fullName, email: c.email }))}
+              stages={stagesRead.data.filter((s) => s.isActive && !s.isTerminal).map((s) => ({ key: s.key, label: s.label }))}
+            />
+          ) : addable && candRead && stagesRead ? (
+            <ReadRefusal
+              inline subject={candRead.kind !== "ok" ? "the talent pool" : "the pipeline stages"}
+              kind={(candRead.kind !== "ok" ? candRead.kind : stagesRead.kind) as "forbidden" | "unavailable"}
+              reason={candRead.kind === "unavailable" ? candRead.reason : stagesRead.kind === "unavailable" ? stagesRead.reason : undefined}
+              detail="A candidate cannot be added without it."
+            />
+          ) : ctl.manage && !addable ? (
+            <p style={{ margin: 0, ...dim }}>Candidates can be added while the requisition is open or on hold. This one is {r.status.replace("_", " ")}.</p>
           ) : null}
         </div>
       </Card>

@@ -4,6 +4,7 @@ import { getSessionUserId } from "./session-server";
 import { platformFetch, PlatformError } from "./platform";
 import {
   createRequisition, updateRequisition, setRequisitionStatus, submitRequisition, createCandidate, requestCandidateErasure,
+  createApplication, moveApplicationStage, scheduleInterview, updateInterview, upsertPipelineStage,
 } from "./hrRecruitmentActions";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -241,6 +242,210 @@ describe("requestCandidateErasure", () => {
     expect((await requestCandidateErasure("co-a", "cd-1")).error).toBe("You don't have permission to request erasure of candidate data.");
     vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(404, "candidate not found"));
     expect((await requestCandidateErasure("co-a", "cd-1")).error).toBe("candidate not found");
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------- applications, stages, interviews
+
+describe("createApplication", () => {
+  const APP = { companyId: "co-a", requisitionId: "rq-1", candidateId: "cd-1", stageKey: "screen", appliedOn: "2026-10-05" };
+
+  it("posts the application and revalidates the console, the requisition page and the application pages", async () => {
+    vi.mocked(platformFetch).mockResolvedValue({ id: "ap-1", stageKey: "screen", status: "active" });
+    const r = await createApplication(form(APP));
+    expect(r).toMatchObject({ ok: true, id: "ap-1", status: "active" });
+    const c = lastCall();
+    expect(c.path).toBe("/api/co-a/modules/hr/applications");
+    expect(c.init.method).toBe("POST");
+    expect(c.body).toEqual({ requisitionId: "rq-1", candidateId: "cd-1", stageKey: "screen", appliedOn: "2026-10-05" });
+    expect(revalidated()).toEqual(expect.arrayContaining(["/hr/recruitment", "/hr/recruitment/rq-1", "/hr/recruitment/[requisitionId]"]));
+  });
+
+  it("leaves the stage and date to the server when blank", async () => {
+    vi.mocked(platformFetch).mockResolvedValue({ id: "ap-1", stageKey: "applied", status: "active" });
+    await createApplication(form(APP, { stageKey: "", appliedOn: "" }));
+    expect(lastCall().body).toEqual({ requisitionId: "rq-1", candidateId: "cd-1" });
+  });
+
+  it("refuses missing ids and a bad date without calling the server", async () => {
+    for (const over of <Record<string, string>[]>[{ requisitionId: "" }, { candidateId: "" }, { appliedOn: "5 Oct" }]) {
+      expect((await createApplication(form(APP, over))).ok).toBe(false);
+    }
+    expect(platformFetch).not.toHaveBeenCalled();
+  });
+
+  it("words a 403 and passes the server's 409 live-application sentence through", async () => {
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(403, "forbidden"));
+    expect((await createApplication(form(APP))).error).toBe("You don't have permission to add applications.");
+    const dup = "this candidate already has a live application for that requisition";
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(409, dup));
+    expect(await createApplication(form(APP))).toEqual({ ok: false, error: dup });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+describe("moveApplicationStage", () => {
+  it("posts the stage with the note and reports the move the server made", async () => {
+    vi.mocked(platformFetch).mockResolvedValue({ from: "screen", to: "interview", status: "active" });
+    const r = await moveApplicationStage("co-a", "ap-1", form({ stageKey: "interview", note: " good call " }));
+    expect(r).toMatchObject({ ok: true, id: "ap-1", status: "active", notice: "Moved from screen to interview." });
+    const c = lastCall();
+    expect(c.path).toBe("/api/co-a/modules/hr/applications/ap-1/stage");
+    expect(c.init.method).toBe("POST");
+    expect(c.body).toEqual({ stageKey: "interview", note: "good call" });
+    expect(revalidated()).toEqual(expect.arrayContaining(["/hr/recruitment", "/hr/recruitment/applications/ap-1"]));
+  });
+
+  it("says when the move ended the application, from the server's status, and sends the rejection reason", async () => {
+    vi.mocked(platformFetch).mockResolvedValue({ from: "interview", to: "rejected", status: "rejected" });
+    const r = await moveApplicationStage("co-a", "ap-1", form({ stageKey: "rejected", rejectionReason: "Not a fit" }));
+    expect(r.notice).toContain("the application is now rejected");
+    expect(lastCall().body).toEqual({ stageKey: "rejected", rejectionReason: "Not a fit" });
+  });
+
+  it("refuses an empty stage without calling the server", async () => {
+    expect((await moveApplicationStage("co-a", "ap-1", form({ stageKey: " " }))).ok).toBe(false);
+    expect(platformFetch).not.toHaveBeenCalled();
+  });
+
+  it("words a 403 and carries the server's 400 for a closed application and an unknown stage", async () => {
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(403, "forbidden"));
+    expect((await moveApplicationStage("co-a", "ap-1", form({ stageKey: "x" }))).error).toBe("You don't have permission to move this application.");
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(400, "application is 'hired' and cannot be moved"));
+    expect((await moveApplicationStage("co-a", "ap-1", form({ stageKey: "x" }))).error).toBe("application is 'hired' and cannot be moved");
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(400, "unknown pipeline stage 'x'"));
+    expect((await moveApplicationStage("co-a", "ap-1", form({ stageKey: "x" }))).error).toBe("unknown pipeline stage 'x'");
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+describe("scheduleInterview", () => {
+  const IV = {
+    kind: "technical", timezone: "Asia/Makassar", scheduledStart: "2026-10-20T09:00", scheduledEnd: "2026-10-20T10:00",
+    location: "Room 2", meetingUrl: "https://meet.example.com/x",
+  };
+
+  it("converts the times typed in the zone to exact instants, sends the panelists, and says they were notified", async () => {
+    vi.mocked(platformFetch).mockResolvedValue({ id: "iv-1" });
+    const f = form(IV);
+    f.append("panelists", "u-a");
+    f.append("panelists", "u-b");
+    f.append("panelists", "u-a");
+    const r = await scheduleInterview("co-a", "ap-1", f);
+    expect(r).toMatchObject({ ok: true, id: "iv-1" });
+    expect(r.notice).toBe("Interview scheduled. 2 panelist(s) were notified.");
+    const c = lastCall();
+    expect(c.path).toBe("/api/co-a/modules/hr/applications/ap-1/interviews");
+    expect(c.init.method).toBe("POST");
+    expect(c.body).toEqual({
+      kind: "technical", scheduledStart: "2026-10-20T01:00:00.000Z", scheduledEnd: "2026-10-20T02:00:00.000Z",
+      timezone: "Asia/Makassar", location: "Room 2", meetingUrl: "https://meet.example.com/x",
+      panelists: [{ userId: "u-a" }, { userId: "u-b" }],
+    });
+    expect(revalidated()).toContain("/hr/recruitment/applications/ap-1");
+  });
+
+  it("defaults the type and zone, and omits empty optional fields and panelists", async () => {
+    vi.mocked(platformFetch).mockResolvedValue({ id: "iv-1" });
+    const r = await scheduleInterview("co-a", "ap-1", form({ scheduledStart: "2026-10-20T09:00", scheduledEnd: "2026-10-20T10:00" }));
+    expect(r.notice).toBe("Interview scheduled.");
+    expect(lastCall().body).toEqual({
+      kind: "interview", scheduledStart: "2026-10-20T01:00:00.000Z", scheduledEnd: "2026-10-20T02:00:00.000Z", timezone: "Asia/Makassar",
+    });
+  });
+
+  it("refuses bad input without calling the server", async () => {
+    for (const over of <Record<string, string>[]>[
+      { kind: "party" }, { timezone: "Mars/Olympus" }, { scheduledStart: "" }, { scheduledEnd: "2026-10-20T09:00" },
+      { scheduledEnd: "2026-10-20T08:00" }, { meetingUrl: "meet.example.com" },
+    ]) {
+      expect((await scheduleInterview("co-a", "ap-1", form(IV, over))).ok).toBe(false);
+    }
+    expect(platformFetch).not.toHaveBeenCalled();
+  });
+
+  it("words a 403 and passes the server's 400 and 404 through", async () => {
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(403, "forbidden"));
+    expect((await scheduleInterview("co-a", "ap-1", form(IV))).error).toBe("You don't have permission to schedule interviews.");
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(400, "scheduledEnd must be after scheduledStart"));
+    expect((await scheduleInterview("co-a", "ap-1", form(IV))).error).toBe("scheduledEnd must be after scheduledStart");
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(404, "application not found"));
+    expect((await scheduleInterview("co-a", "ap-1", form(IV))).error).toBe("application not found");
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateInterview", () => {
+  it("PATCHes the status and outcome, and revalidates the application page", async () => {
+    vi.mocked(platformFetch).mockResolvedValue({ ok: true });
+    const r = await updateInterview("co-a", "ap-1", "iv-1", form({ status: "completed", outcome: "advance" }));
+    expect(r).toMatchObject({ ok: true, id: "iv-1", notice: "Interview updated." });
+    const c = lastCall();
+    expect(c.path).toBe("/api/co-a/modules/hr/interviews/iv-1");
+    expect(c.init.method).toBe("PATCH");
+    expect(c.body).toEqual({ status: "completed", outcome: "advance" });
+    expect(revalidated()).toContain("/hr/recruitment/applications/ap-1");
+  });
+
+  it("converts new times in the interview's own zone, and needs both or neither", async () => {
+    vi.mocked(platformFetch).mockResolvedValue({ ok: true });
+    await updateInterview("co-a", "ap-1", "iv-1", form({ timezone: "Asia/Makassar", scheduledStart: "2026-10-21T14:00", scheduledEnd: "2026-10-21T15:00" }));
+    expect(lastCall().body).toEqual({ scheduledStart: "2026-10-21T06:00:00.000Z", scheduledEnd: "2026-10-21T07:00:00.000Z" });
+    vi.mocked(platformFetch).mockReset();
+    for (const over of <Record<string, string>[]>[
+      { scheduledStart: "2026-10-21T14:00" }, { scheduledStart: "2026-10-21T14:00", scheduledEnd: "2026-10-21T13:00" },
+      { status: "teleported" }, { outcome: "maybe" }, {},
+    ]) {
+      expect((await updateInterview("co-a", "ap-1", "iv-1", form({ timezone: "Asia/Makassar" }, over))).ok).toBe(false);
+    }
+    expect(platformFetch).not.toHaveBeenCalled();
+  });
+
+  it("words a 403 and passes the server's 404 through", async () => {
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(403, "forbidden"));
+    expect((await updateInterview("co-a", "ap-1", "iv-1", form({ status: "completed" }))).error).toBe("You don't have permission to edit this interview.");
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(404, "interview not found"));
+    expect((await updateInterview("co-a", "ap-1", "iv-1", form({ status: "completed" }))).error).toBe("interview not found");
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+describe("upsertPipelineStage", () => {
+  const ST = { companyId: "co-a", key: "tech_interview", label: "Technical interview", sortOrder: "3", terminalKind: "", requiresInterview: "on" };
+
+  it("posts one stage in the stages array and revalidates the console and HR settings", async () => {
+    vi.mocked(platformFetch).mockResolvedValue({ upserted: 1 });
+    const r = await upsertPipelineStage(form(ST));
+    expect(r).toMatchObject({ ok: true, id: "tech_interview" });
+    const c = lastCall();
+    expect(c.path).toBe("/api/co-a/modules/hr/pipeline-stages");
+    expect(c.init.method).toBe("POST");
+    expect(c.body).toEqual({ stages: [{ key: "tech_interview", label: "Technical interview", sortOrder: 3, isTerminal: false, requiresInterview: true }] });
+    expect(revalidated()).toEqual(expect.arrayContaining(["/hr/recruitment", "/hr/settings"]));
+  });
+
+  it("a terminal kind makes the stage terminal", async () => {
+    vi.mocked(platformFetch).mockResolvedValue({ upserted: 1 });
+    await upsertPipelineStage(form(ST, { key: "rejected", label: "Rejected", terminalKind: "rejected", requiresInterview: "" }));
+    expect(lastCall().body.stages[0]).toMatchObject({ isTerminal: true, terminalKind: "rejected", requiresInterview: false });
+  });
+
+  it("refuses bad input without calling the server", async () => {
+    for (const over of <Record<string, string>[]>[
+      { key: "Tech Interview" }, { key: "" }, { label: " " }, { sortOrder: "-1" }, { terminalKind: "vanished" },
+    ]) {
+      expect((await upsertPipelineStage(form(ST, over))).ok).toBe(false);
+    }
+    expect(platformFetch).not.toHaveBeenCalled();
+  });
+
+  it("words a 403 and passes the server's 400 through", async () => {
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(403, "forbidden"));
+    expect((await upsertPipelineStage(form(ST))).error).toBe("You don't have permission to change the pipeline stages.");
+    const words = "stage 'x' is terminal and needs terminalKind (hired|rejected|withdrawn)";
+    vi.mocked(platformFetch).mockRejectedValueOnce(new PlatformError(400, words));
+    expect((await upsertPipelineStage(form(ST))).error).toBe(words);
     expect(revalidatePath).not.toHaveBeenCalled();
   });
 });

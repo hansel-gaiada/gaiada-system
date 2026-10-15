@@ -20,7 +20,7 @@ export function Field({
 }: {
   name: string;
   label: string;
-  type?: "text" | "number" | "date" | "select" | "textarea" | "boolean";
+  type?: "text" | "number" | "date" | "datetime-local" | "select" | "textarea" | "boolean";
   defaultValue?: unknown;
   options?: string[];
   // Value/label pairs for selects where the submitted value differs from the

@@ -22,6 +22,7 @@ import { getMe, platformFetch, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
 import {
   EMPLOYMENT_TYPES, WORK_MODES, CANDIDATE_SOURCES, PATCHABLE_REQUISITION_STATUSES,
+  INTERVIEW_KINDS, INTERVIEW_STATUSES, INTERVIEW_OUTCOMES, zonedLocalToIso,
 } from "./hrRecruitment";
 
 export type RecruitmentResult = {
@@ -300,4 +301,183 @@ export async function requestCandidateErasure(tenantId: string, candidateId: str
   if (!r.ok) return { ok: false, error: r.error };
   revalRequisition();
   return { ok: true, id: candidateId, notice: "Erasure requested. The candidate's data is purged by the retention sweep, not deleted now." };
+}
+
+// ═════════════════════════════════════════════════════════ APPLICATIONS ═════════════════════
+
+// POST applications (authorize `create`, manage tier). A candidate on a requisition. 409 "this candidate already
+// has a live application for that requisition". The stage defaults to "applied" on the server when none is sent.
+export async function createApplication(formData: FormData): Promise<RecruitmentResult> {
+  const c = await ctx(field(formData, "companyId") || undefined);
+  if ("error" in c) return { ok: false, error: c.error };
+
+  const requisitionId = field(formData, "requisitionId");
+  const candidateId = field(formData, "candidateId");
+  const stageKey = field(formData, "stageKey");
+  const appliedOn = field(formData, "appliedOn");
+  if (!requisitionId) return { ok: false, error: "No requisition selected." };
+  if (!candidateId) return { ok: false, error: "Pick the candidate to add." };
+  if (appliedOn && !ISO_DATE.test(appliedOn)) return { ok: false, error: "The applied date must be YYYY-MM-DD." };
+
+  const r = await send<{ id?: string; stageKey?: string; status?: string }>(
+    c.tenant, c.userId, "POST", "/applications",
+    { requisitionId, candidateId, ...(stageKey ? { stageKey } : {}), ...(appliedOn ? { appliedOn } : {}) },
+    "add applications",
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  revalApplication();
+  revalRequisition(requisitionId);
+  return {
+    ok: true, id: str(r.body.id), status: str(r.body.status),
+    notice: `Added to the pipeline${r.body.stageKey ? ` at ${r.body.stageKey}` : ""}.`,
+  };
+}
+
+// POST applications/:id/stage (authorize `update`; a requisition's hiring manager and recruiter also hold it).
+// One route for advance, reject and withdraw: the server derives the new status from the stage's own terminal
+// kind and says what it set. 400 "application is 'hired' and cannot be moved", 400 "unknown pipeline stage".
+// Moving to a terminal stage ends the application. Moving to a `hired` stage does NOT create an employee; that
+// is the offer's convert step.
+export async function moveApplicationStage(tenantId: string, applicationId: string, formData: FormData): Promise<RecruitmentResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!applicationId) return { ok: false, error: "No application selected." };
+
+  const stageKey = field(formData, "stageKey");
+  if (!stageKey) return { ok: false, error: "Pick the stage to move to." };
+  const note = field(formData, "note");
+  const rejectionReason = field(formData, "rejectionReason");
+
+  const r = await send<{ from?: string; to?: string; status?: string }>(
+    c.tenant, c.userId, "POST", `/applications/${encodeURIComponent(applicationId)}/stage`,
+    { stageKey, ...(note ? { note } : {}), ...(rejectionReason ? { rejectionReason } : {}) },
+    "move this application",
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  revalApplication(applicationId);
+  const status = str(r.body.status);
+  return {
+    ok: true, id: applicationId, status,
+    notice: `Moved${r.body.from ? ` from ${r.body.from}` : ""} to ${str(r.body.to) ?? stageKey}${status && status !== "active" ? `; the application is now ${status}` : ""}.`,
+  };
+}
+
+// ═════════════════════════════════════════════════════════ INTERVIEWS ═══════════════════════
+
+function checkZone(raw: string): string | undefined {
+  try { new Intl.DateTimeFormat("en-US", { timeZone: raw }); return raw; } catch { return undefined; }
+}
+
+// POST applications/:id/interviews (authorize `update` with the application's owners, so a hiring manager or
+// recruiter can). The server stores the instants as given and only displays the timezone, so the times typed in
+// that zone are converted to exact instants here. 400 end not after start. The server notifies each panelist.
+export async function scheduleInterview(tenantId: string, applicationId: string, formData: FormData): Promise<RecruitmentResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!applicationId) return { ok: false, error: "No application selected." };
+
+  const kind = field(formData, "kind") || "interview";
+  if (!INTERVIEW_KINDS.includes(kind)) return { ok: false, error: "Pick an interview type from the list." };
+  const timezone = field(formData, "timezone") || "Asia/Makassar";
+  if (!checkZone(timezone)) return { ok: false, error: "That time zone is not recognised. Use a name such as Asia/Makassar." };
+  const start = zonedLocalToIso(field(formData, "scheduledStart"), timezone);
+  const end = zonedLocalToIso(field(formData, "scheduledEnd"), timezone);
+  if (!start || !end) return { ok: false, error: "A start and an end time are required." };
+  if (new Date(end) <= new Date(start)) return { ok: false, error: "The interview must end after it starts." };
+  const meetingUrl = field(formData, "meetingUrl");
+  if (meetingUrl && !/^https?:\/\//i.test(meetingUrl)) return { ok: false, error: "The meeting link must start with http:// or https://." };
+  const location = field(formData, "location");
+  const panelists = [...new Set(formData.getAll("panelists").map((v) => String(v).trim()).filter(Boolean))];
+
+  const r = await send<{ id?: string }>(
+    c.tenant, c.userId, "POST", `/applications/${encodeURIComponent(applicationId)}/interviews`,
+    {
+      kind, scheduledStart: start, scheduledEnd: end, timezone,
+      ...(location ? { location } : {}), ...(meetingUrl ? { meetingUrl } : {}),
+      ...(panelists.length ? { panelists: panelists.map((userId) => ({ userId })) } : {}),
+    },
+    "schedule interviews",
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  revalApplication(applicationId);
+  return {
+    ok: true, id: str(r.body.id),
+    notice: panelists.length ? `Interview scheduled. ${panelists.length} panelist(s) were notified.` : "Interview scheduled.",
+  };
+}
+
+// PATCH interviews/:id (authorize `update` with the application's owners). Status, outcome and the times; the
+// server does not move an interview's timezone. Times are sent only when both are given, in the interview's own zone.
+// `applicationId` is only for revalidating the page; the route does not take it.
+export async function updateInterview(tenantId: string, applicationId: string, interviewId: string, formData: FormData): Promise<RecruitmentResult> {
+  const c = await ctx(tenantId);
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!interviewId) return { ok: false, error: "No interview selected." };
+
+  const body: Record<string, unknown> = {};
+  const status = field(formData, "status");
+  if (status) {
+    if (!INTERVIEW_STATUSES.includes(status)) return { ok: false, error: "Pick a status from the list." };
+    body.status = status;
+  }
+  const outcome = field(formData, "outcome");
+  if (outcome) {
+    if (!INTERVIEW_OUTCOMES.includes(outcome)) return { ok: false, error: "Pick an outcome from the list." };
+    body.outcome = outcome;
+  }
+  const rawStart = field(formData, "scheduledStart");
+  const rawEnd = field(formData, "scheduledEnd");
+  if (rawStart || rawEnd) {
+    const timezone = field(formData, "timezone") || "Asia/Makassar";
+    if (!checkZone(timezone)) return { ok: false, error: "That time zone is not recognised." };
+    const start = zonedLocalToIso(rawStart, timezone);
+    const end = zonedLocalToIso(rawEnd, timezone);
+    if (!start || !end) return { ok: false, error: "Give both a start and an end time, or neither." };
+    if (new Date(end) <= new Date(start)) return { ok: false, error: "The interview must end after it starts." };
+    body.scheduledStart = start;
+    body.scheduledEnd = end;
+  }
+  if (Object.keys(body).length === 0) return { ok: false, error: "Change at least one field." };
+
+  const r = await send(c.tenant, c.userId, "PATCH", `/interviews/${encodeURIComponent(interviewId)}`, body, "edit this interview");
+  if (!r.ok) return { ok: false, error: r.error };
+  revalApplication(applicationId || undefined);
+  return { ok: true, id: interviewId, notice: "Interview updated." };
+}
+
+// ═════════════════════════════════════════════════════════ PIPELINE STAGES ══════════════════
+
+// POST pipeline-stages (authorize `create`, manage tier). An upsert by key: it adds a stage or updates the label,
+// order, terminal kind and interview flag of the one with that key. It cannot deactivate or delete a stage. 400
+// "stage 'x' is terminal and needs terminalKind (hired|rejected|withdrawn)".
+export async function upsertPipelineStage(formData: FormData): Promise<RecruitmentResult> {
+  const c = await ctx(field(formData, "companyId") || undefined);
+  if ("error" in c) return { ok: false, error: c.error };
+
+  const key = field(formData, "key");
+  const label = field(formData, "label");
+  if (!/^[a-z][a-z0-9_]*$/.test(key)) {
+    return { ok: false, error: "The stage key is its stable handle: lowercase letters, digits and underscores, starting with a letter." };
+  }
+  if (!label) return { ok: false, error: "A label is required." };
+  const order = num(field(formData, "sortOrder"), "The order", 0, true);
+  if (order.error) return { ok: false, error: order.error };
+  const terminalKind = field(formData, "terminalKind");
+  if (terminalKind && !["hired", "rejected", "withdrawn"].includes(terminalKind)) {
+    return { ok: false, error: "Pick a terminal kind from the list, or leave it blank for an ordinary stage." };
+  }
+  const requiresInterview = formData.get("requiresInterview") === "on" || formData.get("requiresInterview") === "true";
+
+  const r = await send<{ upserted?: number }>(
+    c.tenant, c.userId, "POST", "/pipeline-stages",
+    { stages: [{
+      key, label, sortOrder: order.value ?? 0, isTerminal: !!terminalKind,
+      ...(terminalKind ? { terminalKind } : {}), requiresInterview,
+    }] },
+    "change the pipeline stages",
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  revalApplication();
+  revalidatePath("/hr/settings");
+  return { ok: true, id: key, notice: `Stage ${label} saved.` };
 }

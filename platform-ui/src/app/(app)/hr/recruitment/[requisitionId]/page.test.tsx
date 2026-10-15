@@ -1,4 +1,4 @@
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // DW-7f-2 — /hr/recruitment/[requisitionId]: the requisition and its controls. There is no single-requisition
@@ -16,14 +16,17 @@ const me = { userId: "u-1", roles: [] as { role: string; scopeType: string; scop
 vi.mock("@/lib/platform", () => ({ getMe: vi.fn(async () => me) }));
 vi.mock("@/lib/tenant", () => ({ getActiveTenant: vi.fn(async () => "co-a") }));
 vi.mock("@/lib/hrRecruitmentActions", () => ({
-  updateRequisition: vi.fn(), setRequisitionStatus: vi.fn(), submitRequisition: vi.fn(),
+  updateRequisition: vi.fn(), setRequisitionStatus: vi.fn(), submitRequisition: vi.fn(), createApplication: vi.fn(),
 }));
 
 type Read = { kind: "ok"; data: unknown } | { kind: "forbidden" } | { kind: "unavailable"; reason: string };
-let reqRead: Read; let employeesRead: Read;
+let reqRead: Read; let employeesRead: Read; let appRead: Read; let candRead: Read; let stagesRead: Read;
 vi.mock("@/lib/hr-full-data", () => ({
   listRequisitionsResult: vi.fn(async () => reqRead),
   listEmployeesResult: vi.fn(async () => employeesRead),
+  listApplicationsResult: vi.fn(async () => appRead),
+  listCandidatesResult: vi.fn(async () => candRead),
+  listPipelineStagesResult: vi.fn(async () => stagesRead),
 }));
 vi.mock("@/lib/hr-full", () => ({ formatMoney: (v: string) => `Rp ${v}` }));
 
@@ -44,6 +47,12 @@ beforeEach(() => {
   me.userId = "u-1";
   reqRead = { kind: "ok", data: [requisition(), requisition({ id: "rq-2", reference: "REQ-2" })] };
   employeesRead = { kind: "ok", data: [{ id: "e1", userId: "u-hm", displayName: "Made" }] };
+  appRead = { kind: "ok", data: [] };
+  candRead = { kind: "ok", data: [{ id: "cd-1", fullName: "Ayu", email: "ayu@example.com", erasureRequestedAt: null }, { id: "cd-2", fullName: "Erased", email: null, erasureRequestedAt: "2026-10-01T00:00:00Z" }] };
+  stagesRead = { kind: "ok", data: [
+    { key: "applied", label: "Applied", isActive: true, isTerminal: false },
+    { key: "rejected", label: "Rejected", isActive: true, isTerminal: true },
+  ] };
 });
 afterEach(() => cleanup());
 
@@ -105,5 +114,61 @@ describe("/hr/recruitment/[requisitionId]", () => {
     await renderPage();
     expect(screen.getByText(/You don't have access to the employee list/)).toBeInTheDocument();
     expect(screen.getByText("REQ-1 — Designer")).toBeInTheDocument();
+  });
+});
+
+describe("/hr/recruitment/[requisitionId] — applications", () => {
+  const application = (over: Record<string, unknown> = {}) => ({
+    id: "ap-1", candidateName: "Budi", stageKey: "screen", status: "active", rating: "4.5", daysInStage: 3, ...over,
+  });
+
+  it("lists the applications with a link to each, every status included", async () => {
+    as("hr_manager");
+    appRead = { kind: "ok", data: [application(), application({ id: "ap-2", candidateName: "Sari", status: "rejected", rating: null })] };
+    await renderPage();
+    expect(screen.getByRole("link", { name: "Budi" })).toHaveAttribute("href", "/hr/recruitment/applications/ap-1");
+    expect(screen.getByRole("link", { name: "Sari" })).toHaveAttribute("href", "/hr/recruitment/applications/ap-2");
+    expect(screen.getByText("4.5")).toBeInTheDocument();
+  });
+
+  it("says plainly when there are none, and in words when the read is refused or failed", async () => {
+    as("hr_manager");
+    await renderPage();
+    expect(screen.getByText("No applications on this requisition yet.")).toBeInTheDocument();
+    cleanup();
+    appRead = { kind: "forbidden" };
+    await renderPage();
+    expect(screen.getByText(/You don't have access to the applications on this requisition/)).toBeInTheDocument();
+    expect(screen.queryByText("No applications on this requisition yet.")).toBeNull();
+    cleanup();
+    appRead = { kind: "unavailable", reason: "apps down" };
+    await renderPage();
+    expect(screen.getByText(/this is not a statement that there is nothing/)).toBeInTheDocument();
+    expect(screen.getByText("apps down")).toBeInTheDocument();
+  });
+
+  it("offers adding a candidate on an open requisition to a manager, without the candidate whose erasure was requested", async () => {
+    as("hr_manager");
+    reqRead = { kind: "ok", data: [requisition({ status: "open" })] };
+    await renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Add candidate to this requisition" }));
+    const options = Array.from((screen.getByLabelText(/^Candidate/) as HTMLSelectElement).options).map((o) => o.textContent);
+    expect(options).toEqual(["Select a candidate…", "Ayu (ayu@example.com)"]);
+  });
+
+  it("says why it cannot add a candidate to a draft, offers nothing to a reader, and says in words when the pool cannot be read", async () => {
+    as("hr_manager");
+    await renderPage();
+    expect(screen.getByText(/Candidates can be added while the requisition is open or on hold. This one is draft/)).toBeInTheDocument();
+    cleanup();
+    as("hr_staff");
+    reqRead = { kind: "ok", data: [requisition({ status: "open" })] };
+    await renderPage();
+    expect(screen.queryByRole("button", { name: "Add candidate to this requisition" })).toBeNull();
+    cleanup();
+    as("hr_manager");
+    candRead = { kind: "forbidden" };
+    await renderPage();
+    expect(screen.getByText(/You don't have access to the talent pool/)).toBeInTheDocument();
   });
 });

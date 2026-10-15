@@ -7,8 +7,9 @@ import { can } from "@/lib/rbac";
 import { formatMoney } from "@/lib/hr-full";
 import {
   listRequisitionsResult, listApplicationsResult, listCandidatesResult, getFunnelResult, listEmployeesResult,
+  listPipelineStagesResult,
 } from "@/lib/hr-full-data";
-import { recruitmentControls } from "@/lib/hrRecruitment";
+import { recruitmentControls, groupByStage } from "@/lib/hrRecruitment";
 import { Card, KpiTile, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
@@ -16,8 +17,11 @@ import { RequisitionForm, type PersonOption } from "@/components/hr/RequisitionF
 import { RequisitionActions } from "@/components/hr/RequisitionActions";
 import { CandidateForm } from "@/components/hr/CandidateForm";
 import { CandidateErasureButton } from "@/components/hr/CandidateErasureButton";
+import { ApplicationStageMove } from "@/components/hr/ApplicationStageMove";
+import { PipelineStageForm } from "@/components/hr/PipelineStageForm";
 import {
   createRequisition, updateRequisition, setRequisitionStatus, submitRequisition, createCandidate, requestCandidateErasure,
+  moveApplicationStage, upsertPipelineStage,
 } from "@/lib/hrRecruitmentActions";
 
 // HR › Recruitment — the ATS console (HR-FULL wave B; the write screens are DW-7f-2).
@@ -53,12 +57,13 @@ export default async function HrRecruitmentPage({
     manage: can(me, "hr.recruitment.manage", tenant),
     approve: can(me, "hr.recruitment.approve", tenant),
   });
-  const [reqRead, appRead, candRead, funnelRead, employeesRead] = await Promise.all([
+  const [reqRead, appRead, candRead, funnelRead, employeesRead, stagesRead] = await Promise.all([
     listRequisitionsResult(userId, tenant),
     listApplicationsResult(userId, tenant, { requisitionId, status: "active" }),
     listCandidatesResult(userId, tenant),
     getFunnelResult(userId, tenant, requisitionId),
     ctl.manage ? listEmployeesResult(userId, tenant) : null,
+    listPipelineStagesResult(userId, tenant),
   ]);
 
   const requisitions = reqRead.kind === "ok" ? reqRead.data : [];
@@ -105,8 +110,9 @@ export default async function HrRecruitmentPage({
           <ReadRefusal inline subject="The recruitment funnel" kind="unavailable" reason={funnelRead.reason} />
         ) : funnelRead.data.length === 0 ? (
           <EmptyNote>
-            No pipeline stages are configured yet. HR defines the funnel on{" "}
-            <Link href="/hr/settings" style={{ color: "var(--erp-accent)" }}>HR settings</Link> — stages are data, so
+            No pipeline stages are configured yet.{" "}
+            {ctl.manage ? "Add the first one below" : <>HR defines the funnel on{" "}
+            <Link href="/hr/settings" style={{ color: "var(--erp-accent)" }}>HR settings</Link></>} — stages are data, so
             every company can run the funnel it actually runs.
           </EmptyNote>
         ) : (
@@ -119,6 +125,11 @@ export default async function HrRecruitmentPage({
               f.count === 0 ? "—" : Number(f.medianDaysInStage).toFixed(1),
             ])}
           />
+        )}
+        {ctl.manage && !requisitionId && (
+          <div style={{ marginTop: 14 }}>
+            <PipelineStageForm save={upsertPipelineStage} companyId={tenant} />
+          </div>
         )}
       </Card>
 
@@ -168,30 +179,52 @@ export default async function HrRecruitmentPage({
         )}
       </Card>
 
-      <Card title={requisitionId ? "Applications in this pipeline" : "Applications needing attention"} style={{ marginBottom: 22 }}>
+      <Card title={requisitionId ? "Pipeline — this requisition" : "Pipeline — active applications by stage"} style={{ marginBottom: 22 }}>
         {appRead.kind === "forbidden" ? (
           <ReadRefusal inline subject="the applications" kind="forbidden" />
         ) : appRead.kind === "unavailable" ? (
           <ReadRefusal inline subject="The applications" kind="unavailable" reason={appRead.reason} />
-        ) : stalled.length === 0 ? (
+        ) : stagesRead.kind === "forbidden" ? (
+          <ReadRefusal inline subject="the pipeline stages" kind="forbidden" detail="Applications cannot be grouped or moved without them." />
+        ) : stagesRead.kind === "unavailable" ? (
+          <ReadRefusal inline subject="The pipeline stages" kind="unavailable" reason={stagesRead.reason} detail="Applications cannot be grouped or moved without them." />
+        ) : applications.length === 0 ? (
           <EmptyNote>No active applications.</EmptyNote>
         ) : (
-          <HairlineTable
-            columns={[
-              { label: "Candidate" }, { label: "Requisition" }, { label: "Stage" },
-              { label: "Rating", align: "right" }, { label: "Days in stage", align: "right" },
-            ]}
-            rows={stalled.map((a) => [
-              <Link key={a.id} href={`/hr/recruitment/applications/${a.id}`} style={{ color: "var(--erp-accent)" }}>
-                {a.candidateName}
-              </Link>,
-              a.requisitionReference,
-              a.stageKey,
-              // A rating only exists once somebody has filed a scorecard; "—" says that, "0.00" lies.
-              a.rating ? Number(a.rating).toFixed(1) : "—",
-              String(a.daysInStage),
-            ])}
-          />
+          <div style={{ display: "grid", gap: 18 }}>
+            {groupByStage(applications, stagesRead.data).map((g) => (
+              <section key={g.key} aria-label={`Stage ${g.label}`} style={{ display: "grid", gap: 6 }}>
+                <h3 style={{ margin: 0, font: "600 14px/1.4 var(--font-body)" }}>
+                  {g.label} <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-ink-60)" }}>({g.apps.length})</span>
+                </h3>
+                {g.apps.length === 0 ? (
+                  <p style={{ margin: 0, font: "400 13px var(--font-body)", color: "var(--erp-ink-60)" }}>Nobody in this stage.</p>
+                ) : (
+                  <HairlineTable
+                    columns={[
+                      { label: "Candidate" }, { label: "Requisition" },
+                      { label: "Rating", align: "right" }, { label: "Days in stage", align: "right" }, { label: "" },
+                    ]}
+                    rows={g.apps.map((a) => [
+                      <Link key={a.id} href={`/hr/recruitment/applications/${a.id}`} style={{ color: "var(--erp-accent)" }}>
+                        {a.candidateName}
+                      </Link>,
+                      a.requisitionReference,
+                      // A rating only exists once somebody has filed a scorecard; "—" says that, "0.00" lies.
+                      a.rating ? Number(a.rating).toFixed(1) : "—",
+                      String(a.daysInStage),
+                      ctl.update ? (
+                        <ApplicationStageMove
+                          key={`${a.id}-m`} tenantId={tenant} applicationId={a.id} candidateName={a.candidateName}
+                          currentStageKey={a.stageKey} stages={stagesRead.data.filter((s) => s.isActive)} move={moveApplicationStage}
+                        />
+                      ) : "",
+                    ])}
+                  />
+                )}
+              </section>
+            ))}
+          </div>
         )}
       </Card>
 

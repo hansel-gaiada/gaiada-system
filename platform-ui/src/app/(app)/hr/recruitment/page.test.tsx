@@ -17,17 +17,18 @@ vi.mock("@/lib/platform", () => ({ getMe: vi.fn(async () => me) }));
 vi.mock("@/lib/tenant", () => ({ getActiveTenant: vi.fn(async () => "co-a") }));
 vi.mock("@/lib/hrRecruitmentActions", () => ({
   createRequisition: vi.fn(), updateRequisition: vi.fn(), setRequisitionStatus: vi.fn(), submitRequisition: vi.fn(),
-  createCandidate: vi.fn(), requestCandidateErasure: vi.fn(),
+  createCandidate: vi.fn(), requestCandidateErasure: vi.fn(), moveApplicationStage: vi.fn(), upsertPipelineStage: vi.fn(),
 }));
 
 type Read = { kind: "ok"; data: unknown } | { kind: "forbidden" } | { kind: "unavailable"; reason: string };
-let reqRead: Read; let appRead: Read; let candRead: Read; let funnelRead: Read; let employeesRead: Read;
+let reqRead: Read; let appRead: Read; let candRead: Read; let funnelRead: Read; let employeesRead: Read; let stagesRead: Read;
 vi.mock("@/lib/hr-full-data", () => ({
   listRequisitionsResult: vi.fn(async () => reqRead),
   listApplicationsResult: vi.fn(async () => appRead),
   listCandidatesResult: vi.fn(async () => candRead),
   getFunnelResult: vi.fn(async () => funnelRead),
   listEmployeesResult: vi.fn(async () => employeesRead),
+  listPipelineStagesResult: vi.fn(async () => stagesRead),
 }));
 vi.mock("@/lib/hr-full", () => ({ formatMoney: (v: string) => `Rp ${v}` }));
 
@@ -43,6 +44,13 @@ const candidate = (over: Record<string, unknown> = {}) => ({
   createdAt: "2026-10-01T00:00:00Z", applicationCount: 1, ...over,
 });
 
+const stage = (key: string, sortOrder: number, label: string, over: Record<string, unknown> = {}) => ({
+  id: key, key, label, sortOrder, isTerminal: false, terminalKind: null, requiresInterview: false, isActive: true, ...over,
+});
+const application = (over: Record<string, unknown> = {}) => ({
+  id: "ap-1", requisitionReference: "REQ-1", candidateName: "Budi", stageKey: "screen", rating: null, daysInStage: 4, ...over,
+});
+
 import HrRecruitmentPage from "./page";
 
 function as(role: string) { me.roles = [{ role, scopeType: "company", scopeId: "co-a" }]; }
@@ -55,6 +63,7 @@ beforeEach(() => {
   candRead = { kind: "ok", data: [candidate()] };
   funnelRead = { kind: "ok", data: [] };
   employeesRead = { kind: "ok", data: [{ id: "e1", userId: "u-hm", displayName: "Made" }] };
+  stagesRead = { kind: "ok", data: [stage("applied", 1, "Applied"), stage("screen", 2, "Screen"), stage("rejected", 9, "Rejected", { isTerminal: true, terminalKind: "rejected" })] };
 });
 afterEach(() => cleanup());
 
@@ -94,10 +103,66 @@ describe("/hr/recruitment — controls per capability", () => {
 
   it("links the requisition reference to its page and an application to the application page", async () => {
     as("hr_manager");
-    appRead = { kind: "ok", data: [{ id: "ap-1", requisitionReference: "REQ-1", candidateName: "Budi", stageKey: "screen", rating: null, daysInStage: 4 }] };
+    appRead = { kind: "ok", data: [application()] };
     await renderPage();
     expect(screen.getByRole("link", { name: "REQ-1" })).toHaveAttribute("href", "/hr/recruitment/rq-1");
     expect(screen.getByRole("link", { name: "Budi" })).toHaveAttribute("href", "/hr/recruitment/applications/ap-1");
+  });
+});
+
+describe("/hr/recruitment — the pipeline", () => {
+  it("groups active applications under their stage, in stage order, with a move control for a manager", async () => {
+    as("hr_manager");
+    appRead = { kind: "ok", data: [application({ id: "ap-1", candidateName: "Budi", stageKey: "screen" }), application({ id: "ap-2", candidateName: "Sari", stageKey: "applied" })] };
+    await renderPage();
+    const applied = screen.getByRole("region", { name: "Stage Applied" });
+    const screening = screen.getByRole("region", { name: "Stage Screen" });
+    expect(within(applied).getByText("Sari")).toBeInTheDocument();
+    expect(within(screening).getByText("Budi")).toBeInTheDocument();
+    expect(within(screening).getByRole("button", { name: "Move Budi to another stage" })).toBeInTheDocument();
+    expect(applied.compareDocumentPosition(screening) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("a stage with nobody says so, and an application in an unconfigured stage is shown under Other stage, not dropped", async () => {
+    as("hr_manager");
+    appRead = { kind: "ok", data: [application({ stageKey: "ghost" })] };
+    await renderPage();
+    expect(within(screen.getByRole("region", { name: "Stage Applied" })).getByText("Nobody in this stage.")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Stage Other stage" })).getByText("Budi")).toBeInTheDocument();
+  });
+
+  it("a view-only reader sees the pipeline with no move control", async () => {
+    as("hr_staff");
+    appRead = { kind: "ok", data: [application()] };
+    await renderPage();
+    expect(screen.getByRole("link", { name: "Budi" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Move Budi/ })).toBeNull();
+  });
+
+  it("someone with no recruitment capability (the hiring-manager arm) is shown the move control; the server decides", async () => {
+    as("member");
+    appRead = { kind: "ok", data: [application()] };
+    await renderPage();
+    expect(screen.getByRole("button", { name: "Move Budi to another stage" })).toBeInTheDocument();
+  });
+
+  it("a refused stage read is said in words and the applications are not shown as if they could be grouped", async () => {
+    as("hr_manager");
+    appRead = { kind: "ok", data: [application()] };
+    stagesRead = { kind: "forbidden" };
+    await renderPage();
+    expect(screen.getByText(/You don't have access to the pipeline stages/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Move Budi/ })).toBeNull();
+  });
+
+  it("only a manager is offered the stage editor", async () => {
+    as("hr_manager");
+    await renderPage();
+    expect(buttons()).toContain("Add or update a stage");
+    cleanup();
+    as("hr_staff");
+    await renderPage();
+    expect(buttons()).not.toContain("Add or update a stage");
   });
 });
 
