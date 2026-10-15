@@ -89,7 +89,7 @@ async function startFakeRunner(): Promise<FakeRunner> {
   return { url: `http://127.0.0.1:${addr.port}`, close: () => new Promise<void>((r) => server.close(() => r())) };
 }
 
-interface FakeKnowledge { url: string; close: () => Promise<void>; hits: Array<{ sourceRef: string; text: string; score: number }> }
+interface FakeKnowledge { url: string; close: () => Promise<void>; hits: Array<{ sourceRef: string; text: string; score: number; tenantId: string; audience: string }> }
 async function startFakeKnowledge(): Promise<FakeKnowledge> {
   const state: FakeKnowledge = { url: "", close: async () => {}, hits: [] };
   const server: Server = createServer((req, res) => {
@@ -218,7 +218,18 @@ describe.skipIf(!TEST_URL)("Assistant knowledge citations (ASST-18) — live PG 
   // ── HALF 2: the RAG-to-chip-to-resolution pipeline, live ──────────────────────────────────────
   it("a knowledge-grounded turn EMITS its citations on the wire, PERSISTS them for reload, and every emitted chip RESOLVES", async () => {
     // The fake knowledge service returns a hit naming this run's REAL project row.
-    knowledge.hits = [{ sourceRef: `erp:project:${projectId}`, text: "Project: Acme Rebuild / Status: active", score: 0.91 }];
+    // DW-D26: the hits are the store's own shape (tenant and tier included), and the assistant keeps only the internal-tier
+    // hits of THIS company that pass DW-8i's per-record read filter. Besides the readable project, the store also returns a
+    // person record (a withheld family), a deleted client, another company's chunk and a public-tier chunk: none may be cited.
+    const goneClient = newId();
+    await withTenants([A], (c) => c.query(`INSERT INTO clients (id, tenant_id, name, deleted_at, origin_site) VALUES ($1,$2,$3,now(),$4)`, [goneClient, A, "Hidden Gone Co", config.originSite]));
+    knowledge.hits = [
+      { sourceRef: `erp:project:${projectId}`, text: "Project: Acme Rebuild / Status: active", score: 0.91, tenantId: A, audience: "internal" },
+      { sourceRef: `erp:person:${A}:${owner}`, text: "PERSON_SECRET report text", score: 0.95, tenantId: A, audience: "internal" },
+      { sourceRef: `erp:client:${goneClient}`, text: "GONE_CLIENT_SECRET text", score: 0.94, tenantId: A, audience: "internal" },
+      { sourceRef: `erp:client:${clientId}`, text: "OTHER_TENANT_SECRET text", score: 0.93, tenantId: B, audience: "internal" },
+      { sourceRef: `erp:client:${clientId}`, text: "PUBLIC_TIER_SECRET text", score: 0.92, tenantId: A, audience: "public" },
+    ];
 
     const created = await app.inject({ method: "POST", url: `/api/${A}/assistant/threads`, headers: asUser(owner), payload: { title: "grounded" } });
     expect(created.statusCode).toBe(201);
@@ -241,6 +252,8 @@ describe.skipIf(!TEST_URL)("Assistant knowledge citations (ASST-18) — live PG 
     expect(body).toContain(`erp:project:${projectId}`);
     expect(body).toContain("event: done");
     expect(body.indexOf("event: citations")).toBeLessThan(body.indexOf("event: done"));
+    // DW-D26: nothing the filter withholds is on the wire.
+    for (const leak of ["PERSON_SECRET", "GONE_CLIENT_SECRET", "OTHER_TENANT_SECRET", "PUBLIC_TIER_SECRET", `erp:person:`, goneClient]) expect(body).not.toContain(leak);
 
     // (b) Persisted for reload — the SAME fact survives in the message's `parts`, not just the
     // live stream.
