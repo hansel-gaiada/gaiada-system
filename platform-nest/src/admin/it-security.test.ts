@@ -164,7 +164,7 @@ describe.skipIf(!TEST_URL || !live)("DW-7h · IT security over the real surface"
     await withTenants([tenant], (c) =>
       c.query(
         `INSERT INTO security_access_seen (tenant_id, user_id, session_id, ip, user_agent, first_seen_at, last_seen_at)
-         VALUES ($1, $2, $3, $4::inet, $5, now() - make_interval(hours => $6::double precision), now() - make_interval(hours => $7::double precision))
+         VALUES ($1, $2, $3, $4::inet, $5, now() - make_interval(secs => $6::double precision * 3600), now() - make_interval(secs => $7::double precision * 3600))
          ON CONFLICT ON CONSTRAINT ux_security_access_seen_key DO NOTHING`,
         [tenant, userId, sessionId, ip, over.ua ?? CHROME_WIN, over.firstSeenHoursAgo ?? 1, over.lastSeenHoursAgo ?? 0.5],
       ),
