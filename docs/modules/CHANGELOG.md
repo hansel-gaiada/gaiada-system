@@ -11,6 +11,17 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.156.0` - DW-8i-3: the SEO property brief and social's brand drafts keep only their own knowledge corpus (2026-10-15) - PROTOTYPED
+
+Owner ruling DW-D31 (plan §11.4 and its decision log, 2026-10-15). Contract: `docs/FRONTEND-BFF-CONTRACT.md` §46.10. No migration, no Cerbos change, no compose change.
+- **The problem.** The knowledge store matches every internal ERP chunk (empty ACL) for any scope. A lookup scoped to one property's grounding or one client's brand corpus could get back a meeting transcript or a contract file, from any company the caller belongs to, and an AI draft could quote it.
+- **The fix.** Each lookup keeps only the hits whose `sourceRef` is the ref its corpus was ingested under:
+  - `queryPropertyKnowledge` takes the property's grounding ref (`search-property:<id>:grounding`);
+  - `queryBrandKnowledge` keeps only `social-brand:<company>:<client>`.
+- ERP records and the public tier are dropped. Each asks the store for `min(topK × 4, 80)` hits, then cuts to `topK` (`modules/knowledge/own-corpus.ts`). The scope sent, the fail-soft contract and the ingest calls are unchanged.
+- **Tests.** New unit suite `modules/knowledge/own-corpus.test.ts`. The SEO brief's DB test now also serves a higher-scored ERP chunk, which reaches neither the brief nor the model prompt. Four social test fakes now answer with the ingested ref, as the real store does; before, they appended `#<n>`.
+- **Verified.** Unit suites locally; the gate is CI on the landing sha.
+
 ### platform-nest `0.155.0` + platform-ui `0.178.0` - DW-7j-5 + f1: the GM's monthly revenue plan, and "Revenue against plan" (2026-10-15) - PROTOTYPED
 
 Contract BFF §40.6.4 and the f1 row of §40.6.2; PERMISSION-CONTRACT §41 (no new kind, no policy change); owner ruling DW-D30 ("build the plan now"). With this, every department KPI in the catalogue has a reader.
