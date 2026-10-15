@@ -8,7 +8,7 @@ import type { Me } from "@/lib/platform";
 // DW-2c/2d: which frame the shell draws. The async server halves are stubs; what is under test is the
 // choice Shell makes between the classic and the workspace parts.
 vi.mock("next/navigation", () => ({ usePathname: () => "/", useRouter: () => ({ push: vi.fn() }) }));
-vi.mock("@/lib/prefs", () => ({ DEFAULT_PREFS: { density: "comfortable", width: "standard", theme: "auto", shell: "classic" } }));
+vi.mock("@/lib/prefs", () => ({ DEFAULT_PREFS: { density: "comfortable", width: "standard", theme: "auto", shell: "classic", shellChosen: true } })); // classic until DW-9d-2
 vi.mock("@/lib/companyContext", async (orig) => ({ ...(await orig<typeof import("@/lib/companyContext")>()), activeCompany: () => null }));
 vi.mock("@/lib/palette", () => ({ buildNavEntries: () => [], buildDeptEntries: () => [], workspacePaletteEntries: () => [] }));
 vi.mock("./nav", () => ({ navFor: () => [] }));

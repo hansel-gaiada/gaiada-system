@@ -44,11 +44,11 @@ export async function setOfficeZoomAction(officeZoom: OfficeZoom): Promise<void>
 
 /** DW-1d: the per-person pilot switch (`lib/shellLayout.ts`). The argument comes from the browser, so it
  *  is parsed, and anything unknown stores the default. Unlike the actions above, the choice changes
- *  the server-rendered shell itself, so the whole app layout is revalidated. Nothing calls it until
- *  DW-2 gives the new shell a switch. */
+ *  the server-rendered shell itself, so the whole app layout is revalidated. It is the ONLY writer of
+ *  `shellChosen` (DW-9d-1): the flag that makes a stored `shell` count (see `getPrefs`). */
 export async function setShellLayoutAction(shell: ShellLayout): Promise<void> {
   const current = await getPrefs();
-  await writePrefs({ ...current, shell: parseShellLayout(shell) });
+  await writePrefs({ ...current, shell: parseShellLayout(shell), shellChosen: true });
   revalidatePath("/", "layout");
 }
 

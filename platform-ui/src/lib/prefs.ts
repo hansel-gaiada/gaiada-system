@@ -29,8 +29,11 @@ export interface Prefs {
   /** The Office canvas's camera zoom (2026-08-23) — same cookie, same "don't invent new storage"
    *  instruction as `assistantRailCollapsed` above. */
   officeZoom: OfficeZoom;
-  /** DW-1d: today's shell or the department workspace shell (`lib/shellLayout.ts`). Classic by default. */
+  /** DW-1d: today's shell or the department workspace shell (`lib/shellLayout.ts`). The workspace shell by default (DW-9d-1). */
   shell: ShellLayout;
+  /** DW-9d-1: true only once the person picked a layout in the avatar menu (`setShellLayoutAction`). A stored
+   *  `shell` counts only with this flag; see `getPrefs`. */
+  shellChosen: boolean;
   /** DW-6c: the tools pinned to the Overview, per workspace key (`lib/pinnedTools.ts`). No entry = the first six. */
   pinnedTools: Record<string, string[]>;
   /** DW-10d (DW-D34): the Overview blocks a person hid or switched on, per workspace (`lib/overviewPrefs.ts`). No entry = today's Overview. */
@@ -48,7 +51,7 @@ export interface Prefs {
 // 1.0.0-alpha.301 were INERT for every user on the default. The design draws a
 // centred column; "standard" is that. "wide" survives untouched as the opt-in
 // full-bleed mode for anyone who wants it.
-export const DEFAULT_PREFS: Prefs = { density: "comfortable", width: "standard", theme: "auto", assistantRailCollapsed: false, officeZoom: "fit", shell: DEFAULT_SHELL_LAYOUT, pinnedTools: {}, overview: {} };
+export const DEFAULT_PREFS: Prefs = { density: "comfortable", width: "standard", theme: "auto", assistantRailCollapsed: false, officeZoom: "fit", shell: DEFAULT_SHELL_LAYOUT, shellChosen: false, pinnedTools: {}, overview: {} };
 const COOKIE = "gaiada_prefs";
 
 const DENSITIES: Density[] = ["comfortable", "compact"];
@@ -70,7 +73,13 @@ export async function getPrefs(): Promise<Prefs> {
         ? parsed.assistantRailCollapsed
         : DEFAULT_PREFS.assistantRailCollapsed,
       officeZoom: OFFICE_ZOOMS.includes(parsed.officeZoom as OfficeZoom) ? (parsed.officeZoom as OfficeZoom) : DEFAULT_PREFS.officeZoom,
-      shell: parseShellLayout(parsed.shell),
+      // DW-9d-1: a stored `shell` counts ONLY with `shellChosen`. Every prefs writer spreads the whole
+      // current prefs, so anyone who ever changed theme, zoom, rail or pins since DW-1d has
+      // `shell: "classic"` in the cookie although they never chose it: classic was just the default
+      // then. Honouring that would leave them on classic after the default flipped to workspaces.
+      // Only `setShellLayoutAction` (the avatar menu) sets the flag.
+      shell: parsed.shellChosen === true ? parseShellLayout(parsed.shell) : DEFAULT_SHELL_LAYOUT,
+      shellChosen: parsed.shellChosen === true,
       pinnedTools: parsePinnedTools(parsed.pinnedTools),
       overview: parseOverviewPrefs(parsed.overview),
     };
