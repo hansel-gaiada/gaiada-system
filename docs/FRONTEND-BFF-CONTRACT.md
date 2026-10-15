@@ -8624,8 +8624,9 @@ Built exactly as §45.1 to §45.5 specify, with these points the text left open:
   - `q` too short gives 400;
   - the query text appears in no activity row.
 
-### 46.6 A finding outside this ticket
-The hub's `knowledge.search` tool and the assistant's retrieval (`config.knowledgeTopK`, ASST-18) apply only the tier's rule today. So the AI Assistant can quote internal chunks, such as a person's report or a meeting transcript, to any member of the company. §46.2's filter is written as a shared function (`search-filter.ts`) so those paths can adopt it. Whether and when they do is the owner's decision (see the DW-8 board), not part of DW-8i.
+### 46.6 A finding outside this ticket (CLOSED by §46.9)
+
+The hub's `knowledge.search` tool and the assistant's retrieval (`config.knowledgeTopK`, ASST-18) applied only the tier's rule: the AI Assistant could quote internal chunks, such as a person's report or a meeting transcript, to any member of the company. §46.2's filter is a shared function (`search-filter.ts`). The owner ruled on 2026-10-15 (DW-D26) that both paths adopt it, and §46.9 is built: neither path can now return an internal chunk of a record the caller cannot open.
 
 ### 46.7 As built (backend, DW-8i)
 
@@ -8661,7 +8662,7 @@ The hub's `knowledge.search` tool and the assistant's retrieval (`config.knowled
 - **Palette.** With 2 or more typed characters the palette adds a "Knowledge" group holding "Search company knowledge for '<text>'", opening `/knowledge?q=<encoded text>`. It is reachable by arrows and click but is never the default highlight, so Enter with nothing else matching still goes to `/search` (DW-2c).
 - **DEMO_MODE.** `demoFixtures.ts` answers the route with three labelled sample results for any query of 2 or more characters, an empty list for a query containing "nothing", and 400 `query_invalid` otherwise.
 
-### 46.9 The assistant and the hub use the same filter (DW-D26, owner 2026-10-15) — PLANNED
+### 46.9 The assistant and the hub use the same filter (DW-D26, owner 2026-10-15; DW-8i-2) — STATUS: BUILT, PROTOTYPED (unit suites run locally; the live-DB suite `assistant-citations.test.ts` is updated for the Linux CI gate and has NOT been run)
 
 DW-D26 closes the finding in §46.6:
 - **The assistant's retrieval.** `modules/assistant/context.ts` (ASST-18) asks the store for internal chunks as the thread's owner. Its candidates now go through `filterReadableHits` (§46.2) for that owner and the thread's company before any chunk enters the prompt. A dropped chunk is never cited. If the filter fails, the turn proceeds with no knowledge, because grounding is additive.
@@ -8673,6 +8674,26 @@ DW-D26 closes the finding in §46.6:
 Tests:
 - the assistant prompt carries no chunk of a record the owner cannot read;
 - the hub tool returns only filtered internal hits and still answers the public tier anonymously.
+
+**As built.**
+
+*Assistant* (`context.ts`, `retrieveReadableKnowledge`):
+- The store call is now `searchKnowledgeStrict` (§46.7), which returns the hits whole (tenant and tier included) and throws on failure. The `queryKnowledge` test seam changed with it: `(userId, query, topK) => KnowledgeStoreHit[]`. A new seam `filterKnowledge` stands for `filterReadableHits`.
+- The store is asked for `searchTopK(topK)` (`min(topK × 4, 80)`) candidates. `collapseHits` keeps the internal-tier hits of the thread's company, one per record. The filter runs as the thread owner. The result is cut to `topK` AFTER the filter, so dropped records do not use up the quota.
+- **Who is checked.** The thread's company comes from `assembleContext`'s `opts.tenantId`, which both call sites (`/stream` and `/ask`) already passed. The principal is the requester's own `req.principal` when it is the thread owner (the session's real assurance, and its `actFor`, which the filter already intersects). Otherwise it is `assemblePrincipal(ownerUserId, "low")`: low assurance can only narrow. With no company in scope, or an owner who does not resolve, there is no knowledge.
+- **Every failure** (store down, Cerbos down, no principal) leaves the turn with no knowledge and no citations, and it never falls back to the unfiltered chunks.
+- **Behaviour change.** Public-tier chunks, which the old call could return, are no longer cited: the assistant grounds on the company's own records only. Several chunks of one record now collapse to one citation.
+- **Test double.** `assistant-citations.test.ts`'s fake store now answers in the store's real hit shape (`tenantId`, `audience`), because the filter keys on both.
+
+*Hub* (`mcp-hub/src/platform-tools.ts`):
+- New optional inputs `tenantId` and `limit` (1 to 20, default 5, the store's own default).
+- **Internal tier** is asked for only when the caller has an identity (`assurance` is not `anonymous`), a `tenantId` is given (it must look like an id, so it cannot rewrite the platform path) and `publicOnly` is not set. The call is `GET /api/:t/knowledge/search?q=&limit=` with the caller's OBO envelope, as `platformGet` sends it. Each result becomes `{tenantId, sourceRef, kind: <family>, text: <title> then a line break then <snippet>, score, audience: "internal", title, href}`.
+- **Public tier** is the store's `POST /search` with `publicOnly: true` (and `topK` when a limit is given).
+- **Merge:** internal first, then public, cut to the limit.
+- **Failure:** a platform 401 or 403 gives `internal.status: "not_permitted"`; any other non-2xx answer, a network error, a timeout (10 s) or an unreadable body gives `"unavailable"`. Each carries a note, and the hits are then public only. The public tier failing is still an error, unless the internal tier answered.
+- **Answer shape.** With no identity or no `tenantId` the answer is the same plain JSON array as before (`wa-chat-bot/src/skills.ts` reads it that way and passes no `tenantId`). When the internal tier was asked for it is `{hits, internal: {status, note?}, public: {status}}`, so a refusal or an outage can never read as "no internal hits".
+- **Withheld families** are never returned, because the platform route withholds them (§46.2).
+- Tests: `mcp-hub/src/knowledge-search-tool.test.ts`; `platform-nest/src/modules/assistant/context-knowledge-filter.test.ts`.
 
 ## 47. Calendar events and meeting scheduling (DW-8g, 2026-10-14) — `platform-nest/src/core/calendar-events.{controller,service}.ts` (new), migrations `202610151100_calendar_events.sql` and `202610151110_iam_calendar_event_permissions.sql`; UI `/calendar` — **STATUS: BACKEND AND UI BUILT, PROTOTYPED (UI: `/calendar`, `/calendar/new`, `/calendar/events/[id]` and its `/edit`, the Overview Today block and the DEMO_MODE store, tested with vitest and `next build`, not yet driven against a live backend; the backend rules `calendar-events.service.test.ts`, the scheduler pin `meeting-schedule.test.ts` and the Cerbos static pin run anywhere; the HTTP suite `calendar-events.test.ts`, the migration suite `calendar-events-migration.db.test.ts` and the live Cerbos matrix `src/rbac/cerbos-calendar-event.test.ts` are written for the Linux CI gate and have not run yet); busy times (§47.4) NOT built, waiting for an owner ruling, so the UI draws none)**
 
