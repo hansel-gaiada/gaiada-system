@@ -412,9 +412,18 @@ describe.skipIf(!TEST_URL)("DW-8j Gmail through your own mailbox (HTTP, real Pos
 
     it("authorisation comes FIRST: a viewer, a bot, an automation principal, a portal login and a stranger sending an INVALID body get 403, never 400", async () => {
       for (const u of [view, botU, autoU, portal, stranger]) {
-        for (const bad of [{}, { to: [] }, "not an object", { ...good(), context: { kind: "project", id: "x" } }]) {
+        // A body that is not a JSON object is refused 415 by the HTTP layer before any handler runs, so it cannot reach the
+        // authorisation step; it is pinned on its own below.
+        for (const bad of [{}, { to: [] }, { ...good(), context: { kind: "project", id: "x" } }]) {
           expect((await send(u, bad)).statusCode, `${u} ${JSON.stringify(bad)}`).toBe(403);
         }
+      }
+      expect(await count(`SELECT count(*)::int AS n FROM activities WHERE verb = 'emailed'`)).toBe(0);
+    });
+
+    it("a body that is not a JSON object never reaches the handler: the HTTP layer refuses it (415) and nothing is sent or recorded", async () => {
+      for (const u of [view, stranger]) {
+        expect((await send(u, "not an object")).statusCode, u).toBe(415);
       }
       expect(await count(`SELECT count(*)::int AS n FROM activities WHERE verb = 'emailed'`)).toBe(0);
     });
