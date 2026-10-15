@@ -1,0 +1,14 @@
+/* PV7-06: My performance. The blocks reuse the Overview's `.ov-block` look (overview.css); this adds only the page grid
+   and the check-in list. Tokens only, no literal radius. */
+.mp-grid { display: grid; gap: var(--space-16); grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
+.mp-block__title { margin: 0; font: 600 14px var(--font-body); color: var(--text-primary); }
+.mp-stats { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-16); }
+.mp-stat { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.mp-stat__label { font: 600 12px var(--font-body); letter-spacing: 0.04em; color: var(--ink-muted); }
+.mp-stat__value { font: 700 22px/1.1 var(--font-display); color: var(--text-primary); }
+.mp-checkins { width: 100%; border-collapse: collapse; font: 400 13px var(--font-body); }
+.mp-checkins th { text-align: left; font: 600 12px var(--font-body); letter-spacing: 0.04em; color: var(--ink-muted); padding: var(--space-4) var(--space-8) var(--space-4) 0; border-bottom: 0.5px solid var(--erp-hairline); }
+.mp-checkins td { padding: var(--space-4) var(--space-8) var(--space-4) 0; border-bottom: 0.5px solid var(--erp-hairline); vertical-align: top; color: var(--text-primary); overflow-wrap: anywhere; }
+.mp-checkins td:first-child { white-space: nowrap; color: var(--ink-muted); }
+.mp-checkins__wrap { max-height: 360px; overflow: auto; }
+.mp-checkins__wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

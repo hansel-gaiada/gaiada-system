@@ -59,6 +59,7 @@ const PERSONAL: AreaRule[] = [
 
 const PERFORMANCE: AreaRule[] = [
   rule("/me/learning", "performance", false, "My learning is Performance, not You"),
+  rule("/me/performance", "performance", false, "PV7-06: My performance is Performance, not You, like My learning"),
   rule("/assistant", "performance"),
   rule("/reports/person", "performance"),
   rule("/reports/department", "performance"),

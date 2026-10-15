@@ -31,7 +31,7 @@ describe("MeTabs", () => {
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Me");
   });
 
-  it.each(["/me/inbox", "/me/mail", "/me/mail/new", "/me/tasks", "/me/learning"])("draws no title and no strip on %s (it has its own title)", (path) => {
+  it.each(["/me/inbox", "/me/mail", "/me/mail/new", "/me/tasks", "/me/learning", "/me/performance"])("draws no title and no strip on %s (it has its own title)", (path) => {
     nav.pathname = path;
     render(<MeTabs tabs={tabs} />);
     expect(strip()).toBeNull();
