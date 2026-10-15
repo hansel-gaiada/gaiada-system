@@ -178,3 +178,39 @@
   color: var(--ink-strong);
   font: 500 13px/1.5 var(--font-body);
 }
+
+/* ── Health card (PV7-03) ───────────────────────────────────────────────────────────────────────────
+   The state chip carries its words and its shape (the edge is solid or dashed), never colour alone; the text is always
+   --ink-strong so contrast holds in both themes (the same lesson as .ch-vis). No literal colours, no literal radii. */
+.ch-health-chip {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  font: 600 12px/1.5 var(--font-body);
+  color: var(--ink-strong);
+  border: 1px solid var(--line);
+  background: var(--wash);
+  white-space: nowrap;
+}
+.ch-health-chip--on_track { background: var(--status-ok-bg); border-color: var(--status-ok); }
+.ch-health-chip--at_risk { background: var(--status-warning-bg); border-color: var(--status-warning); border-style: dashed; }
+.ch-health-chip--off_track { background: var(--status-critical-bg); border-color: var(--status-critical); border-width: 2px; }
+.ch-health-chip--quiet { border-style: dotted; }
+.ch-health-chip--unknown { border-style: dashed; }
+.ch-health { display: grid; gap: 20px; }
+.ch-health__h { margin: 0 0 8px; font: 600 13px/1.4 var(--font-body); color: var(--ink-strong); }
+.ch-health__meaning { margin: 0 0 6px; font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); }
+.ch-health__reasons { margin: 0 0 6px; padding-left: 18px; font: 400 13px/1.6 var(--font-body); color: var(--ink-strong); }
+.ch-health__note { margin: 6px 0 0; font: 400 12px/1.5 var(--font-body); color: var(--ink-subtle); }
+.ch-health__scroll { overflow-x: auto; }
+.ch-health__table { width: 100%; border-collapse: collapse; font: 400 13px/1.5 var(--font-body); }
+.ch-health__table th { text-align: left; font-weight: 500; color: var(--ink-subtle); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); }
+.ch-health__table td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--ink-strong); }
+.ch-health__link { color: var(--erp-accent); text-decoration: none; font-weight: 500; }
+.ch-health__late { color: var(--status-danger-fg); font-weight: 500; }
+.ch-health__cap { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.ch-health__ta { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.ch-health__ta dl { margin: 0; display: grid; gap: 6px; }
+.ch-health__ta-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: space-between; font: 400 13px/1.5 var(--font-body); }
+.ch-health__ta-row dt { color: var(--ink-subtle); }
+.ch-health__ta-row dd { margin: 0; color: var(--ink-strong); }
