@@ -9240,6 +9240,21 @@ Built as §48.1 to §48.4 and §48.6 specify. The simulated mode is what runs; *
 - `mine=me` is unchanged for every tier.
 - `projectId` still narrows.
 
+## 50. Payroll inputs: the read (DW-7f-1c, 2026-10-15) — `platform-nest/src/modules/hr/payroll.controller.ts` — **STATUS: PLANNED (contract)**
+
+**Why.** HR can add a payroll input (`POST /api/:t/modules/hr/payroll-inputs`) but cannot see the inputs already entered, or which run consumed them. The run detail page (DW-7f-1b) therefore cannot list them. The table already holds everything: `hr_payroll_inputs` (`202608240143_hr_payroll.sql`), with `consumed_by_run_id` set when a run's calculate consumes an input. So this section adds a read only: no migration, no new kind.
+
+- **Route:** `GET /api/:t/modules/hr/payroll-inputs` with the filters `runId?`, `employeeId?`, `periodStart?`, `periodEnd?` and `consumed?` (`true`, `false` or omitted for both).
+  - `runId` returns the inputs that run consumed.
+  - Without `runId`, a period filter returns the inputs whose period overlaps `[periodStart, periodEnd]`.
+- **Response:** `[{ id, employeeId, employeeName, periodStart, periodEnd, category, code, label, quantity, amount, taxable, note, consumedByRunId, createdBy, createdAt }]`, newest first, at most 500 rows.
+- **Who may read:** `hr_payroll` `read`, exactly as `GET payroll-runs`. The handler's module walls are the same as the POST's.
+- **The run page** (`/hr/payroll/[runId]`):
+  - **Consumed by this run:** the inputs listed with `runId`.
+  - **Waiting:** while the run is `draft` or `calculated`, the inputs in its period that no run has consumed yet, listed with `periodStart`/`periodEnd` and `consumed=false`. The next calculate will take them in.
+  - A refused or failed read says so in words.
+- **Proof** (live Postgres + Cerbos, Linux CI): inputs consumed by one run and not by another; the period overlap at both edges; another tenant's inputs never listed; a reader without `hr_payroll` `read` refused with 403.
+
 ## 53. The client grain in reports (PV7-01, 2026-10-15) — `platform-nest/src/modules/reports/` — **STATUS: BUILT, PROTOTYPED (backend: the DB and HTTP suite report-client-grain.db.test.ts and the Cerbos matrix reports-cerbos.test.ts are written for the Linux CI gate; no page yet, PV7-05)**
 
 **Why.**
