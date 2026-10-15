@@ -31,6 +31,7 @@ import {
 } from "../../core/portal-visibility";
 import { enabledModuleKeys } from "../registry";
 import { UPTIME_RATIO_SQL } from "../monitoring/monitoring.controller";
+import { loadClientOnTimeRates } from "../reports/report-rollups";
 import { loadClientBall } from "./client-ball";
 import {
   evaluateClientHealth,
@@ -52,8 +53,10 @@ export interface ClientSignals {
   conversationsAwaitingReply: number | null;
   overdueInvoices: DueAged | null;
   site: { openIncidents: number; oldestOpenSince: string | null; uptime30d: number | null } | null;
-  /** PV7-01 will supply delivery on time from the client-grain overview. Always null until it does: see `deliveryOnTimeFor`. */
-  deliveryOnTime: null;
+  /** Delivery on time, month to date: on-time completions over completions that carried a due date, a ratio 0 to 1 (PV7-05,
+   *  the client grain's `delivery.on_time_rate`). Null with no such completion, with the `reports` module off, or when the
+   *  read failed. A display figure: the health rules never read it. */
+  deliveryOnTime: number | null;
   activeProjects: number | null;
   activeServices: number | null;
 }
@@ -188,11 +191,18 @@ function minInstant(values: unknown[]): string | null {
   return best;
 }
 
-/** PV7-01 SEAM. Delivery on time this month comes from the client-grain overview that PV7-01 adds. Until that is on main
- *  (or with the reports module off) every client's answer is `null`, which the payload carries as `deliveryOnTime: null`.
- *  When PV7-01 lands, only this function changes; the payload type already has the field. */
-export async function deliveryOnTimeFor(_tenantId: string, _clientIds: string[]): Promise<null> {
-  return null;
+/** Delivery on time, month to date (UTC), per client: the `delivery.on_time_rate` the client-grain report rolls up
+ *  (`loadClientOnTimeRates`, ONE set query whatever the client count). Read under the `reports` module wall, as its own
+ *  source. A map entry is a ratio 0 to 1, or null with no completion that carried a due date. Returns null when the
+ *  figure does not apply (the `reports` module is off, or the module lookup failed: that is already `unavailable`) or the
+ *  read failed (then `reports` is in `unavailable[]`). The month starts on the first of the month and ends today. */
+export async function deliveryOnTimeFor(
+  reads: HealthReads, clientIds: string[], enabled: ReadonlySet<string> | null, now: Date,
+): Promise<Map<string, number | null> | null> {
+  if (!enabled?.has("reports") || clientIds.length === 0) return null;
+  const end = now.toISOString().slice(0, 10);
+  const start = `${end.slice(0, 7)}-01`;
+  return reads.read("reports", ["reports"], (c) => loadClientOnTimeRates(c, reads.tenantId, start, end, clientIds));
 }
 
 let ledgerAppliedAt: string | null = null;
@@ -227,7 +237,7 @@ interface ClientRow { id: string; name: string; status: string; ownerUserId: str
 
 /** Every signal for `clients`, one set read per source. Returns the signals by client id; a failed source's signals are null. */
 async function loadSignals(
-  reads: HealthReads, clients: ClientRow[], enabled: ReadonlySet<string> | null,
+  reads: HealthReads, clients: ClientRow[], enabled: ReadonlySet<string> | null, now: Date,
 ): Promise<Map<string, ClientSignals>> {
   const ids = clients.map((c) => c.id);
   const finished = [...FINISHED_PROJECT_STATUSES];
@@ -346,6 +356,8 @@ async function loadSignals(
     }
   }
 
+  const onTime = await deliveryOnTimeFor(reads, ids, enabled, now);
+
   const out = new Map<string, ClientSignals>();
   for (const cl of clients) {
     const id = cl.id;
@@ -369,7 +381,7 @@ async function loadSignals(
         // A percent with two decimals, as the website card prints it; null for a window with no measured checks.
         uptime30d: upRow?.ratio === null || upRow?.ratio === undefined ? null : Math.round(Number(upRow.ratio) * 10000) / 100,
       },
-      deliveryOnTime: null,
+      deliveryOnTime: onTime?.get(id) ?? null,
       activeProjects: projects === null ? null : num(projects.get(id)?.active),
       activeServices: services === null ? null : services.get(id) ?? 0,
     });
@@ -391,9 +403,10 @@ async function rowsFor(
       reads.mark("modules");
     }
   }
-  const signals = await loadSignals(reads, clients, enabled);
-  await deliveryOnTimeFor(tenantId, clients.map((c) => c.id));
+  const signals = await loadSignals(reads, clients, enabled, now);
   const unavailable = [...reads.unavailable];
+  // `reports` is a display figure: a failure names it in `unavailable[]` but must not turn a state into `unknown`.
+  const ruleUnavailable = unavailable.filter((s) => s !== "reports");
   const rows = clients.map((cl): ClientHealthRow => {
     const s = signals.get(cl.id)!;
     const verdict = evaluateClientHealth(
@@ -403,7 +416,7 @@ async function rowsFor(
         site: s.site ? { openIncidents: s.site.openIncidents, oldestOpenSince: s.site.oldestOpenSince } : null,
         activeProjects: s.activeProjects, activeServices: s.activeServices,
       },
-      unavailable, now,
+      ruleUnavailable, now,
     );
     return {
       clientId: cl.id, name: cl.name, status: cl.status, ownerUserId: cl.ownerUserId, ownerName: cl.ownerName,

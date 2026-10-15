@@ -8948,7 +8948,8 @@ interface HealthReason { code: HealthReasonCode; count: number; since: string | 
 
 type HealthSource =
   | "projects" | "ball" | "milestones" | "deliverables" | "requests" | "invoices"
-  | "site" | "services" | "modules" | "projectHealth" | "turnaround";
+  | "site" | "services" | "modules" | "projectHealth" | "turnaround"
+  | "reports";                              // PV7-05: delivery on time; named when it fails, never feeds the state
 
 interface Aged    { count: number; oldestSince: string | null }   // ISO instants
 interface DueAged { count: number; oldestDue: string | null }     // YYYY-MM-DD
@@ -8966,7 +8967,7 @@ interface ClientHealthRow {
     conversationsAwaitingReply: number | null;
     overdueInvoices: DueAged | null;         // ISSUED (status sent) and past due: clientMoney's own rule
     site: { openIncidents: number; oldestOpenSince: string | null; uptime30d: number | null } | null;   // uptime30d is a percent, 0 to 100, two decimals
-    deliveryOnTime: null;                    // PV7-01 will supply it; the seam is `deliveryOnTimeFor` in client-health.ts
+    deliveryOnTime: number | null;           // PV7-05: month to date, a ratio 0 to 1 (see below); null = no answer
     activeProjects: number | null;
     activeServices: number | null;           // active social engagements, active search properties, websites
   };
@@ -8976,7 +8977,7 @@ interface ClientHealthRow {
 - **`null` means "no answer", never zero.** A signal is `null` when its source failed (the source is then in `unavailable[]`) or does not apply (the module is off for this company, so the source is not in `unavailable[]`). `uptime30d` is `null` for a window with no measured checks.
 - Active project: not `completed`, `archived` or `cancelled`, not soft-deleted, not `projects.is_internal`.
 - A site with no monitor is `{ openIncidents: 0, oldestOpenSince: null, uptime30d: null }`. `site` is `null` when the `monitoring` module is off for the company. Only enabled, non-deleted monitors count.
-- `deliveryOnTime` is always `null` in this section's build: PV7-01's client-grain overview is not on main yet. The seam is one function, `deliveryOnTimeFor` in `client-health.ts`; the payload field already exists, so PV7-05 can render it as "not measured" and light it up when PV7-01 lands.
+- **`deliveryOnTime` (PV7-05, 2026-10-15)** is the client grain's `delivery.on_time_rate` for the month so far (the first of the month to today, UTC): the sum of `tasks_completed_on_time` over the sum of `tasks_completed_with_due_date` across the client's eligible projects (`report-rollups.ts::loadClientOnTimeRates`, the same regroup and eligibility as `GET reports/overview?grain=client`, `CLIENT_PROJECT_ELIGIBLE_SQL`), a ratio from 0 to 1 (the UI prints a percent). **`null`** when the client has no completion that carried a due date this month (a zero denominator is no answer, never 0%), when the `reports` module is off for the company (not applicable: `reports` is then NOT in `unavailable[]`), or when the read failed (then `reports` IS in `unavailable[]`). It is ONE set query over `clientIds[]` under the `reports` module wall (a missed wall reads zero facts silently), so the board's query count stays fixed (19 in `client-health.db.test.ts`, one more than before). **It is a display figure: the health rules never read it and the golden table is unchanged.** A failed `reports` read names the source but does NOT turn a row to `unknown`.
 - Late deliverable: `due_date` before today and a status other than `delivered`, `approved` or `done`. Late milestone: `due_date` before today and a status other than `done`, on an active project. Non-internal work only. Dates are day-granular (`YYYY-MM-DD`, no time zone shift).
 - Waiting on us and waiting on the client are the hub overview's `needsUs` and `needsClient`, taken from the same code (`client-ball.ts`), so the board and the hub cannot disagree.
 

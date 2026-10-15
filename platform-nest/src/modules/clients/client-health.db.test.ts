@@ -63,7 +63,7 @@ describe.skipIf(!TEST_URL)("PV7-02 · client health, staff side", () => {
     config.serviceToken = "svc-token";
     resetModules();
     resetCoreRollupProviders();
-    co = await createCompany("Health Co", ["clients", "invoice", "pm", "social", "webdev", "monitoring"]);
+    co = await createCompany("Health Co", ["clients", "invoice", "pm", "social", "webdev", "monitoring", "reports"]);
     admin = await createUser("admin@health.test", "Ada Admin");
     outsider = await createUser("outsider@health.test", "Olly Outsider");
     await addMembership(co, admin);
@@ -200,6 +200,21 @@ describe.skipIf(!TEST_URL)("PV7-02 · client health, staff side", () => {
       );
     }, MONITORING);
 
+    // Delivery on time (PV7-05): ontrack has 3 of 4 due-dated completions on time THIS MONTH, and one more fact row last
+    // month that must not count; wait8 has completions but none carried a due date (0/0: no answer, never 0%).
+    await withTenants([co], async (q) => {
+      const fact = (project: string, dateSql: string, tc: number, onTime: number, withDue: number) =>
+        q.query(
+          `INSERT INTO report_work_facts (id, tenant_id, fact_date, project_id, tasks_completed, tasks_completed_on_time, tasks_completed_with_due_date, origin_site)
+           VALUES ($1, $2, ${dateSql}, $3, $4, $5, $6, $7)`,
+          [newId(), co, project, tc, onTime, withDue, site()],
+        );
+      await fact(proj.ontrack, "current_date", 3, 2, 3);
+      await fact(proj.ontrack, "current_date", 1, 1, 1);
+      await fact(proj.ontrack, "(date_trunc('month', current_date) - interval '1 day')::date", 5, 0, 5);
+      await fact(proj.wait8, "current_date", 2, 0, 0);
+    }, { modules: ["reports"] });
+
     // social: no project at all, but an active engagement (an active SERVICE), and one post the client has not reviewed yet.
     await withTenants([co], async (q) => {
       const engagement = newId();
@@ -262,10 +277,22 @@ describe.skipIf(!TEST_URL)("PV7-02 · client health, staff side", () => {
       const b = await board();
       for (const row of b.clients) {
         for (const [k, v] of Object.entries(row.signals)) {
-          if (k === "deliveryOnTime") expect(v, `${row.name}.${k} is the PV7-01 seam`).toBeNull();
-          else expect(v, `${row.name}.${k}`).not.toBeNull();
+          // PV7-05: delivery on time is null for a client with no due-dated completion this month (no answer, not 0%).
+          if (k === "deliveryOnTime") continue;
+          expect(v, `${row.name}.${k}`).not.toBeNull();
         }
       }
+    });
+
+    it("delivery on time: month to date, a ratio of sums, null with no due-dated completion (PV7-05)", async () => {
+      const b = await board();
+      // 3 of 4 this month; last month's 0 of 5 is outside the range.
+      expect(rowOf(b, "ontrack").signals.deliveryOnTime).toBeCloseTo(0.75, 10);
+      // Completions with no due date: denominator 0, so null, never 0.
+      expect(rowOf(b, "wait8").signals.deliveryOnTime).toBeNull();
+      // No facts at all.
+      expect(rowOf(b, "quiet").signals.deliveryOnTime).toBeNull();
+      expect(b.unavailable).toEqual([]);
     });
 
     it("quiet: no project, no service", async () => {
@@ -381,8 +408,9 @@ describe.skipIf(!TEST_URL)("PV7-02 · client health, staff side", () => {
       expect(after.clients).toBe(before.clients + 40);
       expect(after.n).toBe(before.n);
       // The absolute number, so an extra query added to a source is noticed: 1 (clients) + projects, milestones, deliverables,
-      // requests, invoices (5) + the ball (8) + the site (2) + services (2: social and webdev are on, search is not) = 18.
-      expect(before.n).toBe(18);
+      // requests, invoices (5) + the ball (8) + the site (2) + services (2: social and webdev are on, search is not)
+      // + delivery on time (1, PV7-05: one set query over report_work_facts, under the reports wall) = 19.
+      expect(before.n).toBe(19);
     });
   });
 
@@ -408,6 +436,27 @@ describe.skipIf(!TEST_URL)("PV7-02 · client health, staff side", () => {
       const b = await loadClientHealthBoard(co, { read: failing("invoices") });
       expect(b.clients.find((x) => x.clientId === c.off15)!.state).toBe("off_track");
       expect(b.clients.find((x) => x.clientId === c.quiet)!.state).toBe("unknown");
+    });
+
+    it("delivery on time failing is named `reports`, nulls the figure, and never turns a state into unknown (display only)", async () => {
+      const b = await loadClientHealthBoard(co, { read: failing("reports") });
+      expect(b.unavailable).toEqual(["reports"]);
+      const r = b.clients.find((x) => x.clientId === c.ontrack)!;
+      expect(r.signals.deliveryOnTime).toBeNull();
+      expect(r.state).toBe("on_track");
+      expect(r.signals.activeProjects).toBe(1);
+    });
+
+    it("the reports module being off is not a failure: the figure is null and `reports` is not unavailable", async () => {
+      const b = await loadClientHealthBoard(co, { enabled: new Set(["clients", "invoice", "pm", "social", "webdev", "monitoring"]) });
+      expect(b.unavailable).toEqual([]);
+      expect(b.clients.find((x) => x.clientId === c.ontrack)!.signals.deliveryOnTime).toBeNull();
+    });
+
+    it("THE REPORTS WALL: the same read without the `reports` scope sees zero facts, so the figure is null", async () => {
+      const noWall: SourceReader = (t, _source, _modules, fn) => withTenants([t], fn);
+      const b = await loadClientHealthBoard(co, { read: noWall });
+      expect(b.clients.find((x) => x.clientId === c.ontrack)!.signals.deliveryOnTime).toBeNull();
     });
 
     it("the ball failing nulls both waiting signals and the conversation count together", async () => {
