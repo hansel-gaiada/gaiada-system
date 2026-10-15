@@ -11,6 +11,16 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.172.0` - DW-4h-3 and DW-4i: My activity counts all work, and heads see Team activity (2026-10-15) - PROTOTYPED
+
+Contract: `docs/FRONTEND-BFF-CONTRACT.md` §44 (§44.9 "The UI"). Plan §5.6, 4h and 4i; DW-D19 (no single score).
+- **The Overview's My activity** reads the all-work series (`GET /activity/series`, live since 1.0.0-alpha.406): kinds from the server, the window ending on the server's own today, and the "counts project-management work for now" note gone. Its link goes to Analytics › My activity.
+- **Analytics › My activity** (`/analytics/activity`, a tab in every workspace's Analytics row): the year of all work as a grid of days (each labelled with what was done by kind: "3 things done. Commits 2, Site edits 1"; the shade is volume, never a score), the kinds legend, and a day's detail (`?date=`: items by kind with the work's own name, time and a link inside the ERP). `?user=` opens another person's view when the server allows it.
+- **Analytics › Team activity** (`/analytics/activity/team?unit=&period=`, heads and the company-wide tier, the gate of Reports › Team): the unit's roster with each person's counts by kind for the week, month or quarter, sorted by name, no total and no ranking; a person the server refuses reads "Unavailable" on that row only.
+- **PM › Productivity** stays (it carries PM's own measures the all-work series does not) with a line linking to Analytics › My activity.
+- **Demo:** both reads with the real person-axis gate and per-person mixes of the 19 kinds.
+- **Tests:** `activitySeries.test.ts`, `activitySeriesFormat.test.ts`, `activityTeam.test.ts`, `demoActivity.test.ts`, the two Analytics page tests, and the Overview widget, Productivity, registry and shell suites.
+
 ### platform-nest `0.149.0` + platform-ui `0.171.0` - PV7-01, PV7-02, PV7-06: the client grain, client health, and My performance (2026-10-15) - PROTOTYPED
 
 Plan `docs/plans/2026-10-15-pv7-performance-views-tickets.md`; contract FRONTEND-BFF-CONTRACT §53 and §54, PERMISSION-CONTRACT §45.
