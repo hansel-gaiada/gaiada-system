@@ -9240,6 +9240,61 @@ Built as §48.1 to §48.4 and §48.6 specify. The simulated mode is what runs; *
 - `mine=me` is unchanged for every tier.
 - `projectId` still narrows.
 
+## 49. Chart of accounts: add, rename, archive and restore (DW-7g-2, 2026-10-15) — `platform-nest/src/modules/finance/finance.controller.ts` — **STATUS: PLANNED (contract)**
+
+**Why.** Finance can read its chart of accounts (`GET /api/:t/finance/accounts`) but cannot change it: no route creates, renames or retires an account (DW-7g). The schema and its guards already exist (`202608241011_finance_coa_and_dimensions.sql`):
+- codes are unique among live rows;
+- the freeze trigger stops re-coding or re-typing an account that has postings (`first_posted_at`);
+- `finance_post_journal` already refuses an account whose `status` is not `active`.
+
+So this section adds routes over existing rules. There is no migration and no new Cerbos kind.
+
+### 49.1 Who may act
+All four writes authorize on the existing `finance_config` kind (PERMISSION-CONTRACT: `resource_finance_config.yaml`). `create` covers a new account and `update` covers the rest. That means `module_manager` (`finance_manager`) and `company_admin`, plus `platform_admin`. `read` stays as it is. Every write leaves an activity row (`finance_account`, with the code).
+
+### 49.2 Add
+`POST /api/:t/finance/accounts {code, name, accountType, normalBalance?, parentCode?, isPostable?, currencyCode?, description?}` → 201 `{code}`.
+- `code`: 1-20 characters of `A-Z a-z 0-9 . -`, unique among live accounts (409 `code_taken`).
+- `name`: 1-120 characters after trimming. `description`: at most 500.
+- `accountType`: one of `asset`, `liability`, `equity`, `revenue`, `expense`.
+- `normalBalance`: defaults to `debit` for asset and expense, and `credit` otherwise. It may be given explicitly, for a contra account.
+- `parentCode`: must name a live account of the same `accountType` that is a header (`is_postable = false`); otherwise 400 `{field: "parentCode"}`.
+- `isPostable`: default `true`; `false` makes a header.
+- `currencyCode`: optional, three letters, and one of the company's currencies in use; otherwise 400.
+- Control accounts are not created here: `is_control` stays false and `allow_manual_posting` true. Control accounts come from the template and their subledgers.
+
+### 49.3 Rename and edit
+`PATCH /api/:t/finance/accounts/:code {name?, description?, newCode?, parentCode?}` → 200 `{code}`.
+- `name` and `description` may always change.
+- `newCode` only while the account has no postings. With postings, the freeze trigger refuses, and the route answers 409 `account_frozen` with the trigger's hint ("archive it and create a new one").
+- `parentCode` follows §49.2's rule, and may not create a cycle (400).
+- Type, normal balance and the control flags are not editable here.
+
+### 49.4 Archive and restore (the UI's "deactivate")
+`POST /api/:t/finance/accounts/:code/archive` → 200 `{code, status: "archived"}`. The account then refuses new postings; its history stays. Refused with 409 and a reason when:
+- `account_has_balance`: the posted lines' net on the account (all dates) is not 0. Retiring an account that still holds money would hide it from every statement;
+- `account_has_children`: it has live, active child accounts;
+- `account_is_control`: it is a control account;
+- `account_in_use`: something still points at it for NEW postings: a posting rule, a bank or cash account (treasury), a tax code, or an AR/AP configuration. The route lists which. The implementer finds the referring tables from the `REFERENCES finance_accounts` foreign keys.
+
+`POST /api/:t/finance/accounts/:code/restore` → 200 `{code, status: "active"}`. Refused with 409 `parent_archived` while its parent is archived.
+
+### 49.5 The screen (Finance › Ledger › Chart of accounts)
+- **Actions for those who may write:**
+  - a "New account" form;
+  - per row: Rename (name, description, and the code only while it has no postings) and Archive or Restore;
+  - each refusal is shown in words, with its reason.
+- **Who sees the actions:** the people the server allows. The UI has no `finance_config` capability mirror, so it shows them for `company.manage`, elevated, or a `finance_manager` grant in the company, and lets the server refuse anyone else.
+- **Archived accounts** are hidden by default behind a "Show archived" switch, and are marked when shown.
+- Everyone who may read the chart keeps the read-only view of today.
+
+### 49.6 Proof (live Postgres + Cerbos on the Linux CI gate)
+- **Add:** a header and a postable child, a duplicate code (409), a parent of another type (400), a contra account with an explicit normal balance.
+- **Rename:** the code changed before postings, and refused after them (409 `account_frozen`).
+- **Archive:** refused for a balance, a child, a control account and a posting rule; allowed for an unused zero-balance account. A journal posted to it afterwards is refused by `finance_post_journal`.
+- **Restore:** refused under an archived parent.
+- **Authorization:** `finance_staff` is refused every write (403) and may still read.
+
 ## 50. Payroll inputs: the read (DW-7f-1c, 2026-10-15) — `platform-nest/src/modules/hr/payroll.controller.ts` — **STATUS: BUILT, PROTOTYPED (backend: payroll-inputs-read.test.ts; UI: the run page, PayrollInputList and the hr-full-data reader tests; the backend HTTP suite is written for the Linux CI gate)**
 
 **Why.** HR can add a payroll input (`POST /api/:t/modules/hr/payroll-inputs`) but cannot see the inputs already entered, or which run consumed them. The run detail page (DW-7f-1b) therefore cannot list them. The table already holds everything: `hr_payroll_inputs` (`202608240143_hr_payroll.sql`), with `consumed_by_run_id` set when a run's calculate consumes an input. So this section adds a read only: no migration, no new kind.
