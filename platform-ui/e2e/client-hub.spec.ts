@@ -183,6 +183,49 @@ test.describe("client hub", () => {
     }
   });
 
+  // PV7-04b — the Reports tab (BFF §55.3). The demo store is per process and shared with the portal spec, so this publishes the
+  // draft account summary (rep-3) and then withdraws that same one, leaving rep-1 and rep-2 (which the portal spec reads) alone.
+  test("PV7-04b: the Reports tab publishes a draft after a confirm and withdraws it with a required reason", async ({ page }) => {
+    const confirms: string[] = [];
+    page.on("dialog", (d) => { confirms.push(d.message()); void d.accept(); });
+    await openAsAgency(page, "/clients/cl-1");
+    await hubTab(page, /^Reports$/).click();
+    await expect(page).toHaveURL(/\/clients\/cl-1\/reports$/);
+    await expect(hubTab(page, /^Reports$/)).toHaveAttribute("aria-current", "page");
+    await expect(page.locator("h1")).toHaveCount(1);
+
+    // Every status is listed; a published report says the client sees it, a draft does not.
+    await expect(page.locator("#rep-1")).toContainText("Published");
+    await expect(page.locator("#rep-1")).toContainText("Client sees this");
+    await expect(page.locator("#rep-4")).toContainText("Withdrawn");
+    await expect(page.locator("#rep-4")).toContainText("Reason (staff only): The ad spend figures were wrong");
+    await expect(page.locator("#rep-4").getByRole("button")).toHaveCount(0);
+
+    // A draft with no file is refused in words, not a code.
+    const noFile = page.locator("#rep-7");
+    await noFile.getByRole("button", { name: "Publish" }).click();
+    await expect(noFile.getByRole("alert")).toContainText(/no file yet/i);
+    await expect(noFile.getByRole("alert")).not.toContainText("report_has_no_file");
+
+    // Publish the draft with a file.
+    const draft = page.locator("#rep-3");
+    await expect(draft).toContainText("Draft");
+    await draft.getByRole("button", { name: "Publish" }).click();
+    await expect(draft).toContainText("Published", { timeout: 15_000 });
+    await expect(draft).toContainText("Client sees this");
+    expect(confirms.some((m) => m.startsWith("Publish to the client?"))).toBe(true);
+
+    // Withdraw it: the button waits for a reason.
+    const withdraw = draft.getByRole("button", { name: "Withdraw" });
+    await expect(withdraw).toBeDisabled();
+    await draft.getByLabel(/Reason for withdrawing/).fill("Published by mistake in the test");
+    await withdraw.click();
+    await expect(draft).toContainText("Withdrawn", { timeout: 15_000 });
+    await expect(draft).toContainText("Reason (staff only): Published by mistake in the test");
+    await expect(draft.getByRole("button")).toHaveCount(0);
+    expect(confirms.some((m) => m.startsWith("Withdraw this report"))).toBe(true);
+  });
+
   test("a client with no outstanding items says so instead of rendering an empty box", async ({ page }) => {
     // cl-2 gets no ball items in the fixture — the empty state has to be a sentence, because a blank
     // card reads as a broken fetch.

@@ -26,6 +26,8 @@ const PAGES = [
   "/portal/projects/proj-nw-site",
   "/portal/approvals",
   "/portal/deliverables",
+  // PV7-04b: Reports (a New marker, a Markdown and a PDF download, a project and a whole-account row).
+  "/portal/reports",
   "/portal/requests",
   // PV4-08: the list, an open thread (messages, attachment, reply box), a closed thread (a removed message, no box),
   // shared meeting notes, and an amendment (the banner).
