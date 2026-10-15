@@ -11,6 +11,16 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.170.0` - DW-4k: export and print on the report pages (2026-10-15) - PROTOTYPED
+
+Contract: `docs/FRONTEND-BFF-CONTRACT.md` 15a (the export rows) with its "UI (DW-4k, 2026-10-15)" note. Plan §5.6, 4k. Found in DW-4b: no report page offered export, although the backend export existed.
+- **Export** (`components/reports/ReportActions.tsx`) on the company, department, person and project report pages and the department review tab: PDF, XLSX or CSV of exactly the document the page shows (its own header's grain, scope and period), only when the page rendered it. A server action creates the job for the caller's active company; the browser downloads through a new route, `/api/reports/exports/:jobId`, which streams the platform's download with the caller's session and the shared download headers (the platform re-authorizes every download). Refusals are shown in place as sent (403, 422, the 503 "pdf export is not configured"); a failure never looks like a download. An unsealed or custom period says the file is marked "AD HOC · UNSEALED".
+- **Not offered where it would mislead:** a department page showing one served company's slice offers no export (the export has no served-company scope, so it would include the whole department), and says why.
+- **The Team page** offers Print and "Export the department report" (a link to the department page for the same unit and period), never a team export the server cannot produce.
+- **Print** on every report page (`PrintButton`, `reports-print.css`, scoped to the reports pages): the app shell, period controls and buttons are hidden, a "scope · period" line is printed, tiles and table rows are not split across pages, charts keep their colours. Not driven in a browser: jsdom has no print layout.
+- **Demo:** the export answers the controller's refusals, and a success downloads a clearly labelled text placeholder, never a fake report.
+- **Tests:** `reportExport.test.ts`, `reportExportActions.test.ts`, the route's test, `ReportActions.test.tsx`, `reports-print.test.ts`, the company and team page tests, the demo cases.
+
 ### platform-ui `0.169.0` - DW-8n: Me › Timesheet shows your own time (2026-10-15) - PROTOTYPED
 
 Plan §8 (Me is personal admin). Found by PV-7.
