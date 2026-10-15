@@ -25,6 +25,8 @@ describe.skipIf(!TEST_URL)("DW-7j f11 leaver access closed (live PG + RLS + hr w
   let other: string;
   let off: string;
   let empty: string;
+  let fresh: string; // one leaver effective on asOf, deadline tomorrow, login still open
+  let due: string; // a leaver effective on asOf and already disabled, and one whose deadline is due on asOf
   let actor: string;
   let savedTz: string;
   let seq = 0;
@@ -58,6 +60,8 @@ describe.skipIf(!TEST_URL)("DW-7j f11 leaver access closed (live PG + RLS + hr w
     other = await createCompany("DW-7j f11 Other", ["hr"]);
     off = await createCompany("DW-7j f11 Off", ["hr"]);
     empty = await createCompany("DW-7j f11 Empty", ["hr"]);
+    fresh = await createCompany("DW-7j f11 Fresh", ["hr"]);
+    due = await createCompany("DW-7j f11 Due", ["hr"]);
 
     await seedHolidayCalendar(co, [["2026-09-07", "company"]], [["2026-09-08", "public"]]); // the spare calendar's Sep 8 holiday must be ignored
 
@@ -94,6 +98,10 @@ describe.skipIf(!TEST_URL)("DW-7j f11 leaver access closed (live PG + RLS + hr w
     // bare: no calendar, Fri Sep 4 -> Mon Sep 7 (a working day here)
     await leaver(bare, "2026-09-04", await local("2026-09-07", 12)); // on time
     await leaver(bare, "2026-09-04", await local("2026-09-08", 12)); // LATE
+    // fresh and due: Wed Sep 30 is asOf and its deadline is Thu Oct 1 (tomorrow)
+    await leaver(fresh, "2026-09-30", null); // not disabled yet, deadline not due: not counted at all
+    await leaver(due, "2026-09-30", await local("2026-09-30", 10)); // the same case, but disabled today: counted, on time
+    await leaver(due, "2026-09-29", null); // Tue Sep 29: the deadline (Wed Sep 30) is due on asOf and the login is open: counted, late
     // off: HR turned off after its rows exist
     await leaver(off, "2026-09-02", await local("2026-09-03", 10));
     await turnModulesOff(off);
@@ -134,15 +142,16 @@ describe.skipIf(!TEST_URL)("DW-7j f11 leaver access closed (live PG + RLS + hr w
   });
 
   it("the login comes from the separation, else from the employee (Lfb has it on the employee only)", async () => {
-    expect(await leaverAccessClosed(ctx({ start: "2026-09-21", end: "2026-09-21", asOf: "2026-09-21" }))).toEqual({ value: 1, numerator: 1, denominator: 1 });
+    expect(await leaverAccessClosed(ctx({ start: "2026-09-21", end: "2026-09-22", asOf: "2026-09-22" }))).toEqual({ value: 1, numerator: 1, denominator: 1 });
   });
 
   it("the window's edges are dates, inclusive: the first and last day are in, the day before and the day after are out", async () => {
     expect((await leaverAccessClosed(ctx()))?.denominator).toBe(12); // Aug 31, Oct 1 and Oct 5 would make it 15
-    const one = (d: string) => ctx({ start: d, end: d, asOf: d });
+    // asOf stays Sep 30 (past every deadline but Lend's, which is disabled): each single-day window reads its own leaver only
+    const one = (d: string) => ctx({ start: d, end: d });
     expect(await leaverAccessClosed(one("2026-09-01"))).toEqual({ value: 1, numerator: 1, denominator: 1 }); // La only
     expect(await leaverAccessClosed(one("2026-08-31"))).toEqual({ value: 0, numerator: 0, denominator: 1 }); // the Aug 31 leaver only
-    expect(await leaverAccessClosed(one("2026-10-01"))).toEqual({ value: 0, numerator: 0, denominator: 1 }); // the Oct 1 leaver only
+    expect(await leaverAccessClosed(one("2026-10-01"))).toBeNull(); // the Oct 1 leaver is not effective yet at asOf Sep 30
     expect(await leaverAccessClosed(one("2026-09-30"))).toEqual({ value: 1, numerator: 1, denominator: 1 }); // Lend only
   });
 
@@ -151,8 +160,21 @@ describe.skipIf(!TEST_URL)("DW-7j f11 leaver access closed (live PG + RLS + hr w
     expect(await leaverAccessClosed(ctx({ asOf: "2026-09-20" }))).toEqual({ value: 6 / 10, numerator: 6, denominator: 10 });
     // October's leavers (Oct 1, Oct 5) are all after asOf Sep 30
     expect(await leaverAccessClosed(ctx({ start: "2026-10-01", end: "2026-10-31", asOf: "2026-09-30" }))).toBeNull();
-    // asOf Oct 1: the Oct 1 leaver is due, Oct 5 is not
-    expect(await leaverAccessClosed(ctx({ start: "2026-10-01", end: "2026-10-31", asOf: "2026-10-01" }))).toEqual({ value: 0, numerator: 0, denominator: 1 });
+    // asOf Oct 1: the Oct 1 leaver is effective but its deadline (Oct 2) is not due and the login is open: still not counted; Oct 5 is not effective
+    expect(await leaverAccessClosed(ctx({ start: "2026-10-01", end: "2026-10-31", asOf: "2026-10-01" }))).toBeNull();
+    // asOf Oct 2: the Oct 1 leaver's deadline is due and the login is open: counted, late; Oct 5 is still not effective
+    expect(await leaverAccessClosed(ctx({ start: "2026-10-01", end: "2026-10-31", asOf: "2026-10-02" }))).toEqual({ value: 0, numerator: 0, denominator: 1 });
+  });
+
+  it("a leaver whose deadline is still ahead and whose login is open is not counted; disabled already, or once the deadline is due, it is", async () => {
+    // fresh: effective Wed Sep 30 = asOf, deadline Thu Oct 1, never disabled: not counted at all
+    expect(await leaverAccessClosed(ctx({ tenantId: fresh, start: "2026-09-30", end: "2026-09-30" }))).toBeNull();
+    // the same leaver the day the deadline falls due (asOf Oct 1): counted, not closed
+    expect(await leaverAccessClosed(ctx({ tenantId: fresh, start: "2026-09-30", end: "2026-10-01", asOf: "2026-10-01" }))).toEqual({ value: 0, numerator: 0, denominator: 1 });
+    // due: the leaver effective Sep 30 who is disabled today is counted and on time
+    expect(await leaverAccessClosed(ctx({ tenantId: due, start: "2026-09-30", end: "2026-09-30" }))).toEqual({ value: 1, numerator: 1, denominator: 1 });
+    // and the leaver effective Sep 29 (deadline Sep 30 = asOf, login open) is counted, late
+    expect(await leaverAccessClosed(ctx({ tenantId: due, start: "2026-09-29", end: "2026-09-30" }))).toEqual({ value: 1 / 2, numerator: 1, denominator: 2 });
   });
 
   it("another company's leavers and disables are never counted; the unit makes no difference", async () => {

@@ -10,7 +10,9 @@
 //   Numerator: an `activities` row `it.account.disable` on `it_account` for that user (written by it-accounts.controller.ts) whose
 //   date in REPORTS_TZ is on or before the 1st working day after `effective_on` (`nthWorkingDayAfter`, the company's HR calendar:
 //   working-calendar.ts); a login disabled before the effective date counts too. A leaver whose account was never provisioned has
-//   no such row and reads as not closed. `null` when the denominator is 0.
+//   no such row and reads as not closed. A leaver counts only when the deadline (that 1st working day) is already due (`<= asOf`,
+//   §40.5.1, as f3 and f9) OR the login is already disabled (its date `<= asOf`): a leaver whose deadline is still ahead and whose
+//   login is still open is not counted at all, in neither numerator nor denominator. `null` when the denominator is 0.
 //   Walls: `hr` (separations, employees) plus the core `activities` table, in one statement.
 import { config } from "../../../../config";
 import { withTenants } from "../../../../db";
@@ -66,8 +68,11 @@ export const itLeaverAccessClosed: ModuleKpiReader = async (ctx) => {
   let denominator = 0;
   let numerator = 0;
   for (const g of groups) {
+    const deadline = deadlineOf(g.effective_day);
+    const disabled = g.disabled_day !== null && g.disabled_day <= ctx.asOf;
+    if (deadline > ctx.asOf && !disabled) continue; // not due yet and still open: nothing to judge
     denominator += g.n;
-    if (g.disabled_day !== null && g.disabled_day <= deadlineOf(g.effective_day)) numerator += g.n;
+    if (g.disabled_day !== null && g.disabled_day <= deadline) numerator += g.n;
   }
   if (denominator === 0) return null;
   return { value: numerator / denominator, numerator, denominator };
