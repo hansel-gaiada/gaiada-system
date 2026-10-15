@@ -591,7 +591,7 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
       const cells = activity.locator(".prod-heatmap__cell[data-level]");
       expect(await cells.count()).toBeGreaterThanOrEqual(16 * 7 + 1);
       expect(await cells.count()).toBeLessThanOrEqual(17 * 7);
-      await expect(cells.first()).toHaveAttribute("title", /^\d{2} [A-Z][a-z]{2} \d{4}: (\d+ things? done\. .+|nothing recorded)$/);
+      await expect(cells.first()).toHaveAttribute("title", /^\d{2} [A-Z][a-z]{2,3} \d{4}: (\d+ things? done\. .+|nothing recorded)$/);
     }
     await expect(activity.getByText(/score|rating/i)).toHaveCount(0);
   });

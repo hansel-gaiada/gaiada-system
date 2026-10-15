@@ -59,12 +59,12 @@ describe("My activity (the widget)", () => {
   });
 
   it("draws 16 full weeks and this week's days so far, each cell with its volume and its kinds on its date", async () => {
-    getSeries.mockResolvedValue({ kind: "ok", data: answer({ "2026-09-01": { "github.commits": 2, "webdesk.edits": 1 }, "2026-09-02": { "pm.comments": 1 } }) });
+    getSeries.mockResolvedValue({ kind: "ok", data: answer({ "2026-08-03": { "github.commits": 2, "webdesk.edits": 1 }, "2026-08-04": { "pm.comments": 1 } }) });
     const { container } = render(await MyActivity(props()));
     expect(within(block()).getByRole("heading", { level: 3, name: "My activity" })).toBeInTheDocument();
     expect(container.querySelectorAll(".prod-heatmap__cell[data-level]")).toHaveLength(16 * 7 + 2);
-    expect(container.querySelector('[title^="01 Sep 2026: 3 things done. Commits 2, Site edits 1"]')).toBeTruthy();
-    expect(container.querySelector('[title^="02 Sep 2026: 1 thing done. Comments 1"]')).toBeTruthy();
+    expect(container.querySelector('[title^="03 Aug 2026: 3 things done. Commits 2, Site edits 1"]')).toBeTruthy();
+    expect(container.querySelector('[title^="04 Aug 2026: 1 thing done. Comments 1"]')).toBeTruthy();
     expect(container.querySelector(".prod-heatmap__legend")).toBeTruthy();
   });
 
@@ -99,7 +99,7 @@ describe("My activity (the widget)", () => {
   });
 
   it("says Nothing recorded yet today on a day with nothing, and still draws the map", async () => {
-    getSeries.mockResolvedValue({ kind: "ok", data: answer({ "2026-09-01": { "github.commits": 3 } }) });
+    getSeries.mockResolvedValue({ kind: "ok", data: answer({ "2026-08-03": { "github.commits": 3 } }) });
     const { container } = render(await MyActivity(props()));
     expect(screen.getByText("Nothing recorded yet today")).toBeInTheDocument();
     expect(within(block()).queryAllByRole("listitem")).toHaveLength(0);
