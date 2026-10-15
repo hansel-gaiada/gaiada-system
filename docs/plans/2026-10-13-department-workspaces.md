@@ -1491,6 +1491,77 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 - Personalising the Overview.
 - The PV-7 "My performance" depth.
 
+### 12.1 Build notes (DW-9, 2026-10-15)
+
+Started from main `5722ec9a` (release 412) on branch `dw/9`. The board splits 9a, 9b and 9d (TASKS.md › DW-9).
+
+**Where the e2e runs.** Under DEMO_MODE, on sumopod, through `platform-ui/qa/e2e-gate.sh` (one gate at a time,
+two runs on one sha), the way DW-2g, DW-6 and DW-7 ran theirs. CI's Playwright step runs only `smoke`, so the
+workspace projects are gated there and nowhere else. DEMO_MODE mirrors the gates; it does not prove a server
+refusal. Those keep resting on the platform-nest suites in CI. Live has no staff login but the owner's, so the
+personas cannot be driven live.
+
+**The twelve personas (9a), and what DEMO_MODE already has.**
+
+| Persona | Demo login | Home it must land on |
+|---|---|---|
+| Web Dev employee | `webdev@gaiada.com` (u-dev, placed in Web Dev) | Web Dev |
+| SEO employee | new: placed in SEO › On-page › SEO Specialist | SEO |
+| Social Media employee | new: placed in Social Media | Social Media |
+| Creatives employee | new: placed in Creatives › Design | Creatives |
+| Web Dev head | `webhead@gaiada.com` (`org_unit_lead` on dept-1) | Web Dev, with Me \| Team |
+| HR staff | new: `hr_staff` on the agency | HR (`/hr`) |
+| Finance staff | new: `finance_staff` on the agency | Finance (`/finance`) |
+| IT staff | new: `it_admin` on the agency | IT (`/it`) |
+| Unplaced owner | `group-owner@gaiada.com` (`owner` on every company, no placement) | Office of the GM |
+| `platform_admin` | `hansel@gaiada.com` | Office of the GM |
+| Generic-pack user | new: a `member` of Viceroy placed in one of its departments | that department, on the generic workspace |
+| Client-only user | `client@northwind.example` | `/portal`, never the staff shell |
+
+- Each new login has exactly ONE grant, like the existing ones. A second grant is how a persona stops testing its boundary.
+- The token order in `lib/demoIdentity.ts` is the mechanism. A new token must contain neither "ic" nor "client", or it
+  must sit above those tests. "office", "service" and "viceroy" all contain "ic". `demoIdentity.test.ts` pins every new token.
+- Placements go into `lib/org.ts`'s seed, inside existing departments only. The positional ids (`dept-1`…`dept-8`) never move.
+- Generic pack: Viceroy's vertical is hospitality, which resolves to the generic pack (`lib/packs.ts`), but its demo tree
+  is empty today (only the agency vertical is seeded). 9a-1 gives the hospitality vertical a small seed: one ordinary
+  department with no bespoke workspace, plus HR, Finance and IT as on live. It is keyed by vertical, never by name (PV-D13).
+  This closes DW-6e's gap: the generic skeleton was proved only by a jsdom render because no demo department used it.
+- `/api/me` gives every demo identity all three companies, so the active company is the tenant cookie. The generic user's
+  test plants `co-resort`.
+- Every new identity changes what the role-driven rows show, such as the Approvals row (`decider`, DW-D23) and Me's tabs
+  (`lib/meTabs.ts`). The spec asserts what each persona really gets, never a copy of another persona's menu.
+
+**What each persona's test checks (9a-2).** Signing in plants the pilot cookie, then:
+- `/` lands on the home in the table;
+- the switcher names that home;
+- the Work, Performance and You groups draw the rows the registry gives that persona;
+- Company shows for everyone. Admin shows for whoever its gates allow: `platform_admin`, and the root owner, who sees
+  the Group and Platform areas by ownership (PV-D18, PV-D20);
+- every link in the sidebar opens with no error text and no 404;
+- an Admin URL answers as `lib/adminAccess.ts` rules for that persona: a 404 where the page's gate refuses them, the
+  page where it allows them (DW-D20). The table is per page (a manager reads `/admin/users`, IT reads the workflows,
+  and a role the UI cannot model gets the page's soft refusal, not a 404), so each expectation cites its row;
+- the client is sent to `/portal` from `/`, from a department and from an Admin URL.
+
+**axe (9b).** One spec over the shell's own surfaces, not every page. It covers:
+- the Overview, as an employee, as a head in Team mode, and as the company Overview;
+- a row with its tab strip;
+- the open switcher, palette, assistant drawer and avatar menu;
+- the phone drawer at 390×844.
+
+Every surface runs in light and dark, on desktop and phone. Tags are WCAG 2.0 and 2.1, A and AA. The theme is pinned
+through `gaiada_prefs`, as in `a11y-axe.spec.ts`. A green run is evidence of no regression in what axe covers, never
+"accessible". Each deferred rule is named in the spec with its reason.
+
+**Rollout (9c, 9d).**
+- **9c, the pilot week.** It needs the owner: live has no other staff login, so the owner is the pilot. The week starts
+  when the owner switches to the new layout for daily use; their feedback is folded in as tickets on the board.
+- **9d-1, the flip.** `DEFAULT_SHELL_LAYOUT` becomes "workspaces". The avatar menu keeps the way back to classic until
+  9d-2, so anyone stuck has an exit.
+- **9d-1 and the tests.** The e2e and jsdom tests that assume classic by default are rewritten in the same change
+  (trap 8). `/approvals` stays in the palette for everyone (`paletteFindability.test.ts`).
+- **9d-2, the removal.** Two releases after 9d-1, the classic shell and the switch are deleted.
+
 ---
 
 ## 13. Traps, ranked
