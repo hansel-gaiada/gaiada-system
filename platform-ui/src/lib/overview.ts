@@ -12,6 +12,7 @@ import { gateAllows, workspaceKeysOf, type GateContext, type HomeArea, type MyWo
 import type { ShellLayout } from "@/lib/shellLayout";
 import type { DeptLauncher } from "@/lib/deptToolkits";
 import { pinnedToolsFor } from "@/lib/pinnedTools";
+import { effectiveWidgets, type WorkspaceOverviewPrefs } from "@/lib/overviewPrefs";
 
 // ── The period (plan §3.2) ───────────────────────────────────────────────────────────────────────
 
@@ -100,19 +101,37 @@ export interface OverviewBandView {
   widgets: OverviewWidget[];
 }
 
-/** The bands to draw: the fixed order, each with the widgets that are built, allowed and (when `has` is
- *  given) have a component to draw. A band with none is dropped, never drawn empty. */
-export function selectBands(
-  widgets: readonly OverviewWidget[],
-  ctx: GateContext,
-  has: (key: string) => boolean = () => true,
-): OverviewBandView[] {
+/** The widgets that could be placed at all: built, allowed and (when `has` is given) with a component to draw, grouped by band
+ *  in the fixed order. A band with none is dropped, never drawn empty. */
+function placeable(widgets: readonly OverviewWidget[], ctx: GateContext, has: (key: string) => boolean): OverviewBandView[] {
   const out: OverviewBandView[] = [];
   for (const band of OVERVIEW_BANDS) {
     const visible = widgets.filter((w) => w.band === band && !isPlanned(w) && has(w.key) && gateAllows(w.gate, ctx));
     if (visible.length > 0) out.push({ band, widgets: visible });
   }
   return out;
+}
+
+/** The bands to draw: the fixed order, each with the widgets that are built, allowed and (when `has` is
+ *  given) have a component to draw. A band with none is dropped, never drawn empty.
+ *
+ *  DW-10d (DW-D34): the person's own choice (`prefs`, their entry of `Prefs.overview` for this workspace) is applied FIRST, before
+ *  the gates and the placement rules, in `effectiveWidgets`: a hidden widget is never placed, so its component never renders and its
+ *  reads never run, and an optional one is placed only when switched on, and then still needs its gate. Left out, `prefs` is "no
+ *  choice made": every default widget, no optional one. The order is the registry's whatever `prefs` says. */
+export function selectBands(
+  widgets: readonly OverviewWidget[],
+  ctx: GateContext,
+  has: (key: string) => boolean = () => true,
+  prefs?: Partial<WorkspaceOverviewPrefs>,
+): OverviewBandView[] {
+  return placeable(effectiveWidgets(widgets, prefs), ctx, has);
+}
+
+/** What the Customise control lists: every widget this person could see on this Overview if they chose to, in the fixed order, that
+ *  is built, allowed and has a component, whatever they hid or left off. Nothing the person may not see is offered. */
+export function selectCustomisable(widgets: readonly OverviewWidget[], ctx: GateContext, has: (key: string) => boolean = () => true): OverviewBandView[] {
+  return placeable(widgets, ctx, has);
 }
 
 export interface OverviewAction { key: string; label: string; href: string }

@@ -97,12 +97,24 @@ export interface WorkspaceRow {
 export const OVERVIEW_BANDS = ["now", "you", "department", "work", "growth"] as const;
 export type OverviewBand = (typeof OVERVIEW_BANDS)[number];
 
+/** DW-D34 (owner, 2026-10-15): what a person may change on their own Overview. Saved per workspace in the prefs
+ *  cookie (`lib/prefs.ts`, `lib/overviewPrefs.ts`), so it belongs to the browser and never to the account.
+ *   - "fixed": always shown, no control. Needs you (and the company's decisions) and a head's condition banner: what needs the
+ *     person, or says the department is in trouble, must not be switchable off.
+ *   - "default" (an absent `placement` is this): shown, and the person may hide it.
+ *   - "optional": off until the person switches it on.
+ *  The ORDER is never the person's: bands and widgets keep the registry's order (plan §3.1). A choice never bypasses a gate or a
+ *  placement rule, so a switched-on block still needs its gate. */
+export type OverviewPlacement = "fixed" | "default" | "optional";
+
 export interface OverviewWidget {
   key: string;
   band: OverviewBand;
   label: string;
   gate?: Gate;
   ticket?: string;
+  /** See `OverviewPlacement` (DW-D34). Absent = "default". */
+  placement?: OverviewPlacement;
 }
 
 /** A department tile on the Overview. A tile with no backend is hidden, and a failed read says
@@ -225,15 +237,17 @@ const CONN = {
 // ── The Overview (plan §3) ────────────────────────────────────────────────────────────────────────
 
 const AGENCY_ONLY: Gate = { kind: "pack", pack: "agency" };
+/** The Clients row's gate (`CLIENTS_ROW`, the GM's "Clients & sales" Clients tab): the agency pack lists the row and its module is on. */
+const CLIENTS_GATE: Gate = { kind: "agencyRow", row: "clients" };
 
 /** Every department workspace's Overview: the five questions in their fixed order. Campaigns and
  *  Requests are the agency pack's cross-department work, so a generic company never sees them. */
 const DEPARTMENT_OVERVIEW: readonly OverviewWidget[] = [
-  { key: "needs-you", band: "now", label: "Needs you" },
+  { key: "needs-you", band: "now", label: "Needs you", placement: "fixed" },
   { key: "today", band: "now", label: "Today" },
   { key: "your-numbers", band: "you", label: "Your numbers" },
   { key: "my-activity", band: "you", label: "My activity" },
-  { key: "condition", band: "department", label: "Department condition" },
+  { key: "condition", band: "department", label: "Department condition", placement: "fixed" },
   { key: "pulse", band: "department", label: "Pulse" },
   // The Work blocks (DW-3f) each read for the department's org node (`departmentId` / `unitId`). HR, Finance and IT are
   // functional workspaces with no node, so they have nothing to scope to and the frame does not place these blocks
@@ -241,6 +255,10 @@ const DEPARTMENT_OVERVIEW: readonly OverviewWidget[] = [
   { key: "projects", band: "work", label: "Projects" },
   { key: "campaigns", band: "work", label: "Campaigns", gate: AGENCY_ONLY },
   { key: "requests", band: "work", label: "Requests", gate: AGENCY_ONLY },
+  // DW-10d: the first optional block (DW-D34), off until a person switches it on. Its gate is the Clients row's own (`CLIENTS_ROW`), so
+  // it is offered to exactly the people who can open the Clients list. It reads for the department's org node, so the frame does not
+  // place it in a workspace without one (`clientHealthWidgetPlaced`).
+  { key: "client-health", band: "work", label: "Client health", gate: CLIENTS_GATE, placement: "optional" },
   { key: "learning", band: "growth", label: "Learning" },
   { key: "appraisal", band: "growth", label: "Appraisal" },
 ];
@@ -256,7 +274,7 @@ const GM_MONEY: Gate = { kind: "all", gates: [GM_CONSOLE, { kind: "cap", cap: "f
 
 /** The Office of the GM's company Overview (§3.5), same band order. Every block carries the cockpit's own gate. */
 export const COMPANY_OVERVIEW: readonly OverviewWidget[] = [
-  { key: "decisions", band: "now", label: "Needs you: decisions", gate: GM_CONSOLE },
+  { key: "decisions", band: "now", label: "Needs you: decisions", gate: GM_CONSOLE, placement: "fixed" },
   { key: "today", band: "now", label: "Today" },
   // Revenue and overdue receivables need the money gate, milestones and utilization the full one; the block draws only the parts the
   // person may see (`companyAccess`).
@@ -264,6 +282,8 @@ export const COMPANY_OVERVIEW: readonly OverviewWidget[] = [
   { key: "departments", band: "department", label: "Departments by condition", gate: GM_FULL },
   // The cockpit's Campaigns row gate. Not `campaigns`: that key is the department blocks' (shared campaigns with OUR part).
   { key: "company-campaigns", band: "work", label: "Campaigns", gate: { kind: "agencyRow", row: "agency" } },
+  // DW-10d (DW-D34): optional, company-wide (no department to narrow to). The cockpit's gate plus the Clients row's.
+  { key: "client-health", band: "work", label: "Client health", gate: { kind: "all", gates: [GM_CONSOLE, CLIENTS_GATE] }, placement: "optional" },
   { key: "learning-compliance", band: "growth", label: "Learning compliance", gate: { kind: "all", gates: [GM_FULL, { kind: "cap", cap: "lms.progress.view" }] } },
   { key: "appraisal-cycle", band: "growth", label: "Appraisal cycle", gate: { kind: "all", gates: [GM_FULL, { kind: "cap", cap: "appraisal.read" }] } },
 ];
@@ -289,7 +309,7 @@ const CLIENTS_ROW: WorkspaceRow = {
   key: "clients",
   label: "Clients",
   icon: "finance",
-  gate: { kind: "agencyRow", row: "clients" },
+  gate: CLIENTS_GATE,
   tabs: [{ key: "clients", label: "Clients", href: deptPath("clients"), icon: "finance" }],
 };
 

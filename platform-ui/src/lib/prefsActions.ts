@@ -9,7 +9,8 @@ import { revalidatePath } from "next/cache";
 import { getPrefs, writePrefs, type Theme, type OfficeZoom } from "./prefs";
 import { parseShellLayout, type ShellLayout } from "./shellLayout";
 import { MAX_PINNED_TOOLS, pinnedToolsFor } from "./pinnedTools";
-import { GENERIC_WORKSPACE, workspaceBySlug } from "./workspaces";
+import { GENERIC_WORKSPACE, isPlanned, workspaceBySlug } from "./workspaces";
+import { MAX_OVERVIEW_KEYS, overviewPrefsFor, overviewWidgetsForKey } from "./overviewPrefs";
 
 /** Fire-and-forget from `AssistantWorkspace`'s toggle click — the client already holds the
  *  authoritative UI state the instant it clicks (same "optimistic, not awaited for correctness" shape
@@ -67,5 +68,37 @@ export async function togglePinnedToolAction(workspaceKey: string, toolKey: stri
   const next = isPinned ? effective.filter((k) => k !== toolKey) : [...effective, toolKey];
   const ordered = ws.tools.map((t) => t.key).filter((k) => next.includes(k));
   await writePrefs({ ...current, pinnedTools: { ...current.pinnedTools, [ws.key]: ordered } });
+  revalidatePath("/", "layout");
+}
+
+/** DW-10d (DW-D34): hide or show one block of an Overview, or switch an optional one on or off (`lib/overviewPrefs.ts`).
+ *  All three arguments come from the browser. The workspace is re-resolved by key here ("company" is the company list), and a
+ *  widget that is not in THAT workspace's overview is refused silently, with no write. So are a `fixed` widget (Needs you and a
+ *  head's condition banner cannot be hidden) and a widget that is still ticketed (not built, so not the person's to choose).
+ *  `on` false on a default widget adds it to `hide`, true removes it; true on an optional widget adds it to `show`, false removes
+ *  it. The other prefs are kept, and the lists are stored in registry order. Works as a plain form post, so the page needs no
+ *  JavaScript. */
+export async function setOverviewWidgetAction(workspaceKey: string, widgetKey: string, on: boolean): Promise<void> {
+  if (typeof workspaceKey !== "string" || typeof widgetKey !== "string" || typeof on !== "boolean") return;
+  const widgets = overviewWidgetsForKey(workspaceKey);
+  const widget = widgets?.find((w) => w.key === widgetKey);
+  if (!widgets || !widget || isPlanned(widget)) return;
+  const placement = widget.placement ?? "default";
+  if (placement === "fixed") return;
+  const current = await getPrefs();
+  const own = overviewPrefsFor(current.overview, workspaceKey);
+  const listName = placement === "optional" ? "show" : "hide";
+  // `hide` holds a hidden default widget (hiding = not on); `show` holds a switched-on optional one (showing = on).
+  const inList = listName === "show" ? on : !on;
+  const set = new Set(own[listName]);
+  if (inList) set.add(widgetKey); else set.delete(widgetKey);
+  if (set.size > MAX_OVERVIEW_KEYS) return;
+  const ordered = widgets.map((w) => w.key).filter((k) => set.has(k));
+  const entry = { hide: [...own.hide], show: [...own.show] };
+  entry[listName] = ordered;
+  const overview = { ...current.overview };
+  if (entry.hide.length === 0 && entry.show.length === 0) delete overview[workspaceKey];
+  else overview[workspaceKey] = entry;
+  await writePrefs({ ...current, overview });
   revalidatePath("/", "layout");
 }

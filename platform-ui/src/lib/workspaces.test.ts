@@ -338,6 +338,38 @@ describe("the Overview, Performance and tools data", () => {
     }
   });
 
+  it("marks exactly Needs you, the department condition and the company's decisions as fixed (DW-D34)", () => {
+    const fixed = new Set<string>();
+    for (const ws of ALL) for (const w of ws.overview) if (w.placement === "fixed") fixed.add(w.key);
+    expect([...fixed].sort()).toEqual(["condition", "decisions", "needs-you"]);
+    // The same key is never fixed in one list and not in another.
+    for (const ws of ALL) for (const w of ws.overview) expect(w.placement === "fixed", `${ws.key}/${w.key}`).toBe(fixed.has(w.key));
+  });
+
+  it("makes Client health the only optional block, gated like the Clients row, in the Work band after Requests (DW-D34)", () => {
+    for (const ws of ALL) {
+      const optional = ws.overview.filter((w) => w.placement === "optional");
+      expect(optional.map((w) => w.key), ws.key).toEqual(["client-health"]);
+      const ch = optional[0];
+      expect(ch.band).toBe("work");
+      expect(ch.ticket).toBeUndefined();
+      // Department lists: right after Requests, gated by the Clients row's own gate.
+      if (ws.key !== "gm") {
+        const keys = ws.overview.map((w) => w.key);
+        expect(keys[keys.indexOf("requests") + 1], ws.key).toBe("client-health");
+        expect(ch.gate, ws.key).toEqual({ kind: "agencyRow", row: "clients" });
+      } else {
+        // The company list keeps the cockpit's gate and adds the Clients row's.
+        expect(gateMentions(ch.gate, (g) => g.kind === "agencyRow" && g.row === "clients")).toBe(true);
+        expect(gateMentions(ch.gate, (g) => g.kind === "cap" && g.cap === "reports.department.view")).toBe(true);
+      }
+    }
+  });
+
+  it("every placement is one of the three words, and an absent one means default", () => {
+    for (const ws of ALL) for (const w of ws.overview) expect([undefined, "fixed", "default", "optional"], `${ws.key}/${w.key}`).toContain(w.placement);
+  });
+
   it("offers all six report periods, none waiting on a ticket (DW-4a built them in the backend)", () => {
     expect(REPORT_PERIODS.map((p) => p.key)).toEqual(["day", "week", "month", "quarter", "semester", "year"]);
     expect(REPORT_PERIODS.filter((p) => p.ticket)).toEqual([]);
