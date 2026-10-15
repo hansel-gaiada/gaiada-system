@@ -15,7 +15,7 @@ import "./billing/billing.css";
 // comes back in words ("You can't publish reports for this client."), never as a dead click. The server's 409s
 // (`not_a_draft`, `report_has_no_file`, `not_published`) and 400s (`reason_required`, `reason_too_long`) are said in plain
 // words too (`publishErrorText` / `withdrawErrorText`).
-export function ClientReportActions({ report, clientId }: { report: Pick<StaffClientReport, "id" | "status" | "file" | "title">; clientId: string }) {
+export function ClientReportActions({ report, clientId }: { report: Pick<StaffClientReport, "id" | "status" | "file" | "title"> & { source?: StaffClientReport["source"] }; clientId: string }) {
   const { canPublish, canWithdraw, publishBlockedReason } = reportActions(report);
   const [pubState, publish, publishing] = useActionState<ClientReportActionState | null, FormData>(publishClientReportAction, null);
   const [wdState, withdraw, withdrawing] = useActionState<ClientReportActionState | null, FormData>(withdrawClientReportAction, null);

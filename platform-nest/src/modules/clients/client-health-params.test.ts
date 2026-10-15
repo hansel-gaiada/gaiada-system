@@ -87,3 +87,30 @@ describe("PV7-02 · the health reads bind their parameters densely", () => {
     expect(referenced(portal.seen[0].sql)).toEqual([1, 2, 3, 4]);
   });
 });
+
+// PV7-07 seam: `loadTurnaround(c, reach, { asOf })` asks for the 90 days ENDING at an instant (a month's end) instead of at now.
+describe("PV7-07 · turnaround with an explicit window end", () => {
+  const asOf = new Date("2026-10-01T00:00:00.000Z");
+
+  it("binds the instant as the next dense parameter, in both modes, and bounds the window on both sides", async () => {
+    for (const [reach, width] of [[staffReach, 1], [portalReach, 4]] as const) {
+      const { client, seen } = recorder();
+      await loadTurnaround(client, reach, { asOf });
+      expect(seen).toHaveLength(1);
+      expectDense(seen);
+      expect(seen[0].values).toHaveLength(width + 1);
+      expect(seen[0].values.at(-1)).toBe("2026-10-01T00:00:00.000Z");
+      expect(referenced(seen[0].sql).at(-1)).toBe(width + 1);
+      expect(seen[0].sql).toContain("answered_at <");
+      expect(seen[0].sql).not.toContain("now() - interval");
+    }
+  });
+
+  it("without it the window is the 90 days up to now, exactly as before (no extra parameter)", async () => {
+    const { client, seen } = recorder();
+    await loadTurnaround(client, portalReach);
+    expect(seen[0].values).toHaveLength(4);
+    expect(seen[0].sql).toContain("now() - interval '90 days'");
+    expect(seen[0].sql).not.toContain("answered_at <");
+  });
+});

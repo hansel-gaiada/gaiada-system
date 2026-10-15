@@ -559,8 +559,17 @@ function emptyPair(): TurnaroundPair {
  *  (post reviews sit behind the social wall). Internal gates are never samples, and a portal reach is confined, per
  *  sample, by the same predicates the portal's own reads use: a sample with no project (and the payment and post-review
  *  samples, which belong to the client rather than a project) reaches client-wide contacts only. */
-export async function loadTurnaround(c: PoolClient, reach: Reach): Promise<Map<string, TurnaroundPair>> {
+export async function loadTurnaround(c: PoolClient, reach: Reach, opts: { asOf?: Date } = {}): Promise<Map<string, TurnaroundPair>> {
   const portal = reach.kind === "portal";
+  // PV7-07 seam: the account summary asks for the 90 days ENDING at a month's end rather than at now. Without `asOf` the
+  // window and the SQL are exactly as before (the 90 days up to now).
+  const params = paramsFor(reach);
+  let window = `answered_at >= now() - interval '${TURNAROUND_WINDOW_DAYS} days'`;
+  if (opts.asOf) {
+    params.push(opts.asOf.toISOString());
+    const at = `$${params.length}::timestamptz`;
+    window = `answered_at >= ${at} - interval '${TURNAROUND_WINDOW_DAYS} days' AND answered_at < ${at}`;
+  }
   const S = scopeAt(2);
   const w = (sql: string) => (portal ? ` AND ${sql}` : "");
   const r = await c.query<Row>(
@@ -621,9 +630,9 @@ export async function loadTurnaround(c: PoolClient, reach: Reach): Promise<Map<s
             count(*)::int AS n, bool_and(vis) AS vis,
             percentile_cont(0.5) WITHIN GROUP (ORDER BY days) AS median
        FROM s
-      WHERE days >= 0 AND answered_at >= now() - interval '${TURNAROUND_WINDOW_DAYS} days'
+      WHERE days >= 0 AND ${window}
       GROUP BY GROUPING SETS ((client_id, side, part), (client_id, side))`,
-    paramsFor(reach),
+    params,
   );
 
   const agg = (rows: Row[], parts: readonly TurnaroundKind[], side: string): Turnaround => {

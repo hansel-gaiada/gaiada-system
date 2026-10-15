@@ -1,0 +1,27 @@
+/* ── Monthly account summary (PV7-07) ─────────────────────────────────────────────────────────────────────────────────────────
+   The draft control, the figures preview and the narrative editor on the client hub's Reports tab. Tokens only: no literal
+   colours, radii or fonts (the same rule as clientHealthChip.css). */
+.as-draft { display: grid; gap: 10px; margin: 0 0 18px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--wash); }
+.as-draft__title { margin: 0; font: 600 13px/1.4 var(--font-body); color: var(--ink-strong); }
+.as-draft__row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+
+.as-details { margin: 4px 0 0; }
+.as-details > summary { cursor: pointer; font: 600 12px/1.5 var(--font-body); color: var(--ink-strong); }
+.as-details[open] > summary { margin-bottom: 10px; }
+
+.as-note { margin: 0 0 10px; font: 400 12px/1.55 var(--font-body); color: var(--ink-muted); }
+.as-note--warn { color: var(--ink-strong); padding: 8px 10px; border: 1px dashed var(--status-warning); border-radius: var(--radius-sm); background: var(--status-warning-bg); }
+
+.as-preview { display: grid; gap: 16px; }
+.as-preview__h { margin: 0 0 6px; font: 600 12px/1.4 var(--font-body); color: var(--ink-strong); letter-spacing: 0.02em; }
+.as-table { width: 100%; border-collapse: collapse; font: 400 12px/1.5 var(--font-body); color: var(--ink); }
+.as-table caption { text-align: left; padding: 0 0 4px; color: var(--ink-muted); }
+.as-table th, .as-table td { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+.as-table th { font-weight: 600; color: var(--ink-muted); }
+.as-table td.as-num, .as-table th.as-num { text-align: right; font-variant-numeric: tabular-nums; }
+.as-unread { color: var(--ink-strong); padding: 6px 10px; border: 1px dashed var(--status-warning); border-radius: var(--radius-sm); }
+
+.as-narrative { display: grid; gap: 8px; margin: 0 0 14px; }
+.as-narrative__text { white-space: pre-wrap; margin: 0; font: 400 13px/1.6 var(--font-body); color: var(--ink); }
+.as-narrative__source { font: 400 12px/1.5 var(--font-body); color: var(--ink-muted); }
+.as-narrative textarea { width: 100%; min-height: 140px; }

@@ -31,10 +31,13 @@ describe("demo staff reports · GET :t/clients/:clientId/reports (§55.3)", () =
     const rows = (r.json as { reports: StaffClientReport[] }).reports;
     expect(new Set(rows.map((x) => x.status))).toEqual(new Set(["draft", "published", "withdrawn"]));
     for (const x of rows) {
-      expect(Object.keys(x).sort()).toEqual([
+      const base = [
         "clientId", "clientVisible", "createdAt", "deliverableId", "file", "id", "periodEnd", "periodStart", "projectId", "projectName",
         "publishedAt", "publishedByName", "readCount", "source", "sourceId", "status", "title", "withdrawnAt", "withdrawnByName", "withdrawnReason",
-      ]);
+      ];
+      // PV7-07 (BFF §56.3): an account summary alone carries the month, the narrative, who wrote it, when it was read and the snapshot.
+      const summary = ["generatedAt", "narrativeMd", "narrativeSource", "period", "snapshot"];
+      expect(Object.keys(x).sort()).toEqual((x.source === "account_summary" ? [...base, ...summary] : base).sort());
       expect(x.periodStart <= x.periodEnd).toBe(true);
       // The stamp rules of the table: published and withdrawn carry who and when; a draft carries neither; a reason only when withdrawn.
       expect(x.publishedAt === null).toBe(x.status === "draft");
@@ -47,8 +50,8 @@ describe("demo staff reports · GET :t/clients/:clientId/reports (§55.3)", () =
 
   it("carries the file's content type: search is Markdown, social is PDF", () => {
     const rows = staffReports();
-    expect(rows.find((x) => x.source === "search_report")!.file!.contentType).toBe("text/markdown");
-    expect(rows.find((x) => x.source === "social_report")!.file!.contentType).toBe("application/pdf");
+    expect(rows.find((x) => x.source === "search_report" && x.file)!.file!.contentType).toBe("text/markdown");
+    expect(rows.find((x) => x.source === "social_report" && x.file)!.file!.contentType).toBe("application/pdf");
   });
 
   it("refuses a caller who may not read client reports (403), and answers a client with none as an empty list", () => {
@@ -60,7 +63,8 @@ describe("demo staff reports · GET :t/clients/:clientId/reports (§55.3)", () =
 describe("demo publish and withdraw (§55.3), with the controllers' own refusals", () => {
   it("publish: a draft with a file goes out; a repeat is 409 not_a_draft; a draft with no file is 409 report_has_no_file", () => {
     const draft = staffReports().find((x) => x.status === "draft" && x.file)!;
-    const noFile = staffReports().find((x) => x.status === "draft" && !x.file)!;
+    // An account summary has no file until Publish renders one (§56.3), so the "no file" draft is a module-source one.
+    const noFile = staffReports().find((x) => x.status === "draft" && !x.file && x.source !== "account_summary")!;
     const ok = publish(draft.id);
     expect(ok.status).toBe(200);
     expect(ok.json).toMatchObject({ id: draft.id, status: "published" });
