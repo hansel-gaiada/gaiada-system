@@ -677,7 +677,7 @@ describe.skipIf(!TEST_URL)("PV7-07 · the monthly account summary", () => {
       await withTenants([co], async (q) => {
         await q.query(
           `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, sha256, scrubbed, origin_site, role)
-           VALUES ($1, $2, $3, 'client_report', $4, 'w.pdf', 'application/pdf', 1, 'k', 'h', false, $5, 'client_report_file')`,
+           VALUES ($1, $2, $3, 'client_report', $4, 'w.pdf', 'application/pdf', 1, 'k-' || gen_random_uuid()::text, 'h', false, $5, 'client_report_file')`,
           [fileId, co, admin, wid, site()],
         );
         await q.query(
@@ -701,7 +701,7 @@ describe.skipIf(!TEST_URL)("PV7-07 · the monthly account summary", () => {
       const fileId = newId();
       await withTenants([co], (q) => q.query(
         `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, sha256, scrubbed, origin_site, role)
-         VALUES ($1, $2, $3, 'client_report', $4, 'f.pdf', 'application/pdf', 1, 'k2', 'h2', false, $5, 'client_report_file')`,
+         VALUES ($1, $2, $3, 'client_report', $4, 'f.pdf', 'application/pdf', 1, 'k-' || gen_random_uuid()::text, 'h2', false, $5, 'client_report_file')`,
         [fileId, co, admin, id, site()],
       ));
       // the publishing UPDATE itself may not change the narrative or the snapshot with it

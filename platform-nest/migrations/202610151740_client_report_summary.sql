@@ -63,8 +63,8 @@ ALTER TABLE client_reports
 ALTER TABLE client_reports
   ADD CONSTRAINT client_reports_summary_month CHECK (
     source <> 'account_summary'
-    OR (period_start = date_trunc('month', period_start)::date
-        AND period_end = (date_trunc('month', period_start) + interval '1 month' - interval '1 day')::date)
+    OR (period_start = date_trunc('month', period_start::timestamp)::date
+        AND period_end = (date_trunc('month', period_start::timestamp) + interval '1 month' - interval '1 day')::date)
   );
 
 -- One live summary per client and month. A withdrawn one does not block a corrected re-draft. Partial on the source:
