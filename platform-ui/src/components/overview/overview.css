@@ -116,3 +116,30 @@ a.ov-pulse__tile:focus-visible { outline: 2px solid var(--accent); outline-offse
 .ov-work__health { font: 400 13px var(--font-body); color: var(--text-primary); }
 .ov-work__health--risk { font-weight: 600; }
 .ov-work__meta { font: 400 12px var(--font-body); color: var(--ink-subtle); }
+
+/* ---- Customise (DW-10d, DW-D34): a closed disclosure at the end of the header row; inside, each band's blocks with their state ---- */
+.ov-custom { position: relative; }
+.ov-custom__summary { list-style: none; cursor: pointer; }
+.ov-custom__summary::-webkit-details-marker { display: none; }
+.ov-custom__summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ov-custom__panel { position: absolute; right: 0; top: calc(100% + var(--space-8)); z-index: 20; width: 340px; max-width: calc(100vw - var(--space-32)); display: flex; flex-direction: column; gap: var(--space-12); padding: var(--space-16); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); background: var(--surface-card-solid); box-shadow: var(--elev-overlay); }
+.ov-custom__intro { margin: 0; font: 400 12px/1.5 var(--font-body); color: var(--ink-muted); }
+.ov-custom__band { display: flex; flex-direction: column; gap: var(--space-4); }
+.ov-custom__band-label { margin: 0; font: 600 12px var(--font-body); letter-spacing: 0.04em; color: var(--ink-muted); }
+.ov-custom__list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.ov-custom__item { display: flex; align-items: center; gap: var(--space-8); padding: var(--space-4) 0; border-top: 0.5px solid var(--erp-hairline); }
+.ov-custom__name { flex: 1 1 auto; min-width: 0; font: 400 13px var(--font-body); color: var(--text-primary); }
+.ov-custom__state { font: 400 12px var(--font-body); color: var(--ink-subtle); }
+.ov-custom__btn { font: 600 12px var(--font-body); padding: 4px var(--space-12); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm); background: var(--surface-card-solid); color: var(--text-primary); cursor: pointer; }
+.ov-custom__btn:hover { background: var(--tint-hover); }
+.ov-custom__btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 760px) {
+  .ov-custom__panel { position: static; width: auto; margin-top: var(--space-8); }
+}
+@media (pointer: coarse) {
+  .ov-custom__btn { min-height: 44px; }
+}
+
+/* ---- Client health (DW-10d): the counts line, then the clients that need a person ---- */
+.ov-chealth__counts { margin: 0; font: 600 14px/1.4 var(--font-body); color: var(--text-primary); }
+.ov-chealth__row { flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--space-8); }

@@ -1,10 +1,11 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { WorkspaceOverview } from "./WorkspaceOverview";
 import { OVERVIEW_WIDGETS, hasOverviewWidget, type OverviewWidgetComponent } from "./widgets";
 import { COMPANY_SUBJECT, subjectOfRef, type OverviewSubject } from "@/lib/overview";
+import { overviewPrefsKey } from "@/lib/overviewPrefs";
 import { resolveMyWorkspaces } from "@/lib/workspaceAccess";
-import { agencyTree, me, member } from "@/lib/workspaceFixtures";
+import { HOTEL, agencyTree, me, member } from "@/lib/workspaceFixtures";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: () => {} }),
@@ -81,7 +82,7 @@ describe("WorkspaceOverview: with no block to draw", () => {
 
   it("hosts the Now band's two blocks, Your numbers, My activity, Pulse, the Condition, the Work blocks, the Growth blocks and the six company blocks, and no other (DW-3c, DW-3d, DW-3j, DW-3e, DW-3k, DW-3f, DW-3g, DW-3i)", () => {
     expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual([
-      "appraisal", "appraisal-cycle", "campaigns", "company", "company-campaigns", "condition", "decisions", "departments", "learning", "learning-compliance",
+      "appraisal", "appraisal-cycle", "campaigns", "client-health", "company", "company-campaigns", "condition", "decisions", "departments", "learning", "learning-compliance",
       "my-activity", "needs-you", "projects", "pulse", "requests", "today", "your-numbers",
     ]);
     expect(hasOverviewWidget("needs-you")).toBe(true);
@@ -267,5 +268,100 @@ describe("WorkspaceOverview: the Growth band and the company's modules (DW-3g)",
     draw({ widgets: host, moduleOn: (m: string) => m !== "lms" && m !== "reports" });
     expect(screen.queryByRole("heading", { level: 2, name: "Growth" })).not.toBeInTheDocument();
     expect(screen.queryByText("appraisal block")).not.toBeInTheDocument();
+  });
+});
+
+describe("WorkspaceOverview: the person's own blocks and the Customise control (DW-10d)", () => {
+  const SUBJECT: OverviewSubject = {
+    ...webDev,
+    widgets: [
+      { key: "needs-you", band: "now", label: "Needs you", placement: "fixed" },
+      { key: "today", band: "now", label: "Today" },
+      { key: "my-activity", band: "you", label: "My activity" },
+      { key: "client-health", band: "work", label: "Client health", placement: "optional" },
+    ],
+  };
+  const item = (key: string) => document.querySelector(`li[data-widget="${key}"]`) as HTMLElement;
+  const MORNING = new Date(2026, 9, 13, 9, 30);
+  const host = (seen: string[]): Record<string, OverviewWidgetComponent> => Object.fromEntries(
+    ["needs-you", "today", "my-activity", "client-health"].map((k) => [k, () => { seen.push(k); return <p>{`${k} drawn`}</p>; }]),
+  );
+  const drawOverview = (seen: string[], customise?: Parameters<typeof WorkspaceOverview>[0]["customise"]) =>
+    render(<WorkspaceOverview me={made} tenantId="co-a" subject={SUBJECT} period="month" now={MORNING} widgets={host(seen)} customise={customise} />);
+  const setWidget = vi.fn().mockResolvedValue(undefined);
+  const prefs = (entry: { hide: string[]; show: string[] }) => ({ prefs: { "web-dev": entry }, setWidget });
+
+  it("with no prefs (or none given) draws exactly today's Overview: every default block, no optional one, and no control without a prop", () => {
+    const seen: string[] = [];
+    drawOverview(seen);
+    expect(seen).toEqual(["needs-you", "today", "my-activity"]);
+    expect(document.querySelector("details.ov-custom")).toBeNull();
+  });
+
+  it("with an empty choice it draws the same blocks, plus the closed control", () => {
+    const seen: string[] = [];
+    drawOverview(seen, { prefs: {}, setWidget });
+    expect(seen).toEqual(["needs-you", "today", "my-activity"]);
+    expect(document.querySelector("details.ov-custom")).not.toHaveAttribute("open");
+  });
+
+  it("a hidden block's component is never rendered, so its reads never run", () => {
+    const seen: string[] = [];
+    drawOverview(seen, prefs({ hide: ["my-activity"], show: [] }));
+    expect(seen).toEqual(["needs-you", "today"]);
+    expect(screen.queryByText("my-activity drawn")).not.toBeInTheDocument();
+    // It is still offered in the control, as Hidden, so the person can bring it back.
+    expect(within(item("my-activity")).getByText("Hidden")).toBeInTheDocument();
+  });
+
+  it("a fixed block stays even when a forged cookie hides it, and shows 'Always shown'", () => {
+    const seen: string[] = [];
+    drawOverview(seen, prefs({ hide: ["needs-you"], show: [] }));
+    expect(seen).toEqual(["needs-you", "today", "my-activity"]);
+    expect(within(item("needs-you")).getByText("Always shown")).toBeInTheDocument();
+  });
+
+  it("an optional block is drawn when switched on, in its registry place, and still follows the gate", () => {
+    const seen: string[] = [];
+    drawOverview(seen, prefs({ hide: [], show: ["client-health"] }));
+    expect(seen).toEqual(["needs-you", "today", "my-activity", "client-health"]);
+    expect(within(screen.getByRole("region", { name: "Work" })).getByText("client-health drawn")).toBeInTheDocument();
+  });
+
+  it("the order stays the registry's however the prefs list their keys", () => {
+    const seen: string[] = [];
+    drawOverview(seen, prefs({ hide: [], show: ["client-health", "my-activity", "today", "needs-you"] }));
+    expect(seen).toEqual(["needs-you", "today", "my-activity", "client-health"]);
+  });
+
+  it("drops a band whose every block is hidden, label and all", () => {
+    const seen: string[] = [];
+    drawOverview(seen, prefs({ hide: ["my-activity"], show: [] }));
+    expect(screen.queryByRole("heading", { level: 2, name: "You" })).not.toBeInTheDocument();
+  });
+
+  it("says so, and points at Customise, when the person has hidden every block that can be hidden and nothing else is placed", () => {
+    const only: OverviewSubject = { ...SUBJECT, widgets: [{ key: "today", band: "now", label: "Today" }] };
+    render(<WorkspaceOverview me={made} tenantId="co-a" subject={only} period="month" now={MORNING} widgets={host([])} customise={prefs({ hide: ["today"], show: [] })} />);
+    expect(screen.getByText(/You have hidden every block of the Web Dev Overview\. Use Customise to bring them back\./)).toBeInTheDocument();
+    expect(screen.queryByText(/is being built/)).not.toBeInTheDocument();
+  });
+
+  it("the Company frame keeps its choices under 'company'", () => {
+    expect(overviewPrefsKey(COMPANY_SUBJECT)).toBe("company");
+    const seen: string[] = [];
+    const company: OverviewSubject = { ...COMPANY_SUBJECT, widgets: [{ key: "today", band: "now", label: "Today" }, { key: "client-health", band: "work", label: "Client health", placement: "optional" }] };
+    render(<WorkspaceOverview me={made} tenantId="co-a" subject={company} period="month" now={MORNING} widgets={host(seen)} customise={{ prefs: { company: { hide: [], show: ["client-health"] } }, setWidget }} />);
+    expect(seen).toEqual(["today", "client-health"]);
+    fireEvent.click(within(item("client-health")).getByRole("button", { name: "Switch off Client health", hidden: true }));
+    return waitFor(() => expect(setWidget).toHaveBeenCalledWith("company", "client-health", false, expect.anything()));
+  });
+
+  it("does not list a block the person's gates do not allow", () => {
+    const hotel = { ...me([member("co-h")], [HOTEL]), name: "Made Putra" };
+    const gated: OverviewSubject = { ...SUBJECT, widgets: [{ key: "today", band: "now", label: "Today" }, { key: "client-health", band: "work", label: "Client health", placement: "optional", gate: { kind: "agencyRow", row: "clients" } }] };
+    render(<WorkspaceOverview me={hotel} tenantId="co-h" subject={gated} period="month" now={MORNING} widgets={host([])} customise={prefs({ hide: [], show: ["client-health"] })} />);
+    expect(document.querySelector('li[data-widget="client-health"]')).toBeNull();
+    expect(document.querySelector('li[data-widget="today"]')).not.toBeNull();
   });
 });

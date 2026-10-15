@@ -5,6 +5,7 @@ import { moduleGate } from "@/lib/modules";
 import { myWorkspaces } from "@/lib/workspaces-data";
 import { parseOverviewPeriod, subjectOfRef, workspaceRefForPage } from "@/lib/overview";
 import { canSwitchToTeam, resolveOverviewView } from "@/lib/overviewTeam";
+import { setOverviewWidgetAction } from "@/lib/prefsActions";
 import { WorkspaceOverview } from "./WorkspaceOverview";
 
 /** DW-3a: the one branch every Overview page takes. For a person on the pilot switch, a function that wraps
@@ -39,6 +40,7 @@ export async function pilotFrame(
   const canSwitchView = canSwitchToTeam(me, tenantId, subject);
   const mode = resolveOverviewView(view, canSwitchView);
   return (legacy) => (
-    <WorkspaceOverview me={me} tenantId={tenantId} subject={subject} period={parsed} view={mode} canSwitchView={canSwitchView} legacy={legacy} moduleOn={modules.isEnabled} />
+    <WorkspaceOverview me={me} tenantId={tenantId} subject={subject} period={parsed} view={mode} canSwitchView={canSwitchView} legacy={legacy} moduleOn={modules.isEnabled}
+      customise={{ prefs: prefs.overview ?? {}, setWidget: setOverviewWidgetAction }} />
   );
 }

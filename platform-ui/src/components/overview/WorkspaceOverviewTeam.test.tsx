@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/departments/d-web",
   useSearchParams: () => new URLSearchParams(),
 }));
-vi.mock("@/lib/prefs", () => ({ getPrefs: vi.fn(async () => ({ shell: "workspaces", pinnedTools: {} })) }));
+vi.mock("@/lib/prefs", () => ({ getPrefs: vi.fn(async () => ({ shell: "workspaces", pinnedTools: {}, overview: {} })) }));
 vi.mock("@/lib/modules", () => ({ moduleGate: vi.fn(async () => ({ isEnabled: () => true })) }));
 vi.mock("@/lib/workspaces-data", () => ({ myWorkspaces: vi.fn() }));
 

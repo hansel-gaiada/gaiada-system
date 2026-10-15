@@ -24,6 +24,7 @@ import { getPrefs } from "@/lib/prefs";
 import { myWorkspaces } from "@/lib/workspaces-data";
 import { functionalConsoleFor } from "@/lib/workspaceAccess";
 import { COMPANY_SUBJECT, parseOverviewPeriod, resolveHomeRoute } from "@/lib/overview";
+import { setOverviewWidgetAction } from "@/lib/prefsActions";
 import { decideQueueItem } from "./actions";
 import { acknowledgeKpiAlert } from "@/lib/deptKpiAlertActions";
 
@@ -71,7 +72,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
     const route = resolveHomeRoute({ shell: prefs.shell, home: (await myWorkspaces(me, tenantId)).home, tenantId });
     if (route.kind === "redirect") redirect(route.href);
     if (route.kind === "company") {
-      return <WorkspaceOverview me={me} tenantId={tenantId} subject={COMPANY_SUBJECT} period={parseOverviewPeriod(rawPeriod)} />;
+      return <WorkspaceOverview me={me} tenantId={tenantId} subject={COMPANY_SUBJECT} period={parseOverviewPeriod(rawPeriod)} customise={{ prefs: prefs.overview, setWidget: setOverviewWidgetAction }} />;
     }
   }
   const firstName = me.name.split(/\s+/)[0];
