@@ -60,6 +60,11 @@ import {
   type ReportKind, type FrozenSocialReportMetrics, type DailyMetricInput, type PostMetricInput, type KpiTargetInput,
 } from "./reports";
 import { PdfRendererNotConfiguredError, mintPrintJobToken, renderPdfViaSidecar } from "../reports/report-pdf-export";
+// PV7-04a (BFF §55.2): delivery publishes the report to the client, in the same transaction.
+import {
+  announceClientReportPublished, deliveredReportTitle, discardStoredReportFile, publishDeliveredReport, storeClientReportFile,
+  type PublishedClientReport,
+} from "../../core/client-reports";
 
 // SMM-19 grounds a draft in the client's OWN brand corpus, at most this many hits — reuse the same
 // bound `ai-drafts.ts` already declares for captions rather than a second constant.
@@ -447,6 +452,8 @@ export class SocialReportsController {
     const storageKey = `${tenantId}/social-reports/${fileId}`;
     await storage().put(storageKey, bytes);
     const filename = `social-report-${report.period ?? report.kind}-${fileId.slice(0, 8)}.pdf`;
+    // PV7-04a: the client report's own copy of the same bytes, under its own key (core/client-reports.ts header).
+    const clientCopy = req.principal.userId ? await storeClientReportFile(tenantId, bytes, filename, "application/pdf") : null;
 
     const result = await withTenants(
       [tenantId],
@@ -480,14 +487,32 @@ export class SocialReportsController {
         await emitEvent(c, tenantId, "social_report", id, "social.report.delivered", {
           engagementId: report.engagementId, period: report.period, kind: report.kind, fileId, deliverableId,
         });
-        return { deliverableId };
+
+        // PV7-04a (BFF §55.2): publish it to the client in THIS transaction. An engagement with no project gives a client-wide
+        // report (project NULL). Idempotent per source (one client report per social report, ever).
+        let clientReport: PublishedClientReport | null = null;
+        if (clientCopy && req.principal.userId) {
+          const { start, end } = periodDateRange(report.period, new Date(report.createdAt));
+          clientReport = await publishDeliveredReport(c, {
+            tenantId, source: "social_report", sourceId: id, clientId: report.clientId, projectId: report.projectId,
+            deliverableId, title: deliveredReportTitle("social_report", report.kind, report.period, start, end),
+            periodStart: start, periodEnd: end, file: clientCopy, publishedBy: req.principal.userId, announce: true,
+          });
+        }
+        return { deliverableId, clientReport };
       },
       { modules: ["social"] },
-    );
-
-    await writeActivity(tenantId, req.principal.userId, "delivered", "social_report", id, {
-      fileId, deliverableId: result.deliverableId, filename,
+    ).catch(async (err: unknown) => {
+      // Nothing committed, so the client report's copy is referenced by no row: remove it, then fail as before.
+      if (clientCopy) await discardStoredReportFile(clientCopy);
+      throw err;
     });
-    return { id, status: "delivered", fileId, filename, deliverableId: result.deliverableId };
+
+    if (clientCopy && result.clientReport && !result.clientReport.created) await discardStoredReportFile(clientCopy);
+    if (result.clientReport?.created) await announceClientReportPublished(tenantId, req.principal.userId, result.clientReport);
+    await writeActivity(tenantId, req.principal.userId, "delivered", "social_report", id, {
+      fileId, deliverableId: result.deliverableId, filename, clientReportId: result.clientReport?.id ?? null,
+    });
+    return { id, status: "delivered", fileId, filename, deliverableId: result.deliverableId, clientReportId: result.clientReport?.id ?? null };
   }
 }

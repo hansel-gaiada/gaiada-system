@@ -65,7 +65,8 @@
     "vendor:check": "node scripts/vendor-webdesk-vocabulary.mjs --check",
     "seed:hr-statutory-ratify": "node dist/seed/hr-statutory-ratify.js",
     "provision:client-portal-logins": "node dist/admin/provision-client-portal-logins.js",
-    "seal:key": "node dist/ops/seal-key.js"
+    "seal:key": "node dist/ops/seal-key.js",
+    "client-reports:backfill": "node dist/ops/client-reports-backfill.js"
   },
   "dependencies": {
     "@fastify/multipart": "^8.3.1",

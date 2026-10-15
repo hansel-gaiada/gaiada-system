@@ -66,7 +66,10 @@ function routeExists(link: string): boolean {
 // the link (the entry is stale). It is a ledger of a known gap, not a way to skip the guard: nothing is exempt silently.
 // Empty since PV4-08 built `/portal/conversation/:id` (sent by PV4-06) and `/portal/meetings/:id` (sent by PV4-05); both now go
 // through the two real checks below (a page exists, and it sits in an area).
-const AWAITING_PAGE: Record<string, string> = {};
+const AWAITING_PAGE: Record<string, string> = {
+  // PV7-04a (BFF §55.5) sends it in the "New report" notice (platform-nest/src/core/client-reports.ts); PV7-04b builds the page.
+  "/portal/reports": "sent by PV7-04a's report-published notice; the Reports page is PV7-04b's",
+};
 
 describe("links the backend sends clients open a portal page in an area", () => {
   const all = backendPortalLinks();

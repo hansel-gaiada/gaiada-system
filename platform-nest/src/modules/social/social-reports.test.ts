@@ -343,6 +343,28 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("social-media client-facing report
     const redeliver = await app.inject({ method: "POST", url: `/api/${A}/modules/social/reports/${id}/deliver`, headers: asUser(uA) });
     expect(redeliver.statusCode).toBe(400);
 
+    // PV7-04a (BFF §55.2): the delivery published EXACTLY ONE client report, in the same transaction, and the refused
+    // re-delivery added none. Engagement A has no project, so the report is client-wide (project NULL, no deliverable). Its
+    // file is its own role file with the same bytes as the module's PDF.
+    const published = await withTenants([A], (c) => c.query<{
+      id: string; status: string; project_id: string | null; deliverable_id: string | null; title: string; file_id: string;
+    }>(
+      `SELECT id, status, project_id, deliverable_id, title, file_id FROM client_reports WHERE source = 'social_report' AND source_id = $1`, [id],
+    ));
+    expect(published.rows.length).toBe(1);
+    expect(published.rows[0].id).toBe(deliver.json().clientReportId);
+    expect(published.rows[0].status).toBe("published");
+    expect(published.rows[0].project_id).toBeNull();
+    expect(published.rows[0].deliverable_id).toBeNull();
+    expect(published.rows[0].title).toBe("Social media report, August 2026");
+    const copies = await withTenants([A], (c) => c.query<{ id: string; role: string | null; target_entity_type: string; sha256: string }>(
+      `SELECT id, role, target_entity_type, sha256 FROM files WHERE id = ANY($1::uuid[])`, [[fileId, published.rows[0].file_id]],
+    ));
+    const own = copies.rows.find((f) => f.id === published.rows[0].file_id)!;
+    expect(own.role).toBe("client_report_file");
+    expect(own.target_entity_type).toBe("client_report");
+    expect(own.sha256).toBe(copies.rows.find((f) => f.id === fileId)!.sha256);
+
     // approve from a non-'in_review' status is refused too (already 'delivered' here).
     const reapprove = await app.inject({ method: "POST", url: `/api/${A}/modules/social/reports/${id}/approve`, headers: asUser(uA) });
     expect(reapprove.statusCode).toBe(400);

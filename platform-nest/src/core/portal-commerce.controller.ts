@@ -38,12 +38,13 @@ import { notifyBestEffort } from "./client-notify";
 import { canSignFor, requireSignerFor, resolvePortalScope, scopeValues, type PortalScope } from "./portal-scope";
 // PV3-02: every row-visibility predicate below comes from portal-visibility.ts.
 import {
-  changeRequestInPortalScope, contractInPortalScope, conversationAttachmentClientVisible, conversationThreadInPortalScope, deliverableClientVisible,
+  changeRequestInPortalScope, clientReportInPortalScope, contractInPortalScope, conversationAttachmentClientVisible, conversationThreadInPortalScope, deliverableClientVisible,
   invoiceInPortalScope, invoicePaymentClientVisible, projectInPortalScope, scopeAt, type PortalScopeParams,
 } from "./portal-visibility";
 import type { PoolClient } from "pg";
 import { claimHeadroom, hasCurrencyPrecision } from "../modules/invoice/issue";
 import { CONTRACT_SIGNED_COPY_FILE_ID, INVOICE_PDF_FILE_ID } from "./document-read-fields";
+import { CLIENT_REPORT_FILE_ROLE } from "./client-reports";
 // PV5-10: online payment through the provider's hosted checkout. The decision and the checkout rows live in
 // src/payments/; this controller only admits the invoice through the portal scope first.
 import { providerForTenant } from "../payments/registry";
@@ -66,7 +67,7 @@ export const MAX_PROOF_BYTES = 10 * 1024 * 1024;
 // (PV5-04 removed the 1% overpayment tolerance: a claim is bounded by the LEDGER's outstanding amount, because an AR
 // allocation can never exceed what is owed. See recordPayment.)
 
-type DownloadableKind = "deliverable" | "contract" | "invoice_payment" | "project" | "conversation" | "invoice";
+type DownloadableKind = "deliverable" | "contract" | "invoice_payment" | "project" | "conversation" | "invoice" | "client_report";
 
 /** Where a client-visible file may live. An entity NOT in this map is unreachable through the portal's
  *  download route even if a file id is guessed, because the route resolves ownership by looking the
@@ -83,6 +84,10 @@ const DOWNLOADABLE: Record<string, DownloadableKind> = {
   // caller's scope, so a draft, an approved-but-unissued or a legacy never-issued invoice has no downloadable file, even
   // though some of those are visible in the portal. (A contract's sealed copy rides the existing `contract` kind.)
   invoice: "invoice",
+  // PV7-04a (BFF §55.4): a published client report's own file (files.role = 'client_report_file'). ownsEntity admits only a
+  // PUBLISHED report in the caller's reach (clientReportInPortalScope, the strict shape), so a draft, a withdrawn report or one
+  // outside the caller's projects has no downloadable file, and any other file hung on a report is never served.
+  client_report: "client_report",
 };
 
 /**
@@ -695,6 +700,8 @@ export class PortalCommerceController {
       if (!kind) throw new NotFoundException("file not found");
       // PV5-07: under an invoice, only the invoice of record's PDF is a client document.
       if (kind === "invoice" && f.role !== "invoice_pdf") throw new NotFoundException("file not found");
+      // PV7-04a: under a client report, only its own role file is a client document.
+      if (kind === "client_report" && f.role !== CLIENT_REPORT_FILE_ROLE) throw new NotFoundException("file not found");
       if (!(await this.ownsEntity(c, scope, kind, f.target_entity_id))) {
         // 404, not 403: distinguishing them turns this route into an existence oracle for other
         // clients' file ids.
@@ -820,6 +827,10 @@ export class PortalCommerceController {
       // PV5-07: only an ISSUED invoice (the invoice of record) has a downloadable document, and only in scope.
       invoice: `SELECT 1 FROM invoices i WHERE i.id = $1 AND i.issued_at IS NOT NULL
                   AND ${invoiceInPortalScope("i", { clients: 2 })}`,
+      // PV7-04a: a client report's file, reached THROUGH the report: published, and in reach by the strict shape (a report with
+      // no project reaches client-wide contacts only). Withdrawn or out of reach is the same 404 as a file that does not exist.
+      client_report: `SELECT 1 FROM client_reports cr WHERE cr.id = $1
+                       AND ${clientReportInPortalScope("cr", scopeAt(2))}`,
     }[kind];
     // A receipt has no project reach, so its query binds only $1/$2. Passing an unreferenced $3/$4 makes
     // Postgres refuse the statement ("could not determine data type of parameter $3"), which 500s the

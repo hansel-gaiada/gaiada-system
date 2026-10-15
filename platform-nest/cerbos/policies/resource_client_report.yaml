@@ -1,0 +1,89 @@
+# PV7-04a (docs/FRONTEND-BFF-CONTRACT.md §55, docs/PERMISSION-CONTRACT.md §46; plan
+# docs/plans/2026-10-15-pv7-performance-views-tickets.md, ticket PV7-04, lead's call L6) — authz for the NEW
+# `client_report` resource kind (core, no module): one report published (or about to be) to a client in the portal.
+# Four actions:
+#   read      — see a client's reports, every status, and download their files on the STAFF side. The `client` kind's
+#               read tiers: company_admin, manager, member, viewer.
+#   draft     — create or edit a draft (PV7-07's account summary, PV7-08's agent tools). company_admin and manager;
+#               and the CLIENT'S OWNER (its own rule). Automation accounts draft through the manager or company_admin
+#               grant each of them holds (seed/automation.ts); no automation-only rule exists, because the bundle
+#               generator cannot read a principal-kind condition and would put `draft` in every human member's bundle.
+#   publish   — put a draft in front of the client. company_admin and manager; and the client's owner (its own rule).
+#   withdraw  — take a published report back, with a reason. company_admin and manager; and the client's owner.
+# Delivering a social or search report publishes its client report in the same transaction; that path is authorized by
+# the module's own `deliver` action (resource_social_report / resource_search_report), not by this kind.
+# Restart `gaiada-test-cerbos` after editing this file; the bind-mount does not hot-reload.
+#
+# ── THE CLIENT'S OWNER RULE STANDS ALONE (the HIER-2 authoring rule) ──────────────────────────────
+# `ownerUserId` is `clients.owner_user_id`, fed by the HANDLER (client-reports.controller.ts) from the client row,
+# never from a body. The rule names `member` only and compares the attribute to the caller's id, so it is self-scoped:
+# role-permission-bundles.json marks member·draft, member·publish and member·withdraw `selfScoped`. The `has()` guard
+# and the `!= ""` test make an unfed resource (or a client with no owner) deny.
+#
+# ── NO AUTOMATION OR BOT PRINCIPAL PUBLISHES OR WITHDRAWS (L6: agents draft, staff publish; PV-D23) ─
+# Nothing an agent writes reaches a client until a person publishes it. Same `roles: ["user"]` DENY shape as
+# resource_meeting_recording.yaml's `share_minutes` DENY and resource_webdesk_content_item.yaml's T7 `publish` DENY, so
+# under deny-overrides it beats every ALLOW (the platform_admin wildcard and the perm mirror included). It reads
+# `principal.attr.kind` (users.kind, sent by principalPayload()); `has()` makes a raw caller that omits the attribute
+# evaluate to false (no deny) rather than raise a CEL error. `read` and `draft` are deliberately NOT listed.
+#
+# ── THE PERMISSION ARM COVERS `read` ONLY ──────────────────────────────────────────────────────────
+# `draft`, `publish` and `withdraw` each carry the self-scoped owner rule (permission-arm-hazard-scan Pattern B): a
+# flat `perms` mirror would let any holder of the key act on EVERY client's reports, not just the clients they own.
+# Same call as resource_work_request.yaml makes for `cancel`. Consequence: the permission-native `owner` role (zero
+# role-arm rules) holds all four keys in its bundle but reaches only `read` through Cerbos, unless it also holds
+# company_admin or manager.
+#
+# ── PORTAL READS DO NOT USE THIS KIND ──────────────────────────────────────────────────────────────
+# A client contact reads published reports through `portal · read` and `clientReportInPortalScope`
+# (src/core/portal-visibility.ts), as every portal read does. The `client` derived role appears NOWHERE here: granting it
+# read on this kind would open every client's reports tenant-wide, because Cerbos does not know which report is whose.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: client_report
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["draft", "publish", "withdraw"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # The CLIENT'S OWNER drafts, publishes and withdraws their own client's reports, and nothing else. Its own rule,
+    # on `member`, self-scoped (see the header).
+    - actions: ["draft", "publish", "withdraw"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.ownerUserId) && request.resource.attr.ownerUserId != "" &&
+            request.resource.attr.ownerUserId == request.principal.id
+
+    # ══════════ automation and bot principals never publish or withdraw (L6, PV-D23) ═══════════════
+    - actions: ["publish", "withdraw"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot"]
+
+    # =========== permission-matching arm: read ONLY (see the header) ==================================
+    # Generic global-or-company mirror. The platform_admin wildcard is deliberately NOT mirrored (IAM-04c: the tier
+    # bypass never enters the permission catalog).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_client_report_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

@@ -36,7 +36,9 @@ import {
   PROJECT_SCOPE, contractInPortalScope, deliverableClientVisible, gateClientVisible, inCallerClients,
   invoiceInPortalScope, invoicePaymentClientVisible, milestoneClientVisible,
   meetingMinutesInPortalScope, runClientVisible, runInPortalScope, conversationThreadInPortalScope, scopeAt,
+  clientReportInPortalScope,
 } from "./portal-visibility";
+import { NEW_REPORT_WINDOW_DAYS } from "./client-reports";
 import { isUuid, unreadCountSql } from "./conversation-core";
 
 /** Scope params for queries that bind the caller's scope as $1 (clients) / $2 (wide clients) / $3 (projects),
@@ -99,7 +101,7 @@ export class PortalWorkspaceController {
       const scope = await resolvePortalScope(c, req.principal);
       const { args } = scoped(scope);
 
-      const [clients, projects, milestone, needsYou, finance, deliverables, conversationUnread] = await Promise.all([
+      const [clients, projects, milestone, needsYou, finance, deliverables, conversationUnread, newReports] = await Promise.all([
         c.query(
           `SELECT id, name, status FROM clients WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL ORDER BY name`,
           [scope.clientIds],
@@ -149,6 +151,16 @@ export class PortalWorkspaceController {
               AND ${unreadCountSql("t", "r", "staff")} > 0`,
           [...args, req.principal.userId],
         ),
+        // PV7-04a (BFF §55.4): published reports in reach, published in the last NEW_REPORT_WINDOW_DAYS days, that this user has
+        // not opened. The reach is the Reports list's own builder, so the badge can never count a report the list hides.
+        c.query<{ n: number }>(
+          `SELECT count(*)::int AS n
+             FROM client_reports cr
+            WHERE ${clientReportInPortalScope("cr", S1)}
+              AND cr.published_at >= now() - make_interval(days => $5::int)
+              AND NOT EXISTS (SELECT 1 FROM client_report_reads rr WHERE rr.report_id = cr.id AND rr.user_id = $4)`,
+          [...args, req.principal.userId, NEW_REPORT_WINDOW_DAYS],
+        ),
       ]);
 
       const p = projects.rows[0];
@@ -177,6 +189,8 @@ export class PortalWorkspaceController {
         finance,
         // PV4-06: threads with unread messages from staff (§29). The portal nav's Projects badge adds this (PV4-08).
         conversationUnread: conversationUnread.rows[0]?.n ?? 0,
+        // PV7-04a: the Reports tab's "New" count (§55.4).
+        newReports: newReports.rows[0]?.n ?? 0,
       };
     });
   }
@@ -529,7 +543,12 @@ export class PortalWorkspaceController {
       const scope = await resolvePortalScope(c, req.principal);
       const rows = await c.query(
         `SELECT d.id, d.name, d.status, to_char(d.due_date, 'YYYY-MM-DD') AS "dueDate",
-                d.updated_at AS "updatedAt", p.id AS "projectId", p.name AS "projectName"
+                d.updated_at AS "updatedAt", p.id AS "projectId", p.name AS "projectName",
+                -- PV7-04a (BFF §55.4, L5): the published, in-reach client report a delivered social or search report's deliverable
+                -- links to ("Open report"). Through the report's own builder, so a withdrawn or out-of-reach report links nothing.
+                (SELECT cr.id FROM client_reports cr
+                  WHERE cr.deliverable_id = d.id AND ${clientReportInPortalScope("cr", S1)}
+                  ORDER BY cr.published_at DESC LIMIT 1) AS "reportId"
            FROM deliverables d JOIN projects p ON p.id = d.project_id
           WHERE ${PROJECT_SCOPE} AND ${deliverableClientVisible("d")}
             AND ($4::uuid IS NULL OR d.project_id = $4)

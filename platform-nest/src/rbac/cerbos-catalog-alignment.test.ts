@@ -150,8 +150,9 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // DW-8g (2026-10-14): +5 pairs / +1 kind: `calendar_event` (read/create/update/cancel/respond, NEW core kind: an event on the company calendar). 466 -> 471, kinds 108 -> 109.
     // DW-8j (2026-10-15): +3 pairs / +1 kind: `personal_mailbox` (connect/read/send, NEW core kind: one person's OWN Gmail). 471 -> 474, kinds 109 -> 110.
     // PV7-01 (2026-10-15): +1 pair on the EXISTING report_document kind (`read_client`, no new kind). 474 -> 475, kinds stay 110.
-    expect(catalog.length).toBe(475);
-    expect(catalogKindSet.size).toBe(110);
+    // PV7-04a (2026-10-15): +4 pairs / +1 kind: `client_report` (read/draft/publish/withdraw, NEW core kind: a report published to a client). 475 -> 479, kinds 110 -> 111.
+    expect(catalog.length).toBe(479);
+    expect(catalogKindSet.size).toBe(111);
   });
 
   it("(a-forward) every catalog kind is backed by a real resourcePolicy file", () => {
