@@ -15,7 +15,9 @@
 --     tenant set), FORCE RLS, and NO module wall: like IT accounts, security is not behind the `it` module. A read through
 --     `withGlobal` sees ZERO rows on these two (migration-backfill-rls-trap); read them in the tenant's context.
 --   * `security_session_revocations` is GLOBAL like `users`: a session belongs to the person, not to one company, so it has
---     no RLS. `tenant_id` records which company's IT signed it out, for that company's Blocks page. `expires_at` is past the
+--     no RLS. `revoked_from_company_id` records which company's IT signed it out, for that company's Blocks page. It is
+--     deliberately NOT named tenant_id: every table with a tenant_id must FORCE RLS (db/rls.test.ts), and a forced policy
+--     would hide rows from the request hook, which reads this table with no tenant context. `expires_at` is past the
 --     ERP session's 12 h absolute life, so an old row stops costing the hot path anything.
 --   * `security_access_seen.ip` is NULL when the address cannot be told (never a guess), so the key is UNIQUE NULLS NOT
 --     DISTINCT (Postgres 15+; the stack runs 16), or a NULL address would add a row per request. `session_id` is '' when a
@@ -55,14 +57,14 @@ CREATE TABLE IF NOT EXISTS security_session_revocations (
   session_id text CHECK (session_id IS NULL OR char_length(session_id) BETWEEN 1 AND 200),
   revoked_at timestamptz NOT NULL DEFAULT now(),
   revoked_by uuid REFERENCES users(id),
-  tenant_id uuid REFERENCES companies(id),
+  revoked_from_company_id uuid REFERENCES companies(id),
   reason text CHECK (reason IS NULL OR char_length(reason) <= 500),
   expires_at timestamptz NOT NULL,
   CHECK (expires_at > revoked_at)
 );
 CREATE INDEX IF NOT EXISTS ix_security_session_revocations_sid ON security_session_revocations (session_id) WHERE session_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS ix_security_session_revocations_user ON security_session_revocations (user_id, revoked_at DESC);
-CREATE INDEX IF NOT EXISTS ix_security_session_revocations_tenant ON security_session_revocations (tenant_id, revoked_at DESC);
+CREATE INDEX IF NOT EXISTS ix_security_session_revocations_company ON security_session_revocations (revoked_from_company_id, revoked_at DESC);
 
 CREATE TABLE IF NOT EXISTS security_ip_blocks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

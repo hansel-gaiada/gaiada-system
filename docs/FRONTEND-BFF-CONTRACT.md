@@ -9462,7 +9462,7 @@ When sign-ins are `off` or `unavailable`, the two sign-in rules cannot run, and 
 | `POST /api/:t/it/security/blocks` | `{ip, reason, hours?: 1..720 (default 24), confirmShared?: boolean}` | 201 `IpBlock` | 400 for an invalid address, or a private, loopback or link-local one; 409 `blocks_yourself` for the caller's own address; 409 `shared_address` `{detail: {users}}` when 3 or more of this company's members connected from it in the last 24 h and `confirmShared` is not true; 409 `already_blocked` |
 | `POST /api/:t/it/security/blocks/:blockId/lift` | — | 200 `IpBlock` | 404; 409 `not_active` |
 
-- **Revoke:** inserts a revocation `{user_id, session_id, revoked_by, tenant_id, reason, expires_at: now() + 13 h}` and asks Keycloak to delete the session (`DELETE /admin/realms/{realm}/sessions/{sid}`). It is `revoked: true` even when Keycloak fails, because the row alone cuts the ERP. The answer says what Keycloak did.
+- **Revoke:** inserts a revocation `{user_id, session_id, revoked_by, revoked_from_company_id, reason, expires_at: now() + 13 h}` and asks Keycloak to delete the session (`DELETE /admin/realms/{realm}/sessions/{sid}`). It is `revoked: true` even when Keycloak fails, because the row alone cuts the ERP. The answer says what Keycloak did.
 - **Create block:** marks this company's expired, unlifted blocks lifted (`lifted_at = expires_at`) before inserting.
 - **Activities:** `it.security.session_revoke`, `it.security.ip_block`, `it.security.ip_unblock`.
 
