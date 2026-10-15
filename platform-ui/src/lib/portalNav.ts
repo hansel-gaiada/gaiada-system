@@ -12,10 +12,20 @@ export interface PortalSubTab { href: string; label: string }
 
 /** The Website tab's path, so the nav, the tab filter and the guards name it once. */
 export const PORTAL_WEBSITE_HREF = "/portal/website";
+/** The Reports tab's path, so the nav, the badge and the deliverables link name it once. */
+export const PORTAL_REPORTS_HREF = "/portal/reports";
 export interface PortalArea { key: string; label: string; tabs: PortalSubTab[] }
 
 export const PORTAL_AREAS: PortalArea[] = [
-  { key: "overview", label: "Overview", tabs: [{ href: "/portal", label: "Overview" }] },
+  {
+    key: "overview",
+    label: "Overview",
+    tabs: [
+      { href: "/portal", label: "Overview" },
+      // PV7-04b: the performance reports we publish to the client (BFF §55). A new path; every other is kept.
+      { href: PORTAL_REPORTS_HREF, label: "Reports" },
+    ],
+  },
   {
     key: "projects",
     label: "Projects",
@@ -83,15 +93,17 @@ export function activePortalNav(pathname: string): { areaKey: string | null; tab
   return best ?? { areaKey: null, tabHref: null };
 }
 
-/** Badge counts for the two areas that can have something waiting on the client. Projects = gates waiting on the
- *  client + threads with unread messages from our team (`conversationUnread`, PV4-06). */
+/** Badge counts for the areas that can have something waiting on the client. Projects = gates waiting on the
+ *  client + threads with unread messages from our team (`conversationUnread`, PV4-06). Overview = reports published to
+ *  the client that this user has not opened (`newReports`, PV7-04b), shown on the Overview area and its Reports tab. */
 export function portalBadges(
-  overview: Pick<PortalOverview, "needsYou" | "finance" | "conversationUnread"> | null | undefined,
-): { projectsBadge: number; billingBadge: number } {
+  overview: Pick<PortalOverview, "needsYou" | "finance" | "conversationUnread" | "newReports"> | null | undefined,
+): { projectsBadge: number; billingBadge: number; overviewBadge: number } {
   const needs = overview?.needsYou ?? [];
   const overdue = (overview?.finance?.byCurrency ?? []).reduce((sum, c) => sum + (c.overdueCount ?? 0), 0);
   return {
     projectsBadge: needs.filter((n) => n.kind === "gate").length + Math.max(0, overview?.conversationUnread ?? 0),
     billingBadge: needs.filter((n) => n.kind === "contract").length + overdue,
+    overviewBadge: Math.max(0, overview?.newReports ?? 0),
   };
 }

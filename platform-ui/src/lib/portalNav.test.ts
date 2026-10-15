@@ -41,6 +41,9 @@ describe("activePortalNav", () => {
 
   it.each([
     ["/portal", "overview", "/portal"],
+    // PV7-04b: Reports is the Overview area's second tab.
+    ["/portal/reports", "overview", "/portal/reports"],
+    ["/portal/reports/", "overview", "/portal/reports"],
     ["/portal/projects", "projects", "/portal/projects"],
     ["/portal/projects/p1", "projects", "/portal/projects"],
     ["/portal/approvals", "projects", "/portal/approvals"],
@@ -76,12 +79,13 @@ describe("activePortalNav", () => {
     expect(activePortalNav(path)).toEqual({ areaKey, tabHref });
   });
 
-  it("lights only Overview on /portal, and Overview on no other path", () => {
+  it("lights the Overview area only on /portal and its own Reports tab, and no other path", () => {
     for (const area of PORTAL_AREAS) {
       for (const t of area.tabs) {
-        if (t.href !== "/portal") expect(activePortalNav(t.href).areaKey).not.toBe("overview");
+        if (t.href !== "/portal" && t.href !== "/portal/reports") expect(activePortalNav(t.href).areaKey, t.href).not.toBe("overview");
       }
     }
+    expect(PORTAL_AREAS.find((a) => a.key === "overview")!.tabs.map((t) => t.href)).toEqual(["/portal", "/portal/reports"]);
   });
 
   it("returns nulls for unknown paths without throwing", () => {
@@ -97,8 +101,8 @@ describe("activePortalNav", () => {
   it("keeps the existing client-facing paths and the area layout", () => {
     expect(PORTAL_AREAS.map((a) => a.key)).toEqual(["overview", "projects", "business", "billing", "people"]);
     const all = PORTAL_AREAS.flatMap((a) => a.tabs.map((t) => t.href));
-    expect(all).toHaveLength(14);
-    expect(new Set(all).size).toBe(14);
+    expect(all).toHaveLength(15);
+    expect(new Set(all).size).toBe(15);
     // PV4-08 added exactly one: Conversation, in Projects, after Requests.
     expect(PORTAL_AREAS.find((a) => a.key === "projects")!.tabs.map((t) => t.href)).toEqual([
       "/portal/projects", "/portal/approvals", "/portal/deliverables", "/portal/requests",
@@ -121,7 +125,7 @@ describe("portalBadges", () => {
       needsYou: [item("gate"), item("gate"), item("contract")],
       finance: { byCurrency: [cur(2), cur(1)] },
     } as never;
-    expect(portalBadges(o)).toEqual({ projectsBadge: 2, billingBadge: 4 });
+    expect(portalBadges(o)).toEqual({ projectsBadge: 2, billingBadge: 4, overviewBadge: 0 });
   });
   it("adds the threads with unread messages (conversationUnread) to the Projects badge, and only that badge", () => {
     const o = {
@@ -129,14 +133,20 @@ describe("portalBadges", () => {
       finance: { byCurrency: [cur(1)] },
       conversationUnread: 3,
     } as never;
-    expect(portalBadges(o)).toEqual({ projectsBadge: 4, billingBadge: 2 });
+    expect(portalBadges(o)).toEqual({ projectsBadge: 4, billingBadge: 2, overviewBadge: 0 });
   });
   it("an older server that sends no conversationUnread adds nothing", () => {
     const o = { needsYou: [item("gate")], finance: { byCurrency: [] } } as never;
     expect(portalBadges(o).projectsBadge).toBe(1);
   });
   it("is zero for a null or empty overview", () => {
-    expect(portalBadges(null)).toEqual({ projectsBadge: 0, billingBadge: 0 });
-    expect(portalBadges({ needsYou: [], finance: { byCurrency: [] } } as never)).toEqual({ projectsBadge: 0, billingBadge: 0 });
+    expect(portalBadges(null)).toEqual({ projectsBadge: 0, billingBadge: 0, overviewBadge: 0 });
+    expect(portalBadges({ needsYou: [], finance: { byCurrency: [] } } as never)).toEqual({ projectsBadge: 0, billingBadge: 0, overviewBadge: 0 });
+  });
+  it("puts the new reports (newReports) on the Overview badge, and only that badge; an older server adds nothing", () => {
+    const o = { needsYou: [item("gate")], finance: { byCurrency: [] }, newReports: 3 } as never;
+    expect(portalBadges(o)).toEqual({ projectsBadge: 1, billingBadge: 0, overviewBadge: 3 });
+    expect(portalBadges({ needsYou: [], finance: { byCurrency: [] } } as never).overviewBadge).toBe(0);
+    expect(portalBadges({ needsYou: [], finance: { byCurrency: [] }, newReports: -2 } as never).overviewBadge).toBe(0);
   });
 });

@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { PORTAL_AREAS, PORTAL_WEBSITE_HREF, activePortalNav } from "@/lib/portalNav";
+import { PORTAL_AREAS, PORTAL_REPORTS_HREF, PORTAL_WEBSITE_HREF, activePortalNav } from "@/lib/portalNav";
 
 // The portal's navigation: five areas, each with sub-tabs (ruling PV-D4,
 // docs/plans/2026-10-10-three-perspectives.md; PV2-04). A client component only because the active
@@ -25,13 +25,16 @@ import { PORTAL_AREAS, PORTAL_WEBSITE_HREF, activePortalNav } from "@/lib/portal
 // just to produce one, or claim an unverified number. The list page surfaces its own pending count once
 // opened.
 //
+// REPORTS (PV7-04b): the Overview area's second tab. Overview carries the count of published reports this user has not
+// opened (`newReports`, via `portalBadges`), on the area and on the Reports sub-tab, so it is visible from every page.
+//
 // WEBSITE (WSK-49d): the Business area's second tab exists for everyone in `PORTAL_AREAS` (so every page maps to an
 // area), but is OFFERED only when `showWebsite` is true: the viewer holds a website-editor grant for the active client.
 // Cosmetic, never a gate; the Website pages and the BFF refuse everyone else on their own.
-export function PortalTabs({ projectsBadge, billingBadge, showWebsite = false }: { projectsBadge: number; billingBadge: number; showWebsite?: boolean }) {
+export function PortalTabs({ projectsBadge, billingBadge, overviewBadge = 0, showWebsite = false }: { projectsBadge: number; billingBadge: number; overviewBadge?: number; showWebsite?: boolean }) {
   const pathname = usePathname() ?? "/portal";
   const { areaKey, tabHref } = activePortalNav(pathname);
-  const badges: Record<string, number> = { projects: projectsBadge, billing: billingBadge };
+  const badges: Record<string, number> = { overview: overviewBadge, projects: projectsBadge, billing: billingBadge };
   const found = PORTAL_AREAS.find((a) => a.key === areaKey) ?? null;
   const active = found && { ...found, tabs: found.tabs.filter((t) => showWebsite || t.href !== PORTAL_WEBSITE_HREF) };
   return (
@@ -48,7 +51,7 @@ export function PortalTabs({ projectsBadge, billingBadge, showWebsite = false }:
             >
               {a.label}
               {count > 0 && (
-                <span className="cp-tab__count" aria-label={`${count} waiting for you`}>{count}</span>
+                <span className="cp-tab__count" aria-label={a.key === "overview" ? `${count} new ${count === 1 ? "report" : "reports"}` : `${count} waiting for you`}>{count}</span>
               )}
             </Link>
           );
@@ -64,6 +67,9 @@ export function PortalTabs({ projectsBadge, billingBadge, showWebsite = false }:
               aria-current={t.href === tabHref ? "page" : undefined}
             >
               {t.label}
+              {t.href === PORTAL_REPORTS_HREF && overviewBadge > 0 && (
+                <span className="cp-tab__count" aria-label={`${overviewBadge} new ${overviewBadge === 1 ? "report" : "reports"}`}>{overviewBadge}</span>
+              )}
             </Link>
           ))}
         </nav>
