@@ -30,6 +30,7 @@ import {
   conversationThreadInPortalScope, staffConversationDraftClientVisible, staffConversationMessageClientVisible,
   staffConversationThreadClientVisible,
   meetingMinutesClientVisible, meetingMinutesInPortalScope, staffMeetingMinutesClientVisible,
+  wideClientOnly, wideOrOwnProject,
 } from "./portal-visibility";
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -528,6 +529,8 @@ const SWITCHED = [
   "src/core/portal-documents.controller.ts",
   // PV6-02: Services & results; its client-wide test is the per-client scope's `wideClientIds`.
   "src/core/portal-centre-results.controller.ts",
+  // PV7-02: client health for the portal, written on the builders from day one (its reads are client-health.ts and client-ball.ts).
+  "src/core/portal-health.controller.ts",
   // PV5-11: the certified-signing start route and the simulated PSrE's portal pages, written on the builders from day one.
   "src/signatures/certified-signing.controller.ts",
   "src/signatures/simulated-psre.controller.ts",
@@ -651,10 +654,52 @@ describe("portal scope per client — the guard over every portal-facing file", 
     expect(codeOnly(readFileSync(join(SRC, "core", "portal-visibility.ts"), "utf8"))).not.toMatch(DEAD[4].re);
   });
 
+  it("PV7-02: the health controller is discovered as portal-facing and is on the SWITCHED list", () => {
+    expect(importers.map(rel)).toContain("src/core/portal-health.controller.ts");
+    expect(SWITCHED).toContain("src/core/portal-health.controller.ts");
+  });
+
   it("a file that lays scope params out with scopeAt(n) binds them with scopeValues(scope)", () => {
     const offenders = importers
       .filter((f) => { const code = codeOnly(readFileSync(f, "utf8")); return /\bscopeAt\(/.test(code) && !/\bscopeValues\(/.test(code); })
       .map(rel);
     expect(offenders).toEqual([]);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// 5. Client health (PV7-02, BFF 54.5): client-wide material reaches client-wide contacts only
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// The health read takes the STRICT reading of PV-D33 and PV-D37: a row with no project is told only to a contact who reaches
+// the client client-wide, unlike contracts and change requests in the portal lists (which admit a project-less row to a
+// project-scoped contact). Two reach builders carry it. The HTTP proof is portal-health.db.test.ts.
+
+describe("PV7-02 · the health reach builders", () => {
+  const S = scopeAt(2);
+
+  it("wideClientOnly: the row's client is one the caller reaches client-wide, and nothing else", () => {
+    expect(wideClientOnly("pp", S)).toBe("pp.client_id = ANY($3::uuid[])");
+    expect(wideClientOnly("pp", S)).not.toContain("$4");
+    expect(wideClientOnly("", scopeAt(1))).toBe("client_id = ANY($2::uuid[])");
+  });
+
+  it("wideOrOwnProject: client-wide OR one of the caller's own projects, with NO null-project arm", () => {
+    expect(wideOrOwnProject("w", S)).toBe("(w.client_id = ANY($3::uuid[]) OR w.project_id = ANY($4::uuid[]))");
+    expect(wideOrOwnProject("w", S)).not.toMatch(/IS NULL/);
+  });
+
+  it("the difference from the portal lists is the point: contracts and change requests admit a project-less row, this does not", () => {
+    expect(contractInPortalScope("k", S)).toMatch(/k\.project_id IS NULL\)/);
+    expect(changeRequestInPortalScope("w", S)).toMatch(/w\.project_id IS NULL\)/);
+    expect(wideOrOwnProject("k", S)).not.toMatch(/project_id IS NULL/);
+  });
+
+  it("refuse an alias that is not a plain identifier, and a params object without `wide`", () => {
+    expect(() => wideClientOnly("pp; DROP TABLE x", S)).toThrow(/invalid table alias/);
+    expect(() => wideOrOwnProject("W", S)).toThrow(/invalid table alias/);
+    const noWide = { clients: 1, projects: 2 } as never;
+    expect(() => wideClientOnly("pp", noWide)).toThrow(/invalid parameter index/);
+    expect(() => wideOrOwnProject("w", noWide)).toThrow(/invalid parameter index/);
   });
 });

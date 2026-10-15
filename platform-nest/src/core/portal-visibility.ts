@@ -444,3 +444,28 @@ export function meetingMinutesInPortalScope(minutesAlias: string, meetingAlias: 
 export function staffMeetingMinutesClientVisible(minutesAlias: string, meetingAlias: string): string {
   return staffClientVisible(meetingAlias, meetingMinutesClientVisible(minutesAlias, meetingAlias));
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// Client health (PV7-02, BFF §54.5): client-wide material is told only to client-wide contacts
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// PV-D33 and PV-D37: material that belongs to the whole client, not to one project, reaches only the contacts who reach the
+// client client-wide. The portal's own lists are looser for contracts and change requests (`allowNullProject = true` admits a
+// project-less row to a project-scoped contact), and the health read deliberately takes the STRICT reading, so a contact
+// limited to some projects is told about their own projects and nothing else. Two reach builders carry it. They are REACH
+// only: the row-state half is always an existing `<entity>ClientVisible`. They have no `staff*` mirror on purpose, because the
+// staff `clientVisible` flag describes a CLIENT-WIDE contact, for whom both arms below are true by definition.
+
+/** The row's client (`alias.client_id`) is one the caller reaches CLIENT-WIDE (`params.wide`). For rows that belong to the
+ *  client rather than to a project: a payment, a post review. */
+export function wideClientOnly(alias: string, params: PortalScopeParams): string {
+  return `${col(alias, "client_id")} = ANY(${ph(params.wide)}::uuid[])`;
+}
+
+/** The project arm with NO null-project admission: the row's client is one the caller reaches client-wide, OR the row's
+ *  project (`alias.project_id`) is one of the caller's own. A row with no project therefore reaches client-wide contacts only
+ *  (the shape runs, conversation threads and minutes already have). Always AND-ed with `inCallerClients` (or a `client_id =
+ *  ANY(<caller's clients>)` the query already carries) on the same client column. */
+export function wideOrOwnProject(alias: string, params: PortalScopeParams): string {
+  return inCallerProjects(alias, col(alias, "project_id"), params, false);
+}
