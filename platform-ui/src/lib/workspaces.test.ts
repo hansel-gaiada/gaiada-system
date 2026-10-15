@@ -276,6 +276,29 @@ describe("department analytics (DW-4c)", () => {
   });
 });
 
+describe("Analytics activity tabs (DW-4i, BFF section 44.9)", () => {
+  const analytics = PERFORMANCE_ROWS.find((r) => r.key === "analytics")!;
+
+  it("offers My activity to everyone, and Team activity to a head of THIS department, through the same gate as the Team report", () => {
+    const mine = analytics.tabs.find((t) => t.key === "activity")!;
+    expect([mine.href, mine.gate, mine.ticket]).toEqual(["/analytics/activity", undefined, undefined]);
+    const team = analytics.tabs.find((t) => t.key === "team-activity")!;
+    expect(team.href).toBe("/analytics/activity/team?unit={dept}");
+    expect(team.gate).toEqual({ kind: "unitCap", cap: "reports.department.view" });
+    expect(team.ticket).toBeUndefined();
+    const reportsTeam = PERFORMANCE_ROWS.find((r) => r.key === "reports")!.tabs.find((t) => t.key === "team")!;
+    expect(team.gate).toEqual(reportsTeam.gate);
+  });
+
+  it("keeps Work first and puts both in every workspace's Analytics row, ahead of the department's own analytics tabs", () => {
+    expect(analytics.tabs.map((t) => t.key)).toEqual(["work", "activity", "team-activity"]);
+    for (const ws of ALL) {
+      const row = sidebarRows(ws).performance.find((r) => r.key === "analytics")!;
+      expect(row.tabs.map((t) => t.key).slice(0, 3), ws.key).toEqual(["work", "activity", "team-activity"]);
+    }
+  });
+});
+
 describe("the Overview, Performance and tools data", () => {
   it("opens the Performance block with an ungated My performance row (PV7-06), and moves no other href", () => {
     const [first, ...rest] = PERFORMANCE_ROWS;

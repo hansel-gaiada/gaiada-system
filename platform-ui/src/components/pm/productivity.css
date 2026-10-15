@@ -34,6 +34,9 @@
   margin: 0;
 }
 
+.prod-allwork { font: 400 13px var(--font-body); color: var(--pm-text-dim); margin: 0; }
+.prod-allwork a { color: var(--pm-accent); }
+
 .prod-empty {
   font: 400 12px var(--font-body);
   color: var(--pm-text-faint);

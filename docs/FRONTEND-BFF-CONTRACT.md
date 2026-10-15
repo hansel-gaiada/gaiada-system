@@ -8439,6 +8439,40 @@ The three call sites, each ONE `writeActivity(tenantId, actor, verb, entity, id,
 - the day read never carries comment or message text;
 - the backfill is idempotent.
 
+### 44.9 The UI (4h-3 and 4i, 2026-10-15) — `platform-ui/src/lib/activitySeries.ts`, `activitySeriesFormat.ts`, `activityTeam.ts`, `app/(app)/analytics/activity/**`, `components/analytics/**`, `lib/demoActivity.ts` — **STATUS: BUILT (vitest and `next build` on CI; not yet driven against a live backend)**
+
+No backend change: the UI reads §44.3 and §44.4 as they are. Nothing new is added to the API.
+
+**The reader** (`lib/activitySeries.ts`, server-only; `getActivitySeries(userId, tenantId, {subjectUserId, from?, to?})` and `getActivityDay(…, {subjectUserId, date})`). Three outcomes, never an empty series for a failed read:
+- `ok`: the server answered and the answer has the contract's shape;
+- `forbidden`: 403 (§44.3's gate: yourself, the company-wide and HR tiers, a head for their led scope);
+- `error`: everything else, a **404 included** (an older backend without §44 must not read as "you did nothing"), a 400, a 5xx, a timeout, and an answer of the wrong shape.
+
+The shape guard builds the result from the known fields only (so a stray `total` or `score` never travels on), refuses a series with no day (the spine is zero-filled), non-integer or negative counts, and an answer for another person or another day than the one asked for. The pure helpers are in `lib/activitySeriesFormat.ts`: the cells of a year map, a day's label, the kinds legend and a day's items by kind. Their numbers and words follow DW-D19: a day's total (the sum of its counts) is **only a shade** and is worded as volume ("5 things done"); the kinds, their labels and their order are the server's `kinds`, never a fixed list in the UI. Labels are shown as the server gives them ("Commits 2, Site edits 1"), not pluralised, because a label such as "Notes and docs" has no honest singular.
+
+**4h-3, the Overview's My activity** (`widgets/MyActivity.tsx`, `MyActivityBlock.tsx`, `lib/overviewActivity.ts`):
+- one read of the person's own series with **neither `from` nor `to`**: the server answers its default year ending on its own today (REPORTS_TZ), and the 16-week window ends on the answer's `to`. The client never computes "today" (the old UTC `todayIso` is gone, and with it the one-day drift near midnight);
+- the kinds, and the "Today so far" counts, come from the server's `kinds`; the note "Counts project-management work for now" is dropped;
+- a refusal (403) says "Nothing is shown: you can't read this activity"; any other failure, a 404 included, throws, so the frame's boundary says "Unavailable";
+- the block links to `MY_ACTIVITY_HREF = "/analytics/activity"`.
+
+**4i, Analytics › My activity** (`/analytics/activity`, page `app/(app)/analytics/activity/page.tsx`). Registered as the Analytics row's `activity` tab in `PERFORMANCE_ROWS` (every workspace, ungated: self is always allowed) and in the area rules as Performance (`lib/areas.ts`).
+- The year map of **all work**: the server's default year (about 53 weeks, ending on its `to`), one cell per day, a grid with one row per week (`role="grid"`), every cell a link with its own label ("14 Oct 2026: 3 things done. Commits 2, Site edits 1", or "…: nothing recorded") that selects the day. The shade is volume against the busiest day of the year and says so in words; there is no score and no total anywhere. Under it, **the kinds legend**: every kind the server lists with its count over the year, zero included.
+- **A day's detail**, `?date=YYYY-MM-DD` (the cells' links; server-rendered, so it works without JavaScript): `GET /activity/day`, the items grouped by kind in the server's kind order, newest first inside a group, each with its time in the series' own `timezone`, the work's own name, and a link when the server gave one (only a path on this site is followed). An empty day says "Nothing recorded on this day."; a refusal says "No access"; a failure says "Unavailable". None reads as the other.
+- `?user=<id>` opens another person's view (Team activity links here, keeping `?unit=` for the way back). The page only asks; **the server decides**. A refusal says "Nothing is shown", never an empty year.
+
+**4i, Team activity for heads** (`/analytics/activity/team?unit=<orgNodeId>&period=week|month|quarter`, a sibling route, the Analytics row's `team-activity` tab):
+- **Who sees it.** The Team report's own mirror: `reports.department.view` held company-wide, or as a head of the unit (`canInUnit`, `leadsAnyUnitWith`); the tab is gated `unitCap`, exactly like Reports › Team. A person who leads no one is told so and **nothing about a team is read for them**; a head asking for a unit they do not lead is told so before any read. This is cosmetic: the server gates the roster read and **every person's series, per call**. A company-wide reader picks any department; a head picks among the units they lead.
+- **The roster** is the Team report's reader (`GET /reports/overview?grain=person&unit=`, §37), the unit's whole roster as of today, so a quiet person is listed.
+- **The counts.** Each person's `GET /activity/series` is read in parallel with `from` 100 days back and **no `to`**. Every period is cut from the answer's own `to` (this week from its Monday, this month from the 1st, this quarter from the calendar quarter's first day; month by default), so the server's today decides, not this machine's clock. A person whose read was refused or failed shows **"Unavailable" on their own row**; the others are unaffected.
+- **No ranking, no total, no sort by volume (DW-D19).** A real table with a caption; rows are sorted by **name**; each row shows the person's counts by kind ("Commits 4, Site edits 2", or "Nothing recorded in this period"), never summed; there is no total column and no sort control. Each row links to that person's `/analytics/activity?user=<id>&unit=<unit>`.
+
+**PM › Productivity stays.** The plan (§5.6, 4i) says the year map is "moved from Project Management › Productivity". It is **not removed**: Productivity shows PM's own components that the all-work series does not carry (tasks assigned, reactions given and received, notes contributions), and `GET /pm/productivity` is unchanged (§44.3). The all-work year map is added in Analytics, and Productivity gains one line, "See all your work in Analytics › My activity", linking to it. Retiring the PM-only view is a separate decision.
+
+**Demo** (`DEMO_MODE`, `lib/demoActivity.ts`, wired in `demoFixtures.getDemoResponse`): both reads, deterministic per date, 19 kinds, a different mix of kinds per person (`u-dev` commits, edits sites and completes tasks; `seo-staff` and `gede-ic` draft briefs and audits; `demo-hansel` has PM, meetings, time, check-ins and more), a day's items with work names and no message text. The gate is §44.3's: self; `demo-hansel` and `demo-owner` company-wide; `u-webhead` the roster of Web Dev (`u-dev`, `u-pm`); `dept-manager` the roster of SEO (`gede-ic`, `seo-staff`); client-portal identities refused; anyone else 403 "outside your reporting line". (The demo's `GET /pm/productivity` has no gate, so there was none to copy.)
+
+**Not in 4h-3 and 4i:** a score or ranking; message or comment text; changes to the §44.3 and §44.4 wire; the 4h-2 emitters; retiring PM › Productivity.
+
 ## 45. Attachments on requests, campaign parts, campaigns and the staff client page (DW-8h, 2026-10-14) — `platform-nest/src/core/files.controller.ts`; UI `platform-ui/src/components/Attachments.tsx` — **STATUS: BACKEND AND UI BUILT, PROTOTYPED (HTTP suite `files-targets.test.ts` written for the Linux CI gate; UI tested in vitest and built in demo mode, not yet driven live)**
 
 **Why.** Plan §8.1 (row 8h) and §14.2. Today only the task and project pages show files. A request between departments, a campaign, a department's part of a campaign and a client cannot carry a brief, a spec or a delivered file, so that work leaves the ERP.

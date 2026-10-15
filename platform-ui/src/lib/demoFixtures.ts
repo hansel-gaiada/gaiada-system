@@ -6,6 +6,7 @@ import "server-only";
 // touching the network when demo mode is on.
 
 import { pmDemo, allTrackerNotifications, pmTasksForUser } from "./demoPm";
+import { activityDemo } from "./demoActivity";
 import { meetingsDemo } from "./demoMeetings";
 import { calendarEventsDemo } from "./demoCalendarEvents";
 import { conversationDemo, demoConversationNeedsUs } from "./demoConversation";
@@ -2336,6 +2337,10 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // (lib/demoBilling.ts), and placed before the generic matchers so none of them answers one of these paths.
   const billing = billingDemo(method, p, url.searchParams, body, userId);
   if (billing) return billing;
+
+  // DW-4h-3 / DW-4i — the all-work activity series and a day's detail (BFF section 44), with the real person-axis gate.
+  const activity = activityDemo(m, p, url.searchParams, userId);
+  if (activity) return activity;
 
   // PM surface + task comments — stateful in-memory store (lib/demoPm.ts).
   const pm = pmDemo(method, p, url.searchParams, body);

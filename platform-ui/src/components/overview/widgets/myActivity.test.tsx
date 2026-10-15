@@ -6,25 +6,32 @@ import { WidgetBoundary } from "../WidgetBoundary";
 import { selectBands } from "@/lib/overview";
 import { WORKSPACES, isPlanned } from "@/lib/workspaces";
 import { addDaysIso } from "@/lib/checkins";
-import { PlatformError } from "@/lib/platform";
-import * as pm from "@/lib/pm";
-import type { ProductivityDayPoint, ProductivityReport } from "@/lib/pm";
+import * as series from "@/lib/activitySeries";
+import type { ActivitySeries } from "@/lib/activitySeriesFormat";
 import { me as meFixture, member } from "@/lib/workspaceFixtures";
 
-vi.mock("@/lib/pm", () => ({ getProductivity: vi.fn() }));
+vi.mock("@/lib/activitySeries", () => ({ getActivitySeries: vi.fn() }));
 
 const person = meFixture([member()]);
-const getActivity = vi.mocked(pm.getProductivity);
+const getSeries = vi.mocked(series.getActivitySeries);
 const TODAY = "2026-10-13";
 
-const point = (date: string, over: Partial<ProductivityDayPoint> = {}): ProductivityDayPoint => ({
-  date, completedTasks: 0, assignedCompleted: 0, involvedCompleted: 0, tasksAccepted: 0,
-  reactionsGiven: 0, reactionsReceived: 0, notesContributions: 0, comments: 0, total: 0, ...over,
-});
-const report = (over: Record<string, Partial<ProductivityDayPoint>> = {}, extra: Partial<ProductivityReport> = {}): ProductivityReport => {
-  const s: ProductivityDayPoint[] = [];
-  for (let d = "2026-06-15"; d <= TODAY; d = addDaysIso(d, 1)) s.push(point(d, over[d]));
-  return { userId: "u-1", from: "2026-06-15", to: TODAY, days: s.length, series: s, totals: point("x"), score: null, scoreNote: "No composite score is computed.", ...extra };
+const KINDS = [
+  { key: "pm.tasks_completed", label: "Tasks completed", source: "pm" },
+  { key: "github.commits", label: "Commits", source: "github" },
+  { key: "webdesk.edits", label: "Site edits", source: "webdesk" },
+  { key: "pm.comments", label: "Comments", source: "pm" },
+];
+/** The server's answer: a zero-filled year ending on its own `to`, with `over` counts on chosen days. */
+const answer = (over: Record<string, Record<string, number>> = {}, extra: Record<string, unknown> = {}, to = TODAY): ActivitySeries => {
+  const days: ActivitySeries["days"] = [];
+  const totals: Record<string, number> = {};
+  for (let d = addDaysIso(to, -364); d <= to; d = addDaysIso(d, 1)) {
+    const counts = over[d] ?? {};
+    days.push({ date: d, counts });
+    for (const [k, n] of Object.entries(counts)) totals[k] = (totals[k] ?? 0) + n;
+  }
+  return { userId: "u-1", from: addDaysIso(to, -364), to, timezone: "Asia/Makassar", kinds: KINDS, days, totals, ...extra } as ActivitySeries;
 };
 const props = (extra: Partial<OverviewWidgetProps> = {}): OverviewWidgetProps => ({
   me: person, tenantId: "co-a", period: "month", deptId: "d-web", unitPath: ["d-web"], tools: [],
@@ -33,9 +40,10 @@ const props = (extra: Partial<OverviewWidgetProps> = {}): OverviewWidgetProps =>
 const block = () => screen.getByRole("region", { name: "My activity" });
 
 beforeEach(() => {
-  getActivity.mockReset();
+  getSeries.mockReset();
+  // The machine's clock is deliberately a day AFTER the server's today: the window must still end on the server's `to`.
   vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(new Date(`${TODAY}T08:00:00Z`));
+  vi.setSystemTime(new Date("2026-10-14T08:00:00Z"));
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -43,77 +51,91 @@ afterEach(() => {
 });
 
 describe("My activity (the widget)", () => {
-  it("reads the signed-in person's own series, once, from the window's first week and without `to`", async () => {
-    getActivity.mockResolvedValue(report());
+  it("reads the signed-in person's own all-work series, once, with neither from nor to (the server decides what today is)", async () => {
+    getSeries.mockResolvedValue({ kind: "ok", data: answer() });
     await MyActivity(props());
-    expect(getActivity).toHaveBeenCalledTimes(1);
-    expect(getActivity).toHaveBeenCalledWith("u-1", "co-a", { userId: "u-1", from: "2026-06-15" });
+    expect(getSeries).toHaveBeenCalledTimes(1);
+    expect(getSeries).toHaveBeenCalledWith("u-1", "co-a", { subjectUserId: "u-1" });
   });
 
-  it("draws 16 full weeks and this week's days so far, each cell with its count on its date", async () => {
-    getActivity.mockResolvedValue(report({ "2026-09-01": { total: 3 }, "2026-09-02": { total: 1 } }));
+  it("draws 16 full weeks and this week's days so far, each cell with its volume and its kinds on its date", async () => {
+    getSeries.mockResolvedValue({ kind: "ok", data: answer({ "2026-09-01": { "github.commits": 2, "webdesk.edits": 1 }, "2026-09-02": { "pm.comments": 1 } }) });
     const { container } = render(await MyActivity(props()));
     expect(within(block()).getByRole("heading", { level: 3, name: "My activity" })).toBeInTheDocument();
     expect(container.querySelectorAll(".prod-heatmap__cell[data-level]")).toHaveLength(16 * 7 + 2);
-    expect(container.querySelector('[title^="3 things on 01 Sep"]')).toBeTruthy();
-    expect(container.querySelector('[title^="1 thing on 02 Sep"]')).toBeTruthy();
+    expect(container.querySelector('[title^="01 Sep 2026: 3 things done. Commits 2, Site edits 1"]')).toBeTruthy();
+    expect(container.querySelector('[title^="02 Sep 2026: 1 thing done. Comments 1"]')).toBeTruthy();
     expect(container.querySelector(".prod-heatmap__legend")).toBeTruthy();
   });
 
-  it("names what is counted, once, and links to where the full year lives", async () => {
-    getActivity.mockResolvedValue(report());
+  it("ends the window on the server's own today, not on the machine's UTC date", async () => {
+    getSeries.mockResolvedValue({ kind: "ok", data: answer({}, {}, "2026-10-13") });
     render(await MyActivity(props()));
-    expect(screen.getAllByText("Counts project-management work for now")).toHaveLength(1);
-    expect(screen.getByRole("link", { name: "Open my activity" })).toHaveAttribute("href", "/pm?view=productivity");
+    expect(block().querySelector(".prod-heatmap__grid")).toHaveAttribute("aria-label", "Activity calendar, 22 Jun 2026 to 13 Oct 2026");
   });
 
-  it("lists today's counts by kind, leaving out the kinds at zero", async () => {
-    getActivity.mockResolvedValue(report({ [TODAY]: { completedTasks: 2, comments: 5, total: 7 } }));
+  it("no longer says it counts project-management work only, and links to Analytics > My activity", async () => {
+    getSeries.mockResolvedValue({ kind: "ok", data: answer() });
+    const { container } = render(await MyActivity(props()));
+    expect(container.textContent).not.toMatch(/project-management work|for now/i);
+    expect(screen.getByRole("link", { name: "Open my activity" })).toHaveAttribute("href", "/analytics/activity");
+  });
+
+  it("lists today's counts by the server's kinds, leaving out the kinds at zero", async () => {
+    getSeries.mockResolvedValue({ kind: "ok", data: answer({ [TODAY]: { "pm.tasks_completed": 2, "github.commits": 5 } }) });
     render(await MyActivity(props()));
     const items = within(block()).getAllByRole("listitem").map((li) => li.textContent);
-    expect(items).toEqual(["2Tasks completed", "5Comments"]);
+    expect(items).toEqual(["2Tasks completed", "5Commits"]);
     expect(screen.getByRole("heading", { level: 4, name: "Today so far" })).toBeInTheDocument();
     expect(screen.queryByText("Nothing recorded yet today")).not.toBeInTheDocument();
-    expect(screen.queryByText("Notes")).not.toBeInTheDocument();
+    expect(screen.queryByText("Site edits")).not.toBeInTheDocument();
+  });
+
+  it("takes the kinds from the server, so a company with other modules sees its own", async () => {
+    const kinds = [{ key: "seo.briefs", label: "Content briefs", source: "seo" }];
+    getSeries.mockResolvedValue({ kind: "ok", data: answer({ [TODAY]: { "seo.briefs": 3 } }, { kinds }) });
+    render(await MyActivity(props()));
+    expect(within(block()).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["3Content briefs"]);
   });
 
   it("says Nothing recorded yet today on a day with nothing, and still draws the map", async () => {
-    getActivity.mockResolvedValue(report({ "2026-09-01": { total: 3 } }));
+    getSeries.mockResolvedValue({ kind: "ok", data: answer({ "2026-09-01": { "github.commits": 3 } }) });
     const { container } = render(await MyActivity(props()));
     expect(screen.getByText("Nothing recorded yet today")).toBeInTheDocument();
     expect(within(block()).queryAllByRole("listitem")).toHaveLength(0);
     expect(container.querySelectorAll(".prod-heatmap__cell[data-level]").length).toBeGreaterThan(0);
   });
 
-  it("says the feature is not available when the read is a 404 (null), never an empty map or a 0", async () => {
-    getActivity.mockResolvedValue(null);
+  it("says nothing is shown on a refusal (403), never an empty map, a 0 or Unavailable", async () => {
+    getSeries.mockResolvedValue({ kind: "forbidden" });
     const { container } = render(await MyActivity(props()));
-    expect(screen.getByText("Activity isn't available here yet")).toBeInTheDocument();
+    expect(screen.getByText("Nothing is shown: you can't read this activity")).toBeInTheDocument();
     expect(screen.queryByText("Nothing recorded yet today")).not.toBeInTheDocument();
     expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
     expect(container.querySelector(".prod-heatmap")).toBeNull();
     expect(screen.queryByRole("link", { name: "Open my activity" })).not.toBeInTheDocument();
   });
 
-  it("throws when the read fails, and the frame's boundary says Unavailable, never the not-yet line or a 0", async () => {
-    for (const failure of [new Error("down"), new PlatformError(403, "forbidden"), new PlatformError(500, "boom")]) {
-      getActivity.mockReset();
-      getActivity.mockRejectedValue(failure);
+  it("throws when the read failed (a 404 included), and the frame's boundary says Unavailable, never an empty map or a 0", async () => {
+    for (const reason of ["down", "not found", "unexpected answer from the activity endpoint"]) {
+      getSeries.mockReset();
+      getSeries.mockResolvedValue({ kind: "error", reason });
       const thrown = await MyActivity(props()).then(() => null, (e: unknown) => e);
-      expect(thrown).toBe(failure);
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).message).toBe(reason);
     }
     vi.spyOn(console, "error").mockImplementation(() => {});
     const Boom = () => { throw new Error("down"); };
     render(<WidgetBoundary title="My activity"><Boom /></WidgetBoundary>);
     expect(screen.getByRole("heading", { name: "My activity" })).toBeInTheDocument();
     expect(screen.getByText("Unavailable")).toBeInTheDocument();
-    expect(screen.queryByText("Activity isn't available here yet")).not.toBeInTheDocument();
+    expect(screen.queryByText("Nothing recorded yet today")).not.toBeInTheDocument();
   });
 
   it("never renders a score, even if the API ever returned one", async () => {
-    getActivity.mockResolvedValue(report({ [TODAY]: { comments: 1, total: 1 } }, { score: 430, scoreNote: "Score 430 of 500" }));
+    getSeries.mockResolvedValue({ kind: "ok", data: answer({ [TODAY]: { "pm.comments": 1 } }, { score: 430, total: 99, scoreNote: "Score 430 of 500" }) });
     const { container } = render(await MyActivity(props()));
-    expect(container.textContent).not.toMatch(/430|500|score|rating|points/i);
+    expect(container.textContent).not.toMatch(/430|500|99|score|rating|points/i);
     expect(container.textContent).not.toMatch(/total/i);
   });
 });

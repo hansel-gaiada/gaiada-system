@@ -95,4 +95,13 @@ describe("Productivity", () => {
     expect(container.textContent).toContain("delivery.tasks_completed");
     expect(container.textContent).toContain("nightly fact job");
   });
+
+  // DW-4i: this view stays as it is (it carries PM components the all-work series does not), and points to the all-work year map.
+  it("points to Analytics > My activity for all of the person's work, and keeps its own PM components", () => {
+    const { container, getByRole } = render(<Productivity report={makeReport()} scopeName="Ada" viewingSelf />);
+    expect(getByRole("link", { name: "Analytics › My activity" })).toHaveAttribute("href", "/analytics/activity");
+    expect(container.textContent).toContain("See all your work in Analytics › My activity");
+    expect(container.textContent).toContain("Reactions given");
+    expect(container.textContent).toContain("Completed tasks");
+  });
 });

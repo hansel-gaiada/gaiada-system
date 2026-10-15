@@ -565,10 +565,10 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     await expect(numbers.getByText("Unavailable")).toHaveCount(0);
   });
 
-  // DW-3j: the You band's My activity. Either the 16-week map with Today so far (the demo backend has the series),
-  // or the honest "isn't available here yet" line; never "Unavailable", and never a score. Looked up inside the page
-  // (`#main-content`): while it streams, React briefly holds a hidden copy of it outside.
-  test("the You band has My activity: the 16-week map and today so far, or the not-available line, and no score", async ({ page, context }) => {
+  // DW-3j, DW-4h-3: the You band's My activity. Either the 16-week map of all work with Today so far (the demo backend has
+  // the series), or the honest "nothing is shown" line for a refusal; never "Unavailable", and never a score. Looked up inside
+  // the page (`#main-content`): while it streams, React briefly holds a hidden copy of it outside.
+  test("the You band has My activity: the 16-week map and today so far, or the nothing-is-shown line, and no score", async ({ page, context }) => {
     await signInWebDev(page, context);
     await page.goto("/departments/dept-1");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
@@ -578,20 +578,20 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     await expect(activity).toBeVisible();
     await expect(activity.getByRole("heading", { level: 3, name: "My activity" })).toBeVisible();
     await expect(activity.getByText("Unavailable")).toHaveCount(0);
-    if (await activity.getByText("Activity isn't available here yet").count()) {
+    // DW-4h-3: the series counts all work; the demo backend serves it (lib/demoActivity.ts), so the map is always drawn,
+    // and the old "counts project-management work for now" note is gone.
+    if (await activity.getByText("Nothing is shown: you can't read this activity").count()) {
       await expect(activity.getByRole("link", { name: "Open my activity" })).toHaveCount(0);
     } else {
-      await expect(activity.getByText("Counts project-management work for now")).toBeVisible();
+      await expect(activity.getByText(/project-management work/)).toHaveCount(0);
       await expect(activity.getByRole("img", { name: /^Activity calendar, / })).toBeVisible();
       await expect(activity.getByRole("heading", { level: 4, name: "Today so far" })).toBeVisible();
-      await expect(activity.getByRole("link", { name: "Open my activity" })).toHaveAttribute("href", "/pm?view=productivity");
-      // At most 16 full weeks and this week so far (119 days), each with a count on a date, never a score. The demo
-      // backend's clock stands at 16 July 2026 and its series starts at the request's `from`, so under DEMO_MODE the
-      // map holds a few weeks, not 16 (the 16-week window itself is pinned in lib/overviewActivity.test.ts).
+      await expect(activity.getByRole("link", { name: "Open my activity" })).toHaveAttribute("href", "/analytics/activity");
+      // 16 full weeks and this week so far (113 to 119 days), each with its volume on a date, never a score.
       const cells = activity.locator(".prod-heatmap__cell[data-level]");
-      expect(await cells.count()).toBeGreaterThanOrEqual(1);
+      expect(await cells.count()).toBeGreaterThanOrEqual(16 * 7 + 1);
       expect(await cells.count()).toBeLessThanOrEqual(17 * 7);
-      await expect(cells.first()).toHaveAttribute("title", /^\d+ things? on \d{2} [A-Z][a-z]{2} \d{4}$/);
+      await expect(cells.first()).toHaveAttribute("title", /^\d{2} [A-Z][a-z]{2} \d{4}: (\d+ things? done\. .+|nothing recorded)$/);
     }
     await expect(activity.getByText(/score|rating/i)).toHaveCount(0);
   });

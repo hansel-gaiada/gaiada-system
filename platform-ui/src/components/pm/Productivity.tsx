@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import type { ProductivityReport, ProductivityComponents } from "@/lib/pm";
 import type { ReportSeries, ReportKpi } from "@/lib/reports";
 import { Card, KpiTile } from "@/components/ui";
@@ -81,6 +82,11 @@ export function Productivity({ report, scopeName, viewingSelf }: ProductivityPro
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* DW-4i: this view stays as it is (it carries PM components the all-work series does not, such as tasks assigned and
+          reactions); the year map of ALL work, by kind, lives in Analytics. */}
+      <p className="prod-allwork">
+        See all your work in <Link href="/analytics/activity">Analytics › My activity</Link>
+      </p>
       <ScoreTile scoreNote={report.scoreNote} />
 
       <Card title={viewingSelf ? "Your activity, by type" : `${scopeName}'s activity, by type`}>
