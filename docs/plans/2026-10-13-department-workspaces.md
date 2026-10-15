@@ -812,6 +812,7 @@ where a ticket says the classic shell changes too.
       - it has no company, because one n8n serves every company and its workflows carry no company.
     - *Needs from the owner:* a ruling on which companies' IT workspace may count failures from the shared n8n.
       No credential is needed, because the n8n key is already configured.
+    - *Ruled 2026-10-16 (DW-D37):* "me (superadmin) and Anthony (Boss), PM, GM". In BFF §52.12 and PERMISSION §42a it is the platform operator, plus the `owner`, the GM unit's seated lead and the Project Manager seat of a company with `automation-console` on. The tile shows on IT's and the Office of the GM's Pulse, and hides for anyone else.
     - *Then:* the read reports a failure as a failure (503, never `[]`); the tile counts failed runs in the last
       24 hours on a `readResult` reader.
   - *7i-2, bank feeds (Finance).*
@@ -1343,6 +1344,7 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 | DW-D30 | DW-7j: the functional departments' and the GM's KPI readers (BFF §40.6). The data could not settle five definitions: there is no revenue plan; payroll has no "published" time and the close no deadline; IT has no request log or threat backend; and turnaround could count calendar or working days | **Owner (2026-10-15):** build the GM's monthly revenue plan now (§40.6.4). Payroll is on time when a regular run is paid by its pay date. A period is closed on time when soft-locked within 10 calendar days of its end. The IT KPIs use proxies now: leavers' logins closed within 1 working day, and devices offline or degraded. Leave-decided and payments-confirmed count working days. |
 | DW-D31 | DW-8i-3 (a finding of DW-8i-2): the SEO property brief's grounding and social's brand drafts search the knowledge store with a scope, but every internal ERP chunk carries an empty ACL and so matches any scope; a meeting transcript or a contract file could ground an AI draft | **Owner (2026-10-15): own corpus only.** Each lookup keeps only the hits of the corpus it searches: the property's grounding chunks (`search-property:<id>:grounding`) or the client's brand corpus (`social-brand:<company>:<client>`). ERP records and the public tier never reach those drafts (BFF §46.10) |
 | DW-D36 | DW-7h: the UniFi controller is shared with a private house, so no API key can be issued; and most staff addresses are Google Workspace aliases on an HOD account | **Owner (2026-10-15):** build the ERP side now, and the Raspberry Pi collector later. The ERP side means who is connected, sign-ins, alerts, ending a session, blocking a login and blocking an address (BFF §52). The four sample Network tabs are reworked to show it. Control is ERP-side. Sign-in stays email and password. On the owner's question about aliases, the DW-7 session proposed, and the owner then said to proceed: recovery is by IT with a temporary password, and email reset is off, because a reset email to an alias reaches the alias owner; no personal content goes by email to an alias. | DW-7h, DW-7i-4 |
+| DW-D37 | DW-7i-1: one n8n serves the whole group and its workflows carry no company, so who may see its failures? | **Owner (2026-10-16): "me (superadmin) and Anthony (Boss), PM, GM."** As a rule (BFF §52.12, PERMISSION §42a): the platform operator, plus in a company with automation on, its `owner`, the seated lead of its Office of the GM, and the holder of its Project Manager seat (vacant today). IT staff are not in the list. | DW-7i-1 |
 
 ---
 
@@ -1673,6 +1675,7 @@ These are built in code but give no real data until someone outside engineering 
 
 ## Decision log
 
+- **2026-10-16 (owner, during the build):** DW-D37: the failing workflows of the shared n8n are for the superadmin, the owner (Anthony), the PM and the GM (§11.4, BFF §52.12), for DW-7i-1.
 - **2026-10-15 (owner, during the build):** DW-D36: no UniFi key, so IT security moves to the ERP side now and the office collector waits for a Raspberry Pi; staff addresses are mostly Workspace aliases, so recovery is by IT and email reset is off (§11.4, BFF §52), for DW-7h and DW-7i-4.
 - **2026-10-15 (owner, during the build):** DW-D31: the SEO property brief's and social's brand-draft knowledge lookups keep only their own corpus, never ERP records (§11.4, BFF §46.10), for DW-8i-3.
 - **2026-10-15 (owner, during the build):** DW-D26 (the assistant's and the hub's knowledge lookups go through DW-8i's per-record filter), DW-D28 (calendar busy times, times only) and DW-D29 (time entries read by tier, as DW-D19), all §11.4, for DW-8i-2, DW-8g and DW-8n's finding.

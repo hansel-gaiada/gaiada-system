@@ -9520,6 +9520,38 @@ An always-on Raspberry Pi in the office sweeps the client network (ARP, names, v
 - a new source, `'collector'`;
 - a stable key, the MAC address, accepting that about 60% of phones randomize theirs per network.
 
+### 52.12 Failing workflows (DW-7i-1, DW-D37, 2026-10-16) — **STATUS: PLANNED (contract written; building)**
+
+**Who sees them.** One n8n serves the whole group, and its workflows carry no company. DW-D37 (owner, 2026-10-16) names who may see its failures: "me (superadmin) and Anthony (Boss), PM, GM". As a rule, with no names hard-wired:
+- a **platform operator** (`platform_admin`), anywhere;
+- or, in a company where the `automation-console` module is enabled, any one of:
+  - its **`owner`** (the boss holds `owner` on every company he owns, D-8);
+  - the **lead of its Office of the GM** (the person seated as lead of the company's GM unit);
+  - the holder of a **"Project Manager" seat** in its organisation. That seat is vacant on the live roster today, so it matches nobody until someone is placed in it.
+
+Nobody else may see failures, IT staff included. Whether the module is on is read with `isModuleEnabled`. The seat checks read the positions machinery (`positions` and seat holders), never job titles typed on a user.
+
+**`GET /api/:t/automation/failures?window=24h|7d`** (default `24h`; anything else 400 `field: "window"`):
+- **403** `{error, reason: "not_in_audience"}` for anyone outside the rule above;
+- **404** when the company does not have `automation-console` enabled (the platform operator is answered for any company);
+- **200** `{asOf, window, state, reason?, failed: FailedRun[], count}`:
+  - `state: "on"`: n8n answered. `failed` lists the runs with `status: "error"` whose `startedAt` falls inside the window, newest first, at most 200. `count` is the total in the window, which may exceed 200.
+  - `state: "not_configured"`: the automation service has no URL or no key. `failed` is `[]` and `count` is 0; never shown as "no failures".
+  - `state: "unavailable"`: n8n did not answer or answered with something other than a list. It carries `reason`. `failed` is `[]` and `count` is 0; never shown as "no failures".
+- **`FailedRun`:** `{executionId, workflowId, workflowName, startedAt, stoppedAt | null, mode | null}`. `workflowName` falls back to the id when the workflows list cannot be read.
+- n8n's public API is asked for `GET /api/v1/executions?status=error&limit=250`, paging with its cursor until the window is covered or 5 pages have been read. When the cap cuts the window short, `reason` says so and `count` is "at least".
+
+**The tile.** "Failing workflows" (source `automation-failures`) appears on IT's Pulse and on the Office of the GM's Pulse.
+- It counts `count` in `24h` and links to `/workflows/failures`.
+- A 403 HIDES the tile, because it is not meant for everyone; it does not say "No access".
+- `not_configured` and `unavailable` read "Unavailable" with the reason, never 0.
+
+**The page `/workflows/failures`.** It lists the failed runs (workflow, started, stopped, mode) for `24h` or `7d`.
+- People outside the rule get a sentence saying the page is for the owner, the GM, the PM and the platform operator.
+- It links each run's workflow to the n8n editor when `automationPublicUrl` is set.
+
+**Not changed.** `GET /api/admin/automation/executions` (the IT workflows console) keeps its own access and behaviour.
+
 ## 53. The client grain in reports (PV7-01, 2026-10-15) — `platform-nest/src/modules/reports/` — **STATUS: BUILT, PROTOTYPED (backend: the DB and HTTP suite report-client-grain.db.test.ts and the Cerbos matrix reports-cerbos.test.ts are written for the Linux CI gate; no page yet, PV7-05)**
 
 **Why.**
