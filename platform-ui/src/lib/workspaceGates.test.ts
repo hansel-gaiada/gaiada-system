@@ -55,7 +55,7 @@ describe("a plain member's reach (nav.test 'member sees ...')", () => {
     for (const href of ["/me", "/me/inbox", "/me/leave", "/me/loans", "/me/learning"]) expect(hrefs, href).toContain(href);
   });
 
-  it("has Project Management twice-reachable: the Company Projects row (/project-management) and the cross-project scope (/pm), ungated", () => {
+  it("has Project Management (the Company Projects row) and the cross-project scope (/pm), both ungated", () => {
     expect(model.company.find((r) => r.key === "projects")!.tabs.map((t) => t.href).slice(0, 2)).toEqual(["/project-management", "/pm"]);
     expect(hrefs).toContain("/calendar");
   });
@@ -333,7 +333,7 @@ describe("Platform and Group areas (nav.test 'Platform and Group areas')", () =>
   });
 });
 
-// Departments (nav.test 'person nodes') are exercised with person leaves elsewhere; this keeps the helper honest.
+// A person placed in a department leads their own list (the fixture helpers stay honest).
 describe("fixture sanity", () => {
   it("a placed person is offered their own department first", () => {
     const m = { ...base, roles: [grant("member", "c1")], userId: "u-9" };

@@ -104,7 +104,7 @@ function ws(id: string, label: string, over: Partial<ShellWorkspace["rows"]> = {
   };
 }
 const synthetic = (workspaces: ShellWorkspace[], company: ConcreteRow[] = [], admin: ConcreteRow[] = []): ShellModel =>
-  ({ workspaces, company, admin, home: { kind: "company" } as ShellModel["home"], homeLabel: "Company", homeHref: null });
+  ({ workspaces, company, admin, companyTop: [], adminTop: [], home: { kind: "company" } as ShellModel["home"], homeLabel: "Company", homeHref: null });
 
 describe("buildWorkspaceEntries: labels and sections", () => {
   const work = [

@@ -300,3 +300,37 @@ describe("buildShellModel: the Notices tab on the Overview row (DW-10a-2, BFF se
     for (const ws of viewer.workspaces.filter((w) => w.deptId)) expect(ws.rows.top[0].tabs.map((t) => t.label), ws.id).toContain("Notices");
   });
 });
+
+// DW-9d-2 (DW-D38): the floating assistant button is gone, so every area of the shell offers the AI Assistant row: a workspace in its
+// top block, and the Company and Admin areas (which draw no workspace) through `companyTop` and `adminTop`.
+describe("the AI Assistant row in every area", () => {
+  const employee = model(me([member()]), "co-a", agencyTree({ web: ["u-1"] }));
+  const admin = model(me([member(), { role: "company_admin", scopeType: "company", scopeId: "co-a" }]), "co-a", agencyTree());
+
+  it("is offered once by every workspace, in its top block", () => {
+    for (const mod of [employee, admin]) {
+      for (const ws of mod.workspaces) expect(allRows(ws).filter((r) => r.key === "assistant"), ws.id).toHaveLength(1);
+    }
+  });
+
+  it("leads the Company area's menu", () => {
+    expect(employee.companyTop.map((r) => [r.key, r.tabs.map((t) => t.href)])).toEqual([["assistant", ["/assistant"]]]);
+  });
+
+  it("leads the Admin area's menu, for someone who has one", () => {
+    expect(admin.admin.length).toBeGreaterThan(0);
+    expect(admin.adminTop.map((r) => [r.key, r.tabs.map((t) => t.href)])).toEqual([["assistant", ["/assistant"]]]);
+  });
+
+  it("is not one of the area's own rows, so the footer links and the home fallback keep reading the first real row", () => {
+    expect(keys(employee.company)).not.toContain("assistant");
+    expect(keys(admin.admin)).not.toContain("assistant");
+    expect(employee.company[0].tabs[0].href).not.toBe("/assistant");
+  });
+
+  it("is offered to a person whose home is the Company area (no workspace of their own)", () => {
+    const unplaced = model(me([member()]), "co-a", agencyTree());
+    expect(unplaced.home).toEqual({ kind: "company" });
+    expect(keys(unplaced.companyTop)).toEqual(["assistant"]);
+  });
+});

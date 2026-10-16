@@ -37,7 +37,7 @@ export function WorkspaceSidebar({ tenantId, company, companies, newItems, brand
   const shell = useWorkspaceShell();
   // Only the workspace shell draws this, inside its provider. Outside it there is nothing to draw.
   if (!shell) return null;
-  const { model, view, rows, active, pathname } = shell;
+  const { model, view, active, pathname } = shell;
 
   const visiting = view.kind === "workspace" && !view.ws.mine;
   const atHome = view.kind === "workspace" ? view.ws.home : view.kind === "company" && model.home.kind === "company";
@@ -77,7 +77,11 @@ export function WorkspaceSidebar({ tenantId, company, companies, newItems, brand
             <RowGroup label="You" rows={view.ws.rows.you} active={active} pathname={pathname} tenantId={tenantId} />
           </>
         ) : (
-          <RowGroup label={title} rows={rows} active={active} pathname={pathname} tenantId={tenantId} />
+          <>
+            {/* The AI Assistant row leads the Company and Admin menus too (it is in a workspace's top block), so the assistant is one click away in every area. */}
+            <RowGroup rows={view.kind === "company" ? model.companyTop : model.adminTop} active={active} pathname={pathname} tenantId={tenantId} />
+            <RowGroup label={title} rows={view.kind === "company" ? model.company : model.admin} active={active} pathname={pathname} tenantId={tenantId} />
+          </>
         )}
       </nav>
 

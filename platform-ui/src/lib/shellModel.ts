@@ -8,7 +8,7 @@
 //
 // Pure and client-safe, like the registry it reads. Gates mirror the server; they are not security.
 import type { Me } from "@/lib/platform";
-import { ADMIN_ROWS, COMPANY_ROWS, hrefFor, isPlanned, sidebarRows, type WorkspaceKind } from "@/lib/workspaces";
+import { ADMIN_ROWS, ASSISTANT_ROW, COMPANY_ROWS, hrefFor, isPlanned, sidebarRows, type WorkspaceKind } from "@/lib/workspaces";
 import { concreteRows, gateAllows, homeArea, withheldTabPaths, workspaceKeysOf, type ConcreteRow, type GateContext, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
 import type { Area } from "@/lib/areas";
 
@@ -44,6 +44,12 @@ export interface ShellModel {
   workspaces: ShellWorkspace[];
   company: ConcreteRow[];
   admin: ConcreteRow[];
+  /** The AI Assistant row that leads the Company area's menu, above its own rows. A workspace's menu has it in its `top` block; the
+   *  Company and Admin areas draw no workspace, and with the floating button gone (DW-D38) they would offer no assistant at all.
+   *  Kept apart from `company` so that list stays the area's own rows (the footer link and the home fallback read its first tab). */
+  companyTop: ConcreteRow[];
+  /** The same row for the Admin area. */
+  adminTop: ConcreteRow[];
   home: Area;
   homeLabel: string;
   /** Where "Back to <home>" goes: the home workspace's Overview, or the first Company row. */
@@ -104,6 +110,8 @@ export function buildShellModel(input: {
   const flat = { me, tenantId, unitPath: [] as string[], deptId: null, workspaces: departments, approvals };
   const company = concreteRows(COMPANY_ROWS, flat);
   const admin = concreteRows(ADMIN_ROWS, flat);
+  const companyTop = concreteRows([ASSISTANT_ROW], flat);
+  const adminTop = concreteRows([ASSISTANT_ROW], flat);
 
   const home = homeArea(workspaces.home);
   const homeWs = out.find((w) => w.home) ?? null;
@@ -111,6 +119,8 @@ export function buildShellModel(input: {
     workspaces: out,
     company,
     admin,
+    companyTop,
+    adminTop,
     home,
     homeLabel: homeWs?.label ?? "Company",
     homeHref: homeWs ? overviewHref(homeWs) : (company[0]?.tabs[0]?.href ?? null),

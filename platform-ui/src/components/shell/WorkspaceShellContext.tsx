@@ -67,7 +67,7 @@ export interface WorkspaceShellValue {
   model: ShellModel;
   pathname: string;
   view: ShellView;
-  /** The rows the view draws: a workspace's, Company's or Admin's. */
+  /** The rows the view draws: a workspace's, or Company's or Admin's with the AI Assistant row first. */
   rows: ConcreteRow[];
   /** The row and tab holding this page (the deepest tab prefix), or null when no row does. */
   active: { rowKey: string; tabKey: string } | null;
@@ -109,7 +109,8 @@ export function WorkspaceShellProvider({ model, children }: { model: ShellModel;
 
   // Cheap (a few dozen rows), so no memo: it follows the pathname and the last area on every render.
   const view = viewFor(model, area);
-  const rows = view.kind === "workspace" ? allRows(view.ws) : view.kind === "company" ? model.company : model.admin;
+  // Company and Admin lead with the AI Assistant row (`companyTop`, `adminTop`), as a workspace's top block does.
+  const rows = view.kind === "workspace" ? allRows(view.ws) : view.kind === "company" ? [...model.companyTop, ...model.company] : [...model.adminTop, ...model.admin];
   const active = activeLocation(rows, pathname);
   const tabPaths = new Set(rows.flatMap((r) => r.tabs.map((t) => pathOf(t.href))));
   const withheld = new Set(view.kind === "workspace" ? view.ws.withheld : []);

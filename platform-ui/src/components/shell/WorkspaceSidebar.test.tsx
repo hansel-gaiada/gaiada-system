@@ -101,6 +101,30 @@ describe("WorkspaceSidebar", () => {
     });
   });
 
+  // DW-9d-2: with the floating button gone, the Company and Admin menus carry the same row, so no area is without the assistant.
+  describe.each([["Company", "/organization"], ["Admin", "/admin"]])("the AI Assistant row in the %s area", (_area, path) => {
+    it("leads the menu, opens the drawer over the page and takes the one id", () => {
+      renderAt(path);
+      // The first menu row (the "Back to <home>" link above the rows is context, not a row).
+      const links = within(menu()).getAllByRole("link").filter((l) => !/^Back to/.test(l.textContent ?? ""));
+      expect(links[0]).toHaveTextContent("AI Assistant");
+      expect(links[0]).toHaveAttribute("href", `/assistant?from=${encodeURIComponent(path)}`);
+      expect(links[0]).toHaveAttribute("id", "asst-fab-trigger");
+      expect(links[0]).not.toHaveAttribute("aria-current");
+      expect(document.querySelectorAll("#asst-fab-trigger")).toHaveLength(1);
+      expect(linkCalls.find((p) => p.id === "asst-fab-trigger")?.prefetch).toBe(false);
+    });
+
+    it("is the active row on /assistant itself, linking to the page, and still the only one with the id", () => {
+      // /assistant belongs to no area of its own: the last area (set by the page before) decides which menu draws it.
+      window.sessionStorage.setItem("gaiada.shell.lastArea", JSON.stringify({ kind: _area.toLowerCase() }));
+      renderAt("/assistant");
+      expect(document.querySelectorAll("#asst-fab-trigger")).toHaveLength(1);
+      expect(within(menu()).getByRole("link", { name: "AI Assistant" })).toHaveAttribute("aria-current", "page");
+      expect(within(menu()).getByRole("link", { name: "AI Assistant" })).toHaveAttribute("href", "/assistant");
+    });
+  });
+
   it("lists the workspace's own create action first in + New, then the existing items (DW-2f)", () => {
     renderAt("/departments/d-web/prd");
     fireEvent.click(screen.getByRole("button", { name: "New" }));
