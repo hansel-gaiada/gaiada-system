@@ -21,7 +21,7 @@ export async function setAssistantRailCollapsedAction(collapsed: boolean): Promi
   await writePrefs({ ...current, assistantRailCollapsed: collapsed });
 }
 
-/** Same shape as `setAssistantRailCollapsedAction` above — the TopBar theme toggle
+/** Same shape as `setAssistantRailCollapsedAction` above — the theme toggle
  *  (`components/shell/ThemeToggle.tsx`) has already stamped `data-theme` on `<html>` itself before
  *  calling this, so the visible change never waits on a round trip; this only persists the choice
  *  for the next request (middleware-free routes like `/login` read `<html data-theme>` straight

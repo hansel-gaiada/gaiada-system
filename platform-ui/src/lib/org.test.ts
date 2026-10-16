@@ -7,7 +7,7 @@ describe("defaultStructure", () => {
     expect(s.root.kind).toBe("company");
     // GM is LAST here on purpose: these ids are positional (`dept-${i + 1}`), so inserting it at the
     // front would renumber Web Dev off `dept-1` and SEO off `dept-3` — the latter is hard-wired into
-    // the demo login mapping. The sidebar hoists GM for reading (`shell/nav.ts`); identity stays put.
+    // the demo login mapping. The switcher hoists GM for reading (`lib/workspaceAccess.ts`); identity stays put.
     expect(s.root.children.map((c) => c.name)).toEqual(["Web Dev", "Creatives", "SEO", "Social Media", "GM", "HR", "Finance", "IT"]);
     expect(s.root.children.every((c) => c.kind === "department")).toBe(true);
   });

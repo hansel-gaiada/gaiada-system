@@ -33,7 +33,7 @@ export async function WorkspaceShellSidebar({ me, tenantId }: { me: Me; tenantId
       <WorkspaceSidebar
         tenantId={tenantId}
         company={current ? { id: current.id, name: current.name, badge: servedCompanyBadge(me, current.id) } : null}
-        // The same list and the same rule as CompanyContext: a switch only for more than one company.
+        // The same list and the same rule as the old company switcher: a switch only for more than one company.
         companies={canSwitchCompany(me) ? companies.map((c) => ({ id: c.id, name: c.name, badge: servedCompanyBadge(me, c.id) })) : []}
         newItems={newMenuItems(me, tenantId)}
         brand={brand}

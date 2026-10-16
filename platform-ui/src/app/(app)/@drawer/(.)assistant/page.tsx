@@ -7,7 +7,7 @@ import { AssistantDrawer } from "@/components/assistant/AssistantDrawer";
 import { AssistantWorkspace } from "@/components/assistant/AssistantWorkspace";
 
 // ASST-22 — the intercepted `/assistant` route: a client-side navigation to `/assistant` FROM ANY
-// page under `(app)` (the FAB, `components/shell/AssistantFab.tsx`) renders the SAME workspace in a
+// page under `(app)` (the sidebar's AI Assistant row, `components/shell/WorkspaceSidebar.tsx`) renders the SAME workspace in a
 // slide-over instead of replacing the page — exactly the pattern
 // `@drawer/(.)tasks/[taskId]/page.tsx` already established for the task detail drawer (read that
 // file's header first). A hard load of `/assistant` — a shared link, a refresh, a new tab — still

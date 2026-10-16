@@ -74,7 +74,7 @@ const AGENCY_DEPARTMENTS: { name: string; divisions: { name: string; roles?: Org
   // would renumber every other department: Web Dev would stop being `dept-1`, and `dept-3` is
   // hard-wired into the demo login mapping (the `seo-staff` tier is meant to land on SEO) and into
   // `demoReports.ts`'s own department catalog. The sidebar hoists GM to the top for READING
-  // (`shell/nav.ts`) — ordering there is presentation, ids here are identity, and the two must not
+  // (the workspace switcher) — ordering there is presentation, ids here are identity, and the two must not
   // be conflated.
   { name: "GM", divisions: [], people: [person("d5-p1", "Edward", "u-gm")] },
   // HR, Finance and IT (DW-7d): the functional departments are org nodes in every company's tree, so the

@@ -1,6 +1,6 @@
 // What the staff menu, the org tree and the toolkits need to know about the ACTIVE company and about
 // who the person is relative to the group's root (PV1-04). Pure and client-safe: no server-only
-// imports, so `nav.ts`, the sidebar and the server pages can all share it.
+// imports, so the workspace registry, the sidebar and the server pages can all share it.
 //
 // None of this is a security boundary. The server gates every route; these helpers only decide what
 // is worth showing.

@@ -14,10 +14,10 @@ import "./assistant-drawer.css";
 // ── FOCUS MANAGEMENT (the ticket's own bar: "a drawer that traps or loses focus is unusable with a
 //    keyboard") ──────────────────────────────────────────────────────────────────────────────────
 // On open: focus moves into the panel (not just "somewhere" — `panel.current.focus()` on the dialog
-// container itself, same as TaskDrawer). On close: focus returns to the FAB that opened it. TaskDrawer
+// container itself, same as TaskDrawer). On close: focus returns to the trigger that opened it. TaskDrawer
 // doesn't need this second half explicitly — its trigger is one of many in-page links, and landing
 // back on the underlying page reads fine either way. The assistant's trigger is a SINGLE persistent
-// FAB (`AssistantFab.tsx`, mounted once in `Shell`, `id="asst-fab-trigger"`) that exists identically
+// sidebar row (`WorkspaceSidebar.tsx`, `id="asst-fab-trigger"`) that exists identically
 // on every page, so explicitly refocusing it by that stable id — rather than trusting whatever the
 // browser's default post-navigation focus happens to be — is both correct and cheap.
 //

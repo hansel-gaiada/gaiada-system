@@ -15,7 +15,7 @@
 // - Nothing loses its home. Every tab of today's toolkits and of the HR, Finance and IT consoles has a
 //   place here (pinned by the test), even where the plan's table does not name it (HR's and Finance's
 //   Settings).
-// - Gates are DATA (`Gate`), copied from the surface each row comes from (nav.ts, the HR layout, the
+// - Gates are DATA (`Gate`), copied from the surface each row comes from (the retired classic nav, the HR layout, the
 //   toolkit's `requires`). They mirror the server; Cerbos and RLS stay the authority. The program's one
 //   access change (DW-D15) arrives only through `unitCap`, answered by rbac.ts's `canInUnit`.
 // - Keyed by (pack, department slug), never by a company (PV-D13). The bespoke workspaces are the
@@ -39,7 +39,7 @@ export type Gate =
   | { kind: "cap"; cap: Capability }
   /** Company `can()`, or an `org_unit_lead` grant on the workspace's unit or an ancestor (`canInUnit`, DW-D15). */
   | { kind: "unitCap"; cap: Capability }
-  /** nav.ts's agency-row rule: the active company's pack lists the row, and its module (if it has one) is on. */
+  /** the retired classic nav's agency-row rule: the active company's pack lists the row, and its module (if it has one) is on. */
   | { kind: "agencyRow"; row: AgencyRowKey }
   /** The active company's pack. For cross-department work only the agency pack has (campaigns, requests). */
   | { kind: "pack"; pack: PackKey }
@@ -660,7 +660,7 @@ const HR_ON: Gate = { kind: "module", module: "hr" };
 // read and the HR people file (`employee` read), `hr.recruitment.view` is `hr_recruitment` read. What a plain member may read
 // stays ungated (Leave and Attendance, their own cases, Reviews and Settings read `hr_policy`, open to every member).
 const HR_VIEW: Gate = { kind: "cap", cap: "hr.view" };
-// The directory page's own gate (nav.ts's Organization gate, as `DIRECTORY` below), repeated here: that constant is declared later.
+// The directory page's own gate (the retired classic nav's Organization gate, as `DIRECTORY` below), repeated here: that constant is declared later.
 const HR_DIRECTORY: Gate = { kind: "any", gates: [{ kind: "cap", cap: "people.directory" }, { kind: "elevated" }] };
 
 const HR: Workspace = {
@@ -775,7 +775,7 @@ const FINANCE: Workspace = {
       key: "receivables", label: "Receivables", icon: "wallet",
       tabs: [
         { key: "receivables", label: "Receivables", href: "/finance/receivables", icon: "wallet", gate: FIN_AR },
-        // nav.ts's Business › Invoices gate, unchanged.
+        // the retired classic nav's Business › Invoices gate, unchanged.
         { key: "invoices", label: "Invoices", href: "/invoices", icon: "wallet",
           gate: { kind: "all", gates: [{ kind: "agencyRow", row: "invoices" }, { kind: "cap", cap: "company.manage" }] } },
       ],
@@ -1019,7 +1019,7 @@ export const PERFORMANCE_ROWS: readonly WorkspaceRow[] = [
     key: "appraisals", label: "Appraisals", icon: "award",
     tabs: [
       { key: "mine", label: "Mine", href: "/appraisals/mine", icon: "check" },
-      // nav.ts's Team Appraisals gate (`appraisal.score` or `appraisal.read`), plus the head of the unit.
+      // the retired classic nav's Team Appraisals gate (`appraisal.score` or `appraisal.read`), plus the head of the unit.
       { key: "team", label: "Team", href: "/appraisals", icon: "check",
         gate: { kind: "any", gates: [{ kind: "cap", cap: "appraisal.score" }, { kind: "unitCap", cap: "appraisal.read" }] } },
       // DW-4e-2: the department's KPI tiles, condition and targets screen, opened for THIS department (BFF §40).
@@ -1084,7 +1084,7 @@ export const YOU_ROWS: readonly WorkspaceRow[] = [
   },
 ];
 
-// nav.ts's Organization gate for Positions and Access, reused for People.
+// the retired classic nav's Organization gate for Positions and Access, reused for People.
 const DIRECTORY: Gate = { kind: "any", gates: [{ kind: "cap", cap: "people.directory" }, { kind: "elevated" }] };
 
 /** The Company area (plan §9.2): one door to what people need only occasionally. Each row keeps its
@@ -1126,7 +1126,7 @@ export const COMPANY_ROWS: readonly WorkspaceRow[] = [
   { key: "office", label: "The Office", icon: "pulse", tabs: [{ key: "office", label: "The Office", href: "/office", icon: "pulse" }] },
 ];
 
-/** The Admin area (plan §9.1): Settings, Group and Platform, each with its gate unchanged from nav.ts. */
+/** The Admin area (plan §9.1): Settings, Group and Platform, each with its gate unchanged from the retired classic nav. */
 export const ADMIN_ROWS: readonly WorkspaceRow[] = [
   { key: "settings", label: "Settings", icon: "settings", gate: { kind: "cap", cap: "admin.access" }, tabs: [{ key: "settings", label: "Settings", href: "/admin", icon: "settings" }] },
   {

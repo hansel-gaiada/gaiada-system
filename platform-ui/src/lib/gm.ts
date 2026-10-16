@@ -16,7 +16,7 @@
 // would create a second source of truth for one boundary, and `lib/rbac.ts` is a MIRROR of Cerbos,
 // never a second opinion — so the mirror must key on the same fact the server will.
 //
-// ⚠ The design doc's first draft said reuse `rollups.view` (it gates `/rollups` and, in `nav.ts`,
+// ⚠ The design doc's first draft said reuse `rollups.view` (it gates `/rollups` and, in the retired classic nav,
 // the Company Report row). MEASURED against `ROLE_CAPS`, that is wrong: `rollups.view` appears in NO
 // role bundle except `platform_admin`'s wholesale `ALL`, while `company_admin` — the tenant's own
 // administrator, who holds the whole `EXEC_ONLY_REPORTS` tier — does not have it. Gating on it would

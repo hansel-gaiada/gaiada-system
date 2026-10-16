@@ -17,8 +17,8 @@ import "./command-palette.css";
 // handler) — see that file's header for why this needs no new backend contract.
 //
 // Opens two ways, both funnelled through the same state here: the global Cmd/Ctrl-K listener
-// (mounted once, same scope as AssistantFab per §4.3), and a `gaiada:palette:open` DOM event any
-// trigger button elsewhere in the shell (TopBar's visible affordance) can dispatch without needing
+// (mounted once, once per shell, §4.3), and a `gaiada:palette:open` DOM event any
+// trigger button elsewhere in the shell (the top bar's search field) can dispatch without needing
 // React context across the server/client boundary — the same "attribute/event on a shared ancestor"
 // idiom NavToggle already uses for the mobile drawer.
 //

@@ -18,8 +18,6 @@ export function useRailTooltip(label: string, opts?: { always?: boolean }) {
       if (document.documentElement.dataset.sidebar !== "collapsed") return;
       if (!window.matchMedia(RAIL).matches) return;
     }
-    // Rows inside a flyout already show their label.
-    if (e.currentTarget.closest(".erp-railmenu")) return;
     const r = e.currentTarget.getBoundingClientRect();
     setPos({ top: r.top + r.height / 2, left: r.right + 8 });
   }, [opts?.always]);

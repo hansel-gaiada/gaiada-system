@@ -135,7 +135,7 @@
 @keyframes ov-slide-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
 @keyframes ov-slide-in-left { from { transform: translateX(-100%); } to { transform: translateX(0); } }
 
-/* Menu / popover — trigger + positioned panel, unifying UserMenu/NewMenu/RailCategory's three
+/* Menu / popover — trigger + positioned panel, unifying UserMenu/NewMenu's
    independent outside-click + Escape + role="menu" implementations (§6, "Menu unify, NEW"). */
 .ov-menu { position: relative; display: inline-block; }
 .ov-menu__panel {

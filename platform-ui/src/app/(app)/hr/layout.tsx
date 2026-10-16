@@ -26,8 +26,8 @@ export default async function HRConsoleLayout({ children }: { children: React.Re
   //   them the truth, which is that the salary book is a tier above their own.
   //
   // Everything else is ungated because its backend read is genuinely open to the HR reader tier.
-  // Note the pre-existing ⚠ recorded in the blueprint: the HR NAV ENTRY itself is still ungated in
-  // `components/shell/nav.ts`, so every staff member can open this console. That predates this
+  // Note the pre-existing ⚠ recorded in the blueprint: the HR workspace itself is still listed ungated
+  // (the registry, `lib/workspaces.ts`), so every staff member can open this console. That predates this
   // change and remains a product call, not fixed here — but the two money tabs below do not widen it.
   const canPayroll = can(me, "hr.payroll.view", tenant);
   const tabs: SectionTab[] = [

@@ -88,7 +88,7 @@ async function FinanceOverviewBody({ userId, tenant, framed }: { userId: string;
   const keeps = (section: string) => keepsSection("finance", section, { framed });
   const periods = await listPeriods(userId, tenant);
 
-  // Department rows in the sidebar are deliberately ungated (see components/shell/nav.ts) — the
+  // Department rows in the sidebar are deliberately ungated (see lib/workspaces.ts, DEPARTMENT rows) — the
   // console explains itself instead. So this page must tell the two "nothing here" cases apart,
   // because they need opposite responses from the reader.
   if (periods == null) {
@@ -284,8 +284,8 @@ async function FinanceOverviewBody({ userId, tenant, framed }: { userId: string;
         )}
       </Card>}
 
-      {/* Configuration lives BEHIND the console rather than in the sidebar. nav.ts renders exactly
-          one Finance row on purpose (an org structure often contains a department of the same name,
+      {/* Configuration lives BEHIND the console rather than in the sidebar. the sidebar offers exactly
+          one Finance workspace on purpose (an org structure often contains a department of the same name,
           and two identical labels pointing at different screens is the kind of thing a user learns
           to distrust). Adding two more top-level rows would fight that; the console is the entry. */}
       {keeps("configuration") && <Card

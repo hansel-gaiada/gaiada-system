@@ -12,7 +12,7 @@
 // Other placements, led units and functional roles add workspaces to the switcher. Every department of
 // the active company is listed too, ungated, because hiding one would lie about the org chart (GM-01).
 //
-// Nothing here is a security boundary. `gateAllows` mirrors nav.ts and the consoles; the server
+// Nothing here is a security boundary. `gateAllows` mirrors the retired classic nav and the consoles; the server
 // refuses everything it must, and every read is narrowed there.
 import type { Me } from "@/lib/platform";
 import { can, canInUnit, isElevated, isLeadOf, leadUnits, unitPathOf, type Capability } from "@/lib/rbac";
@@ -85,7 +85,7 @@ export function gateAllows(gate: Gate | undefined, ctx: GateContext): boolean {
     case "unitCap":
       return canInUnit(ctx.me, gate.cap, ctx.tenantId, ctx.unitPath);
     case "agencyRow": {
-      // nav.ts's `agencyRow`: listed by the company's pack, and its module (if any) on.
+      // the retired classic nav's `agencyRow`: listed by the company's pack, and its module (if any) on.
       if (!packFor(company?.vertical).agencyRows.includes(gate.row)) return false;
       const mod = ROW_MODULE[gate.row];
       return !mod || moduleOn(company, mod);
@@ -188,7 +188,7 @@ export function resolveMyWorkspaces(input: { me: Me; tenantId: string | null; ro
     return node ? refFor(node) : { workspace: workspaceBySlug(slug)!, deptId: null, unitPath: [], lead: false };
   };
 
-  // Every department, GM first (nav.ts's GM-01/OQ-4 order), then functional ones the tree lacks.
+  // Every department, GM first (the retired classic nav's GM-01/OQ-4 order), then functional ones the tree lacks.
   const isGm = (d: OrgTreeNode) => workspaceFor(vertical, d.name).kind === "office";
   const all: WorkspaceRef[] = [...depts.filter(isGm), ...depts.filter((d) => !isGm(d))].map(refFor);
   for (const slug of ["hr", "it", "finance"]) {

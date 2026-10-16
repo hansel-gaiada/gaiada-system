@@ -8,11 +8,11 @@ export interface MenuRenderState {
   close: () => void;
 }
 
-// Generic trigger + positioned panel (Phase 4, NEW/unify — §6): `UserMenu`, `NewMenu` and
-// `RailCategory`'s flyout are three independent outside-click + Escape + role="menu"
+// Generic trigger + positioned panel (Phase 4, NEW/unify — §6): `UserMenu` and
+// `NewMenu` are two independent outside-click + Escape + role="menu"
 // implementations in `components/shell/` (out of this pass's reach — shell is frozen through
 // Phase 2/3). This is the ONE shared primitive for every new call site: same
-// outside-click-or-Escape-closes contract those three already use, expressed once.
+// outside-click-or-Escape-closes contract those two already use, expressed once.
 export function Menu({
   trigger,
   children,

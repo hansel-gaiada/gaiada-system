@@ -347,7 +347,7 @@
 
   /* Elevation. Four named tiers + scrim. `--elev-overlay` keeps its exact
      legacy name (not renamed to --elev-3) so the shipped consumers
-     (.lux-toast, .erp-usermenu__pop, .erp-railmenu, .erp-new__menu) need
+     (.lux-toast, .erp-usermenu__pop, .erp-new__menu) need
      no edit — only the surface colour under them changes. Light is
      shadow-led (warm-tinted off --n-1, not pure black, to match the ramp's
      hue); dark is grounding-only here because dark elevation's PRIMARY

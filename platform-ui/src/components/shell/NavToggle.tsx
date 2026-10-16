@@ -7,10 +7,10 @@ import { Icon } from "./icons";
 // grid and becomes an off-canvas panel; this button is the only way back to it.
 //
 // The open flag lives on <html> as data-nav rather than in a context, because
-// the button sits in TopBar while the panel it controls is Sidebar — two
+// the button sits in the top bar while the panel it controls is the sidebar — two
 // siblings under the shell grid. An attribute on the root lets CSS reach both
 // without lifting state into Shell and turning the whole shell into a client
-// component (Sidebar and TopBar are async server components that fetch).
+// component (the sidebar and the top bar are async server components that fetch).
 export function NavToggle() {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();

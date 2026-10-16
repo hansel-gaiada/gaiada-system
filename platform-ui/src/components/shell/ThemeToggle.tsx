@@ -5,7 +5,7 @@ import { setThemeAction } from "@/lib/prefsActions";
 import { Icon } from "./icons";
 import "./theme-toggle.css";
 
-// Discoverable Auto/Light/Dark control in the TopBar — the ONLY prior way to change theme was a
+// Discoverable Auto/Light/Dark control in the avatar menu — the ONLY prior way to change theme was a
 // <select> buried on /account, and the default ("auto") silently renders as light on a light-mode
 // machine. Deliberately three states, not a two-state light/dark switch: "auto" (follow the OS)
 // has to stay reachable, it just needs a louder home than Account.

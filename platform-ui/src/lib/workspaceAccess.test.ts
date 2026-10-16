@@ -7,15 +7,15 @@ import { AGENCY, HOTEL, ROOT, agencyTree, lead, me, member, node, person } from 
 
 const ctx = (m: Me, tenantId: string, unitPath: string[] = []) => ({ me: m, tenantId, unitPath });
 
-// DW-9d: these were parity tests against the classic `navFor`. It is gone (DW-D38), so each case now states the answer nav.ts gave
+// DW-9d: these were parity tests against the classic `navFor`. It is gone (DW-D38), so each case now states the answer the classic nav gave
 // (pinned from its output before removal). The wider gate cases of nav.test.ts live in `workspaceGates.test.ts`.
-describe("gateAllows keeps the gates nav.ts had (gates unchanged, plan §2.6 rule 4)", () => {
+describe("gateAllows keeps the gates the classic nav had (gates unchanged, plan §2.6 rule 4)", () => {
   const ROWS: Record<string, string> = {
     clients: "/clients", deliverables: "/deliverables", timesheets: "/timesheets", agency: "/agency",
     meetings: "/meetings", pipeline: "/pipeline", monitoring: "/monitoring",
   };
   const ALL = Object.keys(ROWS);
-  // The rows nav.ts listed for each case, pinned. `invoices` is the Invoices row (agency row AND company.manage).
+  // The rows the classic nav listed for each case, pinned. `invoices` is the Invoices row (agency row AND company.manage).
   const cases: [string, Me, string, { rows: string[]; invoices: boolean }][] = [
     ["agency company", me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]), "co-a", { rows: ALL, invoices: true }],
     ["hospitality company", me([{ role: "company_admin", scopeType: "company", scopeId: "co-h" }], [HOTEL]), "co-h", { rows: [], invoices: false }],
@@ -23,7 +23,7 @@ describe("gateAllows keeps the gates nav.ts had (gates unchanged, plan §2.6 rul
       { rows: ["clients", "deliverables", "timesheets", "meetings", "pipeline"], invoices: false }],
   ];
 
-  it.each(cases)("shows the agency rows exactly as nav.ts did: %s", (_name, m, tenant, expected) => {
+  it.each(cases)("shows the agency rows exactly as the classic nav did: %s", (_name, m, tenant, expected) => {
     for (const row of ALL) {
       expect(gateAllows({ kind: "agencyRow", row: row as never }, ctx(m, tenant)), row).toBe(expected.rows.includes(row));
     }
@@ -39,7 +39,7 @@ describe("gateAllows keeps the gates nav.ts had (gates unchanged, plan §2.6 rul
     ["the operator root's owner", me([{ role: "owner", scopeType: "company", scopeId: "co-root" }], [{ ...ROOT, isOperatorRoot: true }, AGENCY]), "co-root", { group: true, platform: true, settings: true }],
     ["platform_admin in the root", me([{ role: "platform_admin", scopeType: "global", scopeId: null }], [ROOT, AGENCY]), "co-root", { group: true, platform: true, settings: true }],
     ["a member", me([member()]), "co-a", { group: false, platform: false, settings: false }],
-  ] as [string, Me, string, { group: boolean; platform: boolean; settings: boolean }][])("shows Group, Platform and Settings as nav.ts did: %s", (_name, m, tenant, expected) => {
+  ] as [string, Me, string, { group: boolean; platform: boolean; settings: boolean }][])("shows Group, Platform and Settings as the classic nav did: %s", (_name, m, tenant, expected) => {
     expect(gateAllows({ kind: "rootGroup" }, ctx(m, tenant))).toBe(expected.group);
     expect(gateAllows({ kind: "platformOperator" }, ctx(m, tenant))).toBe(expected.platform);
     expect(gateAllows({ kind: "cap", cap: "admin.access" }, ctx(m, tenant))).toBe(expected.settings);
@@ -60,7 +60,7 @@ describe("gateAllows keeps the gates nav.ts had (gates unchanged, plan §2.6 rul
     expect(gateAllows(authoring, ctx(head, "co-a", ["d-seo", "root"]))).toBe(false);
     // Today's heads hold `manager`, which has no learning right: still not offered.
     expect(gateAllows(authoring, ctx(me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]), "co-a", ["d-web", "root"]))).toBe(false);
-    // The company-wide question nav.ts asks today stays false for the head.
+    // The company-wide question the classic nav asked stays false for the head.
     expect(gateAllows({ kind: "cap", cap: "lms.authoring" }, ctx(head, "co-a", ["d-web", "root"]))).toBe(false);
   });
 });

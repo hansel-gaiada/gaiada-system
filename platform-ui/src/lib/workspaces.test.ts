@@ -175,7 +175,7 @@ describe("gates are carried as data, unchanged (plan §2.6 rule 4)", () => {
     }
   });
 
-  it("keeps nav.ts's agency-row gate on every row it gates today", () => {
+  it("keeps the retired classic nav's agency-row gate on every row it gates today", () => {
     const AGENCY_ROWS: Record<string, string> = {
       "/clients": "clients", "/deliverables": "deliverables", "/timesheets": "timesheets", "/invoices": "invoices",
       "/agency": "agency", "/meetings": "meetings", "/pipeline": "pipeline", "/monitoring": "monitoring",
@@ -236,7 +236,7 @@ describe("gates are carried as data, unchanged (plan §2.6 rule 4)", () => {
     expect(gateMentions(team.gate, (g) => g.kind === "unitCap" && g.cap === "appraisal.read")).toBe(true);
   });
 
-  it("keeps the Admin area's gates from nav.ts", () => {
+  it("keeps the Admin area's gates from the retired classic nav", () => {
     expect(ADMIN_ROWS.map((r) => [r.key, r.gate])).toEqual([
       ["settings", { kind: "cap", cap: "admin.access" }],
       ["group", { kind: "rootGroup" }],
