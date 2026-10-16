@@ -2084,6 +2084,15 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.org_structure.read" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # DW-10c: perm_org_structure_read_calendar — the department calendar (BFF §59, PERMISSION §48). Generic global-or-company mirror.
+    - name: perm_org_structure_read_calendar
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.org_structure.read_calendar" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     - name: perm_org_structure_update
       parentRoles: ["user"]
       condition:

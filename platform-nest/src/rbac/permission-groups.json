@@ -7,8 +7,8 @@
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
       "groups": 172,
-      "grantablePermissionsInCatalog": 468,
-      "permissionsCoveredByGroups": 429,
+      "grantablePermissionsInCatalog": 469,
+      "permissionsCoveredByGroups": 430,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
       "sensitiveGroups": 115
@@ -19,13 +19,14 @@
       "key": "company_overview",
       "name": "Company Overview (read-only)",
       "domain": "core",
-      "description": "See the company profile, staff directory, user account list, org chart, and recent activity feed. View-only — no edit rights.",
+      "description": "See the company profile, staff directory, user account list, org chart, a department's calendar (holidays, colleagues' approved leave, deadlines and events), and recent activity feed. View-only — no edit rights.",
       "permissions": [
         "core.company.read",
         "core.member.read",
         "core.user.read",
         "core.activity.read",
-        "core.org_structure.read"
+        "core.org_structure.read",
+        "core.org_structure.read_calendar"
       ],
       "sensitive": false
     },

@@ -2,8 +2,9 @@
 # §8.1, row 8g) — authz for the NEW `calendar_event` resource kind (core, no module): one EVENT on a company's calendar, which
 # may carry a scheduled meeting recording. Five actions:
 #   read    — see an event. company_admin; the ORGANIZER (its own rule); every ATTENDEE (its own rule); and every member and
-#             viewer when the event is `company`-visible (its own rule). A manager reads only through those same three rules (organizer,
-#             attendee, company-visible), never every calendar.
+#             viewer when the event is `company`-visible (its own rule) or `department`-visible (DW-10c, its own rule; the handler
+#             narrows it to the unit's people). A manager reads only through those same rules (organizer, attendee, company-visible,
+#             department-visible), never every calendar.
 #   create  — schedule an event or a meeting: company_admin, manager, member. A viewer cannot. (Also the gate of busy times.)
 #   update  — edit time, title, attendees or place: company_admin, and the ORGANIZER (its own rule; member or manager).
 #   cancel  — call it off: company_admin, and the ORGANIZER (its own rule).
@@ -22,6 +23,10 @@
 #   4. company visibility       — `resource.attr.visibility == "company"`, on `member`, `viewer` and `manager`. NOT self-scoped (it is a
 #                                 tenant-wide read of the events someone chose to share company-wide), so member·read, viewer·read
 #                                 and manager·read are NOT in `selfScoped` (the generator derives the marker from the rule shape).
+#   5. department visibility    — DW-10c: `resource.attr.visibility == "department"`, on `member`, `viewer` and `manager`, its own rule.
+#                                 Tenant-wide at this layer; the handler narrows to the unit's people (`unitNodeId` is fed from the stored
+#                                 row, never a body; an unfed one is "" and no Cerbos rule reads it: it rides along as an attribute for the audit trail and for
+#                                 a future per-unit rule, the narrowing itself is the handler's).
 # All three attributes are fed by the HANDLER (calendar-events.controller.ts) from the event row and its attendee rows:
 # `ownerId` from `calendar_events.organizer_id`, `attendeeIds` from `calendar_event_attendees`, `visibility` from the row.
 # None is ever read from a request body. An unfed resource fails closed: `ownerId` "" never equals a principal id,
@@ -91,6 +96,19 @@ resourcePolicy:
           expr: >-
             variables.inTenant && variables.notLow &&
             has(request.resource.attr.visibility) && request.resource.attr.visibility == "company"
+    # DW-10c (docs/FRONTEND-BFF-CONTRACT.md §59.3; docs/PERMISSION-CONTRACT.md §48): a DEPARTMENT-visible event. Deliberately
+    # TENANT-WIDE here, as dept_notice's `read`: "placed in the unit or below it today, a head whose led scope holds the unit, or
+    # a company-wide tier" needs the caller's PLACEMENT as of today, which Cerbos cannot read. The handler and the SQL mirrors
+    # (`mine`, the detail read) apply it after this check; Cerbos bounds the tier, the service bounds the unit. Its own rule, never
+    # mixed with the organizer, attendee or company rules (HIER-2). Not self-scoped (no attribute is compared to the caller's id).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member", "viewer", "manager"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.visibility) && request.resource.attr.visibility == "department"
 
     # ---- create: any workspace can schedule; a viewer cannot ----
     - actions: ["create"]

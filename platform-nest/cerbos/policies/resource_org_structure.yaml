@@ -13,6 +13,21 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager", "member", "viewer"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # DW-10c (docs/FRONTEND-BFF-CONTRACT.md §59.1; docs/PERMISSION-CONTRACT.md §48): `read_calendar` gates the department calendar,
+    # which discloses colleagues' APPROVED leave and its type to the department's people (owner ruling DW-D33). A distinct action,
+    # not plain `read`, so the disclosure stays visible in the catalogue and a company can withhold it without touching the org chart.
+    # Deliberately TENANT-WIDE here: the per-unit narrowing (placed in the unit or below it today, a head whose led scope holds it, or
+    # a company-wide tier) needs the caller's PLACEMENT as of today, which Cerbos cannot read; the handler
+    # (dept-calendar.controller.ts, through core/unit-reach.ts) applies it after this check.
+    - actions: ["read_calendar"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # The HR read tier (hr_staff, hr_manager): its own rule, so it stays visible as a decision rather than folding into the scope roles.
+    - actions: ["read_calendar"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_reader"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # Editing the structure is elevated: company admins (in-tenant).
     - actions: ["update"]
       effect: EFFECT_ALLOW
@@ -29,4 +44,10 @@ resourcePolicy:
     - actions: ["update"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_org_structure_update"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    # DW-10c: the permission-matching arm for `read_calendar`. Reached only through the scope-only rules above, so a mirror grants no
+    # more than the role arm.
+    - actions: ["read_calendar"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_org_structure_read_calendar"]
       condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

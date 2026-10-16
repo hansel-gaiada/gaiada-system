@@ -157,6 +157,11 @@ export interface Resource {
    *  `unitAncestors` match, and an unfed list is empty). An attribute dropped from the allow-list below makes the rule's `has()`
    *  false, which DENIES. */
   scope?: string;
+  /** DW-10c (docs/FRONTEND-BFF-CONTRACT.md §59.3, PERMISSION-CONTRACT §48) -- the org-tree node a `department`-visible
+   *  `calendar_event` belongs to (`calendar_events.unit_node_id`). Read from the STORED row by the handler, never from a body. No
+   *  Cerbos rule compares it (the per-unit narrowing needs the caller's placement as of today, which Cerbos cannot read, so the
+   *  handler and the SQL mirrors apply it); it is in the payload so the decision carries the unit the event names. Omitted -> "". */
+  unitNodeId?: string;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -296,6 +301,9 @@ function resourcePayload(r: Resource) {
       // DW-10a. Listed here or it never reaches resource_dept_notice.yaml (this is an allow-list; the handler builds the Resource
       // through an object spread, where TypeScript's excess-property check does not fire). Defaults to "unit": see the type's note.
       scope: r.scope ?? "unit",
+      // DW-10c. Listed here or it never reaches resource_calendar_event.yaml (this is an allow-list). No rule reads it today; "" is
+      // "no unit".
+      unitNodeId: r.unitNodeId ?? "",
     },
   };
 }

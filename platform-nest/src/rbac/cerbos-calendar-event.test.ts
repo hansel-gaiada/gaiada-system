@@ -3,7 +3,8 @@
 //
 // THE CLAIMS UNDER TEST
 //   1. read: company_admin; the ORGANIZER (member or manager, ownerId == principal id); an ATTENDEE (member, viewer or manager,
-//      principal id in attendeeIds); and every member, viewer and manager when visibility == "company". Nobody reads every calendar.
+//      principal id in attendeeIds); and every member, viewer and manager when visibility == "company", and (DW-10c, PERMISSION §48) when
+//      visibility == "department" (its own rule: tenant-wide here, the HANDLER narrows it to the unit's people). Nobody reads every calendar.
 //   2. create: company_admin, manager, member (a viewer cannot).
 //   3. update and cancel: company_admin, and the organizer (member or manager). An attendee and a viewer never edit or cancel.
 //   4. respond: an attendee (member, viewer or manager) for themselves; company_admin holds the key. A deny-overrides rule makes it hold
@@ -70,9 +71,9 @@ describe("DW-8g static pin — resource_calendar_event.yaml", () => {
   const attendeeCond = "request.principal.id in request.resource.attr.attendeeIds";
   const organizerCond = "request.resource.attr.ownerId == request.principal.id";
 
-  it("read has FOUR rules, each on its own: company_admin, the organizer, an attendee, company visibility (the last three on member and manager, viewers on the attendee and visibility rules)", () => {
+  it("read has FIVE rules, each on its own: company_admin, the organizer, an attendee, company visibility, department visibility (the last four on member and manager, viewers on the attendee and visibility rules)", () => {
     const rs = reach("read");
-    expect(rs.length).toBe(4);
+    expect(rs.length).toBe(5);
     const admin = rs.find((r) => r.derivedRoles.includes("company_admin"))!;
     expect(admin.derivedRoles).toEqual(["company_admin"]);
     expect(admin.condition).toBe("variables.inTenant && variables.notLow");
@@ -83,8 +84,16 @@ describe("DW-8g static pin — resource_calendar_event.yaml", () => {
     expect([...attendee.derivedRoles].sort()).toEqual(["manager", "member", "viewer"]);
     const visible = rs.find((r) => r.condition.includes('request.resource.attr.visibility == "company"'))!;
     expect([...visible.derivedRoles].sort()).toEqual(["manager", "member", "viewer"]);
-    // manager only through the three attribute rules, never beside company_admin's unconditional one
-    expect(rs.filter((r) => r.derivedRoles.includes("manager")).length).toBe(3);
+    // DW-10c: the department rule is its OWN rule, never mixed with the organizer, attendee or company rules (HIER-2)
+    const department = rs.find((r) => r.condition.includes('request.resource.attr.visibility == "department"'))!;
+    expect([...department.derivedRoles].sort()).toEqual(["manager", "member", "viewer"]);
+    expect(department.condition).toBe('variables.inTenant && variables.notLow && has(request.resource.attr.visibility) && request.resource.attr.visibility == "department"');
+    expect(department.condition).not.toContain("attendeeIds");
+    expect(department.condition).not.toContain("ownerId");
+    expect(visible.condition).not.toContain("department");
+    expect(rs.filter((r) => r.condition.includes("visibility")).length, "company and department are two rules").toBe(2);
+    // manager only through the four attribute rules, never beside company_admin's unconditional one
+    expect(rs.filter((r) => r.derivedRoles.includes("manager")).length).toBe(4);
     for (const r of rs) expect(r.actions, "no read rule carries another action").toEqual(["read"]);
   });
 
@@ -169,6 +178,13 @@ describe("DW-8g static pin — resource_calendar_event.yaml", () => {
     expect(src).toContain('ownerId: r.ownerId ?? ""');
   });
 
+  it("DW-10c: unitNodeId reaches the allow-list too (the Resource type AND resourcePayload(), default empty), though no rule compares it", () => {
+    const src = readFileSync(join(__dirname, "cerbos.ts"), "utf8");
+    expect(src).toContain("unitNodeId?: string;");
+    expect(src).toContain('unitNodeId: r.unitNodeId ?? ""');
+    for (const r of rules) expect(r.condition, "the handler narrows the unit, not Cerbos").not.toContain("unitNodeId");
+  });
+
   it("the bundle JSON: owner == company_admin == platform_admin (all five), manager and member all five (update/cancel/respond self-scoped), viewer read+respond (respond self-scoped), nobody else", () => {
     const doc = JSON.parse(readFileSync(join(__dirname, "role-permission-bundles.json"), "utf8")) as {
       roles: Record<string, string[]>;
@@ -240,6 +256,14 @@ describe.skipIf(!live)("DW-8g Cerbos matrix — calendar_event (role x action)",
     ["member @T1, company-visible event: reads, schedules, but cannot edit, cancel or answer", principal([co("member")]), event({ visibility: "company" }), cell({ read: true, create: true })],
     ["viewer @T1, company-visible event: reads only", principal([co("viewer")]), event({ visibility: "company" }), cell({ read: true })],
     ["manager @T1, company-visible event: reads and schedules, but cannot edit, cancel or answer", principal([co("manager")]), event({ visibility: "company" }), cell({ read: true, create: true })],
+    // DW-10c: department visibility opens READ to member, viewer and manager tenant-wide (the handler narrows the unit), nothing else
+    ["member @T1, department-visible event: reads and schedules, cannot edit, cancel or answer", principal([co("member")]), event({ visibility: "department", unitNodeId: "d-web" }), cell({ read: true, create: true })],
+    ["viewer @T1, department-visible event: reads only", principal([co("viewer")]), event({ visibility: "department", unitNodeId: "d-web" }), cell({ read: true })],
+    ["manager @T1, department-visible event: reads and schedules, cannot edit, cancel or answer", principal([co("manager")]), event({ visibility: "department", unitNodeId: "d-web" }), cell({ read: true, create: true })],
+    ["client @T1, department-visible event: nothing", principal([co("client")]), event({ visibility: "department", unitNodeId: "d-web" }), NONE],
+    ["member @T1 at LOW assurance, department-visible event: nothing", principal([co("member")], { assurance: "low" }), event({ visibility: "department", unitNodeId: "d-web" }), NONE],
+    ["member of T2 only, a T1 department event: nothing (cross-tenant)", principal([co("member", T2)], { companies: [T2] }), event({ visibility: "department", unitNodeId: "d-web" }), NONE],
+    ["a BOT holding member, department-visible event: reads only", principal([co("member")], { kind: "bot" }), event({ visibility: "department", unitNodeId: "d-web" }), cell({ read: true })],
     // the organizer
     ["member @T1, the ORGANIZER: reads, schedules, edits, cancels and answers (they are an attendee too)", principal([co("member")]), asOrganizer(), cell({ read: true, create: true, update: true, cancel: true, respond: true })],
     ["viewer @T1 who is the ORGANIZER by attribute: the organizer rules are on member; the attendee rule still reads and answers", principal([co("viewer")]), asOrganizer(), cell({ read: true, respond: true })],
@@ -296,6 +320,21 @@ describe.skipIf(!live)("DW-8g Cerbos matrix — calendar_event (role x action)",
     expect(await allow(me, event({ visibility: undefined }), "read")).toBe(false);
     expect(await allow(me, event({ visibility: "everyone" }), "read")).toBe(false);
     expect(await allow(me, event({ visibility: "company" }), "read")).toBe(true);
+  });
+
+  it("DW-10c: the department rule is exactly `department` and never reads through another word, and it confers nothing but read", async () => {
+    const viewer = principal([co("viewer")]);
+    expect(await allow(viewer, event({ visibility: "department" }), "read")).toBe(true);
+    expect(await allow(viewer, event({ visibility: "dept" }), "read")).toBe(false);
+    expect(await allow(viewer, event({ visibility: "departments" }), "read")).toBe(false);
+    // a missing visibility defaults to the narrow `attendees` (the payload default), which opens nothing
+    expect(await allow(viewer, event({ visibility: undefined }), "read")).toBe(false);
+    // the unit rides along but no rule compares it: an empty unit and a named one decide the same
+    expect(await allow(viewer, event({ visibility: "department", unitNodeId: "" }), "read")).toBe(true);
+    expect(await allow(viewer, event({ visibility: "department", unitNodeId: "d-seo" }), "read")).toBe(true);
+    // department visibility never reaches a write
+    const member = principal([co("member")]);
+    for (const a of ["update", "cancel", "respond"]) expect(await allow(member, event({ visibility: "department", unitNodeId: "d-web" }), a), a).toBe(false);
   });
 
   it("answering for someone else is refused for EVERY role, whatever it holds", async () => {
