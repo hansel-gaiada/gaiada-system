@@ -11,6 +11,35 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.188.0` - DW-9d (DW-D38): the department workspace shell is the only layout; the classic layout is removed, and the shell streams (2026-10-16) - PROTOTYPED
+
+The owner ruled DW-D38 first-hand: no pilot week and no opt-in; the new layout is permanent, and the classic layout's code goes now. This supersedes DW-D7.
+- **The switch is gone.** No "Try the new layout" or "Back to the classic layout", no `lib/shellLayout.ts`, and no `shell`/`shellChosen` in `gaiada_prefs`. Old cookies are ignored, and their keys drop out on the next write. DW-9d-1's `shellChosen` interim (honour a stored layout only when chosen) was built first and then removed with the rest.
+- **The classic shell is deleted:**
+  - the sidebar `nav.ts` and its renderers (`Sidebar`, `NavGroupSection`, `RailCategory`, `NavLink`, `CompanyContext`);
+  - the classic top bar and `CommandPaletteTrigger`;
+  - the full-width special-access strip;
+  - the floating assistant button (`AssistantFab` and its CSS);
+  - the classic Home at `/` (Command Center, queue/agenda home, throughput sparkline, filter chips);
+  - the departments' My-work rail, with its dead helpers;
+  - the classic-only CSS.
+- **Nothing a person can reach was lost:**
+  - The palette took over what the classic nav made findable. Explicit, gated entries cover `/approvals` (for everyone, DW-D23), `/reports/project`, `/reports/department`, `/learning`, `/learning/authoring` (`lms.authoring`) and `/learning/compliance` (`lms.progress.view`). The gap was measured per role, pack and scope before `nav.ts` went.
+  - The AI Assistant row now leads the Company and Admin menus too. The floating button had been the only way in from there.
+  - A person with no company gets a short "No company yet" page at `/`.
+- **Gates:** every gate case of the classic nav's tests was ported to `gateAllows` and shell-model tests (`workspaceGates.test.ts`) before deletion. No gate changed.
+- **Speed.** Measured live on 417 as the owner, like for like, the new shell was slower than classic on every page and never streamed. For example, `/calendar` took 4.9-6.2 s against 1.2-2.8 s, and the Web Dev Overview 23-24 s against 5-12 s. The first byte waited on `/api/me`, then on the org read and a cross-company `/api/approvals` read, then on the bell's notifications. Now:
+  - `getMe` is per-request cached.
+  - The approvals read starts at once and streams. The Approvals row is shown while it is in flight to a person who holds a decide right, hidden from one who does not, and shown when the read fails; its count arrives with the stream (DW-D23 kept).
+  - The bell's read streams behind `<Suspense>`.
+  - The Overview frame's three reads run in parallel.
+  - The department Overview's legacy body streams under the Overview.
+  - The framed body skips the per-project milestone and status reads it never shows.
+  - The department layout reads only the department's identity, not all its tasks.
+  - In DEMO_MODE with injected delays, the first byte went from about 4.05 s to 30-65 ms, and the Overview header arrives before its slow blocks. The live re-measure is recorded at the release.
+- **Tests:** the e2e drops the pilot cookie and the classic tests. The GM, IAM, company-context, app and assistant specs were rewritten against the workspace shell.
+- No migration. No Cerbos change. No backend change.
+
 ### platform-nest `0.162.0` + platform-ui `0.187.0` - DW-10a: the department notice board (DW-D32, BFF §57, PERMISSION §47); DW-10d-3: Customise says Saving… (2026-10-16) - PROTOTYPED
 
 Plan §12.2 (row 10a); owner ruling DW-D32: heads post, the department reads.

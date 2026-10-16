@@ -1581,6 +1581,38 @@ through `gaiada_prefs`, as in `a11y-axe.spec.ts`. A green run is evidence of no 
 - **The e2e tests (trap 8):** a test of a classic-shell element now plants the explicit choice (`classicLayoutCookie`, `classicTest`), and says "classic until DW-9d-2". The GM console's cockpit tests are among them; 9d-2 rewrites them against the Overview. A test of a page's content runs under the new default.
 - **Streaming under the new shell:** for about 150 ms after `load`, its pages hold the finished content twice: in place, and in React's hidden streaming copy (`div#S:n[hidden]`). A strict locator in that window throws, and `toBeVisible` does not retry the error. Users see nothing, so this is a test-robustness matter. Specs on streaming pages import `test` from `e2e/settledPage.ts`, whose `goto` and `reload` wait for the hidden copies to clear.
 
+**9d as built under DW-D38 (2026-10-16): the workspace shell is the only layout.** The owner waived the pilot week and the
+two-release grace, so 9d-1's `shellChosen` interim was removed with the rest.
+- **Removed:**
+  - the switch and `gaiada_prefs.shell`;
+  - the classic sidebar (`nav.ts` and its renderers), the classic top bar, the floating assistant button and the special-access strip;
+  - the classic Home at `/`, with its Command Center, throughput sparkline and filter chips;
+  - the departments' My-work rail.
+- **Kept findable:**
+  - The palette gained explicit, gated entries for the pages only the classic nav offered: `/approvals` for everyone (DW-D23),
+    `/reports/project`, `/reports/department`, `/learning`, `/learning/authoring` and `/learning/compliance`. The gap was measured
+    per role, pack and scope first.
+  - The AI Assistant row leads the Company and Admin menus, which the floating button used to cover.
+  - A person with no company gets "No company yet" at `/`.
+- **Gates:** the classic nav's gate tests were ported to `gateAllows` and shell-model tests before deletion (`workspaceGates.test.ts`).
+- **Speed (found before landing).** Measured live on 417 as the owner, like for like (`dw9-timing.mjs`, one login), the new shell was
+  slower than classic on every page and streamed nothing: the first byte equalled the document's end.
+  - The cause was a serial chain in the (app) layout and the shell: `getMe`, then the org read and a cross-company `/api/approvals`,
+    then the bell. The department Overview also waited on a serial legacy chain before its widgets could start.
+  - The fixes:
+    - `getMe` is cached per request;
+    - the approvals read streams, so the row shows to a decider while it is in flight, hides from a non-decider, and shows on a
+      failed read (DW-D23 kept);
+    - the bell streams behind `<Suspense>`;
+    - the frame's reads run in parallel;
+    - the legacy body streams under the Overview;
+    - the framed body skips the reads it never shows;
+    - the department layout reads only the department's identity.
+  - Under DEMO_MODE with injected delays, the first byte fell from about 4 s to under 0.1 s.
+- **Not done; the owner decides:**
+  - the Needs-you queue reads 8 sources per company the person can reach (DW-Q2);
+  - the live box is CPU-starved (the OTel collector takes about 80% of a core, and swap is full).
+
 ### 12.2 Build notes (DW-10, 2026-10-15)
 
 **Evidence.** `origin/main` at `5722ec9a` (release 412), read from a clean worktree, plus four read-only

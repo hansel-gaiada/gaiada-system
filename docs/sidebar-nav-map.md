@@ -55,7 +55,9 @@ their gate refuses (DW-D20, one table in `lib/adminAccess.ts`).
 pending count. The page stays reachable for everyone through the command palette.
 
 **The command palette** (⌘K, the top bar's search): every concrete row and tab the person's model offers, the Company and Admin
-rows, a short list of explicit, gated entries for real pages that no row owns (see `lib/palette.ts`), and live records from
+rows, a short list of explicit, gated entries for real pages that no row owns (`STATIC_PALETTE_ENTRIES` in `lib/palette.ts`:
+`/approvals` for everyone, `/reports/project`, `/reports/department`, `/learning`, `/learning/authoring` with `lms.authoring`,
+`/learning/compliance` with `lms.progress.view`), and live records from
 `/api/search/palette`. `src/lib/paletteFindability.test.ts` pins that a page reachable today stays findable.
 
 **Client-only principals** (`isClientOnly`) never see this shell: they are sent to `/portal`, which has its own route group and shell.
