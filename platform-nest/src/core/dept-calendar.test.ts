@@ -243,9 +243,12 @@ describe.skipIf(!TEST_URL)("DW-10c department calendar (HTTP, real Postgres + Ce
       await bad(`from=2026-10-05T00:00:00Z&to=${TO}`, "from");
       expect((await cal("d-web", w.admin, `from=${FROM}&to=${FROM}`)).statusCode, "a one-day window is fine").toBe(200);
       expect((await cal("d-web", w.admin, WINDOW)).statusCode, "42 days is fine").toBe(200);
-      const long = await cal(`${"x".repeat(201)}`, w.admin);
-      expect(long.statusCode).toBe(400);
-      expect(long.json().field).toBe("unitNodeId");
+      // A control character in the id is the handler's 400, naming the field. (An id over 100 characters never reaches the handler:
+      // Fastify's default maxParamLength answers 404 at the router, so the 200-character rule is a second wall.)
+      const ctl = await cal("d%01web", w.admin);
+      expect(ctl.statusCode).toBe(400);
+      expect(ctl.json().field).toBe("unitNodeId");
+      expect((await cal("x".repeat(201), w.admin)).statusCode, "the router refuses an over-long id").toBe(404);
     });
   });
 
