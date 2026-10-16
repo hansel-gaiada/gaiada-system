@@ -288,19 +288,19 @@ BEGIN
    WHERE table_name = 'work_requests'
      AND column_name IN ('requester_tenant_id', 'requester_unit_id', 'requester_unit_name', 'service_assignment_id', 'client_id');
   IF n <> 5 THEN
-    RAISE EXCEPTION '202610160200: work_requests should carry its 5 new columns, found % of 5', n;
+    RAISE EXCEPTION '202610160500: work_requests should carry its 5 new columns, found % of 5', n;
   END IF;
 
   SELECT count(*) INTO n FROM information_schema.columns
    WHERE table_name = 'work_requests' AND column_name = 'requester_tenant_id' AND is_nullable = 'NO';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610160200: work_requests.requester_tenant_id must be NOT NULL';
+    RAISE EXCEPTION '202610160500: work_requests.requester_tenant_id must be NOT NULL';
   END IF;
 
   SELECT count(*) INTO n FROM pg_constraint
    WHERE conrelid = 'work_requests'::regclass AND conname = 'fk_work_requests_client_tenant' AND contype = 'f';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610160200: the composite client FK fk_work_requests_client_tenant is missing';
+    RAISE EXCEPTION '202610160500: the composite client FK fk_work_requests_client_tenant is missing';
   END IF;
 
   SELECT count(*) INTO n FROM pg_constraint
@@ -308,43 +308,43 @@ BEGIN
      AND conname IN ('work_requests_requester_route_ck', 'work_requests_requester_client_ck', 'work_requests_requester_unit_ck',
                      'work_requests_across_from_ck', 'work_requests_across_part_ck');
   IF n <> 5 THEN
-    RAISE EXCEPTION '202610160200: work_requests should carry its 5 requester CHECKs, found % of 5', n;
+    RAISE EXCEPTION '202610160500: work_requests should carry its 5 requester CHECKs, found % of 5', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_indexes
    WHERE tablename = 'work_requests'
      AND indexname IN ('ix_work_requests_requester', 'ix_work_requests_requester_unit', 'ix_work_requests_service_assignment');
   IF n <> 3 THEN
-    RAISE EXCEPTION '202610160200: the three requester indexes are missing (found % of 3)', n;
+    RAISE EXCEPTION '202610160500: the three requester indexes are missing (found % of 3)', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_trigger
    WHERE tgrelid = 'work_requests'::regclass AND NOT tgisinternal
      AND tgname IN ('trg_work_requests_route_guard', 'trg_work_requests_freeze_requester');
   IF n <> 2 THEN
-    RAISE EXCEPTION '202610160200: the route guard and the freeze triggers should both exist, found % of 2', n;
+    RAISE EXCEPTION '202610160500: the route guard and the freeze triggers should both exist, found % of 2', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_class
    WHERE relname = 'work_request_client_intakes' AND relrowsecurity AND relforcerowsecurity;
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610160200: work_request_client_intakes must exist with RLS ENABLED and FORCED';
+    RAISE EXCEPTION '202610160500: work_request_client_intakes must exist with RLS ENABLED and FORCED';
   END IF;
 
   SELECT count(*) INTO n FROM pg_policies
    WHERE tablename = 'work_request_client_intakes' AND policyname = 'tenant_isolation';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610160200: work_request_client_intakes needs exactly one tenant_isolation policy, found %', n;
+    RAISE EXCEPTION '202610160500: work_request_client_intakes needs exactly one tenant_isolation policy, found %', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_policies WHERE tablename = 'work_request_client_intakes';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610160200: work_request_client_intakes must carry exactly one policy, found %', n;
+    RAISE EXCEPTION '202610160500: work_request_client_intakes must carry exactly one policy, found %', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_constraint
    WHERE conname = 'fk_work_request_client_intakes_project_tenant' AND condeferrable AND condeferred;
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610160200: the client intake project FK must be DEFERRABLE INITIALLY DEFERRED (the first-request race depends on it)';
+    RAISE EXCEPTION '202610160500: the client intake project FK must be DEFERRABLE INITIALLY DEFERRED (the first-request race depends on it)';
   END IF;
 END $$;

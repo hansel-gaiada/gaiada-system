@@ -1,4 +1,4 @@
-// DW-10e-1 — the shared world of the two database suites that prove migration 202610160200 (work_requests_across): the route
+// DW-10e-1 — the shared world of the two database suites that prove migration 202610160500 (work_requests_across): the route
 // and client wall (src/core/work-requests-across.db.test.ts) and the migration itself (work-requests-across-migration.db.test.ts).
 //
 // Everything here writes through `adminPool()` (a superuser, so RLS is bypassed): this module BUILDS the world, it never proves

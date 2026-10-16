@@ -1,6 +1,6 @@
 -- IAM — DW-10e: two new actions on the EXISTING `work_request` kind, for REQUESTS ACROSS GROUP COMPANIES
 -- (docs/PERMISSION-CONTRACT.md §49, docs/FRONTEND-BFF-CONTRACT.md §60; rulings DW-D35, DW-D39, DW-D40, DW-D41).
--- Pure IAM seed: no DDL (202610160200 owns the tables and the route/client triggers).
+-- Pure IAM seed: no DDL (202610160500 owns the tables and the route/client triggers).
 --
 --   core.work_request.send_across — send a request to another group company's department, through one of the company's
 --                                   routes. The same reach as `create`, as its own action.
@@ -74,7 +74,7 @@ BEGIN
      AND cerbos_kind = 'work_request' AND class = 'grantable' AND module_key = 'core'
      AND sensitive = false AND ui_grantable = true;
   IF got <> 2 THEN
-    RAISE EXCEPTION '202610160400: expected 2 grantable, non-sensitive, ui_grantable work_request across permissions, found %', got;
+    RAISE EXCEPTION '202610160510: expected 2 grantable, non-sensitive, ui_grantable work_request across permissions, found %', got;
   END IF;
 
   -- Exactly the expected global roles hold each key: the count of holders, and none outside the list.
@@ -90,7 +90,7 @@ BEGIN
       JOIN permissions p ON p.id = rp.permission_id
      WHERE r.company_id IS NULL AND p.key = k.perm_key AND r.name = ANY (k.role_names);
     IF got <> array_length(k.role_names, 1) THEN
-      RAISE EXCEPTION '202610160400: %: expected % of the named roles to hold it, found % (missing/typo''d role name, or a prior partial application)',
+      RAISE EXCEPTION '202610160510: %: expected % of the named roles to hold it, found % (missing/typo''d role name, or a prior partial application)',
         k.perm_key, array_length(k.role_names, 1), got;
     END IF;
 
@@ -100,7 +100,7 @@ BEGIN
       JOIN permissions p ON p.id = rp.permission_id
      WHERE r.company_id IS NULL AND p.key = k.perm_key AND NOT (r.name = ANY (k.role_names));
     IF got <> 0 THEN
-      RAISE EXCEPTION '202610160400: % leaked to % global role(s) outside %', k.perm_key, got, k.role_names;
+      RAISE EXCEPTION '202610160510: % leaked to % global role(s) outside %', k.perm_key, got, k.role_names;
     END IF;
   END LOOP;
 
@@ -113,7 +113,7 @@ BEGIN
    WHERE r.company_id IS NULL AND p.key = 'core.work_request.read_across'
      AND r.name IN ('member', 'viewer', 'org_unit_lead', 'client', 'group_executive', 'webdev_staff', 'webdev_manager', 'hr_manager');
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610160400: read_across reached % role(s) below company_admin/owner/manager', got;
+    RAISE EXCEPTION '202610160510: read_across reached % role(s) below company_admin/owner/manager', got;
   END IF;
   SELECT count(*) INTO got
     FROM role_permissions rp
@@ -122,7 +122,7 @@ BEGIN
    WHERE r.company_id IS NULL AND p.key = 'core.work_request.send_across'
      AND r.name IN ('viewer', 'org_unit_lead', 'client', 'group_executive', 'webdev_staff', 'webdev_manager', 'hr_manager');
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610160400: send_across reached % viewer / org_unit_lead / client / module role(s)', got;
+    RAISE EXCEPTION '202610160510: send_across reached % viewer / org_unit_lead / client / module role(s)', got;
   END IF;
 
   -- None of the nine rows is self-scoped.
@@ -131,7 +131,7 @@ BEGIN
     JOIN permissions p ON p.id = rp.permission_id
    WHERE p.key IN ('core.work_request.send_across', 'core.work_request.read_across') AND rp.self_scoped;
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610160400: % self_scoped row(s) on the across keys (the sender acts for the company, never on their own record)', got;
+    RAISE EXCEPTION '202610160510: % self_scoped row(s) on the across keys (the sender acts for the company, never on their own record)', got;
   END IF;
 
   -- owner ≡ company_admin over the WHOLE work_request kind, in BOTH directions (equal counts alone would not catch the
@@ -158,8 +158,8 @@ BEGIN
         AND p.cerbos_kind = 'work_request')
   ) diff;
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610160400: owner''s work_request bundle diverges from company_admin''s by % key(s) — owner-role.db.test.ts will fail', got;
+    RAISE EXCEPTION '202610160510: owner''s work_request bundle diverges from company_admin''s by % key(s) — owner-role.db.test.ts will fail', got;
   END IF;
 
-  RAISE NOTICE '202610160400: work_request across keys seeded (send_across: 5 roles, read_across: 4 roles)';
+  RAISE NOTICE '202610160510: work_request across keys seeded (send_across: 5 roles, read_across: 4 roles)';
 END $$;

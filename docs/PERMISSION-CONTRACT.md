@@ -2468,7 +2468,7 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §59 (plan `docs/plans/2026-10-13-depart
 
 ## 49. DW-10e — `send_across` and `read_across` on `work_request`: requests across group companies (2026-10-15; revised 2026-10-16 for DW-D40; BUILT 2026-10-16, DW-10e-2)
 
-Design: `docs/FRONTEND-BFF-CONTRACT.md` §60 (rulings DW-D35, DW-D39, DW-D40 and DW-D41; plan `docs/plans/2026-10-13-department-workspaces.md` §11.4 and §12.2). Status: **BUILT, PROTOTYPED (backend: the six artifacts, migration `202610160400_iam_work_request_across.sql`, the UI mirror capabilities; the static suites ran locally, the live-Cerbos matrices in `cerbos-work-request.test.ts` and the DB suites run on the Linux CI gate; not driven live, and the live Cerbos needs its restart after the deploy)**.
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §60 (rulings DW-D35, DW-D39, DW-D40 and DW-D41; plan `docs/plans/2026-10-13-department-workspaces.md` §11.4 and §12.2). Status: **BUILT, PROTOTYPED (backend: the six artifacts, migration `202610160510_iam_work_request_across.sql`, the UI mirror capabilities; the static suites ran locally, the live-Cerbos matrices in `cerbos-work-request.test.ts` and the DB suites run on the Linux CI gate; not driven live, and the live Cerbos needs its restart after the deploy)**.
 
 **As built (2026-10-16, DW-10e-2).**
 - Exactly the six artifacts above; `cerbos.ts` unchanged. The pinned literals moved from 479 to 481 pairs and from 464 to 466 grantable keys; kinds (111) and sensitive (213) did not move.

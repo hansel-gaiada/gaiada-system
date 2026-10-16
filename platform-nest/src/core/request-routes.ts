@@ -8,7 +8,7 @@
 //   - `modules/registry.ts`              `enabledModuleKeys` leaves a routing key out (a route turns no module on);
 //   - `modules/reports/fact-job.ts` and `report-rollups.ts`  a route never stamps a provider on a fact or feeds a provider view;
 //   - `admin/service-assignments.controller.ts`  `assertValidModuleKey` accepts one although it is not a registered module.
-// The database trigger `work_requests_route_guard` (migration 202610160200) spells the same two keys in a SQL CASE; a static test
+// The database trigger `work_requests_route_guard` (migration 202610160500) spells the same two keys in a SQL CASE; a static test
 // pins that CASE to `REQUEST_ROUTE_KEYS`, so the two cannot drift apart silently.
 //
 // Pure on purpose (no DB import at runtime): the reconciler, the registry and the report jobs load this file, and none of them may

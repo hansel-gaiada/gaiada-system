@@ -469,7 +469,7 @@ export function clientIntakeProjectName(unitName: string, clientName: string): s
 
 /** §60.6a intake for a CROSS-COMPANY request: the receiving department's "<Department> · Requests · <Client>" project for ONE
  *  client, created ONCE. The client twin of `ensureIntakeProject`, in the SAME race-safe order (see its comment, and
- *  migration 202610160200): mint the project id, INSERT the `work_request_client_intakes` row first with
+ *  migration 202610160500): mint the project id, INSERT the `work_request_client_intakes` row first with
  *  `ON CONFLICT (tenant_id, unit_id, client_id) DO NOTHING RETURNING`, and create the project row ONLY when that insert won;
  *  the project FK is DEFERRED to COMMIT, so a loser never leaves an orphan project and re-selects the winner's committed row.
  *

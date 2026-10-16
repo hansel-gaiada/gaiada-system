@@ -47,8 +47,8 @@ describe("routing keys (core/request-routes.ts)", () => {
 });
 
 // ── the trigger's CASE is pinned to the keys ─────────────────────────────────────────────────────────────────────────────────
-describe("migration 202610160200 spells the routing keys exactly as core/request-routes.ts does", () => {
-  const sql = read("migrations", "202610160200_work_requests_across.sql");
+describe("migration 202610160500 spells the routing keys exactly as core/request-routes.ts does", () => {
+  const sql = read("migrations", "202610160500_work_requests_across.sql");
 
   it("the route guard's `CASE NEW.kind` maps every request kind to its routing key, and nothing else", () => {
     const block = /sa\.module_key = CASE NEW\.kind([\s\S]*?)END/.exec(sql);

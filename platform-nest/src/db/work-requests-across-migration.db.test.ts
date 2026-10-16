@@ -1,4 +1,4 @@
-// DW-10e-1 (BFF §60.3 "Order, backfill and idempotency" and §60.11 "The migration") — migration 202610160200_work_requests_across.sql,
+// DW-10e-1 (BFF §60.3 "Order, backfill and idempotency" and §60.11 "The migration") — migration 202610160500_work_requests_across.sql,
 // run for real against a database that holds LEGACY rows. Real Postgres (skips silently without DATABASE_URL_TEST; runs on the
 // Linux gate; a skip is NOT a pass).
 //
@@ -24,11 +24,11 @@ import {
   buildAcrossWorld, validCrossCols, sameCompanyCols, insertSql, outcomeOf, type AcrossWorld,
 } from "../testing/work-requests-across-fixtures";
 
-const MIGRATION = "202610160200_work_requests_across.sql";
+const MIGRATION = "202610160500_work_requests_across.sql";
 const MIGRATION_SQL = readFileSync(join(__dirname, "..", "..", "migrations", MIGRATION), "utf8");
 const OWNER = "wr_migrator_test";
 
-describe.skipIf(!TEST_URL)("DW-10e-1 migration 202610160200 over legacy rows (NOBYPASSRLS owner, applied twice)", () => {
+describe.skipIf(!TEST_URL)("DW-10e-1 migration 202610160500 over legacy rows (NOBYPASSRLS owner, applied twice)", () => {
   let w: AcrossWorld;
   let legacyP: string;
   let legacyH: string;
