@@ -21,6 +21,7 @@
 //
 // Needs the Linux gate (DATABASE_URL_TEST and a Cerbos loaded with the CURRENT policy files, restarted after the
 // resource_work_request.yaml edit). It SKIPS without a database; a skip is not a pass.
+import { createHash } from "node:crypto";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
@@ -725,8 +726,8 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
       mem.set(key, bytes);
       await q(
         `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, sha256, scrubbed, origin_site)
-         VALUES ($1, $2, $3, 'work_request', $4, 'brief.pdf', 'application/pdf', $5, $6, 'x', false, 'central')`,
-        [fileId, P, pAdmin, id, bytes.length, key],
+         VALUES ($1, $2, $3, 'work_request', $4, 'brief.pdf', 'application/pdf', $5, $6, $7, false, 'central')`,
+        [fileId, P, pAdmin, id, bytes.length, key, createHash("sha256").update(bytes).digest("hex")],
       );
       const linkId = newId();
       await q(

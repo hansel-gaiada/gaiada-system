@@ -382,10 +382,12 @@ describe.skipIf(!live)("DW-5c Cerbos matrix — work_request, the permission arm
     expect(await allow(permP("core.work_request.read_across", "company", { kind: "bot" }), request(), "read_across")).toBe(true);
   });
 
-  it("DW-10e: a GLOBAL send_across / read_across permission reaches any company; a company grant for T2 does not reach T1", async () => {
+  it("DW-10e: a GLOBAL send_across / read_across permission reaches every company the holder belongs to, never one they do not (every mirror keeps inTenant); a company grant for T2 does not reach T1", async () => {
     for (const a of ACROSS) {
       expect(await allow(permP(`core.work_request.${a}`, "global"), request(), a), `global ${a}`).toBe(true);
-      expect(await allow(permP(`core.work_request.${a}`, "global"), request({}, T2), a), `global ${a} @T2`).toBe(true);
+      const globalBoth = principal([], { perms: [{ key: `core.work_request.${a}`, scopeType: "global", scopeId: null }], companies: [T1, T2] });
+      expect(await allow(globalBoth, request({}, T2), a), `global ${a} @T2, a member of T2`).toBe(true);
+      expect(await allow(permP(`core.work_request.${a}`, "global"), request({}, T2), a), `global ${a} @T2, NOT a member of T2`).toBe(false);
       const t2Only = principal([], { perms: [{ key: `core.work_request.${a}`, scopeType: "company", scopeId: T2 }] });
       expect(await allow(t2Only, request(), a), `T2 grant of ${a} against T1`).toBe(false);
     }
