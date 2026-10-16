@@ -10506,7 +10506,7 @@ Cerbos `calendar_event · read` gains a rule for `visibility == "department"` he
 - **Tenants:** the same node id in two companies leaks nothing across them.
 - **Caps:** a 43-day window answers 400; a leg over 200 items is `truncated`.
 
-## 60. Requests across group companies (DW-10e, 2026-10-15; revised 2026-10-16 for DW-D39 to DW-D41) — `platform-nest/src/core/work-requests-outbound.controller.ts` (new), `core/request-routes.ts` (new), `core/work-requests.{controller,service}.ts`, `core/webdev-change-requests.controller.ts`, `admin/service-assignments.controller.ts`, `admin/service-reconciler.ts`, `modules/registry.ts`, `modules/reports/{fact-job,report-rollups}.ts`; UI `/requests`, `/requests/new`, `/requests/outbound/[id]` (new) — **STATUS: PLANNED (contract only, nothing built; the authorization is PERMISSION-CONTRACT §49)**
+## 60. Requests across group companies (DW-10e, 2026-10-15; revised 2026-10-16 for DW-D39 to DW-D41) — `platform-nest/src/core/work-requests-outbound.controller.ts` (new), `core/request-routes.ts` (new), `core/work-requests.{controller,service}.ts`, `core/webdev-change-requests.controller.ts`, `admin/service-assignments.controller.ts`, `admin/service-reconciler.ts`, `modules/registry.ts`, `modules/reports/{fact-job,report-rollups}.ts`; UI `/requests`, `/requests/new`, `/requests/outbound/[id]` (new) — **STATUS: BUILT, PROTOTYPED (backend 10e-1 and 10e-2: the data, the routes, the permission, the sender routes, the receiving side and the billing wiring. The pure and static suites run anywhere; the DB, HTTP and live-Cerbos suites run on the Linux CI gate: `work-requests-outbound.test.ts`, `work-requests-across.db.test.ts`, `work-requests-across-migration.db.test.ts`, `service-assignments-routes.test.ts`, `cerbos-work-request.test.ts`. The UI is 10e-3 and not built; not driven live. The authorization is PERMISSION-CONTRACT §49; the as-built choices are §60.14)**
 
 **Why.** Ruling DW-D35 (owner, 2026-10-15, plan §11.4): "Group companies send asset and engineering requests to another group company's departments through the group's service assignments (ORG-13), contract first." Today a request stays inside one company (§32.3, §32.8): `to_unit_id` must be a department of the company in the URL, and the UI offers requests to agency-pack companies only. The holding and the hotel companies have no Creatives and no Web Dev, so they cannot ask for assets or engineering work. This section lets them ask the agency's departments, and makes nobody a member of the other company.
 
@@ -10921,3 +10921,25 @@ All after the commit, best-effort and logged loudly on failure, as §32.7. Each 
 ### 60.13 Build order and tiers
 
 Plan §12.2, "10e design". Three tickets, one at a time: 10e-1 the data, the routes and the billing data; 10e-2 the permission, the sender routes, the receiving side and the billing wiring (the cross-company core); 10e-3 the UI. Billing needs no fourth ticket: its data is in 10e-1, its wiring in 10e-2 and its screens in 10e-3.
+
+### 60.14 As built (10e-2, 2026-10-16)
+
+**Where it is.** The sender routes are `core/work-requests-outbound.controller.ts`; their rules, the read tier (`outboundReadScope`), the sender's row and every sender statement are `core/work-requests-outbound.service.ts`. The receiving side is in `core/work-requests.{controller,service}.ts` and the triage hook in `core/webdev-change-requests.controller.ts`. The work item of both creates is one function, `createRequestWorkItemInTx` in `work-requests.controller.ts`, so §32.2's deliberate widening still lives in one file.
+
+**Tenancy, as built.** Every sender statement on `work_requests` carries `SENDER_SCOPE` (`r.tenant_id = $1 AND r.requester_tenant_id = $2`, $1 = P, $2 = H); every `withTenants` call names one company; nothing uses `crossRoot` or `withGlobal`. The providers are read first in H's scope (routing assignments targeting H, any status) and then read one at a time. Static pins: `work-requests-outbound.service.test.ts`.
+
+**Choices the contract left open.**
+- **The form and the kind.** The form's rules are the route's kind. When the body names `kind`, the form is parsed with it before the route is read, as the refusal table orders it; without `kind`, it is parsed after the route resolved, so `form_invalid` then comes after the 404 and 409 route answers.
+- **`toUnitId: null` and `campaignPartId: null`** read as "none" and pass, as §32's parser treats a null part; any other value is 400.
+- **`route_inactive`'s `detail.status`** is the route's status, or `orphaned` when the route is active and its unit is orphaned, or `changed` when the trigger refused the insert (`PD060`).
+- **A deleted provider** answers 404 `route_not_found`; a route on a unit that is not a department answers 409 `route_unit_unavailable`.
+- **The list needs `box`** (`mine`, `sent` or `all`; 400 `box_invalid` otherwise), as §32's does.
+- **P's events gain `requesterTenantId`, `serviceAssignmentId` and `clientId` on cross rows only.** A same-company event's payload is byte for byte §32.7's.
+- **`price` is `null`** for an engineering request whose change request is gone, as `work` is.
+- **The sender's detail lists only live assets**; a deleted one is also 404 on download.
+- **The asset task's description** reads "Requested by <name> (<H> · <department>)".
+- **Activity metadata.** P's `created` and `cancelled` rows for a cross row carry `requesterTenantId`; H's `sent_across` and `cancelled` carry `receivingCompanyId`.
+- **The read tier** is a soft `check()` probe, not `authorize()` (an `own` answer files no denial). It mirrors the act-for intersection, and a Cerbos failure is a 500, never a silent `own`.
+- **`request.price_agreement`** is sent from the triage route after its commit, read in its own transaction over P; the triage response is unchanged.
+
+**The proofs (§60.11) and where they are.** "Sending", "Reading", "The lifecycle", "Billing", "Notifications and events" and the HTTP half of "Tenancy" are `core/work-requests-outbound.test.ts`; "The route and client wall" and "The migration" are 10e-1's suites; "IAM" is `rbac/cerbos-work-request.test.ts` plus the alignment suites. Two notes on the seed: T has a client record at P in this suite (so T can send for the isolation probes); the "T has none" proofs are route creation's (10e-1). A low-assurance session over HTTP is an unresolved OBO envelope (the dev `x-user-id` header always assembles "high"); the Cerbos matrix covers `low` directly.
