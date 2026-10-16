@@ -1,5 +1,5 @@
 -- IAM — DW-10a: the `dept_notice` permission family (docs/FRONTEND-BFF-CONTRACT.md §57, docs/PERMISSION-CONTRACT.md §47), a NEW core
--- Cerbos kind (no module): a notice on a department's board, or a company-wide notice. Pure IAM seed: no DDL (202610152100 owns the
+-- Cerbos kind (no module): a notice on a department's board, or a company-wide notice. Pure IAM seed: no DDL (202610160100 owns the
 -- table).
 --
 -- A new Cerbos kind costs six coupled artifacts; this is #5 (copied from 202610151110_iam_calendar_event_permissions.sql). The others,
@@ -85,7 +85,7 @@ BEGIN
    WHERE cerbos_kind = 'dept_notice' AND class = 'grantable' AND module_key = 'core'
      AND sensitive = false AND ui_grantable = true;
   IF got <> 4 THEN
-    RAISE EXCEPTION '202610152110: expected 4 grantable, non-sensitive, ui_grantable dept_notice permissions, found %', got;
+    RAISE EXCEPTION '202610160110: expected 4 grantable, non-sensitive, ui_grantable dept_notice permissions, found %', got;
   END IF;
 
   FOR expected IN
@@ -102,7 +102,7 @@ BEGIN
      WHERE r.company_id IS NULL AND r.name = expected.role_name
        AND p.cerbos_kind = 'dept_notice';
     IF got <> expected.expected_count THEN
-      RAISE EXCEPTION '202610152110: role "%": expected % bundled dept_notice permission(s), found % (missing/typo''d role name or key, or a prior partial application)',
+      RAISE EXCEPTION '202610160110: role "%": expected % bundled dept_notice permission(s), found % (missing/typo''d role name or key, or a prior partial application)',
         expected.role_name, expected.expected_count, got;
     END IF;
   END LOOP;
@@ -117,7 +117,7 @@ BEGIN
      AND p.key IN ('core.dept_notice.post', 'core.dept_notice.edit', 'core.dept_notice.withdraw')
      AND r.name NOT IN ('platform_admin', 'company_admin', 'owner', 'org_unit_lead');
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610152110: post/edit/withdraw leaked to % row(s) outside platform_admin/company_admin/owner/org_unit_lead', got;
+    RAISE EXCEPTION '202610160110: post/edit/withdraw leaked to % row(s) outside platform_admin/company_admin/owner/org_unit_lead', got;
   END IF;
 
   -- org_unit_lead holds the three writes and NOT read (its read comes from the scope roles it also carries).
@@ -127,7 +127,7 @@ BEGIN
     JOIN permissions p ON p.id = rp.permission_id
    WHERE r.company_id IS NULL AND r.name = 'org_unit_lead' AND p.key = 'core.dept_notice.read';
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610152110: org_unit_lead must not hold core.dept_notice.read directly (found % row)', got;
+    RAISE EXCEPTION '202610160110: org_unit_lead must not hold core.dept_notice.read directly (found % row)', got;
   END IF;
 
   -- No self-scoped marker on this kind.
@@ -136,7 +136,7 @@ BEGIN
     JOIN permissions p ON p.id = rp.permission_id
    WHERE p.cerbos_kind = 'dept_notice' AND rp.self_scoped;
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610152110: % unexpected self_scoped dept_notice row(s)', got;
+    RAISE EXCEPTION '202610160110: % unexpected self_scoped dept_notice row(s)', got;
   END IF;
 
   -- owner ≡ company_admin, in BOTH directions (equal counts alone would not catch the wrong keys).
@@ -162,7 +162,7 @@ BEGIN
         AND p.cerbos_kind = 'dept_notice')
   ) diff;
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610152110: owner''s dept_notice bundle diverges from company_admin''s by % key(s) — owner-role.db.test.ts will fail', got;
+    RAISE EXCEPTION '202610160110: owner''s dept_notice bundle diverges from company_admin''s by % key(s) — owner-role.db.test.ts will fail', got;
   END IF;
 
   SELECT count(*) INTO got
@@ -171,8 +171,8 @@ BEGIN
     JOIN permissions p ON p.id = rp.permission_id
    WHERE r.company_id IS NULL AND p.cerbos_kind = 'dept_notice';
   IF got <> 20 THEN
-    RAISE EXCEPTION '202610152110: total bundled dept_notice permissions on global roles: expected 20 (3x4 + 5 + 3), found %', got;
+    RAISE EXCEPTION '202610160110: total bundled dept_notice permissions on global roles: expected 20 (3x4 + 5 + 3), found %', got;
   END IF;
 
-  RAISE NOTICE '202610152110: role_permissions seeded — % dept_notice rows across 9 global roles', got;
+  RAISE NOTICE '202610160110: role_permissions seeded — % dept_notice rows across 9 global roles', got;
 END $$;
