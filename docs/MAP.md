@@ -169,11 +169,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610160110_iam_dept_notice_permissions.sql`
+- Head: `202610160400_iam_work_request_across.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 320 (121 legacy `NNNN_`, 199 timestamped)
+- Applied files on disk: 322 (121 legacy `NNNN_`, 201 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -311,6 +311,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/notices` | `platform-nest/src/core/dept-notices.controller.ts` |
 | `/api/:tenantId/reports` | `platform-nest/src/modules/reports/reports.controller.ts` |
 | `/api/:tenantId/reports/group` | `platform-nest/src/modules/reports/group-report.controller.ts` |
+| `/api/:tenantId/requests` | `platform-nest/src/core/work-requests-outbound.controller.ts` |
 | `/api/:tenantId/requests` | `platform-nest/src/core/work-requests.controller.ts` |
 | `/api/:tenantId/revenue-plan` | `platform-nest/src/modules/finance/revenue-plan.controller.ts` |
 | `/api/admin` | `platform-nest/src/admin/admin-systems.controller.ts` |
