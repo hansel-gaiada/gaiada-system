@@ -2,6 +2,7 @@
 // (companies.enabled_modules) gates ACCESS at request time (spec §1.1).
 import { withTenants, withGlobal } from "../db";
 import type { ModuleContract } from "./contract";
+import { REQUEST_ROUTE_KEYS } from "../core/request-routes";
 
 const modules = new Map<string, ModuleContract>();
 
@@ -54,6 +55,11 @@ export async function isModuleEnabled(tenantId: string, key: string): Promise<bo
  * assignment for a key this build doesn't ship) and callers need to see it to clear it.
  *
  * Same `withTenants` reasoning as above (service_assignments' dual-side `sa_select` RLS policy).
+ *
+ * DW-10e (BFF §60.2): the assignment arm LEAVES OUT routing keys (`asset_requests`, `engineering_requests`). A route is a
+ * service assignment that only records who may send a request to which department; it turns no module on in the target.
+ * Reusing `pm` or `webdev` as the key would have switched that module on in the target company, which is why a route
+ * has its own keys. `core/request-routes.ts` is the one list.
  */
 export async function enabledModuleKeys(tenantId: string): Promise<string[]> {
   const { rows } = await withTenants([tenantId], (c) =>
@@ -62,8 +68,9 @@ export async function enabledModuleKeys(tenantId: string): Promise<string[]> {
         WHERE id = $1 AND deleted_at IS NULL
        UNION
        SELECT module_key AS key FROM service_assignments
-        WHERE target_tenant_id = $1 AND status = 'active'`,
-      [tenantId],
+        WHERE target_tenant_id = $1 AND status = 'active'
+          AND module_key <> ALL($2::text[])`,
+      [tenantId, [...REQUEST_ROUTE_KEYS]],
     ),
   );
   return rows.map((r) => r.key);

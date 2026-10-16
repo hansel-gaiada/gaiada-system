@@ -34,6 +34,7 @@ import type { Principal } from "../rbac/principal";
 import { config } from "../config";
 import { reconcileAssignment, reconcileProvider, collectSubtreePersons } from "./service-reconciler";
 import type { Envelope, EnvelopeCompany } from "../core/envelope";
+import { isRequestRouteKey, resolveGroupClient } from "../core/request-routes";
 
 // ---- shape of the org-structure blob node we need (mirrors company-admin.controller.ts's OrgNode) ----
 interface BlobNode {
@@ -68,11 +69,58 @@ function assertValidModuleKey(key: unknown): asserts key is string {
   if (typeof key !== "string" || !MODULE_KEY_RE.test(key)) {
     throw new UnprocessableEntityException("invalid module key");
   }
+  // DW-10e (BFF §60.2): a ROUTING KEY (`asset_requests`, `engineering_requests`) is not a registered module and is valid here.
+  // It is a route: it records who may send which requests to which department and materialises nothing.
+  if (isRequestRouteKey(key)) return;
   // Format-only validation until the module registry is populated (WSA-2 is a separate, not-yet
   // -landed ticket) — once modules register, unknown keys 422 automatically. See the completion
   // report for this deliberate, narrow deviation.
   if (allModules().length > 0 && !getModule(key)) {
     throw new UnprocessableEntityException(`unknown module: ${key}`);
+  }
+}
+
+/** A 422 that carries the contract's machine code (`reason`) and, when it names a target, `detail.targetId`. The error filter
+ *  forwards both next to `error` (http-error.filter.ts). */
+function routeRefusal(reason: string, message: string, detail?: Record<string, unknown>): UnprocessableEntityException {
+  return new UnprocessableEntityException({ message, reason, ...(detail ? { detail } : {}) });
+}
+
+/** DW-10e (BFF §60.2): a routing key goes on a DEPARTMENT node only. A division answers 422 `route_unit_not_department`, on
+ *  propose (and its dry run) and on relink. One consent covers one department, never every department under a unit. */
+function assertRouteUnitIsDepartment(node: BlobNode): void {
+  if (node.kind !== "department") {
+    throw routeRefusal(
+      "route_unit_not_department",
+      `a request route goes on a department, and ${node.id} is a ${node.kind}`,
+      { nodeId: node.id, kind: node.kind },
+    );
+  }
+}
+
+/** DW-10e (BFF §60.2 "The target must be the provider's client", DW-D41): for ONE target, how many live client records of the
+ *  provider are linked to it. Read in the PROVIDER's scope (`clients` is FORCE RLS; a wrong scope reads zero rows and every
+ *  company would look like it has no client). */
+async function groupClientOf(providerTenantId: string, targetTenantId: string) {
+  return withTenants([providerTenantId], (c) => resolveGroupClient(c, providerTenantId, targetTenantId));
+}
+
+/** The 422 for a target with no client record, or several. Nothing has been written when this throws. */
+async function assertTargetIsGroupClient(providerTenantId: string, targetTenantId: string): Promise<void> {
+  const r = await groupClientOf(providerTenantId, targetTenantId);
+  if (r.status === "none") {
+    throw routeRefusal(
+      "route_needs_group_client",
+      "a request route needs the target to be a client of the provider: a platform operator links or creates its client record first",
+      { targetId: targetTenantId },
+    );
+  }
+  if (r.status === "ambiguous") {
+    throw routeRefusal(
+      "group_client_ambiguous",
+      "the provider has more than one live client record linked to the target; unlink or merge one before creating a route",
+      { targetId: targetTenantId },
+    );
   }
 }
 
@@ -224,6 +272,12 @@ export class ServiceAssignmentsController {
 
     const leadUserId = typeof body?.leadUserId === "string" ? body.leadUserId : null;
 
+    // DW-10e (BFF §60.2): a route has no manager. Any lead, however spelled, is refused before anything is read or written.
+    const isRoute = isRequestRouteKey(moduleKey);
+    if (isRoute && body?.leadUserId !== undefined && body?.leadUserId !== null && body?.leadUserId !== "") {
+      throw routeRefusal("route_has_no_lead", "a request route has no manager: leadUserId is not accepted with a routing key");
+    }
+
     // ---- ORG-7b dry-run (?dryRun=1): a pure PREVIEW — who WOULD be materialized + which targets
     // are legal — reads only (the provider's org blob subtree + its own membership table), never
     // writes a service_assignments row. Reuses the reconciler's OWN collectSubtreePersons (not a
@@ -253,10 +307,27 @@ export class ServiceAssignmentsController {
           companies.push({ id: target, included: false, reason: "no_access" });
           continue;
         }
+        if (isRoute) {
+          // DW-D41: the target must be the provider's client. Reported per target, never silently dropped.
+          const gc = await groupClientOf(providerTenantId, target);
+          if (gc.status === "none") {
+            companies.push({ id: target, included: false, reason: "no_group_client" });
+            continue;
+          }
+          if (gc.status === "ambiguous") {
+            companies.push({ id: target, included: false, reason: "group_client_ambiguous" });
+            continue;
+          }
+        }
         companies.push({ id: target, name: nameById.get(target) ?? target, included: true });
       }
 
       const node = await fetchOrgNode(providerTenantId, nodeId);
+      if (isRoute) {
+        // A route lists nobody: it places nobody. `routeOnly` tells the sheet to say so instead of showing an empty staff list.
+        assertRouteUnitIsDepartment(node);
+        return { dryRun: true, routeOnly: true, unit: { nodeId: node.id, name: node.name, kind: node.kind }, items: [], companies };
+      }
       const persons = collectSubtreePersons(node);
       let items: Array<{ userId: string; name: string; email: string; role: "staff" | "manager" }> = [];
       if (persons.length) {
@@ -293,6 +364,12 @@ export class ServiceAssignmentsController {
     }
 
     const node = await fetchOrgNode(providerTenantId, nodeId);
+    if (isRoute) {
+      // DW-10e: a department only, and every target must be the provider's client (one live record each). Both BEFORE anything
+      // is written, so a refusal leaves no row, no org_units anchor and no event.
+      assertRouteUnitIsDepartment(node);
+      for (const target of targets) await assertTargetIsGroupClient(providerTenantId, target);
+    }
     const global = isGlobalActor(req.principal);
     const status = global ? "active" : "proposed";
 
@@ -487,6 +564,11 @@ export class ServiceAssignmentsController {
     if (typeof nodeId !== "string" || !nodeId) throw new BadRequestException("nodeId required");
 
     const node = await fetchOrgNode(providerTenantId, nodeId);
+    if (isRequestRouteKey(row.module_key)) {
+      // DW-10e: a route stays on a department and its target must still be the provider's client. Nothing is written on a refusal.
+      assertRouteUnitIsDepartment(node);
+      await assertTargetIsGroupClient(providerTenantId, row.target_tenant_id);
+    }
     const global = isGlobalActor(req.principal);
     // Orphan-repair (the row's CURRENT denormalized unit_status is 'orphaned') re-links skip
     // re-consent — the relationship's authority was never revoked, only its anchor went stale.
