@@ -1,81 +1,119 @@
-# Sidebar nav map — where every item lives
+# Sidebar nav map: where every item lives
 
-**Status:** living document. **Owner of truth:** [`platform-ui/src/components/shell/nav.ts`](../platform-ui/src/components/shell/nav.ts).
-This file is the *human* index of that function plus a per-push record of what moved.
+**Status:** living document. **Owner of truth:** the workspace registry,
+[`platform-ui/src/lib/workspaces.ts`](../platform-ui/src/lib/workspaces.ts), drawn through
+[`lib/workspaceAccess.ts`](../platform-ui/src/lib/workspaceAccess.ts) (home, gates) and
+[`lib/shellModel.ts`](../platform-ui/src/lib/shellModel.ts) (what one person sees). This file is the human index of those
+files plus a record of what moved.
 
-The sidebar changes on nearly every UI push and the diffs are hard to read (one array literal,
-capability-gated rows appearing and disappearing). **Update the tables below in the same commit that
-changes `nav.ts`** — a nav move with no entry here is treated as an accident, not a decision.
+**Update this file in the same commit that adds, moves or re-gates a row in `lib/workspaces.ts`.** A row move with no entry in
+§3 is treated as an accident, not a decision.
+
+Since **DW-D38 (owner, 2026-10-16)** the department workspace shell is the only layout. The classic sidebar (`components/shell/nav.ts`
+and its renderers), the per-person layout switch and the `gaiada_prefs.shell` cookie field are gone. The design is the
+[Department workspaces plan](plans/2026-10-13-department-workspaces.md) §2.
 
 ---
 
 ## 1. How the sidebar renders
 
-> **Coming change: the workspace model (PLANNED; every decision ruled 2026-10-13).** The
-> [Department workspaces plan](plans/2026-10-13-department-workspaces.md) replaces the 12-group map below.
-> - A workspace switcher sits at the top.
-> - Below it come four short blocks: Overview + AI Assistant, Work, Performance, and You.
-> - Company, Admin and + New sit at the foot.
->
-> The collapsed rail becomes flat icons, and an `areaFor(path)` map gives every page exactly one home.
-> Until it ships (DW-2, behind a per-person pilot switch), sections 1 and 2 describe the live sidebar. Each DW change to
-> `nav.ts` gets its own entry in §3, as the rule below requires.
+Top to bottom, for every staff person (`components/shell/WorkspaceSidebar.tsx`):
 
-Two modes, one nav model. `navFor(me, tenantId, departments)` returns `NavGroup[]`; the renderer
-decides how each group is drawn.
+| Part | What it shows | Where it comes from |
+|---|---|---|
+| Wordmark | The root company's name | data, never a literal (PV-D13) |
+| Switcher | "Your workspaces" first, then every department of the active company, then "Switch company" | `resolveMyWorkspaces` + the org tree |
+| Top rows | **Overview** (the department's all-seeing dashboard) and **AI Assistant** (opens the drawer over the page) | registry |
+| **Work** | the workspace's own sections, then the shared rows (Requests, Campaigns, Clients, Tools & connections) where its pack and gates allow | registry `work` rows |
+| **Performance** | My performance · Reports · Analytics · Appraisals · Learning | the shared block; tabs carry the gates |
+| **You** | My tasks · Inbox · Calendar · Approvals · Me | the shared block; Approvals per DW-D23 (below) |
+| Footer | **Company** (everyone) · **Admin** (only for those its gates allow) · **+ New** (the workspace's own create action first) | `ADMIN_ROWS`, `lib/adminAccess.ts` |
 
-| Field | Meaning |
+**Home** (`lib/workspaceAccess.ts`, in this order): the person's placement in the org tree; a unit they lead (`org_unit_lead`); an HR,
+Finance or IT role in the company; GM access (full or narrowed) when the company has an Office of the GM; otherwise the Company area.
+`/` answers with a real redirect to the home workspace's Overview, or shows the company-level Overview for a Company home. A person
+with no company at all gets a short "not a member of any company yet" page.
+
+**Areas** (`lib/areas.ts`): every page belongs to exactly one area (a workspace, Company, the personal area or Admin), chosen by
+`areaFor(path)`. A page-file test fails when a page has no area. Visiting another department shows its rows under "Visiting …" with
+"Back to …"; personal pages keep your workspace's sidebar; record pages (`/tasks/[id]`, `/projects/[id]`, `/clients/[id]/*`,
+`/people/[id]`) keep the area you came from.
+
+**Inside a row:** the shell draws ONE tab strip for the row's tabs (`WorkspaceTabStrip`). A console's own strip (`DeptTabs`,
+`SectionTabs`, `FinanceTabs`) draws only when the row's tabs do not cover every tab of that console.
+
+**Collapsed rail and phone:** the same rows as flat icons with tooltips (no fly-outs); below the drawer breakpoint the off-canvas
+panel opens from the top bar's menu button. The collapsed state persists in the `gaiada_sidebar` cookie and is stamped on
+`<html data-sidebar>` server-side, so a collapsed rail never flashes open.
+
+**Gates are data.** Each row and tab carries a `Gate` (`cap`, `unitCap`, `agencyRow`, `pack`, `module`, `hasWorkspace`, `elevated`,
+`platformOperator`, `rootGroup`, `decider`, `all`, `any`), evaluated by `gateAllows`. Rows with a `ticket` are planned and never
+drawn. A gate only narrows what the menu offers; Cerbos and RLS stay the authority, and the Admin area's pages are a 404 for anyone
+their gate refuses (DW-D20, one table in `lib/adminAccess.ts`).
+
+**Approvals (DW-D23):** the You row shows when something waits on your decision or you hold any right to decide; its badge is the
+pending count. The page stays reachable for everyone through the command palette.
+
+**The command palette** (⌘K, the top bar's search): every concrete row and tab the person's model offers, the Company and Admin
+rows, a short list of explicit, gated entries for real pages that no row owns (see `lib/palette.ts`), and live records from
+`/api/search/palette`. `src/lib/paletteFindability.test.ts` pins that a page reachable today stays findable.
+
+**Client-only principals** (`isClientOnly`) never see this shell: they are sent to `/portal`, which has its own route group and shell.
+
+---
+
+## 2. The Work rows, per workspace
+
+As a member of the agency company sees them (`e2e/workspace-personas.spec.ts` pins these lists persona by persona; rows whose gate
+the person fails are left out, and a generic-pack company has no agency rows).
+
+| Workspace | Work rows (in order) |
 |---|---|
-| `label` | Group heading. **Empty string** = unlabelled single row (Settings) — never collapsible. |
-| `items` | The rows. Each has its own `icon` (shown in expanded mode and in flat rail rows). |
-| `icon` | The group's **rail glyph** — only used when the group becomes a collapsed-mode flyout category. Falls back to `box`. |
-| `pinned` | Expanded: open by default, always. Rail: rows render **flat** (no flyout). |
+| Web Dev | Project Management · Build · Run · Website · Requests · Campaigns · Clients · Tools & connections |
+| SEO | Project Management · Accounts · Optimize · Requests · Campaigns · Clients · Tools & connections |
+| Social Media | Project Management · Publish · Requests · Campaigns · Clients · Tools & connections |
+| Creatives | Project Management · Requests · Studio · Campaigns · Clients · Tools & connections |
+| Office of the GM | Project Management · Command · Oversight · Requests · Campaigns · Clients & sales · Tools & connections |
+| HR | Project Management · People · Time · Talent · Cases & compliance · Tools & connections |
+| Finance | Project Management · Ledger · Receivables · Payables · Treasury & assets · Tax · Close · Tools & connections |
+| IT | Project Management · Devices · Network · IT accounts · Workflows · Tools & connections |
+| Any other department (generic) | Project Management · Tools & connections, under the department's own name |
 
-**Expanded (248px)** — every group is a collapsible disclosure (`NavGroupSection`). Multi-open on
-purpose; the group holding the current route opens by default; an explicit click wins over that.
-
-**Collapsed rail (64px)** — per group:
-
-1. `pinned: true` → items render as flat icon rows.
-2. `items.length === 1` → flat icon row (a flyout for one row costs more than it saves).
-3. otherwise → one `group.icon` glyph opening a flyout (`RailCategory`) on click/hover/`ArrowDown`.
-
-Below the drawer breakpoint the off-canvas panel wins and the collapse button hides — touch has no
-hover, so the rail is width-gated, not pointer-gated. State persists in the **`gaiada_sidebar`**
-cookie (separate from the `gaiada_prefs` blob) and is stamped on `<html data-sidebar>` server-side so
-a collapsed rail never flashes open.
+The Company area lists Departments, People, Organization, Projects, Clients, Campaigns, Knowledge, AI Agents, the Learning catalogue
+and The Office. Admin holds Settings, Group (on a root company) and Platform, each by its own gate.
 
 ---
 
-## 2. Current nav (as of 2026-08-07, the `fadhil/ui` merge)
+## 3. Change log
 
-Order top → bottom. "Rail" is what the collapsed 64px mode shows.
+### 2026-10-16 — DW-D38: the workspace shell is the only layout
 
-| # | Group | Rail | Glyph | Rows (in order) | Gate |
-|---|---|---|---|---|---|
-| 1 | **Me** | flyout | `user` | Overview `/me` · Inbox `/me/inbox` · Leave `/me/leave` · Loans `/me/loans` | none — every staff principal |
-| 2 | **Workspace** | **flat (pinned)** | — | Dashboard `/` · Calendar `/calendar` · Approvals `/approvals` | none |
-| 3 | **Organization** | flat (1 row) | `sitemap` (unused while 1 row) | Overview `/organization` | none |
-| 4 | **Departments** | flyout | `hr` | one row per department `/departments/:id` · HR `/hr` · IT `/it` | none (rows come from the active company's org structure) |
-| 5 | **Business** | flyout | `briefcase` | Projects · Tasks · Clients · Deliverables · Timesheets · **Billing** · Agency · Meetings · Delivery Pipeline · **Monitoring** (+ `/monitoring/new`, `/monitoring/channels`) · **Rollups** | Billing → `company.manage`; Rollups → `rollups.view`; Monitoring → none (backend `monitoring.read` is the boundary) |
-| 6 | **Reports** | flyout | `chart` | My Report `/reports/person` · Project `/reports/project` · Department `/reports/department` · **Company** `/reports/company` | Company → `rollups.view` |
-| 7 | **Appraisals** | flyout | `award` | My Appraisals `/appraisals/mine` · **Team** `/appraisals` · **Cycles** `/appraisals/cycles` | Team → `appraisal.score`\|`appraisal.read`; Cycles → `appraisal.cycle.admin` |
-| 8 | **Intelligence** | flyout | `agents` | Assistant `/assistant` · Knowledge `/knowledge` · AI Agents `/agents` | none (Assistant threads are owner-private in the backend) |
-| 9 | **Systems** | flyout | `server` | WA/TG Bot · AI Gateway · MCP Hub · Automation | none |
-| 10 | *(unlabelled)* | flat | — | Settings `/admin` | `admin.access` |
+The owner ruled that there is no pilot week and no opt-in: the new layout is permanent. Removed in one change (DW-9d):
+- the classic sidebar (`nav.ts`, `Sidebar`, `NavGroupSection`, `RailCategory`, `NavLink`, `CompanyContext`), the classic top bar, the
+  floating assistant button and the full-width special-access strip;
+- the per-person switch ("Try the new layout" / "Back to the classic layout"), `lib/shellLayout.ts` and the `shell`/`shellChosen`
+  fields of `gaiada_prefs` (old cookies are ignored);
+- the classic Home page at `/` (the Command Center and the queue/agenda home): the Overview replaced it (DW-D1, DW-D4, DW-D12);
+- the departments' My-work rail ("Needs you" lives on the Overview).
 
-**Client-only principals** (`isClientOnly`) get a *different* nav entirely: a single **Portal → Your
-portal** `/portal` row. The portal has its own route group and shell; that row is the escape hatch
-for a client who lands on an `(app)` route from a stale bookmark.
+What did not move: every URL, every gate, and every page's own content. The palette took over the findability that the classic nav
+used to give (`/approvals` for everyone, and the explicit entries listed in `lib/palette.ts`). The classic nav's gate tests were
+ported to `gateAllows` and shell-model tests before `nav.ts` was deleted.
 
-Rail glyph budget for an elevated user: 3 flat (Workspace) + 1 (Organization) + 6 flyout categories
-+ 1 (Me) + 1 (Settings) ≈ **12 icons** standing in for ~35 rows.
+### 2026-10-13 to 2026-10-15 — DW-1 to DW-8: the workspace shell, built behind a per-person pilot switch
 
----
+The registry (`lib/workspaces.ts`), the access and home rules (`lib/workspaceAccess.ts`), the areas (`lib/areas.ts`), the shell
+(DW-2), the Overview (DW-3), Performance inside every department (DW-4), Requests and Campaigns (DW-5), each department's tools
+(DW-6), HR, Finance and IT as workspaces in the org tree (DW-7d), and You, Company and Admin (DW-8). DW-9 proved it for twelve kinds
+of person (`workspace-personas`) and with an axe pass (`workspace-a11y`), then made it the only layout.
 
-## 3. Change log — one entry per push that touches `nav.ts`
+### Classic era (before DW-D38): one entry per push that touched `nav.ts`
 
-### 2026-08-24 — GM-01: **GM hoisted to the top of Departments** (no route moved)
+These entries describe the classic sidebar (`components/shell/nav.ts`), which DW-D38 removed on 2026-10-16. They stay as
+the record of why rows sat where they sat; several reasons (GM first, Monitoring as client work, ungated department rows)
+carried into the workspace registry.
+
+#### 2026-08-24 — GM-01: **GM hoisted to the top of Departments** (no route moved)
 
 The GM department gains a bespoke console (`docs/blueprints/gm-console-foundation.md`), and with it
 one nav change: for every principal, **GM sorts FIRST inside the `Departments` group** instead of
@@ -112,7 +150,7 @@ routes breaks deep links, the palette's tier-3 search, MCP hrefs and the agentic
 
 **No new glyph.** The row keeps the `hr` group glyph every department row uses.
 
-### 2026-08-13 — MON: **Monitoring** added to Business
+#### 2026-08-13 — MON: **Monitoring** added to Business
 
 Plane B (client property/service monitoring) gets one row: **Monitoring** `/monitoring`, icon
 `pulse`. Sub-surfaces `/monitoring/new` and `/monitoring/channels` are reached from the page, not
@@ -134,7 +172,7 @@ not forbidden.
 right shape for a health/liveness surface, and the rail only draws a group glyph, so the collision
 is invisible there.
 
-### 2026-08-07 — merge `fadhil/ui` → `main` (collapsible sidebar + 64px icon rail)
+#### 2026-08-07 — merge `fadhil/ui` → `main` (collapsible sidebar + 64px icon rail)
 
 Branch was **1 commit ahead / 163 behind**; it forked before `Me` and `Assistant` existed. One
 conflict (`nav.ts`), resolved by keeping **both** sides:
@@ -163,21 +201,21 @@ the `gaiada_sidebar` cookie in `lib/prefs.ts`, and `shell.css` rail rules.
 the group's `sitemap` glyph is never used. Harmless today; it becomes the right glyph the moment a
 second row lands under Organization.
 
-### Earlier (pre-dating this file)
+#### Earlier (pre-dating this file)
 
 Not reconstructed. `git log -- platform-ui/src/components/shell/nav.ts` is the fallback.
-
 ---
 
-## 4. Rules for the next nav change
+## 4. Rules for the next row change
 
-1. **Add the row to `nav.ts` and the table in §2 in the same commit.** Add a §3 entry saying *why* it
-   sits where it sits.
-2. **A new group needs an `icon`** or the rail draws a generic `box`. Check §2 for a glyph already in
-   use before picking one.
-3. **A group that will only ever hold one row** doesn't need an `icon` — the rail flattens it.
-4. **Capability-gated rows belong in the Gate column**, with the exact capability string. A row with
-   no gate here is asserting *every staff principal sees it*.
-5. `nav.test.ts` asserts group/row composition — extend it, don't loosen it.
-6. The rail e2e specs (`e2e/app.spec.ts`) are **not** `@smoke`-tagged, so CI does not run them. They
-   need the backend; run them by hand against a live stack when the sidebar changes.
+1. **Add or move the row in `lib/workspaces.ts` and update §2 in the same commit**, with a §3 entry saying why it sits where it sits.
+2. **A new page needs an `AREA_RULES` entry** (`lib/areas.ts`); the page-file test fails without one. URLs never move; only true
+   duplicates redirect.
+3. **Every row and tab carries its gate as data.** Mirror the gate of the page's PRIMARY read, never a guess; extend the
+   `gateAllows` tests, do not loosen them. A gate only narrows the menu; the server stays the authority.
+4. **A page no row owns must stay findable**: add a gated entry to the palette's explicit list in `lib/palette.ts` and a case to
+   `paletteFindability.test.ts`.
+5. **Planned rows carry `ticket`** and are never drawn; remove the ticket in the change that builds the row.
+6. **Run the workspace e2e on sumopod** (`platform-ui/qa/e2e-gate.sh`, one gate at a time): `workspace-shell`,
+   `workspace-departments`, `workspace-functional`, `workspace-personas` (the rows per persona) and `workspace-a11y` (axe, light and
+   dark, desktop and phone). CI's Playwright step runs only `smoke`.

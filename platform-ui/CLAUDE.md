@@ -131,7 +131,8 @@ server-only readers with a `*Actions.ts` sibling. Every actions file follows one
 
 ### Authorization is mirrored, not owned
 `lib/rbac.ts` is the UI capability model (`Role` → `Capability[]`, `can(me, cap, companyId?)`,
-`isElevated`, `isClient`/`isStaff`/**`isClientOnly`**); `components/shell/nav.ts` gates nav off it. Use
+`isElevated`, `isClient`/`isStaff`/**`isClientOnly`**); the workspace registry's gates (`gateAllows` in
+`lib/workspaceAccess.ts`) read it. Use
 `isClientOnly` for "external client" — `isClient && !isElevated` wrongly matches a manager who is
 also a client contact, which stripped their whole staff surface. **Cerbos + RLS on the
 backend remain the authority.** Capability families: `admin/company/org/people/pm/it/approvals/
@@ -147,16 +148,26 @@ where excluded companies are **counted with a reason** (`no_access` | `not_serve
 from an ungraduated endpoint; `mergeLegs()` is for client-side per-company fan-out.
 `lib/hr.ts` predates this with an identical local `HrEnvelope` — left alone on purpose.
 
-### Department consoles
-Two-level IA: a stable primary **group** strip (`Home · Work · <craft> · Connections`) with a
-secondary sub-tab strip. `lib/deptToolkits.ts` is the registry — pure and client-safe, keyed by
-department **name** slugified (`deptSlug`), so it survives whatever id the org structure
-assigns; departments with no bespoke toolkit fall back to Home-only. Routes stay flat
-(`/departments/[deptId]/<tab>`) so old deep links work. `[deptId]/layout.tsx` owns header +
-`DeptTabs` + the persistent `MyWorkRail`; tab pages render only their body.
-`lib/departments.ts` derives the workspace from **org structure + PM poly-assignee**
-(`kind=department|division|person`, or a responsible person placed in the dept) — there is no
-departments backend. `(app)/[...placeholder]` catches nav routes not yet furnished.
+### The workspace shell (the only layout since DW-D38)
+Every staff page renders inside the department workspace shell (`components/shell/Shell.tsx` → `WorkspaceShellSidebar`,
+`WorkspaceTopBar`, `WorkspaceTabStrip`). There is no classic sidebar and no layout switch any more: the owner ruled the new
+layout permanent on 2026-10-16 (DW-D38), and an old `gaiada_prefs.shell` value is ignored. `docs/sidebar-nav-map.md` is the
+human index; the design is `docs/plans/2026-10-13-department-workspaces.md` §2.
+- **`lib/workspaces.ts` is the registry** (pure, client-safe): each workspace's Overview, Work rows and their tabs, the shared
+  Performance and You blocks, tools and connections. Departments are keyed by **name** slugified (`deptSlug`), so the registry
+  survives whatever id the org tree assigns; a department with no bespoke workspace gets the generic one. Rows with a `ticket`
+  are planned and never drawn. Gates are data (`Gate`), evaluated by `gateAllows` in `lib/workspaceAccess.ts`, which also
+  resolves each person's home (placement, led unit, HR/Finance/IT role, GM access, else the Company area).
+- **`lib/areas.ts`** gives every page exactly one area (`areaFor`); a new page needs an `AREA_RULES` entry or the page-file test
+  fails. URLs never move.
+- **`lib/shellModel.ts`** builds what one person sees; `lib/palette.ts` builds the command palette from that model plus a short
+  list of explicit, gated entries for pages no row owns (`paletteFindability.test.ts` pins that nothing reachable disappears).
+- Routes stay flat (`/departments/[deptId]/<tab>`, `/hr`, `/finance`, `/it`), so old deep links work. `[deptId]/layout.tsx`
+  owns the header (hidden on the Overview) and `DeptTabs`, which draws only when the row's tabs do not cover the console's;
+  "Needs you" lives on the Overview (there is no My-work rail). `lib/departments.ts` derives a department from the **org
+  structure + PM poly-assignee** (`kind=department|division|person`, or a responsible person placed in the dept): there is no
+  departments backend. `(app)/[...placeholder]` catches routes not yet furnished.
+- The Admin area's pages are a 404 for anyone their gate refuses (DW-D20, one table in `lib/adminAccess.ts`).
 
 ### Reporting / appraisals / check-ins (TR-* program)
 Four grains — `/reports/{person,project,department,company}` — plus `/appraisals/*` and the My
@@ -214,8 +225,8 @@ The guard test fails the build on all of these, deliberately:
 Also: hairline borders, opacity-only hovers, one easing curve (`--erp-ease`), the uppercase
 0.30em-tracking `.type-eyebrow` signature. Fonts are self-hosted **variable** woff2 split
 latin / latin-ext by `unicode-range` and preloaded in `app/layout.tsx`. A11y: skip link,
-`:focus-visible` ring, `prefers-reduced-motion` kill-switch, mobile nav toggle in
-`shell/Sidebar.tsx`.
+`:focus-visible` ring, `prefers-reduced-motion` kill-switch, mobile nav toggle (`shell/NavToggle.tsx`) opening the
+workspace sidebar as a drawer.
 
 ### Gold-glass theme (2026-08-30) — what changed and what is still open
 
@@ -246,6 +257,15 @@ to; a genuinely new surface gets a new prefix, never a bare class name.
 
 ## Traps that have burned real tickets
 
+- **Pages stream under the workspace shell.** For ~150 ms after `load` the finished content sits twice in the DOM, in place and
+  in React's hidden streaming copy (`div#S:n[hidden]`). A strict Playwright locator in that window throws "strict mode violation …
+  2 elements", and `toBeVisible()` does not retry it. Users see nothing. Specs on streaming pages import `test` from
+  `e2e/settledPage.ts`, whose `goto`/`reload` wait for the hidden copies to clear.
+- **The workspace e2e runs only on sumopod.** CI's Playwright step runs `smoke` (and the WebDesk stub config). The projects
+  `workspace-shell`, `workspace-departments`, `workspace-functional`, `workspace-personas` (twelve kinds of person, DW-9a) and
+  `workspace-a11y` (axe, light and dark, desktop and phone, DW-9b) are gated with `qa/e2e-gate.sh`, one gate at a time.
+  The persona logins (`webdev@`, `webhead@`, `seo-specialist@`, `social@`, `creative@`, `hr-staff@`, `finance-staff@`,
+  `it-admin@`, `resort-staff@` with the `co-resort` tenant) are in `lib/demoIdentity.ts` and `e2e/personas.ts`, ONE grant each.
 - **Frontend-first drift** is the recurring bug class here: the console reads fields the backend
   never sends (`limit` vs `maxKeywords`, bare-vs-wrapped envelope, a column missing from a LIST
   select). It renders a confident wrong answer, nothing throws, `tsc` can't see it, and demo

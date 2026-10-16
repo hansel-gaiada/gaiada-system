@@ -365,7 +365,7 @@ Written when DW-3 started, from a survey of every source on main (`5703f27b`).
 - for someone whose home is the Company area, `/` renders the company-level Overview;
 - `/` otherwise sends a pilot user to their home workspace's Overview.
 
-All of this is for people on the pilot switch (DW-D7). Everyone else keeps today's pages.
+All of this was first built for people on the pilot switch (DW-D7). Since DW-D38 (2026-10-16) it is everyone's only layout.
 
 **How a block behaves.**
 - Each widget is a server component behind its own Suspense boundary.
@@ -1312,7 +1312,7 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 | **DW-D4** | The My-work rail goes. "Needs you" lives on the Overview | WS-UX / dept-console-design decision #10 (persistent rail) |
 | **DW-D5** | The floating Assistant button retires. One search box; the theme toggle moves to the avatar menu | |
 | **DW-D6** | HR, IT and Finance become real departments in each company's org tree | |
-| **DW-D7** | A per-person pilot switch for one week, then on for everyone. The old layout is removed two releases later | |
+| **DW-D7** | A per-person pilot switch for one week, then on for everyone. The old layout is removed two releases later | Superseded by DW-D38 (2026-10-16): no pilot week; the new layout is the only layout, and classic was removed at once |
 | **DW-D8** | Heads get a Me / Team switch on the Overview, and Team tabs in Reports, Appraisals and Learning | |
 | **DW-D15** *(access change)* | Heads get `org_unit_lead` on their own department, derived from their lead position. It lets them add learning (DW-D11), read the department report and read appraisals, for their own unit only. It cannot waive mandatory training | heads hold only `manager` today |
 | **DW-D19** *(people decision)* | Keep today's rule on who sees a person's activity map: self, their head (subtree), HR and company-wide tiers; colleagues never. **No single score**: show what was done, by kind. Activity is never an appraisal signal on its own | resolves P4-E1 for this surface |
@@ -1349,6 +1349,7 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 | DW-D35 | DW-10e (moved from DW-5, BFF §32.8): may a group company that is not an agency (the holding, a hotel company) ask the agency company's Creatives and Web Dev? | **Owner (2026-10-15): build it now.** Group companies send asset and engineering requests to another group company's departments through the group's service assignments (ORG-13), contract first (BFF §60, PERMISSION-CONTRACT §49) |
 | DW-D36 | DW-7h: the UniFi controller is shared with a private house, so no API key can be issued; and most staff addresses are Google Workspace aliases on an HOD account | **Owner (2026-10-15):** build the ERP side now, and the Raspberry Pi collector later. The ERP side means who is connected, sign-ins, alerts, ending a session, blocking a login and blocking an address (BFF §52). The four sample Network tabs are reworked to show it. Control is ERP-side. Sign-in stays email and password. On the owner's question about aliases, the DW-7 session proposed, and the owner then said to proceed: recovery is by IT with a temporary password, and email reset is off, because a reset email to an alias reaches the alias owner; no personal content goes by email to an alias. | DW-7h, DW-7i-4 |
 | DW-D37 | DW-7i-1: one n8n serves the whole group and its workflows carry no company, so who may see its failures? | **Owner (2026-10-16): "me (superadmin) and Anthony (Boss), PM, GM."** As a rule (BFF §52.12, PERMISSION §42a): the platform operator, plus in a company with automation on, its `owner`, the seated lead of its Office of the GM, and the holder of its Project Manager seat (vacant today). IT staff are not in the list. | DW-7i-1 |
+| DW-D38 | DW-9c: the pilot week on the per-person switch (DW-D7) had started, with the owner as the only pilot (the only live staff login); DW-9d-1 was built to make the new layout the default while keeping the way back to classic for two releases | **Owner (2026-10-16, first-hand): "proceed to finish dw 9. but ensure it is fully work no need to try the new layout. so the changes is permanent."** No pilot week and no opt-in: the department workspace shell is the only layout. The "Try the new layout" switch, the way back to classic and the classic layout's code (the classic sidebar `nav.ts` and its renderers, the classic top bar, the floating assistant button, the classic Home at `/`, the departments' My-work rail) are removed in the same change, and `gaiada_prefs.shell` is ignored. Findability the classic nav gave moves to the palette's explicit, gated entries, and the classic nav's gate tests are ported before it goes. Supersedes DW-D7's pilot week and two-release grace | DW-9c, DW-9d |
 
 ---
 
@@ -1803,6 +1804,7 @@ These are built in code but give no real data until someone outside engineering 
 
 ## Decision log
 
+- **2026-10-16 (owner, first-hand, during the build):** DW-D38: no pilot week and no opt-in; the new layout is the only layout and the classic layout's code is removed now (§11.4, §12.1). Supersedes DW-D7's pilot week and two-release grace.
 - **2026-10-16 (owner, during the build):** DW-D37: the failing workflows of the shared n8n are for the superadmin, the owner (Anthony), the PM and the GM (§11.4, BFF §52.12), for DW-7i-1.
 - **2026-10-15 (owner, during the build):** DW-D36: no UniFi key, so IT security moves to the ERP side now and the office collector waits for a Raspberry Pi; staff addresses are mostly Workspace aliases, so recovery is by IT and email reset is off (§11.4, BFF §52), for DW-7h and DW-7i-4.
 - **2026-10-15 (owner, at DW-10's start):** DW-D32 (notice board: heads post, the department reads), DW-D33 (the department calendar shows colleagues' approved leave with its type), DW-D34 (Overview: show and hide blocks, saved in the browser) and DW-D35 (requests across group companies are built now), all §11.4; the DW-10 build notes are §12.2.

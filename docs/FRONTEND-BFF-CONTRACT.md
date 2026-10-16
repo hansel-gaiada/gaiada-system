@@ -3915,7 +3915,7 @@ endpoints. Merging the two is what made Gaia Nexus's monitoring dashboard fictio
 - Writes: `lib/monitoringActions.ts` (`createMonitor`, `acknowledgeIncident`, `scheduleMaintenance`,
   `deleteMaintenance`, `testChannel`, `saveChannel`, `setChannelEnabled`, `deleteChannel`,
   `saveRoute`, `deleteRoute` — MON-20 added the last six).
-- Nav: **Business → Monitoring** (`components/shell/nav.ts`, indexed in `docs/sidebar-nav-map.md`).
+- Nav: **Web Dev › Run › Monitoring** (`lib/workspaces.ts`, indexed in `docs/sidebar-nav-map.md`; the classic "Business → Monitoring" row went with the classic sidebar, DW-D38).
   `/monitoring/maintenance` is reached from in-page links (board page + channels page), not a new
   top-level nav entry.
 - DEMO_MODE fixtures: `lib/demoMonitoring.ts` — seeded with a down/degraded/stale/maintenance/
@@ -7146,7 +7146,7 @@ Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.2 (DW-6f) and §14.1 
   - **None, and not `linkable`:** nothing at all, so the convention is not taught in a company it cannot work in.
   - **None otherwise:** nothing.
   - **The read failed:** "Pull requests unavailable".
-- Not pilot-gated: the task page is shared by both layouts, and the section is new information, not a layout change.
+- Not pilot-gated: the section is new information, not a layout change. (Since DW-D38 there is one layout.)
 
 ### 34.8 Before building, and tests
 
@@ -7527,7 +7527,7 @@ There is **no new Cerbos kind**. A link is part of the work it is on, so it is a
   - each part card of the campaign page (`app/(app)/agency/[campaignId]`, `CampaignParts`).
   Each link shows its thumbnail, title, "changed <relative time>", "<n> open comments" (opens Figma at the frame), "Open in Figma", a "Stale" note, Export (PNG, SVG or PDF, with a success line naming the new version) and Remove. A comment count of `null` reads "Comments not read yet". With `figmaConnected: false` the links keep their cached values, with one line, "Figma isn't connected for this company", and a Tools & connections link for `company.manage` holders. Add, Remove and Export are offered to everyone who can read the section; the server decides and a refusal is a sentence.
 - **Thumbnail proxy.** The `<img>` points at `GET /api/figma-links/:linkId/thumbnail` on platform-ui (`app/api/figma-links/[linkId]/thumbnail/route.ts`), which forwards the caller's session to the platform's thumbnail route for the active company, passes on only a PNG, and sets `Cache-Control: private, max-age=600`, `nosniff` and a sandbox CSP. It loads lazily, with `alt` = the title; a failed load shows "Preview unavailable".
-- **Tools & connections** (`FigmaConnectionBlock`, pilot branch): the `DW-6k` ticket is removed from `CONN.figma`. Everyone sees whether Figma is connected and the token type (never the token). `company.manage` holders get a password field, the type (Personal access token or OAuth), Connect (Replace token while connected) and Disconnect.
+- **Tools & connections** (`FigmaConnectionBlock`; built on the pilot branch, the only page since DW-D38): the `DW-6k` ticket is removed from `CONN.figma`. Everyone sees whether Figma is connected and the token type (never the token). `company.manage` holders get a password field, the type (Personal access token or OAuth), Connect (Replace token while connected) and Disconnect.
 - **"Open in".** `CONTEXT_BUILDERS.figma` links each of the task's links by its stored `url`, with the title as the detail; none, or none usable, opens Figma's home. The task page reads the links once and passes the same answer to the Designs section and to `OpenInSlot`.
 - **Demo mode** answers `figma-links` and `integrations/figma` as not connected with nothing linked.
 - **UI deviations.**
@@ -8031,12 +8031,12 @@ Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.2 (DW-6i) and §14.1 
 
 ### 42.6 UI
 
-- **Tools & connections** (pilot page): the Google Drive block shows one of:
+- **Tools & connections** (the workspace page; the only page since DW-D38): the Google Drive block shows one of:
   - "Connect Google Drive", which starts §42.3;
   - the connected account's email with Disconnect;
   - "Reconnect", when `needs_reconnect`;
   - "Google Drive isn't set up for this ERP yet", when `configured: false`.
-  - The manual email row is replaced by this block in the pilot. The classic page is unchanged.
+  - The manual email row is replaced by this block. (The classic page that kept the manual row was removed by DW-D38.)
 - **The PM task's Attachments** gain "Attach from Google Drive" when the person is connected and the feature is configured.
   - It loads Google's Picker script (`https://apis.google.com/js/api.js`) only on click, opens the Picker with `drive.file` access, and posts each picked file to §42.5.
   - The new attachment shows with a Drive mark and opens in a new tab.
@@ -8140,7 +8140,7 @@ Google is STUBBED at `fetch` in every test; nothing here has met real Google (DW
   - `lib/drive-data.ts`: `readDriveStatus`, a `ReadResult` of the token-free status route (`GET /api/:t/integrations/google-drive`, deviation 13). It never reads the Picker route.
   - `lib/driveActions.ts`: start, disconnect, `loadPickerCredentialsAction`, attach.
   - `lib/drivePicker.ts`: the Google loader. `lib/drive-pending.ts`: the cookie.
-- **Tools & connections** (pilot): `components/departments/DriveConnectionBlock.tsx` replaces the manual Drive row in the pilot with the four states and the outcome line. Classic is unchanged (it keeps the manual row).
+- **Tools & connections**: `components/departments/DriveConnectionBlock.tsx` replaces the manual Drive row with the four states and the outcome line. (The classic page, which kept the manual row, was removed by DW-D38.)
 - **PM task page:** `components/drive/DrivePicker.tsx` ("Attach from Google Drive") sits inside `components/Attachments.tsx`, shown only when `readDriveStatus` says `configured && connected`.
   - On click it loads `https://apis.google.com/js/api.js` once, opens the Picker (multi-select) with a FRESH token, posts each picked id to the attach route in turn, then `router.refresh()`.
   - A file with a `url` opens it in a new tab (`rel="noopener noreferrer"`), with a Drive mark for `drive.google.com` and `docs.google.com` links.
