@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } f
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui";
+import type { UnitChoice } from "@/lib/deptCalendar";
 import {
   BUSY_PEOPLE_MAX, busyClashes, busyDayWindow, busyText, validateEventForm,
   type BusyPerson, type EventActionResult, type EventFormInput, type LoadBusy,
@@ -28,7 +29,7 @@ export interface PickProject { id: string; name: string; clientId: string | null
 export type SaveEventAction = (input: EventFormInput, names: Record<string, string>) => Promise<EventActionResult>;
 
 export function EventForm({
-  mode, initial, members, clients, projects, linksUnavailable = false, canRecord, hiddenPersonId, viewerId, zoneLabel, save, cancelHref, loadBusy,
+  mode, initial, members, clients, projects, linksUnavailable = false, units = [], canRecord, hiddenPersonId, viewerId, zoneLabel, save, cancelHref, loadBusy,
 }: {
   mode: "create" | "edit";
   initial: EventFormInput;
@@ -38,6 +39,9 @@ export function EventForm({
   projects: PickProject[];
   /** The client or project list could not be read: say so, so empty pickers never read as "there are none". */
   linksUnavailable?: boolean;
+  /** DW-10c-2 (BFF §59.3): the departments the person may share an event with, each offered as "My department: <unit>" in the
+   *  visibility select. A mirror: the server narrows every write (403 outside the person's reporting line). */
+  units?: UnitChoice[];
   /** The company has the Meetings row: only then is "Record this meeting" offered (and only when creating). */
   canRecord: boolean;
   /** The organizer: always invited, so not listed as a choice. */
@@ -94,6 +98,16 @@ export function EventForm({
     // `people` and `v.date` are what `busyKey` is made of.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busyKey]);
+  // The visibility select's one value: `attendees`, `company`, or `department:<unit id>`. An event already shared with a unit that is
+  // not offered (it has left the tree) keeps an option of its own, so the select never shows another choice than the event holds.
+  const unitOptions = v.visibility === "department" && v.unitNodeId && !units.some((u) => u.id === v.unitNodeId)
+    ? [...units, { id: v.unitNodeId, name: "", label: "A department no longer in the structure" }]
+    : units;
+  const visibilityValue = v.visibility === "department" ? `department:${v.unitNodeId}` : v.visibility;
+  function chooseVisibility(raw: string) {
+    if (raw.startsWith("department:")) setV((p) => ({ ...p, visibility: "department", unitNodeId: raw.slice("department:".length) }));
+    else setV((p) => ({ ...p, visibility: raw === "company" ? "company" : "attendees", unitNodeId: "" }));
+  }
   const youId = viewerId ?? hiddenPersonId;
   const busyName = (id: string) => (id === youId ? "You" : names[id] ?? "Someone");
 
@@ -248,11 +262,12 @@ export function EventForm({
         <p className="lux-field__hint" role="status">Clients and projects couldn&apos;t be loaded right now. You can still schedule without them.</p>
       )}
 
-      {Row({ id: "visibility", label: "Who can see it", children: (
+      {Row({ id: "visibility", label: "Who can see it", hint: v.visibility === "department" ? "Everyone in that department can see it on its calendar. Only the people you invite are notified." : undefined, children: (
         <span className="lux-field__selectwrap">
-          <select id="visibility" className={cls("visibility")} value={v.visibility} onChange={(e) => set("visibility", e.target.value === "company" ? "company" : "attendees")}>
+          <select id="visibility" className={cls("visibility")} value={visibilityValue} onChange={(e) => chooseVisibility(e.target.value)} aria-invalid={!!err("visibility")}>
             <option value="attendees">Only the people invited</option>
             <option value="company">Everyone in the company</option>
+            {unitOptions.map((u) => <option key={u.id} value={`department:${u.id}`}>{u.label}</option>)}
           </select>
         </span>
       ) })}

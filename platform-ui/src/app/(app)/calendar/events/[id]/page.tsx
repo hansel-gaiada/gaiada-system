@@ -6,6 +6,8 @@ import { accessibleCompanies } from "@/lib/rbac";
 import { getActiveTenant } from "@/lib/tenant";
 import { EVENT_NOT_FOUND, getEvent } from "@/lib/calendarEvents-data";
 import { RESPONSE_LABEL, describeWhen } from "@/lib/calendarEvents";
+import { unitNameIn } from "@/lib/deptCalendar";
+import { readOrgRoot } from "@/lib/campaigns-data";
 import { cancelEventAction, respondEventAction } from "@/lib/calendarEventsActions";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui";
@@ -48,6 +50,12 @@ export default async function EventPage({ params, searchParams }: Props) {
   const cancelled = ev.status === "cancelled";
   const companyName = me.companies.find((c) => c.id === ev.tenantId)?.name;
   const qs = `?company=${encodeURIComponent(ev.tenantId)}`;
+  // A department event names its unit by id; the name comes from the org tree. A unit that has left the tree (or a tree that could
+  // not be read) is still said, never left blank.
+  const unitName = ev.visibility === "department" ? unitNameIn(await readOrgRoot(me, ev.tenantId), ev.unitNodeId) : null;
+  const who = ev.visibility === "company" ? "Everyone in the company"
+    : ev.visibility === "department" ? `Visible to ${unitName ?? "its department"}`
+    : "Only the people invited";
 
   return (
     <>
@@ -63,7 +71,7 @@ export default async function EventPage({ params, searchParams }: Props) {
             {companyName && (<><dt>Company</dt><dd>{companyName}</dd></>)}
             {ev.client && (<><dt>Client</dt><dd>{ev.client.name}</dd></>)}
             {ev.project && (<><dt>Project</dt><dd>{ev.project.name}</dd></>)}
-            <dt>Who can see it</dt><dd>{ev.visibility === "company" ? "Everyone in the company" : "Only the people invited"}</dd>
+            <dt>Who can see it</dt><dd>{who}</dd>
             {ev.recording && (
               <>
                 <dt>Recording</dt>

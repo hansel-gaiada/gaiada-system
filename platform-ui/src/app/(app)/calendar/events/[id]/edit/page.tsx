@@ -6,6 +6,8 @@ import { getActiveTenant } from "@/lib/tenant";
 import { listClients, listMembers, listProjects } from "@/lib/entities";
 import { EVENT_NOT_FOUND, getEvent } from "@/lib/calendarEvents-data";
 import { formInputOf } from "@/lib/calendarEvents";
+import { eventUnitChoices } from "@/lib/deptCalendar";
+import { readOrgRoot } from "@/lib/campaigns-data";
 import { loadBusyExcludingEventAction, updateEventAction } from "@/lib/calendarEventsActions";
 import { DISPLAY_TZ } from "@/lib/format";
 import { PageHeader } from "@/components/PageHeader";
@@ -55,10 +57,11 @@ export default async function EditEventPage({ params, searchParams }: Props) {
     );
   }
 
-  const [members, clients, projects] = await Promise.all([
+  const [members, clients, projects, root] = await Promise.all([
     listMembers(userId, ev.tenantId).then((m) => m, () => null),
     listClients(userId, ev.tenantId).then((c) => c, () => null),
     listProjects(userId, ev.tenantId).then((p) => p, () => null),
+    readOrgRoot(me, ev.tenantId),
   ]);
   if (!members) {
     return (
@@ -80,6 +83,7 @@ export default async function EditEventPage({ params, searchParams }: Props) {
           clients={(clients ?? []).map((c) => ({ id: c.id, name: c.name }))}
           projects={(projects ?? []).map((p) => ({ id: p.id, name: p.name, clientId: p.client_id }))}
           linksUnavailable={clients === null || projects === null}
+          units={eventUnitChoices(me, root, ev.visibility === "department" ? ev.unitNodeId : null)}
           canRecord={false}
           hiddenPersonId={ev.organizer.id}
           viewerId={me.userId}

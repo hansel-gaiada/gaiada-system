@@ -8,7 +8,9 @@ import { allDayEventDays, timedEventDays, windowForDays, zoneDay, zoneTime, zone
 
 export type EventStatus = "confirmed" | "cancelled";
 export type EventResponse = "needs_action" | "accepted" | "declined" | "tentative";
-export type EventVisibility = "attendees" | "company";
+/** `department` (DW-10c-2, BFF §59.3): read by the unit's own people (placed in it or below), its heads and the company-wide
+ *  roles, besides the organizer and the invited. It always names its unit (`unitNodeId`). */
+export type EventVisibility = "attendees" | "company" | "department";
 /** What a person may answer; `needs_action` is only ever a starting state. */
 export type EventAnswer = "accepted" | "tentative" | "declined";
 
@@ -49,6 +51,8 @@ export interface CalendarEventDetail {
   location: string | null;
   videoUrl: string | null;
   visibility: EventVisibility;
+  /** DW-10c-2: the org-tree node a `department` event is for; null for any other visibility. */
+  unitNodeId: string | null;
   status: EventStatus;
   cancelledAt: string | null;
   organizer: { id: string; name: string };
@@ -203,6 +207,8 @@ export interface EventFormInput {
   videoUrl: string;
   description: string;
   visibility: EventVisibility;
+  /** The unit of a `department` event (the select's choice); "" for any other visibility. */
+  unitNodeId: string;
   clientId: string;
   projectId: string;
   record: boolean;
@@ -261,12 +267,17 @@ export function validateEventForm(i: EventFormInput, mode: "create" | "edit" = "
   const description = i.description.trim();
   if (description.length > DESCRIPTION_MAX) return fail("description", `The notes can be at most ${DESCRIPTION_MAX} characters.`);
 
+  // A department event names its unit (BFF §59.3). Any other visibility sends none: on create the server refuses a unit on one
+  // (`unit_not_allowed`), and on edit moving an event off `department` clears its unit by itself.
+  if (i.visibility === "department" && !i.unitNodeId) return fail("visibility", "Choose which department can see it.");
+
   const blank = mode === "edit" ? null : undefined;
   const payload: EventPayload = {
     title, ...time, attendeeIds: i.attendeeIds, visibility: i.visibility, description,
     location: location || blank, videoUrl: videoUrl || blank,
     clientId: i.clientId || blank, projectId: i.projectId || blank,
   };
+  if (i.visibility === "department") payload.unitNodeId = i.unitNodeId;
   if (mode === "create" && i.record) payload.record = true;
   for (const k of Object.keys(payload)) if (payload[k] === undefined) delete payload[k];
   return { ok: true, payload };
@@ -279,7 +290,7 @@ export function defaultFormInput(today: string, nowTime: string): EventFormInput
   return {
     title: "", allDay: false, date: today, startTime: `${hh(h)}:00`, endTime: `${hh(h + 1)}:00`,
     startDate: today, endDate: today, attendeeIds: [], location: "", videoUrl: "", description: "",
-    visibility: "attendees", clientId: "", projectId: "", record: false,
+    visibility: "attendees", unitNodeId: "", clientId: "", projectId: "", record: false,
   };
 }
 
@@ -292,7 +303,7 @@ export function formInputOf(ev: CalendarEventDetail, tz: string = DISPLAY_TZ): E
     date: today, startTime: timed ? zoneTime(ev.startsAt as string, tz) : "09:00", endTime: timed ? zoneTime(ev.endsAt as string, tz) : "10:00",
     startDate: ev.startsOn ?? today, endDate: ev.endsOn ?? today,
     attendeeIds: ev.attendees.map((a) => a.userId), location: ev.location ?? "", videoUrl: ev.videoUrl ?? "", description: ev.description,
-    visibility: ev.visibility, clientId: ev.client?.id ?? "", projectId: ev.project?.id ?? "", record: false,
+    visibility: ev.visibility, unitNodeId: ev.visibility === "department" ? ev.unitNodeId ?? "" : "", clientId: ev.client?.id ?? "", projectId: ev.project?.id ?? "", record: false,
   };
 }
 
@@ -329,13 +340,17 @@ export function eventErrorText(
         case "record_not_editable": return "Recording is chosen when the meeting is made and can't be changed.";
         case "nothing_to_change": return "Nothing was changed.";
         case "window_too_large": return "That window is too long to read at once.";
+        case "unit_required": return "Choose which department can see it.";
+        case "unit_not_allowed": return "Only an event shared with a department can name one.";
+        case "unit_invalid": return "That department couldn't be read. Choose one from the list.";
         default: return "Check the details and try again.";
       }
     case 403:
+      if (r === "outside your reporting line") return "You can only share an event with a department you belong to or lead.";
       if (kind === "create") return "You can't schedule meetings in this company.";
       if (kind === "respond") return "Only the people invited to this event can answer it.";
       return "You can't change this event. Only its organizer or a company admin can.";
-    case 404: return "This event doesn't exist or isn't visible to you.";
+    case 404: return r === "unit_not_found" ? "That department isn't in this company's structure." : "This event doesn't exist or isn't visible to you.";
     case 409:
       if (r === "event_cancelled") return "This event was cancelled, so it can't be changed or answered.";
       if (r === "recording_needs_timed_event") return "A meeting with a recording needs a start time, so it can't become all-day.";
