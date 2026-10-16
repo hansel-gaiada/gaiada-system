@@ -26,6 +26,7 @@ import { appraisalsDemo } from "./demoAppraisals";
 import { lmsDemo } from "./demoLms";
 import { deptKpisDemo } from "./demoDeptKpis";
 import { noticesDemo } from "./demoNotices";
+import { deptCalendarDemo } from "./demoDeptCalendar";
 import { deptAppraisalsDemo } from "./demoDeptAppraisals";
 import { financeDemo } from "./demoFinance";
 import { loansDemo } from "./demoLoans";
@@ -2462,6 +2463,12 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // no later catch-all may answer a notices path with an empty list, which the page would read as "No current notices".
   const notices = noticesDemo(method, p, url.searchParams, body, userId);
   if (notices) return notices;
+
+  // DW-10c-3 — the department calendar (`/departments/:unitNodeId/calendar`, BFF §59.1). Answers in the server's order of checks (read gate,
+  // window, unit narrowing, existence) and reads its events leg from the calendar-event store below (lib/demoCalendarEvents.ts). Placed
+  // high for the same reason as the notices: no later catch-all may answer it with an empty list, which the page would read as "nothing on".
+  const deptCalendar = deptCalendarDemo(method, p, url.searchParams, userId);
+  if (deptCalendar) return deptCalendar;
 
   // Finance (/api/:t/finance/*) — fixture store (lib/demoFinance.ts). Placed beside
   // LMS and for the same reason: high enough that no later `/api/:t/...` catch-all can answer a

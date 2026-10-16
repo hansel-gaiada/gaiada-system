@@ -34,6 +34,8 @@ const COMPANY_WIDE = new Set(["demo-hansel", "demo-owner", "u-hr"]);
 const LED: Record<string, string[]> = { "u-webhead": ["dept-1"], "dept-manager": ["dept-3"] };
 const PLACED: Record<string, string[]> = {
   "u-dev": ["dept-1"], "u-pm": ["dept-1"], "seo-staff": ["dept-3"], "u-seo": ["dept-3"], "u-social": ["dept-4"], "u-creative": ["dept-2"],
+  // DW-10c: two more Web Dev colleagues who are not logins (they are the department calendar's away colleagues, `demoDeptCalendar.ts`).
+  "u-andre": ["dept-1"], "u-sari": ["dept-1"],
 };
 /** External client contacts are not staff: the notice board is the company's own (PERMISSION §47: never a client contact). */
 const isClientContact = (userId: string) => userId.startsWith("demo-client") || userId === "demo-two-company-client" || userId === "demo-viceroy-marketing";
@@ -81,6 +83,21 @@ export function resetNoticesDemo(): void { seq = 0; notices = seed(); }
 
 const mayReadUnit = (userId: string, unit: string): boolean =>
   COMPANY_WIDE.has(userId) || (LED[userId] ?? []).includes(unit) || (PLACED[userId] ?? []).includes(unit);
+
+// DW-10c: the department calendar and the `department` calendar events (`demoDeptCalendar.ts`, `demoCalendarEvents.ts`) reach a unit by
+// the same narrowing as a unit's notices (placed in it, leads it, or company-wide), so the demo has ONE placement table.
+/** Placed in the unit, leads it, or company-wide (the unit narrowing of BFF §59.1 / §59.3). A client contact reaches nothing. */
+export const demoReachesUnit = (userId: string, unit: string): boolean => !isClientContact(userId) && mayReadUnit(userId, unit);
+/** Placed in the unit or leads it, WITHOUT the company-wide tiers: the personal calendar's `mine` list holds a department event for a person
+ *  of the unit and its heads (BFF §59.3 point 3), not for every person who may read it. */
+export const demoPlacedOrLeads = (userId: string, unit: string): boolean =>
+  !isClientContact(userId) && ((LED[userId] ?? []).includes(unit) || (PLACED[userId] ?? []).includes(unit));
+/** The demo agency's units by id (`defaultStructure`), the root excluded. */
+export const DEMO_UNIT_NAMES: Readonly<Record<string, string>> = UNITS;
+/** The people placed in a unit, by id, and the names they go by in the demo. */
+export const demoPlacedIn = (unit: string): string[] => Object.keys(PLACED).filter((u) => PLACED[u].includes(unit));
+export const demoIsClientContact = isClientContact;
+export const DEMO_ORG_ROOT = ROOT;
 const mayWrite = (userId: string, n: Pick<DemoNotice, "scope" | "unitNodeId">): boolean =>
   ADMINS.has(userId) || (n.scope === "unit" && n.unitNodeId !== null && (LED[userId] ?? []).includes(n.unitNodeId));
 const reads = (userId: string, n: DemoNotice): boolean =>
