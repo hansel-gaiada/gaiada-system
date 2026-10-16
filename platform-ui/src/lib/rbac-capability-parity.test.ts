@@ -349,6 +349,18 @@ const KNOWN_NON_DRIFT: RegisterEntry[] = [
       "owner's bundle carries reports.dept_kpi_target.appraisal_comment from the catalog seed, but resource_dept_kpi_target.yaml's permission arm honours read, approve, reject and appraisal_assess only; a principal whose only grant is `owner` is denied on appraisal_comment, and widening ROLE_CAPS.owner would show a Comment form that always 403s.",
     decisionRef: "docs/FRONTEND-BFF-CONTRACT.md §41.3; PERMISSION-CONTRACT §38a; cerbos/policies/resource_dept_kpi_target.yaml; same shape as reports.dept_kpi_target.propose above",
   },
+  // DW-10a-2 (2026-10-16): the same call for `notices.post`. The catalog bundles all four `core.dept_notice.*` keys for `owner` (owner mirrors
+  // company_admin exactly), but resource_dept_notice.yaml's permission arm (`perm_dept_notice_read`) covers `read` ONLY: post, edit and withdraw
+  // are reachable by org_unit_lead through an attribute-dependent rule, and a flat mirror could not tell "holds the key through company_admin"
+  // from "holds it through a lead grant over ONE unit" (iam-04-reg1-mirror-reach-invariant). A pure owner is refused by Cerbos.
+  {
+    role: "owner",
+    capability: "notices.post",
+    direction: "under-claim",
+    reason:
+      "owner's bundle carries core.dept_notice.post, .edit and .withdraw from the catalog seed, but resource_dept_notice.yaml's permission arm honours read only; a principal whose only grant is `owner` is denied on post, edit and withdraw unless it also holds company_admin or leads the unit, and widening ROLE_CAPS.owner would show a Post a notice form that always 403s.",
+    decisionRef: "docs/FRONTEND-BFF-CONTRACT.md §57.10; PERMISSION-CONTRACT §47; cerbos/policies/resource_dept_notice.yaml; same shape as reports.dept_kpi_target.propose above",
+  },
 ];
 
 const knownNonDriftKey = (role: string, capability: Capability) => `${role}\x00${capability}`;

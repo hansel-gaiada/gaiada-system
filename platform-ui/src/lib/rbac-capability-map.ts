@@ -928,4 +928,12 @@ export const CAPABILITY_MAP = {
     permissions: ["reports.dept_kpi_target.appraisal_assess"],
     semantics: "all",
   },
+
+  // ── DW-10a-2 · the department notice board (contract §57, PERMISSION-CONTRACT §47) ─────────────
+  "notices.post": {
+    // Post, edit and withdraw are offered together to the same people (a unit's head, or a company admin): a person who may post to a
+    // unit may edit or withdraw any of its notices. `read` is not part of it: every member reads (the handler narrows by unit).
+    permissions: ["core.dept_notice.post", "core.dept_notice.edit", "core.dept_notice.withdraw"],
+    semantics: "all",
+  },
 } as const satisfies Record<Capability, CapabilityDef>;

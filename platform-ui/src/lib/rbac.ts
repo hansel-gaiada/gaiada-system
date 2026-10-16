@@ -447,6 +447,14 @@ export const CAPABILITIES = [
   // `appraisal_assess`: the GM's assessment. The approver tier, company_admin, which `owner` mirrors through the permission arm.
   // Never `manager` (every head carries it company-wide) and never a unit lead: the head comments, the GM assesses.
   "reports.dept_kpi_target.appraisal_assess",
+
+  // ── DW-10a-2 (2026-10-16, the department notice board, docs/FRONTEND-BFF-CONTRACT.md §57, PERMISSION-CONTRACT §47) — mirrors
+  // `resource_dept_notice.yaml` `post` + `edit` + `withdraw`: company_admin by role and org_unit_lead over the unit or an enclosing one
+  // (`canInUnit`), UNIT notices only; a company-wide notice is company_admin's alone, so the company-wide page asks `can()`, which a
+  // unit-scoped head never satisfies. platform_admin by wildcard. ONE capability because the page offers the three to the same people
+  // (any person who may post to a unit may edit or withdraw its notices). The catalog bundles all four keys for `owner`, but the policy's
+  // permission arm covers `read` only, so a pure owner is refused and the mirror leaves `owner` out (the parity register says why).
+  "notices.post",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -536,6 +544,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "reports.dept_kpi_target.propose", "reports.dept_kpi_target.approve",
     // DW-4e-3: and comments on and assesses a department's appraisal.
     "reports.dept_kpi_target.appraisal_comment", "reports.dept_kpi_target.appraisal_assess",
+    // DW-10a-2: company_admin posts, edits and withdraws every notice, the company-wide ones included.
+    "notices.post",
   ],
   // §8's "Dept lead (own unit)" column. Reads person/project/department — NEVER company grain, NEVER
   // seal/amend, NEVER facts recompute, NEVER the n8n ops polls, NEVER cycle admin. May score the
@@ -777,7 +787,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
                   // DW-4e-2: the head proposes a target for their own unit (the approval is the company_admin tier's).
                   "reports.dept_kpi_target.propose",
                   // DW-4e-3: the head comments on their own unit's appraisal (the assessment is the GM's).
-                  "reports.dept_kpi_target.appraisal_comment"],
+                  "reports.dept_kpi_target.appraisal_comment",
+                  // DW-10a-2: the head posts, edits and withdraws notices of their own unit and the units below it (never company-wide).
+                  "notices.post"],
   // IAM-02a-FIX / DR-2b — see the `Role` union's `agency_approver` comment for the full trail. Its
   // ENTIRE verified Cerbos reach is `agency_approval:approve` (via `module_approver`, module always
   // `"agency"`) — nothing else, not even `agency_approval:read` (that baseline rule names
