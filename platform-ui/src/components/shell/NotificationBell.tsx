@@ -27,7 +27,11 @@ export function formatAge(iso: string, now: number = Date.now()): string {
   return new Date(t).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
-export function NotificationBell({ unread, items }: { unread: number | null; items: BellItem[] }) {
+export function NotificationBell({ unread, items, loading = false }: {
+  unread: number | null; items: BellItem[];
+  /** The read is still in flight (the top bar streams it): drawn with no count, and the pop-over says so instead of "Couldn't load". */
+  loading?: boolean;
+}) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
@@ -73,7 +77,9 @@ export function NotificationBell({ unread, items }: { unread: number | null; ite
       </button>
       {open && (
         <div className="erp-bell__pop" id={panelId} role="region" aria-label="Notifications">
-          {failed ? (
+          {loading ? (
+            <p className="erp-bell__note">Loading notifications…</p>
+          ) : failed ? (
             <p className="erp-bell__note">Couldn&apos;t load notifications</p>
           ) : items.length === 0 ? (
             <p className="erp-bell__note">Nothing new</p>

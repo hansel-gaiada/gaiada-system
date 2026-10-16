@@ -1,7 +1,6 @@
-import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { WorkspaceTopBar } from "./WorkspaceTopBar";
-import { listNotifications, type NotificationItem } from "@/lib/entities";
 import { setThemeAction } from "@/lib/prefsActions";
 import { me, member } from "@/lib/workspaceFixtures";
 import type { Me } from "@/lib/platform";
@@ -9,26 +8,28 @@ import type { Me } from "@/lib/platform";
 vi.mock("next/navigation", () => ({ usePathname: () => "/", useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/app/(app)/account/actions", () => ({ logout: vi.fn() }));
 vi.mock("@/lib/prefsActions", () => ({ setThemeAction: vi.fn(async () => {}) }));
-vi.mock("@/lib/entities", () => ({ listNotifications: vi.fn() }));
-
-const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
-const note = (id: string, title: string, ageMs: number): NotificationItem => ({
-  id, type: "approval", payload: { title }, read_at: null, created_at: ago(ageMs),
+// The bell's read is an async server child behind <Suspense> (its own tests: WorkspaceTopBarBell.test.tsx). An async component cannot render in
+// jsdom's client React, so it is stood in for: by a settled bell, or, when `stream.pending`, by one that never resolves, so the bar shows the
+// fallback bell exactly as it does while the read streams.
+const stream = vi.hoisted(() => ({ pending: false }));
+vi.mock("./WorkspaceTopBarBell", async () => {
+  const { use } = await import("react");
+  const { NotificationBell } = await import("./NotificationBell");
+  return { WorkspaceTopBarBell: () => { if (stream.pending) use(new Promise<never>(() => {})); return <NotificationBell unread={0} items={[]} />; } };
 });
 
 const person: Me = me([member()], undefined, { name: "Rina Vale", title: "Designer" });
 
 type Props = Partial<Parameters<typeof WorkspaceTopBar>[0]>;
-async function draw(props: Props = {}) {
-  const ui = await WorkspaceTopBar({ me: person, tenantId: "co-a", theme: "light", special: false, unrestricted: false, ...props });
-  return render(ui);
+// The bar is synchronous now: the bell's read streams behind a <Suspense> (its fallback is the bell with no count).
+function draw(props: Props = {}) {
+  return render(<WorkspaceTopBar me={person} tenantId="co-a" theme="light" special={false} unrestricted={false} {...props} />);
 }
 const bell = () => screen.getByRole("button", { name: /^Notifications/ });
 const openAvatar = () => fireEvent.click(screen.getByRole("button", { name: "Rina Vale" }));
 
 beforeEach(() => {
-  vi.mocked(listNotifications).mockReset();
-  vi.mocked(listNotifications).mockResolvedValue([]);
+  stream.pending = false;
   vi.mocked(setThemeAction).mockClear();
   document.documentElement.removeAttribute("data-theme");
 });
@@ -50,60 +51,21 @@ describe("WorkspaceTopBar: what it draws", () => {
     expect(screen.queryByRole("link", { name: /^Notifications/ })).toBeNull();
   });
 
-  it("keeps the phone's navigation toggle", async () => {
-    await draw();
-    expect(screen.getByRole("button", { name: "Open navigation" })).toBeInTheDocument();
-  });
-});
-
-describe("WorkspaceTopBar: the bell's data", () => {
-  it("counts every unread, lists the newest five with their own titles, newest first", async () => {
-    vi.mocked(listNotifications).mockResolvedValue([
-      note("n1", "Oldest", 9 * 3_600_000),
-      note("n2", "Second", 2 * 3_600_000),
-      note("n3", "Newest", 60_000),
-      note("n4", "Fourth", 3 * 3_600_000),
-      note("n5", "Fifth", 4 * 3_600_000),
-      note("n6", "Sixth", 5 * 3_600_000),
-      note("n7", "Seventh", 6 * 3_600_000),
-    ]);
-    await draw();
-    expect(listNotifications).toHaveBeenCalledWith("u-1", "co-a", true);
-    expect(bell()).toHaveAccessibleName("Notifications, 7 unread");
-    fireEvent.click(bell());
-    const titles = within(screen.getByRole("region", { name: "Notifications" })).getAllByRole("listitem").map((li) => li.querySelector(".erp-bell__title")?.textContent);
-    expect(titles).toEqual(["Newest", "Second", "Fourth", "Fifth", "Sixth"]);
-  });
-
-  it("falls back to the notification's type when a row has no title, never an invented one", async () => {
-    vi.mocked(listNotifications).mockResolvedValue([{ id: "n1", type: "comment.mention", payload: {}, read_at: null, created_at: ago(1000) }]);
-    await draw();
-    fireEvent.click(bell());
-    expect(screen.getByText("comment.mention")).toBeInTheDocument();
-  });
-
-  it("says Nothing new when there is no unread", async () => {
-    await draw();
-    expect(bell()).toHaveAccessibleName("Notifications");
-    fireEvent.click(bell());
-    expect(screen.getByText("Nothing new")).toBeInTheDocument();
-  });
-
-  it("shows no count and says it could not load when the read throws", async () => {
-    vi.mocked(listNotifications).mockRejectedValue(new Error("down"));
-    await draw();
+  it("draws the bell at once with no count while its read streams, never a made-up 0", async () => {
+    stream.pending = true;
+    // The read is an async server child under <Suspense>: until it resolves the bar shows the fallback bell and the pop-over says it is loading.
+    await act(async () => { draw(); });
     expect(bell()).toHaveAccessibleName("Notifications");
     expect(bell()).not.toHaveTextContent(/\d/);
     fireEvent.click(bell());
-    expect(screen.getByText("Couldn't load notifications")).toBeInTheDocument();
+    expect(screen.getByText("Loading notifications…")).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't load notifications")).toBeNull();
     expect(screen.queryByText("Nothing new")).toBeNull();
   });
 
-  it("makes no read without a company", async () => {
-    await draw({ tenantId: null });
-    expect(listNotifications).not.toHaveBeenCalled();
-    fireEvent.click(bell());
-    expect(screen.getByText("Nothing new")).toBeInTheDocument();
+  it("keeps the phone's navigation toggle", async () => {
+    await draw();
+    expect(screen.getByRole("button", { name: "Open navigation" })).toBeInTheDocument();
   });
 });
 
