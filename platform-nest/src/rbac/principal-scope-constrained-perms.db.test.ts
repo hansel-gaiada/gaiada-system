@@ -158,9 +158,14 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
     // DW-4e-3 (2026-10-15) added `reports.dept_kpi_target.appraisal_comment`: a department head writes the commentary on
     // their own unit's appraisal for an open cycle (FRONTEND-BFF-CONTRACT §41.3). Unit-bounded like the rest;
     // `appraisal_assess` (the GM's) is not in this bundle.
+    //
+    // DW-10a (2026-10-16) added `core.dept_notice.{post,edit,withdraw}`: a department head posts, edits and withdraws their own
+    // unit's notices (FRONTEND-BFF-CONTRACT §57.3, PERMISSION-CONTRACT §47). Unit-bounded like the rest; `read` is held through the
+    // member grant at company scope, and a company-wide notice stays company_admin's.
     expect(keys).toEqual([
       "agency.campaign_part.update",
       "core.creative_asset.decide_review",
+      "core.dept_notice.edit", "core.dept_notice.post", "core.dept_notice.withdraw",
       "core.position.assign", "core.position.read", "core.position.unassign",
       "core.role_grant.create", "core.role_grant.read", "core.role_grant.revoke",
       "core.work_request.decline", "core.work_request.deliver",
@@ -188,6 +193,7 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
     expect(keys).not.toContain("reports.dept_kpi_target.approve");
     expect(keys).not.toContain("reports.dept_kpi_target.reject");
     expect(keys).not.toContain("reports.dept_kpi_target.appraisal_assess");
+    expect(keys).not.toContain("core.dept_notice.read");
   });
 
   it("ACCEPTANCE: a legitimate client@company grant is completely unaffected", async () => {
