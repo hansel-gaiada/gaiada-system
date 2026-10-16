@@ -1214,13 +1214,24 @@ export function noticesTab(ws: Pick<Workspace, "kind">): WorkspaceTab {
   return { key: "notices", label: "Notices", href: ws.kind === "office" ? "/notices" : deptPath("notices"), icon: "bell", blurb: "What the unit's head and the company want you to know." };
 }
 
+/** DW-10c-3 (BFF §59.4): the Department calendar tab, after Notices, on a department workspace's Overview row, at
+ *  `/departments/{dept}/schedule` (`/calendar` under a department is Social Media's posts calendar). Null for the Office of the GM:
+ *  its Overview is the company's, and a company-wide calendar is the person's own Calendar, so it has no unit's calendar to open.
+ *  A workspace with no org node keeps the tab in the registry and the shell drops its `{dept}` href with no id to fill (as
+ *  Notices). No gate: the server narrows the read to the unit's own people, its heads and the company-wide roles. */
+export function deptCalendarTab(ws: Pick<Workspace, "kind">): WorkspaceTab | null {
+  if (ws.kind === "office") return null;
+  return { key: "schedule", label: "Department calendar", href: deptPath("schedule"), icon: "clock", blurb: "Holidays, who is away, milestones and events for the unit." };
+}
+
 /** The rows of one workspace's sidebar, in order (plan §2.2), before gates and planned items are applied. */
 export function sidebarRows(ws: Workspace): SidebarModel {
+  const calendarTab = deptCalendarTab(ws);
   const overview: WorkspaceRow = {
     key: "overview",
     label: "Overview",
     icon: "home",
-    tabs: [{ key: "overview", label: "Overview", href: ws.overviewHref, icon: "home" }, noticesTab(ws)],
+    tabs: [{ key: "overview", label: "Overview", href: ws.overviewHref, icon: "home" }, noticesTab(ws), ...(calendarTab ? [calendarTab] : [])],
   };
   const performance = PERFORMANCE_ROWS.map((row) => {
     if (row.key === "reports") return { ...row, tabs: [...row.tabs, ...ws.reports] };

@@ -217,3 +217,63 @@
 .cal-busy__who { min-width: 8em; font-weight: 600; }
 .cal-busy__times { color: var(--erp-ink-60); }
 .cal-busy__clash { font-weight: 700; color: var(--text-primary); }
+
+/* DW-10c-3: the department calendar (BFF section 59). A real table for the month, the agenda below it. Kind is a shape AND a word
+   (legend, title, agenda), never colour alone: holiday = filled square, away = bar, milestone = diamond, event = hollow square. */
+.cal-dept { display: grid; gap: 16px; min-width: 0; }
+.cal-dept__legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.cal-dept__legend-item { display: inline-flex; align-items: center; gap: 7px; }
+.cal-dept__notes { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.cal-dept__note { margin: 0; padding: 8px 12px; border: 0.5px solid var(--status-warning); font: 400 13px var(--font-body); color: var(--text-primary); }
+.cal-dept__skip { margin: 0; font: 400 12px var(--font-body); }
+.cal-dept__lede { margin: 0 0 12px; font: 400 13px var(--font-body); color: var(--erp-ink-60); }
+.cal-dept__head { margin-bottom: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.cal-dept__head .cal-range { margin: 0; }
+.cal-dept__head-actions { margin-left: auto; display: inline-flex; gap: 8px; align-items: center; }
+
+.cal-dept__swatch { flex: 0 0 auto; display: inline-block; width: 8px; height: 8px; background: var(--erp-accent); }
+.cal-dept__swatch--away { background: var(--status-info); width: 3px; height: 12px; }
+.cal-dept__swatch--milestone { background: var(--status-warning); transform: rotate(45deg); width: 7px; height: 7px; }
+.cal-dept__swatch--event { background: transparent; border: 1px solid var(--erp-accent); }
+
+.cal-dept__grid { width: 100%; table-layout: fixed; border-collapse: collapse; border: 0.5px solid var(--erp-hairline); }
+.cal-dept__caption { text-align: left; padding: 0 0 8px; font: 700 13px var(--font-display); color: var(--text-primary); }
+.cal-dept__wd { padding: 8px 10px; font-size: 10px; text-align: left; font-weight: 400; color: var(--erp-ink-60); border-bottom: 0.5px solid var(--erp-hairline); }
+.cal-dept__cell { vertical-align: top; min-height: 104px; height: 104px; padding: 6px 7px 8px; border: 0.5px solid var(--erp-hairline-soft); min-width: 0; overflow: hidden; }
+.cal-dept__cell--outside { opacity: 0.55; }
+.cal-dept__cell--today { background: var(--wash-soft, var(--surface-card-solid)); }
+.cal-dept__num { display: inline-block; padding: 1px 4px; font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.cal-dept__cell--today .cal-dept__num { font-weight: 700; color: var(--text-on-accent); background: var(--erp-accent); }
+.cal-dept__chips { display: flex; flex-direction: column; gap: 3px; min-width: 0; margin-top: 4px; }
+.cal-dept__chip {
+  display: block; min-width: 0; padding: 2px 6px; border: 0.5px solid var(--erp-hairline); border-left-width: 3px;
+  background: var(--surface-card-solid); font: 400 12px var(--font-body); color: var(--text-primary); text-decoration: none;
+}
+a.cal-dept__chip:hover { text-decoration: underline; }
+.cal-dept__chip--holiday { border-left-color: var(--erp-accent); }
+.cal-dept__chip--away { border-left-color: var(--status-info); }
+.cal-dept__chip--milestone { border-left-color: var(--status-warning); }
+.cal-dept__chip--event { border-left-color: var(--erp-accent); border-left-style: dashed; }
+.cal-dept__chip-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-dept__more { font: 400 11px var(--font-body); color: var(--erp-ink-60); text-decoration: none; }
+.cal-dept__more:hover { color: var(--text-primary); text-decoration: underline; }
+
+.cal-dept__agenda { display: grid; gap: 10px; }
+.cal-dept__agenda-h { margin: 0; font: 700 15px var(--font-display); }
+.cal-dept__empty { margin: 0; font: 400 13px var(--font-body); color: var(--erp-ink-60); }
+.cal-dept__days { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.cal-dept__day { scroll-margin-top: 72px; }
+.cal-dept__day-h { margin: 0 0 4px; font: 700 13px var(--font-body); color: var(--text-primary); }
+.cal-dept__items { list-style: none; margin: 0; padding: 0; }
+.cal-dept__item { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; padding: 7px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); font: 400 14px var(--font-body); }
+.cal-dept__item .cal-dept__swatch { align-self: center; }
+.cal-dept__kind { min-width: 5.5em; font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.cal-dept__label { color: var(--text-primary); text-decoration: none; }
+a.cal-dept__label:hover { text-decoration: underline; }
+.cal-dept__detail { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+
+@media (max-width: 900px) {
+  /* Seven columns of text chips are tight on a phone: smaller type and less padding; the agenda below is the reading order. */
+  .cal-dept__cell { height: 74px; min-height: 74px; padding: 3px; }
+  .cal-dept__chip { padding: 1px 3px; font-size: 10px; }
+}
