@@ -38,8 +38,8 @@ describe("where the blocks are placed", () => {
 });
 
 describe("noticesBlockView", () => {
-  it("says unavailable for a refused read and for a failed one, never an empty block", () => {
-    expect(noticesBlockView({ kind: "forbidden" }, true, "dept-1", NOW)).toEqual({ kind: "unavailable" });
+  it("draws nothing for a refused read (a visitor) and says unavailable for a failed one, never an empty block", () => {
+    expect(noticesBlockView({ kind: "forbidden" }, true, "dept-1", NOW)).toEqual({ kind: "hidden" });
     expect(noticesBlockView({ kind: "unavailable", reason: "boom" }, false, "dept-1", NOW)).toEqual({ kind: "unavailable" });
   });
 

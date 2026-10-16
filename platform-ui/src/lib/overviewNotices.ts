@@ -53,6 +53,9 @@ export type NoticesBlockView =
 
 /** `here` is the department's node id for the department block (so a notice posted to a unit above reads "From <unit>"), null for the company's. */
 export function noticesBlockView(result: ReadResult<NoticeList>, canPost: boolean, here: string | null, now: number = Date.now()): NoticesBlockView {
+  // A refused read draws nothing (a visitor from another department has no business with this unit's notices; the DW-3k condition block's
+  // rule). A failed read says "Unavailable", never an empty block.
+  if (result.kind === "forbidden") return { kind: "hidden" };
   if (result.kind !== "ok") return { kind: "unavailable" };
   const current = pinnedFirst(result.data.items.filter((n) => n.state === "current"));
   if (current.length === 0) return canPost ? { kind: "ok", rows: [], canPost } : { kind: "hidden" };

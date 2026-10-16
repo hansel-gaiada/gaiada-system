@@ -69,8 +69,15 @@ describe("Notices (the department block)", () => {
     expect(within(block).queryByRole("link", { name: "Post a notice" })).not.toBeInTheDocument();
   });
 
-  it("says Unavailable for a failed read and for a refused one, never 'No current notices'", async () => {
-    for (const result of [{ kind: "unavailable", reason: "boom" }, { kind: "forbidden" }] as const) {
+  it("draws nothing for a refused read (a visitor from another department)", async () => {
+    list.mockResolvedValue({ kind: "forbidden" });
+    const { container } = render(await Notices(props("notices", admin)));
+    expect(screen.queryByRole("region", { name: "Notices" })).not.toBeInTheDocument();
+    expect(container).not.toHaveTextContent("Unavailable");
+  });
+
+  it("says Unavailable for a failed read, never 'No current notices'", async () => {
+    for (const result of [{ kind: "unavailable", reason: "boom" }] as const) {
       list.mockResolvedValue(result);
       const { unmount } = render(await Notices(props("notices", admin)));
       const block = screen.getByRole("region", { name: "Notices" });
