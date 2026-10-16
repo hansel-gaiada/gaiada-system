@@ -9,6 +9,9 @@
 // Pure and client-safe, like the registry it reads. Gates mirror the server; they are not security.
 import type { Me } from "@/lib/platform";
 import { ADMIN_ROWS, ASSISTANT_ROW, COMPANY_ROWS, hrefFor, isPlanned, sidebarRows, type WorkspaceKind } from "@/lib/workspaces";
+import { can } from "@/lib/rbac";
+import type { RequestRoute } from "@/lib/requests";
+import { routeAskLabel, routeHref } from "@/lib/requests";
 import { concreteRows, gateAllows, homeArea, routeActionsFor, withheldTabPaths, workspaceKeysOf, type ApprovalsRead, type ConcreteRow, type GateContext, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
 import type { Area } from "@/lib/areas";
 
@@ -50,6 +53,9 @@ export interface ShellModel {
   companyTop: ConcreteRow[];
   /** The same row for the Admin area. */
   adminTop: ConcreteRow[];
+  /** Set only on a model built with `routes: "inflight"`: the person may send across (`work_request.send_across`), so `applyRoutes` adds one
+   *  "Ask ..." create per route once the read settles. */
+  awaitsRoutes?: { canSend: boolean };
   home: Area;
   homeLabel: string;
   /** Where "Back to <home>" goes: the home workspace's Overview, or the first Company row. */
@@ -130,7 +136,43 @@ export function buildShellModel(input: {
     home,
     homeLabel: homeWs?.label ?? "Company",
     homeHref: homeWs ? overviewHref(homeWs) : (company[0]?.tabs[0]?.href ?? null),
+    ...(routes === "inflight" ? { awaitsRoutes: { canSend: can(me, "work_request.send_across", tenantId) } } : {}),
   };
+}
+
+// ── The routes read, settled after the first byte (DW-9 perf; BFF §60.9) ──────────────────────────
+
+/** What the shell knows of the company's routes once the streamed read resolves: the list, `null` when it failed, `"inflight"` before. */
+export type RoutesRead = readonly RequestRoute[] | null | "inflight";
+
+/** Settles a model built with `routes: "inflight"`. Unlike the approvals row (shown to a decider while in flight), everything the routes gate
+ *  is HIDDEN until the read resolves: a row marked `awaitsRoutes` is dropped (its tabs' paths join the workspace's `withheld`, as a gate would
+ *  have), and no "Ask ..." create is offered. Resolved with routes: the rows stay and each workspace gets one create per route (for a person
+ *  who may send across). Resolved with none, or failed (`null`): the rows stay hidden, which is the "a failure hides" rule. Pure; a model that
+ *  awaits no routes is returned as is. */
+export function applyRoutes(model: ShellModel, read: RoutesRead): ShellModel {
+  if (!model.awaitsRoutes) return model;
+  const routes = Array.isArray(read) ? (read as readonly RequestRoute[]) : [];
+  const keep = routes.length > 0;
+  const settle = (rows: ConcreteRow[], hidden: string[]): ConcreteRow[] => {
+    if (!rows.some((r) => r.awaitsRoutes)) return rows;
+    const out: ConcreteRow[] = [];
+    for (const row of rows) {
+      if (!row.awaitsRoutes) { out.push(row); continue; }
+      if (!keep) { for (const t of row.tabs) hidden.push(t.href.split(/[?#]/)[0]); continue; }
+      const { awaitsRoutes: _wait, ...rest } = row;
+      out.push(rest);
+    }
+    return out;
+  };
+  const creates = keep && model.awaitsRoutes.canSend ? routes.map((r) => ({ label: routeAskLabel(r), href: routeHref(r.routeId) })) : [];
+  const workspaces = model.workspaces.map((ws) => {
+    const hidden: string[] = [];
+    const rows = { top: settle(ws.rows.top, hidden), work: settle(ws.rows.work, hidden), performance: settle(ws.rows.performance, hidden), you: settle(ws.rows.you, hidden) };
+    return { ...ws, rows, creates: [...ws.creates, ...creates], withheld: hidden.length ? [...new Set([...ws.withheld, ...hidden])] : ws.withheld };
+  });
+  const { awaitsRoutes: _done, ...rest } = model;
+  return { ...rest, workspaces };
 }
 
 // ── The approvals read, settled after the first byte (DW-9d perf) ─────────────────────────────────

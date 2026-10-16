@@ -2,7 +2,8 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { areaFor, resolveArea, sameArea, type Area } from "@/lib/areas";
-import { activeLocation, allRows, applyApprovals, workspaceForArea, type ShellModel, type ShellWorkspace } from "@/lib/shellModel";
+import { activeLocation, allRows, applyApprovals, applyRoutes, workspaceForArea, type RoutesRead, type ShellModel, type ShellWorkspace } from "@/lib/shellModel";
+import type { RequestRoute } from "@/lib/requests";
 import type { ApprovalsRead, ConcreteRow } from "@/lib/workspaceAccess";
 
 // DW-2b: the one place the workspace shell decides where the person is (plan §2.3, §13 trap 2).
@@ -104,6 +105,24 @@ export function ShellApprovalsSettle({ read }: { read: { pending: number } | nul
   return null;
 }
 
+// DW-10e (BFF §60.9, DW-9 perf): the company's routes are read the same way, and only for a company whose pack does not already have the Requests
+// row. The layout starts the read without awaiting it and builds the model with `routes: "inflight"`, which HIDES every routes-gated row and "Ask ..."
+// action; `ShellRoutesFeed` (a <Suspense> child) hands the settled read to this provider through `RoutesSetterCtx`, and `applyRoutes` shows them when
+// routes exist. A failed read hides them, as an unknown one always did.
+const RoutesSetterCtx = createContext<((read: RoutesRead) => void) | null>(null);
+
+/** Renders nothing: hands the layout's settled routes read to the shell. Rendered by the server's `ShellRoutesFeed`. */
+export function ShellRoutesSettle({ read }: { read: readonly RequestRoute[] | null }) {
+  const set = useContext(RoutesSetterCtx);
+  // The server sends a fresh array on every render; settle on its content, so a refresh with the same routes does not set state again.
+  const key = read === null ? "null" : JSON.stringify(read);
+  useEffect(() => {
+    set?.(read);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [set, key]);
+  return null;
+}
+
 /** Renders no DOM: `.erp-app`'s grid relies on its direct children. */
 export function WorkspaceShellProvider({ model: built, children }: { model: ShellModel; children: ReactNode }) {
   const pathname = usePathname() ?? "/";
@@ -111,7 +130,8 @@ export function WorkspaceShellProvider({ model: built, children }: { model: Shel
   // The model the server built, with the approvals read settled as far as it is known. A model built with a settled read (tests, anything that
   // does not stream it) has no row awaiting it and passes through as is.
   const [approvals, setApprovals] = useState<ApprovalsRead>("inflight");
-  const model = useMemo(() => applyApprovals(built, approvals), [built, approvals]);
+  const [routes, setRoutes] = useState<RoutesRead>("inflight");
+  const model = useMemo(() => applyRoutes(applyApprovals(built, approvals), routes), [built, approvals, routes]);
 
   useEffect(() => {
     setLast(readLastArea());
@@ -151,7 +171,9 @@ export function WorkspaceShellProvider({ model: built, children }: { model: Shel
 
   return (
     <ApprovalsSetterCtx.Provider value={setApprovals}>
-      <Ctx.Provider value={value}>{children}</Ctx.Provider>
+      <RoutesSetterCtx.Provider value={setRoutes}>
+        <Ctx.Provider value={value}>{children}</Ctx.Provider>
+      </RoutesSetterCtx.Provider>
     </ApprovalsSetterCtx.Provider>
   );
 }

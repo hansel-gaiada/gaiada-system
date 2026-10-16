@@ -4,6 +4,7 @@ import { getPrefs } from "@/lib/prefs";
 import { moduleGate } from "@/lib/modules";
 import { myWorkspaces } from "@/lib/workspaces-data";
 import { routesForShell } from "@/lib/requests-data";
+import { needsRoutesRead } from "@/lib/workspaceAccess";
 import { parseOverviewPeriod, subjectOfRef, workspaceRefForPage } from "@/lib/overview";
 import { canSwitchToTeam, resolveOverviewView } from "@/lib/overviewTeam";
 import { setOverviewWidgetAction } from "@/lib/prefsActions";
@@ -25,8 +26,13 @@ export async function pilotFrame(
 ): Promise<((legacy: ReactNode) => ReactNode) | null> {
   // Three independent reads (the cookie, the org tree, the modules), started together: serially they added up on the first byte.
   // DW-3g: one read of the company's modules, so a block whose module is off is not placed. It fails open.
-  // DW-10e: the company's routes to other group companies (memoised with the layout's read), for the Requests block's gate and the per-route actions.
-  const [prefs, all, modules, routes] = await Promise.all([getPrefs(), myWorkspaces(me, tenantId), moduleGate(me.userId, tenantId), routesForShell(me.userId, tenantId)]);
+  // DW-10e: the company's routes to other group companies, for the Requests block's gate and the per-route actions. The Overview AWAITS them here (it is
+  // a page under loading.tsx, already off the shell's first-byte path), in the same parallel group, and the read is the layout's own memoised promise, so
+  // it costs nothing extra. A company whose pack has the Requests row (the agency pack) does not read them at all.
+  const [prefs, all, modules, routes] = await Promise.all([
+    getPrefs(), myWorkspaces(me, tenantId), moduleGate(me.userId, tenantId),
+    needsRoutesRead(me, tenantId) ? routesForShell(me.userId, tenantId) : Promise.resolve(undefined),
+  ]);
   const ref = workspaceRefForPage(all, target);
   if (!ref) return null;
   const { period, view } = await searchParams;

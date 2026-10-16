@@ -55,8 +55,10 @@ export interface GateContext {
   workspaces?: readonly string[];
   /** The active company's routes to other group companies' departments (`GET requests/routes`, DW-10e, BFF §60.9), read once by the
    *  shell. Read only by the `hasRoutes` gate and by `routeActionsFor`. `undefined` = not known and `null` = the read failed: both
-   *  HIDE, like `workspaces`, so a person is never offered a link to a form that can only refuse. */
-  routes?: readonly RequestRoute[] | null;
+   *  HIDE, like `workspaces`, so a person is never offered a link to a form that can only refuse.
+   *  `"inflight"` (the layout, which does not wait for the read: DW-9 perf): the shell model is built with the routes-gated rows present and
+   *  marked `awaitsRoutes`, and `applyRoutes` (`lib/shellModel.ts`) hides them until the read resolves, and keeps them only if routes exist. */
+  routes?: readonly RequestRoute[] | null | "inflight";
   /** What the shell read of the person's pending approvals (`listApprovals`), for the `decider` gate and the row's count
    *  (DW-D23, DW-8m). `pending` is how many wait on THIS person's decision (the items the server marks `decidable`).
    *  `undefined` = the caller did not read approvals (the palette, a test): the gate ALLOWS, so
@@ -88,13 +90,19 @@ export function approvalsGateInput(read: { items: readonly { decidable: boolean 
   return read.unavailable ? null : { pending: read.items.filter((i) => i.decidable).length };
 }
 
+/** Does the company need the routes read for the shell at all? Not when its pack already has the Requests row (the agency pack: the row
+ *  and the block are `AGENCY_ONLY` already), so most staff never pay for the read (BFF §60.9, DW-9 perf). */
+export function needsRoutesRead(me: Me, tenantId: string | null): boolean {
+  return !!tenantId && packFor(activeCompany(me, tenantId)?.vertical).key !== "agency";
+}
+
 /** The quick actions DW-10e adds beside the same-company ones (BFF §60.9): one per active route, "Ask <unit> at <company> for assets"
  *  or "Ask <unit> at <company>", each linking to `/requests/new?route=<routeId>`. Offered to a person who holds the UI capability
  *  `work_request.send_across` (the mirror of PERMISSION-CONTRACT §49) and only for a route the shell actually read. Cosmetic: the
  *  server decides who may send. */
 export function routeActionsFor(ctx: Pick<GateContext, "me" | "tenantId" | "routes">): { key: string; label: string; href: string }[] {
-  if (!ctx.routes || ctx.routes.length === 0 || !can(ctx.me, "work_request.send_across", ctx.tenantId)) return [];
-  return ctx.routes.map((r) => ({ key: `ask-route-${r.routeId}`, label: routeAskLabel(r), href: routeHref(r.routeId) }));
+  if (!Array.isArray(ctx.routes) || ctx.routes.length === 0 || !can(ctx.me, "work_request.send_across", ctx.tenantId)) return [];
+  return (ctx.routes as readonly RequestRoute[]).map((r) => ({ key: `ask-route-${r.routeId}`, label: routeAskLabel(r), href: routeHref(r.routeId) }));
 }
 
 /** Evaluate a registry gate. Mirrors the surface each gate was copied from; see `Gate`'s doc. */
@@ -119,7 +127,9 @@ export function gateAllows(gate: Gate | undefined, ctx: GateContext): boolean {
     case "hasWorkspace":
       return ctx.workspaces?.includes(gate.workspace) ?? false;
     case "hasRoutes":
-      return !!ctx.routes && ctx.routes.some((r) => !gate.routeKind || r.kind === gate.routeKind);
+      // In flight the gate is optimistic (true): `concreteRows` marks the row `awaitsRoutes` and the shell hides it until the read settles.
+      if (ctx.routes === "inflight") return true;
+      return Array.isArray(ctx.routes) && (ctx.routes as readonly RequestRoute[]).some((r) => !gate.routeKind || r.kind === gate.routeKind);
     case "elevated":
       return isElevated(ctx.me);
     case "platformOperator":
@@ -269,6 +279,9 @@ export function homeArea(home: HomeArea): Area {
 export interface ConcreteTab { key: string; label: string; href: string; icon: IconName }
 export interface ConcreteRow {
   key: string; label: string; icon: IconName; tabs: ConcreteTab[];
+  /** Set only on a model built with `routes: "inflight"`: the row is there only if the company has routes (its gate is `hasRoutes` and nothing
+   *  else would show it). `applyRoutes` hides it until the read settles and removes this field. */
+  awaitsRoutes?: true;
   /** The count the sidebar draws after the label (DW-8m). Set only when above 0. */
   count?: number;
   /** Set only on a model built while the pending-approvals read was in flight (`approvals: "inflight"`): this row's visibility or count
@@ -283,6 +296,13 @@ function gateUsesDecider(gate: Gate | undefined): boolean {
   if (!gate) return false;
   if (gate.kind === "decider") return true;
   return gate.kind === "all" || gate.kind === "any" ? gate.gates.some(gateUsesDecider) : false;
+}
+
+/** Does this gate (or one nested in it) ask the `hasRoutes` question? */
+function gateUsesRoutes(gate: Gate | undefined): boolean {
+  if (!gate) return false;
+  if (gate.kind === "hasRoutes") return true;
+  return gate.kind === "all" || gate.kind === "any" ? gate.gates.some(gateUsesRoutes) : false;
 }
 
 /** The figure behind a row's badge key, from what the shell read. Add a case when another key is built. */
@@ -333,7 +353,9 @@ export function concreteRows(
     const awaits = ctx.approvals === "inflight" && (gateUsesDecider(row.gate) || row.badge === "approvals")
       ? { awaitsApprovals: { decider: holdsDecideRight(ctx.me), badge: row.badge === "approvals" } }
       : {};
-    out.push({ key: row.key, label: row.label, icon: row.icon, tabs, ...(count > 0 ? { count } : {}), ...awaits });
+    // While the routes read is in flight, a row that only the routes can show (its gate is true with them and false without) waits on it.
+    const awaitsR = ctx.routes === "inflight" && gateUsesRoutes(row.gate) && !gateAllows(row.gate, { ...ctx, routes: [] }) ? { awaitsRoutes: true as const } : {};
+    out.push({ key: row.key, label: row.label, icon: row.icon, tabs, ...(count > 0 ? { count } : {}), ...awaits, ...awaitsR });
   }
   return out;
 }
