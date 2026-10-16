@@ -1,6 +1,6 @@
 # DW-5c (docs/FRONTEND-BFF-CONTRACT.md §32.2; plan docs/plans/2026-10-13-department-workspaces.md §7.2 and §7.3, ruling
 # DW-D14) — authz for the NEW `work_request` resource kind (core, no module): one REQUEST between departments (a
-# department asks another for assets, or asks Web Dev for engineering work). Five actions:
+# department asks another for assets, or asks Web Dev for engineering work). Five actions (DW-5c; two across-company ones follow below):
 #   read     — see requests. Same reach as `pm_task` read: every member already reads every PM task, and an asset
 #              request IS a PM task (company_admin, manager, member, viewer).
 #   create   — ask a department for something. Any workspace can ask (plan §7.2): company_admin, manager, member.
@@ -12,6 +12,18 @@
 #              responsible person and any person assignee).
 #   decline  — refuse an asset request. company_admin and manager; an `org_unit_lead` over the receiving department
 #              (its own rule). Engineering requests are declined by Web Dev triage (§32.6), not here.
+# DW-10e (docs/PERMISSION-CONTRACT.md §49, docs/FRONTEND-BFF-CONTRACT.md §60; rulings DW-D35, DW-D39, DW-D40, DW-D41) adds two
+# more actions, for REQUESTS ACROSS GROUP COMPANIES. Both are checked on the REQUESTING company (`tenantId` = the sender's
+# company); the route and the client record never reach Cerbos (the handler resolves them, a database trigger enforces them):
+#   send_across — send a request to another group company's department, through one of the company's routes. The same reach
+#              as `create`, as its own action (company_admin, manager, member), so every cross-company send is its own line
+#              in the decision log. Never agents: it is in the bot/automation DENY below.
+#   read_across — DW-D40's wide tier: read EVERY request the company sent to another group company's departments
+#              (company_admin, manager). It LIFTS a narrowing and is not the only read: every sender read first needs `read`,
+#              and the handler narrows it to the caller's own requests unless this action allows. No requester rule on
+#              purpose (it would make the action self-scoped and forbid the permission mirror); not `org_unit_lead` (the
+#              grant carries no company). Not denied to agents: like `read`, a bot or automation principal is decided by
+#              the roles it holds.
 # Restart `gaiada-test-cerbos` after editing this file; the bind-mount does not hot-reload.
 #
 # ── EVERY ATTRIBUTE-DEPENDENT RULE STANDS ALONE (the HIER-2 authoring rule) ──────────────────────
@@ -31,19 +43,21 @@
 # `unitAncestors` [] contains nothing.
 #
 # ── NO AUTOMATION OR BOT PRINCIPAL ASKS, CANCELS, DELIVERS OR DECLINES (after the PV-4 precedent) ──
-# Agents may triage later, under the separate AI plan. `read` stays allowed. The DENY is shaped exactly like
+# Agents may triage later, under the separate AI plan. `read` and `read_across` stay allowed. The DENY is shaped exactly like
 # resource_conversation.yaml's: `roles: ["user"]`, which every principal carries, so under deny-overrides it beats
 # every ALLOW below, the platform_admin wildcard and the perm mirrors included. It reads `principal.attr.kind`
 # (users.kind, sent by principalPayload()); `has()` makes a raw caller that omits the attribute evaluate to false.
 #
-# ── THE PERMISSION ARM COVERS `read` AND `create` ONLY ───────────────────────────────────────────
+# ── THE PERMISSION ARM COVERS `read`, `create`, `send_across` AND `read_across` ONLY ─────────────
 # `cancel` (requester rule: self-scoped, permission-arm-hazard-scan Pattern B), `deliver` (assignee rule: self-scoped;
 # lead rule: attribute-dependent) and `decline` (lead rule: attribute-dependent, fails
 # iam-04-reg1-mirror-reach-invariant) are exactly the shapes a flat `perms` mirror cannot express: a mirror would let
 # any holder of the key act on EVERY request, not just their own or their unit's. Same call as
 # resource_agency_campaign_part.yaml makes for `update` and resource_time_entry.yaml for its self-scoped actions.
-# Consequence: the permission-native `owner` role (zero role-arm rules) holds all five keys in its bundle but reaches
-# only `read` and `create` through Cerbos, unless it also holds company_admin or manager.
+# `send_across` and `read_across` ARE mirrored: their ALLOWs name scope roles only and read no attribute (no self rule, no
+# lead rule), so neither Pattern B nor the mirror-reach invariant applies.
+# Consequence: the permission-native `owner` role (zero role-arm rules) holds all seven keys in its bundle but reaches
+# only `read`, `create`, `send_across` and `read_across` through Cerbos, unless it also holds company_admin or manager.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
@@ -64,6 +78,20 @@ resourcePolicy:
       derivedRoles: ["company_admin", "manager", "member"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     - actions: ["cancel", "deliver", "decline"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # DW-10e: send a request across group companies. The same reach as `create`, its own action. Checked on the REQUESTING
+    # company; the route is the handler's and the database's, never a Cerbos input.
+    - actions: ["send_across"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # DW-10e (DW-D40): the wide read tier over what the company sent across. Scope roles only: no requester rule (the
+    # requester's read is the handler's narrowing, never this action) and no org_unit_lead (the grant has no company).
+    - actions: ["read_across"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
@@ -107,8 +135,8 @@ resourcePolicy:
 
     # ══════════ automation and bot principals never ask, cancel, deliver or decline ══════════════
     # Same `roles: ["user"]` DENY shape as resource_conversation.yaml, so it beats the platform_admin wildcard and
-    # every ALLOW (the perm mirrors too) under deny-overrides. `read` is deliberately NOT listed.
-    - actions: ["create", "cancel", "deliver", "decline"]
+    # every ALLOW (the perm mirrors too) under deny-overrides. `read` and `read_across` are deliberately NOT listed.
+    - actions: ["create", "send_across", "cancel", "deliver", "decline"]
       effect: EFFECT_DENY
       roles: ["user"]
       condition:
@@ -117,7 +145,7 @@ resourcePolicy:
             has(request.principal.attr.kind) &&
             request.principal.attr.kind in ["automation", "bot"]
 
-    # =========== permission-matching arm: read / create ONLY (see the header) ===========================
+    # =========== permission-matching arm: read / create / send_across / read_across ONLY (see the header) ==========
     # Generic global-or-company mirror per action. The platform_admin wildcard is deliberately NOT mirrored
     # (IAM-04c: the tier bypass never enters the permission catalog).
     - actions: ["read"]
@@ -127,4 +155,12 @@ resourcePolicy:
     - actions: ["create"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_work_request_create"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["send_across"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_work_request_send_across"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["read_across"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_work_request_read_across"]
       condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

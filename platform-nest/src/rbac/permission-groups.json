@@ -7,8 +7,8 @@
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
       "groups": 172,
-      "grantablePermissionsInCatalog": 469,
-      "permissionsCoveredByGroups": 430,
+      "grantablePermissionsInCatalog": 471,
+      "permissionsCoveredByGroups": 432,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
       "sensitiveGroups": 115
@@ -1911,13 +1911,15 @@
       "key": "work_requests",
       "name": "Requests between departments",
       "domain": "core",
-      "description": "Asking another department for assets or engineering work, and answering such requests. DW-5c: any member can ask (create); the requester can withdraw their own request (cancel); the receiving department's head and the people doing the work deliver, and the head declines. Agents and automation can read requests but never ask, cancel, deliver or decline.",
+      "description": "Asking another department for assets or engineering work, and answering such requests. DW-5c: any member can ask (create); the requester can withdraw their own request (cancel); the receiving department's head and the people doing the work deliver, and the head declines. Agents and automation can read requests but never ask, cancel, deliver or decline. DW-10e: send_across sends a request to another group company's department through one of the company's routes (company admin, manager, member); read_across reads every request the company sent across (company admin, manager); a bot or automation principal never sends across.",
       "permissions": [
         "core.work_request.read",
         "core.work_request.create",
         "core.work_request.cancel",
         "core.work_request.deliver",
-        "core.work_request.decline"
+        "core.work_request.decline",
+        "core.work_request.send_across",
+        "core.work_request.read_across"
       ],
       "sensitive": false
     },
