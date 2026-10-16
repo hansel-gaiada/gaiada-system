@@ -3,7 +3,7 @@
 //
 // Home (plan §2.1), in this order:
 //   1. the person's primary placement in the active company's org tree (the first person node that is
-//      them, in the same walk order as `myPlacement`);
+//      them, in tree order);
 //   2. a unit they lead (`org_unit_lead`), as the department that holds it;
 //   3. a functional role in this company: HR (`hr_*`), Finance (`finance_*`) or IT (`it*`), or a
 //      shared-service scope serving this company for that module;
@@ -159,7 +159,7 @@ function departmentsOf(root: OrgTreeNode | null): OrgTreeNode[] {
 }
 
 /** The department nodes the person sits in, anywhere below them, in tree order. The first is the
- *  department `myPlacement` reports. */
+ *  department the first placement belongs to. */
 function placements(depts: readonly OrgTreeNode[], userId: string): OrgTreeNode[] {
   const holds = (n: OrgTreeNode): boolean => n.children.some((c) => (c.kind === "person" && c.assigneeId === userId) || holds(c));
   return depts.filter(holds);

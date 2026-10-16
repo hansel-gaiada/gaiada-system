@@ -48,7 +48,7 @@ describe("Board", () => {
 
   it("prints a priority chip only when the priority is high or urgent", () => {
     // "NORMAL" on every ordinary card takes the same weight as HIGH and says only that nothing is
-    // unusual — the same rule MyWorkRail already follows.
+    // unusual — the same rule the old My-work rail followed.
     const { container, unmount } = render(
       <Board columns={statusColumns([task({ id: "t1", title: "Ordinary", priority: "normal" })])} move={vi.fn()} />
     );

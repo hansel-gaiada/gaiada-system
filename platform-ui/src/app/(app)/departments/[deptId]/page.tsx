@@ -34,8 +34,8 @@ type SearchParams = Promise<{ sscope?: string; period?: string }>;
 const ACTIVITY_PREVIEW_LIMIT = 8;
 
 // Department console Home — the command center (decision #10). Renders inside
-// `.dept-shell__main`; the layout supplies the header, tab strip, and the
-// persistent My-work rail. Real data wiring (P1-07): KPI math + ring health
+// `.dept-shell__main`; the layout supplies the header and tab strip.
+// Real data wiring (P1-07): KPI math + ring health
 // come from each owned project's own PM tasks/milestones (lib/pm.ts); the
 // feed is the F2 work-activity read (lib/activity.ts) scoped to this
 // department. Every reader degrades to [] on its own so a missing/disabled

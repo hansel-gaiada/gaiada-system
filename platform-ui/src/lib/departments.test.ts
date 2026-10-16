@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   isOverdue, isDueSoon, computeDeptKpis, computeProjectHealth,
-  toRailPriority, myDeptTasksToday, myBlockedTasks,
   parseBoardFocus, encodeBoardFocus, filterTasksByFocus,
   priorityColumns, assigneeColumns, divisionColumns, divisionStatusGrid, assigneeStatusGrid,
   ballColumns, ballKey, responsibleKey, filterTasksByBall, filterTasksByResponsible,
@@ -166,52 +165,6 @@ describe("computeProjectHealth", () => {
       const c = computeProjectHealth(tasks, [], NOW, [DOING, STUCK, SHIPPED]).composition;
       expect(c).toEqual({ done: 1, blocked: 1, overdue: 1, onTrack: 0, total: 3 });
     });
-  });
-});
-
-describe("toRailPriority", () => {
-  it("maps normal->medium and urgent->critical; passes high/low through", () => {
-    expect(toRailPriority("normal")).toBe("medium");
-    expect(toRailPriority("urgent")).toBe("critical");
-    expect(toRailPriority("high")).toBe("high");
-    expect(toRailPriority("low")).toBe("low");
-  });
-});
-
-describe("myDeptTasksToday", () => {
-  it("filters to this person's not-done tasks, sorted by due date then priority desc", () => {
-    const mkA = (id: string, dueDate: string | null, priority: PmTask["priority"]) =>
-      task({ id, dueDate, priority, assignee: { kind: "person", refId: "u-1", refName: "Me", responsibleId: "u-1", responsibleName: "Me" } });
-    const tasks = [
-      mkA("late-low", "2026-07-25", "low"),
-      mkA("late-high", "2026-07-25", "high"),
-      mkA("early", "2026-07-20", "normal"),
-      task({ id: "not-mine", dueDate: "2026-07-01", assignee: { kind: "person", refId: "u-2", refName: "Other", responsibleId: "u-2", responsibleName: "Other" } }),
-      task({ id: "done", status: "done", assignee: { kind: "person", refId: "u-1", refName: "Me", responsibleId: "u-1", responsibleName: "Me" } }),
-    ];
-    const result = myDeptTasksToday(tasks, "u-1").map((t) => t.id);
-    expect(result).toEqual(["early", "late-high", "late-low"]);
-  });
-  it("puts undated tasks last", () => {
-    const mine = (id: string, dueDate: string | null) =>
-      task({ id, dueDate, assignee: { kind: "person", refId: "u-1", refName: "Me", responsibleId: "u-1", responsibleName: "Me" } });
-    const result = myDeptTasksToday([mine("undated", null), mine("dated", "2026-07-20")], "u-1").map((t) => t.id);
-    expect(result).toEqual(["dated", "undated"]);
-  });
-});
-
-describe("myBlockedTasks", () => {
-  it("only this person's blocked tasks", () => {
-    const blocked = (id: string, respId: string) =>
-      task({ id, status: "blocked", assignee: { kind: "person", refId: respId, refName: "X", responsibleId: respId, responsibleName: "X" } });
-    const tasks = [blocked("mine", "u-1"), blocked("theirs", "u-2"), task({ id: "not-blocked", status: "todo", assignee: { kind: "person", refId: "u-1", refName: "Me", responsibleId: "u-1", responsibleName: "Me" } })];
-    expect(myBlockedTasks(tasks, "u-1").map((t) => t.id)).toEqual(["mine"]);
-  });
-  it("resolves 'blocked' by FLAG against each task's project registry (renamed 'Stuck')", () => {
-    const mine = (id: string, status: string) =>
-      task({ id, projectId: "pc", status, assignee: { kind: "person", refId: "u-1", refName: "Me", responsibleId: "u-1", responsibleName: "Me" } });
-    const tasks = [mine("stuck", "s-stuck"), mine("doing", "s-doing")];
-    expect(myBlockedTasks(tasks, "u-1", CUSTOM_STATUSES).map((t) => t.id)).toEqual(["stuck"]);
   });
 });
 

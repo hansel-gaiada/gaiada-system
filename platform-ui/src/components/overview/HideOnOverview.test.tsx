@@ -34,7 +34,7 @@ describe("HideOnOverview", () => {
     }
   });
 
-  it("never hides it in the classic shell", () => {
+  it("never hides it outside the workspace shell", () => {
     nav.pathname = "/departments/d-web";
     render(<HideOnOverview overviewPath="/departments/d-web">{header}</HideOnOverview>);
     expect(screen.getByText("Web Dev header")).toBeInTheDocument();

@@ -46,8 +46,8 @@ export interface ActivityFeedProps {
    *  a quieter way: "Today" was decided by the SERVER's clock and zone, so a request just after
    *  local midnight in Asia/Makassar (still yesterday in UTC) labelled today's rows "Yesterday".
    *  Passing the instant in also keeps the component pure, so its labels are testable and the day
-   *  it thinks it is cannot drift between the two render sites. Same contract as `MyWorkRail`'s
-   *  precomputed `urgencyTier`. Omit it and the feed drops the relative labels entirely — an
+   *  it thinks it is cannot drift between the two render sites. Same contract as the precomputed
+   *  `urgencyTier` of the task rows. Omit it and the feed drops the relative labels entirely — an
    *  absolute date is never wrong, a guessed one is. */
   nowIso?: string;
   /** true when the caller had more rows than it passed, so the feed can say so instead of

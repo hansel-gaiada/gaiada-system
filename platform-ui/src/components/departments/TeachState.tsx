@@ -1,8 +1,7 @@
 import Link from "next/link";
 
 // Shared "teach" empty-state — used inside every dept-console component (KpiStrip's
-// zero-project state, ActivityFeed with no events yet, MyWorkRail with nothing
-// waiting, LauncherRow with no tools configured). Distinct from the plain
+// zero-project state, ActivityFeed with no events yet, LauncherRow with no tools configured). Distinct from the plain
 // `EmptyNote` (systems/EmptyNote.tsx): EmptyNote is one quiet caption line for
 // "connected but empty"; TeachState is the warmer "here's what to do about it"
 // moment for a first-run department — glyph + one-line title + one-line body +

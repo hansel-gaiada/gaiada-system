@@ -35,7 +35,7 @@ export interface DeptTab {
   icon: IconName;
   blurb: string;
   /** Structurally wide surfaces (board/timeline/projects) render full-bleed —
-   *  no `MyWorkRail`, independent of the user's global width pref. */
+   *  independent of the user's global width pref. */
   fullBleed?: boolean;
   /** M5-V3-i: a capability the viewer must hold for this tab to be offered at all. The console layout hides the tab without it
    *  and `requireWebsiteCtx` 404s a hand-typed URL (never an empty list). Absent = every member of the department sees it. */
@@ -165,7 +165,7 @@ const WEB_DEV: DeptToolkit = {
         // owner calls this surface, and renaming the survivor of a merge is how people conclude
         // the thing they knew was removed rather than kept.
         //
-        // `fullBleed` — measured, not assumed. With the `MyWorkRail` present the content column is
+        // `fullBleed` — measured, not assumed. With the old My-work rail present the content column was
         // ~700px, and a six-column table carrying a domain AND a client·project pair needs ~900px
         // before its cells start breaking mid-phrase. The result on screen was the last column
         // (Probe consent) pushed off into a horizontal scroll and the KPI row wrapping 4 + 1

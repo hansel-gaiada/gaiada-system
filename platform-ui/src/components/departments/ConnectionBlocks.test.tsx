@@ -68,7 +68,7 @@ describe("ConnectionsPanel `only`", () => {
     expect(screen.queryByText(/account mappings/)).toBeNull();
   });
 
-  it("renders all three rows and the note when `only` is left off (classic)", () => {
+  it("renders all three rows and the note when `only` is left off", () => {
     const { container } = render(<ConnectionsPanel actions={actions} />);
     expect(container.querySelectorAll("li.dept-conn-row")).toHaveLength(3);
     expect(screen.getByText(/account mappings/)).toBeInTheDocument();

@@ -9,7 +9,7 @@ vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname }));
 const items = [{ label: "Organization", href: "/organization" }, { label: "Departments", href: "/departments" }, { label: "HR" }];
 
 describe("Breadcrumbs", () => {
-  it("renders the trail in the classic shell, even on a tool page", () => {
+  it("renders the trail outside the workspace shell (the portal), even on a tool page", () => {
     nav.pathname = "/hr/people";
     render(<Breadcrumbs items={items} />);
     const trail = screen.getByRole("navigation", { name: "Breadcrumb" });

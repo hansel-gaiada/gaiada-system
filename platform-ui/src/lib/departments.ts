@@ -17,9 +17,6 @@ import { listAssignmentsForUnit, assignmentInclusion, SERVICE_ASSIGNMENTS_ENABLE
 import type { Envelope } from "./envelope";
 import { PM_TERMS } from "./pmVocabulary";
 
-/** The rail's own four-value priority (PmTask's `normal` reads `medium`, `urgent` reads `critical`). */
-export type RailPriority = "low" | "medium" | "high" | "critical";
-
 export interface DeptPerson { id: string; name: string }
 export interface DeptDivision { id: string; name: string; people: DeptPerson[] }
 export interface DeptSummary { id: string; name: string; divisions: number; people: number; openTasks: number }
@@ -81,7 +78,7 @@ const departmentNodes = cache(async function departmentNodes(u: string, t: strin
 
 // Lightweight {id,name} list for the sidebar nav (department children). Reads only
 // the org structure — no task scan — and shares departmentNodes' cache with
-// myPlacement so the sidebar adds no extra fetch per page.
+// the department reads, so the sidebar adds no extra fetch per page.
 export interface DeptBrief { id: string; name: string }
 export async function listDepartmentBriefs(u: string, t: string): Promise<DeptBrief[]> {
   return (await departmentNodes(u, t)).map((d) => ({ id: d.id, name: d.name }));
@@ -96,24 +93,6 @@ export async function listDepartments(u: string, t: string): Promise<DeptSummary
     const open = tasks.filter((x) => !isDoneStatus(x.status) && belongs(x, d.id, divisionIds, personIds)).length;
     return { id: d.id, name: d.name, divisions: divisions.length, people: people.length, openTasks: open };
   });
-}
-
-export interface MyPlacement { deptId: string; deptName: string; divisionName: string | null }
-// Where the signed-in employee sits in the active company's org (their department +
-// division), for the sidebar "My team" shortcut. Null when they aren't placed.
-export async function myPlacement(u: string, t: string, userId: string): Promise<MyPlacement | null> {
-  const depts = await departmentNodes(u, t);
-  for (const d of depts) {
-    // direct under department (no-division depts)
-    if (d.children.some((c) => c.kind === "person" && c.assigneeId === userId)) return { deptId: d.id, deptName: d.name, divisionName: null };
-    for (const v of d.children.filter((c) => c.kind === "division")) {
-      let hit = false;
-      const walk = (n: OrgNode) => { for (const c of n.children) { if (c.kind === "person" && c.assigneeId === userId) hit = true; walk(c); } };
-      walk(v);
-      if (hit) return { deptId: d.id, deptName: d.name, divisionName: v.name };
-    }
-  }
-  return null;
 }
 
 // Memoised for the duration of one request render so the department console
@@ -335,7 +314,7 @@ export function computeProjectHealth(
 // `blockedCount` is a SUBSET of it, not an addition — a blocked task is also open, so
 // "4 open · 1 blocked" means one of those four cannot move, never five tasks.
 //
-// Person axis is `assignee.responsibleId`, matching `myOpenTasks`/`myBlockedTasks` below. NOT
+// Person axis is `assignee.responsibleId`, matching the board's Just-me focus. NOT
 // `assignee.refId`: that is who holds the ball right now (a unit, often), which is a different
 // question and would drop every task assigned to a division.
 export interface TeamMember {
@@ -381,61 +360,6 @@ export function computeTeamRoster(
   // not grow an empty "No division" row to prove it.
   if (loose.length > 0) groups.push({ id: NO_DIVISION_GROUP_ID, label: "No division", people: loose.map(member) });
   return groups;
-}
-
-// ---------------- My-work rail data (P1-07, decision #12) ----------------
-// The rail component (`MyWorkRail`) is a pure view that does NOT sort —
-// sorting is data-wiring logic, i.e. this file's job.
-
-const PRIORITY_RANK: Record<Priority, number> = { urgent: 3, high: 2, normal: 1, low: 0 };
-
-/** PmTask's 4-value priority -> the rail's own 4-value enum (normal->medium, urgent->critical). */
-export function toRailPriority(p: Priority): RailPriority {
-  if (p === "urgent") return "critical";
-  if (p === "normal") return "medium";
-  return p;
-}
-
-// This person's not-done department tasks, sorted by (due date ascending —
-// undated last, then priority descending). "My work today" (decision #12).
-// P4-K3 — tasks where the viewer currently HOLDS THE BALL (`assignee.refId`), which is a different
-// question from `myDeptTasksToday` above (that one is due-date driven, off `responsibleId`). A task
-// can be due next week and still be the single thing blocking everyone else, because the turn is
-// yours; that is exactly the case a due-date rail hides.
-//
-// Ball is kind-agnostic in the data model, but a UNIT cannot take a turn — so only a person-kind
-// ball counts as "yours". Done tasks are excluded via the registry FLAGS, never a literal id.
-export function myDeptBallTasks(tasks: PmTask[], userId: string, statusesByProject: Record<string, ProjectStatus[]> = {}): PmTask[] {
-  return tasks
-    .filter((t) =>
-      !statusFlags(t.status, statusesByProject[t.projectId]).isDone
-      && t.assignee?.kind === "person"
-      && t.assignee.refId === userId)
-    .slice()
-    .sort((a, b) => {
-      const ad = a.dueDate ?? "9999-12-31";
-      const bd = b.dueDate ?? "9999-12-31";
-      if (ad !== bd) return ad.localeCompare(bd);
-      return PRIORITY_RANK[b.priority] - PRIORITY_RANK[a.priority];
-    });
-}
-
-export function myDeptTasksToday(tasks: PmTask[], userId: string, statusesByProject: Record<string, ProjectStatus[]> = {}): PmTask[] {
-  return tasks
-    .filter((t) => !statusFlags(t.status, statusesByProject[t.projectId]).isDone && t.assignee?.responsibleId === userId)
-    .slice()
-    .sort((a, b) => {
-      const ad = a.dueDate ?? "9999-12-31";
-      const bd = b.dueDate ?? "9999-12-31";
-      if (ad !== bd) return ad.localeCompare(bd);
-      return PRIORITY_RANK[b.priority] - PRIORITY_RANK[a.priority];
-    });
-}
-
-// This person's blocked department tasks — one half of "Waiting on me"
-// (decision #12; the other half is pending approvals, wired at the call site).
-export function myBlockedTasks(tasks: PmTask[], userId: string, statusesByProject: Record<string, ProjectStatus[]> = {}): PmTask[] {
-  return tasks.filter((t) => statusFlags(t.status, statusesByProject[t.projectId]).isBlocked && t.assignee?.responsibleId === userId);
 }
 
 // ---------------- Board focus model (WSUX-7, R-2 — ORG-CORE STEP-5 semantics) ----------------

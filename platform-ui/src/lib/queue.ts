@@ -1,7 +1,7 @@
 import "server-only";
 // The shared "what needs me" data spine — UX-2 §1 + WS-UX-plan R-1. ONE
-// merge, consumed by BOTH the app Home (`/`, this ticket) and the department
-// console rail (`MyWorkRail`, via `projectQueueForCompany` below) — no second
+// merge, consumed by the Overview's Needs you block (`lib/overviewQueue.ts`) and the GM
+// Decisions page (via `projectQueueForCompany` below) — no second
 // queue implementation may exist (R-1, WSUX-5 acceptance criteria).
 //
 // This is UI composition over EXISTING typed reads, per the daily-work spec's
@@ -346,9 +346,8 @@ export interface QueueProjectionOptions {
   limit?: number;
 }
 
-// The department console rail's compact projection of the SAME queue (R-1) —
-// a pure filter, never a second fetch/merge. Kept here (not in the rail
-// component, which stays props-only) so callers share one implementation:
+// A compact projection of the SAME queue (R-1) for one company —
+// a pure filter, never a second fetch/merge. Kept here so callers share one implementation:
 // `projectQueueForCompany(queue, companyId, {types}) === queue.items.filter(...)`
 // by construction, which is exactly what the WSUX-5 rail-equivalence test
 // below asserts.

@@ -14,8 +14,8 @@ import type { ProjectComposition } from "@/lib/departments";
 // track, `ProjectComposition`), so risk is visible as a slice of the work
 // rather than as a stain on the progress figure. That makes the ring the one
 // polychrome object on the card, and it is the ONLY one: everything else stays
-// ink plus the single rust rule down the at-risk edge (the same idiom the rail
-// uses in `.dept-rail__item--waiting` — "this needs you").
+// ink plus the single rust rule down the at-risk edge (the same idiom the old My-work
+// rail used — "this needs you").
 //
 // Dept-agnostic, props only: the caller (Home tab data wiring) computes
 // progress/open/at-risk from whatever entities that department's projects are

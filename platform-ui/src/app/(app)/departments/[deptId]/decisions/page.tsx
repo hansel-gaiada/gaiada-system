@@ -15,11 +15,10 @@ const TITLE = "Decisions";
 // GM console → Command → Decisions (GM-06).
 //
 // ── THIS IS A PROJECTION, NOT A SECOND APPROVALS IMPLEMENTATION ──────────────────────────────────
-// `/approvals` owns the approval surface, and the console shell's My-work rail already projects the
-// SAME `getMyWorkQueue` spine (restricted to approval/gate rows) on every tab of this console —
-// including this one. So this page deliberately does NOT fetch approvals itself. It calls the same
-// spine and widens the projection: every type, ranked, with the one thing a GM needs that the rail's
-// compact strip cannot show — **how long each thing has been waiting**, and a count of what is past
+// `/approvals` owns the approval surface, and the Overview's Needs you block reads the
+// SAME `getMyWorkQueue` spine. So this page deliberately does NOT fetch approvals itself. It calls the same
+// spine and widens the projection: every type, ranked, with the one thing a GM needs that a compact strip
+// cannot show — **how long each thing has been waiting**, and a count of what is past
 // the point where waiting is itself the problem.
 //
 // `projectQueueForCompany(queue, companyId, {types})` is a PURE FILTER over `queue.items` by

@@ -92,7 +92,7 @@ describe("SectionTabs inside the workspace shell", () => {
   });
 });
 
-describe("SectionTabs in the classic shell", () => {
+describe("SectionTabs outside the workspace shell", () => {
   it.each([["HR", HR_TABS, "/hr/people"], ["Admin", ADMIN_TABS, "/admin/users"], ["Me", ME_TABS, "/me/leave"]])(
     "always draws the %s strip",
     (_name, tabs, path) => {
@@ -117,7 +117,7 @@ describe("FinanceTabs", () => {
     expect(screen.queryByRole("navigation", { name: "Finance sections" })).toBeNull();
   });
 
-  it("always draws in the classic shell", () => {
+  it("always draws outside the workspace shell", () => {
     nav.pathname = "/finance/journals";
     render(<FinanceTabs />);
     const strip = screen.getByRole("navigation", { name: "Finance sections" });
@@ -151,7 +151,7 @@ describe("DeptTabs", () => {
     expect(strips()[1]).toBeInTheDocument();
   });
 
-  it("always draws both levels in the classic shell", () => {
+  it("always draws both levels outside the workspace shell", () => {
     nav.pathname = "/departments/d-web/board";
     render(<DeptTabs groups={groups} deptId="d-web" />);
     expect(strips()[0]).toBeInTheDocument();

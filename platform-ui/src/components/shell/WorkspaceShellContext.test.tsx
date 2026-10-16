@@ -8,7 +8,7 @@ vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname }));
 
 function Probe() {
   const shell = useWorkspaceShell();
-  if (!shell) return <p>classic</p>;
+  if (!shell) return <p>outside</p>;
   const view = shell.view.kind === "workspace" ? `workspace:${shell.view.ws.key}` : shell.view.kind;
   return (
     <dl>
@@ -26,10 +26,10 @@ beforeEach(() => {
 });
 
 describe("useWorkspaceShell", () => {
-  it("is null in the classic shell", () => {
+  it("is null outside the workspace shell", () => {
     nav.pathname = "/departments/d-web/prd";
     render(<Probe />);
-    expect(screen.getByText("classic")).toBeInTheDocument();
+    expect(screen.getByText("outside")).toBeInTheDocument();
   });
 
   it("gives the Web Dev view, its rows and the active row and tab on a Web Dev page", () => {

@@ -256,8 +256,8 @@ describe("proxy — the pathname request header (DW-3a2)", () => {
     expect(res.headers.get("x-middleware-request-x-keep")).toBe("yes");
   });
 
-  // A layout redirect thrown while a Server Action or an RSC fetch re-renders never reaches the browser ("Try the new
-  // layout" on `/` left the classic shell on screen), so only a document request carries the header.
+  // A layout redirect thrown while a Server Action or an RSC fetch re-renders never reaches the browser (a Server Action on `/`
+  // left the old page on screen), so only a document request carries the header.
   it("withholds it from the client router's RSC fetches and prefetches, and strips a client-sent copy", () => {
     expect(forwarded(proxy(req("/", { cookie: devCookie(), headers: { rsc: "1" } })))).toBeNull();
     expect(forwarded(proxy(req("/", { cookie: devCookie(), headers: { rsc: "1", "next-router-prefetch": "1" } })))).toBeNull();

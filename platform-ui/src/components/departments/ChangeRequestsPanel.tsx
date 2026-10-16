@@ -269,7 +269,7 @@ function OriginCell({ origins, id }: { origins: ChangeRequestOrigins; id: string
   if (origins.state === "unavailable") return <span>Unavailable</span>;
   const o = origins.byChangeRequest[id];
   if (!o) return <span>{"\u2014"}</span>;
-  // One short link, the department, so the column stays narrow beside the My-work rail (it wrapped over five lines
+  // One short link, the department, so the column stays narrow (it wrapped over five lines
   // as "From <dept> · <person> Open request"). The person stays available: in the tooltip and in the link's name.
   return (
     <Link

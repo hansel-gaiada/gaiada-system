@@ -645,8 +645,8 @@ function Card({
         <div className="pm-card__meta">
           <span className="pm-who">{who}</span>
           {/* A "NORMAL" chip on every ordinary card is a label with no reader: it takes the same
-              weight as HIGH/URGENT and says only that nothing is unusual. Same rule the rail already
-              follows (`MyWorkRail` prints a priority only at high/critical). The unit tag still wins
+              weight as HIGH/URGENT and says only that nothing is unusual. Same rule the old My-work rail
+              followed (it printed a priority only at high/critical). The unit tag still wins
               when there is one — it names WHO holds the work, which no other line on the card says. */}
           {unitTag
             ? <span className="pm-chip">{unitTag}</span>

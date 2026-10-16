@@ -64,7 +64,7 @@ describe("WorkspaceTabStrip", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("draws nothing in the classic shell", () => {
+  it("draws nothing outside the workspace shell", () => {
     nav.pathname = "/departments/d-web/repositories";
     const { container } = render(<WorkspaceTabStrip />);
     expect(container).toBeEmptyDOMElement();
