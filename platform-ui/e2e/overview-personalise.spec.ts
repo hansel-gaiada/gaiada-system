@@ -38,7 +38,9 @@ const row = (page: Page, key: string) => panel(page).locator(`li[data-widget="${
 
 /** Opens the Customise disclosure if it is closed (it is closed by default, and a redraw may leave it open). */
 async function openCustomise(page: Page) {
-  const summary = page.locator("summary", { hasText: "Customise" });
+  // Scoped to the page body: while Next streams the page, a resolved chunk sits in a hidden <div> at the end of <body> before React
+  // moves it into place, so an unscoped locator can briefly see the summary twice.
+  const summary = main(page).locator("summary", { hasText: "Customise" });
   await expect(summary).toBeVisible();
   if (!(await panel(page).isVisible())) {
     await hydrated(summary);
@@ -102,13 +104,12 @@ test.describe("Overview: personalise (DW-10d)", () => {
     await expect(block(page, "Today")).toHaveCount(0);
   });
 
-  test("Needs you is always shown: Customise lists it with no control", async ({ page, context }) => {
+  test("Needs you is always shown: Customise offers no control for it and says it stays", async ({ page, context }) => {
     await signInWebDev(page, context);
     await page.goto("/departments/dept-1");
     await openCustomise(page);
-    await expect(row(page, "needs-you")).toContainText("Always shown");
-    await expect(row(page, "needs-you").getByRole("button")).toHaveCount(0);
-    await expect(row(page, "needs-you").locator("form")).toHaveCount(0);
+    await expect(row(page, "needs-you")).toHaveCount(0);
+    await expect(panel(page).getByText(/Needs you always stays/)).toBeVisible();
     // The blocks that may be hidden each have one.
     await expect(row(page, "today").getByRole("button", { name: "Hide Today" })).toBeVisible();
     await expect(block(page, "Needs you")).toBeVisible();
@@ -144,6 +145,8 @@ test.describe("Overview: personalise (DW-10d)", () => {
   test("on the company Overview, Client health shows the whole board's counts worst first, each client opening its page", async ({ page, context }) => {
     await signInSuperadmin(page, context);
     await page.goto("/");
+    // `/` redirects the superadmin to the Office of the GM (DW-3a2): a full reload, so wait for the target page before reading it.
+    await page.waitForURL(/\/departments\/[^/?]+/);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), /);
     await expect(block(page, "Client health")).toHaveCount(0);
 

@@ -314,11 +314,11 @@ describe("WorkspaceOverview: the person's own blocks and the Customise control (
     expect(within(item("my-activity")).getByText("Hidden")).toBeInTheDocument();
   });
 
-  it("a fixed block stays even when a forged cookie hides it, and shows 'Always shown'", () => {
+  it("a fixed block stays even when a forged cookie hides it, and Customise offers no control for it", () => {
     const seen: string[] = [];
     drawOverview(seen, prefs({ hide: ["needs-you"], show: [] }));
     expect(seen).toEqual(["needs-you", "today", "my-activity"]);
-    expect(within(item("needs-you")).getByText("Always shown")).toBeInTheDocument();
+    expect(item("needs-you")).toBeNull();
   });
 
   it("an optional block is drawn when switched on, in its registry place, and still follows the gate", () => {
