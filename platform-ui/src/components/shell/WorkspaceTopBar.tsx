@@ -2,6 +2,7 @@ import type { Me } from "@/lib/platform";
 import type { Theme } from "@/lib/prefs";
 import type { ShellLayout } from "@/lib/shellLayout";
 import { listNotifications } from "@/lib/entities";
+import { noticePostedLine } from "@/lib/notices";
 import { NavToggle } from "./NavToggle";
 import { NotificationBell, type BellItem } from "./NotificationBell";
 import { SpecialAccessChip } from "./SpecialAccessChip";
@@ -38,7 +39,7 @@ export async function WorkspaceTopBar({ me, tenantId, theme, shell, special, unr
         items: [...rows]
           .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))
           .slice(0, BELL_ITEMS)
-          .map((n) => ({ id: n.id, title: n.payload?.title || n.type, createdAt: n.created_at })),
+          .map((n) => ({ id: n.id, title: noticePostedLine(n.type, n.payload) ?? (n.payload?.title || n.type), createdAt: n.created_at })),
       };
     } catch {
       unread = null;

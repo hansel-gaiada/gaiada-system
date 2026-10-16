@@ -110,6 +110,7 @@ const COMPANY: AreaRule[] = [
   rule("/knowledge", "company"),
   rule("/agents", "company", true),
   rule("/office", "company", true),
+  rule("/notices", "company", false, "DW-10a-2: the company-wide notice board. A department's own is /departments/[deptId]/notices, in its workspace (the subtree rule below)"),
 ];
 
 const ADMIN: AreaRule[] = [

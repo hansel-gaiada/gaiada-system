@@ -1,0 +1,29 @@
+/* DW-10a-2 — the department notice board (BFF §57). Tokens only; a notice is said in words (the "Pinned" marker is text), never by colour alone. */
+.nt-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 16px; }
+.nt-head__links { display: flex; gap: 16px; flex-wrap: wrap; font: 600 13px var(--font-body); }
+.nt-link { color: var(--text-primary); text-decoration: underline; text-underline-offset: 3px; }
+.nt-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.nt-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.nt-item { display: flex; flex-direction: column; gap: 8px; padding: 18px 0; border-top: 0.5px solid var(--erp-hairline); scroll-margin-top: 80px; }
+.nt-item:first-child { border-top: 0; }
+.nt-item:target { background: var(--surface-card-solid); outline: 1px solid var(--line); outline-offset: 8px; }
+.nt-item__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.nt-item__title { margin: 0; font: 600 16px/1.35 var(--font-body); color: var(--text-primary); overflow-wrap: anywhere; }
+.nt-pin { font: 600 12px var(--font-body); letter-spacing: 0.04em; color: var(--accent); }
+.nt-meta { margin: 0; font: 400 12px/1.5 var(--font-body); color: var(--ink-subtle); }
+/* Plain text: line breaks kept by CSS, never by markup the notice's author controls. */
+.nt-body { margin: 0; font: 400 14px/1.6 var(--font-body); color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.nt-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.nt-confirm { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font: 400 13px var(--font-body); color: var(--text-primary); }
+.nt-msg { font: 400 12px/1.5 var(--font-body); max-width: 520px; }
+.nt-msg--bad { color: var(--status-critical-fg); }
+.nt-form { display: flex; flex-direction: column; gap: 14px; max-width: 640px; padding: 4px 0 8px; }
+.nt-form__row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.nt-compose { margin: 0 0 20px; display: flex; flex-direction: column; gap: 12px; }
+.nt-empty { margin: 0; font: 400 14px/1.5 var(--font-body); color: var(--ink-muted); }
+.nt-more { margin: 16px 0 0; }
+/* The Overview blocks. */
+.nt-block__row { flex-direction: column; }
+.nt-block__line { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.nt-block__excerpt { font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); overflow-wrap: anywhere; }
+.nt-block__links { display: flex; gap: 16px; flex-wrap: wrap; }

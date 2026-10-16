@@ -7,6 +7,7 @@ import { listNotifications, type NotificationItem } from "@/lib/entities";
 import { markAllReadAction, markReadAction } from "./actions";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { MailThreadPanel } from "@/components/mail/MailThreadPanel";
+import { noticePostedLine } from "@/lib/notices";
 
 // `/me/inbox` — the employee's personal inbox (employee-portal wave F).
 //
@@ -52,6 +53,14 @@ function severityOf(n: NotificationItem): Severity {
   return n.payload?.severity ?? "info";
 }
 
+/** The row's headline: a `notice.posted` reads "<unit or Whole company>: <title>" (BFF §57.6), anything else its own title (else its type). */
+function headline(n: NotificationItem): string {
+  return noticePostedLine(n.type, n.payload) ?? n.payload?.title ?? n.type;
+}
+
+/** A notice has no thread (comments are out of scope for the notice board), though its payload carries an entity for the record. */
+const hasThread = (n: NotificationItem): boolean => n.type !== "notice.posted" && Boolean(n.payload?.entityType && n.payload?.entityId);
+
 function when(iso: string): string {
   if (!iso) return "";
   const d = new Date(iso);
@@ -96,7 +105,7 @@ export default async function MeInboxPage({ searchParams }: { searchParams: SP }
   });
 
   const open = thread ? all.find((n) => n.id === thread) ?? null : null;
-  const openEntity = open?.payload?.entityType && open?.payload?.entityId
+  const openEntity = open && hasThread(open) && open.payload?.entityType && open.payload?.entityId
     ? { entityType: open.payload.entityType, entityId: open.payload.entityId }
     : null;
 
@@ -148,7 +157,7 @@ export default async function MeInboxPage({ searchParams }: { searchParams: SP }
           {items.map((n, i) => {
             const sev = severityOf(n);
             const color = SEVERITY_COLOR[sev];
-            const hasEntity = Boolean(n.payload?.entityType && n.payload?.entityId);
+            const hasEntity = hasThread(n);
             const isOpen = thread === n.id;
             return (
               <div
@@ -168,10 +177,10 @@ export default async function MeInboxPage({ searchParams }: { searchParams: SP }
                   }}>
                     {n.payload?.href ? (
                       <Link href={n.payload.href} style={{ color: "inherit", textDecoration: "none" }}>
-                        {n.payload?.title ?? n.type}
+                        {headline(n)}
                       </Link>
                     ) : (
-                      n.payload?.title ?? n.type
+                      headline(n)
                     )}
                   </p>
                   {n.payload?.body && (
