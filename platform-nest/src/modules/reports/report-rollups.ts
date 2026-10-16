@@ -24,6 +24,7 @@ import { withTenants } from "../../db";
 import type { RollupProvider, RollupRow } from "../contract";
 import { effectiveStatuses } from "../pm/pm.controller";
 import { resolveMembershipAsOf, type MembershipInterval } from "../../core/dept-resolution";
+import { REQUEST_ROUTE_KEYS } from "../../core/request-routes";
 import {
   attributePerson,
   DEFAULT_WORK_CALENDAR,
@@ -232,15 +233,18 @@ async function computeOwnFactRollups(client: PoolClient, tenantId: string, start
  *  `gatherForeignContext`'s two-step shape in fact-job.ts — D5: never a widened tenant set) to sum
  *  that tenant's facts stamped for A, grouped by `provider_unit_node_id`. Emitted with dimensions
  *  `{unit, servedTenant}` for every fact-backed metric that supports the department grain — the
- *  D12-sanctioned, ONLY cross-company read path (never a raw cross-tenant JOIN). */
+ *  D12-sanctioned, ONLY cross-company read path (never a raw cross-tenant JOIN).
+ *
+ *  DW-10e (BFF §60.2): step 1 LEAVES OUT routing keys. A route places nobody in the served company, so it never feeds this
+ *  view. `core/request-routes.ts` is the one list. */
 async function computeProviderViewRollups(tenantId: string, start: string, end: string): Promise<RollupRow[]> {
   const served = await withTenants(
     [tenantId],
     (c) =>
       c.query<{ target_tenant_id: string }>(
         `SELECT DISTINCT target_tenant_id FROM service_assignments
-          WHERE provider_tenant_id = $1 AND status = 'active'`,
-        [tenantId],
+          WHERE provider_tenant_id = $1 AND status = 'active' AND module_key <> ALL($2::text[])`,
+        [tenantId, [...REQUEST_ROUTE_KEYS]],
       ),
     { modules: ["reports"] },
   );

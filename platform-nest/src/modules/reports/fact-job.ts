@@ -90,6 +90,7 @@ import type { PoolClient } from "pg";
 import { newId, withGlobal, withTenants } from "../../db";
 import { config } from "../../config";
 import { isModuleEnabled } from "../registry";
+import { REQUEST_ROUTE_KEYS } from "../../core/request-routes";
 import { logAssigneeDriftIfAny } from "../pm/pm.controller";
 import {
   addDaysIso,
@@ -602,14 +603,19 @@ const EMPTY_FOREIGN: ForeignContext = { memberships: {}, activeProviderUnits: ne
  *  visible from the served tenant's scope, so there is no way to fold this into one transaction.
  *
  *  Ruling 2 is why step 1 does NOT filter on status: a suspended edge must still let the person's
- *  own unit resolve. Only `activeProviderUnits` (the STAMP source) is status-filtered. */
+ *  own unit resolve. Only `activeProviderUnits` (the STAMP source) is status-filtered.
+ *
+ *  DW-10e (BFF §60.2): step 1 LEAVES OUT routing keys. A route (`asset_requests`, `engineering_requests`) places nobody in
+ *  the target company, so it must never make the provider's unit a candidate for anybody's membership lookup and never stamp
+ *  a provider on a fact. `core/request-routes.ts` is the one list. */
 export async function gatherForeignContext(tenantId: string): Promise<ForeignContext> {
   const edges = await withTenants(
     [tenantId],
     (c) =>
       c.query<{ provider_tenant_id: string; unit_id: string; status: string }>(
-        `SELECT provider_tenant_id, unit_id, status FROM service_assignments WHERE target_tenant_id = $1`,
-        [tenantId],
+        `SELECT provider_tenant_id, unit_id, status FROM service_assignments
+          WHERE target_tenant_id = $1 AND module_key <> ALL($2::text[])`,
+        [tenantId, [...REQUEST_ROUTE_KEYS]],
       ),
     { modules: [...REPORT_JOB_MODULES] },
   );
