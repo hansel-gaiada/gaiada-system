@@ -1648,9 +1648,7 @@ data is in 10e-1, its wiring in 10e-2 and its screens in 10e-3.
 | 10e-3 The UI | senior-fe, Sonnet | §60.9: the routes read and `hasRoutes`, the quick actions, `/requests/new?route=`, the merged My requests and Sent with the `scope` notice, `/requests/outbound/[id]` with the price state and its download proxies, the receiving side's labels and client, ORG-13's picker and its client sentences, DEMO_MODE | vitest, `next build` and the demo e2e green; then driven live after §60.12's steps |
 
 **Owner questions for 10e** (each with the default the build uses until ruled):
-1. **The switch** (asked 2026-10-15, still open). DW-D39's routes need `SERVICE_ASSIGNMENTS_ENABLED` on in live, in
-   both services, and it also wakes the reconciler for every other assignment (none recorded live). Default: on,
-   after the owner reads the live table (§60.12 step 1). It blocks only the live drive.
+1. **The switch** (settled 2026-10-15: already on). `SERVICE_ASSIGNMENTS_ENABLED=1` was read in both live containers (`gaiada-platform-1`, `gaiada-platform-ui-1`) on 2026-10-15, so DW-D39's routes can be created after the deploy; read the live `service_assignments` table first (BFF §60.12).
 2. **Lead-only heads.** Should a head who holds `org_unit_lead` but not `manager` also read their department's
    requests to other companies? Default: no (DW-D40 as written). If yes, the safe shape is a handler-fed list of
    the department's lead-seat holders, never the `org_unit_lead` role (PERMISSION-CONTRACT §49).
