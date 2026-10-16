@@ -836,7 +836,7 @@ test.describe("the Overview's Me | Team switch: a head of department (webhead@ga
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
 
     const main = page.locator("#main-content");
-    const view = page.getByRole("navigation", { name: "View" });
+    const view = page.getByRole("navigation", { name: "View", exact: true });
     await expect(view.getByRole("link")).toHaveText(["Me", "Team"]);
     await expect(view.getByRole("link", { name: "Me" })).toHaveAttribute("aria-current", "true");
     await expect(view.getByRole("link", { name: "Team" })).not.toHaveAttribute("aria-current", "true");
@@ -857,7 +857,7 @@ test.describe("the Overview's Me | Team switch: a head of department (webhead@ga
     await page.goto("/departments/dept-1");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
     const main = page.locator("#main-content");
-    const view = page.getByRole("navigation", { name: "View" });
+    const view = page.getByRole("navigation", { name: "View", exact: true });
 
     await press(view.getByRole("link", { name: "Team" }));
     await expect(page).toHaveURL(/\/departments\/dept-1\?period=month&view=team$/);
@@ -917,7 +917,7 @@ test.describe("the Overview's Me | Team switch: a head of department (webhead@ga
     await signInWebDevHead(page, context);
     await page.goto("/departments/dept-1?period=week&view=team");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
-    const view = page.getByRole("navigation", { name: "View" });
+    const view = page.getByRole("navigation", { name: "View", exact: true });
     await expect(view.getByRole("link", { name: "Team" })).toHaveAttribute("aria-current", "true");
     await expect(view.getByRole("link", { name: "Me" })).toHaveAttribute("href", "?period=week");
     await expect(page.locator("#main-content").getByRole("region", { name: "Team numbers", exact: true })).toBeVisible();
@@ -933,7 +933,7 @@ test.describe("the Overview's Me | Team switch: a head of department (webhead@ga
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
     const main = page.locator("#main-content");
     await expect(main.getByText(/^SEO · Gaia Digital Agency · /)).toBeVisible();
-    await expect(page.getByRole("navigation", { name: "View" })).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "View", exact: true })).toHaveCount(0);
     await expect(main.getByRole("region", { name: "Your numbers", exact: true })).toBeVisible();
     await expect(main.getByRole("region", { name: "Team numbers", exact: true })).toHaveCount(0);
   });
@@ -942,7 +942,7 @@ test.describe("the Overview's Me | Team switch: a head of department (webhead@ga
     await signInWebDevHead(page, context, { pilot: false });
     await page.goto("/departments/dept-1?view=team");
     await expect(page.getByRole("heading", { level: 1, name: "Web Dev", exact: true })).toBeVisible();
-    await expect(page.getByRole("navigation", { name: "View" })).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "View", exact: true })).toHaveCount(0);
     await expect(page.getByRole("group", { name: "Period" })).toHaveCount(0);
     for (const name of ["Team numbers", "Team needs you", "Team learning", "Team appraisals"]) {
       await expect(page.getByRole("region", { name, exact: true })).toHaveCount(0);
@@ -965,7 +965,7 @@ test.describe("the Overview's Me | Team switch: someone who does not head the de
       await expect(main.getByRole("region", { name: "Needs you", exact: true })).toBeVisible();
       await expect(main.getByRole("region", { name: "Learning", exact: true })).toBeVisible();
       await expect(main.getByRole("region", { name: "Appraisal", exact: true })).toBeVisible();
-      await expect(page.getByRole("navigation", { name: "View" })).toHaveCount(0);
+      await expect(page.getByRole("navigation", { name: "View", exact: true })).toHaveCount(0);
       for (const name of ["Team numbers", "Team needs you", "Team learning", "Team appraisals"]) {
         await expect(main.getByRole("region", { name, exact: true })).toHaveCount(0);
       }
@@ -977,7 +977,7 @@ test.describe("the Overview's Me | Team switch: someone who does not head the de
     await signInWebDev(page, context, { pilot: false });
     await page.goto("/departments/dept-1?view=team");
     await expect(page.getByRole("heading", { level: 1, name: "Web Dev", exact: true })).toBeVisible();
-    await expect(page.getByRole("navigation", { name: "View" })).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "View", exact: true })).toHaveCount(0);
     for (const name of ["Team numbers", "Team needs you", "Team learning", "Team appraisals"]) {
       await expect(page.getByRole("region", { name, exact: true })).toHaveCount(0);
     }
