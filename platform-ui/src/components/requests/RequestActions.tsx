@@ -5,7 +5,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui";
-import { cancelRequestAction, declineRequestAction, deliverRequestAction } from "@/lib/requestActions";
+import { cancelOutboundRequestAction, cancelRequestAction, declineRequestAction, deliverRequestAction } from "@/lib/requestActions";
 import { LIMITS, checkDeclineReason, checkDeliverIds, type OfferedActions } from "@/lib/requests";
 import "@/components/forms/forms.css";
 import "./requests.css";
@@ -19,11 +19,14 @@ export interface RequestActionsProps {
   library: LibraryChoice[] | null;
   /** Why the library could not be read, in the backend's words. */
   libraryReason?: string | null;
+  /** DW-10e: this is the SENDER's page for a request to another group company (`/requests/outbound/<id>`). Cancel then goes through the
+   *  sender route, under the asking company. */
+  outbound?: boolean;
 }
 
 type Mode = "none" | "cancel" | "deliver" | "decline";
 
-export function RequestActions({ requestId, offered, library, libraryReason }: RequestActionsProps) {
+export function RequestActions({ requestId, offered, library, libraryReason, outbound = false }: RequestActionsProps) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("none");
   const [error, setError] = useState<string | null>(null);
@@ -126,7 +129,7 @@ export function RequestActions({ requestId, offered, library, libraryReason }: R
       {mode === "cancel" && (
         <div className="req-actions" role="group" aria-label="Cancel this request">
           <span className="req-note">Cancel this request? The receiving team stops working on it.</span>
-          <Button size="sm" onClick={() => run(() => cancelRequestAction(requestId))} disabled={pending}>{pending ? "Cancelling…" : "Yes, cancel it"}</Button>
+          <Button size="sm" onClick={() => run(() => (outbound ? cancelOutboundRequestAction(requestId) : cancelRequestAction(requestId)))} disabled={pending}>{pending ? "Cancelling…" : "Yes, cancel it"}</Button>
           <Button variant="ghost" size="sm" onClick={() => setMode("none")} disabled={pending}>Keep it</Button>
         </div>
       )}

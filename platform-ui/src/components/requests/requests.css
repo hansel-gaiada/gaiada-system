@@ -59,3 +59,7 @@
 .req-pick { display: grid; gap: 6px; max-height: 280px; overflow: auto; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); }
 .req-pick__item { display: flex; gap: 10px; align-items: baseline; font: 400 13px var(--font-body); color: var(--text-primary); }
 .req-pick__meta { font: 400 12px var(--font-body); color: var(--ink-muted); }
+
+/* DW-10e: the routes the chooser lists, and the price state on the sender's page. */
+.req-routes { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.req-routes li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font: 400 13px var(--font-body); }

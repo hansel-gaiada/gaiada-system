@@ -1,13 +1,14 @@
 import { HairlineTable, StatusBadge } from "@/components/ui";
 import {
-  ageText, isNeededByOverdue, neededByText, unitText, workText,
+  ageText, fromText, isNeededByOverdue, neededByText, workText,
   type RequestRow,
 } from "@/lib/requests";
 import "./requests.css";
 
 // DW-5d: Creatives' Incoming, the asset requests waiting on this department. The whole row opens the request. Every value
 // is plain text (a title, a name and a campaign name are user input). A past needed-by date carries the word "Overdue",
-// so it never rests on colour alone.
+// so it never rests on colour alone. DW-10e (§60.6): a request another group company asked for names that company and its
+// department, and the client the work is billed to, under "From".
 export function IncomingRequestsTable({ rows, now }: { rows: readonly RequestRow[]; now?: Date }) {
   return (
     <HairlineTable
@@ -19,7 +20,10 @@ export function IncomingRequestsTable({ rows, now }: { rows: readonly RequestRow
       rowLinks={rows.map((r) => ({ href: `/requests/${encodeURIComponent(r.id)}`, label: r.title }))}
       rows={rows.map((r) => [
         <span key={`${r.id}-t`} className="req-title">{r.title}</span>,
-        unitText(r.fromUnit),
+        <span key={`${r.id}-f`}>
+          <span>{fromText(r)}</span>
+          {r.client ? <span className="req-sub">Billed to {r.client.name}</span> : null}
+        </span>,
         r.requestedBy.name,
         <span key={`${r.id}-n`}>
           {neededByText(r.neededBy)}

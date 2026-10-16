@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { HairlineTable, StatusBadge } from "@/components/ui";
 import {
-  neededByText, requestKindLabel, unitText, workText,
+  neededByText, requestHref, requestKindLabel, toText, workText,
   type RequestRow,
 } from "@/lib/requests";
 import "./requests.css";
 
 // DW-5c UI — one table for "my requests" and a department's Sent tab. The whole row opens the request. Every value is
-// plain text: a title, a name and a brief are user input.
+// plain text: a title, a name and a brief are user input. DW-10e (§60.9): a request to another group company says "To <unit> ·
+// <company>" and opens the sender's page (`/requests/outbound/<id>`).
 export function RequestsTable({ rows, showRequester }: { rows: readonly RequestRow[]; showRequester: boolean }) {
   const columns = [
     { label: "Request" }, { label: "To" },
@@ -19,13 +20,13 @@ export function RequestsTable({ rows, showRequester }: { rows: readonly RequestR
     <HairlineTable
       tcols={tcols}
       columns={columns}
-      rowLinks={rows.map((r) => ({ href: `/requests/${encodeURIComponent(r.id)}`, label: r.title }))}
+      rowLinks={rows.map((r) => ({ href: requestHref(r), label: r.title }))}
       rows={rows.map((r) => [
         <span key={`${r.id}-t`}>
           <span className="req-title">{r.title}</span>
           <span className="req-sub">{requestKindLabel(r.kind)}</span>
         </span>,
-        unitText(r.toUnit),
+        toText(r),
         ...(showRequester ? [r.requestedBy.name] : []),
         neededByText(r.neededBy),
         <StatusBadge key={`${r.id}-s`} label={r.status} />,

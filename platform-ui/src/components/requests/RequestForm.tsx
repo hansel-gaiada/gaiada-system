@@ -3,18 +3,32 @@
 // (Creatives takes asset requests, Web Dev takes engineering requests; contract §32.4). What a person types is checked
 // by `validateRequestDraft`, which mirrors §32.4 bound for bound, so a mistake is explained next to its field before the
 // server is asked; the server still validates and its refusal lands on the same field. Everything is plain text.
+//
+// DW-10e (BFF §60.9): with a `route`, the form asks ANOTHER group company's department through one of the company's routes. The
+// form is the same per kind; there is no campaign picker (a cross request links no campaign part), a line says the work is billed to
+// the requesting company as a client, and the send goes through `createOutboundRequestAction`, which opens the sender's own page.
 import { useRef, useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui";
 import { Field } from "@/components/forms/Field";
-import { createRequestAction } from "@/lib/requestActions";
+import { createOutboundRequestAction, createRequestAction } from "@/lib/requestActions";
 import {
   DELIVERABLE_FORMATS, DELIVERABLE_FORMAT_LABEL, ENGINEERING_KINDS, ENGINEERING_KIND_LABEL, LIMITS,
-  emptyDeliverable, validateRequestDraft,
+  emptyDeliverable, outboundBodyFrom, validateRequestDraft,
   type DeliverableDraft, type FieldErrors, type PartOption, type RequestDraft, type RequestKind,
 } from "@/lib/requests";
 import "@/components/forms/forms.css";
 import "./requests.css";
+
+/** One of the company's routes to another group company's department (`GET requests/routes`, §60.5). */
+export interface RequestFormRoute {
+  routeId: string;
+  /** The receiving company and its department, as the route names them. */
+  companyName: string;
+  unitName: string;
+  /** The asking company, named in the billing line. */
+  requestingCompanyName: string;
+}
 
 export interface RequestFormProps {
   kind: RequestKind;
@@ -22,11 +36,13 @@ export interface RequestFormProps {
   toUnitName: string;
   /** The campaigns where the receiving department has a part. `null` when they could not be read. */
   campaigns: PartOption[] | null;
+  /** Set for a request to another group company: the route replaces the department and the campaign picker. */
+  route?: RequestFormRoute;
 }
 
 const val = (fd: FormData, k: string) => String(fd.get(k) ?? "");
 
-export function RequestForm({ kind, toUnitId, toUnitName, campaigns }: RequestFormProps) {
+export function RequestForm({ kind, toUnitId, toUnitName, campaigns, route }: RequestFormProps) {
   const router = useRouter();
   const nextKey = useRef(1);
   const [rows, setRows] = useState<number[]>([0]);
@@ -42,11 +58,12 @@ export function RequestForm({ kind, toUnitId, toUnitName, campaigns }: RequestFo
     }));
     const draft: RequestDraft = {
       kind,
-      toUnitId,
+      // A route names the department, so the draft check only needs SOMETHING to send to: the route id stands in for it.
+      toUnitId: route ? route.routeId : toUnitId,
       title: val(fd, "title"),
       brief: val(fd, "brief"),
       neededBy: val(fd, "neededBy"),
-      campaignPartId: val(fd, "campaignPartId"),
+      campaignPartId: route ? "" : val(fd, "campaignPartId"),
       assets: { deliverables, channel: val(fd, "channel"), references: val(fd, "references"), notes: val(fd, "notes") },
       engineering: { kind: val(fd, "engKind"), affectedUrl: val(fd, "affectedUrl") },
     };
@@ -59,6 +76,16 @@ export function RequestForm({ kind, toUnitId, toUnitName, campaigns }: RequestFo
     setErrors({});
     setFormError(null);
     startTransition(async () => {
+      if (route) {
+        const sent = await createOutboundRequestAction(outboundBodyFrom(route.routeId, check.body));
+        if (!sent.ok) {
+          setFormError(sent.error);
+          if (sent.field) setErrors({ [sent.field]: sent.error });
+          return;
+        }
+        router.push(`/requests/outbound/${encodeURIComponent(sent.id)}`);
+        return;
+      }
       const res = await createRequestAction(check.body);
       if (!res.ok) {
         setFormError(res.error);
@@ -75,13 +102,19 @@ export function RequestForm({ kind, toUnitId, toUnitName, campaigns }: RequestFo
 
   return (
     <form className="req-form" onSubmit={submit} aria-label="New request" noValidate>
-      <p className="req-form__to">To <strong>{toUnitName}</strong></p>
+      <p className="req-form__to">To <strong>{route ? `${route.unitName} · ${route.companyName}` : toUnitName}</strong></p>
+      {route && (
+        <p className="req-note">
+          This is client work: {route.companyName} bills {route.requestingCompanyName} for it as a client. You see how it is going on the
+          request page, and for a change that moves the price, whether a price agreement is needed, but never amounts.
+        </p>
+      )}
 
       <Field name="title" label="Title" type="text" required error={errors.title} hint={`Up to ${LIMITS.title} characters.`} />
       <Field name="brief" label="Brief" type="textarea" error={errors.brief} hint="What you need and why. Plain text." />
       <div className="req-form__row">
         <Field name="neededBy" label="Needed by" type="date" error={errors.neededBy} />
-        {campaigns === null ? (
+        {route ? null : campaigns === null ? (
           <p className="req-note" style={{ alignSelf: "end" }}>
             The campaigns could not be read, so a campaign cannot be named now. You can still send the request.
           </p>

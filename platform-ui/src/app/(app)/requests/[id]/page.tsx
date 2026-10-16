@@ -33,6 +33,8 @@ import "@/components/requests/requests.css";
 //   Cancel          the requester while open (an engineering request only while its change request is still new);
 //   Deliver / more  assets only: a manager, the receiving department's head, or one of the task's assignees;
 //   Decline         assets only, while open: a manager or the receiving department's head.
+// DW-10e (§60.6): a request another company asked for names that company, its department and the client it is billed to, and
+// Cancel is not offered on it (the server answers 409 `requester_side_only`): the receiving side declines.
 // "Manager or head" is `work_request.decide` through `canInUnit` over the receiving department's path in the org tree,
 // read only when it can change the answer; when the tree cannot be read, only the company-wide grant is offered.
 export default async function RequestPage({ params }: { params: Promise<{ id: string }> }) {
@@ -92,6 +94,9 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
     { label: "Status", value: <StatusBadge label={req.status} /> },
     { label: "Kind", value: requestKindLabel(req.kind) },
     { label: "From and to", value: routeText(req) },
+    // DW-10e (§60.6): another company's request names that company, and the client the work is billed to.
+    ...(req.requestingCompany ? [{ label: "Requesting company", value: req.requestingCompany.name }] : []),
+    ...(req.client ? [{ label: "Billed to client", value: <Link href={`/clients/${encodeURIComponent(req.client.id)}`}>{req.client.name}</Link> }] : []),
     { label: "Requested by", value: req.requestedBy.name },
     { label: "Needed by", value: neededByText(req.neededBy) },
     {
