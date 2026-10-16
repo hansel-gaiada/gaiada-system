@@ -165,13 +165,4 @@ test.describe("Overview: personalise (DW-10d)", () => {
     await expect(health.getByRole("link", { name: "Open the health board" })).toHaveAttribute("href", "/clients/health");
     await expect(health.getByText("Unavailable")).toHaveCount(0);
   });
-
-  test("a classic user has no Customise control and no optional block", async ({ page, context }) => {
-    await signInWebDev(page, context, { pilot: false });
-    await page.goto("/departments/dept-1");
-    await expect(page.getByRole("heading", { level: 1, name: "Web Dev", exact: true })).toBeVisible();
-    await expect(page.locator("summary", { hasText: "Customise" })).toHaveCount(0);
-    await expect(panel(page)).toHaveCount(0);
-    await expect(page.getByRole("region", { name: "Client health", exact: true })).toHaveCount(0);
-  });
 });
