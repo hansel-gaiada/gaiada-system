@@ -10905,7 +10905,7 @@ All after the commit, best-effort and logged loudly on failure, as §32.7. Each 
 
 ### 60.12 Owner and admin steps (not code)
 
-1. **The switch.** `SERVICE_ASSIGNMENTS_ENABLED` on in both `platform` and `platform-ui` (the live `.env`). DW-D39's routes need it. It also wakes the reconciler for every other assignment, so the owner first reads the live table (`SELECT module_key, status, count(*) FROM service_assignments GROUP BY 1, 2`). Earlier migrations recorded none live (0091, 0097, 0106). Still an owner question (plan §12.2).
+1. **The switch.** `SERVICE_ASSIGNMENTS_ENABLED` on in both `platform` and `platform-ui` (the live `.env`). DW-D39's routes need it. It also wakes the reconciler for every other assignment, so the owner first reads the live table (`SELECT module_key, status, count(*) FROM service_assignments GROUP BY 1, 2`). Earlier migrations recorded none live (0091, 0097, 0106). **Already on:** read on gda-aicenter on 2026-10-15, `SERVICE_ASSIGNMENTS_ENABLED=1` in both `gaiada-platform-1` and `gaiada-platform-ui-1`, so the reconciler already runs; the table read above is still the first step before the routes are created.
 2. **The client records (DW-D41).** Viceroy is the agency's client already (the seed's group client); check the link on live. The holding is not: a platform operator creates its client record at the agency (Clients › New client, Group company = the holding, with a business type) before its routes.
 3. **Signer contacts.** Each of the two client records gets a client-wide contact with signing capability, a person of that company, so a price agreement can be signed. The owner names them.
 4. **The routes (DW-D39)**, after the deploy, created `active` by a `platform_admin`:
