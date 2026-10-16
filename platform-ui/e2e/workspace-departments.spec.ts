@@ -19,14 +19,9 @@ async function hydrated(loc: Locator) {
   await expect.poll(() => loc.evaluate((el) => Object.keys(el).some((k) => k.startsWith("__reactProps$")))).toBe(true);
 }
 
-/** The pilot switch, written the way lib/prefs.ts reads it (see workspace-shell.spec.ts). */
-function pilotCookie(at: string, shell: "workspaces" | "classic" = "workspaces") {
-  return { name: "gaiada_prefs", value: encodeURIComponent(JSON.stringify({ shell, shellChosen: true })), url: new URL("/", at).toString() };
-}
-
 async function signInSuperadmin(page: Page, context: BrowserContext) {
   await loginAsPersona(page, "superadmin");
-  await context.addCookies([tenantCookie(page.url()), pilotCookie(page.url())]);
+  await context.addCookies([tenantCookie(page.url())]);
 }
 
 const menu = (page: Page, title: string) => page.getByRole("navigation", { name: `${title} menu` });
@@ -129,7 +124,7 @@ const DEPARTMENTS: readonly DeptSpec[] = [
   },
 ];
 
-test.describe("department workspaces (superadmin, pilot shell)", () => {
+test.describe("department workspaces (superadmin)", () => {
   for (const dept of DEPARTMENTS) {
     test(`${dept.title}: the Work menu draws the registry's rows in order, and each multi-tab row has its strip`, async ({ page, context }) => {
       await signInSuperadmin(page, context);
@@ -201,7 +196,7 @@ test.describe("department workspaces (superadmin, pilot shell)", () => {
   }
 });
 
-// DW-6c: the pilot's Tools & connections page. Under DEMO_MODE the connection reads may be unavailable, so the
+// DW-6c: the Tools & connections page. Under DEMO_MODE the connection reads may be unavailable, so the
 // Connections blocks are asserted by heading, never by their state. The tool pins live in the gaiada_prefs cookie.
 test.describe("Tools & connections (superadmin, DW-6c)", () => {
   const WEB_DEV_CONNECTIONS = "/departments/dept-1/connections";
@@ -263,15 +258,6 @@ test.describe("Tools & connections (superadmin, DW-6c)", () => {
     await page.goto("/departments/dept-1");
     await expect(page.getByRole("region", { name: "Today", exact: true }).getByRole("link", { name: /^Figma/ })).toBeVisible();
   });
-
-  test("for a person who chose classic the same URL is the classic page: no Tools section (classic until DW-9d-2)", async ({ page, context }) => {
-    await loginAsPersona(page, "superadmin");
-    await context.addCookies([tenantCookie(page.url()), pilotCookie(page.url(), "classic")]);
-    await page.goto(WEB_DEV_CONNECTIONS);
-    await expect(page.getByRole("heading", { name: "My connections" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Tools", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /to the Overview$/ })).toHaveCount(0);
-  });
 });
 
 // 6c2, "Open in": the demo project `p-web-1` ("Client site redesign") belongs to Web Dev (dept-1, lib/demoFixtures.ts).
@@ -303,14 +289,6 @@ test.describe("Open in (superadmin, DW-6c2)", () => {
     await page.keyboard.press("Escape");
     await expect(btn).toHaveAttribute("aria-expanded", "false");
     await expect(page.getByRole("menu", { name: "Open in" })).toHaveCount(0);
-  });
-
-  test("for a person who chose classic the same project page has no Open in menu (classic until DW-9d-2)", async ({ page, context }) => {
-    await loginAsPersona(page, "superadmin");
-    await context.addCookies([tenantCookie(page.url()), pilotCookie(page.url(), "classic")]);
-    await page.goto(WEB_DEV_PROJECT);
-    await expect(page.getByRole("heading", { name: "Client site redesign" })).toBeVisible();
-    await expect(openIn(page)).toHaveCount(0);
   });
 });
 

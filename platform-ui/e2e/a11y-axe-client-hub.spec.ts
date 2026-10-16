@@ -52,7 +52,7 @@ const PAGES = [
 // `shell.css`, excluded by exact selector exactly as `a11y-axe.spec.ts` does (see its comments for the measured
 // ratios and root cause: raw `opacity` on the sidebar tagline and group labels). Not a hub surface; the hub's own
 // content is NOT excluded, so any contrast regression in it still fails the run.
-const SHELL_CONTRAST_EXCLUSIONS = [".erp-side__tagline", ".erp-side__grouplabel", ".erp-company .type-eyebrow"];
+const SHELL_CONTRAST_EXCLUSIONS = [".erp-side__tagline", ".erp-company .type-eyebrow"];
 
 async function runAxe(page: Page) {
   let builder = new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]);

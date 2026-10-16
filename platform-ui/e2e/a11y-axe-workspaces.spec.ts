@@ -4,8 +4,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { loginAsHrStaff, loginAsPersona, loginAsPlacedWebDev, loginAsResortStaff, loginAsWebDevHead } from "./personas";
 import { tenantCookie } from "./appCookies";
 
-// DW-9b-1: an axe-core sweep of the department workspace shell (the "new layout", behind the per-person pilot cookie), so DW-9d
-// can turn it on for everyone without an accessibility regression (plan §12.1, "axe (9b)").
+// DW-9b-1: an axe-core sweep of the department workspace shell (the only layout, DW-D38), so the layout change
+// leaves no accessibility regression behind (plan §12.1, "axe (9b)").
 //
 // ── WHAT IT COVERS ────────────────────────────────────────────────────────────────────────────────────────────────────
 // The shell's own surfaces, not every page: the Overview as an employee, as a head in Team mode and as the company Overview;
@@ -25,24 +25,21 @@ import { tenantCookie } from "./appCookies";
 // A green run is evidence of "no regression in what axe covers", never "accessible".
 //
 // ── WHY ITS OWN PROJECT, AND NOT IN CI ────────────────────────────────────────────────────────────────────────────────
-// It is the `workspace-a11y` project: every test signs in as its own demo identity and plants the tenant and the pilot cookies
+// It is the `workspace-a11y` project: every test signs in as its own demo identity and plants the tenant cookie and its theme
 // itself, so NO stored session (a stale shared session would scan the wrong person). CI runs only the smoke project; the
 // workspace projects are gated on sumopod (a Linux box, `next build` then `next start`), the same as workspace-personas.
 // It is excluded from the default `chromium` project for the same reason.
 //
 // ── THEMES ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-// ONE `gaiada_prefs` cookie holds the pilot switch and the theme together (two cookies of the same name would shadow each
-// other), written the way lib/prefs.ts reads it: URL-encoded JSON.
+// The theme is the `gaiada_prefs` cookie, written the way lib/prefs.ts reads it: URL-encoded JSON.
 //
 // ── THE JSON SUMMARY ──────────────────────────────────────────────────────────────────────────────────────────────────
 // Each scan also writes its violations to `test-results/axe-workspaces/<test title>.json` (gitignored) so a report can group
-// them by rule without parsing the reporter. Set AXE_SHELL=classic to scan the classic layout instead (for "did DW introduce
-// this?"); the files then go to `test-results/axe-workspaces-classic/`.
+// them by rule without parsing the reporter.
 
 type Theme = "light" | "dark";
 type Viewport = "desktop" | "phone";
-const SHELL = process.env.AXE_SHELL === "classic" ? "classic" : "workspaces";
-const OUT_DIR = SHELL === "classic" ? "test-results/axe-workspaces-classic" : "test-results/axe-workspaces";
+const OUT_DIR = "test-results/axe-workspaces";
 
 // Copied from workspace-shell.spec.ts (not imported: that file belongs to another session).
 // A button is a plain control until React owns it; clicking earlier does nothing.
@@ -55,9 +52,9 @@ async function press(loc: Locator) {
   await loc.click();
 }
 
-/** The pilot switch and the theme in ONE cookie, the way lib/prefs.ts reads it. */
+/** The theme, the way lib/prefs.ts reads it. */
 function prefsCookie(at: string, theme: Theme) {
-  return { name: "gaiada_prefs", value: encodeURIComponent(JSON.stringify({ shell: SHELL, shellChosen: true, theme })), url: new URL("/", at).toString() };
+  return { name: "gaiada_prefs", value: encodeURIComponent(JSON.stringify({ theme })), url: new URL("/", at).toString() };
 }
 
 const menu = (page: Page, title: string) => page.getByRole("navigation", { name: `${title} menu` });

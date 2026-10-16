@@ -7,8 +7,8 @@ import { tenantCookie } from "./appCookies";
 
 // DW-9a: the department workspace shell proved right for TWELVE kinds of person, end to end, under DEMO_MODE (plan §12.1).
 //
-// The shell is a per-person pilot switch (`gaiada_prefs.shell`, lib/shellLayout.ts), so every test signs in fresh, plants the
-// tenant cookie and the `workspaces` pilot cookie, and then checks what THAT person really gets. Each persona has one
+// The workspace shell is the only layout (DW-D38), so every test signs in fresh, plants the tenant cookie, and then checks what
+// THAT person really gets. Each persona has one
 // `describe`, built by `personaSuite` from one row of the table below, with five tests:
 //   1. `/` lands on the home the plan's table names, and the switcher button names it;
 //   2. the Work, Performance and You groups draw exactly the rows pinned in the row;
@@ -43,11 +43,6 @@ async function press(loc: Locator) {
   await expect(loc).toBeVisible();
   await hydrated(loc);
   await loc.click();
-}
-
-/** The pilot switch, written the way lib/prefs.ts reads it: JSON in `gaiada_prefs`, URL-encoded. */
-function pilotCookie(at: string, shell: "workspaces" | "classic" = "workspaces") {
-  return { name: "gaiada_prefs", value: encodeURIComponent(JSON.stringify({ shell, shellChosen: true })), url: new URL("/", at).toString() };
 }
 
 const sidebar = (page: Page) => page.locator("aside#app-nav");
@@ -316,7 +311,7 @@ const PERSONAS: Persona[] = [
 
 async function signIn(page: Page, context: BrowserContext, p: Persona) {
   await p.login(page);
-  await context.addCookies([tenantCookie(page.url(), p.tenant), pilotCookie(page.url())]);
+  await context.addCookies([tenantCookie(page.url(), p.tenant)]);
 }
 
 /** The visible labels of a group's links, with the Approvals row's pending count (DW-8m) taken off. */
@@ -464,7 +459,7 @@ for (const p of PERSONAS) personaSuite(p);
 test.describe("unplaced group owner: the root company adds Group", () => {
   test("on the root company the Admin area lists Settings, Group and Platform, and the Group pages open", async ({ page, context }) => {
     await loginAsGroupOwner(page);
-    await context.addCookies([tenantCookie(page.url(), "co-holding"), pilotCookie(page.url())]);
+    await context.addCookies([tenantCookie(page.url(), "co-holding")]);
     await page.goto("/admin");
     const nav = menu(page, "Admin");
     await expect(nav).toBeVisible();
@@ -505,10 +500,10 @@ test.describe("generic-pack user: the generic workspace", () => {
 // ── The client ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 test.describe("client-only user (client@northwind.example, demo-client)", () => {
-  test("`/`, a department and an Admin URL all end in /portal, even with the pilot cookie", async ({ page, context }) => {
+  test("`/`, a department and an Admin URL all end in /portal", async ({ page, context }) => {
     await loginAsPersona(page, "client_contact");
     await expect(page).toHaveURL(/\/portal/);
-    await context.addCookies([tenantCookie(page.url()), pilotCookie(page.url())]);
+    await context.addCookies([tenantCookie(page.url())]);
     for (const path of ["/", "/departments/dept-1", "/admin/users"]) {
       await page.goto(path);
       await expect(page).toHaveURL(/\/portal/);

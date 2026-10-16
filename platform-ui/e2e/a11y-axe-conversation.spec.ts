@@ -26,7 +26,7 @@ const PAGES = [
 ];
 
 // Pre-existing shell contrast findings owned by shell.css, excluded by exact selector exactly as a11y-axe-client-hub.spec.ts does.
-const SHELL_CONTRAST_EXCLUSIONS = [".erp-side__tagline", ".erp-side__grouplabel", ".erp-company .type-eyebrow"];
+const SHELL_CONTRAST_EXCLUSIONS = [".erp-side__tagline", ".erp-company .type-eyebrow"];
 
 async function runAxe(page: Page) {
   let builder = new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]);

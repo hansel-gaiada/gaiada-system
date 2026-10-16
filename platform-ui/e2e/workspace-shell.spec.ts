@@ -4,9 +4,8 @@ import { tenantCookie } from "./appCookies";
 
 // DW-2g: the department workspace shell (DW-2a..2f), end to end, per persona, under DEMO_MODE.
 //
-// The shell is a per-person pilot switch (`gaiada_prefs.shell`, lib/shellLayout.ts), so every test signs in
-// fresh, plants the `workspaces` pilot cookie, and then checks what THAT persona really gets. Nothing here
-// assumes a department the demo data does not give. The facts every expectation below derives from:
+// The workspace shell is the only layout (DW-D38), so every test signs in fresh and checks what THAT persona
+// really gets. Nothing here assumes a department the demo data does not give. The facts every expectation below derives from:
 //
 //   - The demo company is `co-agency` (Gaia Digital Agency, vertical "agency"). With no backend its org tree
 //     is the seeded default (lib/org.ts): Web Dev (dept-1), Creatives (dept-2), SEO (dept-3), Social Media
@@ -36,21 +35,12 @@ async function press(loc: Locator) {
   await loc.click();
 }
 
-/** The layout choice, written the way lib/prefs.ts reads it: JSON in `gaiada_prefs`. `shellChosen` is what makes a
- *  stored shell count (DW-9d-1): without it the default, the workspace shell, applies. `pilot: false` below means
- *  "a person who chose classic" (classic until DW-9d-2). (Missing fields fall back to
- *  the defaults). Next URL-encodes cookie values on write and decodes on read, so the value is encoded here. */
-function pilotCookie(at: string, shell: "workspaces" | "classic" = "workspaces") {
-  return { name: "gaiada_prefs", value: encodeURIComponent(JSON.stringify({ shell, shellChosen: true })), url: new URL("/", at).toString() };
-}
-
-async function signIn(page: Page, context: BrowserContext, persona: PersonaKey, opts: { pilot?: boolean } = {}) {
+async function signIn(page: Page, context: BrowserContext, persona: PersonaKey) {
   await loginAsPersona(page, persona);
-  await context.addCookies([tenantCookie(page.url()), pilotCookie(page.url(), opts.pilot === false ? "classic" : "workspaces")]);
+  await context.addCookies([tenantCookie(page.url())]);
 }
 
-// The workspace sidebar. `aside#app-nav` is the one place a CSS id is used: the classic and the workspace
-// sidebar share that landmark id, and the footer links have no landmark of their own.
+// The workspace sidebar. `aside#app-nav` is the one place a CSS id is used: the footer links have no landmark of their own.
 const sidebar = (page: Page) => page.locator("aside#app-nav");
 const menu = (page: Page, title: string) => page.getByRole("navigation", { name: `${title} menu` });
 const switcher = (page: Page) => page.getByRole("button", { name: /\. Switch workspace$/ });
@@ -62,16 +52,16 @@ async function openSwitcher(page: Page) {
   return { mine: page.getByRole("list", { name: "Your workspaces" }), others: page.getByRole("list", { name: "Departments" }) };
 }
 
-/** The placed Web Dev employee (DW-3a): u-dev, a plain member seated in Web Dev, signed in on the pilot or not. */
-async function signInWebDev(page: Page, context: BrowserContext, opts: { pilot?: boolean } = {}) {
+/** The placed Web Dev employee (DW-3a): u-dev, a plain member seated in Web Dev. */
+async function signInWebDev(page: Page, context: BrowserContext) {
   await loginAsPlacedWebDev(page);
-  await context.addCookies([tenantCookie(page.url()), pilotCookie(page.url(), opts.pilot === false ? "classic" : "workspaces")]);
+  await context.addCookies([tenantCookie(page.url())]);
 }
 
-/** The head of Web Dev (DW-3h): u-webhead, `org_unit_lead` on dept-1, signed in on the pilot or not. */
-async function signInWebDevHead(page: Page, context: BrowserContext, opts: { pilot?: boolean } = {}) {
+/** The head of Web Dev (DW-3h): u-webhead, `org_unit_lead` on dept-1. */
+async function signInWebDevHead(page: Page, context: BrowserContext) {
   await loginAsWebDevHead(page);
-  await context.addCookies([tenantCookie(page.url()), pilotCookie(page.url(), opts.pilot === false ? "classic" : "workspaces")]);
+  await context.addCookies([tenantCookie(page.url())]);
 }
 
 const DEPARTMENTS = ["Web Dev", "Creatives", "SEO", "Social Media"];
@@ -245,7 +235,7 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
     await expect(bell).toBeFocused();
   });
 
-  test("the avatar menu holds Theme and the way back to the classic layout, which brings the classic sidebar back", async ({ page, context }) => {
+  test("the avatar menu holds Theme, Account settings and Sign out", async ({ page, context }) => {
     await signIn(page, context, "superadmin");
     await page.goto("/departments/dept-5");
 
@@ -259,12 +249,19 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
     // The Theme control works from here: pinning dark sets the attribute on <html> at once.
     await account.getByRole("menuitemradio", { name: /dark/i }).click(); // DW-9b-2: menu radios inside the menu
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  });
 
-    await account.getByRole("menuitem", { name: "Back to the classic layout" }).click();
-    // Classic sidebar back: its pinned Dashboard row and the floating assistant button; no workspace switcher.
-    await expect(page.getByRole("link", { name: "Dashboard", exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Open assistant" })).toBeVisible();
-    await expect(switcher(page)).toHaveCount(0);
+  // DW-D38 (2026-10-16): the workspace shell is the only layout, so the avatar menu offers no layout switch in either direction.
+  // EXPECTED TO FAIL until the DW-9d-2 code change (which removes the switch from UserMenu.tsx) is merged: on this branch the
+  // switch still exists. Not skipped on purpose, so the failure shows until the code lands.
+  test("the avatar menu offers no layout switch: neither the new layout nor the way back to the classic one (DW-D38)", async ({ page, context }) => {
+    await signIn(page, context, "superadmin");
+    await page.goto("/departments/dept-5");
+    await press(page.getByRole("button", { name: "Clement Hansel" }));
+    const account = page.getByRole("menu", { name: "Account menu" });
+    await expect(account.getByRole("menuitem", { name: "Account settings" })).toBeVisible(); // the menu drew
+    await expect(account.getByRole("menuitem", { name: "Try the new layout" })).toHaveCount(0);
+    await expect(account.getByRole("menuitem", { name: "Back to the classic layout" })).toHaveCount(0);
   });
 
   test("the AI Assistant row opens the drawer over the page with the page's context; Escape closes it and focus returns to the row", async ({ page, context }) => {
@@ -273,7 +270,7 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
     await page.goto("/projects/p-web-1");
 
     const row = menu(page, "Office of the GM").getByRole("link", { name: "AI Assistant" });
-    // The page context rides in the link (`ctx=`), the same href the classic floating button builds.
+    // The page context rides in the link (`ctx=`), the href the floating button once built.
     await expect(row).toHaveAttribute("href", /^\/assistant\?ctx=/);
     await hydrated(row);
     await row.click();
@@ -317,7 +314,7 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
 
   test("`/` is a real redirect to the home workspace's Overview, not a streamed 200 (DW-3a2)", async ({ page, context }) => {
     await signIn(page, context, "superadmin");
-    // page.request shares the context's cookies (session, tenant, pilot) and is told NOT to follow redirects.
+    // page.request shares the context's cookies (session, tenant) and is told NOT to follow redirects.
     const res = await page.request.get("/", { maxRedirects: 0 });
     expect(res.status()).toBe(307);
     expect(res.headers()["location"] ?? "").toMatch(/\/departments\/dept-5$/);
@@ -326,50 +323,15 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
     expect(spoofed.status()).toBe(200);
   });
 
-  test("`/` is a plain 200 for a person who chose classic, even one whose home is a workspace (DW-3a2; classic until DW-9d-2)", async ({ page, context }) => {
-    await signIn(page, context, "superadmin", { pilot: false });
-    const res = await page.request.get("/", { maxRedirects: 0 });
-    expect(res.status()).toBe(200);
-  });
-
-  test("with NO layout cookie a person gets the new layout (the default since DW-9d-1), and a way back to classic", async ({ page, context }) => {
+  test("with NO layout cookie a person gets the workspace layout (the only layout, DW-D38)", async ({ page, context }) => {
     await loginAsPersona(page, "superadmin");
     await context.addCookies([tenantCookie(page.url())]);
     await page.goto("/");
 
     await expect(switcher(page)).toBeVisible();
     await expect(page.getByRole("link", { name: "Open assistant" })).toHaveCount(0);
-
-    await press(page.getByRole("button", { name: "Clement Hansel" }));
-    await page.getByRole("menuitem", { name: "Back to the classic layout" }).click();
-    await expect(page.getByRole("link", { name: "Open assistant" })).toBeVisible();
-    await expect(switcher(page)).toHaveCount(0);
   });
 
-  test("a cookie with shell classic but no shellChosen flag (a theme change since DW-1d) is not a choice: the new layout", async ({ page, context }) => {
-    await loginAsPersona(page, "superadmin");
-    const legacy = { name: "gaiada_prefs", value: encodeURIComponent(JSON.stringify({ shell: "classic", theme: "dark" })), url: new URL("/", page.url()).toString() };
-    await context.addCookies([tenantCookie(page.url()), legacy]);
-    await page.goto("/");
-    await expect(switcher(page)).toBeVisible();
-  });
-
-  test("a person who chose classic keeps it (classic until DW-9d-2): classic sidebar, floating assistant button, and a way into the new layout", async ({ page, context }) => {
-    await signIn(page, context, "superadmin", { pilot: false });
-    await page.goto("/");
-
-    await expect(page.getByRole("link", { name: "Dashboard", exact: true })).toBeVisible();
-    const fab = page.getByRole("link", { name: "Open assistant" });
-    await expect(fab).toBeVisible();
-    await expect(switcher(page)).toHaveCount(0);
-    await expect(page.getByRole("textbox", { name: "Search" })).toBeVisible(); // the classic top bar's own form (a text input, not the new bar's searchbox)
-
-    // The switch is reachable from the classic avatar menu and lands in the new shell.
-    await press(page.getByRole("button", { name: "Clement Hansel" }));
-    await page.getByRole("menuitem", { name: "Try the new layout" }).click();
-    await expect(switcher(page)).toBeVisible();
-    await expect(page.getByRole("link", { name: "Open assistant" })).toHaveCount(0);
-  });
 });
 
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -512,8 +474,8 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     await expect(page.locator("#main-content").getByRole("heading", { level: 2, name: "Growth", exact: true })).toBeVisible();
   });
 
-  // DW-3c: what `/` showed before it redirected (the queue, the check-in) is on the Overview, so a pilot user
-  // loses nothing when `/` sends them here.
+  // DW-3c: what `/` showed before it redirected (the queue, the check-in) is on the Overview, so nobody
+  // loses anything when `/` sends them here.
   test("the Now band has Needs you and Today: the queue (or its honest empty line), the check-in and the tools", async ({ page, context }) => {
     await signInWebDev(page, context);
     await page.goto("/");
@@ -815,28 +777,6 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     await expect(page.locator("#main-content").getByRole("heading", { name: "Tools", exact: true })).toBeVisible();
   });
 
-  test("a person who chose classic: / and the department page are unchanged", async ({ page, context }) => {
-    await signInWebDev(page, context, { pilot: false });
-    await page.goto("/");
-    await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole("link", { name: "Dashboard", exact: true })).toBeVisible();
-    await expect(page.getByRole("group", { name: "Period" })).toHaveCount(0);
-
-    await page.goto("/departments/dept-1");
-    await expect(page.getByRole("heading", { level: 1, name: "Web Dev", exact: true })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Project health" })).toBeVisible();
-    // DW-3z removes nothing from a classic page: every card of today's Home is still there.
-    for (const name of ["Recent activity", "Build tools", "Team"]) await expect(page.getByRole("heading", { name, exact: true }).first(), name).toBeVisible();
-    await expect(page.locator(".ov-legacy")).toHaveCount(0);
-    await expect(page.getByRole("group", { name: "Period" })).toHaveCount(0);
-    await expect(page.getByText(/Overview is being built/)).toHaveCount(0);
-    // None of the Overview's Work band (DW-3f) reaches a classic user.
-    await expect(page.getByRole("heading", { level: 2, name: "Work", exact: true })).toHaveCount(0);
-    for (const name of ["Projects", "Campaigns", "Requests"]) await expect(page.getByRole("region", { name, exact: true })).toHaveCount(0);
-    // Nor the Growth band (DW-3g).
-    await expect(page.getByRole("heading", { level: 2, name: "Growth", exact: true })).toHaveCount(0);
-    for (const name of ["Learning", "Appraisal"]) await expect(page.getByRole("region", { name, exact: true })).toHaveCount(0);
-  });
 });
 
 // DW-3h: the head's Me | Team switch (plan §3.4). Under DEMO_MODE the head of Web Dev is `webhead@gaiada.com` (u-webhead:
@@ -962,16 +902,6 @@ test.describe("the Overview's Me | Team switch: a head of department (webhead@ga
     await expect(main.getByRole("region", { name: "Team numbers", exact: true })).toHaveCount(0);
   });
 
-  test("a head who chose classic sees none of it", async ({ page, context }) => {
-    await signInWebDevHead(page, context, { pilot: false });
-    await page.goto("/departments/dept-1?view=team");
-    await expect(page.getByRole("heading", { level: 1, name: "Web Dev", exact: true })).toBeVisible();
-    await expect(page.getByRole("navigation", { name: "View", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("group", { name: "Period" })).toHaveCount(0);
-    for (const name of ["Team numbers", "Team needs you", "Team learning", "Team appraisals"]) {
-      await expect(page.getByRole("region", { name, exact: true })).toHaveCount(0);
-    }
-  });
 });
 
 // DW-3h: a person who does not head the department gets no switch, and `?view=team` is Me for them: nothing about a team is
@@ -997,15 +927,6 @@ test.describe("the Overview's Me | Team switch: someone who does not head the de
     }
   });
 
-  test("a person who chose classic sees none of it", async ({ page, context }) => {
-    await signInWebDev(page, context, { pilot: false });
-    await page.goto("/departments/dept-1?view=team");
-    await expect(page.getByRole("heading", { level: 1, name: "Web Dev", exact: true })).toBeVisible();
-    await expect(page.getByRole("navigation", { name: "View", exact: true })).toHaveCount(0);
-    for (const name of ["Team numbers", "Team needs you", "Team learning", "Team appraisals"]) {
-      await expect(page.getByRole("region", { name, exact: true })).toHaveCount(0);
-    }
-  });
 });
 
 // DW-3k: the department's condition on its Overview (plan §5.5). The numbers are DW-4e-2's demo `dept-kpis` fixture
@@ -1100,13 +1021,6 @@ test.describe("the Overview's department condition (DW-3k)", () => {
     await expect(main.getByRole("list", { name: "Department KPIs" })).toHaveCount(0);
   });
 
-  test("a person who chose classic sees none of it", async ({ page, context }) => {
-    await signInWebDevHead(page, context, { pilot: false });
-    await page.goto("/departments/dept-1");
-    await expect(page.getByRole("heading", { level: 1, name: "Web Dev", exact: true })).toBeVisible();
-    await expect(page.getByRole("region", { name: "Department condition", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("list", { name: "Department KPIs" })).toHaveCount(0);
-  });
 });
 
 test.describe("the Overview's frame: the functional workspaces keep their page body", () => {
@@ -1125,12 +1039,11 @@ test.describe("the Overview's frame: the functional workspaces keep their page b
 
   // DW-3z (plan §3.8): HR's area cards and Finance's aging, configuration and period cards are rows and tabs of their workspaces, so
   // they leave the Overview's page; the counts, the integrity verdicts, the close gate and all of IT's page have no block yet, so they stay.
-  // A classic user keeps every card.
   const section = (page: Page) => page.locator("#main-content .ov-legacy");
   // A card title with a "?" hint carries the hint's button inside its heading, so the name starts with the title but is not equal to it.
   const heading = (loc: Locator | Page, name: string) => loc.getByRole("heading", { name: new RegExp(`^${name.replace(/[?]/g, "\\$&")}(?!\\w)`) });
 
-  test("/hr under the Overview: the area cards and the directory card are gone, the counts stay, and a person who chose classic keeps every card (DW-3z)", async ({ page, context }) => {
+  test("/hr under the Overview: the area cards and the directory card are gone, the counts stay (DW-3z)", async ({ page, context }) => {
     await signIn(page, context, "superadmin");
     await page.goto("/hr");
     await expect(page.getByRole("heading", { name: "More from HR" })).toBeVisible();
@@ -1142,14 +1055,9 @@ test.describe("the Overview's frame: the functional workspaces keep their page b
     // Where they went: the workspace's own rows.
     const work = menu(page, "HR").getByRole("group", { name: "Work" });
     for (const row of ["People", "Time", "Cases & compliance"]) await expect(work.getByRole("link", { name: row, exact: true }), row).toBeVisible();
-
-    await context.addCookies([pilotCookie(page.url(), "classic")]);
-    await page.goto("/hr");
-    await expect(page.locator(".ov-legacy")).toHaveCount(0);
-    for (const name of ["Leave", "Attendance", "Onboarding", "Cases", "People directory"]) await expect(heading(page, name).first(), name).toBeVisible();
   });
 
-  test("/finance under the Overview: the aging, configuration, period and close-gate cards are gone, the totals and integrity stay, and a person who chose classic keeps every card (DW-3z, DW-7e-3)", async ({ page, context }) => {
+  test("/finance under the Overview: the aging, configuration, period and close-gate cards are gone, the totals and integrity stay (DW-3z, DW-7e-3)", async ({ page, context }) => {
     await signIn(page, context, "superadmin");
     await page.goto("/finance");
     await expect(page.getByRole("heading", { name: "More from Finance" })).toBeVisible();
@@ -1157,13 +1065,6 @@ test.describe("the Overview's frame: the functional workspaces keep their page b
     await expect(section(page).getByText("Total assets")).toBeVisible();
     for (const name of ["Can this period close?", "Receivables aging", "Payables aging", "Configuration", "Fiscal periods"]) {
       await expect(heading(page.locator("#main-content"), name), name).toHaveCount(0);
-    }
-
-    await context.addCookies([pilotCookie(page.url(), "classic")]);
-    await page.goto("/finance");
-    await expect(page.locator(".ov-legacy")).toHaveCount(0);
-    for (const name of ["Integrity", "Can this period close?", "Receivables aging", "Payables aging", "Configuration", "Fiscal periods"]) {
-      await expect(heading(page, name).first(), name).toBeVisible();
     }
   });
 
@@ -1297,27 +1198,16 @@ test.describe("the Overview's frame: someone whose home is the Company area", ()
     await expect(main.locator(".ov-legacy").getByRole("heading", { name: "Client monitoring", exact: true })).toBeVisible();
   });
 
-  test("a person who chose classic sees none of it: the Office of the GM's page is the cockpit alone", async ({ page, context }) => {
-    await signIn(page, context, "superadmin", { pilot: false });
-    await page.goto("/departments/dept-5");
-    const main = page.locator("#main-content");
-    await expect(main.getByText("The business", { exact: true })).toBeVisible();
-    await expect(page.getByRole("group", { name: "Period" })).toHaveCount(0);
-    await expect(main.locator(".ov-band__label")).toHaveCount(0);
-    for (const name of ["Needs you: decisions", "Company", "Departments by condition", "Campaigns", "Learning compliance", "Appraisal cycle"]) {
-      await expect(main.getByRole("region", { name, exact: true }), name).toHaveCount(0);
-    }
-  });
 });
 
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
-// client_contact: never in the staff shell, pilot cookie or not.
+// client_contact: never in the staff shell.
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
 test.describe("client_contact (dana@northwind.example)", () => {
-  test("lands on /portal and is bounced from staff pages, even with the pilot cookie set", async ({ page, context }) => {
+  test("lands on /portal and is bounced from staff pages", async ({ page, context }) => {
     await loginAsPersona(page, "client_contact");
     await expect(page).toHaveURL(/\/portal/);
-    await context.addCookies([tenantCookie(page.url()), pilotCookie(page.url())]);
+    await context.addCookies([tenantCookie(page.url())]);
 
     for (const path of ["/", "/projects", "/departments/dept-1"]) {
       await page.goto(path);

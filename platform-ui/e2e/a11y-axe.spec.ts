@@ -106,8 +106,8 @@ async function clickNewChatVerified(page: Page) {
 // OTHER contrast regression on these same pages still fails the run. See the a11y automation report
 // for the full writeup (measured ratios, root cause, suggested fix, owning surface).
 const PRE_EXISTING_CONTRAST_EXCLUSIONS = [
-  // `shell.css`: `.erp-side__tagline { opacity: 0.55 }` and `.erp-side__grouplabel { opacity: 0.4 }`
-  // — raw CSS `opacity` on the sidebar tagline/nav-group labels, present on EVERY page (not specific
+  // `shell.css`: `.erp-side__tagline { opacity: 0.55 }`
+  // — raw CSS `opacity` on the sidebar tagline, present on EVERY page (not specific
   // to the drawers/streaming/proposal-card surfaces this ticket covers). Measured as low as 3.21:1
   // in dark theme. Root cause: `opacity` composites against the page background a second time on
   // top of whatever ink token is already alpha-blended, which is exactly the "ad-hoc alpha instead
@@ -115,9 +115,8 @@ const PRE_EXISTING_CONTRAST_EXCLUSIONS = [
   // belongs in `shell.css` (replace `opacity` with a properly contrast-checked `--ink-*` tier) —
   // app-wide blast radius, so it needs its own ticket + visual review, not a silent change here.
   ".erp-side__tagline",
-  ".erp-side__grouplabel",
   // `CompanyContext.tsx`'s `.erp-company` wrapper reuses the same `.type-eyebrow` class over the
-  // same muted-on-chrome context — same root cause as the two selectors above.
+  // same muted-on-chrome context — same root cause as the selector above.
   ".erp-company .type-eyebrow",
   // `TaskDetailView`/`TaskDrawer` section headers ("Tags", "Assignee", "Description", …) — a
   // NARROWER case of the same `.type-eyebrow` class, but here the failure is in the shared
