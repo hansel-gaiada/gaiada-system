@@ -11,6 +11,25 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.163.0` + platform-ui `0.189.0` - DW-10b: monthly targets against actuals (BFF §58) (2026-10-16) - PROTOTYPED
+
+Plan §12.2 (row 10b). No new Cerbos kind or action and no migration: both reads use `dept_kpi_target · read`, and the writes use `propose`, `approve` and `reject` with every check of §40.2.
+- **Backend:**
+  - `GET /api/:t/dept-kpis/months` returns at most 12 months, evaluated one after another. Each KPI and month carries its value, its parts, the target in force that month, and the condition. A cell is exactly that month's `KpiRead`, never 0 and never carried over. The current month is `partial`. The read gate is `GET /dept-kpis`'s.
+  - `POST /dept-kpis/targets/batch` takes 1 to 36 proposals in one transaction, authorized before any item is validated. The first invalid item names its index.
+  - `POST /dept-kpis/targets/decide-batch` decides 1 to 36 ids all or nothing, in month order inside the transaction so an approval never supersedes one just approved. A refusal names the `failedId`.
+  - `insertProposal` and `decideTarget` take the caller's transaction; the single routes are unchanged. `HttpErrorFilter` forwards `failedId`.
+- **UI:** the department KPI page gains a This period | By month switch.
+  - **By month:** a KPI × month table with every cell in words (value, target or "no target", condition), "so far" on the current month, and a trend line with the target as a step (`TrendLine` gains `stepKeys` and `formatDate`).
+  - **Plan the coming months (for a proposer):** one batch for up to 12 months, pre-filled from the target in force.
+  - **The approver's view:** proposals grouped by KPI with Approve selected and Reject selected; one's own proposal has no checkbox.
+  - **Demo:** the store answers the series and both batches.
+- **Gates:**
+  - CI 38846750857 on the backend; every new suite ran on real Postgres: `dept-kpis-months.controller.db` 24, `dept-kpi-batch` 20, and the existing `dept-kpis.controller.db` 22 unchanged.
+  - UI vitest: 94 new tests.
+  - e2e `dept-kpi-months` on sumopod.
+- **Known limit, pre-existing:** someone else's proposal names its proposer by user id.
+
 ### platform-ui `0.188.0` - DW-9d (DW-D38): the department workspace shell is the only layout; the classic layout is removed, and the shell streams (2026-10-16) - PROTOTYPED
 
 The owner ruled DW-D38 first-hand: no pilot week and no opt-in; the new layout is permanent, and the classic layout's code goes now. This supersedes DW-D7.

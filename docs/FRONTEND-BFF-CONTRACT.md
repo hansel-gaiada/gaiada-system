@@ -10275,7 +10275,7 @@ The pages, the Notices tab, the two Overview blocks, the Inbox line and the demo
 - **Demo.** `lib/demoNotices.ts` answers the five routes in the server's order of checks (403 before validation, an unreadable notice is 404, the 3-pin limit is 409). Seed for `co-agency`: Web Dev's pinned "Release freeze starts Friday 17:00" and plain "New code-review checklist", a past "Quarter retro notes" for the Past view, and the company-wide "Office closed for Nyepi". `u-webhead` posts to `dept-1`, `demo-hansel` anywhere and company-wide, `demo-owner` reads and posts nothing.
 - **Proofs.** vitest for the reader, the actions, the pages, both blocks, the tab, the Inbox line and the rbac parity; the e2e `e2e/dept-notices.spec.ts` (project `dept-notices`, sumopod under DEMO_MODE). The CI gate's backend suites are §57.10's.
 
-## 58. Monthly targets against actuals (DW-10b, 2026-10-15) — `platform-nest/src/modules/reports/dept-kpis.controller.ts`, `dept-kpi-targets.ts`; UI `/appraisals/department?unit=…&view=months` — **STATUS: BUILT, PROTOTYPED (backend 10b-1 and the backend half of 10b-3: the pure suite `dept-kpi-batch.test.ts` ran locally; the HTTP/DB suite `dept-kpis-months.controller.db.test.ts` is written for the Linux CI gate; the UI, 10b-2, is not built)**
+## 58. Monthly targets against actuals (DW-10b, 2026-10-15) — `platform-nest/src/modules/reports/dept-kpis.controller.ts`, `dept-kpi-targets.ts`; UI `/appraisals/department?unit=…&view=months` — **STATUS: BUILT, PROTOTYPED (backend 10b-1 and the backend half of 10b-3: the pure suite `dept-kpi-batch.test.ts` ran locally; the HTTP/DB suite `dept-kpis-months.controller.db.test.ts` (24) ran green on the Linux CI gate. UI, 10b-2 and the UI half of 10b-3: the By month view, the plan form and the approver's grouped proposals, §58.7; vitest, `next build` and the sumopod e2e `dept-kpi-months`)**
 
 **Why.** Plan §12 (DW-10) and §12.2 (row 10b). Targets are already effective-dated per month (§40.2: one approved row per unit, KPI and `effective_from` month), so a department can have a different target each month, but:
 - every read answers ONE period (`GET /dept-kpis`);
@@ -10392,6 +10392,17 @@ The contract above stands. Where it left a choice open:
 - **Races.** A row that is gone or no longer `proposed` between the per-id checks and the transaction aborts the whole transaction and answers 404 or 409 `not_proposed` with that `failedId`. Nothing is decided.
 - **Activity rows** are written after the commit (one per id, as the single routes write them after their own commit): `proposed` per proposal with its fields, `approved` or `rejected` per decision with `superseded` and `note`.
 - **Not measured yet:** the 10-second budget of 58.1 for the largest department's 12-month read. It is a live check on gda-aicenter, not a test.
+
+
+### 58.7 As built (UI, 10b-2 and the UI half of 10b-3, 2026-10-16)
+
+- **Files.** `platform-ui/src/lib/deptKpis.ts` (`getDeptKpiMonths`, a `ReadResult`), `deptKpiActions.ts` (`proposeTargetsBatchAction`, `decideTargetsBatchAction`), `deptKpiFormat.ts` (types and pure helpers), the demo store `demoDeptKpis.ts`; components `components/deptkpis/{MonthsView,PlanMonths,OpenProposals,ViewSwitch}.tsx`; the page `app/(app)/appraisals/department/page.tsx`.
+- **The switch** is a pair of links that keep `unit` and the period. By month also reads `?from=YYYY-MM&to=YYYY-MM` (a malformed value is dropped); there is no control for it yet.
+- **The table** says each cell in words: the value in the KPI's unit, "target …" or "no target", and the condition as a word with a dot (colour never alone); an `unavailable` cell says why; the current month is marked "so far". A failed read says Unavailable instead of a table; only `unit_not_found` says "This department does not exist".
+- **The trend** reuses `TrendLine` with two new optional props (`stepKeys`, `formatDate`): the target is a step line and the axis reads by month. With fewer than two months that have a value it says so in words.
+- **Plan the coming months** (for a proposer): a KPI and 1 to 12 months; each row pre-filled with the latest approved target from that month or earlier (else the catalogue's suggestion); percent typed as a whole percent and sent as a fraction; one optional note for every month. A server `items[i].field` refusal lands under that month's row.
+- **The approver's view:** open proposals grouped by KPI with a checkbox each and Approve selected / Reject selected; the viewer's own proposal has no checkbox and says "You proposed this, so someone else decides it." A refused batch names the KPI and month from `failedId`, says nothing was decided and keeps the selection. The single Approve and Reject buttons stay.
+- **Known limit, pre-existing:** the proposer of someone else's proposal is shown by user id, as the Targets card has done since DW-4e-2.
 
 ## 59. The department calendar (DW-10c, 2026-10-15) — `platform-nest/src/core/dept-calendar.{controller,service}.ts` (new), `src/core/calendar-events.{controller,service}.ts` (the `department` visibility); migration `<prefix>_calendar_events_department.sql` (the next free prefix at landing); UI `/departments/[deptId]/schedule` — **STATUS: PLANNED**
 
