@@ -788,3 +788,32 @@ describe("reports.dept_kpi_target.appraisal_comment / appraisal_assess (DW-4e-3)
     expect(CAPABILITY_MAP[ASSESS]).toEqual({ permissions: ["reports.dept_kpi_target.appraisal_assess"], semantics: "all" });
   });
 });
+
+// DW-10a-2: `notices.post` mirrors resource_dept_notice.yaml `post` + `edit` + `withdraw` (BFF section 57.3, PERMISSION-CONTRACT section 47):
+// company_admin by role, the head of the unit or an enclosing one through canInUnit (UNIT notices only), platform_admin by wildcard. A pure
+// owner is refused by Cerbos (the permission arm covers `read` only), so the mirror leaves it out; the parity register says why.
+describe("notices.post (DW-10a-2)", () => {
+  const as = (role: string, scopeType = "company", scopeId: string | null = "co-a") => me([{ role, scopeType, scopeId }]);
+  const head = me([
+    { role: "member", scopeType: "company", scopeId: "co-a" },
+    { role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web" },
+  ]);
+  it("lets company_admin and platform_admin post company-wide", () => {
+    expect(can(as("company_admin"), "notices.post", "co-a")).toBe(true);
+    expect(can(as("platform_admin", "global", null), "notices.post", "co-a")).toBe(true);
+  });
+  it("never lets owner, manager, member, viewer, HR or a client post", () => {
+    for (const role of ["owner", "manager", "member", "viewer", "hr_manager", "hr_staff", "client"]) expect(can(as(role), "notices.post", "co-a"), role).toBe(false);
+  });
+  it("reaches a unit head only through canInUnit over their own unit or one below it, and never company-wide", () => {
+    expect(can(head, "notices.post", "co-a")).toBe(false);
+    expect(canInUnit(head, "notices.post", "co-a", ["d-web", "root"])).toBe(true);
+    expect(canInUnit(head, "notices.post", "co-a", ["d-web-fe", "d-web", "root"])).toBe(true);
+    expect(canInUnit(head, "notices.post", "co-a", ["d-seo", "root"])).toBe(false);
+  });
+  it("is declared in the capability map with the three keys it mirrors", () => {
+    expect(CAPABILITY_MAP["notices.post"]).toEqual({
+      permissions: ["core.dept_notice.post", "core.dept_notice.edit", "core.dept_notice.withdraw"], semantics: "all",
+    });
+  });
+});
