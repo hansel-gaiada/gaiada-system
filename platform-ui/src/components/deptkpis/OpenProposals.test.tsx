@@ -7,7 +7,7 @@ vi.mock("@/lib/deptKpiActions", () => ({
   decideTargetsBatchAction: vi.fn(), approveDeptKpiTarget: vi.fn(), rejectDeptKpiTarget: vi.fn(), proposeDeptKpiTarget: vi.fn(),
 }));
 
-import { decideTargetsBatchAction, approveDeptKpiTarget } from "@/lib/deptKpiActions";
+import { decideTargetsBatchAction, approveDeptKpiTarget, rejectDeptKpiTarget } from "@/lib/deptKpiActions";
 import { OpenProposals, type ProposalGroup } from "./OpenProposals";
 import type { DeptKpiTargetRow } from "@/lib/deptKpiFormat";
 
@@ -30,6 +30,7 @@ beforeEach(() => {
   refresh.mockReset();
   vi.mocked(decideTargetsBatchAction).mockReset();
   vi.mocked(approveDeptKpiTarget).mockReset();
+  vi.mocked(rejectDeptKpiTarget).mockReset();
 });
 
 describe("Open proposals, grouped by KPI", () => {
@@ -54,7 +55,16 @@ describe("Open proposals, grouped by KPI", () => {
     expect(screen.queryByRole("checkbox", { name: /January 2027/ })).toBeNull();
     const own = screen.getByText(/You proposed this/).closest("li") as HTMLElement;
     expect(own).toHaveTextContent("By you on 2026-10-15");
-    expect(within(own).queryByRole("button")).toBeNull();
+    // DW-10b-4: no Approve and no Reject on one's own, only Withdraw.
+    expect(within(own).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Withdraw your proposal for Projects on time, January 2027"]);
+  });
+
+  it("DW-10b-4: Withdraw on the viewer's own proposal is the single reject, and the page refreshes", async () => {
+    vi.mocked(rejectDeptKpiTarget).mockResolvedValue({ ok: true });
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Withdraw your proposal for Projects on time, January 2027" }));
+    await waitFor(() => expect(rejectDeptKpiTarget).toHaveBeenCalledWith("p3"));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
   });
 
   it("keeps the single Approve and Reject on every proposal that is not the viewer's own", async () => {
