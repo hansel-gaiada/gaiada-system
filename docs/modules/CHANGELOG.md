@@ -11,6 +11,37 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.164.0` + platform-ui `0.190.0` - DW-10c: the department calendar (DW-D33, BFF §59, PERMISSION §48) (2026-10-16) - PROTOTYPED
+
+Plan §12.2 (row 10c). Owner ruling DW-D33: the department's people see its people's approved leave with the leave type.
+
+**Backend (10c-1 and 10c-2):**
+- `GET /api/:t/departments/:unitNodeId/calendar?from&to` covers at most 42 days and answers in four legs. Each leg is `{included, items}` or `{included: false, reason}`; a failed leg is logged and isolated, and a leg holds at most 200 items, marked `truncated` beyond that.
+  - **holidays:** the company's default holiday calendar, read under the `hr` module wall.
+  - **away:** the approved leave of the people placed in the unit or below it today. It carries exactly the name, the dates and the leave type: never the note, the minutes or the approver, and never pending, denied or cancelled leave. It uses its own query, never the HR leave reader.
+  - **deadlines:** the open milestones of the unit's projects. Each project is re-checked for `pm_project · read` in Cerbos batches of at most 50.
+  - **events:** company-visible events, plus department-visible ones for the unit or a unit above it.
+- The gate is Cerbos `org_structure · read_calendar` (a NEW action, migration `202610160310`), then the shared unit reach (`core/unit-reach.ts`), then existence.
+- Calendar events gain a `department` visibility with `unit_node_id` (migration `202610160300`; the CHECK is re-declared whole).
+  - `calendar_event · read` gets its own rule for department events; the handler and the `mine` and detail SQL narrow it by placement.
+  - Creating or moving an event to `department` requires the unit reach, checked before the body is validated.
+  - Busy times are unchanged.
+
+**UI (10c-3):**
+- The page `/departments/[deptId]/schedule`, titled "<Department> calendar", is reached from the Overview row's new Department calendar tab (none for the Office of the GM). It shows:
+  - a six-week month grid, a real table with headers, with chips for holidays, away (name · type), milestones and events, each kind shown by shape and words;
+  - an agenda list, which is the reading order;
+  - a legend;
+  - a one-line note per leg that could not be read, never implying "nobody is away".
+- The event form offers "My department: <unit>". The event page says "Visible to <unit>".
+- A demo store answers the read and department events.
+
+**Gates:**
+- CI on the backend: the calendar suite and the existing calendar suite (66) green after one test fix. A 201-character id is answered 404 by Fastify's router before the handler sees it.
+- UI vitest about 130 new tests; e2e `dept-calendar` on sumopod.
+
+**Deploy:** migrations `202610160300` and `202610160310` apply. Restart Cerbos and probe `read_calendar` and the department read rule.
+
 ### platform-nest `0.163.0` + platform-ui `0.189.0` - DW-10b: monthly targets against actuals (BFF §58) (2026-10-16) - PROTOTYPED
 
 Plan §12.2 (row 10b). No new Cerbos kind or action and no migration: both reads use `dept_kpi_target · read`, and the writes use `propose`, `approve` and `reject` with every check of §40.2.
