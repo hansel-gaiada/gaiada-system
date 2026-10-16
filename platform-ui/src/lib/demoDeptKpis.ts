@@ -20,6 +20,11 @@ import "server-only";
 // overview rows are computed from ONE fixture, so they cannot disagree. Values are a fixed sample for any period; a
 // target is in force for a period when its month start is on or before the period's start (§40.2).
 //
+// DW-10b-2 (BFF §58): `GET dept-kpis/months`, `POST dept-kpis/targets/batch` and `POST dept-kpis/targets/decide-batch`, in the section "THE MONTHLY SERIES"
+// below. The series is built from the SAME fixture, so the current month's cells equal the page's tiles; earlier months vary around the sample reading
+// (deterministically) so a trend has a shape, and two seeded approved targets (July and September 2026) give Web Dev's Projects on time two different
+// targets over the window.
+//
 // ⚠ A DEMO LIBERTY, stated: the server only has readers for four report_fact KPIs (§40.1), so in a real Web Dev read
 // `requests-within-sla` is `no_reader`. Here it carries a value and no target so the `no_target` state is reachable on the
 // department the demo opens on. The page itself is honest either way.
@@ -97,12 +102,14 @@ const today = () => new Date().toISOString().slice(0, 10);
 const monthStart = (iso: string) => `${iso.slice(0, 7)}-01`;
 
 function seedRows(): DeptKpiTargetRow[] {
-  const approved = (unit: string, kpi: string, target: number, tolerance: number): DeptKpiTargetRow => ({
-    id: `demo-dkt-${seq++}`, unitNodeId: unit, kpiKey: kpi, effectiveFrom: "2026-07-01", target, tolerance, status: "approved",
+  const approved = (unit: string, kpi: string, target: number, tolerance: number, effectiveFrom = "2026-07-01"): DeptKpiTargetRow => ({
+    id: `demo-dkt-${seq++}`, unitNodeId: unit, kpiKey: kpi, effectiveFrom, target, tolerance, status: "approved",
     note: null, proposedBy: "demo-head", proposedAt: "2026-06-20T09:00:00.000Z", decidedBy: "demo-hansel", decidedAt: "2026-06-25T09:00:00.000Z",
   });
   const seeded = [
-    approved("dept-1", "projects-on-time", 0.85, 0.05),
+    // Web Dev's Projects on time: 82% from July, raised to 85% from September (DW-10b: a series over months with different targets).
+    approved("dept-1", "projects-on-time", 0.82, 0.05),
+    approved("dept-1", "projects-on-time", 0.85, 0.05, "2026-09-01"),
     approved("dept-1", "reopened-work-rate", 0.05, 0.03),
     approved("dept-2", "asset-requests-on-time", 0.9, 0.05),
     approved("dept-3", "client-reports-on-time", 0.95, 0.05),
@@ -393,6 +400,169 @@ function drivers(userId: string, qs: URLSearchParams): DemoResult {
   return ok({ kpi, period, drivers: null, reason: hasReader ? "no_drivers" : "no_reader" });
 }
 
+// ── THE MONTHLY SERIES AND THE BATCH WRITES (DW-10b-2, BFF §58) ─────────────────────────────────────────────────────────────────────
+// `GET dept-kpis/months?unitNodeId=&from=YYYY-MM&to=YYYY-MM`: the unit read's gate (403 before any word on whether the unit exists, then 404), then the window
+// (the 12 months ending with the current month by default; a bad month, `from` after `to`, more than 12 months or a `to` after the current month is 400 with the
+// field). One cell per KPI per month, each a month's own `KpiRead`: the target in force THAT month, `unavailable` with its reason when there is no reading (never 0).
+// Two kinds of month are unreadable on purpose so the table shows the state: every month before the fixture's fact history (January 2026), and May 2026 (a sync gap).
+// `POST dept-kpis/targets/batch` and `POST dept-kpis/targets/decide-batch` keep the server's order of checks and are ALL OR NOTHING.
+const HISTORY_FROM = "2026-01";
+const GAP_MONTH = "2026-05";
+const WINDOW_MAX = 12;
+const BATCH_MAX = 36;
+const MONTH_KEY_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+/** Month-to-month wobble around the sample reading, as a fraction of the value: a fixed cycle, so a trend has a shape and a test can pin it. */
+const WOBBLE = [0, -0.1, 0.07, -0.04, 0.11, -0.08, 0.03];
+
+const monthKeyOf = (iso: string) => iso.slice(0, 7);
+function shiftMonth(key: string, by: number): string {
+  const idx = Number(key.slice(0, 4)) * 12 + (Number(key.slice(5, 7)) - 1) + by;
+  return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, "0")}`;
+}
+const monthSpan = (from: string, to: string) => (Number(to.slice(0, 4)) - Number(from.slice(0, 4))) * 12 + (Number(to.slice(5, 7)) - Number(from.slice(5, 7))) + 1;
+const lastDayOf = (key: string) => new Date(Date.parse(`${nextMonthStart(`${key}-01`)}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+
+function windowOf(qs: URLSearchParams): { from: string; to: string } | DemoResult {
+  const current = monthKeyOf(today());
+  const from = qs.get("from");
+  const to = qs.get("to");
+  if (from !== null && from !== "" && !MONTH_KEY_RE.test(from)) return err(400, "from must be a month, YYYY-MM", "from");
+  if (to !== null && to !== "" && !MONTH_KEY_RE.test(to)) return err(400, "to must be a month, YYYY-MM", "to");
+  // Without BOTH bounds the window is the default one (§58.1, §58.6); the value that was sent is still checked.
+  if (!from || !to) return { from: shiftMonth(current, -(WINDOW_MAX - 1)), to: current };
+  if (from > to) return err(400, "from must not be after to", "from");
+  if (monthSpan(from, to) > WINDOW_MAX) return err(400, `a window is at most ${WINDOW_MAX} months`, "from");
+  if (to > current) return err(400, "to must not be after the current month", "to");
+  return { from, to };
+}
+
+/** One month's reading of one KPI: the sample reading varied by month (the current month is the sample itself, month to date), or why there is none. */
+function monthReading(unit: DemoUnit, def: KpiDef, month: string, current: string): Reading {
+  const base: Reading = def.key === "departments-in-good-condition" ? NO_READER : READINGS[unit.id]?.[def.key] ?? NO_READER;
+  if (base.value === null) return base;
+  if (month < HISTORY_FROM || month === GAP_MONTH) return { value: null, reason: "no_data" };
+  if (month === current) return base;
+  const wobble = WOBBLE[(Number(month.slice(0, 4)) * 12 + Number(month.slice(5, 7)) + def.key.length) % WOBBLE.length];
+  if (base.denominator !== undefined) {
+    const n = Math.min(base.denominator, Math.max(0, Math.round((base.value + wobble) * base.denominator)));
+    return { value: n / base.denominator, numerator: n, denominator: base.denominator };
+  }
+  return { value: Math.min(1, Math.max(0, base.value + wobble)) };
+}
+
+function months(userId: string, qs: URLSearchParams): DemoResult {
+  const unitId = qs.get("unitNodeId");
+  if (!unitId) return err(400, "unitNodeId is required", "unitNodeId");
+  if (whoReads(userId, unitId) === "none") return err(403, "outside your reporting line");
+  const unit = UNITS.find((u) => u.id === unitId);
+  if (!unit) return err(404, "unit_not_found", "unitNodeId");
+  const w = windowOf(qs);
+  if ("status" in w) return w;
+  const current = monthKeyOf(today());
+  const keys = Array.from({ length: monthSpan(w.from, w.to) }, (_, i) => shiftMonth(w.from, i));
+  const kpis = unit.kpis.map((d) => ({
+    key: d.key, label: d.label, unit: d.unit, direction: d.direction,
+    cells: keys.map((month) => {
+      const reading = monthReading(unit, d, month, current);
+      const f = inForce(unit.id, d.key, `${month}-01`);
+      const target = f ? { target: f.target, tolerance: f.tolerance, targetSource: "approved" as const } : { target: null, tolerance: null, targetSource: "none" as const };
+      const parts = { ...(reading.numerator !== undefined ? { numerator: reading.numerator } : {}), ...(reading.denominator !== undefined ? { denominator: reading.denominator } : {}) };
+      if (reading.value === null) return { month, value: null, ...target, condition: "unavailable" as KpiCondition, reason: reading.reason ?? "no_data" };
+      if (!f) return { month, value: reading.value, ...parts, ...target, condition: "unavailable" as KpiCondition, reason: "no_target" };
+      return { month, value: reading.value, ...parts, ...target, condition: kpiCondition(d, reading.value, f.target, f.tolerance) };
+    }),
+  }));
+  return ok({
+    unit: { id: unit.id, name: unit.name },
+    workspace: unit.workspace,
+    months: keys.map((month, i) => ({
+      month, start: `${month}-01`, end: lastDayOf(month), partial: month === current,
+      condition: deptCondition(kpis.map((k) => k.cells[i]) as unknown as DeptKpi[]),
+    })),
+    kpis,
+  });
+}
+
+const errAt = (status: number, error: string, field: string): DemoResult => ({ status, json: { error, field } });
+const errFailed = (status: number, error: string, failedId: string): DemoResult => ({ status, json: { error, failedId } });
+
+/** The server's order (§58.2): authorize before any body validation, then each item in order (shape, duplicate, workspace), the unit's existence last of all. */
+function proposeBatch(userId: string, body?: string): DemoResult {
+  const b = parse(body);
+  const unitId = typeof b.unitNodeId === "string" ? b.unitNodeId : "";
+  if (!PROPOSERS_WIDE.has(userId) && !(LED[userId] ?? []).includes(unitId)) return err(403, "not authorized");
+  if (unitId === "") return errAt(400, "unitNodeId is required", "unitNodeId");
+  if (!Array.isArray(b.items) || b.items.length < 1 || b.items.length > BATCH_MAX) return errAt(400, `items must be a list of 1 to ${BATCH_MAX}`, "items");
+  const unit = UNITS.find((u) => u.id === unitId);
+  const seen = new Set<string>();
+  const made: DeptKpiTargetRow[] = [];
+  for (let i = 0; i < b.items.length; i++) {
+    const it = b.items[i] as Record<string, unknown> | null;
+    if (!it || typeof it !== "object" || Array.isArray(it)) return errAt(400, "each item must be an object", `items[${i}]`);
+    const effectiveFrom = typeof it.effectiveFrom === "string" ? it.effectiveFrom : "";
+    if (!isMonthStart(effectiveFrom)) return errAt(400, "effectiveFrom must be the first day of a month", `items[${i}].effectiveFrom`);
+    const { target, tolerance } = it;
+    if (typeof tolerance !== "number" || !Number.isFinite(tolerance) || tolerance < 0) return errAt(400, "tolerance must be 0 or more", `items[${i}].tolerance`);
+    if (typeof target !== "number" || !Number.isFinite(target)) return errAt(400, "target must be a number", `items[${i}].target`);
+    const dup = `${String(it.kpiKey)}|${effectiveFrom}`;
+    if (seen.has(dup)) return errAt(400, "one item per KPI and month", `items[${i}].effectiveFrom`);
+    seen.add(dup);
+    if (!unit) continue; // the unit's existence is answered after the items' shape, as the single route orders it
+    const def = unit.kpis.find((k) => k.key === it.kpiKey);
+    if (!def) return errAt(400, "kpiKey is not one of this department's KPIs", `items[${i}].kpiKey`);
+    if (def.unit === "percent" && (target < 0 || target > 1)) return errAt(400, "a percent target is a fraction between 0 and 1", `items[${i}].target`);
+    made.push({
+      id: `demo-dkt-${seq + made.length}`, unitNodeId: unit.id, kpiKey: def.key, effectiveFrom, target, tolerance, status: "proposed",
+      note: typeof it.note === "string" && it.note.trim() ? it.note.trim() : null, proposedBy: userId, proposedAt: new Date().toISOString(),
+      decidedBy: null, decidedAt: null,
+    });
+  }
+  if (!unit) return errAt(404, "unit_not_found", "unitNodeId");
+  seq += made.length;
+  rows.push(...made); // all or nothing: nothing above wrote
+  return { status: 201, json: { ids: made.map((r) => r.id) } };
+}
+
+/** The server's order (§58.3): the body, then per id in the order given (exists 404, proposed 409, own approval 409, the approver tier 403), then ONE all-or-nothing pass. */
+function decideBatch(userId: string, body?: string): DemoResult {
+  const b = parse(body);
+  if (b.decision !== "approve" && b.decision !== "reject") return errAt(400, "decision must be approve or reject", "decision");
+  const ids = b.ids;
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > BATCH_MAX || ids.some((x) => typeof x !== "string" || x === "") || new Set(ids).size !== ids.length) {
+    return errAt(400, `ids must be 1 to ${BATCH_MAX} distinct ids`, "ids");
+  }
+  const picked: DeptKpiTargetRow[] = [];
+  for (const id of ids as string[]) {
+    const row = rows.find((r) => r.id === id);
+    if (!row) return errFailed(404, "target_not_found", id);
+    if (row.status !== "proposed") return errFailed(409, "not_proposed", id);
+    if (b.decision === "approve" && row.proposedBy === userId) return errFailed(409, "cannot_approve_own_proposal", id);
+    if (!APPROVERS.has(userId)) return errFailed(403, "not authorized", id);
+    picked.push(row);
+  }
+  // Apply in (unit, KPI, month, id) order: an approval supersedes the approved rows from its month ON, so a later month must not go before an earlier one.
+  const order = [...picked].sort((x, y) =>
+    x.unitNodeId.localeCompare(y.unitNodeId) || x.kpiKey.localeCompare(y.kpiKey) || x.effectiveFrom.localeCompare(y.effectiveFrom) || x.id.localeCompare(y.id));
+  const now = new Date().toISOString();
+  const result = new Map<string, { id: string; status: string; superseded: string[] }>();
+  for (const row of order) {
+    const superseded: string[] = [];
+    if (b.decision === "approve") {
+      for (const r of rows) {
+        if (r !== row && r.unitNodeId === row.unitNodeId && r.kpiKey === row.kpiKey && r.status === "approved" && r.effectiveFrom >= row.effectiveFrom) {
+          r.status = "superseded";
+          superseded.push(r.id);
+        }
+      }
+    }
+    row.status = b.decision === "approve" ? "approved" : "rejected";
+    row.decidedBy = userId;
+    row.decidedAt = now;
+    result.set(row.id, { id: row.id, status: row.status, superseded });
+  }
+  return ok({ decided: (ids as string[]).map((id) => result.get(id)!) });
+}
+
 /** Returns null when the path is not a department-KPI route, so the caller falls through. */
 export function deptKpisDemo(
   method: string, p: string, qs: URLSearchParams, body?: string, userId = "demo-hansel",
@@ -429,6 +599,9 @@ export function deptKpisDemo(
   }
 
   if (verb === "GET" && rest === "drivers") return drivers(userId, qs);
+  if (verb === "GET" && rest === "months") return months(userId, qs);
+  if (verb === "POST" && rest === "targets/batch") return proposeBatch(userId, body);
+  if (verb === "POST" && rest === "targets/decide-batch") return decideBatch(userId, body);
 
   if (verb === "GET" && rest === "alerts") {
     const unitId = qs.get("unitNodeId");

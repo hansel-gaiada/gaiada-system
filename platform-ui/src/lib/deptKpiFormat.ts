@@ -319,3 +319,137 @@ export function compareByConditionThenName(
     (a.unit.id < b.unit.id ? -1 : a.unit.id > b.unit.id ? 1 : 0)
   );
 }
+
+// ─────────────────────────────────────────────────────────────────── the monthly series (DW-10b, BFF §58) ───────────────
+/** One column of `GET dept-kpis/months` (§58.1): a calendar month, oldest first. `partial` is the current month (month to date). */
+export interface DeptKpiMonth { month: string; start: string; end: string; partial: boolean; condition: KpiCondition }
+
+/** One cell: exactly that month's KPI read (§40.3). `unavailable` carries its `reason`; it is never 0 and never carried over. */
+export interface DeptKpiMonthCell {
+  month: string;
+  value: number | null;
+  numerator?: number;
+  denominator?: number;
+  target: number | null;
+  tolerance: number | null;
+  targetSource: "approved" | "none";
+  condition: KpiCondition;
+  reason?: KpiReason;
+}
+
+export interface DeptKpiMonthsKpi {
+  key: string;
+  label: string;
+  unit: KpiUnit;
+  direction: KpiDirection;
+  cells: DeptKpiMonthCell[];
+}
+
+export interface DeptKpiMonthsView {
+  unit: { id: string; name: string };
+  workspace: string;
+  months: DeptKpiMonth[];
+  kpis: DeptKpiMonthsKpi[];
+}
+
+const MONTH_KEY = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+/** A `YYYY-MM` value, the form of `?from=` and `?to=` and of a month column's key. */
+export function isMonthKey(s: string): boolean {
+  return MONTH_KEY.test(s);
+}
+
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "2026-10" -> "Oct 2026" (a column heading). */
+export function monthColumnLabel(month: string): string {
+  const mi = Number(month.slice(5, 7)) - 1;
+  return MONTH_ABBR[mi] ? `${MONTH_ABBR[mi]} ${month.slice(0, 4)}` : month;
+}
+
+/** The line under a cell's value: the target in force that month in the KPI's unit, or "no target". */
+export function cellTargetText(cell: Pick<DeptKpiMonthCell, "target">, unit: KpiUnit): string {
+  return cell.target === null ? "no target" : `target ${formatKpiValue(cell.target, unit)}`;
+}
+
+/** A cell's condition as WORDS (colour never carries it alone): "On track", or "Unavailable · No data this period". */
+export function cellConditionText(cell: Pick<DeptKpiMonthCell, "condition" | "reason">): string {
+  const word = conditionLabel(cell.condition);
+  if (cell.condition !== "unavailable") return word;
+  const why = reasonText(cell.reason);
+  return why ? `${word} \u00b7 ${why}` : word;
+}
+
+/** The whole cell as one sentence for a screen reader and the trend's table: "Oct 2026: 81%, target 85%, At risk". */
+export function cellSentence(month: string, cell: DeptKpiMonthCell, unit: KpiUnit): string {
+  return `${monthColumnLabel(month)}: ${formatKpiValue(cell.value, unit)}, ${cellTargetText(cell, unit)}, ${cellConditionText(cell)}`;
+}
+
+/** The KPI's cells in the order of the series' months (a cell for a month the server left out reads as a gap, never a zero). */
+export function cellsInMonthOrder(kpi: DeptKpiMonthsKpi, months: readonly DeptKpiMonth[]): (DeptKpiMonthCell | null)[] {
+  const by = new Map(kpi.cells.map((c) => [c.month, c]));
+  return months.map((m) => by.get(m.month) ?? null);
+}
+
+/** The trend's data in `ReportSeries` form, one point per month on the month's first day; a gap is `null`, never 0. */
+export function trendSeriesOf(kpi: DeptKpiMonthsKpi, months: readonly DeptKpiMonth[]) {
+  const cells = cellsInMonthOrder(kpi, months);
+  const points = (pick: (c: DeptKpiMonthCell) => number | null) =>
+    months.map((m, i) => ({ t: m.start, v: cells[i] ? pick(cells[i] as DeptKpiMonthCell) : null }));
+  return {
+    values: { key: "value", label: kpi.label, unit: kpi.unit, kind: "line" as const, points: points((c) => c.value) },
+    target: { key: "target", label: "Target", unit: kpi.unit, kind: "line" as const, points: points((c) => c.target) },
+  };
+}
+
+/** How many months of a KPI carry a real value: a trend needs at least two. */
+export function monthsWithValue(kpi: DeptKpiMonthsKpi): number {
+  return kpi.cells.filter((c) => c.value !== null).length;
+}
+
+// ─────────────────────────────────────────────────────────────────── batch writes (DW-10b, BFF §58.2 and §58.3) ───────────────
+/** One month of a plan, as typed: strings, percent as a whole percent (`parseProposal`'s convention). */
+export interface BatchItemInput {
+  kpiKey: string;
+  unit: KpiUnit;
+  effectiveFrom: string;
+  target: string;
+  tolerance: string;
+  note?: string;
+}
+
+/** The answer of the batch propose: the ids in item order, or the first problem with the item it names. */
+export interface DeptKpiBatchResult {
+  ok: boolean;
+  error?: string;
+  /** The server's field as sent, for example `items[3].target`. */
+  field?: string;
+  /** The item index and the item's own field when `field` names one (`items[3].target` is 3 and `target`). */
+  index?: number;
+  itemField?: string;
+  /** A decide batch refusal names the proposal that caused it (404, 409 and 403). */
+  failedId?: string;
+  ids?: string[];
+  decided?: { id: string; status: string; superseded: string[] }[];
+}
+
+const ITEM_FIELD = /^items\[(\d+)\](?:\.(\w+))?$/;
+
+/** `items[3].target` -> `{ index: 3, field: "target" }`; `items[3]` -> `{ index: 3, field: "" }`; anything else is null. */
+export function splitItemField(field: string | undefined): { index: number; field: string } | null {
+  const m = field ? ITEM_FIELD.exec(field) : null;
+  return m ? { index: Number(m[1]), field: m[2] ?? "" } : null;
+}
+
+/** The refusal of a batch decision, said with the proposal that caused it ("Projects on time, November 2026: ..."). */
+export function explainBatchDecisionError(message: string, rowName: string | null): string {
+  const said = explainDecisionError(message);
+  return rowName ? `${rowName}: ${said} Nothing was decided.` : `${said} Nothing was decided.`;
+}
+
+/** The target in force for a month: the latest APPROVED row from that month or earlier (the proposals never count). */
+export function targetInForceFor(kpi: DeptKpiTargetsKpi, monthStart: string): { target: number; tolerance: number } | null {
+  const approved = [...(kpi.inForce ? [kpi.inForce] : []), ...kpi.history].filter((r) => r.status === "approved" && r.effectiveFrom <= monthStart);
+  approved.sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? 1 : a.effectiveFrom > b.effectiveFrom ? -1 : 0));
+  return approved[0] ? { target: approved[0].target, tolerance: approved[0].tolerance } : null;
+}

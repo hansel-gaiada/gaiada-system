@@ -1,6 +1,7 @@
 import "server-only";
 import { platformFetch, PlatformError } from "./platform";
-import type { DeptKpisView, DeptKpiTargetsView } from "./deptKpiFormat";
+import { readResult, type ReadResult } from "./readResult";
+import type { DeptKpisView, DeptKpiTargetsView, DeptKpiMonthsView } from "./deptKpiFormat";
 
 export * from "./deptKpiFormat";
 
@@ -75,4 +76,27 @@ export async function getDeptKpiTargets(u: string, t: string, unit: string): Pro
   } catch (e) {
     return fail(e);
   }
+}
+
+/**
+ * DW-10b-2 (§58.1): one department's KPIs for each of up to 12 months, oldest first. A `ReadResult`, so a refusal and a failure are
+ * said apart and neither becomes an empty table: `forbidden` (403) and `unavailable` (everything else, 404 and a malformed answer
+ * included, with the backend's own words). Without `from` and `to` the server answers the 12 months ending with the current month.
+ */
+export async function getDeptKpiMonths(
+  u: string, t: string, unit: string, q: { from?: string; to?: string } = {},
+): Promise<ReadResult<DeptKpiMonthsView>> {
+  const qs = new URLSearchParams({ unitNodeId: unit });
+  if (q.from) qs.set("from", q.from);
+  if (q.to) qs.set("to", q.to);
+  const res = await readResult(platformFetch<DeptKpiMonthsView>(`/api/${t}/dept-kpis/months?${qs.toString()}`, u));
+  if (res.kind !== "ok") return res;
+  const d = res.data;
+  if (
+    !d || typeof d !== "object" || !Array.isArray(d.months) || !Array.isArray(d.kpis) ||
+    !d.unit || typeof d.unit.name !== "string" || d.kpis.some((k) => !k || !Array.isArray(k.cells))
+  ) {
+    return { kind: "unavailable", reason: "unexpected answer from the department KPI months endpoint" };
+  }
+  return res;
 }

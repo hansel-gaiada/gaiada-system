@@ -9,7 +9,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
-import { parseProposal, type KpiUnit } from "./deptKpiFormat";
+import { parseProposal, splitItemField, type BatchItemInput, type DeptKpiBatchResult, type KpiUnit } from "./deptKpiFormat";
 
 export type DeptKpiActionResult = { ok: boolean; error?: string; field?: string; id?: string; status?: string };
 
@@ -83,4 +83,78 @@ export async function rejectDeptKpiTarget(id: string, note?: string): Promise<De
   const r = await post(c.tenant, c.userId, `/${encodeURIComponent(id)}/reject`, note?.trim() ? { note: note.trim() } : {});
   if (r.ok) reval();
   return r;
+}
+
+// ── DW-10b-2 (BFF §58.2 and §58.3): several months in one write, all or nothing. ─────────────────────────────────────────────────
+
+/** A refusal as the form shows it: the server's sentence, its field (for a batch, `items[3].target`) split into the item and its own field, and the
+ *  `failedId` a decide refusal names. Nothing here widens or narrows what the server said. */
+function batchFailure(e: PlatformError): DeptKpiBatchResult {
+  const at = splitItemField(e.field);
+  const failedId = (e.body as { failedId?: unknown } | undefined)?.failedId;
+  return {
+    ok: false, error: e.message, field: e.field,
+    ...(at ? { index: at.index, itemField: at.field } : {}),
+    ...(typeof failedId === "string" ? { failedId } : {}),
+  };
+}
+
+/**
+ * Propose a target for each of several months in ONE batch (§58.2). Each item is typed as `ProposeTargetForm` takes it (a percent as a whole percent) and goes
+ * out as a fraction. Items are checked here in order first, and the first problem names its item exactly as the server would (`items[2].target`), so a
+ * typo costs no round trip; the server then judges all of it again (the unit, the KPI, the month, a duplicate) and stays the authority. All or nothing.
+ */
+export async function proposeTargetsBatchAction(input: { unitNodeId: string; items: BatchItemInput[] }): Promise<DeptKpiBatchResult> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  if (!input.unitNodeId) return { ok: false, error: "Choose a department.", field: "unitNodeId" };
+  if (!Array.isArray(input.items) || input.items.length === 0) return { ok: false, error: "Choose at least one month.", field: "items" };
+  if (input.items.length > 36) return { ok: false, error: "A plan covers at most 36 months at a time.", field: "items" };
+  const items = [];
+  for (let i = 0; i < input.items.length; i++) {
+    const it = input.items[i];
+    if (!UNITS.includes(it.unit)) return { ok: false, error: "Unknown KPI unit.", field: `items[${i}].kpiKey`, index: i, itemField: "kpiKey" };
+    const parsed = parseProposal(it.unit, { unitNodeId: input.unitNodeId, ...it });
+    if (!parsed.ok) return { ok: false, error: parsed.error, field: `items[${i}].${parsed.field}`, index: i, itemField: parsed.field };
+    const { kpiKey, effectiveFrom, target, tolerance, note } = parsed.body;
+    items.push({ kpiKey, effectiveFrom, target, tolerance, ...(note ? { note } : {}) });
+  }
+  try {
+    const res = await platformFetch<{ ids?: string[] }>(
+      `/api/${c.tenant}/dept-kpis/targets/batch`, c.userId,
+      { method: "POST", body: JSON.stringify({ unitNodeId: input.unitNodeId, items }) },
+    );
+    reval();
+    return { ok: true, ids: res?.ids ?? [] };
+  } catch (e) {
+    if (e instanceof PlatformError) return batchFailure(e);
+    throw e;
+  }
+}
+
+/**
+ * Approve or reject several open proposals in ONE batch (§58.3). The server refuses the whole set when any one is refused (a missing or already
+ * decided proposal, your own proposal for an approval, a unit you may not decide for) and names it in `failedId`; nothing is decided then.
+ */
+export async function decideTargetsBatchAction(
+  input: { decision: "approve" | "reject"; ids: string[]; note?: string },
+): Promise<DeptKpiBatchResult> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  if (input.decision !== "approve" && input.decision !== "reject") return { ok: false, error: "Choose approve or reject.", field: "decision" };
+  const ids = [...new Set((input.ids ?? []).filter((id) => typeof id === "string" && id !== ""))];
+  if (ids.length === 0) return { ok: false, error: "Choose at least one proposal.", field: "ids" };
+  if (ids.length > 36) return { ok: false, error: "Decide at most 36 proposals at a time.", field: "ids" };
+  const note = input.note?.trim();
+  try {
+    const res = await platformFetch<{ decided?: { id: string; status: string; superseded: string[] }[] }>(
+      `/api/${c.tenant}/dept-kpis/targets/decide-batch`, c.userId,
+      { method: "POST", body: JSON.stringify({ decision: input.decision, ids, ...(note ? { note } : {}) }) },
+    );
+    reval();
+    return { ok: true, decided: res?.decided ?? [] };
+  } catch (e) {
+    if (e instanceof PlatformError) return batchFailure(e);
+    throw e;
+  }
 }
