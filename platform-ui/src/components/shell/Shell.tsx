@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { Me } from "@/lib/platform";
 import type { Prefs } from "@/lib/prefs";
 import { DEFAULT_PREFS } from "@/lib/prefs";
-import { can, canViewAllCompanies, isUnrestricted } from "@/lib/rbac";
+import { canViewAllCompanies, isUnrestricted } from "@/lib/rbac";
 import { navFor } from "./nav";
 import { Sidebar } from "./Sidebar";
 import { WorkspaceShellSidebar } from "./WorkspaceShellSidebar";
@@ -13,8 +13,7 @@ import { WorkspaceTopBar } from "./WorkspaceTopBar";
 import { SpecialAccessBanner } from "./SpecialAccessBanner";
 import { AssistantFab } from "./AssistantFab";
 import { CommandPalette } from "./CommandPalette";
-import { activeCompany } from "@/lib/companyContext";
-import { buildNavEntries, buildDeptEntries, workspacePaletteEntries } from "@/lib/palette";
+import { workspacePaletteEntries, type PaletteEntry } from "@/lib/palette";
 import type { ShellModel } from "@/lib/shellModel";
 import "./shell.css";
 
@@ -29,9 +28,10 @@ export function Shell({ me, tenantId, moduleLabel, prefs = DEFAULT_PREFS, depart
   // Command palette tiers 1+2 (§4.1/§4.2) — computed here, in the same request that renders the
   // sidebar, so typing in the palette costs zero network round-trips for anything but tier 3 (live
   // records, fetched client-side from CommandPalette itself). Both builders are pure/client-safe.
-  const todayEntries = [...buildNavEntries(navFor(me, tenantId, departments)), ...buildDeptEntries(departments, activeCompany(me, tenantId)?.vertical, (t) => !t.requires || can(me, t.requires, tenantId))];
-  // DW-2e: the workspace shell builds them from the registry too (rule 3), with today's entries kept in the union.
-  const paletteEntries = workspaceModel ? workspacePaletteEntries(workspaceModel, todayEntries) : todayEntries;
+  // Interim (removed with the classic shell in this same change set): the classic shell's own nav, flat.
+  const classicEntries: PaletteEntry[] = navFor(me, tenantId, departments).flatMap((g) =>
+    g.items.map((i) => ({ id: `nav:${i.href}`, label: i.label, href: i.href, section: g.label || "Navigate", icon: i.icon })));
+  const paletteEntries = workspaceModel ? workspacePaletteEntries(workspaceModel, me, tenantId) : classicEntries;
 
   // Everything below the skip link. In the workspace shell it sits inside the provider, which renders no
   // DOM, so `.erp-app`'s grid still sees these as its direct children.

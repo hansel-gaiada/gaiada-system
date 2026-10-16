@@ -1,49 +1,48 @@
 import { describe, it, expect } from "vitest";
-import { buildNavEntries, buildDeptEntries } from "./palette";
-import type { NavGroup } from "@/components/shell/nav";
+import type { Me } from "./platform";
+import { STATIC_PALETTE_ENTRIES, staticPaletteEntries } from "./palette";
+import { AGENCY, HOTEL, ROOT, me, member } from "./workspaceFixtures";
 
-describe("palette entry builders", () => {
-  it("buildNavEntries flattens every group's items, tagging each with its section", () => {
-    const groups: NavGroup[] = [
-      { label: "Workspace", pinned: true, items: [{ label: "Dashboard", href: "/", icon: "home" }] },
-      { label: "Business", items: [{ label: "Clients", href: "/clients", icon: "finance" }] },
-    ];
-    const entries = buildNavEntries(groups);
-    expect(entries).toEqual([
-      { id: "nav:/", label: "Dashboard", href: "/", section: "Workspace", icon: "home" },
-      { id: "nav:/clients", label: "Clients", href: "/clients", section: "Business", icon: "finance" },
-    ]);
+// DW-9d: the explicit, gated entries that replaced the classic nav's "today" list. Each gate is the one its nav row had.
+const hrefsOf = (m: Me, tenant: string) => staticPaletteEntries(m, tenant).map((e) => e.href);
+const grant = (role: string, co = "co-a") => ({ role, scopeType: "company", scopeId: co });
+
+describe("staticPaletteEntries", () => {
+  it("offers the ungated pages to every staff person, in every kind of company", () => {
+    const ungated = ["/approvals", "/reports/project", "/reports/department", "/learning"];
+    for (const [m, t] of [
+      [me([member()]), "co-a"],
+      [me([member("co-h")], [HOTEL]), "co-h"],
+      [me([member("co-root")], [ROOT]), "co-root"],
+      [me([]), "co-a"],
+    ] as [Me, string][]) {
+      for (const href of ungated) expect(hrefsOf(m, t), href).toContain(href);
+    }
   });
 
-  it("falls back to 'Navigate' for the unlabelled Settings group", () => {
-    const groups: NavGroup[] = [{ label: "", items: [{ label: "Settings", href: "/admin", icon: "settings" }] }];
-    expect(buildNavEntries(groups)[0].section).toBe("Navigate");
+  it("gives every entry an id, a label, a section and an icon, and a unique href", () => {
+    const entries = staticPaletteEntries(me([{ role: "platform_admin", scopeType: "global", scopeId: null }], [ROOT, AGENCY]), "co-a");
+    expect(entries).toHaveLength(STATIC_PALETTE_ENTRIES.length);
+    expect(new Set(entries.map((e) => e.href)).size).toBe(entries.length);
+    for (const e of entries) expect(e).toMatchObject({ id: `static:${e.href}`, label: expect.any(String), section: expect.any(String), icon: expect.any(String) });
   });
 
-  it("buildDeptEntries lists every non-Home tab, skipping the department's own root", () => {
-    const entries = buildDeptEntries([{ id: "dept-1", name: "Web Dev" }], "agency");
-    expect(entries.every((e) => e.href !== "/departments/dept-1")).toBe(true);
-    expect(entries.some((e) => e.label === "Web Dev · Activity")).toBe(true);
-    expect(entries.every((e) => e.section === "Departments")).toBe(true);
+  it("Learning authoring needs lms.authoring, as the nav row did: absent for a member, present for a company admin", () => {
+    expect(hrefsOf(me([member()]), "co-a")).not.toContain("/learning/authoring");
+    expect(hrefsOf(me([member(), grant("company_admin")]), "co-a")).toContain("/learning/authoring");
+    expect(hrefsOf(me([{ role: "platform_admin", scopeType: "global", scopeId: null }]), "co-a")).toContain("/learning/authoring");
   });
 
-  // M5-V3-i: a tab that names a capability is offered only when `allow` says the viewer holds it (no palette link that would 404).
-  it("buildDeptEntries leaves out a tab the viewer may not open, and offers it to one who may", () => {
-    const labels = (allow?: (t: { requires?: string }) => boolean) => buildDeptEntries([{ id: "dept-1", name: "Web Dev" }], "agency", allow as never).map((e) => e.label);
-    expect(labels()).toContain("Web Dev · Visitors");
-    expect(labels((t) => !t.requires)).not.toContain("Web Dev · Visitors");
-    expect(labels((t) => !t.requires)).toContain("Web Dev · Analytics");
-    expect(labels((t) => t.requires === "search.visitors.read")).toContain("Web Dev · Visitors");
+  it("Learning compliance needs lms.progress.view: HR staff have it and not authoring, a member neither", () => {
+    expect(hrefsOf(me([member()]), "co-a")).not.toContain("/learning/compliance");
+    const hr = hrefsOf(me([member(), grant("hr_staff")]), "co-a");
+    expect(hr).toContain("/learning/compliance");
+    expect(hr).not.toContain("/learning/authoring");
   });
 
-  it("buildDeptEntries falls back to the generic Home-only toolkit for an unregistered department name", () => {
-    // The generic toolkit has only the Home tab, which is deliberately skipped — so this
-    // department contributes zero tier-2 entries, not a crash.
-    expect(buildDeptEntries([{ id: "dept-9", name: "Legal" }], "agency")).toEqual([]);
-  });
-
-  it("buildDeptEntries gives a bespoke department name no tier-2 tabs outside the agency vertical", () => {
-    expect(buildDeptEntries([{ id: "dept-1", name: "Web Dev" }], "hospitality")).toEqual([]);
-    expect(buildDeptEntries([{ id: "dept-1", name: "Web Dev" }], undefined)).toEqual([]);
+  it("reads the ACTIVE company: a right held only in another company does not offer the entry here", () => {
+    const m = me([member(), grant("company_admin", "co-h")], [AGENCY, HOTEL]);
+    expect(hrefsOf(m, "co-a")).not.toContain("/learning/authoring");
+    expect(hrefsOf(m, "co-h")).toContain("/learning/authoring");
   });
 });

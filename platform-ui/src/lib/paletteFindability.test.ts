@@ -1,25 +1,20 @@
-// DW-2e: the workspace shell's command palette is built from the registry (plan §2.6 rule 3, "⌘K finds
-// everything a person may open"). The findability test builds the entry list exactly as `Shell` does
-// and checks it against what the person can open: the nav and every tab of the model.
+// DW-2e, DW-9d: the workspace shell's command palette is built from the registry (plan §2.6 rule 3, "⌘K finds
+// everything a person may open") plus a small explicit list of gated pages (`STATIC_PALETTE_ENTRIES`). The findability
+// test builds the entry list exactly as `Shell` does and checks it against what the person can open.
+//
+// The classic nav is gone (DW-D38), so it can no longer be the oracle. `WAS_FINDABLE` is its output, PINNED from the real
+// `navFor` for these personas immediately before it was deleted: every page that was findable then must still be.
 import { describe, it, expect } from "vitest";
 import type { Me } from "./platform";
-import { navFor } from "@/components/shell/nav";
-import { can } from "./rbac";
 import { resolveMyWorkspaces, type ConcreteRow, type OrgTreeNode } from "./workspaceAccess";
 import { buildShellModel, type ShellModel, type ShellWorkspace } from "./shellModel";
-import { buildDeptEntries, buildNavEntries, buildWorkspaceEntries, mergePaletteEntries, workspacePaletteEntries } from "./palette";
-import { activeCompany } from "./companyContext";
+import { buildWorkspaceEntries, mergePaletteEntries, workspacePaletteEntries } from "./palette";
 import { AGENCY, HOTEL, ROOT, agencyTree, me, member, node, person } from "./workspaceFixtures";
-
-const departmentsOf = (root: OrgTreeNode) => root.children.filter((n) => n.kind === "department").map((n) => ({ id: n.id, name: n.name }));
 
 /** Everything `Shell` does for the workspace shell, from a persona. */
 function build(m: Me, tenantId: string, root: OrgTreeNode) {
-  const departments = departmentsOf(root);
   const model = buildShellModel({ me: m, tenantId, workspaces: resolveMyWorkspaces({ me: m, tenantId, root }) });
-  const nav = navFor(m, tenantId, departments);
-  const today = [...buildNavEntries(nav), ...buildDeptEntries(departments, activeCompany(m, tenantId)?.vertical, (t) => !t.requires || can(m, t.requires, tenantId))];
-  return { model, nav, entries: workspacePaletteEntries(model, today) };
+  return { model, entries: workspacePaletteEntries(model, m, tenantId) };
 }
 
 const modelHrefs = (model: ShellModel) => [
@@ -31,21 +26,41 @@ const AGENCY_ROOT = { ...AGENCY, id: "co-root", name: "Group", rootCompanyId: "c
 const owner = { role: "owner", scopeType: "company", scopeId: "co-root" };
 const hotelTree = node("root", "Hotel", "company", [node("d-hk", "Housekeeping", "department", [person("p-1", "u-1")])]);
 
-const PERSONAS: [string, Me, string, OrgTreeNode][] = [
-  ["a placed Web Dev employee in an agency company", me([member()]), "co-a", agencyTree({ web: ["u-1"] })],
-  ["an unplaced owner of the operator root", me([owner], [{ ...AGENCY_ROOT, isOperatorRoot: true }]), "co-root", agencyTree()],
-  ["an owner of a customer root", me([owner], [AGENCY_ROOT]), "co-root", agencyTree()],
-  ["HR staff with no HR org node", me([member(), { role: "hr_staff", scopeType: "company", scopeId: "co-a" }]), "co-a", agencyTree()],
-  ["a member of a generic-pack company", me([member("co-h")], [HOTEL]), "co-h", hotelTree],
-  ["platform_admin", me([{ role: "platform_admin", scopeType: "global", scopeId: null }], [ROOT, AGENCY]), "co-root", agencyTree()],
+// ── The pinned oracle: every href the classic nav offered, per persona ───────────────────────────
+// ("/" is left out on purpose: it only redirects to the home Overview or the Company area, both of which are entries.)
+const EVERYONE = [
+  "/me", "/me/inbox", "/me/leave", "/me/loans", "/me/learning", "/pm", "/calendar", "/approvals",
+  "/organization", "/organization/positions", "/organization/access", "/departments", "/hr", "/it", "/finance", "/project-management",
+  "/reports/person", "/reports/project", "/reports/department", "/appraisals/mine",
+  "/learning", "/learning/catalogue", "/assistant", "/knowledge", "/agents", "/office",
+];
+const AGENCY_ROWS = ["/clients", "/deliverables", "/timesheets", "/agency", "/meetings", "/pipeline", "/monitoring"];
+const AGENCY_DEPTS = ["/departments/d-gm", "/departments/d-web", "/departments/d-seo"];
+const COMPANY_ADMIN_TIER = ["/appraisals", "/learning/authoring", "/learning/compliance"];
+const GROUP_AREA = ["/group", "/rollups", "/group/reports"];
+const PLATFORM_AREA = ["/systems/bot", "/systems/gateway", "/systems/hub", "/systems/automation", "/systems/observability"];
+
+const PERSONAS: [string, Me, string, OrgTreeNode, string[]][] = [
+  ["a placed Web Dev employee in an agency company", me([member()]), "co-a", agencyTree({ web: ["u-1"] }),
+    [...EVERYONE, ...AGENCY_ROWS, ...AGENCY_DEPTS]],
+  ["an unplaced owner of the operator root", me([owner], [{ ...AGENCY_ROOT, isOperatorRoot: true }]), "co-root", agencyTree(),
+    [...EVERYONE, ...AGENCY_ROWS, ...AGENCY_DEPTS, "/invoices", ...COMPANY_ADMIN_TIER, ...GROUP_AREA, ...PLATFORM_AREA, "/admin"]],
+  ["an owner of a customer root", me([owner], [AGENCY_ROOT]), "co-root", agencyTree(),
+    [...EVERYONE, ...AGENCY_ROWS, ...AGENCY_DEPTS, "/invoices", ...COMPANY_ADMIN_TIER, ...GROUP_AREA, "/admin"]],
+  ["HR staff with no HR org node", me([member(), { role: "hr_staff", scopeType: "company", scopeId: "co-a" }]), "co-a", agencyTree(),
+    [...EVERYONE, ...AGENCY_ROWS, ...AGENCY_DEPTS, "/learning/compliance"]],
+  ["a member of a generic-pack company", me([member("co-h")], [HOTEL]), "co-h", hotelTree,
+    [...EVERYONE, "/departments/d-hk"]],
+  ["platform_admin", me([{ role: "platform_admin", scopeType: "global", scopeId: null }], [ROOT, AGENCY]), "co-root", agencyTree(),
+    [...EVERYONE, ...AGENCY_DEPTS, ...COMPANY_ADMIN_TIER, "/appraisals/cycles", ...GROUP_AREA, ...PLATFORM_AREA, "/admin"]],
 ];
 
-describe.each(PERSONAS)("the workspace shell's palette finds everything: %s", (_name, m, tenantId, root) => {
-  const { model, nav, entries } = build(m, tenantId, root);
+describe.each(PERSONAS)("the workspace shell's palette finds everything: %s", (_name, m, tenantId, root, wasFindable) => {
+  const { model, entries } = build(m, tenantId, root);
   const hrefs = entries.map((e) => e.href);
 
-  it("has an entry for every page navFor offers", () => {
-    for (const href of nav.flatMap((g) => g.items.map((i) => i.href))) expect(hrefs, href).toContain(href);
+  it("still finds every page the classic nav offered (pinned from navFor before its removal)", () => {
+    for (const href of wasFindable) expect(hrefs, href).toContain(href);
   });
 
   it("has an entry for every concrete tab of every workspace, Company and Admin", () => {
@@ -54,8 +69,7 @@ describe.each(PERSONAS)("the workspace shell's palette finds everything: %s", (_
 
   it("finds the client health board and the client report wherever the person is offered them (PV7-05)", () => {
     for (const href of ["/clients/health", "/reports/client"]) {
-      const offered = nav.some((g) => g.items.some((i) => i.href === href)) || modelHrefs(model).includes(href);
-      if (offered) expect(entries.filter((e) => e.href === href), href).toHaveLength(1);
+      if (modelHrefs(model).includes(href)) expect(entries.filter((e) => e.href === href), href).toHaveLength(1);
     }
   });
 
@@ -134,16 +148,13 @@ describe("buildWorkspaceEntries: labels and sections", () => {
   });
 });
 
-describe("workspacePaletteEntries: the union with today's entries", () => {
-  it("lets the registry's entry win a clash and keeps what only today's lists offer", () => {
-    const model = synthetic([ws("web", "Web Dev", {}, true)]);
-    const today = [
-      { id: "nav:/learning", label: "Learning", href: "/learning", section: "Workspace", icon: "home" as const },
-      { id: "nav:/old", label: "Old", href: "/old", section: "Workspace", icon: "home" as const },
-    ];
-    const e = workspacePaletteEntries(model, today);
+describe("workspacePaletteEntries: the model, then the explicit static entries", () => {
+  it("lets the model's entry win a clash and keeps the static entries the model lacks", () => {
+    const m = me([member()]);
+    const e = workspacePaletteEntries(synthetic([ws("web", "Web Dev", {}, true)]), m, "co-a");
+    // The synthetic model carries "/learning" as "My learning": that label wins over the static "Learning overview".
     expect(e.find((x) => x.href === "/learning")?.label).toBe("My learning");
-    expect(e.find((x) => x.href === "/old")?.id).toBe("nav:/old");
+    expect(e.find((x) => x.href === "/reports/project")?.id).toBe("static:/reports/project");
   });
 
   it("mergePaletteEntries keeps the first of a repeated href", () => {
@@ -154,13 +165,38 @@ describe("workspacePaletteEntries: the union with today's entries", () => {
 
 describe("Approvals stays findable where its row is hidden (DW-D23)", () => {
   // The row hides from a member with nothing waiting and no right to decide; the page must stay reachable by the palette.
-  // Today the classic nav's entries carry it. DW-9d retires those entries, and must keep this test green.
-  it("finds /approvals for a member whose sidebar has no Approvals row", () => {
+  // The explicit static entry carries it now that the classic nav's entries are gone.
+  it("finds /approvals, from the explicit entry, for a member whose sidebar has no Approvals row", () => {
     const m = me([member()]);
     const root = agencyTree({ web: ["u-1"] });
     const model = buildShellModel({ me: m, tenantId: "co-a", workspaces: resolveMyWorkspaces({ me: m, tenantId: "co-a", root }), approvals: { pending: 0 } });
     expect(model.workspaces[0].rows.you.map((r) => r.key)).not.toContain("approvals");
-    const today = buildNavEntries(navFor(m, "co-a", departmentsOf(root)));
-    expect(workspacePaletteEntries(model, today).map((e) => e.href)).toContain("/approvals");
+    expect(buildWorkspaceEntries(model).map((e) => e.href)).not.toContain("/approvals");
+    const entries = workspacePaletteEntries(model, m, "co-a");
+    expect(entries.find((e) => e.href === "/approvals")).toMatchObject({ id: "static:/approvals", label: "Approvals" });
+  });
+
+  it("offers it once, as the model's own entry, to someone the sidebar row is shown to", () => {
+    const m = me([member()]);
+    const root = agencyTree({ web: ["u-1"] });
+    const model = buildShellModel({ me: m, tenantId: "co-a", workspaces: resolveMyWorkspaces({ me: m, tenantId: "co-a", root }), approvals: { pending: 2 } });
+    const found = workspacePaletteEntries(model, m, "co-a").filter((e) => e.href === "/approvals");
+    expect(found).toHaveLength(1);
+    expect(found[0].id).toBe("ws:/approvals");
+  });
+});
+
+describe("a tab the person may not open is not offered (M5-V3-i, ported from buildDeptEntries)", () => {
+  const web = agencyTree({ web: ["u-1"] });
+  const visitors = "/departments/d-web/website/visitors";
+  const hrefsFor = (roles: Me["roles"]) => build(me(roles), "co-a", web).entries.map((e) => e.href);
+
+  it("leaves Visitors (search.visitors.read) out for a plain member, and offers it to a holder", () => {
+    expect(hrefsFor([member()])).not.toContain(visitors);
+    expect(hrefsFor([member(), { role: "search_manager", scopeType: "company", scopeId: "co-a" }])).toContain(visitors);
+  });
+
+  it("still offers the Website tabs that carry no gate", () => {
+    expect(hrefsFor([member()])).toContain("/departments/d-web/website/analytics");
   });
 });

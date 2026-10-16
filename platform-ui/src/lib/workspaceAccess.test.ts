@@ -1,47 +1,48 @@
 import { describe, it, expect } from "vitest";
 import type { Me } from "./platform";
-import { navFor } from "@/components/shell/nav";
 import { sidebarRows, workspaceBySlug, type Gate } from "./workspaces";
 import { approvalsGateInput, concreteRows, functionalConsoleFor, gateAllows, homeArea, resolveMyWorkspaces } from "./workspaceAccess";
 import { areaFor, resolveArea } from "./areas";
 import { AGENCY, HOTEL, ROOT, agencyTree, lead, me, member, node, person } from "./workspaceFixtures";
 
-const navHrefs = (m: Me, tenant: string) => navFor(m, tenant).flatMap((g) => g.items.map((i) => i.href));
-const navGroups = (m: Me, tenant: string) => navFor(m, tenant).map((g) => g.label);
 const ctx = (m: Me, tenantId: string, unitPath: string[] = []) => ({ me: m, tenantId, unitPath });
 
-describe("gateAllows mirrors nav.ts (gates unchanged, plan §2.6 rule 4)", () => {
+// DW-9d: these were parity tests against the classic `navFor`. It is gone (DW-D38), so each case now states the answer nav.ts gave
+// (pinned from its output before removal). The wider gate cases of nav.test.ts live in `workspaceGates.test.ts`.
+describe("gateAllows keeps the gates nav.ts had (gates unchanged, plan §2.6 rule 4)", () => {
   const ROWS: Record<string, string> = {
     clients: "/clients", deliverables: "/deliverables", timesheets: "/timesheets", agency: "/agency",
     meetings: "/meetings", pipeline: "/pipeline", monitoring: "/monitoring",
   };
-  const cases: [string, Me, string][] = [
-    ["agency company", me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]), "co-a"],
-    ["hospitality company", me([{ role: "company_admin", scopeType: "company", scopeId: "co-h" }], [HOTEL]), "co-h"],
-    ["agency with the agency module off", me([member()], [{ ...AGENCY, enabledModules: ["pm", "clients"] }]), "co-a"],
+  const ALL = Object.keys(ROWS);
+  // The rows nav.ts listed for each case, pinned. `invoices` is the Invoices row (agency row AND company.manage).
+  const cases: [string, Me, string, { rows: string[]; invoices: boolean }][] = [
+    ["agency company", me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]), "co-a", { rows: ALL, invoices: true }],
+    ["hospitality company", me([{ role: "company_admin", scopeType: "company", scopeId: "co-h" }], [HOTEL]), "co-h", { rows: [], invoices: false }],
+    ["agency with the agency module off", me([member()], [{ ...AGENCY, enabledModules: ["pm", "clients"] }]), "co-a",
+      { rows: ["clients", "deliverables", "timesheets", "meetings", "pipeline"], invoices: false }],
   ];
 
-  it.each(cases)("shows the agency rows exactly where nav.ts does: %s", (_name, m, tenant) => {
-    const nav = navHrefs(m, tenant);
-    for (const [row, href] of Object.entries(ROWS)) {
-      expect(gateAllows({ kind: "agencyRow", row: row as never }, ctx(m, tenant)), row).toBe(nav.includes(href));
+  it.each(cases)("shows the agency rows exactly as nav.ts did: %s", (_name, m, tenant, expected) => {
+    for (const row of ALL) {
+      expect(gateAllows({ kind: "agencyRow", row: row as never }, ctx(m, tenant)), row).toBe(expected.rows.includes(row));
     }
     const invoices: Gate = { kind: "all", gates: [{ kind: "agencyRow", row: "invoices" }, { kind: "cap", cap: "company.manage" }] };
-    expect(gateAllows(invoices, ctx(m, tenant))).toBe(nav.includes("/invoices"));
+    expect(gateAllows(invoices, ctx(m, tenant))).toBe(expected.invoices);
   });
 
+  const rootOwner = me([{ role: "owner", scopeType: "company", scopeId: "co-root" }], [ROOT, AGENCY]);
   it.each([
-    ["the root owner in the root", me([{ role: "owner", scopeType: "company", scopeId: "co-root" }], [ROOT, AGENCY]), "co-root"],
-    ["the root owner in a child", me([{ role: "owner", scopeType: "company", scopeId: "co-root" }], [ROOT, AGENCY]), "co-a"],
+    ["the root owner in the root", rootOwner, "co-root", { group: true, platform: false, settings: true }],
+    ["the root owner in a child", rootOwner, "co-a", { group: false, platform: false, settings: false }],
     // PV-D31: only the owner of the OPERATOR root gets Platform.
-    ["the operator root's owner", me([{ role: "owner", scopeType: "company", scopeId: "co-root" }], [{ ...ROOT, isOperatorRoot: true }, AGENCY]), "co-root"],
-    ["platform_admin in the root", me([{ role: "platform_admin", scopeType: "global", scopeId: null }], [ROOT, AGENCY]), "co-root"],
-    ["a member", me([member()]), "co-a"],
-  ] as [string, Me, string][])("shows Group, Platform and Settings exactly where nav.ts does: %s", (_name, m, tenant) => {
-    const groups = navGroups(m, tenant);
-    expect(gateAllows({ kind: "rootGroup" }, ctx(m, tenant))).toBe(groups.includes("Group"));
-    expect(gateAllows({ kind: "platformOperator" }, ctx(m, tenant))).toBe(groups.includes("Platform"));
-    expect(gateAllows({ kind: "cap", cap: "admin.access" }, ctx(m, tenant))).toBe(navHrefs(m, tenant).includes("/admin"));
+    ["the operator root's owner", me([{ role: "owner", scopeType: "company", scopeId: "co-root" }], [{ ...ROOT, isOperatorRoot: true }, AGENCY]), "co-root", { group: true, platform: true, settings: true }],
+    ["platform_admin in the root", me([{ role: "platform_admin", scopeType: "global", scopeId: null }], [ROOT, AGENCY]), "co-root", { group: true, platform: true, settings: true }],
+    ["a member", me([member()]), "co-a", { group: false, platform: false, settings: false }],
+  ] as [string, Me, string, { group: boolean; platform: boolean; settings: boolean }][])("shows Group, Platform and Settings as nav.ts did: %s", (_name, m, tenant, expected) => {
+    expect(gateAllows({ kind: "rootGroup" }, ctx(m, tenant))).toBe(expected.group);
+    expect(gateAllows({ kind: "platformOperator" }, ctx(m, tenant))).toBe(expected.platform);
+    expect(gateAllows({ kind: "cap", cap: "admin.access" }, ctx(m, tenant))).toBe(expected.settings);
   });
 
   it("answers the pack and module gates from the active company", () => {

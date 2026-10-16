@@ -1,56 +1,24 @@
-// Command palette (Cmd/Ctrl-K) data model — UI redesign §4. Pure, client-safe: builds tier-1
-// (static nav) and tier-2 (department toolkit) destinations from data the shell ALREADY computes
-// server-side and is already RBAC-filtered by construction (`navFor()` takes `me`/`tenantId`;
-// `toolkitFor()` is a pure lookup keyed by the company's vertical, with no capability surface of its own). No network cost — Shell.tsx
-// builds this list in the same request that renders the sidebar and hands it to the client
-// CommandPalette component as a plain, serialisable array.
+// Command palette (Cmd/Ctrl-K) data model — UI redesign §4, rebuilt on the workspace shell's registry (DW-2e, DW-9d).
+// Pure, client-safe: tier 1 is every concrete tab of the person's shell model (`buildWorkspaceEntries`) plus a small,
+// explicit, GATED list of pages the sidebar does not draw (`STATIC_PALETTE_ENTRIES`); both come from data the shell
+// ALREADY computes server-side and is RBAC-filtered by construction. No network cost — Shell.tsx builds this list in the
+// same request that renders the sidebar and hands it to the client CommandPalette component as a plain, serialisable array.
 //
 // Tier 3 (live records) is NOT built here — it is a genuine per-keystroke network read, so it goes
 // through `/api/search/palette` (the single-egress route handler) straight from CommandPalette.tsx.
-import type { NavGroup } from "@/components/shell/nav";
+import type { Me } from "@/lib/platform";
 import type { IconName } from "@/components/shell/icons";
-import { toolkitFor, deptTabs, tabHref, type DeptTab } from "./deptToolkits";
-import type { ConcreteRow } from "./workspaceAccess";
+import type { Gate } from "./workspaces";
+import { gateAllows, type ConcreteRow } from "./workspaceAccess";
 import type { ShellModel } from "./shellModel";
 
 export interface PaletteEntry {
   id: string;
   label: string;
   href: string;
-  /** Groups results in the palette list — the nav group label, or "Departments" for tier 2. */
+  /** Groups results in the palette list — the workspace name, "You", "Performance", "Company", "Admin", or a static entry's own. */
   section: string;
   icon: IconName;
-}
-
-/** Tier 1 — every NavItem from navFor(), flattened. Already RBAC-filtered (navFor's own job). */
-export function buildNavEntries(groups: NavGroup[]): PaletteEntry[] {
-  const out: PaletteEntry[] = [];
-  for (const g of groups) {
-    for (const item of g.items) {
-      out.push({ id: `nav:${item.href}`, label: item.label, href: item.href, section: g.label || "Navigate", icon: item.icon });
-    }
-  }
-  return out;
-}
-
-/** Tier 2 — every DeptTab across every department the active company has, via the same
- *  `toolkitFor()`/`tabHref()` DeptTabs.tsx itself uses. The department's OWN root ("Home", `path:
- *  ""`) is skipped — navFor() already lists it once as the department's row in the Departments
- *  group, so this only adds what nav does NOT already surface (Board, Timeline, Connections, …). */
-export function buildDeptEntries(
-  departments: { id: string; name: string }[], vertical: string | null | undefined,
-  /** M5-V3-i: false hides a tab the viewer may not open (a tab with `requires`); absent = every tab is offered. */
-  allow: (tab: DeptTab) => boolean = () => true,
-): PaletteEntry[] {
-  const out: PaletteEntry[] = [];
-  for (const d of departments) {
-    const toolkit = toolkitFor(vertical, d.name);
-    for (const tab of deptTabs(toolkit)) {
-      if (tab.path === "" || !allow(tab)) continue;
-      out.push({ id: `dept:${d.id}:${tab.key}`, label: `${d.name} · ${tab.label}`, href: tabHref(d.id, tab), section: "Departments", icon: tab.icon });
-    }
-  }
-  return out;
 }
 
 /** The text for one tab of a row: the row's own label once when its only tab carries it, else the tab's. */
@@ -94,6 +62,38 @@ export function buildWorkspaceEntries(model: ShellModel): PaletteEntry[] {
   return out;
 }
 
+/** A page the palette offers that the sidebar does not draw, with the gate its old nav row carried (DW-9d). */
+interface StaticPaletteEntry { href: string; label: string; section: string; icon: IconName; gate?: Gate }
+
+/** Pages findable before the classic nav retired (DW-9d, plan §13 trap 1) that no tab of a person's shell model carries, so
+ *  retiring `navFor` must not drop them. Measured per persona against the real functions before the removal, over every role of
+ *  `Role` x agency/hospitality/holding companies x placed/unplaced x global/company/unit scope: exactly these pages.
+ *  Every gate is the one its nav row had (an absent gate = the row was ungated), never a simplification of it. The shell is
+ *  staff-only (`(app)/layout.tsx` sends a client-only person to the portal), so "ungated" means "every staff person".
+ *  - Approvals: the sidebar's row hides from a member with nothing waiting and no right to decide (DW-D23); the PAGE stays
+ *    reachable for everyone and the server decides who may act.
+ *  - Project and Department Reports: the registry offers the department grain only to a head (`unitCap`), the old nav row was
+ *    ungated and the page renders the server's own refusal.
+ *  - Learning overview and, for the holders of the company-wide right, Authoring and Compliance: the registry offers those
+ *    two only per department (`?unit=`), so a company-wide holder with no department node had no other way in.
+ *  `/` ("Dashboard") is deliberately not here: it only redirects to the home workspace's Overview or the Company area, both of
+ *  which are entries already. */
+export const STATIC_PALETTE_ENTRIES: readonly StaticPaletteEntry[] = [
+  { href: "/approvals", label: "Approvals", section: "You", icon: "check" },
+  { href: "/reports/project", label: "Project Reports", section: "Reports", icon: "pulse" },
+  { href: "/reports/department", label: "Department Reports", section: "Reports", icon: "pulse" },
+  { href: "/learning", label: "Learning overview", section: "Learning", icon: "home" },
+  { href: "/learning/authoring", label: "Learning authoring", section: "Learning", icon: "projects", gate: { kind: "cap", cap: "lms.authoring" } },
+  { href: "/learning/compliance", label: "Learning compliance", section: "Learning", icon: "check", gate: { kind: "cap", cap: "lms.progress.view" } },
+];
+
+/** The static entries this person may be offered (each gate evaluated against the active company, as the nav row was). */
+export function staticPaletteEntries(me: Me, tenantId: string | null): PaletteEntry[] {
+  return STATIC_PALETTE_ENTRIES
+    .filter((e) => gateAllows(e.gate, { me, tenantId, unitPath: [] }))
+    .map((e) => ({ id: `static:${e.href}`, label: e.label, href: e.href, section: e.section, icon: e.icon }));
+}
+
 /** Entries are unique by href; the first list wins a clash. */
 export function mergePaletteEntries(...lists: PaletteEntry[][]): PaletteEntry[] {
   const seen = new Set<string>();
@@ -106,8 +106,7 @@ export function mergePaletteEntries(...lists: PaletteEntry[][]): PaletteEntry[] 
   return out;
 }
 
-/** What the workspace shell hands the palette: the registry's entries, then today's nav and department
- *  entries, so nothing findable before stops being findable until the classic nav retires (DW-9d). */
-export function workspacePaletteEntries(model: ShellModel, today: PaletteEntry[]): PaletteEntry[] {
-  return mergePaletteEntries(buildWorkspaceEntries(model), today);
+/** What the shell hands the palette: the model's own entries, then the explicit static ones (the model's entry wins a clash). */
+export function workspacePaletteEntries(model: ShellModel, me: Me, tenantId: string | null): PaletteEntry[] {
+  return mergePaletteEntries(buildWorkspaceEntries(model), staticPaletteEntries(me, tenantId));
 }

@@ -10,7 +10,7 @@ import type { Me } from "@/lib/platform";
 vi.mock("next/navigation", () => ({ usePathname: () => "/", useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/lib/prefs", () => ({ DEFAULT_PREFS: { density: "comfortable", width: "standard", theme: "auto", shell: "classic", shellChosen: true } })); // classic until DW-9d-2
 vi.mock("@/lib/companyContext", async (orig) => ({ ...(await orig<typeof import("@/lib/companyContext")>()), activeCompany: () => null }));
-vi.mock("@/lib/palette", () => ({ buildNavEntries: () => [], buildDeptEntries: () => [], workspacePaletteEntries: () => [] }));
+vi.mock("@/lib/palette", () => ({ workspacePaletteEntries: () => [] }));
 vi.mock("./nav", () => ({ navFor: () => [] }));
 vi.mock("./Sidebar", () => ({ Sidebar: () => <aside data-testid="classic-side" /> }));
 vi.mock("./WorkspaceShellSidebar", () => ({ WorkspaceShellSidebar: () => <aside data-testid="ws-side" /> }));

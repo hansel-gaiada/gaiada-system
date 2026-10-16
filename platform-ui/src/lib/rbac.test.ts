@@ -375,6 +375,19 @@ describe("canManageIT", () => {
     expect(canManageIT(itA)).toBe(true); // has it.manage somewhere
     expect(canManageIT(me([{ role: "member", scopeType: "company", scopeId: "co-a" }]))).toBe(false);
   });
+
+  // Ported from the retired nav.test.ts (DW-9d), which asserted these with GLOBAL-scope grants.
+  const withRoles = (roles: string[]) => me(roles.map((role) => ({ role, scopeType: "global", scopeId: null })));
+  it("is true for elevated (platform_admin: IAM-15 removed the second elevated role)", () => {
+    expect(canManageIT(withRoles(["platform_admin"]))).toBe(true);
+  });
+  it("is true for a dedicated IT role", () => {
+    expect(canManageIT(withRoles(["it_admin"]))).toBe(true);
+    expect(canManageIT(withRoles(["it_manager"]))).toBe(true);
+  });
+  it("is false for a plain member", () => {
+    expect(canManageIT(withRoles(["member"]))).toBe(false);
+  });
 });
 
 describe("isManagerTier — UX-2 §1.3 Home role boundary", () => {
