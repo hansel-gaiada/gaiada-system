@@ -66,11 +66,16 @@ async function mapRules<T>(fn: () => Promise<T>): Promise<T> {
 interface LockedRequest {
   id: string; kind: svc.RequestKind; status: svc.RequestStatus; requested_by: string; title: string; to_unit_id: string;
   pm_task_id: string | null; change_request_id: string | null;
+  // DW-10e (§60.6, §60.7): who asked, and the cross row's route and client (the event keys); the receiving company's name.
+  tenant_id: string; requester_tenant_id: string; service_assignment_id: string | null; client_id: string | null;
+  receiving_name: string | null;
 }
 /** The ask row under its lock, re-read INSIDE the transaction: the status the rules judge is the one that is committed now. */
 async function lockRequest(c: PoolClient, requestId: string): Promise<LockedRequest> {
   const { rows } = await c.query<LockedRequest>(
-    `SELECT id, kind, status, requested_by, title, to_unit_id, pm_task_id, change_request_id
+    `SELECT id, kind, status, requested_by, title, to_unit_id, pm_task_id, change_request_id,
+            tenant_id, requester_tenant_id, service_assignment_id, client_id,
+            (SELECT name FROM companies WHERE id = work_requests.tenant_id) AS receiving_name
        FROM work_requests WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
     [requestId],
   );
@@ -114,51 +119,17 @@ export class WorkRequestsController {
         const requesterName = who.rows[0]?.name ?? "Someone";
         const id = newId();
 
-        let work: { type: "pm_task" | "change_request"; id: string };
-        let pmTaskId: string | null = null;
-        let changeRequestId: string | null = null;
         // The receiving department's intake project serves BOTH kinds: the asset task lives in it, and the engineering
         // change request names it as its `project_id`, so Web Dev's `pm_task` triage lands the task in
         // "<Department> · Requests" with no extra input (§32.1).
         const intake = await svc.ensureIntakeProject(c, tenantId, input.toUnitId, toName, config.originSite);
-        if (input.kind === "assets") {
-          const form = input.form as svc.AssetsForm;
-          const n = normalizePmTaskInput({
-            projectId: intake.projectId,
-            title: input.title,
-            description: svc.buildTaskDescription({ brief: input.brief, form, requesterName, fromUnitName }),
-            dueDate: input.neededBy ?? undefined,
-            priority: "normal",
-          });
-          // The task is owned by the RECEIVING DEPARTMENT, with nobody responsible yet. `normalizePmTaskInput` validates an
-          // assignee only when it names a responsible person, which a department with nobody on it yet cannot, so the
-          // department assignee is set here, after the rest of the task was validated. Someone is made responsible
-          // later through PM, and the task then reaches that person's Needs you (§32 preamble).
-          // `responsibleId` is JSON null, NOT "": the assignment ledger writes it into a uuid column
-          // (pm_task_assignment_events.responsible_id), where "" is a 500, and null is the "nobody yet" shape PM's own
-          // dual-write, drift guard and readers already treat as no responsible person (`!assignee.responsibleId`).
-          n.assignee = {
-            kind: "department", refId: input.toUnitId, refName: toName,
-            responsibleId: null as unknown as string, responsibleName: null as unknown as string,
-          };
-          const task = await createPmTaskInTx(c, tenantId, userId, n);
-          pmTaskId = task.id;
-          work = { type: "pm_task", id: task.id };
-        } else {
-          const form = input.form as svc.EngineeringForm;
-          changeRequestId = newId();
-          await c.query(
-            `INSERT INTO webdev_change_requests
-               (id, tenant_id, client_id, project_id, source, kind, title, body, status, requested_by, origin_site, affected_url)
-             VALUES ($1, $2, NULL, $9, 'internal', $3, $4, $5, 'new', $6, $7, $8)`,
-            [changeRequestId, tenantId, form.kind, input.title, input.brief || null, userId, config.originSite, form.affectedUrl ?? null, intake.projectId],
-          );
-          // The same event the internal-create route emits, so everything watching Web Dev intake sees this request too.
-          await emitEvent(c, tenantId, "webdev_change_request", changeRequestId, "webdev.change_request.created", {
-            source: "internal", kind: form.kind, clientId: null, projectId: intake.projectId, actorId: userId,
-          });
-          work = { type: "change_request", id: changeRequestId };
-        }
+        const w = await createRequestWorkItemInTx(c, {
+          tenantId, userId, kind: input.kind, toUnitId: input.toUnitId, toName, projectId: intake.projectId, clientId: null,
+          title: input.title, brief: input.brief, neededBy: input.neededBy, form: input.form, requesterName, fromUnitName,
+        });
+        const work = w.work;
+        const pmTaskId = w.pmTaskId;
+        const changeRequestId = w.changeRequestId;
 
         await c.query(
           `INSERT INTO work_requests
@@ -224,15 +195,17 @@ export class WorkRequestsController {
         } else {
           await c.query(`UPDATE work_requests SET updated_at = now() WHERE id = $1`, [id]);
         }
-        await emitEvent(c, tenantId, "work_request", id, "work_request.delivered", { requestId: id, assetIds, more: !plan.closes });
-        return { requestedBy: r.requested_by, title: r.title, more: !plan.closes };
+        await emitEvent(c, tenantId, "work_request", id, "work_request.delivered", { requestId: id, assetIds, more: !plan.closes, ...svc.crossEventKeys(r) });
+        return { requestedBy: r.requested_by, title: r.title, more: !plan.closes, requesterTenantId: r.requester_tenant_id, receivingName: r.receiving_name };
       }),
     );
 
     await writeActivity(tenantId, userId, out.more ? "delivered_more" : "delivered", "work_request", id, { assetIds });
-    await notifyBestEffort(tenantId, userId, [out.requestedBy], "request.delivered", {
-      title: out.more ? `More assets were delivered: ${out.title}` : `Your request was delivered: ${out.title}`,
-      href: `/requests/${id}`, entityType: "work_request", entityId: id, severity: "info",
+    // DW-10e (§60.7): a cross request's requester is told in THEIR company, and H's mirror event is written there.
+    if (out.requesterTenantId !== tenantId) await svc.emitOutboundMirror(out.requesterTenantId, id, tenantId, "delivered");
+    await svc.notifyRequesterOutcome({
+      requestTenantId: tenantId, requesterTenantId: out.requesterTenantId, receivingName: out.receivingName, actorId: userId,
+      requestedBy: out.requestedBy, requestId: id, title: out.title, outcome: out.more ? "delivered_more" : "delivered",
     });
     return { id, status: "delivered", assetIds };
   }
@@ -257,15 +230,17 @@ export class WorkRequestsController {
         );
         // A declined ask leaves the receiver's board: its task is closed the way a delivered one is.
         if (r.pm_task_id) await closePmTaskInTx(c, tenantId, userId, r.pm_task_id);
-        await emitEvent(c, tenantId, "work_request", id, "work_request.declined", { requestId: id, via: "decline" });
-        return { requestedBy: r.requested_by, title: r.title };
+        await emitEvent(c, tenantId, "work_request", id, "work_request.declined", { requestId: id, via: "decline", ...svc.crossEventKeys(r) });
+        return { requestedBy: r.requested_by, title: r.title, requesterTenantId: r.requester_tenant_id, receivingName: r.receiving_name };
       }),
     );
 
     await writeActivity(tenantId, userId, "declined", "work_request", id, {});
-    await notifyBestEffort(tenantId, userId, [out.requestedBy], "request.declined", {
-      title: `Your request was declined: ${out.title}`, body: reason,
-      href: `/requests/${id}`, entityType: "work_request", entityId: id, severity: "warning",
+    // DW-10e (§60.7): as for deliver, the requester of a cross request is told in their own company.
+    if (out.requesterTenantId !== tenantId) await svc.emitOutboundMirror(out.requesterTenantId, id, tenantId, "declined");
+    await svc.notifyRequesterOutcome({
+      requestTenantId: tenantId, requesterTenantId: out.requesterTenantId, receivingName: out.receivingName, actorId: userId,
+      requestedBy: out.requestedBy, requestId: id, title: out.title, outcome: "declined", body: reason,
     });
     return { id, status: "declined" };
   }
@@ -275,6 +250,16 @@ export class WorkRequestsController {
   async cancel(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
     const facts = await this.preRead(req, tenantId, id);
     await authorize(req.principal, factsResource(tenantId, facts), "cancel");
+    // DW-10e (§60.6): the RECEIVING company never cancels a request another group company sent. A cancel tells nobody on the
+    // requester's side, so the receiver declines instead (assets) or declines in triage (engineering), and the requester is
+    // told. After the authorization, so the refusal is never an existence oracle; the requester cancels through
+    // `POST requests/outbound/:id/cancel` under their own company.
+    if (facts.requesterTenantId !== tenantId) {
+      throw new ConflictException({
+        message: "this request was sent by another group company; only the requesting side cancels it (decline it instead)",
+        reason: "requester_side_only",
+      });
+    }
     const userId = req.principal.userId as string;
 
     const out = await mapRules(() =>
@@ -400,6 +385,53 @@ export class WorkRequestsController {
       console.error(`[work-requests] request.received notification failed (request=${requestId}):`, (err as Error)?.message ?? err);
     }
   }
+}
+
+/** The WORK ITEM of a request, written in the caller's transaction BEFORE the request row (§32.5's order; the DW-10e route
+ *  guard reads it): an asset request is a PM task owned by the receiving DEPARTMENT in `projectId`; an engineering request is a
+ *  Web Dev change request (`source = 'internal'`) naming `projectId` and `clientId`. Shared by §32's create (`clientId` null,
+ *  the internal intake project) and §60's send (H's client record and its client requests project, DW-D41), so THE
+ *  DELIBERATE WIDENING of the header stays in this one file.
+ *
+ *  The task is owned by the RECEIVING DEPARTMENT, with nobody responsible yet. `normalizePmTaskInput` validates an assignee only
+ *  when it names a responsible person, which a department with nobody on it yet cannot, so the department assignee is set
+ *  here, after the rest of the task was validated. Someone is made responsible later through PM, and the task then reaches
+ *  that person's Needs you (§32 preamble). `responsibleId` is JSON null, NOT "": the assignment ledger writes it into a uuid
+ *  column (pm_task_assignment_events.responsible_id), where "" is a 500, and null is the "nobody yet" shape PM's own
+ *  dual-write, drift guard and readers already treat as no responsible person (`!assignee.responsibleId`). */
+export async function createRequestWorkItemInTx(c: PoolClient, o: {
+  tenantId: string; userId: string; kind: svc.RequestKind; toUnitId: string; toName: string; projectId: string;
+  clientId: string | null; title: string; brief: string; neededBy: string | null; form: svc.RequestForm;
+  requesterName: string; fromUnitName: string | null;
+}): Promise<{ work: { type: "pm_task" | "change_request"; id: string }; pmTaskId: string | null; changeRequestId: string | null }> {
+  if (o.kind === "assets") {
+    const n = normalizePmTaskInput({
+      projectId: o.projectId,
+      title: o.title,
+      description: svc.buildTaskDescription({ brief: o.brief, form: o.form as svc.AssetsForm, requesterName: o.requesterName, fromUnitName: o.fromUnitName }),
+      dueDate: o.neededBy ?? undefined,
+      priority: "normal",
+    });
+    n.assignee = {
+      kind: "department", refId: o.toUnitId, refName: o.toName,
+      responsibleId: null as unknown as string, responsibleName: null as unknown as string,
+    };
+    const task = await createPmTaskInTx(c, o.tenantId, o.userId, n);
+    return { work: { type: "pm_task", id: task.id }, pmTaskId: task.id, changeRequestId: null };
+  }
+  const form = o.form as svc.EngineeringForm;
+  const changeRequestId = newId();
+  await c.query(
+    `INSERT INTO webdev_change_requests
+       (id, tenant_id, client_id, project_id, source, kind, title, body, status, requested_by, origin_site, affected_url)
+     VALUES ($1, $2, $10, $9, 'internal', $3, $4, $5, 'new', $6, $7, $8)`,
+    [changeRequestId, o.tenantId, form.kind, o.title, o.brief || null, o.userId, config.originSite, form.affectedUrl ?? null, o.projectId, o.clientId],
+  );
+  // The same event the internal-create route emits, so everything watching Web Dev intake sees this request too.
+  await emitEvent(c, o.tenantId, "webdev_change_request", changeRequestId, "webdev.change_request.created", {
+    source: "internal", kind: form.kind, clientId: o.clientId, projectId: o.projectId, actorId: o.userId,
+  });
+  return { work: { type: "change_request", id: changeRequestId }, pmTaskId: null, changeRequestId };
 }
 
 /** The Cerbos resource for an action on one request: the three attributes come from the DB read, never from the body. */

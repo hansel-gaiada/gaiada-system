@@ -39,7 +39,7 @@ import { notifyBestEffort, resolveClientRecipients } from "./client-notify";
 import { createPmTaskInTx, normalizePmTaskInput } from "../modules/pm/pm.controller";
 // DW-5c (FRONTEND-BFF-CONTRACT §32.6): an engineering request is a change request, so its ask follows the change request
 // through triage-decline, verify and unverify. The hook is called INSIDE each transaction; the notification goes out after commit.
-import { notifyWorkRequestSync, syncWorkRequestFromChangeRequest } from "./work-requests.service";
+import { notifyPriceAgreement, notifyWorkRequestSync, syncWorkRequestFromChangeRequest } from "./work-requests.service";
 import {
   CR_AMENDMENT_COLUMNS, CR_AMENDMENT_JOIN, UUID_RE, assertAmendable, assertAmendmentSigned, defaultAmendTarget,
   insertAmendmentDraft, isDeadContractStatus,
@@ -713,6 +713,10 @@ export class WebdevChangeRequestsController {
       await writeActivity(tenantId, req.principal.userId, "triaged", "webdev_change_request", id, {
         kind: result.kind, priceImpact: "changes_price", amendmentContractId: result.contractId,
       });
+      // DW-10e (BFF §60.6, §60.7): when this change request carries a request from another group company, its requester is
+      // told in their own company that a price agreement is needed (once per new draft). Reads the request in its own
+      // transaction and notifies after this one committed; best-effort, never fails the triage.
+      await notifyPriceAgreement(tenantId, req.principal.userId, id);
       return {
         id, status: "new", route: null, priceImpact: "changes_price", blocked: true,
         amendmentContractId: result.contractId, amendmentKind: result.contractKind, amendsId: result.amendsId,
