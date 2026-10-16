@@ -31,13 +31,14 @@ export class HttpErrorFilter implements ExceptionFilter {
     let retryAfterSeconds: number | undefined;
     let usedBy: unknown[] | undefined;
     let hint: string | undefined;
+    let failedId: string | undefined;
     if (typeof res === "string") {
       error = res;
     } else {
       const r = res as {
         message?: string | string[]; field?: string; existing?: unknown; site?: unknown;
         reason?: string; blockers?: unknown; detail?: unknown; retryAfterSeconds?: unknown;
-        usedBy?: unknown; hint?: unknown;
+        usedBy?: unknown; hint?: unknown; failedId?: unknown;
       };
       const m = r.message;
       error = Array.isArray(m) ? m.join(", ") : m ?? exception.message;
@@ -69,6 +70,9 @@ export class HttpErrorFilter implements ExceptionFilter {
       // frozen account (`account_frozen`) carries the database's own hint ("archive it and create a new one").
       if (Array.isArray(r.usedBy)) usedBy = r.usedBy;
       if (typeof r.hint === "string" && r.hint) hint = r.hint;
+      // DW-10b (BFF §58.3): `failedId`, same additive rule. A batch that decides several rows at once refuses as a whole and
+      // names the row that stopped it (404, 409 or 403), so the screen can point at that proposal.
+      if (typeof r.failedId === "string" && r.failedId) failedId = r.failedId;
       if (r.existing && typeof r.existing === "object" && !Array.isArray(r.existing)) {
         existing = r.existing as Record<string, unknown>;
       }
@@ -97,6 +101,7 @@ export class HttpErrorFilter implements ExceptionFilter {
       ...(detail ? { detail } : {}),
       ...(usedBy ? { usedBy } : {}),
       ...(hint ? { hint } : {}),
+      ...(failedId ? { failedId } : {}),
       ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
     });
   }

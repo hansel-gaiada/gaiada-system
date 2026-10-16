@@ -117,19 +117,30 @@ export interface ProposalInput {
   note: string | null;
 }
 
-export async function insertProposal(tenantId: string, input: ProposalInput, proposedBy: string): Promise<TargetRow> {
+export async function insertProposal(tenantId: string, input: ProposalInput, proposedBy: string, client?: PoolClient): Promise<TargetRow> {
+  const run = async (c: PoolClient): Promise<TargetRow> => {
+    const { rows } = await c.query<DbTargetRow>(
+      `INSERT INTO dept_kpi_targets (id, tenant_id, unit_node_id, kpi_key, effective_from, target, tolerance, status, note,
+                                     proposed_by, origin_site)
+       VALUES ($1, $2, $3, $4, $5::date, $6, $7, 'proposed', $8, $9, $10)
+       RETURNING ${ROW_COLUMNS}`,
+      [newId(), tenantId, input.unitNodeId, input.kpiKey, input.effectiveFrom, input.target, input.tolerance, input.note,
+        proposedBy, config.originSite],
+    );
+    return toRow(rows[0]);
+  };
+  // `client`: the caller's open tenant transaction (the batch, §58.2), so several proposals commit together or not at all.
+  return client ? run(client) : withTenants([tenantId], run, { modules: DEPT_KPI_MODULES });
+}
+
+/** DW-10b (§58.2): every proposal of a batch in ONE transaction, in item order. A failure inserts none. */
+export async function insertProposals(tenantId: string, inputs: readonly ProposalInput[], proposedBy: string): Promise<TargetRow[]> {
   return withTenants(
     [tenantId],
     async (c) => {
-      const { rows } = await c.query<DbTargetRow>(
-        `INSERT INTO dept_kpi_targets (id, tenant_id, unit_node_id, kpi_key, effective_from, target, tolerance, status, note,
-                                       proposed_by, origin_site)
-         VALUES ($1, $2, $3, $4, $5::date, $6, $7, 'proposed', $8, $9, $10)
-         RETURNING ${ROW_COLUMNS}`,
-        [newId(), tenantId, input.unitNodeId, input.kpiKey, input.effectiveFrom, input.target, input.tolerance, input.note,
-          proposedBy, config.originSite],
-      );
-      return toRow(rows[0]);
+      const out: TargetRow[] = [];
+      for (const input of inputs) out.push(await insertProposal(tenantId, input, proposedBy, c));
+      return out;
     },
     { modules: DEPT_KPI_MODULES },
   );
@@ -150,52 +161,98 @@ export type DecisionOutcome =
   | { ok: true; row: TargetRow; superseded: string[] }
   | { ok: false; reason: "not_found" | "not_proposed" };
 
-/** Approve or reject a proposal, in one transaction under the (unit, KPI) family lock (see this file's header). */
+/**
+ * Approve or reject a proposal, in one transaction under the (unit, KPI) family lock (see this file's header).
+ * `client` (DW-10b, §58.3): the caller's open tenant transaction; the decision then joins it and the caller commits, which is
+ * how the batch decides all or none. Without it the decision opens its own transaction, as the single routes always did.
+ */
 export async function decideTarget(
   tenantId: string,
   id: string,
   decision: "approve" | "reject",
   decidedBy: string,
+  client?: PoolClient,
 ): Promise<DecisionOutcome> {
-  return withTenants(
-    [tenantId],
-    async (c: PoolClient): Promise<DecisionOutcome> => {
-      // Lock the whole (unit, KPI) family, in id order, before reading the row's status.
-      const family = await c.query<{ id: string }>(
-        `SELECT t.id FROM dept_kpi_targets t
-          WHERE (t.tenant_id, t.unit_node_id, t.kpi_key) =
-                (SELECT s.tenant_id, s.unit_node_id, s.kpi_key FROM dept_kpi_targets s WHERE s.tenant_id = $1 AND s.id = $2)
-          ORDER BY t.id
-          FOR UPDATE`,
-        [tenantId, id],
-      );
-      if (family.rows.length === 0) return { ok: false, reason: "not_found" };
-      const { rows } = await c.query<DbTargetRow>(`SELECT ${ROW_COLUMNS} FROM dept_kpi_targets WHERE tenant_id = $1 AND id = $2`, [tenantId, id]);
-      const current = rows[0];
-      if (!current) return { ok: false, reason: "not_found" };
-      if (current.status !== "proposed") return { ok: false, reason: "not_proposed" };
+  const run = async (c: PoolClient): Promise<DecisionOutcome> => {
+    // Lock the whole (unit, KPI) family, in id order, before reading the row's status.
+    const family = await c.query<{ id: string }>(
+      `SELECT t.id FROM dept_kpi_targets t
+        WHERE (t.tenant_id, t.unit_node_id, t.kpi_key) =
+              (SELECT s.tenant_id, s.unit_node_id, s.kpi_key FROM dept_kpi_targets s WHERE s.tenant_id = $1 AND s.id = $2)
+        ORDER BY t.id
+        FOR UPDATE`,
+      [tenantId, id],
+    );
+    if (family.rows.length === 0) return { ok: false, reason: "not_found" };
+    const { rows } = await c.query<DbTargetRow>(`SELECT ${ROW_COLUMNS} FROM dept_kpi_targets WHERE tenant_id = $1 AND id = $2`, [tenantId, id]);
+    const current = rows[0];
+    if (!current) return { ok: false, reason: "not_found" };
+    if (current.status !== "proposed") return { ok: false, reason: "not_proposed" };
 
-      let superseded: string[] = [];
-      if (decision === "approve") {
-        const s = await c.query<{ id: string }>(
-          `UPDATE dept_kpi_targets SET status = 'superseded'
-            WHERE tenant_id = $1 AND unit_node_id = $2 AND kpi_key = $3 AND status = 'approved'
-              AND effective_from >= $4::date AND id <> $5
-           RETURNING id`,
-          [tenantId, current.unit_node_id, current.kpi_key, current.effective_from, id],
-        );
-        superseded = s.rows.map((r) => r.id).sort();
-      }
-      const updated = await c.query<DbTargetRow>(
-        `UPDATE dept_kpi_targets SET status = $3, decided_by = $4, decided_at = now()
-          WHERE tenant_id = $1 AND id = $2
-         RETURNING ${ROW_COLUMNS}`,
-        [tenantId, id, decision === "approve" ? "approved" : "rejected", decidedBy],
+    let superseded: string[] = [];
+    if (decision === "approve") {
+      const s = await c.query<{ id: string }>(
+        `UPDATE dept_kpi_targets SET status = 'superseded'
+          WHERE tenant_id = $1 AND unit_node_id = $2 AND kpi_key = $3 AND status = 'approved'
+            AND effective_from >= $4::date AND id <> $5
+         RETURNING id`,
+        [tenantId, current.unit_node_id, current.kpi_key, current.effective_from, id],
       );
-      return { ok: true, row: toRow(updated.rows[0]), superseded };
-    },
-    { modules: DEPT_KPI_MODULES },
-  );
+      superseded = s.rows.map((r) => r.id).sort();
+    }
+    const updated = await c.query<DbTargetRow>(
+      `UPDATE dept_kpi_targets SET status = $3, decided_by = $4, decided_at = now()
+        WHERE tenant_id = $1 AND id = $2
+       RETURNING ${ROW_COLUMNS}`,
+      [tenantId, id, decision === "approve" ? "approved" : "rejected", decidedBy],
+    );
+    return { ok: true, row: toRow(updated.rows[0]), superseded };
+  };
+  return client ? run(client) : withTenants([tenantId], run, { modules: DEPT_KPI_MODULES });
+}
+
+export type BatchDecisionOutcome =
+  | { ok: true; outcomes: Map<string, { row: TargetRow; superseded: string[] }> }
+  | { ok: false; failedId: string; reason: "not_found" | "not_proposed" };
+
+/**
+ * DW-10b (§58.3): decide `ids` (already in their processing order, see `decisionOrder`) in ONE transaction. The first id
+ * that cannot be decided (gone, or no longer `proposed`: a race lost between the controller's checks and here) aborts the
+ * transaction, so every earlier decision and supersession is rolled back, and answers `{ok: false, failedId, reason}`.
+ */
+export async function decideTargetsAtomically(
+  tenantId: string,
+  ids: readonly string[],
+  decision: "approve" | "reject",
+  decidedBy: string,
+): Promise<BatchDecisionOutcome> {
+  class Abort extends Error {
+    constructor(
+      public readonly failedId: string,
+      public readonly reason: "not_found" | "not_proposed",
+    ) {
+      super("batch decision aborted");
+    }
+  }
+  try {
+    const outcomes = await withTenants(
+      [tenantId],
+      async (c) => {
+        const done = new Map<string, { row: TargetRow; superseded: string[] }>();
+        for (const id of ids) {
+          const o = await decideTarget(tenantId, id, decision, decidedBy, c);
+          if (!o.ok) throw new Abort(id, o.reason);
+          done.set(id, { row: o.row, superseded: o.superseded });
+        }
+        return done;
+      },
+      { modules: DEPT_KPI_MODULES },
+    );
+    return { ok: true, outcomes };
+  } catch (err) {
+    if (err instanceof Abort) return { ok: false, failedId: err.failedId, reason: err.reason };
+    throw err;
+  }
 }
 
 // ═══════════════════════════════ targets: read ═══════════════════════════════

@@ -7,6 +7,9 @@
 //   GET  /api/:t/dept-kpis/targets?unitNodeId=                  — each KPI's in-force row, open proposals, history
 //   POST /api/:t/dept-kpis/targets                              — the head proposes (201)
 //   POST /api/:t/dept-kpis/targets/:id/approve | /reject        — the approver decides (200)
+//   GET  /api/:t/dept-kpis/months?unitNodeId=&from=&to=         — DW-10b: the unit's KPIs month by month (§58.1)
+//   POST /api/:t/dept-kpis/targets/batch                        — DW-10b: the head proposes up to 36 targets at once (201, §58.2)
+//   POST /api/:t/dept-kpis/targets/decide-batch                 — DW-10b: the approver decides up to 36 at once (200, §58.3)
 //
 // ── THE WALLS ────────────────────────────────────────────────────────────────────────────────────
 //   1. Cerbos — `dept_kpi_target` (cerbos/policies/resource_dept_kpi_target.yaml). `read` is tenant-wide in Cerbos;
@@ -47,6 +50,7 @@ import {
   ForbiddenException,
   Get,
   HttpCode,
+  HttpException,
   NotFoundException,
   Param,
   Post,
@@ -72,20 +76,45 @@ import {
   requiresUnitNarrowing,
   todayIsoInTz,
 } from "./person-scope";
-import { compareByConditionThenName, departmentUnits, findOrgUnit, kpiDefFor, workspaceSlugFor, type OrgUnitRef } from "./dept-kpis";
+import { compareByConditionThenName, departmentUnits, findOrgUnit, workspaceSlugFor, type OrgUnitRef } from "./dept-kpis";
 import {
   DEPT_KPI_MODULES,
   assembleTargetsView,
   companyVertical,
   decideTarget,
+  decideTargetsAtomically,
   evaluateUnits,
   fetchTarget,
   insertProposal,
+  insertProposals,
   listUnitTargets,
+  type TargetRow,
+  type UnitKpis,
 } from "./dept-kpi-targets";
+import {
+  FieldError,
+  MAX_NOTE,
+  assembleSeries,
+  checkProposalAgainstWorkspace,
+  decisionOrder,
+  monthWindow,
+  parseBatchItems,
+  parseDecideBatchBody,
+  parseProposalShape,
+  validateBatchItems,
+} from "./dept-kpi-batch";
 
-const MONTH_START_RE = /^\d{4}-(0[1-9]|1[0-2])-01$/;
-const MAX_NOTE = 2000;
+/** A FieldError is a 400 that names its input (`{message, field}`: the error filter puts `field` beside `error`). */
+function badRequest(err: unknown): never {
+  if (err instanceof FieldError) throw new BadRequestException({ message: err.message, field: err.field });
+  throw err;
+}
+
+/** A 403 from Cerbos, with the row that stopped a batch beside it (`failedId`, §58.3). Everything else it said is kept. */
+function forbiddenFor(err: HttpException, failedId: string): ForbiddenException {
+  const res = err.getResponse();
+  return new ForbiddenException({ ...(typeof res === "string" ? { message: res } : (res as object)), failedId });
+}
 
 // DW-10a: `isCompanyWide` and the "placed, leads, or company-wide" predicate moved to core/unit-reach.ts, which the notice board
 // shares. Re-exported so the appraisal and watch controllers keep importing it from here.
@@ -203,6 +232,39 @@ export class DeptKpisController {
     return { period: range, departments: reads.sort(compareByConditionThenName) };
   }
 
+  /**
+   * DW-10b (§58.1): one unit's KPIs month by month, oldest first. The read gate is `GET /dept-kpis`' own (the shared
+   * `authorizeUnitRead`); the window is checked AFTER it, so a caller who may not read the unit gets 403 whatever the window.
+   * Each month is one `evaluateUnits` call judged against the target in force at that month's start, and the months run one
+   * after another, never together: one request must not fan the readers out across a year on the 2-vCPU box.
+   */
+  @Get("months")
+  async months(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("unitNodeId") unitNodeIdRaw?: string,
+    @Query("from") fromRaw?: string,
+    @Query("to") toRaw?: string,
+  ) {
+    const unitNodeId = requireUnitParam(unitNodeIdRaw);
+    const { unit, structure } = await this.authorizeUnitRead(req.principal, tenantId, unitNodeId);
+    const today = todayIsoInTz(config.reportsTz);
+    let slots;
+    try {
+      slots = monthWindow(fromRaw, toRaw, today);
+    } catch (err) {
+      return badRequest(err);
+    }
+    const vertical = await companyVertical(tenantId);
+    const departments = departmentUnits(structure);
+    const perMonth: UnitKpis[] = [];
+    for (const slot of slots) {
+      const [read] = await evaluateUnits(tenantId, vertical, [unit], departments, { periodKind: "month", start: slot.start, end: slot.end }, slot.start, today);
+      perMonth.push(read);
+    }
+    return assembleSeries(unit, perMonth[0].workspace, slots, perMonth);
+  }
+
   // ---------------- targets (§40.2) ----------------
 
   @Get("targets")
@@ -231,43 +293,140 @@ export class DeptKpisController {
 
     // (3) the body.
     if (!unitNodeId.trim()) throw new BadRequestException({ message: "unitNodeId is required", field: "unitNodeId" });
-    const kpiKey = typeof body.kpiKey === "string" ? body.kpiKey : "";
-    if (!kpiKey) throw new BadRequestException({ message: "kpiKey is required", field: "kpiKey" });
-    const effectiveFrom = typeof body.effectiveFrom === "string" ? body.effectiveFrom : "";
-    if (!MONTH_START_RE.test(effectiveFrom)) {
-      throw new BadRequestException({ message: "effectiveFrom must be the first day of a month (YYYY-MM-01)", field: "effectiveFrom" });
+    let shape;
+    try {
+      shape = parseProposalShape(body as Record<string, unknown>);
+    } catch (err) {
+      return badRequest(err);
     }
-    const target = body.target;
-    if (typeof target !== "number" || !Number.isFinite(target)) throw new BadRequestException({ message: "target must be a number", field: "target" });
-    const tolerance = body.tolerance;
-    if (typeof tolerance !== "number" || !Number.isFinite(tolerance) || tolerance < 0) {
-      throw new BadRequestException({ message: "tolerance must be a number of at least 0", field: "tolerance" });
-    }
-    let note: string | null = null;
-    if (body.note !== undefined && body.note !== null) {
-      if (typeof body.note !== "string" || body.note.length > MAX_NOTE) {
-        throw new BadRequestException({ message: `note must be a string of at most ${MAX_NOTE} characters`, field: "note" });
-      }
-      note = body.note.trim() || null;
-    }
+    const { kpiKey, effectiveFrom, target, tolerance, note } = shape;
 
     // (4) the unit exists, and the KPI is one of its workspace's set.
     const structure = await withTenants([tenantId], (c) => loadOrgStructure(c, tenantId), { modules: DEPT_KPI_MODULES });
     const unit = findOrgUnit(structure, unitNodeId);
     if (!unit) throw new NotFoundException({ message: "unit_not_found", field: "unitNodeId" });
     const workspace = workspaceSlugFor(await companyVertical(tenantId), unit.name);
-    const def = kpiDefFor(workspace, kpiKey);
-    if (!def) throw new BadRequestException({ message: `kpiKey is not a KPI of this unit's workspace (${workspace})`, field: "kpiKey" });
-    if (def.unit === "percent" && (target < 0 || target > 1 || tolerance > 1)) {
-      throw new BadRequestException({ message: "a percent target and tolerance are fractions between 0 and 1 (0.85 = 85%)", field: "target" });
+    try {
+      checkProposalAgainstWorkspace(workspace, { kpiKey, target, tolerance });
+    } catch (err) {
+      return badRequest(err);
     }
-    if (def.unit !== "percent" && target < 0) throw new BadRequestException({ message: "target must not be negative", field: "target" });
 
     const row = await insertProposal(tenantId, { unitNodeId, kpiKey, effectiveFrom, target, tolerance, note }, principal.userId);
     await writeActivity(tenantId, principal.userId, "proposed", "dept_kpi_target", row.id, {
       unitNodeId, kpiKey, effectiveFrom, target, tolerance, ...(note ? { note } : {}),
     });
     return { id: row.id, status: row.status };
+  }
+
+  /**
+   * DW-10b (§58.2): the head proposes up to 36 targets for one unit in one request. The single propose's order, with the
+   * authorization ONCE before any item is looked at: the unit's ancestry, Cerbos `propose`, then the body (each item exactly
+   * as a single proposal, the first invalid one naming its index), then the unit's existence. All proposals are inserted in one
+   * transaction, or none; each writes its own `proposed` activity row.
+   */
+  @Post("targets/batch")
+  @HttpCode(201)
+  async proposeBatch(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Body() rawBody: { unitNodeId?: unknown; items?: unknown }) {
+    const principal = req.principal;
+    const body = rawBody ?? {};
+    const unitNodeId = typeof body.unitNodeId === "string" ? body.unitNodeId : "";
+    // (1) the unit's ancestry from the closure, (2) authorize: before any body validation.
+    const unitAncestors = await unitAncestorsOf(tenantId, unitNodeId);
+    await authorize(principal, { kind: "dept_kpi_target", tenantId, module: "reports", unitAncestors }, "propose");
+    if (!principal.userId) throw new BadRequestException("no principal user");
+
+    // (3) the body: the unit, the list, then each item in order.
+    if (!unitNodeId.trim()) throw new BadRequestException({ message: "unitNodeId is required", field: "unitNodeId" });
+    let items: unknown[];
+    try {
+      items = parseBatchItems(body.items);
+    } catch (err) {
+      return badRequest(err);
+    }
+    // The unit is looked up BEFORE the items are judged, because "a KPI of the unit's workspace" needs its name; its absence
+    // is only answered (404) once every item's shape is sound, the single propose's order (shape, unit, workspace).
+    const structure = await withTenants([tenantId], (c) => loadOrgStructure(c, tenantId), { modules: DEPT_KPI_MODULES });
+    const unit = findOrgUnit(structure, unitNodeId);
+    const workspace = unit ? workspaceSlugFor(await companyVertical(tenantId), unit.name) : null;
+    let proposals;
+    try {
+      proposals = validateBatchItems(items, workspace);
+    } catch (err) {
+      return badRequest(err);
+    }
+    if (!unit) throw new NotFoundException({ message: "unit_not_found", field: "unitNodeId" });
+
+    const rows = await insertProposals(tenantId, proposals.map((p) => ({ unitNodeId, ...p })), principal.userId);
+    for (const [i, row] of rows.entries()) {
+      const p = proposals[i];
+      await writeActivity(tenantId, principal.userId, "proposed", "dept_kpi_target", row.id, {
+        unitNodeId, kpiKey: p.kpiKey, effectiveFrom: p.effectiveFrom, target: p.target, tolerance: p.tolerance, ...(p.note ? { note: p.note } : {}),
+      });
+    }
+    return { ids: rows.map((r) => r.id) };
+  }
+
+  /**
+   * DW-10b (§58.3): the approver decides up to 36 proposals together, all or none. The tenant `read` gate runs once before any
+   * row is looked up; then each id in the order given: it exists (404), it is `proposed` (409 `not_proposed`), an approval is
+   * not of the caller's own proposal (409 `cannot_approve_own_proposal`), Cerbos allows `approve`/`reject` with that row's unit
+   * ancestry (403). Every refusal carries `failedId`. The decisions then run in ONE transaction (`decideTargetsAtomically`).
+   */
+  @Post("targets/decide-batch")
+  @HttpCode(200)
+  async decideBatch(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Body() rawBody: Record<string, unknown>) {
+    const principal = req.principal;
+    await authorize(principal, { kind: "dept_kpi_target", tenantId, module: "reports" }, "read");
+    if (!principal.userId) throw new BadRequestException("no principal user");
+    let parsed;
+    try {
+      parsed = parseDecideBatchBody(rawBody ?? {});
+    } catch (err) {
+      return badRequest(err);
+    }
+    const { decision, ids, note } = parsed;
+
+    const rows: TargetRow[] = [];
+    const ancestry = new Map<string, string[]>();
+    for (const id of ids) {
+      const existing = isUuidShaped(id) ? await fetchTarget(tenantId, id) : null;
+      if (!existing) throw new NotFoundException({ message: "target not found", failedId: id });
+      if (existing.status !== "proposed") throw new ConflictException({ message: "not_proposed", failedId: id });
+      if (decision === "approve" && existing.proposedBy === principal.userId) {
+        throw new ConflictException({ message: "cannot_approve_own_proposal", failedId: id });
+      }
+      let unitAncestors = ancestry.get(existing.unitNodeId);
+      if (!unitAncestors) {
+        unitAncestors = await unitAncestorsOf(tenantId, existing.unitNodeId);
+        ancestry.set(existing.unitNodeId, unitAncestors);
+      }
+      try {
+        await authorize(principal, { kind: "dept_kpi_target", tenantId, module: "reports", id, unitAncestors }, decision);
+      } catch (err) {
+        throw err instanceof ForbiddenException ? forbiddenFor(err, id) : err;
+      }
+      rows.push(existing);
+    }
+
+    const result = await decideTargetsAtomically(tenantId, decisionOrder(rows).map((r) => r.id), decision, principal.userId);
+    if (!result.ok) {
+      if (result.reason === "not_found") throw new NotFoundException({ message: "target not found", failedId: result.failedId });
+      throw new ConflictException({ message: "not_proposed", failedId: result.failedId });
+    }
+    const decided: Array<{ id: string; status: TargetRow["status"]; superseded: string[] }> = [];
+    for (const id of ids) {
+      const { row, superseded } = result.outcomes.get(id)!;
+      await writeActivity(tenantId, principal.userId, decision === "approve" ? "approved" : "rejected", "dept_kpi_target", id, {
+        unitNodeId: row.unitNodeId,
+        kpiKey: row.kpiKey,
+        effectiveFrom: row.effectiveFrom,
+        ...(superseded.length ? { superseded } : {}),
+        ...(note ? { note } : {}),
+      });
+      decided.push({ id, status: row.status, superseded });
+    }
+    return { decided };
   }
 
   @Post("targets/:id/approve")
