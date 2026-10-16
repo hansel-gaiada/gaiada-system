@@ -61,9 +61,10 @@ test.describe("Department notices (DW-10a-2)", () => {
     await expect(now.locator("section.ov-block").nth(1)).toHaveAttribute("aria-label", "Today");
     await expect(now.locator("section.ov-block").nth(2)).toHaveAttribute("aria-label", "Notices");
 
-    // The tab: Notices follows Overview on the Overview row, and the board lists the unit's notices pinned first.
+    // The tab: Notices follows Overview on the Overview row (Department calendar, DW-10c-3, follows Notices), and the board lists the unit's
+    // notices pinned first.
     const strip = page.getByRole("navigation", { name: "Overview sections" });
-    await expect(strip.getByRole("link")).toHaveText(["Overview", "Notices"]);
+    await expect(strip.getByRole("link")).toHaveText(["Overview", "Notices", "Department calendar"]);
     await press(strip.getByRole("link", { name: "Notices" }));
     await expect(page).toHaveURL(/\/departments\/dept-1\/notices$/);
     await expect(strip.getByRole("link", { name: "Notices" })).toHaveAttribute("aria-current", "page");

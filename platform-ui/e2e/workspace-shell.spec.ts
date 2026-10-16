@@ -144,6 +144,7 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
     await expect(strip.getByRole("link", { name: "Activity" })).toHaveAttribute("aria-current", "page");
 
     // The Overview row has two tabs since DW-10a-2 (Overview, then Notices: the company-wide board for the Office of the GM), so it has a strip.
+    // The Office of the GM has no Department calendar tab (DW-10c-3): its Overview is the company's, so the strip holds exactly these two.
     await page.goto("/departments/dept-5");
     await expect(menu(page, "Office of the GM")).toBeVisible();
     const overview = page.getByRole("navigation", { name: "Overview sections" });
