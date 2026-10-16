@@ -675,6 +675,27 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.work_request.create" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_work_request_send_across and perm_work_request_read_across — DW-10e (2026-10-16, docs/PERMISSION-CONTRACT.md §49,
+    # docs/FRONTEND-BFF-CONTRACT.md §60). One generic global-or-company mirror each. Safe to mirror, unlike cancel/deliver/decline
+    # above: the ALLOWs name scope roles only and read no attribute (no self-scoped rule, no org_unit_lead rule), so neither
+    # permission-arm-hazard-scan Pattern B nor the iam-04-reg1 mirror-reach invariant applies. The permission-native `owner`
+    # reaches both through these.
+    - name: perm_work_request_send_across
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.work_request.send_across" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_work_request_read_across
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.work_request.read_across" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_client_report_read — PV7-04a (2026-10-15, docs/FRONTEND-BFF-CONTRACT.md §55, docs/PERMISSION-CONTRACT.md §46).
     # One generic global-or-company mirror, for read only. NO draft/publish/withdraw mirror, on purpose: each is reachable
     # by the client's-owner rule (self-scoped, `ownerUserId == principal.id`), which a flat `perms` mirror cannot express

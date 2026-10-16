@@ -722,6 +722,45 @@ describe("work_request.decide (DW-5c)", () => {
   });
 });
 
+// DW-10e: `work_request.send_across` and `work_request.read_across` mirror resource_work_request (PERMISSION-CONTRACT §49), both
+// checked on the requesting company. Their biconditional against the bundles is rbac-capability-parity.test.ts; these pin the role
+// sets in words. `read_across` is the wide tier: a member or viewer reads only their own sent requests (the handler's narrowing).
+describe("work_request.send_across / work_request.read_across (DW-10e)", () => {
+  const as = (role: string, scopeType = "company", scopeId: string | null = "co-a") => me([{ role, scopeType, scopeId }]);
+  it("send_across is held by company_admin, manager, member, owner and platform_admin", () => {
+    for (const role of ["company_admin", "manager", "member", "owner"]) {
+      expect(can(as(role), "work_request.send_across", "co-a"), role).toBe(true);
+    }
+    expect(can(as("platform_admin", "global", null), "work_request.send_across", "co-a")).toBe(true);
+  });
+  it("read_across is held by company_admin, manager, owner and platform_admin, never a member or a viewer", () => {
+    for (const role of ["company_admin", "manager", "owner"]) {
+      expect(can(as(role), "work_request.read_across", "co-a"), role).toBe(true);
+    }
+    expect(can(as("platform_admin", "global", null), "work_request.read_across", "co-a")).toBe(true);
+    for (const role of ["member", "viewer", "client", "hr_manager"]) {
+      expect(can(as(role), "work_request.read_across", "co-a"), role).toBe(false);
+    }
+  });
+  it("send_across is not held by a viewer, a portal contact or a module tier", () => {
+    for (const role of ["viewer", "client", "hr_manager"]) {
+      expect(can(as(role), "work_request.send_across", "co-a"), role).toBe(false);
+    }
+  });
+  it("neither crosses companies, and neither reaches a unit lead through can()", () => {
+    for (const cap of ["work_request.send_across", "work_request.read_across"] as const) {
+      expect(can(as("manager"), cap, "co-b"), cap).toBe(false);
+      const head = me([{ role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-cre" }]);
+      expect(can(head, cap, "co-a"), `${cap} head`).toBe(false);
+      expect(canInUnit(head, cap, "co-a", ["d-cre", "root"]), `${cap} head in unit`).toBe(false);
+    }
+  });
+  it("are declared in the capability map with the one permission each mirrors", () => {
+    expect(CAPABILITY_MAP["work_request.send_across"]).toEqual({ permissions: ["core.work_request.send_across"], semantics: "all" });
+    expect(CAPABILITY_MAP["work_request.read_across"]).toEqual({ permissions: ["core.work_request.read_across"], semantics: "all" });
+  });
+});
+
 // DW-4e-2: the department KPI target capabilities mirror resource_dept_kpi_target.yaml (BFF §40.2). `propose` is the
 // company_admin tier plus the head of the unit (canInUnit); `approve` is the company_admin tier, which `owner` mirrors through
 // the permission arm; `manager` (every head's company-wide role) and a unit lead never approve. The parity register explains why

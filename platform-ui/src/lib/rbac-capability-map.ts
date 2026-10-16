@@ -908,6 +908,18 @@ export const CAPABILITY_MAP = {
     semantics: "all",
   },
 
+  // ── DW-10e · requests across group companies (contract PERMISSION §49, BFF §60) ──────────────
+  // One key each, so `all`. Both are checked on the requesting company. `send_across` is also DENIED to bot and automation
+  // principals by the server; no role list can express that, the server stays the authority.
+  "work_request.send_across": {
+    permissions: ["core.work_request.send_across"],
+    semantics: "all",
+  },
+  "work_request.read_across": {
+    permissions: ["core.work_request.read_across"],
+    semantics: "all",
+  },
+
   // ── DW-4e-2 · department KPI targets (contract §40.2) ────────────────────────────────────────
   "reports.dept_kpi_target.propose": {
     permissions: ["reports.dept_kpi_target.propose"],

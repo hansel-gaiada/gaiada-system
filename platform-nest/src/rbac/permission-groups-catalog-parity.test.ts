@@ -137,7 +137,8 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // PV7-01 (2026-10-15): +1 grantable (reports.document.read_client on the EXISTING report_document kind, added to the existing `team_project_reports` group). 459 -> 460.
     // PV7-04a (2026-10-15): +4 grantable (core.client_report.{read,draft,publish,withdraw} on the NEW client_report kind, in 1 NEW authoring group `client_reports`, sensitive, not advancedOnly). 460 -> 464.
     // DW-10a (2026-10-15): +4 grantable (core.dept_notice.{read,post,edit,withdraw} on the NEW dept_notice kind, in 1 NEW authoring group `notices`, not sensitive, not advancedOnly). 464 -> 468.
-    expect(grantable.length).toBe(468);
+    // DW-10e (2026-10-16): +2 grantable (core.work_request.{send_across,read_across} on the EXISTING work_request kind, both in the existing `work_requests` group). 468 -> 470.
+    expect(grantable.length).toBe(470);
     expect(relationshipKeys.size).toBe(15);
   });
 

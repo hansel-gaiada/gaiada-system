@@ -152,7 +152,8 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // PV7-01 (2026-10-15): +1 pair on the EXISTING report_document kind (`read_client`, no new kind). 474 -> 475, kinds stay 110.
     // PV7-04a (2026-10-15): +4 pairs / +1 kind: `client_report` (read/draft/publish/withdraw, NEW core kind: a report published to a client). 475 -> 479, kinds 110 -> 111.
     // DW-10a (2026-10-15): +4 pairs / +1 kind: `dept_notice` (read/post/edit/withdraw, NEW core kind: a notice on a department's board). 479 -> 483, kinds 111 -> 112.
-    expect(catalog.length).toBe(483);
+    // DW-10e (2026-10-16): +2 pairs on the EXISTING work_request kind (`send_across`, `read_across`, no new kind). 483 -> 485, kinds stay 112.
+    expect(catalog.length).toBe(485);
     expect(catalogKindSet.size).toBe(112);
   });
 

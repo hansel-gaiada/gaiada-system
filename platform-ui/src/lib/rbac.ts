@@ -429,6 +429,15 @@ export const CAPABILITIES = [
   // so a pure owner is refused by Cerbos: the mirror leaves `owner` out and the parity register says why.
   "work_request.decide",
 
+  // ── DW-10e (2026-10-16, requests across group companies, docs/PERMISSION-CONTRACT.md §49, BFF §60) — mirrors
+  // `resource_work_request.yaml` `send_across` and `read_across`, both checked on the REQUESTING company.
+  // `send_across`: company_admin, manager and member by role (the reach of `create`); owner through the `perm_*` arm; platform_admin by
+  // wildcard. Never a bot or automation principal (the server DENY), which no role list can express.
+  "work_request.send_across",
+  // `read_across`: company_admin and manager by role (DW-D40's wide tier: every request the company sent); owner through the `perm_*`
+  // arm; platform_admin by wildcard. A member or viewer reads only their own sent requests, which the handler narrows (no capability).
+  "work_request.read_across",
+
   // ── DW-4e-2 (2026-10-14, department KPI targets, docs/FRONTEND-BFF-CONTRACT.md §40.2) — mirrors `resource_dept_kpi_target.yaml`.
   // `propose`: company_admin by role and org_unit_lead over the unit or an enclosing one (`canInUnit`); platform_admin by wildcard.
   // The catalog bundles it for `owner` too, but the policy has no permission-arm mirror for `propose` (PERMISSION-CONTRACT §38), so
@@ -540,6 +549,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "agency.campaign.manage",
     // DW-5c UI: company_admin is on work_request `deliver` and `decline`.
     "work_request.decide",
+    // DW-10e: and on `send_across` and `read_across`.
+    "work_request.send_across", "work_request.read_across",
     // DW-4e-2: company_admin proposes, approves and rejects department KPI targets.
     "reports.dept_kpi_target.propose", "reports.dept_kpi_target.approve",
     // DW-4e-3: and comments on and assesses a department's appraisal.
@@ -626,6 +637,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "agency.campaign.manage",
     // DW-5c UI: manager is on work_request `deliver` and `decline`.
     "work_request.decide",
+    // DW-10e: and on `send_across` and `read_across`.
+    "work_request.send_across", "work_request.read_across",
   ],
   // A plain member's own report, own check-in and own appraisal are NOT capabilities — they are
   // self-service, gated server-side by `ownerId`/`subjectUserId == principal.id` (§11 principle 2:
@@ -660,7 +673,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // (`"read"` also on `resource_agency_discovery_submission.yaml`), but NOT on `triage`/`convert` —
   // so `.read`/`.write` only, matching `pipeline.write`'s own member-inclusive-but-not-manage shape.
   // CC-D10 — `client.write` but NOT `client.delete`: resource_client.yaml's 2026-08-18 split.
-  member: ["pm.contribute", "people.directory", "pipeline.write", "lms.catalogue.view", "agency.lead.read", "agency.lead.write", "client.write"],
+  // DW-10e: `member` is named on `resource_work_request.yaml`'s `send_across` rule (the reach of `create`), but NOT on `read_across`.
+  member: ["pm.contribute", "people.directory", "pipeline.write", "lms.catalogue.view", "agency.lead.read", "agency.lead.write", "client.write", "work_request.send_across"],
   // Gap 3 find — see the `Role` union's `viewer` comment for the full evidence trail. Matches
   // `member`'s ORIGINAL two capabilities exactly: `pm.contribute` + `people.directory` (DR-2a above).
   // Deliberately does NOT also pick up `member`'s IAM-02a-FIX-2 `pipeline.write` grant: `viewer` is
@@ -899,6 +913,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "reports.dept_kpi_target.approve",
     // DW-4e-3: and assesses (`perm_dept_kpi_target_appraisal_assess`). NOT appraisal_comment (no mirror, as propose).
     "reports.dept_kpi_target.appraisal_assess",
+    // DW-10e: owner holds both keys in the bundle AND the policy's permission arm
+    // (`perm_work_request_send_across`, `perm_work_request_read_across`) honours them.
+    "work_request.send_across", "work_request.read_across",
   ],
 };
 

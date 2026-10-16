@@ -110,8 +110,9 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // PV7-01 (2026-10-15): +1 grantable / +1 total on the existing report_document kind (`read_client`, uiGrantable TRUE). 474 -> 475 / 459 -> 460.
     // PV7-04a (2026-10-15): +4 grantable / +4 total on the NEW client_report kind (all uiGrantable TRUE). 475 -> 479 / 460 -> 464.
     // DW-10a (2026-10-15): +4 grantable / +4 total on the NEW dept_notice kind (all uiGrantable TRUE). 479 -> 483 / 464 -> 468.
-    expect(permissions.length).toBe(483);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(468);
+    // DW-10e (2026-10-16): +2 grantable / +2 total on the existing work_request kind (send_across, read_across; both uiGrantable TRUE). 483 -> 485 / 468 -> 470.
+    expect(permissions.length).toBe(485);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(470);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

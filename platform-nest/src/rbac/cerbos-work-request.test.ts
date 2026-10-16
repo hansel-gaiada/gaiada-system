@@ -11,7 +11,14 @@
 //   6. EFFECT_DENY on create / cancel / deliver / decline for automation and bot principals (beats the platform_admin
 //      wildcard and the permission mirrors); read stays allowed.
 //   7. The permission arm covers read and create and NOT cancel / deliver / decline.
-//   8. `owner` (permission-native, zero rules) holds the same five keys as company_admin in its bundle.
+//   8. `owner` (permission-native, zero rules) holds the same keys as company_admin in its bundle.
+//   DW-10e (docs/PERMISSION-CONTRACT.md §49) adds two actions for requests across group companies, both checked on the REQUESTING
+//   company:
+//   9. send_across: company_admin / manager / member (the reach of create, as its own action); platform_admin; the permission-native
+//      owner through the mirror. EFFECT_DENY for automation and bot, like create.
+//  10. read_across: company_admin / manager; platform_admin; the permission-native owner through the mirror. NOT denied to agents
+//      (like read), NO requester rule (a member or viewer never reads across, even as the requester: the requester's read is the
+//      handler's narrowing), NO org_unit_lead rule. Every claim above (1-8) stays exactly as it was.
 //
 // Two layers:
 //   A. STATIC (always runs): re-parses cerbos/policies/*.yaml and pins the structure.
@@ -28,6 +35,9 @@ import type { Principal, RoleGrant, PermissionGrant } from "./principal";
 const POLICIES_DIR = join(__dirname, "../../cerbos/policies");
 const ACTIONS = ["read", "create", "cancel", "deliver", "decline"] as const;
 const WRITES = ["create", "cancel", "deliver", "decline"] as const;
+// DW-10e: the two across-company actions. The five above are the §36 matrix and stay exactly as they were.
+const ACROSS = ["send_across", "read_across"] as const;
+const EVERY_ACTION = [...ACTIONS, ...ACROSS] as const;
 
 interface ParsedRule {
   actions: string[];
@@ -123,16 +133,43 @@ describe("DW-5c static pin — resource_work_request.yaml", () => {
     }
   });
 
-  it("an EFFECT_DENY on create/cancel/deliver/decline for automation and bot, on roles [user], and NOT on read", () => {
+  it("an EFFECT_DENY on create/send_across/cancel/deliver/decline for automation and bot, on roles [user], and NOT on read or read_across", () => {
     const denies = rules.filter((r) => r.effect === "EFFECT_DENY");
     expect(denies.length).toBe(1);
     expect(denies[0].roles).toEqual(["user"]);
-    expect(denies[0].actions.sort()).toEqual([...WRITES].sort());
+    expect(denies[0].actions.sort()).toEqual([...WRITES, "send_across"].sort());
+    expect(denies[0].actions).not.toContain("read");
+    expect(denies[0].actions).not.toContain("read_across");
     expect(denies[0].condition).toBe('has(request.principal.attr.kind) && request.principal.attr.kind in ["automation", "bot"]');
   });
 
-  it("the permission arm mirrors read and create exactly once each, under inTenant && notLow && inRoot, and NOT cancel/deliver/decline", () => {
-    for (const a of ["read", "create"]) {
+  it("DW-10e send_across = ONE role-arm rule for company_admin/manager/member (inTenant && notLow); read_across = ONE for company_admin/manager", () => {
+    const send = reach("send_across");
+    expect(send.length).toBe(1);
+    expect(send[0].actions).toEqual(["send_across"]);
+    expect(send[0].derivedRoles.sort()).toEqual(["company_admin", "manager", "member"]);
+    expect(send[0].condition).toBe("variables.inTenant && variables.notLow");
+    const readAcross = reach("read_across");
+    expect(readAcross.length).toBe(1);
+    expect(readAcross[0].actions).toEqual(["read_across"]);
+    expect(readAcross[0].derivedRoles.sort()).toEqual(["company_admin", "manager"]);
+    expect(readAcross[0].condition).toBe("variables.inTenant && variables.notLow");
+  });
+
+  it("DW-10e neither across action has a requester, assignee or org_unit_lead rule, and neither names viewer (attribute-free scope roles only)", () => {
+    for (const r of roleArm.filter((x) => x.actions.some((a) => (ACROSS as readonly string[]).includes(a)))) {
+      expect(r.derivedRoles).not.toContain("org_unit_lead");
+      expect(r.derivedRoles).not.toContain("viewer");
+      expect(r.condition).not.toContain("requestedBy");
+      expect(r.condition).not.toContain("assigneeIds");
+      expect(r.condition).not.toContain("unitAncestors");
+      // one action per rule, so no across action rides beside another
+      expect(r.actions.length).toBe(1);
+    }
+  });
+
+  it("the permission arm mirrors read, create, send_across and read_across exactly once each, under inTenant && notLow && inRoot, and NOT cancel/deliver/decline", () => {
+    for (const a of ["read", "create", "send_across", "read_across"]) {
       const mirrors = rules.filter((r) => r.derivedRoles.some((d) => d.startsWith("perm_")) && r.actions.includes(a));
       expect(mirrors.length, `perm mirror rules for ${a}`).toBe(1);
       expect(mirrors[0].derivedRoles).toEqual([`perm_work_request_${a}`]);
@@ -165,18 +202,21 @@ describe("DW-5c static pin — resource_work_request.yaml", () => {
     expect(src).toContain("unitAncestors: r.unitAncestors ?? []");
   });
 
-  it("the bundle JSON: owner == company_admin (all five), manager all five, member read/create/cancel/deliver (cancel and deliver self-scoped), viewer read, org_unit_lead deliver+decline, client none", () => {
+  it("the bundle JSON: owner == company_admin (all seven), manager all seven, member read/create/send_across/cancel/deliver (cancel and deliver self-scoped), viewer read, org_unit_lead deliver+decline, client none", () => {
     const doc = JSON.parse(readFileSync(join(__dirname, "role-permission-bundles.json"), "utf8")) as {
       roles: Record<string, string[]>;
       selfScoped: Record<string, string[]>;
     };
     const keys = (role: string) => doc.roles[role].filter((k) => k.startsWith("core.work_request.")).sort();
-    const all = ACTIONS.map((a) => `core.work_request.${a}`).sort();
+    const all = EVERY_ACTION.map((a) => `core.work_request.${a}`).sort();
     expect(keys("company_admin")).toEqual(all);
     expect(keys("owner")).toEqual(all);
     expect(keys("manager")).toEqual(all);
     expect(keys("platform_admin")).toEqual(all);
-    expect(keys("member")).toEqual(["core.work_request.cancel", "core.work_request.create", "core.work_request.deliver", "core.work_request.read"]);
+    expect(keys("member")).toEqual([
+      "core.work_request.cancel", "core.work_request.create", "core.work_request.deliver", "core.work_request.read",
+      "core.work_request.send_across",
+    ]);
     expect(keys("viewer")).toEqual(["core.work_request.read"]);
     expect(keys("org_unit_lead")).toEqual(["core.work_request.decline", "core.work_request.deliver"]);
     expect(keys("client")).toEqual([]);
@@ -184,10 +224,19 @@ describe("DW-5c static pin — resource_work_request.yaml", () => {
       "core.work_request.cancel", "core.work_request.deliver",
     ]);
     expect((doc.selfScoped.org_unit_lead ?? []).filter((k) => k.startsWith("core.work_request."))).toEqual([]);
-    // create, read and decline are never in a self-scoped pair
+    // create, read, decline and the two across actions are never in a self-scoped pair
     for (const list of Object.values(doc.selfScoped)) {
-      for (const k of ["create", "read", "decline"]) expect(list).not.toContain(`core.work_request.${k}`);
+      for (const k of ["create", "read", "decline", "send_across", "read_across"]) expect(list).not.toContain(`core.work_request.${k}`);
     }
+  });
+
+  it("DW-10e bundle JSON: send_across = platform_admin/company_admin/owner/manager/member; read_across = platform_admin/company_admin/owner/manager; nobody else", () => {
+    const doc = JSON.parse(readFileSync(join(__dirname, "role-permission-bundles.json"), "utf8")) as {
+      roles: Record<string, string[]>;
+    };
+    const holders = (key: string) => Object.keys(doc.roles).filter((r) => doc.roles[r].includes(key)).sort();
+    expect(holders("core.work_request.send_across")).toEqual(["company_admin", "manager", "member", "owner", "platform_admin"]);
+    expect(holders("core.work_request.read_across")).toEqual(["company_admin", "manager", "owner", "platform_admin"]);
   });
 });
 
@@ -310,11 +359,11 @@ describe.skipIf(!live)("DW-5c Cerbos matrix — work_request, the permission arm
   const permP = (key: string, scopeType: "company" | "global" = "company", opts: { assurance?: Principal["assurance"]; kind?: string } = {}) =>
     principal([], { perms: [{ key, scopeType, scopeId: scopeType === "company" ? T1 : null }], ...opts });
 
-  for (const action of ["read", "create"] as const) {
+  for (const action of ["read", "create", "send_across", "read_across"] as const) {
     const key = `core.work_request.${action}`;
     it(`permission ${key} ALONE allows ${action} and no sibling action; no cross-tenant, no low assurance`, async () => {
       expect(await allow(permP(key), request(), action)).toBe(true);
-      for (const other of ACTIONS.filter((a) => a !== action)) {
+      for (const other of EVERY_ACTION.filter((a) => a !== action)) {
         expect(await allow(permP(key), request(), other), `${key} must not allow ${other}`).toBe(false);
       }
       expect(await allow(permP(key), request({}, T2), action)).toBe(false);
@@ -327,18 +376,127 @@ describe.skipIf(!live)("DW-5c Cerbos matrix — work_request, the permission arm
     expect(await allow(permP("core.work_request.read", "company", { kind: "bot" }), request(), "read")).toBe(true);
   });
 
+  it("DW-10e: a bot holding the send_across permission is denied (the DENY applies to the mirror), but a bot holding read_across may read across", async () => {
+    expect(await allow(permP("core.work_request.send_across", "company", { kind: "bot" }), request(), "send_across")).toBe(false);
+    expect(await allow(permP("core.work_request.send_across", "global", { kind: "automation" }), request(), "send_across")).toBe(false);
+    expect(await allow(permP("core.work_request.read_across", "company", { kind: "bot" }), request(), "read_across")).toBe(true);
+  });
+
+  it("DW-10e: a GLOBAL send_across / read_across permission reaches any company; a company grant for T2 does not reach T1", async () => {
+    for (const a of ACROSS) {
+      expect(await allow(permP(`core.work_request.${a}`, "global"), request(), a), `global ${a}`).toBe(true);
+      expect(await allow(permP(`core.work_request.${a}`, "global"), request({}, T2), a), `global ${a} @T2`).toBe(true);
+      const t2Only = principal([], { perms: [{ key: `core.work_request.${a}`, scopeType: "company", scopeId: T2 }] });
+      expect(await allow(t2Only, request(), a), `T2 grant of ${a} against T1`).toBe(false);
+    }
+  });
+
   it("the bare cancel / deliver / decline permissions allow NOTHING (there is deliberately no mirror)", async () => {
     for (const a of ["cancel", "deliver", "decline"] as const) {
       expect(await allow(permP(`core.work_request.${a}`), request({ requestedBy: ME, assigneeIds: [ME] }), a), a).toBe(false);
     }
   });
 
-  it("a permission-native OWNER (the bundle's keys, zero rules) reads and creates, but its cancel/deliver/decline keys have no arm", async () => {
+  it("a permission-native OWNER (the bundle's keys, zero rules) reads, creates, sends across and reads across, but its cancel/deliver/decline keys have no arm", async () => {
     const bundles = JSON.parse(readFileSync(join(__dirname, "role-permission-bundles.json"), "utf8")) as { roles: Record<string, string[]> };
     const ownerP = principal([co("owner")], {
       perms: bundles.roles.owner.map((key) => ({ key, scopeType: "company" as const, scopeId: T1 })),
     });
-    for (const a of ["read", "create"]) expect(await allow(ownerP, request(), a), `owner · ${a}`).toBe(true);
+    for (const a of ["read", "create", "send_across", "read_across"]) expect(await allow(ownerP, request(), a), `owner · ${a}`).toBe(true);
     for (const a of ["cancel", "deliver", "decline"]) expect(await allow(ownerP, request(), a), `owner · ${a}`).toBe(false);
+  });
+});
+
+// ─── DW-10e: the across-company actions. Both are checked on the REQUESTING company (T1). ───────────────────────
+describe.skipIf(!live)("DW-10e Cerbos matrix — work_request send_across (role x action)", () => {
+  const table: Array<[string, Principal, boolean]> = [
+    // allowed
+    ["company_admin @T1", principal([co("company_admin")]), true],
+    ["manager @T1", principal([co("manager")]), true],
+    ["member @T1 (the reach is the sender's company, not the row)", principal([co("member")]), true],
+    ["platform_admin (global, the wildcard)", principal([glob("platform_admin")]), true],
+    ["an employee-kind principal is unaffected by the DENY", principal([co("company_admin")], { kind: "employee" }), true],
+    // denied
+    ["viewer @T1", principal([co("viewer")]), false],
+    ["a member of ANOTHER company (T2 only)", principal([co("member", T2)], { companies: [T2] }), false],
+    ["company_admin of T2 only", principal([co("company_admin", T2)], { companies: [T2] }), false],
+    ["org_unit_lead of d-creative with no scope role (unitAncestors fed)", principal([lead("d-creative")]), false],
+    ["org_unit_lead of d-corp with no scope role", principal([lead("d-corp")]), false],
+    ["a company-scoped org_unit_lead grant (mis-scoped)", principal([co("org_unit_lead")]), false],
+    ["member @T1 at LOW assurance", principal([co("member")], { assurance: "low" }), false],
+    ["company_admin @T1 at LOW assurance", principal([co("company_admin")], { assurance: "low" }), false],
+    ["a portal contact (client @T1)", principal([co("client")]), false],
+    ["webdev_manager @T1 (a module tier)", principal([co("webdev_manager")]), false],
+    ["no grants at all", principal([]), false],
+    // denied even with the strongest role: the DENY beats every ALLOW, the wildcard included
+    ["a BOT holding member", principal([co("member")], { kind: "bot" }), false],
+    ["a BOT holding company_admin", principal([co("company_admin")], { kind: "bot" }), false],
+    ["an AUTOMATION principal holding company_admin", principal([co("company_admin")], { kind: "automation" }), false],
+    ["an AUTOMATION principal holding manager", principal([co("manager")], { kind: "automation" }), false],
+    ["platform_admin that is a bot (the DENY beats the wildcard)", principal([glob("platform_admin")], { kind: "bot" }), false],
+    ["platform_admin that is an automation principal", principal([glob("platform_admin")], { kind: "automation" }), false],
+  ];
+  for (const [label, p, expected] of table) {
+    it(`${label}: ${expected ? "allowed" : "denied"}`, async () => {
+      expect(await allow(p, request(), "send_across"), `${label}: work_request · send_across`).toBe(expected);
+      // the handler also checks on an id route, with the row's id and attributes
+      expect(await allow(p, request({ requestedBy: ME }), "send_across"), `${label}: work_request · send_across (id route)`).toBe(expected);
+    });
+  }
+});
+
+describe.skipIf(!live)("DW-10e Cerbos matrix — work_request read_across (role x action)", () => {
+  const table: Array<[string, Principal, Partial<Resource>, boolean]> = [
+    // allowed
+    ["company_admin @T1", principal([co("company_admin")]), {}, true],
+    ["manager @T1", principal([co("manager")]), {}, true],
+    ["platform_admin (global, the wildcard)", principal([glob("platform_admin")]), {}, true],
+    ["a BOT holding manager (read_across is not in the DENY: decided by its roles, like read)", principal([co("manager")], { kind: "bot" }), {}, true],
+    ["an AUTOMATION principal holding company_admin", principal([co("company_admin")], { kind: "automation" }), {}, true],
+    // denied: the requester's own read is the handler's narrowing, never this action
+    ["member @T1", principal([co("member")]), {}, false],
+    ["member @T1 who IS the requester (requestedBy = the principal)", principal([co("member")]), { requestedBy: ME }, false],
+    ["viewer @T1", principal([co("viewer")]), {}, false],
+    ["viewer @T1 who IS the requester", principal([co("viewer")]), { requestedBy: ME }, false],
+    ["manager of ANOTHER company (T2 only)", principal([co("manager", T2)], { companies: [T2] }), {}, false],
+    ["member of ANOTHER company (T2 only)", principal([co("member", T2)], { companies: [T2] }), {}, false],
+    ["org_unit_lead of d-creative with no scope role", principal([lead("d-creative")]), {}, false],
+    ["org_unit_lead of d-creative, resource fed unitAncestors holding the grant's node", principal([lead("d-creative")]), { unitAncestors: CREATIVE_ANCESTORS }, false],
+    ["org_unit_lead of d-corp (an ancestor), unitAncestors fed", principal([lead("d-corp")]), { unitAncestors: CREATIVE_ANCESTORS }, false],
+    ["org_unit_lead of d-creative + member (the lead arm adds nothing)", principal([lead("d-creative"), co("member")]), { unitAncestors: CREATIVE_ANCESTORS }, false],
+    ["company_admin @T1 at LOW assurance", principal([co("company_admin")], { assurance: "low" }), {}, false],
+    ["manager @T1 at LOW assurance", principal([co("manager")], { assurance: "low" }), {}, false],
+    ["a portal contact (client @T1)", principal([co("client")]), {}, false],
+    ["a portal contact that is the requester", principal([co("client")]), { requestedBy: ME }, false],
+    ["webdev_manager @T1 (a module tier)", principal([co("webdev_manager")]), {}, false],
+    ["no grants at all", principal([]), {}, false],
+  ];
+  for (const [label, p, extra, expected] of table) {
+    it(`${label}: ${expected ? "allowed" : "denied"}`, async () => {
+      expect(await allow(p, request(extra), "read_across"), `${label}: work_request · read_across`).toBe(expected);
+    });
+  }
+});
+
+describe.skipIf(!live)("DW-10e Cerbos — the across actions do not widen the §36 ones, and the §36 ones do not reach them", () => {
+  it("both across actions are checked on the REQUESTING tenant: a T1 grant does not reach a T2 resource", async () => {
+    const admin = principal([co("company_admin")]);
+    for (const a of ACROSS) expect(await allow(admin, request({}, T2), a), `${a} @T2`).toBe(false);
+  });
+
+  it("holding every §36 member rule grants neither across action (a member who is requester AND assignee still cannot read across)", async () => {
+    const me = principal([co("member")]);
+    const row = request({ requestedBy: ME, assigneeIds: [ME] });
+    expect(await allow(me, row, "read")).toBe(true);
+    expect(await allow(me, row, "cancel")).toBe(true);
+    expect(await allow(me, row, "deliver")).toBe(true);
+    expect(await allow(me, row, "read_across")).toBe(false);
+  });
+
+  it("a viewer reads (§36) but neither sends across nor reads across", async () => {
+    const v = principal([co("viewer")]);
+    expect(await allow(v, request(), "read")).toBe(true);
+    expect(await allow(v, request(), "send_across")).toBe(false);
+    expect(await allow(v, request(), "read_across")).toBe(false);
   });
 });

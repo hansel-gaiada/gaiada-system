@@ -188,6 +188,8 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
     expect(keys).not.toContain("core.work_request.cancel");
     expect(keys).not.toContain("core.work_request.create");
     expect(keys).not.toContain("core.work_request.read");
+    expect(keys).not.toContain("core.work_request.send_across");
+    expect(keys).not.toContain("core.work_request.read_across");
     expect(keys).not.toContain("core.creative_asset.request_review");
     expect(keys).not.toContain("core.creative_asset.withdraw_review");
     expect(keys).not.toContain("reports.dept_kpi_target.approve");
