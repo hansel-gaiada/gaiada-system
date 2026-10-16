@@ -1,4 +1,4 @@
-// DW-10a (docs/FRONTEND-BFF-CONTRACT.md §57.1) — migration 202610152100_dept_notices.sql (the table) and 202610152110_iam_dept_notice_permissions.sql
+// DW-10a (docs/FRONTEND-BFF-CONTRACT.md §57.1) — migration 202610160100_dept_notices.sql (the table) and 202610160110_iam_dept_notice_permissions.sql
 // (the permission seed), proven against a REAL Postgres as the NOSUPERUSER NOBYPASSRLS app role: every CHECK (the scope/unit pairing
 // from both sides, the title and body lengths, the withdrawn pairing), the column defaults, the FKs, the no-default `origin_site`, RLS
 // (zero rows with the tenant GUC unset, nothing across tenants, FORCE on), and the IAM seed's reach.
@@ -176,7 +176,7 @@ describe.skipIf(!TEST_URL)("DW-10a — dept_notices schema (as the NOBYPASSRLS a
     });
   });
 
-  describe("the permission seed (202610152110)", () => {
+  describe("the permission seed (202610160110)", () => {
     const bundled = async (roleName: string) =>
       (
         await adminPool().query(

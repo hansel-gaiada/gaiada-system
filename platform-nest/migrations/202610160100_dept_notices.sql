@@ -20,7 +20,7 @@
 -- be refused: the scope/unit pairing is a pair of IS [NOT] NULL tests joined with the (NOT NULL) scope, the length checks run on
 -- NOT NULL columns, and the withdrawn pairing compares two booleans that are never NULL (IS NULL tests).
 --
--- Pure DDL. The Cerbos kind's permission seed is the NEXT migration (202610152110).
+-- Pure DDL. The Cerbos kind's permission seed is the NEXT migration (202610160110).
 
 -- ── 1 · dept_notices ────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS dept_notices (
@@ -74,21 +74,21 @@ BEGIN
   SELECT count(*) INTO n FROM pg_class c JOIN pg_namespace s ON s.oid = c.relnamespace
    WHERE s.nspname = current_schema() AND c.relname = 'dept_notices' AND c.relrowsecurity AND c.relforcerowsecurity;
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610152100: dept_notices must have RLS enabled and FORCED (found % matching table)', n;
+    RAISE EXCEPTION '202610160100: dept_notices must have RLS enabled and FORCED (found % matching table)', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_constraint
    WHERE conrelid = 'dept_notices'::regclass AND contype = 'c'
      AND conname IN ('dept_notices_scope_unit_ck', 'dept_notices_title_ck', 'dept_notices_body_ck', 'dept_notices_withdrawn_ck');
   IF n <> 4 THEN
-    RAISE EXCEPTION '202610152100: expected the 4 named CHECKs on dept_notices, found %', n;
+    RAISE EXCEPTION '202610160100: expected the 4 named CHECKs on dept_notices, found %', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_indexes
    WHERE tablename = 'dept_notices' AND indexname IN ('ix_dept_notices_unit', 'ix_dept_notices_company');
   IF n <> 2 THEN
-    RAISE EXCEPTION '202610152100: expected the 2 partial indexes on dept_notices, found %', n;
+    RAISE EXCEPTION '202610160100: expected the 2 partial indexes on dept_notices, found %', n;
   END IF;
 
-  RAISE NOTICE '202610152100: dept_notices ready (RLS forced, 4 CHECKs, 2 indexes)';
+  RAISE NOTICE '202610160100: dept_notices ready (RLS forced, 4 CHECKs, 2 indexes)';
 END $$;
