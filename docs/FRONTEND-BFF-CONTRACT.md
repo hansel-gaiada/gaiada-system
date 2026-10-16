@@ -10069,7 +10069,7 @@ No new endpoint beyond §56.3.
 
 ## 57. The department notice board (DW-10a, 2026-10-15) — `platform-nest/src/core/dept-notices.{controller,service}.ts` (new); migrations `<prefix>_dept_notices.sql` and `<prefix>_iam_dept_notice_permissions.sql` (prefixes: the next free after main's newest at landing); UI `/departments/[deptId]/notices`, `/notices`, the Overview's Notices block — **STATUS: PLANNED**
 
-**Why.** Plan §12 (DW-10) and §12.1 (row 10a); owner ruling **DW-D32** (plan §11.4): heads post, the department reads. Nothing like it exists: there is no table, route, page, Cerbos kind or flow for notices, and `notify()` (`src/core/http.ts`) sends to one recipient at a time. The Cerbos kind is PERMISSION-CONTRACT §47.
+**Why.** Plan §12 (DW-10) and §12.2 (row 10a); owner ruling **DW-D32** (plan §11.4): heads post, the department reads. Nothing like it exists: there is no table, route, page, Cerbos kind or flow for notices, and `notify()` (`src/core/http.ts`) sends to one recipient at a time. The Cerbos kind is PERMISSION-CONTRACT §47.
 
 **Out of scope (v1):** comments and reactions (conversation lives elsewhere); attachments (a link in the body is enough for now); "must acknowledge" read receipts; scheduled posting; email (system mail stays approvals and risk only); agent writes (DW-D32: agents read and never post).
 
@@ -10244,7 +10244,7 @@ On a successful `post`, after the commit, one notification of type **`notice.pos
 
 ## 58. Monthly targets against actuals (DW-10b, 2026-10-15) — `platform-nest/src/modules/reports/dept-kpis.controller.ts`, `dept-kpi-targets.ts`; UI `/appraisals/department?unit=…&view=months` — **STATUS: PLANNED**
 
-**Why.** Plan §12 (DW-10) and §12.1 (row 10b). Targets are already effective-dated per month (§40.2: one approved row per unit, KPI and `effective_from` month), so a department can have a different target each month, but:
+**Why.** Plan §12 (DW-10) and §12.2 (row 10b). Targets are already effective-dated per month (§40.2: one approved row per unit, KPI and `effective_from` month), so a department can have a different target each month, but:
 - every read answers ONE period (`GET /dept-kpis`);
 - the department appraisal loops months, but returns conditions only;
 - the KPI page shows the current period with no trend;
@@ -10345,7 +10345,7 @@ No new Cerbos kind, action or migration: both reads use `dept_kpi_target · read
 
 ## 59. The department calendar (DW-10c, 2026-10-15) — `platform-nest/src/core/dept-calendar.{controller,service}.ts` (new), `src/core/calendar-events.{controller,service}.ts` (the `department` visibility); migration `<prefix>_calendar_events_department.sql` (the next free prefix at landing); UI `/departments/[deptId]/schedule` — **STATUS: PLANNED**
 
-**Why.** Plan §12 (DW-10) and §12.1 (row 10c); owner ruling **DW-D33** (plan §11.4): the department's people see its people's approved leave with the leave type. Today nothing is department-shaped:
+**Why.** Plan §12 (DW-10) and §12.2 (row 10c); owner ruling **DW-D33** (plan §11.4): the department's people see its people's approved leave with the leave type. Today nothing is department-shaped:
 - `calendar_events.visibility` is `attendees` or `company`;
 - leave (`hr_leave_requests`) has no unit, and a plain member's leave read silently narrows to their own rows;
 - holidays are per company;

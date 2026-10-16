@@ -2378,7 +2378,7 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §55 (plan `docs/plans/2026-10-15-pv7-pe
 
 ## 47. DW-10a — the `dept_notice` kind (2026-10-15, PLANNED)
 
-Design: `docs/FRONTEND-BFF-CONTRACT.md` §57 (plan `docs/plans/2026-10-13-department-workspaces.md` §12.1, row 10a; owner ruling DW-D32). Status: **PLANNED**.
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §57 (plan `docs/plans/2026-10-13-department-workspaces.md` §12.2, row 10a; owner ruling DW-D32). Status: **PLANNED**.
 
 **A new core kind, `dept_notice` (no module), with four actions.** The policy is `resource_dept_notice.yaml`, with keys `core.dept_notice.{read,post,edit,withdraw}`. One resource is one notice: a unit notice (on one org unit of the company) or a company-wide notice.
 
@@ -2426,7 +2426,7 @@ Plus the static pins and the live matrix (`cerbos-dept-notice.test.ts`), and the
 
 ## 48. DW-10c — the department calendar: `org_structure · read_calendar` and department-visible events (2026-10-15, PLANNED)
 
-Design: `docs/FRONTEND-BFF-CONTRACT.md` §59 (plan `docs/plans/2026-10-13-department-workspaces.md` §12.1, row 10c; owner ruling DW-D33). Status: **PLANNED**.
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §59 (plan `docs/plans/2026-10-13-department-workspaces.md` §12.2, row 10c; owner ruling DW-D33). Status: **PLANNED**.
 
 **1. A new action on an existing kind: `org_structure · read_calendar`.**
 - **Key:** `core.org_structure.read_calendar`, in `resource_org_structure.yaml`.
