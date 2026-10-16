@@ -1350,6 +1350,9 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 | DW-D36 | DW-7h: the UniFi controller is shared with a private house, so no API key can be issued; and most staff addresses are Google Workspace aliases on an HOD account | **Owner (2026-10-15):** build the ERP side now, and the Raspberry Pi collector later. The ERP side means who is connected, sign-ins, alerts, ending a session, blocking a login and blocking an address (BFF §52). The four sample Network tabs are reworked to show it. Control is ERP-side. Sign-in stays email and password. On the owner's question about aliases, the DW-7 session proposed, and the owner then said to proceed: recovery is by IT with a temporary password, and email reset is off, because a reset email to an alias reaches the alias owner; no personal content goes by email to an alias. | DW-7h, DW-7i-4 |
 | DW-D37 | DW-7i-1: one n8n serves the whole group and its workflows carry no company, so who may see its failures? | **Owner (2026-10-16): "me (superadmin) and Anthony (Boss), PM, GM."** As a rule (BFF §52.12, PERMISSION §42a): the platform operator, plus in a company with automation on, its `owner`, the seated lead of its Office of the GM, and the holder of its Project Manager seat (vacant today). IT staff are not in the list. | DW-7i-1 |
 | DW-D38 | DW-9c: the pilot week on the per-person switch (DW-D7) had started, with the owner as the only pilot (the only live staff login); DW-9d-1 was built to make the new layout the default while keeping the way back to classic for two releases | **Owner (2026-10-16, first-hand): "proceed to finish dw 9. but ensure it is fully work no need to try the new layout. so the changes is permanent."** No pilot week and no opt-in: the department workspace shell is the only layout. The "Try the new layout" switch, the way back to classic and the classic layout's code (the classic sidebar `nav.ts` and its renderers, the classic top bar, the floating assistant button, the classic Home at `/`, the departments' My-work rail) are removed in the same change, and `gaiada_prefs.shell` is ignored. Findability the classic nav gave moves to the palette's explicit, gated entries, and the classic nav's gate tests are ported before it goes. Supersedes DW-D7's pilot week and two-release grace | DW-9c, DW-9d |
+| DW-D39 | DW-10e: which group companies get routes, and to which departments (BFF §60.12)? | **Owner (2026-10-15), first-hand: the holding and Viceroy.** Each gets a route to the agency's Creatives (`asset_requests`) and to its Web Dev (`engineering_requests`): four routes, created by an admin after the deploy (BFF §60.12) |
+| DW-D40 | DW-10e: who in the requesting company sees what it sent? The contract had mirrored §32, so everyone with `read` there | **Owner (2026-10-15), first-hand: only the sender, the company's managers and its company admins.** The sender reads their own requests. The `manager` role and the company admins read all of them through a new action, `read_across`; heads read them through `manager`, which heads hold, and `org_unit_lead` alone does not count. Everyone else in the company sees only their own (BFF §60.4, PERMISSION-CONTRACT §49) |
+| DW-D41 | DW-10e: is a request from a group company internal work or client work? The contract had chosen internal and unbilled | **Owner (2026-10-15), first-hand: billable client work of the agency for that company.** The work lands on the company's client record at the agency (PV-D2's `clients.group_company_id`), in a requests project per department and client, and is billed through the agency's existing paths: billable time on the invoice, and triage's price gate with its amendment when an engineering change moves the price. A company with no client record gets no route until a platform operator links one (BFF §60.6a) |
 
 ---
 
@@ -1639,7 +1642,7 @@ written by the orchestrating session.
 5. 10e after its contract (cross-company authorization: the orchestrating session reviews every line,
    and the core may take an Opus implementer).
 
-**Numbers.** Rulings DW-D32 to DW-D35. BFF §57 (10a), §58 (10b), §59 (10c), §60 (10e). PERMISSION-CONTRACT
+**Numbers.** Rulings DW-D32 to DW-D35, and DW-D39 to DW-D41 for 10e. BFF §57 (10a), §58 (10b), §59 (10c), §60 (10e). PERMISSION-CONTRACT
 §47 (10a), §48 (10c), §49 (10e). Migrations take the next free prefix after main's newest at landing
 (`lint-migration-names.mjs` after every rebase). Branches `dw/10*`.
 
@@ -1652,7 +1655,8 @@ written by the orchestrating session.
   through its own query, never `listLeave`.
 - An empty notice list or calendar leg is a claim: draw it only from a read that succeeded.
 
-**10e design (contract written 2026-10-15: BFF §60 and PERMISSION-CONTRACT §49, both PLANNED).**
+**10e design (contract written 2026-10-15, revised 2026-10-16 for the owner's rulings DW-D39 to DW-D41: BFF §60
+and PERMISSION-CONTRACT §49, both PLANNED).**
 - **The request and its work live in the receiving company** (the agency). Its Incoming, board, Needs you, triage
   and KPIs count the request, and nobody becomes a member of the other company. The row records the requesting
   company (`requester_tenant_id`), which keeps a sender's view through its own URLs
@@ -1661,32 +1665,48 @@ written by the orchestrating session.
   receiving department itself. ORG-13 creates it: a `platform_admin` directly, or the provider proposes and the
   target accepts. It materialises nothing. The reconciler, the module gate, the fact job and the provider rollups
   all leave routing keys out, in code: otherwise the reconciler would make the department's people members of the
-  target.
+  target. The target must already be the provider's client (422 otherwise). DW-D39 names the four routes: the
+  holding and Viceroy, each to the agency's Creatives and Web Dev.
 - **Two walls.** Cerbos decides who may send for a company: a new action, `send_across`, on the requesting company
   (company_admin, manager, member; bots and automation denied). The route decides where: the handler resolves an
-  active route, and a `BEFORE INSERT` trigger on `work_requests` refuses any cross-company row without one. No
-  existing rule or attribute changes.
-- **Reach inside the requesting company is §32's:** everyone in it reads what it sent; the requester, its
-  company_admin and its manager cancel. The receiving company declines rather than cancels.
+  active route, and a `BEFORE INSERT` trigger on `work_requests` refuses any cross-company row without one, or
+  without the requesting company's client record. No existing rule or attribute changes.
+- **Reach inside the requesting company (DW-D40).** The sender reads and cancels their own requests. The company's
+  managers (the `manager` role, which heads hold) and company admins read all of them through a second new action,
+  `read_across`, and cancel any. Everyone else sees only their own. `org_unit_lead` alone does not count: the
+  ruling does not name it, and its grant carries no company. The receiving company declines rather than cancels.
+- **Billing (DW-D41).** The work is client work for the requesting company's client record at the agency
+  (`clients.group_company_id`), in a requests project per department and client. It is billed through the agency's
+  existing paths: billable time on the client's invoice, and triage's price gate with its amendment when an
+  engineering change moves the price. The requester sees the price state, never an amount. A company with no
+  client record gets no route until a platform operator links one.
 - **Not in v1:** campaign parts across companies, attachments from the sender (links only; the sender downloads),
-  the sender's say in asset review rounds (DW-6h), and billing.
+  the sender's say in asset review rounds (DW-6h), a price on asset asks, and fixed-fee invoice lines (PV-5's
+  parked item).
 
-**10e tickets, one at a time** (the orchestrating session reviews every line):
+**10e tickets, one at a time** (the orchestrating session reviews every line). Billing needs no fourth ticket: its
+data is in 10e-1, its wiring in 10e-2 and its screens in 10e-3.
 
 | Ticket | Seat and model | Scope | Done when |
 |---|---|---|---|
-| 10e-1 The data and the route | senior-db, Sonnet | Migration `…_work_requests_across.sql`: four columns, the per-company backfill, NOT NULL, four CHECKs, three indexes, the route-guard and freeze triggers, assertions. `core/request-routes.ts`. Routing keys left out of the reconciler, `enabledModuleKeys`, `gatherForeignContext` and `computeProviderViewRollups`. ORG-7's propose, relink and dry run for routing keys | BFF §60.11 "The route wall", "A route grants nothing" and "The migration" green on the Linux gate |
-| 10e-2 The permission, the sender routes and the receiving side (the core) | senior-be, **Opus high**: cross-company authorization and tenancy, where one mistake is a leak between companies | `send_across` (six artifacts and the literals); `work-requests-outbound.controller.ts` (§60.5); the receiving-side changes (§60.6); notifications, activity and events (§60.7) | §60.11 "Sending", "Reading", "The lifecycle", "Notifications and events", "IAM" and "Tenancy" green on the Linux gate; Cerbos probed |
-| 10e-3 The UI | senior-fe, Sonnet | §60.9: the routes read and `hasRoutes`, the quick actions, `/requests/new?route=`, the merged My requests and Sent, `/requests/outbound/[id]` and its download proxies, the receiving side's labels, ORG-13's picker, DEMO_MODE | vitest, `next build` and the demo e2e green; then driven live after §60.12's steps |
+| 10e-1 The data, the routes and the billing data | senior-db, Sonnet | Migration `…_work_requests_across.sql`: five columns (with `client_id`), the per-company backfill, NOT NULL, the client FK, five CHECKs, three indexes, the route-guard (`PD060` route, `PD062` client) and freeze (`PD061`) triggers, the `work_request_client_intakes` table, assertions. `core/request-routes.ts`. `ensureClientIntakeProject`, in §32.1's race-safe order. Routing keys left out of the reconciler, `enabledModuleKeys`, `gatherForeignContext` and `computeProviderViewRollups`. ORG-7's propose, relink and dry run for routing keys, with the client-record check (422 `route_needs_group_client`, `group_client_ambiguous`) | BFF §60.11 "The route and client wall", "A route grants nothing" and "The migration" green on the Linux gate, plus the two-first-sends race of "Sending" |
+| 10e-2 The permission, the sender routes, the receiving side and the billing wiring (the core) | senior-be, **Opus high**: cross-company authorization, DW-D40's narrowing and tenancy, where one mistake is a leak between companies or work billed to the wrong client | `send_across` and `read_across` (six artifacts and the literals); `outboundReadScope`; `work-requests-outbound.controller.ts` (§60.5), with the client resolution and the client requests project; the receiving-side changes (§60.6), including the change request that names the client and the triage `request.price_agreement`; notifications, activity and events (§60.7) | §60.11 "Sending", "Reading", "The lifecycle", "Billing", "Notifications and events", "IAM" and "Tenancy" green on the Linux gate; Cerbos probed |
+| 10e-3 The UI | senior-fe, Sonnet | §60.9: the routes read and `hasRoutes`, the quick actions, `/requests/new?route=`, the merged My requests and Sent with the `scope` notice, `/requests/outbound/[id]` with the price state and its download proxies, the receiving side's labels and client, ORG-13's picker and its client sentences, DEMO_MODE | vitest, `next build` and the demo e2e green; then driven live after §60.12's steps |
 
-**Owner questions for 10e:**
-1. May `SERVICE_ASSIGNMENTS_ENABLED` go on in live, in both services? Routing honours it, and it also wakes the
-   reconciler for every other assignment (none recorded live). Without it 10e stays dark.
-2. Which companies get routes, to which departments: the holding, and which hotel companies (§60.12)?
-3. Reach: the contract mirrors §32, so everyone in the requesting company reads what it sent. Narrow it to the
-   requester and the company's admins and managers?
-4. Is a request from a group company that is also the agency's client internal work (v1: yes, unbilled, no client
-   on the task) or client work?
+**Owner questions for 10e** (each with the default the build uses until ruled):
+1. **The switch** (asked 2026-10-15, still open). DW-D39's routes need `SERVICE_ASSIGNMENTS_ENABLED` on in live, in
+   both services, and it also wakes the reconciler for every other assignment (none recorded live). Default: on,
+   after the owner reads the live table (§60.12 step 1). It blocks only the live drive.
+2. **Lead-only heads.** Should a head who holds `org_unit_lead` but not `manager` also read their department's
+   requests to other companies? Default: no (DW-D40 as written). If yes, the safe shape is a handler-fed list of
+   the department's lead-seat holders, never the `org_unit_lead` role (PERMISSION-CONTRACT §49).
+3. **The portal.** The agency's client portal shows the requesting company's client contacts its requests
+   projects, engineering change requests, price agreements and invoices, by the portal's rules for client work.
+   Default: yes, as for any client work. The alternative hides cross-company change requests from the portal.
+4. **Pricing beyond time.** A price on asset asks, or fixed-fee invoice lines from a signed amendment (PV-5's
+   parked item)? Default: neither; the work is billed by time.
+5. **Billable by default.** The time log's Billable box starts unticked everywhere. Should it start ticked on
+   client projects? Default: unchanged in 10e. Recommended as a small PM change outside 10e.
 
 ---
 
@@ -1874,6 +1894,7 @@ These are built in code but give no real data until someone outside engineering 
 
 - **2026-10-16 (owner, first-hand, during the build):** DW-D38: no pilot week and no opt-in; the new layout is the only layout and the classic layout's code is removed now (§11.4, §12.1). Supersedes DW-D7's pilot week and two-release grace.
 - **2026-10-16 (owner, during the build):** DW-D37: the failing workflows of the shared n8n are for the superadmin, the owner (Anthony), the PM and the GM (§11.4, BFF §52.12), for DW-7i-1.
+- **2026-10-15 (owner, first-hand, on DW-10e's open questions):** DW-D39 (the holding and Viceroy each get routes to the agency's Creatives and Web Dev), DW-D40 (only the sender, the requesting company's managers and its company admins see what it sent) and DW-D41 (a request from a group company is billable client work of the agency for it), all §11.4; BFF §60 and PERMISSION-CONTRACT §49 revised to match (§12.2, "10e design").
 - **2026-10-15 (owner, during the build):** DW-D36: no UniFi key, so IT security moves to the ERP side now and the office collector waits for a Raspberry Pi; staff addresses are mostly Workspace aliases, so recovery is by IT and email reset is off (§11.4, BFF §52), for DW-7h and DW-7i-4.
 - **2026-10-15 (owner, at DW-10's start):** DW-D32 (notice board: heads post, the department reads), DW-D33 (the department calendar shows colleagues' approved leave with its type), DW-D34 (Overview: show and hide blocks, saved in the browser) and DW-D35 (requests across group companies are built now), all §11.4; the DW-10 build notes are §12.2.
 - **2026-10-15 (owner, during the build):** DW-D31: the SEO property brief's and social's brand-draft knowledge lookups keep only their own corpus, never ERP records (§11.4, BFF §46.10), for DW-8i-3.
