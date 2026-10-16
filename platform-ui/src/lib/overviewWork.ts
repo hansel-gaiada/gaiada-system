@@ -5,7 +5,7 @@ import type { ReadResult } from "./readResult";
 import { computeProjectHealth } from "./departments";
 import { statusFlags, type Milestone, type PmTask, type ProjectStatus } from "./pm";
 import type { DeptCampaignRow } from "./campaigns";
-import type { RequestSummary } from "./requests";
+import type { OutboundSummary, RequestSummary } from "./requests";
 import { GENERIC_WORKSPACE, WORKSPACES, hrefFor } from "./workspaces";
 
 export const NO_ACCESS = "No access";
@@ -201,7 +201,15 @@ export function campaignsView(result: ReadResult<DeptCampaignRow[]>, deptId: str
 // ── Requests ─────────────────────────────────────────────────────────────────────────────────────
 
 export type RequestsView =
-  | { kind: "ok"; incoming: number; sent: number; oldestOpenAt: string | null; oldestAge: string | null }
+  | {
+    kind: "ok"; incoming: number;
+    /** What the department is waiting on: its own asks of other departments, plus (DW-10e) what its company asked of other group
+     *  companies. `null` = a read of the two failed: the figure is "unavailable", never a shorter number read as the whole (§60.9). */
+    sent: number | null;
+    /** DW-10e: the sender read answered in scope `own`, so the sent figure counts only the caller's requests to other companies (DW-D40). */
+    sentScope?: "own";
+    oldestOpenAt: string | null; oldestAge: string | null;
+  }
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
@@ -220,9 +228,14 @@ export function ageText(iso: string | null, now: Date): string | null {
 }
 
 /** The counts only from a successful read. The oldest waiting is shown only while something waits. */
-export function requestsView(result: ReadResult<RequestSummary>, now: Date): RequestsView {
+export function requestsView(result: ReadResult<RequestSummary>, now: Date, outbound?: ReadResult<OutboundSummary>): RequestsView {
   if (result.kind !== "ok") return { kind: result.kind };
   const { incoming, sent } = result.data;
   const oldest = incoming.open > 0 ? incoming.oldestOpenAt : null;
-  return { kind: "ok", incoming: incoming.open, sent: sent.open, oldestOpenAt: oldest, oldestAge: ageText(oldest, now) };
+  const base = { kind: "ok" as const, incoming: incoming.open, oldestOpenAt: oldest, oldestAge: ageText(oldest, now) };
+  // DW-10e (§60.9): "sent, open" adds the requests this department's company sent to other group companies. When that read did not
+  // answer, the figure is unavailable: a number that left them out would read as the whole.
+  if (!outbound) return { ...base, sent: sent.open };
+  if (outbound.kind !== "ok") return { ...base, sent: null };
+  return { ...base, sent: sent.open + outbound.data.sent.open, ...(outbound.data.scope === "own" ? { sentScope: "own" as const } : {}) };
 }

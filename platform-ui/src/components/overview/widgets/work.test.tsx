@@ -17,13 +17,14 @@ import * as requests from "@/lib/requests-data";
 vi.mock("@/lib/entities", async (orig) => ({ ...(await orig<typeof import("@/lib/entities")>()), listProjects: vi.fn() }));
 vi.mock("@/lib/pm", async (orig) => ({ ...(await orig<typeof import("@/lib/pm")>()), readProjectPmInputs: vi.fn() }));
 vi.mock("@/lib/campaigns-data", () => ({ readSharedCampaigns: vi.fn() }));
-vi.mock("@/lib/requests-data", () => ({ readRequestSummary: vi.fn() }));
+vi.mock("@/lib/requests-data", () => ({ readRequestSummary: vi.fn(), readOutboundSummary: vi.fn() }));
 
 const person = meFixture([member()]);
 const listProjects = vi.mocked(entities.listProjects);
 const projectWork = vi.mocked(pm.readProjectPmInputs);
 const shared = vi.mocked(campaigns.readSharedCampaigns);
 const summary = vi.mocked(requests.readRequestSummary);
+const outboundSummary = vi.mocked(requests.readOutboundSummary);
 
 const placed = resolveMyWorkspaces({ me: person, tenantId: "co-a", root: agencyTree({ web: ["u-1"] }) });
 const webDev = subjectOfRef(placed.mine[0]);
@@ -39,7 +40,9 @@ const refused = { kind: "forbidden" as const };
 const failed = { kind: "unavailable" as const, reason: "boom" };
 
 beforeEach(() => {
-  for (const m of [listProjects, projectWork, shared, summary]) m.mockReset();
+  for (const m of [listProjects, projectWork, shared, summary, outboundSummary]) m.mockReset();
+  // DW-10e: the sender read answers "nothing sent to other companies" unless a test says otherwise.
+  outboundSummary.mockResolvedValue({ kind: "ok", data: { scope: "company", sent: { open: 0 } } });
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -53,7 +56,7 @@ describe("the Work blocks are wired into the host (DW-3f)", () => {
     expect(await Projects(props("projects", { deptId: null }))).toBeNull();
     expect(await Campaigns(props("campaigns", { deptId: null }))).toBeNull();
     expect(await Requests(props("requests", { deptId: null }))).toBeNull();
-    for (const m of [listProjects, shared, summary]) expect(m).not.toHaveBeenCalled();
+    for (const m of [listProjects, shared, summary, outboundSummary]) expect(m).not.toHaveBeenCalled();
   });
 });
 
@@ -146,6 +149,39 @@ describe("Campaigns (widget)", () => {
     shared.mockResolvedValue(refused);
     render(await Campaigns(props("campaigns")));
     expect(screen.getByRole("region", { name: "Campaigns" })).toHaveTextContent("No access");
+  });
+});
+
+describe("Requests (widget): DW-10e, the sent figure adds the requests sent to other group companies", () => {
+  it("adds the sender read to the sent count", async () => {
+    summary.mockResolvedValue({ kind: "ok", data: { incoming: { open: 1, oldestOpenAt: null }, sent: { open: 2 } } });
+    outboundSummary.mockResolvedValue({ kind: "ok", data: { scope: "company", sent: { open: 3 } } });
+    render(await Requests(props("requests")));
+    const block = screen.getByRole("region", { name: "Requests" });
+    expect(outboundSummary).toHaveBeenCalledWith("u-1", "co-a", "d-web");
+    expect(block.querySelector('[data-tile="sent"]')).toHaveTextContent("We are waiting on5");
+    expect(block).not.toHaveTextContent("only the requests you sent");
+  });
+
+  it("says so when the sender read answered in scope own", async () => {
+    summary.mockResolvedValue({ kind: "ok", data: { incoming: { open: 0, oldestOpenAt: null }, sent: { open: 1 } } });
+    outboundSummary.mockResolvedValue({ kind: "ok", data: { scope: "own", sent: { open: 1 } } });
+    render(await Requests(props("requests")));
+    const block = screen.getByRole("region", { name: "Requests" });
+    expect(block.querySelector('[data-tile="sent"]')).toHaveTextContent("We are waiting on2");
+    expect(block).toHaveTextContent("counts only the requests you sent to other companies");
+  });
+
+  it("shows the sent figure as Unavailable, never a shorter number, when either read failed (the incoming figure stays)", async () => {
+    summary.mockResolvedValue({ kind: "ok", data: { incoming: { open: 4, oldestOpenAt: null }, sent: { open: 2 } } });
+    for (const bad of [failed, refused]) {
+      outboundSummary.mockResolvedValue(bad);
+      const r = render(await Requests(props("requests")));
+      const block = screen.getByRole("region", { name: "Requests" });
+      expect(block.querySelector('[data-tile="sent"]')).toHaveTextContent("We are waiting onUnavailable");
+      expect(block.querySelector('[data-tile="incoming"]')).toHaveTextContent("Waiting on us4");
+      r.unmount();
+    }
   });
 });
 

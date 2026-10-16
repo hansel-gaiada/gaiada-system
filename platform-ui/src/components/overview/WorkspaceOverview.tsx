@@ -79,7 +79,7 @@ export function WorkspaceOverview({ me, tenantId, subject, period, view = "me", 
 }) {
   // Team mode is a head's alone: whatever the caller passed, without the switch the page is Me.
   const mode: OverviewView = canSwitchView ? view : "me";
-  const ctx = { me, tenantId, unitPath: subject.unitPath, workspaces: subject.workspaces };
+  const ctx = { me, tenantId, unitPath: subject.unitPath, workspaces: subject.workspaces, routes: subject.routes };
   // The Pulse is the one block whose content depends on the workspace: with no built tile it is not placed at
   // all, so the Department band does not draw a label over nothing.
   const pulse = builtPulseTiles(subject);

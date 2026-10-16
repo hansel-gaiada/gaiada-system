@@ -70,7 +70,8 @@ describe("the Work blocks' placement (DW-3f)", () => {
 
   it("gives a generic department's Projects block its projects link too (DW-3z): the generic workspace has the Project Management row", () => {
     expect(workLinks({ workspaceKey: "generic", deptId: "d-9" })).toEqual({
-      projects: "/departments/d-9/projects", campaigns: null, requestsIncoming: null, requestsSent: null,
+      // DW-10e: the generic workspace has Requests > Sent for a company with routes, so its block links there.
+      projects: "/departments/d-9/projects", campaigns: null, requestsIncoming: null, requestsSent: "/departments/d-9/requests/sent",
     });
   });
 });

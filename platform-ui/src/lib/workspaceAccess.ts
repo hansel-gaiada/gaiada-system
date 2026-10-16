@@ -26,6 +26,7 @@ import {
 } from "@/lib/workspaces";
 import type { IconName } from "@/components/shell/icons";
 import type { Area } from "@/lib/areas";
+import { routeAskLabel, routeHref, type RequestRoute } from "@/lib/requests";
 
 /** The parts of an org node this file reads (`lib/org.ts`'s `OrgNode`, which is server-only). */
 export interface OrgTreeNode {
@@ -52,6 +53,10 @@ export interface GateContext {
    *  `hasWorkspace` gate. Absent means "not known", and that gate then hides: it never offers a link to a department the
    *  caller cannot show exists. */
   workspaces?: readonly string[];
+  /** The active company's routes to other group companies' departments (`GET requests/routes`, DW-10e, BFF §60.9), read once by the
+   *  shell. Read only by the `hasRoutes` gate and by `routeActionsFor`. `undefined` = not known and `null` = the read failed: both
+   *  HIDE, like `workspaces`, so a person is never offered a link to a form that can only refuse. */
+  routes?: readonly RequestRoute[] | null;
   /** What the shell read of the person's pending approvals (`listApprovals`), for the `decider` gate and the row's count
    *  (DW-D23, DW-8m). `pending` is how many wait on THIS person's decision (the items the server marks `decidable`).
    *  `undefined` = the caller did not read approvals (the palette, a test): the gate ALLOWS, so
@@ -83,6 +88,15 @@ export function approvalsGateInput(read: { items: readonly { decidable: boolean 
   return read.unavailable ? null : { pending: read.items.filter((i) => i.decidable).length };
 }
 
+/** The quick actions DW-10e adds beside the same-company ones (BFF §60.9): one per active route, "Ask <unit> at <company> for assets"
+ *  or "Ask <unit> at <company>", each linking to `/requests/new?route=<routeId>`. Offered to a person who holds the UI capability
+ *  `work_request.send_across` (the mirror of PERMISSION-CONTRACT §49) and only for a route the shell actually read. Cosmetic: the
+ *  server decides who may send. */
+export function routeActionsFor(ctx: Pick<GateContext, "me" | "tenantId" | "routes">): { key: string; label: string; href: string }[] {
+  if (!ctx.routes || ctx.routes.length === 0 || !can(ctx.me, "work_request.send_across", ctx.tenantId)) return [];
+  return ctx.routes.map((r) => ({ key: `ask-route-${r.routeId}`, label: routeAskLabel(r), href: routeHref(r.routeId) }));
+}
+
 /** Evaluate a registry gate. Mirrors the surface each gate was copied from; see `Gate`'s doc. */
 export function gateAllows(gate: Gate | undefined, ctx: GateContext): boolean {
   if (!gate) return true;
@@ -104,6 +118,8 @@ export function gateAllows(gate: Gate | undefined, ctx: GateContext): boolean {
       return moduleOn(company, gate.module);
     case "hasWorkspace":
       return ctx.workspaces?.includes(gate.workspace) ?? false;
+    case "hasRoutes":
+      return !!ctx.routes && ctx.routes.some((r) => !gate.routeKind || r.kind === gate.routeKind);
     case "elevated":
       return isElevated(ctx.me);
     case "platformOperator":

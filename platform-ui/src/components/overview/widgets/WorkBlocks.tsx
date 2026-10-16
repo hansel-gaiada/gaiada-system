@@ -76,11 +76,12 @@ export function CampaignsBlock({ view, href }: { view: CampaignsView; href: stri
 
 export function RequestsBlock({ view, incomingHref, sentHref }: { view: RequestsView; incomingHref: string | null; sentHref: string | null }) {
   if (view.kind !== "ok") return <Refusal title="Requests" kind={view.kind} />;
-  const tile = (key: string, label: string, value: number, href: string | null) => {
+  // A figure that could not be read says so; it is never drawn as 0 (DW-10e: the sent figure joins two reads).
+  const tile = (key: string, label: string, value: number | null, href: string | null) => {
     const body = (
       <>
         <span className="ov-nums__label">{label}</span>
-        <span className="ov-nums__value">{value}</span>
+        <span className="ov-nums__value">{value === null ? "Unavailable" : value}</span>
       </>
     );
     return (
@@ -99,6 +100,8 @@ export function RequestsBlock({ view, incomingHref, sentHref }: { view: Requests
       {view.incoming === 0
         ? <p className="ov-block__note">Nothing is waiting on this department.</p>
         : <p className="ov-block__note">{view.oldestAge ? `Oldest waiting: ${view.oldestAge}` : "Oldest waiting: age not known"}</p>}
+      {view.sent === null && <p className="ov-block__note">The requests this department sent to other companies could not be read, so the figure is not shown.</p>}
+      {view.sentScope === "own" && <p className="ov-block__note">The figure counts only the requests you sent to other companies.</p>}
     </section>
   );
 }

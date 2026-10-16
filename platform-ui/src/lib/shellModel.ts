@@ -9,7 +9,7 @@
 // Pure and client-safe, like the registry it reads. Gates mirror the server; they are not security.
 import type { Me } from "@/lib/platform";
 import { ADMIN_ROWS, ASSISTANT_ROW, COMPANY_ROWS, hrefFor, isPlanned, sidebarRows, type WorkspaceKind } from "@/lib/workspaces";
-import { concreteRows, gateAllows, homeArea, withheldTabPaths, workspaceKeysOf, type ApprovalsRead, type ConcreteRow, type GateContext, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
+import { concreteRows, gateAllows, homeArea, routeActionsFor, withheldTabPaths, workspaceKeysOf, type ApprovalsRead, type ConcreteRow, type GateContext, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
 import type { Area } from "@/lib/areas";
 
 export interface ShellRows {
@@ -64,8 +64,11 @@ export function buildShellModel(input: {
    *  Omitted or null leaves the row shown with no count. `"inflight"` (the layout, which does not wait for the read) leaves the rows that
    *  depend on it marked `awaitsApprovals`, and `applyApprovals` settles them on the client once the count streams in. */
   approvals?: GateContext["approvals"];
+  /** The active company's routes to other group companies (`GET requests/routes`, DW-10e), for the `hasRoutes` gate and the per-route
+   *  "Ask ..." actions. Omitted or null (unread, failed) offers none of them. */
+  routes?: GateContext["routes"];
 }): ShellModel {
-  const { me, tenantId, workspaces, approvals } = input;
+  const { me, tenantId, workspaces, approvals, routes } = input;
   const homeRef = workspaces.home.kind === "workspace" ? workspaces.home.ref : null;
   // Which departments this company has, for the `hasWorkspace` gate (DW-5f: "Ask Creatives" needs a Creatives).
   const departments = workspaceKeysOf(workspaces);
@@ -77,7 +80,7 @@ export function buildShellModel(input: {
     const dedupe = `${ref.workspace.key}:${ref.deptId ?? ""}`;
     if (seen.has(dedupe)) return;
     seen.add(dedupe);
-    const ctx = { me, tenantId, unitPath: ref.unitPath, deptId: ref.deptId, workspaces: departments, approvals };
+    const ctx = { me, tenantId, unitPath: ref.unitPath, deptId: ref.deptId, workspaces: departments, approvals, routes };
     const raw = sidebarRows(ref.workspace);
     const creates = ref.workspace.creates.flatMap((key) => {
       const action = ref.workspace.quickActions.find((a) => a.key === key);
@@ -85,6 +88,8 @@ export function buildShellModel(input: {
       const href = hrefFor(action.href, { deptId: ref.deptId, companyId: tenantId });
       return href ? [{ label: action.label, href }] : [];
     });
+    // DW-10e (§60.9): one create per active route, beside the same-company ones.
+    for (const a of routeActionsFor(ctx)) creates.push({ label: a.label, href: a.href });
     out.push({
       id: idOf(ref),
       key: ref.workspace.key,
@@ -108,7 +113,7 @@ export function buildShellModel(input: {
   for (const ref of workspaces.all) add(ref, false);
 
   // The Company and Admin areas belong to no department.
-  const flat = { me, tenantId, unitPath: [] as string[], deptId: null, workspaces: departments, approvals };
+  const flat = { me, tenantId, unitPath: [] as string[], deptId: null, workspaces: departments, approvals, routes };
   const company = concreteRows(COMPANY_ROWS, flat);
   const admin = concreteRows(ADMIN_ROWS, flat);
   const companyTop = concreteRows([ASSISTANT_ROW], flat);

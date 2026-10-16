@@ -14,6 +14,7 @@ import { listApprovals } from "@/lib/approvals";
 import { layoutHomeRedirect } from "@/lib/overview";
 import { PATHNAME_HEADER } from "@/lib/pathnameHeader";
 import { buildShellModel } from "@/lib/shellModel";
+import { routesForShell } from "@/lib/requests-data";
 
 // `drawer` is the parallel slot the intercepted task route renders into (see @drawer/). It sits
 // OUTSIDE <Shell>'s scroll container so the slide-over is positioned against the viewport rather
@@ -43,11 +44,13 @@ export default async function AppLayout({ children, drawer }: { children: React.
   const tenantId = await getActiveTenant(me);
   // `myWorkspaces` never throws and `buildShellModel` is pure: a failure here is a bug, and it reaches the error boundary rather than
   // another sidebar (DW-D38).
-  const [prefs, workspaces] = await Promise.all([getPrefs(), myWorkspaces(me, tenantId)]);
+  // DW-10e (BFF §60.9): the shell reads the company's routes ONCE (`GET requests/routes`, memoised per request, so a page shares it), beside
+  // the org read. `routesForShell` never throws: a failed read is null, which hides every route-gated link rather than offering one.
+  const [prefs, workspaces, routes] = await Promise.all([getPrefs(), myWorkspaces(me, tenantId), routesForShell(me.userId, tenantId)]);
   // DW-8m / DW-D23: the Approvals row's gate and count. The model is built with the read IN FLIGHT: the row is shown to a person who
   // holds a decide right (computed here, with no read) and hidden from one who does not, until `ShellApprovalsFeed` settles it: shown
   // when something waits on them or they may decide, with the pending count as its badge; an unavailable read shows it.
-  const workspaceModel = buildShellModel({ me, tenantId, workspaces, approvals: "inflight" });
+  const workspaceModel = buildShellModel({ me, tenantId, workspaces, approvals: "inflight", routes });
   // DW-3a2: `/` for a person whose home is a workspace is answered HERE, with a real 307. The page's own
   // redirect would stream (it sits under loading.tsx) and leave a meta refresh that breaks client navigation.
   const homeHref = layoutHomeRedirect({ pathname: (await headers()).get(PATHNAME_HEADER), home: workspaces.home, tenantId });

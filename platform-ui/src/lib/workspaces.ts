@@ -30,6 +30,7 @@ import type { Capability } from "@/lib/rbac";
 import { packFor, type AgencyRowKey, type PackKey } from "@/lib/packs";
 import { bespokeToolkit, deptSlug, type DeptLauncher, type DeptTab } from "@/lib/deptToolkits";
 import { PM_TERMS } from "@/lib/pmVocabulary";
+import type { RequestKind } from "@/lib/requests";
 
 // ── Types ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,10 @@ export type Gate =
   /** The active company has a department whose workspace is this key (`workspaceKeysOf`, DW-5f): "Ask Creatives" only
    *  where there is a Creatives to ask. Unlike `module`, unknown hides. */
   | { kind: "hasWorkspace"; workspace: string }
+  /** The active company has at least one active route to send requests to another group company's department (DW-10e, BFF §60.9),
+   *  of this kind when `routeKind` is given. Reads `GateContext.routes`, which the shell reads once (`GET requests/routes`). Unknown
+   *  or a failed read hides, like `hasWorkspace`: a link to a form that can only say "no route" is not offered. */
+  | { kind: "hasRoutes"; routeKind?: RequestKind }
   /** `isElevated(me)`: global `platform_admin`. */
   | { kind: "elevated" }
   /** `isPlatformOperator(me)` (PV-D18). */
@@ -237,6 +242,9 @@ const CONN = {
 // ── The Overview (plan §3) ────────────────────────────────────────────────────────────────────────
 
 const AGENCY_ONLY: Gate = { kind: "pack", pack: "agency" };
+/** DW-10e (§60.9): the requests surfaces (the Overview's Requests block, Requests › Sent) are the agency pack's OR a company that has
+ *  routes to send requests to another group company: the requesting company need not be agency-pack. Campaigns stay `AGENCY_ONLY`. */
+const REQUESTS_GATE: Gate = { kind: "any", gates: [AGENCY_ONLY, { kind: "hasRoutes" }] };
 /** The Clients row's gate (`CLIENTS_ROW`, the GM's "Clients & sales" Clients tab): the agency pack lists the row and its module is on. */
 const CLIENTS_GATE: Gate = { kind: "agencyRow", row: "clients" };
 
@@ -257,7 +265,7 @@ const DEPARTMENT_OVERVIEW: readonly OverviewWidget[] = [
   // there (`workWidgetPlaced`); the Work band then has nothing and is dropped.
   { key: "projects", band: "work", label: "Projects" },
   { key: "campaigns", band: "work", label: "Campaigns", gate: AGENCY_ONLY },
-  { key: "requests", band: "work", label: "Requests", gate: AGENCY_ONLY },
+  { key: "requests", band: "work", label: "Requests", gate: REQUESTS_GATE },
   // DW-10d: the first optional block (DW-D34), off until a person switches it on. Its gate is the Clients row's own (`CLIENTS_ROW`), so
   // it is offered to exactly the people who can open the Clients list. It reads for the department's org node, so the frame does not
   // place it in a workspace without one (`clientHealthWidgetPlaced`).
@@ -340,6 +348,9 @@ const SENT_REQUESTS: WorkspaceTab = {
   key: "sent", label: "Sent", href: deptPath("requests/sent"), icon: "bell",
   blurb: "Requests this department has sent to other departments, and where each one stands.",
 };
+
+/** The Requests row of the workspaces that have Sent only: the agency pack's (DW-5h) or a company with routes (DW-10e, §60.9). */
+const REQUESTS_ROW: WorkspaceRow = { key: "requests", label: "Requests", icon: "bell", gate: REQUESTS_GATE, tabs: [SENT_REQUESTS] };
 
 // ── The agency pack's workspaces (plan §4) ────────────────────────────────────────────────────────
 
@@ -440,7 +451,7 @@ const SEO: Workspace = {
       // Search Console & GA4 moves to the Analytics row (§4).
       tabs: ["audit", "keywords", "rankings", "briefs", "ai-visibility"].map((k) => fromToolkit("seo", k)),
     },
-    { key: "requests", label: "Requests", icon: "bell", gate: AGENCY_ONLY, tabs: [SENT_REQUESTS] },
+    REQUESTS_ROW,
     {
       key: "campaigns", label: "Campaigns", icon: "finance",
       tabs: [SHARED_CAMPAIGNS, ...["planner", "ads", "search-terms", "pacing"].map((k) => fromToolkit("seo", k))],
@@ -493,7 +504,7 @@ const SOCIAL_MEDIA: Workspace = {
     PM_ROW,
     // Publish › Analytics moves to the Analytics row (§4).
     { key: "publish", label: "Publish", icon: "gateway", tabs: ["calendar", "composer", "inbox"].map((k) => fromToolkit("social-media", k)) },
-    { key: "requests", label: "Requests", icon: "bell", gate: AGENCY_ONLY, tabs: [SENT_REQUESTS] },
+    REQUESTS_ROW,
     {
       key: "campaigns", label: "Campaigns", icon: "sales", gate: AGENCY_ONLY,
       tabs: [
@@ -599,7 +610,7 @@ const OFFICE_OF_THE_GM: Workspace = {
     PM_ROW,
     { key: "command", label: "Command", icon: "chart", tabs: [fromToolkit("gm", "review"), fromToolkit("gm", "decisions"), fromToolkit("gm", "revenue-plan")] },
     { key: "oversight", label: "Oversight", icon: "sitemap", tabs: ["depts", "money", "people"].map((k) => fromToolkit("gm", k)) },
-    { key: "requests", label: "Requests", icon: "bell", gate: AGENCY_ONLY, tabs: [SENT_REQUESTS] },
+    REQUESTS_ROW,
     {
       key: "campaigns", label: "Campaigns", icon: "sales", gate: { kind: "agencyRow", row: "agency" },
       tabs: [{ key: "all", label: "All campaigns", href: "/agency", icon: "sales", blurb: "Every campaign across the departments." }],
@@ -915,7 +926,9 @@ const GENERIC: Workspace = {
   label: "Department",
   mission: "Team workspace.",
   overviewHref: deptPath(""),
-  work: [PM_ROW],
+  // DW-10e (§60.9): "in every workspace with a department node". The generic workspace had no Requests row (only the agency pack's
+  // workspaces did), so it gets Sent for a company that HAS routes, and nobody else: the agency pack's own generic departments are unchanged.
+  work: [PM_ROW, { ...REQUESTS_ROW, gate: { kind: "hasRoutes" } }],
   reports: [],
   analytics: [],
   tools: [],

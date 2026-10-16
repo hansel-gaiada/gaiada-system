@@ -8,7 +8,7 @@ import {
   COMPANY_OVERVIEW, OVERVIEW_BANDS, REPORT_PERIODS, hrefFor, isPlanned,
   type OverviewBand, type OverviewWidget, type QuickAction,
 } from "@/lib/workspaces";
-import { gateAllows, workspaceKeysOf, type GateContext, type HomeArea, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
+import { gateAllows, routeActionsFor, workspaceKeysOf, type GateContext, type HomeArea, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
 import type { DeptLauncher } from "@/lib/deptToolkits";
 import { pinnedToolsFor } from "@/lib/pinnedTools";
 import { effectiveWidgets, type WorkspaceOverviewPrefs } from "@/lib/overviewPrefs";
@@ -71,6 +71,9 @@ export interface OverviewSubject {
   unitPath: readonly string[];
   /** The registry keys of the workspaces this company has a department for, for the `hasWorkspace` gate (DW-5f). */
   workspaces?: readonly string[];
+  /** The active company's routes to other group companies (DW-10e), for the `hasRoutes` gate and the per-route quick actions. Set by
+   *  the page that read them (`pilotFrame`); absent hides both. */
+  routes?: GateContext["routes"];
 }
 
 /** `pins` is `Prefs.pinnedTools` (DW-6c); left out, the Today block shows the workspace's first six tools. `all` (DW-5f)
@@ -143,7 +146,9 @@ export function selectQuickActions(
   ctx: GateContext & { deptId: string | null },
 ): OverviewAction[] {
   const out: OverviewAction[] = [];
-  for (const a of actions) {
+  // DW-10e (§60.9): the same-company actions first, then one per active route; the header still shows at most three.
+  const routeActions = routeActionsFor(ctx).map((a): QuickAction => ({ key: a.key, label: a.label, href: a.href }));
+  for (const a of [...actions, ...routeActions]) {
     if (isPlanned(a) || !gateAllows(a.gate, ctx)) continue;
     const href = hrefFor(a.href, { deptId: ctx.deptId, companyId: ctx.tenantId });
     if (href) out.push({ key: a.key, label: a.label, href });

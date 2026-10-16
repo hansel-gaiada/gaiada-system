@@ -3,6 +3,7 @@ import type { Me } from "@/lib/platform";
 import { getPrefs } from "@/lib/prefs";
 import { moduleGate } from "@/lib/modules";
 import { myWorkspaces } from "@/lib/workspaces-data";
+import { routesForShell } from "@/lib/requests-data";
 import { parseOverviewPeriod, subjectOfRef, workspaceRefForPage } from "@/lib/overview";
 import { canSwitchToTeam, resolveOverviewView } from "@/lib/overviewTeam";
 import { setOverviewWidgetAction } from "@/lib/prefsActions";
@@ -24,13 +25,14 @@ export async function pilotFrame(
 ): Promise<((legacy: ReactNode) => ReactNode) | null> {
   // Three independent reads (the cookie, the org tree, the modules), started together: serially they added up on the first byte.
   // DW-3g: one read of the company's modules, so a block whose module is off is not placed. It fails open.
-  const [prefs, all, modules] = await Promise.all([getPrefs(), myWorkspaces(me, tenantId), moduleGate(me.userId, tenantId)]);
+  // DW-10e: the company's routes to other group companies (memoised with the layout's read), for the Requests block's gate and the per-route actions.
+  const [prefs, all, modules, routes] = await Promise.all([getPrefs(), myWorkspaces(me, tenantId), moduleGate(me.userId, tenantId), routesForShell(me.userId, tenantId)]);
   const ref = workspaceRefForPage(all, target);
   if (!ref) return null;
   const { period, view } = await searchParams;
   // DW-6c: the Today block shows the tools this person pinned for this workspace (Tools & connections).
   // DW-5f: `all` gives the `hasWorkspace` gate the company's department workspaces.
-  const subject = subjectOfRef(ref, prefs.pinnedTools, all);
+  const subject = { ...subjectOfRef(ref, prefs.pinnedTools, all), routes };
   const parsed = parseOverviewPeriod(period);
   // DW-3h: the Me | Team switch is a head's, of THIS workspace's unit. For anyone else `?view=team` is ignored (Me), so
   // nothing about a team is read for them. The switch is cosmetic: the server narrows every Team read.
