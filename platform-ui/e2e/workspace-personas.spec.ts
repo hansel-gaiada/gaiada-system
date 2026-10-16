@@ -411,6 +411,8 @@ function personaSuite(p: Persona) {
       await expect(page).toHaveURL(p.home);
       await expect(menu(page, p.menuTitle)).toBeVisible();
       await expect.poll(() => groupLabels(menu(page, p.menuTitle), "Work")).toEqual(p.work);
+      // The streamed rows (the Approvals count since DW-9d, DW-10e's routed rows) settle after hydration: wait for You before reading.
+      await expect.poll(() => groupLabels(menu(page, p.menuTitle), "You")).toEqual(p.you);
 
       const hrefs = await sidebar(page).locator("a[href]").evaluateAll((as) =>
         [...new Set(as.map((a) => a.getAttribute("href") ?? "").filter((h) => h.startsWith("/")))],
