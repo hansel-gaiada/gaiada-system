@@ -432,7 +432,7 @@ describe("accessibleCompanies / canSwitchCompany", () => {
 });
 
 // The rule that decides WHERE a user lands. `(app)/page.tsx` redirects `isClient && !isElevated` to
-// /portal and `navFor` gates on the identical pair, so these two predicates together are the routing
+// /portal and the shell gates on the identical pair, so these two predicates together are the routing
 // contract for external clients. Untested before: a client used to land on the staff dashboard because
 // nothing consulted them outside nav.
 describe("isClient — external client routing", () => {
@@ -454,7 +454,7 @@ describe("isClient — external client routing", () => {
   it("a MANAGER who is also a client contact keeps the staff surface — the bug this rule replaces", () => {
     // Real case: an internal PM added as a contact on their own client. The old rule was
     // `isClient && !isElevated`, and isElevated covers ONLY global platform_admin/group_executive —
-    // so a manager matched it, navFor handed them portal-only navigation, and the redirect added here
+    // so a manager matched it, the classic nav handed them portal-only navigation, and the redirect added here
     // would have locked them out of the app entirely. Any staff role must win.
     const both = me([
       { role: "manager", scopeType: "company", scopeId: "co-a" },

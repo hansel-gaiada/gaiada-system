@@ -17,41 +17,21 @@
   --dept-ring-track: var(--erp-hairline);
 }
 
-/* ── Console shell — 2-col with persistent rail ─────────────────────────── */
-/* DOM order is always main-then-rail; on narrow viewports the grid simply
-   collapses to one column and the rail falls in normal flow below the main
-   content (no reorder) — main content stays first for mobile scan order and
-   screen readers, and no JS is needed for the "responsive collapse". */
-.dept-shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 24px;
-  align-items: start;
-}
+/* Console shell: one column (DW-D4, DW-D38: the My-work rail is gone). */
 .dept-shell__main {
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 24px;
 }
-.dept-shell__rail {
-  position: sticky;
-  top: 24px;
-}
-@media (max-width: 1180px) {
-  .dept-shell { grid-template-columns: 1fr; }
-  .dept-shell__rail { position: static; }
-}
 
 /* Full-bleed tabs (Projects/Board/Timeline, P1-01): structurally wide surfaces
-   render with no rail at all — not a 1-col collapse of the 2-col grid, the
-   rail is simply not mounted (see DeptShellFrame). Widen the page's own
-   max-width wrapper via :has so these surfaces use the full viewport, same as
-   the narrow-viewport collapse but independent of the user's width pref. */
+   (see DeptShellFrame). Widen the page's own
+   max-width wrapper via :has so these surfaces use the full viewport, independent of the user's width pref. */
 .dept-shell--full {
   display: block;
 }
-/* DW-2b: the workspace shell shows no My-work rail, so the main column is the whole page. */
+/* The main column is the whole page. */
 .dept-shell--solo {
   display: block;
 }
@@ -159,7 +139,7 @@
   gap: 0;
 }
 /* At risk is a rule down the leading edge, not a rust box around the whole card. Same idiom, same
-   meaning, as `.dept-rail__item--waiting` — "this one needs you" — and it leaves the card's own
+   meaning, as the old My-work rail's waiting rows — "this one needs you" — and it leaves the card's own
    hairline intact so a grid of cards still reads as one grid. */
 .dept-ring-card--risk { border-left: 2px solid var(--dept-risk); padding-left: 18px; }
 .dept-ring-card__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 16px; }
@@ -324,8 +304,6 @@ a.dept-ring-card__name:hover { opacity: 0.6; }
    overflow rather than just the clipping. */
 .dept-activity__text,
 .dept-activity__object,
-.dept-rail__item-title,
-.dept-rail__item-project,
 .dept-team__name,
 .dept-ring-card__name,
 .dept-ring-card__lead-caption,
@@ -344,72 +322,6 @@ a.dept-ring-card__name:hover { opacity: 0.6; }
 
 .dept-activity__more { margin: 16px 0 0; font: 400 11px var(--font-body); color: var(--erp-ink-50); }
 
-/* ── My-work rail (persistent, decision #10) ────────────────────────────── */
-.dept-rail { display: flex; flex-direction: column; gap: 0; background: var(--surface-card-solid); border: 0.5px solid var(--erp-hairline); }
-.dept-rail__section { padding: 20px 22px; }
-.dept-rail__section + .dept-rail__section { border-top: 0.5px solid var(--erp-hairline); }
-/* `color`, not `opacity` (Phase 5 a11y fix, 2026-08-22): opacity composites against
-   whatever the ambient text colour already is, double-dipping alpha on top of an
-   inherited colour and landing under the 4.5:1 AA floor (axe caught it at 3-node scale
-   on the department console, light theme). Same root cause the existing
-   PRE_EXISTING_CONTRAST_EXCLUSIONS in e2e/a11y-axe.spec.ts names for
-   `.erp-side__tagline`/`.erp-side__grouplabel`, but this one is scoped to departments.css
-   alone (not app-wide), so it is fixed here rather than deferred: `--erp-ink-50` is the
-   house alias for `--ink-subtle`, the token colors.css documents as AA-cleared for exactly
-   this case ("small caps labels"). */
-.dept-rail__heading { display: flex; align-items: baseline; gap: 8px; color: var(--erp-ink-50); font-size: 10px; margin-bottom: 14px; }
-/* Count beside the heading — the number a person wants before reading a single row. Not in the
-   eyebrow's tracking: 0.30em on a digit is spacing with nothing to separate. */
-.dept-rail__count { font: 700 10px var(--font-body); letter-spacing: 0; color: var(--erp-ink-60); }
-/* An empty section is ONE row: heading left, verdict right, nothing under it. Three sections each
-   spending a heading plus a full sentence on "nothing here" gave the absence of work more of the
-   rail than the work itself. */
-.dept-rail__section--clear { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 12px 22px; }
-.dept-rail__heading--inline { margin-bottom: 0; }
-.dept-rail__clear { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
-.dept-rail__empty { margin: 0; font: 400 13px var(--font-body); color: var(--erp-ink-50); }
-.dept-rail__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.dept-rail__item + .dept-rail__item { border-top: 0.5px solid var(--erp-hairline-soft); }
-.dept-rail__item-link { display: flex; flex-direction: column; gap: 4px; padding: 10px 0; text-decoration: none; color: inherit; transition: opacity 0.2s var(--erp-ease); }
-.dept-rail__item-link:hover { opacity: 0.6; }
-.dept-rail__item { display: flex; flex-direction: column; }
-.dept-rail__item:not(:has(.dept-rail__item-link)) { padding: 10px 0; gap: 4px; }
-.dept-rail__item-title { font: 400 13px var(--font-body); color: var(--text-primary); }
-.dept-rail__item-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 400 11px var(--font-body); color: var(--erp-ink-50); }
-.dept-rail__item-project { color: var(--erp-ink-50); }
-.dept-rail__due { font-weight: 700; letter-spacing: 0.02em; }
-.dept-rail__due--risk { color: var(--dept-risk); }
-.dept-rail__due--soon { color: var(--brand-color-primary); }
-.dept-rail__due--quiet { color: var(--erp-ink-50); }
-.dept-rail__priority { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--dept-risk); }
-.dept-rail__kind { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-60); }
-/* Title line of a waiting row: title left, age right. */
-.dept-rail__item-head { display: flex; align-items: baseline; gap: 10px; }
-.dept-rail__item-head .dept-rail__item-title { flex: 1 1 auto; min-width: 0; }
-/* Age is the rank. It is the only urgency an approval has, so it is set in the same tabular figures
-   the console uses for numbers — a column of ages has to be comparable at a glance. */
-.dept-rail__age {
-  flex: 0 0 auto;
-  font: 700 10px var(--font-body);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.04em;
-  color: var(--erp-ink-50);
-}
-/* The rust bar marks the rows to act on first — the rail's one "this needs you" signal, and it only
-   works while most rows do not have it (it used to sit on every waiting row, which marked none).
-   The gutter is reserved on EVERY row via a transparent border, so a marked row does not shift its
-   title 2px left of its unmarked neighbours: the first build did exactly that and the column
-   visibly wobbled. A marked row's age takes the same colour, so bar and number say one thing. */
-.dept-rail__section--waiting .dept-rail__item {
-  border-left: 2px solid transparent;
-  padding-left: 10px;
-  margin-left: -12px;
-}
-/* Selector deliberately as specific as the transparent-gutter rule above it. Written as the bare
-   `.dept-rail__item--stale`, the shorthand `border-left: 2px solid transparent` in that rule wins on
-   specificity and the bar silently never paints — which is exactly what the first build did. */
-.dept-rail__section--waiting .dept-rail__item--stale { border-left-color: var(--dept-risk); }
-.dept-rail__item--stale .dept-rail__age { color: var(--dept-risk); }
 
 /* ── Launcher row (Build Tools merged into Home, decision #10/Q4) ──────── */
 /* Icons only, names on hover/focus (see LauncherRow.tsx). `wrap`, not `overflow-x: auto`: the row

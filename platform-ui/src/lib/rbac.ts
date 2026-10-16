@@ -1079,7 +1079,7 @@ export const SCOPED_DATA_ROLES: ReadonlySet<string> = new Set([
  *  This is the correct companion to `isClient` for deciding "is this person EXTERNAL ONLY", and it
  *  replaces an `isElevated` check that was subtly wrong: `isElevated` is only global `platform_admin`
  *  / `group_executive`, so `isClient && !isElevated` classified a **manager or company_admin who is
- *  also a client contact** as an external client. `navFor` used that pair and handed such a person
+ *  also a client contact** as an external client. The classic nav used that pair and handed such a person
  *  portal-only navigation, losing the entire staff surface. A PM added as a contact on their own
  *  client is an ordinary thing to do, so this was reachable, not theoretical.
  *
