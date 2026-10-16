@@ -43,18 +43,18 @@ unfalsifiable after.
 | assistant | `assistant` | 15 |
 | automation-console | `admin/automation` | 3 |
 | clients | `clients` | 25 |
-| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `notices?unitNodeId=:unitNodeId&scope=:scope&state=:state` · `positions` · `role-grants` | 75 |
+| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `notices?unitNodeId=:unitNodeId&scope=:scope&state=:state` · `positions` · `role-grants` | 76 |
 | finance | `finance` | 4 |
 | hr | `hr` | 14 |
-| invoice | `invoices` | 13 |
+| invoice | `invoices` | 14 |
 | it | `it` | 5 |
 | knowledge | `knowledge` | 3 |
 | monitoring | `monitoring` | 3 |
-| pm | `pm` | 15 |
+| pm | `pm` | 16 |
 | reports | `checkins` · `reports` | 24 |
 | search | `search` | 30 |
 | social | `social` | 13 |
-| webdev | `webdev` | 36 |
+| webdev | `webdev` | 37 |
 
 ## Capabilities
 

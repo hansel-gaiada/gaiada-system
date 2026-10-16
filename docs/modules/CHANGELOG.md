@@ -11,6 +11,45 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.165.0` + platform-ui `0.191.0` - DW-10e: requests across group companies (DW-D35, D39, D40, D41; BFF §60, PERMISSION §49); DW-10b-4: an approver withdraws their own proposal (2026-10-16) - PROTOTYPED
+
+Plan §12.2 (row 10e). A group company asks another group company's department (the agency's Creatives and Web Dev) through a route: a service assignment with a routing key.
+
+**Data (10e-1), migration `202610160500`:**
+- `work_requests` gains `requester_tenant_id` (NOT NULL, backfilled one company at a time), `requester_unit_id`, `requester_unit_name`, `service_assignment_id` and `client_id`, with five CHECKs.
+- The `BEFORE INSERT` guard refuses a cross-company row unless its route is active and matches the kind, the department and both companies of one root (PD060). The row must sit on the asking company's live client record at the receiving company, with its work item on that client's books (PD062).
+- The `BEFORE UPDATE` freeze is PD061.
+- New table `work_request_client_intakes`: one requests project per department and client.
+- The routing keys `asset_requests` and `engineering_requests` materialise nothing: no membership, grant or claim. The reconciler, the module gate, the fact job and the provider rollups all skip them.
+- ORG-13 refuses a route on a division, with a lead, or to a company with no client record at the provider.
+
+**The core (10e-2), migration `202610160510`:**
+- New Cerbos actions `send_across` and `read_across` on `work_request`, checked on the ASKING company. Bots and automation are denied the send.
+- Sender routes live under the asking company's URL: `requests/routes` and `requests/outbound…` (create, list, summary, detail, cancel, downloads).
+- `outboundReadScope` (DW-D40): the sender reads their own; `read_across` holders (company admin, manager, owner, platform admin) read everything their company sent. Every provider read runs in that company alone, with `r.tenant_id = P AND r.requester_tenant_id = H`.
+- Billing (DW-D41): the work lands on the client record linked to the asking company, in its requests project. Engineering asks go through the existing quote path. The sender sees only a price state, never an amount. The receiving side cannot cancel a cross row (409 `requester_side_only`).
+- Notifications are stamped in each recipient's own company.
+
+**UI (10e-3):**
+- The routes in the shell: skipped for the agency pack, otherwise streamed off the first byte.
+- `/requests/new` offers the routes.
+- The sent lists state the scope.
+- The sender page `/requests/outbound/[id]` shows the price state in words.
+- The receiving side names the requesting company and the billed client.
+- The ORG-13 route picker.
+- A demo store.
+
+**DW-10b-4:** the approver's view offers Withdraw on one's own proposal (the single reject). It was found by the 420 live check.
+
+**Gates:**
+- CI green on the backend: the route wall 66, the migration 7, routes through ORG-13 22, the outbound HTTP suite, the live Cerbos matrix, and DW-5's request suite 50 unchanged.
+- UI vitest about 240 new; e2e `requests-across` on sumopod.
+- The permission catalogue is now 486 pairs and 471 grantable.
+
+**Deploy:**
+- Both migrations apply. Restart Cerbos and probe `send_across` and `read_across`.
+- Owner and admin steps before the live drive (§60.12): read the live `service_assignments` table; create the holding's client record at the agency (a platform operator); name signer contacts; create the four routes (DW-D39).
+
 ### platform-nest `0.164.0` + platform-ui `0.190.0` - DW-10c: the department calendar (DW-D33, BFF §59, PERMISSION §48) (2026-10-16) - PROTOTYPED
 
 Plan §12.2 (row 10c). Owner ruling DW-D33: the department's people see its people's approved leave with the leave type.
