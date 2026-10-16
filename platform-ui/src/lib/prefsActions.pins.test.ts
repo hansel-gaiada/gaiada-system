@@ -71,11 +71,10 @@ describe("togglePinnedToolAction", () => {
   });
 
   it("leaves the other prefs alone", async () => {
-    store.set("gaiada_prefs", JSON.stringify({ theme: "dark", shell: "workspaces" }));
+    store.set("gaiada_prefs", JSON.stringify({ theme: "dark" }));
     await togglePinnedToolAction("seo", "gsc");
     const p = await getPrefs();
     expect(p.theme).toBe("dark");
-    expect(p.shell).toBe("workspaces");
     expect(p.pinnedTools.seo).toEqual(["ga4", "google-ads", "looker", "claude"]);
   });
 });

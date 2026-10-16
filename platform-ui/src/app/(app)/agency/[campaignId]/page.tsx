@@ -36,7 +36,7 @@ function datesText(startsOn: string | null, endsOn: string | null): string {
 
 // DW-5b — the shared campaign page (contract §31). Reads `GET campaigns/:id` (the campaign, its money block and its
 // parts), no longer a scan of the whole list. A 404 is `notFound()`; a refusal or a failed read is a <ReadRefusal>.
-// Pilot and classic users both land here (the notification href is /agency/<id>); a department page links to it.
+// Everyone lands here (the notification href is /agency/<id>); a department page links to it.
 //
 // What is offered is cosmetic and the server decides: managers (`agency.campaign.manage`) may add or remove a
 // department, set allocations and edit the budget, currency, lead and dates; a part's owner, its department's head and a

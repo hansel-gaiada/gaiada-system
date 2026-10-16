@@ -6,7 +6,7 @@ import type { ReadResult } from "@/lib/readResult";
 import { startDriveConnectAction, disconnectDriveAction } from "@/lib/driveActions";
 import { driveOutcomeText, type DriveStatus } from "@/lib/drive";
 
-// DW-6i: the Google Drive block of the pilot's Tools & connections page (BFF §42.6). It replaces the manual email row. One of:
+// DW-6i: the Google Drive block of the Tools & connections page (BFF §42.6). It replaces the manual email row. One of:
 //   * "Google Drive isn't set up for this ERP yet" (`configured: false`, the normal state until the OAuth client exists);
 //   * "Connect Google Drive", which starts OAuth and navigates to Google;
 //   * the connected account's email, with Disconnect;

@@ -194,7 +194,7 @@ export async function TaskDetailView({
         unfollow={unfollowTask.bind(null, task.id)}
       />
       <Link href={`/tasks/${task.id}/edit`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit</Link>
-      {/* DW-6c2 — pilot only: renders nothing on the classic shell. */}
+      {/* DW-6c2 — the "Open in" menu; renders nothing when the page has no workspace tools to offer. */}
       <OpenInSlot scope="task" projectId={task.projectId} taskKey={task.displayCode} figma={figma} />
       {canEdit && (
         <form action={duplicateTaskAction.bind(null, task.id)}>
@@ -262,7 +262,7 @@ export async function TaskDetailView({
           </Section>
 
           {/* DW-6f (§34.7) — pull requests + CI linked through the task's key. Renders nothing when there is nothing to
-              say; "Pull requests unavailable" when the read failed. Not pilot-gated: this page is shared by both layouts. */}
+              say; "Pull requests unavailable" when the read failed. */}
           <PullRequestsSection result={pullRequests} />
 
           {/* DW-6k (§36.6) — the Figma files and frames linked to this task. Shared by both layouts, like the pull requests. */}

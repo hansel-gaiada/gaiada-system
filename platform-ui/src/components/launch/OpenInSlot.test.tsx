@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
-// DW-6c2: the wiring. The pilot (`prefs.shell === "workspaces"`) shows the menu with the right workspace's tools and
-// context; the classic shell shows nothing and reads nothing. A repository registry that cannot be read falls back to
+// DW-6c2: the wiring. The menu shows the right workspace's tools and
+// context. A repository registry that cannot be read falls back to
 // home links, never to "no repository".
 
-vi.mock("@/lib/prefs", () => ({ getPrefs: vi.fn() }));
 vi.mock("@/lib/session-server", () => ({ getSessionUserId: vi.fn(async () => "u-1") }));
 vi.mock("@/lib/platform", () => ({
   getMe: vi.fn(async () => ({ userId: "u-1", companies: [{ id: "co-1", vertical: "agency" }], roles: [] })),
@@ -17,7 +16,6 @@ vi.mock("@/lib/workspaces-data", () => ({ myWorkspaces: vi.fn() }));
 vi.mock("@/lib/githubRepos-data", () => ({ listGithubRepos: vi.fn() }));
 vi.mock("@/lib/searchMarketing", () => ({ listProperties: vi.fn() }));
 
-import { getPrefs } from "@/lib/prefs";
 import { getProject } from "@/lib/entities";
 import { listDepartmentBriefs } from "@/lib/departments";
 import { myWorkspaces } from "@/lib/workspaces-data";
@@ -30,41 +28,27 @@ const webDevTools = workspaceFor("agency", "Web Dev").tools;
 const seoTools = workspaceFor("agency", "SEO").tools;
 
 const mount = async (p: OpenInScope) => render(await OpenInSlot(p));
-const pilot = () => vi.mocked(getPrefs).mockResolvedValue({ shell: "workspaces" } as never);
-const classic = () => vi.mocked(getPrefs).mockResolvedValue({ shell: "classic" } as never);
 const labels = () => screen.getAllByRole("menuitem").map((a) => a.querySelector(".open-in__text > span")?.textContent);
 const repo = (fullName: string, projectId: string | null) => ({ fullName, projectId });
 const reposOk = (repos: unknown[], total = repos.length) =>
   vi.mocked(listGithubRepos).mockResolvedValue({ ok: true, data: { repos, total, limit: 200, offset: 0, org: {} } } as never);
 
 beforeEach(() => {
-  for (const m of [getPrefs, getProject, listDepartmentBriefs, myWorkspaces, listGithubRepos, listProperties]) vi.mocked(m).mockReset();
+  for (const m of [getProject, listDepartmentBriefs, myWorkspaces, listGithubRepos, listProperties]) vi.mocked(m).mockReset();
   vi.mocked(getProject).mockResolvedValue({ id: "p-1", department_id: "dept-1", shortCode: "WEB" } as never);
   vi.mocked(listDepartmentBriefs).mockResolvedValue([{ id: "dept-1", name: "Web Dev" }, { id: "dept-3", name: "SEO" }]);
   reposOk([]);
   vi.mocked(listProperties).mockResolvedValue([]);
 });
 
-describe("OpenInSlot · classic shell", () => {
-  it("renders nothing and reads nothing", async () => {
-    classic();
-    const { container } = await mount({ scope: "project", projectId: "p-1" });
-    expect(container.innerHTML).toBe("");
-    expect(getProject).not.toHaveBeenCalled();
-    expect(listGithubRepos).not.toHaveBeenCalled();
-  });
-});
-
-describe("OpenInSlot · pilot, project and task", () => {
+describe("OpenInSlot · project and task", () => {
   it("lists the project's department workspace tools in registry order", async () => {
-    pilot();
     await mount({ scope: "project", projectId: "p-1" });
     fireEvent.click(screen.getByRole("button", { name: "Open in" }));
     expect(labels()).toEqual(webDevTools.map((t) => t.label));
   });
 
   it("uses the department of the project, not Web Dev's", async () => {
-    pilot();
     vi.mocked(getProject).mockResolvedValue({ id: "p-3", department_id: "dept-3" } as never);
     await mount({ scope: "project", projectId: "p-3" });
     fireEvent.click(screen.getByRole("button", { name: "Open in" }));
@@ -72,7 +56,6 @@ describe("OpenInSlot · pilot, project and task", () => {
   });
 
   it("renders no menu for a project with no department, or one not in the org tree", async () => {
-    pilot();
     vi.mocked(getProject).mockResolvedValue({ id: "p-1", department_id: null } as never);
     expect((await mountContainer({ scope: "project", projectId: "p-1" })).innerHTML).toBe("");
     vi.mocked(getProject).mockResolvedValue({ id: "p-1", department_id: "dept-gone" } as never);
@@ -82,7 +65,6 @@ describe("OpenInSlot · pilot, project and task", () => {
   });
 
   it("links the project's one linked repository, from a single registry read", async () => {
-    pilot();
     reposOk([repo("gaiada/web-site", "p-1"), repo("gaiada/other", "p-9"), repo("gaiada/unlinked", null)]);
     await mount({ scope: "project", projectId: "p-1" });
     fireEvent.click(screen.getByRole("button", { name: "Open in" }));
@@ -95,7 +77,6 @@ describe("OpenInSlot · pilot, project and task", () => {
   });
 
   it("filters the task's pull requests by its key", async () => {
-    pilot();
     reposOk([repo("gaiada/web-site", "p-1")]);
     await mount({ scope: "task", projectId: "p-1", taskKey: "WEB-12" });
     fireEvent.click(screen.getByRole("button", { name: "Open in" }));
@@ -106,7 +87,6 @@ describe("OpenInSlot · pilot, project and task", () => {
   });
 
   it("falls back to home links when the registry cannot be read, or the page was truncated, never 'no repo'", async () => {
-    pilot();
     for (const failing of [
       () => vi.mocked(listGithubRepos).mockResolvedValue({ ok: false, reason: "refused" } as never),
       () => vi.mocked(listGithubRepos).mockResolvedValue({ ok: false, reason: "unavailable" } as never),
@@ -123,12 +103,11 @@ describe("OpenInSlot · pilot, project and task", () => {
   });
 });
 
-describe("OpenInSlot · pilot, client", () => {
+describe("OpenInSlot · client", () => {
   const home = (tools: readonly unknown[]) =>
     vi.mocked(myWorkspaces).mockResolvedValue({ home: { kind: "workspace", ref: { workspace: { tools } } } } as never);
 
   it("lists the viewer's home workspace tools", async () => {
-    pilot();
     home(seoTools);
     await mount({ scope: "client", clientId: "cl-1" });
     fireEvent.click(screen.getByRole("button", { name: "Open in" }));
@@ -137,7 +116,6 @@ describe("OpenInSlot · pilot, client", () => {
   });
 
   it("opens Search Console at its home while the property row does not say which kind it is", async () => {
-    pilot();
     home(seoTools);
     vi.mocked(listProperties).mockResolvedValue([
       { id: "sp-1", clientId: "cl-1", domain: "example.com", siteUrl: "https://example.com/" },
@@ -149,7 +127,6 @@ describe("OpenInSlot · pilot, client", () => {
   });
 
   it("renders no menu for a Company home or an empty tool set", async () => {
-    pilot();
     vi.mocked(myWorkspaces).mockResolvedValue({ home: { kind: "company" } } as never);
     expect((await mountContainer({ scope: "client", clientId: "cl-1" })).innerHTML).toBe("");
     home([]);

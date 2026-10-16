@@ -15,7 +15,7 @@ import type { ConcreteRow } from "@/lib/workspaceAccess";
 import { useWorkspaceShell } from "./WorkspaceShellContext";
 import "./workspace-sidebar.css";
 
-// DW-2a: the department workspace sidebar (plan §2.2), drawn only for people on the pilot switch.
+// DW-2a: the department workspace sidebar (plan §2.2), the only sidebar (DW-D38).
 //
 // Where the person is (area, view, active row) comes from `WorkspaceShellContext` (DW-2b), so the sidebar,
 // the tab strip and the breadcrumbs share one answer. Rows arrive already gated and concrete

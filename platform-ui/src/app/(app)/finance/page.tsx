@@ -70,7 +70,7 @@ export default async function FinanceOverviewPage({ searchParams }: { searchPara
   const tenant = await getActiveTenant(me);
   if (!tenant) return <EmptyNote>Select a company from the top bar.</EmptyNote>;
 
-  // DW-3a: on the pilot switch the Overview frames this page body, which stays below its bands until the
+  // DW-3a: the Overview frames this page body, which stays below its bands until the
   // Overview's own blocks replace it. The body is its own server component (it has several early returns),
   // so it is read once either way.
   const frame = await pilotFrame(me, tenant, { slug: "finance" }, searchParams);

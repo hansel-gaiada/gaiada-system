@@ -22,7 +22,7 @@ export const adminShellModel = buildShellModel({
   workspaces: resolveMyWorkspaces({ me: admin, tenantId: "co-a", root: agencyTree({ web: ["u-1"] }) }),
 });
 
-/** The component inside the workspace shell. Without it, the classic shell. */
+/** The component inside the workspace shell. Without it, outside the workspace shell. */
 export function inShell(ui: ReactNode, model: ShellModel = shellModel) {
   return <WorkspaceShellProvider model={model}>{ui}</WorkspaceShellProvider>;
 }

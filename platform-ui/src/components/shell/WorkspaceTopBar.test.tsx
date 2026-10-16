@@ -2,13 +2,13 @@ import { render, screen, fireEvent, within, waitFor } from "@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { WorkspaceTopBar } from "./WorkspaceTopBar";
 import { listNotifications, type NotificationItem } from "@/lib/entities";
-import { setShellLayoutAction, setThemeAction } from "@/lib/prefsActions";
+import { setThemeAction } from "@/lib/prefsActions";
 import { me, member } from "@/lib/workspaceFixtures";
 import type { Me } from "@/lib/platform";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/", useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/app/(app)/account/actions", () => ({ logout: vi.fn() }));
-vi.mock("@/lib/prefsActions", () => ({ setShellLayoutAction: vi.fn(async () => {}), setThemeAction: vi.fn(async () => {}) }));
+vi.mock("@/lib/prefsActions", () => ({ setThemeAction: vi.fn(async () => {}) }));
 vi.mock("@/lib/entities", () => ({ listNotifications: vi.fn() }));
 
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
@@ -20,7 +20,7 @@ const person: Me = me([member()], undefined, { name: "Rina Vale", title: "Design
 
 type Props = Partial<Parameters<typeof WorkspaceTopBar>[0]>;
 async function draw(props: Props = {}) {
-  const ui = await WorkspaceTopBar({ me: person, tenantId: "co-a", theme: "light", shell: "workspaces", special: false, unrestricted: false, ...props });
+  const ui = await WorkspaceTopBar({ me: person, tenantId: "co-a", theme: "light", special: false, unrestricted: false, ...props });
   return render(ui);
 }
 const bell = () => screen.getByRole("button", { name: /^Notifications/ });
@@ -30,12 +30,11 @@ beforeEach(() => {
   vi.mocked(listNotifications).mockReset();
   vi.mocked(listNotifications).mockResolvedValue([]);
   vi.mocked(setThemeAction).mockClear();
-  vi.mocked(setShellLayoutAction).mockClear();
   document.documentElement.removeAttribute("data-theme");
 });
 
 describe("WorkspaceTopBar: what it draws", () => {
-  it("has one search form, the bell and the avatar, and nothing of the classic bar", async () => {
+  it("has one search form, the bell and the avatar, and nothing of the old bar", async () => {
     const { container } = await draw();
     expect(screen.getAllByRole("search")).toHaveLength(1);
     expect(screen.getByRole("searchbox", { name: "Search" })).toHaveAttribute("name", "q");
@@ -47,7 +46,7 @@ describe("WorkspaceTopBar: what it draws", () => {
     expect(screen.queryByRole("radiogroup")).toBeNull();
     expect(screen.queryByRole("button", { name: "Open command palette" })).toBeNull();
     expect(screen.queryByText("Jump to…")).toBeNull();
-    // The bell is a button here, not the classic link.
+    // The bell is a button here, not a plain link.
     expect(screen.queryByRole("link", { name: /^Notifications/ })).toBeNull();
   });
 
@@ -109,18 +108,18 @@ describe("WorkspaceTopBar: the bell's data", () => {
 });
 
 describe("WorkspaceTopBar: the avatar menu", () => {
-  it("holds Theme, Account, Sign out and the layout switch, and no Client view for a plain staff member", async () => {
+  it("holds Theme, Account and Sign out, no layout switch, and no Client view for a plain staff member", async () => {
     await draw();
     openAvatar();
     const menu = screen.getByRole("menu", { name: "Account menu" });
     expect(within(menu).getByRole("group", { name: "Theme" })).toBeInTheDocument();
     expect(within(menu).getByRole("menuitem", { name: "Account settings" })).toHaveAttribute("href", "/account");
-    expect(within(menu).getByRole("menuitem", { name: "Back to the classic layout" })).toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: /layout/i })).toBeNull();
     expect(within(menu).getByRole("menuitem", { name: "Sign out" })).toBeInTheDocument();
     expect(within(menu).queryByRole("menuitem", { name: "Client view" })).toBeNull();
   });
 
-  it("shows Client view under the same condition as the classic bar", async () => {
+  it("shows Client view for a staff member who is also a client contact", async () => {
     await draw({ me: { ...person, clientOf: [{ companyId: "co-x", companyName: "Acme" }] } });
     openAvatar();
     expect(screen.getByRole("menuitem", { name: "Client view" })).toHaveAttribute("href", "/portal");

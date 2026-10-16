@@ -7,7 +7,6 @@
 // cookie.
 import { revalidatePath } from "next/cache";
 import { getPrefs, writePrefs, type Theme, type OfficeZoom } from "./prefs";
-import { parseShellLayout, type ShellLayout } from "./shellLayout";
 import { MAX_PINNED_TOOLS, pinnedToolsFor } from "./pinnedTools";
 import { GENERIC_WORKSPACE, isPlanned, workspaceBySlug } from "./workspaces";
 import { MAX_OVERVIEW_KEYS, overviewPrefsFor, overviewWidgetsForKey } from "./overviewPrefs";
@@ -40,16 +39,6 @@ export async function setThemeAction(theme: Theme): Promise<void> {
 export async function setOfficeZoomAction(officeZoom: OfficeZoom): Promise<void> {
   const current = await getPrefs();
   await writePrefs({ ...current, officeZoom });
-}
-
-/** DW-1d: the per-person pilot switch (`lib/shellLayout.ts`). The argument comes from the browser, so it
- *  is parsed, and anything unknown stores the default. Unlike the actions above, the choice changes
- *  the server-rendered shell itself, so the whole app layout is revalidated. It is the ONLY writer of
- *  `shellChosen` (DW-9d-1): the flag that makes a stored `shell` count (see `getPrefs`). */
-export async function setShellLayoutAction(shell: ShellLayout): Promise<void> {
-  const current = await getPrefs();
-  await writePrefs({ ...current, shell: parseShellLayout(shell), shellChosen: true });
-  revalidatePath("/", "layout");
 }
 
 /** DW-6c: pin or unpin one tool of a workspace for the Overview's Today card (`lib/pinnedTools.ts`).

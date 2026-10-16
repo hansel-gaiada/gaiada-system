@@ -6,7 +6,7 @@ import type { ReadResult } from "@/lib/readResult";
 import { connectFigmaAction, disconnectFigmaAction } from "@/lib/figmaActions";
 import { NOT_CONNECTED_LINE, tokenTypeLabel, type FigmaConnection, type FigmaTokenType } from "@/lib/figma";
 
-// DW-6k: the Figma block of the pilot's Tools & connections page (BFF §36.1, §36.8). Everyone sees whether the company has a Figma
+// DW-6k: the Figma block of the Tools & connections page (BFF §36.1, §36.8). Everyone sees whether the company has a Figma
 // token linked, and of which kind. Only a `company.manage` holder is OFFERED the form (the server decides: a 403 is a sentence).
 // The token is typed into a password input, sent once, and never shown again: the platform answers with the masked status only,
 // and this block keeps no copy of it (the field is cleared the moment the call returns, success or refusal).

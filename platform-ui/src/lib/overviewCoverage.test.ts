@@ -175,7 +175,7 @@ describe("DW-7e-3: what the new Pulse tiles cover", () => {
 });
 
 describe("keepsSection", () => {
-  it("keeps everything for a classic page, whatever the inventory says", () => {
+  it("keeps everything for an unframed page, whatever the inventory says", () => {
     for (const e of COVERAGE) expect(keepsSection(e.page, e.section, { framed: false, access: { numbers: true, money: true } }), `${e.page}/${e.section}`).toBe(true);
   });
 

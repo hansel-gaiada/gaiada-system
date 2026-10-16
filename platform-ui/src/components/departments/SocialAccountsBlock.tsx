@@ -1,7 +1,7 @@
 import { StatusBadge } from "@/components/ui";
 import type { SocialAccount } from "@/lib/socialShared";
 
-// DW-6c: the social accounts block of the pilot's Connections section. Read-only: the backend's
+// DW-6c: the social accounts block of the Connections section. Read-only: the backend's
 // account-connect (SMM-07) is built, but the ERP has no connect control yet. `accounts: null` means
 // the read failed, which says "unavailable", never "none".
 export function SocialAccountsBlock({ accounts, forbidden = false }: { accounts: readonly SocialAccount[] | null; forbidden?: boolean }) {

@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Icon } from "./icons";
 
 // DW-2c: the workspace top bar's bell. A disclosure button opens a small pop-over with the latest unread
-// notifications and "Open inbox"; the classic bell stays a plain link to /me/inbox.
+// notifications and "Open inbox".
 //
 // The server reads the notifications (the same read the count always used) and hands over the count and
 // the newest few. `unread === null` means the read failed: no count, and the pop-over says so, never a

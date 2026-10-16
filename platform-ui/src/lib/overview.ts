@@ -1,5 +1,5 @@
 // The Overview's pure rules (DW-3a/3b, docs/plans/2026-10-13-department-workspaces.md §3): which bands and
-// widgets a person sees, the period, the quick actions, and where `/` sends someone on the pilot. No React
+// widgets a person sees, the period, the quick actions, and where `/` sends someone. No React
 // and no server imports, so the components stay thin and every rule here is a plain unit test.
 //
 // Nothing here is a security boundary. `gateAllows` mirrors the surfaces the server enforces; every read
@@ -9,7 +9,6 @@ import {
   type OverviewBand, type OverviewWidget, type QuickAction,
 } from "@/lib/workspaces";
 import { gateAllows, workspaceKeysOf, type GateContext, type HomeArea, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
-import type { ShellLayout } from "@/lib/shellLayout";
 import type { DeptLauncher } from "@/lib/deptToolkits";
 import { pinnedToolsFor } from "@/lib/pinnedTools";
 import { effectiveWidgets, type WorkspaceOverviewPrefs } from "@/lib/overviewPrefs";
@@ -155,7 +154,7 @@ export function selectQuickActions(
 
 // ── The header's words ───────────────────────────────────────────────────────────────────────────
 
-/** By the clock of the machine rendering the page, like the classic Home's greeting. There is no per-person
+/** By the clock of the machine rendering the page. There is no per-person
  *  time zone yet, so near a day boundary this can differ from the reader's own clock. */
 export function greetingFor(now: Date): string {
   const h = now.getHours();
@@ -168,18 +167,16 @@ export function dateLineFor(now: Date): string {
   return `${part({ weekday: "long" })} ${part({ day: "numeric" })} ${part({ month: "long" })}`;
 }
 
-// ── `/` for the pilot (plan §3.7) ────────────────────────────────────────────────────────────────
+// ── `/` (plan §3.7) ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export type HomeRoute =
-  | { kind: "classic" }
   | { kind: "redirect"; href: string }
   | { kind: "company" };
 
-/** What `/` does. Classic users keep today's page. On the pilot, a person whose home is a workspace goes
+/** What `/` does. A person whose home is a workspace goes
  *  to that workspace's Overview, and a Company-area person stays for the company frame. A target that
  *  cannot be made concrete, or that is `/` itself, falls back to the frame, so it can never loop. */
-export function resolveHomeRoute(input: { shell: ShellLayout; home: HomeArea; tenantId: string | null }): HomeRoute {
-  if (input.shell !== "workspaces") return { kind: "classic" };
+export function resolveHomeRoute(input: { home: HomeArea; tenantId: string | null }): HomeRoute {
   if (input.home.kind === "company") return { kind: "company" };
   const { workspace, deptId } = input.home.ref;
   const href = hrefFor(workspace.overviewHref, { deptId, companyId: input.tenantId });
@@ -188,10 +185,10 @@ export function resolveHomeRoute(input: { shell: ShellLayout; home: HomeArea; te
 
 /** DW-3a2: the layout's own answer to `/`. The page's `redirect()` sits under `loading.tsx`, so on a document
  *  request Next has already streamed the shell and emits a meta refresh instead of a 307. The layout is outside
- *  that boundary, so it redirects there: only for the pilot, on exactly `/` (the proxy's pathname header, no
+ *  that boundary, so it redirects there: on exactly `/` (the proxy's pathname header, no
  *  query), when `resolveHomeRoute` says redirect. Anything else returns null and the page decides as before. */
-export function layoutHomeRedirect(input: { pathname: string | null; shell: ShellLayout; home: HomeArea; tenantId: string | null }): string | null {
+export function layoutHomeRedirect(input: { pathname: string | null; home: HomeArea; tenantId: string | null }): string | null {
   if (input.pathname !== "/") return null;
-  const route = resolveHomeRoute({ shell: input.shell, home: input.home, tenantId: input.tenantId });
+  const route = resolveHomeRoute({ home: input.home, tenantId: input.tenantId });
   return route.kind === "redirect" ? route.href : null;
 }

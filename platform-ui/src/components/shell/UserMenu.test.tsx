@@ -1,10 +1,9 @@
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { UserMenu } from "./UserMenu";
-import { setShellLayoutAction } from "@/lib/prefsActions";
 
 vi.mock("@/app/(app)/account/actions", () => ({ logout: vi.fn() }));
-vi.mock("@/lib/prefsActions", () => ({ setShellLayoutAction: vi.fn(async () => {}), setThemeAction: vi.fn(async () => {}) }));
+vi.mock("@/lib/prefsActions", () => ({ setThemeAction: vi.fn(async () => {}) }));
 
 // PV2-06: "Client view" appears only when the caller is an active client contact somewhere
 // (TopBar computes `clientView` from `(me.clientOf ?? []).length > 0`).
@@ -38,31 +37,17 @@ describe("UserMenu — accessible name", () => {
   });
 });
 
-// DW-2a: the visible pilot switch between the classic shell and the workspace shell.
-describe("UserMenu — the layout switch (DW-2a)", () => {
-  function open(shellLayout?: "classic" | "workspaces") {
-    const { container } = render(<UserMenu name="U" secondary="x" initials="U" compact shellLayout={shellLayout} />);
-    fireEvent.click(container.querySelector(".erp-usermenu__trigger") as HTMLElement);
-  }
-
-  it("offers the new layout from the classic one, and stores the choice", async () => {
-    vi.mocked(setShellLayoutAction).mockClear();
-    open("classic");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Try the new layout" }));
-    await waitFor(() => expect(setShellLayoutAction).toHaveBeenCalledWith("workspaces"));
-    expect(screen.queryByRole("menuitem", { name: "Back to the classic layout" })).toBeNull();
-  });
-
-  it("offers the way back from the new layout", async () => {
-    vi.mocked(setShellLayoutAction).mockClear();
-    open("workspaces");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Back to the classic layout" }));
-    await waitFor(() => expect(setShellLayoutAction).toHaveBeenCalledWith("classic"));
-  });
-
-  it("shows no switch when the caller passes no layout", () => {
-    open();
-    expect(screen.queryByRole("menuitem", { name: /layout/ })).toBeNull();
+// DW-D38: there is one layout, so the avatar menu has no layout switch to offer.
+describe("UserMenu — no layout switch (DW-D38)", () => {
+  it("offers Account settings and Sign out and nothing about the layout, with or without a theme", () => {
+    for (const theme of [undefined, "dark" as const]) {
+      const { container, unmount } = render(<UserMenu name="U" secondary="x" initials="U" compact theme={theme} />);
+      fireEvent.click(container.querySelector(".erp-usermenu__trigger") as HTMLElement);
+      const items = screen.getAllByRole("menuitem").map((i) => i.textContent);
+      expect(items).toEqual(expect.arrayContaining(["Account settings", "Sign out"]));
+      expect(items.join("|")).not.toMatch(/layout|classic/i);
+      unmount();
+    }
   });
 });
 
@@ -90,7 +75,7 @@ describe("UserMenu — the Theme control (DW-2c)", () => {
     expect(screen.queryByRole("radio")).toBeNull();
   });
 
-  it("shows nothing of it without the prop, so the classic menu is as it was", () => {
+  it("shows nothing of it without the prop, so the menu is as it was", () => {
     open();
     expect(screen.queryByRole("group", { name: "Theme" })).toBeNull();
     expect(screen.queryByRole("radiogroup")).toBeNull();

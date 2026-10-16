@@ -57,8 +57,8 @@ export type Gate =
   /** Approvals "when it concerns you" (DW-D23, owner ruling 2026-10-14): something waits on this person's decision, or they
    *  hold any right to decide (`DECIDE_CAPABILITIES`, in any company they can reach: the inbox is cross-company). Deciding is
    *  split across several Cerbos rights and some are conditional, so a capability check alone could hide the row from a real
-   *  decider; the pending count is the second arm. UNKNOWN NEVER HIDES: a caller that did not read the approvals (the palette,
-   *  the classic shell) or whose read failed gets the row, so the page stays reachable for everyone and the server decides who
+   *  decider; the pending count is the second arm. UNKNOWN NEVER HIDES: a caller that did not read the approvals (the palette)
+   *  or whose read failed gets the row, so the page stays reachable for everyone and the server decides who
    *  may act (`GateContext.approvals`). */
   | { kind: "decider" }
   | { kind: "all"; gates: readonly Gate[] }
@@ -959,7 +959,7 @@ export const ASSISTANT_ROW: WorkspaceRow = {
   tabs: [{ key: "assistant", label: "AI Assistant", href: "/assistant", icon: "assistant" }],
 };
 
-/** Tools & connections (§4.1): today's Connections page. For the pilot the combined page, with the tools and pinning, is built (DW-6c). */
+/** Tools & connections (§4.1): the Connections page, combined with the tools and their pinning (DW-6c). */
 export const TOOLS_ROW: WorkspaceRow = {
   key: "tools",
   label: "Tools & connections",

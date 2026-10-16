@@ -8,7 +8,7 @@ import { useWorkspaceShell } from "@/components/shell/WorkspaceShellContext";
 // would say the same thing twice. A layout gets no pathname on the server (plan §13 trap 2), so the choice
 // is made here on the client, from the same URL the shell reads.
 //
-// Everywhere else it renders its children untouched: classic shell (no shell context), every other page of
+// Everywhere else it renders its children untouched: outside the workspace shell (no shell context), every other page of
 // the workspace, and a layout that passes `enabled={false}` because its page keeps the header (the GM's
 // refusal page, which draws no Overview).
 export function HideOnOverview({ overviewPath, enabled = true, children }: {

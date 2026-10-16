@@ -229,7 +229,7 @@ function SeatRowView({
 
 export type ConnectionsPanelPart = "github" | "drive" | "seat";
 
-/** What the rows ARE: account mappings, not sign-ins. Exported so the pilot's Connections section can
+/** What the rows ARE: account mappings, not sign-ins. Exported so the Connections section can
  *  say it once above its per-kind blocks instead of once per block. */
 export function AccountMappingNote() {
   return (
@@ -252,8 +252,8 @@ export function AccountMappingNote() {
   );
 }
 
-/** `only` (DW-6c) renders a subset of the rows, with no note: the pilot's Connections page draws one
- *  block per kind and says the note once. Left off, it renders exactly what it always did. */
+/** `only` (DW-6c) renders a subset of the rows, with no note: the Connections page draws one
+ *  block per kind and says the note once. Left off, it renders every row. */
 export function ConnectionsPanel({
   github, drive, seat, actions, only,
 }: {

@@ -11,7 +11,7 @@ type Decide = (tenantId: string, origin: QueueDecideOrigin, originId: string, de
 // DW-3c: the Overview's "Needs you" block. The server widget ranks the queue (`selectNeedsYou`) and passes it
 // whole; this only draws the top rows and lets "Show all" open the rest in place, so the whole queue stays
 // reachable now that `/` no longer shows it. Rows and the inline Approve/Deny are today's own
-// (`QueueRows`, `useQueueDecisions`): a decide runs the same code here as on the classic home.
+// (`QueueRows`, `useQueueDecisions`): a decide runs the same code here as it did on the old home.
 //
 // Every company's items are here, each row tagged with its company when the person has more than one. A
 // company that could not be read is named in the note rather than failing the block.

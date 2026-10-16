@@ -58,7 +58,7 @@ export default async function HRConsoleLayout({ children }: { children: React.Re
 
   return (
     <>
-      {/* DW-3a: the pilot's Overview draws its own header. With the module off the page body is not the
+      {/* DW-3a: the Overview draws its own header. With the module off the page body is not the
           Overview, so the header stays. */}
       <HideOnOverview overviewPath="/hr" enabled={moduleOn}>
         <PageHeader

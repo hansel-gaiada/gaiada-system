@@ -9,7 +9,7 @@ export interface Crumb { label: string; href?: string }
 //
 // DW-2b: a client component only to ask the workspace shell where the page is. On a tool page of the
 // current view (the pathname IS a tab) the sidebar and tab strip already say where you are, so the trail
-// hides (plan §2.4). A record below a tool, and every page in the classic shell, keep it.
+// hides (plan §2.4). A record below a tool, and any page outside the workspace shell (the portal), keep it.
 export function Breadcrumbs({ items }: { items: Crumb[] }) {
   const shell = useWorkspaceShell();
   if (items.length === 0 || shell?.onToolPage) return null;

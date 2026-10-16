@@ -1,4 +1,4 @@
-/* DW-2a: the department workspace sidebar (WorkspaceSidebar.tsx), drawn only on the pilot switch.
+/* DW-2a: the department workspace sidebar (WorkspaceSidebar.tsx), the only sidebar (DW-D38).
    It is still an `.erp-side`, so the grid area, the phone drawer, the collapsed rail and the rail
    tooltips all come from shell.css unchanged; this file only restyles what is inside the panel.
    Tokens only (src/styles/tokens.test.ts): no colour, radius or shadow literals, no uppercase. */

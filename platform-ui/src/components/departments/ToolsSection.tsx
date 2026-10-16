@@ -4,7 +4,7 @@ import { launcherSeatProps } from "@/lib/claudeSeats";
 import type { Workspace } from "@/lib/workspaces";
 import type { SeatRow } from "@/lib/claudeSeats";
 
-// DW-6c: the Tools half of the pilot's Tools & connections page (plan §4.1). The workspace's tools in
+// DW-6c: the Tools half of the Tools & connections page (plan §4.1). The workspace's tools in
 // registry order, each opening in a new tab, with your own seat on the Claude tools exactly as the
 // department Home shows it (same `LauncherRow`, same `launcherSeatProps`). Each tool has a pin button
 // that is a real <button> in a <form> posting to a server action, so it works without JavaScript.

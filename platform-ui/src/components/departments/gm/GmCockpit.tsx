@@ -121,7 +121,7 @@ export async function GmCockpit({
    *  every tier of one render shares an anchor. */
   anchorDate: string;
   /** DW-3z: the sections the company Overview now shows, left out when the cockpit sits under it (plan §3.8). A section left out is
-   *  not read either. The default, and every classic page, leaves nothing out. */
+   *  not read either. The default leaves nothing out. */
   hide?: readonly GmSection[];
 }) {
   const shows = (section: GmSection) => !hide.includes(section);

@@ -10,8 +10,8 @@ import type { ConcreteRow } from "@/lib/workspaceAccess";
 // The sidebar, the shell's tab strip, the console strips and the breadcrumbs all need the same answer:
 // which area, which view, which row and tab hold this page. Computing it in each would let them
 // disagree (a strip for one department under another's sidebar), so it is computed here, once, from the
-// URL on the CLIENT and the model the server sent. `useWorkspaceShell()` returns null in the classic
-// shell, which is how every consumer knows to render exactly as it always did.
+// URL on the CLIENT and the model the server sent. `useWorkspaceShell()` returns null outside the workspace
+// shell (the portal, a unit test), which is how a consumer there knows to render plainly.
 //
 // The last area lives in sessionStorage, so it is per tab and read only after mount; the first render
 // uses none, which is what the server rendered too (no hydration mismatch).
@@ -81,7 +81,7 @@ export interface WorkspaceShellValue {
 
 const Ctx = createContext<WorkspaceShellValue | null>(null);
 
-/** The workspace shell's state, or null in the classic shell. */
+/** The workspace shell's state, or null outside the workspace shell. */
 export function useWorkspaceShell(): WorkspaceShellValue | null {
   return useContext(Ctx);
 }

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { isPlanned, type ConnectionKind, type Workspace } from "@/lib/workspaces";
 
-// DW-6c: the Connections half of the pilot's Tools & connections page (plan §4.1). One block per
+// DW-6c: the Connections half of the Tools & connections page (plan §4.1). One block per
 // non-ticketed kind of the workspace, in registry order. A kind with a ticket is not built and is not
 // drawn. The page supplies each kind's content; a kind it has no content for is skipped rather than
 // drawn empty.

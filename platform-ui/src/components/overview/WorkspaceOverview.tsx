@@ -27,7 +27,7 @@ import "./overview.css";
 // what needs me, how am I doing, how is my department doing, where is our work, how am I growing. This
 // ticket draws the header, the bands and the host each block plugs into. A block is its own ticket.
 //
-// Server component. Pilot only: the pages that render it check the switch, and everyone else keeps today's page.
+// Server component.
 
 /** A band's quiet label. The Department band carries the workspace's own name. */
 function bandLabel(band: OverviewBand, subject: OverviewSubject, view: OverviewView): string {

@@ -1,6 +1,5 @@
-// DW-9d-1: the workspace shell is the default for everyone, and only a person who CHOSE classic keeps
-// it. Every prefs writer spreads the whole cookie, so a stored `shell: "classic"` without `shellChosen`
-// is a leftover default (classic was the default until DW-9d-1), never a choice.
+// DW-9d-2 (DW-D38): the layout switch is gone. A cookie written while the switch existed may still carry `shell` and
+// `shellChosen`; neither is read any more, and both drop out of the cookie the next time anything writes the prefs.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const store = new Map<string, string>();
@@ -13,70 +12,41 @@ vi.mock("next/headers", () => ({
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { getPrefs } from "./prefs";
-import { setAssistantRailCollapsedAction, setOfficeZoomAction, setShellLayoutAction, setThemeAction, togglePinnedToolAction } from "./prefsActions";
+import * as prefsActions from "./prefsActions";
+import { setAssistantRailCollapsedAction, setOfficeZoomAction, setThemeAction, togglePinnedToolAction } from "./prefsActions";
 
 beforeEach(() => store.clear());
 
-describe("shell default and shellChosen (DW-9d-1)", () => {
-  it("no cookie reads as the workspace shell", async () => {
-    const p = await getPrefs();
-    expect(p.shell).toBe("workspaces");
-    expect(p.shellChosen).toBe(false);
+const stored = () => JSON.parse(store.get("gaiada_prefs") ?? "{}") as Record<string, unknown>;
+
+describe("the retired layout switch (DW-D38)", () => {
+  it("has no action to switch the layout", () => {
+    expect(Object.keys(prefsActions)).not.toContain("setShellLayoutAction");
   });
 
-  it("a stored classic WITHOUT the flag is ignored", async () => {
-    store.set("gaiada_prefs", JSON.stringify({ theme: "dark", shell: "classic" }));
-    const p = await getPrefs();
-    expect(p.shell).toBe("workspaces");
-    expect(p.theme).toBe("dark");
-  });
-
-  it("a stored classic WITH the flag is kept", async () => {
-    store.set("gaiada_prefs", JSON.stringify({ shell: "classic", shellChosen: true }));
-    const p = await getPrefs();
-    expect(p.shell).toBe("classic");
-    expect(p.shellChosen).toBe(true);
-  });
-
-  it("a non-boolean flag does not count", async () => {
-    store.set("gaiada_prefs", JSON.stringify({ shell: "classic", shellChosen: "true" }));
-    expect((await getPrefs()).shell).toBe("workspaces");
-  });
-
-  it("setThemeAction on a fresh cookie does not make anyone classic", async () => {
-    await setThemeAction("dark");
+  it("a cookie still holding shell classic and shellChosen true changes nothing in the prefs read", async () => {
+    store.set("gaiada_prefs", JSON.stringify({ theme: "dark", shell: "classic", shellChosen: true }));
     const p = await getPrefs();
     expect(p.theme).toBe("dark");
-    expect(p.shell).toBe("workspaces");
-    expect(p.shellChosen).toBe(false);
+    expect(p).not.toHaveProperty("shell");
+    expect(p).not.toHaveProperty("shellChosen");
   });
 
-  it("a legacy cookie with shell classic and no flag stays on workspaces after another writer runs", async () => {
-    store.set("gaiada_prefs", JSON.stringify({ shell: "classic", theme: "light" }));
-    await setOfficeZoomAction(2);
-    await setAssistantRailCollapsedAction(true);
-    await togglePinnedToolAction("web-dev", "figma");
-    expect((await getPrefs()).shell).toBe("workspaces");
-  });
-
-  it("setShellLayoutAction('classic') is a choice, and later writers keep it", async () => {
-    await setShellLayoutAction("classic");
-    expect((await getPrefs()).shell).toBe("classic");
-    await setThemeAction("dark");
+  it("drops both retired keys from the cookie on the next write, and keeps the rest", async () => {
+    for (const write of [
+      () => setThemeAction("light"),
+      () => setOfficeZoomAction(2),
+      () => setAssistantRailCollapsedAction(true),
+      () => togglePinnedToolAction("web-dev", "figma"),
+    ]) {
+      store.set("gaiada_prefs", JSON.stringify({ theme: "dark", shell: "classic", shellChosen: true }));
+      await write();
+      const raw = stored();
+      expect(raw, String(write)).not.toHaveProperty("shell");
+      expect(raw, String(write)).not.toHaveProperty("shellChosen");
+    }
+    store.set("gaiada_prefs", JSON.stringify({ theme: "dark", shell: "classic", shellChosen: true }));
     await setOfficeZoomAction(3);
-    await setAssistantRailCollapsedAction(true);
-    await togglePinnedToolAction("web-dev", "figma");
-    const p = await getPrefs();
-    expect(p.shell).toBe("classic");
-    expect(p.shellChosen).toBe(true);
-    expect(p.theme).toBe("dark");
-  });
-
-  it("switching back to workspaces is also a choice", async () => {
-    await setShellLayoutAction("classic");
-    await setShellLayoutAction("workspaces");
-    const p = await getPrefs();
-    expect(p.shell).toBe("workspaces");
-    expect(p.shellChosen).toBe(true);
+    expect(stored()).toMatchObject({ theme: "dark", officeZoom: 3 });
   });
 });

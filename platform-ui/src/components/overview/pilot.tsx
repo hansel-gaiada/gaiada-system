@@ -8,10 +8,9 @@ import { canSwitchToTeam, resolveOverviewView } from "@/lib/overviewTeam";
 import { setOverviewWidgetAction } from "@/lib/prefsActions";
 import { WorkspaceOverview } from "./WorkspaceOverview";
 
-/** DW-3a: the one branch every Overview page takes. For a person on the pilot switch, a function that wraps
- *  the page's own body (`legacy`) in the Overview of the workspace the URL belongs to (a department by its
- *  org node id, a functional one by its slug); `null` for everyone else, and for a URL that names no
- *  workspace of this company, so the caller renders its own page exactly as it always did.
+/** DW-3a: the one branch every Overview page takes. A function that wraps the page's own body
+ *  (`legacy`) in the Overview of the workspace the URL belongs to (a department by its org node id, a functional one by its
+ *  slug); `null` for a URL that names no workspace of this company, so the caller renders its own page whole.
  *
  *  The page decides this BEFORE it reads its own data, builds its body once, and passes it through `wrap`,
  *  so the page reads exactly what it read before. Today's body stays under the Overview's bands until the
@@ -24,7 +23,6 @@ export async function pilotFrame(
   searchParams: Promise<{ period?: string | string[]; view?: string | string[] }>,
 ): Promise<((legacy: ReactNode) => ReactNode) | null> {
   const prefs = await getPrefs();
-  if (prefs.shell !== "workspaces") return null;
   const all = await myWorkspaces(me, tenantId);
   const ref = workspaceRefForPage(all, target);
   if (!ref) return null;

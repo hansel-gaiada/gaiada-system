@@ -30,7 +30,7 @@ export default async function HROverviewPage({ searchParams }: { searchParams: P
   const tenant = await getActiveTenant(me);
   if (!tenant) return <EmptyNote>Select a company from the top bar.</EmptyNote>;
 
-  // DW-3a: on the pilot switch the Overview frames this page body, which stays below its bands until the
+  // DW-3a: the Overview frames this page body, which stays below its bands until the
   // Overview's own blocks replace it. The body is built once, below, and passed through `frame`.
   // DW-3z: under the frame, the cards that are only links to the workspace's own rows and tabs go (plan §3.8); the counts and the
   // scope note stay, because no block shows them yet.

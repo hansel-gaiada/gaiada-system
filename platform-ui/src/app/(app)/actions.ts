@@ -24,7 +24,7 @@ export async function decideApproval(tenantId: string, approvalId: string, decis
 
 export type QueueDecideOrigin = "agency" | "automation" | "pipeline";
 
-// DW-3c: the pages that render the Overview's "Needs you" block for the workspaces pilot. `/` and
+// DW-3c: the pages that render the Overview's "Needs you" block. `/` and
 // `/departments` do not cover them: `revalidatePath` matches one path, and `/departments/[deptId]` is a
 // dynamic segment. The functional workspaces' Overviews are their own pages.
 function revalidateOverviews() {

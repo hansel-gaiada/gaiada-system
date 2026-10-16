@@ -27,7 +27,7 @@ export default async function ITConsoleLayout({ children }: { children: React.Re
   const moduleOn = await isModuleOnForActiveCompany("it");
   return (
     <>
-      {/* DW-3a: the pilot's Overview draws its own header. With the module off the page body is not the
+      {/* DW-3a: the Overview draws its own header. With the module off the page body is not the
           Overview, so the header stays. */}
       <HideOnOverview overviewPath="/it" enabled={moduleOn}>
         <PageHeader

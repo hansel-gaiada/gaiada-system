@@ -5,7 +5,6 @@ import { getMe } from "@/lib/platform";
 import { rethrowIfSessionEnded } from "@/lib/sessionEnded";
 import { getActiveTenant } from "@/lib/tenant";
 import { getPrefs } from "@/lib/prefs";
-import { listDepartmentBriefs, type DeptBrief } from "@/lib/departments";
 import { Shell } from "@/components/shell/Shell";
 import { isClientOnly } from "@/lib/rbac";
 import { myWorkspaces } from "@/lib/workspaces-data";
@@ -13,7 +12,7 @@ import { approvalsGateInput } from "@/lib/workspaceAccess";
 import { listApprovals } from "@/lib/approvals";
 import { layoutHomeRedirect } from "@/lib/overview";
 import { PATHNAME_HEADER } from "@/lib/pathnameHeader";
-import { buildShellModel, type ShellModel } from "@/lib/shellModel";
+import { buildShellModel } from "@/lib/shellModel";
 
 // `drawer` is the parallel slot the intercepted task route renders into (see @drawer/). It sits
 // OUTSIDE <Shell>'s scroll container so the slide-over is positioned against the viewport rather
@@ -38,33 +37,18 @@ export default async function AppLayout({ children, drawer }: { children: React.
 
   const tenantId = await getActiveTenant(me);
   const prefs = await getPrefs();
-  // The active company's departments for the Departments nav section.
-  const departments: DeptBrief[] = tenantId
-    ? await listDepartmentBriefs(userId, tenantId).catch(() => [] as DeptBrief[])
-    : [];
-  // DW-2a: only the pilot switch reads the person's workspaces, so the classic shell makes no extra call.
-  // A model that cannot be built leaves the classic sidebar, never a broken page.
-  let workspaceModel: ShellModel | null = null;
-  let homeHref: string | null = null;
-  if (prefs.shell === "workspaces") {
-    try {
-      // DW-8m: the pending approvals are read here, in parallel, for the Approvals row's gate and count (DW-D23). Only the
-      // pilot pays for it, and `listApprovals` never throws (a failed read is `unavailable`, which shows the row).
-      const [workspaces, pending] = await Promise.all([myWorkspaces(me, tenantId), listApprovals(userId, { status: "pending" })]);
-      workspaceModel = buildShellModel({ me, tenantId, workspaces, approvals: approvalsGateInput({ items: pending.envelope.items, unavailable: pending.unavailable }) });
-      // DW-3a2: `/` for a pilot user whose home is a workspace is answered HERE, with a real 307. The page's own
-      // redirect would stream (it sits under loading.tsx) and leave a meta refresh that breaks client navigation.
-      homeHref = layoutHomeRedirect({ pathname: (await headers()).get(PATHNAME_HEADER), shell: prefs.shell, home: workspaces.home, tenantId });
-    } catch {
-      workspaceModel = null;
-      homeHref = null;
-    }
-  }
-  // Outside the try: redirect() works by throwing.
+  // DW-8m: the pending approvals are read here, in parallel, for the Approvals row's gate and count (DW-D23). `listApprovals`
+  // never throws (a failed read is `unavailable`, which shows the row), `myWorkspaces` never throws, and `buildShellModel` is
+  // pure: a failure here is a bug, and it reaches the error boundary rather than another sidebar (DW-D38).
+  const [workspaces, pending] = await Promise.all([myWorkspaces(me, tenantId), listApprovals(userId, { status: "pending" })]);
+  const workspaceModel = buildShellModel({ me, tenantId, workspaces, approvals: approvalsGateInput({ items: pending.envelope.items, unavailable: pending.unavailable }) });
+  // DW-3a2: `/` for a person whose home is a workspace is answered HERE, with a real 307. The page's own
+  // redirect would stream (it sits under loading.tsx) and leave a meta refresh that breaks client navigation.
+  const homeHref = layoutHomeRedirect({ pathname: (await headers()).get(PATHNAME_HEADER), home: workspaces.home, tenantId });
   if (homeHref) redirect(homeHref);
   return (
     <>
-      <Shell me={me} tenantId={tenantId} moduleLabel="My Workspace" prefs={prefs} departments={departments} workspaceModel={workspaceModel}>
+      <Shell me={me} tenantId={tenantId} prefs={prefs} workspaceModel={workspaceModel}>
         {children}
       </Shell>
       {drawer}

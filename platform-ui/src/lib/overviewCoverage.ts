@@ -9,7 +9,7 @@
 // A section that shows MORE than its block (more rows, other columns, actions) is "covered" only where the block links to the rest,
 // and says so in `by`.
 //
-// Everything is for a person on the pilot (`framed`). A classic page never passes through here, so it keeps today's body exactly, and
+// Everything here is for a page drawn inside the Overview (`framed`). A page the Overview does not frame (an unresolved workspace) keeps its full body, and
 // a section that is not in this table is KEPT (the safe default: nothing leaves without a verdict).
 //
 // Pure and client-safe: the vitest pins every claim to the registry (`overviewCoverage.test.ts`).
@@ -152,7 +152,7 @@ export const COVERAGE: readonly CoverageEntry[] = [
 ];
 
 export interface CoverageContext {
-  /** The page is drawn inside the Overview (the person is on the pilot). False: today's page, whole. */
+  /** The page is drawn inside the Overview. False: the page, whole. */
   framed: boolean;
   /** The company Overview's `companyAccess`, for the entries that hold only where its block is placed. */
   access?: { numbers: boolean; money: boolean };
@@ -168,7 +168,7 @@ export function keepsSection(page: LegacyPage, section: string, ctx: CoverageCon
   return false;
 }
 
-/** The cockpit's sections that leave the pilot's page for this person. */
+/** The cockpit's sections that leave the page for this person. */
 export type GmSection = "provenance" | "business" | "departments" | "money";
 const GM_SECTIONS: readonly GmSection[] = ["provenance", "business", "departments", "money"];
 

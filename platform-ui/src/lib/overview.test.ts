@@ -203,47 +203,42 @@ describe("workspaceRefForPage", () => {
 });
 
 describe("resolveHomeRoute (what `/` does)", () => {
-  it("sends a pilot user whose home is a department to that department's Overview", () => {
+  it("sends a person whose home is a department to that department's Overview", () => {
     expect(placed.home.kind).toBe("workspace");
-    expect(resolveHomeRoute({ shell: "workspaces", home: placed.home, tenantId: "co-a" })).toEqual({ kind: "redirect", href: "/departments/d-web" });
+    expect(resolveHomeRoute({ home: placed.home, tenantId: "co-a" })).toEqual({ kind: "redirect", href: "/departments/d-web" });
   });
 
-  it("leaves a classic user on today's page, whatever their home", () => {
-    expect(resolveHomeRoute({ shell: "classic", home: placed.home, tenantId: "co-a" })).toEqual({ kind: "classic" });
-    expect(resolveHomeRoute({ shell: "classic", home: { kind: "company" }, tenantId: "co-a" })).toEqual({ kind: "classic" });
-  });
-
-  it("keeps a pilot user whose home is the Company area on `/`, for the company frame", () => {
+  it("keeps a person whose home is the Company area on `/`, for the company frame", () => {
     const unplaced = resolveMyWorkspaces({ me: employee, tenantId: "co-a", root: agencyTree() });
     expect(unplaced.home).toEqual({ kind: "company" });
-    expect(resolveHomeRoute({ shell: "workspaces", home: unplaced.home, tenantId: "co-a" })).toEqual({ kind: "company" });
+    expect(resolveHomeRoute({ home: unplaced.home, tenantId: "co-a" })).toEqual({ kind: "company" });
   });
 
   it("sends a functional home with no department id to its slug route", () => {
     const hrStaff = me([member(), { role: "hr_staff", scopeType: "company", scopeId: "co-a" }]);
     const ws = resolveMyWorkspaces({ me: hrStaff, tenantId: "co-a", root: agencyTree() });
     expect(ws.home.kind === "workspace" && ws.home.ref.deptId).toBeNull();
-    expect(resolveHomeRoute({ shell: "workspaces", home: ws.home, tenantId: "co-a" })).toEqual({ kind: "redirect", href: "/hr" });
+    expect(resolveHomeRoute({ home: ws.home, tenantId: "co-a" })).toEqual({ kind: "redirect", href: "/hr" });
   });
 
   it("sends the Office of the GM's home to its own page", () => {
     const gmTree = resolveMyWorkspaces({
       me: me([{ role: "platform_admin", scopeType: "global", scopeId: null }]), tenantId: "co-a", root: agencyTree(),
     });
-    expect(resolveHomeRoute({ shell: "workspaces", home: gmTree.home, tenantId: "co-a" })).toEqual({ kind: "redirect", href: "/departments/d-gm" });
+    expect(resolveHomeRoute({ home: gmTree.home, tenantId: "co-a" })).toEqual({ kind: "redirect", href: "/departments/d-gm" });
   });
 
   it("can never redirect to `/` or to a link it cannot make concrete: that falls back to the frame", () => {
     const base = WORKSPACES.find((x) => x.key === "web-dev")!;
     const loop: HomeArea = { kind: "workspace", ref: { workspace: { ...base, overviewHref: "/" }, deptId: "d-web", unitPath: [], lead: false } };
-    expect(resolveHomeRoute({ shell: "workspaces", home: loop, tenantId: "co-a" })).toEqual({ kind: "company" });
+    expect(resolveHomeRoute({ home: loop, tenantId: "co-a" })).toEqual({ kind: "company" });
     const noId: HomeArea = { kind: "workspace", ref: { workspace: base, deptId: null, unitPath: [], lead: false } };
-    expect(resolveHomeRoute({ shell: "workspaces", home: noId, tenantId: "co-a" })).toEqual({ kind: "company" });
+    expect(resolveHomeRoute({ home: noId, tenantId: "co-a" })).toEqual({ kind: "company" });
   });
 
   it("never redirects to `/` for any registry workspace", () => {
     for (const workspace of WORKSPACES) {
-      const route = resolveHomeRoute({ shell: "workspaces", home: { kind: "workspace", ref: { workspace, deptId: "d-1", unitPath: [], lead: false } }, tenantId: "co-a" });
+      const route = resolveHomeRoute({ home: { kind: "workspace", ref: { workspace, deptId: "d-1", unitPath: [], lead: false } }, tenantId: "co-a" });
       expect(route.kind === "redirect" && route.href, workspace.key).not.toBe("/");
     }
   });
@@ -266,14 +261,13 @@ describe("the header's words", () => {
 
 describe("layoutHomeRedirect (the layout's real 307 for `/`)", () => {
   const unplaced = resolveMyWorkspaces({ me: employee, tenantId: "co-a", root: agencyTree() });
-  it("redirects a pilot user on `/` whose home is a workspace", () => {
-    expect(layoutHomeRedirect({ pathname: "/", shell: "workspaces", home: placed.home, tenantId: "co-a" })).toBe("/departments/d-web");
+  it("redirects a person on `/` whose home is a workspace", () => {
+    expect(layoutHomeRedirect({ pathname: "/", home: placed.home, tenantId: "co-a" })).toBe("/departments/d-web");
   });
-  it("does not redirect a Company-home person, a classic user, another path, a missing header or `/` with a query", () => {
-    expect(layoutHomeRedirect({ pathname: "/", shell: "workspaces", home: unplaced.home, tenantId: "co-a" })).toBeNull();
-    expect(layoutHomeRedirect({ pathname: "/", shell: "classic", home: placed.home, tenantId: "co-a" })).toBeNull();
-    expect(layoutHomeRedirect({ pathname: "/projects", shell: "workspaces", home: placed.home, tenantId: "co-a" })).toBeNull();
-    expect(layoutHomeRedirect({ pathname: null, shell: "workspaces", home: placed.home, tenantId: "co-a" })).toBeNull();
-    expect(layoutHomeRedirect({ pathname: "/?scope=co-a", shell: "workspaces", home: placed.home, tenantId: "co-a" })).toBeNull();
+  it("does not redirect a Company-home person, another path, a missing header or `/` with a query", () => {
+    expect(layoutHomeRedirect({ pathname: "/", home: unplaced.home, tenantId: "co-a" })).toBeNull();
+    expect(layoutHomeRedirect({ pathname: "/projects", home: placed.home, tenantId: "co-a" })).toBeNull();
+    expect(layoutHomeRedirect({ pathname: null, home: placed.home, tenantId: "co-a" })).toBeNull();
+    expect(layoutHomeRedirect({ pathname: "/?scope=co-a", home: placed.home, tenantId: "co-a" })).toBeNull();
   });
 });

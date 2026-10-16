@@ -115,8 +115,7 @@ export function proxy(req: NextRequest) {
   // DW-3a2: hand the pathname to the server as a REQUEST header so `(app)/layout.tsx` (outside the loading boundary)
   // can answer `/` with a real 307. Only a document request carries it. A Server Action (`next-action`) or an RSC
   // fetch (`rsc`: a client navigation, a prefetch, `router.refresh()`) also re-renders the layout, and a redirect the
-  // layout throws there never reaches the browser: "Try the new layout", an action on `/`, left the classic shell
-  // on screen. Those keep the page's own redirect, as before. Always cleared first, so a client-sent value never
+  // layout throws there never reaches the browser (an action on `/` left the old page on screen). Those keep the page's own redirect, as before. Always cleared first, so a client-sent value never
   // survives.
   const requestHeaders = new Headers(req.headers);
   requestHeaders.delete(PATHNAME_HEADER);

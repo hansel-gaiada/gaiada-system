@@ -19,10 +19,9 @@ describe("prefs: pinnedTools (DW-6c)", () => {
   });
 
   it("round-trips through the cookie", async () => {
-    await writePrefs({ ...DEFAULT_PREFS, shell: "workspaces", pinnedTools: { "web-dev": ["claude", "figma"], seo: [] } });
+    await writePrefs({ ...DEFAULT_PREFS, pinnedTools: { "web-dev": ["claude", "figma"], seo: [] } });
     const back = await getPrefs();
     expect(back.pinnedTools).toEqual({ "web-dev": ["claude", "figma"], seo: [] });
-    expect(back.shell).toBe("workspaces");
   });
 
   it("reads a forged or malformed value as {} and keeps the other prefs", async () => {

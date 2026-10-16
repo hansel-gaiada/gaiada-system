@@ -14,7 +14,7 @@ import { type DeptGroup, tabHref } from "@/lib/deptToolkits";
 // logic lives here so the server layout only passes serialisable data.
 //
 // DW-2b: inside the workspace shell both levels hide together when the shell's rows offer every tab of
-// every group; otherwise both stay (a half strip would strand the pages it dropped). Classic: always drawn.
+// every group; otherwise both stay (a half strip would strand the pages it dropped). Outside the workspace shell: always drawn.
 export function DeptTabs({ groups, deptId }: { groups: DeptGroup[]; deptId: string }) {
   const pathname = usePathname();
   const shell = useWorkspaceShell();

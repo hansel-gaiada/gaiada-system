@@ -27,7 +27,7 @@ export default async function ITOverviewPage({ searchParams }: { searchParams: P
     return <EmptyNote>Select a company from the top bar.</EmptyNote>;
   }
 
-  // DW-3a: on the pilot switch the Overview frames this page body, which stays below its bands until the
+  // DW-3a: the Overview frames this page body, which stays below its bands until the
   // Overview's own blocks replace it. The body is built once, below, and passed through `frame`.
   const frame = await pilotFrame(me, tenant, { slug: "it" }, searchParams);
 

@@ -3,9 +3,8 @@ import "server-only";
 // once per request (`cache`) and each block takes what it needs; a second fan-out would double every call.
 //
 // Scope (owner ruling DW-Q2, plan §11.3: one Overview per company, and Needs you keeps every company's items,
-// tagged): the read covers every company the person can reach, built as classic `/` builds its list
-// (`accessibleCompanies`), through the same `getMyWorkQueue` spine as today's home and the department rail
-// (R-1). That spine already reads the person's PM tasks with `assignee=me`, which the backend answers as
+// tagged): the read covers every company the person can reach, built with `accessibleCompanies`, through the same
+// `getMyWorkQueue` spine the old home used (R-1). That spine already reads the person's PM tasks with `assignee=me`, which the backend answers as
 // ball-or-responsible, so a department's ball tasks are in it without a second read. "Needs you" shows all of
 // it; "Today" narrows to the Overview's own company (`itemsOfCompany`), because it is the agenda of this
 // workspace's day.

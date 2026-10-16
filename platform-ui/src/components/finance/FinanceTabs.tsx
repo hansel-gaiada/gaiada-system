@@ -49,7 +49,7 @@ export const FINANCE_TABS: FinanceTab[] = [
 ];
 
 // DW-2b: hidden inside the workspace shell when its rows offer every tab below (they do today); the
-// shell draws one strip instead. Classic shell: always drawn.
+// shell draws one strip instead. Outside the workspace shell it is always drawn.
 const tabHref = (t: FinanceTab) => (t.segment ? `/finance/${t.segment}` : "/finance");
 
 export function FinanceTabs() {

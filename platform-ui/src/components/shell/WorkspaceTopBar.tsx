@@ -1,6 +1,5 @@
 import type { Me } from "@/lib/platform";
 import type { Theme } from "@/lib/prefs";
-import type { ShellLayout } from "@/lib/shellLayout";
 import { listNotifications } from "@/lib/entities";
 import { noticePostedLine } from "@/lib/notices";
 import { NavToggle } from "./NavToggle";
@@ -11,8 +10,7 @@ import { UserMenu } from "./UserMenu";
 import { SimulatedFactorBadge } from "@/components/auth/SimulatedFactorBadge";
 import "./workspace-topbar.css";
 
-// DW-2c: the workspace shell's top bar (plan §2.5), drawn only for people on the pilot switch. The
-// classic bar (TopBar.tsx) is untouched.
+// DW-2c: the workspace shell's top bar (plan §2.5), the only top bar (DW-D38).
 //
 //   [☰ phone]  [ Search pages, people, records…  ⌘K ]        [chip] [🔔 3] [avatar]
 //
@@ -22,14 +20,13 @@ import "./workspace-topbar.css";
 /** How many notifications the bell's pop-over lists. */
 const BELL_ITEMS = 5;
 
-export async function WorkspaceTopBar({ me, tenantId, theme, shell, special, unrestricted }: {
-  me: Me; tenantId: string | null; theme: Theme; shell?: ShellLayout; special: boolean; unrestricted: boolean;
+export async function WorkspaceTopBar({ me, tenantId, theme, special, unrestricted }: {
+  me: Me; tenantId: string | null; theme: Theme; special: boolean; unrestricted: boolean;
 }) {
   const initials = me.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
-  // The same unread read the classic bell uses. That one turns a failure into 0; here a thrown read is
-  // `null`, so the bell shows no count and says it could not load. (listNotifications itself already
-  // turns a 403/404, a tenant without the feature, into an empty list.)
+  // The unread read: a thrown read is `null`, so the bell shows no count and says it could not load.
+  // (listNotifications itself already turns a 403/404, a tenant without the feature, into an empty list.)
   let unread: { count: number; items: BellItem[] } | null = { count: 0, items: [] };
   if (tenantId) {
     try {
@@ -55,7 +52,7 @@ export async function WorkspaceTopBar({ me, tenantId, theme, shell, special, unr
         {/* PV5-14 / PV-D40: only while a simulated second factor holds this sign-in (dev stage). */}
         {me.assuranceSource === "simulated" && me.assuranceExpiresAt && <SimulatedFactorBadge expiresAt={me.assuranceExpiresAt} />}
         <NotificationBell unread={unread?.count ?? null} items={unread?.items ?? []} />
-        <UserMenu name={me.name} secondary={me.title ?? me.email} initials={initials} compact clientView={(me.clientOf ?? []).length > 0} shellLayout={shell} theme={theme} />
+        <UserMenu name={me.name} secondary={me.title ?? me.email} initials={initials} compact clientView={(me.clientOf ?? []).length > 0} theme={theme} />
       </div>
     </header>
   );

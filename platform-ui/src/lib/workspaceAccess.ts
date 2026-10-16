@@ -47,7 +47,7 @@ export interface GateContext {
   workspaces?: readonly string[];
   /** What the shell read of the person's pending approvals (`listApprovals`), for the `decider` gate and the row's count
    *  (DW-D23, DW-8m). `pending` is how many wait on THIS person's decision (the items the server marks `decidable`).
-   *  `undefined` = the caller did not read approvals (the palette, the classic shell, a test): the gate ALLOWS, so
+   *  `undefined` = the caller did not read approvals (the palette, a test): the gate ALLOWS, so
    *  nothing that was findable stops being findable. `null` = the read was unavailable: the gate ALLOWS too, because a
    *  failed read must never hide the page from a decider. */
   approvals?: { pending: number } | null;

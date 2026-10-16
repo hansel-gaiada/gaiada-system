@@ -5,8 +5,8 @@ import type { TodayEvent } from "@/lib/calendarEvents";
 import { CheckinCard, type SubmitCheckinAction } from "@/components/dashboard/CheckinCard";
 import { LauncherRow, type LauncherItem } from "@/components/departments/LauncherRow";
 
-// DW-3c: the Overview's "Today" block, three honest parts. Today's check-in (the card as it is on the classic
-// home, so it can still be submitted from here), what is due today, and the workspace's tools as the
+// DW-3c: the Overview's "Today" block, three honest parts. Today's check-in (the same card the old home drew, so it can still be
+// submitted from here), what is due today, and the workspace's tools as the
 // department Home draws them. DW-8g added today's calendar events (BFF §47), read from the cross-company events
 // endpoint for this company's day in the display zone.
 //

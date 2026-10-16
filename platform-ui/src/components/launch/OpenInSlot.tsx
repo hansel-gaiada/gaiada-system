@@ -1,4 +1,3 @@
-import { getPrefs } from "@/lib/prefs";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
@@ -15,9 +14,9 @@ import type { FigmaLinks } from "@/lib/figma";
 import type { DeptLauncher } from "@/lib/deptToolkits";
 import { OpenInMenu } from "./OpenInMenu";
 
-// DW-6c2: the "Open in" menu's server half. Pilot only: it renders nothing unless `prefs.shell === "workspaces"`,
-// so the classic pages stay byte-identical. Everything it reads is a convenience, so a failed read never breaks
-// the page: a repository list that cannot be read falls back to the tools' home links, never to "no repository".
+// DW-6c2: the "Open in" menu's server half. Every page that carries it is on the workspace shell (DW-D38), so it is always offered.
+// Everything it reads is a convenience, so a failed read never breaks the page: a repository list that cannot be read
+// falls back to the tools' home links, never to "no repository".
 //
 //   task / project  the tools of the project's department's workspace (projects.department_id -> the org tree's
 //                   department name -> workspaceFor). No department, no menu.
@@ -41,9 +40,6 @@ async function linkedRepos(userId: string, tenant: string, projectId: string): P
 }
 
 export async function OpenInSlot(props: OpenInScope) {
-  const prefs = await getPrefs();
-  if (prefs.shell !== "workspaces") return null;
-
   const userId = await getSessionUserId();
   if (!userId) return null;
   const me = await getMe(userId);

@@ -110,7 +110,7 @@ export default async function ClientHubLayout({
             {canWrite && (
               <Link href={`/clients/${clientId}/edit`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit</Link>
             )}
-            {/* DW-6c2 — pilot only: renders nothing on the classic shell. */}
+            {/* DW-6c2 — the "Open in" menu; renders nothing when the page has no workspace tools to offer. */}
             <OpenInSlot scope="client" clientId={clientId} />
             {canWrite && (
               <form action={toggleArchive}>

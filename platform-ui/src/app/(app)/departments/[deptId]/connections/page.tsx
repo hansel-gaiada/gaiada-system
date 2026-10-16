@@ -74,7 +74,6 @@ export default async function DepartmentConnectionsPage({ params, searchParams }
     listClaudeSeats(userId, tenant, "me"),
   ]);
   const github = findConnection(myConnections.rows, "github");
-  const drive = findConnection(myConnections.rows, "google_drive");
   const seat = mySeat(mySeats.rows, userId);
   const unavailable = myConnections.unavailable || mySeats.unavailable;
 
@@ -141,145 +140,88 @@ export default async function DepartmentConnectionsPage({ params, searchParams }
   // and `GithubOrgHealth` renders each as itself — never as a silent all-clear.
   const orgStatus = usesRepos ? await getGithubOrgStatus(userId, tenant) : null;
 
-  // ── DW-6c: the pilot's page ───────────────────────────────────────────────────────────────────────
-  // Only a person on the workspace shell (`prefs.shell === "workspaces"`) gets the registry-driven page.
-  // Everyone else falls through to the unchanged classic page below, which this branch never touches.
+  // ── DW-6c: the registry-driven page (the only one since DW-D38) ─────────────────────────────────
   const prefs = await getPrefs();
-  if (prefs.shell === "workspaces") {
-    const ws = workspaceFor(activeCompany(me, tenant)?.vertical, dept.name);
-    const kinds = new Set(visibleConnections(ws).map((k) => k.key));
-    // A failed read is "unavailable", never "none" (the guard: `forbidden` is a real denial, a throw an outage).
-    let socialAccounts: SocialAccount[] | null = null;
-    let socialForbidden = false;
-    if (kinds.has("social-accounts")) {
-      try {
-        const r = await listAccounts(userId, tenant);
-        socialAccounts = r.data;
-        socialForbidden = r.forbidden;
-      } catch {
-        socialAccounts = null;
-      }
+  const ws = workspaceFor(activeCompany(me, tenant)?.vertical, dept.name);
+  const kinds = new Set(visibleConnections(ws).map((k) => k.key));
+  // A failed read is "unavailable", never "none" (the guard: `forbidden` is a real denial, a throw an outage).
+  let socialAccounts: SocialAccount[] | null = null;
+  let socialForbidden = false;
+  if (kinds.has("social-accounts")) {
+    try {
+      const r = await listAccounts(userId, tenant);
+      socialAccounts = r.data;
+      socialForbidden = r.forbidden;
+    } catch {
+      socialAccounts = null;
     }
-    // DW-6k: the company's Figma connection (BFF §36.8). A failed read is a ReadResult the block says in words, never "not connected".
-    const figmaConnection = kinds.has("figma") ? await readFigmaConnection(userId, tenant) : null;
-    // DW-6i: the person's Google Drive status (BFF §42.4), token already dropped. A failed read is a ReadResult the block says in words.
-    const driveStatus = kinds.has("drive") ? await readDriveStatus(userId, tenant) : null;
-    const panelActions = { connect, update, revoke, mapSeat, updateSeat, unmapSeat };
-    const githubBlock = (
-      <>
-        <ConnectionsPanel github={github} actions={panelActions} only={["github"]} />
-        {orgStatus && (
-          <div style={{ marginTop: 12 }}>
-            <p className="dept-conn-note">
-              This is the org-wide GitHub App, separate from your own GitHub row above. Repository lists, linking and
-              provisioning authenticate through it, and it is managed from{" "}
-              <Link href={`/departments/${deptId}/repositories`}>Repositories</Link>.
-            </p>
-            <GithubOrgHealth result={orgStatus} />
-          </div>
-        )}
-      </>
-    );
-    const blocks = {
-      github: githubBlock,
-      drive: driveStatus ? (
-        <DriveConnectionBlock
-          result={driveStatus}
-          returnPath={`/departments/${deptId}/connections`}
-          outcome={sp.driveOAuth}
-          outcomeReason={sp.driveOAuthReason}
-        />
-      ) : null,
-      "claude-seats": <ConnectionsPanel seat={seat} actions={panelActions} only={["seat"]} />,
-      "google-accounts": (
-        <GoogleConnectionsPanel
-          tenantId={tenant}
-          returnPath={`/departments/${deptId}/connections`}
-          connections={googleConnections}
-          clients={searchClients.map((c) => ({ id: c.id, name: c.name }))}
-          properties={searchProperties.map((p) => ({ id: p.id, domain: p.domain, clientId: p.clientId }))}
-          canManage={canManageGoogle}
-          oauthStatus={sp.googleOAuth}
-          oauthDetail={sp.googleOAuthDetail}
-        />
-      ),
-      "social-accounts": <SocialAccountsBlock accounts={socialAccounts} forbidden={socialForbidden} />,
-      figma: figmaConnection ? <FigmaConnectionBlock result={figmaConnection} canManage={isAdmin} /> : null,
-    };
-    return (
-      <>
-        <Card title="Tools">
-          <ToolsSection
-            workspace={ws}
-            pins={prefs.pinnedTools}
-            seat={seat}
-            seatsUnavailable={mySeats.unavailable}
-            toggleAction={togglePinnedToolAction}
-          />
-        </Card>
-        <Card title="Connections" style={{ marginTop: 16 }}>
-          {unavailable && (
-            <p className="dept-conn-banner">
-              The connections service isn&apos;t reachable yet — status shown below may be incomplete. It will populate once the backend is deployed.
-            </p>
-          )}
-          {(kinds.has("github") || kinds.has("drive") || kinds.has("claude-seats")) && <AccountMappingNote />}
-          <ConnectionBlocks workspace={ws} blocks={blocks} />
-        </Card>
-        {isAdmin && (
-          <Card title="Team status" style={{ marginTop: 16 }}>
-            {teamUnavailable && (
-              <p className="dept-conn-banner">
-                The connections service isn&apos;t reachable yet — the team grid below may be incomplete.
-              </p>
-            )}
-            {teamRows.length === 0 ? (
-              <TeachState
-                glyph="⌁"
-                title="No one placed yet"
-                body="Add people to this department in the org structure editor to see their connection status here."
-              />
-            ) : (
-              <TeamConnectionsGrid rows={teamRows} onMapSeat={adminMapSeat} />
-            )}
-          </Card>
-        )}
-      </>
-    );
   }
-
+  // DW-6k: the company's Figma connection (BFF §36.8). A failed read is a ReadResult the block says in words, never "not connected".
+  const figmaConnection = kinds.has("figma") ? await readFigmaConnection(userId, tenant) : null;
+  // DW-6i: the person's Google Drive status (BFF §42.4), token already dropped. A failed read is a ReadResult the block says in words.
+  const driveStatus = kinds.has("drive") ? await readDriveStatus(userId, tenant) : null;
+  const panelActions = { connect, update, revoke, mapSeat, updateSeat, unmapSeat };
+  const githubBlock = (
+    <>
+      <ConnectionsPanel github={github} actions={panelActions} only={["github"]} />
+      {orgStatus && (
+        <div style={{ marginTop: 12 }}>
+          <p className="dept-conn-note">
+            This is the org-wide GitHub App, separate from your own GitHub row above. Repository lists, linking and
+            provisioning authenticate through it, and it is managed from{" "}
+            <Link href={`/departments/${deptId}/repositories`}>Repositories</Link>.
+          </p>
+          <GithubOrgHealth result={orgStatus} />
+        </div>
+      )}
+    </>
+  );
+  const blocks = {
+    github: githubBlock,
+    drive: driveStatus ? (
+      <DriveConnectionBlock
+        result={driveStatus}
+        returnPath={`/departments/${deptId}/connections`}
+        outcome={sp.driveOAuth}
+        outcomeReason={sp.driveOAuthReason}
+      />
+    ) : null,
+    "claude-seats": <ConnectionsPanel seat={seat} actions={panelActions} only={["seat"]} />,
+    "google-accounts": (
+      <GoogleConnectionsPanel
+        tenantId={tenant}
+        returnPath={`/departments/${deptId}/connections`}
+        connections={googleConnections}
+        clients={searchClients.map((c) => ({ id: c.id, name: c.name }))}
+        properties={searchProperties.map((p) => ({ id: p.id, domain: p.domain, clientId: p.clientId }))}
+        canManage={canManageGoogle}
+        oauthStatus={sp.googleOAuth}
+        oauthDetail={sp.googleOAuthDetail}
+      />
+    ),
+    "social-accounts": <SocialAccountsBlock accounts={socialAccounts} forbidden={socialForbidden} />,
+    figma: figmaConnection ? <FigmaConnectionBlock result={figmaConnection} canManage={isAdmin} /> : null,
+  };
   return (
     <>
-      <Card title="My connections">
+      <Card title="Tools">
+        <ToolsSection
+          workspace={ws}
+          pins={prefs.pinnedTools}
+          seat={seat}
+          seatsUnavailable={mySeats.unavailable}
+          toggleAction={togglePinnedToolAction}
+        />
+      </Card>
+      <Card title="Connections" style={{ marginTop: 16 }}>
         {unavailable && (
           <p className="dept-conn-banner">
             The connections service isn&apos;t reachable yet — status shown below may be incomplete. It will populate once the backend is deployed.
           </p>
         )}
-        <ConnectionsPanel
-          github={github}
-          drive={drive}
-          seat={seat}
-          actions={{ connect, update, revoke, mapSeat, updateSeat, unmapSeat }}
-        />
+        {(kinds.has("github") || kinds.has("drive") || kinds.has("claude-seats")) && <AccountMappingNote />}
+        <ConnectionBlocks workspace={ws} blocks={blocks} />
       </Card>
-
-      {orgStatus && (
-        <Card
-          title="GitHub App (organisation)"
-          hint="The credential the repository registry and provisioning actually run on. It belongs to the company, not to you, and is not self-service."
-          style={{ marginTop: 16 }}
-        >
-          <p className="dept-conn-note">
-            This is the org-wide GitHub App — separate from the personal GitHub row above, which
-            only records your username. Repository lists, linking and provisioning authenticate
-            through this, and it is managed from{" "}
-            <Link href={`/departments/${deptId}/repositories`}>Repositories</Link>.
-          </p>
-          <GithubOrgHealth result={orgStatus} />
-        </Card>
-      )}
-
       {isAdmin && (
         <Card title="Team status" style={{ marginTop: 16 }}>
           {teamUnavailable && (
@@ -296,21 +238,6 @@ export default async function DepartmentConnectionsPage({ params, searchParams }
           ) : (
             <TeamConnectionsGrid rows={teamRows} onMapSeat={adminMapSeat} />
           )}
-        </Card>
-      )}
-
-      {isSeo && (
-        <Card title="Google (Search Console / GA4 / Ads)" style={{ marginTop: 16 }}>
-          <GoogleConnectionsPanel
-            tenantId={tenant}
-            returnPath={`/departments/${deptId}/connections`}
-            connections={googleConnections}
-            clients={searchClients.map((c) => ({ id: c.id, name: c.name }))}
-            properties={searchProperties.map((p) => ({ id: p.id, domain: p.domain, clientId: p.clientId }))}
-            canManage={canManageGoogle}
-            oauthStatus={sp.googleOAuth}
-            oauthDetail={sp.googleOAuthDetail}
-          />
         </Card>
       )}
     </>

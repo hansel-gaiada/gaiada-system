@@ -76,7 +76,7 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
     // server lets them read, rather than the same refusal a member gets.
     const access = gmAccessFor(me, tenant);
     if (access === "none") return <GmAccessDenied />;
-    // DW-3z: on the pilot, the cockpit sections the company Overview now shows (§3.8) are left out for the person it shows them to.
+    // DW-3z: the cockpit sections the company Overview now shows (§3.8) are left out for the person it shows them to.
     const gmFrame = await pilotFrame(me, tenant, { deptId }, searchParams);
     const hide = gmFrame ? gmHiddenSections(companyAccess(me, tenant)) : [];
     const cockpit = (
@@ -91,13 +91,13 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
         hide={hide}
       />
     );
-    // DW-3i: on the pilot switch the Office of the GM's page is the company Overview, and today's cockpit stays under it as "More
+    // DW-3i: the Office of the GM's page is the company Overview, and the cockpit stays under it as "More
     // from the Office of the GM" (plan §2.6 rule 1: nothing is removed), less what its blocks now show (DW-3z, plan §3.8). The
-    // refusal above stays frameless, so a person without the access sees no Overview. Classic users get the cockpit alone, as before.
+    // refusal above stays frameless, so a person without the access sees no Overview.
     return gmFrame ? gmFrame(cockpit) : cockpit;
   }
 
-  // DW-3a: on the pilot switch the Overview frames this Home body, which stays below its bands until the
+  // DW-3a: the Overview frames this Home body, which stays below its bands until the
   // Overview's own blocks replace it. After the GM branch, which frames its own cockpit (DW-3i). The body is built
   // once, below, and passed through `frame`.
   // DW-3z: under the frame, only the sections the Overview does not cover stay (plan §3.8): the Project health, Recent activity

@@ -13,7 +13,7 @@ export interface SectionTab { key: string; label: string; href: string; icon: Ic
 //
 // DW-2b: inside the workspace shell it hides itself when the shell's sidebar rows already offer every one
 // of its tabs (the shell draws one strip instead). A strip with a tab the registry lacks stays, so no page
-// loses its way in (plan §2.6 rule 1). The classic shell always draws it.
+// loses its way in (plan §2.6 rule 1). Outside the workspace shell it is always drawn.
 export function SectionTabs({ tabs }: { tabs: SectionTab[] }) {
   const pathname = usePathname();
   const shell = useWorkspaceShell();
