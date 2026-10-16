@@ -2,7 +2,7 @@
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe, platformFetch, PlatformError } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { canManageIT } from "@/components/shell/nav";
+import { canManageIT } from "@/lib/rbac";
 
 export type RegisterResult = { ok: boolean; error?: string; id?: string };
 

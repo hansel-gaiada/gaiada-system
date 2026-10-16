@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { canManageIT } from "@/components/shell/nav";
+import { canManageIT } from "@/lib/rbac";
 import { listAlertsResult } from "@/lib/itSecurity";
 import { ALERT_RULES, CONNECTION_WINDOWS, SEVERITY_LABEL, WINDOW_LABEL, alertLabel, countBySeverity, parseWindow, signInsStateWords } from "@/lib/itSecurityView";
 import { formatTimestamp } from "@/lib/format";

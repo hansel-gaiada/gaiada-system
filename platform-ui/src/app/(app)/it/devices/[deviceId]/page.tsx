@@ -12,7 +12,7 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { LineChart } from "@/components/LineChart";
 import { DeviceStatus } from "@/components/it/DeviceStatus";
 import { DeviceEditor } from "@/components/it/DeviceEditor";
-import { canManageIT } from "@/components/shell/nav";
+import { canManageIT } from "@/lib/rbac";
 import { updateDevice, deleteDevice } from "../actions";
 
 type Params = Promise<{ deviceId: string }>;

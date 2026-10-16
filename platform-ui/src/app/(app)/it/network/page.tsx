@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { canManageIT } from "@/components/shell/nav";
+import { canManageIT } from "@/lib/rbac";
 import { listSignInsResult } from "@/lib/itSecurity";
 import { SIGN_IN_WINDOWS, WINDOW_LABEL, parseWindow, signInsStateWords } from "@/lib/itSecurityView";
 import { formatTimestamp } from "@/lib/format";

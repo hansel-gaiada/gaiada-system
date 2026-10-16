@@ -1,11 +1,23 @@
 import type { Me } from "@/lib/platform";
 import { getSidebarState } from "@/lib/prefs";
-import { accessibleCompanies, canSwitchCompany } from "@/lib/rbac";
+import { accessibleCompanies, can, canSwitchCompany } from "@/lib/rbac";
 import { servedCompanyBadge } from "@/lib/serviceAssignments";
 import { activeCompany, groupNameOf } from "@/lib/companyContext";
-import { newMenuItems } from "./Sidebar";
 import { SidebarState } from "./sidebarState";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
+
+// RBAC-gated global create menu (the sidebar floor's "New" button). The list is the same in every
+// workspace; DW-2f may make it workspace-aware.
+export function newMenuItems(me: Me, tenantId?: string | null): { label: string; href: string }[] {
+  return [
+    { label: "Project", href: "/projects/new" },
+    { label: "Task", href: "/tasks/new" },
+    { label: "Campaign", href: "/agency/new" },
+    ...(can(me, "pm.manage", tenantId) ? [{ label: "Client", href: "/clients/new" }, { label: "Deliverable", href: "/deliverables/new" }] : []),
+    ...(can(me, "company.manage", tenantId) ? [{ label: "Company", href: "/companies/new" }, { label: "Invoice", href: "/invoices/new" }] : []),
+    ...(can(me, "admin.access", tenantId) ? [{ label: "Employee", href: "/people/new" }] : []),
+  ];
+}
 
 // DW-2a: the server half of the workspace sidebar. It reads what only the server can (the collapse
 // cookie, the company list with its service badges, the New menu's gates) and hands it to the client

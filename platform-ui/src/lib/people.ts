@@ -9,7 +9,7 @@ import "server-only";
 // gate is defence-in-depth; the backend RLS/Cerbos is the real boundary.
 import { PlatformError, type Me } from "./platform";
 import { readResult } from "./readResult";
-import { isElevated } from "@/components/shell/nav";
+import { isElevated } from "@/lib/rbac";
 import {
   listMembers,
   listProjects,

@@ -6,26 +6,12 @@ import { NavLink } from "./NavLink";
 import { NavGroupSection } from "./NavGroupSection";
 import { NewMenu } from "./NewMenu";
 import { Icon } from "./icons";
-import { can } from "@/lib/rbac";
+import { newMenuItems } from "./WorkspaceShellSidebar";
 import { activeCompany, groupNameOf } from "@/lib/companyContext";
 import { CompanyContext } from "./CompanyContext";
 import { SidebarToggle } from "./SidebarToggle";
 import { SidebarState } from "./sidebarState";
 import { Eyebrow } from "@/components/ui";
-
-// RBAC-gated global create menu. Moved here from TopBar with the button:
-// the design puts it at the sidebar floor. Identical item list. Shared with the
-// workspace sidebar (DW-2a), which keeps this list until DW-2f makes it workspace-aware.
-export function newMenuItems(me: Me, tenantId?: string | null): { label: string; href: string }[] {
-  return [
-    { label: "Project", href: "/projects/new" },
-    { label: "Task", href: "/tasks/new" },
-    { label: "Campaign", href: "/agency/new" },
-    ...(can(me, "pm.manage", tenantId) ? [{ label: "Client", href: "/clients/new" }, { label: "Deliverable", href: "/deliverables/new" }] : []),
-    ...(can(me, "company.manage", tenantId) ? [{ label: "Company", href: "/companies/new" }, { label: "Invoice", href: "/invoices/new" }] : []),
-    ...(can(me, "admin.access", tenantId) ? [{ label: "Employee", href: "/people/new" }] : []),
-  ];
-}
 
 export async function Sidebar({ me, tenantId, departments = [] }: { me: Me; tenantId?: string | null; departments?: { id: string; name: string }[] }) {
   const initials = me.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();

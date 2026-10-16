@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { isElevated } from "@/components/shell/nav";
+import { isElevated } from "@/lib/rbac";
 import { getHolding, type CompanyOrg } from "@/lib/organization";
 import { PlatformError } from "@/lib/platform";
 import { PageHeader } from "@/components/PageHeader";

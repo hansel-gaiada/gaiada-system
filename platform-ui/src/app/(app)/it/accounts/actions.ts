@@ -10,7 +10,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe, platformFetch, PlatformError } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { canManageIT } from "@/components/shell/nav";
+import { canManageIT } from "@/lib/rbac";
 
 export type ActionResult =
   | { ok: true; message: string; password?: string; email?: string; sessionsEnded?: boolean }

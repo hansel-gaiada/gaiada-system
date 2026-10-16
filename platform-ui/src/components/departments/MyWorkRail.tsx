@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { UrgencyChip } from "@/components/pm/UrgencyChip";
 import type { UrgencyTier } from "@/lib/pmUrgency";
+import type { RailPriority } from "@/lib/departments";
 import { PM_TERMS } from "@/lib/pmVocabulary";
 
 // The persistent rail (decision #10: rendered once in `[deptId]/layout.tsx`, so
@@ -20,7 +21,6 @@ import { PM_TERMS } from "@/lib/pmVocabulary";
 //      a person wants before reading any row.
 //   3. The rust bar is for the rows that have waited too long, not for every
 //      waiting row. Spent on all five, it marked none of them.
-export type RailPriority = "low" | "medium" | "high" | "critical";
 
 export interface RailTaskItem {
   id: string;

@@ -15,8 +15,10 @@ import {
 import { listProjects, type Project } from "./entities";
 import { listAssignmentsForUnit, assignmentInclusion, SERVICE_ASSIGNMENTS_ENABLED, type AssignmentSummary } from "./serviceAssignments";
 import type { Envelope } from "./envelope";
-import type { RailPriority } from "@/components/departments/MyWorkRail";
 import { PM_TERMS } from "./pmVocabulary";
+
+/** The rail's own four-value priority (PmTask's `normal` reads `medium`, `urgent` reads `critical`). */
+export type RailPriority = "low" | "medium" | "high" | "critical";
 
 export interface DeptPerson { id: string; name: string }
 export interface DeptDivision { id: string; name: string; people: DeptPerson[] }
