@@ -5,12 +5,12 @@ import {
   explainBatchDecisionError, formatKpiValue, formatMonth, formatTolerance, type DeptKpiTargetRow, type KpiUnit,
 } from "@/lib/deptKpiFormat";
 import { decideTargetsBatchAction } from "@/lib/deptKpiActions";
-import { DecideButtons } from "./TargetControls";
+import { DecideButtons, WithdrawOwnProposal } from "./TargetControls";
 import "./deptKpis.css";
 
 // DW-10b-2 (BFF §58.3, §58.4): the approver's view of the open proposals. They are grouped by KPI, each with a checkbox, and one bar decides the ticked
 // ones in ONE batch ("Approve selected" / "Reject selected"): all are decided or none. The viewer's OWN proposal has no checkbox and says "You proposed
-// this" (the server refuses an approval of one's own, and the whole batch with it). The single Approve and Reject buttons stay on every row. When the server
+// this" (the server refuses an approval of one's own, and the whole batch with it) and offers Withdraw (DW-10b-4: the single reject). The single Approve and Reject buttons stay on every row. When the server
 // refuses the batch it names the proposal that caused it (`failedId`), and the form says which KPI and month that is. The server stays the authority.
 
 export interface ProposalGroup {
@@ -90,7 +90,10 @@ export function OpenProposals({ groups, meId }: { groups: ProposalGroup[]; meId:
                       {own ? "you" : p.proposedBy} on {p.proposedAt.slice(0, 10)}.{p.note ? ` Note: ${p.note}` : ""}
                     </p>
                     {own ? (
-                      <span className="dk-target__meta">You proposed this, so someone else decides it.</span>
+                      <>
+                        <span className="dk-target__meta">You proposed this, so someone else approves it. You may withdraw it.</span>
+                        <WithdrawOwnProposal id={p.id} rowName={rowName(g, p)} />
+                      </>
                     ) : (
                       <DecideButtons id={p.id} kpiLabel={g.label} />
                     )}

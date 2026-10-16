@@ -74,6 +74,34 @@ export function ProposeTargetForm({ unitId, kpi, asOf }: { unitId: string; kpi: 
 }
 
 /** Approve / Reject one open proposal. Shown to the approver tier who is not the proposer; the server still decides. */
+/** DW-10b-4: an approver withdraws their OWN proposal (the server's single reject, §58.6: a reject has no own-proposal check). An approver
+ *  cannot approve their own (409), so before this the approver's view left them no way to take a mistaken proposal back. */
+export function WithdrawOwnProposal({ id, rowName }: { id: string; rowName: string }) {
+  const router = useRouter();
+  const [msg, setMsg] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const withdraw = () => {
+    startTransition(async () => {
+      const res = await rejectDeptKpiTarget(id);
+      if (res.ok) {
+        setMsg(null);
+        router.refresh();
+      } else {
+        setMsg(explainDecisionError(res.error ?? "Could not withdraw the proposal."));
+      }
+    });
+  };
+  return (
+    <span className="dk-target__actions">
+      <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" disabled={pending}
+        aria-label={`Withdraw your proposal for ${rowName}`} onClick={withdraw}>
+        {pending ? "Withdrawing…" : "Withdraw"}
+      </button>
+      {msg && <span role="alert" className="dk-msg dk-msg--bad">{msg}</span>}
+    </span>
+  );
+}
+
 export function DecideButtons({ id, kpiLabel }: { id: string; kpiLabel: string }) {
   const router = useRouter();
   const [msg, setMsg] = useState<string | null>(null);
