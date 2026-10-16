@@ -1,10 +1,20 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { test } from "./settledPage";
-import { classicTest } from "./classicLayout";
 import { tenantCookie } from "./appCookies";
 
+// The workspace shell is the only layout (DW-D38). Its sidebar is `aside#app-nav`.
 function sidebar(page: Page) {
-  return page.locator(".erp-side");
+  return page.locator("aside#app-nav");
+}
+
+// A button or link is a plain control until React owns it; clicking earlier does nothing (same helper as the assistant-drawer spec).
+async function hydrated(loc: Locator) {
+  await expect.poll(() => loc.evaluate((el) => Object.keys(el).some((k) => k.startsWith("__reactProps$")))).toBe(true);
+}
+async function press(loc: Locator) {
+  await expect(loc).toBeVisible();
+  await hydrated(loc);
+  await loc.click();
 }
 
 test("My Work dashboard loads", async ({ page }) => {
@@ -12,51 +22,59 @@ test("My Work dashboard loads", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 });
 
-classicTest("sidebar navigates the business modules", async ({ page }) => {
-  // 2026-10-11 (commit d609d7c3, PV1-04): the agency rows (Deliverables, Agency, ...) follow the ACTIVE
+test("the Company area's rows navigate the business modules", async ({ page }) => {
+  // 2026-10-11 (commit d609d7c3, PV1-04): the agency rows (Deliverables, Campaigns, ...) follow the ACTIVE
   // company's vertical pack; the demo opens on the holding root, whose generic menu has none of them,
   // so this test works as the agency company.
   await switchToAgency(page);
-  // Nav groups collapse; Business holds these four and starts closed on the dashboard.
-  // 2026-08-10 (commit c89fed6): Business's separate "Projects"/"Tasks" rows collapsed into one
-  // "Project Management" entry (PM_TERMS.projectManagement) pointing at /project-management,
-  // which carries Projects/Tasks as tabs instead — see e2e/pm-unified-interface.spec.ts for
-  // coverage of that surface's own tab set/deep-links. Updated here so this pre-existing test
-  // matches the shipped nav rather than asserting sidebar rows that no longer exist.
-  await sidebar(page).getByRole("button", { name: "Business" }).click();
-  // Scoped to #nav-business: Workspace's OWN row (`/pm`) carries the identical "Project
-  // Management" label (PM_TERMS.projectManagement, same string everywhere on purpose) and
-  // Workspace is pinned open, so an unscoped lookup is ambiguous between the two rows.
-  const business = page.locator("#nav-business");
-  for (const [label, heading] of [
-    ["Project Management", /project management/i],
-    ["Deliverables", /deliverables/i],
-    ["Agency", /agency|campaign/i],
-  ] as const) {
-    await business.getByRole("link", { name: label, exact: true }).click();
-    await expect(page.getByRole("heading", { level: 1 })).toContainText(heading);
-  }
-  // Workspace is pinned: its daily rows stay open away from the dashboard too.
-  await expect(sidebar(page).getByRole("link", { name: "Calendar", exact: true })).toBeVisible();
+  // The Company area (the footer's "Company" door, /departments) holds the business modules as rows; a row links to its first tab and the
+  // shell's tab strip shows the rest. 2026-08-10 (commit c89fed6): "Projects"/"Tasks" collapsed into one "Project Management" entry
+  // (PM_TERMS.projectManagement), whose first tab is /project-management.
+  await page.goto("/departments");
+  const company = page.getByRole("navigation", { name: "Company menu" });
+  await expect(company).toBeVisible();
+  await press(company.getByRole("link", { name: "Projects", exact: true }));
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/project management/i);
+  // Deliverables is a tab of the Projects row.
+  await press(page.getByRole("navigation", { name: "Projects sections" }).getByRole("link", { name: "Deliverables", exact: true }));
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/deliverables/i);
+  await press(company.getByRole("link", { name: "Campaigns", exact: true }));
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/agency|campaign/i);
+  // The You group's daily rows stay on every workspace page, away from the Overview too.
+  await page.goto("/departments/dept-1/projects");
+  await expect(sidebar(page).getByRole("group", { name: "You" }).getByRole("link", { name: "Calendar", exact: true })).toBeVisible();
 });
 
-classicTest("global search returns cross-entity results", async ({ page }) => {
+test("global search returns cross-entity results", async ({ page }) => {
+  await switchToAgency(page);
   await page.goto("/");
   // "gaia" matches companies, which are searched across every tenant the
-  // user can access (independent of the active company).
-  await page.getByLabel("Search").fill("gaia");
-  await page.getByLabel("Search").press("Enter");
-  await page.waitForURL("**/search?q=gaia");
+  // user can access (independent of the active company). The top bar's one search field opens the command palette,
+  // which does the searching (companies and people from the server, then knowledge).
+  const search = page.getByRole("searchbox", { name: "Search" });
+  await press(search);
+  const palette = page.getByRole("dialog", { name: "Command palette" });
+  await expect(palette).toBeVisible();
+  await palette.getByRole("combobox").fill("gaia");
+  await expect(palette.getByText("Gaia Digital Agency", { exact: true })).toBeVisible();
+  await expect(palette.getByText("Made Putra", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(palette).toBeHidden();
+
+  // The field is still a real GET form, so without the palette (no JavaScript, or a person who presses a link) the results page answers.
+  await page.goto("/search?q=gaia");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/results for/i);
   await expect(page.getByRole("link", { name: /Gaia Digital Agency/i }).first()).toBeVisible();
 });
 
-classicTest("notifications surface shows items and unread badge", async ({ page }) => {
+test("notifications surface shows items and unread badge", async ({ page }) => {
   await page.goto("/");
-  // Scoped to the top bar: a demo task is titled "Push notifications spike".
-  const bell = page.locator(".erp-top").getByRole("link", { name: /notifications/i });
-  await expect(bell).toBeVisible();
-  await bell.click();
+  // The bell in the top bar: a pop-over with the inbox link (a demo task is titled "Push notifications spike", so the page is not searched by this word).
+  const bell = page.getByRole("button", { name: /^Notifications/ });
+  await press(bell);
+  const pop = page.getByRole("region", { name: "Notifications" });
+  await expect(pop).toBeVisible();
+  await pop.getByRole("link", { name: "Open inbox" }).click();
   await page.waitForURL("**/me/inbox");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/inbox/i);
   await expect(page.getByText(/approval requested/i)).toBeVisible();
@@ -124,16 +142,18 @@ test("account links to own employee page", async ({ page }) => {
 
 async function switchToAgency(page: Page) {
   await page.goto("/");
-  // The tenant cookie, not the classic top bar's "Active company" switcher: the default workspace shell (DW-9d-1) has no such
-  // control in the same place, and these tests are about the pages, not the switcher.
+  // The tenant cookie, not the workspace switcher's company select: these tests are about the pages, not the switcher.
   await page.context().addCookies([tenantCookie(page.url())]);
   await page.reload(); // the page already open was rendered for the holding company
 }
 
-classicTest("department Home shows live KPIs, a project health ring, activity feed, and the rail", async ({ page }) => {
+test("department Overview shows live KPIs, the project health, and what waits on me", async ({ page }) => {
   await switchToAgency(page);
   await page.goto("/departments/dept-1");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText(/web dev/i);
+  // The Overview's own greeting is the page's one h1; the department is named on the line under it.
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), Clement$/);
+  const main = page.locator("#main-content");
+  await expect(main.getByText(/^Web Dev · Gaia Digital Agency · /)).toBeVisible();
 
   // KPI strip — real numbers DERIVED from the seeded PM demo store, not the P1-06 all-zero
   // placeholders. These literals track `lib/demoPm.ts`, so re-derive them when it changes; that
@@ -142,8 +162,8 @@ classicTest("department Home shows live KPIs, a project health ring, activity fe
   // `t-4` (u-dev, in_progress), `t-web-b` (assigned to the dept-1-div-1 division) and `t-web2-b` —
   // all genuinely the department's own under the poly-assignee rule in `departments.ts::belongs`,
   // which counts a task assigned to the department, to a division under it, or to a person placed
-  // in it. The KPI was right; the literal was stale.
-  const kpi = (label: string) => page.locator(".dept-kpi", { hasText: label }).locator(".dept-kpi__value");
+  // in it. The KPI was right; the literal was stale. The strip has no Overview block, so it stays under "More from Web Dev" (DW-3z).
+  const kpi = (label: string) => main.locator(".ov-legacy .dept-kpi", { hasText: label }).locator(".dept-kpi__value");
   await expect(kpi("Active")).toHaveText("3");
   // "Due soon" is `daysUntil(due) <= 7` with NO lower bound (departments.ts::isDueSoon), so it
   // counts overdue tasks as well as imminent ones. Every seeded due date is now in the past, so
@@ -158,24 +178,23 @@ classicTest("department Home shows live KPIs, a project health ring, activity fe
   // three stale literals, and only the first was visible because the assertions run in order.
   await expect(kpi("Progress")).toHaveText("47%");
 
-  // Project health rings. Web Dev owns TWO projects since the P3-06 fixture, not one — so the
-  // unqualified /at risk/ lookup below became a strict-mode violation (both rings carry the badge)
-  // rather than a genuine assertion failure. Scoped to the named project the assertion is actually
-  // about, which is what it always meant; an unscoped getByText that happens to be unique is a
-  // latent failure waiting for a second row.
-  const ring = page.locator(".dept-ring-card", { hasText: "Client site redesign" });
-  await expect(page.getByRole("link", { name: "Client site redesign" })).toBeVisible();
-  await expect(ring.getByText(/at risk/i)).toBeVisible();
-  await expect(ring.getByText(/overdue.*blocked|blocked.*overdue/i)).toBeVisible();
+  // Project health: the Projects block (DW-3z: it replaces the Home's health rings). Web Dev owns TWO projects since the P3-06 fixture,
+  // so each is read inside its own list item; scoped to the named project the assertion is actually about — an unscoped getByText that
+  // happens to be unique is a latent failure waiting for a second row.
+  const projects = main.getByRole("region", { name: "Projects", exact: true });
+  const project = projects.getByRole("listitem").filter({ has: page.getByRole("link", { name: "Client site redesign" }) });
+  await expect(project.getByRole("link", { name: "Client site redesign" })).toBeVisible();
+  await expect(project.getByText(/at risk/i)).toBeVisible();
+  await expect(project.getByText(/overdue/i)).toBeVisible();
+  await expect(project.getByText(/blocked/i)).toBeVisible();
 
-  // Activity feed — real F2 rows for this department, not the empty teach-state.
-  await expect(page.getByText("Task: Wire homepage hero")).toBeVisible();
-  await expect(page.getByText(/no activity yet/i)).toHaveCount(0);
+  // The Home's activity feed is Project Management > Activity now (the next test drives it), so it is not drawn twice here.
+  await expect(main.getByRole("heading", { name: "Recent activity", exact: true })).toHaveCount(0);
 
-  // The persistent rail (rendered once in the layout) shows real "waiting on
-  // me" data: pending agency approvals + WS4 automation approvals.
-  await expect(page.getByText(/waiting on me/i)).toBeVisible();
-  await expect(page.getByText("Landing page copy brief")).toBeVisible();
+  // "Waiting on me" (the department rail it replaced) is the Now band's Needs you block: pending agency approvals + WS4 automation approvals.
+  const needsYou = main.getByRole("region", { name: /^Needs you/ });
+  await expect(needsYou).toBeVisible();
+  await expect(needsYou.getByText("Landing page copy brief")).toBeVisible();
 });
 
 test("department Activity tab filters by project and person", async ({ page }) => {
@@ -511,53 +530,30 @@ test("a meeting recording links to its ingested pipeline run", async ({ page }) 
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/northwind/i);
 });
 
-classicTest("the sidebar collapses to a labelled icon rail and stays collapsed", async ({ page }) => {
+test("the sidebar collapses to a labelled icon rail and stays collapsed", async ({ page }) => {
+  // The holding company the stored session opens on has no department, so its home is the Company area, which has no You rows.
+  await switchToAgency(page);
   await page.goto("/");
-  await expect(page.getByRole("link", { name: "Dashboard" })).toContainText("Dashboard");
+  // The workspace sidebar's rows: by href (a collapsed rail hides the labels, which a role-and-name lookup would then lose).
+  const inbox = sidebar(page).locator('a[href="/me/inbox"]');
+  await expect(inbox).toContainText("Inbox");
 
-  await page.getByRole("button", { name: "Close sidebar" }).click();
+  const toggle = page.getByRole("button", { name: "Close sidebar" });
+  await hydrated(toggle);
+  await toggle.click();
   await expect(page.locator("html")).toHaveAttribute("data-sidebar", "collapsed");
-  await expect(page.getByRole("link", { name: "Dashboard" }).locator("span")).toBeHidden();
+  await expect(inbox.locator("span")).toBeHidden();
 
-  await page.getByRole("link", { name: "Approvals" }).first().hover();
+  await sidebar(page).locator('a[href="/approvals"]').hover();
   await expect(page.locator(".erp-railtip")).toHaveText("Approvals");
 
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-sidebar", "collapsed");
-  await page.getByRole("button", { name: "Open sidebar" }).click();
+  const open = page.getByRole("button", { name: "Open sidebar" });
+  await hydrated(open);
+  await open.click();
   await expect(page.locator("html")).not.toHaveAttribute("data-sidebar", "collapsed");
-});
-
-classicTest("rail categories open a flyout by click, hover and keyboard", async ({ page }) => {
-  // 2026-10-11 (commit d609d7c3, PV1-04): Business has more than one row (so is a flyout
-  // category, not a lone link) only in a company whose pack lists the agency rows, and "Systems" became "Platform".
-  await switchToAgency(page);
-  await page.reload(); // render the menu from the persisted company, not mid-switch
-  await page.getByRole("button", { name: "Close sidebar" }).click();
-
-  const flyout = page.locator(".erp-railmenu");
-  const category = (name: string) => sidebar(page).getByRole("button", { name, exact: true });
-
-  await category("Business").click();
-  await expect(flyout).toContainText("Delivery Pipeline");
-
-  // Escape closes and hands focus back; hover then opens a different category,
-  // and only one panel is ever open.
-  await page.keyboard.press("Escape");
-  await expect(category("Business")).toBeFocused();
-  await category("Platform").hover();
-  await expect(flyout).toHaveCount(1);
-  await expect(flyout).toContainText("MCP Hub");
-
-  // Hover must not steal focus, so the keyboard walk starts from the category itself.
-  await category("Platform").focus();
-  await page.keyboard.press("ArrowDown");
-  await expect(flyout.getByRole("link", { name: "WA/TG Bot" })).toBeFocused();
-  await page.keyboard.press("ArrowDown");
-  await expect(flyout.getByRole("link", { name: "AI Gateway" })).toBeFocused();
-  await page.keyboard.press("Enter");
-  await page.waitForURL("**/systems/gateway");
-  await expect(flyout).toHaveCount(0);
+  await expect(inbox.locator("span")).toBeVisible();
 });
 
 test("sign out returns to login", async ({ page }) => {
@@ -570,16 +566,19 @@ test("sign out returns to login", async ({ page }) => {
   await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
 });
 
-classicTest("the mobile drawer keeps labels even when the desktop rail is collapsed", async ({ page }) => {
+test("the mobile drawer keeps labels even when the desktop rail is collapsed", async ({ page }) => {
+  await switchToAgency(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Close sidebar" }).click();
+  const toggle = page.getByRole("button", { name: "Close sidebar" });
+  await hydrated(toggle);
+  await toggle.click();
+  await expect(page.locator("html")).toHaveAttribute("data-sidebar", "collapsed");
   await page.setViewportSize({ width: 420, height: 820 });
-  await page.getByRole("button", { name: "Open navigation" }).click();
-  await expect(sidebar(page).getByRole("button", { name: "Business" })).toBeVisible();
-  await sidebar(page).getByRole("button", { name: "Business" }).click();
-  // c89fed6 collapsed Business's "Projects" row into "Project Management" — see the note on
-  // "sidebar navigates the business modules" above. Scoped to #nav-business: Workspace's own
-  // pinned-open row (/pm) carries the identical label.
-  await expect(page.locator("#nav-business").getByRole("link", { name: "Project Management", exact: true })).toBeVisible();
-  await expect(page.locator(".erp-railmenu")).toHaveCount(0);
+  await press(page.getByRole("button", { name: "Open navigation" }));
+  // The workspace sidebar's rows keep their labels in the drawer: the phone has no icon rail.
+  const inbox = sidebar(page).locator('a[href="/me/inbox"]');
+  await expect(inbox).toBeVisible();
+  await expect(inbox.locator("span")).toBeVisible();
+  await expect(sidebar(page).getByRole("link", { name: "Overview", exact: true })).toBeVisible();
+  await expect(sidebar(page).getByRole("group", { name: "Work" })).toBeVisible();
 });

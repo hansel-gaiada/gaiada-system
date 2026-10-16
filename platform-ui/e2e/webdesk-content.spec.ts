@@ -77,7 +77,7 @@ test.beforeEach(async ({ page, context }) => {
 
 test("the Website row sits in the Web Dev menu; one site redirects straight into it", async ({ page }) => {
   await page.goto(DEPT);
-  // DW-9d-1: the default workspace shell's sidebar menu replaces the classic "Department sections" strip.
+  // The workspace shell's sidebar menu is the department's navigation (DW-D38).
   const strip = page.getByRole("navigation", { name: "Web Dev menu" });
   await expect(strip.getByRole("link", { name: "Website" })).toBeVisible();
   await strip.getByRole("link", { name: "Website" }).click();
@@ -1034,7 +1034,7 @@ const seedMedia = async (o: Record<string, unknown>) => ((await stub.post("seed-
 test("the Website group has a Media tab next to Content; a library with nothing in it says it is empty", async ({ page }) => {
   await page.goto(DEPT);
   await page.getByRole("navigation", { name: "Web Dev menu" }).getByRole("link", { name: "Website" }).click();
-  // the group's own tab strip: Content and Media ("Website sections" in the workspace shell, "Website tools" in classic)
+  // the group's own tab strip: Content and Media ("Website sections")
   const tabs = page.getByRole("navigation", { name: "Website sections" });
   await expect(tabs.getByRole("link", { name: "Content" })).toBeVisible();
   await tabs.getByRole("link", { name: "Media" }).click();

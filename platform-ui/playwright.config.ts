@@ -102,9 +102,8 @@ export default defineConfig({
       testMatch: /gm-console\.spec\.ts/,
     },
     {
-      // DW-2g: the department workspace shell, per persona. Self-contained: each test signs in as one demo
-      // identity and plants the `gaiada_prefs` pilot cookie itself, so NO stored session (a stale shared
-      // staff session would test the wrong persona, same reasoning as the projects above). Not in the smoke
+      // DW-2g: the department workspace shell, per persona. Self-contained: each test signs in as one demo identity itself,
+      // so NO stored session (a stale shared staff session would test the wrong persona, same reasoning as the projects above). Not in the smoke
       // project: that one selects by FILE (smoke.spec.ts) as well as by tag.
       name: "workspace-shell",
       use: { ...devices["Desktop Chrome"] },
@@ -112,7 +111,7 @@ export default defineConfig({
     },
     {
       // DW-6a/6b/6e: the department workspaces' Work menus against the registry, per agency department. Same
-      // reasoning as `workspace-shell` above: it signs in as the superadmin and plants the pilot cookie itself, so
+      // reasoning as `workspace-shell` above: it signs in as the superadmin itself, so
       // NO stored session.
       name: "workspace-departments",
       use: { ...devices["Desktop Chrome"] },
@@ -120,7 +119,7 @@ export default defineConfig({
     },
     {
       // DW-7a/7b/7c: HR, Finance and IT walked row by row, as the superadmin and as a plain member. Same reasoning as
-      // `workspace-departments` above: it signs in itself and plants the pilot cookie, so NO stored session.
+      // `workspace-departments` above: it signs in itself, so NO stored session.
       name: "workspace-functional",
       use: { ...devices["Desktop Chrome"] },
       testMatch: /workspace-functional\.spec\.ts/,
@@ -128,14 +127,14 @@ export default defineConfig({
     {
       // DW-9a: the twelve kinds of person the workspace shell must be right for (placed employees, a head, HR/Finance/IT staff,
       // the unplaced owner, a platform admin, a generic-pack user, a client). Same reasoning as `workspace-functional`: every
-      // test signs in as its own demo identity and plants the tenant and pilot cookies itself, so NO stored session.
+      // test signs in as its own demo identity and plants the tenant cookie itself, so NO stored session.
       name: "workspace-personas",
       use: { ...devices["Desktop Chrome"] },
       testMatch: /workspace-personas\.spec\.ts/,
     },
     {
       // DW-9b: the axe sweep of the workspace shell's own surfaces, light and dark, desktop and phone. Same reasoning as
-      // `workspace-personas`: every test signs in as its own demo identity and plants the tenant and pilot cookies, so NO stored
+      // `workspace-personas`: every test signs in as its own demo identity and plants the tenant cookie, so NO stored
       // session. Not in CI's smoke; gated on sumopod with the other workspace projects.
       name: "workspace-a11y",
       use: { ...devices["Desktop Chrome"] },

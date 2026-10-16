@@ -7,7 +7,7 @@ import { tenantCookie } from "./appCookies";
 // tenant cookie moves the session to the agency.
 async function switchToAgency(page: Page) {
   await page.goto("/");
-  // The tenant cookie, not the classic top bar's "Active company" switcher (DW-9d-1: the default workspace shell has none there).
+  // The tenant cookie, not the workspace switcher's company select: these tests are about the pages, not the switcher.
   await page.context().addCookies([tenantCookie(page.url())]);
   await page.reload(); // the page already open was rendered for the holding company
 }

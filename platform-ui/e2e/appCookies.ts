@@ -18,13 +18,3 @@ export function tenantCookie(at: string, value = "co-agency"): AddableCookie {
   if (!process.env.CI) return { name: "gaiada_tenant", value, url: new URL("/", u).toString() };
   return { name: "__Host-gaiada_tenant", value, domain: u.hostname, path: "/", secure: true, sameSite: "Lax" };
 }
-
-/**
- * A person who CHOSE the classic layout (avatar menu "Back to the classic layout"): `gaiada_prefs` with
- * `shellChosen`, the flag that makes a stored `shell` count (src/lib/prefs.ts). Since DW-9d-1 the workspace shell
- * is the default, so a spec that tests a classic-shell element (the classic sidebar, its floating assistant
- * button) plants this. Classic until DW-9d-2 removes it.
- */
-export function classicLayoutCookie(at: string): AddableCookie {
-  return { name: "gaiada_prefs", value: encodeURIComponent(JSON.stringify({ shell: "classic", shellChosen: true })), url: new URL("/", at).toString() };
-}

@@ -1,7 +1,15 @@
 import { expect, type Locator } from "@playwright/test";
-import { classicTest as test } from "./classicLayout"; // the FAB is the classic floating button (classic until DW-9d-2); the workspace shell opens the same drawer from its sidebar row
+import { test } from "./settledPage";
+import { tenantCookie } from "./appCookies";
 
-// The FAB is a link to /assistant that the @drawer intercepting route turns into a drawer. Clicked before React
+// The AI Assistant row is drawn in a department workspace's sidebar. The stored staff session opens on the holding company, which has no
+// department (its home is the Company area, with no Assistant row), so every test works as the agency company.
+test.beforeEach(async ({ context, baseURL }) => {
+  await context.addCookies([tenantCookie(baseURL ?? "http://localhost")]);
+});
+
+// The workspace sidebar's "AI Assistant" row (`#asst-fab-trigger`) is a link to /assistant that the @drawer intercepting route turns
+// into a drawer (DW-D38: the floating button is gone, this row is the one trigger). Clicked before React
 // hydrates, it is a plain link and does a full navigation to /assistant: the right no-JavaScript fallback, and the
 // cause of this spec's flakes on a loaded box (2026-10-12: "Escape closes the drawer" failed 5 runs on a hard-loaded
 // /tasks/t-4, then passed). Click it only once React owns it (same helper as portal-website.spec.ts).
@@ -15,11 +23,11 @@ async function hydrated(loc: Locator) {
 // pinned to that page's context, promotion round-trips to `/assistant` with the SAME thread and
 // its history, and focus moves into the drawer on open / back to the trigger on close.
 
-test("FAB opens the drawer pinned to the current page's entity, sends a message, and promotes to the full page with the same thread + history", async ({ page }) => {
+test("the AI Assistant row opens the drawer pinned to the current page's entity, sends a message, and promotes to the full page with the same thread + history", async ({ page }) => {
   await page.goto("/projects/p-web-1");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
-  const fab = page.locator("#asst-fab-trigger");
+  const fab = page.locator("aside#app-nav").locator("#asst-fab-trigger");
   await expect(fab).toBeVisible();
   await hydrated(fab);
   await fab.click();
@@ -76,7 +84,7 @@ test("FAB opens the drawer pinned to the current page's entity, sends a message,
   await expect(page.getByText(/You said:/)).toBeVisible();
 });
 
-test("Escape closes the drawer and returns focus to the FAB trigger", async ({ page }) => {
+test("Escape closes the drawer and returns focus to the AI Assistant row", async ({ page }) => {
   await page.goto("/tasks/t-4");
   const fab = page.locator("#asst-fab-trigger");
   await hydrated(fab);
@@ -88,9 +96,13 @@ test("Escape closes the drawer and returns focus to the FAB trigger", async ({ p
   await expect(fab).toBeFocused();
 });
 
-test("the FAB is hidden on the /assistant page itself", async ({ page }) => {
+test("on the /assistant page itself the AI Assistant row is the current row and links to the page, not the drawer", async ({ page }) => {
   await page.goto("/assistant");
-  await expect(page.locator("#asst-fab-trigger")).toHaveCount(0);
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Assistant");
+  const row = page.locator("aside#app-nav").locator("#asst-fab-trigger");
+  await expect(row).toBeVisible();
+  await expect(row).toHaveAttribute("aria-current", "page");
+  await expect(row).toHaveAttribute("href", "/assistant");
 });
 
 test("a page with no resolvable entity opens the drawer with no context pin", async ({ page }) => {
