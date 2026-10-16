@@ -62,14 +62,15 @@ export async function dryRunConnectServiceAction(
   companyId: string,
   nodeId: string,
   body: { targets: string[]; module: string; leadUserId?: string },
-): Promise<{ ok: boolean; error?: string; result?: DryRunResult }> {
+): Promise<{ ok: boolean; error?: string; reason?: string; result?: DryRunResult }> {
   const ctx = await requireOrgEdit(companyId);
   if ("error" in ctx) return { ok: false, error: ctx.error };
   try {
     const result = await dryRunConnectService(ctx.userId, companyId, nodeId, body);
     return { ok: true, result };
   } catch (e) {
-    return { ok: false, error: e instanceof PlatformError ? e.message : "Couldn't preview this connection." };
+    // `reason` is the backend's machine code (DW-10e: route_unit_not_department, route_has_no_lead, ...): the panel words it.
+    return { ok: false, error: e instanceof PlatformError ? e.message : "Couldn't preview this connection.", ...(e instanceof PlatformError && e.reason ? { reason: e.reason } : {}) };
   }
 }
 
@@ -77,7 +78,7 @@ export async function proposeConnectServiceAction(
   companyId: string,
   nodeId: string,
   body: { targets: string[]; module: string; leadUserId?: string },
-): Promise<{ ok: boolean; error?: string; result?: ProposeResult }> {
+): Promise<{ ok: boolean; error?: string; reason?: string; targetId?: string; result?: ProposeResult }> {
   const ctx = await requireOrgEdit(companyId);
   if ("error" in ctx) return { ok: false, error: ctx.error };
   try {
@@ -85,7 +86,14 @@ export async function proposeConnectServiceAction(
     revalidatePath(`/companies/${companyId}/org`);
     return { ok: true, result };
   } catch (e) {
-    return { ok: false, error: e instanceof PlatformError ? e.message : "Couldn't create the service assignment." };
+    if (!(e instanceof PlatformError)) return { ok: false, error: "Couldn't create the service assignment." };
+    // DW-10e: 422 route_needs_group_client / group_client_ambiguous carry `detail.targetId`; the panel names the company from it.
+    const detail = e.body && typeof e.body === "object" ? (e.body as { detail?: { targetId?: unknown } }).detail : undefined;
+    return {
+      ok: false, error: e.message,
+      ...(e.reason ? { reason: e.reason } : {}),
+      ...(typeof detail?.targetId === "string" ? { targetId: detail.targetId } : {}),
+    };
   }
 }
 

@@ -33,6 +33,8 @@ export interface ServiceProps {
   companies: { id: string; name: string }[]; // candidate targets (self already excluded by the caller)
   modules: readonly string[];
   actions: ConnectServiceActions;
+  /** This company's name (the provider), for the route sentences of DW-10e (BFF §60.9). */
+  providerName?: string;
 }
 interface Props {
   companyId: string;
@@ -200,6 +202,7 @@ export function OrgBuilder({ companyId, initial, canEdit, members, source, updat
           node={selected}
           companies={service.companies}
           modules={service.modules}
+          providerName={service.providerName}
           members={members}
           actions={service.actions}
           existing={existingAssignments}

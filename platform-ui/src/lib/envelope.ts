@@ -12,7 +12,8 @@ export interface EnvelopeCompany {
   id: string;
   name: string;
   included: boolean;
-  reason?: "no_access" | "not_served" | "suspended" | "error";
+  // DW-10e: `no_group_client` and `group_client_ambiguous` are the dry run's reasons for a route (BFF §60.2): the target is not the provider's client.
+  reason?: "no_access" | "not_served" | "suspended" | "error" | "no_group_client" | "group_client_ambiguous";
   /**
    * AGN-3: sources that FAILED for a company that is otherwise included. `included: false` covers
    * "you saw none of this company"; this covers the quieter and more dangerous case — you saw SOME
@@ -35,6 +36,8 @@ export const REASON_LABEL: Record<string, string> = {
   not_served: "not served",
   suspended: "suspended",
   error: "unavailable",
+  no_group_client: "not a client yet",
+  group_client_ambiguous: "more than one client record",
 };
 
 // True when every company in the envelope is included — the banner renders

@@ -16,3 +16,4 @@
 .svc-row__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .svc-row__relink { display: inline-flex; align-items: center; gap: 6px; }
 .svc-row__error { margin: 0; font: 400 12px var(--font-body); color: var(--dept-risk, var(--status-critical-fg)); }
+.svc-row__note { margin: 4px 0 0; font: 400 12px/1.5 var(--font-body); color: var(--erp-ink-50); }

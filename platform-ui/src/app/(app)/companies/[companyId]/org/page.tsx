@@ -5,6 +5,7 @@ import { can } from "@/lib/rbac";
 import { getCompany, listMembers, listCompanies } from "@/lib/entities";
 import { getOrgStructure } from "@/lib/org";
 import { listAssignments, SERVICE_ASSIGNMENTS_ENABLED, SERVICE_MODULE_OPTIONS } from "@/lib/serviceAssignments";
+import { ROUTING_KEYS } from "@/lib/requests";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { OrgBuilder } from "@/components/org/OrgBuilder";
@@ -66,7 +67,9 @@ export default async function OrgPage({ params }: { params: Params }) {
           // backend's Cerbos propose gate is the real boundary.
           enabled: SERVICE_ASSIGNMENTS_ENABLED && canEdit,
           companies: allCompanies.filter((c) => c.id !== companyId).map((c) => ({ id: c.id, name: c.name })),
-          modules: SERVICE_MODULE_OPTIONS,
+          // DW-10e: the two routing keys join the modules; the panel offers them on department nodes only (BFF §60.9).
+          modules: [...SERVICE_MODULE_OPTIONS, ...ROUTING_KEYS],
+          providerName: company.name,
           actions: {
             dryRun: dryRunConnectServiceAction.bind(null, companyId),
             propose: proposeConnectServiceAction.bind(null, companyId),

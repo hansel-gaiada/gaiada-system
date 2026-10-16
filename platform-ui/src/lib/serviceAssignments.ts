@@ -85,6 +85,8 @@ export interface StaffPreviewRow {
 
 export interface DryRunResult {
   dryRun: true;
+  /** DW-10e: the module is a routing key (BFF §60.2). `items` is empty by design: a route places nobody. */
+  routeOnly?: boolean;
   unit: { nodeId: string; name: string; kind: string };
   items: StaffPreviewRow[];
   companies: EnvelopeCompany[];

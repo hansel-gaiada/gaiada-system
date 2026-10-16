@@ -951,3 +951,40 @@ export function sentScopeCopy(scope: OutboundScope | null, company: string | nul
     note: scope === "own" ? `Only the requests you sent to other companies are shown. Managers and administrators of ${co} see all of them.` : null,
   };
 }
+
+// ── DW-10e: ORG-13's side of a route (BFF §60.2, §60.9) ───────────────────────────────────────────────
+
+/** The two routing keys: a service assignment with one of these places NOBODY anywhere. It only records who may ask (§60.2), on a department. */
+export const ROUTING_KEYS = ["asset_requests", "engineering_requests"] as const;
+export type RoutingKey = (typeof ROUTING_KEYS)[number];
+export const isRoutingKey = (key: string): key is RoutingKey => (ROUTING_KEYS as readonly string[]).includes(key);
+
+/** "Asset requests" and "Engineering requests" for a routing key; any other module key as it is. */
+export function moduleOptionLabel(key: string): string {
+  return key === "asset_requests" ? "Asset requests" : key === "engineering_requests" ? "Engineering requests" : key;
+}
+const routeKindWord = (key: string): string => (key === "asset_requests" ? "asset" : "engineering");
+
+/** The preview of a route (§60.9): it adds nobody, and says what it allows. */
+export function routePreviewText(key: string, company: string, unit: string): string {
+  return `Nobody is added to ${company}. ${company} can send ${routeKindWord(key)} requests to ${unit}, billed to it as a client.`;
+}
+
+/** Why a target is not eligible for a route: the dry run's `companies[].reason` or the propose refusal's code, in words (§60.2). Null for
+ *  a reason that is not about the client record, so the caller keeps its own words for it. */
+export function routeClientReasonText(reason: string | undefined, company: string, provider: string): string | null {
+  if (reason === "no_group_client" || reason === "route_needs_group_client") {
+    return `${company} is not a client of ${provider} yet: a platform operator links it in Clients`;
+  }
+  if (reason === "group_client_ambiguous") {
+    return `${company} is down as a client of ${provider} more than once: a platform operator merges the records in Clients`;
+  }
+  return null;
+}
+
+/** The other refusals of propose for a routing key (§60.2), in words. */
+export function routeProposeErrorText(reason: string | undefined): string | null {
+  if (reason === "route_unit_not_department") return "A route goes on a department. Choose a department, not a division.";
+  if (reason === "route_has_no_lead") return "A route has no manager, so it takes no lead.";
+  return null;
+}

@@ -2,6 +2,7 @@
 import { useState, useTransition } from "react";
 import { StatusBadge, Button } from "@/components/ui";
 import type { AssignmentSummary } from "@/lib/serviceAssignments";
+import { isRoutingKey, moduleOptionLabel } from "@/lib/requests";
 import "./services.css";
 
 type Result = { ok: boolean; error?: string };
@@ -49,9 +50,15 @@ export function ServiceAssignmentRow({ a, label, actions }: { a: AssignmentSumma
     <li className="svc-row">
       <div className="svc-row__main">
         <span className="svc-row__label">{label}</span>
-        <span className="svc-row__module">{a.module}</span>
+        <span className="svc-row__module">{moduleOptionLabel(a.module)}</span>
         <StatusBadge label={a.unitStatus === "orphaned" ? "orphaned" : a.status} />
       </div>
+      {isRoutingKey(a.module) && (
+        <p className="svc-row__note">
+          A route: {a.targetCompanyName ?? "the target company"} can send {a.module === "asset_requests" ? "asset" : "engineering"} requests to {a.unitName},
+          billed to it as a client. Nobody is added to {a.targetCompanyName ?? "it"}.
+        </p>
+      )}
       {a.unitStatus === "orphaned" && (
         <p className="svc-row__banner">Orphaned — the provider unit was removed or changed kind and needs re-linking.</p>
       )}
