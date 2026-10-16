@@ -375,8 +375,10 @@ function personaSuite(p: Persona) {
       for (const group of ["Work", "Performance", "You"]) await expect(nav.getByRole("group", { name: group })).toBeVisible();
       // Work, Performance and You: the lists themselves (a poll, so a slow hydration does not fail a correct page).
       await expect.poll(() => groupLabels(nav, "Work")).toEqual(p.work);
-      expect(await groupLabels(nav, "Performance")).toEqual(p.performance);
-      expect(await groupLabels(nav, "You")).toEqual(p.you);
+      // Polled like Work: since DW-9d the Approvals row's count streams in after the first byte (and DW-10e's routed rows settle the same
+      // way), so a single read can land before the row does.
+      await expect.poll(() => groupLabels(nav, "Performance")).toEqual(p.performance);
+      await expect.poll(() => groupLabels(nav, "You")).toEqual(p.you);
     });
 
     test("the footer shows Company, and Admin exactly where the gates allow it", async ({ page, context }) => {
