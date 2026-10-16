@@ -272,3 +272,48 @@ describe("busy times (§47.4, DW-D28)", () => {
     expect(busyClashes([], "2026-10-14", "10:00", "11:00", SG)).toBe(false);
   });
 });
+
+describe("the `department` visibility (DW-10c-2, BFF section 59.3)", () => {
+  it("sends the unit with a department event, on create and on edit", () => {
+    const c = validateEventForm(form({ visibility: "department", unitNodeId: "dept-1" }), "create", SG);
+    expect(c.ok && c.payload).toMatchObject({ visibility: "department", unitNodeId: "dept-1" });
+    const e = validateEventForm(form({ visibility: "department", unitNodeId: "dept-1" }), "edit", SG);
+    expect(e.ok && e.payload).toMatchObject({ visibility: "department", unitNodeId: "dept-1" });
+  });
+
+  it("asks which department when none is chosen, on the visibility field, before any request", () => {
+    expect(validateEventForm(form({ visibility: "department", unitNodeId: "" }), "create", SG)).toEqual({ ok: false, field: "visibility", error: "Choose which department can see it." });
+  });
+
+  it("sends NO unit with any other visibility, even a stale one (the server refuses a unit on those: unit_not_allowed)", () => {
+    for (const visibility of ["attendees", "company"] as const) {
+      const r = validateEventForm(form({ visibility, unitNodeId: "dept-1" }), "create", SG);
+      expect(r.ok && "unitNodeId" in r.payload, visibility).toBe(false);
+      const edit = validateEventForm(form({ visibility, unitNodeId: "dept-1" }), "edit", SG);
+      expect(edit.ok && "unitNodeId" in edit.payload, visibility).toBe(false);
+    }
+  });
+
+  it("starts a new meeting with no unit, and reads the unit back from a department event for the edit form", () => {
+    expect(defaultFormInput("2026-10-14", "09:12").unitNodeId).toBe("");
+    const detail = {
+      title: "Sprint review", allDay: false, startsAt: "2026-10-14T02:00:00.000Z", endsAt: "2026-10-14T03:00:00.000Z", startsOn: null, endsOn: null,
+      attendees: [], location: null, videoUrl: null, description: "", visibility: "department", unitNodeId: "dept-1", client: null, project: null,
+    } as unknown as CalendarEventDetail;
+    expect(formInputOf(detail, SG)).toMatchObject({ visibility: "department", unitNodeId: "dept-1" });
+    expect(formInputOf({ ...detail, visibility: "company", unitNodeId: null }, SG).unitNodeId).toBe("");
+  });
+
+  it("words the unit refusals", () => {
+    const t = (status: number, reason: string, kind?: "create" | "change") => eventErrorText({ status, reason }, () => undefined, kind);
+    expect(t(403, "outside your reporting line", "create")).toBe("You can only share an event with a department you belong to or lead.");
+    expect(t(403, "outside your reporting line", "change")).toBe("You can only share an event with a department you belong to or lead.");
+    expect(t(400, "unit_required")).toBe("Choose which department can see it.");
+    expect(t(400, "unit_not_allowed")).toBe("Only an event shared with a department can name one.");
+    expect(t(400, "unit_invalid")).toBe("That department couldn't be read. Choose one from the list.");
+    expect(t(404, "unit_not_found")).toBe("That department isn't in this company's structure.");
+    // The other 404 and 403 are unchanged.
+    expect(t(404, "not_found")).toBe("This event doesn't exist or isn't visible to you.");
+    expect(t(403, "forbidden", "create")).toBe("You can't schedule meetings in this company.");
+  });
+});

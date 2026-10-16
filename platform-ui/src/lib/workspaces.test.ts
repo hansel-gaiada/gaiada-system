@@ -5,7 +5,7 @@ import { PACKS } from "./packs";
 import { bespokeToolkit, deptTabs } from "./deptToolkits";
 import {
   WORKSPACES, GENERIC_WORKSPACE, PERFORMANCE_ROWS, YOU_ROWS, COMPANY_ROWS, ADMIN_ROWS, TOOLS_ROW,
-  OVERVIEW_BANDS, REPORT_PERIODS, workspaceFor, workspaceBySlug, hrefFor, isPlanned, sidebarRows, departmentOverviewHref,
+  OVERVIEW_BANDS, REPORT_PERIODS, workspaceFor, workspaceBySlug, hrefFor, isPlanned, sidebarRows, departmentOverviewHref, deptCalendarTab,
   type Gate, type Workspace, type WorkspaceRow, type WorkspaceTab,
 } from "./workspaces";
 
@@ -443,7 +443,8 @@ describe("the Notices tab on the Overview row (DW-10a-2, BFF section 57.8)", () 
   it("follows Overview in every workspace, ungated, and is built (no ticket)", () => {
     for (const ws of ALL) {
       const tabs = overviewRow(ws).tabs;
-      expect(tabs.map((t) => t.key), ws.key).toEqual(["overview", "notices"]);
+      // DW-10c-3 adds the Department calendar after Notices on every workspace but the Office of the GM (the next block).
+      expect(tabs.map((t) => t.key).slice(0, 2), ws.key).toEqual(["overview", "notices"]);
       expect(tabs[0].href, ws.key).toBe(ws.overviewHref);
       expect(tabs[1].gate, ws.key).toBeUndefined();
       expect(isPlanned(tabs[1]), ws.key).toBe(false);
@@ -467,5 +468,40 @@ describe("the Notices tab on the Overview row (DW-10a-2, BFF section 57.8)", () 
   it("lands on page files that exist", () => {
     expect(existsSync(pageFile("/departments/{dept}/notices"))).toBe(true);
     expect(existsSync(pageFile("/notices"))).toBe(true);
+  });
+});
+
+describe("the Department calendar tab on the Overview row (DW-10c-3, BFF section 59.4)", () => {
+  const overviewRow = (ws: Workspace) => sidebarRows(ws).top.find((r) => r.key === "overview")!;
+
+  it("follows Notices on every department workspace, ungated and built, at the unit's schedule page", () => {
+    for (const ws of ALL.filter((w) => w.kind !== "office")) {
+      const tabs = overviewRow(ws).tabs;
+      expect(tabs.map((t) => t.key), ws.key).toEqual(["overview", "notices", "schedule"]);
+      expect(tabs[2].label, ws.key).toBe("Department calendar");
+      expect(tabs[2].href, ws.key).toBe("/departments/{dept}/schedule");
+      expect(tabs[2].gate, ws.key).toBeUndefined();
+      expect(isPlanned(tabs[2]), ws.key).toBe(false);
+    }
+  });
+
+  it("is absent from the Office of the GM, whose Overview is the company's", () => {
+    const gm = ALL.filter((w) => w.kind === "office");
+    expect(gm.length).toBeGreaterThan(0);
+    for (const ws of gm) expect(overviewRow(ws).tabs.map((t) => t.key), ws.key).toEqual(["overview", "notices"]);
+    expect(deptCalendarTab({ kind: "office" })).toBeNull();
+    expect(deptCalendarTab({ kind: "department" })?.href).toBe("/departments/{dept}/schedule");
+  });
+
+  it("is dropped by hrefFor when the workspace has no department id, and filled with the id when it has one", () => {
+    expect(hrefFor("/departments/{dept}/schedule", { deptId: null })).toBeNull();
+    expect(hrefFor("/departments/{dept}/schedule", { deptId: "d-hr" })).toBe("/departments/d-hr/schedule");
+  });
+
+  it("lands on a page file that exists, and not on /calendar, which is Social Media's posts calendar", () => {
+    expect(existsSync(pageFile("/departments/{dept}/schedule"))).toBe(true);
+    expect(overviewRow(workspaceBySlug("social-media")!).tabs.map((t) => t.href)).not.toContain("/departments/{dept}/calendar");
+    // Social Media's own Calendar tab is still at /calendar.
+    expect(rowsOf(workspaceBySlug("social-media")!).flatMap((r) => r.tabs).some((t) => t.href === "/departments/{dept}/calendar")).toBe(true);
   });
 });

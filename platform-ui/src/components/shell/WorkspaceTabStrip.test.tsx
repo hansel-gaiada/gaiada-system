@@ -35,12 +35,12 @@ describe("WorkspaceTabStrip", () => {
     expect(within(strip).getByRole("link", { current: "page" })).toHaveAttribute("href", "/departments/d-web/board");
   });
 
-  it("draws the Overview row's two tabs, Overview and Notices, on a department's Overview (DW-10a-2)", () => {
+  it("draws the Overview row's three tabs, Overview, Notices and Department calendar, on a department's Overview (DW-10a-2, DW-10c-3)", () => {
     nav.pathname = "/departments/d-web";
     render(inShell(<WorkspaceTabStrip />));
     const strip = screen.getByRole("navigation", { name: /sections$/ });
     expect(within(strip).getAllByRole("link").map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
-      ["Overview", "/departments/d-web"], ["Notices", "/departments/d-web/notices"],
+      ["Overview", "/departments/d-web"], ["Notices", "/departments/d-web/notices"], ["Department calendar", "/departments/d-web/schedule"],
     ]);
     expect(within(strip).getByRole("link", { current: "page" })).toHaveTextContent("Overview");
   });
@@ -49,6 +49,14 @@ describe("WorkspaceTabStrip", () => {
     nav.pathname = "/departments/d-web/notices";
     render(inShell(<WorkspaceTabStrip />));
     expect(within(screen.getByRole("navigation", { name: /sections$/ })).getByRole("link", { current: "page" })).toHaveTextContent("Notices");
+  });
+
+  it("lights Department calendar on the schedule page, and not on Social Media's own /calendar tab (DW-10c-3)", () => {
+    nav.pathname = "/departments/d-web/schedule";
+    render(inShell(<WorkspaceTabStrip />));
+    const strip = screen.getByRole("navigation", { name: /sections$/ });
+    expect(within(strip).getByRole("link", { current: "page" })).toHaveTextContent("Department calendar");
+    expect(within(strip).getByRole("link", { current: "page" })).toHaveAttribute("href", "/departments/d-web/schedule");
   });
 
   it("draws nothing for a row with one tab", () => {

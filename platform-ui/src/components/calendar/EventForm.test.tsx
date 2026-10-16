@@ -103,6 +103,50 @@ describe("EventForm", () => {
     expect([...sel.options].map((o) => o.textContent)).toEqual(["Only the people invited", "Everyone in the company"]);
   });
 
+  it("offers 'My department: <unit>' after the two company choices, for each unit it is given (DW-10c-2)", () => {
+    draw({ units: [{ id: "dept-1", name: "Web Dev", label: "My department: Web Dev" }, { id: "dv-fe", name: "Frontend", label: "My department: Frontend" }] });
+    const sel = screen.getByLabelText("Who can see it") as HTMLSelectElement;
+    expect([...sel.options].map((o) => o.textContent)).toEqual(["Only the people invited", "Everyone in the company", "My department: Web Dev", "My department: Frontend"]);
+    expect(sel.value).toBe("attendees");
+  });
+
+  it("sends the department and its unit when it is chosen, and no unit when the choice goes back to another visibility", async () => {
+    const save = draw({ units: [{ id: "dept-1", name: "Web Dev", label: "My department: Web Dev" }] });
+    const sel = screen.getByLabelText("Who can see it") as HTMLSelectElement;
+    fireEvent.change(sel, { target: { value: "department:dept-1" } });
+    expect(sel.value).toBe("department:dept-1");
+    expect(screen.getByText(/Only the people you invite are notified\./)).toBeInTheDocument();
+    submit();
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0][0]).toMatchObject({ visibility: "department", unitNodeId: "dept-1" });
+
+    save.mockClear();
+    fireEvent.change(sel, { target: { value: "company" } });
+    submit();
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0][0]).toMatchObject({ visibility: "company", unitNodeId: "" });
+  });
+
+  it("starts on the department it is given (the calendar's 'Add an event' preselects it)", () => {
+    draw({ initial: { ...initial, visibility: "department", unitNodeId: "dept-1" }, units: [{ id: "dept-1", name: "Web Dev", label: "My department: Web Dev" }] });
+    expect((screen.getByLabelText("Who can see it") as HTMLSelectElement).value).toBe("department:dept-1");
+  });
+
+  it("keeps an option for an event's department that is no longer offered, so the select never shows another choice than the event holds", () => {
+    draw({ mode: "edit", initial: { ...initial, visibility: "department", unitNodeId: "gone" }, units: [] });
+    const sel = screen.getByLabelText("Who can see it") as HTMLSelectElement;
+    expect(sel.value).toBe("department:gone");
+    expect(sel.selectedOptions[0]).toHaveTextContent("A department no longer in the structure");
+  });
+
+  it("shows a server refusal that names the unit in the form's error line", async () => {
+    const save = draw({ units: [{ id: "dept-3", name: "SEO", label: "My department: SEO" }] });
+    save.mockResolvedValueOnce({ ok: false, error: "You can only share an event with a department you belong to or lead.", field: "unitNodeId" });
+    fireEvent.change(screen.getByLabelText("Who can see it"), { target: { value: "department:dept-3" } });
+    submit();
+    expect(await screen.findByRole("alert")).toHaveTextContent("You can only share an event with a department you belong to or lead.");
+  });
+
   it("narrows the projects to the chosen client", () => {
     draw();
     const client = screen.getByLabelText("Client (optional)");

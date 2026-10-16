@@ -113,3 +113,94 @@ describe("demoCalendarEvents: busy times (§47.4)", () => {
     expect(without.length).toBe(all.length - 1);
   });
 });
+
+describe("demoCalendarEvents: the `department` visibility (BFF section 59.3)", () => {
+  const D = "/api/co-agency/calendar/events";
+  const dept = (extra: Record<string, unknown> = {}) => ({
+    title: "Web Dev planning", startsAt: new Date(Date.now() + 86_400_000).toISOString(), endsAt: new Date(Date.now() + 90_000_000).toISOString(),
+    attendeeIds: [], visibility: "department", unitNodeId: "dept-1", ...extra,
+  });
+  const make = (user: string, body: Record<string, unknown>) => call("POST", D, user, body);
+  const idOf = (r: ReturnType<typeof call>) => (r?.json as { id: string }).id;
+  const get = (user: string, id: string) => call("GET", `${D}/${id}`, user);
+
+  it("creates one for a unit the caller is placed in or leads, and the detail names the unit", () => {
+    for (const user of ["u-dev", "u-webhead"]) {
+      const r = make(user, dept());
+      expect(r?.status, user).toBe(201);
+      expect(r?.json).toMatchObject({ visibility: "department", unitNodeId: "dept-1" });
+    }
+  });
+
+  it("is read by the unit's people, its head and the company-wide roles, and is a 404 (never a 403) for a sibling department", () => {
+    const id = idOf(make("u-webhead", dept()));
+    for (const user of ["u-dev", "u-pm", "u-webhead", "demo-hansel", "demo-owner", "u-hr"]) expect(get(user, id)?.status, user).toBe(200);
+    for (const user of ["seo-staff", "u-seo", "dept-manager", "u-creative"]) expect(get(user, id)?.status, user).toBe(404);
+  });
+
+  it("canEdit follows the organizer and the admin, not the unit's people", () => {
+    const id = idOf(make("u-webhead", dept()));
+    expect(get("u-dev", id)?.json).toMatchObject({ canEdit: false, canCancel: false, canRespond: false });
+    expect(get("u-webhead", id)?.json).toMatchObject({ canEdit: true });
+  });
+
+  it("is on the personal list of the unit's people and its head, not on a sibling's and not on a company-wide caller's", () => {
+    const id = idOf(make("u-webhead", dept({ title: "Listed for Web Dev" })));
+    // The event is tomorrow, so ask for a window that holds it.
+    const wide = (user: string) => (call("GET", "/api/calendar/events/mine", user, undefined, `from=${encodeURIComponent(new Date(Date.now() - 86_400_000).toISOString())}&to=${encodeURIComponent(new Date(Date.now() + 5 * 86_400_000).toISOString())}`)?.json as { items: { id: string }[] }).items.some((i) => i.id === id);
+    expect(wide("u-dev")).toBe(true);
+    expect(wide("u-webhead")).toBe(true);
+    expect(wide("seo-staff")).toBe(false);
+    expect(wide("demo-hansel")).toBe(false);
+  });
+
+  it("refuses a unit the caller is not in with 403 `outside your reporting line`, BEFORE any other field is read (an invalid body is still 403)", () => {
+    const r = make("u-dev", dept({ unitNodeId: "dept-3" }));
+    expect(r).toEqual({ status: 403, json: { error: "outside your reporting line", reason: "outside your reporting line", field: "unitNodeId" } });
+    expect(make("u-dev", { visibility: "department", unitNodeId: "dept-3", title: 5, startsAt: "garbage" })?.status).toBe(403);
+    expect(make("seo-staff", dept())?.status).toBe(403);
+  });
+
+  it("lets a company-wide caller make one for any unit, but refuses the root and an unknown unit with 404 `unit_not_found`", () => {
+    expect(make("demo-hansel", dept({ unitNodeId: "dept-3" }))?.status).toBe(201);
+    expect(make("demo-hansel", dept({ unitNodeId: "root" }))).toMatchObject({ status: 404, json: { reason: "unit_not_found", field: "unitNodeId" } });
+    expect(make("demo-hansel", dept({ unitNodeId: "no-such-unit" }))).toMatchObject({ status: 404, json: { reason: "unit_not_found" } });
+  });
+
+  it("needs a unit with `department` (400 unit_required), allows none on another visibility (400 unit_not_allowed), and refuses a malformed one (400 unit_invalid)", () => {
+    const { unitNodeId, ...noUnit } = dept();
+    void unitNodeId;
+    expect(make("u-dev", noUnit)).toMatchObject({ status: 400, json: { reason: "unit_required", field: "unitNodeId" } });
+    expect(make("u-dev", dept({ visibility: "company" }))).toMatchObject({ status: 400, json: { reason: "unit_not_allowed", field: "unitNodeId" } });
+    expect(make("u-dev", dept({ visibility: "attendees" }))).toMatchObject({ status: 400, json: { reason: "unit_not_allowed" } });
+    expect(make("demo-hansel", dept({ unitNodeId: "" }))).toMatchObject({ status: 400, json: { reason: "unit_invalid" } });
+    expect(make("demo-hansel", dept({ unitNodeId: 7 }))).toMatchObject({ status: 400, json: { reason: "unit_invalid" } });
+  });
+
+  it("still makes attendee-only and company events with no unit (the CHECK keeps both working)", () => {
+    for (const visibility of ["attendees", "company"]) {
+      const r = make("u-dev", dept({ visibility, unitNodeId: undefined }));
+      expect(r?.status, visibility).toBe(201);
+      expect(r?.json).toMatchObject({ visibility, unitNodeId: null });
+    }
+  });
+
+  it("follows the unit on an edit: moving off `department` clears it, moving to it needs one, and an unrelated edit never re-checks the unit", () => {
+    const id = idOf(make("u-webhead", dept()));
+    // An unrelated edit by the organizer (who stays in the unit): fine, and the unit stays.
+    expect(call("PATCH", `${D}/${id}`, "u-webhead", { title: "Renamed" })?.json).toMatchObject({ title: "Renamed", visibility: "department", unitNodeId: "dept-1" });
+    // Off `department`: the unit is cleared with no explicit null.
+    expect(call("PATCH", `${D}/${id}`, "u-webhead", { visibility: "company" })?.json).toMatchObject({ visibility: "company", unitNodeId: null });
+    // Back to it: a unit is needed.
+    expect(call("PATCH", `${D}/${id}`, "u-webhead", { visibility: "department" })).toMatchObject({ status: 400, json: { reason: "unit_required" } });
+    expect(call("PATCH", `${D}/${id}`, "u-webhead", { visibility: "department", unitNodeId: "dept-1" })?.json).toMatchObject({ visibility: "department", unitNodeId: "dept-1" });
+  });
+
+  it("narrows an edit that MOVES the event to another unit, and not one that keeps the unit", () => {
+    const id = idOf(make("u-webhead", dept()));
+    const moved = call("PATCH", `${D}/${id}`, "u-webhead", { visibility: "department", unitNodeId: "dept-3" });
+    expect(moved).toMatchObject({ status: 403, json: { reason: "outside your reporting line" } });
+    // Naming the unit it already has is not a move.
+    expect(call("PATCH", `${D}/${id}`, "u-webhead", { visibility: "department", unitNodeId: "dept-1", title: "Same unit" })?.status).toBe(200);
+  });
+});
