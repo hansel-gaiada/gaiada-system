@@ -11,6 +11,31 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.162.0` + platform-ui `0.187.0` - DW-10a: the department notice board (DW-D32, BFF §57, PERMISSION §47); DW-10d-3: Customise says Saving… (2026-10-16) - PROTOTYPED
+
+Plan §12.2 (row 10a); owner ruling DW-D32: heads post, the department reads.
+- **Backend (10a-1):**
+  - Table `dept_notices` (migration `202610160100`): a unit notice or a company-wide one; plain-text body; pin; end date; withdraw, never delete. FORCE RLS on the tenant.
+  - New core Cerbos kind `dept_notice` (`read`, `post`, `edit`, `withdraw`; migration `202610160110`; the six artifacts). `read` is tenant-wide and the handler narrows each notice: placed in the unit's subtree today, a head whose led scope holds the unit, or a company-wide tier. Heads post to their unit through an `org_unit_lead` rule of their own, and company-wide notices are company_admin's alone. Bots and automation are denied every write. The permission arm covers `read` only.
+  - Routes `api/:tenantId/notices`: list, one, post, edit, withdraw. Checks run in order: Cerbos, then the body, then existence. An unreadable notice answers 404. A fourth current pin answers 409 `pin_limit`.
+  - Inbox fan-out `notice.posted` after the commit: the unit's placed people and its own heads, or every active member for a company-wide notice; never the author. A failed send never undoes the post.
+  - Hub read tool `notices.list`.
+  - `core/unit-reach.ts` now holds the "placed, leads or company-wide" check that `GET /dept-kpis` uses too, with unchanged behaviour.
+- **UI (10a-2):**
+  - Pages `/departments/[deptId]/notices` and `/notices` (company-wide): pinned first, Past, the post form for those who may post, and Edit and Withdraw per row's `canEdit`.
+  - The Overview row gains a Notices tab, so every Overview now draws its tab strip.
+  - Fixed Overview blocks `notices` (a department) and `company-notices` (the company Overview, never narrowed). A refused read draws nothing; a failed read says Unavailable.
+  - The Inbox and the bell render `notice.posted`. Capability `notices.post`. A demo store.
+- **10d-3:** the Customise buttons say "Saving…" and are disabled while a choice applies. On live, each choice took 14 to 17 s (the action re-renders the whole Overview). The intro says Needs you and Notices always stay.
+- **Gates:** CI on the backend `dw/10a` `f3b14804` (38840447212). Every new suite ran on real Postgres and Cerbos:
+  - HTTP 47
+  - `cerbos-dept-notice` 53, including the live matrix
+  - migration 21
+  - service 24
+  - `unit-reach` 19
+  - `dept-kpis.controller.db` 22, unchanged
+- **Deploy:** migrations `202610160100` and `202610160110` apply. Restart Cerbos, then probe: a head's `post` on their own unit is allowed, and on a sibling unit denied.
+
 ### platform-ui `0.186.0` - DW-10d: personalise the Overview (show and hide blocks, saved in the browser), and Client health as the first optional block (DW-D34) (2026-10-16) - PROTOTYPED
 
 Plan §12.2 (row 10d); owner ruling DW-D34. The DW-10 plan notes, the rulings DW-D32 to DW-D35 and the contracts BFF §57 to §59 and PERMISSION §47 and §48 (all PLANNED) land with this change. UI only.

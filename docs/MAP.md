@@ -426,6 +426,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/keywords`
 - `/departments/[deptId]/ledger`
 - `/departments/[deptId]/money`
+- `/departments/[deptId]/notices`
 - `/departments/[deptId]/pacing`
 - `/departments/[deptId]/people`
 - `/departments/[deptId]/planner`
@@ -563,6 +564,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/monitoring/channels`
 - `/monitoring/maintenance`
 - `/monitoring/new`
+- `/notices`
 - `/office`
 - `/office-lab`
 - `/office/credits`
