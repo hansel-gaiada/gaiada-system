@@ -1,6 +1,6 @@
 import { expect, type Page, type BrowserContext } from "@playwright/test";
 import { test } from "./settledPage";
-import { classicLayoutCookie, tenantCookie } from "./appCookies";
+import { tenantCookie } from "./appCookies";
 
 // Coverage for commit c89fed6 ("one project-management interface, on every surface that shows
 // it") — deliberately deferred and flagged in that commit's own message: "e2e specs don't yet
@@ -160,27 +160,33 @@ test.describe("Deep links are preserved (explicitly NOT redirected)", () => {
   });
 });
 
-test.describe("Department console primary group reads 'Project Management', not 'Work'", () => {
-  test("dept-1 (Web Dev) primary strip + sub-tabs", async ({ page, context }) => {
+test.describe("The department's project-management row reads 'Project Management', not 'Work'", () => {
+  test("dept-1 (Web Dev) sidebar row + its tab strip", async ({ page, context }) => {
     await loginAs(page, context, HANSEL);
-    // The department console strips are the CLASSIC shell (the workspace shell hides them: its rows own the tabs). Classic until DW-9d-2.
-    await context.addCookies([classicLayoutCookie(page.url())]);
     await page.goto("/departments/dept-1");
 
-    const primaryStrip = page.getByRole("navigation", { name: "Department sections" });
+    // The workspace sidebar's Work group holds the row. The group's own label is "Work" (a heading of the menu, not a row),
+    // so the requirement is that no ROW is called "Work" and the PM row carries the literal label.
+    const menu = page.getByRole("navigation", { name: "Web Dev menu" });
+    const work = menu.getByRole("group", { name: "Work" });
     // The literal label IS the requirement (2026-08-10 owner decision, PM_RENAMES in
     // pmVocabulary.ts: "Work" -> PM_TERMS.projectManagement) — assert it directly, and assert
-    // "Work" is gone, not just that "Project Management" showed up somewhere else on the page.
-    await expect(primaryStrip.getByRole("link", { name: "Project Management", exact: true })).toBeVisible();
-    await expect(primaryStrip.getByRole("link", { name: "Work", exact: true })).toHaveCount(0);
+    // no row is called "Work", not just that "Project Management" showed up somewhere else on the page.
+    await expect(work.getByRole("link", { name: "Project Management", exact: true })).toBeVisible();
+    await expect(menu.getByRole("link", { name: "Work", exact: true })).toHaveCount(0);
 
-    await primaryStrip.getByRole("link", { name: "Project Management", exact: true }).click();
+    await work.getByRole("link", { name: "Project Management", exact: true }).click();
     await page.waitForURL(/\/departments\/dept-1\/projects$/);
 
-    const subStrip = page.getByRole("navigation", { name: /project management tools/i });
-    for (const label of ["Projects", "Board", "Ball", "Timeline", "Charts", "Activity"]) {
+    const subStrip = page.getByRole("navigation", { name: "Project Management sections" });
+    for (const label of ["Projects", "Board", "Ball", "Timeline", "Activity"]) {
       await expect(subStrip.getByRole("link", { name: label, exact: true })).toBeVisible();
     }
+    // Charts moved out of the PM strip to Analytics › Work (plan §4 "What moves"): not drawn twice.
+    await expect(subStrip.getByRole("link", { name: "Charts", exact: true })).toHaveCount(0);
+    const analytics = menu.getByRole("group", { name: "Performance" }).getByRole("link", { name: "Analytics", exact: true });
+    await analytics.click();
+    await expect(page.getByRole("navigation", { name: "Analytics sections" }).getByRole("link", { name: "Work", exact: true })).toBeVisible();
   });
 });
 

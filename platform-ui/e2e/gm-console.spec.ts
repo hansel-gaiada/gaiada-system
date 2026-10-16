@@ -1,7 +1,7 @@
 import { expect, type Page, type BrowserContext } from "@playwright/test";
 import { test } from "./settledPage";
 import { loginAsPersona } from "./personas";
-import { classicLayoutCookie, tenantCookie } from "./appCookies";
+import { tenantCookie } from "./appCookies";
 
 // GM-10 — the GM console suite (`docs/plans/2026-08-24-gm-console-PROGRESS.md`), over DEMO_MODE.
 //
@@ -65,50 +65,88 @@ async function login(page: Page, context: BrowserContext, persona: "superadmin" 
   await context.addCookies([tenantCookie(page.url())]);
 }
 
-test.describe("GM cockpit (GM-03)", () => {
-  test("renders the three tiers, and the provenance line refuses to imply a seal state", async ({ page, context }) => {
+// The workspace shell is the only layout (DW-D38): the Office of the GM's page is the company Overview, and the cockpit renders under it as
+// "More from the Office of the GM", LESS the sections the Overview's own blocks show (`gmHiddenSections`, lib/overviewCoverage.ts, DW-3z).
+// A person with company figures sees the business, departments and money cards as the Company and Departments-by-condition blocks and
+// the provenance line is not drawn; a narrowed lead (no company figures) still gets the cockpit's own Departments card and provenance line.
+const COMPANY_PERIOD = / · Money: /;
+const companyPeriod = (p: Page) => p.locator("#main-content").getByRole("region", { name: "Company", exact: true }).getByText(COMPANY_PERIOD);
+
+test.describe("GM cockpit (GM-03), on the Office of the GM's Overview", () => {
+  test("renders the business and the departments as Overview blocks, and the Company block names its live period rather than a seal state", async ({ page, context }) => {
     await login(page, context, "superadmin");
-    // The cockpit is the CLASSIC department home; the workspace shell shows the Overview there (DW-3z). Classic until DW-9d-2.
-    await context.addCookies([classicLayoutCookie(page.url())]);
     await page.goto(GM);
 
     // The console spine — proves the `gm` toolkit resolved, not the Home-only generic fallback.
     await expect(page.getByRole("link", { name: "Command" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Oversight" })).toBeVisible();
 
-    // Tier 1 + Tier 2.
-    await expect(page.getByText("The business")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Departments" })).toBeVisible();
+    // Tier 1 (the business: the Company block) + Tier 2 (the departments: Departments by condition).
+    const main = page.locator("#main-content");
+    const company = main.getByRole("region", { name: "Company", exact: true });
+    await expect(company).toBeVisible();
+    await expect(company.locator('[data-tile="revenue"]')).toHaveAttribute("data-state", "ok");
+    await expect(main.getByRole("region", { name: "Departments by condition", exact: true })).toHaveAttribute("data-state", "ok");
+    await expect(company.getByRole("link", { name: "Company report" })).toBeVisible();
 
-    // The provenance line. This estate distinguishes SEALED report periods from live-computed ones
-    // and stamps unsealed exports; `reports/overview` carries NO seal flag, so the line must say so
-    // rather than presenting headline figures as the record. A cockpit that quietly implied "sealed"
-    // would put an unsealed number into a business review as fact.
-    await expect(page.getByText(/carries no seal state/i)).toBeVisible();
-    await expect(page.getByRole("link", { name: /open the full report/i })).toBeVisible();
+    // The provenance. This estate distinguishes SEALED report periods from live-computed ones and stamps unsealed exports;
+    // `reports/overview` carries NO seal flag, so nothing may present these figures as the record. The Company block states the live
+    // date range its money was read for; the cockpit's own provenance line is covered by the Overview and so not drawn for this person.
+    await expect(companyPeriod(page)).toHaveText(/ · Money: \d{1,2} \w{3} \d{4} to \d{1,2} \w{3} \d{4}$/);
+    await expect(main.getByText(/carries no seal state/i)).toHaveCount(0);
+    await expect(main.getByText(/\bsealed\b/i)).toHaveCount(0);
   });
 
-  test("the period toggle actually changes the period, not just the highlighted button", async ({ page, context }) => {
-    await login(page, context, "superadmin");
-    // The cockpit is the CLASSIC department home; the workspace shell shows the Overview there (DW-3z). Classic until DW-9d-2.
-    await context.addCookies([classicLayoutCookie(page.url())]);
-
+  test("a narrowed lead's cockpit keeps the provenance line, which refuses to imply a seal state", async ({ page, context }) => {
+    await login(page, context, "manager");
     await page.goto(GM);
-    await expect(page.getByText(/this week/i)).toBeVisible();
+    // The Overview drew (its greeting), then the cockpit's own cards under "More from".
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), Rai$/);
+    const more = page.locator("#main-content .ov-legacy");
+    await expect(more.getByRole("heading", { name: "Departments", exact: true })).toBeVisible();
+    // `reports/overview` carries NO seal flag, so the line must say so rather than presenting headline figures as the record. A cockpit
+    // that quietly implied "sealed" would put an unsealed number into a business review as fact.
+    await expect(more.getByText(/carries no seal state/i)).toBeVisible();
+    await expect(more.getByRole("link", { name: /open the full report/i })).toBeVisible();
+  });
+
+  test("the Overview's period selector actually changes the Company block's period, not just the highlighted button", async ({ page, context }) => {
+    await login(page, context, "superadmin");
 
     await page.goto(`${GM}?period=month`);
-    await expect(page.getByText(/this month/i)).toBeVisible();
-    // The distinction: the old label must be GONE, not merely joined by the new one.
-    await expect(page.getByText(/this week/i)).toHaveCount(0);
+    await expect(companyPeriod(page)).toHaveText(/^[A-Za-z]+ \d{4} · Money: /); // "October 2026"
+
+    await page.goto(`${GM}?period=day`);
+    await expect(companyPeriod(page)).toHaveText(/^\d{1,2} \w{3} \d{4} · Money: /); // "16 Oct 2026"
+    // The distinction: the month label must be GONE, not merely joined by the day one.
+    await expect(companyPeriod(page)).not.toHaveText(/^[A-Za-z]+ \d{4} · Money: /);
   });
 
-  test("an unrecognised period falls back to the week instead of reaching the backend", async ({ page, context }) => {
+  test("an unrecognised period falls back to the default instead of reaching the backend", async ({ page, context }) => {
     await login(page, context, "superadmin");
-    // The cockpit is the CLASSIC department home; the workspace shell shows the Overview there (DW-3z). Classic until DW-9d-2.
-    await context.addCookies([classicLayoutCookie(page.url())]);
-    // `day` and `custom` are real ReportPeriodKinds the console deliberately does not offer.
+    await page.goto(GM);
+    await expect(companyPeriod(page)).toBeVisible();
+    const fallback = await companyPeriod(page).textContent();
+    expect(fallback).toMatch(COMPANY_PERIOD);
+    await page.goto(`${GM}?period=nonsense`);
+    await expect(companyPeriod(page)).toHaveText(fallback!);
+  });
+
+  test("the cockpit's own week/month toggle (the narrowed lead's Departments card) changes the period, and one it does not offer falls back to the week", async ({ page, context }) => {
+    await login(page, context, "manager");
+    const more = (p: Page) => p.locator("#main-content .ov-legacy");
+
+    await page.goto(GM);
+    await expect(more(page).getByText(/this week/i)).toBeVisible();
+
+    await page.goto(`${GM}?period=month`);
+    await expect(more(page).getByText(/this month/i)).toBeVisible();
+    // The distinction: the old label must be GONE, not merely joined by the new one.
+    await expect(more(page).getByText(/this week/i)).toHaveCount(0);
+
+    // `day` and `custom` are real ReportPeriodKinds the console deliberately does not offer (the Overview's own selector does take "day").
     await page.goto(`${GM}?period=day`);
-    await expect(page.getByText(/this week/i)).toBeVisible();
+    await expect(more(page).getByText(/this week/i)).toBeVisible();
   });
 });
 
@@ -257,25 +295,6 @@ test.describe("the money tier (GM-09)", () => {
     await expect(page.getByText(/SM-17/)).toHaveCount(0);
   });
 
-  test("money sits BELOW the operating tiers, not above them", async ({ page, context }) => {
-    await login(page, context, "superadmin");
-    // The cockpit is the CLASSIC department home; the workspace shell shows the Overview there (DW-3z). Classic until DW-9d-2.
-    await context.addCookies([classicLayoutCookie(page.url())]);
-    await page.goto(GM);
-    // Amazon's cadence rule, and the reason the card is ordered where it is: inputs and outputs
-    // first, financials last. Asserted on the CARD HEADINGS rather than on raw page text — the first
-    // attempt searched `main`'s innerText for "Departments" and matched the breadcrumb
-    // ("Home / Organization / Departments / GM"), which sits above everything and made the assertion
-    // meaningless. Headings are the thing being ordered, so they are the thing to assert on.
-    const headings = await page.locator("h2, h3").allTextContents();
-    const at = (t: string) => headings.findIndex((h) => h.trim() === t);
-    expect(at("The business"), "the business card must render").toBeGreaterThanOrEqual(0);
-    expect(at("Money"), "the money card must render").toBeGreaterThanOrEqual(0);
-    expect(at("Departments"), "the departments card must render").toBeGreaterThanOrEqual(0);
-    expect(at("The business")).toBeLessThan(at("Money"));
-    expect(at("Departments")).toBeLessThan(at("Money"));
-  });
-
   test("the money tab shows the full view, month-to-date", async ({ page, context }) => {
     await login(page, context, "superadmin");
     await page.goto(`${GM}/money`);
@@ -312,23 +331,26 @@ test.describe("client monitoring (B3)", () => {
   // tunnel, and is deliberately absent from this console. B3 sat "blocked: monitoring has no backend"
   // all build; the module shipped one, which is the third stale blocker this program found this week.
 
-  test("the cockpit carries client health, above the money tier", async ({ page, context }) => {
+  test("the cockpit still carries client health, under the Overview's own blocks", async ({ page, context }) => {
     await login(page, context, "superadmin");
-    // The cockpit is the CLASSIC department home; the workspace shell shows the Overview there (DW-3z). Classic until DW-9d-2.
-    await context.addCookies([classicLayoutCookie(page.url())]);
     await page.goto(GM);
-    await expect(page.getByRole("heading", { name: "Client monitoring" })).toBeVisible();
+    const main = page.locator("#main-content");
+    // Client monitoring is what no Overview block shows, so it is what stays under "More from the Office of the GM" (DW-3z).
+    await expect(main.locator(".ov-legacy").getByRole("heading", { name: "Client monitoring", exact: true })).toBeVisible();
     await expect(page.getByText("Needs attention")).toBeVisible();
     await expect(page.getByText("Open incidents")).toBeVisible();
 
-    // Cadence order: operating signals before financial outcomes. Asserted on headings so a
-    // refactor cannot quietly reorder it — the same assertion style that caught the money card
-    // shipping in the wrong place.
+    // Cadence order: the Overview's operating blocks first (the Company block, then the departments by condition), then client
+    // monitoring. Asserted on headings so a refactor cannot quietly reorder it.
     const headings = await page.locator("h2, h3").allTextContents();
     const at = (t: string) => headings.findIndex((h) => h.trim() === t);
+    expect(at("Company"), "the Company block must render").toBeGreaterThanOrEqual(0);
+    expect(at("Departments by condition"), "the departments block must render").toBeGreaterThanOrEqual(0);
     expect(at("Client monitoring")).toBeGreaterThanOrEqual(0);
-    expect(at("Client monitoring")).toBeLessThan(at("Money"));
-    expect(at("Departments")).toBeLessThan(at("Client monitoring"));
+    expect(at("Company")).toBeLessThan(at("Client monitoring"));
+    expect(at("Departments by condition")).toBeLessThan(at("Client monitoring"));
+    // The cockpit's own business, money and departments cards are the Overview's blocks now: not drawn twice.
+    for (const name of ["The business", "Money", "Departments"]) await expect(main.getByRole("heading", { name, exact: true }), name).toHaveCount(0);
   });
 
   test("a narrowed department lead sees it too — monitoring is not company-grain", async ({ page, context }) => {

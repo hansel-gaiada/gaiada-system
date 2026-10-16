@@ -1,29 +1,31 @@
 import { expect } from "@playwright/test";
 import { test } from "./settledPage";
 import { loginAsPersona } from "./personas";
-import { classicLayoutCookie } from "./appCookies";
 
 // IAM-06b — reference example for the persona fixture, run in DEMO_MODE (this project's default —
 // see playwright.config.ts). Demonstrates BOTH directions with the exact copy-paste shape the
 // README shows: "as persona X this is visible" and "as persona Y it is not", using a capability
-// (`admin.access` -> the "Settings" nav item, `components/shell/nav.ts`) that is unambiguously
+// (`admin.access` -> the workspace sidebar's "Admin" door and its "Settings" row, `lib/workspaces.ts` ADMIN_ROWS) that is unambiguously
 // ALLOW for one persona and DENY for another under today's `rbac.ts` — no program-specific
 // knowledge required to read this file.
 test.describe("IAM-06b persona fixture — reference example", () => {
-  test("ALLOW — superadmin sees the Settings nav item (admin.access)", async ({ page }) => {
+  test("ALLOW — superadmin sees the Admin door and its Settings row (admin.access)", async ({ page }) => {
     await loginAsPersona(page, "superadmin");
-    // The "Settings" item is a CLASSIC sidebar row: a person who chose classic (classic until DW-9d-2).
-    await page.context().addCookies([classicLayoutCookie(page.url())]);
     await page.goto("/");
-    await expect(page.getByRole("link", { name: "Settings" })).toBeVisible();
+    const sidebar = page.locator("aside#app-nav");
+    await expect(sidebar.getByRole("link", { name: "Admin", exact: true })).toBeVisible();
+    await page.goto("/admin");
+    await expect(page.getByRole("navigation", { name: "Admin menu" }).getByRole("link", { name: "Settings", exact: true })).toBeVisible();
   });
 
-  test("DENY — member does NOT see the Settings nav item (admin.access)", async ({ page }) => {
+  test("DENY — member does NOT see the Admin door or a Settings row (admin.access)", async ({ page }) => {
     await loginAsPersona(page, "member");
-    // The "Settings" item is a CLASSIC sidebar row: a person who chose classic (classic until DW-9d-2).
-    await page.context().addCookies([classicLayoutCookie(page.url())]);
     await page.goto("/");
-    await expect(page.getByRole("link", { name: "Settings" })).toHaveCount(0);
+    const sidebar = page.locator("aside#app-nav");
+    // The shell drew (the footer's Company door is open to everyone); only then is an absence worth asserting.
+    await expect(sidebar.getByRole("link", { name: "Company", exact: true })).toBeVisible();
+    await expect(sidebar.getByRole("link", { name: "Admin", exact: true })).toHaveCount(0);
+    await expect(sidebar.getByRole("link", { name: "Settings", exact: true })).toHaveCount(0);
   });
 
   test("a DEMO_MODE-unsupported persona fails loudly, not silently as the wrong identity", async ({ page }) => {
