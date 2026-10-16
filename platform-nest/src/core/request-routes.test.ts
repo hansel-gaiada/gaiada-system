@@ -150,6 +150,9 @@ describe("the readers that must leave routing keys out (static pins; the databas
       "src/seed/reassign-retired.ts", // a comment
       "src/core/dept-resolution.ts", // a comment
       "src/modules/registry.ts", "src/modules/reports/fact-job.ts", "src/modules/reports/report-rollups.ts",
+      // DW-10e-2: the sender's routes read ONLY routing keys (`module_key = ANY(REQUEST_ROUTE_KEYS)`), the opposite filter: they
+      // look for routes, never for a module decision (pinned in work-requests-outbound.service.test.ts)
+      "src/core/work-requests-outbound.controller.ts", "src/core/work-requests-outbound.service.ts",
     ]);
     const offenders: string[] = [];
     for (const f of walk(join(NEST, "src")).filter((p) => p.endsWith(".ts") && !p.endsWith(".test.ts"))) {

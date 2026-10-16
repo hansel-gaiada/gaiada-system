@@ -13,7 +13,7 @@
 // `work_requests` carries only the ask and its own lifecycle. Progress inside that lifecycle is read live from the work
 // item and is never copied here.
 import type { PoolClient } from "pg";
-import { newId } from "../db";
+import { newId, withTenants } from "../db";
 import { loadOrgStructure, type OrgNode } from "../admin/org-structure.service";
 import { emitEvent } from "../events/outbox.service";
 import { isUuidShaped, todayIso } from "./dept-resolution";
@@ -517,6 +517,9 @@ export interface AuthFacts {
   toUnitId: string;
   pmTaskId: string | null;
   changeRequestId: string | null;
+  /** DW-10e (§60.6): the company that asked. Equals the row's `tenant_id` on a same-company request. Not a Cerbos attribute:
+   *  the §32 handlers read it only to refuse the receiving company's cancel of a cross row (409 `requester_side_only`). */
+  requesterTenantId: string;
   /** The facts Cerbos must see, read from the DB and never from a body (§32.2). */
   assigneeIds: string[];
   unitAncestors: string[];
@@ -529,8 +532,9 @@ export async function loadAuthFacts(c: PoolClient, tenantId: string, requestId: 
   if (!isUuidShaped(requestId)) return null;
   const { rows } = await c.query<{
     id: string; kind: RequestKind; requested_by: string; to_unit_id: string; pm_task_id: string | null; change_request_id: string | null;
+    requester_tenant_id: string;
   }>(
-    `SELECT id, kind, requested_by, to_unit_id, pm_task_id, change_request_id
+    `SELECT id, kind, requested_by, to_unit_id, pm_task_id, change_request_id, requester_tenant_id
        FROM work_requests WHERE id = $1 AND deleted_at IS NULL`,
     [requestId],
   );
@@ -555,7 +559,7 @@ export async function loadAuthFacts(c: PoolClient, tenantId: string, requestId: 
   }
   return {
     id: r.id, kind: r.kind, requestedBy: r.requested_by, toUnitId: r.to_unit_id,
-    pmTaskId: r.pm_task_id, changeRequestId: r.change_request_id,
+    pmTaskId: r.pm_task_id, changeRequestId: r.change_request_id, requesterTenantId: r.requester_tenant_id,
     assigneeIds: [...ids],
     unitAncestors: await loadUnitAncestors(c, tenantId, r.to_unit_id),
   };
@@ -585,12 +589,18 @@ export interface RequestRow {
   t_responsible_name: string | null;
   change_request_id: string | null; cr_id: string | null; cr_status: string | null; cr_route: string | null;
   asset_count: number;
+  // DW-10e (§60.6, §60.5): the requester side of a cross-company row, and the price state the SENDER reads. `tenant_id` and
+  // `requester_tenant_id` are equal on a same-company row, where the four others are NULL.
+  tenant_id: string; requester_tenant_id: string; requester_unit_id: string | null; requester_unit_name: string | null;
+  service_assignment_id: string | null; client_id: string | null;
+  requesting_company_name: string | null; client_name: string | null;
+  cr_price_impact: string | null; cr_amendment_contract_id: string | null; amendment_status: string | null;
 }
 
 /** One SELECT shared by the list and the detail read: the ask, its routing, its campaign and the work item read LIVE.
  *  `isDone` follows the PM reads' rule: the project's status-registry done row when its status set is materialized, else
  *  `status = 'done'`. A deleted work item joins to nothing, which the shaper reads as `work: null`. */
-const REQUEST_SELECT = `
+export const REQUEST_SELECT = `
   SELECT r.id, r.kind, r.title, r.status, r.needed_by::text AS needed_by, r.created_at, r.closed_at,
          r.to_unit_id, r.from_unit_id, r.requested_by, ru.name AS requested_by_name,
          r.brief, r.form, r.decline_reason,
@@ -601,9 +611,14 @@ const REQUEST_SELECT = `
               ELSE (t.status = 'done') END AS t_is_done,
          CASE WHEN COALESCE(t.assignee->>'responsibleId', '') = '' THEN NULL ELSE t.assignee->>'responsibleName' END AS t_responsible_name,
          r.change_request_id, cr.id AS cr_id, cr.status AS cr_status, cr.route AS cr_route,
-         (SELECT count(*)::int FROM work_request_assets a WHERE a.request_id = r.id) AS asset_count
+         (SELECT count(*)::int FROM work_request_assets a WHERE a.request_id = r.id) AS asset_count,
+         r.tenant_id, r.requester_tenant_id, r.requester_unit_id, r.requester_unit_name, r.service_assignment_id, r.client_id,
+         rc.name AS requesting_company_name, cl.name AS client_name,
+         cr.price_impact AS cr_price_impact, cr.amendment_contract_id AS cr_amendment_contract_id, ac.status AS amendment_status
     FROM work_requests r
     JOIN users ru ON ru.id = r.requested_by
+    LEFT JOIN companies rc ON rc.id = r.requester_tenant_id AND r.requester_tenant_id <> r.tenant_id
+    LEFT JOIN clients cl ON cl.id = r.client_id
     LEFT JOIN agency_campaign_parts pt ON pt.id = r.campaign_part_id
     LEFT JOIN agency_campaigns c ON c.id = pt.campaign_id
     LEFT JOIN pm_tasks t ON t.id = r.pm_task_id AND t.deleted_at IS NULL
@@ -611,11 +626,18 @@ const REQUEST_SELECT = `
       SELECT EXISTS(SELECT 1 FROM pm_project_statuses s2 WHERE s2.project_id = t.project_id AND s2.deleted_at IS NULL) AS materialized,
              (SELECT s.is_done FROM pm_project_statuses s WHERE s.project_id = t.project_id AND s.id = t.status AND s.deleted_at IS NULL) AS is_done_row
     ) reg ON t.id IS NOT NULL
-    LEFT JOIN webdev_change_requests cr ON cr.id = r.change_request_id AND cr.deleted_at IS NULL`;
+    LEFT JOIN webdev_change_requests cr ON cr.id = r.change_request_id AND cr.deleted_at IS NULL
+    LEFT JOIN contracts ac ON ac.id = cr.amendment_contract_id AND ac.deleted_at IS NULL`;
+
+/** True for a request sent from another group company (DW-10e). */
+export const isCrossRow = (r: { tenant_id: string; requester_tenant_id: string }): boolean => r.requester_tenant_id !== r.tenant_id;
 
 const iso = (v: string | Date | null): string | null => (v === null ? null : v instanceof Date ? v.toISOString() : new Date(v).toISOString());
 
-/** The row of §32.5, shared by the list and the detail read. */
+/** The row of §32.5, shared by the list and the detail read. DW-10e (§60.6) adds `requestingCompany`, `requesterUnit` and
+ *  `client`: all three `null` on a same-company row. On a cross row `requesterUnit.name` is the name stored when the request
+ *  was sent (the receiving company never reads the requester's tree), and `fromUnit` is `null` (`from_unit_id` is NULL by
+ *  CHECK). */
 export function shapeRequest(r: RequestRow, index: Map<string, OrgUnitInfo>) {
   let work: Record<string, unknown> | null = null;
   if (r.kind === "assets" && r.t_id) {
@@ -635,6 +657,9 @@ export function shapeRequest(r: RequestRow, index: Map<string, OrgUnitInfo>) {
     campaign: r.campaign_id ? { id: r.campaign_id, name: r.campaign_name, partId: r.campaign_part_id } : null,
     work,
     assetCount: r.asset_count,
+    requestingCompany: isCrossRow(r) ? { id: r.requester_tenant_id, name: r.requesting_company_name } : null,
+    requesterUnit: isCrossRow(r) && r.requester_unit_id ? { id: r.requester_unit_id, name: r.requester_unit_name } : null,
+    client: isCrossRow(r) && r.client_id ? { id: r.client_id, name: r.client_name } : null,
   };
 }
 
@@ -646,7 +671,9 @@ export async function listRequests(
   const push = (v: unknown) => { args.push(v); return `$${args.length}`; };
   if (q.box === "incoming") where.push(`r.to_unit_id = ${push(q.unitId)}`);
   else if (q.box === "sent") where.push(`r.from_unit_id = ${push(q.unitId)}`);
-  else where.push(`r.requested_by = ${push(principalId)}::uuid`);
+  // DW-10e (§60.6): "mine" is what I asked of THIS company. A person who is a member of both companies (the owner) would
+  // otherwise find their own cross request, sent from the other company, among this company's.
+  else where.push(`r.requested_by = ${push(principalId)}::uuid AND r.requester_tenant_id = r.tenant_id`);
   if (q.status === "open") where.push("r.status = 'open'");
   else if (q.status === "closed") where.push("r.status <> 'open'");
   if (q.kind) where.push(`r.kind = ${push(q.kind)}`);
@@ -700,6 +727,20 @@ export interface WorkRequestSync {
   title: string;
   from: RequestStatus;
   to: "open" | "delivered" | "declined";
+  /** DW-10e (§60.6): the company that asked; equals `tenantId` on a same-company request. The requester is told, and the
+   *  mirror event is written, in THIS company. */
+  requesterTenantId: string;
+  /** The receiving company's name, for the requester's notification title on a cross request. */
+  receivingName: string | null;
+}
+
+/** DW-10e (§60.7): the three keys every `work_request.*` event of the RECEIVING company gains on a cross-company request
+ *  (`{}` on a same-company one, whose payloads stay exactly as §32.7 wrote them). Ids only. */
+export function crossEventKeys(r: {
+  tenant_id: string; requester_tenant_id: string; service_assignment_id: string | null; client_id: string | null;
+}): Record<string, unknown> {
+  if (r.requester_tenant_id === r.tenant_id) return {};
+  return { requesterTenantId: r.requester_tenant_id, serviceAssignmentId: r.service_assignment_id, clientId: r.client_id };
 }
 
 /** §32.6: keep the ask in step with its change request, INSIDE the change-request route's own transaction (triage decline,
@@ -711,8 +752,13 @@ export interface WorkRequestSync {
  *  every path here follows (change-request lock first, ask row second; the cancel route takes them in the same order).
  *  The caller sends the notification from the returned value AFTER its commit (`notifyWorkRequestSync`). */
 export async function syncWorkRequestFromChangeRequest(c: PoolClient, changeRequestId: string): Promise<WorkRequestSync | null> {
-  const ask = await c.query<{ id: string; tenant_id: string; status: RequestStatus; requested_by: string; title: string }>(
-    `SELECT id, tenant_id, status, requested_by, title FROM work_requests
+  const ask = await c.query<{
+    id: string; tenant_id: string; status: RequestStatus; requested_by: string; title: string;
+    requester_tenant_id: string; service_assignment_id: string | null; client_id: string | null; receiving_name: string | null;
+  }>(
+    `SELECT id, tenant_id, status, requested_by, title, requester_tenant_id, service_assignment_id, client_id,
+            (SELECT name FROM companies WHERE id = work_requests.tenant_id) AS receiving_name
+       FROM work_requests
       WHERE change_request_id = $1 AND deleted_at IS NULL FOR UPDATE`,
     [changeRequestId],
   );
@@ -726,39 +772,122 @@ export async function syncWorkRequestFromChangeRequest(c: PoolClient, changeRequ
   if (!row) return null;
   const to = planSync(wr.status, row.status);
   if (!to) return null;
+  const cross = crossEventKeys(wr);
   if (to === "declined") {
     await c.query(
       `UPDATE work_requests SET status = 'declined', closed_by = $2, closed_at = now(), decline_reason = $3, updated_at = now() WHERE id = $1`,
       [wr.id, row.triaged_by, (row.declined_reason ?? "").trim() || DECLINED_BY_TRIAGE],
     );
-    await emitEvent(c, wr.tenant_id, "work_request", wr.id, "work_request.declined", { requestId: wr.id, changeRequestId, via: "triage" });
+    await emitEvent(c, wr.tenant_id, "work_request", wr.id, "work_request.declined", { requestId: wr.id, changeRequestId, via: "triage", ...cross });
   } else if (to === "delivered") {
     await c.query(
       `UPDATE work_requests SET status = 'delivered', closed_by = $2, closed_at = now(), decline_reason = NULL, updated_at = now() WHERE id = $1`,
       [wr.id, row.verified_by],
     );
-    await emitEvent(c, wr.tenant_id, "work_request", wr.id, "work_request.delivered", { requestId: wr.id, changeRequestId, via: "verify" });
+    await emitEvent(c, wr.tenant_id, "work_request", wr.id, "work_request.delivered", { requestId: wr.id, changeRequestId, via: "verify", ...cross });
   } else {
     await c.query(
       `UPDATE work_requests SET status = 'open', closed_by = NULL, closed_at = NULL, decline_reason = NULL, updated_at = now() WHERE id = $1`,
       [wr.id],
     );
-    await emitEvent(c, wr.tenant_id, "work_request", wr.id, "work_request.reopened", { requestId: wr.id, changeRequestId });
+    await emitEvent(c, wr.tenant_id, "work_request", wr.id, "work_request.reopened", { requestId: wr.id, changeRequestId, ...cross });
   }
-  return { tenantId: wr.tenant_id, requestId: wr.id, requestedBy: wr.requested_by, title: wr.title, from: wr.status, to };
+  return {
+    tenantId: wr.tenant_id, requestId: wr.id, requestedBy: wr.requested_by, title: wr.title, from: wr.status, to,
+    requesterTenantId: wr.requester_tenant_id, receivingName: wr.receiving_name,
+  };
+}
+
+// ───────────────────────────────────────── DW-10e: the requesting company's side effects ─────────────────────────────────────────
+// BFF §60.7. A cross-company request lives in the receiving company P; its requester belongs to H. Everything the REQUESTER
+// is told, and the mirror event an n8n flow on H's side reacts to, is written in H's OWN tenant, in a transaction of its own
+// over H alone (`withTenants([H])`), AFTER the receiving company's transaction committed. Best-effort and logged loudly, as
+// §32.7: a failure here never undoes the committed write.
+
+export const OUTBOUND_TRANSITIONS = ["created", "cancelled", "delivered", "declined", "reopened"] as const;
+export type OutboundTransition = (typeof OUTBOUND_TRANSITIONS)[number];
+
+/** The sender's page for a request (platform-ui `/requests/outbound/[id]`, §60.9). */
+export const outboundHref = (requestId: string): string => `/requests/outbound/${requestId}`;
+
+/** H's mirror event of one transition: `work_request.outbound.<transition>`, ids only, correlated by the request id (the
+ *  `emitDual` precedent of service assignments). Never throws. */
+export async function emitOutboundMirror(
+  requesterTenantId: string, requestId: string, receivingTenantId: string, transition: OutboundTransition,
+): Promise<void> {
+  try {
+    await withTenants([requesterTenantId], (c) =>
+      emitEvent(c, requesterTenantId, "work_request", requestId, `work_request.outbound.${transition}`, {
+        requestId, receivingTenantId, correlationId: requestId,
+      }),
+    );
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`[work-requests] outbound mirror event failed (request=${requestId}, transition=${transition}):`, (err as Error)?.message ?? err);
+  }
+}
+
+/** The requester hears that the work was delivered (or more was) or declined: in their OWN company, with the link their side
+ *  can open. A same-company request keeps §32.7's link and titles; a cross one names the receiving company. */
+export async function notifyRequesterOutcome(o: {
+  requestTenantId: string; requesterTenantId: string; receivingName: string | null; actorId: string | null; requestedBy: string;
+  requestId: string; title: string; outcome: "delivered" | "delivered_more" | "declined"; body?: string;
+}): Promise<void> {
+  const cross = o.requesterTenantId !== o.requestTenantId;
+  const p = o.receivingName ?? "the other company";
+  const title = o.outcome === "declined"
+    ? (cross ? `Your request to ${p} was declined: ${o.title}` : `Your request was declined: ${o.title}`)
+    : o.outcome === "delivered_more"
+      ? (cross ? `${p} delivered more assets: ${o.title}` : `More assets were delivered: ${o.title}`)
+      : (cross ? `Your request to ${p} was delivered: ${o.title}` : `Your request was delivered: ${o.title}`);
+  await notifyBestEffort(o.requesterTenantId, o.actorId, [o.requestedBy], o.outcome === "declined" ? "request.declined" : "request.delivered", {
+    title,
+    ...(o.body !== undefined ? { body: o.body } : {}),
+    href: cross ? outboundHref(o.requestId) : `/requests/${o.requestId}`,
+    entityType: "work_request", entityId: o.requestId, severity: o.outcome === "declined" ? "warning" : "info",
+  });
+}
+
+/** BFF §60.6: triage's `awaiting_amendment` outcome drafted a price agreement for a change request; when that change request
+ *  carries a CROSS request, its requester is told in their own company (`request.price_agreement`), once per new draft (each
+ *  `awaiting_amendment` is a fresh draft). Reads the request in its own transaction over the receiving company, then notifies
+ *  in the requester's. Never throws. */
+export async function notifyPriceAgreement(receivingTenantId: string, actorId: string | null, changeRequestId: string): Promise<void> {
+  try {
+    const row = await withTenants([receivingTenantId], async (c) => {
+      const r = await c.query<{ id: string; requester_tenant_id: string; requested_by: string; title: string; receiving_name: string | null }>(
+        `SELECT id, requester_tenant_id, requested_by, title,
+                (SELECT name FROM companies WHERE id = work_requests.tenant_id) AS receiving_name
+           FROM work_requests
+          WHERE tenant_id = $1 AND change_request_id = $2 AND deleted_at IS NULL AND requester_tenant_id <> tenant_id`,
+        [receivingTenantId, changeRequestId],
+      );
+      return r.rows[0] ?? null;
+    });
+    if (!row) return;
+    await notifyBestEffort(row.requester_tenant_id, actorId, [row.requested_by], "request.price_agreement", {
+      title: `${row.receiving_name ?? "The other company"} needs a price agreement before starting: ${row.title}`,
+      href: outboundHref(row.id), entityType: "work_request", entityId: row.id, severity: "info",
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`[work-requests] request.price_agreement notification failed (change request=${changeRequestId}):`, (err as Error)?.message ?? err);
+  }
 }
 
 // ───────────────────────────────────────── §32.7 notifications (best-effort, never fail the write) ─────────────────────────────────────────
 
 /** The requester hears the outcome of an engineering request that the change-request routes just moved. Called AFTER the
- *  change-request transaction commits, with whatever `syncWorkRequestFromChangeRequest` returned (a reopen is silent). */
+ *  change-request transaction commits, with whatever `syncWorkRequestFromChangeRequest` returned (a reopen is silent).
+ *  DW-10e (§60.7): on a CROSS request the requester is told in THEIR company with the sender's link, and every transition,
+ *  the reopen included, also writes H's mirror event. */
 export async function notifyWorkRequestSync(actorId: string | null, sync: WorkRequestSync | null): Promise<void> {
-  if (!sync || sync.to === "open") return;
-  await notifyBestEffort(sync.tenantId, actorId, [sync.requestedBy], sync.to === "delivered" ? "request.delivered" : "request.declined", {
-    title: sync.to === "delivered" ? `Your request was delivered: ${sync.title}` : `Your request was declined: ${sync.title}`,
-    href: `/requests/${sync.requestId}`,
-    entityType: "work_request",
-    entityId: sync.requestId,
-    severity: sync.to === "delivered" ? "info" : "warning",
+  if (!sync) return;
+  const cross = sync.requesterTenantId !== sync.tenantId;
+  if (cross) await emitOutboundMirror(sync.requesterTenantId, sync.requestId, sync.tenantId, sync.to === "open" ? "reopened" : sync.to);
+  if (sync.to === "open") return;
+  await notifyRequesterOutcome({
+    requestTenantId: sync.tenantId, requesterTenantId: sync.requesterTenantId, receivingName: sync.receivingName, actorId,
+    requestedBy: sync.requestedBy, requestId: sync.requestId, title: sync.title, outcome: sync.to,
   });
 }

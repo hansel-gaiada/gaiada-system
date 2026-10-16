@@ -60,7 +60,7 @@ export function targetReadResource(f: { target_entity_type: string; target_entit
   return wk ? readResourceOf(wk, tenantId, f.target_entity_id) : { kind: f.target_entity_type, id: f.target_entity_id, tenantId };
 }
 
-function dispositionHeader(filename: string): string {
+export function dispositionHeader(filename: string): string {
   const ascii = filename.replace(/[\r\n"\\]/g, "_").replace(/[^\x20-\x7e]/g, "_");
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
