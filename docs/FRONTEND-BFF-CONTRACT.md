@@ -6899,7 +6899,7 @@ Six artifacts, as in §31.2.
 
 ### 32.8 Known limits (each on the board, none hidden)
 
-- **Same company only.** Routing through the group's service assignments (ORG-13) is out of DW-5 (owner, 2026-10-14): requests are offered to agency-pack companies only, and only the agency company has Creatives and Web Dev today. It is recorded as a later item under DW-10 on the board. **DW-10e designs it (DW-D35, 2026-10-15): §60, PLANNED.** Until §60 is built this limit holds.
+- **Same company only.** Routing through the group's service assignments (ORG-13) is out of DW-5 (owner, 2026-10-14): requests are offered to agency-pack companies only, and only the agency company has Creatives and Web Dev today. It is recorded as a later item under DW-10 on the board. **DW-10e designs it (DW-D35, 2026-10-15; DW-D39 to DW-D41 ruled its questions): §60, PLANNED.** Until §60 is built this limit holds.
 - **Deleting a linked PM task is refused (guard built, 2026-10-14).** `DELETE /api/:t/pm/tasks/:id` answers **409 `task_has_open_request`** with `detail: {requestId}` while an `open` ask points at the task, so the receiver declines or delivers instead. Closed asks (delivered, declined, cancelled) do not hold the task. The task page's Delete now shows that refusal in place (`components/pm/DeleteTaskButton.tsx`); it used to redirect as if the delete had worked. Proof: `work-requests.test.ts` "PM delete guard". A task removed before the guard, or by a direct database change, still reads `work: null`.
 - **No attachments on the request itself.** References are links (`form.references`). File attachments come with DW-8h.
 - **Asset versions and review rounds** are DW-6h. Delivery here links finished library assets.
@@ -10473,27 +10473,38 @@ Cerbos `calendar_event · read` gains a rule for `visibility == "department"` he
 - **Tenants:** the same node id in two companies leaks nothing across them.
 - **Caps:** a 43-day window answers 400; a leg over 200 items is `truncated`.
 
-## 60. Requests across group companies (DW-10e, 2026-10-15) — `platform-nest/src/core/work-requests-outbound.controller.ts` (new), `core/request-routes.ts` (new), `core/work-requests.{controller,service}.ts`, `admin/service-assignments.controller.ts`, `admin/service-reconciler.ts`, `modules/registry.ts`, `modules/reports/{fact-job,report-rollups}.ts`; UI `/requests`, `/requests/new`, `/requests/outbound/[id]` (new) — **STATUS: PLANNED (contract only, nothing built; the authorization is PERMISSION-CONTRACT §49)**
+## 60. Requests across group companies (DW-10e, 2026-10-15; revised 2026-10-16 for DW-D39 to DW-D41) — `platform-nest/src/core/work-requests-outbound.controller.ts` (new), `core/request-routes.ts` (new), `core/work-requests.{controller,service}.ts`, `core/webdev-change-requests.controller.ts`, `admin/service-assignments.controller.ts`, `admin/service-reconciler.ts`, `modules/registry.ts`, `modules/reports/{fact-job,report-rollups}.ts`; UI `/requests`, `/requests/new`, `/requests/outbound/[id]` (new) — **STATUS: PLANNED (contract only, nothing built; the authorization is PERMISSION-CONTRACT §49)**
 
 **Why.** Ruling DW-D35 (owner, 2026-10-15, plan §11.4): "Group companies send asset and engineering requests to another group company's departments through the group's service assignments (ORG-13), contract first." Today a request stays inside one company (§32.3, §32.8): `to_unit_id` must be a department of the company in the URL, and the UI offers requests to agency-pack companies only. The holding and the hotel companies have no Creatives and no Web Dev, so they cannot ask for assets or engineering work. This section lets them ask the agency's departments, and makes nobody a member of the other company.
 
-**The model in four lines.**
-- **A route** is a service assignment with a routing key (§60.2): "this department of the provider company takes asset (or engineering) requests from the target company". ORG-13 creates it. It materialises nothing.
-- **The request lives in the receiving company**, exactly like a same-company request (§32): the row, its PM task or change request, the intake project and the delivered assets. The receiver sees it in Incoming, on its board, in Needs you, in triage and in its KPIs (DW-6n). There is no second queue.
-- **The requesting company keeps the sender's view** through its own URLs (`api/<requesting company>/requests/outbound…`). It sends, lists, reads, cancels and downloads what it sent, and nothing else of the receiver's.
-- **Cerbos decides who may send for a company:** a new action, `send_across`, checked on the requesting company. **The route decides where:** the handler resolves it, and a database trigger refuses any cross-company row without an active route.
+**The owner then ruled this contract's open questions (2026-10-15, first-hand, plan §11.4).**
+- **DW-D39:** the holding and Viceroy each get routes to the agency's Creatives and Web Dev: four routes, created by an admin after the deploy (§60.12).
+- **DW-D40:** in the requesting company, only the sender, its managers and its company admins see what it sent (§60.4).
+- **DW-D41:** a request from a group company is billable client work of the agency for that company (§60.6a).
 
-In this section **H** is the requesting company (the holding, a hotel company) and **P** is the receiving company (the agency).
+**The model in five lines.**
+- **A route** is a service assignment with a routing key (§60.2): "this department of the provider company takes asset (or engineering) requests from the target company". ORG-13 creates it. It materialises nothing.
+- **The request lives in the receiving company**, exactly like a same-company request (§32): the row, its PM task or change request and the delivered assets. The receiver sees it in Incoming, on its board, in Needs you, in triage and in its KPIs (DW-6n). There is no second queue.
+- **It is client work (DW-D41).** The work lands on the requesting company's client record at the receiving company (PV-D2's `clients.group_company_id`), in that client's requests project for the department. It is billed through the agency's existing paths: billable time on the client's invoice, and the price gate with its amendment when an engineering change moves the price (§60.6a). Nothing new is invented.
+- **The requesting company keeps the sender's view** through its own URLs (`api/<requesting company>/requests/outbound…`). The sender reads their own requests; the company's managers and company admins read all of them (DW-D40). Nothing else of the receiver's is visible.
+- **Cerbos decides who may send and who reads everything sent:** two new actions, `send_across` and `read_across`, checked on the requesting company. **The route decides where:** the handler resolves it, and a database trigger refuses any cross-company row without an active route and the right client.
+
+In this section **H** is the requesting company (the holding, Viceroy) and **P** is the receiving company (the agency).
 
 ### 60.1 Decisions (each with the options it rejects)
 
 | # | Question | Decision | Rejected, one line each |
 |---|---|---|---|
-| 1 | Where do the row and the work live? | In the **receiving** company P. `work_requests.tenant_id` = P, and the PM task, change request, intake project and assets are P's. The row records H in `requester_tenant_id`. | **A row in H:** the work would sit outside the receiver's board, triage, Needs you and KPIs, or the receiver's staff would have to become members of H and work in H's tenant (a second queue, against DW-D14). **Reversing the edge (H "serves" P):** the reconciler would make every placed person of H's unit a service member of P, and the assignment would state the opposite of the truth. |
+| 1 | Where do the row and the work live? | In the **receiving** company P. `work_requests.tenant_id` = P, and the PM task or change request, its project and the delivered assets are P's. The row records H in `requester_tenant_id` and H's client record at P in `client_id`. | **A row in H:** the work would sit outside the receiver's board, triage, Needs you and KPIs, or the receiver's staff would have to become members of H and work in H's tenant (a second queue, against DW-D14). **Reversing the edge (H "serves" P):** the reconciler would make every placed person of H's unit a service member of P, and the assignment would state the opposite of the truth. |
 | 2 | What is a route? | A `service_assignments` row whose `module_key` is a **routing key**, `asset_requests` or `engineering_requests` (§60.2). Provider = P, its unit = the receiving department, target = H. | **Reusing `pm` or `webdev`:** an active assignment with a real module key turns that module on in the target (`enabledModuleKeys`) and makes the provider unit's staff service members of the target with `<module>_staff` grants: the agency's Web Dev people would become members of the holding with `webdev_staff`, and the holding's Web Dev module would switch on. **A separate routes table:** a second consent lifecycle beside ORG-13, against the ruling's "through the group's service assignments". |
-| 3 | How is the requester authorized? | **Two independent walls.** *Who:* Cerbos `send_across` (new) on `{kind: 'work_request', tenantId: H}`: company_admin, manager and member of H; bots and automation denied (PERMISSION-CONTRACT §49). *Where:* the handler resolves an **active** route from H to the department, and a `BEFORE INSERT` trigger on `work_requests` refuses a cross-company row unless its route is active and matches the kind, the department and both companies, and both companies share a root (§60.3). Every existing rule, attribute and `inTenant` condition stays as it is. | **A cross-tenant derived role** (a grant in H confers an action on a resource of P): a new shape that the IAM scans do not model (every rule keeps `inTenant`; the mirror-reach invariant; the bundle generator), and its facts would come from the same handler, so it adds surface and no independent check. **The handler alone:** one bug would write into any company; the trigger makes the database refuse it. |
+| 3 | How is the requester authorized? | **Two independent walls.** *Who:* Cerbos `send_across` (new) on `{kind: 'work_request', tenantId: H}`: company_admin, manager and member of H; bots and automation denied (PERMISSION-CONTRACT §49). *Where:* the handler resolves an **active** route from H to the department, and a `BEFORE INSERT` trigger on `work_requests` refuses a cross-company row unless its route is active and matches the kind, the department and both companies, both companies share a root, and the work is on H's client record (§60.3). Every existing rule, attribute and `inTenant` condition stays as it is. | **A cross-tenant derived role** (a grant in H confers an action on a resource of P): a new shape that the IAM scans do not model (every rule keeps `inTenant`; the mirror-reach invariant; the bundle generator), and its facts would come from the same handler, so it adds surface and no independent check. **The handler alone:** one bug would write into any company; the trigger makes the database refuse it. |
 | 4 | Which company id is in the URL? | **H's** for everything the sender does (`api/:H/requests/routes`, `api/:H/requests/outbound…`). **P's** for everything the receiver does (§32's routes, unchanged). | **`POST api/:P/requests` with a `fromCompanyId`:** the check would run against a company the caller is not a member of, which is the shape GHT-1 warns about (`core/github-org-tenant.ts`: authorizing against the wrong tenant "is a cross-root data leak dressed as a bug fix"), and every sender read would need a new Cerbos path into P. |
-| 5 | What does the row carry? | Four new columns (§60.3): `requester_tenant_id` (NOT NULL, equal to `tenant_id` on a same-company row, backfilled), `requester_unit_id` and `requester_unit_name` (the requester's department in H, cross rows only) and `service_assignment_id` (the route, cross rows only). `from_unit_id` stays NULL on a cross row. | **A second RLS policy for H** (`requester_tenant_id = ANY(app_current_tenants())`): every existing statement on `work_requests` relies on `tenant_isolation` alone, with no tenant predicate (`listRequests`, `requestSummary`, `getRequest`, `loadAuthFacts`, the sync), so H's own boxes would silently start returning P's rows, and node ids, unique only per company, would collide in `to_unit_id` and `from_unit_id`. **H's department in `from_unit_id`:** P's Sent box and summary filter on it and would match H's node ids. |
+| 5 | What does the row carry? | Five new columns (§60.3): `requester_tenant_id` (NOT NULL, equal to `tenant_id` on a same-company row, backfilled), `requester_unit_id` and `requester_unit_name` (the requester's department in H, cross rows only), `service_assignment_id` (the route, cross rows only) and `client_id` (H's client record at P, cross rows only). `from_unit_id` stays NULL on a cross row. | **A second RLS policy for H** (`requester_tenant_id = ANY(app_current_tenants())`): every existing statement on `work_requests` relies on `tenant_isolation` alone, with no tenant predicate (`listRequests`, `requestSummary`, `getRequest`, `loadAuthFacts`, the sync), so H's own boxes would silently start returning P's rows, and node ids, unique only per company, would collide in `to_unit_id` and `from_unit_id`. **H's department in `from_unit_id`:** P's Sent box and summary filter on it and would match H's node ids. |
+| 6 | Internal work or client work? | **Client work (DW-D41).** P bills H as its client, with P's existing paths (§60.6a). | **Internal and unbilled** (this contract's first choice): overruled by DW-D41. **A new billing engine** (a price on every ask, fixed-fee lines): PV-5 parks fixed-fee lines until the owner names the need, and nothing would read a price on an ask. |
+| 7 | Which client record, and which project? | **The one live client record of P linked to H** (`clients.group_company_id = H`, not deleted, not the internal sentinel). **One requests project per department and client**, "<Department> · Requests · <Client>", created on first use like §32's intake (`work_request_client_intakes`, §60.3). | **The client's existing project:** ambiguous when the client has none or several, and the sender would have to choose among P's projects, which H never sees. **§32's internal intake project:** unbilled, which DW-D41 overrules. **A `client_id` column on `work_request_intakes`:** its primary key cannot hold a NULL client, so §32's conflict target would change with it. |
+| 8 | What if H has no client record at P? | **Refuse, and make it an admin step.** Creating a route needs the record (422 `route_needs_group_client`, §60.2), and every send checks it again (409 `group_client_missing` or `group_client_ambiguous`, §60.5). A platform operator links or creates the record through PV3-04's path (§60.12). | **Create the record on the first send:** an H member would open a commercial relationship in P, bypassing the platform-operator gate on `groupCompanyId`, the business type PV3-04 requires and P's own decision to take a client. **Pick one of several:** PV-D10 says one record per company, but the database does not enforce it (`idx_clients_group_company` is not unique, and the PV3 suite links two clients to one company), so a guess could bill the wrong record. |
+| 9 | Who in H sees what H sent? | **DW-D40: the sender, H's managers and H's company admins** (§60.4). The sender reads their own requests through §36's `read` and the row's `requested_by`. `read_across` (new) reads all of them: company_admin and manager of H, the permission-native `owner` through its mirror, and `platform_admin`. "Managers" is the company `manager` role in H; heads count through it, because heads hold `manager` (plan §5.4). `org_unit_lead` alone does not count. | **§32's reach** (every member and viewer of H): overruled by DW-D40. **The requester's head through `org_unit_lead`:** not in the ruling, and the grant carries no company (`g.scopeId in unitAncestors`), so it would match a same-id department of another company for a person placed in both; legacy ids such as `d-hr` repeat across companies (`legacyFunctionalNodeId`). **A self rule on `read_across`:** a self-scoped arm forbids the permission mirror (Pattern B), so the `owner` role would lose the read. |
+| 10 | Is a route a shared service (PV-D2)? | **No.** PV-D2 keeps service assignments for internal functions and makes agency work for a group company a client relationship. A route places nobody and turns nothing on (§60.2); it records only who may ask, and DW-D35 chose the assignments for that consent. The work itself is PV-D2's client relationship (row 6). | **A separate consent table:** a second lifecycle beside ORG-13, against DW-D35. |
 
 ### 60.2 Routes: service assignments with a routing key
 
@@ -10504,12 +10515,18 @@ In this section **H** is the requesting company (the holding, a hotel company) a
 | `asset_requests` | `assets` | `pm` (the asset task) | send asset requests to that department |
 | `engineering_requests` | `engineering` | `webdev` (the change request) | send engineering requests to that department |
 
-**A route means exactly one thing:** the target company's people may send requests of that kind to that department of the provider company. It gives nobody access to either company.
+**A route means exactly one thing:** the target company's people may send requests of that kind to that department of the provider company, as the provider's client. It gives nobody access to either company.
 
 **The provider unit is the receiving department itself.**
 - A routing key goes on a **department** node only (`org_units.kind = 'department'`). A division answers **422 `route_unit_not_department`** on propose and on relink.
 - The request goes to exactly that node (`to_unit_id = org_units.node_id`). There is no routing through an ancestor: one consent covers one department, never every department under a unit.
 - No code names a department or a company (PV-D13). Which department takes which requests is data: the route.
+
+**The target must be the provider's client (DW-D41).**
+- On propose, on a platform_admin create and on relink, a routing key needs, for each target, exactly one live client record of the provider linked to it (`clients.group_company_id` = the target, not deleted, not `is_internal`), read in the provider's scope.
+- None answers **422 `route_needs_group_client`**; several answer **422 `group_client_ambiguous`**; both with `detail.targetId`. Nothing is written.
+- The dry run reports it per target: a `companies[]` entry with `included: false` and `reason: 'no_group_client'` or `'group_client_ambiguous'`.
+- Accept, suspend, resume and revoke do not check it. Every send does (§60.4).
 
 **Who creates it: the ORG-13 flow.**
 - A `platform_admin` creates it `active`: `POST api/:P/org-structure/units/:nodeId/assignments {targets, module: <routing key>}`.
@@ -10532,9 +10549,9 @@ In this section **H** is the requesting company (the holding, a hotel company) a
 
 ### 60.3 Data model (one migration, then the IAM seed)
 
-Two files with the next free prefixes after main's newest at landing: `<prefix>_work_requests_across.sql` (this section) and `<prefix+1>_iam_work_request_send_across.sql` (PERMISSION-CONTRACT §49). Both are idempotent.
+Two files with the next free prefixes after main's newest at landing: `<prefix>_work_requests_across.sql` (this section) and `<prefix+1>_iam_work_request_across.sql` (PERMISSION-CONTRACT §49). Both are idempotent.
 
-**`work_requests` gains four columns:**
+**`work_requests` gains five columns:**
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -10542,9 +10559,11 @@ Two files with the next free prefixes after main's newest at landing: `<prefix>_
 | `requester_unit_id` | `text NULL` | The requester's department node in **their own** company's tree (§32.3's walk, run in H). Cross rows only. |
 | `requester_unit_name` | `text NULL`, at most 200 characters | That department's name when the request was sent. Only the receiving side shows it, so P never reads H's tree. |
 | `service_assignment_id` | `uuid NULL → service_assignments` | The route the request came through. Cross rows only. |
+| `client_id` | `uuid NULL`, composite FK `fk_work_requests_client_tenant`: `(client_id, tenant_id) → clients (id, tenant_id)` | H's client record at P: the client the work is billed to (DW-D41). Cross rows only. |
 
-**CHECKs.** Every operand is NOT NULL or an `IS NULL` test, so none of them can pass on a NULL.
+**CHECKs.** Every operand is NOT NULL or an `IS NULL` test, so none of them can pass on a NULL. They are added after `SET NOT NULL`.
 - `work_requests_requester_route_ck`: `(requester_tenant_id = tenant_id) = (service_assignment_id IS NULL)`.
+- `work_requests_requester_client_ck`: `(requester_tenant_id = tenant_id) = (client_id IS NULL)`. A cross row always names its client; a same-company row never does (§32's work stays internal).
 - `work_requests_requester_unit_ck`: `requester_tenant_id <> tenant_id OR (requester_unit_id IS NULL AND requester_unit_name IS NULL)`.
 - `work_requests_across_from_ck`: `requester_tenant_id = tenant_id OR from_unit_id IS NULL`. A cross row never carries `from_unit_id`, so the receiver's Sent box and summary, which filter on it, can never match H's node ids.
 - `work_requests_across_part_ck`: `requester_tenant_id = tenant_id OR campaign_part_id IS NULL` (§60.8).
@@ -10554,66 +10573,94 @@ Two files with the next free prefixes after main's newest at landing: `<prefix>_
 - `(requester_tenant_id, requester_unit_id, status) WHERE deleted_at IS NULL AND requester_unit_id IS NOT NULL`;
 - `(service_assignment_id) WHERE service_assignment_id IS NOT NULL`.
 
-**The route guard: a `BEFORE INSERT` trigger, `work_requests_route_guard` (SQLSTATE `PD060`).**
-- It is SECURITY INVOKER. It reads under the inserting session's tenant set, which is P's; there `sa_select` (the provider side) and `org_units` both show the rows it needs. No bypass role is involved.
+**A new table, `work_request_client_intakes`:** each (department, client)'s requests project at the receiving company (§60.6a), the client twin of §32.1's `work_request_intakes`.
+
+| Column | Type | Meaning |
+|---|---|---|
+| `tenant_id` | `uuid NOT NULL → companies` | The receiving company. |
+| `unit_id` | `text NOT NULL`, non-empty | The receiving department's node. |
+| `client_id` | `uuid NOT NULL`, composite FK `(client_id, tenant_id) → clients (id, tenant_id)` | The client the project bills. |
+| `project_id` | `uuid NOT NULL`, composite FK `(project_id, tenant_id) → projects (id, tenant_id)`, `DEFERRABLE INITIALLY DEFERRED` | The requests project. Deferred for the same first-request race as §32.1. |
+| `created_at` | `timestamptz NOT NULL DEFAULT now()` | |
+
+Primary key `(tenant_id, unit_id, client_id)`. RLS enabled and forced, with one `tenant_isolation` policy (the `202610140600` shape).
+
+**The route guard: a `BEFORE INSERT` trigger, `work_requests_route_guard`.**
+- It is SECURITY INVOKER. It reads under the inserting session's tenant set, which is P's; there `sa_select` (the provider side), `org_units`, `clients`, `projects`, `pm_tasks` and `webdev_change_requests` show the rows it needs (all on the plain tenant wall; none composes `app_module_allowed`). No bypass role is involved.
 - A NULL `requester_tenant_id` becomes `tenant_id`, so code that predates the column keeps inserting same-company rows. A rollback between the migration and the code is harmless.
-- For a cross row (`requester_tenant_id <> tenant_id`) it requires one `service_assignments` row `sa` with:
+- **The route (SQLSTATE `PD060`).** For a cross row (`requester_tenant_id <> tenant_id`) it requires one `service_assignments` row `sa` with:
   - `sa.id = NEW.service_assignment_id`, `sa.status = 'active'` and `sa.unit_status = 'active'`;
   - `sa.provider_tenant_id = NEW.tenant_id` and `sa.target_tenant_id = NEW.requester_tenant_id`;
   - `sa.module_key` = the routing key of `NEW.kind` (a SQL `CASE` that a static test pins to `REQUEST_ROUTE_KEYS`);
   - its `org_units` row's `node_id = NEW.to_unit_id`;
   - and both companies with the same `root_company_id` (`companies` has no RLS).
-- Anything else raises `PD060`. The handler checks all of it first, to give a precise answer (§60.5). The trigger is the wall that holds when a handler is wrong.
-- A route suspended after the row commits does not touch the row.
+- **The client (SQLSTATE `PD062`).** A cross row also requires:
+  - `NEW.client_id` a live client of `NEW.tenant_id`, not `is_internal`, with `group_company_id = NEW.requester_tenant_id`;
+  - its work on that client's books: the PM task's project has `client_id = NEW.client_id` (assets), or the change request has `client_id = NEW.client_id` and its project, when set, has the same client (engineering). The handler writes the work item before the row in the same transaction (§32.5's order), so the trigger sees it.
+- Anything else raises `PD060` or `PD062`. The handler checks all of it first, to give a precise answer (§60.5). The trigger is the wall that holds when a handler is wrong: a cross request can never be written as unbilled internal work.
+- A route suspended, or a client unlinked, after the row commits does not touch the row.
 
-**The freeze: a `BEFORE UPDATE` trigger, `work_requests_freeze_requester` (SQLSTATE `PD061`).** `tenant_id`, `requester_tenant_id`, `requester_unit_id`, `requester_unit_name` and `service_assignment_id` never change. On a cross row `kind`, `to_unit_id` and `requested_by` never change either. Nothing in §32 updates any of them.
+**The freeze: a `BEFORE UPDATE` trigger, `work_requests_freeze_requester` (SQLSTATE `PD061`).** `tenant_id`, `requester_tenant_id`, `requester_unit_id`, `requester_unit_name`, `service_assignment_id` and `client_id` never change. On a cross row `kind`, `to_unit_id` and `requested_by` never change either. Nothing in §32 updates any of them.
 
-**RLS: no new policy.** The row belongs to the receiving company and stays under `tenant_isolation` alone. Every sender read enters P's scope with an explicit `requester_tenant_id = H` predicate (§60.4). Decision 5 says why a second policy is refused.
+**RLS: no new policy on `work_requests`.** The row belongs to the receiving company and stays under `tenant_isolation` alone. Every sender read enters P's scope with an explicit `requester_tenant_id = H` predicate (§60.4). Decision 5 says why a second policy is refused.
 
-**Backfill and idempotency.**
-- The columns are added with `ADD COLUMN IF NOT EXISTS`, nullable first. CHECKs and triggers are dropped `IF EXISTS` and created again.
+**Order, backfill and idempotency.**
+- The order: the columns (nullable), the backfill, `SET NOT NULL`, the client FK, the CHECKs, the indexes, the triggers, the new table, the assertions.
+- The columns are added with `ADD COLUMN IF NOT EXISTS`. Constraints and triggers are dropped `IF EXISTS` and created again; the table is `CREATE TABLE IF NOT EXISTS`.
 - The backfill sets `requester_tenant_id = tenant_id` **one company at a time**, with `app.current_tenant_ids` set for each (the `202608261030` pattern). `work_requests` is FORCE RLS and the migration role has no bypass, so an unscoped UPDATE would touch zero rows and say nothing.
 - Then `ALTER COLUMN requester_tenant_id SET NOT NULL`. That check scans the whole table regardless of RLS, so it is the real proof that no row was missed.
-- A DO block asserts the columns, the NOT NULL, the four CHECKs, the three indexes and the two triggers. It counts no rows: a count with no tenant set reads zero and lies.
-- Existing rows become same-company rows: `requester_tenant_id = tenant_id`, and the three other columns NULL.
+- A DO block asserts the five columns, the NOT NULL, the client FK, the five CHECKs, the three indexes, the two triggers, and the new table (RLS enabled and forced, one policy, the deferred project FK). It counts no rows: a count with no tenant set reads zero and lies.
+- Existing rows become same-company rows: `requester_tenant_id = tenant_id`, and the four other columns NULL.
 
 ### 60.4 Authorization (in detail: PERMISSION-CONTRACT §49)
 
 **The sender side.** The URL's `:tenantId` is H. Every sender route authorizes against H, on the existing kind, with attributes read from the database:
 
-| Route | Action on `{kind: 'work_request', tenantId: H, …}` |
-|---|---|
-| `GET requests/routes`, `GET requests/outbound`, `GET requests/outbound/summary`, `GET requests/outbound/:id` and the downloads | `read` |
-| `POST requests/outbound` | `send_across` (new) |
-| `POST requests/outbound/:id/cancel` | `cancel`, with `id` and `requestedBy` from the row |
+| Route | Cerbos on `{kind: 'work_request', tenantId: H, …}` | Then (DW-D40) |
+|---|---|---|
+| `GET requests/routes` | `read` | none |
+| `GET requests/outbound`, `GET requests/outbound/summary` | `read`, then `read_across` | `read_across` allowed: every request H sent (`scope: 'company'`). Denied: the caller's own requests only (`scope: 'own'`). |
+| `GET requests/outbound/:id`, its files and its downloads | `read`, then `read_across` with the row's `id` unless the row is the caller's | the caller's own row, or any row with `read_across`; otherwise 404 `request_not_found`, as for an absent row |
+| `POST requests/outbound` | `send_across` (new) | none |
+| `POST requests/outbound/:id/cancel` | `read`; the row must be visible to the caller as above; then `cancel` with `id` and `requestedBy` from the row | §36's `cancel` |
+
+**Reach inside the requesting company (DW-D40).**
+- **The sender** reads, downloads and cancels their own requests: §36's `read` on H, narrowed to `requested_by = principal`, and §36's `cancel` requester rule.
+- **H's company admins and managers** read every request H sent (`read_across`) and cancel any of them while it is `open` (§36's `cancel`).
+- **"Managers" is the `manager` role in H**, a company grant. Heads read their department's requests through it, because heads hold `manager` (plan §5.4). A head who holds only `org_unit_lead` reads only their own requests (§60.1 row 9 says why).
+- **The permission-native `owner`** reads every request through `read_across`'s mirror. It cannot cancel one unless it also holds company_admin or manager: §36's `cancel` has no mirror.
+- **`platform_admin`** reads and cancels through the wildcard, as on every kind.
+- **Everyone else in H** (members and viewers) sees only their own requests. Another person's request is absent from their lists and 404 by id, so an id is never an existence oracle inside H either.
+- **One helper decides the tier** for every sender read: `outboundReadScope(principal, H)` returns `'company'` or `'own'`. A test pins that every sender read goes through it.
+- Same-company requests are untouched: §32's reach still applies inside a company.
 
 **What the handler checks, in order, after `send_across` and before any write.** Each step runs in one company's scope; §60.5 lists the answers.
 1. `SERVICE_ASSIGNMENTS_ENABLED` is on.
 2. The route, read in **H's** scope (`sa_select`, the target side): `id = routeId`, `target_tenant_id = H` and a routing key; its `status` and `unit_status` are `active`.
 3. P is the route's `provider_tenant_id`. P is not deleted, and P and H have the same `root_company_id`.
-4. In **P's** scope: the receiving module is on (`pm` or `webdev`, `isModuleEnabled`), the route's `org_units.node_id` is a department of P's current org tree, and the intake project is available.
+4. In **P's** scope:
+   - the receiving module is on (`pm` or `webdev`, `isModuleEnabled`);
+   - the route's `org_units.node_id` is a department of P's current org tree;
+   - H's client record at P resolves to exactly one live record (§60.6a);
+   - the client requests project for (department, client) is available: created on first use, 409 if it was deleted.
 5. The requester's department in H: §32.3's walk over H's tree, in H's scope.
-6. The write, in P's scope, where the trigger checks the route again.
-
-**Reach inside the requesting company: the same as §32.**
-- Every company_admin, manager, member and viewer of H reads every request H sent (`read` on H), exactly as they read every request inside H today. The boxes (`mine`, `sent`, `all`) are filters.
-- Cancel is the requester's own (the `member` requester rule) or H's company_admin's and manager's, as in §32. H's heads gain nothing, as in §32.
-- A narrower rule (the requester only) would make a department's Sent tab show its same-company asks and hide its cross-company ones, and it would be a privacy ruling that §32 never made. The owner may narrow it (open question, plan §12.1).
+6. The write, in P's scope: the work item (the PM task in the client requests project, or the change request naming the client and that project), then the row, where the trigger checks the route and the client again.
 
 **What a sender never reaches.**
 - Only rows with `requester_tenant_id = H`. Never the receiver's own requests, never another company's requests to the same department.
-- Of the receiver's data, only what hangs off H's own requests: the work's progress, the delivered assets and the request's files. Never the receiver's tasks, projects, change requests or other files.
+- Of the receiver's data, only what hangs off H's own requests: the work's progress, its price state (engineering), the delivered assets and the request's files. Never the receiver's tasks, projects, change requests, contracts or other files.
+- **Never an amount:** no time entry, hour, rate, contract value, currency or invoice reaches a sender route (§60.6a).
 - No right in P: every §32 route under P (`api/:P/requests…`) answers 403 to a sender, as today.
 
 **The receiving side: unchanged.** P's people read, deliver and decline a cross row through §32, under P, with today's rules and attributes. One handler rule is new: **P cannot cancel a cross row** (409 `requester_side_only`). A cancel tells nobody on the requester's side, so P declines instead (assets) or declines in triage (engineering), and the requester is told (§60.7).
 
 **Tenancy (D5).**
-- Every statement runs in exactly ONE company's scope: H's (the route lookup, H's org tree, H's notifications, activity and events) or P's (the row, its work, P's org tree, P's notifications, activity and events).
+- Every statement runs in exactly ONE company's scope: H's (the route lookup, H's org tree, H's notifications, activity and events) or P's (the row, its work, its client, P's org tree, P's notifications, activity and events).
 - Never a two-company tenant set, never `crossRoot`.
 - The sender reads enter P's scope one provider at a time, the shape of `computeProviderViewRollups` (D12's provider view). The set of providers is read first in H's own scope: routing assignments with `target_tenant_id = H`, any status, so history stays visible. It is therefore bounded and cannot be guessed into.
 - Node ids are unique only per company: `requester_unit_id` is only ever compared under `requester_tenant_id = H` and validated against H's tree; `to_unit_id` and `unitAncestors` only ever against P's tree, in P's scope.
 
-**Agents.** `send_across` and `cancel` are DENIED for `principal.attr.kind in ['automation','bot']` (PERMISSION-CONTRACT §49), as `create` and `cancel` are (PERMISSION-CONTRACT §36). `read` is not.
+**Agents.** `send_across` and `cancel` are DENIED for `principal.attr.kind in ['automation','bot']` (PERMISSION-CONTRACT §49), as `create` and `cancel` are (PERMISSION-CONTRACT §36). `read` and `read_across` are not.
 
 ### 60.5 Sender routes (`api/:tenantId/requests/…`, `AuthGuard`; `:tenantId` is the requesting company)
 
@@ -10623,10 +10670,10 @@ Two files with the next free prefixes after main's newest at landing: `<prefix>_
 |---|---|---|
 | `GET requests/routes` | none | 200 `{enabled, routes: [{routeId, kind, company: {id, name}, unit: {name}}]}`: the active routes whose unit is active, ordered by company name, then unit name. `unit.name` is the assignment's `unit_name` (A8), so H never reads P's tree for it. With the switch off: `{enabled: false, routes: []}`. |
 | `POST requests/outbound` | `{routeId, title, brief?, neededBy?, form, kind?}`, parsed by §32.4's rules for the route's kind | 201 `{id, kind, receivingCompany: {id, name}}`. The kind is the route's; a `kind` in the body must equal it. |
-| `GET requests/outbound` | `box=mine\|sent\|all`; `unitId` (required for `sent`: a department of H); `status=open\|closed\|all` (default `open`); `kind` | 200 rows (below), newest first, at most 200 in all: each provider's read is limited to 200, then the reads are merged and cut. |
-| `GET requests/outbound/summary` | `unitId` (required: a department of H) | 200 `{sent: {open}}`: H's open requests to other companies from that department. An honest reader: numbers or a failure, never 0. |
+| `GET requests/outbound` | `box=mine\|sent\|all`; `unitId` (required for `sent`: a department of H); `status=open\|closed\|all` (default `open`); `kind` | 200 `{scope: 'company' \| 'own', rows}`, newest first, at most 200 rows in all: each provider's read is limited to 200, then the reads are merged and cut. In scope `own` every box holds only the caller's requests. |
+| `GET requests/outbound/summary` | `unitId` (required: a department of H) | 200 `{scope, sent: {open}}`: H's open requests to other companies from that department; in scope `own`, only the caller's. An honest reader: numbers or a failure, never 0. |
 | `GET requests/outbound/:id` | none | 200 the row, plus `brief`, `form`, `declineReason` and `assets: [{id, name, contentType, href}]`, where `href` is the sender's download route below. |
-| `POST requests/outbound/:id/cancel` | none | 200 `{id, status: 'cancelled'}`. §32.5's cancel, run in P: an asset request closes its PM task; an engineering request only while its change request is `new`. |
+| `POST requests/outbound/:id/cancel` | none | 200 `{id, status: 'cancelled'}`. §32.5's cancel, run in P: an asset request closes its PM task; an engineering request only while its change request is `new` and carries no live price agreement. |
 | `GET requests/outbound/:id/assets/:assetId/content` | none | The delivered asset's graded bytes, with the creative content route's headers (`nosniff`, `content-security-policy: sandbox`). Only an asset linked to this request (`work_request_assets`). |
 | `GET requests/outbound/:id/files` | none | 200 `[{id, filename, contentType, byteSize, createdAt, url}]`: the request's `work_request` files (DW-8h, §45), read-only. `url` is set on a link row. |
 | `GET requests/outbound/:id/files/:fileId/content` | none | The file's bytes, with the files content route's headers. A link row has no bytes (404). |
@@ -10637,6 +10684,9 @@ Two files with the next free prefixes after main's newest at landing: `<prefix>_
 - `fromUnit` is the requester's department (`requester_unit_id`), named from H's tree;
 - `campaign` is always `null`;
 - `work` carries no ids: `{type: 'pm_task', status, isDone, responsibleName}`, `{type: 'change_request', status}` or `null`. The receiver's task, project and change-request ids and its triage route stay with the receiver: a sender could not open them.
+- `price` (engineering only; `null` for assets): `{impact: 'unassessed' | 'none' | 'changes_price', agreement: null | 'preparing' | 'awaiting_signature' | 'signed' | 'closed'}`, read live from the change request and its linked contract.
+  - `agreement` is set only when `impact` is `changes_price`: `preparing` while the contract is a draft, `awaiting_signature` once sent, `signed`, and `closed` when it is declined, void, expired or unreadable (P re-assesses at triage).
+  - Never a value, a currency, a contract id or its terms. A test pins the row's key set.
 
 **Refusals, in the order they are checked.**
 
@@ -10652,20 +10702,53 @@ Two files with the next free prefixes after main's newest at landing: `<prefix>_
 | 409 `route_inactive` | The route is not `active` or its unit is orphaned (`detail.status`). Also when the trigger refused the insert (`PD060`) because the route changed between the check and the write. |
 | 409 `route_unit_unavailable` | The route's department is no longer a department of P's tree. The provider relinks or revokes. |
 | 409 `request_kind_unavailable` | P's receiving module (`pm` or `webdev`) is off. |
-| 409 `intake_project_unavailable` | As §32. |
+| 409 `group_client_missing` | P has no live client record linked to H (DW-D41); an admin links one (§60.12). Also when the trigger refused the insert (`PD062`) because the link changed between the check and the write. |
+| 409 `group_client_ambiguous` | P has more than one live client record linked to H; P's admin unlinks or merges one. |
+| 409 `intake_project_unavailable` | The client requests project for this department was deleted, as §32. |
 | 400 `box_invalid`, `unit_invalid`, `status_invalid`, `kind_invalid` | The list and summary filters, as §32. `unit_invalid` means "not a department of H". |
-| 404 `request_not_found` | After `read` passed: no live row with this id and `requester_tenant_id = H` at any of H's providers. |
+| 404 `request_not_found` | After `read` passed: no live row with this id and `requester_tenant_id = H` at any of H's providers, or the row is another person's and the caller may not `read_across`. |
 | 404 `asset_not_found`, `file_not_found` | Not linked to this request, a link row (files), or deleted. |
 | 409 `request_not_open`, `already_in_progress` | Cancel, as §32. |
+| 409 `price_agreement_open` | Cancel of an engineering request whose change request has a live price agreement (a draft, sent or signed amendment, `detail.agreement`). P declines it in triage and settles the agreement in Contracts & billing, as PV4-04's `amendment_exists` rule does. |
 
 ### 60.6 The receiving side (§32's routes, small changes)
 
-- **Rows and the detail gain** `requestingCompany: {id, name} | null` and `requesterUnit: {id, name} | null`. Both are `null` on a same-company row. `requesterUnit.name` is `requester_unit_name`, the name when the request was sent. `fromUnit` is `null` on a cross row. The company's name is read from `companies`, which has no RLS.
+- **Rows and the detail gain** `requestingCompany: {id, name} | null`, `requesterUnit: {id, name} | null` and `client: {id, name} | null`. All three are `null` on a same-company row. `requesterUnit.name` is `requester_unit_name`, the name when the request was sent. `fromUnit` is `null` on a cross row. The company's name is read from `companies`, which has no RLS; the client's from `clients`, in P's scope.
 - **`box=mine` gains `requester_tenant_id = tenant_id`:** "mine" is what I asked from this company. Otherwise a person in both companies (the owner) would find their own cross request among the receiver's.
 - **`POST requests/:id/cancel` on a cross row** answers **409 `requester_side_only`**, after the authorization.
+- **The change request is the client's.** A cross engineering request's change request names H's client record and the Web Dev client requests project (`source` stays `'internal'`, §60.6a). Triage then treats it as any client's request: the price gate applies, and `changes_price` drafts the amendment for H's client record.
+- **Triage's `awaiting_amendment` outcome** (a new draft for a change request that carries a cross request) tells the requester in H (`request.price_agreement`, §60.7). The triage route reads the cross request in its own transaction and notifies after the commit, like `notifyWorkRequestSync`.
 - **The requester is told in their own company** (§60.7). `deliver`, `decline` and `notifyWorkRequestSync` (triage decline and verify) stamp `request.delivered` and `request.declined` in `requester_tenant_id`, with the sender's link. `syncWorkRequestFromChangeRequest` returns `requesterTenantId` for that.
 - **Everything else is unchanged and now counts cross rows:** Incoming (`to_unit_id`), `summary.incoming`, deliver and decline, the PM delete guard (§32.8), Web Dev triage and its Origin column, the DW-6n readers (`work-requests-on-time.ts` counts by `tenant_id` and `to_unit_id`) and DW-6h's `loadRequesterIds` (which now also lists a sender who cannot act in P, §60.8).
 - A same-company row reads byte for byte as in §32.
+
+### 60.6a Billing: client work of the agency (DW-D41)
+
+**How the agency bills today** (read at `d711b208`).
+- **Time and materials only.** `POST invoices` drafts one client's invoice over a period at one hourly rate: one line per project, from the billable time entries on that client's projects (`invoice.controller.ts`). Lines cannot be edited. Fixed-fee and milestone lines are parked by PV-5 ("Not in PV-5": the owner names the need).
+- **Time is billable when its logger ticks Billable.** `POST pm/tasks/:taskId/time` defaults `billable` to false, and the task's time log starts with the box unticked.
+- **Issue** numbers the invoice and posts it to the ledger. A group client's AR customer carries `counterparty_company_id` from `clients.group_company_id`, so its invoices land on the intercompany receivable (PV5-04, PV5-05).
+- **Engineering price changes** go through triage's price gate (PV4-04, `webdev-amendment.ts`). A `convert` must answer `priceImpact`. `changes_price` drafts an amendment for the change request's client: it amends the project's latest signed agreement, else the client's master agreement, else it is a new agreement. The work stays blocked until the client's signer signs it in the portal and P countersigns; the triager is told and re-triages to start. An internal request with no client answers 400 `client_required_for_price_change`.
+- **Creative work carries no price.** Deliverables, assets, asset tasks and asks have no price column.
+- **The client portal** shows a client's contacts its projects (a progress figure, never the tasks), milestones, deliverables, change requests (any `source`), contracts once sent, invoices once issued, and payments. Never time, rates or margin (`portal-workspace.controller.ts`).
+- **A group client exists for Viceroy only**, in the seed (`ensureGroupClient` is a seed helper; no runtime path creates one, and linking `groupCompanyId` needs a platform operator). The holding has no client record at the agency.
+
+**The path: P's existing machinery, pointed at H's client record.**
+1. **The client.** P's one live client record linked to H, resolved at every send (§60.4 step 4). None or several: 409 (§60.5), fixed by an admin (§60.12).
+2. **The project.** One requests project per (department, client), "<Department> · Requests · <Client>" (at most 200 characters, the client's name cut to fit): `client_id` = the client, `is_internal = false`, `department_id` = the department, no owner, a derived short code. It is created on first use through `work_request_client_intakes`, in §32.1's race-safe order (`ensureClientIntakeProject`). It is P's client project like any other: the client hub, the department's Clients row (§33), client health (§54) and the client grain in reports (§53) all count it.
+3. **Assets.** The PM task goes into that project with the department assignee (§32.5). The ask carries no price. The time Creatives logs on it, ticked Billable, is invoiced with H's other work.
+4. **Engineering.** The change request names the client and the Web Dev requests project. Triage then works exactly as for any client's request:
+   - `priceImpact: 'none'` starts the work, billed by time;
+   - `changes_price` drafts the amendment for H's client record; P's staff write its terms and value and send it; H's signer contact signs it in P's client portal; P countersigns; the triager re-triages and the work starts.
+   - The requester is told when an agreement is needed (§60.7) and follows its state on the request page (`price`, §60.5).
+5. **The invoice.** P's normal cycle: Finance drafts H's invoice from billable time on H's projects (the requests projects included), approves it, issues it to the intercompany receivable, and H's contacts see it in the portal. 10e adds no invoicing code.
+6. **What the requester sees.** The work's progress and, for engineering, the price state. Never hours, rates, values or invoices. H's client contacts see the amounts in P's portal, under the portal's own rules.
+
+**`source` stays `'internal'`.** The work request is the origin record. The portal-only notification audiences (F1, 2026-08-08) stay as they are, so H's client contacts are not told of every triage step on top of the requester. Rejected: `'portal'` (untrue, and it would notify H's contacts of every disposition as well as the requester); a new `source` value (re-declares a shared CHECK and every reader of it for no change in behaviour).
+
+**The portal and DW-D40.** Because the work is client work, P's client portal shows H's client contacts its traces under the portal's existing rules: the requests projects with their progress figure (never the tasks), an engineering request's change request, any price agreement once sent, and the invoices. DW-D40 governs the ERP's sender view; the portal follows the contacts H designated for P (owner question, plan §12.2).
+
+**Not changed by 10e:** the time log's Billable default, fixed-fee invoice lines, the portal's predicates, and the price gate itself.
 
 ### 60.7 Side effects: notifications, activity and events
 
@@ -10674,13 +10757,14 @@ All after the commit, best-effort and logged loudly on failure, as §32.7. Each 
 | Moment | Who is told | Stamped in | Link |
 |---|---|---|---|
 | Sent | `request.received` to the receiving department's heads (§32.7) | P | `/departments/<toUnit>/requests` |
+| A price agreement is needed (triage's `awaiting_amendment` on the change request of a cross request, once per new draft) | `request.price_agreement` to the requester | H (`requester_tenant_id`) | `/requests/outbound/<id>` |
 | Delivered, more delivered, declined (a receiver's action, or triage through the sync) | `request.delivered` or `request.declined` to the requester | H (`requester_tenant_id`) | `/requests/outbound/<id>` |
 | Cancelled by the sender | `request.cancelled` to the PM task's responsible person, if any | P | `/departments/<toUnit>/requests` |
 | Reopened (unverify) | nobody, as §32 | none | none |
 
-- Titles name the other company: "New request from <H> for <department>: <title>"; "Your request to <P> was delivered: <title>".
+- Titles name the other company: "New request from <H> for <department>: <title>"; "<P> needs a price agreement before starting: <title>"; "Your request to <P> was delivered: <title>".
 - **Activity.** In P as §32.7 (entity `work_request`; the actor is the sender). In H as well, the sender's own record: `sent_across` and `cancelled`, with `{receivingCompanyId}`.
-- **Outbox (ids only).** P's events as §32.7, whose payload gains `requesterTenantId` and `serviceAssignmentId`. H gets a mirror event per transition, `work_request.outbound.created|cancelled|delivered|declined|reopened`, with `{requestId, receivingTenantId, correlationId: requestId}`, so an n8n flow on H's side can react (the `emitDual` precedent of service assignments). Nothing consumes `work_request.*` events today.
+- **Outbox (ids only).** P's events as §32.7, whose payload gains `requesterTenantId`, `serviceAssignmentId` and `clientId`. H gets a mirror event per transition, `work_request.outbound.created|cancelled|delivered|declined|reopened`, with `{requestId, receivingTenantId, correlationId: requestId}`, so an n8n flow on H's side can react (the `emitDual` precedent of service assignments). Nothing consumes `work_request.*` events today.
 
 ### 60.8 What does not cross in v1 (known limits, each on the board)
 
@@ -10688,7 +10772,10 @@ All after the commit, best-effort and logged loudly on failure, as §32.7. Each 
 - **Attachments from the sender.** The sender reads and downloads the request's files (§60.5) but cannot attach. References are links (`form.references`, any http(s), Drive links included). The receiving side attaches as §45.
 - **Figma links** (§36) on a cross request stay with the receiver; the sender's view does not show them.
 - **Review rounds (DW-6h).** `creative_asset` `decide_review`'s requester rule needs a membership in P (`inTenant`), so a sender can neither approve nor ask for changes; the receiving head or a manager decides. A sender-side decision is a follow-up.
-- **Internal work, even for a client company.** A cross request is internal work in P's "<Department> · Requests" project, with no client, also when H is P's client (`clients.group_company_id`, PV-D2). Billing it is out (open question, plan §12.1).
+- **No price on asset asks** (§60.6a). Creatives may draft an agreement for the client by hand in Contracts & billing before starting; there is no gate.
+- **An agreed price is not an invoice line.** A signed amendment unblocks the work; the invoice is still hours × rate (PV-5 parks fixed-fee lines).
+- **Billable time must be ticked** on the task, as on any client project.
+- **A head without `manager`** reads only their own requests to other companies (DW-D40, §60.4).
 - **The receiving company cannot cancel** (§60.6); it declines.
 - **The delete guard is unchanged** (§32.8): an open request holds its PM task, whichever company asked.
 - **No hub tool** (§60.10).
@@ -10700,76 +10787,104 @@ All after the commit, best-effort and logged loudly on failure, as §32.7. Each 
 - **Quick actions.** One per active route, beside the same-company ones: "Ask <unit> at <company> for assets" (`asset_requests`) or "Ask <unit> at <company>" (`engineering_requests`), linking to `/requests/new?route=<routeId>`. Gated by the new UI capability `work_request.send_across` (the mirror of PERMISSION-CONTRACT §49) and by the route being present.
 - **`/requests/new`.**
   - `?route=<routeId>` (new) finds the route in the routes read. An absent route is a sentence ("Your company can no longer send requests there"); a failed read is "unavailable".
-  - It renders `RequestForm` with the route's kind, "To <unit> · <company>" and no campaign picker, and sends through a new action, `createOutboundRequestAction`, which returns a value and never throws a refusal. Every code of §60.5 is a sentence in `requestErrorText`.
+  - It renders `RequestForm` with the route's kind, "To <unit> · <company>", a line saying the work is billed to the company as a client, and no campaign picker. It sends through a new action, `createOutboundRequestAction`, which returns a value and never throws a refusal. Every code of §60.5 is a sentence in `requestErrorText`; `group_client_missing` reads "<company> has not set your company up as a client yet. Ask an administrator."
   - Success opens `/requests/outbound/<id>`.
   - Without a target, the chooser lists the same-company departments (agency) and then the routes.
-- **My requests (`/requests`) and a department's Sent tab** merge §32's read (`box=mine`, or `box=sent&unitId`) with the sender read (`outbound?box=mine`, or `box=sent&unitId`). A row to another company says "To <unit> · <company>" and links to `/requests/outbound/<id>`. When one of the two reads fails, the page shows what it did read AND says which part could not be read; it never shows a shorter list as if it were whole.
-- **The Overview's Requests block:** "sent, open" adds `outbound/summary`. If either read fails, the figure is "unavailable".
+- **My requests (`/requests`) and a department's Sent tab** merge §32's read (`box=mine`, or `box=sent&unitId`) with the sender read (`outbound?box=mine`, or `box=sent&unitId`). A row to another company says "To <unit> · <company>" and links to `/requests/outbound/<id>`.
+  - In scope `own`, the page says that only the caller's requests to other companies are shown (DW-D40).
+  - When one of the two reads fails, the page shows what it did read AND says which part could not be read; it never shows a shorter list as if it were whole.
+- **The Overview's Requests block:** "sent, open" adds `outbound/summary`, and says so when its scope is `own`. If either read fails, the figure is "unavailable".
 - **`/requests/outbound/[id]`** (new, area `shared`):
   - the ask, its status and "To <unit> · <company>";
   - the work's progress (status, done, the responsible person), the brief and the form as plain text, and the decline reason;
+  - for engineering, the price state as a sentence: "Not assessed yet", "No price change", "<P> is preparing a price agreement", "Waiting for <H>'s signature in <P>'s client portal", "Price agreed", "The price agreement was declined or withdrawn; <P> will re-assess". Never an amount;
   - the delivered assets and the files, with download links;
-  - Cancel, for the requester or H's company_admin or manager, while `open` (an engineering request only while its change request is `new`).
+  - Cancel, for the requester or H's company_admin or manager (§36's `cancel`, mirrored in `lib/rbac.ts`), while `open`; an engineering request only while its change request is `new` and has no live price agreement.
   - Downloads go through two new UI proxy routes, `app/api/requests/outbound/[id]/assets/[assetId]/route.ts` and `app/api/requests/outbound/[id]/files/[fileId]/route.ts`. They call the platform with the caller's session, like `/api/creative-assets/:assetId`.
-- **The receiving side.** Incoming, the request page and Web Dev's Origin column show "From <company> · <department>" (`requestingCompany`, `requesterUnit`). The request page hides Cancel on a cross row.
-- **ORG-13.** The module picker offers "Asset requests" and "Engineering requests" (labels for `asset_requests` and `engineering_requests`) on department nodes only, and hides the lead picker for them. The preview says "Nobody is added to <company>. <company> can send <kind> requests to <unit>." The Serviced functions panel lists them.
-- **DEMO_MODE:** a route, an outbound request in each state, and a cross row in the agency's Incoming.
+- **The receiving side.** Incoming, the request page and Web Dev's Origin column show "From <company> · <department>" (`requestingCompany`, `requesterUnit`), and the client, linked to its client page. The request page hides Cancel on a cross row.
+- **ORG-13.** The module picker offers "Asset requests" and "Engineering requests" (labels for `asset_requests` and `engineering_requests`) on department nodes only, and hides the lead picker for them. The preview says "Nobody is added to <company>. <company> can send <kind> requests to <unit>, billed to it as a client." A target without a client record shows `no_group_client` as "<company> is not a client of <provider> yet: a platform operator links it in Clients". The Serviced functions panel lists the routes.
+- **DEMO_MODE:** a route, an outbound request in each state, an engineering request waiting on a price agreement, a list in scope `own`, and a cross row in the agency's Incoming.
 
 ### 60.10 Agents and automation (the agentic bar)
 
 - **No request tool exists in the hub today** (verified: none in `mcp-hub/src` and none in any module's `mcpTools`; DW-5c added none). 10e adds none and changes none.
 - **Parity holds through the routes themselves.** An n8n flow, or an agent acting for a human (`x-act-for`, with both principals checked), calls the same routes as the UI.
-- `send_across` and `cancel` are denied to `automation` and `bot` principals (PERMISSION-CONTRACT §49), as `create` and `cancel` are (PERMISSION-CONTRACT §36). `read` is not, so an agent may list a company's routes and outbound requests and answer about them. Agents may send later, under the separate AI plan, as for §32.
+- `send_across` and `cancel` are denied to `automation` and `bot` principals (PERMISSION-CONTRACT §49), as `create` and `cancel` are (PERMISSION-CONTRACT §36). `read` and `read_across` are not, so an agent may list a company's routes and outbound requests within its own tier and answer about them. Agents may send later, under the separate AI plan, as for §32.
 - n8n reacts to the outbox events in each company (§60.7).
 
 ### 60.11 Proofs required before ticking (Linux CI gate, real Postgres and Cerbos)
 
-**Seed.** One root with the agency P (Creatives and Web Dev, a head on each), the holding H and a hotel company T (members, a viewer, a bot and an automation account each), and a second root R with one company. Routes: `asset_requests` from P's Creatives to H, and `engineering_requests` from P's Web Dev to H. One department of H has the same node id as a department of P (the collision probe).
+**Seed.**
+- One root with the agency P (Creatives and Web Dev, a head on each), the holding H and a hotel company T, and a second root R with one company.
+- At P: a live client record linked to H, with a client-wide signer contact who is an H member. No client record for T.
+- In H: a company_admin, a manager, a permission-native `owner`, members A (who sends) and B, a viewer, a head of A's department holding only `org_unit_lead`, a bot and an automation account.
+- In T: a member, a viewer, a bot and an automation account.
+- Routes: `asset_requests` from P's Creatives to H, and `engineering_requests` from P's Web Dev to H.
+- One department of H has the same node id as a department of P, and a person who leads that P department is also a member of H (the collision probe).
 
 - **Sending.**
-  - An H member sends both kinds. The asset task is in P's Creatives intake project with the department assignee. The change request is in P's triage (`source 'internal'`). The row has `tenant_id = P`, `requester_tenant_id = H`, `requester_unit_id` from H's tree, `from_unit_id` NULL and `service_assignment_id` = the route.
+  - A sends both kinds. The asset task is in "Creatives · Requests · <client>", whose `client_id` is H's record, with the department assignee. The change request is in P's triage (`source 'internal'`) with `client_id` = H's record and `project_id` = the Web Dev requests project. The row has `tenant_id = P`, `requester_tenant_id = H`, `requester_unit_id` from H's tree, `from_unit_id` NULL, `service_assignment_id` = the route and `client_id` = H's record.
+  - Two concurrent first sends to one (department, client) create exactly one requests project and no orphan.
   - 403 for H's viewer, bot, automation account (even holding company_admin), a low-assurance session, and a member of T or of R. Each is repeated with a malformed body: validation never pre-empts authorization.
   - 404 `route_not_found`: no such id, a route whose target is T, a non-routing assignment, a route that H provides.
   - 409 `route_inactive` for a proposed, suspended, revoked or orphaned route; 409 `request_routes_disabled` with the switch off; 409 `route_unit_unavailable` once P's tree loses the department; 409 `request_kind_unavailable` with P's `pm` off.
+  - 409 `group_client_missing` once H's record is unlinked; 409 `group_client_ambiguous` with a second linked record; 409 `intake_project_unavailable` once the client requests project is deleted.
   - 400 for `toUnitId`, `campaignPartId` or a mismatched `kind` in the body.
   - A route whose provider sits in root R (inserted directly, since the controller refuses to make one) answers 404, and a direct INSERT through it fails `PD060`.
-- **The route wall.**
+- **The route and client wall.**
   - A direct INSERT of a cross row fails `PD060` with no route, a suspended route, the wrong key for the kind, the wrong department, the wrong target, and a provider other than `tenant_id`.
+  - It fails `PD062` with no `client_id`, a client of another company, a client linked to another company, a deleted client, the internal sentinel, an asset task in §32's internal intake project, and a change request naming another client.
   - An UPDATE of any frozen column fails `PD061`.
-  - A same-company INSERT that omits `requester_tenant_id` gets `tenant_id`.
+  - A same-company INSERT that omits `requester_tenant_id` gets `tenant_id`, and one that names a `client_id` fails its CHECK.
   - A static test pins the trigger's `CASE` to `REQUEST_ROUTE_KEYS`.
 - **A route grants nothing.** After a routing assignment is created, accepted and reconciled with the switch on:
   - no `company_memberships` row, no `user_roles` grant and no claim in H for any person of P;
   - `enabledModuleKeys(H)` leaves out the key, and `GET /api/me` `serviceScopes` is unchanged for P's staff;
   - `gatherForeignContext(H)` and `computeProviderViewRollups(P)` ignore it;
-  - propose on a division → 422; with `leadUserId` → 422; the dry run lists nobody.
-- **Reading.**
-  - H's members and viewer list and read H's rows to other companies (`mine`, `sent` by H's department, `all`), with the receiving company named. The detail carries none of the receiver's ids.
+  - propose on a division → 422; with `leadUserId` → 422; the dry run lists nobody;
+  - propose for T (no client record) → 422 `route_needs_group_client`, and with two linked records → 422 `group_client_ambiguous`; the dry run marks both targets.
+- **Reading (DW-D40).**
+  - A lists and reads their own requests (`scope: 'own'`), with the receiving company named, and downloads their files and assets.
+  - B and H's viewer list none of A's requests; A's id and its downloads answer them 404.
+  - H's company_admin and manager list all of H's requests with `scope: 'company'`; so do the permission-native `owner` (through the mirror) and `platform_admin`.
+  - The lead-only head of A's department lists only their own requests. The person who leads P's colliding department gains nothing in H.
+  - The detail carries none of the receiver's ids, and no row carries a value, currency, hour, rate, contract id or invoice (a key-set pin).
   - An H member never sees T's requests to the same department of P, nor P's own requests. A T member never sees H's.
   - An H member gets 403 on every §32 route under P.
-  - P's reads are unchanged: the cross row is in Incoming with `requestingCompany`. P's Sent box and summary for the department whose node id collides with H's do NOT include it. P's `box=mine` for the owner (a member of both) does not include their cross request.
+  - P's reads are unchanged: the cross row is in Incoming with `requestingCompany` and `client`. P's Sent box and summary for the department whose node id collides with H's do NOT include it. P's `box=mine` for the owner (a member of both) does not include their cross request.
   - The DW-6n reader n10 counts the cross row for P's Creatives.
 - **The lifecycle.**
-  - P's assignee delivers, and the requester downloads exactly those bytes through the sender route; an asset of another request is 404.
+  - P's assignee delivers, and A downloads exactly those bytes through the sender route; an asset of another request is 404.
   - P's head declines. Triage decline, verify and unverify move the ask through the sync.
-  - The requester or H's company_admin cancels while `open` (engineering only while `new`, else 409). P's company_admin cancelling a cross row gets 409 `requester_side_only`.
-  - A suspended route leaves every one of these working.
-- **Notifications and events.** `request.received` rows in P, for P's heads only. `request.delivered` and `request.declined` rows in H for the requester, and none in P for them. `request.cancelled` in P. The mirror events land in H's outbox, and P's events carry `requesterTenantId`.
-- **The migration.** Applied twice without error. Existing rows have `requester_tenant_id = tenant_id`; the column is NOT NULL; the four CHECKs and both triggers exist.
-- **IAM.** `send_across`'s matrix (PERMISSION-CONTRACT §49), the six artifacts and the moved count literals; Cerbos restarted and probed.
-- **Tenancy.** A unit test pins that every sender statement binds both `tenant_id = P` and `requester_tenant_id = H`, and that no 10e code calls `withTenants` with more than one company.
+  - A cancels their own while `open` (engineering only while `new`, else 409). H's manager cancels A's. B gets 404. The permission-native `owner` alone gets 403 (no mirror on `cancel`). P's company_admin cancelling a cross row gets 409 `requester_side_only`.
+  - Cancel of an engineering request with a draft, sent or signed amendment answers 409 `price_agreement_open`; with a declined one it succeeds.
+  - A suspended route, or an unlinked client, leaves every one of these working for requests already sent.
+- **Billing (DW-D41).**
+  - Triage `convert` with `priceImpact: 'none'` on the cross change request starts the work in the Web Dev requests project (`pm_task` route).
+  - `changes_price` drafts an amendment for H's client record (never 400 `client_required_for_price_change`). The sender's `price` moves `preparing` → `awaiting_signature` (P sends) → `signed` (H's signer signs in the portal, P countersigns); the triager's re-triage then starts the work. A declined amendment reads `closed`.
+  - The requester gets one `request.price_agreement` in H per new draft.
+  - Billable time on the asset task appears as a line of H's invoice draft (`POST invoices` for H's client record); a non-billable entry does not. (PV5-05's own suite proves the intercompany posting.)
+  - H's client-wide contact sees the requests project and the change request in P's portal; a contact of another client does not.
+- **Notifications and events.** `request.received` rows in P, for P's heads only. `request.price_agreement`, `request.delivered` and `request.declined` rows in H for the requester, and none in P for them. `request.cancelled` in P. The mirror events land in H's outbox, and P's events carry `requesterTenantId` and `clientId`.
+- **The migration.** Applied twice without error. Existing rows have `requester_tenant_id = tenant_id` and `client_id` NULL; the column is NOT NULL; the five CHECKs, the client FK, both triggers and the new table (RLS forced, one policy, the deferred FK) exist.
+- **IAM.** The `send_across` and `read_across` matrices (PERMISSION-CONTRACT §49), the six artifacts and the moved count literals; Cerbos restarted and probed.
+- **Tenancy.** A unit test pins that every sender statement binds both `tenant_id = P` and `requester_tenant_id = H`, that every sender read goes through `outboundReadScope`, and that no 10e code calls `withTenants` with more than one company.
 
 ### 60.12 Owner and admin steps (not code)
 
-1. **The switch.** `SERVICE_ASSIGNMENTS_ENABLED` on in both `platform` and `platform-ui` (the live `.env`). It also wakes the reconciler for every other assignment, so the owner first reads the live table (`SELECT module_key, status, count(*) FROM service_assignments GROUP BY 1, 2`). Earlier migrations recorded none live (0091, 0097, 0106).
-2. **The routes**, after the deploy. Either the owner (`platform_admin`) creates each one active, or the agency's company_admin proposes and each target's company_admin accepts in Admin › Services:
+1. **The switch.** `SERVICE_ASSIGNMENTS_ENABLED` on in both `platform` and `platform-ui` (the live `.env`). DW-D39's routes need it. It also wakes the reconciler for every other assignment, so the owner first reads the live table (`SELECT module_key, status, count(*) FROM service_assignments GROUP BY 1, 2`). Earlier migrations recorded none live (0091, 0097, 0106). Still an owner question (plan §12.2).
+2. **The client records (DW-D41).** Viceroy is the agency's client already (the seed's group client); check the link on live. The holding is not: a platform operator creates its client record at the agency (Clients › New client, Group company = the holding, with a business type) before its routes.
+3. **Signer contacts.** Each of the two client records gets a client-wide contact with signing capability, a person of that company, so a price agreement can be signed. The owner names them.
+4. **The routes (DW-D39)**, after the deploy, created `active` by a `platform_admin`:
    - the agency's Creatives → the holding, `asset_requests`;
    - the agency's Web Dev → the holding, `engineering_requests`;
-   - the same two → each hotel company that should ask (the owner names them).
-3. **Cerbos** restarted after the policy deploy, then probed: `send_across` allowed for a holding member, denied for a viewer and a bot.
-4. **Heads.** Each receiving department has an active lead seat, so `request.received` reaches someone. Without one, the board still shows the request.
-5. **A first live drive:** a holding member asks Creatives for one asset, Creatives delivers it, and the holding member downloads it. Then the teardown: labelled test rows, cancelled or declined.
+   - the agency's Creatives → Viceroy, `asset_requests`;
+   - the agency's Web Dev → Viceroy, `engineering_requests`.
+5. **Cerbos** restarted after the policy deploy, then probed: `send_across` allowed for a holding member, denied for a viewer and a bot; `read_across` allowed for a holding manager, denied for a member.
+6. **Heads.** Each receiving department has an active lead seat, so `request.received` reaches someone. Without one, the board still shows the request.
+7. **Billable time.** The receiving heads tell their people that requests from group companies are client work: tick Billable when logging time on them.
+8. **A first live drive:** a holding member asks Creatives for one asset; Creatives logs billable time and delivers it; the holding member downloads it; Finance's draft invoice for the holding shows the line. Then the teardown: the draft invoice voided, and the labelled test rows cancelled or declined.
 
 ### 60.13 Build order and tiers
 
-Plan §12.1, "10e design". Three tickets, one at a time: 10e-1 the data and the route, 10e-2 the permission, the sender routes and the receiving side (the cross-company core), and 10e-3 the UI.
+Plan §12.2, "10e design". Three tickets, one at a time: 10e-1 the data, the routes and the billing data; 10e-2 the permission, the sender routes, the receiving side and the billing wiring (the cross-company core); 10e-3 the UI. Billing needs no fourth ticket: its data is in 10e-1, its wiring in 10e-2 and its screens in 10e-3.
