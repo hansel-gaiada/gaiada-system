@@ -62,7 +62,7 @@ afterEach(() => vi.restoreAllMocks());
 describe("the Now band is registered (DW-3c)", () => {
   it("hosts Needs you, Today, Your numbers (DW-3d), My activity (DW-3j), Pulse (DW-3e), the Condition (DW-3k), the Work blocks (DW-3f), the Growth blocks (DW-3g), the company blocks (DW-3i) and Client health (DW-10d), and still no other block", () => {
     expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual([
-      "appraisal", "appraisal-cycle", "campaigns", "client-health", "company", "company-campaigns", "condition", "decisions", "departments", "learning", "learning-compliance",
+      "appraisal", "appraisal-cycle", "campaigns", "client-health", "company", "company-campaigns", "company-client-health", "condition", "decisions", "departments", "learning", "learning-compliance",
       "my-activity", "needs-you", "projects", "pulse", "requests", "today", "your-numbers",
     ]);
     // `condition` is the department's banner and strip (DW-3k); the six company blocks are DW-3i's.

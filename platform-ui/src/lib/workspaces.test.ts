@@ -349,7 +349,8 @@ describe("the Overview, Performance and tools data", () => {
   it("makes Client health the only optional block, gated like the Clients row, in the Work band after Requests (DW-D34)", () => {
     for (const ws of ALL) {
       const optional = ws.overview.filter((w) => w.placement === "optional");
-      expect(optional.map((w) => w.key), ws.key).toEqual(["client-health"]);
+      // The company list has its own key (`company-client-health`, never narrowed); every department list has `client-health`.
+      expect(optional.map((w) => w.key), ws.key).toEqual([ws.key === "gm" ? "company-client-health" : "client-health"]);
       const ch = optional[0];
       expect(ch.band).toBe("work");
       expect(ch.ticket).toBeUndefined();

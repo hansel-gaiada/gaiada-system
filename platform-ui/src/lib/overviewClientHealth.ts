@@ -11,20 +11,20 @@
 import type { ReadResult } from "./readResult";
 import { STATE_LABEL, type ClientHealthBoard, type HealthState } from "./clientHealth";
 import { shortReasons, sortWorstFirst, filterBoard, STATE_ORDER, unavailableSentence } from "./clientHealthBoard";
-import { overviewPrefsKey, COMPANY_PREFS_KEY } from "./overviewPrefs";
-import type { OverviewWidget } from "./workspaces";
 
 export const CLIENT_HEALTH_KEY = "client-health";
+/** The company Overview's block: the whole company's board, never narrowed (its own key, as `company-campaigns`). */
+export const COMPANY_CLIENT_HEALTH_KEY = "company-client-health";
 /** The block lists at most this many clients (plan §3: a block shows at most 4 numbers or 6 rows). */
 export const MAX_CLIENT_HEALTH_ROWS = 5;
 /** The states that need a person; the others (on track, quiet) are counted but not listed. */
 const NEEDS_ATTENTION: readonly HealthState[] = ["off_track", "at_risk", "unknown"];
 
-/** The block reads for the department's org node (to narrow the board to its clients) or, in the company frame, for the whole company.
- *  A workspace with no node that is not the company (HR, Finance and IT are functional) has nothing to narrow to, so the block is not
- *  placed there. Other widget keys are not this rule's business and stay placed. */
-export function clientHealthWidgetPlaced(key: string, subject: { deptId: string | null; workspaceKey: string | null; widgets: readonly OverviewWidget[] }): boolean {
-  return key !== CLIENT_HEALTH_KEY || !!subject.deptId || overviewPrefsKey(subject) === COMPANY_PREFS_KEY;
+/** The department block (`client-health`) reads for the department's org node, to narrow the board to its clients, so a workspace with no
+ *  node has nothing to narrow to and the block is not placed there. The company Overview lists `company-client-health` instead, which is
+ *  never narrowed. Other widget keys are not this rule's business and stay placed. */
+export function clientHealthWidgetPlaced(key: string, subject: { deptId: string | null }): boolean {
+  return key !== CLIENT_HEALTH_KEY || !!subject.deptId;
 }
 
 export interface ClientHealthRowView {

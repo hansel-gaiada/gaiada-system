@@ -66,11 +66,11 @@ describe("setOverviewWidgetAction: an optional widget", () => {
 
   it("is per workspace: switching it on in Web Dev leaves SEO as it was, and 'company' is its own list", async () => {
     await setOverviewWidgetAction("web-dev", "client-health", true);
-    await setOverviewWidgetAction("company", "client-health", true);
+    await setOverviewWidgetAction("company", "company-client-health", true);
     await setOverviewWidgetAction("web-dev", "pulse", false);
     expect(await overview()).toEqual({
       "web-dev": { hide: ["pulse"], show: ["client-health"] },
-      company: { hide: [], show: ["client-health"] },
+      company: { hide: [], show: ["company-client-health"] },
     });
   });
 

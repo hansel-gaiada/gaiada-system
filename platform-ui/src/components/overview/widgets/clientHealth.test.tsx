@@ -1,7 +1,7 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { OVERVIEW_WIDGETS, hasOverviewWidget, type OverviewWidgetProps } from "./index";
-import { ClientHealth } from "./ClientHealth";
+import { ClientHealth, CompanyClientHealth } from "./ClientHealth";
 import { ClientHealthBlock } from "./ClientHealthBlock";
 import { clientHealthView, clientHealthWidgetPlaced, MAX_CLIENT_HEALTH_ROWS } from "@/lib/overviewClientHealth";
 import { COMPANY_OVERVIEW, WORKSPACES, GENERIC_WORKSPACE } from "@/lib/workspaces";
@@ -65,6 +65,7 @@ afterEach(cleanup);
 describe("Client health is wired into the host (DW-10d)", () => {
   it("has a component, and the registry lists it as the one optional block of every workspace's Overview", () => {
     expect(hasOverviewWidget("client-health", OVERVIEW_WIDGETS)).toBe(true);
+    expect(hasOverviewWidget("company-client-health", OVERVIEW_WIDGETS)).toBe(true);
     for (const list of [COMPANY_OVERVIEW, ...[...WORKSPACES, GENERIC_WORKSPACE].map((w) => w.overview)]) {
       for (const w of list.filter((x) => x.placement === "optional")) expect(hasOverviewWidget(w.key, OVERVIEW_WIDGETS), w.key).toBe(true);
     }
@@ -167,6 +168,17 @@ describe("ClientHealth (widget): a refused or failed read is 'Unavailable', neve
   }
 });
 
+describe("CompanyClientHealth (widget): the company Overview's block", () => {
+  it("is the whole company's board even in the Office of the GM, a workspace with a node of its own: never narrowed", async () => {
+    board.mockResolvedValue(ok(MIX));
+    render(await CompanyClientHealth(props({ deptId: "dept-5", widget: { key: "company-client-health", band: "work", label: "Client health" } })));
+    expect(readClients).not.toHaveBeenCalled();
+    expect(within(block()).queryByText("No clients in this department.")).toBeNull();
+    expect(within(block()).getAllByRole("listitem").map((li) => li.getAttribute("data-client"))).toEqual(["c-off", "c-risk", "c-unk"]);
+    expect(within(block()).getByRole("link", { name: "Open the health board" })).toHaveAttribute("href", "/clients/health");
+  });
+});
+
 describe("ClientHealth (widget): a department workspace", () => {
   it("narrows the board to the clients list's own department facet, and counts only those", async () => {
     board.mockResolvedValue(ok(MIX));
@@ -218,10 +230,12 @@ describe("where the block is placed (DW-10d)", () => {
   const placed = resolveMyWorkspaces({ me: person, tenantId: "co-a", root: agencyTree({ frontend: ["u-1"] }) });
   const webDev = subjectOfRef(placed.mine[0]);
 
-  it("is placed for a department with a unit and for the company frame, and not for a workspace with no unit that is not the company", () => {
+  it("the department block is placed only where there is a unit to narrow to; the company block always", () => {
     expect(clientHealthWidgetPlaced("client-health", webDev)).toBe(true);
-    expect(clientHealthWidgetPlaced("client-health", COMPANY_SUBJECT)).toBe(true);
+    expect(clientHealthWidgetPlaced("client-health", COMPANY_SUBJECT)).toBe(false);
     expect(clientHealthWidgetPlaced("client-health", { ...webDev, deptId: null })).toBe(false);
+    expect(clientHealthWidgetPlaced("company-client-health", COMPANY_SUBJECT)).toBe(true);
+    expect(clientHealthWidgetPlaced("company-client-health", { ...webDev, deptId: "dept-5" })).toBe(true);
     // Other keys are not this rule's business.
     expect(clientHealthWidgetPlaced("pulse", { ...webDev, deptId: null })).toBe(true);
   });

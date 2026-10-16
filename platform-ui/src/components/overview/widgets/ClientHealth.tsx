@@ -16,3 +16,10 @@ export async function ClientHealth({ me, tenantId, deptId }: OverviewWidgetProps
   ]);
   return <ClientHealthBlock view={clientHealthView(board, departmentIds)} departmentId={deptId} />;
 }
+
+/** The company Overview's block (`company-client-health`): the whole company's board, never narrowed, whatever node the frame carries.
+ *  The Office of the GM is a workspace with a node of its own, so the department block would narrow the board to the GM's office. */
+export async function CompanyClientHealth({ me, tenantId }: OverviewWidgetProps) {
+  const board = await getClientHealthBoard(me.userId, tenantId);
+  return <ClientHealthBlock view={clientHealthView(board, null)} departmentId={null} />;
+}

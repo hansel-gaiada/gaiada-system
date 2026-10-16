@@ -150,11 +150,13 @@ test.describe("Overview: personalise (DW-10d)", () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), /);
     await expect(block(page, "Client health")).toHaveCount(0);
 
+    // The company Overview lists its own block, `company-client-health`: the whole board, never narrowed to the Office of the GM.
     await openCustomise(page);
-    await press(row(page, "client-health").getByRole("button", { name: "Switch on Client health" }));
+    await press(row(page, "company-client-health").getByRole("button", { name: "Switch on Client health" }));
 
     const health = block(page, "Client health");
     await expect(health).toBeVisible();
+    await expect(health.getByText("No clients in this department.")).toHaveCount(0);
     // The demo board: two off track, two at risk, two on track, one quiet (client-health-board.spec.ts).
     await expect(health.getByText("2 off track · 2 at risk · 2 on track · 1 quiet")).toBeVisible();
     // Up to five clients that need a person, worst first; on track and quiet ones are counted, never listed.

@@ -82,7 +82,7 @@ describe("WorkspaceOverview: with no block to draw", () => {
 
   it("hosts the Now band's two blocks, Your numbers, My activity, Pulse, the Condition, the Work blocks, the Growth blocks and the six company blocks, and no other (DW-3c, DW-3d, DW-3j, DW-3e, DW-3k, DW-3f, DW-3g, DW-3i)", () => {
     expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual([
-      "appraisal", "appraisal-cycle", "campaigns", "client-health", "company", "company-campaigns", "condition", "decisions", "departments", "learning", "learning-compliance",
+      "appraisal", "appraisal-cycle", "campaigns", "client-health", "company", "company-campaigns", "company-client-health", "condition", "decisions", "departments", "learning", "learning-compliance",
       "my-activity", "needs-you", "projects", "pulse", "requests", "today", "your-numbers",
     ]);
     expect(hasOverviewWidget("needs-you")).toBe(true);
@@ -284,7 +284,7 @@ describe("WorkspaceOverview: the person's own blocks and the Customise control (
   const item = (key: string) => document.querySelector(`li[data-widget="${key}"]`) as HTMLElement;
   const MORNING = new Date(2026, 9, 13, 9, 30);
   const host = (seen: string[]): Record<string, OverviewWidgetComponent> => Object.fromEntries(
-    ["needs-you", "today", "my-activity", "client-health"].map((k) => [k, () => { seen.push(k); return <p>{`${k} drawn`}</p>; }]),
+    ["needs-you", "today", "my-activity", "client-health", "company-client-health"].map((k) => [k, () => { seen.push(k); return <p>{`${k} drawn`}</p>; }]),
   );
   const drawOverview = (seen: string[], customise?: Parameters<typeof WorkspaceOverview>[0]["customise"]) =>
     render(<WorkspaceOverview me={made} tenantId="co-a" subject={SUBJECT} period="month" now={MORNING} widgets={host(seen)} customise={customise} />);
@@ -350,11 +350,11 @@ describe("WorkspaceOverview: the person's own blocks and the Customise control (
   it("the Company frame keeps its choices under 'company'", () => {
     expect(overviewPrefsKey(COMPANY_SUBJECT)).toBe("company");
     const seen: string[] = [];
-    const company: OverviewSubject = { ...COMPANY_SUBJECT, widgets: [{ key: "today", band: "now", label: "Today" }, { key: "client-health", band: "work", label: "Client health", placement: "optional" }] };
-    render(<WorkspaceOverview me={made} tenantId="co-a" subject={company} period="month" now={MORNING} widgets={host(seen)} customise={{ prefs: { company: { hide: [], show: ["client-health"] } }, setWidget }} />);
-    expect(seen).toEqual(["today", "client-health"]);
-    fireEvent.click(within(item("client-health")).getByRole("button", { name: "Switch off Client health", hidden: true }));
-    return waitFor(() => expect(setWidget).toHaveBeenCalledWith("company", "client-health", false, expect.anything()));
+    const company: OverviewSubject = { ...COMPANY_SUBJECT, widgets: [{ key: "today", band: "now", label: "Today" }, { key: "company-client-health", band: "work", label: "Client health", placement: "optional" }] };
+    render(<WorkspaceOverview me={made} tenantId="co-a" subject={company} period="month" now={MORNING} widgets={host(seen)} customise={{ prefs: { company: { hide: [], show: ["company-client-health"] } }, setWidget }} />);
+    expect(seen).toEqual(["today", "company-client-health"]);
+    fireEvent.click(within(item("company-client-health")).getByRole("button", { name: "Switch off Client health", hidden: true }));
+    return waitFor(() => expect(setWidget).toHaveBeenCalledWith("company", "company-client-health", false, expect.anything()));
   });
 
   it("does not list a block the person's gates do not allow", () => {

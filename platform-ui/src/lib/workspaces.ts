@@ -282,8 +282,9 @@ export const COMPANY_OVERVIEW: readonly OverviewWidget[] = [
   { key: "departments", band: "department", label: "Departments by condition", gate: GM_FULL },
   // The cockpit's Campaigns row gate. Not `campaigns`: that key is the department blocks' (shared campaigns with OUR part).
   { key: "company-campaigns", band: "work", label: "Campaigns", gate: { kind: "agencyRow", row: "agency" } },
-  // DW-10d (DW-D34): optional, company-wide (no department to narrow to). The cockpit's gate plus the Clients row's.
-  { key: "client-health", band: "work", label: "Client health", gate: { kind: "all", gates: [GM_CONSOLE, CLIENTS_GATE] }, placement: "optional" },
+  // DW-10d (DW-D34): optional, company-wide. Its own key, like `company-campaigns`: the Office of the GM is a workspace WITH a node, and
+  // the department block (`client-health`) would narrow the board to that node. The cockpit's gate plus the Clients row's.
+  { key: "company-client-health", band: "work", label: "Client health", gate: { kind: "all", gates: [GM_CONSOLE, CLIENTS_GATE] }, placement: "optional" },
   { key: "learning-compliance", band: "growth", label: "Learning compliance", gate: { kind: "all", gates: [GM_FULL, { kind: "cap", cap: "lms.progress.view" }] } },
   { key: "appraisal-cycle", band: "growth", label: "Appraisal cycle", gate: { kind: "all", gates: [GM_FULL, { kind: "cap", cap: "appraisal.read" }] } },
 ];

@@ -23,7 +23,7 @@ import { Pulse } from "./Pulse";
 import { Projects } from "./Projects";
 import { Campaigns } from "./Campaigns";
 import { Requests } from "./Requests";
-import { ClientHealth } from "./ClientHealth";
+import { ClientHealth, CompanyClientHealth } from "./ClientHealth";
 import { Learning } from "./Learning";
 import { Appraisal } from "./Appraisal";
 import { Decisions } from "./Decisions";
@@ -77,6 +77,8 @@ export const OVERVIEW_WIDGETS: Readonly<Record<string, OverviewWidgetComponent>>
   company: Company,
   departments: Departments,
   "company-campaigns": CompanyCampaigns,
+  // DW-10d: the company's Client health, optional (DW-D34), never narrowed to a department.
+  "company-client-health": CompanyClientHealth,
   "learning-compliance": CompanyLearning,
   "appraisal-cycle": CompanyAppraisals,
 };
