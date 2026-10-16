@@ -1,11 +1,12 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { getDepartment, getServicedCompanies, computeDeptKpis, computeProjectHealth, computeTeamRoster } from "@/lib/departments";
+import { getDepartment, getDepartmentNode, getServicedCompanies, computeDeptKpis, computeProjectHealth, computeTeamRoster } from "@/lib/departments";
 import { listProjects, listMembers } from "@/lib/entities";
-import { listPmTasks, listMilestones, listProjectStatuses } from "@/lib/pm";
+import { listPmTasks, listMilestones, listProjectStatuses, projectProgress, type Milestone, type ProjectStatus } from "@/lib/pm";
 import { listWorkActivity, objectLabel, activityHref, humanizeVerb, actorLabel } from "@/lib/activity";
 import { listClaudeSeats, mySeat, launcherSeatProps } from "@/lib/claudeSeats";
 import { toolkitFor } from "@/lib/deptToolkits";
@@ -18,6 +19,7 @@ import { GmCockpit } from "@/components/departments/gm/GmCockpit";
 import { GmAccessDenied } from "@/components/departments/gm/GmAccessDenied";
 import { pilotFrame } from "@/components/overview/pilot";
 import { Card } from "@/components/ui";
+import { Skeleton } from "@/components/Feedback";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ServicedBlock } from "@/components/departments/ServicedBlock";
 import { KpiStrip } from "@/components/departments/KpiStrip";
@@ -52,7 +54,10 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
   const { deptId } = await params;
   if (!tenant) notFound();
 
-  const dept = await getDepartment(userId, tenant, deptId);
+  // The page's own branches (the functional redirect, the GM cockpit, the Overview frame) need only the department's identity, so they
+  // read the light org-structure node and the Overview's header and widgets are not held behind `getDepartment` (every tenant PM task
+  // plus a status read per project). The Home body that does use `dept.tasks` reads it below, behind its own <Suspense> when framed.
+  const dept = await getDepartmentNode(userId, tenant, deptId);
   if (!dept) notFound();
 
   // DW-7d: HR, Finance and IT are org nodes now, but keep their own consoles. Their department Home is
@@ -94,20 +99,50 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
     // DW-3i: the Office of the GM's page is the company Overview, and the cockpit stays under it as "More
     // from the Office of the GM" (plan §2.6 rule 1: nothing is removed), less what its blocks now show (DW-3z, plan §3.8). The
     // refusal above stays frameless, so a person without the access sees no Overview.
-    return gmFrame ? gmFrame(cockpit) : cockpit;
+    // The cockpit's reads stream behind their own boundary, so the Overview's header and widgets above it do not wait for them.
+    return gmFrame ? gmFrame(<Suspense fallback={<HomeBodyFallback label="cockpit" />}>{cockpit}</Suspense>) : cockpit;
   }
 
   // DW-3a: the Overview frames this Home body, which stays below its bands until the
   // Overview's own blocks replace it. After the GM branch, which frames its own cockpit (DW-3i). The body is built
-  // once, below, and passed through `frame`.
+  // once, as `DepartmentHomeBody`, and passed through `frame`.
   // DW-3z: under the frame, only the sections the Overview does not cover stay (plan §3.8): the Project health, Recent activity
   // and Build tools cards are the Projects block, the Activity tab and Tools & connections now, so their reads are not made.
   const frame = await pilotFrame(me, tenant, { deptId }, searchParams);
-  const keeps = (section: string) => keepsSection("department-home", section, { framed: !!frame });
+
+  // DW-9d perf: framed, the Home body (the legacy band) is its own async component under <Suspense>, so `pilotFrame`'s Overview header and
+  // widgets are sent as soon as they resolve instead of after the body's reads. Unframed, it renders exactly as before.
+  const homeBody = <DepartmentHomeBody me={me} userId={userId} tenant={tenant} deptId={deptId} framed={!!frame} searchParams={searchParams} />;
+  return frame ? frame(<Suspense fallback={<HomeBodyFallback label="department" />}>{homeBody}</Suspense>) : homeBody;
+}
+
+/** The quiet loading state of the legacy band under the Overview: two card-shaped blocks, so the band does not jump when it arrives. */
+function HomeBodyFallback({ label }: { label: string }) {
+  return (
+    <div className="fb-skeleton-cards" role="status" aria-busy="true" aria-label={`Loading the ${label} sections`}>
+      {[0, 1].map((i) => (
+        <div className="fb-skeleton-card" key={i}>
+          <Skeleton width={120} height={10} />
+          <Skeleton width="70%" height={22} />
+          <Skeleton width="100%" height={12} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// The department Home's own body: today's KPI strip, Project health, Recent activity, Build tools, Team and Serviced companies (the ones the
+// Overview frame does not cover, plan §3.8). Same reads and same output as when this lived in the page; only the place it runs moved.
+async function DepartmentHomeBody({ me, userId, tenant, deptId, framed, searchParams }: {
+  me: Awaited<ReturnType<typeof getMe>>; userId: string; tenant: string; deptId: string; framed: boolean; searchParams: SearchParams;
+}) {
+  const keeps = (section: string) => keepsSection("department-home", section, { framed });
 
   const { sscope } = await searchParams;
   const servicedScope = sscope ?? "all";
-  const [serviced, allProjects, feed, members, mySeats] = await Promise.all([
+  const [dept, serviced, allProjects, feed, members, mySeats] = await Promise.all([
+    // Memoised: the same org read the node above used, plus every tenant PM task and one status read per project.
+    getDepartment(userId, tenant, deptId),
     getServicedCompanies(userId, tenant, deptId),
     listProjects(userId, tenant).catch(() => []),
     // One over the preview limit: the extra row is never rendered, it only tells the feed whether
@@ -117,6 +152,7 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
     keeps("recent-activity") ? listMembers(userId, tenant).catch(() => []) : Promise.resolve<Awaited<ReturnType<typeof listMembers>>>([]),
     keeps("build-tools") ? listClaudeSeats(userId, tenant, "me") : Promise.resolve<Awaited<ReturnType<typeof listClaudeSeats>>>({ rows: [], unavailable: false }),
   ]);
+  if (!dept) notFound();
   const buildServicedHref = (v: "all" | string) => `/departments/${deptId}${v === "all" ? "" : `?sscope=${v}`}`;
 
   // WSUX-17: launcher chips with a per-person seat concept ("opens as
@@ -136,15 +172,20 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
   // the department's poly-assignee task list — a project can have open work
   // no one in this department is individually assigned to yet.
   const owned = allProjects.filter((p) => p.department_id === deptId);
+  // DW-9d perf: the milestones and the status registry feed ONLY the Project health cards (next milestone, open/at-risk counts, ring
+  // composition). Under the Overview frame those cards are not kept (`keeps("project-health")` false: the Projects block shows them), so the
+  // two reads per owned project are not made. The KPI strip's Progress is `projectProgress(tasks)` (what `computeProjectHealth(...).progressPct`
+  // returns, whatever the milestones or statuses are), so it is the same figure either way. Unframed, every read is made as before.
+  const showHealth = keeps("project-health");
   const [ownedTaskLists, ownedMilestoneLists, ownedStatuses] = await Promise.all([
     Promise.all(owned.map((p) => listPmTasks(userId, tenant, p.id))),
-    Promise.all(owned.map((p) => listMilestones(userId, tenant, p.id))),
-    Promise.all(owned.map((p) => listProjectStatuses(userId, tenant, p.id))),
+    showHealth ? Promise.all(owned.map((p) => listMilestones(userId, tenant, p.id))) : Promise.resolve<Milestone[][]>([]),
+    showHealth ? Promise.all(owned.map((p) => listProjectStatuses(userId, tenant, p.id))) : Promise.resolve<ProjectStatus[][]>([]),
   ]);
   // P2-05: health/KPI counts derive from the isDone/isBlocked FLAGS resolved per
   // project's own status registry (correct even when a project renamed "Done").
-  const health = owned.map((p, i) => computeProjectHealth(ownedTaskLists[i], ownedMilestoneLists[i], undefined, ownedStatuses[i]));
-  const kpis = computeDeptKpis(dept.tasks, health.map((h) => h.progressPct), undefined, dept.statusesByProject);
+  const health = showHealth ? owned.map((p, i) => computeProjectHealth(ownedTaskLists[i], ownedMilestoneLists[i], undefined, ownedStatuses[i])) : [];
+  const kpis = computeDeptKpis(dept.tasks, ownedTaskLists.map((tasks) => projectProgress(tasks)), undefined, dept.statusesByProject);
 
   const nameById = new Map(members.map((mm) => [mm.user_id, mm.name]));
   const activityTruncated = feed.length > ACTIVITY_PREVIEW_LIMIT;
@@ -234,5 +275,5 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
       <ServicedBlock envelope={serviced} scope={servicedScope} buildHref={buildServicedHref} />
     </>
   );
-  return frame ? frame(body) : body;
+  return body;
 }

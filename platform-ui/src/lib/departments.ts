@@ -84,6 +84,15 @@ export async function listDepartmentBriefs(u: string, t: string): Promise<DeptBr
   return (await departmentNodes(u, t)).map((d) => ({ id: d.id, name: d.name }));
 }
 
+/** One department's identity ({id, name}) from the memoised org structure, or null when the company has no such department node
+ *  (or the org tree could not be read, as `getDepartment`). Reads NO tasks and no statuses: the department console's layout needs
+ *  only the name for its header and toolkit, and awaiting `getDepartment` there held the whole shell on every tenant PM task plus one
+ *  status read per project. A page that uses `dept.tasks` keeps `getDepartment` (same `departmentNodes` cache, so no second org read). */
+export async function getDepartmentNode(u: string, t: string, deptId: string): Promise<DeptBrief | null> {
+  const d = (await departmentNodes(u, t)).find((x) => x.id === deptId);
+  return d ? { id: d.id, name: d.name } : null;
+}
+
 export async function listDepartments(u: string, t: string): Promise<DeptSummary[]> {
   const [depts, tasks] = await Promise.all([departmentNodes(u, t), listAllPmTasks(u, t)]);
   return depts.map((d) => {

@@ -4,7 +4,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
-import { getDepartment } from "@/lib/departments";
+import { getDepartmentNode } from "@/lib/departments";
 import { toolkitFor, visibleGroups } from "@/lib/deptToolkits";
 import { activeCompany } from "@/lib/companyContext";
 import { canReadGmConsole, isGmDept } from "@/lib/gm";
@@ -34,7 +34,9 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
   const { deptId } = await params;
   if (!tenant) notFound();
 
-  const dept = await getDepartment(userId, tenant, deptId);
+  // The header and toolkit need only the department's identity: the light org-structure read, not `getDepartment` (every tenant PM
+  // task plus a status read per project). An unknown department is a 404 exactly as before.
+  const dept = await getDepartmentNode(userId, tenant, deptId);
   if (!dept) notFound();
 
   const toolkit = toolkitFor(activeCompany(me, tenant)?.vertical, dept.name);
