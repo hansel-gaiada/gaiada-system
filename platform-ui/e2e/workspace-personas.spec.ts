@@ -296,8 +296,9 @@ const PERSONAS: Persona[] = [
     // "Front Office" slugs to no registry workspace, so the generic workspace draws under the department's own name.
     home: /\/departments\/hosp-dept-1$/, menuTitle: "Front Office", switcherName: "Front Office, Viceroy. Switch workspace",
     work: [
-      "Project Management", // the generic workspace: Project Management only,
-      "Tools & connections", // and the shared Tools row. No Requests, Campaigns or Clients: those are the agency pack's.
+      "Project Management", // the generic workspace: Project Management,
+      "Requests", // DW-10e: Requests > Sent, because Viceroy HAS routes to the agency's departments in the demo (the `hasRoutes` gate),
+      "Tools & connections", // and the shared Tools row. No Campaigns or Clients: those are the agency pack's.
     ],
     performance: PERFORMANCE,
     // Calendar and Me are rows of every workspace; the agency-only Meetings and Timesheet are TABS inside them, so the row list is the same.
@@ -483,9 +484,10 @@ test.describe("generic-pack user: the generic workspace", () => {
     const nav = menu(page, "Front Office");
     await expect(nav).toBeVisible();
     await expect(nav.getByRole("group", { name: "Work" }).getByRole("link", { name: "Project Management", exact: true })).toBeVisible();
-    await expect.poll(() => groupLabels(nav, "Work")).toEqual(["Project Management", "Tools & connections"]);
-    // The agency pack's rows are not here: the positive (Project Management) was checked above.
-    for (const row of ["Requests", "Campaigns", "Clients", "Build", "Optimize", "Publish"]) {
+    await expect.poll(() => groupLabels(nav, "Work")).toEqual(["Project Management", "Requests", "Tools & connections"]);
+    // The agency pack's rows are not here: the positive (Project Management) was checked above. Requests is here for another reason
+    // (Viceroy has routes, DW-10e), and has Sent alone.
+    for (const row of ["Campaigns", "Clients", "Build", "Optimize", "Publish"]) {
       await expect(nav.getByRole("link", { name: row, exact: true })).toHaveCount(0);
     }
     // The company's other departments are in the switcher, HR, Finance and IT as live has them (DW-7d).

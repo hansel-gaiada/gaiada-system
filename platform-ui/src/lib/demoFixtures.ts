@@ -14,6 +14,7 @@ import { pipelineDemo, portalDemo } from "./demoPipeline";
 import { clientCentreDemo, demoCentreRegisterClient, demoCentreSetBusinessType, demoIsBusinessType } from "./demoClientCentre";
 import { socialDemo, socialClientReviewPortalDemo } from "./demoSocial";
 import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
+import { requestsDemo } from "./demoRequests";
 import { agencyLeadsDemo } from "./demoAgencyLeads";
 import { webdevProvisionedSitesDemo } from "./demoWebdevProvisionedSites";
 import { webdevConsoleDemo } from "./demoWebdevConsole";
@@ -2513,6 +2514,10 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const social = socialDemo(method, p, url.searchParams, body);
   if (social) return social;
 
+  // DW-5 / DW-10e — requests between departments and across group companies (BFF §32, §60) — stateful store (lib/demoRequests.ts).
+  const requests = requestsDemo(method, p, url.searchParams, body, userId);
+  if (requests) return requests;
+
   // MI-05 — Web Dev maintenance-intake triage queue (staff console) — stateful store
   // (lib/demoWebdevChangeRequests.ts).
   const webdevCr = webdevChangeRequestsDemo(method, p, url.searchParams, body, userId);
@@ -2890,18 +2895,27 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     const nodeId = assignUnitMatch[1];
     const b = JSON.parse(body || "{}") as { targets?: string[]; module?: string; leadUserId?: string };
     const targets = Array.isArray(b.targets) ? b.targets : [];
+    // DW-10e (BFF §60.2): a ROUTING key places nobody, takes no lead, and needs each target to be the provider's client. In the demo the
+    // agency has two client records linked to group companies: the holding's and Viceroy's (lib/demoRequests.ts).
+    const routing = b.module === "asset_requests" || b.module === "engineering_requests";
+    const isClientOfProvider = (target: string) => tenantFromPath(p) === "co-agency" && (target === "co-holding" || target === "co-resort");
+    if (routing && b.leadUserId) return { status: 422, json: { error: "a route has no manager", reason: "route_has_no_lead" } };
     const companies = targets.map((id) => {
       const co = COMPANIES.find((c) => c.id === id) as { id: string; name: string } | undefined;
+      if (routing && !isClientOfProvider(id)) return { id, name: co?.name ?? id, included: false, reason: "no_group_client" };
       return { id, name: co?.name ?? id, included: true };
     });
     if (url.searchParams.get("dryRun") === "1") {
       return ok({
         dryRun: true,
+        ...(routing ? { routeOnly: true } : {}),
         unit: { nodeId, name: "Demo unit", kind: "department" },
-        items: [{ userId: DEMO_USER_ID, name: "Clement Hansel", email: "hansel@gaiada.com", role: "staff" }],
+        items: routing ? [] : [{ userId: DEMO_USER_ID, name: "Clement Hansel", email: "hansel@gaiada.com", role: "staff" }],
         companies,
       });
     }
+    const unlinked = routing ? companies.find((c) => !c.included) : undefined;
+    if (unlinked) return { status: 422, json: { error: "the target is not a client of the provider", reason: "route_needs_group_client", detail: { targetId: unlinked.id } } };
     const assignments = targets.map((t) => ({ id: demoId("sa"), target: t, status: "proposed" as const }));
     DEMO_ASSIGNMENTS.push(...assignments.map((a, i) => ({
       id: a.id, providerTenantId: tenantFromPath(p) ?? "", providerCompanyName: undefined,
