@@ -34,14 +34,14 @@ function revalidateOverviews() {
   revalidatePath("/it");
 }
 
-// The Home `NeedsMeQueue`'s decide dispatcher — one action shape over the
+// The Needs you queue's decide dispatcher — one action shape over the
 // queue's three approval-like origins, matching contract §9(a)'s generic
 // decide façade in spirit (`POST /api/:t/approvals/:id/decide {origin,
 // decision}`) WITHOUT waiting on that endpoint: it dispatches straight to
 // each origin's own already-live decide handler (no new authorization model,
 // `approvals.decide` is checked server-side per-origin exactly as today).
 // Swap the body of this function for a single call to the façade once
-// WSUX-2 ships — callers (NeedsMeQueue) never need to change.
+// WSUX-2 ships — callers never need to change.
 export async function decideQueueItem(
   tenantId: string,
   origin: QueueDecideOrigin,

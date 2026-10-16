@@ -18,7 +18,7 @@ beforeEach(() => {
 });
 
 describe("decideQueueItem: what a decide revalidates", () => {
-  it("keeps the classic pages and adds the Overview pages (DW-3c)", async () => {
+  it("keeps the home and directory pages and adds the Overview pages (DW-3c)", async () => {
     vi.mocked(platformFetch).mockResolvedValue({});
     expect(await decideQueueItem("co-a", "agency", "a1", "approved")).toEqual({ ok: true });
     expect(paths()).toEqual([

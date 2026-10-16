@@ -58,14 +58,3 @@ export async function getActivity(userId: string, tenantId: string, limit = 20):
     throw e;
   }
 }
-
-export function weeklyThroughput(rows: { occurred_at: string }[], weeks = 8): number[] {
-  const wk = 7 * 24 * 3600 * 1000;
-  const now = Date.now();
-  const series = new Array(weeks).fill(0);
-  for (const r of rows) {
-    const age = Math.floor((now - Date.parse(r.occurred_at)) / wk);
-    if (age >= 0 && age < weeks) series[weeks - 1 - age] += 1;
-  }
-  return series;
-}

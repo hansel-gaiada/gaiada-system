@@ -161,9 +161,8 @@ export function QueueRows({ items, act, ack, showCompany = true }: {
   );
 }
 
-// The shared ranked list — UX-2 §1.4. Used verbatim by both Home variants
-// (CommandCenterHome/QueueAgendaHome); a client component only because
-// approval/gate rows need optimistic decide + a toast (mirrors
+// The shared ranked list — UX-2 §1.4. Its rows and decide hook (`QueueRows`, `useQueueDecisions`) draw the Overview's
+// Needs you block. A client component only because approval/gate rows need optimistic decide + a toast (mirrors
 // components/dashboard/ApprovalsPanel.tsx's own pattern).
 export function NeedsMeQueue({ items, decide, acknowledge, emptyText }: { items: QueueItem[]; decide: Decide; acknowledge?: Acknowledge; emptyText?: string }) {
   const { visible, act, ack, toast } = useQueueDecisions(items, decide, acknowledge);

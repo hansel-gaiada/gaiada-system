@@ -1,25 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { getPendingApprovals, getMyTasks, weeklyThroughput } from "./data";
+import { getPendingApprovals, getMyTasks } from "./data";
 
 beforeEach(() => {
   process.env.PLATFORM_URL = "http://p.test";
   process.env.PLATFORM_SERVICE_TOKEN = "t";
-});
-
-describe("weeklyThroughput", () => {
-  it("buckets activity into 8 weekly counts, oldest first", () => {
-    const now = Date.now();
-    const wk = 7 * 24 * 3600 * 1000;
-    const rows = [
-      { occurred_at: new Date(now - 0.5 * wk).toISOString() },
-      { occurred_at: new Date(now - 0.6 * wk).toISOString() },
-      { occurred_at: new Date(now - 2.5 * wk).toISOString() },
-    ];
-    const series = weeklyThroughput(rows);
-    expect(series).toHaveLength(8);
-    expect(series[7]).toBe(2);
-    expect(series[5]).toBe(1);
-  });
 });
 
 describe("getPendingApprovals", () => {
