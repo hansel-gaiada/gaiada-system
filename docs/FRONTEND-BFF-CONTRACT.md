@@ -10275,7 +10275,7 @@ The pages, the Notices tab, the two Overview blocks, the Inbox line and the demo
 - **Demo.** `lib/demoNotices.ts` answers the five routes in the server's order of checks (403 before validation, an unreadable notice is 404, the 3-pin limit is 409). Seed for `co-agency`: Web Dev's pinned "Release freeze starts Friday 17:00" and plain "New code-review checklist", a past "Quarter retro notes" for the Past view, and the company-wide "Office closed for Nyepi". `u-webhead` posts to `dept-1`, `demo-hansel` anywhere and company-wide, `demo-owner` reads and posts nothing.
 - **Proofs.** vitest for the reader, the actions, the pages, both blocks, the tab, the Inbox line and the rbac parity; the e2e `e2e/dept-notices.spec.ts` (project `dept-notices`, sumopod under DEMO_MODE). The CI gate's backend suites are §57.10's.
 
-## 58. Monthly targets against actuals (DW-10b, 2026-10-15) — `platform-nest/src/modules/reports/dept-kpis.controller.ts`, `dept-kpi-targets.ts`; UI `/appraisals/department?unit=…&view=months` — **STATUS: PLANNED**
+## 58. Monthly targets against actuals (DW-10b, 2026-10-15) — `platform-nest/src/modules/reports/dept-kpis.controller.ts`, `dept-kpi-targets.ts`; UI `/appraisals/department?unit=…&view=months` — **STATUS: BUILT, PROTOTYPED (backend 10b-1 and the backend half of 10b-3: the pure suite `dept-kpi-batch.test.ts` ran locally; the HTTP/DB suite `dept-kpis-months.controller.db.test.ts` is written for the Linux CI gate; the UI, 10b-2, is not built)**
 
 **Why.** Plan §12 (DW-10) and §12.2 (row 10b). Targets are already effective-dated per month (§40.2: one approved row per unit, KPI and `effective_from` month), so a department can have a different target each month, but:
 - every read answers ONE period (`GET /dept-kpis`);
@@ -10375,6 +10375,23 @@ No new Cerbos kind, action or migration: both reads use `dept_kpi_target · read
   - Approving two months supersedes each month's earlier approved row only.
   - The activity rows are written per id.
 - **No regression:** the single propose, approve and reject routes and their tests are unchanged.
+
+### 58.6 As built (10b-1 and the backend half of 10b-3, 2026-10-16)
+
+The contract above stands. Where it left a choice open:
+
+- **Where it lives.** The three routes are on `DeptKpisController` (`dept-kpis.controller.ts`). The pure half (month window, series shape, proposal validation, batch bodies, decision order) is `dept-kpi-batch.ts`; the I/O is `dept-kpi-targets.ts`. No new Cerbos kind, action or migration.
+- **One validator for the single and the batch.** The single `POST /dept-kpis/targets` now calls the same `parseProposalShape` and `checkProposalAgainstWorkspace` as each batch item, so "exactly as a single proposal" cannot drift. Its checks, order and messages are unchanged. Existing callers see no difference.
+- **`failedId`.** The error filter did not forward it, so `HttpErrorFilter` now forwards a string `failedId` beside `error` (additive, like `field` and `reason`). A 403 from Cerbos on a batch decide keeps everything it said and gains `failedId`.
+- **The series: the window is checked after the gate.** `GET /dept-kpis/months` authorizes first (`authorizeUnitRead`), then checks `from` and `to`. A caller who may not read the unit gets 403 whatever the window says. Fields: `from > to` and a window of more than 12 months name `from`; a `to` after the current month names `to`; a value that is not `YYYY-MM` names the one that is bad, even when the other is missing.
+- **One bound only.** With only `from` or only `to`, the window is the default one (the 12 months ending with the current month), as 58.1 says ("without both"). The value that was sent is still checked.
+- **The batch propose: unit lookup before the items.** "A KPI of the unit's workspace" needs the unit's name, so the org tree is read before the items are judged. Items are then checked in order and the first problem names its index: its shape, then a duplicate `(kpiKey, effectiveFrom)` (`items[i].effectiveFrom`, i being the later of the two), then the workspace checks. If the unit does not exist, the shape and duplicate checks still run and 404 `unit_not_found` follows (the single's order). An item that is not an object is 400 `items[i]`. A missing, empty, non-list or over-36 `items` is 400 `field: "items"`; a missing `unitNodeId` is 400 `unitNodeId`, after the authorization.
+- **The batch decide: processing order.** The refusal checks of 58.3 run per id in the order given, and the first refusal answers with its `failedId`. The decisions then run in ONE transaction in the order (unit, KPI, month ascending, id), not the order given, for two reasons. An approval supersedes the approved rows of its (unit, KPI) from its month ON, so a later month approved before an earlier one would be superseded by it. And a single global lock order stops two overlapping batches from deadlocking. The answer is `decided` in the order the ids were given.
+- **What "supersedes each month's earlier approved row only" means here.** Approval keeps §40.2's rule: it supersedes the approved rows from its month on. Approving January and February together over an approved January and an approved February supersedes both old rows, listed under January's decision (February's list is empty); an approved row from an EARLIER month stays approved. The final state is what a row-by-row approval in month order would give.
+- **Rejecting.** A batch reject has no own-proposal check (as the single reject): a head or approver can reject their own proposals. It supersedes nothing.
+- **Races.** A row that is gone or no longer `proposed` between the per-id checks and the transaction aborts the whole transaction and answers 404 or 409 `not_proposed` with that `failedId`. Nothing is decided.
+- **Activity rows** are written after the commit (one per id, as the single routes write them after their own commit): `proposed` per proposal with its fields, `approved` or `rejected` per decision with `superseded` and `note`.
+- **Not measured yet:** the 10-second budget of 58.1 for the largest department's 12-month read. It is a live check on gda-aicenter, not a test.
 
 ## 59. The department calendar (DW-10c, 2026-10-15) — `platform-nest/src/core/dept-calendar.{controller,service}.ts` (new), `src/core/calendar-events.{controller,service}.ts` (the `department` visibility); migration `<prefix>_calendar_events_department.sql` (the next free prefix at landing); UI `/departments/[deptId]/schedule` — **STATUS: PLANNED**
 
