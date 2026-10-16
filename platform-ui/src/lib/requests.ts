@@ -90,6 +90,17 @@ export type RequestWork =
  *  wire carried something this UI cannot read, which is NOT the same as removed. */
 export type WorkState = { state: "live"; work: RequestWork } | { state: "removed" } | { state: "unknown" };
 
+/** A company as the wire names it (DW-10e, §60.5/§60.6). */
+export interface CompanyRef { id: string; name: string }
+
+/** The sender's view of an engineering request's price (§60.5): a STATE, never an amount. Only these two fields are read, so
+ *  an amount, a currency or a contract id that ever reached the wire is dropped here and cannot be drawn (DW-D41). */
+export const PRICE_IMPACTS = ["unassessed", "none", "changes_price"] as const;
+export type PriceImpact = (typeof PRICE_IMPACTS)[number];
+export const PRICE_AGREEMENTS = ["preparing", "awaiting_signature", "signed", "closed"] as const;
+export type PriceAgreement = (typeof PRICE_AGREEMENTS)[number];
+export interface RequestPrice { impact: PriceImpact; agreement: PriceAgreement | null }
+
 export interface RequestRow {
   id: string;
   kind: RequestKind;
@@ -104,6 +115,18 @@ export interface RequestRow {
   campaign: { id: string; name: string; partId: string } | null;
   work: WorkState;
   assetCount: number;
+  // DW-10e. Optional on purpose: absent reads as null, which is a same-company row exactly as §32 sends it.
+  /** The RECEIVING side's rows and detail (§60.6): the company that asked, its department (the name when it was sent) and the
+   *  client the work is billed to. All null on a same-company row. */
+  requestingCompany?: CompanyRef | null;
+  requesterUnit?: { id: string; name: string } | null;
+  client?: CompanyRef | null;
+  /** The SENDER's rows (§60.5): the company that takes the request, and the route it went through. Set on every row the outbound
+   *  reads return, so a row with a `receivingCompany` opens at `/requests/outbound/<id>`. */
+  receivingCompany?: CompanyRef | null;
+  routeId?: string | null;
+  /** The sender's row of an engineering request: the price state. Null for assets, and when it could not be read. */
+  price?: RequestPrice | null;
 }
 
 export interface RequestAsset { id: string; name: string; contentType: string; href: string }
@@ -127,20 +150,23 @@ const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
 const count = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
 
-function unitRef(v: unknown): UnitRef | null {
+function unitRef(v: unknown, loose = false): UnitRef | null {
   const o = obj(v);
   if (!o) return null;
-  const id = str(o.id);
+  // The sender's rows name a unit by its name alone when the wire gives no id (it is another company's tree: an id would be useless to
+  // the reader), so a loose read keeps a unit that has a name.
+  const id = str(o.id) ?? (loose && str(o.name) ? "" : null);
   if (id === null) return null;
   const name = str(o.name);
   return { id, name, unitMissing: o.unitMissing === true || name === null };
 }
 
-function normalizeWork(v: unknown): WorkState {
+/** `idless`: the sender's `work` carries no ids (§60.5: the receiver's task and change-request ids stay with the receiver). */
+function normalizeWork(v: unknown, idless = false): WorkState {
   if (v === null) return { state: "removed" };
   const o = obj(v);
-  const id = o ? str(o.id) : null;
-  if (!o || !id) return { state: "unknown" };
+  const id = o ? (str(o.id) ?? (idless ? "" : null)) : null;
+  if (!o || id === null || (!idless && !id)) return { state: "unknown" };
   if (o.type === "pm_task") {
     return {
       state: "live",
@@ -156,9 +182,34 @@ function normalizeWork(v: unknown): WorkState {
   return { state: "unknown" };
 }
 
-export function normalizeRequestRow(raw: unknown): RequestRow | null {
+function companyRef(v: unknown): CompanyRef | null {
+  const o = obj(v);
+  const id = o ? str(o.id) : null;
+  return o && id ? { id, name: str(o.name) ?? "Another company" } : null;
+}
+
+function requesterUnitRef(v: unknown): { id: string; name: string } | null {
+  const o = obj(v);
+  const name = o ? str(o.name) : null;
+  return o && name ? { id: str(o.id) ?? "", name } : null;
+}
+
+/** The price state only: two fields from a closed vocabulary. Anything else on the object (an amount, a currency, a contract) is
+ *  never copied, and a value outside the vocabulary reads as "cannot be read" (null), never as a guess. */
+export function normalizePrice(v: unknown): RequestPrice | null {
+  const o = obj(v);
+  if (!o) return null;
+  const impact = (PRICE_IMPACTS as readonly unknown[]).includes(o.impact) ? (o.impact as PriceImpact) : null;
+  if (!impact) return null;
+  const agreement = (PRICE_AGREEMENTS as readonly unknown[]).includes(o.agreement) ? (o.agreement as PriceAgreement) : null;
+  return { impact, agreement: impact === "changes_price" ? agreement : null };
+}
+
+/** `outbound`: a row from the sender's routes (§60.5) rather than §32's. */
+export function normalizeRequestRow(raw: unknown, opts: { outbound?: boolean } = {}): RequestRow | null {
   const r = obj(raw);
   if (!r) return null;
+  const outbound = opts.outbound === true;
   const id = str(r.id);
   const kind = r.kind === "assets" || r.kind === "engineering" ? r.kind : null;
   if (!id || !kind) return null;
@@ -173,17 +224,23 @@ export function normalizeRequestRow(raw: unknown): RequestRow | null {
     neededBy: str(r.neededBy),
     createdAt: str(r.createdAt),
     closedAt: str(r.closedAt),
-    fromUnit: unitRef(r.fromUnit),
-    toUnit: unitRef(r.toUnit) ?? { id: "", name: null, unitMissing: true },
+    fromUnit: unitRef(r.fromUnit, outbound),
+    toUnit: unitRef(r.toUnit, outbound) ?? { id: "", name: null, unitMissing: true },
     requestedBy: { id: (by && str(by.id)) ?? "", name: (by && str(by.name)) ?? "Unknown" },
     campaign: camp && campId ? { id: campId, name: str(camp.name) ?? "(unnamed)", partId: str(camp.partId) ?? "" } : null,
-    work: normalizeWork(r.work),
+    work: normalizeWork(r.work, outbound),
     assetCount: count(r.assetCount),
+    requestingCompany: companyRef(r.requestingCompany),
+    requesterUnit: requesterUnitRef(r.requesterUnit),
+    client: companyRef(r.client),
+    receivingCompany: outbound ? companyRef(r.receivingCompany) ?? { id: "", name: "Another company" } : null,
+    routeId: outbound ? str(r.routeId) : null,
+    price: outbound && kind === "engineering" ? normalizePrice(r.price) : null,
   };
 }
 
-export function normalizeRequestDetail(raw: unknown): RequestDetail | null {
-  const row = normalizeRequestRow(raw);
+export function normalizeRequestDetail(raw: unknown, opts: { outbound?: boolean } = {}): RequestDetail | null {
+  const row = normalizeRequestRow(raw, opts);
   const r = obj(raw);
   if (!row || !r) return null;
   const assets = (Array.isArray(r.assets) ? r.assets : []).flatMap((a): RequestAsset[] => {
@@ -200,6 +257,168 @@ export function normalizeSummary(raw: unknown): RequestSummary | null {
   const sent = r ? obj(r.sent) : null;
   if (!inc || !sent || typeof inc.open !== "number" || typeof sent.open !== "number") return null;
   return { incoming: { open: inc.open, oldestOpenAt: str(inc.oldestOpenAt) }, sent: { open: sent.open } };
+}
+
+// ── DW-10e: requests across group companies (docs/FRONTEND-BFF-CONTRACT.md §60) ──────────────────────────────
+
+/** DW-D40: `company` = everything the company sent (the caller is a manager or company admin there); `own` = only what the caller sent. */
+export type OutboundScope = "company" | "own";
+
+export interface OutboundSummary { scope: OutboundScope; sent: { open: number } }
+
+/** `GET requests/outbound/summary` (§60.5). A missing or unknown scope is a broken answer, not a guess at `own`. */
+export function normalizeOutboundSummary(raw: unknown): OutboundSummary | null {
+  const r = obj(raw);
+  const sent = r ? obj(r.sent) : null;
+  if (!r || !sent || typeof sent.open !== "number" || !Number.isFinite(sent.open) || sent.open < 0) return null;
+  if (r.scope !== "company" && r.scope !== "own") return null;
+  return { scope: r.scope, sent: { open: sent.open } };
+}
+
+/** One route of the active company (§60.5 `GET requests/routes`): the requesting company may send `kind` requests to `unit` of `company`. */
+export interface RequestRoute { routeId: string; kind: RequestKind; company: CompanyRef; unit: { name: string } }
+export interface RoutesRead { enabled: boolean; routes: RequestRoute[] }
+
+/** A 200 that is not `{enabled, routes[]}` is a broken read (null), so a page never reads it as "no routes". A route that is not
+ *  readable is dropped alone. */
+export function normalizeRoutes(raw: unknown): RoutesRead | null {
+  const r = obj(raw);
+  if (!r || typeof r.enabled !== "boolean" || !Array.isArray(r.routes)) return null;
+  const routes = r.routes.flatMap((x): RequestRoute[] => {
+    const o = obj(x);
+    const routeId = o ? str(o.routeId) : null;
+    const kind = o && (o.kind === "assets" || o.kind === "engineering") ? o.kind : null;
+    const company = o ? companyRef(o.company) : null;
+    const unit = o ? obj(o.unit) : null;
+    const unitName = unit ? str(unit.name) : null;
+    return routeId && kind && company && unitName ? [{ routeId, kind, company, unit: { name: unitName } }] : [];
+  });
+  return { enabled: r.enabled, routes };
+}
+
+/** "To Creatives · Gaia Digital Agency": the route as the form and the chooser name it. */
+export const routeToText = (r: Pick<RequestRoute, "company" | "unit">): string => `To ${r.unit.name} · ${r.company.name}`;
+
+/** The quick action's words (§60.9): "Ask Creatives at Gaia Digital Agency for assets", or "Ask Web Dev at Gaia Digital Agency". */
+export const routeAskLabel = (r: Pick<RequestRoute, "kind" | "company" | "unit">): string =>
+  `Ask ${r.unit.name} at ${r.company.name}${r.kind === "assets" ? " for assets" : ""}`;
+
+export const routeHref = (routeId: string): string => `/requests/new?route=${encodeURIComponent(routeId)}`;
+
+/** The route a `?route=` names, among the routes the company has. Null when it is not one of them. */
+export function findRoute(routes: readonly RequestRoute[], raw: string | string[] | undefined): RequestRoute | null {
+  const v = Array.isArray(raw) ? raw[0] : raw;
+  return v ? routes.find((r) => r.routeId === v) ?? null : null;
+}
+
+/** A row the sender's routes returned (it names the company that takes it), as opposed to §32's. */
+export const isOutboundRow = (r: Pick<RequestRow, "receivingCompany">): boolean => !!r.receivingCompany;
+
+/** A row on the RECEIVING side that another company asked for (§60.6). */
+export const isAcrossIncoming = (r: Pick<RequestRow, "requestingCompany">): boolean => !!r.requestingCompany;
+
+/** Where a row opens: the sender's page for a request to another company, else the ordinary request page. */
+export const requestHref = (r: Pick<RequestRow, "id" | "receivingCompany">): string =>
+  isOutboundRow(r) ? `/requests/outbound/${encodeURIComponent(r.id)}` : `/requests/${encodeURIComponent(r.id)}`;
+
+/** The row's receiver: "To Creatives · Gaia Digital Agency" for another company, else the department's name (§60.9). */
+export function toText(r: Pick<RequestRow, "toUnit" | "receivingCompany">): string {
+  return r.receivingCompany ? `To ${unitText(r.toUnit)} · ${r.receivingCompany.name}` : unitText(r.toUnit);
+}
+
+/** Who asked, on the receiving side: "Viceroy · Front Office" for another company's request, else the department's name (§60.6). */
+export function fromText(r: Pick<RequestRow, "fromUnit" | "requestingCompany" | "requesterUnit">): string {
+  if (!r.requestingCompany) return unitText(r.fromUnit);
+  return r.requesterUnit?.name ? `${r.requestingCompany.name} · ${r.requesterUnit.name}` : r.requestingCompany.name;
+}
+
+/** The price state as a sentence (§60.9). A STATE: this takes no amount and draws none. `provider` is the company doing the work,
+ *  `requester` the company that asked. */
+export function priceText(price: RequestPrice | null | undefined, names: { provider: string; requester: string }): string {
+  if (!price) return "The price state cannot be read.";
+  if (price.impact === "unassessed") return "Not assessed yet";
+  if (price.impact === "none") return "No price change";
+  switch (price.agreement) {
+    case "awaiting_signature": return `Waiting for ${names.requester}'s signature in ${names.provider}'s client portal`;
+    case "signed": return "Price agreed";
+    case "closed": return `The price agreement was declined or withdrawn; ${names.provider} will re-assess`;
+    default: return `${names.provider} is preparing a price agreement`;
+  }
+}
+
+/** A price agreement that is a draft, sent or signed holds the request: it cannot be cancelled while one is live (§60.5). */
+export const hasLiveAgreement = (price: RequestPrice | null | undefined): boolean =>
+  !!price && price.impact === "changes_price"
+  && (price.agreement === "preparing" || price.agreement === "awaiting_signature" || price.agreement === "signed");
+
+export interface OutboundActionAudience {
+  /** The signed-in person sent it (`requestedBy.id`). */
+  isRequester: boolean;
+  /** A manager or company admin of the requesting company (`work_request.read_across`, the nearest mirror of §36's `cancel`). */
+  canManage: boolean;
+}
+
+/** Cancel on the sender's page (§60.9): the requester or the company's manager or admin, while `open`; an engineering request only
+ *  while its change request is `new` and no price agreement is live. Cosmetic: the server decides (an owner without the manager
+ *  role reads 403 as a sentence). */
+export function outboundActions(
+  req: Pick<RequestRow, "kind" | "status" | "work" | "price">, who: OutboundActionAudience,
+): { cancel: boolean } {
+  const open = req.status === "open";
+  const assets = req.kind === "assets";
+  const crNew = req.work.state === "live" && req.work.work.type === "change_request" && req.work.work.status === "new";
+  return { cancel: (who.isRequester || who.canManage) && open && (assets || (crNew && !hasLiveAgreement(req.price))) };
+}
+
+/** One file of a request the sender may download (§60.5 `outbound/:id/files`). `url` is set on a link row, which has no bytes. */
+export interface OutboundFile { id: string; filename: string; contentType: string; byteSize: number | null; createdAt: string | null; url: string | null }
+
+export function normalizeOutboundFiles(raw: unknown): OutboundFile[] | null {
+  if (!Array.isArray(raw)) return null;
+  return raw.flatMap((f): OutboundFile[] => {
+    const o = obj(f);
+    const id = o ? str(o.id) : null;
+    if (!o || !id) return [];
+    return [{
+      id, filename: str(o.filename) ?? id, contentType: str(o.contentType) ?? "",
+      byteSize: typeof o.byteSize === "number" && Number.isFinite(o.byteSize) ? o.byteSize : null, createdAt: str(o.createdAt), url: str(o.url),
+    }];
+  });
+}
+
+/** The two proxies the sender's browser downloads through (`app/api/requests/outbound/...`): the platform path itself is not callable. */
+export const outboundAssetHref = (requestId: string, assetId: string): string =>
+  `/api/requests/outbound/${encodeURIComponent(requestId)}/assets/${encodeURIComponent(assetId)}`;
+export const outboundFileHref = (requestId: string, fileId: string): string =>
+  `/api/requests/outbound/${encodeURIComponent(requestId)}/files/${encodeURIComponent(fileId)}`;
+
+/** The body of `POST requests/outbound` (§60.5). The route names the department, so there is no `toUnitId` and no campaign part. */
+export interface OutboundRequestBody {
+  routeId: string;
+  kind: RequestKind;
+  title: string;
+  brief?: string;
+  neededBy?: string;
+  form: Record<string, unknown>;
+}
+
+/** What the form's draft check produced, as the outbound body: the route replaces the department, and a campaign part is never sent. */
+export function outboundBodyFrom(routeId: string, body: RequestBody): OutboundRequestBody {
+  return {
+    routeId, kind: body.kind, title: body.title,
+    ...(body.brief !== undefined ? { brief: body.brief } : {}),
+    ...(body.neededBy !== undefined ? { neededBy: body.neededBy } : {}),
+    form: body.form,
+  };
+}
+
+/** Merge the §32 read with the sender read into one list, newest first (§60.9). */
+export function mergeNewestFirst(...lists: readonly (readonly RequestRow[])[]): RequestRow[] {
+  const t = (r: RequestRow) => {
+    const v = Date.parse(r.createdAt ?? "");
+    return Number.isNaN(v) ? 0 : v;
+  };
+  return lists.flat().slice().sort((a, b) => t(b) - t(a));
 }
 
 // ── words for the page ───────────────────────────────────────────────────────────────────────────
@@ -223,9 +442,9 @@ export function humanize(s: string): string {
   return t ? t[0].toUpperCase() + t.slice(1) : "";
 }
 
-/** "Marketing to Creatives". */
-export function routeText(r: Pick<RequestRow, "fromUnit" | "toUnit">): string {
-  return `${unitText(r.fromUnit)} to ${unitText(r.toUnit)}`;
+/** "Marketing to Creatives". On the receiving side of another company's request (DW-10e), "Viceroy · Front Office to Creatives". */
+export function routeText(r: Pick<RequestRow, "fromUnit" | "toUnit" | "requestingCompany" | "requesterUnit">): string {
+  return `${fromText(r)} to ${unitText(r.toUnit)}`;
 }
 
 /** The live work item in a sentence. A deleted item says so; an unreadable one says it cannot be read. */
@@ -458,13 +677,16 @@ export interface OfferedActions { cancel: boolean; deliver: boolean; deliverMore
 /** Cancel: the requester while `open` (an engineering request only while its change request is still `new`, §32.5).
  *  Deliver and Deliver more: assets only; a manager, the receiving head or an assignee. Decline: assets only, `open`
  *  only; a manager or the receiving head. */
-export function requestActions(req: Pick<RequestRow, "kind" | "status" | "work">, who: ActionAudience): OfferedActions {
+export function requestActions(req: Pick<RequestRow, "kind" | "status" | "work" | "requestingCompany">, who: ActionAudience): OfferedActions {
   const open = req.status === "open";
   const assets = req.kind === "assets";
   const crNew = req.work.state === "live" && req.work.work.type === "change_request" && req.work.work.status === "new";
   const mayDeliver = assets && (who.canDecide || who.isAssignee === true);
+  // §60.6: the receiving company cannot cancel another company's request (409 `requester_side_only`); it declines. So a row that
+  // another company asked for never offers Cancel here, whoever the viewer is.
+  const crossRow = !!req.requestingCompany;
   return {
-    cancel: who.isRequester && open && (assets || crNew),
+    cancel: !crossRow && who.isRequester && open && (assets || crNew),
     deliver: mayDeliver && open,
     deliverMore: mayDeliver && req.status === "delivered",
     decline: assets && open && who.canDecide,
@@ -526,8 +748,9 @@ export function formFieldText(field: string | undefined): string | null {
 }
 
 /** Typed refusals from the §32.5 routes (and the extra codes of §32.10 #6) as plain sentences. */
-export function requestErrorText(r: RequestRefusal): string {
+export function requestErrorText(r: RequestRefusal, opts: { company?: string } = {}): string {
   const d = r.detail ?? {};
+  const company = opts.company;
   switch (r.reason) {
     case "body_invalid":
       return "The request could not be read. Reload the page and try again.";
@@ -575,6 +798,39 @@ export function requestErrorText(r: RequestRefusal): string {
     }
     case "already_in_progress":
       return "Web Dev has already accepted this work, so it can no longer be cancelled here.";
+    // DW-10e (§60.5): the sender's refusals. `company` is the receiving company's name when the caller knows it from the route.
+    case "route_invalid":
+      return "Choose one of your company's routes to send this request.";
+    case "route_not_found":
+      return "Your company can no longer send requests there.";
+    case "route_inactive": {
+      const s = typeof d.status === "string" ? d.status : "";
+      const who = company ?? "That company";
+      const why =
+        s === "proposed" ? `${who} has not accepted the route yet.`
+        : s === "suspended" ? `${who} has paused the route.`
+        : s === "revoked" ? `The route to ${who} has been withdrawn.`
+        : s === "orphaned" ? `The department there has been removed from the org chart.`
+        : s === "changed" ? "The route changed while you were sending. Reload the page and look again."
+        : "The route is not active.";
+      return `Your company cannot send requests there right now. ${why}`;
+    }
+    case "route_unit_unavailable":
+      return `${company ?? "That company"}'s department is no longer in its org chart, so it cannot take requests. An administrator has to relink or withdraw the route.`;
+    case "group_client_missing":
+      return `${company ?? "That company"} has not set your company up as a client yet. Ask an administrator.`;
+    case "group_client_ambiguous":
+      return `${company ?? "That company"} has your company down as a client more than once, so it cannot place the request. Ask an administrator there to merge them.`;
+    case "request_routes_disabled":
+      return "Requests between group companies are switched off.";
+    case "requester_side_only":
+      return "Only the company that sent this request can cancel it. Decline it instead, and the requester is told.";
+    case "price_agreement_open":
+      return "A price agreement is already open for this request, so it can no longer be cancelled here. The receiving team declines it in triage and settles the agreement.";
+    case "asset_not_found":
+      return "That asset is no longer part of this request.";
+    case "file_not_found":
+      return "That file is no longer available.";
     case "intake_project_unavailable":
       return "The receiving department's requests project has been removed, so it cannot take requests until it is restored.";
     default:
@@ -637,7 +893,61 @@ export function originsByChangeRequest(rows: readonly RequestRow[]): Record<stri
   const out: Record<string, RequestOrigin> = {};
   for (const r of rows) {
     if (r.work.state !== "live" || r.work.work.type !== "change_request") continue;
-    out[r.work.work.id] = { requestId: r.id, from: unitText(r.fromUnit), person: r.requestedBy.name };
+    out[r.work.work.id] = { requestId: r.id, from: fromText(r), person: r.requestedBy.name };
   }
   return out;
+}
+
+// ── DW-10e: the lists that merge §32's read with the sender read (§60.9) ─────────────────────────────
+
+/** A read as the readers answer it (`ReadResult`, structurally; that type is server-only and this file is not). */
+type Read<T> = { kind: "ok"; data: T } | { kind: "forbidden" } | { kind: "unavailable"; reason: string };
+
+/** The part of a merged list that could not be read: the person's asks of other departments (§32) or of other companies (§60.5). */
+export interface SentFailure { part: "departments" | "companies"; kind: "forbidden" | "unavailable"; reason?: string }
+
+export interface MergedSent {
+  /** What the two reads returned, newest first. When a part failed this is the other part alone, and the list says so. */
+  rows: RequestRow[];
+  /** The sender read's answer (DW-D40), or null when it did not answer. */
+  scope: OutboundScope | null;
+  /** How many of `rows` are requests to other companies. */
+  acrossCount: number;
+  failed: SentFailure[];
+}
+
+/** One list from the two reads ("My requests", a department's Sent tab). It never shows a shorter list as if it were whole: a part
+ *  that failed is reported in `failed`, and the page says which part could not be read (§60.9). */
+export function mergeSentReads(
+  departments: Read<readonly RequestRow[]>, companies: Read<{ scope: OutboundScope; rows: readonly RequestRow[] }>,
+): MergedSent {
+  const failed: SentFailure[] = [];
+  const part = (which: SentFailure["part"], r: Read<unknown>) => {
+    if (r.kind === "forbidden") failed.push({ part: which, kind: "forbidden" });
+    else if (r.kind === "unavailable") failed.push({ part: which, kind: "unavailable", reason: r.reason });
+  };
+  part("departments", departments);
+  part("companies", companies);
+  const own = departments.kind === "ok" ? departments.data : [];
+  const across = companies.kind === "ok" ? companies.data.rows : [];
+  return {
+    rows: mergeNewestFirst(own, across),
+    scope: companies.kind === "ok" ? companies.data.scope : null,
+    acrossCount: across.length,
+    failed,
+  };
+}
+
+/** The words over a sent list, from the sender read's scope (DW-D40). In `own` only the caller's requests to other companies are
+ *  shown, and the page says so; in `company` the company's managers and administrators see every one it sent. */
+export function sentScopeCopy(scope: OutboundScope | null, company: string | null): { title: string; hint: string; note: string | null } {
+  const co = company ?? "your company";
+  if (scope === "company") {
+    return { title: `Requests ${co} sent`, hint: `Asks to other departments, and every request ${co} sent to other companies. You see them all as a manager or administrator.`, note: null };
+  }
+  return {
+    title: "Requests you sent",
+    hint: "Asks you made of other departments and of other companies, and where each one stands.",
+    note: scope === "own" ? `Only the requests you sent to other companies are shown. Managers and administrators of ${co} see all of them.` : null,
+  };
 }
