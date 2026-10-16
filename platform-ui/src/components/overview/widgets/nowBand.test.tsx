@@ -60,10 +60,10 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("the Now band is registered (DW-3c)", () => {
-  it("hosts Needs you, Today, Your numbers (DW-3d), My activity (DW-3j), Pulse (DW-3e), the Condition (DW-3k), the Work blocks (DW-3f), the Growth blocks (DW-3g), the company blocks (DW-3i) and Client health (DW-10d), and still no other block", () => {
+  it("hosts Needs you, Today, Your numbers (DW-3d), My activity (DW-3j), Pulse (DW-3e), the Condition (DW-3k), the Work blocks (DW-3f), the Growth blocks (DW-3g), the company blocks (DW-3i) Client health (DW-10d) and the two notice blocks (DW-10a-2), and still no other block", () => {
     expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual([
-      "appraisal", "appraisal-cycle", "campaigns", "client-health", "company", "company-campaigns", "company-client-health", "condition", "decisions", "departments", "learning", "learning-compliance",
-      "my-activity", "needs-you", "projects", "pulse", "requests", "today", "your-numbers",
+      "appraisal", "appraisal-cycle", "campaigns", "client-health", "company", "company-campaigns", "company-client-health", "company-notices", "condition", "decisions", "departments", "learning", "learning-compliance",
+      "my-activity", "needs-you", "notices", "projects", "pulse", "requests", "today", "your-numbers",
     ]);
     // `condition` is the department's banner and strip (DW-3k); the six company blocks are DW-3i's.
     expect(hasOverviewWidget("condition")).toBe(true);
@@ -77,7 +77,8 @@ describe("the Now band is registered (DW-3c)", () => {
       // The company frame has no Your numbers (it is the department's block); every department workspace does. For a plain member
       // the company frame has Today and, in an agency, the campaigns across departments: every other block is behind the cockpit's gates.
       expect(bands.map((b) => b.band), ws.key).toEqual(company ? ["now", "work"] : ["now", "you", "department", "work", "growth"]);
-      expect(bands[0].widgets.map((w) => w.key), ws.key).toEqual(company ? ["today"] : ["needs-you", "today"]);
+      // DW-10a-2: the notice blocks follow Today, fixed (DW-D34): the unit's in a department, the company's in the company frame.
+      expect(bands[0].widgets.map((w) => w.key), ws.key).toEqual(company ? ["today", "company-notices"] : ["needs-you", "today", "notices"]);
       if (!company) expect(bands[1].widgets.map((w) => w.key), ws.key).toEqual(["your-numbers", "my-activity"]);
       if (!company) expect(bands[2].widgets.map((w) => w.key), ws.key).toEqual(["condition", "pulse"]);
       if (!company) expect(bands[3].widgets.map((w) => w.key), ws.key).toEqual(["projects", "campaigns", "requests"]);
@@ -87,7 +88,7 @@ describe("the Now band is registered (DW-3c)", () => {
 
   it("gives a plain member's company frame Today and Campaigns, and neither decisions, money nor company figures (DW-3i)", () => {
     const bands = selectBands(COMPANY_SUBJECT.widgets, { me: person, tenantId: "co-a", unitPath: [] }, (key) => hasOverviewWidget(key));
-    expect(bands.map((b) => [b.band, b.widgets.map((w) => w.key)])).toEqual([["now", ["today"]], ["work", ["company-campaigns"]]]);
+    expect(bands.map((b) => [b.band, b.widgets.map((w) => w.key)])).toEqual([["now", ["today", "company-notices"]], ["work", ["company-campaigns"]]]);
   });
 });
 

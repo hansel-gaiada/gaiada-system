@@ -338,10 +338,10 @@ describe("the Overview, Performance and tools data", () => {
     }
   });
 
-  it("marks exactly Needs you, the department condition and the company's decisions as fixed (DW-D34)", () => {
+  it("marks exactly Needs you, the department condition, the company's decisions and the two notice blocks as fixed (DW-D34, DW-10a-2)", () => {
     const fixed = new Set<string>();
     for (const ws of ALL) for (const w of ws.overview) if (w.placement === "fixed") fixed.add(w.key);
-    expect([...fixed].sort()).toEqual(["condition", "decisions", "needs-you"]);
+    expect([...fixed].sort()).toEqual(["company-notices", "condition", "decisions", "needs-you", "notices"]);
     // The same key is never fixed in one list and not in another.
     for (const ws of ALL) for (const w of ws.overview) expect(w.placement === "fixed", `${ws.key}/${w.key}`).toBe(fixed.has(w.key));
   });
@@ -434,5 +434,38 @@ describe("departmentOverviewHref (DW-8e)", () => {
     expect(departmentOverviewHref("agency", { id: "d-it-co-a", name: "IT" }, "co-a")).toBe("/it");
     expect(departmentOverviewHref("agency", { id: "d-web", name: "Web Dev" }, "co-a")).toBe("/departments/d-web");
     expect(departmentOverviewHref("hospitality", { id: "d-hk", name: "Housekeeping" }, "co-h")).toBe("/departments/d-hk");
+  });
+});
+
+describe("the Notices tab on the Overview row (DW-10a-2, BFF section 57.8)", () => {
+  const overviewRow = (ws: Workspace) => sidebarRows(ws).top.find((r) => r.key === "overview")!;
+
+  it("follows Overview in every workspace, ungated, and is built (no ticket)", () => {
+    for (const ws of ALL) {
+      const tabs = overviewRow(ws).tabs;
+      expect(tabs.map((t) => t.key), ws.key).toEqual(["overview", "notices"]);
+      expect(tabs[0].href, ws.key).toBe(ws.overviewHref);
+      expect(tabs[1].gate, ws.key).toBeUndefined();
+      expect(isPlanned(tabs[1]), ws.key).toBe(false);
+      expect(isPlanned(overviewRow(ws)), ws.key).toBe(false);
+    }
+  });
+
+  it("opens the unit's board for a department workspace, HR, Finance and IT included, and the company-wide board for the Office of the GM", () => {
+    for (const ws of ALL) {
+      const href = overviewRow(ws).tabs[1].href;
+      expect(href, ws.key).toBe(ws.kind === "office" ? "/notices" : "/departments/{dept}/notices");
+    }
+    expect(hrefFor("/departments/{dept}/notices", { deptId: "d-hr" })).toBe("/departments/d-hr/notices");
+  });
+
+  it("is dropped by hrefFor when the workspace has no department id, so it is never offered a link to nowhere", () => {
+    expect(hrefFor(overviewRow(workspaceBySlug("hr")!).tabs[1].href, { deptId: null })).toBeNull();
+    expect(hrefFor(overviewRow(workspaceBySlug("gm")!).tabs[1].href, { deptId: null })).toBe("/notices");
+  });
+
+  it("lands on page files that exist", () => {
+    expect(existsSync(pageFile("/departments/{dept}/notices"))).toBe(true);
+    expect(existsSync(pageFile("/notices"))).toBe(true);
   });
 });

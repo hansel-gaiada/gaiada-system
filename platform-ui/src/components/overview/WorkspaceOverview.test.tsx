@@ -80,10 +80,10 @@ describe("WorkspaceOverview: with no block to draw", () => {
     expect(screen.getByText(/The Company Overview is being built/)).toBeInTheDocument();
   });
 
-  it("hosts the Now band's two blocks, Your numbers, My activity, Pulse, the Condition, the Work blocks, the Growth blocks and the six company blocks, and no other (DW-3c, DW-3d, DW-3j, DW-3e, DW-3k, DW-3f, DW-3g, DW-3i)", () => {
+  it("hosts the Now band's two blocks, Your numbers, My activity, Pulse, the Condition, the Work blocks, the Growth blocks the six company blocks and the two notice blocks, and no other (DW-10a-2, DW-3c, DW-3d, DW-3j, DW-3e, DW-3k, DW-3f, DW-3g, DW-3i)", () => {
     expect(Object.keys(OVERVIEW_WIDGETS).sort()).toEqual([
-      "appraisal", "appraisal-cycle", "campaigns", "client-health", "company", "company-campaigns", "company-client-health", "condition", "decisions", "departments", "learning", "learning-compliance",
-      "my-activity", "needs-you", "projects", "pulse", "requests", "today", "your-numbers",
+      "appraisal", "appraisal-cycle", "campaigns", "client-health", "company", "company-campaigns", "company-client-health", "company-notices", "condition", "decisions", "departments", "learning", "learning-compliance",
+      "my-activity", "needs-you", "notices", "projects", "pulse", "requests", "today", "your-numbers",
     ]);
     expect(hasOverviewWidget("needs-you")).toBe(true);
     expect(hasOverviewWidget("pulse")).toBe(true);
@@ -363,5 +363,45 @@ describe("WorkspaceOverview: the person's own blocks and the Customise control (
     render(<WorkspaceOverview me={hotel} tenantId="co-h" subject={gated} period="month" now={MORNING} widgets={host([])} customise={prefs({ hide: [], show: ["client-health"] })} />);
     expect(document.querySelector('li[data-widget="client-health"]')).toBeNull();
     expect(document.querySelector('li[data-widget="today"]')).not.toBeNull();
+  });
+});
+
+describe("WorkspaceOverview: the notice blocks are placed where they can read (DW-10a-2)", () => {
+  const host: Record<string, OverviewWidgetComponent> = {
+    notices: () => <p>unit notices drawn</p>,
+    "company-notices": () => <p>company notices drawn</p>,
+  };
+  const subject = (over: Partial<OverviewSubject>): OverviewSubject => ({
+    ...webDev,
+    widgets: [
+      { key: "notices", band: "now", label: "Notices", placement: "fixed" },
+      { key: "company-notices", band: "now", label: "Company notices", placement: "fixed" },
+    ],
+    ...over,
+  });
+
+  it("draws the department block for a workspace with an org node, and the company's block only where the company frame lists it", () => {
+    draw({ subject: subject({ widgets: [{ key: "notices", band: "now", label: "Notices", placement: "fixed" }] }), widgets: host });
+    expect(screen.getByText("unit notices drawn")).toBeInTheDocument();
+    expect(screen.queryByText("company notices drawn")).not.toBeInTheDocument();
+  });
+
+  it("does not place the department block in a workspace with no org node (it would have nothing to read), and says nothing in its place", () => {
+    draw({ subject: subject({ deptId: null, unitPath: [], widgets: [{ key: "notices", band: "now", label: "Notices", placement: "fixed" }, { key: "today", band: "now", label: "Today" }] }), widgets: { ...host, today: () => <p>today drawn</p> } });
+    expect(screen.queryByText("unit notices drawn")).not.toBeInTheDocument();
+    expect(screen.getByText("today drawn")).toBeInTheDocument();
+  });
+
+  it("draws the company's block in the company frame, which has no node", () => {
+    draw({ subject: COMPANY_SUBJECT, widgets: host });
+    expect(screen.getByText("company notices drawn")).toBeInTheDocument();
+    expect(screen.queryByText("unit notices drawn")).not.toBeInTheDocument();
+  });
+
+  it("cannot be hidden: a forged cookie that lists them as hidden changes nothing (fixed, DW-D34)", () => {
+    const customise = { prefs: { "web-dev": { hide: ["notices"], show: [] } }, setWidget: vi.fn().mockResolvedValue(undefined) };
+    draw({ subject: subject({ widgets: [{ key: "notices", band: "now", label: "Notices", placement: "fixed" }] }), widgets: host, customise });
+    expect(screen.getByText("unit notices drawn")).toBeInTheDocument();
+    expect(document.querySelector('li[data-widget="notices"]')).toBeNull();
   });
 });

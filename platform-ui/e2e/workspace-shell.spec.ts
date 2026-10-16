@@ -151,8 +151,17 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
     await expect(page).toHaveURL(/\/departments\/dept-5\/activity$/);
     await expect(strip.getByRole("link", { name: "Activity" })).toHaveAttribute("aria-current", "page");
 
-    // A single-tab row (Overview) has no strip at all.
+    // The Overview row has two tabs since DW-10a-2 (Overview, then Notices: the company-wide board for the Office of the GM), so it has a strip.
     await page.goto("/departments/dept-5");
+    await expect(menu(page, "Office of the GM")).toBeVisible();
+    const overview = page.getByRole("navigation", { name: "Overview sections" });
+    await expect(overview.getByRole("link")).toHaveText(["Overview", "Notices"]);
+    await expect(overview.getByRole("link", { name: "Notices" })).toHaveAttribute("href", "/notices");
+    await expect(overview.getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("navigation", { name: /sections$/ })).toHaveCount(1);
+
+    // A single-tab row (My tasks) has no strip at all.
+    await page.goto("/me/tasks");
     await expect(menu(page, "Office of the GM")).toBeVisible();
     await expect(page.getByRole("navigation", { name: /sections$/ })).toHaveCount(0);
   });

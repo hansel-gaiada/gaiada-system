@@ -126,10 +126,10 @@ describe("selectBands", () => {
     }
     // For a plain member the company frame has Today and, in an agency, the campaigns across departments (DW-3i): decisions, the
     // company's money and figures, the departments and the growth blocks are behind the cockpit's gates (overviewCompany.test.ts).
-    expect(selectBands(COMPANY_SUBJECT.widgets, ctx).map((b) => [b.band, b.widgets.map((w) => w.key)])).toEqual([["now", ["today"]], ["work", ["company-campaigns"]]]);
-    // Department workspaces have Needs you and Today.
+    expect(selectBands(COMPANY_SUBJECT.widgets, ctx).map((b) => [b.band, b.widgets.map((w) => w.key)])).toEqual([["now", ["today", "company-notices"]], ["work", ["company-campaigns"]]]);
+    // Department workspaces have Needs you, Today and the unit's Notices (DW-10a-2).
     const dept = WORKSPACES.find((w) => w.key === "web-dev")!;
-    expect(selectBands(dept.overview, ctx)[0].widgets.map((w) => w.key)).toEqual(["needs-you", "today"]);
+    expect(selectBands(dept.overview, ctx)[0].widgets.map((w) => w.key)).toEqual(["needs-you", "today", "notices"]);
   });
 });
 

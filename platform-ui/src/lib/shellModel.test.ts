@@ -261,3 +261,42 @@ describe("buildShellModel: the Company area by pack (DW-8e)", () => {
     expect(keys(hotel.company)).not.toContain("campaigns");
   });
 });
+
+describe("buildShellModel: the Notices tab on the Overview row (DW-10a-2, BFF section 57.8)", () => {
+  const overviewTabs = (ws: ShellWorkspace) => ws.rows.top.find((r) => r.key === "overview")!.tabs.map((t) => [t.label, t.href]);
+  const mod = model(me([member()]), "co-a", agencyTree({ web: ["u-1"] }));
+
+  it("gives every department workspace with an org node Overview then Notices, at its own unit's page", () => {
+    expect(overviewTabs(byId(mod, "d-web"))).toEqual([["Overview", "/departments/d-web"], ["Notices", "/departments/d-web/notices"]]);
+    expect(overviewTabs(byId(mod, "d-seo"))).toEqual([["Overview", "/departments/d-seo"], ["Notices", "/departments/d-seo/notices"]]);
+  });
+
+  it("gives the Company workspace (the Office of the GM) the company-wide board, not its own unit's", () => {
+    expect(overviewTabs(byId(mod, "d-gm"))).toEqual([["Overview", "/departments/d-gm"], ["Notices", "/notices"]]);
+  });
+
+  it("gives a workspace with no org node no department Notices tab (the shell drops a {dept} href with no id), and keeps its own Overview", () => {
+    for (const id of ["slug:hr", "slug:it", "slug:finance"]) expect(overviewTabs(byId(mod, id)).map(([label]) => label), id).toEqual(["Overview"]);
+  });
+
+  it("gives HR, Finance and IT the tab once they are org nodes (DW-7d)", () => {
+    const base = agencyTree({ web: ["u-1"] });
+    const tree = node("root", "Agency", "company", [...base.children, node("d-hr", "HR", "department"), node("d-fin", "Finance", "department"), node("d-it", "IT", "department")]);
+    const withNodes = model(me([member()]), "co-a", tree);
+    expect(overviewTabs(byId(withNodes, "d-hr"))).toEqual([["Overview", "/hr"], ["Notices", "/departments/d-hr/notices"]]);
+    expect(overviewTabs(byId(withNodes, "d-fin"))).toEqual([["Overview", "/finance"], ["Notices", "/departments/d-fin/notices"]]);
+    expect(overviewTabs(byId(withNodes, "d-it"))).toEqual([["Overview", "/it"], ["Notices", "/departments/d-it/notices"]]);
+  });
+
+  it("keeps the Overview tab first, so the switcher still opens a workspace on its Overview", () => {
+    for (const ws of mod.workspaces) expect(overviewHref(ws), ws.id).toBe(ws.rows.top.find((r) => r.key === "overview")!.tabs[0].href);
+    expect(overviewHref(byId(mod, "d-web"))).toBe("/departments/d-web");
+  });
+
+  it("offers the tab to every person: it carries no gate", () => {
+    for (const ws of mod.workspaces.filter((w) => w.deptId)) expect(ws.rows.top.find((r) => r.key === "overview")!.tabs.map((t) => t.label), ws.id).toContain("Notices");
+    const viewer = model(me([{ role: "viewer", scopeType: "company", scopeId: "co-a" }]), "co-a", agencyTree());
+    expect(viewer.workspaces.length).toBeGreaterThan(0);
+    for (const ws of viewer.workspaces.filter((w) => w.deptId)) expect(ws.rows.top[0].tabs.map((t) => t.label), ws.id).toContain("Notices");
+  });
+});

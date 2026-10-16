@@ -65,6 +65,7 @@ describe("the registry's gates place exactly the blocks the access allows (COMPA
   const expected = (a: CompanyAccess): string[] => [
     ...(a.console ? ["decisions"] : []),
     "today",
+    "company-notices",
     ...(a.numbers || a.money ? ["company"] : []),
     ...(a.numbers ? ["departments"] : []),
     "company-campaigns",
@@ -77,18 +78,18 @@ describe("the registry's gates place exactly the blocks the access allows (COMPA
     }
   });
 
-  it("shows a plain member Today and Campaigns only: no decisions, no money, no company figures", () => {
-    expect(placed("member")).toEqual(["today", "company-campaigns"]);
+  it("shows a plain member Today, the company's notices and Campaigns only: no decisions, no money, no company figures", () => {
+    expect(placed("member")).toEqual(["today", "company-notices", "company-campaigns"]);
   });
 
   it("shows a narrowed lead the decisions but no company block, no departments and no growth blocks", () => {
-    expect(placed("manager")).toEqual(["decisions", "today", "company-campaigns"]);
+    expect(placed("manager")).toEqual(["decisions", "today", "company-notices", "company-campaigns"]);
   });
 
   it("shows the executive tier every block, in the spec's band order", () => {
     const bands = selectBands(COMPANY_OVERVIEW, ctx("company_admin")).map((b) => [b.band, b.widgets.map((w) => w.key)]);
     expect(bands).toEqual([
-      ["now", ["decisions", "today"]],
+      ["now", ["decisions", "today", "company-notices"]],
       ["department", ["company", "departments"]],
       ["work", ["company-campaigns"]],
       ["growth", ["learning-compliance", "appraisal-cycle"]],

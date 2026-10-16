@@ -245,6 +245,9 @@ const CLIENTS_GATE: Gate = { kind: "agencyRow", row: "clients" };
 const DEPARTMENT_OVERVIEW: readonly OverviewWidget[] = [
   { key: "needs-you", band: "now", label: "Needs you", placement: "fixed" },
   { key: "today", band: "now", label: "Today" },
+  // DW-10a-2 (DW-D34): the unit's notices, after Today. Fixed, like Needs you: what the head or the company wants a person to know cannot be
+  // switched off. It reads for the department's org node, so the frame does not place it in a workspace without one (`noticesWidgetPlaced`).
+  { key: "notices", band: "now", label: "Notices", placement: "fixed" },
   { key: "your-numbers", band: "you", label: "Your numbers" },
   { key: "my-activity", band: "you", label: "My activity" },
   { key: "condition", band: "department", label: "Department condition", placement: "fixed" },
@@ -276,6 +279,10 @@ const GM_MONEY: Gate = { kind: "all", gates: [GM_CONSOLE, { kind: "cap", cap: "f
 export const COMPANY_OVERVIEW: readonly OverviewWidget[] = [
   { key: "decisions", band: "now", label: "Needs you: decisions", gate: GM_CONSOLE, placement: "fixed" },
   { key: "today", band: "now", label: "Today" },
+  // DW-10a-2 (DW-D34): the company-wide notices, fixed, never narrowed to a department. Its own key, like `company-campaigns`: the Office of the GM is
+  // a workspace WITH a node, and the department block (`notices`) would narrow the board to that node. No gate: every person with a company
+  // reads its company-wide notices (the server answers each read).
+  { key: "company-notices", band: "now", label: "Company notices", placement: "fixed" },
   // Revenue and overdue receivables need the money gate, milestones and utilization the full one; the block draws only the parts the
   // person may see (`companyAccess`).
   { key: "company", band: "department", label: "Company", gate: { kind: "any", gates: [GM_FULL, GM_MONEY] } },
@@ -1198,13 +1205,22 @@ export interface SidebarModel {
   you: readonly WorkspaceRow[];
 }
 
+/** DW-10a-2 (BFF §57.8): the Notices tab, after Overview, on every workspace's Overview row. A department workspace (HR, Finance and IT are
+ *  org nodes since DW-7d, so they too) opens its unit's board at `/departments/{dept}/notices`; the shell drops the tab, as it drops any
+ *  `{dept}` href with no id to fill, for a workspace with no org node. The Company workspace (the Office of the GM, whose Overview is the
+ *  company's) opens the company-wide board at `/notices`. No gate: every person reads their own unit's notices and the company's; the server
+ *  narrows what each list holds. */
+export function noticesTab(ws: Pick<Workspace, "kind">): WorkspaceTab {
+  return { key: "notices", label: "Notices", href: ws.kind === "office" ? "/notices" : deptPath("notices"), icon: "bell", blurb: "What the unit's head and the company want you to know." };
+}
+
 /** The rows of one workspace's sidebar, in order (plan §2.2), before gates and planned items are applied. */
 export function sidebarRows(ws: Workspace): SidebarModel {
   const overview: WorkspaceRow = {
     key: "overview",
     label: "Overview",
     icon: "home",
-    tabs: [{ key: "overview", label: "Overview", href: ws.overviewHref, icon: "home" }],
+    tabs: [{ key: "overview", label: "Overview", href: ws.overviewHref, icon: "home" }, noticesTab(ws)],
   };
   const performance = PERFORMANCE_ROWS.map((row) => {
     if (row.key === "reports") return { ...row, tabs: [...row.tabs, ...ws.reports] };

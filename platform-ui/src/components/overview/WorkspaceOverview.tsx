@@ -13,6 +13,7 @@ import { workLinks, workWidgetPlaced } from "@/lib/overviewWork";
 import { growthWidgetPlaced } from "@/lib/overviewGrowth";
 import { conditionWidgetPlaced } from "@/lib/overviewCondition";
 import { clientHealthWidgetPlaced } from "@/lib/overviewClientHealth";
+import { noticesWidgetPlaced } from "@/lib/overviewNotices";
 import { overviewPrefsFor, overviewPrefsKey, type OverviewPrefs } from "@/lib/overviewPrefs";
 import { widgetTitle, youBandLabel, type OverviewView } from "@/lib/overviewTeam";
 import { PeriodSelector } from "./PeriodSelector";
@@ -89,7 +90,7 @@ export function WorkspaceOverview({ me, tenantId, subject, period, view = "me", 
   // The Growth blocks (DW-3g) are not placed for a company that switched their module off.
   const placed = (key: string) =>
     hasOverviewWidget(key, widgets) && (key !== "pulse" || pulse.length > 0) && workWidgetPlaced(key, subject) && conditionWidgetPlaced(key, subject)
-    && growthWidgetPlaced(key, moduleOn) && clientHealthWidgetPlaced(key, subject);
+    && growthWidgetPlaced(key, moduleOn) && clientHealthWidgetPlaced(key, subject) && noticesWidgetPlaced(key, subject);
   // DW-10d: the person's choice is applied first (`selectBands`), so a hidden block is not placed and its reads never run; an optional
   // one they switched on still needs its gate and its placement rule.
   const prefsKey = overviewPrefsKey(subject);

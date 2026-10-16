@@ -35,8 +35,24 @@ describe("WorkspaceTabStrip", () => {
     expect(within(strip).getByRole("link", { current: "page" })).toHaveAttribute("href", "/departments/d-web/board");
   });
 
-  it("draws nothing for a row with one tab", () => {
+  it("draws the Overview row's two tabs, Overview and Notices, on a department's Overview (DW-10a-2)", () => {
     nav.pathname = "/departments/d-web";
+    render(inShell(<WorkspaceTabStrip />));
+    const strip = screen.getByRole("navigation", { name: /sections$/ });
+    expect(within(strip).getAllByRole("link").map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+      ["Overview", "/departments/d-web"], ["Notices", "/departments/d-web/notices"],
+    ]);
+    expect(within(strip).getByRole("link", { current: "page" })).toHaveTextContent("Overview");
+  });
+
+  it("lights Notices on the notices page", () => {
+    nav.pathname = "/departments/d-web/notices";
+    render(inShell(<WorkspaceTabStrip />));
+    expect(within(screen.getByRole("navigation", { name: /sections$/ })).getByRole("link", { current: "page" })).toHaveTextContent("Notices");
+  });
+
+  it("draws nothing for a row with one tab", () => {
+    nav.pathname = "/me/tasks";
     const { container } = render(inShell(<WorkspaceTabStrip />));
     expect(container).toBeEmptyDOMElement();
   });

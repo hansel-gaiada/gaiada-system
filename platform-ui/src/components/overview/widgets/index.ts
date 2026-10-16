@@ -16,6 +16,7 @@ import type { OverviewPeriod } from "@/lib/overview";
 import type { OverviewView } from "@/lib/overviewTeam";
 import { NeedsYou } from "./NeedsYou";
 import { Today } from "./Today";
+import { Notices, CompanyNotices } from "./Notices";
 import { YourNumbers } from "./YourNumbers";
 import { MyActivity } from "./MyActivity";
 import { Condition } from "./Condition";
@@ -60,6 +61,8 @@ export type OverviewWidgetComponent = (props: OverviewWidgetProps) => ReactNode 
 export const OVERVIEW_WIDGETS: Readonly<Record<string, OverviewWidgetComponent>> = {
   "needs-you": NeedsYou,
   today: Today,
+  // DW-10a-2: the unit's notices, fixed (DW-D34); placed only in a workspace with an org node (`noticesWidgetPlaced`).
+  notices: Notices,
   "your-numbers": YourNumbers,
   "my-activity": MyActivity,
   condition: Condition,
@@ -74,6 +77,8 @@ export const OVERVIEW_WIDGETS: Readonly<Record<string, OverviewWidgetComponent>>
   // The company Overview's blocks (DW-3i). Their keys differ from the department blocks' (`campaigns`, `learning`, `appraisal`) on
   // purpose: one key, one component, whichever workspace lists it.
   decisions: Decisions,
+  // DW-10a-2: the company-wide notices, fixed, never narrowed to a department (its own key, like `company-client-health`).
+  "company-notices": CompanyNotices,
   company: Company,
   departments: Departments,
   "company-campaigns": CompanyCampaigns,
