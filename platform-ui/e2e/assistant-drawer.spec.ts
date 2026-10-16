@@ -1,4 +1,4 @@
-import { expect, type Locator } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { test } from "./settledPage";
 import { tenantCookie } from "./appCookies";
 
@@ -17,6 +17,15 @@ async function hydrated(loc: Locator) {
   await expect.poll(() => loc.evaluate((el) => Object.keys(el).some((k) => k.startsWith("__reactProps$")))).toBe(true);
 }
 
+/** The sidebar's AI Assistant row, once it carries the page's context in its href (`/assistant?ctx=...&from=...`) and React owns it. Off a
+ *  workspace page's own route the href is the plain /assistant until the shell has read the page, and a click then is a full navigation. */
+async function assistantRow(page: Page): Promise<Locator> {
+  const row = page.locator("aside#app-nav").locator("#asst-fab-trigger");
+  await expect(row).toHaveAttribute("href", /^\/assistant\?/);
+  await hydrated(row);
+  return row;
+}
+
 // ASST-22 — the `@drawer` mount end to end, driven under DEMO_MODE (per `demoAssistant.ts`'s
 // citation fixture, extended for this ticket with real demo ids: `p-web-1` -> "Client site
 // redesign"). Covers the ticket's own DONE WHEN bullets: opens on any app page with a thread
@@ -27,10 +36,8 @@ test("the AI Assistant row opens the drawer pinned to the current page's entity,
   await page.goto("/projects/p-web-1");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
-  const fab = page.locator("aside#app-nav").locator("#asst-fab-trigger");
-  await expect(fab).toBeVisible();
-  await hydrated(fab);
-  await fab.click();
+  const row = await assistantRow(page);
+  await row.click();
 
   const dialog = page.getByRole("dialog", { name: "Assistant" });
   await expect(dialog).toBeVisible();
@@ -86,14 +93,13 @@ test("the AI Assistant row opens the drawer pinned to the current page's entity,
 
 test("Escape closes the drawer and returns focus to the AI Assistant row", async ({ page }) => {
   await page.goto("/tasks/t-4");
-  const fab = page.locator("#asst-fab-trigger");
-  await hydrated(fab);
-  await fab.click();
+  const row = await assistantRow(page);
+  await row.click();
   await expect(page.getByRole("dialog", { name: "Assistant" })).toBeVisible();
 
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "Assistant" })).toBeHidden();
-  await expect(fab).toBeFocused();
+  await expect(row).toBeFocused();
 });
 
 test("on the /assistant page itself the AI Assistant row is the current row and links to the page, not the drawer", async ({ page }) => {
@@ -107,9 +113,8 @@ test("on the /assistant page itself the AI Assistant row is the current row and 
 
 test("a page with no resolvable entity opens the drawer with no context pin", async ({ page }) => {
   await page.goto("/reports/company");
-  const fab = page.locator("#asst-fab-trigger");
-  await hydrated(fab);
-  await fab.click();
+  const row = await assistantRow(page);
+  await row.click();
   const dialog = page.getByRole("dialog", { name: "Assistant" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("button", { name: /^Pinned:/ })).toHaveCount(0);
