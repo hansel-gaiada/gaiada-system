@@ -245,7 +245,11 @@ for (const theme of ["light", "dark"] as const) {
       expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
     });
 
-    test(`assistant drawer, opened via the FAB (${theme})`, async ({ page }) => {
+    test(`assistant drawer, opened from the sidebar's AI Assistant row (${theme})`, async ({ page }) => {
+      // Reduced motion: the drawer slides and fades in, and a scan taken mid-transition reads blended colours (seen as a
+      // contrast of 1.02 on the dark theme in about 1 run in 4; 16 of 16 pass with this). axe judges the settled drawer, as
+      // e2e/a11y-axe-workspaces.spec.ts does. The trigger keeps the id the floating button had (`#asst-fab-trigger`, DW-9d).
+      await page.emulateMedia({ reducedMotion: "reduce" });
       await page.goto("/projects/p-web-1");
       await pinTheme(page, theme);
       await page.reload();
