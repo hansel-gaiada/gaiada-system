@@ -47,3 +47,53 @@
 .dk-driver__name { font-weight: 600; color: inherit; text-underline-offset: 3px; }
 .dk-driver__value { font-weight: 600; }
 .dk-driver__parts { color: var(--erp-ink-60); }
+/* DW-10b-2 — the By month view: the switch, the table, the trend rows, the plan form and the approver's open proposals. Status tokens only; every condition is
+   also a WORD beside its dot (dk-cell__cond), so colour never carries the meaning alone. */
+.dk-switch { display: flex; gap: 0; margin: 0 0 16px; }
+.dk-switch__link { padding: 6px 14px; font: 600 13px var(--font-body); color: var(--erp-ink-60); text-decoration: none;
+  border: 0.5px solid var(--erp-ink-20, currentColor); margin-left: -0.5px; }
+.dk-switch__link:first-child { margin-left: 0; }
+.dk-switch__link--on { color: inherit; border-bottom: 2px solid var(--accent, currentColor); }
+.dk-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; flex: 0 0 8px; }
+.dk-dot--ok { background: var(--status-ok); }
+.dk-dot--warning { background: var(--status-warning); }
+.dk-dot--danger { background: var(--status-danger); }
+.dk-dot--idle { background: var(--status-idle); }
+.dk-months { display: flex; flex-direction: column; gap: 18px; margin: 0 0 24px; }
+.dk-months__scroll { overflow-x: auto; max-width: 100%; border: 0.5px solid var(--erp-ink-20, currentColor); }
+.dk-months__table { border-collapse: collapse; width: max-content; min-width: 100%; font: 400 13px/1.4 var(--font-body); }
+.dk-months__table caption { text-align: left; padding: 8px 12px; font: 400 12px/1.5 var(--font-body); color: var(--erp-ink-60); caption-side: top; }
+.dk-months__table th, .dk-months__table td { padding: 8px 12px; text-align: left; vertical-align: top; border-top: 0.5px solid var(--erp-ink-20, currentColor); }
+.dk-months__table thead th { font: 600 12px var(--font-body); white-space: nowrap; border-top: 0; }
+.dk-months__kpi { position: sticky; left: 0; min-width: 160px; max-width: 220px; background: var(--surface-card-solid, transparent); font: 600 13px/1.4 var(--font-body); }
+.dk-months__sofar { font-weight: 400; color: var(--erp-ink-60); }
+.dk-cell { min-width: 132px; border-left: 0.5px solid var(--erp-ink-20, currentColor); }
+.dk-cell > span { display: flex; align-items: center; }
+.dk-cell__value { font: 600 16px/1.2 var(--font-body); }
+.dk-cell__target { font: 400 12px/1.5 var(--font-body); color: var(--erp-ink-60); }
+.dk-cell__cond { font: 600 12px/1.4 var(--font-body); }
+.dk-months__trends { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.dk-months__trendrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 0; border-top: 0.5px solid var(--erp-ink-20, currentColor); }
+.dk-months__trendrow:first-child { border-top: 0; }
+.dk-months__trendname { font: 600 13px var(--font-body); flex: 1 1 200px; }
+.dk-months__panel { flex: 1 1 100%; min-width: 0; }
+.dk-months__panel[hidden] { display: none; }
+.dk-months__trend { display: flex; flex-direction: column; gap: 6px; }
+.dk-months__note { font: 400 12px/1.5 var(--font-body); color: var(--erp-ink-60); margin: 0; }
+.dk-plan { display: flex; flex-direction: column; gap: 14px; }
+.dk-plan__pick { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); max-width: 560px; }
+.dk-plan__form { display: flex; flex-direction: column; gap: 12px; max-width: 760px; }
+.dk-plan__table { border-collapse: collapse; width: 100%; font: 400 13px/1.4 var(--font-body); }
+.dk-plan__caption { text-align: left; padding: 0 0 8px; font: 400 12px/1.5 var(--font-body); color: var(--erp-ink-60); }
+.dk-plan__table th, .dk-plan__table td { padding: 6px 10px 6px 0; text-align: left; vertical-align: top; }
+.dk-plan__table thead th { font: 600 12px var(--font-body); }
+.dk-plan__hint { font-weight: 400; color: var(--erp-ink-60); }
+.dk-plan__note { display: flex; flex-direction: column; gap: 6px; max-width: 460px; }
+.dk-open { display: flex; flex-direction: column; gap: 12px; padding: 14px 0; }
+.dk-open__group { display: flex; flex-direction: column; gap: 6px; }
+.dk-open__kpi { font: 600 13px var(--font-body); margin: 0; }
+.dk-open__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.dk-open__row { display: flex; gap: 12px; align-items: flex-start; }
+.dk-open__box { flex: 0 0 18px; width: 18px; height: 18px; margin: 2px 0 0; }
+.dk-open__text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dk-open__bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding-top: 8px; border-top: 0.5px solid var(--erp-ink-20, currentColor); }

@@ -22,7 +22,7 @@ const SERIES_COLORS = [
 // what makes an "ends in future" trailing gap read correctly without the
 // chart lying about a flat drop to 0.
 export function TrendLine({
-  series, dayCount, title, unit = "count", pointInTimeKeys = [],
+  series, dayCount, title, unit = "count", pointInTimeKeys = [], stepKeys = [], formatDate = fmtDate,
 }: {
   series: ReportSeries[];
   dayCount: number;
@@ -31,6 +31,11 @@ export function TrendLine({
   // series keys that are point-in-time (§5.4 #20 e.g. overdue_open) and must
   // bucket via their bucket's LAST value, never a sum — see lib/reports.ts.
   pointInTimeKeys?: string[];
+  // series keys drawn as a STEP line (DW-10b: a target holds its level until the next point, then jumps), not a slope between
+  // points. A null point still breaks the line. Everything else about the series (legend, hover, table) is unchanged.
+  stepKeys?: string[];
+  // How a point's date is worded in the tooltip and the table. The default is the day and month ("04 Oct"); a monthly series says "Oct 2026".
+  formatDate?: (iso: string) => string;
 }) {
   const bucketed: BucketedSeriesDetailed[] = series.map((s) =>
     bucketSeriesWithParts(s, series, dayCount, { lastNotSum: pointInTimeKeys.includes(s.key) }),
@@ -56,11 +61,16 @@ export function TrendLine({
   const pathFor = (b: BucketedSeriesDetailed): string => {
     let d = "";
     let drawing = false;
+    const step = stepKeys.includes(b.key);
+    let prevY = "0";
     b.points.forEach((p, i) => {
       if (p.v === null) { drawing = false; return; }
-      const cmd = drawing ? "L" : "M";
-      d += `${cmd}${xAt(i).toFixed(2)} ${yAt(p.v).toFixed(2)} `;
+      const y = yAt(p.v).toFixed(2);
+      // A step holds the previous level to this point's x, then jumps to this level.
+      if (drawing && step) d += `L${xAt(i).toFixed(2)} ${prevY} `;
+      d += `${drawing ? "L" : "M"}${xAt(i).toFixed(2)} ${y} `;
       drawing = true;
+      prevY = y;
     });
     return d.trim();
   };
@@ -134,7 +144,7 @@ export function TrendLine({
           </svg>
           {hoverI !== null && (
             <div className="rc-tooltip" style={{ left: `${xs[hoverI]}%` }}>
-              <div className="rc-tooltip__head">{fmtDate(bucketed[0].points[hoverI]?.t ?? "")}</div>
+              <div className="rc-tooltip__head">{formatDate(bucketed[0].points[hoverI]?.t ?? "")}</div>
               {bucketed.map((b, i) => {
                 const p = b.points[hoverI];
                 const hasRatio = p?.numerator !== undefined && p?.denominator !== undefined;
@@ -159,7 +169,7 @@ export function TrendLine({
         caption={`${title}, as a table`}
         columns={["Date", ...bucketed.map((b) => b.label)]}
         rows={bucketed[0].points.map((p, i) => [
-          fmtDate(p.t),
+          formatDate(p.t),
           ...bucketed.map((b) => (b.points[i]?.v === null || b.points[i]?.v === undefined ? "—" : formatVal(b.points[i].v as number, unit))),
         ])}
       />

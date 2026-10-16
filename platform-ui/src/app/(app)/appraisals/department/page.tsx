@@ -7,7 +7,8 @@ import { can, canInUnit, unitPathOf } from "@/lib/rbac";
 import { readOrgRoot } from "@/lib/campaigns-data";
 import {
   bannerSentence, conditionLabel, conditionTone, formatKpiValue, formatMonth, formatTolerance, getDeptKpis, getDeptKpiTargets,
-  kpiPeriodFromQuery, ratioParts, tileFoot, type DeptKpiTargetRow, type DeptKpiTargetsKpi, type DeptKpiTargetsView, type DeptKpisView,
+  getDeptKpiMonths, isMonthKey, kpiPeriodFromQuery, ratioParts, tileFoot,
+  type DeptKpiTargetRow, type DeptKpiTargetsKpi, type DeptKpiTargetsView, type DeptKpisView,
 } from "@/lib/deptKpis";
 import { getUnitKpiAlerts } from "@/lib/deptKpiAlerts";
 import { getKpiDrivers, hasMiss } from "@/lib/deptKpiDrivers";
@@ -20,10 +21,14 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { ReportAccessDenied } from "@/components/reports/ReportAccessDenied";
 import { ReportPeriodBar } from "@/components/reports/ReportPeriodBar";
-import { ProposeTargetForm, DecideButtons } from "@/components/deptkpis/TargetControls";
+import { ProposeTargetForm } from "@/components/deptkpis/TargetControls";
 import { AppraisalView, CyclePicker } from "@/components/deptkpis/AppraisalView";
 import { AlertsSection, TileAlertLine } from "@/components/deptkpis/KpiAlerts";
 import { BehindTheMiss } from "@/components/deptkpis/BehindTheMiss";
+import { ViewSwitch } from "@/components/deptkpis/ViewSwitch";
+import { MonthsView } from "@/components/deptkpis/MonthsView";
+import { PlanMonths } from "@/components/deptkpis/PlanMonths";
+import { OpenProposals } from "@/components/deptkpis/OpenProposals";
 import "@/components/deptkpis/deptKpis.css";
 
 const TITLE = "Department";
@@ -51,7 +56,10 @@ function todayIso(): string {
 export default async function DepartmentKpiPage({
   searchParams,
 }: {
-  searchParams: Promise<{ unit?: string | string[]; cycle?: string | string[]; periodKind?: string; start?: string; end?: string }>;
+  searchParams: Promise<{
+    unit?: string | string[]; cycle?: string | string[]; periodKind?: string; start?: string; end?: string;
+    view?: string | string[]; from?: string | string[]; to?: string | string[];
+  }>;
 }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
@@ -141,6 +149,15 @@ export default async function DepartmentKpiPage({
     );
   }
 
+  const one = (v: string | string[] | undefined) => (typeof v === "string" && v !== "" ? v : undefined);
+  // "By month" (DW-10b-2, BFF §58.4): `?view=months` is the department's KPIs for each of the last 12 months, not for one period.
+  if (one(sp.view) === "months") {
+    return renderMonths({
+      userId, me, tenant, unit, treeRoot, picker,
+      from: one(sp.from), to: one(sp.to), period: { periodKind: one(sp.periodKind), start: one(sp.start), end: one(sp.end) },
+    });
+  }
+
   const today = todayIso();
   // The period is the URL's (shareable): the weekly digest (DW-4j-3, BFF §43.8a) links here with `?periodKind=week&start=<Monday>`.
   const { periodKind, start, end } = kpiPeriodFromQuery(sp, today);
@@ -213,6 +230,7 @@ export default async function DepartmentKpiPage({
     <>
       <PageHeader eyebrow="Appraisals" title={`${view.unit.name} · ${TITLE}`} />
       {picker}
+      <ViewSwitch unit={unit} view="period" period={{ periodKind: one(sp.periodKind), start: one(sp.start), end: one(sp.end) }} />
       <ReportPeriodBar
         value={{ kind: view.period.periodKind as ReportPeriodKind, start: view.period.start, end: view.period.end }}
         todayIso={today}
@@ -289,6 +307,12 @@ function TargetsSection({
       title="Targets"
       hint="A head proposes a target; the approver approves it. A newer proposal changes nothing until it is approved, so the target in force keeps governing until then. Targets are levels: one target applies to a month, a quarter, a semester or a year."
     >
+      {canApprove && data.kpis.some((k) => k.proposals.length > 0) && (
+        <OpenProposals
+          meId={meId}
+          groups={data.kpis.map((k) => ({ key: k.key, label: k.label, unit: k.unit, proposals: k.proposals }))}
+        />
+      )}
       {data.kpis.length === 0 ? (
         <EmptyNote>This department has no KPIs to set targets for.</EmptyNote>
       ) : (
@@ -321,7 +345,8 @@ function TargetRow({
             : "No target"}
         </p>
       </div>
-      {kpi.proposals.map((p) => {
+      {/* An approver reads the open proposals grouped above (checkboxes, batch and single decisions); everyone else lists them here, read only. */}
+      {!canApprove && kpi.proposals.map((p) => {
         const own = p.proposedBy === meId;
         return (
           <div key={p.id} className="dk-target__actions">
@@ -330,7 +355,6 @@ function TargetRow({
               {formatMonth(p.effectiveFrom)}. By {who(p, meId)} on {p.proposedAt.slice(0, 10)}.
               {p.note ? ` Note: ${p.note}` : ""}
             </p>
-            {canApprove && !own && <DecideButtons id={p.id} kpiLabel={kpi.label} />}
             {own && <span className="dk-target__meta">You proposed this, so someone else decides it.</span>}
           </div>
         );
@@ -341,5 +365,81 @@ function TargetRow({
         </div>
       )}
     </div>
+  );
+}
+
+// ── DW-10b-2: "By month" (BFF §58.4) ─────────────────────────────────────────────────────────────────────────────────────────────
+// `?unit=U&view=months` (optionally `&from=YYYY-MM&to=YYYY-MM`; without them the server answers the 12 months ending with the current month). One honest read
+// of `GET dept-kpis/months`: a refusal is said as a refusal and a failure as "unavailable" IN PLACE OF the table, never an empty table. For a head of the unit
+// or the approver tier it carries the same targets read as the other view, so the viewer can plan the coming months (a proposer) and decide open proposals (an
+// approver), and sees what they proposed listed as proposals straight after.
+async function renderMonths({
+  userId, me, tenant, unit, treeRoot, picker, from, to, period,
+}: {
+  userId: string;
+  me: Awaited<ReturnType<typeof getMe>>;
+  tenant: string;
+  unit: string;
+  treeRoot: Awaited<ReturnType<typeof readOrgRoot>>;
+  picker: React.ReactNode;
+  from?: string;
+  to?: string;
+  period: { periodKind?: string; start?: string; end?: string };
+}) {
+  const switcher = <ViewSwitch unit={unit} view="months" period={period} />;
+  const res = await getDeptKpiMonths(userId, tenant, unit, {
+    ...(from && isMonthKey(from) ? { from } : {}),
+    ...(to && isMonthKey(to) ? { to } : {}),
+  });
+  if (res.kind === "forbidden") {
+    return (
+      <>
+        <PageHeader eyebrow="Appraisals" title={TITLE} />
+        <ReportAccessDenied reason={DENIED} />
+      </>
+    );
+  }
+  if (res.kind === "unavailable") {
+    return (
+      <>
+        <PageHeader eyebrow="Appraisals" title={TITLE} />
+        {picker}
+        {switcher}
+        {res.reason === "unit_not_found" ? (
+          <EmptyNote>This department does not exist.</EmptyNote>
+        ) : (
+          <ReadRefusal subject="The monthly KPIs" kind="unavailable" reason={res.reason} />
+        )}
+      </>
+    );
+  }
+  const months = res.data;
+
+  const canPropose =
+    can(me, "reports.dept_kpi_target.propose", tenant) ||
+    canInUnit(me, "reports.dept_kpi_target.propose", tenant, treeRoot ? unitPathOf(treeRoot, unit) : []);
+  const canApprove = can(me, "reports.dept_kpi_target.approve", tenant);
+  const targets = canPropose || canApprove ? await getDeptKpiTargets(userId, tenant, unit) : null;
+
+  return (
+    <>
+      <PageHeader eyebrow="Appraisals" title={`${months.unit.name} · ${TITLE}`} />
+      {picker}
+      {switcher}
+      <MonthsView view={months} />
+      {targets !== null && (
+        <>
+          {canPropose && targets.kind === "ok" && (
+            <Card
+              title="Plan the coming months"
+              hint="Choose a KPI and the next months, set a target and tolerance for each, and send them as one set. They are proposals: the target in force keeps governing each month until the approver approves it."
+            >
+              <PlanMonths unitId={unit} kpis={targets.data.kpis} asOf={targets.data.asOf} />
+            </Card>
+          )}
+          <TargetsSection unit={unit} result={targets} meId={me.userId} canPropose={canPropose} canApprove={canApprove} />
+        </>
+      )}
+    </>
   );
 }
