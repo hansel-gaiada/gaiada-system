@@ -17,7 +17,9 @@ import { isUuidShaped } from "./dept-resolution";
 
 // ───────────────────────────────────────────── vocabulary ─────────────────────────────────────────────
 
-export const VISIBILITIES = ["attendees", "company"] as const;
+/** `department` (DW-10c, BFF §59.3) is an event for one org-tree unit's people: it names a `unitNodeId`, and the people placed in that
+ *  unit or below it today, the heads over it and the company-wide tiers read it, besides the organizer and the attendees. */
+export const VISIBILITIES = ["attendees", "company", "department"] as const;
 export type Visibility = (typeof VISIBILITIES)[number];
 export const EVENT_STATUSES = ["confirmed", "cancelled"] as const;
 export type EventStatus = (typeof EVENT_STATUSES)[number];
@@ -177,6 +179,34 @@ function parseVisibility(value: unknown): Visibility {
   return value as Visibility;
 }
 
+export const UNIT_NODE_ID_MAX = 200;
+
+/** An org-tree node id as the body names it: 1 to 200 characters, no control characters (the node ids are free text, short slugs or
+ *  uuids). Shape only; whether the unit exists in this company's tree, and whether the caller reaches it, are the controller's. */
+export function isUnitNodeIdShaped(v: unknown): v is string {
+  return typeof v === "string" && v.length >= 1 && v.length <= UNIT_NODE_ID_MAX && ![...v].some((ch) => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f);
+}
+
+function parseUnitNodeId(value: unknown): string | null {
+  if (value === null) return null;
+  if (!isUnitNodeIdShaped(value)) throw bad("unit_invalid", `unitNodeId must be an org unit id of 1 to ${UNIT_NODE_ID_MAX} characters, or null`, "unitNodeId");
+  return value;
+}
+
+/** What authorization needs from a create or PATCH body BEFORE any other field is looked at (the DW-5a / DW-10a order: a refused caller
+ *  always gets 403, never a 400): only `visibility` and `unitNodeId`, and only to say which unit a `department` event names. A body that
+ *  is not an object, a visibility that is not `department`, or a unit that is not even shaped like one names no unit here: the parse
+ *  that follows refuses it with its own 400. `visibilityGiven` is whether the body named a visibility at all (a PATCH may leave it). */
+export function departmentFactsOf(body: unknown): { visibilityGiven: boolean; department: boolean; unitNodeId: string | null; unitGiven: boolean } {
+  if (!isPlainObject(body)) return { visibilityGiven: false, department: false, unitNodeId: null, unitGiven: false };
+  return {
+    visibilityGiven: body.visibility !== undefined,
+    department: body.visibility === "department",
+    unitNodeId: isUnitNodeIdShaped(body.unitNodeId) ? body.unitNodeId : null,
+    unitGiven: body.unitNodeId !== undefined,
+  };
+}
+
 function parseOptionalUuid(value: unknown, field: string): string | null {
   if (value === null || value === undefined) return null;
   if (typeof value !== "string" || !isUuidShaped(value)) throw bad("id_invalid", `${field} must be an id, or null`, field);
@@ -206,6 +236,8 @@ export interface CreateInput {
   videoUrl: string | null;
   attendeeIds: string[];
   visibility: Visibility;
+  /** The org unit of a `department` event; `null` for every other visibility. */
+  unitNodeId: string | null;
   clientId: string | null;
   projectId: string | null;
   record: boolean;
@@ -222,6 +254,14 @@ export function parseCreate(body: unknown): CreateInput {
   if (record && time.allDay) {
     throw bad("record_needs_timed_event", "an all-day event cannot be recorded: the recording is scheduled for a start time", "record");
   }
+  const visibility = body.visibility === undefined ? "attendees" : parseVisibility(body.visibility);
+  const unitNodeId = body.unitNodeId === undefined ? null : parseUnitNodeId(body.unitNodeId);
+  if (visibility === "department" && unitNodeId === null) {
+    throw bad("unit_required", "a department event needs unitNodeId: the org unit it belongs to", "unitNodeId");
+  }
+  if (visibility !== "department" && unitNodeId !== null) {
+    throw bad("unit_not_allowed", "unitNodeId is only for an event whose visibility is department", "unitNodeId");
+  }
   return {
     title,
     time,
@@ -229,7 +269,8 @@ export function parseCreate(body: unknown): CreateInput {
     location: body.location === undefined ? null : parseLocation(body.location),
     videoUrl: body.videoUrl === undefined ? null : parseVideoUrl(body.videoUrl),
     attendeeIds: body.attendeeIds === undefined ? [] : parseAttendeeIds(body.attendeeIds),
-    visibility: body.visibility === undefined ? "attendees" : parseVisibility(body.visibility),
+    visibility,
+    unitNodeId,
     clientId: parseOptionalUuid(body.clientId, "clientId"),
     projectId: parseOptionalUuid(body.projectId, "projectId"),
     record,
@@ -243,6 +284,8 @@ export interface PatchInput {
   location?: string | null;
   videoUrl?: string | null;
   visibility?: Visibility;
+  /** `undefined` leaves the unit alone; `null` clears it (only valid when the event ends up not `department`). */
+  unitNodeId?: string | null;
   attendeeIds?: string[];
   clientId?: string | null;
   projectId?: string | null;
@@ -261,6 +304,7 @@ export function parsePatch(body: unknown): PatchInput {
   if (body.location !== undefined) out.location = parseLocation(body.location);
   if (body.videoUrl !== undefined) out.videoUrl = parseVideoUrl(body.videoUrl);
   if (body.visibility !== undefined) out.visibility = parseVisibility(body.visibility);
+  if (body.unitNodeId !== undefined) out.unitNodeId = parseUnitNodeId(body.unitNodeId);
   if (body.attendeeIds !== undefined) out.attendeeIds = parseAttendeeIds(body.attendeeIds);
   if (body.clientId !== undefined) out.clientId = parseOptionalUuid(body.clientId, "clientId");
   if (body.projectId !== undefined) out.projectId = parseOptionalUuid(body.projectId, "projectId");
@@ -353,6 +397,7 @@ export interface PatchPlan {
   location: string | null;
   videoUrl: string | null;
   visibility: Visibility;
+  unitNodeId: string | null;
   clientId: string | null;
   projectId: string | null;
   attendees: AttendeeDiff;
@@ -375,6 +420,15 @@ export function planPatch(facts: EventFacts, patch: PatchInput): PatchPlan {
   const location = patch.location !== undefined ? patch.location : facts.location;
   const videoUrl = patch.videoUrl !== undefined ? patch.videoUrl : facts.videoUrl;
   const visibility = patch.visibility ?? facts.visibility;
+  // The unit follows the visibility: a `department` event keeps (or is given) a unit, any other visibility has none. Moving an event
+  // off `department` clears the unit; naming a unit for a non-department event, or making an event `department` without one, is a 400.
+  const unitNodeId = visibility === "department" ? (patch.unitNodeId !== undefined ? patch.unitNodeId : facts.unitNodeId) : null;
+  if (visibility === "department" && unitNodeId === null) {
+    throw bad("unit_required", "a department event needs unitNodeId: the org unit it belongs to", "unitNodeId");
+  }
+  if (visibility !== "department" && patch.unitNodeId !== undefined && patch.unitNodeId !== null) {
+    throw bad("unit_not_allowed", "unitNodeId is only for an event whose visibility is department", "unitNodeId");
+  }
   const clientId = patch.clientId !== undefined ? patch.clientId : facts.clientId;
   const projectId = patch.projectId !== undefined ? patch.projectId : facts.projectId;
   const attendees = diffAttendees(facts.attendees.map((a) => a.userId), patch.attendeeIds ?? facts.attendees.map((a) => a.userId), facts.organizerId);
@@ -385,10 +439,11 @@ export function planPatch(facts: EventFacts, patch: PatchInput): PatchPlan {
   if (location !== facts.location) changed.push("location");
   if (videoUrl !== facts.videoUrl) changed.push("videoUrl");
   if (visibility !== facts.visibility) changed.push("visibility");
+  if (unitNodeId !== facts.unitNodeId) changed.push("unitNodeId");
   if (clientId !== facts.clientId) changed.push("clientId");
   if (projectId !== facts.projectId) changed.push("projectId");
   if (attendees.added.length || attendees.removed.length) changed.push("attendees");
-  return { title, description, time, location, videoUrl, visibility, clientId, projectId, attendees, timeChanged: moved, changed };
+  return { title, description, time, location, videoUrl, visibility, unitNodeId, clientId, projectId, attendees, timeChanged: moved, changed };
 }
 
 /** The display zone for times in words (the UI's `NEXT_PUBLIC_DISPLAY_TZ`; the server reads the same variable). */
@@ -430,6 +485,8 @@ export interface EventFacts {
   videoUrl: string | null;
   organizerId: string;
   visibility: Visibility;
+  /** The org unit of a `department` event (`calendar_events.unit_node_id`); `null` otherwise. */
+  unitNodeId: string | null;
   status: EventStatus;
   cancelledAt: Date | null;
   clientId: string | null;
@@ -443,7 +500,7 @@ export interface EventFacts {
 interface EventRow {
   id: string; tenant_id: string; title: string; description: string;
   starts_at: Date | null; ends_at: Date | null; starts_on: string | null; ends_on: string | null;
-  location: string | null; video_url: string | null; organizer_id: string; visibility: Visibility; status: EventStatus;
+  location: string | null; video_url: string | null; organizer_id: string; visibility: Visibility; unit_node_id: string | null; status: EventStatus;
   cancelled_at: Date | null; client_id: string | null; project_id: string | null; meeting_recording_id: string | null;
   created_at: Date; updated_at: Date;
 }
@@ -455,7 +512,7 @@ export async function loadFacts(c: PoolClient, tenantId: string, id: string, loc
   const ev = await c.query<EventRow>(
     `SELECT id, tenant_id, title, description, starts_at, ends_at,
             to_char(starts_on, 'YYYY-MM-DD') AS starts_on, to_char(ends_on, 'YYYY-MM-DD') AS ends_on,
-            location, video_url, organizer_id, visibility, status, cancelled_at, client_id, project_id, meeting_recording_id,
+            location, video_url, organizer_id, visibility, unit_node_id, status, cancelled_at, client_id, project_id, meeting_recording_id,
             created_at, updated_at
        FROM calendar_events WHERE id = $1 AND tenant_id = $2${lock ? " FOR UPDATE" : ""}`,
     [id, tenantId],
@@ -469,7 +526,7 @@ export async function loadFacts(c: PoolClient, tenantId: string, id: string, loc
   return {
     id: r.id, tenantId: r.tenant_id, title: r.title, description: r.description,
     startsAt: r.starts_at, endsAt: r.ends_at, startsOn: r.starts_on, endsOn: r.ends_on,
-    location: r.location, videoUrl: r.video_url, organizerId: r.organizer_id, visibility: r.visibility, status: r.status,
+    location: r.location, videoUrl: r.video_url, organizerId: r.organizer_id, visibility: r.visibility, unitNodeId: r.unit_node_id, status: r.status,
     cancelledAt: r.cancelled_at, clientId: r.client_id, projectId: r.project_id, meetingRecordingId: r.meeting_recording_id,
     createdAt: r.created_at, updatedAt: r.updated_at,
     attendees: at.rows.map((a) => ({ userId: a.user_id, response: a.response })),
@@ -518,6 +575,8 @@ export interface EventDetail {
   location: string | null;
   videoUrl: string | null;
   visibility: Visibility;
+  /** The org unit of a `department` event; `null` otherwise. */
+  unitNodeId: string | null;
   status: EventStatus;
   cancelledAt: string | null;
   organizer: { id: string; name: string };
@@ -560,7 +619,7 @@ export async function buildDetail(c: PoolClient, facts: EventFacts, viewerId: st
     endsAt: facts.endsAt ? facts.endsAt.toISOString() : null,
     allDay: facts.startsOn !== null,
     startsOn: facts.startsOn, endsOn: facts.endsOn,
-    location: facts.location, videoUrl: facts.videoUrl, visibility: facts.visibility, status: facts.status,
+    location: facts.location, videoUrl: facts.videoUrl, visibility: facts.visibility, unitNodeId: facts.unitNodeId, status: facts.status,
     cancelledAt: facts.cancelledAt ? facts.cancelledAt.toISOString() : null,
     organizer: { id: facts.organizerId, name: nameOf.get(facts.organizerId) ?? "" },
     attendees,
@@ -600,10 +659,33 @@ export interface MineRow {
   href: string;
 }
 
+/** The units of the DEPARTMENT-visible events in the window that the caller reaches (DW-10c, BFF §59.3): the distinct `unit_node_id`s
+ *  of the company's `department` events overlapping `[from, to)`, filtered by `reaches` (the caller's placement as of today, their led
+ *  scope, or a company-wide tier: `loadUnitReach`). The SQL mirror of the Cerbos department rule's handler narrowing: `listMine` takes
+ *  this list as its department branch, so a department event the caller may read is listed and one they may not is not. */
+export async function reachableDepartmentUnits(
+  c: PoolClient, tenantId: string, w: { from: Date; to: Date }, reaches: (unitNodeId: string) => boolean,
+): Promise<string[]> {
+  const fromDay = w.from.toISOString().slice(0, 10);
+  const toDay = new Date(w.to.getTime() - 1).toISOString().slice(0, 10);
+  const { rows } = await c.query<{ unit_node_id: string }>(
+    `SELECT DISTINCT e.unit_node_id
+       FROM calendar_events e
+      WHERE e.tenant_id = $1 AND e.visibility = 'department' AND e.unit_node_id IS NOT NULL
+        AND ((e.starts_at IS NOT NULL AND e.starts_at < $3 AND e.ends_at > $2)
+          OR (e.starts_on IS NOT NULL AND e.starts_on <= $5::date AND e.ends_on >= $4::date))`,
+    [tenantId, w.from.toISOString(), w.to.toISOString(), fromDay, toDay],
+  );
+  return rows.map((r) => r.unit_node_id).filter((u) => reaches(u));
+}
+
 /** The caller's events in one company over `[from, to)`: the ones they organize or are invited to, cancelled and declined
- *  ones included (the calendar strikes them through or dims them). A timed event is in the window when it overlaps it; an
- *  all-day event when its inclusive date range meets the window's UTC days. */
-export async function listMine(c: PoolClient, tenantId: string, companyName: string, userId: string, w: { from: Date; to: Date }): Promise<MineRow[]> {
+ *  ones included (the calendar strikes them through or dims them), and (DW-10c) the DEPARTMENT-visible ones of `departmentUnits`, the
+ *  units the caller reaches (`reachableDepartmentUnits`; empty when they reach none or Cerbos withholds the department read). A timed
+ *  event is in the window when it overlaps it; an all-day event when its inclusive date range meets the window's UTC days. */
+export async function listMine(
+  c: PoolClient, tenantId: string, companyName: string, userId: string, w: { from: Date; to: Date }, departmentUnits: readonly string[] = [],
+): Promise<MineRow[]> {
   const fromDay = w.from.toISOString().slice(0, 10);
   const toDay = new Date(w.to.getTime() - 1).toISOString().slice(0, 10);
   const { rows } = await c.query<{
@@ -626,12 +708,13 @@ export async function listMine(c: PoolClient, tenantId: string, companyName: str
        LEFT JOIN clients cl ON cl.id = e.client_id
        LEFT JOIN projects p ON p.id = e.project_id
       WHERE e.tenant_id = $1
-        AND (e.organizer_id = $2 OR me.user_id IS NOT NULL)
+        AND (e.organizer_id = $2 OR me.user_id IS NOT NULL
+             OR (e.visibility = 'department' AND e.unit_node_id = ANY($7::text[])))
         AND ((e.starts_at IS NOT NULL AND e.starts_at < $4 AND e.ends_at > $3)
           OR (e.starts_on IS NOT NULL AND e.starts_on <= $6::date AND e.ends_on >= $5::date))
       ORDER BY COALESCE(e.starts_at, e.starts_on::timestamp AT TIME ZONE 'UTC'), e.created_at
       LIMIT ${MINE_LIMIT}`,
-    [tenantId, userId, w.from.toISOString(), w.to.toISOString(), fromDay, toDay],
+    [tenantId, userId, w.from.toISOString(), w.to.toISOString(), fromDay, toDay, [...departmentUnits]],
   );
   return rows.map((r) => ({
     id: r.id, tenantId, company: companyName, title: r.title,

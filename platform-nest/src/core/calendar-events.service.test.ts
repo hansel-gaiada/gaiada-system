@@ -4,7 +4,7 @@
 // the Linux gate.
 import { describe, it, expect } from "vitest";
 import {
-  CalendarRuleError, ATTENDEES_MAX, BUSY_USERS_MAX, describeWhen, mergeIntervals, parseBusyQuery, diffAttendees, eventHref, mineSortKey, parseAttendeeIds, parseCreate, parseDay,
+  CalendarRuleError, ATTENDEES_MAX, BUSY_USERS_MAX, UNIT_NODE_ID_MAX, VISIBILITIES, departmentFactsOf, isUnitNodeIdShaped, describeWhen, mergeIntervals, parseBusyQuery, diffAttendees, eventHref, mineSortKey, parseAttendeeIds, parseCreate, parseDay,
   parseInstant, parseMineQuery, parsePatch, parseRespond, parseTimeSpec, planPatch, responseAfterTimeChange, timeChanged,
   timeOfFacts, type EventFacts,
 } from "./calendar-events.service";
@@ -172,7 +172,7 @@ describe("a time change resets the answers (§47.3)", () => {
 function facts(over: Partial<EventFacts> = {}): EventFacts {
   return {
     id: T, tenantId: T, title: "Kickoff", description: "Agenda", startsAt: new Date("2026-10-20T01:00:00Z"), endsAt: new Date("2026-10-20T02:00:00Z"),
-    startsOn: null, endsOn: null, location: "Room 1", videoUrl: null, organizerId: ORG, visibility: "attendees", status: "confirmed",
+    startsOn: null, endsOn: null, location: "Room 1", videoUrl: null, organizerId: ORG, visibility: "attendees", unitNodeId: null, status: "confirmed",
     cancelledAt: null, clientId: null, projectId: null, meetingRecordingId: null, createdAt: new Date(0), updatedAt: new Date(0),
     attendees: [{ userId: ORG, response: "accepted" }, { userId: U1, response: "accepted" }], ...over,
   };
@@ -351,5 +351,77 @@ describe("busy times (§47.4, DW-D28): the query and the merge", () => {
     const b = { startsAt: d("2027-03-10T09:30:00Z"), endsAt: d("2027-03-10T11:00:00Z") };
     mergeIntervals([a, b]);
     expect(a.endsAt.toISOString()).toBe("2027-03-10T10:00:00.000Z");
+  });
+});
+
+// ── DW-10c · the `department` visibility (BFF §59.3) ──────────────────────────────────────────────────────────────
+describe("the department visibility: parsing and the patch plan (§59.3)", () => {
+  it("`department` is one of the three visibilities, and `attendees` and `company` are still there", () => {
+    expect([...VISIBILITIES]).toEqual(["attendees", "company", "department"]);
+  });
+
+  it("create: `department` needs `unitNodeId`; any other visibility refuses one; a null or absent unit on a non-department event is fine", () => {
+    const ok = parseCreate({ ...timed, visibility: "department", unitNodeId: "d-web" });
+    expect(ok).toMatchObject({ visibility: "department", unitNodeId: "d-web" });
+    expect(reasonOf(() => parseCreate({ ...timed, visibility: "department" }))).toBe("unit_required");
+    expect(reasonOf(() => parseCreate({ ...timed, visibility: "department", unitNodeId: null }))).toBe("unit_required");
+    expect(reasonOf(() => parseCreate({ ...timed, visibility: "company", unitNodeId: "d-web" }))).toBe("unit_not_allowed");
+    expect(reasonOf(() => parseCreate({ ...timed, unitNodeId: "d-web" }))).toBe("unit_not_allowed"); // the default visibility is attendees
+    expect(parseCreate({ ...timed, visibility: "company", unitNodeId: null }).unitNodeId).toBeNull();
+    expect(parseCreate({ ...timed }).unitNodeId).toBeNull();
+    expect(refusal(() => parseCreate({ ...timed, visibility: "department" })).field).toBe("unitNodeId");
+  });
+
+  it("the unit id is shaped like an id: 1 to 200 characters, a string, no control character", () => {
+    for (const bad of [123, "", "x".repeat(UNIT_NODE_ID_MAX + 1), "a\nb", "a\u0000b", "a\u007fb", {}, ["d-web"]]) {
+      expect(isUnitNodeIdShaped(bad), JSON.stringify(bad)).toBe(false);
+      expect(reasonOf(() => parseCreate({ ...timed, visibility: "department", unitNodeId: bad }))).toBe("unit_invalid");
+    }
+    expect(isUnitNodeIdShaped("d-web")).toBe(true);
+    expect(isUnitNodeIdShaped("x".repeat(UNIT_NODE_ID_MAX))).toBe(true);
+    expect(isUnitNodeIdShaped("0190a000-0000-7000-8000-000000000001")).toBe(true);
+  });
+
+  it("departmentFactsOf reads ONLY visibility and the unit, tolerates any body, and names no unit for a non-department or a malformed one", () => {
+    expect(departmentFactsOf({ visibility: "department", unitNodeId: "d-web", title: "" })).toEqual({ visibilityGiven: true, department: true, unitNodeId: "d-web", unitGiven: true });
+    expect(departmentFactsOf({ visibility: "company", unitNodeId: "d-web" })).toEqual({ visibilityGiven: true, department: false, unitNodeId: "d-web", unitGiven: true });
+    expect(departmentFactsOf({ unitNodeId: "d-web" })).toMatchObject({ visibilityGiven: false, department: false, unitGiven: true });
+    expect(departmentFactsOf({ visibility: "department", unitNodeId: 5 })).toMatchObject({ department: true, unitNodeId: null, unitGiven: true });
+    expect(departmentFactsOf({ visibility: "department" })).toMatchObject({ department: true, unitNodeId: null, unitGiven: false });
+    for (const body of [null, undefined, "x", 7, [], [{ visibility: "department" }]]) {
+      expect(departmentFactsOf(body), JSON.stringify(body)).toEqual({ visibilityGiven: false, department: false, unitNodeId: null, unitGiven: false });
+    }
+  });
+
+  it("parsePatch carries the unit (a string, or null to clear), and refuses a malformed one", () => {
+    expect(parsePatch({ visibility: "department", unitNodeId: "d-web" })).toEqual({ visibility: "department", unitNodeId: "d-web" });
+    expect(parsePatch({ visibility: "company", unitNodeId: null })).toEqual({ visibility: "company", unitNodeId: null });
+    expect(reasonOf(() => parsePatch({ unitNodeId: 9 }))).toBe("unit_invalid");
+    expect(reasonOf(() => parsePatch({ unitNodeId: "" }))).toBe("unit_invalid");
+  });
+
+  it("planPatch: the unit follows the visibility; leaving `department` clears it, entering it needs one, and a stray unit is refused", () => {
+    const base = facts();
+    const dept = facts({ visibility: "department", unitNodeId: "d-web" });
+    // attendees -> department with a unit
+    const into = planPatch(base, { visibility: "department", unitNodeId: "d-web" });
+    expect(into).toMatchObject({ visibility: "department", unitNodeId: "d-web" });
+    expect(into.changed).toEqual(expect.arrayContaining(["visibility", "unitNodeId"]));
+    // attendees -> department without one
+    expect(reasonOf(() => planPatch(base, { visibility: "department" }))).toBe("unit_required");
+    // a department event keeps its unit when the patch leaves it alone, and moves it when the patch names another
+    expect(planPatch(dept, { title: "Renamed" })).toMatchObject({ visibility: "department", unitNodeId: "d-web", changed: ["title"] });
+    expect(planPatch(dept, { unitNodeId: "dv-fe" })).toMatchObject({ unitNodeId: "dv-fe", changed: ["unitNodeId"] });
+    // department -> company clears the unit (no explicit null needed)
+    const out = planPatch(dept, { visibility: "company" });
+    expect(out).toMatchObject({ visibility: "company", unitNodeId: null });
+    expect(out.changed).toEqual(expect.arrayContaining(["visibility", "unitNodeId"]));
+    // department -> department with the unit cleared is a refusal, not a silent keep
+    expect(reasonOf(() => planPatch(dept, { unitNodeId: null }))).toBe("unit_required");
+    // a unit on a non-department event
+    expect(reasonOf(() => planPatch(base, { unitNodeId: "d-web" }))).toBe("unit_not_allowed");
+    expect(reasonOf(() => planPatch(facts({ visibility: "company" }), { unitNodeId: "d-web" }))).toBe("unit_not_allowed");
+    // an explicit null on a non-department event is a no-op, not an error
+    expect(planPatch(base, { unitNodeId: null })).toMatchObject({ unitNodeId: null, changed: [] });
   });
 });
