@@ -71,7 +71,7 @@ describe("CustomiseOverview: a fixed block", () => {
     draw({ hide: ["needs-you"], show: [] });
     expect(item("needs-you")).toBeNull();
     expect(screen.queryByText("Always shown")).toBeNull();
-    expect(screen.getByText(/Needs you always stays/)).toBeInTheDocument();
+    expect(screen.getByText(/Needs you and Notices always stay/)).toBeInTheDocument();
   });
 });
 

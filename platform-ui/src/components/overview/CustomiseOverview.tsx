@@ -1,6 +1,7 @@
 import type { OverviewBand } from "@/lib/workspaces";
 import type { OverviewBandView } from "@/lib/overview";
 import { widgetIsOn, type WorkspaceOverviewPrefs } from "@/lib/overviewPrefs";
+import { CustomiseSubmit } from "./CustomiseSubmit";
 
 // DW-10d (DW-D34): the Customise disclosure at the end of the Overview's header row. Closed by default. Inside, each band's blocks the
 // person could see, with the state they are in and one button to change it:
@@ -38,7 +39,7 @@ export function CustomiseOverview({ bands, prefs, workspaceKey, bandLabel, actio
       <summary className="lux-btn lux-btn--ghost lux-btn--sm ov-custom__summary">Customise</summary>
       <div className="ov-custom__panel" role="group" aria-label="Customise this Overview">
         <p className="ov-custom__intro">
-          Hide the blocks you do not want and switch on the optional ones. Needs you always stays. The order stays the same. Your choice
+          Hide the blocks you do not want and switch on the optional ones. Needs you and Notices always stay. The order stays the same. Your choice
           is kept in this browser.
         </p>
         {choosable.map(({ band, widgets }) => (
@@ -55,7 +56,7 @@ export function CustomiseOverview({ bands, prefs, workspaceKey, bandLabel, actio
                     <span className="ov-custom__name">{w.label}</span>
                     <span className="ov-custom__state">{optional ? (on ? "Switched on" : "Switched off") : on ? "Shown" : "Hidden"}</span>
                     <form action={action.bind(null, workspaceKey, w.key, !on)}>
-                      <button type="submit" className="ov-custom__btn" aria-label={`${verb} ${w.label}`}>{verb}</button>
+                      <CustomiseSubmit verb={verb} label={w.label} />
                     </form>
                   </li>
                 );

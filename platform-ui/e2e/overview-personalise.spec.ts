@@ -109,7 +109,7 @@ test.describe("Overview: personalise (DW-10d)", () => {
     await page.goto("/departments/dept-1");
     await openCustomise(page);
     await expect(row(page, "needs-you")).toHaveCount(0);
-    await expect(panel(page).getByText(/Needs you always stays/)).toBeVisible();
+    await expect(panel(page).getByText(/Needs you and Notices always stay/)).toBeVisible();
     // The blocks that may be hidden each have one.
     await expect(row(page, "today").getByRole("button", { name: "Hide Today" })).toBeVisible();
     await expect(block(page, "Needs you")).toBeVisible();
