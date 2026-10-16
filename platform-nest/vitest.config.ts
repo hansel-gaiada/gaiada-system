@@ -24,11 +24,13 @@ export default defineConfig({
   // package's CI job does not install platform-ui's node_modules (see src/testing/next-navigation-stub.ts).
   // `next/headers` too (DW-7h): that test drives the UI's real `platformFetch`, which reads the incoming request's
   // headers to forward the client's address (see src/testing/next-headers-stub.ts).
+  // `react` too (DW-9d): platform-ui's `lib/platform.ts` wraps `getMe` in React's `cache()` (see src/testing/react-stub.ts).
   resolve: {
     alias: {
       "server-only": path.resolve(__dirname, "src/testing/server-only-stub.ts"),
       "next/navigation": path.resolve(__dirname, "src/testing/next-navigation-stub.ts"),
       "next/headers": path.resolve(__dirname, "src/testing/next-headers-stub.ts"),
+      "react": path.resolve(__dirname, "src/testing/react-stub.ts"),
     },
   },
   test: {
