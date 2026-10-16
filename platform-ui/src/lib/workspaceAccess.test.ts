@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Me } from "./platform";
-import { sidebarRows, workspaceBySlug, type Gate } from "./workspaces";
-import { approvalsGateInput, concreteRows, functionalConsoleFor, gateAllows, homeArea, resolveMyWorkspaces } from "./workspaceAccess";
+import { ADMIN_ROWS, COMPANY_ROWS, GENERIC_WORKSPACE, WORKSPACES, sidebarRows, workspaceBySlug, type Gate } from "./workspaces";
+import { approvalsGateInput, concreteRows, functionalConsoleFor, gateAllows, holdsDecideRight, homeArea, resolveMyWorkspaces } from "./workspaceAccess";
 import { areaFor, resolveArea } from "./areas";
 import { AGENCY, HOTEL, ROOT, agencyTree, lead, me, member, node, person } from "./workspaceFixtures";
 
@@ -246,6 +246,46 @@ describe("the decider gate: Approvals when it concerns you (DW-D23)", () => {
     expect(approvalsRow(deciderElsewhere, { pending: 0 })).toMatchObject({ key: "approvals" });
     expect(approvalsRow(deciderElsewhere, { pending: 0 })?.count).toBeUndefined();
     expect(approvalsRow(plain, undefined)?.count).toBeUndefined();
+  });
+});
+
+describe("the decider gate while the approvals read is in flight (DW-9d)", () => {
+  const plain = me([member()]);
+  const admin = me([member(), { role: "company_admin", scopeType: "company", scopeId: "co-a" }]);
+  const you = sidebarRows(workspaceBySlug("web-dev")!).you;
+  const inflightRow = (m: Me) => concreteRows(you, { ...ctx(m, "co-a"), deptId: null, approvals: "inflight" }).find((r) => r.key === "approvals");
+
+  it("holdsDecideRight is the server-side boolean: a decide right, in any reachable company, with no read", () => {
+    expect(holdsDecideRight(plain)).toBe(false);
+    expect(holdsDecideRight(admin)).toBe(true);
+  });
+
+  it("keeps the row for everyone (the client settles it) and records the boolean and the badge on it", () => {
+    expect(inflightRow(plain)).toMatchObject({ key: "approvals", awaitsApprovals: { decider: false, badge: true } });
+    expect(inflightRow(admin)).toMatchObject({ key: "approvals", awaitsApprovals: { decider: true, badge: true } });
+    expect(inflightRow(plain)?.count).toBeUndefined();
+  });
+
+  it("marks no other row of the You block as waiting on the read", () => {
+    const rows = concreteRows(you, { ...ctx(plain, "co-a"), deptId: null, approvals: "inflight" });
+    expect(rows.filter((r) => r.awaitsApprovals).map((r) => r.key)).toEqual(["approvals"]);
+  });
+
+  it("a settled read leaves no row marked", () => {
+    for (const approvals of [{ pending: 2 }, null, undefined] as const) {
+      expect(concreteRows(you, { ...ctx(plain, "co-a"), deptId: null, approvals }).some((r) => r.awaitsApprovals)).toBe(false);
+    }
+  });
+
+  // `concreteRows` marks a row whose OWN gate (or badge) is the decider; `applyApprovals` settles whole rows. A decider gate on a tab alone
+  // would be neither marked nor settled, so the registry must keep the decider on the Approvals row (and its one tab) only.
+  it("is used by the Approvals row and its tab only, anywhere in the registry", () => {
+    const rows = [...WORKSPACES, GENERIC_WORKSPACE].flatMap((w) => { const r = sidebarRows(w); return [...r.top, ...r.work, ...r.performance, ...r.you]; })
+      .concat(COMPANY_ROWS, ADMIN_ROWS);
+    for (const row of rows) {
+      const uses = (g: Gate | undefined) => JSON.stringify(g ?? null).includes('"decider"');
+      if (uses(row.gate) || row.tabs.some((t) => uses(t.gate))) expect(row.key).toBe("approvals");
+    }
   });
 });
 

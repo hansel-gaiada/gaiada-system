@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { Me } from "./platform";
 import { GENERIC_WORKSPACE, isPlanned, sidebarRows, workspaceBySlug } from "./workspaces";
 import { resolveMyWorkspaces, type OrgTreeNode } from "./workspaceAccess";
-import { activeLocation, allRows, buildShellModel, overviewHref, workspaceForArea, type ShellModel, type ShellWorkspace } from "./shellModel";
+import { activeLocation, allRows, applyApprovals, buildShellModel, overviewHref, workspaceForArea, type ShellModel, type ShellWorkspace } from "./shellModel";
 import { HOTEL, agencyTree, me, member, node, person, type Company } from "./workspaceFixtures";
 
 /** A root company of the agency vertical, so its owner has an Office of the GM to land in. */
@@ -247,6 +247,70 @@ describe("buildShellModel: the Approvals row (DW-8m, DW-D23)", () => {
       expect(row).toBeDefined();
       expect(row?.count).toBeUndefined();
     }
+  });
+});
+
+// DW-9d perf: the layout no longer waits for the pending-approvals read. It builds the model with the read IN FLIGHT and the client settles it
+// (`applyApprovals`) when the count streams in. DW-D23 stays exact; the in-flight state is the one new case.
+describe("the Approvals row while the read is in flight, and once it settles (DW-D23, DW-9d)", () => {
+  const plain = me([member()]);
+  const decider = me([member(), { role: "company_admin", scopeType: "company", scopeId: "co-a" }]);
+  const inflight = (m: Me) =>
+    buildShellModel({ me: m, tenantId: "co-a", workspaces: resolveMyWorkspaces({ me: m, tenantId: "co-a", root: agencyTree({ web: ["u-1"] }) }), approvals: "inflight" });
+  const row = (mod: ShellModel) => mod.workspaces[0].rows.you.find((r) => r.key === "approvals");
+
+  it("marks the row, with whether the person holds a decide right (computed with no read), and keeps it for every person", () => {
+    expect(row(inflight(plain))?.awaitsApprovals).toEqual({ decider: false, badge: true });
+    expect(row(inflight(decider))?.awaitsApprovals).toEqual({ decider: true, badge: true });
+  });
+
+  it("in flight: SHOWN to a person who holds a decide right, with no badge", () => {
+    const r = row(applyApprovals(inflight(decider), "inflight"));
+    expect(r).toBeDefined();
+    expect(r?.count).toBeUndefined();
+    expect(r?.awaitsApprovals).toBeUndefined();
+  });
+
+  it("in flight: HIDDEN from a non-decider", () => {
+    expect(row(applyApprovals(inflight(plain), "inflight"))).toBeUndefined();
+  });
+
+  it("resolved with something waiting: shown with the pending count as its badge, for a non-decider and a decider", () => {
+    expect(row(applyApprovals(inflight(plain), { pending: 3 }))?.count).toBe(3);
+    expect(row(applyApprovals(inflight(decider), { pending: 3 }))?.count).toBe(3);
+  });
+
+  it("resolved with 0 waiting: hidden from a non-decider, shown (no badge) to a decider", () => {
+    expect(row(applyApprovals(inflight(plain), { pending: 0 }))).toBeUndefined();
+    const d = row(applyApprovals(inflight(decider), { pending: 0 }));
+    expect(d).toBeDefined();
+    expect(d?.count).toBeUndefined();
+  });
+
+  it("unavailable (a failed read): shown, no badge, for a non-decider too: a failed read never hides it", () => {
+    const r = row(applyApprovals(inflight(plain), null));
+    expect(r).toBeDefined();
+    expect(r?.count).toBeUndefined();
+  });
+
+  it("settles to exactly what a model built with that read from the start holds", () => {
+    for (const m of [plain, decider]) {
+      for (const read of [{ pending: 0 }, { pending: 4 }, null] as const) {
+        const direct = buildShellModel({ me: m, tenantId: "co-a", workspaces: resolveMyWorkspaces({ me: m, tenantId: "co-a", root: agencyTree({ web: ["u-1"] }) }), approvals: read });
+        expect(applyApprovals(inflight(m), read)).toEqual(direct);
+      }
+    }
+  });
+
+  it("adds a hidden row's path to the workspace's withheld paths, as its gate would have", () => {
+    expect(byId(inflight(plain), "d-web").withheld).not.toContain("/approvals");
+    expect(byId(applyApprovals(inflight(plain), { pending: 0 }), "d-web").withheld).toContain("/approvals");
+    expect(byId(applyApprovals(inflight(plain), { pending: 2 }), "d-web").withheld).not.toContain("/approvals");
+  });
+
+  it("returns a model with nothing awaiting as it is", () => {
+    const settled = model(plain, "co-a", agencyTree({ web: ["u-1"] }));
+    expect(applyApprovals(settled, "inflight")).toBe(settled);
   });
 });
 

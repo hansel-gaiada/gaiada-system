@@ -1,9 +1,9 @@
 "use client";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { areaFor, resolveArea, sameArea, type Area } from "@/lib/areas";
-import { activeLocation, allRows, workspaceForArea, type ShellModel, type ShellWorkspace } from "@/lib/shellModel";
-import type { ConcreteRow } from "@/lib/workspaceAccess";
+import { activeLocation, allRows, applyApprovals, workspaceForArea, type ShellModel, type ShellWorkspace } from "@/lib/shellModel";
+import type { ApprovalsRead, ConcreteRow } from "@/lib/workspaceAccess";
 
 // DW-2b: the one place the workspace shell decides where the person is (plan §2.3, §13 trap 2).
 //
@@ -86,10 +86,32 @@ export function useWorkspaceShell(): WorkspaceShellValue | null {
   return useContext(Ctx);
 }
 
+// DW-9d perf: the pending-approvals count is read AFTER the shell's first byte. The layout builds the model with that read in flight
+// (`approvals: "inflight"`: the Approvals row is shown to a person who holds a decide right, hidden from one who does not), streams the
+// count in a <Suspense> child (`ShellApprovalsFeed`), and that child hands the settled read to this provider through `ApprovalsSetterCtx`
+// (`ShellApprovalsSettle`, an effect). Why an effect and not `use(promise)` in the provider: a suspending provider would hold the whole
+// shell behind the read again, which is the thing being removed. The state lives here (not in the feed) so a later server refresh that
+// re-renders the layout updates the count in place and the row never falls back to "in flight" once it has resolved.
+const ApprovalsSetterCtx = createContext<((read: ApprovalsRead) => void) | null>(null);
+
+/** Renders nothing: hands the layout's settled approvals read to the shell (see above). Rendered by the server's `ShellApprovalsFeed`. */
+export function ShellApprovalsSettle({ read }: { read: { pending: number } | null }) {
+  const set = useContext(ApprovalsSetterCtx);
+  const pending = read ? read.pending : null;
+  useEffect(() => {
+    set?.(pending === null ? null : { pending });
+  }, [set, pending]);
+  return null;
+}
+
 /** Renders no DOM: `.erp-app`'s grid relies on its direct children. */
-export function WorkspaceShellProvider({ model, children }: { model: ShellModel; children: ReactNode }) {
+export function WorkspaceShellProvider({ model: built, children }: { model: ShellModel; children: ReactNode }) {
   const pathname = usePathname() ?? "/";
   const [last, setLast] = useState<Area | null>(null);
+  // The model the server built, with the approvals read settled as far as it is known. A model built with a settled read (tests, anything that
+  // does not stream it) has no row awaiting it and passes through as is.
+  const [approvals, setApprovals] = useState<ApprovalsRead>("inflight");
+  const model = useMemo(() => applyApprovals(built, approvals), [built, approvals]);
 
   useEffect(() => {
     setLast(readLastArea());
@@ -127,5 +149,9 @@ export function WorkspaceShellProvider({ model, children }: { model: ShellModel;
     onToolPage: tabPaths.has(pathOf(pathname)),
   };
 
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return (
+    <ApprovalsSetterCtx.Provider value={setApprovals}>
+      <Ctx.Provider value={value}>{children}</Ctx.Provider>
+    </ApprovalsSetterCtx.Provider>
+  );
 }

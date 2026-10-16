@@ -36,6 +36,13 @@ export interface OrgTreeNode {
   children: readonly OrgTreeNode[];
 }
 
+/** What the shell knows of the person's pending approvals (`GateContext.approvals`):
+ *  - `{ pending }`: the read resolved; `pending` waits on THIS person's decision.
+ *  - `null`: the read was unavailable (a failed read never hides the row).
+ *  - `"inflight"`: the read has not resolved yet. The shell no longer waits for it before its first byte (DW-9d perf), so the model is
+ *    built in this state and the client settles it when the count streams in (`applyApprovals`, `lib/shellModel.ts`). */
+export type ApprovalsRead = { pending: number } | null | "inflight";
+
 export interface GateContext {
   me: Me;
   tenantId: string | null;
@@ -49,8 +56,9 @@ export interface GateContext {
    *  (DW-D23, DW-8m). `pending` is how many wait on THIS person's decision (the items the server marks `decidable`).
    *  `undefined` = the caller did not read approvals (the palette, a test): the gate ALLOWS, so
    *  nothing that was findable stops being findable. `null` = the read was unavailable: the gate ALLOWS too, because a
-   *  failed read must never hide the page from a decider. */
-  approvals?: { pending: number } | null;
+   *  failed read must never hide the page from a decider. `"inflight"`: the gate ALLOWS (a superset), and `concreteRows` marks the row
+   *  `awaitsApprovals`, so `applyApprovals` can settle it when the read resolves. */
+  approvals?: ApprovalsRead;
 }
 
 /** The decide rights the UI mirrors, any one of which makes the Approvals row worth showing (DW-D23). `approvals.decide`
@@ -65,7 +73,7 @@ export const DECIDE_CAPABILITIES: readonly Capability[] = [
 
 /** Does the person hold a decide right in ANY company they can reach, or globally? The inbox is cross-company
  *  (`scope=all`), so the active company alone would hide the row from someone who decides in another one. */
-function holdsDecideRight(me: Me): boolean {
+export function holdsDecideRight(me: Me): boolean {
   return DECIDE_CAPABILITIES.some((cap) => can(me, cap, null) || me.companies.some((c) => can(me, cap, c.id)));
 }
 
@@ -103,8 +111,9 @@ export function gateAllows(gate: Gate | undefined, ctx: GateContext): boolean {
     case "rootGroup":
       return (isRootOwner(ctx.me) || isElevated(ctx.me)) && isRootCompany(company);
     case "decider":
-      // Unknown (undefined) and failed (null) reads never hide the row (DW-D23).
-      if (ctx.approvals == null) return true;
+      // Unknown (undefined) and failed (null) reads never hide the row (DW-D23). An in-flight read keeps it too: `concreteRows` marks
+      // the row and `applyApprovals` decides it (decider: shown, non-decider: hidden) until the count resolves.
+      if (ctx.approvals == null || ctx.approvals === "inflight") return true;
       return ctx.approvals.pending > 0 || holdsDecideRight(ctx.me);
     case "all":
       return gate.gates.every((g) => gateAllows(g, ctx));
@@ -246,12 +255,24 @@ export interface ConcreteRow {
   key: string; label: string; icon: IconName; tabs: ConcreteTab[];
   /** The count the sidebar draws after the label (DW-8m). Set only when above 0. */
   count?: number;
+  /** Set only on a model built while the pending-approvals read was in flight (`approvals: "inflight"`): this row's visibility or count
+   *  depends on that read. `decider` is whether the person holds a decide right (`holdsDecideRight`, computed on the server with no
+   *  read): it is what shows the row while the count is still arriving. `badge` is whether the row's count is the pending figure.
+   *  `applyApprovals` settles the row and removes this field. */
+  awaitsApprovals?: { decider: boolean; badge: boolean };
+}
+
+/** Does this gate (or one nested in it) ask the `decider` question? */
+function gateUsesDecider(gate: Gate | undefined): boolean {
+  if (!gate) return false;
+  if (gate.kind === "decider") return true;
+  return gate.kind === "all" || gate.kind === "any" ? gate.gates.some(gateUsesDecider) : false;
 }
 
 /** The figure behind a row's badge key, from what the shell read. Add a case when another key is built. */
 function badgeCount(badge: RowBadge | undefined, ctx: GateContext): number {
   switch (badge) {
-    case "approvals": return ctx.approvals?.pending ?? 0;
+    case "approvals": return typeof ctx.approvals === "object" && ctx.approvals ? ctx.approvals.pending : 0;
     default: return 0;
   }
 }
@@ -292,7 +313,11 @@ export function concreteRows(
     }
     if (tabs.length === 0) continue;
     const count = badgeCount(row.badge, ctx);
-    out.push({ key: row.key, label: row.label, icon: row.icon, tabs, ...(count > 0 ? { count } : {}) });
+    // While the approvals read is in flight, a row that waits on it carries what the client needs to settle it later.
+    const awaits = ctx.approvals === "inflight" && (gateUsesDecider(row.gate) || row.badge === "approvals")
+      ? { awaitsApprovals: { decider: holdsDecideRight(ctx.me), badge: row.badge === "approvals" } }
+      : {};
+    out.push({ key: row.key, label: row.label, icon: row.icon, tabs, ...(count > 0 ? { count } : {}), ...awaits });
   }
   return out;
 }

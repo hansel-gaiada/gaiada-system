@@ -9,7 +9,7 @@
 // Pure and client-safe, like the registry it reads. Gates mirror the server; they are not security.
 import type { Me } from "@/lib/platform";
 import { ADMIN_ROWS, ASSISTANT_ROW, COMPANY_ROWS, hrefFor, isPlanned, sidebarRows, type WorkspaceKind } from "@/lib/workspaces";
-import { concreteRows, gateAllows, homeArea, withheldTabPaths, workspaceKeysOf, type ConcreteRow, type GateContext, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
+import { concreteRows, gateAllows, homeArea, withheldTabPaths, workspaceKeysOf, type ApprovalsRead, type ConcreteRow, type GateContext, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
 import type { Area } from "@/lib/areas";
 
 export interface ShellRows {
@@ -61,7 +61,8 @@ const idOf = (ref: WorkspaceRef) => ref.deptId ?? `slug:${ref.workspace.key}`;
 export function buildShellModel(input: {
   me: Me; tenantId: string | null; workspaces: MyWorkspaces;
   /** The shell's one read of the pending approvals (`approvalsGateInput`), for the Approvals row's gate and count (DW-8m).
-   *  Omitted or null leaves the row shown with no count. */
+   *  Omitted or null leaves the row shown with no count. `"inflight"` (the layout, which does not wait for the read) leaves the rows that
+   *  depend on it marked `awaitsApprovals`, and `applyApprovals` settles them on the client once the count streams in. */
   approvals?: GateContext["approvals"];
 }): ShellModel {
   const { me, tenantId, workspaces, approvals } = input;
@@ -125,6 +126,49 @@ export function buildShellModel(input: {
     homeLabel: homeWs?.label ?? "Company",
     homeHref: homeWs ? overviewHref(homeWs) : (company[0]?.tabs[0]?.href ?? null),
   };
+}
+
+// ── The approvals read, settled after the first byte (DW-9d perf) ─────────────────────────────────
+
+/** Settles the rows a model built with `approvals: "inflight"` marked `awaitsApprovals`, for what is now known of the pending read.
+ *  DW-D23, exactly, with the one new state (the count still in flight):
+ *   - in flight: the row is shown to a person who holds a decide right (no badge yet) and hidden from one who does not;
+ *   - resolved: shown when `pending > 0` or the person holds a decide right, with the pending count as its badge when above 0;
+ *   - unavailable (`null`): shown, no badge: a failed read never hides it.
+ *  A row it hides has its tabs' paths added to the workspace's `withheld`, as `concreteRows`'s own gate would have. Pure: the model is
+ *  returned as is when nothing awaits, so a model built with a settled read (a test, the palette) passes through untouched. */
+export function applyApprovals(model: ShellModel, read: ApprovalsRead): ShellModel {
+  let touched = false;
+  const settle = (rows: ConcreteRow[], hidden: string[]): ConcreteRow[] => {
+    if (!rows.some((r) => r.awaitsApprovals)) return rows;
+    touched = true;
+    const out: ConcreteRow[] = [];
+    for (const row of rows) {
+      const { awaitsApprovals: wait, ...rest } = row;
+      if (!wait) { out.push(row); continue; }
+      const shown = read === "inflight" ? wait.decider : read === null ? true : read.pending > 0 || wait.decider;
+      if (!shown) { for (const t of row.tabs) hidden.push(t.href.split(/[?#]/)[0]); continue; }
+      const count = wait.badge && read !== null && read !== "inflight" && read.pending > 0 ? read.pending : undefined;
+      out.push(count ? { ...rest, count } : rest);
+    }
+    return out;
+  };
+  const noHidden: string[] = [];
+  const workspaces = model.workspaces.map((ws) => {
+    const hidden: string[] = [];
+    const rows = {
+      top: settle(ws.rows.top, hidden), work: settle(ws.rows.work, hidden),
+      performance: settle(ws.rows.performance, hidden), you: settle(ws.rows.you, hidden),
+    };
+    return hidden.length === 0 && rows.top === ws.rows.top && rows.work === ws.rows.work && rows.performance === ws.rows.performance && rows.you === ws.rows.you
+      ? ws
+      : { ...ws, rows, withheld: [...new Set([...ws.withheld, ...hidden])] };
+  });
+  const company = settle(model.company, noHidden);
+  const admin = settle(model.admin, noHidden);
+  const companyTop = settle(model.companyTop, noHidden);
+  const adminTop = settle(model.adminTop, noHidden);
+  return touched ? { ...model, workspaces, company, admin, companyTop, adminTop } : model;
 }
 
 // ── Helpers the client sidebar uses (and the tests pin) ───────────────────────────────────────────

@@ -1,8 +1,8 @@
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, act } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { WorkspaceSidebar, type SidebarCompany } from "./WorkspaceSidebar";
-import { WorkspaceShellProvider } from "./WorkspaceShellContext";
+import { ShellApprovalsSettle, WorkspaceShellProvider } from "./WorkspaceShellContext";
 import { buildShellModel } from "@/lib/shellModel";
 import { resolveMyWorkspaces } from "@/lib/workspaceAccess";
 import { agencyTree, me, member } from "@/lib/workspaceFixtures";
@@ -257,5 +257,83 @@ describe("the Approvals count (DW-8m)", () => {
   it("draws no count when the model carries none", () => {
     renderAt("/");
     expect(screen.queryByRole("img", { name: /waiting for you/ })).toBeNull();
+  });
+});
+
+// DW-9d perf: the layout builds the model with the pending-approvals read in flight and streams the count after the first byte. The sidebar
+// therefore draws the row from the in-flight state first, and `ShellApprovalsSettle` (rendered by the streamed server child) settles it.
+describe("the Approvals row while the count streams in (DW-D23, DW-9d)", () => {
+  const decider = me([member(), { role: "company_admin", scopeType: "company", scopeId: "co-a" }]);
+  const inflight = (m: typeof employee) => buildShellModel({
+    me: m, tenantId: "co-a", approvals: "inflight",
+    workspaces: resolveMyWorkspaces({ me: m, tenantId: "co-a", root: agencyTree({ web: ["u-1"] }) }),
+  });
+  const approvalsLink = () => screen.queryByRole("link", { name: /^Approvals/ });
+  function drawBefore(m: typeof employee) {
+    nav.pathname = "/";
+    // No settle child rendered: the count is still in flight.
+    return render(
+      <WorkspaceShellProvider model={inflight(m)}>
+        <WorkspaceSidebar tenantId="co-a" company={COMPANY} companies={[]} newItems={[]} />
+      </WorkspaceShellProvider>,
+    );
+  }
+  const settleWith = async (m: typeof employee, read: { pending: number } | null) => {
+    nav.pathname = "/";
+    await act(async () => {
+      render(
+        <WorkspaceShellProvider model={inflight(m)}>
+          <WorkspaceSidebar tenantId="co-a" company={COMPANY} companies={[]} newItems={[]} />
+          <ShellApprovalsSettle read={read} />
+        </WorkspaceShellProvider>,
+      );
+    });
+  };
+
+  it("in flight: shows the row, with no badge, to a person who holds a decide right", () => {
+    drawBefore(decider);
+    expect(approvalsLink()).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /waiting for you/ })).toBeNull();
+  });
+
+  it("in flight: hides the row from a non-decider", () => {
+    drawBefore(employee);
+    expect(approvalsLink()).toBeNull();
+  });
+
+  it("resolved with something waiting: shows the row with the count, even for a non-decider", async () => {
+    await settleWith(employee, { pending: 3 });
+    expect(approvalsLink()).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "3 waiting for you" })).toHaveTextContent("3");
+  });
+
+  it("resolved with nothing waiting: hides the row from a non-decider and keeps it, no badge, for a decider", async () => {
+    await settleWith(employee, { pending: 0 });
+    expect(approvalsLink()).toBeNull();
+    document.body.innerHTML = "";
+    await settleWith(decider, { pending: 0 });
+    expect(approvalsLink()).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /waiting for you/ })).toBeNull();
+  });
+
+  it("unavailable: shows the row, no badge, for a non-decider too (a failed read never hides it)", async () => {
+    await settleWith(employee, null);
+    expect(approvalsLink()).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /waiting for you/ })).toBeNull();
+  });
+
+  it("a later refresh updates the count in place and never drops the row back to in flight", async () => {
+    nav.pathname = "/";
+    const ui = (read: { pending: number }) => (
+      <WorkspaceShellProvider model={inflight(employee)}>
+        <WorkspaceSidebar tenantId="co-a" company={COMPANY} companies={[]} newItems={[]} />
+        <ShellApprovalsSettle read={read} />
+      </WorkspaceShellProvider>
+    );
+    let out!: ReturnType<typeof render>;
+    await act(async () => { out = render(ui({ pending: 2 })); });
+    expect(screen.getByRole("img", { name: "2 waiting for you" })).toBeInTheDocument();
+    await act(async () => { out.rerender(ui({ pending: 5 })); });
+    expect(screen.getByRole("img", { name: "5 waiting for you" })).toBeInTheDocument();
   });
 });
