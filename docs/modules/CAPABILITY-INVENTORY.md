@@ -17,8 +17,8 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **273** capabilities across **16** owners
-- **144** writes · 129 reads
+- **274** capabilities across **16** owners
+- **144** writes · 130 reads
 - Writes by impact: **high 26** · medium 41 · low 77
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
@@ -43,7 +43,7 @@ unfalsifiable after.
 | assistant | `assistant` | 15 |
 | automation-console | `admin/automation` | 3 |
 | clients | `clients` | 25 |
-| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `positions` · `role-grants` | 75 |
+| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `notices?unitNodeId=:unitNodeId&scope=:scope&state=:state` · `positions` · `role-grants` | 75 |
 | finance | `finance` | 4 |
 | hr | `hr` | 13 |
 | invoice | `invoices` | 13 |
@@ -122,6 +122,7 @@ unfalsifiable after.
 | core | `meetings.getMinutes` | `GET` | `/api/:tenantId/meetings/:meetingId/minutes` | read | — |
 | core | `meetings.saveMinutes` | `PUT` | `/api/:tenantId/meetings/:meetingId/minutes` | write | `low` |
 | core | `meetings.shareMinutes` | `POST` | `/api/:tenantId/meetings/:meetingId/minutes/share` | write | `medium` |
+| core | `notices.list` | `GET` | `/api/:tenantId/notices?unitNodeId=:unitNodeId&scope=:scope&state=:state` | read | — |
 | finance | `finance.apAging` | `GET` | `/api/:tenantId/finance/ap/aging` | read | — |
 | finance | `finance.arAging` | `GET` | `/api/:tenantId/finance/ar/aging` | read | — |
 | finance | `finance.balanceSheet` | `GET` | `/api/:tenantId/finance/balance-sheet` | read | — |
