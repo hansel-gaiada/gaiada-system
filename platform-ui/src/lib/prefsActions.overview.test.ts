@@ -139,11 +139,10 @@ describe("setOverviewWidgetAction: refusals write nothing", () => {
 
 describe("setOverviewWidgetAction: the rest of the prefs", () => {
   it("leaves the other prefs and the pins alone", async () => {
-    store.set("gaiada_prefs", JSON.stringify({ theme: "dark", shell: "workspaces", pinnedTools: { seo: ["ga4"] } }));
+    store.set("gaiada_prefs", JSON.stringify({ theme: "dark", pinnedTools: { seo: ["ga4"] } }));
     await setOverviewWidgetAction("seo", "my-activity", false);
     const p = await getPrefs();
     expect(p.theme).toBe("dark");
-    expect(p.shell).toBe("workspaces");
     expect(p.pinnedTools).toEqual({ seo: ["ga4"] });
     expect(p.overview).toEqual({ seo: { hide: ["my-activity"], show: [] } });
   });

@@ -50,11 +50,10 @@ describe("prefs: overview (DW-10d)", () => {
   });
 
   it("round-trips through the cookie, next to the pins", async () => {
-    await writePrefs({ ...DEFAULT_PREFS, shell: "workspaces", pinnedTools: { seo: ["ga4"] }, overview: { "web-dev": { hide: ["my-activity"], show: ["client-health"] } } });
+    await writePrefs({ ...DEFAULT_PREFS, pinnedTools: { seo: ["ga4"] }, overview: { "web-dev": { hide: ["my-activity"], show: ["client-health"] } } });
     const back = await getPrefs();
     expect(back.overview).toEqual({ "web-dev": { hide: ["my-activity"], show: ["client-health"] } });
     expect(back.pinnedTools).toEqual({ seo: ["ga4"] });
-    expect(back.shell).toBe("workspaces");
   });
 
   it("reads a forged or malformed value as {} and keeps the other prefs", async () => {

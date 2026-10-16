@@ -12,6 +12,9 @@ vi.mock("@/lib/session-server", () => ({ getSessionUserId: vi.fn(async () => "u-
 vi.mock("@/lib/platform", () => ({ getMe: vi.fn(async () => ({ userId: "u-1", companies: [], roles: [] })) }));
 vi.mock("@/lib/tenant", () => ({ getActiveTenant: vi.fn() }));
 vi.mock("@/lib/workspaces-data", () => ({ myWorkspaces: vi.fn() }));
+// DW-10d: the company Overview is personalised from the prefs cookie, through the Customise action.
+vi.mock("@/lib/prefs", () => ({ getPrefs: vi.fn(async () => ({ pinnedTools: {}, overview: {} })) }));
+vi.mock("@/lib/prefsActions", () => ({ setOverviewWidgetAction: vi.fn() }));
 vi.mock("@/components/overview/WorkspaceOverview", () => ({ WorkspaceOverview: () => <div data-testid="company-overview" /> }));
 
 import { getActiveTenant } from "@/lib/tenant";
