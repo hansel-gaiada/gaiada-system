@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { isDemoMode } from "./demoMode";
 import { SESSION_REVOKED_REASON, withSessionEndedRedirect } from "./sessionEnded";
 // The ONLY backend this UI talks to. Server-side only — tokens never reach the browser.
@@ -223,4 +224,7 @@ export interface Me {
   clientOf?: { companyId: string; companyName: string }[];
 }
 
-export const getMe = (userId: string) => platformFetch<Me>("/api/me", userId);
+// Memoised per request (React `cache`, keyed by userId): the (app) layout, the department layout and the page each ask for the
+// caller's `me`, and without this each was its own `/api/me` round trip and its own object, so the caches keyed on the `me`
+// object (`myWorkspaces`, `readNowQueue`) never hit across components. Nothing mutates the returned value (it is read-only data).
+export const getMe = cache((userId: string) => platformFetch<Me>("/api/me", userId));

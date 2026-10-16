@@ -22,8 +22,9 @@ export async function pilotFrame(
   target: { deptId: string } | { slug: string },
   searchParams: Promise<{ period?: string | string[]; view?: string | string[] }>,
 ): Promise<((legacy: ReactNode) => ReactNode) | null> {
-  const prefs = await getPrefs();
-  const all = await myWorkspaces(me, tenantId);
+  // Three independent reads (the cookie, the org tree, the modules), started together: serially they added up on the first byte.
+  // DW-3g: one read of the company's modules, so a block whose module is off is not placed. It fails open.
+  const [prefs, all, modules] = await Promise.all([getPrefs(), myWorkspaces(me, tenantId), moduleGate(me.userId, tenantId)]);
   const ref = workspaceRefForPage(all, target);
   if (!ref) return null;
   const { period, view } = await searchParams;
@@ -31,8 +32,6 @@ export async function pilotFrame(
   // DW-5f: `all` gives the `hasWorkspace` gate the company's department workspaces.
   const subject = subjectOfRef(ref, prefs.pinnedTools, all);
   const parsed = parseOverviewPeriod(period);
-  // DW-3g: one read of the company's modules, so a block whose module is off is not placed. It fails open.
-  const modules = await moduleGate(me.userId, tenantId);
   // DW-3h: the Me | Team switch is a head's, of THIS workspace's unit. For anyone else `?view=team` is ignored (Me), so
   // nothing about a team is read for them. The switch is cosmetic: the server narrows every Team read.
   const canSwitchView = canSwitchToTeam(me, tenantId, subject);
