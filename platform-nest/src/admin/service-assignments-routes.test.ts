@@ -155,7 +155,7 @@ describe.skipIf(!TEST_URL)("DW-10e-1 routes through ORG-13 (HTTP, real Postgres 
       expect(await assignmentCount()).toBe(before);
       // ...and an absent or null lead is simply no lead
       const dry = await create(exec, "d-creative", { targets: [H], module: "asset_requests", leadUserId: null }, "?dryRun=1");
-      expect(dry.statusCode, dry.body).toBe(200);
+      expect(dry.statusCode, dry.body).toBe(201); // the dry run is the propose POST (BFF ORG-3 dry run: 201)
     });
 
     it("a target with NO client record answers 422 route_needs_group_client with detail.targetId, for both creators", async () => {
@@ -203,7 +203,7 @@ describe.skipIf(!TEST_URL)("DW-10e-1 routes through ORG-13 (HTTP, real Postgres 
     it("items is empty, routeOnly is true, and each target is included or says why not", async () => {
       const before = await assignmentCount();
       const r = await create(exec, "d-creative", { targets: [H, T, T2], module: "asset_requests" }, "?dryRun=1");
-      expect(r.statusCode, r.body).toBe(200);
+      expect(r.statusCode, r.body).toBe(201); // the dry run is the propose POST (BFF ORG-3 dry run: 201)
       const body = r.json() as {
         dryRun: boolean; routeOnly?: boolean; items: unknown[]; unit: { nodeId: string; kind: string };
         companies: Array<{ id: string; name?: string; included: boolean; reason?: string }>;
@@ -227,7 +227,7 @@ describe.skipIf(!TEST_URL)("DW-10e-1 routes through ORG-13 (HTTP, real Postgres 
 
     it("CONTROL: the same unit through a real module lists its placed people and carries no routeOnly", async () => {
       const r = await create(exec, "d-creative", { targets: [H], module: "rt_ctl" }, "?dryRun=1");
-      expect(r.statusCode, r.body).toBe(200);
+      expect(r.statusCode, r.body).toBe(201); // the dry run is the propose POST (BFF ORG-3 dry run: 201)
       const body = r.json() as { routeOnly?: boolean; items: Array<{ userId: string }> };
       expect(body.routeOnly).toBeUndefined();
       expect(body.items.map((i) => i.userId)).toContain(staffer);
