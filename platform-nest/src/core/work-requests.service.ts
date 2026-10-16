@@ -454,6 +454,62 @@ export async function ensureIntakeProject(
   return { projectId: rows[0].project_id, created: false };
 }
 
+/** The longest name a project carries (`projects.name` has no CHECK; this is the contract's own bound, BFF §60.6a). */
+export const CLIENT_INTAKE_NAME_MAX = 200;
+
+/** §60.6a: "<Department> · Requests · <Client>", at most 200 characters, the CLIENT's name cut to fit. A department name so long
+ *  that nothing of the client fits is cut itself (never a name over the bound). Counts characters (code points), not UTF-16
+ *  units, so a cut never splits a surrogate pair. Pure: unit-tested without a database. */
+export function clientIntakeProjectName(unitName: string, clientName: string): string {
+  const prefix = `${unitName} · Requests · `;
+  const full = [...`${prefix}${clientName}`];
+  if (full.length <= CLIENT_INTAKE_NAME_MAX) return full.join("");
+  return full.slice(0, CLIENT_INTAKE_NAME_MAX).join("").trimEnd();
+}
+
+/** §60.6a intake for a CROSS-COMPANY request: the receiving department's "<Department> · Requests · <Client>" project for ONE
+ *  client, created ONCE. The client twin of `ensureIntakeProject`, in the SAME race-safe order (see its comment, and
+ *  migration 202610160200): mint the project id, INSERT the `work_request_client_intakes` row first with
+ *  `ON CONFLICT (tenant_id, unit_id, client_id) DO NOTHING RETURNING`, and create the project row ONLY when that insert won;
+ *  the project FK is DEFERRED to COMMIT, so a loser never leaves an orphan project and re-selects the winner's committed row.
+ *
+ *  The project is CLIENT work, not internal: `client_id` = the client (the requesting company's record at this company),
+ *  `is_internal = false`, `department_id` = the unit, no owner (provisioning for an authorized request, so there is no project
+ *  `create` gate) and a derived short code. Time logged on it, ticked Billable, is invoiced to that client (DW-D41).
+ *
+ *  Runs on the caller's `PoolClient`, inside `withTenants([tenantId])`; the caller has already resolved the client (one live
+ *  record linked to the requester, `resolveGroupClient`) and the unit's name from the receiving company's own tree. */
+export async function ensureClientIntakeProject(
+  c: PoolClient, tenantId: string, unitId: string, unitName: string, clientId: string, clientName: string, originSite: string,
+): Promise<{ projectId: string; created: boolean }> {
+  const candidate = newId();
+  const won = await c.query<{ project_id: string }>(
+    `INSERT INTO work_request_client_intakes (tenant_id, unit_id, client_id, project_id) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (tenant_id, unit_id, client_id) DO NOTHING RETURNING project_id`,
+    [tenantId, unitId, clientId, candidate],
+  );
+  if (won.rows[0]) {
+    const name = clientIntakeProjectName(unitName, clientName);
+    const shortCode = await deriveUniqueShortCode(c, tenantId, name);
+    await c.query(
+      `INSERT INTO projects (id, tenant_id, name, client_id, is_internal, owner_id, custom_fields, department_id, short_code, origin_site)
+       VALUES ($1, $2, $3, $4, false, NULL, '{}'::jsonb, $5, $6, $7)`,
+      [candidate, tenantId, name, clientId, unitId, shortCode, originSite],
+    );
+    return { projectId: candidate, created: true };
+  }
+  const { rows } = await c.query<{ project_id: string; deleted_at: string | null }>(
+    `SELECT i.project_id, p.deleted_at FROM work_request_client_intakes i
+       JOIN projects p ON p.id = i.project_id AND p.tenant_id = i.tenant_id
+      WHERE i.tenant_id = $1 AND i.unit_id = $2 AND i.client_id = $3`,
+    [tenantId, unitId, clientId],
+  );
+  if (!rows[0] || rows[0].deleted_at) {
+    throw new WorkRequestRuleError(409, "intake_project_unavailable", "this department's requests project for this client is missing or deleted; restore it before asking this department");
+  }
+  return { projectId: rows[0].project_id, created: false };
+}
+
 export interface AuthFacts {
   id: string;
   kind: RequestKind;

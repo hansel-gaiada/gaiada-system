@@ -11,7 +11,9 @@ export interface EnvelopeCompany {
   // reason} only.
   name?: string;
   included: boolean;
-  reason?: "no_access" | "not_served" | "suspended" | "error";
+  // DW-10e (BFF §60.2): `no_group_client` and `group_client_ambiguous` are the dry run's per-target answers for a request route
+  // whose target is not (or not uniquely) the provider's client.
+  reason?: "no_access" | "not_served" | "suspended" | "error" | "no_group_client" | "group_client_ambiguous";
 }
 
 export interface Envelope<T> {

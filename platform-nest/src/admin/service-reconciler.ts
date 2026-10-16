@@ -21,6 +21,11 @@
 //  - A2 no coalescing: claims are the liveness source of truth; managed_by is a marker only.
 //    A manual identical grant (managed_by NULL) is left entirely alone — no claim recorded, so a
 //    later revoke cannot decrement it.
+//  - DW-10e (BFF §60.2): a ROUTING KEY (`asset_requests`, `engineering_requests`) is not a module and places nobody. Its desired
+//    set is EMPTY whatever the status: no membership, no grant, no claim. The unit refresh and the orphan detection (A8, A16)
+//    still run, so `unit_name` and `unit_status` stay current. This must be explicit, because the target membership is created
+//    BEFORE the `<module>_staff` role is looked up: a key with no roles would still make the provider's people members of the
+//    target if the placement below ran for it.
 //  - A16 freeze-don't-revoke: when the unit node vanishes/changes-kind in the blob the assignment
 //    is marked orphaned and grants are FROZEN (not stripped); the nightly sweep auto-suspends
 //    after a TTL. A person merely moved OUT of the (still-present) unit is an ordinary re-diff.
@@ -36,6 +41,8 @@ import { emitEvent } from "../events/outbox.service";
 // TRUSTED_INTERNAL caller — no caller-choice validation runs — for the reasons stated at each
 // call site and pinned by name in `user-roles-writer-guard.test.ts`.
 import { insertGrantRow, revokeManagedGrant } from "./grant-write.service";
+// DW-10e: the routing keys. A route places nobody (BFF §60.2), so its desired set is always empty.
+import { isRequestRouteKey } from "../core/request-routes";
 
 const UNIT_KINDS = new Set(["department", "division"]);
 const LIVE_ISH = ["active", "suspended", "proposed"];
@@ -185,7 +192,9 @@ export async function reconcileAssignment(
 
     // Placed staff = distinct person assigneeIds in the subtree WITH an active provider membership.
     // A bogus/stale assigneeId is skipped and reported, never granted (closes the unvalidated-id hole).
-    const persons = collectSubtreePersons(node);
+    // DW-10e: a routing key places NOBODY, so no one is collected and `desired` stays empty (the removal phase below still runs
+    // and would strip any claim a pre-fix row somehow held).
+    const persons = isRequestRouteKey(row.module_key) ? [] : collectSubtreePersons(node);
     const valid = new Set<string>();
     if (persons.length) {
       const { rows } = await withTenants([provider], (c) =>
