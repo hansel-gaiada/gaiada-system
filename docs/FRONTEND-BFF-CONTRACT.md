@@ -10978,6 +10978,8 @@ All after the commit, best-effort and logged loudly on failure, as §32.7. Each 
 7. **Billable time.** The receiving heads tell their people that requests from group companies are client work: tick Billable when logging time on them.
 8. **A first live drive:** a holding member asks Creatives for one asset; Creatives logs billable time and delivers it; the holding member downloads it; Finance's draft invoice for the holding shows the line. Then the teardown: the draft invoice voided, and the labelled test rows cancelled or declined.
 
+**Done on live, 2026-10-18** (DW-10, as hansel@ on 1.0.0-alpha.422, owner go 2026-10-17). Step 1: no assignments existed. Step 2: Viceroy Bali's client record was live and linked; the holding's, "D & A Syrowatka", was created (business type Other). Step 4: the four routes, active. Step 5: probed 14/14. Step 8, narrowed by the owner to one labelled asset request from Viceroy to Creatives, checked on both sides and cancelled (no billable time, no invoice). Open: step 3 (DW-D42: the company admins sign; the holding has none) and steps 6-7 (the heads' briefing).
+
 ### 60.13 Build order and tiers
 
 Plan §12.2, "10e design". Three tickets, one at a time: 10e-1 the data, the routes and the billing data; 10e-2 the permission, the sender routes, the receiving side and the billing wiring (the cross-company core); 10e-3 the UI. Billing needs no fourth ticket: its data is in 10e-1, its wiring in 10e-2 and its screens in 10e-3.

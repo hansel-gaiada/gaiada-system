@@ -1353,6 +1353,7 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 | DW-D39 | DW-10e: which group companies get routes, and to which departments (BFF §60.12)? | **Owner (2026-10-15), first-hand: the holding and Viceroy.** Each gets a route to the agency's Creatives (`asset_requests`) and to its Web Dev (`engineering_requests`): four routes, created by an admin after the deploy (BFF §60.12) |
 | DW-D40 | DW-10e: who in the requesting company sees what it sent? The contract had mirrored §32, so everyone with `read` there | **Owner (2026-10-15), first-hand: only the sender, the company's managers and its company admins.** The sender reads their own requests. The `manager` role and the company admins read all of them through a new action, `read_across`; heads read them through `manager`, which heads hold, and `org_unit_lead` alone does not count. Everyone else in the company sees only their own (BFF §60.4, PERMISSION-CONTRACT §49) |
 | DW-D41 | DW-10e: is a request from a group company internal work or client work? The contract had chosen internal and unbilled | **Owner (2026-10-15), first-hand: billable client work of the agency for that company.** The work lands on the company's client record at the agency (PV-D2's `clients.group_company_id`), in a requests project per department and client, and is billed through the agency's existing paths: billable time on the invoice, and triage's price gate with its amendment when an engineering change moves the price. A company with no client record gets no route until a platform operator links one (BFF §60.6a) |
+| DW-D42 | DW-10e: who are the signer contacts, the people of a group company who sign a price agreement in the agency's client portal (BFF §60.12 step 3)? | **Owner (2026-10-17), first-hand: the company admins.** On live, Viceroy's only company admin is hansel@ (the owner's own login); the holding has none (Anthony Syrowatka holds `owner` there), so its signer is still to be named. Accepting a signer invite grants that login the `client` role at the agency, so the contacts are set up only when the owner confirms the person. Needed only when an engineering request changes the price |
 
 ---
 
@@ -1642,7 +1643,7 @@ written by the orchestrating session.
 5. 10e after its contract (cross-company authorization: the orchestrating session reviews every line,
    and the core may take an Opus implementer).
 
-**Numbers.** Rulings DW-D32 to DW-D35, and DW-D39 to DW-D41 for 10e. BFF §57 (10a), §58 (10b), §59 (10c), §60 (10e). PERMISSION-CONTRACT
+**Numbers.** Rulings DW-D32 to DW-D35, and DW-D39 to DW-D42 for 10e. BFF §57 (10a), §58 (10b), §59 (10c), §60 (10e). PERMISSION-CONTRACT
 §47 (10a), §48 (10c), §49 (10e). Migrations take the next free prefix after main's newest at landing
 (`lint-migration-names.mjs` after every rebase). Branches `dw/10*`.
 
@@ -1890,6 +1891,7 @@ These are built in code but give no real data until someone outside engineering 
 
 ## Decision log
 
+- **2026-10-17 (owner, first-hand, on DW-10e's live setup):** go for the live setup ("do all of it": read the assignments, create the holding's client record at the agency, create the four routes, one labelled drive), and DW-D42 (signers: the company admins), §11.4. Done on live 2026-10-18 apart from the signers (BFF §60.12).
 - **2026-10-16 (owner, first-hand, during the build):** DW-D38: no pilot week and no opt-in; the new layout is the only layout and the classic layout's code is removed now (§11.4, §12.1). Supersedes DW-D7's pilot week and two-release grace.
 - **2026-10-16 (owner, during the build):** DW-D37: the failing workflows of the shared n8n are for the superadmin, the owner (Anthony), the PM and the GM (§11.4, BFF §52.12), for DW-7i-1.
 - **2026-10-15 (owner, first-hand, on DW-10e's open questions):** DW-D39 (the holding and Viceroy each get routes to the agency's Creatives and Web Dev), DW-D40 (only the sender, the requesting company's managers and its company admins see what it sent) and DW-D41 (a request from a group company is billable client work of the agency for it), all §11.4; BFF §60 and PERMISSION-CONTRACT §49 revised to match (§12.2, "10e design").
