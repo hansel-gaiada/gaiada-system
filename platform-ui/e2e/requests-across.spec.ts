@@ -77,7 +77,9 @@ test.describe("Requests across group companies (DW-10e-3)", () => {
     // Success opens the sender's own page: the receiving company and department, and no amount.
     await expect(page).toHaveURL(/\/requests\/outbound\/[^/]+$/);
     await expect(main(page).getByRole("heading", { level: 1, name: ASSETS_TITLE, exact: true })).toBeVisible();
-    await expect(main(page).getByText("To Creatives · Gaia Digital Agency", { exact: true })).toBeVisible();
+    await expect(main(page).getByText("Creatives · Gaia Digital Agency", { exact: true })).toBeVisible();
+    // DW-10e-5: the row is labelled "Sent to", so its value does not say "To" again.
+    await expect(main(page).getByText("To Creatives · Gaia Digital Agency", { exact: true })).toHaveCount(0);
     await expect(main(page).getByText("Nothing has been delivered yet.")).toBeVisible();
     expect((await main(page).textContent()) ?? "").not.toMatch(CURRENCY);
 

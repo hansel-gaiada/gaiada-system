@@ -15,7 +15,7 @@ import { formatDateTime } from "@/lib/format";
 import { readOutboundDetail, readOutboundFiles } from "@/lib/requests-data";
 import {
   formLinks, formSummary, neededByText, outboundActions, outboundAssetHref, outboundFileHref, priceText, requestKindLabel,
-  requestStatusLabel, safeHttpHref, toText, unitText, workText,
+  receiverText, requestStatusLabel, safeHttpHref, unitText, workText,
 } from "@/lib/requests";
 import "@/components/requests/requests.css";
 
@@ -62,7 +62,7 @@ export default async function OutboundRequestPage({ params }: { params: Promise<
   const items: { label: string; value: ReactNode }[] = [
     { label: "Status", value: <StatusBadge label={req.status} /> },
     { label: "Kind", value: requestKindLabel(req.kind) },
-    { label: "Sent to", value: toText(req) },
+    { label: "Sent to", value: receiverText(req) },
     ...(req.fromUnit ? [{ label: "From", value: unitText(req.fromUnit) }] : []),
     { label: "Requested by", value: req.requestedBy.name },
     { label: "Needed by", value: neededByText(req.neededBy) },

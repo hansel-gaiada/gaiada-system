@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   findRoute, fromText, hasLiveAgreement, mergeNewestFirst, mergeSentReads, normalizeOutboundFiles, normalizeOutboundSummary, normalizePrice,
   normalizeRequestDetail, normalizeRequestRow, normalizeRoutes, outboundActions, outboundAssetHref, outboundBodyFrom, outboundFileHref, priceText,
-  requestActions, requestErrorText, requestHref, routeAskLabel, routeHref, routeToText, sentScopeCopy, toText, originsByChangeRequest,
+  receiverText, requestActions, requestErrorText, requestHref, routeAskLabel, routeHref, routeToText, sentScopeCopy, toText, originsByChangeRequest,
   type RequestRoute, type RequestRow, type WorkState,
 } from "./requests";
 
@@ -227,6 +227,11 @@ describe("the routes (§60.5)", () => {
   it("says a row to another company as 'To <unit> · <company>', and a same-company row as the department", () => {
     expect(toText(row())).toBe("To Creatives · Gaia Digital Agency");
     expect(toText({ toUnit: { id: "d", name: "Creatives", unitMissing: false }, receivingCompany: null })).toBe("Creatives");
+  });
+
+  it("says the receiver without a leading 'To' for a row whose label already says where it went (DW-10e-5)", () => {
+    expect(receiverText(row())).toBe("Creatives · Gaia Digital Agency");
+    expect(receiverText({ toUnit: { id: "d", name: "Creatives", unitMissing: false }, receivingCompany: null })).toBe("Creatives");
   });
 });
 

@@ -11,6 +11,10 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.191.1` - DW-10e-5: the sender's page says "Sent to · Creatives · Gaia Digital Agency", not "Sent to · To Creatives …" (2026-10-18) - PROTOTYPED
+
+Found by the DW-10e live drive on 1.0.0-alpha.422: the sender's page `/requests/outbound/[id]` labels the row "Sent to" and its value repeated "To". New `receiverText()` in `lib/requests.ts` (the receiver with no leading "To"); `toText()` is built on it and unchanged for the lists and the chooser. Tests: the page test and `requestsAcross.test.ts` pin both forms; the e2e `requests-across` checks the sender's page has no "To Creatives …".
+
 ### platform-nest `0.165.0` + platform-ui `0.191.0` - DW-10e: requests across group companies (DW-D35, D39, D40, D41; BFF §60, PERMISSION §49); DW-10b-4: an approver withdraws their own proposal (2026-10-16) - PROTOTYPED
 
 Plan §12.2 (row 10e). A group company asks another group company's department (the agency's Creatives and Web Dev) through a route: a service assignment with a routing key.

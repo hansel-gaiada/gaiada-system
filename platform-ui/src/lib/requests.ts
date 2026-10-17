@@ -321,9 +321,15 @@ export const isAcrossIncoming = (r: Pick<RequestRow, "requestingCompany">): bool
 export const requestHref = (r: Pick<RequestRow, "id" | "receivingCompany">): string =>
   isOutboundRow(r) ? `/requests/outbound/${encodeURIComponent(r.id)}` : `/requests/${encodeURIComponent(r.id)}`;
 
+/** The receiver with no leading "To": "Creatives · Gaia Digital Agency" for another company, else the department's name. For a row
+ *  whose label already says where it went (the sender's page: "Sent to"). DW-10e-5: "Sent to · To Creatives" read twice. */
+export function receiverText(r: Pick<RequestRow, "toUnit" | "receivingCompany">): string {
+  return r.receivingCompany ? `${unitText(r.toUnit)} · ${r.receivingCompany.name}` : unitText(r.toUnit);
+}
+
 /** The row's receiver: "To Creatives · Gaia Digital Agency" for another company, else the department's name (§60.9). */
 export function toText(r: Pick<RequestRow, "toUnit" | "receivingCompany">): string {
-  return r.receivingCompany ? `To ${unitText(r.toUnit)} · ${r.receivingCompany.name}` : unitText(r.toUnit);
+  return r.receivingCompany ? `To ${receiverText(r)}` : receiverText(r);
 }
 
 /** Who asked, on the receiving side: "Viceroy · Front Office" for another company's request, else the department's name (§60.6). */

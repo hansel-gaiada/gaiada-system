@@ -65,7 +65,9 @@ describe("the sender's page: what it says", () => {
     await mount();
     expect(screen.getAllByText("Reception banners").length).toBeGreaterThan(0);
     expect(screen.getByText("Sent to")).toBeInTheDocument();
-    expect(screen.getByText("To Creatives · Gaia Digital Agency")).toBeInTheDocument();
+    expect(screen.getByText("Creatives · Gaia Digital Agency")).toBeInTheDocument();
+    // DW-10e-5: the label says "Sent to", so the value does not say "To" again.
+    expect(screen.queryByText("To Creatives · Gaia Digital Agency")).toBeNull();
     expect(screen.getByText("Front Office")).toBeInTheDocument();
     expect(screen.getByText("In progress. Responsible: Putu Rani")).toBeInTheDocument();
     expect(screen.getByText("Three banners for the front desk.")).toBeInTheDocument();
