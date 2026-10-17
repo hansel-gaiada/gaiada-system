@@ -140,7 +140,8 @@ describe("Approve selected and Reject selected", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("not authorized Nothing was decided.");
     vi.mocked(decideTargetsBatchAction).mockResolvedValueOnce({ ok: false, error: "target_not_found", failedId: "gone" });
     fireEvent.click(screen.getByRole("button", { name: "Reject selected" }));
-    // The second refusal replaces the first after a transition: under a loaded full-suite run that can take longer than the default 1 s.
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("target_not_found Nothing was decided."), { timeout: 5000 });
-  });
+    // The second refusal replaces the first after a transition: under a loaded full-suite run that can take longer than the default 1 s,
+    // and the whole test longer than vitest's default 5 s (CI 39053572191 attempt 2: 5053 ms), so both limits are raised.
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("target_not_found Nothing was decided."), { timeout: 10_000 });
+  }, 20_000);
 });
