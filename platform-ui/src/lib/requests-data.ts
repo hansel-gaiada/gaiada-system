@@ -11,7 +11,7 @@ import { cache } from "react";
 import { platformFetch } from "./platform";
 import { readResult, type ReadResult } from "./readResult";
 import {
-  normalizeOutboundFiles, normalizeOutboundSummary, normalizeRequestDetail, normalizeRequestRow, normalizeRoutes, normalizeSummary, assigneeIdsOf,
+  isOutboundScope, normalizeOutboundFiles, normalizeOutboundSummary, normalizeRequestDetail, normalizeRequestRow, normalizeRoutes, normalizeSummary, assigneeIdsOf,
   type OutboundFile, type OutboundScope, type OutboundSummary, type RequestDetail, type RequestKind, type RequestRoute, type RequestRow,
   type RequestSummary, type RoutesRead, type StatusFilter,
 } from "./requests";
@@ -110,7 +110,8 @@ export type OutboundBox = { box: "mine" } | { box: "sent"; unitId: string };
 export interface OutboundList { scope: OutboundScope; rows: RequestRow[] }
 
 /** `GET requests/outbound?box=&unitId=&status=` (at most 200 rows, newest first). `scope` says whether the rows are everything the
- *  company sent (`company`) or only the caller's (`own`, DW-D40): the page says which, never leaving it to be assumed. */
+ *  company sent (`company`), what the departments the caller leads sent plus their own (`unit`, DW-D43), or only the caller's (`own`,
+ *  DW-D40): the page says which, never leaving it to be assumed. */
 export const readOutboundRequests = (
   u: string, t: string, which: OutboundBox, status: StatusFilter, opts: { kind?: RequestKind } = {},
 ): Promise<ReadResult<OutboundList>> => {
@@ -121,7 +122,7 @@ export const readOutboundRequests = (
     platformFetch<unknown>(`${outboundBase(t)}?${q.toString()}`, u).then((raw) => {
       const o = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null;
       // A 200 without a scope or a row list is a broken read, not "you sent nothing".
-      if (!o || (o.scope !== "company" && o.scope !== "own") || !Array.isArray(o.rows)) throw new Error("The sent-requests read returned an unexpected answer.");
+      if (!o || !isOutboundScope(o.scope) || !Array.isArray(o.rows)) throw new Error("The sent-requests read returned an unexpected answer.");
       const rows = o.rows.flatMap((r) => {
         const row = normalizeRequestRow(r, { outbound: true });
         return row ? [row] : [];

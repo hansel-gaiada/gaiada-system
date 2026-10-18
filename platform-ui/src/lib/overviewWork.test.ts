@@ -209,6 +209,15 @@ describe("Requests", () => {
     expect(requestsView(summary(2, null, 0), NOW)).toMatchObject({ incoming: 2, oldestAge: null });
   });
 
+  it("DW-10e adds what the company sent to other companies, and says how wide that figure is (own, unit; nothing for company)", () => {
+    const out = (scope: "company" | "unit" | "own", open: number) => ok({ scope, sent: { open } });
+    expect(requestsView(summary(1, null, 2), NOW, out("company", 3))).toMatchObject({ sent: 5 });
+    expect(requestsView(summary(1, null, 2), NOW, out("company", 3))).not.toHaveProperty("sentScope");
+    expect(requestsView(summary(1, null, 2), NOW, out("unit", 4))).toMatchObject({ sent: 6, sentScope: "unit" });
+    expect(requestsView(summary(1, null, 2), NOW, out("own", 1))).toMatchObject({ sent: 3, sentScope: "own" });
+    expect(requestsView(summary(1, null, 2), NOW, { kind: "unavailable", reason: "x" })).toMatchObject({ sent: null });
+  });
+
   it("never turns a failed or refused read into a count", () => {
     expect(requestsView({ kind: "unavailable", reason: "x" }, NOW)).toEqual({ kind: "unavailable" });
     expect(requestsView({ kind: "forbidden" }, NOW)).toEqual({ kind: "forbidden" });

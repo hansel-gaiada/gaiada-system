@@ -206,8 +206,9 @@ export type RequestsView =
     /** What the department is waiting on: its own asks of other departments, plus (DW-10e) what its company asked of other group
      *  companies. `null` = a read of the two failed: the figure is "unavailable", never a shorter number read as the whole (§60.9). */
     sent: number | null;
-    /** DW-10e: the sender read answered in scope `own`, so the sent figure counts only the caller's requests to other companies (DW-D40). */
-    sentScope?: "own";
+    /** DW-10e: the sender read answered in scope `own` (the sent figure counts only the caller's requests to other companies, DW-D40)
+     *  or `unit` (it counts what the departments the caller leads sent, and the caller's own, DW-D43). Absent for `company`. */
+    sentScope?: "own" | "unit";
     oldestOpenAt: string | null; oldestAge: string | null;
   }
   | { kind: "forbidden" }
@@ -237,5 +238,6 @@ export function requestsView(result: ReadResult<RequestSummary>, now: Date, outb
   // answer, the figure is unavailable: a number that left them out would read as the whole.
   if (!outbound) return { ...base, sent: sent.open };
   if (outbound.kind !== "ok") return { ...base, sent: null };
-  return { ...base, sent: sent.open + outbound.data.sent.open, ...(outbound.data.scope === "own" ? { sentScope: "own" as const } : {}) };
+  const scope = outbound.data.scope;
+  return { ...base, sent: sent.open + outbound.data.sent.open, ...(scope === "own" || scope === "unit" ? { sentScope: scope } : {}) };
 }

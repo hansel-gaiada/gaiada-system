@@ -102,6 +102,7 @@ export function RequestsBlock({ view, incomingHref, sentHref }: { view: Requests
         : <p className="ov-block__note">{view.oldestAge ? `Oldest waiting: ${view.oldestAge}` : "Oldest waiting: age not known"}</p>}
       {view.sent === null && <p className="ov-block__note">The requests this department sent to other companies could not be read, so the figure is not shown.</p>}
       {view.sentScope === "own" && <p className="ov-block__note">The figure counts only the requests you sent to other companies.</p>}
+      {view.sentScope === "unit" && <p className="ov-block__note">The figure counts the requests the departments you lead sent to other companies, and your own.</p>}
     </section>
   );
 }

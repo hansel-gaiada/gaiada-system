@@ -239,6 +239,9 @@ describe("the summary and the list scope (DW-D40)", () => {
   it("reads the scope and the count, and refuses an answer without a scope", () => {
     expect(normalizeOutboundSummary({ scope: "own", sent: { open: 2 } })).toEqual({ scope: "own", sent: { open: 2 } });
     expect(normalizeOutboundSummary({ scope: "company", sent: { open: 0 } })).toEqual({ scope: "company", sent: { open: 0 } });
+    // DW-D43: a head's tier
+    expect(normalizeOutboundSummary({ scope: "unit", sent: { open: 4 } })).toEqual({ scope: "unit", sent: { open: 4 } });
+    expect(normalizeOutboundSummary({ scope: "Unit", sent: { open: 4 } })).toBeNull();
     expect(normalizeOutboundSummary({ sent: { open: 2 } })).toBeNull();
     expect(normalizeOutboundSummary({ scope: "everyone", sent: { open: 2 } })).toBeNull();
     expect(normalizeOutboundSummary({ scope: "own", sent: { open: "2" } })).toBeNull();
@@ -253,6 +256,15 @@ describe("the summary and the list scope (DW-D40)", () => {
     expect(sentScopeCopy("own", "Viceroy").note).toBe("Only the requests you sent to other companies are shown. Managers and administrators of Viceroy see all of them.");
     // Without an answer from the sender read, the page claims no scope.
     expect(sentScopeCopy(null, "Viceroy")).toMatchObject({ title: "Requests you sent", note: null });
+  });
+
+  it("DW-D43 words a head's list (unit): the departments they lead, their own, and who sees the rest", () => {
+    expect(sentScopeCopy("unit", "Viceroy")).toEqual({
+      title: "Requests from the departments you lead",
+      hint: "Asks you made, and every request the departments you lead sent to other companies.",
+      note: "You see the requests the departments you lead sent to other companies, and your own. Managers and administrators of Viceroy see all of them.",
+    });
+    expect(sentScopeCopy("unit", null).note).toBe("You see the requests the departments you lead sent to other companies, and your own. Managers and administrators of your company see all of them.");
   });
 });
 

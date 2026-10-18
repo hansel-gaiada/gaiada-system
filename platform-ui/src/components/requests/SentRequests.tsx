@@ -6,8 +6,9 @@ import "./requests.css";
 
 // DW-10e (BFF §60.9): the sent list of My requests and of a department's Sent tab. It merges §32's read with the sender read, and it is
 // honest about both halves:
-//  - the scope the sender read answered (DW-D40): "Requests you sent" when only the caller's are shown (`own`), "Requests <company> sent"
-//    when the caller is a manager or administrator and sees everything the company sent (`company`);
+//  - the scope the sender read answered (DW-D40, DW-D43): "Requests you sent" when only the caller's are shown (`own`), "Requests from
+//    the departments you lead" for a head (`unit`), "Requests <company> sent" when the caller is a manager or administrator and sees
+//    everything the company sent (`company`);
 //  - a part that could not be read is said out loud, beside what WAS read. A list that left one half out never reads as the whole, and an
 //    empty list is claimed only when both halves answered.
 export function SentRequests({

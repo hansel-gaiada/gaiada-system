@@ -76,6 +76,13 @@ describe("readOutboundRequests", () => {
     expect(await readOutboundRequests("u", "t1", { box: "mine" }, "open")).toEqual({ kind: "ok", data: { scope: "company", rows: [] } });
   });
 
+  it("DW-D43 carries the unit scope when the caller heads a department", async () => {
+    vi.stubGlobal("fetch", reply(200, { scope: "unit", rows: [senderRow()] }));
+    const r = await readOutboundRequests("u", "t1", { box: "sent", unitId: "d-creative" }, "open");
+    expect(r.kind === "ok" && r.data.scope).toBe("unit");
+    expect(r.kind === "ok" && r.data.rows.map((x) => x.id)).toEqual(["r1"]);
+  });
+
   it("is forbidden on a 403 and unavailable on a 400, a 404, a 5xx and a failed request, never an empty list", async () => {
     vi.stubGlobal("fetch", reply(403, { error: "forbidden" }));
     expect(await readOutboundRequests("u", "t1", { box: "mine" }, "open")).toEqual({ kind: "forbidden" });
@@ -88,7 +95,7 @@ describe("readOutboundRequests", () => {
   });
 
   it("treats a 200 without a scope, or without rows, as a broken read, not as 'you sent nothing'", async () => {
-    for (const body of [[], { rows: [] }, { scope: "own" }, { scope: "everyone", rows: [] }, { scope: "own", rows: "none" }]) {
+    for (const body of [[], { rows: [] }, { scope: "own" }, { scope: "everyone", rows: [] }, { scope: "units", rows: [] }, { scope: "own", rows: "none" }]) {
       vi.stubGlobal("fetch", reply(200, body));
       expect((await readOutboundRequests("u", "t1", { box: "mine" }, "open")).kind, JSON.stringify(body)).toBe("unavailable");
     }

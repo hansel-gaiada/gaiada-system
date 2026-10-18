@@ -261,8 +261,13 @@ export function normalizeSummary(raw: unknown): RequestSummary | null {
 
 // ── DW-10e: requests across group companies (docs/FRONTEND-BFF-CONTRACT.md §60) ──────────────────────────────
 
-/** DW-D40: `company` = everything the company sent (the caller is a manager or company admin there); `own` = only what the caller sent. */
-export type OutboundScope = "company" | "own";
+/** DW-D40 and DW-D43: `company` = everything the company sent (the caller is a manager or company admin there); `unit` = what the
+ *  departments the caller heads sent, plus their own (the caller holds a lead seat there); `own` = only what the caller sent. */
+export type OutboundScope = "company" | "unit" | "own";
+
+/** The scopes a sender read may answer. Anything else is a broken answer, never a guess. */
+export const OUTBOUND_SCOPES: readonly OutboundScope[] = ["company", "unit", "own"];
+export const isOutboundScope = (v: unknown): v is OutboundScope => (OUTBOUND_SCOPES as readonly unknown[]).includes(v);
 
 export interface OutboundSummary { scope: OutboundScope; sent: { open: number } }
 
@@ -271,7 +276,7 @@ export function normalizeOutboundSummary(raw: unknown): OutboundSummary | null {
   const r = obj(raw);
   const sent = r ? obj(r.sent) : null;
   if (!r || !sent || typeof sent.open !== "number" || !Number.isFinite(sent.open) || sent.open < 0) return null;
-  if (r.scope !== "company" && r.scope !== "own") return null;
+  if (!isOutboundScope(r.scope)) return null;
   return { scope: r.scope, sent: { open: sent.open } };
 }
 
@@ -944,12 +949,20 @@ export function mergeSentReads(
   };
 }
 
-/** The words over a sent list, from the sender read's scope (DW-D40). In `own` only the caller's requests to other companies are
- *  shown, and the page says so; in `company` the company's managers and administrators see every one it sent. */
+/** The words over a sent list, from the sender read's scope (DW-D40, DW-D43). In `own` only the caller's requests to other companies
+ *  are shown, and the page says so; in `unit` a head sees what the departments they lead sent, and their own; in `company` the
+ *  company's managers and administrators see every one it sent. */
 export function sentScopeCopy(scope: OutboundScope | null, company: string | null): { title: string; hint: string; note: string | null } {
   const co = company ?? "your company";
   if (scope === "company") {
     return { title: `Requests ${co} sent`, hint: `Asks to other departments, and every request ${co} sent to other companies. You see them all as a manager or administrator.`, note: null };
+  }
+  if (scope === "unit") {
+    return {
+      title: "Requests from the departments you lead",
+      hint: "Asks you made, and every request the departments you lead sent to other companies.",
+      note: `You see the requests the departments you lead sent to other companies, and your own. Managers and administrators of ${co} see all of them.`,
+    };
   }
   return {
     title: "Requests you sent",
