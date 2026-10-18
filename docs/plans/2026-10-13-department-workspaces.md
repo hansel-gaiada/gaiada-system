@@ -1354,6 +1354,10 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 | DW-D40 | DW-10e: who in the requesting company sees what it sent? The contract had mirrored §32, so everyone with `read` there | **Owner (2026-10-15), first-hand: only the sender, the company's managers and its company admins.** The sender reads their own requests. The `manager` role and the company admins read all of them through a new action, `read_across`; heads read them through `manager`, which heads hold, and `org_unit_lead` alone does not count. Everyone else in the company sees only their own (BFF §60.4, PERMISSION-CONTRACT §49) |
 | DW-D41 | DW-10e: is a request from a group company internal work or client work? The contract had chosen internal and unbilled | **Owner (2026-10-15), first-hand: billable client work of the agency for that company.** The work lands on the company's client record at the agency (PV-D2's `clients.group_company_id`), in a requests project per department and client, and is billed through the agency's existing paths: billable time on the invoice, and triage's price gate with its amendment when an engineering change moves the price. A company with no client record gets no route until a platform operator links one (BFF §60.6a) |
 | DW-D42 | DW-10e: who are the signer contacts, the people of a group company who sign a price agreement in the agency's client portal (BFF §60.12 step 3)? | **Owner (2026-10-17), first-hand: the company admins.** On live, Viceroy's only company admin is hansel@ (the owner's own login); the holding has none (Anthony Syrowatka holds `owner` there). **Owner (2026-10-18): hansel@ signs for both.** Accepting a signer invite grants that login the `client` role at the agency, so the owner confirmed it first. Viceroy's contact was already an active signer (the seed); the holding's was invited and accepted on live 2026-10-18 (Keycloak untouched, `existingAccount`), and the owner's login still lands in the staff workspace |
+| DW-D43 | DW-10e: should a department head who is not a company manager or admin also see the requests their department sent to other companies (owner question 2)? | **Owner (2026-10-18), first-hand: yes, heads too.** Built as DW-10e-6: a third read tier, `unit`, between `company` and `own`. A head is a holder of an active lead seat (`positions.is_lead`) in the REQUESTING company's own tree, read in its own scope, with the seat's subtree; never the `org_unit_lead` role, whose grant carries no company (PERMISSION-CONTRACT §49). Heads read; they do not cancel other people's requests |
+| DW-D44 | DW-10e: does the agency's client portal show the requesting company's contacts its requests projects, change requests, price agreements and invoices (owner question 3)? | **Owner (2026-10-18), first-hand: yes, like any client.** The default as built; nothing changes |
+| DW-D45 | How does the agency charge its clients, group companies included (owner questions 4 and 5)? The build assumed hours × rate | **Owner (2026-10-18), first-hand: clients pay the agency per contract.** Time logs count a project's effort (work hours and manpower) and pay freelancers; they are not how clients are charged, so the Billable box stays as it is and nobody is told to tick it for clients (BFF §60.12 step 7 withdrawn). A signed agreement carries a **payment schedule** (one or more instalments: an amount and a due date, or "on signing"); Finance's invoice draft offers the instalments that are due as fixed-fee lines, each invoiced once. Covers full upfront, split payments and monthly retainers. **Planned, built later** as DW-10f (design in §12.2, "10f design") |
+| DW-D46 | Freelancers: should hours a freelancer logs become their bill? | **Owner (2026-10-18), first-hand: yes, planned with contract billing.** A freelancer has an agreed rate; the hours they log in a period draft a vendor bill (accounts payable) for Finance to approve. DW-10f |
 
 ---
 
@@ -1643,7 +1647,7 @@ written by the orchestrating session.
 5. 10e after its contract (cross-company authorization: the orchestrating session reviews every line,
    and the core may take an Opus implementer).
 
-**Numbers.** Rulings DW-D32 to DW-D35, and DW-D39 to DW-D42 for 10e. BFF §57 (10a), §58 (10b), §59 (10c), §60 (10e). PERMISSION-CONTRACT
+**Numbers.** Rulings DW-D32 to DW-D35, and DW-D39 to DW-D46 for 10e and 10f. BFF §57 (10a), §58 (10b), §59 (10c), §60 (10e). PERMISSION-CONTRACT
 §47 (10a), §48 (10c), §49 (10e). Migrations take the next free prefix after main's newest at landing
 (`lint-migration-names.mjs` after every rebase). Branches `dw/10*`.
 
@@ -1675,12 +1679,15 @@ and PERMISSION-CONTRACT §49, both PLANNED).**
 - **Reach inside the requesting company (DW-D40).** The sender reads and cancels their own requests. The company's
   managers (the `manager` role, which heads hold) and company admins read all of them through a second new action,
   `read_across`, and cancel any. Everyone else sees only their own. `org_unit_lead` alone does not count: the
-  ruling does not name it, and its grant carries no company. The receiving company declines rather than cancels.
+  ruling does not name it, and its grant carries no company. DW-D43 (2026-10-18) adds heads, through the company's own lead
+  seats (DW-10e-6). The receiving company declines rather than cancels.
 - **Billing (DW-D41).** The work is client work for the requesting company's client record at the agency
   (`clients.group_company_id`), in a requests project per department and client. It is billed through the agency's
   existing paths: billable time on the client's invoice, and triage's price gate with its amendment when an
   engineering change moves the price. The requester sees the price state, never an amount. A company with no
   client record gets no route until a platform operator links one.
+  **Superseded in part by DW-D45 (2026-10-18):** clients pay the agency per contract, so the work is charged through
+  the agreement's payment schedule (DW-10f), not billable time; time logs count effort and pay freelancers.
 - **Not in v1:** campaign parts across companies, attachments from the sender (links only; the sender downloads),
   the sender's say in asset review rounds (DW-6h), a price on asset asks, and fixed-fee invoice lines (PV-5's
   parked item).
@@ -1694,7 +1701,7 @@ data is in 10e-1, its wiring in 10e-2 and its screens in 10e-3.
 | 10e-2 The permission, the sender routes, the receiving side and the billing wiring (the core) | senior-be, **Opus high**: cross-company authorization, DW-D40's narrowing and tenancy, where one mistake is a leak between companies or work billed to the wrong client | `send_across` and `read_across` (six artifacts and the literals); `outboundReadScope`; `work-requests-outbound.controller.ts` (§60.5), with the client resolution and the client requests project; the receiving-side changes (§60.6), including the change request that names the client and the triage `request.price_agreement`; notifications, activity and events (§60.7) | §60.11 "Sending", "Reading", "The lifecycle", "Billing", "Notifications and events", "IAM" and "Tenancy" green on the Linux gate; Cerbos probed |
 | 10e-3 The UI | senior-fe, Sonnet | §60.9: the routes read and `hasRoutes`, the quick actions, `/requests/new?route=`, the merged My requests and Sent with the `scope` notice, `/requests/outbound/[id]` with the price state and its download proxies, the receiving side's labels and client, ORG-13's picker and its client sentences, DEMO_MODE | vitest, `next build` and the demo e2e green; then driven live after §60.12's steps |
 
-**Owner questions for 10e** (each with the default the build uses until ruled):
+**Owner questions for 10e** (each with the default the build uses until ruled). **All answered 2026-10-18:** 2 → DW-D43 (yes, heads too: DW-10e-6), 3 → DW-D44 (yes, like any client), 4 and 5 → DW-D45 and DW-D46 (clients pay per contract through a payment schedule; time counts effort and pays freelancers: DW-10f).
 1. **The switch** (settled 2026-10-15: already on). `SERVICE_ASSIGNMENTS_ENABLED=1` was read in both live containers (`gaiada-platform-1`, `gaiada-platform-ui-1`) on 2026-10-15, so DW-D39's routes can be created after the deploy; read the live `service_assignments` table first (BFF §60.12).
 2. **Lead-only heads.** Should a head who holds `org_unit_lead` but not `manager` also read their department's
    requests to other companies? Default: no (DW-D40 as written). If yes, the safe shape is a handler-fed list of
@@ -1706,6 +1713,46 @@ data is in 10e-1, its wiring in 10e-2 and its screens in 10e-3.
    parked item)? Default: neither; the work is billed by time.
 5. **Billable by default.** The time log's Billable box starts unticked everywhere. Should it start ticked on
    client projects? Default: unchanged in 10e. Recommended as a small PM change outside 10e.
+
+**DW-10e-6 (DW-D43): heads read what their department sent.** A third tier on the sender's side, `unit`, between `company`
+(`read_across`) and `own`. A head is a holder of an active lead seat (`positions.is_lead`, an open `position_assignments` row)
+in the REQUESTING company, read in that company's own scope, with each seat's subtree. They read their own requests and every
+request whose `requester_unit_id` is in that set; they cancel only their own. Never the `org_unit_lead` role: its grant carries
+no company and node ids repeat across companies (PERMISSION-CONTRACT §49). No Cerbos change, no migration.
+
+**DW-10g (finding, 2026-10-18): the department surfaces' head path is not anchored to a company.** `core/unit-reach.ts`
+(`callerReachesUnit`, `loadUnitReach`), used by the notice board (10a), the department calendar (10c) and the department KPI
+pages (DW-4), decides "a head" with `requiresUnitNarrowing` and `loadLedUnitScope` (`modules/reports/person-scope.ts`). Both
+accept an `org_unit_lead` grant for ANY company: the grant names a node id only, and legacy ids (`d-hr`, `d-gm`) repeat across
+companies. So a head in company A who is also a member of company B reads B's same-id department's notices, its calendar
+(colleagues' leave and its type) and its KPI targets. Fix: the head path reads the company's own lead seats
+(`loadLeadSeatUnits`, built in 10e-6), and the suites gain the cross-company case. `personAxisTier` itself is shared with the
+reports and check-ins and has the same blind spot; that wider fix belongs to the reports' owner and is noted on the board.
+
+**10f design (planned 2026-10-18, built later: DW-D45, DW-D46).**
+- **What exists** (read at `f16fb467`). `contracts` has `value` (nullable) and `currency`, statuses draft, sent, signed,
+  declined, expired and void, and no payment terms. An amendment (`kind = 'amendment'`, drafted by `webdev-amendment.ts`)
+  stores no value. An invoice draft is one client's billable hours over a period at one hourly rate, one JSONB line per
+  project; lines have no type and cannot be edited. Issue writes `finance_ar_invoice_lines` and posts AR against each line's
+  revenue account; a group client posts to the intercompany receivable (PV5-04, PV5-05). Freelancers exist only as manual
+  vendor bills.
+- **The payment schedule.** A new table of instalments per contract: a label, an amount, and either "on signing" or a due
+  date. It is written with the contract while it is a draft, must add up to the contract's value before it is sent, and is
+  fixed with the content (PV-5's content hash covers it). Presets: all on signing, 50/50, monthly for N months. An amendment
+  carries its own value and schedule.
+- **The invoice.** Finance's draft for a client offers the instalments that are due in the period (due date reached, or "on
+  signing" once signed) as fixed-fee lines: "<agreement> · instalment 2 of 3", quantity 1, the amount. Each instalment is
+  invoiced once (taken in the draft's transaction; voiding the invoice releases it). Issue, tax and posting are unchanged. The
+  hourly draft stays for exceptions, but Finance chooses it explicitly.
+- **Freelancers.** A freelancer has an agreed rate (with dates). Finance drafts, per period, one vendor bill per freelancer from
+  the hours they logged, a line per project, for approval through the existing payables path with its withholding.
+- **Effort.** Time logs keep counting hours and people per project; reports read them as today. The Billable box keeps its
+  default and stops being an instruction for client work.
+- **Tickets** (about two working days with the gates and a release): 10f-0 contracts (BFF and PERMISSION sections, Opus
+  architect); 10f-1 data (instalments, freelancer rates; senior-db, Sonnet); 10f-2 the schedule in the contract editor and the
+  portal (senior-fe, Sonnet); 10f-3 the invoice draft from due instalments, issue and void (senior-be, Opus: money); 10f-4
+  freelancer bill drafts (senior-be, Opus: money); 10f-5 gates, release and a live drive. Invoices and contracts are PV-5's
+  code, so the build coordinates with the PV sessions.
 
 ---
 
@@ -1891,6 +1938,7 @@ These are built in code but give no real data until someone outside engineering 
 
 ## Decision log
 
+- **2026-10-18 (owner, first-hand, on DW-10e's owner questions):** DW-D43 (heads also see what their department sent: DW-10e-6, from the requesting company's own lead seats), DW-D44 (the portal shows group clients their work like any client's), DW-D45 (clients pay the agency per contract: a payment schedule on the signed agreement becomes fixed-fee invoice lines; time logs count effort and pay freelancers; Billable unchanged, §60.12 step 7 withdrawn) and DW-D46 (freelancers' logged hours draft their vendor bill). DW-D45 and DW-D46 are planned as DW-10f, built later ("Plan it, build later"), §11.4 and §12.2.
 - **2026-10-17 (owner, first-hand, on DW-10e's live setup):** go for the live setup ("do all of it": read the assignments, create the holding's client record at the agency, create the four routes, one labelled drive), and DW-D42 (signers: the company admins), §11.4. 2026-10-18: the holding has no company admin, so the owner named hansel@ for both. Done on live 2026-10-18 (BFF §60.12).
 - **2026-10-16 (owner, first-hand, during the build):** DW-D38: no pilot week and no opt-in; the new layout is the only layout and the classic layout's code is removed now (§11.4, §12.1). Supersedes DW-D7's pilot week and two-release grace.
 - **2026-10-16 (owner, during the build):** DW-D37: the failing workflows of the shared n8n are for the superadmin, the owner (Anthony), the PM and the GM (§11.4, BFF §52.12), for DW-7i-1.

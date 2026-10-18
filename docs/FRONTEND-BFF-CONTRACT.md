@@ -10824,6 +10824,11 @@ Primary key `(tenant_id, unit_id, client_id)`. RLS enabled and forced, with one 
 
 ### 60.6a Billing: client work of the agency (DW-D41)
 
+> **Owner, 2026-10-18 (DW-D45, DW-D46):** the agency's clients pay per contract, not by logged time. A signed agreement's payment
+> schedule becomes fixed-fee invoice lines; time logs count a project's effort and pay freelancers. That is planned as DW-10f
+> (plan §12.2, "10f design"). What follows describes the machinery 10e wired into, which is still time-based until 10f lands;
+> the work's client record, its requests project and the price gate stand.
+
 **How the agency bills today** (read at `d711b208`).
 - **Time and materials only.** `POST invoices` drafts one client's invoice over a period at one hourly rate: one line per project, from the billable time entries on that client's projects (`invoice.controller.ts`). Lines cannot be edited. Fixed-fee and milestone lines are parked by PV-5 ("Not in PV-5": the owner names the need).
 - **Time is billable when its logger ticks Billable.** `POST pm/tasks/:taskId/time` defaults `billable` to false, and the task's time log starts with the box unticked.
@@ -10982,10 +10987,10 @@ All after the commit, best-effort and logged loudly on failure, as §32.7. Each 
    - the agency's Web Dev → Viceroy, `engineering_requests`.
 5. **Cerbos** restarted after the policy deploy, then probed: `send_across` allowed for a holding member, denied for a viewer and a bot; `read_across` allowed for a holding manager, denied for a member.
 6. **Heads.** Each receiving department has an active lead seat, so `request.received` reaches someone. Without one, the board still shows the request.
-7. **Billable time.** The receiving heads tell their people that requests from group companies are client work: tick Billable when logging time on them.
+7. ~~**Billable time.**~~ Withdrawn by DW-D45 (2026-10-18): clients pay per contract, so nobody is told to tick Billable for client work. Time logs count effort.
 8. **A first live drive:** a holding member asks Creatives for one asset; Creatives logs billable time and delivers it; the holding member downloads it; Finance's draft invoice for the holding shows the line. Then the teardown: the draft invoice voided, and the labelled test rows cancelled or declined.
 
-**Done on live, 2026-10-18** (DW-10, as hansel@ on 1.0.0-alpha.422, owner go 2026-10-17). Step 1: no assignments existed. Step 2: Viceroy Bali's client record was live and linked; the holding's, "D & A Syrowatka", was created (business type Other). Step 4: the four routes, active. Step 5: probed 14/14. Step 8, narrowed by the owner to one labelled asset request from Viceroy to Creatives, checked on both sides and cancelled (no billable time, no invoice). Step 3 (DW-D42): hansel@ signs for both (the owner, 2026-10-18; the holding has no company admin); Viceroy's contact was already active, the holding's was invited and accepted. Open: steps 6-7 (the heads' briefing).
+**Done on live, 2026-10-18** (DW-10, as hansel@ on 1.0.0-alpha.422, owner go 2026-10-17). Step 1: no assignments existed. Step 2: Viceroy Bali's client record was live and linked; the holding's, "D & A Syrowatka", was created (business type Other). Step 4: the four routes, active. Step 5: probed 14/14. Step 8, narrowed by the owner to one labelled asset request from Viceroy to Creatives, checked on both sides and cancelled (no billable time, no invoice). Step 3 (DW-D42): hansel@ signs for both (the owner, 2026-10-18; the holding has no company admin); Viceroy's contact was already active, the holding's was invited and accepted. Step 7 withdrawn (DW-D45). Open: step 6, a check that each receiving department has an active lead seat.
 
 ### 60.13 Build order and tiers
 
