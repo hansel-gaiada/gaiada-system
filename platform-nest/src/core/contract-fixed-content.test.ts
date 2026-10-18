@@ -28,7 +28,7 @@ import { resetModules } from "../modules/registry";
 import { resetCoreRollupProviders } from "../rollups/engine";
 import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole, createClient } from "../testing/fixtures";
-import { fixedContentCols } from "../testing/contract-fixtures";
+import { fixedContentCols, addOneRowSchedule } from "../testing/contract-fixtures";
 import { setStorageForTest, localStorage as diskStorage } from "./storage";
 import { sha256Hex } from "./content-hash";
 
@@ -78,6 +78,8 @@ describe.skipIf(!TEST_URL)("PV5-06 · fixed content and the signature tiers (HTT
   }
   async function sent(clientId: string, extra: Record<string, unknown> = {}): Promise<string> {
     const id = await draft(clientId, extra);
+    // DW-10f-1: a valued contract is sent only with a schedule that adds up to its value (PD612). No-op when unvalued.
+    await addOneRowSchedule(co, id);
     const r = await post(`/api/${co}/contracts/${id}/send`, admin);
     expect(r.statusCode, r.body).toBe(200);
     return id;
@@ -439,6 +441,7 @@ describe.skipIf(!TEST_URL)("PV5-06 · fixed content and the signature tiers (HTT
           [amendId, co, clientA, TERMS, base],
         ),
       );
+      await addOneRowSchedule(co, amendId); // DW-10f-1: the amendment's own value needs its own schedule (PD612)
       expect((await post(`/api/${co}/contracts/${amendId}/send`, admin)).statusCode).toBe(200);
       expect((await row(amendId)).signature_tier).toBe("certified");
     });

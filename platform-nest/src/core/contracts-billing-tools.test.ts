@@ -34,6 +34,7 @@ import { allCoreTools } from "./core-tools";
 import { APPROVER_RECORDED_THIS_PAYMENT, getExecutable } from "./approval-executables";
 import { executeApprovedAutomationWrite } from "./approval-execute";
 import { createIssuedInvoice, ensureBillingSetup } from "../seed/billing-setup";
+import { addOneRowSchedule } from "../testing/contract-fixtures";
 
 const svc = { authorization: "Bearer svc-token" };
 const AGENT = "agent:billing";
@@ -164,6 +165,7 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
   }
   async function sentViaTool(clientId: string, ref: string): Promise<string> {
     const id = await draftViaTool(clientId, ref);
+    await addOneRowSchedule(tenant, id); // DW-10f-1: a valued send needs its schedule (PD612); no-op when unvalued
     const r = await callTool("contracts.send", { tenantId: tenant, contractId: id }, ADMIN);
     expect(r.statusCode, r.body).toBe(200);
     return id;
@@ -253,6 +255,7 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
       expect(ok.statusCode, ok.body).toBe(200);
       const got = await callTool("contracts.get", { tenantId: tenant, contractId: id }, ADMIN);
       expect(got.json()).toMatchObject({ id, title: "Renamed by the agent", value: 1200, status: "draft" });
+      await addOneRowSchedule(tenant, id); // DW-10f-1: the valued send needs its schedule (PD612)
       expect((await callTool("contracts.send", { tenantId: tenant, contractId: id }, ADMIN)).statusCode).toBe(200);
       const late = await callTool("contracts.updateDraft", { tenantId: tenant, contractId: id, title: "Too late" }, ADMIN);
       expect(late.statusCode).toBe(400);
@@ -462,6 +465,7 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
 
       // A sent contract cannot have its value cleared (not even while voiding it), and is untouched.
       const sent = await draftViaTool(clientA, "PV5F1-CLEAR-2", { value: 99 });
+      await addOneRowSchedule(tenant, sent); // DW-10f-1: the valued send needs its schedule (PD612)
       expect((await callTool("contracts.send", { tenantId: tenant, contractId: sent }, ADMIN)).statusCode).toBe(200);
       expect((await patch(sent, { value: null })).statusCode).toBe(400);
       expect((await patch(sent, { value: null, status: "void" })).statusCode).toBe(400);

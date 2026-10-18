@@ -498,10 +498,13 @@ export class ContractsController {
         throw new ConflictException({ message: NO_CERTIFIED_PROVIDER, reason: "no_certified_provider" });
       }
       const sha = await contractContentSha256(c, tenantId, k);
+      // DW-10f-1 (BFF §61.2): the send also fixes the payment schedule, storing its hash from the one SQL function. The
+      // database refuses (PD612) a valued contract whose schedule does not add up to the value, or a wrong hash.
+      // 10f-2a adds the handler's own 400 schedule_total_mismatch before this UPDATE and returns scheduleSha256.
       const upd = await c.query(
         `UPDATE contracts
             SET status = 'sent', sent_at = now(), content_sha256 = $2, content_fixed_at = now(), signature_tier = $3,
-                updated_at = now()
+                schedule_sha256 = contract_schedule_sha256(id, currency, value), updated_at = now()
           WHERE id = $1 AND status = 'draft'`,
         [contractId, sha, tier],
       );
