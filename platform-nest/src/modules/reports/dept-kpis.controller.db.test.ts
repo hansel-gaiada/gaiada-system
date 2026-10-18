@@ -370,7 +370,12 @@ describe.skipIf(!TEST_URL)("DW-4e-1 department KPIs (live PG + RLS + Cerbos)", (
       expect((await read(`unitNodeId=d-web&${SEPT}`, twoCo)).statusCode).toBe(403);
       expect((await read(`unitNodeId=dv-fe&${SEPT}`, twoCo)).statusCode).toBe(403);
       expect((await targets("d-web", twoCo)).statusCode).toBe(403);
+      // DW-10g-2: the department's report document. Cerbos's org_unit_lead `read_department` rule matches the bare node id; the
+      // person-axis narrowing (`loadLedUnitScope`, company-anchored) does not, so it is a 403, as for a plain member.
+      const docAs = (as: string) => app.inject({ method: "GET", url: `/api/${co}/reports/document?grain=department&scopeRef=d-web&${SEPT}`, headers: asUser(as) });
+      expect((await docAs(twoCo)).statusCode).toBe(403);
       await grantLeadSeat(co, "d-web", twoCo);
+      expect((await docAs(twoCo)).statusCode).toBe(200);
       expect((await read(`unitNodeId=d-web&${SEPT}`, twoCo)).statusCode).toBe(200);
       expect((await read(`unitNodeId=dv-fe&${SEPT}`, twoCo)).statusCode).toBe(200); // a seat covers the unit's divisions
       expect((await read(`unitNodeId=d-seo&${SEPT}`, twoCo)).statusCode).toBe(403);

@@ -26,8 +26,8 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../config";
 import { buildApp } from "../../main";
 import { newId, withGlobal, withTenants } from "../../db";
-import { initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
-import { addMembership, createCompany, createProject, createRole, createUser, grantRole } from "../../testing/fixtures";
+import { adminPool, initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
+import { addMembership, createCompany, createProject, createRole, createUser, grantLeadSeat, grantRole } from "../../testing/fixtures";
 import { syncMetricDefinitions } from "../../rollups/engine";
 import { rebuildOrgUnitClosure } from "../../core/org-unit-closure";
 
@@ -188,6 +188,7 @@ describe.skipIf(!TEST_URL)("DW-4e-3 department appraisal per cycle (live PG + RL
     await grantRole(admin, await createRole("company_admin"), "company", co);
     await grantRole(webHead, await createRole("org_unit_lead"), "org_unit", "d-web");
     await grantRole(webHead, await createRole("manager"), "company", co);
+    await grantLeadSeat(co, "d-web", webHead); // DW-10g-2: the real head shape includes this company's own lead seat
     await grantRole(hr, await createRole("hr_staff"), "company", co);
 
     const root = {
@@ -280,6 +281,24 @@ describe.skipIf(!TEST_URL)("DW-4e-3 department appraisal per cycle (live PG + RL
     expect(list.map((c) => c.id)).not.toContain(draftCycle);
     expect(list[1]).toEqual({ id: openCycle, name: "H2 2026 review", periodStart: "2026-09-01", periodEnd: "2026-10-31", status: "open" });
     expect(Object.keys(r.json())).toEqual(["cycles"]);
+  });
+
+  it("DW-10g-2: the head of a same-id d-web in ANOTHER company (its grant and its seat there) is refused the cycles here, as a plain member; a seat here opens them", async () => {
+    const twoCo = await createUser("two-co-head@dw4e3.test");
+    try {
+      for (const t of [co, other]) {
+        await addMembership(t, twoCo);
+        await grantRole(twoCo, await createRole("member"), "company", t);
+      }
+      await grantRole(twoCo, await createRole("org_unit_lead"), "org_unit", "d-web"); // a bare node id: names this company's d-web too
+      await grantLeadSeat(other, "d-web", twoCo);
+      expect((await cycles(twoCo)).statusCode).toBe(403);
+      expect((await cycles(webStaff)).statusCode).toBe(403); // the plain member it matches
+      await grantLeadSeat(co, "d-web", twoCo);
+      expect((await cycles(twoCo)).statusCode).toBe(200);
+    } finally {
+      await adminPool().query(`UPDATE company_memberships SET status = 'ended' WHERE user_id = $1`, [twoCo]);
+    }
   });
 
   it("the company-wide tiers get the same list: company_admin and HR's people-reader tier", async () => {
