@@ -24,18 +24,19 @@
 // `unavailable` to on track, is stored silently. One notification per unit per run, only when the unit has something to tell.
 //
 // ══════════════════════════ WHO IS TOLD (§43.1) ══════════════════════════
-// The users holding `org_unit_lead` scoped to the department's node EXACTLY: a CURRENT `user_roles` row (`expires_at` null
-// or in the future: the exact conjunct `assemblePrincipal` applies, so what is told here is what Cerbos and
-// `loadLedUnitScope` see) whose holder is an active member of the company. The position reconciler's `own_unit` grants and
-// direct grants are the same rows. Not told: the heads of enclosing units, a manager placed in the unit, an `is_lead` seat
-// with no grant. `user_roles` has no RLS and no tenant column, so it is read with `withGlobal`, and the membership
-// conjunct (read under the tenant, since `company_memberships` is RLS'd) is what keeps a node id that two companies happen to share (`d-hr`) from reaching across companies.
+// DW-10g-2: the holders of THIS company's own lead seat on the department's node EXACTLY (`loadSeatHoldersByNode`: an active
+// `is_lead` position carrying the `org_unit_lead` role row, held through an assignment with no `valid_to`) who are active members
+// of the company. The same seat `loadLedUnitScope` reads, so what is told here is who heads the unit there. Not told: the heads
+// of enclosing units, a manager placed in the unit, a lead position without its role row, and the holder of an `org_unit_lead`
+// GRANT alone. Before DW-10g-2 this read `user_roles`, whose `org_unit` grant carries no company: only the membership conjunct
+// kept a node id that two companies share (`d-hr`) from reaching across, and a member of both companies was told as a head of
+// each. Seats belong to one company's `positions` and are read in its scope.
 import type { PoolClient } from "pg";
 import { newId, withGlobal, withTenants } from "../../db";
 import { config } from "../../config";
 import { notifyBestEffort } from "../../core/client-notify";
 import { resolveRange } from "./reports.controller";
-import { loadOrgStructure, todayIsoInTz } from "./person-scope";
+import { loadLeadSeatNodes, loadOrgStructure, loadSeatHoldersByNode, todayIsoInTz } from "./person-scope";
 import { departmentUnits, findOrgUnit, kpiDefFor, workspaceSlugFor, type KpiCondition, type KpiUnit } from "./dept-kpis";
 import { DEPT_KPI_MODULES, companyVertical, evaluateUnits, type UnitKpis } from "./dept-kpi-targets";
 
@@ -234,10 +235,6 @@ export function planWatch(reads: readonly UnitKpis[], previous: PreviousStates, 
 
 // ═══════════════════════════════ recipients (§43.1) ═══════════════════════════════
 
-/** The CURRENT `org_unit_lead` grant, in SQL: the role, the scope type, and the expiry conjunct `assemblePrincipal` applies
- *  (`expires_at IS NULL OR expires_at > now()`). Used by both directions so they cannot drift apart. */
-const CURRENT_LEAD_GRANT = `r.name = 'org_unit_lead' AND ur.scope_type = 'org_unit' AND (ur.expires_at IS NULL OR ur.expires_at > now())`;
-
 /** Which of `userIds` are active members of the company. `company_memberships` is tenant-RLS'd (an unset tenant GUC reads
  *  ZERO rows, so this cannot run under `withGlobal`), hence the tenant transaction. */
 async function activeMembers(tenantId: string, userIds: string[]): Promise<Set<string>> {
@@ -255,27 +252,17 @@ async function activeMembers(tenantId: string, userIds: string[]): Promise<Set<s
 }
 
 /** The heads of each of `unitNodeIds`, exact node, as unit -> sorted distinct user ids. A unit with no head is absent. The
- *  grants come from the global `user_roles`; the holder must also be an active member of THIS company (see the header). */
+ *  company's own lead seats (`loadSeatHoldersByNode`, in its scope); the holder must also be an active member of THIS company
+ *  (see the header). */
 export async function loadLeadUserIdsByUnit(tenantId: string, unitNodeIds: string[]): Promise<Map<string, string[]>> {
   const out = new Map<string, string[]>();
   if (unitNodeIds.length === 0) return out;
-  const { rows } = await withGlobal((c) =>
-    c.query<{ unit: string; user_id: string }>(
-      `SELECT DISTINCT ur.scope_id AS unit, ur.user_id
-         FROM user_roles ur JOIN roles r ON r.id = ur.role_id
-        WHERE ${CURRENT_LEAD_GRANT} AND ur.scope_id = ANY($1::text[])
-        ORDER BY ur.scope_id, ur.user_id`,
-      [unitNodeIds],
-    ),
-  );
-  const members = await activeMembers(tenantId, rows.map((r) => r.user_id));
-  for (const r of rows) {
-    if (!members.has(r.user_id)) continue;
-    const list = out.get(r.unit) ?? [];
-    list.push(r.user_id);
-    out.set(r.unit, list);
+  const seats = await withTenants([tenantId], (c) => loadSeatHoldersByNode(c, tenantId, unitNodeIds));
+  const members = await activeMembers(tenantId, [...seats.values()].flat());
+  for (const [unit, holders] of seats) {
+    const list = [...new Set(holders.filter((u) => members.has(u)))].sort();
+    if (list.length > 0) out.set(unit, list);
   }
-  for (const list of out.values()) list.sort();
   return out;
 }
 
@@ -284,19 +271,11 @@ export async function loadUnitLeadUserIds(tenantId: string, unitNodeId: string):
   return (await loadLeadUserIdsByUnit(tenantId, [unitNodeId])).get(unitNodeId) ?? [];
 }
 
-/** The inverse of the above, for the caller: the nodes `userId` heads exactly (current grants, active member). */
+/** The inverse of the above, for the caller: the nodes `userId` heads exactly in THIS company (its own lead seats, active
+ *  member). */
 export async function loadUnitsLedExactly(tenantId: string, userId: string): Promise<string[]> {
   if (!(await activeMembers(tenantId, [userId])).has(userId)) return [];
-  const { rows } = await withGlobal((c) =>
-    c.query<{ unit: string }>(
-      `SELECT DISTINCT ur.scope_id AS unit
-         FROM user_roles ur JOIN roles r ON r.id = ur.role_id
-        WHERE ${CURRENT_LEAD_GRANT} AND ur.user_id = $1 AND ur.scope_id IS NOT NULL
-        ORDER BY ur.scope_id`,
-      [userId],
-    ),
-  );
-  return rows.map((r) => r.unit);
+  return withTenants([tenantId], (c) => loadLeadSeatNodes(c, tenantId, userId));
 }
 
 // ═══════════════════════════════ the run (§43.6) ═══════════════════════════════

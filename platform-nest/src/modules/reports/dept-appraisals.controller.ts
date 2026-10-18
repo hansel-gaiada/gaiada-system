@@ -17,7 +17,7 @@
 // Plus `ModuleEnabledGuard("reports")`: 404-dark for a company without the reports module, like every reports route.
 //
 // ── WHO MAY READ (§41.3) ─────────────────────────────────────────────────────────────────────────
-// The unit's heads (their led scope: `loadLedUnitScope`, grant- and placement-derived subtrees) and the company-wide tiers
+// The unit's heads (their led scope: `loadLedUnitScope`, company-anchored since DW-10g-2: this company's own lead seats) and the company-wide tiers
 // (personAxisTier unrestricted/company_wide, which includes HR's people-reader, plus `owner` of this company). Staff of the
 // unit may NOT read it: they read the KPI page (§40.3), not the appraisal. Unlike the KPI read there is no "placed in the
 // unit" branch. Order, as §37/§40: Cerbos, then the narrowing (403), then existence: an unknown unit is 404

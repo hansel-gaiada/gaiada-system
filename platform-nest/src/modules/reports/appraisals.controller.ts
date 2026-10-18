@@ -72,7 +72,10 @@ import {
   type GenerateSubjectInput,
 } from "./appraisal-engine";
 import type { AppraisalAxis } from "./appraisal-document";
-import { PERSON_SCOPE_MODULES, loadLedUnitScope, loadUnitByUser, personAxisTier, resolveSubjectUnit, todayIsoInTz } from "./person-scope";
+import {
+  PERSON_SCOPE_MODULES, anchoredPersonAxisTier, loadAnchoredLeadGrantNodes, loadLedUnitScope, loadUnitByUser, personAxisTier,
+  resolveSubjectUnit, todayIsoInTz,
+} from "./person-scope";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -118,8 +121,12 @@ function hasBroadAppraisalReadTier(principal: Principal, tenantId: string): bool
  *  resource the narrowing target is different: `report_appraisals.manager_user_id` is a real per-row
  *  column assigned at generate time, so this file narrows to an EXACT manager match rather than to an
  *  org-unit subtree. Same tier, strictly TIGHTER boundary — see this file's header. */
-function isManagerCoarseOnly(principal: Principal, tenantId: string): boolean {
-  return personAxisTier(principal, tenantId) === "unit_scoped";
+async function isManagerCoarseOnly(principal: Principal, tenantId: string): Promise<boolean> {
+  // DW-10g-2: company-anchored. A caller whose only unit-scoped grant is another company's `org_unit` grant is not this tier
+  // here; they fall to the own-rows branch, as a plain member does.
+  if (personAxisTier(principal, tenantId) !== "unit_scoped") return false;
+  const tier = await withTenants([tenantId], (c) => anchoredPersonAxisTier(c, principal, tenantId), { modules: PERSON_SCOPE_MODULES });
+  return tier === "unit_scoped";
 }
 
 /** HIER-2 (DR-9/DR-11) — the SUBJECT's current unit ancestor chain (IAM-09's closure), so
@@ -141,16 +148,15 @@ async function subjectUnitAncestors(tenantId: string, subjectUserId: string): Pr
   );
 }
 
-/** Does `principal` hold an `org_unit`-scoped `org_unit_lead` grant covering the subject (i.e.
- *  its scopeId appears in `unitAncestors`)? Re-derives the SAME containment Cerbos's org_unit_lead
- *  rule just evaluated to reach ALLOW — belt-and-suspenders, matching every other in-app
- *  confirmation in this program (e.g. `assertPersonInLedScope` re-checking after Cerbos already
- *  allowed). Never widens: a principal without a qualifying grant was already denied by
+/** Does `principal` hold an `org_unit_lead` grant covering the subject (its scopeId appears in `unitAncestors`) that THIS
+ *  company's own lead seat backs (DW-10g-2: `loadAnchoredLeadGrantNodes`)? Re-derives the containment Cerbos's org_unit_lead
+ *  rule evaluated to reach ALLOW, and closes what that rule cannot see: the grant carries no company, so a grant made for another
+ *  company's same-id node also matched there. Never widens: a principal without a qualifying grant was already denied by
  *  `authorize()` above, before this is ever consulted. */
-function isOrgUnitLeadForSubject(principal: Principal, unitAncestors: string[]): boolean {
-  return principal.roles.some(
-    (g) => g.role === "org_unit_lead" && g.scopeType === "org_unit" && !!g.scopeId && unitAncestors.includes(g.scopeId),
-  );
+async function isOrgUnitLeadForSubject(principal: Principal, tenantId: string, unitAncestors: string[]): Promise<boolean> {
+  if (unitAncestors.length === 0) return false;
+  const nodes = await withTenants([tenantId], (c) => loadAnchoredLeadGrantNodes(c, principal, tenantId), { modules: PERSON_SCOPE_MODULES });
+  return nodes.some((u) => unitAncestors.includes(u));
 }
 
 /** The list-row response shape every `GET /appraisals` branch returns. */
@@ -158,17 +164,10 @@ function toAppraisalListItem(r: AppraisalRowShape) {
   return { id: r.id, cycleId: r.cycleId, subjectUserId: r.subjectUserId, managerUserId: r.managerUserId, status: r.status, composite: r.composite === null ? null : Number(r.composite) };
 }
 
-/** The org units the caller leads by GRANT (`org_unit_lead`, `org_unit`-scoped), sorted so any
- *  "pick one" is deterministic. Same grant reading as `isOrgUnitLeadForSubject` and
- *  `loadLedUnitScope`; empty when the caller holds none. */
-function orgUnitLeadGrantScopeIds(principal: Principal): string[] {
-  return [
-    ...new Set(
-      principal.roles
-        .filter((g) => g.role === "org_unit_lead" && g.scopeType === "org_unit" && !!g.scopeId)
-        .map((g) => g.scopeId as string),
-    ),
-  ].sort();
+/** The org units the caller leads in THIS company by a seat-backed GRANT (DW-10g-2: `loadAnchoredLeadGrantNodes`), sorted so
+ *  any "pick one" is deterministic; empty when the caller holds none here. */
+async function orgUnitLeadGrantScopeIds(principal: Principal, tenantId: string): Promise<string[]> {
+  return withTenants([tenantId], (c) => loadAnchoredLeadGrantNodes(c, principal, tenantId), { modules: PERSON_SCOPE_MODULES });
 }
 
 function assertDate(value: string | undefined, field: string): string {
@@ -328,8 +327,8 @@ export class AppraisalsController {
 
   // Four tiers, in this order (BFF §39 for the third):
   //   1. broad (HR / admin / company-wide): every appraisal;
-  //   2. a department head (holds an `org_unit_lead` grant, nothing broader, and a non-empty led
-  //      scope): the appraisals of subjects whose primary unit today is in the led subtree, plus
+  //   2. a department head (holds an `org_unit_lead` grant that this company's own lead seat backs, DW-10g-2, nothing
+  //      broader, and a non-empty led scope): the appraisals of subjects whose primary unit today is in the led subtree, plus
   //      every row they are the `managerUserId` of. A bulk list has no single subject, so Cerbos is
   //      asked once with the ancestors of one led unit (it confirms the caller leads there) and the
   //      subtree narrowing is done here, as for the TR-25 report listing. An EMPTY scope falls
@@ -340,13 +339,13 @@ export class AppraisalsController {
   async listRoute(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("cycleId") cycleId?: string, @Query("subjectId") subjectId?: string) {
     const principal = req.principal;
     const broad = hasBroadAppraisalReadTier(principal, tenantId);
-    const managerCoarse = !broad && isManagerCoarseOnly(principal, tenantId);
+    const managerCoarse = !broad && (await isManagerCoarseOnly(principal, tenantId));
 
     if (broad) {
       await authorize(principal, { kind: "appraisal", tenantId }, "read");
       return { appraisals: (await listAppraisalRows(tenantId, { cycleId, subjectUserId: subjectId })).map(toAppraisalListItem) };
     }
-    const ledGrantIds = orgUnitLeadGrantScopeIds(principal);
+    const ledGrantIds = broad ? [] : await orgUnitLeadGrantScopeIds(principal, tenantId);
     if (ledGrantIds.length > 0 && principal.userId) {
       const asOf = todayIsoInTz(config.reportsTz);
       const led = await withTenants(
@@ -429,7 +428,7 @@ export class AppraisalsController {
       const isSelf = principal.userId === row.subjectUserId;
       if (isSelf && row.status === "draft") throw new ForbiddenException("this appraisal has not been submitted yet");
       const isExactManager = principal.userId === row.managerUserId;
-      const isDeptLead = isOrgUnitLeadForSubject(principal, unitAncestors);
+      const isDeptLead = !isSelf && !isExactManager && (await isOrgUnitLeadForSubject(principal, tenantId, unitAncestors));
       if (!isSelf && !isExactManager && !isDeptLead) throw new ForbiddenException("not your assigned subject");
     }
 

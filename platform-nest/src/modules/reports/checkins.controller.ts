@@ -714,8 +714,8 @@ export class CheckinsController {
           // rather than an error or (catastrophically) an unfiltered one.
           unitFilter = null;
           const asOf = todayIsoInTz(tz);
-          // HIER-2: `principal` passed so a grant-derived org_unit_lead scope is unioned with the
-          // placement-derived one (person-scope.ts's `loadLedUnitScope`) — additive, never narrower.
+          // `principal` passed: the company-anchored head scope (person-scope.ts's `loadLedUnitScope`, DW-10g-2: this company's
+          // own lead seats, plus the placement subtree for a unit-scoped grant on this company; never a grant alone).
           ledScope = await loadLedUnitScope(c, tenantId, principal.userId, asOf, principal);
           if (ledScope.size === 0) return { from, to, unit: null, rows: [] };
           unitEcho = principal.userId ? await resolveSubjectUnit(c, tenantId, principal.userId, asOf) : null;

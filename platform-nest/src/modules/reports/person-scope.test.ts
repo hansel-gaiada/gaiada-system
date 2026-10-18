@@ -4,7 +4,11 @@
 // decisions the in-app half rests on — tier resolution and the unit-subtree walk — because those are
 // where §15 finding ① said the boundary had been getting silently wrong.
 import { describe, it, expect } from "vitest";
-import { collectUnitSubtree, personAxisTier, requiresUnitNarrowing, isSelfOnlyTier, sliceRowsToUnitScope, unwrapOrgRoot, todayIsoInTz, unitExistsInStructure } from "./person-scope";
+import {
+  anchoredPersonAxisTier, collectUnitSubtree, loadAnchoredLeadGrantNodes, loadLedUnitScope, loadSeatHoldersByNode, personAxisTier,
+  requiresUnitNarrowing, isSelfOnlyTier, sliceRowsToUnitScope, unwrapOrgRoot, todayIsoInTz, unitExistsInStructure,
+} from "./person-scope";
+import type { PoolClient } from "pg";
 import type { Principal, RoleGrant } from "../../rbac/principal";
 
 const T1 = "dddddddd-3333-0000-0000-000000000001";
@@ -186,5 +190,81 @@ describe("DW-4b unitExistsInStructure — tells an unknown unit from a known one
   it("is false for an absent or unreadable tree (fail-closed)", () => {
     expect(unitExistsInStructure(null, "d-web")).toBe(false);
     expect(unitExistsInStructure({}, "d-web")).toBe(false);
+  });
+});
+
+// ═══════════════════════ DW-10g-2: a head is company-anchored ═══════════════════════
+describe("DW-10g-2 the head scope and tier read THIS company's own lead seats, never a grant alone", () => {
+  /** A client answering the reads by SQL text: the caller's placement, the org tree, the seats (`seats`: the caller's exact
+   *  seat nodes; `holders`: unit -> holders for the audience read) and the project probe (`projects`, ids of THIS company). */
+  function fake(o: { placement?: string | null; seats?: string[]; holders?: Record<string, string[]>; projects?: string[] } = {}) {
+    const calls: Array<{ kind: string; params: unknown[] }> = [];
+    const client = {
+      query: async (sql: string, params: unknown[] = []) => {
+        const kind = sql.includes("org_unit_memberships") ? "placement" : sql.includes("company_org_structure") ? "structure"
+          : sql.includes("FROM positions") && sql.includes("pa.user_id = $2") ? "seats"
+          : sql.includes("FROM positions") ? "holders" : sql.includes("FROM projects") ? "projects" : "other";
+        calls.push({ kind, params });
+        if (kind === "placement") return { rows: o.placement ? [{ unit_node_id: o.placement }] : [] };
+        if (kind === "structure") return { rows: [{ structure: ORG }] };
+        if (kind === "seats") return { rows: (o.seats ?? []).map((unit_node_id) => ({ unit_node_id })) };
+        if (kind === "holders") {
+          const wanted = params[1] as string[];
+          return { rows: Object.entries(o.holders ?? {}).filter(([u]) => wanted.includes(u)).flatMap(([unit, us]) => us.map((user_id) => ({ unit, user_id }))) };
+        }
+        if (kind === "projects") return { rows: [{ ok: (params[1] as string[]).some((id) => (o.projects ?? []).includes(id)) && params[0] === T1 }] };
+        throw new Error(`unexpected query: ${sql}`);
+      },
+    } as unknown as PoolClient;
+    return { client, calls };
+  }
+  const sorted = (s: Set<string>) => [...s].sort();
+  const lead = (node: string) => g("org_unit_lead", "org_unit", node);
+
+  it("loadLedUnitScope(principal): another company's org_unit_lead grant on a same-id node adds nothing; a seat here adds its subtree", async () => {
+    const foreign = p([g("member", "company", T1), lead("d-web")]);
+    expect(sorted(await loadLedUnitScope(fake({ placement: "d-seo" }).client, T1, "u1", "2026-10-18", foreign))).toEqual([]);
+    expect(sorted(await loadLedUnitScope(fake({ placement: "d-seo", seats: ["d-web"] }).client, T1, "u1", "2026-10-18", foreign)))
+      .toEqual(["d-web", "dv-backend", "dv-frontend"]);
+  });
+
+  it("loadLedUnitScope(principal): the placement subtree only for a unit-scoped grant on THIS company; without a principal, placement alone (unchanged)", async () => {
+    expect(sorted(await loadLedUnitScope(fake({ placement: "d-seo" }).client, T1, "u1", "2026-10-18", p([g("manager", "company", T1)]))))
+      .toEqual(["d-seo", "dv-content"]);
+    expect(sorted(await loadLedUnitScope(fake({ placement: "d-seo" }).client, T1, "u1", "2026-10-18", p([g("manager", "company", T2)])))).toEqual([]);
+    expect(sorted(await loadLedUnitScope(fake({ placement: "d-seo" }).client, T1, "u1", "2026-10-18"))).toEqual(["d-seo", "dv-content"]);
+    expect(sorted(await loadLedUnitScope(fake({ placement: "d-seo" }).client, T1, null, "2026-10-18", p([g("manager", "company", T1)])))).toEqual([]);
+  });
+
+  it("anchoredPersonAxisTier: a foreign org_unit grant alone is self_only (a plain member); a seat here or a manager grant here keeps unit_scoped; the top tiers are untouched and cost no query", async () => {
+    const foreign = p([g("member", "company", T1), lead("d-web")]);
+    expect(personAxisTier(foreign, T1)).toBe("unit_scoped"); // the sync CANDIDATE
+    expect(await anchoredPersonAxisTier(fake().client, foreign, T1)).toBe("self_only");
+    expect(await anchoredPersonAxisTier(fake({ seats: ["d-web"] }).client, foreign, T1)).toBe("unit_scoped");
+    expect(await anchoredPersonAxisTier(fake().client, p([g("manager", "company", T1)]), T1)).toBe("unit_scoped");
+    expect(await anchoredPersonAxisTier(fake().client, p([g("member", "company", T1), g("manager", "project", "prj-elsewhere")]), T1)).toBe("self_only");
+    expect(await anchoredPersonAxisTier(fake({ projects: ["prj-1"] }).client, p([g("member", "company", T1), g("manager", "project", "prj-1")]), T1)).toBe("unit_scoped");
+    const top = fake();
+    expect(await anchoredPersonAxisTier(top.client, p([g("company_admin", "company", T1)]), T1)).toBe("company_wide");
+    expect(await anchoredPersonAxisTier(top.client, p([g("platform_admin", "global", null)], []), T1)).toBe("unrestricted");
+    expect(await anchoredPersonAxisTier(top.client, p([g("member", "company", T1)]), T1)).toBe("self_only");
+    expect(top.calls).toEqual([]);
+  });
+
+  it("loadAnchoredLeadGrantNodes: only the grants this company's own seat backs, on the same node", async () => {
+    const both = p([g("member", "company", T1), lead("d-web"), lead("d-seo")]);
+    expect(await loadAnchoredLeadGrantNodes(fake({ seats: ["d-seo", "d-hr"] }).client, both, T1)).toEqual(["d-seo"]);
+    expect(await loadAnchoredLeadGrantNodes(fake({ seats: [] }).client, both, T1)).toEqual([]);
+    const noGrant = fake({ seats: ["d-seo"] });
+    expect(await loadAnchoredLeadGrantNodes(noGrant.client, p([g("member", "company", T1)]), T1)).toEqual([]);
+    expect(noGrant.calls).toEqual([]); // no grant, no query
+  });
+
+  it("loadSeatHoldersByNode: the head audience is this company's seat holders per exact node; the query binds the tenant", async () => {
+    const f = fake({ holders: { "d-web": ["u-a", "u-b"], "d-seo": ["u-c"] } });
+    const out = await loadSeatHoldersByNode(f.client, T1, ["d-web", "d-web", "dv-frontend"]);
+    expect(Object.fromEntries(out)).toEqual({ "d-web": ["u-a", "u-b"] });
+    expect(f.calls[0].params).toEqual([T1, ["d-web", "dv-frontend"]]);
+    expect(await loadSeatHoldersByNode(fake().client, T1, [])).toEqual(new Map());
   });
 });

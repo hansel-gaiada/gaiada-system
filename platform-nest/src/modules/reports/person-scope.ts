@@ -161,7 +161,12 @@ export function personAxisTier(principal: Principal, tenantId: string): PersonAx
 }
 
 /** True when the caller must be narrowed to their own led unit subtree. The ONLY predicate any
- *  controller should branch on — never a re-derived role check. */
+ *  controller should branch on — never a re-derived role check.
+ *
+ *  DW-10g-2: this is the CANDIDATE set (every caller a unit-scoped Cerbos rule may have admitted, including one whose only grant
+ *  is another company's `org_unit` grant). Narrowing such a caller is always safe: `loadLedUnitScope(..., principal)` is
+ *  company-anchored, so they are narrowed to what they head HERE (often nothing) and keep their own rows. Where a `self_only`
+ *  answer would choose a different, own-rows branch, use `anchoredPersonAxisTier` instead. */
 export function requiresUnitNarrowing(principal: Principal, tenantId: string): boolean {
   return personAxisTier(principal, tenantId) === "unit_scoped";
 }
@@ -299,19 +304,146 @@ export async function loadOrgStructure(c: PoolClient, tenantId: string): Promise
   return rows[0]?.structure ?? null;
 }
 
+// ═══════════════════════ WHO HEADS WHAT IN ONE COMPANY (DW-10g, DW-10g-2) ═══════════════════════
+//
+// An `org_unit_lead` GRANT carries no company: its scopeType is `org_unit` and its scopeId a bare node id, and node ids repeat
+// across group companies (`d-webdev`, `d-hr`). Read as leadership on its own, a grant made for company P's `d-web` would make its
+// holder a head of company H's `d-web` too, wherever they are a member. So no access decision reads the grant as leadership.
+// Leadership in a company is that company's OWN lead seat: a `positions` row of the company with `is_lead` and
+// `status = 'active'`, carrying a `position_roles` row for the `org_unit_lead` role at `own_unit` (0109 design §2.2: a lead
+// position without it confers nothing), held through a `position_assignments` row with no `valid_to`. Plus the placement-derived
+// path for a caller whose unit-scoped grant (`manager`, `org_unit_lead`) is anchored on THIS company (a company or global grant,
+// or a project grant on one of its projects). Every helper below reads inside `withTenants([tenantId])` (positions,
+// position_roles and position_assignments are FORCE RLS: an unset tenant GUC reads ZERO seats, a silent "heads nothing").
+
+/** The seat join, shared by every seat read so they cannot drift: `p` the position, `pa` the open assignment, the role row. */
+const LEAD_SEAT_FROM = `positions p
+       JOIN position_assignments pa ON pa.position_id = p.id AND pa.tenant_id = p.tenant_id
+       JOIN position_roles pr ON pr.position_id = p.id AND pr.tenant_id = p.tenant_id AND pr.scope_kind = 'own_unit'
+       JOIN roles r ON r.id = pr.role_id AND r.name = 'org_unit_lead' AND (r.company_id IS NULL OR r.company_id = p.tenant_id)`;
+const LEAD_SEAT_LIVE = `p.is_lead AND p.status = 'active' AND pa.valid_to IS NULL`;
+
+/** The EXACT units (no subtree) `userId` holds a lead seat on in `tenantId`, sorted. */
+export async function loadLeadSeatNodes(c: PoolClient, tenantId: string, userId: string | null): Promise<string[]> {
+  if (!userId) return [];
+  const { rows } = await c.query<{ unit_node_id: string }>(
+    `SELECT DISTINCT p.unit_node_id
+       FROM ${LEAD_SEAT_FROM}
+      WHERE p.tenant_id = $1 AND ${LEAD_SEAT_LIVE} AND pa.user_id = $2
+      ORDER BY p.unit_node_id`,
+    [tenantId, userId],
+  );
+  return rows.map((r) => r.unit_node_id);
+}
+
+/**
+ * DW-10e-6 (DW-D43) — the units a person HEADS in one company, read from that company's OWN lead seats (see the block above),
+ * each seat's unit expanded by `collectUnitSubtree` over `structure` (that company's tree, `loadOrgStructure`), so a division
+ * head also covers the units under it. An empty set means "heads nothing here". Never reads an `org_unit_lead` grant.
+ */
+export async function loadLeadSeatUnits(
+  c: PoolClient,
+  tenantId: string,
+  userId: string | null,
+  structure: unknown,
+): Promise<Set<string>> {
+  const led = new Set<string>();
+  for (const unit of await loadLeadSeatNodes(c, tenantId, userId)) for (const id of collectUnitSubtree(structure, unit)) led.add(id);
+  return led;
+}
+
+/** DW-10g-2 — the caller's `org_unit_lead` GRANTS that THIS company's own lead seat backs: the grant scopeIds that are also a
+ *  node the caller holds a live lead seat on in `tenantId` (the reconciler materializes a seat's role row as exactly that grant),
+ *  sorted. For the places that hand Cerbos a unit to match the grant against: a grant from another company on a same-id node is
+ *  left out, so it is never offered as leadership here. */
+export async function loadAnchoredLeadGrantNodes(c: PoolClient, principal: Principal, tenantId: string): Promise<string[]> {
+  const granted = new Set(
+    principal.roles.filter((g) => g.role === "org_unit_lead" && g.scopeType === "org_unit" && !!g.scopeId).map((g) => g.scopeId as string),
+  );
+  if (granted.size === 0) return [];
+  return (await loadLeadSeatNodes(c, tenantId, principal.userId)).filter((u) => granted.has(u));
+}
+
+/** DW-10g-2 — the HEAD AUDIENCE of each of `unitNodeIds` in `tenantId`, exact node: the holders of a live lead seat on it (the
+ *  same seat as `loadLeadSeatNodes`), as unit -> sorted distinct user ids. A unit with no seat holder is absent. Membership is
+ *  the caller's to check where it matters (a seat outlives nothing: the JML flow closes it). */
+export async function loadSeatHoldersByNode(c: PoolClient, tenantId: string, unitNodeIds: string[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  if (unitNodeIds.length === 0) return out;
+  const { rows } = await c.query<{ unit: string; user_id: string }>(
+    `SELECT DISTINCT p.unit_node_id AS unit, pa.user_id::text AS user_id
+       FROM ${LEAD_SEAT_FROM}
+      WHERE p.tenant_id = $1 AND ${LEAD_SEAT_LIVE} AND p.unit_node_id = ANY($2::text[])
+      ORDER BY 1, 2`,
+    [tenantId, [...new Set(unitNodeIds)]],
+  );
+  for (const r of rows) {
+    const list = out.get(r.unit) ?? [];
+    list.push(r.user_id);
+    out.set(r.unit, list);
+  }
+  return out;
+}
+
+/**
+ * DW-10g — does the placement-derived lead path apply to this caller IN THIS COMPANY? The company-anchored half of the
+ * `unit_scoped` tier: a `manager` or `org_unit_lead` grant (`UNIT_SCOPED_ROLES`) that is a company or global grant covering
+ * `tenantId`, or a project grant on one of `tenantId`'s own projects (read in this company's scope, so a project of another
+ * company never matches). The `org_unit` grant is never enough: it carries no company.
+ */
+export async function placementLeadApplies(c: PoolClient, principal: Principal, tenantId: string): Promise<boolean> {
+  const grants = principal.roles.filter((g) => UNIT_SCOPED_ROLES.has(g.role));
+  if (grants.some((g) => grantCoversTenant(g, tenantId))) return true;
+  const projectIds = grants.filter((g) => g.scopeType === "project" && !!g.scopeId).map((g) => g.scopeId as string);
+  if (projectIds.length === 0) return false;
+  const { rows } = await c.query<{ ok: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM projects WHERE tenant_id = $1 AND id::text = ANY($2::text[])) AS ok`,
+    [tenantId, projectIds],
+  );
+  return rows[0]?.ok === true;
+}
+
+/** The caller's own primary unit(s) as of `asOf`, each with its subtree: the placement-derived lead scope. */
+async function placementScope(c: PoolClient, tenantId: string, userId: string, asOf: string, structure?: unknown): Promise<Set<string>> {
+  const own = await ownPrimaryUnits(c, tenantId, userId, asOf);
+  const scope = new Set<string>();
+  if (own.length === 0) return scope;
+  const tree = structure === undefined ? await loadOrgStructure(c, tenantId) : structure;
+  for (const unit of own) for (const id of collectUnitSubtree(tree, unit)) scope.add(id);
+  return scope;
+}
+
+/**
+ * DW-10g — the units of `tenantId` the caller HEADS, company-anchored: the company's own lead seats (`loadLeadSeatUnits`),
+ * plus the caller's own primary unit(s) and their subtrees when `placementLeadApplies`. Never the tenantless grant.
+ */
+export async function loadHeadUnits(
+  c: PoolClient,
+  principal: Principal,
+  tenantId: string,
+  structure: unknown,
+  asOf: string,
+): Promise<Set<string>> {
+  const led = await loadLeadSeatUnits(c, tenantId, principal.userId, structure);
+  if (principal.userId && (await placementLeadApplies(c, principal, tenantId))) {
+    for (const id of await placementScope(c, tenantId, principal.userId, asOf, structure)) led.add(id);
+  }
+  return led;
+}
+
 /**
  * THE unit boundary: every unit id the caller may read the person axis within, as of `asOf`.
  *
  * An EMPTY set means "this caller leads no unit" — which must read as *no access*, never as
  * *unfiltered access*. Every consumer below honours that, and it is asserted by the parity suite.
  *
- * HIER-2: `principal`, when passed, adds a SECOND, GRANT-DERIVED source — the union of the
- * caller's `org_unit`-scoped `org_unit_lead` grant scopeIds, each expanded by the SAME
- * `collectUnitSubtree` walk used for the placement-derived `manager` path below. Additive, never
- * replacing: leadership is now also explicit and grant-auditable (D-3), not solely inferred from
- * where the caller happens to sit in the chart. `principal` is OPTIONAL and defaults to no
- * grant-derived source, so every pre-existing call site that doesn't pass it keeps its exact
- * prior behaviour.
+ * Without `principal`: the caller's own placement subtree(s) (the placement-derived source alone).
+ *
+ * With `principal` (DW-10g-2, replacing HIER-2's grant-derived source): `loadHeadUnits`, i.e. the company's own lead seats plus
+ * the placement subtree only for a unit-scoped grant anchored on this company. HIER-2 used to union the caller's `org_unit_lead`
+ * grant scopeIds here, and before that the placement subtree for ANY unit-scoped caller; both read a grant with no company, so
+ * the head of a same-id department in another company was a head here. Callers still gate on `requiresUnitNarrowing` (or the
+ * anchored tier) first, so an unanchored caller is narrowed to this (empty) set: they keep their own rows, as a plain member does.
  */
 export async function loadLedUnitScope(
   c: PoolClient,
@@ -321,16 +453,23 @@ export async function loadLedUnitScope(
   principal?: Principal,
 ): Promise<Set<string>> {
   if (!userId) return new Set();
-  const own = await ownPrimaryUnits(c, tenantId, userId, asOf);
-  const grantedUnits = (principal?.roles ?? [])
-    .filter((g) => g.role === "org_unit_lead" && g.scopeType === "org_unit" && !!g.scopeId)
-    .map((g) => g.scopeId as string);
-  if (own.length === 0 && grantedUnits.length === 0) return new Set();
+  if (!principal) return placementScope(c, tenantId, userId, asOf);
   const structure = await loadOrgStructure(c, tenantId);
-  const scope = new Set<string>();
-  for (const unit of own) for (const id of collectUnitSubtree(structure, unit)) scope.add(id);
-  for (const unit of grantedUnits) for (const id of collectUnitSubtree(structure, unit)) scope.add(id);
-  return scope;
+  return loadHeadUnits(c, { ...principal, userId }, tenantId, structure, asOf);
+}
+
+/**
+ * DW-10g-2 — `personAxisTier`, company-anchored: `unit_scoped` survives only when the caller heads something in THIS company
+ * (`placementLeadApplies`, or a lead seat here); otherwise it falls to `self_only`, so a caller whose only unit-scoped grant
+ * belongs to another company is treated exactly as a plain member is. The two top tiers are returned unchanged and cost no query.
+ * Use this, not `personAxisTier`, wherever the `self_only` answer selects a branch that reads the caller's own rows. Must run
+ * inside `withTenants([tenantId])`.
+ */
+export async function anchoredPersonAxisTier(c: PoolClient, principal: Principal, tenantId: string): Promise<PersonAxisTier> {
+  const tier = personAxisTier(principal, tenantId);
+  if (tier !== "unit_scoped") return tier;
+  if (await placementLeadApplies(c, principal, tenantId)) return tier;
+  return (await loadLeadSeatNodes(c, tenantId, principal.userId)).length > 0 ? tier : "self_only";
 }
 
 /** A subject's primary unit as of `asOf`, or `null` when they have none (pre-adoption history, or

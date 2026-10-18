@@ -357,8 +357,8 @@ export class DeptNoticesController {
       const structure = await loadOrgStructure(c, tenantId);
       return loadUnitRoster(c, tenantId, collectUnitSubtree(structure, unit), asOf);
     });
-    // The heads of THIS unit exactly (a current org_unit_lead grant on it, held by an active member of this company): not the
-    // heads above it, and not the company-wide tiers.
+    // The heads of THIS unit exactly (DW-10g-2: this company's own lead seat on it, held by an active member of this company): not
+    // the heads above it, and not the company-wide tiers.
     const heads = await loadUnitLeadUserIds(tenantId, unit);
     return [...new Set([...placed, ...heads])].sort();
   }

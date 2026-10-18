@@ -19,6 +19,7 @@ import { emitEvent } from "../events/outbox.service";
 import { isUuidShaped, todayIso } from "./dept-resolution";
 import { deriveUniqueShortCode } from "./project-short-codes";
 import { loadUnitAncestors } from "./org-unit-closure";
+import { loadSeatHoldersByNode } from "../modules/reports/person-scope";
 import { scrubText } from "./scrub";
 import { notifyBestEffort } from "./client-notify";
 
@@ -565,17 +566,12 @@ export async function loadAuthFacts(c: PoolClient, tenantId: string, requestId: 
   };
 }
 
-/** §32.7 `request.received`: the active holders of a `positions.is_lead = true` seat on the receiving unit (migration 0109).
- *  An active assignment is one with `valid_to IS NULL` on an `active` position. With no head, nobody is told. */
+/** §32.7 `request.received`: the active holders of a lead seat on the receiving unit (migration 0109). DW-10g-2: the SAME seat
+ *  every head check reads (`loadSeatHoldersByNode`): an `active` `is_lead` position that carries the `org_unit_lead` role row
+ *  (0109 §2.2: a lead position without it confers nothing), held through an assignment with no `valid_to`. With no head, nobody
+ *  is told. Runs inside `withTenants([tenantId])`. */
 export async function loadUnitHeads(c: PoolClient, tenantId: string, unitId: string): Promise<string[]> {
-  const { rows } = await c.query<{ user_id: string }>(
-    `SELECT DISTINCT pa.user_id::text AS user_id
-       FROM positions p
-       JOIN position_assignments pa ON pa.position_id = p.id AND pa.tenant_id = p.tenant_id
-      WHERE p.tenant_id = $1 AND p.unit_node_id = $2 AND p.is_lead AND p.status = 'active' AND pa.valid_to IS NULL`,
-    [tenantId, unitId],
-  );
-  return rows.map((r) => r.user_id);
+  return (await loadSeatHoldersByNode(c, tenantId, [unitId])).get(unitId) ?? [];
 }
 
 // ───────────────────────────────────────── reads ─────────────────────────────────────────

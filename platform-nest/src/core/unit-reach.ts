@@ -26,13 +26,15 @@
 import type { PoolClient } from "pg";
 import type { Principal } from "../rbac/principal";
 import {
-  UNIT_SCOPED_ROLES,
   collectUnitSubtree,
-  grantCoversTenant,
-  loadLedUnitScope,
+  loadHeadUnits,
   personAxisTier,
   resolveSubjectUnit,
 } from "../modules/reports/person-scope";
+
+// DW-10g-2: the seat helpers live in person-scope.ts now (its company-anchored `loadLedUnitScope` needs them, and person-scope
+// cannot import this file without a cycle). Re-exported so every existing import keeps working.
+export { loadHeadUnits, loadLeadSeatUnits, placementLeadApplies } from "../modules/reports/person-scope";
 
 /** The company-wide tiers of a department surface (see the header): personAxisTier's two top tiers, plus `owner` of this
  *  company. Reads only `principal.roles` (server-assembled at auth time), never request input. */
@@ -67,82 +69,6 @@ export async function callerReachesUnit(
 export interface UnitReach {
   readonly companyWide: boolean;
   reaches(unitNodeId: string): boolean;
-}
-
-/**
- * DW-10e-6 (DW-D43, PERMISSION-CONTRACT §49) — the units a person HEADS in one company, read from that company's OWN lead seats:
- * every `positions` row of `tenantId` with `is_lead` and `status = 'active'` that ALSO carries a `position_roles` row for the
- * `org_unit_lead` role at `own_unit` (0109 design §2.2: "a position with is_lead=true and no org_unit_lead role row confers no lead
- * power"), held by `userId` through an assignment with no `valid_to`. Each seat's unit is expanded by `collectUnitSubtree` over
- * `structure` (that company's tree, `loadOrgStructure`), so a division head also covers the units under it. An empty set means
- * "heads nothing here". The role is matched by NAME, as Cerbos and `position_roles_guard()` do: the library role, or a role of this
- * company.
- *
- * Company-anchored on purpose. It never reads an `org_unit_lead` GRANT: that grant carries no company (scopeType `org_unit`, the
- * scopeId a bare node id) and node ids repeat across companies (`d-webdev`, `d-hr`), so a grant-based answer would make the head of
- * another company's same-id department a head here. Placement alone is not a seat either. A retired position (`status` other than
- * `active`), an ended assignment (`valid_to` set) or a lead position without the role row does not count.
- *
- * ⚠ CALLER CONTRACT: `c` must be inside `withTenants([tenantId], ...)` (positions, position_roles and position_assignments are FORCE
- * RLS: an unset tenant GUC reads ZERO seats, which here is a silent "heads nothing").
- */
-export async function loadLeadSeatUnits(
-  c: PoolClient,
-  tenantId: string,
-  userId: string | null,
-  structure: unknown,
-): Promise<Set<string>> {
-  const led = new Set<string>();
-  if (!userId) return led;
-  const { rows } = await c.query<{ unit_node_id: string }>(
-    `SELECT DISTINCT p.unit_node_id
-       FROM positions p
-       JOIN position_assignments pa ON pa.position_id = p.id AND pa.tenant_id = p.tenant_id
-       JOIN position_roles pr ON pr.position_id = p.id AND pr.tenant_id = p.tenant_id AND pr.scope_kind = 'own_unit'
-       JOIN roles r ON r.id = pr.role_id AND r.name = 'org_unit_lead' AND (r.company_id IS NULL OR r.company_id = p.tenant_id)
-      WHERE p.tenant_id = $1 AND p.is_lead AND p.status = 'active' AND pa.valid_to IS NULL AND pa.user_id = $2
-      ORDER BY p.unit_node_id`,
-    [tenantId, userId],
-  );
-  for (const r of rows) for (const id of collectUnitSubtree(structure, r.unit_node_id)) led.add(id);
-  return led;
-}
-
-/**
- * DW-10g — does the placement-derived lead path apply to this caller IN THIS COMPANY? The company-anchored half of the old
- * `requiresUnitNarrowing` gate: a `manager` or `org_unit_lead` grant (personAxisTier's unit-scoped roles) that is a company or
- * global grant covering `tenantId`, or a project grant on one of `tenantId`'s own projects (read in this company's scope, so a
- * project of another company never matches). The `org_unit` grant source is dropped: it carries no company.
- */
-export async function placementLeadApplies(c: PoolClient, principal: Principal, tenantId: string): Promise<boolean> {
-  const grants = principal.roles.filter((g) => UNIT_SCOPED_ROLES.has(g.role));
-  if (grants.some((g) => grantCoversTenant(g, tenantId))) return true;
-  const projectIds = grants.filter((g) => g.scopeType === "project" && !!g.scopeId).map((g) => g.scopeId as string);
-  if (projectIds.length === 0) return false;
-  const { rows } = await c.query<{ ok: boolean }>(
-    `SELECT EXISTS (SELECT 1 FROM projects WHERE tenant_id = $1 AND id::text = ANY($2::text[])) AS ok`,
-    [tenantId, projectIds],
-  );
-  return rows[0]?.ok === true;
-}
-
-/**
- * DW-10g — the units of `tenantId` the caller HEADS, company-anchored: the company's own lead seats (`loadLeadSeatUnits`), plus,
- * when `placementLeadApplies`, the caller's own primary unit(s) and their subtrees (`loadLedUnitScope` WITHOUT the principal, which
- * is exactly its placement-derived source). Never the tenantless `org_unit_lead` grant. Same caller contract as above.
- */
-export async function loadHeadUnits(
-  c: PoolClient,
-  principal: Principal,
-  tenantId: string,
-  structure: unknown,
-  asOf: string,
-): Promise<Set<string>> {
-  const led = await loadLeadSeatUnits(c, tenantId, principal.userId, structure);
-  if (principal.userId && (await placementLeadApplies(c, principal, tenantId))) {
-    for (const id of await loadLedUnitScope(c, tenantId, principal.userId, asOf)) led.add(id);
-  }
-  return led;
 }
 
 /** The batch form of `callerReachesUnit`: the caller's primary unit and head set are read once (eagerly), then each unit is a

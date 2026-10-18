@@ -26,9 +26,9 @@
 //   - placed:  the caller's primary unit TODAY (REPORTS_TZ) is in the unit's subtree (a division's staff see their
 //              department; never the reverse). Today, not the range end: the TR-25 rule, so choosing a past range
 //              cannot widen what someone sees.
-//   - a head:  DW-10g (`callerReachesUnit` -> `loadHeadUnits`, core/unit-reach.ts): the company's own lead seats, and the
-//              placement-derived path for a `manager` anchored on this company; never the tenantless `org_unit_lead`
-//              grant. (`authorizeUnitHeadRead` below still reads the grant: a known remaining path, see the CHANGELOG.)
+//   - a head:  DW-10g (`callerReachesUnit` -> `loadHeadUnits`): the company's own lead seats, and the placement-derived
+//              path for a `manager` anchored on this company; never the tenantless `org_unit_lead` grant. DW-10g-2:
+//              `authorizeUnitHeadRead` below reads the same company-anchored scope (`loadLedUnitScope(..., principal)`).
 //   - company-wide: `personAxisTier` unrestricted or company_wide (platform_admin, company_admin, the HR tiers, the
 //              served reports tiers), plus `owner` of this company: owner mirrors company_admin (§40.2) but is
 //              deliberately absent from personAxisTier (person-scope.ts), so it is named here.

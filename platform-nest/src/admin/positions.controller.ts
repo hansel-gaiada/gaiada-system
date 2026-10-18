@@ -35,6 +35,7 @@ import { check } from "../rbac/cerbos";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { loadUnitAncestors, loadUnitDescendants } from "../core/org-unit-closure";
+import { loadAnchoredLeadGrantNodes } from "../modules/reports/person-scope";
 import { assertRoleUiGrantable, nonUiGrantableKeysForRole } from "../rbac/ui-grantable";
 import { EDITORIAL_ROLE_DEDICATED_PATH, isEditorialRole } from "../rbac/editorial-roles";
 import { reconcileUser, reconcilePosition } from "./position-reconciler";
@@ -89,7 +90,8 @@ export class PositionsController {
    *
    *  The subtree narrowing is applied to the RESULT SET, not left to Cerbos: `position · read` is a
    *  per-resource decision over `unitAncestors`, and a LIST cannot pass one resource. Asking Cerbos
-   *  per row would be N round-trips; instead the caller's own `org_unit_lead` grants are expanded
+   *  per row would be N round-trips; instead the caller's own `org_unit_lead` grants (DW-10g-2: those this company's own lead
+   *  seat backs) are expanded
    *  through the closure table (the SAME containment Cerbos's derived role computes) and used as a
    *  filter. Reach itself is still decided by Cerbos — see the two probes below. */
   @Get(":tenantId/positions")
@@ -106,9 +108,9 @@ export class PositionsController {
     //   2. failing that, does ANY of the caller's own lead units pass? If so they are a dept head and
     //      the result set is narrowed to the union of those subtrees.
     // Neither ⇒ a real 403, never a silently empty list.
-    const leadUnits = req.principal.roles
-      .filter((g) => g.role === "org_unit_lead" && g.scopeType === "org_unit" && !!g.scopeId)
-      .map((g) => g.scopeId!);
+    // DW-10g-2: only the caller's org_unit_lead grants that THIS company's own lead seat backs. The grant carries no company, so
+    // a grant made for another company's same-id node would otherwise pass Cerbos's per-unit probe here and widen the list.
+    const leadUnits = await withTenants([tenantId], (c) => loadAnchoredLeadGrantNodes(c, req.principal, tenantId));
     const tenantWide = await check(req.principal, { kind: "position", tenantId, unitAncestors: [] }, "read");
     if (!tenantWide.allow) {
       const perUnit = await Promise.all(

@@ -428,8 +428,8 @@ export class ReportsController {
       scopeRefs = await withTenants(
         [tenantId],
         async (c) => {
-          // HIER-2: `req.principal` passed so a grant-derived org_unit_lead scope (person-scope.ts's
-          // `loadLedUnitScope`) is unioned with the placement-derived one — additive, never narrower.
+          // `req.principal` passed: the company-anchored head scope (person-scope.ts's `loadLedUnitScope`, DW-10g-2: this
+          // company's own lead seats, plus the placement subtree for a unit-scoped grant on this company; never a grant alone).
           const scope = await loadLedUnitScope(c, tenantId, req.principal.userId, asOf, req.principal);
           if (scope.size === 0) return []; // leads no unit ⇒ nothing in scope, never "everything"
           if (grain === "department") return scopeRefs.filter((ref) => scope.has(ref));
@@ -561,7 +561,7 @@ export class ReportsController {
       filtered = await withTenants(
         [tenantId],
         async (c) => {
-          // HIER-2: see the `overview` endpoint's identical comment above.
+          // DW-10g-2: see the `overview` endpoint's comment above (company-anchored head scope).
           const scope = await loadLedUnitScope(c, tenantId, req.principal.userId, asOf, req.principal);
           if (scope.size === 0) return [];
           if (grain === "department") return filtered.filter((r) => scope.has(String((r.dimensions ?? {}).unit ?? "")));

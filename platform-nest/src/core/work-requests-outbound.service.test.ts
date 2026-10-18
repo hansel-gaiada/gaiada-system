@@ -310,12 +310,18 @@ describe("DW-10e §60.11 Tenancy: static pins of the sender files", () => {
         expect(code(text)).not.toContain(banned);
       }
     }
-    const seats = code(read("unit-reach.ts"));
-    const fn = seats.slice(seats.indexOf("export async function loadLeadSeatUnits("), seats.indexOf("export async function placementLeadApplies("));
-    expect(fn).toMatch(/p\.tenant_id = \$1 AND p\.is_lead AND p\.status = 'active' AND pa\.valid_to IS NULL AND pa\.user_id = \$2/);
-    expect(fn).toContain("pa.position_id = p.id AND pa.tenant_id = p.tenant_id");
-    expect(fn).toContain("JOIN position_roles pr ON pr.position_id = p.id AND pr.tenant_id = p.tenant_id AND pr.scope_kind = 'own_unit'");
-    expect(fn).not.toMatch(/user_roles|principal/);
+    // DW-10g-2: the seat read lives in modules/reports/person-scope.ts (re-exported by unit-reach.ts), one join for every seat read
+    const seats = code(readFileSync(join(__dirname, "..", "modules", "reports", "person-scope.ts"), "utf8"));
+    const from = seats.slice(seats.indexOf("const LEAD_SEAT_FROM ="), seats.indexOf("export async function loadLeadSeatNodes("));
+    expect(from).toContain("JOIN position_assignments pa ON pa.position_id = p.id AND pa.tenant_id = p.tenant_id");
+    expect(from).toContain("JOIN position_roles pr ON pr.position_id = p.id AND pr.tenant_id = p.tenant_id AND pr.scope_kind = 'own_unit'");
+    expect(from).toContain("const LEAD_SEAT_LIVE = `p.is_lead AND p.status = 'active' AND pa.valid_to IS NULL`");
+    const nodes = seats.slice(seats.indexOf("export async function loadLeadSeatNodes("), seats.indexOf("export async function loadLeadSeatUnits("));
+    expect(nodes).toContain("WHERE p.tenant_id = $1 AND ${LEAD_SEAT_LIVE} AND pa.user_id = $2");
+    const units = seats.slice(seats.indexOf("export async function loadLeadSeatUnits("), seats.indexOf("export async function loadAnchoredLeadGrantNodes("));
+    expect(units).toContain("loadLeadSeatNodes(c, tenantId, userId)");
+    expect(units + nodes).not.toMatch(/user_roles|principal/);
+    expect(code(read("unit-reach.ts"))).toContain('export { loadHeadUnits, loadLeadSeatUnits, placementLeadApplies } from "../modules/reports/person-scope";');
   });
 
   it("every handler authorizes FIRST, on the requesting company (validation never pre-empts a 403)", () => {
