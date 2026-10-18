@@ -52,19 +52,23 @@ describe.skipIf(!TEST_URL)("IAM Phase 2 substrate (0109) — employees/positions
     for (const r of rows) expect(r.relforcerowsecurity, `${r.relname} must FORCE RLS`).toBe(true);
   });
 
-  it("positions/position_roles/position_assignments/position_grant_claims each have exactly one FOR-ALL tenant_isolation policy", async () => {
+  it("positions/position_roles/position_assignments/position_grant_claims each have one FOR-ALL tenant_isolation policy; the three seat tables also a SELECT-only principal_lookup (DW-10g-2)", async () => {
     const coreTables = ["positions", "position_roles", "position_assignments", "position_grant_claims"];
     const { rows } = await withGlobal((c) =>
       c.query<{ tablename: string; policyname: string; cmd: string }>(
-        `SELECT tablename, policyname, cmd FROM pg_policies WHERE tablename = ANY($1::text[]) ORDER BY tablename`,
+        `SELECT tablename, policyname, cmd FROM pg_policies WHERE tablename = ANY($1::text[]) ORDER BY tablename, policyname`,
         [coreTables],
       ),
     );
-    expect(rows.map((r) => r.tablename).sort()).toEqual([...coreTables].sort());
-    for (const r of rows) {
-      expect(r.policyname, r.tablename).toBe("tenant_isolation");
-      expect(r.cmd, r.tablename).toBe("ALL");
-    }
+    expect(rows.map((r) => `${r.tablename}:${r.policyname}:${r.cmd}`).sort()).toEqual([
+      "position_assignments:principal_lookup:SELECT",
+      "position_assignments:tenant_isolation:ALL",
+      "position_grant_claims:tenant_isolation:ALL",
+      "position_roles:principal_lookup:SELECT",
+      "position_roles:tenant_isolation:ALL",
+      "positions:principal_lookup:SELECT",
+      "positions:tenant_isolation:ALL",
+    ]);
   });
 
   // ── (2) core-wall tenant isolation (positions et al.) ────────────────────────────────────────

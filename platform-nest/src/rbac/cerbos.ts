@@ -201,6 +201,10 @@ export function principalPayload(p: Principal) {
         // Conditional spread: every non-client grant keeps its exact historical shape (the HIER-1 round-trip
         // tests pin it); only a client-scoped grant carries a tenant.
         ...(g.scopeTenantId ? { scopeTenantId: g.scopeTenantId } : {}),
+        // DW-10g-2 Part B: an `org_unit_lead` grant carries the companies whose own lead seat backs it (RoleGrant.tenantIds).
+        // Same conditional-spread rule: every other grant keeps its exact shape. The derived role guards it with has(), so an
+        // `org_unit_lead` grant that arrives without it (a hand-built principal, an older producer) matches nothing.
+        ...(g.tenantIds ? { tenantIds: [...g.tenantIds] } : {}),
         // M5-W1a: a writers' room grant's scope rows (RoleGrant.editorialScopes). Same conditional-spread rule:
         // every other grant keeps its exact shape. Each row is re-listed field by field (an allow-list, like
         // this whole function), so nothing beyond the five fields the derived roles read reaches Cerbos.

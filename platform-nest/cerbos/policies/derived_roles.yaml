@@ -78,13 +78,22 @@ derivedRoles:
     # mirror over-grant. Classified UNSAFE by permission-arm-hazard-scan.test.ts's own structural
     # detector (no global/company disjunction) — correctly: this role IS attribute-dependent, by
     # design, and must never be treated as if it were scope-only.
+    #
+    # ⚠ DW-10g-2 Part B (PERMISSION-CONTRACT §50) — THE COMPANY. The grant carries no company: its scopeId is a bare node id,
+    # and node ids repeat across group companies (`d-webdev`, `d-hr`). Matched on the node alone, a grant made for company P's
+    # `d-web` gave its holder lead powers over company H's `d-web` wherever they were a member (inTenant). So the grant also
+    # carries `tenantIds`: the companies whose OWN lead seat backs it (an active `positions.is_lead` row on the node with its
+    # `org_unit_lead` role row, held through an open assignment), resolved by assemblePrincipal() under the seat tables'
+    # principal_lookup policies, never from a request. has() makes a grant without it (a hand-built principal) match nothing,
+    # and `[]` (no backing seat) matches nothing.
     - name: org_unit_lead
       parentRoles: ["user"]
       condition:
         match:
           expr: >-
             request.principal.attr.grants.exists(g, g.role == "org_unit_lead" &&
-              g.scopeType == "org_unit" && g.scopeId in request.resource.attr.unitAncestors)
+              g.scopeType == "org_unit" && g.scopeId in request.resource.attr.unitAncestors &&
+              has(g.tenantIds) && request.resource.attr.tenantId in g.tenantIds)
 
     # IT staff (it_admin/it_manager/it) covering the IT device registry for their company.
     - name: it_staff

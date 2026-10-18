@@ -39,6 +39,14 @@ export interface RoleGrant {
    *  rows (W1b) -- never from a request. Absent on every other grant; a writers' room grant WITHOUT it
    *  matches nothing in Cerbos (has() guard), so an unresolved scope fails closed. */
   editorialScopes?: EditorialScope[];
+  /** DW-10g-2 Part B (PERMISSION-CONTRACT §50). Only set on an `org_unit_lead` grant (always scopeType `org_unit`, a bare node
+   *  id with no company): the companies whose OWN lead seat backs it -- an active `positions.is_lead` row of that company on the
+   *  grant's node, carrying the `org_unit_lead` role row at `own_unit`, held by this user through an OPEN assignment -- and in
+   *  which the user is an active member. Read by `assemblePrincipal()` under the seat tables' `principal_lookup` policies
+   *  (migration 202610180911), never from a request. The `org_unit_lead` derived role requires
+   *  `resource.attr.tenantId in g.tenantIds`, so a grant no seat backs (`[]`) matches nothing, and a grant made for another
+   *  company's same-id node never acts here. Absent on every other grant. */
+  tenantIds?: string[];
 }
 
 /** M5-W1a -- one scope row of a writers' room grant. "All" is an explicit boolean, never an empty list. */
@@ -380,7 +388,7 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
   // Fixing it here is not a scope departure: MON-00i's own new client_contacts anchor (below) reads
   // the identical FORCE-RLS/`principal_lookup` shape, so it would have shipped with the exact same
   // defect if the two queries stayed apart.
-  const { companies, rootCompanies, clientContacts, scopeRows } = await withGlobal(async (c) => {
+  const { companies, rootCompanies, clientContacts, scopeRows, leadSeats } = await withGlobal(async (c) => {
     await c.query("BEGIN");
     try {
       await c.query("SELECT set_config('app.principal_user_id', $1, true)", [userId]);
@@ -476,12 +484,33 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
             )
           ).rows;
 
+      // DW-10g-2 Part B. The (company, node) pairs of the principal's LIVE lead seats, read under the SAME `principal_lookup`
+      // GUC: `positions`, `position_roles` and `position_assignments` are FORCE RLS, and their principal_lookup policies
+      // (migration 202610180911) expose only this user's OPEN assignments and the positions they reference. Outside this
+      // transaction the read would return ZERO rows and no error, and every `org_unit_lead` rule in Cerbos would silently stop
+      // matching. Skipped when the principal holds no `org_unit_lead` grant (the common case costs nothing).
+      const leadSeats = !roles.some((g) => g.role === "org_unit_lead" && g.scopeType === "org_unit")
+        ? []
+        : (
+            await c.query<{ tenant_id: string; unit_node_id: string }>(
+              `SELECT DISTINCT p.tenant_id, p.unit_node_id
+                 FROM position_assignments pa
+                 JOIN positions p ON p.id = pa.position_id AND p.tenant_id = pa.tenant_id
+                 JOIN position_roles pr ON pr.position_id = p.id AND pr.tenant_id = p.tenant_id AND pr.scope_kind = 'own_unit'
+                 JOIN roles r ON r.id = pr.role_id AND r.name = 'org_unit_lead' AND (r.company_id IS NULL OR r.company_id = p.tenant_id)
+                WHERE pa.user_id = $1 AND pa.valid_to IS NULL AND p.is_lead AND p.status = 'active'
+                ORDER BY p.tenant_id, p.unit_node_id`,
+              [userId],
+            )
+          ).rows;
+
       await c.query("COMMIT");
       return {
         companies: companiesRes,
         rootCompanies: rootRes.rows.map((r) => r.id),
         clientContacts: contactRes.rows,
         scopeRows,
+        leadSeats,
       };
     } catch (err) {
       await c.query("ROLLBACK");
@@ -496,9 +525,24 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
     const tenantId = g.scopeId ? tenantOfClient.get(g.scopeId) : undefined;
     return tenantId ? [{ ...g, scopeTenantId: tenantId }] : []; // no active client-wide contact row => inert
   });
+  // DW-10g-2 Part B: each `org_unit_lead` grant gets `tenantIds`, the member companies whose own live lead seat sits on the
+  // grant's node (see RoleGrant.tenantIds). `[]` when none: the derived role then matches nothing for it (fail closed).
+  const memberOf = new Set(companies.rows.map((r) => r.tenant_id));
+  const seatTenantsByNode = new Map<string, string[]>();
+  for (const s of leadSeats) {
+    if (!memberOf.has(s.tenant_id)) continue;
+    const list = seatTenantsByNode.get(s.unit_node_id) ?? [];
+    if (!list.includes(s.tenant_id)) list.push(s.tenant_id);
+    seatTenantsByNode.set(s.unit_node_id, list);
+  }
+  const seatResolved = clientResolved.map((g) =>
+    g.role === "org_unit_lead" && g.scopeType === "org_unit"
+      ? { ...g, tenantIds: [...(g.scopeId ? seatTenantsByNode.get(g.scopeId) ?? [] : [])].sort() }
+      : g,
+  );
   // M5-W1b: each writers' room grant gets ITS scope rows as `editorialScopes`; one with none gets nothing (fail
   // closed). Strips the internal `grantId` from every grant. See attachEditorialScopes().
-  const resolvedRoles = attachEditorialScopes(clientResolved, scopeRows);
+  const resolvedRoles = attachEditorialScopes(seatResolved, scopeRows);
   const clientAdminOf = clientContacts
     .filter((r) => r.capability === "admin")
     .map((r) => ({ tenantId: r.tenant_id, clientId: r.client_id }));
