@@ -14,7 +14,7 @@ import { config } from "../../config";
 import { buildApp } from "../../main";
 import { withTenants } from "../../db";
 import { initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
-import { addMembership, createCompany, createRole, createUser, grantRole } from "../../testing/fixtures";
+import { addMembership, createCompany, createRole, createUser, grantRole, grantLeadSeat } from "../../testing/fixtures";
 import { seedFinanceCompany } from "../../testing/finance-kpi-seed";
 
 const svc = { authorization: "Bearer svc-token" };
@@ -84,6 +84,8 @@ describe.skipIf(!TEST_URL)("DW-7j-5 revenue plan routes (live PG + RLS + Cerbos)
       await grantRole(lead, mgr, "company", t);
     }
     await grantRole(lead, unitLead, "org_unit", "d-gm");
+    // DW-10g-2 Part B: a head acts through Cerbos's org_unit_lead rule only in a company whose own lead seat backs the grant.
+    await grantLeadSeat(co, "d-gm", lead);
     await grantRole(admin2, companyAdmin, "company", other);
 
     app = await buildApp();

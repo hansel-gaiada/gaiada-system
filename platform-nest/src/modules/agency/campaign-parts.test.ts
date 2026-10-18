@@ -13,7 +13,7 @@ import { buildApp } from "../../main";
 import { agencyModule } from "./index";
 import { applyOrgStructure, sanitizeStructure } from "../../admin/org-structure.service";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/setup";
-import { createCompany, createUser, addMembership, createRole, grantRole, createProject, createClient } from "../../testing/fixtures";
+import { createCompany, createUser, addMembership, createRole, grantRole, createProject, createClient, grantLeadSeat } from "../../testing/fixtures";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -117,6 +117,8 @@ describe.skipIf(!TEST_URL)("DW-5a campaign parts (HTTP, real Postgres + Cerbos)"
     await grantRole(leadSeo, leadRole, "org_unit", "d-seo");
     await grantRole(leadSocial, leadRole, "org_unit", "d-social");
     await grantRole(leadRoot, leadRole, "org_unit", "root");
+    // DW-10g-2 Part B: a head acts through Cerbos's org_unit_lead rule only in a company whose own lead seat backs the grant.
+    for (const [u, unit] of [[leadSeo, "d-seo"], [leadSocial, "d-social"], [leadRoot, "root"]] as const) await grantLeadSeat(A, unit, u);
 
     // The org tree goes through the PRODUCTION writer, so the closure the lead rule reads is the one real requests see.
     await withTenants([A], (c) => applyOrgStructure(c, A, sanitizeStructure(TREE())));

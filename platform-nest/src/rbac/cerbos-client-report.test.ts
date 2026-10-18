@@ -217,7 +217,7 @@ describe.skipIf(!live)("PV7-04a Cerbos matrix — client_report (role x action)"
     ["member @T1 who does not own the client: reads only", principal([co("member")]), READ_ONLY],
     ["viewer @T1: reads only", principal([co("viewer")]), READ_ONLY],
     ["client @T1 (a portal contact): nothing (portal reads go through `portal`)", principal([co("client")]), NONE],
-    ["org_unit_lead (unit-scoped): nothing", principal([{ role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-x" }]), NONE],
+    ["org_unit_lead (unit-scoped): nothing", principal([{ role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-x", tenantIds: [T1] }]), NONE],
     ["webdev_manager @T1 (a module tier)", principal([co("webdev_manager")]), NONE],
     ["company_admin of T2 only (cross-tenant)", principal([co("company_admin", T2)], { companies: [T2] }), NONE],
     ["company_admin @T1 at LOW assurance (notLow)", principal([co("company_admin")], { assurance: "low" }), NONE],

@@ -10,7 +10,7 @@ import { buildApp } from "../main";
 import { config } from "../config";
 import { withGlobal, withTenants } from "../db";
 import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
-import { createCompany, createUser, createRole, addMembership, grantRole } from "../testing/fixtures";
+import { createCompany, createUser, createRole, addMembership, grantRole, grantLeadSeat } from "../testing/fixtures";
 
 const live = !!process.env.CERBOS_URL && process.env.CERBOS_URL.length > 0;
 const svc = { authorization: "Bearer svc-token" };
@@ -70,6 +70,8 @@ describe.skipIf(!TEST_URL || !live)("P2-08 — the grant/revoke surface", () => 
     for (const u of [admin, webLead, webStaff, hrStaff]) await addMembership(T, u);
     await grantRole(admin, await createRole("company_admin"), "company", T);
     await grantRole(webLead, await createRole("org_unit_lead", null), "org_unit", "d-web");
+    // DW-10g-2 Part B: a head acts through Cerbos's org_unit_lead rule only in a company whose own lead seat backs the grant.
+    await grantLeadSeat(T, "d-web", webLead);
     memberRole = await createRole("member");
     viewerRole = await createRole("viewer");
     platformAdminRole = await createRole("platform_admin");

@@ -260,7 +260,9 @@ function principal(
 }
 const co = (role: string, scopeId = T1): RoleGrant => ({ role, scopeType: "company", scopeId });
 const glob = (role: string): RoleGrant => ({ role, scopeType: "global", scopeId: null });
-const lead = (unit: string): RoleGrant => ({ role: "org_unit_lead", scopeType: "org_unit", scopeId: unit });
+// DW-10g-2 Part B: an org_unit_lead grant carries the companies whose own lead seat backs it (assemblePrincipal() resolves
+// them); the derived role requires the resource's company to be one. Default: the matrix's own company.
+const lead = (unit: string, tenantIds: string[] = [T1]): RoleGrant => ({ role: "org_unit_lead", scopeType: "org_unit", scopeId: unit, tenantIds });
 
 // A request addressed to department d-creative, which sits under d-corp; d-seo is its sibling.
 const CREATIVE_ANCESTORS = ["d-creative", "d-corp"];
@@ -286,6 +288,8 @@ describe.skipIf(!live)("DW-5c Cerbos matrix — work_request (role x action)", (
     ["org_unit_lead of d-creative alone: delivers and declines, nothing else (no read either)", principal([lead("d-creative")]), { ...NONE, deliver: true, decline: true }],
     ["org_unit_lead of d-corp (an ANCESTOR unit): delivers and declines", principal([lead("d-corp")]), { ...NONE, deliver: true, decline: true }],
     ["org_unit_lead of d-seo (a SIBLING unit): nothing", principal([lead("d-seo")]), NONE],
+    // DW-10g-2 Part B: the grant counts only in a company whose own lead seat backs it
+    ["DW-10g-2: org_unit_lead of d-creative whose seat is in ANOTHER company (T2), member of T1 and T2: in T1 a plain member", principal([co("member"), lead("d-creative", [T2])], { companies: [T1, T2] }), READ_CREATE],
     ["org_unit_lead of d-creative + member: reads, asks, delivers, declines, but cannot cancel", principal([lead("d-creative"), co("member")]), { ...READ_CREATE, deliver: true, decline: true }],
     ["company-scoped org_unit_lead grant (mis-scoped): nothing", principal([co("org_unit_lead")]), NONE],
     ["client @T1", principal([co("client")]), NONE],

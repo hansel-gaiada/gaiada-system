@@ -29,7 +29,7 @@ import { applyOrgStructure, sanitizeStructure } from "../admin/org-structure.ser
 import { setStorageForTest, localStorage as diskStorage } from "./storage";
 import { sha256Hex } from "./content-hash";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
-import { createCompany, createUser, addMembership, createRole, grantRole, createProject, createClient } from "../testing/fixtures";
+import { createCompany, createUser, addMembership, createRole, grantRole, createProject, createClient, grantLeadSeat } from "../testing/fixtures";
 import { createIssuedInvoice, ensureBillingSetup } from "../seed/billing-setup";
 
 const mem = new Map<string, Buffer>();
@@ -154,6 +154,9 @@ describe.skipIf(!TEST_URL)("DW-8h attachments on requests and campaign parts (HT
     await grantRole(viewer, viewerRole, "company", A);
     await grantRole(leadCreative, leadRole, "org_unit", "d-creative");
     await grantRole(leadSeo, leadRole, "org_unit", "d-seo");
+    // DW-10g-2 Part B: a head acts through Cerbos's org_unit_lead rule only in a company whose own lead seat backs the grant.
+    await grantLeadSeat(A, "d-creative", leadCreative);
+    await grantLeadSeat(A, "d-seo", leadSeo);
     await grantRole(adminB, adminRole, "company", B);
     await grantRole(outsider, memberRole, "company", B);
 

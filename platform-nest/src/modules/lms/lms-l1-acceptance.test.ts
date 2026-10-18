@@ -22,7 +22,7 @@ import { withTenants } from "../../db";
 import { rebuildOrgUnitClosure } from "../../core/org-unit-closure";
 import { buildApp } from "../../main";
 import { initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
-import { createCompany, createUser, addMembership, createRole, grantRole } from "../../testing/fixtures";
+import { createCompany, createUser, addMembership, createRole, grantRole, grantLeadSeat } from "../../testing/fixtures";
 import { registerModule, resetModules } from "../registry";
 import { lmsModule } from "./index";
 import { hrModule } from "../hr";
@@ -84,6 +84,9 @@ describe.skipIf(!RUN)("LMS L1 — the learning catalogue, driven end-to-end over
     const leadRole = await createRole("org_unit_lead");
     await grantRole(webLead, leadRole, "org_unit", "d-web");
     await grantRole(seoLead, leadRole, "org_unit", "d-seo");
+    // DW-10g-2 Part B: a head acts through Cerbos's org_unit_lead rule only in a company whose own lead seat backs the grant.
+    await grantLeadSeat(A, "d-web", webLead);
+    await grantLeadSeat(A, "d-seo", seoLead);
 
     // ⚠ THE ORG-UNIT CLOSURE MUST EXIST OR EVERY org_unit_lead RULE DENIES. `loadUnitAncestors`
     // returns [] for a node with no closure rows — fail-closed by design (HIER-2) — and then

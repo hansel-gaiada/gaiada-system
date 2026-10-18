@@ -168,7 +168,9 @@ function principal(
 }
 const co = (role: string, scopeId = T1): RoleGrant => ({ role, scopeType: "company", scopeId });
 const glob = (role: string): RoleGrant => ({ role, scopeType: "global", scopeId: null });
-const unitGrant = (unit: string): RoleGrant => ({ role: "org_unit_lead", scopeType: "org_unit", scopeId: unit });
+// DW-10g-2 Part B: an org_unit_lead grant carries the companies whose own lead seat backs it (assemblePrincipal() resolves
+// them); the derived role requires the resource's company to be one. Default: the matrix's own company.
+const unitGrant = (unit: string, tenantIds: string[] = [T1]): RoleGrant => ({ role: "org_unit_lead", scopeType: "org_unit", scopeId: unit, tenantIds });
 const org = (tenantId = T1): Resource => ({ kind: "org_structure", tenantId });
 const allow = async (p: Principal, r: Resource, a: string) => (await check(p, r, a)).allow;
 

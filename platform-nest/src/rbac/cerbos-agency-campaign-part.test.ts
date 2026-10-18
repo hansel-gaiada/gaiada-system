@@ -167,7 +167,9 @@ function principal(
 }
 const co = (role: string, scopeId = T1): RoleGrant => ({ role, scopeType: "company", scopeId });
 const glob = (role: string): RoleGrant => ({ role, scopeType: "global", scopeId: null });
-const lead = (unit: string): RoleGrant => ({ role: "org_unit_lead", scopeType: "org_unit", scopeId: unit });
+// DW-10g-2 Part B: an org_unit_lead grant carries the companies whose own lead seat backs it (assemblePrincipal() resolves
+// them); the derived role requires the resource's company to be one. Default: the matrix's own company.
+const lead = (unit: string, tenantIds: string[] = [T1]): RoleGrant => ({ role: "org_unit_lead", scopeType: "org_unit", scopeId: unit, tenantIds });
 
 // A part of department d-seo, which sits under d-corp; d-social is its sibling.
 const SEO_ANCESTORS = ["d-seo", "d-corp"];

@@ -34,7 +34,7 @@ import { agencyModule } from "../../modules/agency";
 import { applyOrgStructure, sanitizeStructure } from "../../admin/org-structure.service";
 import { setStorageForTest } from "../storage";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/setup";
-import { createCompany, createUser, addMembership, createRole, grantRole, createProject } from "../../testing/fixtures";
+import { createCompany, createUser, addMembership, createRole, grantRole, createProject, grantLeadSeat } from "../../testing/fixtures";
 import { createFigmaClient, setFigmaClientForTests } from "./client";
 
 const mem = new Map<string, Buffer>();
@@ -256,6 +256,9 @@ describe.skipIf(!TEST_URL)("DW-6k Figma links (HTTP, real Postgres + Cerbos, Fig
     await grantRole(viewer, viewerRole, "company", A);
     await grantRole(leadCreative, leadRole, "org_unit", "d-creative");
     await grantRole(leadSeo, leadRole, "org_unit", "d-seo");
+    // DW-10g-2 Part B: a head acts through Cerbos's org_unit_lead rule only in a company whose own lead seat backs the grant.
+    await grantLeadSeat(A, "d-creative", leadCreative);
+    await grantLeadSeat(A, "d-seo", leadSeo);
     await grantRole(adminB, adminRole, "company", B);
     await grantRole(outsider, memberRole, "company", B);
 

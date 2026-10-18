@@ -23,7 +23,7 @@ import { config } from "../../config";
 import { buildApp } from "../../main";
 import { newId, withGlobal, withTenants } from "../../db";
 import { initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
-import { addMembership, createCompany, createProject, createRole, createUser, grantRole } from "../../testing/fixtures";
+import { addMembership, createCompany, createProject, createRole, createUser, grantRole, grantLeadSeat } from "../../testing/fixtures";
 import { syncMetricDefinitions } from "../../rollups/engine";
 import { rebuildOrgUnitClosure } from "../../core/org-unit-closure";
 import { todayIsoInTz } from "./person-scope";
@@ -186,6 +186,9 @@ describe.skipIf(!TEST_URL)("DW-10b monthly targets against actuals (live PG + RL
     await grantRole(webHead, manager, "company", co);
     await grantRole(seoHead, lead, "org_unit", "d-seo");
     await grantRole(seoHead, manager, "company", co);
+    // DW-10g-2 Part B: a head acts through Cerbos's org_unit_lead rule only in a company whose own lead seat backs the grant.
+    await grantLeadSeat(co, "d-web", webHead);
+    await grantLeadSeat(co, "d-seo", seoHead);
     await grantRole(hr, await createRole("hr_staff"), "company", co);
 
     const root = {

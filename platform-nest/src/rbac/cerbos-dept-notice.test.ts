@@ -190,7 +190,9 @@ function principal(
 }
 const co = (role: string, scopeId = T1): RoleGrant => ({ role, scopeType: "company", scopeId });
 const glob = (role: string): RoleGrant => ({ role, scopeType: "global", scopeId: null });
-const unitGrant = (unit: string): RoleGrant => ({ role: "org_unit_lead", scopeType: "org_unit", scopeId: unit });
+// DW-10g-2 Part B: an org_unit_lead grant carries the companies whose own lead seat backs it (assemblePrincipal() resolves
+// them); the derived role requires the resource's company to be one. Default: the matrix's own company.
+const unitGrant = (unit: string, tenantIds: string[] = [T1]): RoleGrant => ({ role: "org_unit_lead", scopeType: "org_unit", scopeId: unit, tenantIds });
 
 // A notice of the division `dv-fe`, in department `d-web`, under the root `d-corp`: the closure's self-inclusive ancestry, nearest first.
 const WEB_CHAIN = ["dv-fe", "d-web", "d-corp"];
@@ -237,6 +239,9 @@ describe.skipIf(!live)("DW-10a Cerbos matrix — dept_notice (role x action)", (
     ["a head with a manager grant too (the real head shape): the manager part reads, the lead part writes its unit only", principal([co("manager"), unitGrant("d-web")]), seoNotice(), READ],
     // the tenant trap
     ["head of d-web whose companies are [T1], a notice of T2 with the SAME node ids: nothing (inTenant)", principal([co("member"), unitGrant("d-web")]), unitNotice({}, T2), NONE],
+    // DW-10g-2 Part B: a member of BOTH companies whose lead seat is in T2 only: in T1 a plain member (reads), never the lead writes
+    ["DW-10g-2: head of T2's d-web (seat in T2), member of T1 and T2, a T1 notice on the SAME node: reads only", principal([co("member"), unitGrant("d-web", [T2])], { companies: [T1, T2] }), unitNotice(), READ],
+    ["DW-10g-2: the same head on T2's own notice: the lead writes there", principal([co("member", T2), unitGrant("d-web", [T2])], { companies: [T1, T2] }), unitNotice({}, T2), ALL],
     ["company_admin of T2 only, a T1 notice", principal([co("company_admin", T2)], { companies: [T2] }), unitNotice(), NONE],
     ["company_admin @T1, a T2 notice", principal([co("company_admin")]), unitNotice({}, T2), NONE],
     // the boundary
