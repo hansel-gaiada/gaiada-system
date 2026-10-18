@@ -52,7 +52,7 @@ export function canSwitchToTeam(
 ): boolean {
   if (!subject.deptId || !tenantId || subject.unitPath.length === 0) return false;
   if (!me.companies.some((c) => c.id === tenantId)) return false;
-  return isLeadOf(me, subject.unitPath);
+  return isLeadOf(me, subject.unitPath, tenantId);
 }
 
 /** The view the page draws: `?view=team` counts only for someone who may switch. For anyone else it is ignored, so
@@ -93,8 +93,8 @@ export function youBandLabel(view: OverviewView): string {
 /** Whether the person leads exactly this department and nothing else. The check-in grid and the appraisal list are narrowed
  *  by the server to EVERYONE the person leads, not to one department; for a head of one unit that is this department, and
  *  otherwise the figure covers more, which the block must say. */
-export function ledScopeIsThisUnit(me: Me, deptId: string | null): boolean {
-  const led = leadUnits(me);
+export function ledScopeIsThisUnit(me: Me, deptId: string | null, tenantId: string | null | undefined): boolean {
+  const led = leadUnits(me, tenantId);
   return !!deptId && led.length === 1 && led[0] === deptId;
 }
 

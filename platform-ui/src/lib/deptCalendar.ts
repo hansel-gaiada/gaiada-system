@@ -251,8 +251,9 @@ export interface UnitChoice { id: string; name: string; /** "My department: X" f
  *  reaches every unit above it, so the department as well as the division), the units they lead, and `requested` (the
  *  `?unit=` the page linked here with, when it is in the tree). Departments and divisions only: a role or a person is not a
  *  unit to share with, and the company root is refused by the server (company-wide is "Everyone in the company"). A mirror: the
- *  server narrows every write. Without the org tree there are no choices. */
-export function eventUnitChoices(me: Me, root: UnitNode | null, requested?: string | null): UnitChoice[] {
+ *  server narrows every write. Without the org tree there are no choices. The led units are those of `tenantId` only (a lead
+ *  grant counts only in a company whose own lead seat backs it, DW-10g-2). */
+export function eventUnitChoices(me: Me, tenantId: string | null | undefined, root: UnitNode | null, requested?: string | null): UnitChoice[] {
   if (!root) return [];
   const names = new Map<string, string>();
   const unitIds: string[] = [];
@@ -267,7 +268,7 @@ export function eventUnitChoices(me: Me, root: UnitNode | null, requested?: stri
     for (const c of n.children) walk(c, [...above, n]);
   };
   walk(root, []);
-  for (const id of leadUnits(me)) if (names.has(id) && !own.has(id)) { own.add(id); unitIds.push(id); }
+  for (const id of leadUnits(me, tenantId)) if (names.has(id) && !own.has(id)) { own.add(id); unitIds.push(id); }
   const out: UnitChoice[] = unitIds.map((id) => ({ id, name: names.get(id) as string, label: `My department: ${names.get(id)}` }));
   if (requested && names.has(requested) && !own.has(requested)) out.push({ id: requested, name: names.get(requested) as string, label: `Department: ${names.get(requested)}` });
   return out;

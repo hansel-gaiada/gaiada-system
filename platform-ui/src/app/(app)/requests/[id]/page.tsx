@@ -59,7 +59,7 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
   // Who may be offered what.
   const isRequester = req.requestedBy.id === me.userId;
   let canDecide = can(me, "work_request.decide", tenant);
-  if (!canDecide && req.kind === "assets" && req.toUnit.id && leadUnits(me).length > 0) {
+  if (!canDecide && req.kind === "assets" && req.toUnit.id && leadUnits(me, tenant).length > 0) {
     const root = await readOrgRoot(me, tenant);
     canDecide = canInUnit(me, "work_request.decide", tenant, root ? unitPathOf(root, req.toUnit.id) : []);
   }

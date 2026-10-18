@@ -202,7 +202,8 @@ const ME_WEBHEAD = {
   companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
   roles: [
     { role: "member", scopeType: "company", scopeId: "co-agency" },
-    { role: "org_unit_lead", scopeType: "org_unit", scopeId: "dept-1" },
+    // DW-10g-2: the companies whose own lead seat backs the grant, as `GET /api/me` sends it.
+    { role: "org_unit_lead", scopeType: "org_unit", scopeId: "dept-1", tenantIds: ["co-agency"] },
   ],
 };
 

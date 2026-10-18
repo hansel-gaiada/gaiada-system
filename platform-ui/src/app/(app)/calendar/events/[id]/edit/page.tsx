@@ -83,7 +83,7 @@ export default async function EditEventPage({ params, searchParams }: Props) {
           clients={(clients ?? []).map((c) => ({ id: c.id, name: c.name }))}
           projects={(projects ?? []).map((p) => ({ id: p.id, name: p.name, clientId: p.client_id }))}
           linksUnavailable={clients === null || projects === null}
-          units={eventUnitChoices(me, root, ev.visibility === "department" ? ev.unitNodeId : null)}
+          units={eventUnitChoices(me, tenant, root, ev.visibility === "department" ? ev.unitNodeId : null)}
           canRecord={false}
           hiddenPersonId={ev.organizer.id}
           viewerId={me.userId}

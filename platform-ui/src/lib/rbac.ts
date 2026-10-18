@@ -954,28 +954,35 @@ export function can(me: Me, cap: Capability, companyId?: string | null): boolean
  * `manager` granted at org_unit scope is inert server-side, so it is ignored here too.
  *
  * Limit: an org_unit grant's scopeId is a bare org node id with NO company id, and node ids are
- * unique only per company. So a unit grant can answer only a question asked against a specific
- * company the person belongs to (`me.companies`); with no companyId it answers false. The server
- * stays authoritative if ids ever repeat across companies.
+ * unique only per company. DW-10g-2: the grant carries `tenantIds`, the companies whose own lead seat
+ * backs it (assembled by the server; the `org_unit_lead` derived role requires the resource's company
+ * to be one). So a unit grant answers only a question asked against one of THOSE companies, which the
+ * person also belongs to (`me.companies`); with no companyId, or a grant without `tenantIds`, it
+ * answers false (fail closed, as the server does).
  *
  * `unitPath` is the unit plus its ancestors, inclusive, nearest first (see `unitPathOf`).
  */
 type UnitTree = { id: string; children?: readonly UnitTree[] };
 
-/** Distinct unit ids the person leads (`org_unit_lead` at org_unit scope), in grant order. */
-export function leadUnits(me: Me): string[] {
+/** Distinct unit ids the person leads IN `companyId` (`org_unit_lead` at org_unit scope, backed by that company's own lead
+ *  seat: `tenantIds`), in grant order. No company, or a company the grant's seat is not in: none (DW-10g-2). */
+export function leadUnits(me: Me, companyId: string | null | undefined): string[] {
   const out: string[] = [];
+  if (companyId == null) return out;
   for (const g of me.roles) {
-    if (g.role === "org_unit_lead" && g.scopeType === "org_unit" && g.scopeId && !out.includes(g.scopeId)) {
+    if (
+      g.role === "org_unit_lead" && g.scopeType === "org_unit" && g.scopeId && (g.tenantIds ?? []).includes(companyId) &&
+      !out.includes(g.scopeId)
+    ) {
       out.push(g.scopeId);
     }
   }
   return out;
 }
 
-/** True when the person leads any unit in `unitPath` (leading an ancestor cascades down). */
-export function isLeadOf(me: Me, unitPath: readonly string[]): boolean {
-  const led = leadUnits(me);
+/** True when the person leads, in `companyId`, any unit in `unitPath` (leading an ancestor cascades down). */
+export function isLeadOf(me: Me, unitPath: readonly string[], companyId: string | null | undefined): boolean {
+  const led = leadUnits(me, companyId);
   return unitPath.some((id) => led.includes(id));
 }
 
@@ -988,7 +995,7 @@ export function canInUnit(
 ): boolean {
   if (can(me, cap, companyId)) return true;
   if (companyId == null || !me.companies.some((c) => c.id === companyId)) return false;
-  return ROLE_CAPS.org_unit_lead.includes(cap) && isLeadOf(me, unitPath);
+  return ROLE_CAPS.org_unit_lead.includes(cap) && isLeadOf(me, unitPath, companyId);
 }
 
 /**
@@ -999,7 +1006,7 @@ export function canInUnit(
  */
 export function leadsAnyUnitWith(me: Me, cap: Capability, companyId: string | null | undefined): boolean {
   if (companyId == null || !me.companies.some((c) => c.id === companyId)) return false;
-  return ROLE_CAPS.org_unit_lead.includes(cap) && leadUnits(me).length > 0;
+  return ROLE_CAPS.org_unit_lead.includes(cap) && leadUnits(me, companyId).length > 0;
 }
 
 /**

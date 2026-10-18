@@ -73,7 +73,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
 
   const canManage = can(me, "agency.campaign.manage", tenant);
   // The org tree answers "is this person the head of that department": read it only when it can change the answer.
-  const needHeads = !canManage && leadUnits(me).length > 0 && campaign.parts.length > 0;
+  const needHeads = !canManage && leadUnits(me, tenant).length > 0 && campaign.parts.length > 0;
   const [projectName, clients, people, departments, root, briefs] = await Promise.all([
     // The project's NAME for the Project row (it showed the raw id). A failed read is not "no project": the link stays,
     // worded "Open the project".
@@ -124,7 +124,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
       canManage,
       meId: me.userId,
       ownerId: part.ownerId,
-      isHead: root && part.unitId ? isLeadOf(me, unitPathOf(root, part.unitId)) : false,
+      isHead: root && part.unitId ? isLeadOf(me, unitPathOf(root, part.unitId), tenant) : false,
     }),
   }));
 

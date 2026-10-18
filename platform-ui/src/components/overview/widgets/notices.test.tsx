@@ -18,7 +18,7 @@ import { me as meFixture, member } from "@/lib/workspaceFixtures";
 
 const list = vi.mocked(listNotices);
 const person = meFixture([member()]);
-const head = meFixture([member(), { role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web" }]);
+const head = meFixture([member(), { role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web", tenantIds: ["co-a"] }]);
 const admin = meFixture([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]);
 
 const row = (id: string, over: Partial<NoticeRow> = {}): NoticeRow => ({

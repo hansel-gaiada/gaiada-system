@@ -37,7 +37,7 @@ export default async function AuthorCoursePage({ params }: { params: Promise<{ c
   // tree is read only when it can change the answer.
   const { courseId } = await params;
   const plain = await getCourse(userId, tenant, courseId);
-  const root = !can(me, "lms.authoring", tenant) && leadUnits(me).length > 0 ? await readOrgRoot(me, tenant) : null;
+  const root = !can(me, "lms.authoring", tenant) && leadUnits(me, tenant).length > 0 ? await readOrgRoot(me, tenant) : null;
   if (!canWorkOnCourse(me, "lms.authoring", tenant, root, plain)) {
     return <EmptyNote>Authoring training is for department heads, HR and company administrators.</EmptyNote>;
   }

@@ -33,7 +33,7 @@ export async function TeamNumbers({ me, tenantId, period, deptId }: Props) {
     readResult(getReportDocument(tenantId, me.userId, { grain: "department", scopeRef: deptId, periodKind, start: today, end: today })),
     readResult(getCheckinCompliance(tenantId, me.userId, { unit: deptId, periodKind, start: today })),
   ]);
-  const view = buildTeamNumbers({ document, compliance, wider: !ledScopeIsThisUnit(me, deptId), selfUserId: me.userId });
+  const view = buildTeamNumbers({ document, compliance, wider: !ledScopeIsThisUnit(me, deptId, tenantId), selfUserId: me.userId });
   const qs = new URLSearchParams({ unit: deptId, periodKind, start: today, end: today });
   return <TeamNumbersBlock view={view} reportHref={`/reports/team?${qs.toString()}`} />;
 }

@@ -338,7 +338,7 @@ describe("scopeCovers — A4 fixes (no over-grant)", () => {
   // place this file already decided over-granting is not acceptable, and that has not changed).
   // This is exactly the shape `team_lead` used to occupy here before HIER-3 retired it.
   it("a real org_unit_lead grant (scopeType: org_unit) does not cover any company", () => {
-    const orgUnitLead = me([{ role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web" }]);
+    const orgUnitLead = me([{ role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web", tenantIds: ["co-a"] }]);
     for (const cap of ["reports.department.view", "appraisal.read"] as const) {
       expect(can(orgUnitLead, cap, "co-a")).toBe(false);
       expect(can(orgUnitLead, cap, "co-b")).toBe(false);
@@ -706,7 +706,7 @@ describe("work_request.decide (DW-5c)", () => {
   it("reaches a unit lead only through canInUnit over the receiving unit, never a company-wide can()", () => {
     const head = me([
       { role: "member", scopeType: "company", scopeId: "co-a" },
-      { role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-cre" },
+      { role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-cre", tenantIds: ["co-a"] },
     ]);
     expect(can(head, "work_request.decide", "co-a")).toBe(false);
     expect(canInUnit(head, "work_request.decide", "co-a", ["d-cre", "root"])).toBe(true);
@@ -750,7 +750,7 @@ describe("work_request.send_across / work_request.read_across (DW-10e)", () => {
   it("neither crosses companies, and neither reaches a unit lead through can()", () => {
     for (const cap of ["work_request.send_across", "work_request.read_across"] as const) {
       expect(can(as("manager"), cap, "co-b"), cap).toBe(false);
-      const head = me([{ role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-cre" }]);
+      const head = me([{ role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-cre", tenantIds: ["co-a"] }]);
       expect(can(head, cap, "co-a"), `${cap} head`).toBe(false);
       expect(canInUnit(head, cap, "co-a", ["d-cre", "root"]), `${cap} head in unit`).toBe(false);
     }
@@ -786,7 +786,7 @@ describe("reports.dept_kpi_target.propose / approve (DW-4e-2)", () => {
   it("reaches a unit head for propose only through canInUnit over their own unit, and never for approve", () => {
     const head = me([
       { role: "member", scopeType: "company", scopeId: "co-a" },
-      { role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web" },
+      { role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web", tenantIds: ["co-a"] },
     ]);
     expect(can(head, "reports.dept_kpi_target.propose", "co-a")).toBe(false);
     expect(canInUnit(head, "reports.dept_kpi_target.propose", "co-a", ["d-web", "root"])).toBe(true);
@@ -827,7 +827,7 @@ describe("reports.dept_kpi_target.appraisal_comment / appraisal_assess (DW-4e-3)
   it("reaches a unit head for comment only through canInUnit over their own unit, and never for assess", () => {
     const head = me([
       { role: "member", scopeType: "company", scopeId: "co-a" },
-      { role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web" },
+      { role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web", tenantIds: ["co-a"] },
     ]);
     expect(can(head, COMMENT, "co-a")).toBe(false);
     expect(canInUnit(head, COMMENT, "co-a", ["d-web", "root"])).toBe(true);
@@ -848,7 +848,7 @@ describe("notices.post (DW-10a-2)", () => {
   const as = (role: string, scopeType = "company", scopeId: string | null = "co-a") => me([{ role, scopeType, scopeId }]);
   const head = me([
     { role: "member", scopeType: "company", scopeId: "co-a" },
-    { role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web" },
+    { role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web", tenantIds: ["co-a"] },
   ]);
   it("lets company_admin and platform_admin post company-wide", () => {
     expect(can(as("company_admin"), "notices.post", "co-a")).toBe(true);

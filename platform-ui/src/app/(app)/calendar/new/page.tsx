@@ -51,7 +51,7 @@ export default async function NewEventPage({ searchParams }: { searchParams: Sea
 
   const canRecord = gateAllows({ kind: "agencyRow", row: "meetings" }, { me, tenantId: tenant, unitPath: [] });
   const requestedUnit = one(sp.visibility) === "department" ? one(sp.unit) : "";
-  const units = eventUnitChoices(me, root, requestedUnit || null);
+  const units = eventUnitChoices(me, tenant, root, requestedUnit || null);
   const base = defaultFormInput(todayIsoInDisplayZone(), zoneTime(Date.now()));
   const initial = requestedUnit && units.some((u) => u.id === requestedUnit) ? { ...base, visibility: "department" as const, unitNodeId: requestedUnit } : base;
 

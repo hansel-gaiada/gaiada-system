@@ -13,7 +13,8 @@ export function me(roles: Me["roles"], companies: Company[] = [AGENCY], extra: P
   return { userId: "u-1", name: "U", email: "u@x.test", title: null, assurance: "high", companies, roles, ...extra };
 }
 export const member = (co = "co-a") => ({ role: "member", scopeType: "company", scopeId: co });
-export const lead = (unit: string) => ({ role: "org_unit_lead", scopeType: "org_unit", scopeId: unit });
+// DW-10g-2: a lead grant carries `tenantIds`, the companies whose own lead seat backs it (the server assembles it). Default: AGENCY.
+export const lead = (unit: string, tenantIds: string[] = ["co-a"]) => ({ role: "org_unit_lead", scopeType: "org_unit", scopeId: unit, tenantIds });
 
 export const node = (id: string, name: string, kind: string, children: OrgTreeNode[] = [], assigneeId?: string): OrgTreeNode =>
   ({ id, name, kind, children, ...(assigneeId ? { assigneeId } : {}) });

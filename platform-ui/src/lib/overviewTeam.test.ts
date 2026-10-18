@@ -114,10 +114,10 @@ describe("the switch's links and words", () => {
   });
 
   it("says whether the person leads exactly this department", () => {
-    expect(ledScopeIsThisUnit(me([lead("d-web")]), "d-web")).toBe(true);
-    expect(ledScopeIsThisUnit(me([lead("d-web"), lead("d-seo")]), "d-web")).toBe(false);
-    expect(ledScopeIsThisUnit(me([lead("root")]), "d-web")).toBe(false);
-    expect(ledScopeIsThisUnit(me([lead("d-web")]), null)).toBe(false);
+    expect(ledScopeIsThisUnit(me([lead("d-web")]), "d-web", "co-a")).toBe(true);
+    expect(ledScopeIsThisUnit(me([lead("d-web"), lead("d-seo")]), "d-web", "co-a")).toBe(false);
+    expect(ledScopeIsThisUnit(me([lead("root")]), "d-web", "co-a")).toBe(false);
+    expect(ledScopeIsThisUnit(me([lead("d-web")]), null, "co-a")).toBe(false);
   });
 });
 

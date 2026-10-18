@@ -9,7 +9,7 @@ import type { Me } from "./platform";
 
 const me = (roles: Me["roles"]): Me => ({ userId: "u1", assurance: "high", roles, companies: [{ id: "co-a", name: "Agency", type: "agency" }] }) as Me;
 const admin = me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]);
-const head = me([{ role: "member", scopeType: "company", scopeId: "co-a" }, { role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web" }]);
+const head = me([{ role: "member", scopeType: "company", scopeId: "co-a" }, { role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web", tenantIds: ["co-a"] }]);
 const member = me([{ role: "member", scopeType: "company", scopeId: "co-a" }]);
 const owner = me([{ role: "owner", scopeType: "company", scopeId: "co-a" }]);
 

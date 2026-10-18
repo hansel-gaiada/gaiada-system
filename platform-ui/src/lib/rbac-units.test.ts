@@ -9,36 +9,58 @@ const companies = [
 function me(roles: Me["roles"], comps = companies): Me {
   return { userId: "u", name: "U", email: "u@x.com", title: null, assurance: "high", companies: comps, roles };
 }
-const lead = (scopeId: string | null) => ({ role: "org_unit_lead", scopeType: "org_unit", scopeId });
+// DW-10g-2: a lead grant carries the companies whose own lead seat backs it. Default: the fixture company co-a.
+const lead = (scopeId: string | null, tenantIds: string[] = ["co-a"]) => ({ role: "org_unit_lead", scopeType: "org_unit", scopeId, tenantIds });
 const path = ["d-web-frontend", "d-web", "d-gm"];
 
 describe("leadUnits", () => {
   it("dedupes and keeps grant order", () => {
-    expect(leadUnits(me([lead("d-web"), lead("d-seo"), lead("d-web")]))).toEqual(["d-web", "d-seo"]);
+    expect(leadUnits(me([lead("d-web"), lead("d-seo"), lead("d-web")]), "co-a")).toEqual(["d-web", "d-seo"]);
   });
   it("ignores org_unit_lead at company scope", () => {
-    expect(leadUnits(me([{ role: "org_unit_lead", scopeType: "company", scopeId: "co-a" }]))).toEqual([]);
+    expect(leadUnits(me([{ role: "org_unit_lead", scopeType: "company", scopeId: "co-a" }]), "co-a")).toEqual([]);
   });
   it("ignores other roles at org_unit scope", () => {
-    expect(leadUnits(me([{ role: "manager", scopeType: "org_unit", scopeId: "d-web" }]))).toEqual([]);
+    expect(leadUnits(me([{ role: "manager", scopeType: "org_unit", scopeId: "d-web" }]), "co-a")).toEqual([]);
   });
   it("ignores a null scopeId", () => {
-    expect(leadUnits(me([lead(null)]))).toEqual([]);
+    expect(leadUnits(me([lead(null)]), "co-a")).toEqual([]);
   });
 });
 
 describe("isLeadOf", () => {
   it("true for the direct unit", () => {
-    expect(isLeadOf(me([lead("d-web")]), ["d-web", "d-gm"])).toBe(true);
+    expect(isLeadOf(me([lead("d-web")]), ["d-web", "d-gm"], "co-a")).toBe(true);
   });
   it("an ancestor lead cascades to a descendant path", () => {
-    expect(isLeadOf(me([lead("d-web")]), path)).toBe(true);
+    expect(isLeadOf(me([lead("d-web")]), path, "co-a")).toBe(true);
   });
   it("false for a sibling unit", () => {
-    expect(isLeadOf(me([lead("d-web")]), ["d-seo", "d-gm"])).toBe(false);
+    expect(isLeadOf(me([lead("d-web")]), ["d-seo", "d-gm"], "co-a")).toBe(false);
   });
   it("false for an empty path", () => {
-    expect(isLeadOf(me([lead("d-web")]), [])).toBe(false);
+    expect(isLeadOf(me([lead("d-web")]), [], "co-a")).toBe(false);
+  });
+});
+
+describe("DW-10g-2: a lead grant counts only in a company whose own lead seat backs it (`tenantIds`)", () => {
+  it("leadUnits and isLeadOf answer per company: the seat's company yes, another company no, no company no", () => {
+    const m = me([lead("d-web", ["co-a"])]);
+    expect(leadUnits(m, "co-a")).toEqual(["d-web"]);
+    expect(leadUnits(m, "co-b")).toEqual([]);
+    expect(leadUnits(m, null)).toEqual([]);
+    expect(isLeadOf(m, path, "co-b")).toBe(false);
+  });
+  it("THE FOREIGN GRANT: a member of co-a and co-b whose seat is in co-b is no head of co-a's same-id unit", () => {
+    const m = me([lead("d-web", ["co-b"])]);
+    expect(canInUnit(m, "lms.authoring", "co-a", path)).toBe(false);
+    expect(leadsAnyUnitWith(m, "lms.authoring", "co-a")).toBe(false);
+    expect(canInUnit(m, "lms.authoring", "co-b", path)).toBe(true);
+  });
+  it("a grant WITHOUT tenantIds (an older payload) counts nowhere, as the server's has() guard", () => {
+    const m = me([{ role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web" }]);
+    expect(leadUnits(m, "co-a")).toEqual([]);
+    expect(canInUnit(m, "lms.authoring", "co-a", path)).toBe(false);
   });
 });
 

@@ -261,36 +261,38 @@ describe("the department choices of the event form", () => {
   ]);
 
   it("offers the units above a person's own placement, outermost first, and never their role or the root", () => {
-    expect(eventUnitChoices(me([member()]), tree).map((c) => [c.id, c.label])).toEqual([["d-web", "My department: Web Dev"], ["dv-fe", "My department: Frontend"]]);
+    expect(eventUnitChoices(me([member()]), "co-a", tree).map((c) => [c.id, c.label])).toEqual([["d-web", "My department: Web Dev"], ["dv-fe", "My department: Frontend"]]);
   });
 
   it("offers a unit the person leads, even when they are placed elsewhere, once", () => {
     const head = me([member(), lead("d-seo")]);
-    expect(eventUnitChoices(head, tree).map((c) => c.id)).toEqual(["d-web", "dv-fe", "d-seo"]);
+    expect(eventUnitChoices(head, "co-a", tree).map((c) => c.id)).toEqual(["d-web", "dv-fe", "d-seo"]);
+    // DW-10g-2: a lead grant whose seat is in ANOTHER company adds nothing here
+    expect(eventUnitChoices(me([member(), lead("d-seo", ["co-h"])]), "co-a", tree).map((c) => c.id)).toEqual(["d-web", "dv-fe"]);
     const both = me([member(), lead("d-web")]);
-    expect(eventUnitChoices(both, tree).map((c) => c.id)).toEqual(["d-web", "dv-fe"]);
+    expect(eventUnitChoices(both, "co-a", tree).map((c) => c.id)).toEqual(["d-web", "dv-fe"]);
   });
 
   it("offers nobody a unit they have no part in, and the root never", () => {
     const stranger = { ...me([member(), lead("root")]), userId: "u-9" };
-    expect(eventUnitChoices(stranger, tree)).toEqual([]);
+    expect(eventUnitChoices(stranger, "co-a", tree)).toEqual([]);
   });
 
   it("adds the unit the page linked here with, labelled as a department rather than as 'mine'", () => {
-    const choices = eventUnitChoices({ ...me([member()]), userId: "u-9" }, tree, "d-seo");
+    const choices = eventUnitChoices({ ...me([member()]), userId: "u-9" }, "co-a", tree, "d-seo");
     expect(choices).toEqual([{ id: "d-seo", name: "SEO", label: "Department: SEO" }]);
     // Already one of theirs: not offered twice. Not in the tree, or the root: not offered.
-    expect(eventUnitChoices(me([member()]), tree, "d-web").map((c) => c.id)).toEqual(["d-web", "dv-fe"]);
-    expect(eventUnitChoices(me([member()]), tree, "nowhere").map((c) => c.id)).toEqual(["d-web", "dv-fe"]);
-    expect(eventUnitChoices(me([member()]), tree, "root").map((c) => c.id)).toEqual(["d-web", "dv-fe"]);
+    expect(eventUnitChoices(me([member()]), "co-a", tree, "d-web").map((c) => c.id)).toEqual(["d-web", "dv-fe"]);
+    expect(eventUnitChoices(me([member()]), "co-a", tree, "nowhere").map((c) => c.id)).toEqual(["d-web", "dv-fe"]);
+    expect(eventUnitChoices(me([member()]), "co-a", tree, "root").map((c) => c.id)).toEqual(["d-web", "dv-fe"]);
   });
 
   it("offers nothing without the org tree", () => {
-    expect(eventUnitChoices(me([member(), lead("d-web")]), null, "d-web")).toEqual([]);
+    expect(eventUnitChoices(me([member(), lead("d-web")]), "co-a", null, "d-web")).toEqual([]);
   });
 
   it("works on the shared workspace fixture tree too", () => {
-    expect(eventUnitChoices(me([member()]), agencyTree({ web: ["u-1"] })).map((c) => c.name)).toEqual(["Web Dev"]);
+    expect(eventUnitChoices(me([member()]), "co-a", agencyTree({ web: ["u-1"] })).map((c) => c.name)).toEqual(["Web Dev"]);
   });
 
   it("names a unit from the tree, or null when it has left it", () => {

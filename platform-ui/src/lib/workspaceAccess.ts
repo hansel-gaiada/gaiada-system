@@ -216,7 +216,7 @@ export function resolveMyWorkspaces(input: { me: Me; tenantId: string | null; ro
 
   const refFor = (d: OrgTreeNode): WorkspaceRef => {
     const unitPath = root ? unitPathOf(root, d.id) : [d.id];
-    return { workspace: workspaceFor(vertical, d.name), deptId: d.id, unitPath, lead: isLeadOf(me, unitPath) };
+    return { workspace: workspaceFor(vertical, d.name), deptId: d.id, unitPath, lead: isLeadOf(me, unitPath, tenantId) };
   };
   const bySlug = (slug: string): WorkspaceRef => {
     const node = depts.find((d) => deptSlug(d.name) === slug);
@@ -234,7 +234,7 @@ export function resolveMyWorkspaces(input: { me: Me; tenantId: string | null; ro
   const own: WorkspaceRef[] = placements(depts, me.userId).map(refFor);
   for (const d of depts) {
     // A led unit adds the department that holds it (the unit may be the department or below it).
-    if (leadUnits(me).some((unit) => unitPathOf(d, unit).length > 0)) own.push(refFor(d));
+    if (leadUnits(me, tenantId).some((unit) => unitPathOf(d, unit).length > 0)) own.push(refFor(d));
   }
   for (const slug of FUNCTIONAL_SLUGS) if (holdsFunctional(me, tenantId, slug)) own.push(bySlug(slug));
   const gm = all.find((r) => r.workspace.kind === "office");

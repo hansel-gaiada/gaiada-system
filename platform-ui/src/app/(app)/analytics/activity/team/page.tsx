@@ -74,7 +74,7 @@ export default async function TeamActivityPage({
 
   // No unit: pick one. A head is offered the units they lead (and what sits beneath them); a company-wide reader, every department.
   if (unit === null) {
-    const options = root ? unitOptions(root, wide ? null : leadUnits(me)) : [];
+    const options = root ? unitOptions(root, wide ? null : leadUnits(me, tenant)) : [];
     return (
       <>
         <PageHeader eyebrow="Analytics" title={TITLE} />

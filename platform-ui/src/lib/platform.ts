@@ -218,7 +218,9 @@ export interface Me {
     id: string; name: string; type: string | null;
     vertical?: string; enabledModules?: string[]; rootCompanyId?: string | null; isOperatorRoot?: boolean;
   }[];
-  roles: { role: string; scopeType: string; scopeId: string | null }[];
+  /** `tenantIds` (DW-10g-2, PERMISSION §50) is set only on an `org_unit_lead` grant: the companies whose own lead seat backs it.
+   *  The grant's scopeId is a bare node id with no company, so the unit mirror (`canInUnit`) counts it only in those companies. */
+  roles: { role: string; scopeType: string; scopeId: string | null; tenantIds?: string[] }[];
   serviceScopes?: ServiceScope[];
   /** PV2-02: companies where the caller is an active client contact. Optional: treat missing as []. */
   clientOf?: { companyId: string; companyName: string }[];

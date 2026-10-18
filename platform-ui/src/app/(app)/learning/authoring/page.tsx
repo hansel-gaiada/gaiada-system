@@ -74,7 +74,7 @@ export default async function AuthoringPage({
   // answer: a `?unit=` to check, or a head (no company-wide right) whose led units must be found.
   const wideAuthor = can(me, "lms.authoring", tenant);
   const widePublish = can(me, "lms.publish", tenant);
-  const maybeHead = leadUnits(me).length > 0;
+  const maybeHead = leadUnits(me, tenant).length > 0;
   const root = unit !== null || (!wideAuthor && maybeHead) ? await readOrgRoot(me, tenant) : null;
   const unitPath = unit !== null && root ? unitPathOf(root, unit) : [];
 
@@ -86,7 +86,7 @@ export default async function AuthoringPage({
   } else {
     // Without a unit a head needs to lead at least one unit that exists in this company's tree (a grant
     // for a node of another company is not a lead here).
-    const ledHere = root ? leadUnits(me).filter((u) => unitPathOf(root, u).length > 0) : [];
+    const ledHere = root ? leadUnits(me, tenant).filter((u) => unitPathOf(root, u).length > 0) : [];
     mayAuthor = wideAuthor || (leadsAnyUnitWith(me, "lms.authoring", tenant) && ledHere.length > 0);
     mayPublish = widePublish || (leadsAnyUnitWith(me, "lms.publish", tenant) && ledHere.length > 0);
   }
@@ -117,7 +117,7 @@ export default async function AuthoringPage({
   const published = courses.filter((c) => c.status === "published");
   const retired = courses.filter((c) => c.status === "retired");
   const unitOptions = departmentOnly && root
-    ? ledUnitOptions(root, leadUnits(me))
+    ? ledUnitOptions(root, leadUnits(me, tenant))
     : departments.map((d) => ({ value: d.id, label: d.name }));
 
   const courseRows = (list: typeof courses) =>
