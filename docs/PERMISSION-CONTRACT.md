@@ -2466,7 +2466,7 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §59 (plan `docs/plans/2026-10-13-depart
 - a department event readable by a member of the tenant through Cerbos (the handler narrows);
 - an attendee-only event still refused to a non-attendee.
 
-## 49. DW-10e — `send_across` and `read_across` on `work_request`: requests across group companies (2026-10-15; revised 2026-10-16 for DW-D40; BUILT 2026-10-16, DW-10e-2)
+## 49. DW-10e — `send_across` and `read_across` on `work_request`: requests across group companies (2026-10-15; revised 2026-10-16 for DW-D40; BUILT 2026-10-16, DW-10e-2; revised 2026-10-18 for DW-D43, DW-10e-6)
 
 Design: `docs/FRONTEND-BFF-CONTRACT.md` §60 (rulings DW-D35, DW-D39, DW-D40 and DW-D41; plan `docs/plans/2026-10-13-department-workspaces.md` §11.4 and §12.2). Status: **BUILT, PROTOTYPED (backend: the six artifacts, migration `202610160510_iam_work_request_across.sql`, the UI mirror capabilities; the static suites ran locally, the live-Cerbos matrices in `cerbos-work-request.test.ts` and the DB suites run on the Linux CI gate; not driven live, and the live Cerbos needs its restart after the deploy)**.
 
@@ -2475,6 +2475,15 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §60 (rulings DW-D35, DW-D39, DW-D40 and
 - The DO block asserts the exact global holders of each key in both directions, no self-scoped row, and `owner` == `company_admin` over the whole `work_request` kind both ways.
 - The UI mirror lists `owner` beside company_admin, manager (and member for `send_across`) and platform_admin: `owner` holds both keys and reaches them through the mirrors, so the capability-parity biconditional needs it.
 - The handler side of the narrowing is `outboundReadScope` (`core/work-requests-outbound.service.ts`): a soft `check()` probe of `read_across` that mirrors `authorize()`'s act-for intersection; a Cerbos failure is a failure, never a silent `own`.
+
+**DW-D43 (owner, 2026-10-18; built in DW-10e-6): department heads see what their department sent.** A third tier, `unit`, between `company` and `own`.
+- **It is a handler narrowing on H's own data, not a Cerbos rule.** No policy change, no new action, no new attribute, no migration.
+- **A head is a person with an active lead seat in H:** a `positions` row of H with `is_lead` and `status = 'active'`, held through a `position_assignments` row with no `valid_to`. Each seat's unit counts with its subtree in H's tree. The handler reads them in H's own scope (`withTenants([H])`), with `loadLeadSeatUnits` (`core/unit-reach.ts`). This is the safe shape named below under "Not `org_unit_lead`".
+- **Never the `org_unit_lead` role.** Its grant carries no company, and node ids repeat across companies, so a head of a same-id department in another company would read as a head in H. A seat belongs to one company's `positions`, so it cannot leak that way. Placement alone is not a seat.
+- **The head reads** their own requests plus every request whose `requester_unit_id` is a unit they head. Precedence: `company` (`read_across`), then `unit`, then `own`.
+- **Act-for:** the tier is never wider than the acting human's (`company` only when both have it; two `unit` tiers keep the units both head; anything empty is `own`).
+- **No new cancel.** §36's `cancel` is unchanged: a head who is only a member and a seat holder gets 403 on a colleague's request.
+- **Proof:** BFF §60.16 (the HTTP suite on the Linux CI gate, and the pure and static suites).
 
 **Two independent walls decide a request sent to another group company.**
 - **Cerbos decides who may send on behalf of a company, and who reads everything it sent:** two new actions on the existing `work_request` kind, both checked on the REQUESTING company.
@@ -2495,9 +2504,9 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §60 (rulings DW-D35, DW-D39, DW-D40 and
 - **Bundles:** `company_admin`, `owner`, `manager`, `platform_admin` and `member` hold it. `viewer`, `org_unit_lead` and every module role do not. It is not self-scoped (the sender acts for their company, not on their own record), not sensitive (like `create`) and `uiGrantable` (like `create`).
 
 **`read_across` (DW-D40: only the sender, the company's managers and its company admins see what it sent).**
-- **It lifts a narrowing; it is not the only read.** Every sender read first needs §36's `read` on the requesting company. The handler then narrows it to the caller's own requests (`requested_by = principal`) unless `read_across` allows (BFF §60.4, one helper, `outboundReadScope`). So the sender reads their own requests with no new action.
-- **"Managers" is the `manager` role**, a company grant. Department heads read through it, because heads hold `manager` (plan §5.4).
-- **Not `org_unit_lead`.** The ruling does not name it, and the grant carries no company: the derived role matches `g.scopeId in resource.attr.unitAncestors` with no tenant, so a head rule over the requester's department would match a same-id department of another company for a person placed in both (legacy ids such as `d-hr` repeat across companies). If the owner later adds lead-only heads, the safe shape is a handler-fed list of the requester department's lead-seat holders, computed from the requesting company's own `positions` in its own scope (the `assigneeIds` pattern), never the `org_unit_lead` derived role.
+- **It lifts a narrowing; it is not the only read.** Every sender read first needs §36's `read` on the requesting company. The handler then narrows it to the caller's own requests (`requested_by = principal`) unless `read_across` allows, or, since DW-D43, to their own plus their departments' when the caller holds a lead seat in the requesting company (BFF §60.4, one helper, `outboundReadScope`). So the sender reads their own requests with no new action.
+- **"Managers" is the `manager` role**, a company grant. A head who holds `manager` reads everything through it (plan §5.4). Heads without it read their departments' requests through the DW-D43 tier above, never through this action.
+- **Not `org_unit_lead`** (still true after DW-D43, which uses lead seats). The ruling does not name it, and the grant carries no company: the derived role matches `g.scopeId in resource.attr.unitAncestors` with no tenant, so a head rule over the requester's department would match a same-id department of another company for a person placed in both (legacy ids such as `d-hr` repeat across companies). If the owner later adds lead-only heads, the safe shape is a handler-fed list of the requester department's lead-seat holders, computed from the requesting company's own `positions` in its own scope (the `assigneeIds` pattern), never the `org_unit_lead` derived role.
 - **No self rule.** A requester arm would make the action self-scoped, which forbids the permission mirror (Pattern B), and the permission-native `owner` would then lose the read.
 - **The permission arm:** `perm_work_request_read_across`, the generic global-or-company mirror under `variables.inTenant && variables.notLow && variables.inRoot`. Scope roles only, no attribute: safe to mirror. The permission-native `owner` reaches it through the mirror.
 - **Not denied to agents:** like `read` (§36), an automation or bot principal is decided by the roles it holds.
