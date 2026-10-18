@@ -28,7 +28,7 @@ import { rebuildOrgUnitClosure } from "./org-unit-closure";
 import { addDaysIso } from "./dept-resolution";
 import { todayIsoInTz } from "../modules/reports/person-scope";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
-import { createCompany, createUser, addMembership, createRole, grantRole } from "../testing/fixtures";
+import { createCompany, createUser, addMembership, createRole, grantRole, grantLeadSeat } from "../testing/fixtures";
 
 // The notify-failure case needs ONE recipient's send to throw while the others go through. `./http` is wrapped (not spied on) so the
 // override is a plain property the controller's import resolves at call time; with no fault set it is the real `notify`.
@@ -198,6 +198,14 @@ describe.skipIf(!TEST_URL)("DW-10a department notices (HTTP, real Postgres + Cer
     await grantRole(bAdmin, role.admin, "company", B);
     for (const u of [bHead, bStaff]) await grantRole(u, role.member, "company", B);
     await grantRole(bHead, role.lead, "org_unit", "d-web");
+    // DW-10g: a head is a head through its company's own lead SEAT (position + org_unit_lead role row + assignment); the grants above
+    // stay because Cerbos's lead rules (post, edit, withdraw) read them, but the read narrowing no longer does (a grant has no company).
+    await grantLeadSeat(A, "d-web", webHead);
+    await grantLeadSeat(A, "dv-fe", feHead);
+    await grantLeadSeat(A, "d-seo", seoHead);
+    await grantLeadSeat(A, "d-web", webLead2);
+    await grantLeadSeat(A, "d-corp", corpHead);
+    await grantLeadSeat(B, "d-web", bHead);
 
     await seedTree(A, "Notice Co A");
     await seedTree(B, "Notice Co B");
@@ -696,11 +704,45 @@ describe.skipIf(!TEST_URL)("DW-10a department notices (HTTP, real Postgres + Cer
       await addMembership(A, botHead, "service"); // a service membership: not a person, so never in a company-wide audience
       await grantRole(botHead, await createRole("member"), "company", A);
       await grantRole(botHead, await createRole("org_unit_lead"), "org_unit", "d-seo");
+      await grantLeadSeat(A, "d-seo", botHead); // DW-10g: the read reach comes from the seat
       await q().query(`UPDATE users SET kind = 'bot' WHERE id = $1`, [botHead]);
       expect((await call("POST", base(), botHead, unitBody("d-seo"))).statusCode).toBe(403);
       expect((await call("PATCH", `${base()}/${N.seo}`, botHead, { title: "Nope" })).statusCode).toBe(403);
       expect((await call("POST", `${base()}/${N.seo}/withdraw`, botHead)).statusCode).toBe(403);
       expect(idsOf(await list("unitNodeId=d-seo", botHead))).toContain(N.seo);
+    });
+  });
+
+  // ═══════════════════════════════════════════ DW-10g: a head is company-anchored ═══════════════════════════════════════════
+  describe("DW-10g: the head of a same-id unit in ANOTHER company", () => {
+    it("an org_unit_lead grant and a seat on d-web in B, held by a member of A placed in A's d-ops, reach nothing of A's d-web; a seat in A does", async () => {
+      const twoCo = await createUser("twoco@notice.test", "Tess Twoco");
+      try {
+        for (const t of [A, B]) {
+          await addMembership(t, twoCo);
+          await grantRole(twoCo, await createRole("member"), "company", t);
+        }
+        await grantRole(twoCo, await createRole("org_unit_lead"), "org_unit", "d-web"); // the grant names a bare node id: B's, and A's too
+        await grantLeadSeat(B, "d-web", twoCo); // the head of B's d-web
+        await place(A, twoCo, "d-ops");
+        // in B: a head of d-web
+        expect(idsOf(await list("unitNodeId=d-web", twoCo, B))).toContain(N.bWeb);
+        // in A: not a head of A's d-web (placed in d-ops, no seat in A)
+        expect((await list("unitNodeId=d-web", twoCo)).statusCode).toBe(403);
+        expect((await list("unitNodeId=dv-fe", twoCo)).statusCode).toBe(403);
+        const d = await call("GET", `${base()}/${N.web}`, twoCo);
+        expect(d.statusCode).toBe(404);
+        expect(idsOf(await list("unitNodeId=d-ops", twoCo))).not.toContain(N.web); // placed in d-ops: d-ops reads, d-web does not
+        // a proper seat in A on d-web: now a head here too
+        await grantLeadSeat(A, "d-web", twoCo);
+        expect(idsOf(await list("unitNodeId=d-web", twoCo)).sort()).toEqual(expect.arrayContaining([N.web, N.co]));
+        expect(idsOf(await list("unitNodeId=dv-fe", twoCo))).toContain(N.fe);
+        expect((await call("GET", `${base()}/${N.web}`, twoCo)).statusCode).toBe(200);
+      } finally {
+        // leave A's and B's audiences as the notification cases expect them: an ended membership is never told (the grant-based head
+        // audience of a d-web notice would otherwise include this d-web grant holder in both companies)
+        await q().query(`UPDATE company_memberships SET status = 'ended' WHERE tenant_id = ANY($1::uuid[]) AND user_id = $2`, [[A, B], twoCo]);
+      }
     });
   });
 

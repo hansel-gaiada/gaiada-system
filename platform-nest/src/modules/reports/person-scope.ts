@@ -121,13 +121,13 @@ const COMPANY_WIDE_ROLES = new Set([
 // (2026-08-11) now retires `team_lead` itself — the role, its Cerbos derived role, and every
 // writer that could mint the grant are gone — so it comes out of this set in the same change, per
 // the HIER-01 consolidation plan's own sketch (`{"manager","unit_lead"}`).
-const UNIT_SCOPED_ROLES = new Set(["manager", "org_unit_lead"]);
+export const UNIT_SCOPED_ROLES: ReadonlySet<string> = new Set(["manager", "org_unit_lead"]);
 
 /** Does this grant apply to `tenantId`? A `global` grant covers everything; `company` must match
  *  exactly (a null/absent scopeId is NEVER a wildcard — the same A4 rule `rbac.ts`'s `scopeCovers`
  *  enforces on the UI side). `project`/`org_unit` grants are unit-ish by nature and are only ever
  *  consulted for the `unit_scoped` tier. */
-function grantCoversTenant(g: Principal["roles"][number], tenantId: string): boolean {
+export function grantCoversTenant(g: Principal["roles"][number], tenantId: string): boolean {
   if (g.scopeType === "global") return true;
   return g.scopeType === "company" && g.scopeId === tenantId;
 }

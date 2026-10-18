@@ -16,8 +16,10 @@
 //   * THE COLLISION PROBE: H's department `d-creative` has the same node id as P's Creatives, A is placed in it, and P's head of
 //     Creatives (`pLead`, org_unit_lead of `d-creative` and the lead seat on P's Creatives) is also a member of H, placed there;
 //   * DW-10e-6 (DW-D43), the head tier: `hLead` holds H's lead seat on `d-creative`; `hFinHead` H's lead seat on `d-fin`; `hRetired`
-//     a lead seat on `d-creative` whose position is retired; `hEnded` one whose assignment ended (`valid_to` set). The head tier
-//     reads H's own lead seats only, never the `org_unit_lead` role: pLead's grant and P seat make it no head in H.
+//     a lead seat on `d-creative` whose position is retired; `hEnded` one whose assignment ended (`valid_to` set); `hNoRole` an
+//     `is_lead` position on `d-creative` with no `org_unit_lead` role row (0109 §2.2: it confers nothing). Every seat is a real one
+//     (`grantLeadSeat`: position, its org_unit_lead role row, an assignment). The head tier reads H's own lead seats only, never the
+//     `org_unit_lead` role: pLead's grant and P seat make it no head in H.
 //
 // Standard applied: a 200 is not a pass. Write claims are read back through `adminPool()` (RLS bypassed: what committed), refusals
 // assert nothing was written, and every 403 is ALSO sent with a malformed body, so validation can never pre-empt authorization.
@@ -34,7 +36,7 @@ import { buildApp } from "../main";
 import { agencyModule } from "../modules/agency";
 import { applyOrgStructure, sanitizeStructure } from "../admin/org-structure.service";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
-import { createCompany, createUser, addMembership, createRole, grantRole, createClient, linkIdentity } from "../testing/fixtures";
+import { createCompany, createUser, addMembership, createRole, grantRole, createClient, linkIdentity, grantLeadSeat } from "../testing/fixtures";
 import { FIXTURE_TERMS_SHA256 } from "../testing/contract-fixtures";
 import { setStorageForTest, storage, type StorageBackend } from "./storage";
 import { assetRequestsOnTime } from "../modules/reports/dept-kpi-readers/delivery/work-requests-on-time";
@@ -59,7 +61,7 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
   // H
   let hAdmin: string; let hManager: string; let hOwner: string; let memberA: string; let memberB: string; let hViewer: string;
   let hLead: string; let hBot: string; let hAuto: string; let hSigner: string;
-  let hFinHead: string; let hRetired: string; let hEnded: string;
+  let hFinHead: string; let hRetired: string; let hEnded: string; let hNoRole: string;
   // P
   let pAdmin: string; let pLead: string; let pWebHead: string; let pAssignee: string; let pPlatform: string;
   // T and R
@@ -143,7 +145,7 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
         // the COLLISION: same node id as P's Creatives
         dept("d-creative", "Holding Creative Desk", [
           person(memberA, "Member A"), person(memberB, "Member B"), person(hLead, "H Desk Head"), person(pLead, "P Creative Head"),
-          person(hRetired, "H Retired Head"), person(hEnded, "H Ended Head"),
+          person(hRetired, "H Retired Head"), person(hEnded, "H Ended Head"), person(hNoRole, "H Title-only Head"),
         ]),
         dept("d-fin", "Holding Finance", [person(hManager, "H Manager"), person(hFinHead, "H Finance Head")]),
       ],
@@ -175,7 +177,7 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
     hLead = await u("h-lead@across.test", "H Desk Head"); hBot = await u("h-bot@across.test", "H Bot");
     hAuto = await u("h-auto@across.test", "H Automation"); hSigner = await u("h-signer@across.test", "H Signer");
     hFinHead = await u("h-finhead@across.test", "H Finance Head"); hRetired = await u("h-retired@across.test", "H Retired Head");
-    hEnded = await u("h-ended@across.test", "H Ended Head");
+    hEnded = await u("h-ended@across.test", "H Ended Head"); hNoRole = await u("h-norole@across.test", "H Title-only Head");
     pAdmin = await u("p-admin@across.test", "P Admin"); pLead = await u("p-lead@across.test", "P Creative Head");
     pWebHead = await u("p-webhead@across.test", "P Web Head"); pAssignee = await u("p-assignee@across.test", "P Assignee");
     pPlatform = await u("p-platform@across.test", "P Platform");
@@ -183,7 +185,7 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
     tBot = await u("t-bot@across.test", "T Bot"); tAuto = await u("t-auto@across.test", "T Automation");
     rMember = await u("r-member@across.test", "R Member"); otherContact = await u("other-contact@across.test", "Other Contact");
 
-    for (const x of [hAdmin, hManager, hOwner, memberA, memberB, hViewer, hLead, hBot, hAuto, hSigner, pLead, hFinHead, hRetired, hEnded]) await addMembership(H, x);
+    for (const x of [hAdmin, hManager, hOwner, memberA, memberB, hViewer, hLead, hBot, hAuto, hSigner, pLead, hFinHead, hRetired, hEnded, hNoRole]) await addMembership(H, x);
     for (const x of [pAdmin, pLead, pWebHead, pAssignee, pPlatform]) await addMembership(P, x);
     for (const x of [tMember, tViewer, tBot, tAuto]) await addMembership(T, x);
     await addMembership(R, rMember);
@@ -196,7 +198,7 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
     await grantRole(hAdmin, role.admin, "company", H);
     await grantRole(hManager, role.manager, "company", H);
     await grantRole(hOwner, role.owner, "company", H); // permission-native: reaches work_request only through the mirrors
-    for (const x of [memberA, memberB, hLead, hBot, hSigner, pLead, hFinHead, hRetired, hEnded]) await grantRole(x, role.member, "company", H);
+    for (const x of [memberA, memberB, hLead, hBot, hSigner, pLead, hFinHead, hRetired, hEnded, hNoRole]) await grantRole(x, role.member, "company", H);
     await grantRole(hViewer, role.viewer, "company", H);
     await grantRole(hLead, role.lead, "org_unit", "d-creative"); // H's head of A's department: org_unit_lead ONLY (no manager)
     await grantRole(hAuto, role.admin, "company", H);
@@ -212,7 +214,7 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
     await q(`UPDATE users SET kind = 'bot' WHERE id = ANY($1::uuid[])`, [[hBot, tBot]]);
     await q(`UPDATE users SET kind = 'automation' WHERE id = ANY($1::uuid[])`, [[hAuto, tAuto]]);
     // MON-00a: the permission arm is root-bounded; anchor every person on their own company.
-    await q(`UPDATE users SET home_company_id = $1 WHERE id = ANY($2::uuid[])`, [H, [hAdmin, hManager, hOwner, memberA, memberB, hViewer, hLead, hBot, hAuto, hSigner, hFinHead, hRetired, hEnded]]);
+    await q(`UPDATE users SET home_company_id = $1 WHERE id = ANY($2::uuid[])`, [H, [hAdmin, hManager, hOwner, memberA, memberB, hViewer, hLead, hBot, hAuto, hSigner, hFinHead, hRetired, hEnded, hNoRole]]);
     await q(`UPDATE users SET home_company_id = $1 WHERE id = ANY($2::uuid[])`, [P, [pAdmin, pLead, pWebHead, pAssignee, pPlatform]]);
     await q(`UPDATE users SET home_company_id = $1 WHERE id = ANY($2::uuid[])`, [T, [tMember, tViewer, tBot, tAuto]]);
     await q(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [R, rMember]);
@@ -223,14 +225,7 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
     await withTenants([R], (c) => applyOrgStructure(c, R, sanitizeStructure({ root: { id: "root", name: "Other", kind: "company", children: [dept("d-creative", "Other Creatives")] } })));
 
     // Heads: an active lead seat on each receiving department (P), and on A's department in H.
-    const seat = async (tenant: string, unit: string, holder: string, o: { status?: string; ended?: boolean } = {}) => {
-      const pos = (await q(`INSERT INTO positions (tenant_id, unit_node_id, title, is_lead, status) VALUES ($1, $2, 'Head', true, $3) RETURNING id`, [tenant, unit, o.status ?? "active"])).rows[0].id;
-      if (o.ended) {
-        await q(`INSERT INTO position_assignments (tenant_id, position_id, user_id, valid_from, valid_to) VALUES ($1, $2, $3, current_date - 30, current_date - 1)`, [tenant, pos, holder]);
-      } else {
-        await q(`INSERT INTO position_assignments (tenant_id, position_id, user_id) VALUES ($1, $2, $3)`, [tenant, pos, holder]);
-      }
-    };
+    const seat = (tenant: string, unit: string, holder: string, o: Parameters<typeof grantLeadSeat>[3] = {}) => grantLeadSeat(tenant, unit, holder, o);
     await seat(P, "d-creative", pLead);
     await seat(P, "d-web", pWebHead);
     await seat(H, "d-creative", hLead);
@@ -238,6 +233,7 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
     await seat(H, "d-fin", hFinHead);
     await seat(H, "d-creative", hRetired, { status: "retired" });
     await seat(H, "d-creative", hEnded, { ended: true });
+    await seat(H, "d-creative", hNoRole, { noRole: true });
 
     // P's client records (a platform operator's link, direct): H's, T's, and an unrelated one.
     cH = await createClient(P, "Holding at Agency");
@@ -622,8 +618,8 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
       }
     });
 
-    it("DW-D43: a retired lead position, an ended lead assignment, or placement alone is no head (scope own)", async () => {
-      for (const as of [hRetired, hEnded, memberB]) {
+    it("DW-D43: a retired lead position, an ended lead assignment, a lead position with no org_unit_lead role row, or placement alone is no head (scope own)", async () => {
+      for (const as of [hRetired, hEnded, hNoRole, memberB]) {
         const l = await listIds(as);
         expect(l.scope, as).toBe("own");
         expect(l.ids).not.toContain(aAsset);
@@ -650,7 +646,7 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
       expect(await seats(P, pLead)).toEqual(["d-creative"]);
       expect(await seats(H, pLead)).toEqual([]);
       // a retired position, an ended assignment, a placed member, a company admin with no seat
-      for (const x of [hRetired, hEnded, memberB, hAdmin]) expect(await seats(H, x), x).toEqual([]);
+      for (const x of [hRetired, hEnded, hNoRole, memberB, hAdmin]) expect(await seats(H, x), x).toEqual([]);
       // H's seats are invisible from P's scope (FORCE RLS): the helper only ever answers for the company it runs in
       const crossed = await withTenants([P], async (c) => [...(await loadLeadSeatUnits(c, H, hLead, null))]);
       expect(crossed).toEqual([]);

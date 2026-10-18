@@ -311,10 +311,11 @@ describe("DW-10e §60.11 Tenancy: static pins of the sender files", () => {
       }
     }
     const seats = code(read("unit-reach.ts"));
-    const fn = seats.slice(seats.indexOf("export async function loadLeadSeatUnits("), seats.indexOf("export async function loadUnitReach("));
+    const fn = seats.slice(seats.indexOf("export async function loadLeadSeatUnits("), seats.indexOf("export async function placementLeadApplies("));
     expect(fn).toMatch(/p\.tenant_id = \$1 AND p\.is_lead AND p\.status = 'active' AND pa\.valid_to IS NULL AND pa\.user_id = \$2/);
     expect(fn).toContain("pa.position_id = p.id AND pa.tenant_id = p.tenant_id");
-    expect(fn).not.toContain("roles");
+    expect(fn).toContain("JOIN position_roles pr ON pr.position_id = p.id AND pr.tenant_id = p.tenant_id AND pr.scope_kind = 'own_unit'");
+    expect(fn).not.toMatch(/user_roles|principal/);
   });
 
   it("every handler authorizes FIRST, on the requesting company (validation never pre-empts a 403)", () => {

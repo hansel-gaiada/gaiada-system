@@ -15,7 +15,7 @@ import { config } from "../config";
 import { newId, withTenants } from "../db";
 import { rebuildOrgUnitClosure } from "../core/org-unit-closure";
 import { adminPool } from "./setup";
-import { addMembership, createCompany, createProject, createRole, createUser, grantRole } from "./fixtures";
+import { addMembership, createCompany, createProject, createRole, createUser, grantLeadSeat, grantRole } from "./fixtures";
 
 const site = () => config.originSite;
 
@@ -203,6 +203,13 @@ export async function seedWorld(prefix: string): Promise<World> {
   await grantRole(w.feLead2, role.lead, "org_unit", "dv-fe"); // leads dv-fe, placed in d-ops: reaches dv-fe, NOT d-web above it
   await grantRole(w.seoHead, role.lead, "org_unit", "d-seo");
   await grantRole(w.corpHead, role.lead, "org_unit", "d-corp");
+  // DW-10g: a head reaches a unit through the company's own lead SEAT (position + org_unit_lead role row + assignment), never the
+  // grant alone (it carries no company). The grants above stay: Cerbos's lead rules read them.
+  await grantLeadSeat(A, "d-web", w.webHead);
+  await grantLeadSeat(A, "dv-fe", w.feHead);
+  await grantLeadSeat(A, "dv-fe", w.feLead2);
+  await grantLeadSeat(A, "d-seo", w.seoHead);
+  await grantLeadSeat(A, "d-corp", w.corpHead);
   await grantRole(w.clientU, role.client, "company", A);
   await q().query(`UPDATE users SET kind = 'bot' WHERE id = $1`, [w.botU]);
   await q().query(`UPDATE users SET kind = 'automation' WHERE id = $1`, [w.autoU]);

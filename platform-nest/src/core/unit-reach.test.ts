@@ -1,7 +1,11 @@
 // DW-10a (docs/FRONTEND-BFF-CONTRACT.md §57.2) — core/unit-reach.ts: the shared "placed in the unit's subtree today, or leads it, or is
-// company-wide" predicate that `authorizeUnitRead` (department KPIs) and the notice board both use. Pure: the only I/O is two reads
-// (the caller's primary placement and the org tree), faked here by a client that answers by SQL text. The same predicate over real
-// Postgres is covered by dept-kpis.controller.db.test.ts (authorizeUnitRead, unchanged) and dept-notices.test.ts (the notice board).
+// company-wide" predicate that `authorizeUnitRead` (department KPIs) and the notice board both use. Pure: the I/O (the caller's primary
+// placement, the org tree, the company's lead seats and, for a project grant, the company's projects) is faked here by a client that
+// answers by SQL text. The same predicate over real Postgres is covered by dept-kpis.controller.db.test.ts (authorizeUnitRead) and
+// dept-notices.test.ts (the notice board).
+//
+// DW-10g: a head is company-anchored. The units a caller heads are the company's own lead seats (`loadLeadSeatUnits`) plus the
+// placement-derived path for a `manager` (or `org_unit_lead`) grant anchored on this company; never a tenantless `org_unit` grant.
 import { describe, it, expect } from "vitest";
 import type { PoolClient } from "pg";
 import type { Principal, RoleGrant } from "../rbac/principal";
@@ -27,14 +31,19 @@ const STRUCTURE = {
 };
 const UNITS = ["d-corp", "d-web", "dv-fe", "dv-be", "d-seo", "d-ops", "d-unknown"];
 
-/** A client that answers only the two reads the predicate makes, and counts them. */
-function fakeClient(placement: string | null) {
+/** A client that answers only the reads the predicate makes, and counts them: the caller's placement, the org tree, the company's
+ *  lead seats held by the caller (`seats`), and whether a project id is one of the company's (`projects`). */
+function fakeClient(placement: string | null, seats: string[] = [], projects: string[] = []) {
   const calls: string[] = [];
   const client = {
-    query: async (sql: string) => {
-      calls.push(sql.includes("org_unit_memberships") ? "placement" : sql.includes("company_org_structure") ? "structure" : "other");
-      if (sql.includes("org_unit_memberships")) return { rows: placement ? [{ unit_node_id: placement }] : [] };
-      if (sql.includes("company_org_structure")) return { rows: [{ structure: STRUCTURE }] };
+    query: async (sql: string, params: unknown[] = []) => {
+      const kind = sql.includes("org_unit_memberships") ? "placement" : sql.includes("company_org_structure") ? "structure"
+        : sql.includes("FROM positions") ? "seats" : sql.includes("FROM projects") ? "projects" : "other";
+      calls.push(kind);
+      if (kind === "placement") return { rows: placement ? [{ unit_node_id: placement }] : [] };
+      if (kind === "structure") return { rows: [{ structure: STRUCTURE }] };
+      if (kind === "seats") return { rows: seats.map((unit_node_id) => ({ unit_node_id })) };
+      if (kind === "projects") return { rows: [{ ok: (params[1] as string[]).some((id) => projects.includes(id)) && params[0] === T }] };
       throw new Error(`unexpected query: ${sql}`);
     },
   } as unknown as PoolClient;
@@ -44,13 +53,14 @@ function fakeClient(placement: string | null) {
 const co = (role: string, scopeId = T): RoleGrant => ({ role, scopeType: "company", scopeId });
 const unitGrant = (role: string, scopeId: string): RoleGrant => ({ role, scopeType: "org_unit", scopeId });
 const glob = (role: string): RoleGrant => ({ role, scopeType: "global", scopeId: null });
+const proj = (role: string, scopeId: string): RoleGrant => ({ role, scopeType: "project", scopeId });
 function principal(roles: RoleGrant[], userId: string | null = "u-me"): Principal {
   return { userId, assurance: "high", companies: [T], rootCompanies: [T], roles, perms: [], sessionVersion: 1 } as unknown as Principal;
 }
 
-/** What the predicate answers for every unit, for one caller placed at `placement`. */
-async function reachMap(p: Principal, placement: string | null): Promise<Record<string, boolean>> {
-  const { client } = fakeClient(placement);
+/** What the predicate answers for every unit, for one caller placed at `placement` who holds the company's lead seats `seats`. */
+async function reachMap(p: Principal, placement: string | null, seats: string[] = [], projects: string[] = []): Promise<Record<string, boolean>> {
+  const { client } = fakeClient(placement, seats, projects);
   const out: Record<string, boolean> = {};
   for (const u of UNITS) out[u] = await callerReachesUnit(client, p, T, STRUCTURE, u, ASOF);
   return out;
@@ -91,14 +101,37 @@ describe("DW-10a · callerReachesUnit", () => {
     expect(reachedUnits(await reachMap(principal([co("viewer")]), null))).toEqual([]);
   });
 
-  it("an org_unit_lead grant reaches the led unit and below, wherever the head is placed (a head above is not a head of a sibling)", async () => {
+  it("a lead seat of THIS company reaches the led unit and below, wherever the head is placed (a head above is not a head of a sibling)", async () => {
+    // DW-10g: the seat decides (the fixture keeps the grant the reconciler would materialize, but the grant alone is not read)
     const head = principal([co("member"), unitGrant("org_unit_lead", "d-web")]);
-    expect(reachedUnits(await reachMap(head, "d-seo"))).toEqual(["d-corp", "d-seo", "d-web", "dv-be", "dv-fe"]); // placed in d-seo (+ its line), leads d-web and below
+    expect(reachedUnits(await reachMap(head, "d-seo", ["d-web"]))).toEqual(["d-corp", "d-seo", "d-web", "dv-be", "dv-fe"]); // placed in d-seo (+ its line), leads d-web and below
     const divisionHead = principal([co("member"), unitGrant("org_unit_lead", "dv-fe")]);
-    expect(reachedUnits(await reachMap(divisionHead, null))).toEqual(["dv-fe"]);
+    expect(reachedUnits(await reachMap(divisionHead, null, ["dv-fe"]))).toEqual(["dv-fe"]);
+    // a seat with no grant at all is a head too (the reconciler has not run yet)
+    expect(reachedUnits(await reachMap(principal([co("member")]), null, ["d-web"]))).toEqual(["d-web", "dv-be", "dv-fe"]);
   });
 
-  it("the placement-derived lead: a company-wide `manager` placed in a unit leads that unit's subtree; a bare member does not lead anything", async () => {
+  it("DW-10g THE CROSS-COMPANY CASE: an org_unit_lead grant with no seat in THIS company reaches nothing beyond the caller's placement", async () => {
+    // the head of d-web in ANOTHER company (the grant names a bare node id), a member here placed in d-seo, holding no seat here
+    const otherCoHead = principal([co("member"), unitGrant("org_unit_lead", "d-web")]);
+    expect(reachedUnits(await reachMap(otherCoHead, "d-seo"))).toEqual(["d-corp", "d-seo"]);
+    expect(reachedUnits(await reachMap(otherCoHead, null))).toEqual([]);
+    // the org_unit grant no longer opens the placement-derived lead path either: placed in d-web, it does not reach d-web's divisions
+    expect(reachedUnits(await reachMap(otherCoHead, "d-web"))).toEqual(["d-corp", "d-web"]);
+    // with a proper seat here on d-web, they do reach it
+    expect(reachedUnits(await reachMap(otherCoHead, "d-seo", ["d-web"]))).toEqual(["d-corp", "d-seo", "d-web", "dv-be", "dv-fe"]);
+  });
+
+  it("DW-10g the placement-derived lead path needs a manager grant anchored on THIS company: company, global, or a project of this company", async () => {
+    const LEADS_WEB = ["d-corp", "d-web", "dv-be", "dv-fe"];
+    expect(reachedUnits(await reachMap(principal([glob("manager")]), "d-web"))).toEqual(LEADS_WEB);
+    expect(reachedUnits(await reachMap(principal([proj("manager", "prj-1")]), "d-web", [], ["prj-1"]))).toEqual(LEADS_WEB);
+    // another company's manager grant, or a project of another company: placed only
+    expect(reachedUnits(await reachMap(principal([co("member"), co("manager", OTHER_T)]), "d-web"))).toEqual(["d-corp", "d-web"]);
+    expect(reachedUnits(await reachMap(principal([co("member"), proj("manager", "prj-elsewhere")]), "d-web", [], ["prj-1"]))).toEqual(["d-corp", "d-web"]);
+  });
+
+  it("the placement-derived lead: a company `manager` placed in a unit leads that unit's subtree; a bare member does not lead anything", async () => {
     const lead = principal([co("manager")]);
     expect(reachedUnits(await reachMap(lead, "d-web"))).toEqual(["d-corp", "d-web", "dv-be", "dv-fe"]);
     expect(reachedUnits(await reachMap(principal([co("member")]), "d-seo"))).toEqual(["d-corp", "d-seo"]);
@@ -115,22 +148,23 @@ describe("DW-10a · callerReachesUnit", () => {
 });
 
 describe("DW-10a · loadUnitReach (the batch form) answers exactly what callerReachesUnit does, unit by unit", () => {
-  const callers: Array<[string, Principal, string | null]> = [
-    ["company_admin", principal([co("company_admin")]), null],
-    ["platform_admin", principal([glob("platform_admin")]), null],
-    ["member placed in d-web", principal([co("member")]), "d-web"],
-    ["member placed in dv-fe", principal([co("member")]), "dv-fe"],
-    ["unplaced member", principal([co("member")]), null],
-    ["head of d-web placed in d-seo", principal([co("member"), unitGrant("org_unit_lead", "d-web")]), "d-seo"],
-    ["division head, unplaced", principal([co("member"), unitGrant("org_unit_lead", "dv-fe")]), null],
-    ["manager placed in d-ops", principal([co("manager")]), "d-ops"],
-    ["no user id", principal([co("member")], null), "d-web"],
+  const callers: Array<[string, Principal, string | null, string[]]> = [
+    ["company_admin", principal([co("company_admin")]), null, []],
+    ["platform_admin", principal([glob("platform_admin")]), null, []],
+    ["member placed in d-web", principal([co("member")]), "d-web", []],
+    ["member placed in dv-fe", principal([co("member")]), "dv-fe", []],
+    ["unplaced member", principal([co("member")]), null, []],
+    ["head of d-web (a seat here) placed in d-seo", principal([co("member"), unitGrant("org_unit_lead", "d-web")]), "d-seo", ["d-web"]],
+    ["division head (a seat here), unplaced", principal([co("member"), unitGrant("org_unit_lead", "dv-fe")]), null, ["dv-fe"]],
+    ["another company's head of d-web (no seat here) placed in d-seo", principal([co("member"), unitGrant("org_unit_lead", "d-web")]), "d-seo", []],
+    ["manager placed in d-ops", principal([co("manager")]), "d-ops", []],
+    ["no user id", principal([co("member")], null), "d-web", ["d-web"]],
   ];
-  for (const [label, p, placement] of callers) {
+  for (const [label, p, placement, seats] of callers) {
     it(label, async () => {
-      const { client } = fakeClient(placement);
+      const { client } = fakeClient(placement, seats);
       const batch = await loadUnitReach(client, p, T, STRUCTURE, ASOF);
-      const single = await reachMap(p, placement);
+      const single = await reachMap(p, placement, seats);
       for (const u of UNITS) expect(batch.reaches(u), `${label} / ${u}`).toBe(single[u]);
       expect(batch.companyWide).toBe(isCompanyWide(p, T));
     });
@@ -177,13 +211,21 @@ describe("DW-10e-6 · loadLeadSeatUnits: the units a person heads in ONE company
 
   it("is anchored on the company: the query binds the tenant and the user, keeps active lead seats with an open assignment, and reads no role grant", async () => {
     const { client, calls } = seatClient(["d-web"]);
-    // an org_unit_lead GRANT on another node changes nothing: the helper takes no principal and never reads roles
+    // an org_unit_lead GRANT on another node changes nothing: the helper takes no principal and never reads user_roles
     await loadLeadSeatUnits(client, OTHER_T, "u-me", STRUCTURE);
     expect(calls).toHaveLength(1);
     expect(calls[0].params).toEqual([OTHER_T, "u-me"]);
     const sql = calls[0].sql.replace(/\s+/g, " ");
     expect(sql).toContain("JOIN position_assignments pa ON pa.position_id = p.id AND pa.tenant_id = p.tenant_id");
     expect(sql).toContain("p.tenant_id = $1 AND p.is_lead AND p.status = 'active' AND pa.valid_to IS NULL AND pa.user_id = $2");
-    expect(sql).not.toMatch(/user_roles|org_unit_lead/);
+    expect(sql).not.toMatch(/user_roles/);
+  });
+
+  it("a lead position counts only with its org_unit_lead role row (0109 §2.2): the same position, at own_unit, matched by name in this company", async () => {
+    const { client, calls } = seatClient(["d-web"]);
+    await loadLeadSeatUnits(client, T, "u-me", STRUCTURE);
+    const sql = calls[0].sql.replace(/\s+/g, " ");
+    expect(sql).toContain("JOIN position_roles pr ON pr.position_id = p.id AND pr.tenant_id = p.tenant_id AND pr.scope_kind = 'own_unit'");
+    expect(sql).toContain("JOIN roles r ON r.id = pr.role_id AND r.name = 'org_unit_lead' AND (r.company_id IS NULL OR r.company_id = p.tenant_id)");
   });
 });

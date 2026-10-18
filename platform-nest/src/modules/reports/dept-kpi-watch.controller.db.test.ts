@@ -27,7 +27,7 @@ import { config } from "../../config";
 import { buildApp } from "../../main";
 import { newId, withGlobal, withTenants } from "../../db";
 import { adminPool, initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
-import { addMembership, createCompany, createProject, createRole, createUser, grantRole } from "../../testing/fixtures";
+import { addMembership, createCompany, createProject, createRole, createUser, grantLeadSeat, grantRole } from "../../testing/fixtures";
 import { syncMetricDefinitions } from "../../rollups/engine";
 import { rebuildOrgUnitClosure } from "../../core/org-unit-closure";
 import { assemblePrincipal } from "../../rbac/principal";
@@ -180,6 +180,10 @@ describe.skipIf(!TEST_URL)("DW-4j-1 the KPI watch (live PG + RLS + Cerbos)", () 
     await grantRole(genHead, lead, "org_unit", "d-gen");
     await grantRole(gmHead, lead, "org_unit", "d-corp");
     await grantRole(ghostHead, lead, "org_unit", "d-gen");
+    // DW-10g: the unit read gate (authorizeUnitRead) reaches a unit through the company's own lead SEAT, not the grant (which has no
+    // company); the grants above stay, because the recipients and "Needs you" read them. gmHead is unplaced, so only its seat on the
+    // root reaches d-web. lapsedHead and ghostHead get no seat: their point is the grant.
+    for (const [u, unit] of [[webHead, "d-web"], [webHead2, "d-web"], [genHead, "d-gen"], [gmHead, "d-corp"]] as const) await grantLeadSeat(co, unit, u);
     await withGlobal((c) =>
       c.query(`INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id, expires_at) VALUES ($1, $2, $3, 'org_unit', 'd-web', now() - interval '1 day')`, [
         newId(), lapsedHead, lead,

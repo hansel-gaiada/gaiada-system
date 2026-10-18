@@ -21,8 +21,8 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../config";
 import { buildApp } from "../../main";
 import { newId, withGlobal, withTenants } from "../../db";
-import { initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
-import { addMembership, createCompany, createProject, createRole, createUser, grantRole } from "../../testing/fixtures";
+import { adminPool, initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
+import { addMembership, createCompany, createProject, createRole, createUser, grantLeadSeat, grantRole } from "../../testing/fixtures";
 import { syncMetricDefinitions } from "../../rollups/engine";
 import { rebuildOrgUnitClosure } from "../../core/org-unit-closure";
 
@@ -117,6 +117,7 @@ describe.skipIf(!TEST_URL)("DW-4e-1 department KPIs (live PG + RLS + Cerbos)", (
     await grantRole(admin2, companyAdmin, "company", co);
     await grantRole(webHead, await createRole("org_unit_lead"), "org_unit", "d-web");
     await grantRole(webHead, await createRole("manager"), "company", co);
+    await grantLeadSeat(co, "d-web", webHead); // DW-10g: the real head shape includes the company's own lead seat
     await grantRole(hr, await createRole("hr_staff"), "company", co);
 
     const root = {
@@ -355,6 +356,27 @@ describe.skipIf(!TEST_URL)("DW-4e-1 department KPIs (live PG + RLS + Cerbos)", (
     expect((await read(`unitNodeId=d-seo&${SEPT}`, webHead)).statusCode).toBe(403); // a head of another unit
     expect((await read(`unitNodeId=d-seo&${SEPT}`, hr)).statusCode).toBe(200);
     expect((await read(`unitNodeId=d-seo&${SEPT}`, admin)).statusCode).toBe(200);
+  });
+
+  it("DW-10g: the head of a same-id d-web in ANOTHER company (its org_unit_lead grant and its seat there) is no head of this company's d-web; a seat here makes one", async () => {
+    const twoCo = await createUser("two-co-head@dw4e.test");
+    try {
+      for (const t of [co, other]) {
+        await addMembership(t, twoCo);
+        await grantRole(twoCo, await createRole("member"), "company", t);
+      }
+      await grantRole(twoCo, await createRole("org_unit_lead"), "org_unit", "d-web"); // a bare node id: names this company's d-web too
+      await grantLeadSeat(other, "d-web", twoCo);
+      expect((await read(`unitNodeId=d-web&${SEPT}`, twoCo)).statusCode).toBe(403);
+      expect((await read(`unitNodeId=dv-fe&${SEPT}`, twoCo)).statusCode).toBe(403);
+      expect((await targets("d-web", twoCo)).statusCode).toBe(403);
+      await grantLeadSeat(co, "d-web", twoCo);
+      expect((await read(`unitNodeId=d-web&${SEPT}`, twoCo)).statusCode).toBe(200);
+      expect((await read(`unitNodeId=dv-fe&${SEPT}`, twoCo)).statusCode).toBe(200); // a seat covers the unit's divisions
+      expect((await read(`unitNodeId=d-seo&${SEPT}`, twoCo)).statusCode).toBe(403);
+    } finally {
+      await adminPool().query(`UPDATE company_memberships SET status = 'ended' WHERE user_id = $1`, [twoCo]);
+    }
   });
 
   it("an unknown unit: 404 unit_not_found for a company-wide caller, 403 for staff; no unitNodeId is 400", async () => {

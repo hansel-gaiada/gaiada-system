@@ -91,6 +91,43 @@ export async function createRole(name: string, companyId: string | null = null):
   return rows[0].id;
 }
 
+/**
+ * DW-10g: a REAL lead seat in `tenantId` on `unitNodeId`, held by `userId`: a `positions` row (`is_lead`, `status` default
+ * `active`), its `position_roles` row for the library `org_unit_lead` role at `own_unit` (0109 §2.2: a lead position without it
+ * confers nothing), and an open `position_assignments` row. This is what makes a head of a unit IN THAT COMPANY for
+ * `loadLeadSeatUnits` / `loadHeadUnits` (core/unit-reach.ts); an `org_unit_lead` grant alone does not, because it carries no
+ * company. Options: `status` (e.g. `retired`), `ended` (the assignment closed yesterday), `noRole` (an `is_lead` position without
+ * the role row). Written through the app role, inside the company's own tenant set. Returns the position id.
+ */
+export async function grantLeadSeat(
+  tenantId: string,
+  unitNodeId: string,
+  userId: string,
+  o: { status?: "active" | "retired" | "orphaned"; ended?: boolean; noRole?: boolean } = {},
+): Promise<string> {
+  const leadRoleId = o.noRole ? null : await createRole("org_unit_lead");
+  const positionId = newId();
+  await withTenants([tenantId], async (c) => {
+    await c.query(
+      `INSERT INTO positions (id, tenant_id, unit_node_id, title, is_lead, status, origin_site) VALUES ($1, $2, $3, 'Head', true, $4, $5)`,
+      [positionId, tenantId, unitNodeId, o.status ?? "active", site()],
+    );
+    if (leadRoleId) {
+      await c.query(
+        `INSERT INTO position_roles (tenant_id, position_id, role_id, scope_kind) VALUES ($1, $2, $3, 'own_unit')`,
+        [tenantId, positionId, leadRoleId],
+      );
+    }
+    await c.query(
+      o.ended
+        ? `INSERT INTO position_assignments (tenant_id, position_id, user_id, valid_from, valid_to) VALUES ($1, $2, $3, current_date - 30, current_date - 1)`
+        : `INSERT INTO position_assignments (tenant_id, position_id, user_id) VALUES ($1, $2, $3)`,
+      [tenantId, positionId, userId],
+    );
+  });
+  return positionId;
+}
+
 export async function grantRole(
   userId: string,
   roleId: string,
