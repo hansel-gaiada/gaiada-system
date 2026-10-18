@@ -2384,7 +2384,7 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §57 (plan `docs/plans/2026-10-13-depart
 
 | Action | Reach | What it is |
 |---|---|---|
-| `read` | `company_admin`, `manager`, `member`, `viewer`; **its own rule** for the HR read tier (`hr_people_reader`). All with `inTenant && notLow`. **Tenant-wide here on purpose:** the per-unit narrowing (placed under the unit today, a head whose led scope holds it, or a company-wide tier) needs the caller's placement as of today, which Cerbos cannot read, so the handler applies it after this check (BFF §57.2), as `dept_kpi_target · read` does | list and open notices |
+| `read` | `company_admin`, `manager`, `member`, `viewer`; **its own rule** for the HR read tier (`hr_people_reader`). All with `inTenant && notLow`. **Tenant-wide here on purpose:** the per-unit narrowing (placed under the unit today, a head whose led scope holds it, or a company-wide tier; since DW-10g a head is the company's own lead seats, never the `org_unit_lead` role) needs the caller's placement as of today, which Cerbos cannot read, so the handler applies it after this check (BFF §57.2), as `dept_kpi_target · read` does | list and open notices |
 | `post` | `company_admin`. **Its own rule** for `org_unit_lead` when `scope == "unit"` (the grant's scopeId in `unitAncestors`) | post a notice. A company-wide notice (`scope == "company"`) is `company_admin` only: the lead rule carries `request.resource.attr.scope == "unit"` |
 | `edit` | as `post`, on the stored row's scope and unit | change title, body, pin or end date |
 | `withdraw` | as `post`, on the stored row's scope and unit | take a notice down (no delete exists) |
@@ -2441,7 +2441,7 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §59 (plan `docs/plans/2026-10-13-depart
 - **Why a new action, not plain `read`:**
   - It gates the department calendar (BFF §59). That read discloses colleagues' approved leave and its type to the department's people (DW-D33), which no other read does.
   - A distinct key keeps that disclosure visible in the catalogue, and lets a company withhold it without touching the org chart.
-- **Narrowing:** the per-unit narrowing (placed in the unit or below it today, a head whose led scope holds it, or a company-wide tier) is the handler's, as for `dept_kpi_target · read`. It needs placement as of today, which Cerbos cannot read.
+- **Narrowing:** the per-unit narrowing (placed in the unit or below it today, a head whose led scope holds it, or a company-wide tier) is the handler's, as for `dept_kpi_target · read`. It needs placement as of today, which Cerbos cannot read. Since DW-10g a head is read from the company's own lead seats, never from the `org_unit_lead` role, whose grant carries no company.
 - **The permission arm mirrors it** (`perm_org_structure_read_calendar`, with `inTenant && notLow && inRoot`). The action is reached only through scope-only rules, so a mirror grants no more than the role arm.
 - **Bundles:** `company_admin`, `owner`, `platform_admin`, `manager`, `member` and `viewer` hold it. It is not `sensitive`.
 - **Artifacts:**
@@ -2478,7 +2478,7 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §60 (rulings DW-D35, DW-D39, DW-D40 and
 
 **DW-D43 (owner, 2026-10-18; built in DW-10e-6): department heads see what their department sent.** A third tier, `unit`, between `company` and `own`.
 - **It is a handler narrowing on H's own data, not a Cerbos rule.** No policy change, no new action, no new attribute, no migration.
-- **A head is a person with an active lead seat in H:** a `positions` row of H with `is_lead` and `status = 'active'`, held through a `position_assignments` row with no `valid_to`. Each seat's unit counts with its subtree in H's tree. The handler reads them in H's own scope (`withTenants([H])`), with `loadLeadSeatUnits` (`core/unit-reach.ts`). This is the safe shape named below under "Not `org_unit_lead`".
+- **A head is a person with an active lead seat in H:** a `positions` row of H with `is_lead` and `status = 'active'` that also carries a `position_roles` row for the `org_unit_lead` role at `own_unit` (0109 §2.2), held through a `position_assignments` row with no `valid_to`. Each seat's unit counts with its subtree in H's tree. The handler reads them in H's own scope (`withTenants([H])`), with `loadLeadSeatUnits` (`core/unit-reach.ts`). This is the safe shape named below under "Not `org_unit_lead`".
 - **Never the `org_unit_lead` role.** Its grant carries no company, and node ids repeat across companies, so a head of a same-id department in another company would read as a head in H. A seat belongs to one company's `positions`, so it cannot leak that way. Placement alone is not a seat.
 - **The head reads** their own requests plus every request whose `requester_unit_id` is a unit they head. Precedence: `company` (`read_across`), then `unit`, then `own`.
 - **Act-for:** the tier is never wider than the acting human's (`company` only when both have it; two `unit` tiers keep the units both head; anything empty is `own`).
