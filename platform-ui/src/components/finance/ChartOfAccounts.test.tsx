@@ -205,9 +205,11 @@ describe("renaming", () => {
     expect(alert).toHaveTextContent("Reason: code_taken");
     expect(card("4910").getByLabelText("Code")).toHaveValue("4900");
     fa.editAccount.mockResolvedValue({ ok: false, error: "account 4910 has postings; code cannot change. Archive this account and create a new one.", reason: "account_frozen" });
-    fireEvent.click(card("4910").getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Reason: account_frozen"));
-  });
+    // Under CI's loaded full-suite run the button can still read "Saving…" when the first refusal shows (CI 39053572191 and
+    // 39108366861: "Unable to find … button … Save"), so wait for it to come back before the second click.
+    fireEvent.click(await card("4910").findByRole("button", { name: "Save" }, { timeout: 10_000 }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Reason: account_frozen"), { timeout: 10_000 });
+  }, 30_000);
 
   it("Cancel closes the form without a request", () => {
     view();
