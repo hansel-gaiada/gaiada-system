@@ -21,7 +21,7 @@
 // `asUser`-style header helper (see pm-adversarial-authz.test.ts's `beforeAll`).
 import { newId, withTenants } from "../db";
 import { config } from "../config";
-import { createCompany, createUser, createRole, grantRole, addMembership } from "./fixtures";
+import { createCompany, createUser, createRole, grantLeadSeat, grantRole, addMembership } from "./fixtures";
 import { assemblePrincipal, type Assurance, type Principal } from "../rbac/principal";
 
 const site = () => config.originSite;
@@ -173,6 +173,9 @@ export async function seedPersonaTenant(
     if (def.scope === "org_unit") {
       await placeInOrgUnit(tenantId, userId, orgUnitId);
       await grantRole(userId, roleId, "org_unit", orgUnitId);
+      // DW-10g-2: a head is the grant AND this company's own lead seat on the unit (the shape live heads have); every handler
+      // reads the seat, never the grant alone.
+      await grantLeadSeat(tenantId, orgUnitId, userId);
     } else {
       await grantRole(userId, roleId, def.scope, def.scope === "global" ? null : tenantId);
     }

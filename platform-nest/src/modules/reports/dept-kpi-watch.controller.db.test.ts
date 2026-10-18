@@ -32,7 +32,7 @@ import { syncMetricDefinitions } from "../../rollups/engine";
 import { rebuildOrgUnitClosure } from "../../core/org-unit-closure";
 import { assemblePrincipal } from "../../rbac/principal";
 import { loadLedUnitScope, todayIsoInTz } from "./person-scope";
-import { WATCH_NOTIFICATION_TYPE, loadUnitLeadUserIds, runDeptKpiWatch } from "./dept-kpi-watch";
+import { WATCH_NOTIFICATION_TYPE, loadUnitLeadUserIds, loadUnitsLedExactly, runDeptKpiWatch } from "./dept-kpi-watch";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -180,9 +180,9 @@ describe.skipIf(!TEST_URL)("DW-4j-1 the KPI watch (live PG + RLS + Cerbos)", () 
     await grantRole(genHead, lead, "org_unit", "d-gen");
     await grantRole(gmHead, lead, "org_unit", "d-corp");
     await grantRole(ghostHead, lead, "org_unit", "d-gen");
-    // DW-10g: the unit read gate (authorizeUnitRead) reaches a unit through the company's own lead SEAT, not the grant (which has no
-    // company); the grants above stay, because the recipients and "Needs you" read them. gmHead is unplaced, so only its seat on the
-    // root reaches d-web. lapsedHead and ghostHead get no seat: their point is the grant.
+    // DW-10g / DW-10g-2: the unit read gate, the head-only gate, the recipients and "Needs you" all read the company's own lead SEAT,
+    // never the grant (which has no company); the grants above stay for Cerbos's lead rules. gmHead is unplaced, so only its seat on
+    // the root reaches d-web. lapsedHead's grant expired and ghostHead is no member: neither holds a seat here, so neither is told.
     for (const [u, unit] of [[webHead, "d-web"], [webHead2, "d-web"], [genHead, "d-gen"], [gmHead, "d-corp"]] as const) await grantLeadSeat(co, unit, u);
     await withGlobal((c) =>
       c.query(`INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id, expires_at) VALUES ($1, $2, $3, 'org_unit', 'd-web', now() - interval '1 day')`, [
@@ -240,6 +240,35 @@ describe.skipIf(!TEST_URL)("DW-4j-1 the KPI watch (live PG + RLS + Cerbos)", () 
     expect(await loadUnitLeadUserIds(co, "d-gen")).toEqual([genHead]);
     expect(await loadUnitLeadUserIds(co, "d-seo")).toEqual([]);
     expect(await loadUnitLeadUserIds(co, "d-corp")).toEqual([gmHead]);
+  });
+
+  it("DW-10g-2: the audience is this company's lead SEAT, never the grant: a foreign seat, a seat without its role row and a grant alone are not told", async () => {
+    const elsewhere = await createCompany("DW-10g-2 Elsewhere", ["reports"]);
+    const twoCo = await createUser("two-co-head@dw4j.test", "Tia Twoco");
+    const titleOnly = await createUser("title-only@dw4j.test", "Tomo Titleonly");
+    try {
+      for (const [u, t] of [[twoCo, co], [twoCo, elsewhere], [titleOnly, co]] as const) {
+        await addMembership(t, u);
+        await grantRole(u, await createRole("member"), "company", t);
+      }
+      await grantRole(twoCo, await createRole("org_unit_lead"), "org_unit", "d-web"); // a bare node id: names this company's d-web too
+      await grantLeadSeat(elsewhere, "d-web", twoCo); // the head of the OTHER company's d-web
+      await grantLeadSeat(co, "d-seo", titleOnly, { noRole: true }); // an is_lead position with no org_unit_lead role row
+      expect(await loadUnitLeadUserIds(co, "d-web")).toEqual([webHead, webHead2].sort());
+      expect(await loadUnitLeadUserIds(co, "d-seo")).toEqual([]);
+      expect(await loadUnitsLedExactly(co, twoCo)).toEqual([]);
+      expect(await loadUnitsLedExactly(co, titleOnly)).toEqual([]);
+      expect(await loadUnitsLedExactly(co, webHead)).toEqual(["d-web"]);
+      expect(await loadUnitsLedExactly(co, gmHead)).toEqual(["d-corp"]);
+      // a seat here (with its role row) makes a head here
+      await grantLeadSeat(co, "d-web", twoCo);
+      expect(await loadUnitLeadUserIds(co, "d-web")).toEqual([webHead, webHead2, twoCo].sort());
+      expect(await loadUnitsLedExactly(co, twoCo)).toEqual(["d-web"]);
+    } finally {
+      // the later run cases expect d-web's heads to be exactly webHead and webHead2: an ended membership is never told
+      await adminPool().query(`UPDATE company_memberships SET status = 'ended' WHERE user_id = ANY($1::uuid[])`, [[twoCo, titleOnly]]);
+    }
+    expect(await loadUnitLeadUserIds(co, "d-web")).toEqual([webHead, webHead2].sort());
   });
 
   it("pinned against the forward direction: every returned head has the unit in loadLedUnitScope; the exactness is deliberate", async () => {

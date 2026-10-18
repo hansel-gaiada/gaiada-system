@@ -29,7 +29,7 @@ import { config } from "../../config";
 import { buildApp } from "../../main";
 import { newId, withTenants } from "../../db";
 import { initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
-import { addMembership, createCompany, createProject, createRole, createUser, grantRole } from "../../testing/fixtures";
+import { addMembership, createCompany, createProject, createRole, createUser, grantLeadSeat, grantRole } from "../../testing/fixtures";
 import { syncMetricDefinitions } from "../../rollups/engine";
 import { rebuildOrgUnitClosure } from "../../core/org-unit-closure";
 
@@ -483,7 +483,8 @@ describe.skipIf(!TEST_URL)("TR-24 appraisal engine (live PG + RLS + Cerbos)", ()
   // unit today is in the led subtree, UNION the rows they manage. Fixtures are this block's own. The
   // org tree is written in the REAL stored shape (`{root: ...}`) and the org-unit closure is built
   // with the PRODUCTION builder — without the closure every org_unit_lead rule denies. The heads are
-  // deliberately NOT placed in any unit, so the led scope here is grant-derived only.
+  // deliberately NOT placed in any unit, so the led scope here is seat-derived only. DW-10g-2: a head is
+  // the grant AND this company's own lead seat on the unit (`grantLeadSeat`); a grant alone is not.
   describe("DW-4d — a head's list", () => {
     let webHead: string; // org_unit_lead @ d-web ONLY (no manager grant)
     let dualHead: string; // org_unit_lead @ d-web AND a company `manager`
@@ -523,6 +524,8 @@ describe.skipIf(!TEST_URL)("TR-24 appraisal engine (live PG + RLS + Cerbos)", ()
       await grantRole(webHead, leadRole, "org_unit", "d-web");
       await grantRole(dualHead, leadRole, "org_unit", "d-web");
       await grantRole(dualHead, await createRole("manager"), "company", co);
+      await grantLeadSeat(co, "d-web", webHead);
+      await grantLeadSeat(co, "d-web", dualHead);
 
       const root = {
         id: "d-corp",
@@ -593,6 +596,27 @@ describe.skipIf(!TEST_URL)("TR-24 appraisal engine (live PG + RLS + Cerbos)", ()
       expect((await listRoute(`?cycleId=${cycleId}&subjectId=${seoSubj2}`, dualHead)).json().appraisals).toEqual([]);
       expect(idsOf(await listRoute(`?cycleId=${cycleId}&subjectId=${seoSubj}`, dualHead))).toEqual([rowOf[seoSubj]]);
       expect(idsOf(await listRoute(`?cycleId=${cycleId}&subjectId=${feSubj}`, webHead))).toEqual([rowOf[feSubj]]);
+    });
+
+    it("(e) DW-10g-2: the head of a same-id d-web in ANOTHER company (its org_unit_lead grant and its seat there) is a plain member here; a seat here makes a head", async () => {
+      const elsewhere = await createCompany("DW-10g-2 Elsewhere", ["reports"]);
+      const twoCo = await createUser("two-co-head@dw4d.test");
+      for (const t of [co, elsewhere]) {
+        await addMembership(t, twoCo);
+        await grantRole(twoCo, await createRole("member"), "company", t);
+      }
+      await grantRole(twoCo, await createRole("org_unit_lead"), "org_unit", "d-web"); // a bare node id: names this company's d-web too
+      await grantLeadSeat(elsewhere, "d-web", twoCo);
+      // the list: the own-rows branch (they are no subject: empty), as for a plain member; never the d-web subtree
+      const r = await listRoute(`?cycleId=${cycleId}`, twoCo);
+      expect(r.statusCode).toBe(200);
+      expect(r.json().appraisals).toEqual([]);
+      // one row: Cerbos's org_unit_lead rule matches the bare node id, the handler's dept-lead check does not
+      expect((await getAppraisalRoute(rowOf[webSubj], twoCo)).statusCode).toBe(403);
+      // a seat here (with the grant): a head of d-web here
+      await grantLeadSeat(co, "d-web", twoCo);
+      expect(subjectsOf(await listRoute(`?cycleId=${cycleId}`, twoCo))).toEqual([webSubj, feSubj].sort());
+      expect((await getAppraisalRoute(rowOf[webSubj], twoCo)).statusCode).toBe(200);
     });
 
     it("(d) the broad tier, a manager-only caller and a plain member are unchanged", async () => {

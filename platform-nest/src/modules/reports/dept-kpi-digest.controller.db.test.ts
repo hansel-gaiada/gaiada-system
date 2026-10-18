@@ -25,7 +25,7 @@ import { config } from "../../config";
 import { buildApp } from "../../main";
 import { newId, withGlobal, withTenants } from "../../db";
 import { adminPool, initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
-import { addMembership, createCompany, createProject, createRole, createUser, grantRole } from "../../testing/fixtures";
+import { addMembership, createCompany, createProject, createRole, createUser, grantLeadSeat, grantRole } from "../../testing/fixtures";
 import { syncMetricDefinitions } from "../../rollups/engine";
 import { rebuildOrgUnitClosure } from "../../core/org-unit-closure";
 import { mondayOnOrBefore } from "./report-calendar";
@@ -222,6 +222,9 @@ describe.skipIf(!TEST_URL)("DW-4j-3 the weekly digest and the drivers (live PG +
     await grantRole(webHead2, lead, "org_unit", "d-web");
     await grantRole(genHead, lead, "org_unit", "d-gen");
     await grantRole(gmHead, lead, "org_unit", "d-corp");
+    // DW-10g-2: the digest's heads are this company's own lead-seat holders (seat + org_unit_lead role row + open assignment); the
+    // grants above stay for Cerbos.
+    for (const [u, unit] of [[webHead, "d-web"], [webHead2, "d-web"], [genHead, "d-gen"], [gmHead, "d-corp"]] as const) await grantLeadSeat(co, unit, u);
 
     const root = {
       id: "d-corp",

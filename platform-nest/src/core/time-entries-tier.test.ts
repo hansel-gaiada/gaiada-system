@@ -11,7 +11,7 @@ import { buildApp } from "../main";
 import { resetModules } from "../modules/registry";
 import { resetCoreRollupProviders } from "../rollups/engine";
 import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
-import { createCompany, createUser, addMembership, createRole, grantRole, createProject } from "../testing/fixtures";
+import { createCompany, createUser, addMembership, createRole, grantRole, createProject, grantLeadSeat } from "../testing/fixtures";
 import { newId, withTenants } from "../db";
 
 const svc = { authorization: "Bearer svc-token" };
@@ -82,9 +82,11 @@ describe.skipIf(!TEST_URL)("GET /time-entries is read by person-axis tier (DW-D2
     hr = await mk("hr", "hr_staff");
     // HR's people readers also hold the everyday member grant (time_entry read is a member-level grant)
     await grantRole(hr, await createRole("member"), "company", t);
-    // A head by the org_unit_lead GRANT on d-b (how live heads are seated), with no primary unit of their own and no entries.
+    // A head of d-b (how live heads are seated: the org_unit_lead grant AND this company's own lead seat, DW-10g-2), with no
+    // primary unit of their own and no entries.
     unitLead = await mk("unitlead", "member");
     await grantRole(unitLead, await createRole("org_unit_lead", null), "org_unit", "d-b");
+    await grantLeadSeat(t, "d-b", unitLead);
     rivalAdmin = await mk("rivaladmin", "company_admin", rival);
     rivalUser = await mk("rivaluser", "member", rival);
     await setUnit(t, a, "d-a");
@@ -188,6 +190,23 @@ describe.skipIf(!TEST_URL)("GET /time-entries is read by person-axis tier (DW-D2
       const out = await list(`?userId=${a}`, unitLead);
       expect(out.statusCode).toBe(403);
       expect(JSON.stringify(out.json())).toContain("outside your reporting line");
+    });
+
+    it("DW-10g-2: the head of a same-id d-b in ANOTHER company (its grant and its seat there) reads only their own here, as a plain member; a seat here opens d-b", async () => {
+      const twoCo = await createUser("twoco@time-tier.test", "twoco");
+      for (const tn of [t, rival]) {
+        await addMembership(tn, twoCo);
+        await grantRole(twoCo, await createRole("member"), "company", tn);
+      }
+      await grantRole(twoCo, await createRole("org_unit_lead", null), "org_unit", "d-b"); // a bare node id: names this company's d-b too
+      await grantLeadSeat(rival, "d-b", twoCo);
+      const r = await list("", twoCo);
+      expect(r.statusCode).toBe(200);
+      expect(owners(r)).toEqual([]); // their own (none): never d-b's people
+      expect((await list(`?userId=${c}`, twoCo)).statusCode).toBe(403);
+      await grantLeadSeat(t, "d-b", twoCo);
+      expect(owners(await list("", twoCo))).toEqual(sorted(c, otherHead));
+      expect(owners(await list(`?userId=${c}`, twoCo))).toEqual([c]);
     });
 
     it("mine=me is the head's own entries only", async () => {

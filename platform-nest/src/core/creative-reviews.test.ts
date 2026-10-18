@@ -165,6 +165,8 @@ describe.skipIf(!TEST_URL)("DW-6h asset versions and review rounds (HTTP, real P
       `INSERT INTO positions (tenant_id, unit_node_id, title, is_lead, status) VALUES ($1, 'd-creative', 'Head of Creatives', true, 'active') RETURNING id`,
       [A],
     )).rows[0].id as string;
+    // DW-10g-2: a lead seat confers lead power only with its org_unit_lead role row (0109 §2.2).
+    await q().query(`INSERT INTO position_roles (tenant_id, position_id, role_id, scope_kind) VALUES ($1, $2, $3, 'own_unit')`, [A, seat, leadRole]);
     await q().query(`INSERT INTO position_assignments (tenant_id, position_id, user_id) VALUES ($1, $2, $3)`, [A, seat, leadCreative]);
 
     app = await buildApp();

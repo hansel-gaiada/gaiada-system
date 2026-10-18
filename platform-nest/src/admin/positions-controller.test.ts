@@ -10,7 +10,7 @@ import { buildApp } from "../main";
 import { config } from "../config";
 import { withTenants, withGlobal } from "../db";
 import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
-import { createCompany, createUser, createRole, addMembership, grantRole } from "../testing/fixtures";
+import { createCompany, createUser, createRole, addMembership, grantLeadSeat, grantRole } from "../testing/fixtures";
 
 const live = !!process.env.CERBOS_URL && process.env.CERBOS_URL.length > 0;
 const svc = { authorization: "Bearer svc-token" };
@@ -59,6 +59,8 @@ describe.skipIf(!TEST_URL || !live)("P2-12 — positions backend over the real s
       method: "PUT", url: `/api/${T}/org-structure`, headers: asUser(admin), payload: ORG_BLOB,
     });
     expect(put.statusCode).toBe(200);
+    // DW-10g-2: the list's lead units are the grants THIS company's own lead seat backs, so the dept head also holds the seat.
+    await grantLeadSeat(T, "d-web", webLead);
   });
 
   afterAll(async () => {
@@ -273,6 +275,23 @@ describe.skipIf(!TEST_URL || !live)("P2-12 — positions backend over the real s
     });
     expect(again.statusCode).toBe(400);
     expect(again.json().error).toContain("retired");
+  });
+
+  it("DW-10g-2: the head of a same-id d-web in ANOTHER company (its grant and its seat there) lists nothing here, as a plain member; a seat here opens the subtree", async () => {
+    const elsewhere = await createCompany("Positions Elsewhere", ["hr"]);
+    const twoCo = await createUser("pos-twoco@a.test");
+    for (const t of [T, elsewhere]) {
+      await addMembership(t, twoCo);
+      await grantRole(twoCo, await createRole("member"), "company", t);
+    }
+    await grantRole(twoCo, leadRole, "org_unit", "d-web"); // a bare node id: names this company's d-web too
+    await grantLeadSeat(elsewhere, "d-web", twoCo);
+    const before = await app.inject({ method: "GET", url: `/api/${T}/positions`, headers: asUser(twoCo) });
+    expect(before.statusCode).toBe(403);
+    await grantLeadSeat(T, "d-web", twoCo);
+    const after = await app.inject({ method: "GET", url: `/api/${T}/positions`, headers: asUser(twoCo) });
+    expect(after.statusCode).toBe(200);
+    expect(after.json().scope).toBe("subtree");
   });
 
   it("a plain member reaches none of it", async () => {

@@ -201,6 +201,8 @@ describe.skipIf(!TEST_URL)("DW-5c requests between departments (HTTP, real Postg
       (await q().query(`INSERT INTO positions (tenant_id, unit_node_id, title, is_lead, status) VALUES ($1, $2, $3, $4, $5) RETURNING id`, [A, unit, title, isLead, status])).rows[0].id as string;
     const leadSeat = await seat("d-creative", "Head of Creatives", true);
     const staffSeat = await seat("d-creative", "Designer", false);
+    // DW-10g-2: a lead seat confers lead power only with its org_unit_lead role row (0109 §2.2); the non-lead seat has none.
+    await q().query(`INSERT INTO position_roles (tenant_id, position_id, role_id, scope_kind) VALUES ($1, $2, $3, 'own_unit')`, [A, leadSeat, leadRole]);
     await q().query(`INSERT INTO position_assignments (tenant_id, position_id, user_id) VALUES ($1, $2, $3)`, [A, leadSeat, leadCreative]);
     await q().query(`INSERT INTO position_assignments (tenant_id, position_id, user_id, valid_from, valid_to) VALUES ($1, $2, $3, current_date - 90, current_date - 30)`, [A, leadSeat, retiredHead]);
     await q().query(`INSERT INTO position_assignments (tenant_id, position_id, user_id) VALUES ($1, $2, $3)`, [A, staffSeat, nonLeadHolder]);
