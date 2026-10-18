@@ -2578,7 +2578,7 @@ Also the UI mirror: the capabilities `work_request.send_across` (company_admin, 
     4. Probe an allow: one live seat-backed head is still allowed, e.g. azlan@ on the agency's `d-webdev` (post a test notice there, or read the department's report document, then remove the test record).
     5. Census on 2026-10-18: all 6 live `org_unit_lead` grants are backed by a seat with its role row on the same unit, so nobody's access changes.
 
-## 50. DW-10f — contract billing and freelancer bills, BFF §61 (2026-10-18; revised 2026-10-18 for DW-D47 to DW-D49; PLANNED): no new kind, no new action
+## 51. DW-10f — contract billing and freelancer bills, BFF §61 (2026-10-18; revised 2026-10-18 for DW-D47 to DW-D49; PLANNED): no new kind, no new action
 
 Design: `docs/FRONTEND-BFF-CONTRACT.md` §61 (rulings DW-D45 to DW-D49; plan `docs/plans/2026-10-13-department-workspaces.md` §11.4 and §12.2, "10f design"). Status: **PLANNED (the contract only; nothing is built)**.
 

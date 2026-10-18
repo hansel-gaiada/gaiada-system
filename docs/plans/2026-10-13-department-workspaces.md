@@ -1360,7 +1360,7 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 | DW-D46 | Freelancers: should hours a freelancer logs become their bill? | **Owner (2026-10-18), first-hand: yes, planned with contract billing.** A freelancer has an agreed rate; the hours they log in a period draft a vendor bill (accounts payable) for Finance to approve. DW-10f |
 | DW-D47 | DW-10f: which withholding applies to a freelancer's bill, PPh 21 or PPh 23 (BFF §61.15)? | **Owner (2026-10-18), first-hand: per the vendor's tax code.** Finance sets the withholding code on each freelancer's vendor record, and the bill computes it with `finance_tax_compute()`. With no code there is no withholding, and the draft shows a warning (BFF §61.8) |
 | DW-D48 | DW-10f: may one invoice mix the schedule's fixed-fee lines with hourly lines? | **Owner (2026-10-18), first-hand: no.** An invoice is either instalments or hours. The hourly draft stays as an explicit exception (BFF §61.5) |
-| DW-D49 | DW-10f: how is an agreement billed that was signed before 10f, with a value and no schedule? The contract's default was the hourly exception or an amendment | **Owner (2026-10-18), first-hand: Finance may add a payment schedule once to an already-signed agreement that has a value and no schedule.** It must add up to the value; the addition is recorded in the contract's history (who and when); afterwards it is frozen with its own `schedule_sha256`, like a schedule fixed at send. It is the only way a signed contract's schedule can change: the database refuses every other path (BFF §61.4a, PERMISSION-CONTRACT §50) |
+| DW-D49 | DW-10f: how is an agreement billed that was signed before 10f, with a value and no schedule? The contract's default was the hourly exception or an amendment | **Owner (2026-10-18), first-hand: Finance may add a payment schedule once to an already-signed agreement that has a value and no schedule.** It must add up to the value; the addition is recorded in the contract's history (who and when); afterwards it is frozen with its own `schedule_sha256`, like a schedule fixed at send. It is the only way a signed contract's schedule can change: the database refuses every other path (BFF §61.4a, PERMISSION-CONTRACT §51) |
 
 ---
 
@@ -1651,7 +1651,7 @@ written by the orchestrating session.
    and the core may take an Opus implementer).
 
 **Numbers.** Rulings DW-D32 to DW-D35, and DW-D39 to DW-D49 for 10e and 10f. BFF §57 (10a), §58 (10b), §59 (10c), §60 (10e), §61 (10f).
-PERMISSION-CONTRACT §47 (10a), §48 (10c), §49 (10e), §50 (10f). Migrations take the next free prefix after main's newest at landing
+PERMISSION-CONTRACT §47 (10a), §48 (10c), §49 (10e), §51 (10f). Migrations take the next free prefix after main's newest at landing
 (`lint-migration-names.mjs` after every rebase). Branches `dw/10*`.
 
 **Traps to carry.**
@@ -1732,7 +1732,7 @@ companies. So a head in company A who is also a member of company B reads B's sa
 (`loadLeadSeatUnits`, built in 10e-6), and the suites gain the cross-company case. `personAxisTier` itself is shared with the
 reports and check-ins and has the same blind spot; that wider fix belongs to the reports' owner and is noted on the board.
 
-**10f design (planned 2026-10-18 for DW-D45 and DW-D46; contract written 2026-10-18 as 10f-0: BFF §61 and PERMISSION-CONTRACT §50, both PLANNED; revised the same day for DW-D47 to DW-D49). Built next after 10g-2, strictly once 10g-2 is released (the owner's choice, 2026-10-18).**
+**10f design (planned 2026-10-18 for DW-D45 and DW-D46; contract written 2026-10-18 as 10f-0: BFF §61 and PERMISSION-CONTRACT §51, both PLANNED; revised the same day for DW-D47 to DW-D49). Built next after 10g-2, strictly once 10g-2 is released (the owner's choice, 2026-10-18).**
 - **What exists** (read at `31cc5c94`). `contracts` has `value` (nullable) and `currency`, statuses draft, sent, signed, declined,
   expired and void, and no payment terms. An amendment (`kind = 'amendment'`, drafted by `webdev-amendment.ts`) stores no value.
   An invoice draft is one client's billable hours over a period at one hourly rate, one JSONB line per project; lines have no type
@@ -1757,7 +1757,7 @@ reports and check-ins and has the same blind spot; that wider fix belongs to the
     freelancer and period: a line per project and rate, withholding through `finance_tax_compute()` with the code Finance sets on
     the vendor (DW-D47; no code: no withholding, and the draft shows a warning), each time entry claimed once
     (`time_entries.ap_bill_id`) and frozen while claimed. A wrong draft is discarded; approval is the existing payables path.
-  - **No new permission** (PERMISSION-CONTRACT §50): `contract` `update`, `invoice` `create` (both, for DW-D49's addition),
+  - **No new permission** (PERMISSION-CONTRACT §51): `contract` `update`, `invoice` `create` (both, for DW-D49's addition),
     `finance_ap` `vendor_master`, `bill_entry` and `approve`.
 - **Found in the code, fixed by 10f.** `PATCH contracts/:id {status: 'void', value: …}` rewrites a signed contract's value while
   voiding it (the money and term columns now freeze at send). `POST invoices` validates the body before it authorizes. No screen
@@ -1971,7 +1971,7 @@ These are built in code but give no real data until someone outside engineering 
 
 ## Decision log
 
-- **2026-10-18 (owner, first-hand, on DW-10f's owner questions):** DW-D47 (withholding on a freelancer bill follows the tax code Finance sets on the freelancer's vendor; no code, no withholding, and the draft shows a warning), DW-D48 (no mixed invoices: instalments or hours; the hourly draft stays as an explicit exception) and DW-D49 (Finance may add a payment schedule once to an already-signed agreement with a value and none: it adds up to the value, who and when are recorded, and it is then frozen with its own hash; the only way a signed contract's schedule changes), all §11.4; BFF §61 and PERMISSION-CONTRACT §50 revised to match. The other four questions keep their defaults (BFF §61.15). 10f is built next after 10g-2, once 10g-2 is released (§12.2, "10f design").
+- **2026-10-18 (owner, first-hand, on DW-10f's owner questions):** DW-D47 (withholding on a freelancer bill follows the tax code Finance sets on the freelancer's vendor; no code, no withholding, and the draft shows a warning), DW-D48 (no mixed invoices: instalments or hours; the hourly draft stays as an explicit exception) and DW-D49 (Finance may add a payment schedule once to an already-signed agreement with a value and none: it adds up to the value, who and when are recorded, and it is then frozen with its own hash; the only way a signed contract's schedule changes), all §11.4; BFF §61 and PERMISSION-CONTRACT §51 revised to match. The other four questions keep their defaults (BFF §61.15). 10f is built next after 10g-2, once 10g-2 is released (§12.2, "10f design").
 - **2026-10-18 (owner, first-hand, on DW-10e's owner questions):** DW-D43 (heads also see what their department sent: DW-10e-6, from the requesting company's own lead seats), DW-D44 (the portal shows group clients their work like any client's), DW-D45 (clients pay the agency per contract: a payment schedule on the signed agreement becomes fixed-fee invoice lines; time logs count effort and pay freelancers; Billable unchanged, §60.12 step 7 withdrawn) and DW-D46 (freelancers' logged hours draft their vendor bill). DW-D45 and DW-D46 are planned as DW-10f, built later ("Plan it, build later"), §11.4 and §12.2.
 - **2026-10-17 (owner, first-hand, on DW-10e's live setup):** go for the live setup ("do all of it": read the assignments, create the holding's client record at the agency, create the four routes, one labelled drive), and DW-D42 (signers: the company admins), §11.4. 2026-10-18: the holding has no company admin, so the owner named hansel@ for both. Done on live 2026-10-18 (BFF §60.12).
 - **2026-10-16 (owner, first-hand, during the build):** DW-D38: no pilot week and no opt-in; the new layout is the only layout and the classic layout's code is removed now (§11.4, §12.1). Supersedes DW-D7's pilot week and two-release grace.
