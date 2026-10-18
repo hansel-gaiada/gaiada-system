@@ -4,8 +4,8 @@
 // keep working it through §32's routes under P's URL, unchanged. Rules, parsing and SQL are in work-requests-outbound.service.ts.
 //
 // ── TWO INDEPENDENT WALLS (§60.1 decision 3) ──────────────────────────────────────────────────────────────────────────────
-//   * WHO: Cerbos, on H only — `send_across` to send, §36's `read` to read (narrowed by `read_across`, DW-D40: see
-//     `outboundReadScope`), §36's `cancel` to cancel. No rule, attribute or `inTenant` condition changed; the route and the
+//   * WHO: Cerbos, on H only — `send_across` to send, §36's `read` to read (narrowed by `read_across`, DW-D40, and by H's own
+//     lead seats, DW-D43: see `outboundReadScope`), §36's `cancel` to cancel. No rule, attribute or `inTenant` condition changed; the route and the
 //     client never reach Cerbos.
 //   * WHERE: the ROUTE (an active service assignment with a routing key, target = H), resolved here, and re-checked by the
 //     database's `work_requests_route_guard` (PD060 route, PD062 client) when the row is written.
@@ -254,7 +254,7 @@ export class WorkRequestsOutboundController {
   }
 
   // ═══════════════════════════════════════════════ READS ═══════════════════════════════════════════════
-  // Every read: §36's `read` on H first, then the DW-D40 tier (`outboundReadScope`, directly or through
+  // Every read: §36's `read` on H first, then the DW-D40/DW-D43 tier (`outboundReadScope`, directly or through
   // `findVisibleOutbound`).
 
   /** §60.5 `GET requests/outbound`: 200 `{scope, rows}`, newest first, at most 200 in all (each provider's read is limited to
@@ -265,8 +265,8 @@ export class WorkRequestsOutboundController {
     const q = await mapRules(async () => out.parseOutboundListQuery(query ?? {}));
     const indexH = await withTenants([tenantId], (c) => svc.loadOrgIndex(c, tenantId));
     if (q.unitId) await mapRules(async () => svc.requireFilterDepartment(indexH, q.unitId as string));
-    const scope = await out.outboundReadScope(req.principal, tenantId);
-    const filter = out.outboundFilter(q, scope, req.principal.userId as string);
+    const tier = await out.outboundReadScope(req.principal, tenantId);
+    const filter = out.outboundFilter(q, tier, req.principal.userId as string);
     const all: out.OutboundRow[] = [];
     for (const provider of await out.loadRouteProviders(tenantId)) {
       const rows = await withTenants([provider.id], async (c) => {
@@ -276,10 +276,12 @@ export class WorkRequestsOutboundController {
       all.push(...rows);
     }
     all.sort((a, b) => (a.createdAt === b.createdAt ? (a.id < b.id ? 1 : -1) : (a.createdAt ?? "") < (b.createdAt ?? "") ? 1 : -1));
-    return { scope, rows: all.slice(0, svc.LIST_LIMIT) };
+    return { scope: tier.scope, rows: all.slice(0, svc.LIST_LIMIT) };
   }
 
-  /** §60.5 `GET requests/outbound/summary?unitId=`: 200 `{scope, sent: {open}}`. An honest reader: a number or a failure. */
+  /** §60.5 `GET requests/outbound/summary?unitId=`: 200 `{scope, sent: {open}}`. An honest reader: a number or a failure. Every
+   *  open request from the department when the tier reaches it (`company`, or `unit` and the department is one the caller
+   *  heads); otherwise only the caller's own. */
   @Get("outbound/summary")
   async summary(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("unitId") unitIdQ?: string) {
     await authorize(req.principal, resource(tenantId), "read");
@@ -288,13 +290,13 @@ export class WorkRequestsOutboundController {
       if (!unitId) throw rule(400, "unit_invalid", "unitId (a department of your company) is required", "unitId");
       svc.requireFilterDepartment(await withTenants([tenantId], (c) => svc.loadOrgIndex(c, tenantId)), unitId);
     });
-    const scope = await out.outboundReadScope(req.principal, tenantId);
-    const onlyBy = scope === "own" ? (req.principal.userId as string) : null;
+    const tier = await out.outboundReadScope(req.principal, tenantId);
+    const onlyBy = out.tierReachesUnit(tier, unitId) ? null : (req.principal.userId as string);
     let open = 0;
     for (const provider of await out.loadRouteProviders(tenantId)) {
       open += await withTenants([provider.id], (c) => out.countOpenFromUnit(c, provider.id, tenantId, unitId as string, onlyBy));
     }
-    return { scope, sent: { open } };
+    return { scope: tier.scope, sent: { open } };
   }
 
   /** §60.5 `GET requests/outbound/:id`: the sender's row, plus `brief`, `form`, `declineReason` and the delivered assets with
@@ -478,8 +480,8 @@ export class WorkRequestsOutboundController {
   // ═══════════════════════════════════════════════ helpers ═══════════════════════════════════════════════
 
   /** Every id route's gate (§60.4): `read` on H FIRST (so an absent id is 403 to a caller who may not read H's requests, never
-   *  a 404 oracle), then the row as the caller may see it (`findVisibleOutbound`: the caller's own, or any with `read_across`),
-   *  else 404 `request_not_found`, as for an absent row. */
+   *  a 404 oracle), then the row as the caller may see it (`findVisibleOutbound`: the caller's own, any with `read_across`, or
+   *  one sent from a unit the caller heads), else 404 `request_not_found`, as for an absent row. */
   private async visible(req: FastifyRequest, tenantId: string, id: string): Promise<out.VisibleOutbound> {
     await authorize(req.principal, resource(tenantId, isUuidShaped(id) ? { id: id.toLowerCase() } : {}), "read");
     const v = await out.findVisibleOutbound(req.principal, tenantId, id);

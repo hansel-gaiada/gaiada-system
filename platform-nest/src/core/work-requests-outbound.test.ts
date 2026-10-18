@@ -14,7 +14,10 @@
 //   * routes, created through ORG-13 by a platform_admin: P's Creatives -> H (`asset_requests`), P's Web Dev -> H
 //     (`engineering_requests`), P's Creatives -> T (`asset_requests`);
 //   * THE COLLISION PROBE: H's department `d-creative` has the same node id as P's Creatives, A is placed in it, and P's head of
-//     Creatives (`pLead`, org_unit_lead of `d-creative`) is also a member of H.
+//     Creatives (`pLead`, org_unit_lead of `d-creative` and the lead seat on P's Creatives) is also a member of H, placed there;
+//   * DW-10e-6 (DW-D43), the head tier: `hLead` holds H's lead seat on `d-creative`; `hFinHead` H's lead seat on `d-fin`; `hRetired`
+//     a lead seat on `d-creative` whose position is retired; `hEnded` one whose assignment ended (`valid_to` set). The head tier
+//     reads H's own lead seats only, never the `org_unit_lead` role: pLead's grant and P seat make it no head in H.
 //
 // Standard applied: a 200 is not a pass. Write claims are read back through `adminPool()` (RLS bypassed: what committed), refusals
 // assert nothing was written, and every 403 is ALSO sent with a malformed body, so validation can never pre-empt authorization.
@@ -36,6 +39,8 @@ import { FIXTURE_TERMS_SHA256 } from "../testing/contract-fixtures";
 import { setStorageForTest, storage, type StorageBackend } from "./storage";
 import { assetRequestsOnTime } from "../modules/reports/dept-kpi-readers/delivery/work-requests-on-time";
 import { todayIso } from "./dept-resolution";
+import { loadLeadSeatUnits } from "./unit-reach";
+import { loadOrgStructure } from "../modules/reports/person-scope";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -54,6 +59,7 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
   // H
   let hAdmin: string; let hManager: string; let hOwner: string; let memberA: string; let memberB: string; let hViewer: string;
   let hLead: string; let hBot: string; let hAuto: string; let hSigner: string;
+  let hFinHead: string; let hRetired: string; let hEnded: string;
   // P
   let pAdmin: string; let pLead: string; let pWebHead: string; let pAssignee: string; let pPlatform: string;
   // T and R
@@ -137,8 +143,9 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
         // the COLLISION: same node id as P's Creatives
         dept("d-creative", "Holding Creative Desk", [
           person(memberA, "Member A"), person(memberB, "Member B"), person(hLead, "H Desk Head"), person(pLead, "P Creative Head"),
+          person(hRetired, "H Retired Head"), person(hEnded, "H Ended Head"),
         ]),
-        dept("d-fin", "Holding Finance", [person(hManager, "H Manager")]),
+        dept("d-fin", "Holding Finance", [person(hManager, "H Manager"), person(hFinHead, "H Finance Head")]),
       ],
     },
   });
@@ -167,6 +174,8 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
     memberB = await u("member-b@across.test", "Member B"); hViewer = await u("h-viewer@across.test", "H Viewer");
     hLead = await u("h-lead@across.test", "H Desk Head"); hBot = await u("h-bot@across.test", "H Bot");
     hAuto = await u("h-auto@across.test", "H Automation"); hSigner = await u("h-signer@across.test", "H Signer");
+    hFinHead = await u("h-finhead@across.test", "H Finance Head"); hRetired = await u("h-retired@across.test", "H Retired Head");
+    hEnded = await u("h-ended@across.test", "H Ended Head");
     pAdmin = await u("p-admin@across.test", "P Admin"); pLead = await u("p-lead@across.test", "P Creative Head");
     pWebHead = await u("p-webhead@across.test", "P Web Head"); pAssignee = await u("p-assignee@across.test", "P Assignee");
     pPlatform = await u("p-platform@across.test", "P Platform");
@@ -174,7 +183,7 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
     tBot = await u("t-bot@across.test", "T Bot"); tAuto = await u("t-auto@across.test", "T Automation");
     rMember = await u("r-member@across.test", "R Member"); otherContact = await u("other-contact@across.test", "Other Contact");
 
-    for (const x of [hAdmin, hManager, hOwner, memberA, memberB, hViewer, hLead, hBot, hAuto, hSigner, pLead]) await addMembership(H, x);
+    for (const x of [hAdmin, hManager, hOwner, memberA, memberB, hViewer, hLead, hBot, hAuto, hSigner, pLead, hFinHead, hRetired, hEnded]) await addMembership(H, x);
     for (const x of [pAdmin, pLead, pWebHead, pAssignee, pPlatform]) await addMembership(P, x);
     for (const x of [tMember, tViewer, tBot, tAuto]) await addMembership(T, x);
     await addMembership(R, rMember);
@@ -187,7 +196,7 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
     await grantRole(hAdmin, role.admin, "company", H);
     await grantRole(hManager, role.manager, "company", H);
     await grantRole(hOwner, role.owner, "company", H); // permission-native: reaches work_request only through the mirrors
-    for (const x of [memberA, memberB, hLead, hBot, hSigner, pLead]) await grantRole(x, role.member, "company", H);
+    for (const x of [memberA, memberB, hLead, hBot, hSigner, pLead, hFinHead, hRetired, hEnded]) await grantRole(x, role.member, "company", H);
     await grantRole(hViewer, role.viewer, "company", H);
     await grantRole(hLead, role.lead, "org_unit", "d-creative"); // H's head of A's department: org_unit_lead ONLY (no manager)
     await grantRole(hAuto, role.admin, "company", H);
@@ -203,7 +212,7 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
     await q(`UPDATE users SET kind = 'bot' WHERE id = ANY($1::uuid[])`, [[hBot, tBot]]);
     await q(`UPDATE users SET kind = 'automation' WHERE id = ANY($1::uuid[])`, [[hAuto, tAuto]]);
     // MON-00a: the permission arm is root-bounded; anchor every person on their own company.
-    await q(`UPDATE users SET home_company_id = $1 WHERE id = ANY($2::uuid[])`, [H, [hAdmin, hManager, hOwner, memberA, memberB, hViewer, hLead, hBot, hAuto, hSigner]]);
+    await q(`UPDATE users SET home_company_id = $1 WHERE id = ANY($2::uuid[])`, [H, [hAdmin, hManager, hOwner, memberA, memberB, hViewer, hLead, hBot, hAuto, hSigner, hFinHead, hRetired, hEnded]]);
     await q(`UPDATE users SET home_company_id = $1 WHERE id = ANY($2::uuid[])`, [P, [pAdmin, pLead, pWebHead, pAssignee, pPlatform]]);
     await q(`UPDATE users SET home_company_id = $1 WHERE id = ANY($2::uuid[])`, [T, [tMember, tViewer, tBot, tAuto]]);
     await q(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [R, rMember]);
@@ -214,13 +223,21 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
     await withTenants([R], (c) => applyOrgStructure(c, R, sanitizeStructure({ root: { id: "root", name: "Other", kind: "company", children: [dept("d-creative", "Other Creatives")] } })));
 
     // Heads: an active lead seat on each receiving department (P), and on A's department in H.
-    const seat = async (tenant: string, unit: string, holder: string) => {
-      const pos = (await q(`INSERT INTO positions (tenant_id, unit_node_id, title, is_lead, status) VALUES ($1, $2, 'Head', true, 'active') RETURNING id`, [tenant, unit])).rows[0].id;
-      await q(`INSERT INTO position_assignments (tenant_id, position_id, user_id) VALUES ($1, $2, $3)`, [tenant, pos, holder]);
+    const seat = async (tenant: string, unit: string, holder: string, o: { status?: string; ended?: boolean } = {}) => {
+      const pos = (await q(`INSERT INTO positions (tenant_id, unit_node_id, title, is_lead, status) VALUES ($1, $2, 'Head', true, $3) RETURNING id`, [tenant, unit, o.status ?? "active"])).rows[0].id;
+      if (o.ended) {
+        await q(`INSERT INTO position_assignments (tenant_id, position_id, user_id, valid_from, valid_to) VALUES ($1, $2, $3, current_date - 30, current_date - 1)`, [tenant, pos, holder]);
+      } else {
+        await q(`INSERT INTO position_assignments (tenant_id, position_id, user_id) VALUES ($1, $2, $3)`, [tenant, pos, holder]);
+      }
     };
     await seat(P, "d-creative", pLead);
     await seat(P, "d-web", pWebHead);
     await seat(H, "d-creative", hLead);
+    // DW-10e-6: H's other heads, live and dead
+    await seat(H, "d-fin", hFinHead);
+    await seat(H, "d-creative", hRetired, { status: "retired" });
+    await seat(H, "d-creative", hEnded, { ended: true });
 
     // P's client records (a platform operator's link, direct): H's, T's, and an unrelated one.
     cH = await createClient(P, "Holding at Agency");
@@ -560,20 +577,124 @@ describe.skipIf(!TEST_URL)("DW-10e-2 requests across group companies (HTTP, real
       }
     });
 
-    it("the lead-only head of A's department lists only their own; the person who leads P's colliding department gains nothing in H", async () => {
+    it("DW-D43: the head of A's department (H's lead seat on d-creative) reads every request it sent, in box=all, box=sent and by id (scope unit)", async () => {
       const lead = await listIds(hLead);
-      expect(lead.scope).toBe("own");
-      expect(lead.ids).toEqual([]);
-      expect((await call("GET", `${out()}/${aAsset}`, hLead)).statusCode).toBe(404);
+      expect(lead.scope).toBe("unit");
+      expect(lead.ids).toEqual(expect.arrayContaining([aAsset, aEng, bothReq]));
+      // never another company's request, nor P's own
+      expect(lead.ids).not.toContain(tReq);
+      expect(lead.ids).not.toContain(pOwn);
+      const sent = await listIds(hLead, "box=sent&unitId=d-creative&status=all");
+      expect(sent.scope).toBe("unit");
+      expect(sent.ids).toEqual(expect.arrayContaining([aAsset, aEng, bothReq]));
+      // the sent box of a department they do not head holds only their own (none)
+      expect((await listIds(hLead, "box=sent&unitId=d-fin&status=all")).ids).toEqual([]);
+      // box=mine stays their own
+      expect((await listIds(hLead, "box=mine&status=all")).ids).toEqual([]);
+      const d = await call("GET", `${out()}/${aAsset}`, hLead);
+      expect(d.statusCode, d.body).toBe(200);
+      expect(d.json()).toMatchObject({ id: aAsset, requestedBy: { id: memberA } });
+      expect((await call("GET", `${out()}/${aAsset}/files`, hLead)).statusCode).toBe(200);
+      expect((await call("GET", `${out()}/${tReq}`, hLead)).statusCode).toBe(404);
+      // the wide tier is unchanged
+      const sentAdmin = await listIds(hAdmin, "box=sent&unitId=d-creative&status=all");
+      expect(sentAdmin.scope).toBe("company");
+      expect(sentAdmin.ids).toEqual(expect.arrayContaining([aAsset, aEng, bothReq]));
+    });
+
+    it("DW-D43: the summary counts every open request from a department the caller heads, and only their own from any other", async () => {
+      const all = await count(`SELECT count(*) AS n FROM work_requests WHERE tenant_id = $1 AND requester_tenant_id = $2 AND requester_unit_id = 'd-creative' AND status = 'open' AND deleted_at IS NULL`, [P, H]);
+      expect(all).toBeGreaterThan(0);
+      expect((await call("GET", `${out()}/summary?unitId=d-creative`, hLead)).json()).toEqual({ scope: "unit", sent: { open: all } });
+      expect((await call("GET", `${out()}/summary?unitId=d-fin`, hLead)).json()).toEqual({ scope: "unit", sent: { open: 0 } });
+      expect((await call("GET", `${out()}/summary?unitId=d-creative`, hFinHead)).json()).toEqual({ scope: "unit", sent: { open: 0 } });
+    });
+
+    it("DW-D43: the head of ANOTHER department of H does not see A's requests (absent from every list, 404 by id)", async () => {
+      const fin = await listIds(hFinHead);
+      expect(fin.scope).toBe("unit");
+      for (const id of [aAsset, aEng, bothReq]) expect(fin.ids).not.toContain(id);
+      expect((await listIds(hFinHead, "box=sent&unitId=d-creative&status=all")).ids).toEqual([]);
+      for (const id of [aAsset, aEng]) {
+        const d = await call("GET", `${out()}/${id}`, hFinHead);
+        expect(d.statusCode, d.body).toBe(404);
+        expect(reason(d)).toBe("request_not_found");
+      }
+    });
+
+    it("DW-D43: a retired lead position, an ended lead assignment, or placement alone is no head (scope own)", async () => {
+      for (const as of [hRetired, hEnded, memberB]) {
+        const l = await listIds(as);
+        expect(l.scope, as).toBe("own");
+        expect(l.ids).not.toContain(aAsset);
+        expect((await call("GET", `${out()}/${aAsset}`, as)).statusCode, as).toBe(404);
+        expect((await call("GET", `${out()}/summary?unitId=d-creative`, as)).json()).toEqual({ scope: "own", sent: { open: 0 } });
+      }
+    });
+
+    it("THE LEAK PROBE: P's head of the colliding d-creative (org_unit_lead grant + P's lead seat), a member of H placed in H's d-creative, is NO head in H", async () => {
       const both = await listIds(pLead);
       expect(both.scope).toBe("own");
       expect(both.ids).toEqual([bothReq]);
       expect((await call("GET", `${out()}/${aAsset}`, pLead)).statusCode).toBe(404);
-      // the sent box for A's department: every H request from it for the wide tier, only one's own for the narrow
-      const sent = await listIds(hLead, "box=sent&unitId=d-creative&status=all");
-      expect(sent.ids).toEqual([]);
-      const sentAdmin = await listIds(hAdmin, "box=sent&unitId=d-creative&status=all");
-      expect(sentAdmin.ids).toEqual(expect.arrayContaining([aAsset, aEng, bothReq]));
+      expect((await listIds(pLead, "box=sent&unitId=d-creative&status=all")).ids).toEqual([bothReq]);
+      expect((await call("GET", `${out()}/summary?unitId=d-creative`, pLead)).json()).toEqual({ scope: "own", sent: { open: 1 } });
+    });
+
+    it("DW-D43 loadLeadSeatUnits over real Postgres (app role): each company's OWN active lead seats, in its own scope", async () => {
+      const seats = (tenant: string, userId: string) =>
+        withTenants([tenant], async (c) => [...(await loadLeadSeatUnits(c, tenant, userId, await loadOrgStructure(c, tenant)))].sort());
+      expect(await seats(H, hLead)).toEqual(["d-creative"]);
+      expect(await seats(H, hFinHead)).toEqual(["d-fin"]);
+      // P's head of Creatives: a head in P, none in H (the same node id, another company's seat)
+      expect(await seats(P, pLead)).toEqual(["d-creative"]);
+      expect(await seats(H, pLead)).toEqual([]);
+      // a retired position, an ended assignment, a placed member, a company admin with no seat
+      for (const x of [hRetired, hEnded, memberB, hAdmin]) expect(await seats(H, x), x).toEqual([]);
+      // H's seats are invisible from P's scope (FORCE RLS): the helper only ever answers for the company it runs in
+      const crossed = await withTenants([P], async (c) => [...(await loadLeadSeatUnits(c, H, hLead, null))]);
+      expect(crossed).toEqual([]);
+    });
+
+    it("DW-D43: a head may read a colleague's request but not cancel it (403, nothing changes)", async () => {
+      const r = await call("POST", `${out()}/${aAsset}/cancel`, hLead);
+      expect(r.statusCode, r.body).toBe(403);
+      expect((await row(aAsset)).status).toBe("open");
+    });
+
+    it("DW-D43 act-for: an agent acting for a head reads no wider than the head; acting for a member, only its own", async () => {
+      await linkIdentity(hAuto, "whatsapp", "+62-across-auto", true);
+      await linkIdentity(hBot, "whatsapp", "+62-across-bot", true);
+      const obo = (ext: string, actFor?: string) => ({
+        ...svc, "x-obo-provider": "whatsapp", "x-obo-external-id": ext, ...(actFor ? { "x-act-for": actFor } : {}),
+      });
+      const list = async (headers: Record<string, string>, query = "box=all&status=all") => {
+        const r = await app.inject({ method: "GET", url: `${out()}?${query}`, headers });
+        expect(r.statusCode, r.body).toBe(200);
+        const b = r.json() as { scope: string; rows: Array<{ id: string }> };
+        return { scope: b.scope, ids: b.rows.map((x) => x.id) };
+      };
+      // the automation account holds company_admin: alone it reads everything H sent
+      expect((await list(obo("+62-across-auto"))).scope).toBe("company");
+      // acting for the head of d-creative: the head's tier, never wider
+      const forHead = await list(obo("+62-across-auto", hLead));
+      expect(forHead.scope).toBe("unit");
+      expect(forHead.ids).toEqual(expect.arrayContaining([aAsset, aEng, bothReq]));
+      expect(forHead.ids).not.toContain(tReq);
+      const viaId = await app.inject({ method: "GET", url: `${out()}/${aAsset}`, headers: obo("+62-across-auto", hLead) });
+      expect(viaId.statusCode, viaId.body).toBe(200);
+      // acting for the head of ANOTHER department: A's requests are out of reach
+      const forFin = await list(obo("+62-across-auto", hFinHead));
+      expect(forFin.scope).toBe("unit");
+      expect(forFin.ids).not.toContain(aAsset);
+      expect((await app.inject({ method: "GET", url: `${out()}/${aAsset}`, headers: obo("+62-across-auto", hFinHead) })).statusCode).toBe(404);
+      // acting for a plain member: own; acting for the company admin: company
+      expect((await list(obo("+62-across-auto", memberB))).scope).toBe("own");
+      expect((await list(obo("+62-across-auto", hAdmin))).scope).toBe("company");
+      // a bot holding only member, acting for the head: the bot's own tier (own) bounds it
+      const bot = await list(obo("+62-across-bot", hLead));
+      expect(bot.scope).toBe("own");
+      expect(bot.ids).not.toContain(aAsset);
     });
 
     it("the detail carries none of the receiver's ids and no amount (a key-set pin)", async () => {

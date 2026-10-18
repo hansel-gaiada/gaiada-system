@@ -7,13 +7,15 @@
 //   * the sender's row: its exact key set, and none of the receiver's ids, amounts or contract ids in it;
 //   * tenancy, statically: every statement on `work_requests` in the sender files carries `SENDER_SCOPE` (`tenant_id = P` AND
 //     `requester_tenant_id = H`); every `withTenants` call names exactly ONE company; nothing uses `crossRoot`; and every sender
-//     read goes through `outboundReadScope`.
+//     read goes through `outboundReadScope`;
+//   * DW-10e-6 (DW-D43): the three read tiers (`company`, `unit`, `own`), the act-for intersection, and statically that the head
+//     tier reads H's own lead seats and never the `org_unit_lead` role (whose grant carries no company).
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  SENDER_SCOPE, agreementState, liveAgreement, outboundAssetHref, outboundFilter, parseFormForKind, parseOutboundCreate,
-  parseOutboundListQuery, priceState, shapeOutbound,
+  COMPANY_TIER, OWN_TIER, SENDER_SCOPE, agreementState, headTier, liveAgreement, narrowTier, outboundAssetHref, outboundFilter,
+  parseFormForKind, parseOutboundCreate, parseOutboundListQuery, priceState, shapeOutbound, tierReachesUnit, type OutboundTier,
 } from "./work-requests-outbound.service";
 import { WorkRequestRuleError, indexOrgTree, type RequestRow } from "./work-requests.service";
 
@@ -85,14 +87,69 @@ describe("DW-10e §60.5 GET requests/outbound: the query", () => {
 
   it("the narrowing: scope own ALWAYS binds requested_by; scope company binds it only for box=mine; parameters start at $3", () => {
     const me = "0190a000-0000-7000-8000-0000000000e1";
-    const own = outboundFilter({ box: "all", unitId: null, status: "all", kind: null }, "own", me);
+    const own = outboundFilter({ box: "all", unitId: null, status: "all", kind: null }, OWN_TIER, me);
     expect(own).toEqual({ sql: " AND r.requested_by = $3::uuid", args: [me] });
-    const company = outboundFilter({ box: "all", unitId: null, status: "all", kind: null }, "company", me);
+    const company = outboundFilter({ box: "all", unitId: null, status: "all", kind: null }, COMPANY_TIER, me);
     expect(company).toEqual({ sql: "", args: [] });
-    const mine = outboundFilter({ box: "mine", unitId: null, status: "open", kind: "assets" }, "company", me);
+    const mine = outboundFilter({ box: "mine", unitId: null, status: "open", kind: "assets" }, COMPANY_TIER, me);
     expect(mine).toEqual({ sql: " AND r.requested_by = $3::uuid AND r.status = 'open' AND r.kind = $4", args: [me, "assets"] });
-    const sentOwn = outboundFilter({ box: "sent", unitId: "d-hr", status: "closed", kind: null }, "own", me);
+    const sentOwn = outboundFilter({ box: "sent", unitId: "d-hr", status: "closed", kind: null }, OWN_TIER, me);
     expect(sentOwn).toEqual({ sql: " AND r.requested_by = $3::uuid AND r.requester_unit_id = $4 AND r.status <> 'open'", args: [me, "d-hr"] });
+  });
+
+  it("DW-D43 the unit tier binds the caller's own OR a row sent from a unit they head, as ONE parenthesised, parameterised clause", () => {
+    const me = "0190a000-0000-7000-8000-0000000000e1";
+    const head = headTier(new Set(["dv-fe", "d-web"]));
+    const all = outboundFilter({ box: "all", unitId: null, status: "all", kind: null }, head, me);
+    expect(all).toEqual({ sql: " AND (r.requested_by = $3::uuid OR r.requester_unit_id = ANY($4::text[]))", args: [me, ["d-web", "dv-fe"]] });
+    const sent = outboundFilter({ box: "sent", unitId: "d-web", status: "open", kind: "engineering" }, head, me);
+    expect(sent).toEqual({
+      sql: " AND (r.requested_by = $3::uuid OR r.requester_unit_id = ANY($4::text[])) AND r.requester_unit_id = $5 AND r.status = 'open' AND r.kind = $6",
+      args: [me, ["d-web", "dv-fe"], "d-web", "engineering"],
+    });
+    // box=mine stays the caller's own, whatever the tier
+    const mine = outboundFilter({ box: "mine", unitId: null, status: "all", kind: null }, head, me);
+    expect(mine).toEqual({ sql: " AND r.requested_by = $3::uuid", args: [me] });
+    // a unit id never reaches the SQL text, only the parameters
+    const hostile = outboundFilter({ box: "all", unitId: null, status: "all", kind: null }, headTier(new Set(["x'); DROP TABLE work_requests; --"])), me);
+    expect(hostile.sql).not.toContain("DROP");
+  });
+});
+
+describe("DW-10e-6 (DW-D43) the read tiers", () => {
+  const units = (...u: string[]) => new Set(u);
+  const shape = (t: OutboundTier) => ({ scope: t.scope, ledUnits: [...t.ledUnits].sort() });
+
+  it("headTier: a non-empty seat set is unit, an empty one is own", () => {
+    expect(shape(headTier(units("d-web", "dv-fe")))).toEqual({ scope: "unit", ledUnits: ["d-web", "dv-fe"] });
+    expect(headTier(units())).toBe(OWN_TIER);
+    expect(shape(COMPANY_TIER)).toEqual({ scope: "company", ledUnits: [] });
+    expect(shape(OWN_TIER)).toEqual({ scope: "own", ledUnits: [] });
+  });
+
+  it("narrowTier (act-for): never wider than either side; company only when both are; unit sets intersect; an empty intersection is own", () => {
+    const web = headTier(units("d-web", "dv-fe"));
+    const fe = headTier(units("dv-fe", "d-seo"));
+    const seo = headTier(units("d-seo"));
+    expect(narrowTier(COMPANY_TIER, COMPANY_TIER)).toBe(COMPANY_TIER);
+    for (const t of [COMPANY_TIER, web, OWN_TIER]) {
+      expect(narrowTier(t, OWN_TIER)).toBe(OWN_TIER);
+      expect(narrowTier(OWN_TIER, t)).toBe(OWN_TIER);
+    }
+    expect(shape(narrowTier(COMPANY_TIER, web))).toEqual(shape(web));
+    expect(shape(narrowTier(web, COMPANY_TIER))).toEqual(shape(web));
+    expect(shape(narrowTier(web, fe))).toEqual({ scope: "unit", ledUnits: ["dv-fe"] });
+    expect(narrowTier(web, seo)).toBe(OWN_TIER);
+  });
+
+  it("tierReachesUnit: company reaches every unit; unit only its led units (never a null department); own none", () => {
+    const web = headTier(units("d-web", "dv-fe"));
+    expect(tierReachesUnit(COMPANY_TIER, "d-anything")).toBe(true);
+    expect(tierReachesUnit(COMPANY_TIER, null)).toBe(true);
+    expect(tierReachesUnit(web, "dv-fe")).toBe(true);
+    expect(tierReachesUnit(web, "d-seo")).toBe(false);
+    expect(tierReachesUnit(web, null)).toBe(false);
+    expect(tierReachesUnit(OWN_TIER, "d-web")).toBe(false);
   });
 });
 
@@ -238,6 +295,26 @@ describe("DW-10e §60.11 Tenancy: static pins of the sender files", () => {
     const svcCode = code(files.service);
     const find = svcCode.slice(svcCode.indexOf("export async function findVisibleOutbound("));
     expect(find).toContain("outboundReadScope(principal, requesterTenantId, id)");
+    expect(find).toContain("tierReachesUnit(tier, row.requester_unit_id)");
+    // the summary counts the whole department only when the tier reaches it
+    expect(handler("summary")).toContain("out.tierReachesUnit(tier, unitId) ? null : (req.principal.userId as string)");
+  });
+
+  it("DW-D43: the head tier reads H's own lead seats (loadLeadSeatUnits, in H's scope), never the org_unit_lead role", () => {
+    const svcCode = code(files.service);
+    const tierOf = svcCode.slice(svcCode.indexOf("async function tierOf("), svcCode.indexOf("export async function outboundReadScope("));
+    expect(tierOf).toMatch(/withTenants\(\[tenantId\], async \(c\) => loadLeadSeatUnits\(c, tenantId, userId, await loadOrgStructure\(c, tenantId\)\)\)/);
+    for (const text of Object.values(files)) {
+      // an org_unit grant carries no company and node ids repeat across companies: none of these may decide a sender's tier
+      for (const banned of ["org_unit_lead", "requiresUnitNarrowing", "loadLedUnitScope", "personAxisTier", "callerReachesUnit", "loadUnitReach"]) {
+        expect(code(text)).not.toContain(banned);
+      }
+    }
+    const seats = code(read("unit-reach.ts"));
+    const fn = seats.slice(seats.indexOf("export async function loadLeadSeatUnits("), seats.indexOf("export async function loadUnitReach("));
+    expect(fn).toMatch(/p\.tenant_id = \$1 AND p\.is_lead AND p\.status = 'active' AND pa\.valid_to IS NULL AND pa\.user_id = \$2/);
+    expect(fn).toContain("pa.position_id = p.id AND pa.tenant_id = p.tenant_id");
+    expect(fn).not.toContain("roles");
   });
 
   it("every handler authorizes FIRST, on the requesting company (validation never pre-empts a 403)", () => {

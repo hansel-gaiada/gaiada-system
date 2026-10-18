@@ -65,6 +65,40 @@ export interface UnitReach {
   reaches(unitNodeId: string): boolean;
 }
 
+/**
+ * DW-10e-6 (DW-D43, PERMISSION-CONTRACT §49) — the units a person HEADS in one company, read from that company's OWN lead seats:
+ * every active `positions.is_lead` seat in `tenantId` held by `userId` through an assignment with no `valid_to`, each seat's unit
+ * expanded by `collectUnitSubtree` over `structure` (that company's tree, `loadOrgStructure`), so a division head also covers the
+ * units under it. An empty set means "heads nothing here".
+ *
+ * Company-anchored on purpose. It never reads an `org_unit_lead` grant: that grant carries no company (scopeType `org_unit`, the
+ * scopeId a bare node id) and node ids repeat across companies (`d-webdev`, `d-hr`), so a grant-based answer would make the head of
+ * another company's same-id department a head here. Placement alone is not a seat either. A retired position (`status` other than
+ * `active`) or an ended assignment (`valid_to` set) does not count.
+ *
+ * ⚠ CALLER CONTRACT: `c` must be inside `withTenants([tenantId], ...)` (positions and position_assignments are FORCE RLS: an unset
+ * tenant GUC reads ZERO seats, which here is a silent "heads nothing").
+ */
+export async function loadLeadSeatUnits(
+  c: PoolClient,
+  tenantId: string,
+  userId: string | null,
+  structure: unknown,
+): Promise<Set<string>> {
+  const led = new Set<string>();
+  if (!userId) return led;
+  const { rows } = await c.query<{ unit_node_id: string }>(
+    `SELECT DISTINCT p.unit_node_id
+       FROM positions p
+       JOIN position_assignments pa ON pa.position_id = p.id AND pa.tenant_id = p.tenant_id
+      WHERE p.tenant_id = $1 AND p.is_lead AND p.status = 'active' AND pa.valid_to IS NULL AND pa.user_id = $2
+      ORDER BY p.unit_node_id`,
+    [tenantId, userId],
+  );
+  for (const r of rows) for (const id of collectUnitSubtree(structure, r.unit_node_id)) led.add(id);
+  return led;
+}
+
 /** The batch form of `callerReachesUnit`: the caller's primary unit and led scope are read once (eagerly), then each unit is a
  *  pure in-memory test. Same predicate, same answer per unit. */
 export async function loadUnitReach(

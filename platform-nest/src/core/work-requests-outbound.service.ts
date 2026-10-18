@@ -10,8 +10,9 @@
 //   2. Each P is then read in P's scope ALONE (`withTenants([P])`), one company per statement, never a two-company tenant set
 //      and never `crossRoot`, with an explicit `r.tenant_id = $1 AND r.requester_tenant_id = $2` predicate (`SENDER_SCOPE`,
 //      $1 = P, $2 = H). No RLS policy is widened: `work_requests` stays under `tenant_isolation` alone (§60.3, decision 5).
-//   3. DW-D40 narrows it further: `outboundReadScope` decides, for EVERY sender read, whether the caller reads everything H
-//      sent (`company`: `read_across` allowed) or only their own (`own`: `r.requested_by = principal`). Another person's
+//   3. DW-D40 and DW-D43 narrow it further: `outboundReadScope` decides, for EVERY sender read, whether the caller reads everything
+//      H sent (`company`: `read_across` allowed), what the departments they head in H sent plus their own (`unit`: active lead
+//      seats in H's own `positions`, read in H's scope), or only their own (`own`: `r.requested_by = principal`). Any other
 //      request is then absent from the lists and 404 by id.
 //
 // Node ids repeat across companies (`d-webdev`), so a node id is only ever compared inside its own company: `to_unit_id`
@@ -24,31 +25,76 @@ import type { PoolClient } from "pg";
 import { withTenants } from "../db";
 import { check, type Resource } from "../rbac/cerbos";
 import { assemblePrincipal, type Principal } from "../rbac/principal";
+import { loadOrgStructure } from "../modules/reports/person-scope";
+import { loadLeadSeatUnits } from "./unit-reach";
 import { REQUEST_ROUTE_KEYS } from "./request-routes";
 import { isUuidShaped } from "./dept-resolution";
 import * as svc from "./work-requests.service";
 
-// ───────────────────────────────────────────── the read tier (DW-D40) ─────────────────────────────────────────────
+// ───────────────────────────────────────────── the read tier (DW-D40, DW-D43) ─────────────────────────────────────────────
 
-export type OutboundScope = "company" | "own";
+export type OutboundScope = "company" | "unit" | "own";
 
-/** DW-D40: `company` when the caller may read EVERY request H sent (`read_across` on `{work_request, H}`: H's company_admin
- *  and manager, the permission-native `owner` through the mirror, `platform_admin`), else `own` (the caller's own requests,
- *  which §36's `read` already covers). THE one helper every sender read goes through.
+/** The caller's read tier over what H sent. `ledUnits` holds the node ids of H the caller heads (each lead seat's unit and its
+ *  subtree in H's tree); it is non-empty exactly when `scope` is `unit`, and empty otherwise. */
+export interface OutboundTier { scope: OutboundScope; ledUnits: ReadonlySet<string> }
+
+const NO_UNITS: ReadonlySet<string> = new Set<string>();
+export const COMPANY_TIER: OutboundTier = Object.freeze({ scope: "company" as const, ledUnits: NO_UNITS });
+export const OWN_TIER: OutboundTier = Object.freeze({ scope: "own" as const, ledUnits: NO_UNITS });
+
+/** A head's tier from their seat set: `unit` with the set when it holds anything, else `own`. */
+export const headTier = (ledUnits: ReadonlySet<string>): OutboundTier =>
+  ledUnits.size > 0 ? { scope: "unit", ledUnits } : OWN_TIER;
+
+/** The act-for rule (pure): the tier is never wider than EITHER side. `company` only when both are; `own` when either is;
+ *  otherwise `unit` over the intersection of the two seat sets (a `company` side contributes the other side's set), and an empty
+ *  intersection is `own`. */
+export function narrowTier(a: OutboundTier, b: OutboundTier): OutboundTier {
+  if (a.scope === "own" || b.scope === "own") return OWN_TIER;
+  if (a.scope === "company") return b;
+  if (b.scope === "company") return a;
+  return headTier(new Set([...a.ledUnits].filter((u) => b.ledUnits.has(u))));
+}
+
+/** Does the tier reach a request sent from `requesterUnitId`, beyond the caller's own (which every tier reads)? */
+export function tierReachesUnit(tier: OutboundTier, requesterUnitId: string | null): boolean {
+  if (tier.scope === "company") return true;
+  return tier.scope === "unit" && requesterUnitId !== null && tier.ledUnits.has(requesterUnitId);
+}
+
+/** One principal's own tier, act-for aside: `company` when `read_across` allows; else `unit` when they hold an active lead seat
+ *  in H (`loadLeadSeatUnits`: H's own `positions.is_lead`, read in H's scope, never the `org_unit_lead` role, whose grant carries
+ *  no company); else `own`. */
+async function tierOf(principal: Principal, tenantId: string, resource: Resource): Promise<OutboundTier> {
+  if ((await check(principal, resource, "read_across")).allow) return COMPANY_TIER;
+  if (!principal.userId) return OWN_TIER;
+  const userId = principal.userId;
+  const led = await withTenants([tenantId], async (c) => loadLeadSeatUnits(c, tenantId, userId, await loadOrgStructure(c, tenantId)));
+  return headTier(led);
+}
+
+/** DW-D40 and DW-D43: THE one helper every sender read goes through. Three tiers, widest first:
+ *   - `company`: the caller may read EVERY request H sent (`read_across` on `{work_request, H}`: H's company_admin and manager,
+ *     the permission-native `owner` through the mirror, `platform_admin`);
+ *   - `unit`: the caller heads departments of H (an active lead seat in H's own `positions`); they read their own requests plus
+ *     every one whose `requester_unit_id` is in `ledUnits`;
+ *   - `own`: everyone else, the caller's own requests only (which §36's `read` already covers).
  *
- *  A soft probe through `check()`, not `authorize()`: `own` is a narrowing, not a refusal, so it must not file a denial row
- *  every time a member opens their list. The delegation half of `authorize()` is mirrored (an `x-act-for` caller reads the
- *  company tier only when the acting human may too), so the tier can never be wider than the human's. A Cerbos failure is
- *  NOT swallowed into `own`: a failed read is a failure, never a shorter list presented as whole. */
-export async function outboundReadScope(principal: Principal, tenantId: string, id?: string): Promise<OutboundScope> {
+ *  A soft probe through `check()`, not `authorize()`: a narrower tier is a narrowing, not a refusal, so it must not file a denial
+ *  row every time a member opens their list. The delegation half of `authorize()` is mirrored: an `x-act-for` caller's tier is
+ *  never wider than the acting human's (`narrowTier`). A Cerbos or database failure is NOT swallowed into `own`: a failed read is
+ *  a failure, never a shorter list presented as whole. */
+export async function outboundReadScope(principal: Principal, tenantId: string, id?: string): Promise<OutboundTier> {
   const resource: Resource = { kind: "work_request", tenantId, ...(id ? { id } : {}) };
-  if (!(await check(principal, resource, "read_across")).allow) return "own";
+  const mine = await tierOf(principal, tenantId, resource);
+  if (mine.scope === "own") return OWN_TIER;
   if (principal.actFor && principal.actFor.userId !== principal.userId) {
     const human = await assemblePrincipal(principal.actFor.userId, principal.assurance);
-    if (!human) return "own";
-    if (!(await check({ ...human, via: principal.via }, resource, "read_across")).allow) return "own";
+    if (!human) return OWN_TIER;
+    return narrowTier(mine, await tierOf({ ...human, via: principal.via }, tenantId, resource));
   }
-  return "company";
+  return mine;
 }
 
 // ───────────────────────────────────────────── pure parsing (§60.5) ─────────────────────────────────────────────
@@ -230,12 +276,18 @@ export async function loadRouteProviders(requesterTenantId: string): Promise<Com
   return rows;
 }
 
-/** The narrowing filter of one sender list, as SQL appended to `SENDER_SCOPE` ($1, $2 taken). */
-export function outboundFilter(q: OutboundListQuery, scope: OutboundScope, principalId: string): { sql: string; args: unknown[] } {
+/** The narrowing filter of one sender list, as SQL appended to `SENDER_SCOPE` ($1, $2 taken). `box=mine` and the `own` tier
+ *  bind the caller's own rows; the `unit` tier binds the caller's own OR a row sent from a unit they head; `company` binds
+ *  nothing more. */
+export function outboundFilter(q: OutboundListQuery, tier: OutboundTier, principalId: string): { sql: string; args: unknown[] } {
   const parts: string[] = [];
   const args: unknown[] = [];
   const push = (v: unknown) => { args.push(v); return `$${args.length + 2}`; };
-  if (q.box === "mine" || scope === "own") parts.push(`r.requested_by = ${push(principalId)}::uuid`);
+  if (q.box === "mine" || tier.scope === "own") parts.push(`r.requested_by = ${push(principalId)}::uuid`);
+  else if (tier.scope === "unit") {
+    const me = push(principalId);
+    parts.push(`(r.requested_by = ${me}::uuid OR r.requester_unit_id = ANY(${push([...tier.ledUnits].sort())}::text[]))`);
+  }
   if (q.box === "sent") parts.push(`r.requester_unit_id = ${push(q.unitId)}`);
   if (q.status === "open") parts.push("r.status = 'open'");
   else if (q.status === "closed") parts.push("r.status <> 'open'");
@@ -282,8 +334,9 @@ export interface VisibleOutbound {
 }
 
 /** §60.4: the request `requestId` that H sent, as the caller may see it, or `null` (absent, deleted, not H's, or another
- *  person's while the caller's tier is `own`). Looks at H's providers one at a time, each in its own scope. The tier is asked
- *  only when the row is NOT the caller's own (the sender reads their own with §36's `read` alone). */
+ *  person's while the caller's tier is `own`, or `unit` and it was sent from a unit they do not head). Looks at H's providers one
+ *  at a time, each in its own scope. The tier is asked only when the row is NOT the caller's own (the sender reads their own with
+ *  §36's `read` alone). */
 export async function findVisibleOutbound(principal: Principal, requesterTenantId: string, requestId: string): Promise<VisibleOutbound | null> {
   if (!isUuidShaped(requestId)) return null;
   const id = requestId.toLowerCase();
@@ -291,8 +344,8 @@ export async function findVisibleOutbound(principal: Principal, requesterTenantI
     const row = await withTenants([provider.id], (c) => readOutboundRow(c, provider.id, requesterTenantId, id));
     if (!row) continue;
     if (row.requested_by === principal.userId) return { provider, row, scope: "own" };
-    const scope = await outboundReadScope(principal, requesterTenantId, id);
-    return scope === "company" ? { provider, row, scope } : null;
+    const tier = await outboundReadScope(principal, requesterTenantId, id);
+    return tierReachesUnit(tier, row.requester_unit_id) ? { provider, row, scope: tier.scope } : null;
   }
   return null;
 }

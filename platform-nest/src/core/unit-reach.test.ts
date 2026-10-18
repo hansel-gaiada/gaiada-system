@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 import type { PoolClient } from "pg";
 import type { Principal, RoleGrant } from "../rbac/principal";
-import { callerReachesUnit, isCompanyWide, loadUnitReach } from "./unit-reach";
+import { callerReachesUnit, isCompanyWide, loadLeadSeatUnits, loadUnitReach } from "./unit-reach";
 
 const T = "aaaaaaaa-1010-0000-0000-000000000001";
 const OTHER_T = "aaaaaaaa-1010-0000-0000-000000000002";
@@ -139,5 +139,51 @@ describe("DW-10a · loadUnitReach (the batch form) answers exactly what callerRe
     const { client, calls } = fakeClient(null);
     await loadUnitReach(client, principal([co("company_admin")]), T, STRUCTURE, ASOF);
     expect(calls).toEqual([]);
+  });
+});
+
+describe("DW-10e-6 · loadLeadSeatUnits: the units a person heads in ONE company, from that company's own lead seats", () => {
+  /** A client that answers only the seat read, records its SQL and parameters, and returns `seats` as the rows. */
+  function seatClient(seats: string[]) {
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    const client = {
+      query: async (sql: string, params: unknown[] = []) => {
+        calls.push({ sql, params });
+        if (sql.includes("FROM positions")) return { rows: seats.map((unit_node_id) => ({ unit_node_id })) };
+        throw new Error(`unexpected query: ${sql}`);
+      },
+    } as unknown as PoolClient;
+    return { client, calls };
+  }
+  const sorted = (s: Set<string>) => [...s].sort();
+
+  it("expands each seat's unit through the company's tree: a department head covers its divisions, a division head only its own", async () => {
+    expect(sorted(await loadLeadSeatUnits(seatClient(["d-web"]).client, T, "u-me", STRUCTURE))).toEqual(["d-web", "dv-be", "dv-fe"]);
+    expect(sorted(await loadLeadSeatUnits(seatClient(["dv-fe"]).client, T, "u-me", STRUCTURE))).toEqual(["dv-fe"]);
+    expect(sorted(await loadLeadSeatUnits(seatClient(["dv-fe", "d-seo"]).client, T, "u-me", STRUCTURE))).toEqual(["d-seo", "dv-fe"]);
+  });
+
+  it("no seat is an empty set (heads nothing), and a principal with no user id reads nothing at all", async () => {
+    expect(sorted(await loadLeadSeatUnits(seatClient([]).client, T, "u-me", STRUCTURE))).toEqual([]);
+    const none = seatClient(["d-web"]);
+    expect(sorted(await loadLeadSeatUnits(none.client, T, null, STRUCTURE))).toEqual([]);
+    expect(none.calls).toEqual([]);
+  });
+
+  it("a seat on a unit the tree no longer holds still names that unit alone (no subtree), never the whole tree", async () => {
+    expect(sorted(await loadLeadSeatUnits(seatClient(["d-gone"]).client, T, "u-me", STRUCTURE))).toEqual(["d-gone"]);
+    expect(sorted(await loadLeadSeatUnits(seatClient(["d-web"]).client, T, "u-me", null))).toEqual(["d-web"]);
+  });
+
+  it("is anchored on the company: the query binds the tenant and the user, keeps active lead seats with an open assignment, and reads no role grant", async () => {
+    const { client, calls } = seatClient(["d-web"]);
+    // an org_unit_lead GRANT on another node changes nothing: the helper takes no principal and never reads roles
+    await loadLeadSeatUnits(client, OTHER_T, "u-me", STRUCTURE);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].params).toEqual([OTHER_T, "u-me"]);
+    const sql = calls[0].sql.replace(/\s+/g, " ");
+    expect(sql).toContain("JOIN position_assignments pa ON pa.position_id = p.id AND pa.tenant_id = p.tenant_id");
+    expect(sql).toContain("p.tenant_id = $1 AND p.is_lead AND p.status = 'active' AND pa.valid_to IS NULL AND pa.user_id = $2");
+    expect(sql).not.toMatch(/user_roles|org_unit_lead/);
   });
 });
