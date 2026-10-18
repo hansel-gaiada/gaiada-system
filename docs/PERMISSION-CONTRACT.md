@@ -2136,14 +2136,14 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §41 (plan `docs/plans/2026-10-13-depart
 
   It records only that the alert was seen. It changes no target, no condition and no score, so it needs no write action of its own.
 - **The scheduled run and the digest** (`POST /dept-kpis/watch` and `/digest`) reuse `report_admin` · `recompute` (company_admin, platform_admin), the gate of `POST /reports/facts/recompute`. The n8n automation account `wf:reports-kpi-watch` holds company_admin, like the other reports flows.
-- **The drivers read** (`GET /dept-kpis/drivers`, 4j-3) uses the unit read's gate, narrowed to heads and the company-wide tier. Placed staff get 403. It is the department appraisal's gate, extracted as one function (`authorizeUnitHeadRead` in `dept-kpis.controller.ts`): Cerbos `dept_kpi_target` · `read` with the unit's ancestry, then `isCompanyWide` or the unit in `loadLedUnitScope`, then 404. A manager placed in the unit and the head of an enclosing unit hold the unit in their led scope and so pass, exactly as for the appraisal.
+- **The drivers read** (`GET /dept-kpis/drivers`, 4j-3) uses the unit read's gate, narrowed to heads and the company-wide tier. Placed staff get 403. It is the department appraisal's gate, extracted as one function (`authorizeUnitHeadRead` in `dept-kpis.controller.ts`): Cerbos `dept_kpi_target` · `read` with the unit's ancestry, then `isCompanyWide` or the unit in `loadLedUnitScope` (company-anchored since DW-10g-2: the company's own lead seats, never a grant alone), then 404. A manager placed in the unit and the head of an enclosing unit hold the unit in their led scope and so pass, exactly as for the appraisal.
 
 ## 38c. DW-4h — the activity series, the day read and the person filter, BFF §44 (2026-10-15, PLANNED): no new kind, no new action
 
 - **The series and the day read** (`GET /activity/series`, `/activity/day`) are core reads with no Cerbos kind of their own. They are gated by the person-axis rule `GET /pm/productivity` already applies, moved to a shared helper:
   - yourself;
   - the `unrestricted` or `company_wide` tier (HR's people readers included);
-  - a `unit_scoped` caller for a person in their led scope (TR-25);
+  - a `unit_scoped` caller for a person in their led scope (TR-25; since DW-10g-2 the led scope is the company's own lead seats, so another company's `org_unit_lead` grant on a same-id node reaches nobody here);
   - else 403.
 - **`GET /work-activity?personId=`** keeps its Cerbos `work_activity:read`, and from 4h-1 also applies that person-axis rule for the named person. This closes a peer read that broke line-of-sight. The unfiltered feed is unchanged. The feed never lists the bridged, person-grain sources (`BRIDGED_SOURCES`) in any mode; they are read only through the gated series and day reads (amended 2026-10-15, DW-D19, DW-D29).
 
@@ -2555,3 +2555,10 @@ Also the UI mirror: the capabilities `work_request.send_across` (company_admin, 
 - Every §36 decision unchanged (a replay of the existing matrix).
 - The static alignment suites, and BFF §60.11's HTTP suite (the narrowing, including the collision probe).
 - **Restart the Cerbos test container and the live sidecar after the policy deploy** (nothing hot-reloads), then probe `send_across` and `read_across`.
+
+## 50. DW-10g-2 — a head is the company's own lead seat, in every handler (2026-10-18, PROTOTYPED; Cerbos half PROPOSED)
+
+- **The handler rule.** No handler treats an `org_unit_lead` grant as leadership in a company unless that company's own lead seat backs it: an active `positions.is_lead` row of the company with its `org_unit_lead` role row at `own_unit` (0109 §2.2), held through an assignment with no `valid_to`. The grant carries no company (scopeType `org_unit`, a bare node id), and node ids repeat across companies.
+- **Where.** The person-axis narrowing (`loadLedUnitScope(..., principal)`, used by reports, check-ins, appraisals, time entries, the activity gate, the department appraisal and the KPI drivers), the appraisal head checks, the positions list, and the head audiences. BFF §60.17 lists them.
+- **What does not change.** `personAxisTier` keeps its tiers; `unrestricted` and `company_wide` are untouched. A caller whose only unit-scoped grant is another company's is narrowed to what they head here (nothing), so they keep their own rows, as a plain member does. Where a branch is chosen by the tier, `anchoredPersonAxisTier` gives them `self_only`.
+- **Cerbos.** The `org_unit_lead` derived role (`derived_roles.yaml`) still matches `g.scopeId in resource.attr.unitAncestors` with no company. Closing it is DW-10g-2 Part B: designed, waiting for the owner's answer, no policy changed here.
