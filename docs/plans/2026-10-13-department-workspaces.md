@@ -1647,8 +1647,8 @@ written by the orchestrating session.
 5. 10e after its contract (cross-company authorization: the orchestrating session reviews every line,
    and the core may take an Opus implementer).
 
-**Numbers.** Rulings DW-D32 to DW-D35, and DW-D39 to DW-D46 for 10e and 10f. BFF §57 (10a), §58 (10b), §59 (10c), §60 (10e). PERMISSION-CONTRACT
-§47 (10a), §48 (10c), §49 (10e). Migrations take the next free prefix after main's newest at landing
+**Numbers.** Rulings DW-D32 to DW-D35, and DW-D39 to DW-D46 for 10e and 10f. BFF §57 (10a), §58 (10b), §59 (10c), §60 (10e), §61 (10f).
+PERMISSION-CONTRACT §47 (10a), §48 (10c), §49 (10e), §50 (10f). Migrations take the next free prefix after main's newest at landing
 (`lint-migration-names.mjs` after every rebase). Branches `dw/10*`.
 
 **Traps to carry.**
@@ -1729,30 +1729,54 @@ companies. So a head in company A who is also a member of company B reads B's sa
 (`loadLeadSeatUnits`, built in 10e-6), and the suites gain the cross-company case. `personAxisTier` itself is shared with the
 reports and check-ins and has the same blind spot; that wider fix belongs to the reports' owner and is noted on the board.
 
-**10f design (planned 2026-10-18, built later: DW-D45, DW-D46).**
-- **What exists** (read at `f16fb467`). `contracts` has `value` (nullable) and `currency`, statuses draft, sent, signed,
-  declined, expired and void, and no payment terms. An amendment (`kind = 'amendment'`, drafted by `webdev-amendment.ts`)
-  stores no value. An invoice draft is one client's billable hours over a period at one hourly rate, one JSONB line per
-  project; lines have no type and cannot be edited. Issue writes `finance_ar_invoice_lines` and posts AR against each line's
-  revenue account; a group client posts to the intercompany receivable (PV5-04, PV5-05). Freelancers exist only as manual
-  vendor bills.
-- **The payment schedule.** A new table of instalments per contract: a label, an amount, and either "on signing" or a due
-  date. It is written with the contract while it is a draft, must add up to the contract's value before it is sent, and is
-  fixed with the content (PV-5's content hash covers it). Presets: all on signing, 50/50, monthly for N months. An amendment
-  carries its own value and schedule.
-- **The invoice.** Finance's draft for a client offers the instalments that are due in the period (due date reached, or "on
-  signing" once signed) as fixed-fee lines: "<agreement> · instalment 2 of 3", quantity 1, the amount. Each instalment is
-  invoiced once (taken in the draft's transaction; voiding the invoice releases it). Issue, tax and posting are unchanged. The
-  hourly draft stays for exceptions, but Finance chooses it explicitly.
-- **Freelancers.** A freelancer has an agreed rate (with dates). Finance drafts, per period, one vendor bill per freelancer from
-  the hours they logged, a line per project, for approval through the existing payables path with its withholding.
-- **Effort.** Time logs keep counting hours and people per project; reports read them as today. The Billable box keeps its
-  default and stops being an instruction for client work.
-- **Tickets** (about two working days with the gates and a release): 10f-0 contracts (BFF and PERMISSION sections, Opus
-  architect); 10f-1 data (instalments, freelancer rates; senior-db, Sonnet); 10f-2 the schedule in the contract editor and the
-  portal (senior-fe, Sonnet); 10f-3 the invoice draft from due instalments, issue and void (senior-be, Opus: money); 10f-4
-  freelancer bill drafts (senior-be, Opus: money); 10f-5 gates, release and a live drive. Invoices and contracts are PV-5's
-  code, so the build coordinates with the PV sessions.
+**10f design (planned 2026-10-18 for DW-D45 and DW-D46; contract written 2026-10-18 as 10f-0: BFF §61 and PERMISSION-CONTRACT §50, both PLANNED).**
+- **What exists** (read at `31cc5c94`). `contracts` has `value` (nullable) and `currency`, statuses draft, sent, signed, declined,
+  expired and void, and no payment terms. An amendment (`kind = 'amendment'`, drafted by `webdev-amendment.ts`) stores no value.
+  An invoice draft is one client's billable hours over a period at one hourly rate, one JSONB line per project; lines have no type
+  and cannot be edited. Issue writes `finance_ar_invoice_lines` and posts AR against the billing profile's revenue account; a group
+  client posts to the intercompany receivable (PV5-04, PV5-05). Freelancers exist only as manual vendor bills.
+- **The shape (BFF §61).**
+  - **The schedule** is rows (`contract_instalments`): a label, an amount, and "on signing" or a date. A contract with a value
+    cannot be sent unless its schedule adds up to it. Sending freezes the rows and stores `schedule_sha256`, computed in SQL, which
+    every signature copies. It is NOT folded into PV-5's `content_sha256`: that hash must stay the document's bytes, which the PSrE
+    envelope and the sealed copy check. Presets: all on signing, 50/50, monthly × N (the remainder on the first row).
+  - **Billing.** Finance's draft offers the instalments of signed agreements and amendments that are due by a chosen date, as
+    fixed-fee lines (quantity 1, which issue already books that way). Each instalment is claimed by one live invoice
+    (`contract_instalments.invoice_id`, guarded by a trigger) and released by a trigger when that invoice is voided. The hourly
+    draft stays as an explicit exception; a draft never mixes the two. Issue, tax and posting are unchanged.
+  - **An amendment** carries its own value (what it adds) and its own schedule.
+  - **Freelancers.** A freelancer is a person who logs time in the company; their AP vendor names them
+    (`finance_ap_vendors.user_id`). Hourly rates have dates (`finance_freelancer_rates`, no overlaps). Finance drafts one AP bill per
+    freelancer and period: a line per project and rate, withholding through `finance_tax_compute()` with the vendor's withholding
+    code, each time entry claimed once (`time_entries.ap_bill_id`) and frozen while claimed. A wrong draft is discarded; approval is
+    the existing payables path.
+  - **No new permission** (PERMISSION-CONTRACT §50): `contract` `update`, `invoice` `create`, `finance_ap` `vendor_master`,
+    `bill_entry` and `approve`.
+- **Found in the code, fixed by 10f.** `PATCH contracts/:id {status: 'void', value: …}` rewrites a signed contract's value while
+  voiding it (the money and term columns now freeze at send). `POST invoices` validates the body before it authorizes. No screen
+  cancels an unissued draft invoice (10f adds Cancel draft, which is how a draft's instalments are released: there is no invoice
+  delete). An AP draft can be neither edited nor deleted, the manual bill route computes withholding with JS floats, and a vendor's
+  `default_withholding_rate` is written as 0.02 by the API and the seed but as 2 by the finance suites (10f uses the tax code, never
+  that rate). The time-entry, contract and AP walls are database triggers, `PD610` to `PD617`.
+- **Tickets.** One agent per ticket, each reviewed by the orchestrating session. After 10f-1, the contract track (2, then 3) and the
+  freelancer track (4) can run side by side. Invoices and contracts are PV-5's code: rebase on main and coordinate with the PV
+  sessions. About six agent-days in all, about four working days with the two tracks.
+
+| Ticket | Seat and model | Scope | Done when |
+|---|---|---|---|
+| 10f-1 The data | senior-db, **Opus medium**: the claim and freeze triggers are the money wall, and a trigger that reads an RLS-hidden row as "gone" fails open while every handler test passes | The two migrations of BFF §61.2: `contract_instalments`, the `contracts` and `contract_signatures` columns, `contract_schedule_sha256()`, `time_entries.ap_bill_id`, `finance_ap_vendors.user_id`, `finance_freelancer_rates`, `finance_freelancer_bills`, the eight triggers and the assertions; the schedule helper in `testing/contract-fixtures.ts` | Every `PD610` to `PD617` case and "The migrations" of BFF §61.14 green on the Linux CI gate (about 0.75 day) |
+| 10f-2a The schedule, backend | senior-be, Sonnet | `core/contract-schedule.ts`; `PUT contracts/:id/schedule`; `schedule` and `scheduleSummary` on the reads and in the portal; `send` stores the hash; `PATCH` void-only after send; the hash on all three signature paths; the sealed copy's schedule and check; `contracts.setSchedule` and the `contracts.send` precondition; the PV-5 suites' helpers gain a schedule; the portal seed gains a scheduled agreement | BFF §61.14 "The schedule" green on the Linux CI gate (about 0.75 day) |
+| 10f-2b The schedule, screens | senior-fe, Sonnet | `ScheduleEditor` with the presets, Send gating, the read-only states, the portal table, the print block, DEMO_MODE | vitest (the presets), `next build`, the sumopod e2e `contract-billing` (editor part) (about 1 day) |
+| 10f-3a Invoices from the schedule, backend | senior-be, **Opus medium**: concurrent claims, the idempotent replay and the release on both void doors are paths where a double bill is silent | BFF §61.5: the billable read, `POST invoices` with `source: 'instalments'`, the three readiness blockers, `releasedInstalments`, the portal's line keys, authorization first on the hourly path, two tools | BFF §61.14 "Invoices" green on the Linux CI gate (about 0.75 day) |
+| 10f-3b Invoices, screens | senior-fe, Sonnet | `/invoices/new` (the schedule first, hours as the exception), fixed-fee lines and Cancel draft on `/invoices/[id]`, the Finance pulse, DEMO_MODE | vitest, `next build`, the sumopod e2e `contract-billing` (invoice part) (about 0.5 day) |
+| 10f-4a Freelancer bills, backend | senior-be, **Opus medium**: withholding, rounding and the finance plus hr scopes, where a zero-row read drafts a wrong bill without an error | BFF §61.7 and §61.8: rates, the vendor link, preview, draft, list, discard, the time-entry 409, two tools | BFF §61.14 "Freelancers" green on the Linux CI gate (about 1 day) |
+| 10f-4b Freelancers, screens | senior-fe, Sonnet | `/finance/payables/freelancers` (Rates and Bills), DEMO_MODE | vitest, `next build`, the sumopod e2e `freelancer-bills` (about 0.75 day) |
+| 10f-5 Gates, release, live drive | qa, Sonnet; the orchestrating session cuts the release | The rows of BFF §61.13, MAP, the capability inventory (new tools), MODULES and CHANGELOG, the release, the live drive | BFF §61.14 "Live" observed and the teardown list empty (about 0.75 day) |
+
+- **Owner questions** (BFF §61.15, each with the default the build uses): tax on freelancer bills (PPh 21 or 23, for the
+  accountant); the hourly draft stays; no mixed invoices; retainers are monthly × N inside a term; revenue on advance invoices
+  (deferred or not, for the accountant); who records rates, and whether freelancers see them; agreements from before 10f; certified
+  signing with a schedule.
 
 ---
 

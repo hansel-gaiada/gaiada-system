@@ -10827,7 +10827,8 @@ Primary key `(tenant_id, unit_id, client_id)`. RLS enabled and forced, with one 
 
 > **Owner, 2026-10-18 (DW-D45, DW-D46):** the agency's clients pay per contract, not by logged time. A signed agreement's payment
 > schedule becomes fixed-fee invoice lines; time logs count a project's effort and pay freelancers. That is planned as DW-10f
-> (plan §12.2, "10f design"). What follows describes the machinery 10e wired into, which is still time-based until 10f lands;
+> (plan §12.2, "10f design"; its contract is §61). What follows describes the machinery 10e wired into, which is still
+> time-based until 10f lands;
 > the work's client record, its requests project and the price gate stand.
 
 **How the agency bills today** (read at `d711b208`).
@@ -11041,3 +11042,460 @@ Plan §12.2, "10e design". Three tickets, one at a time: 10e-1 the data, the rou
 - **What moved.** `loadLedUnitScope(..., principal)` is company-anchored, so every person-axis narrowing (report documents, overview and raw, the roster, check-ins, appraisals, time entries, the activity gate, the department appraisal, the KPI drivers) narrows a caller to what they head in this company. A caller whose only unit-scoped grant is another company's keeps their own rows, as a plain member does. The appraisal head branch, its detail check and the positions list use the seat-backed grants. The head audiences (KPI watch, digest, Needs you, acknowledge, notice notifications, `request.received`, review requests) are the seat holders.
 - **Part B (Cerbos, built in the same change).** Each `org_unit_lead` grant now carries `tenantIds` (the companies whose own lead seat backs it), read by `assemblePrincipal()` under new `principal_lookup` policies on the seat tables (migration `202610180911_positions_principal_lookup.sql`). The derived role requires `request.resource.attr.tenantId in g.tenantIds`, so a grant made for another company's same-id node never acts here. `GET /api/me` sends the field; the UI's unit mirror reads it (§ `/api/me` `roles[].tenantIds`). PERMISSION §50 has the rule and the deploy probe.
 - **Proof** (Linux CI gate): the cross-company case (another company's grant and seat on a same-id node, then a seat here) in the appraisal, positions, time-entry, KPI-watch audience, department-report-document and department-appraisal suites; pure tests in `person-scope.test.ts`.
+
+## 61. Contract billing and freelancer bills (DW-10f, 2026-10-18) — `platform-nest/src/core/contract-schedule.ts` (new), `core/contracts.controller.ts`, `core/portal-commerce.controller.ts`, `core/document-jobs.ts`, `signatures/certified-signing.ts`, `core/client-work.controller.ts`, `modules/invoice/{invoice.controller,issue,contract-billing}.ts` (`contract-billing.ts` new), `modules/finance/freelancer-bills.{controller,service}.ts` (new), `modules/finance/finance.controller.ts` (vendors); migrations `<prefix>_contract_instalments.sql` and `<prefix+1>_freelancer_bills.sql`; UI `/clients/[clientId]/billing`, `/invoices/new`, `/invoices/[invoiceId]`, `/portal/contracts/[contractId]`, `/print/contracts/[jobToken]`, `/finance/payables/freelancers` (new) — **STATUS: PLANNED (the contract only, written as 10f-0; nothing is built. The authorization is PERMISSION-CONTRACT §50; the build order is plan §12.2, "10f design")**
+
+**Why.** Two owner rulings of 2026-10-18 (plan §11.4).
+- **DW-D45:** the agency's clients, group companies included, pay per contract, not by logged time. A signed agreement carries a payment schedule: one or more instalments, each an amount and either "on signing" or a due date. Finance's invoice draft offers the instalments that are due as fixed-fee lines, each invoiced once. It covers full upfront, split payments and monthly retainers.
+- **DW-D46:** a freelancer has an agreed rate. The hours they log in a period draft a vendor bill (accounts payable) for Finance to approve.
+
+Time logs keep counting a project's effort: hours and people. They also pay freelancers. They are not how clients are charged, so the Billable box stays as it is.
+
+**What exists** (read at `31cc5c94`).
+- `contracts` has `value` (nullable) and `currency`, the statuses draft, sent, signed, declined, expired and void, `kind` agreement or amendment, and PV-5's content fixing (`content_sha256`, `content_fixed_at`, `signature_tier`). It has no payment terms. Staff edit a draft's value and terms with `PATCH contracts/:id` (§16e), from `ContractForm` on the client's Contracts & billing page. Triage drafts a price amendment with no value (`webdev-amendment.ts`).
+- An invoice draft is one client's billable hours over a period at one hourly rate, one JSONB line per project (`POST invoices`, §4). Lines have no type, and no route edits them. Issue writes `finance_ar_invoice_lines` and posts AR; a group client posts to the intercompany receivable (§30, PV5-05). An unissued draft is cancelled only by `PATCH {status: 'void'}`, which no screen offers.
+- Freelancers exist only as an employment type in recruitment, and as manual vendor bills (the BFF's Finance & Accounting section, `POST finance/ap/bills`). A vendor has no link to a person. An AP draft can be neither edited nor deleted.
+
+**The model in five lines.**
+- **A schedule is rows**, `contract_instalments`, written while the contract is a draft. A contract with a value cannot be sent unless its schedule adds up to that value. Sending fixes the schedule and stores its own hash, `schedule_sha256`, beside PV-5's content hash.
+- **An instalment is billable** once its contract is signed and the instalment is due. Finance's draft takes the chosen instalments as fixed-fee lines. Each instalment is claimed by exactly one live invoice (`contract_instalments.invoice_id`), and voiding that invoice releases it. Issue, tax and posting do not change.
+- **An amendment is a contract with its own value and schedule**, billed the same way. It never edits the schedule it amends.
+- **A freelancer is a person who logs time in the company.** Their AP vendor names them (`finance_ap_vendors.user_id`), and their hourly rates have dates (`finance_freelancer_rates`).
+- **A freelancer bill is an AP draft** made from the person's unbilled hours in a period: a line per project and rate, withholding from the vendor's tax code, and each time entry claimed once (`time_entries.ap_bill_id`). Finance approves it on the existing payables path.
+
+### 61.1 Decisions (each with the options it rejects)
+
+| # | Question | Decision | Rejected, one line each |
+|---|---|---|---|
+| 1 | Where does the schedule live? | A new core table, `contract_instalments`, one row per instalment (§61.2). | **A JSONB column on `contracts`:** no row to claim, no foreign key from an invoice, no uniqueness; a claim would rewrite signed content. **Milestones on the invoice side:** the schedule is a term the client signs, so it belongs to the contract. |
+| 2 | What does an instalment say? | A position, a label, an amount in the contract's currency, and when it is due: `on_signing` or a date. The presets (all on signing, 50/50, monthly × N) are computed by the editor into explicit rows (§61.4). | **Percentages:** the money would be computed again at invoice time, with its own rounding. **Offsets ("30 days after signing"):** the client signs a date they can read. **A currency per instalment:** one agreement has one currency. |
+| 3 | Is a schedule required? | **A contract with a value above zero cannot be sent unless its schedule adds up exactly to the value.** A contract with no value, or a zero value, carries no schedule (an NDA, a no-fee agreement). | **Optional:** a valued agreement could be signed and never billed. **Required on every contract:** an agreement with no price has nothing to schedule. |
+| 4 | How is the schedule fixed with the content? | Sending fixes it in the same statement that fixes the content. From then on the database refuses any change to its rows (`PD610`). The send stores `schedule_sha256`, computed in SQL from the rows (§61.2), and every signature copies it beside `content_sha256`. The sealed copy prints the schedule and checks its hash. | **Folding the schedule into `content_sha256`** (the outline's "PV-5's content hash covers it"): that hash is the SHA-256 of the exact document bytes. A PSrE envelope must match it (`certified-signing.ts`), and the sealed copy re-hashes the file or body before sealing (`document-jobs.ts`). A mixed hash breaks both, and changes what every existing hash means. **A second hash echo on the portal's sign:** the schedule cannot change after send and the portal never shows a draft, so the content echo already proves the signer read a sent page. |
+| 5 | What does an amendment carry? | Its own `value` (what it adds to the price) and its own schedule, written and fixed exactly like an agreement's. Its instalments are billed like any other. | **Editing the amended agreement's schedule:** signed content would change. **The amendment's value as the new total:** amounts already scheduled would be counted twice. A price cut is a credit note in Finance, or a re-issued agreement, never a negative amendment. |
+| 6 | When is an instalment billable? | When its contract is `signed` and not deleted, no signed version supersedes it, it has no live invoice, and it is due: `on_signing` at once, a date when `due_on` is on or before the draft's `dueBy`. `dueBy` defaults to today; Finance may move it forward to invoice ahead of the date. | **From `sent`:** nothing is agreed yet. **Invoices made automatically on the due date:** DW-D45 has Finance's draft offer them. An n8n flow can still call the same route (§61.10). |
+| 7 | How is "invoiced once" held? | **A claim column,** `contract_instalments.invoice_id`, set in the draft's transaction. A trigger guards it: the invoice must be a live, unissued invoice (`draft` or `approved`) of the same client and currency whose lines name the instalment at its amount (`PD611`). A trigger on `invoices` releases the claim when the invoice is voided or soft-deleted, and the foreign key releases it on a hard delete. A claim never moves from one live invoice to another. | **A claims table:** a second place that can disagree with the instalment. **Reading claims from `invoices.lines`:** JSON gives no uniqueness, so two drafts could both bill one instalment. **Claiming at issue:** two drafts could carry one instalment until one of them is issued. |
+| 8 | How do instalment lines reach the ledger? | As JSON lines of `kind: 'instalment'` with no hours and no rate. Issue already books such a line as quantity 1 at its amount (`issue.ts`, the `per_hour` test). Tax, numbering, the service line, posting, the intercompany receivable and void are unchanged. | **Relational invoice lines:** a PV-5 refactor of issue, the portal, revisions and the PDF, for no new behaviour. **A second posting path:** two ways to book revenue. |
+| 9 | May one draft mix sources? | **No (owner question 3, default):** a draft is made from hours or from instalments, never both. | **Mixing:** one invoice would carry two pricing rules, and the service-line default and the portal's reading would have to handle both. |
+| 10 | Does the hourly draft stay? | **Yes, as an explicit exception (owner question 2, default).** `POST invoices` keeps `source: 'hours'` as its default, so seeds, suites and existing callers keep working. The draft form opens on the schedule and offers hours only behind "From logged hours (exception)". | **Removing it:** agreements signed before 10f carry no schedule and would become unbillable. **Making `source` required:** breaks every existing caller over a choice the screen already makes. |
+| 11 | Who is a freelancer, and how is the vendor linked? | A person (`users`, kind `employee`) who logs time in the company and has a rate there. Their AP vendor names them: `finance_ap_vendors.user_id`, at most one live vendor per person and company. The link decides where the person's money goes, so it is vendor-master data (`vendor_master`, high assurance), like a vendor's bank details. | **A freelancer principal class:** not built, and a freelancer logs time like anyone. **An HR employee record:** freelancers are not on payroll, and an `employees` row with a compensation is paid by payroll. **A vendor id on each rate row:** one person could be paid to several vendors with no single answer. |
+| 12 | How are rates kept? | `finance_freelancer_rates`: an hourly rate, valid from a date to an optional date, with its currency (the company's functional currency) and the expense account its lines debit. No two rates of one person overlap (an `EXCLUDE` constraint). Each time entry is priced at the rate in force on its date. | **A rate on the vendor:** no history, so re-drafting an old period would use today's rate. **Day rates or monthly fees:** not ruled; a fixed-fee freelancer stays a manual vendor bill. |
+| 13 | How is "paid once" held for hours? | **A claim column,** `time_entries.ap_bill_id`, set when the draft is made. A claimed entry's minutes, date, project, person and deletion are frozen (`PD615`). Discarding the draft, or voiding the bill, releases it. | **One bill per person and period:** an entry logged late into a billed period would be missed or paid twice. **A snapshot table:** a second record of hours that could disagree with the log. |
+| 14 | How is withholding computed? | **Through `finance_tax_compute()`**, with the vendor's `default_withholding_code` resolved to a tax code of kind `pph21`, `pph23` or `pph42` in force on the bill date; that code's `account_id` is the liability account. A vendor with no code gets no withholding, and the preview flags it. Which code fits an individual freelancer is the accountant's call (owner question 1). | **The vendor's `default_withholding_rate`:** the API writes it as a rate (0.02) and the finance suites write it as a percentage (2), so its meaning is ambiguous; multiplying it in a handler is the "arithmetic in a handler" that PV-5 decision 8 rules out. **A fixed PPh 21 table in code:** PPh 21 on non-employees is progressive and cumulative, an accountant's job. |
+| 15 | Which permissions? | **No new kind and no new action** (PERMISSION-CONTRACT §50). The schedule is `contract` `update`; drafting from it is `invoice` `create`; rates and the vendor link are `finance_ap` `vendor_master`; freelancer drafts are `finance_ap` `bill_entry`; approval is `finance_ap` `approve`, unchanged. | **A `bill_from_schedule` action:** the same people draft invoices today. **A `freelancer` kind:** six artifacts for rows that are vendor-master and bill-entry data. |
+| 16 | What else freezes once a contract is sent? | **Its money and term columns:** `client_id`, `project_id`, `kind`, `amends_id`, `supersedes_id`, `version`, `value`, `currency`, `starts_on`, `ends_on` and `schedule_sha256` never change once the status leaves `draft` (`PD613`). `PATCH` on a contract that is not a draft accepts `{status: 'void'}` and nothing else. | **Leaving it to the handler:** today `PATCH {status: 'void', value: …}` on a signed contract writes the new value while it voids, because the UPDATE `COALESCE`s every field. With a schedule, the value is what the client signed. |
+
+### 61.2 Data model (two migrations; no IAM migration)
+
+Two files, with the next free prefixes after main's newest at landing: `<prefix>_contract_instalments.sql` (the contract and invoice half) and `<prefix+1>_freelancer_bills.sql` (the time and payables half). Both are idempotent and end with a DO-block self-assertion that counts no rows. Neither backfills anything: no existing contract has a schedule, and no existing time entry is claimed.
+
+**The database refusals of this section** (§61's own SQLSTATE range, `PD610` to `PD617`; each handler maps its code to the answer named in §61.4 to §61.8, and a test pins every code):
+
+| SQLSTATE | Name | Raised when |
+|---|---|---|
+| `PD610` | `schedule_frozen` | an instalment of a contract that is not a draft is inserted, deleted, or has a term column changed |
+| `PD611` | `instalment_claim_invalid` | a claim that does not hold, a claim moved between invoices, or a release while the invoice is live |
+| `PD612` | `schedule_total_mismatch` | a contract moves from draft to sent with a schedule that does not add up to its value, or with a wrong `schedule_sha256` |
+| `PD613` | `contract_terms_frozen` | a money or term column of a contract that is not a draft changes |
+| `PD614` | `invoice_unvoid_refused` | a void invoice that carries an instalment line is moved out of `void` |
+| `PD615` | `time_entry_billed` | a claimed time entry's company, person, project, task, minutes, date or deletion changes |
+| `PD616` | `time_entry_claim_invalid` | a time-entry claim or release that does not hold, or any change of `ap_bill_id` outside a finance-scoped session |
+| `PD617` | `ap_bill_posted_no_delete` | an AP bill that is not a draft is deleted |
+
+**`contract_instalments` (new, core).**
+
+| Column | Type | Meaning |
+|---|---|---|
+| `id` | `uuid PRIMARY KEY` | |
+| `tenant_id` | `uuid NOT NULL → companies` | The contract's company. |
+| `contract_id` | `uuid NOT NULL`, composite FK `(contract_id, tenant_id) → contracts (id, tenant_id) ON DELETE CASCADE` | The agreement or amendment. Contracts are soft-deleted, so the cascade only meets a hard-deleted draft. |
+| `position` | `smallint NOT NULL`, `CHECK (position BETWEEN 1 AND 60)` | The order, 1 to N with no gaps. The handler writes them; a test pins it. |
+| `label` | `text NOT NULL`, `CHECK (btrim(label) <> '' AND length(label) <= 120)` | "Deposit", "Month 3", "Final payment". |
+| `amount` | `numeric(20,4) NOT NULL`, `CHECK (amount > 0)` | In the contract's currency, with no more decimals than the currency allows (the handler checks `finance_currencies.minor_unit`). |
+| `due_kind` | `text NOT NULL`, `CHECK (due_kind IN ('on_signing', 'date'))` | |
+| `due_on` | `date NULL` | Set exactly when `due_kind = 'date'`. |
+| `invoice_id` | `uuid NULL`, composite FK `(invoice_id, tenant_id) → invoices (id, tenant_id) ON DELETE SET NULL (invoice_id)` | The claim: the one live invoice that bills it. |
+| `claimed_at` | `timestamptz NULL` | When the claim was taken. |
+| `created_at`, `updated_at` | `timestamptz NOT NULL DEFAULT now()` | |
+
+- CHECKs: `contract_instalments_due_ck` `(due_kind = 'date') = (due_on IS NOT NULL)`; `contract_instalments_claim_ck` `(invoice_id IS NULL) = (claimed_at IS NULL)`.
+- Uniques: `(contract_id, position)`; `(id, tenant_id)`; a partial unique index on `(contract_id) WHERE due_kind = 'on_signing'` (at most one "on signing").
+- Indexes: `(tenant_id, contract_id)`; `(tenant_id, invoice_id) WHERE invoice_id IS NOT NULL`; `(tenant_id, due_on) WHERE invoice_id IS NULL`.
+- RLS enabled and forced, one `tenant_isolation` policy over the authorized-tenant set, NULLIF-hardened (the `202610130400` shape), **with no module predicate**: like `contracts`, the portal reads it, and the portal is not a module. `platform_app` gets DML; `sync_app` gets nothing.
+
+**`contracts` gains `schedule_sha256 text NULL`.** CHECKs: `contracts_schedule_sha256_format` (NULL or 64 lower-case hex) and `contracts_schedule_draft_unset` (`status <> 'draft' OR schedule_sha256 IS NULL`). `POST …/send` sets it in the UPDATE that sets `content_sha256`; it stays NULL for a contract with no instalments.
+
+**`contract_signatures` gains `schedule_sha256 text NULL`** (the same format CHECK). Every signature insert copies the contract's stored value, exactly as `content_sha256` is copied today: the portal's sign, the countersign, and the certified provider's completion (`certified-signing.ts`). Never from the request.
+
+**One SQL function computes the hash:** `contract_schedule_sha256(p_contract uuid, p_currency text, p_value numeric) RETURNS text` (STABLE, SECURITY INVOKER). It returns NULL when the contract has no instalments. Otherwise it returns `encode(sha256(convert_to(<canonical>, 'UTF8')), 'hex')`, where `<canonical>` is the `jsonb::text` of:
+
+```
+{"v": 1, "currency": <p_currency>, "value": <trim_scale(p_value)>,
+ "instalments": [{"position": 1, "label": "…", "amount": <trim_scale(amount)>, "due": "on_signing" | "YYYY-MM-DD"}, …]}
+```
+
+with the instalments in `position` order. The send, its trigger and the sealed copy's check all call this one function; no TypeScript re-derives it.
+
+**Triggers on the contract and invoice side.** Each trigger function is written for one table and names only that table's columns, as PV-5's are.
+
+| Trigger | On | Rule | Code |
+|---|---|---|---|
+| `contract_instalments_guard` | `contract_instalments` BEFORE INSERT, UPDATE, DELETE | INSERT and DELETE need the parent contract (same tenant) in `draft`, or gone. An UPDATE that changes `tenant_id`, `contract_id`, `position`, `label`, `amount`, `due_kind` or `due_on` needs it in `draft`. | `PD610` |
+| (same) | | **A claim** (`invoice_id` NULL → X) needs: X a row of `invoices` in the same tenant with `status IN ('draft', 'approved')`, `issued_at IS NULL` and `deleted_at IS NULL`, the contract's `client_id` and `currency`, and exactly one element of its `lines` with `kind = 'instalment'`, this `instalmentId` and this `amount`; the parent contract `signed`, not deleted, and not superseded by a signed version. **A move** (X → Y) is refused. **A release** (X → NULL) needs X `void`, soft-deleted or gone. | `PD611` |
+| `contracts_schedule_on_send` | `contracts` BEFORE UPDATE OF `status`, when `OLD.status = 'draft' AND NEW.status = 'sent'` | `NEW.value > 0`: at least one instalment, and their sum equals `NEW.value`. `NEW.value` NULL or 0: no instalments. And `NEW.schedule_sha256 IS NOT DISTINCT FROM contract_schedule_sha256(NEW.id, NEW.currency, NEW.value)`, so a direct UPDATE that forgets the hash is refused. | `PD612` |
+| `contracts_terms_frozen` | `contracts` BEFORE UPDATE, when `OLD.status <> 'draft'` | None of `client_id`, `project_id`, `kind`, `amends_id`, `supersedes_id`, `version`, `value`, `currency`, `starts_on`, `ends_on` or `schedule_sha256` changes. PV-5's `trg_contracts_content_frozen` is untouched. | `PD613` |
+| `invoices_release_instalments` | `invoices` AFTER UPDATE OF `status`, `deleted_at` | When the row becomes `void`, or soft-deleted: `UPDATE contract_instalments SET invoice_id = NULL, claimed_at = NULL WHERE tenant_id = NEW.tenant_id AND invoice_id = NEW.id`. It covers both doors: `PATCH {status: 'void'}` for an unissued draft and `POST …/void` for an issued invoice. | |
+| `invoices_instalment_unvoid_guard` | `invoices` BEFORE UPDATE OF `status`, when `OLD.status = 'void' AND NEW.status <> 'void'` | Refused when the row's `lines` hold an instalment line: its claims were released and may now be on another invoice. Hourly invoices keep today's behaviour. | `PD614` |
+
+**What the send trigger does not see.** A contract inserted directly as `sent` or `signed` (seeds and fixtures) is not checked: the draft-to-sent transition is the only runtime path to a sent contract, and that is where the check runs. Instalments for such a row cannot be added afterwards (`PD610`). `testing/contract-fixtures.ts` gains a helper that inserts a draft and its instalments, then moves it to `sent` with the content columns and the hash.
+
+**The time and payables half.**
+- `time_entries` gains `ap_bill_id uuid NULL`, composite FK `(ap_bill_id, tenant_id) → finance_ap_bills (id, tenant_id) ON DELETE SET NULL (ap_bill_id)`; indexes `(tenant_id, user_id, entry_date) WHERE ap_bill_id IS NULL AND deleted_at IS NULL` and `(ap_bill_id) WHERE ap_bill_id IS NOT NULL`. `time_entries` stays core (no module predicate). Referential actions ignore RLS, which is what lets a discarded draft release its entries.
+- `finance_ap_vendors` gains `user_id uuid NULL → users`, with a partial unique index `(tenant_id, user_id) WHERE user_id IS NOT NULL AND deleted_at IS NULL`.
+
+**`finance_freelancer_rates` (new, finance wall).**
+
+| Column | Type | Meaning |
+|---|---|---|
+| `id` | `uuid PRIMARY KEY DEFAULT gen_random_uuid()` | |
+| `tenant_id` | `uuid NOT NULL → companies` | |
+| `user_id` | `uuid NOT NULL → users` | The freelancer. |
+| `hourly_rate` | `numeric(20,4) NOT NULL`, `CHECK (hourly_rate > 0)` | |
+| `currency_code` | `text NOT NULL → finance_currencies` | The company's functional currency (the handler checks it). |
+| `expense_account_code` | `text NOT NULL`, `CHECK (btrim(expense_account_code) <> '')` | The account the bill's lines debit. A code, not an id: accounts are renumberable (the billing profile's rule); it is resolved when a bill is drafted. |
+| `valid_from` | `date NOT NULL` | |
+| `valid_to` | `date NULL`, `CHECK (valid_to IS NULL OR valid_to >= valid_from)` | NULL = open. |
+| `note` | `text NULL`, at most 500 characters | |
+| `created_by` | `uuid → users` | |
+| `created_at`, `updated_at` | `timestamptz NOT NULL DEFAULT now()` | |
+
+- `EXCLUDE USING gist (tenant_id WITH =, user_id WITH =, daterange(valid_from, valid_to, '[]') WITH &&)`: no two rates of one person overlap (btree_gist is installed; the 0109 pattern, where a NULL upper bound is open).
+- RLS enabled and forced, `tenant_isolation` composing `app_module_allowed('finance')`, like every `finance_*` table.
+
+**`finance_freelancer_bills` (new, finance wall).** One row per freelancer draft.
+
+| Column | Type | Meaning |
+|---|---|---|
+| `bill_id` | `uuid PRIMARY KEY`, composite FK `(bill_id, tenant_id) → finance_ap_bills (id, tenant_id) ON DELETE CASCADE` | The AP bill. |
+| `tenant_id` | `uuid NOT NULL → companies` | |
+| `user_id` | `uuid NOT NULL → users` | The freelancer. |
+| `vendor_id` | `uuid NOT NULL`, composite FK `(vendor_id, tenant_id) → finance_ap_vendors (id, tenant_id)` | |
+| `period_start`, `period_end` | `date NOT NULL`, `CHECK (period_end >= period_start)` | |
+| `minutes` | `integer NOT NULL`, `CHECK (minutes > 0)` | |
+| `created_by`, `created_at` | | |
+
+Index `(tenant_id, user_id, period_start)`. RLS as for the rates.
+
+**Triggers on the payables side.**
+
+| Trigger | On | Rule | Code |
+|---|---|---|---|
+| `time_entries_ap_bill_guard` | `time_entries` BEFORE UPDATE | While `ap_bill_id` is set and stays the same: `tenant_id`, `user_id`, `project_id`, `task_id`, `pm_task_id`, `minutes`, `entry_date` and `deleted_at` never change. `billable` and `notes` may. | `PD615` |
+| (same) | | Any change of `ap_bill_id` needs a finance-scoped session (`COALESCE(app_module_allowed('finance'), false)`), so a bill that RLS hides can never read as gone. **A claim** (NULL → X): X a `draft` bill of the same tenant with a `finance_freelancer_bills` row for this `user_id` whose period holds `entry_date`, and the entry not deleted. **A move** (X → Y) is refused. **A release** (X → NULL): X gone (the discard's cascade) or `void`. | `PD616` |
+| `finance_ap_bills_delete_guard` | `finance_ap_bills` BEFORE DELETE | Only a `draft` can be deleted. A posted bill would leave its journal behind and break the AP reconciliation. | `PD617` |
+| `finance_ap_bills_release_hours` | `finance_ap_bills` AFTER UPDATE OF `status`, when it becomes `void` | Releases the bill's time entries. No route voids an AP bill today; the invariant holds for the day one does. | |
+
+**Order and assertions.**
+- `<prefix>`: the table, its CHECKs, indexes, RLS and grants; the `contracts` and `contract_signatures` columns and CHECKs; the function; the five triggers; the assertions.
+- `<prefix+1>`: the `time_entries` column, FK and indexes; the vendor column and index; the two tables with RLS and the `EXCLUDE`; the three triggers; the assertions.
+- `ADD COLUMN IF NOT EXISTS` and `CREATE TABLE IF NOT EXISTS`; constraints and triggers dropped `IF EXISTS` and created again.
+- The DO blocks assert by name every table (RLS enabled and forced, one policy), column, CHECK, FK (with the `SET NULL (column)` lists), index, trigger and function. They count no rows: with no tenant set, a count reads zero and lies.
+- Rollout: additive, and nothing existing writes the new columns. Brief locks on `contracts`, `contract_signatures`, `invoices`, `time_entries`, `finance_ap_vendors` and `finance_ap_bills`, all small tables.
+
+### 61.3 Instalment states (derived on read, never stored)
+
+| State | When | Staff reads | The portal reads |
+|---|---|---|---|
+| `scheduled` | the contract is a draft or sent | "Scheduled" | (once sent) "On signing" or "Due <date>" |
+| `upcoming` | signed; a date after `dueBy` | "Upcoming, <date>" | "Due <date>" |
+| `due` | signed; due; no live invoice | "Due: ready to invoice" | "Due" |
+| `invoicing` | claimed by a `draft` or `approved` invoice | "On a draft invoice" (links it) | "Due": an unissued invoice is never shown (PV3-02d) |
+| `invoiced` | claimed by a `sent` (issued) invoice | "Invoiced, <invoice no.>" | "Invoiced, <invoice no.>" (links `/portal/invoices/:id`) |
+| `paid` | claimed by a `paid` invoice | "Paid" | "Paid" |
+| `not_billed` | never claimed, and the contract was voided, declined or expired, or a signed version superseded it | "Not billed (<why>)" | "Not billed" |
+
+A contract sent before 10f with a value and no schedule reads `schedule: null`. The editor says it predates payment schedules; it is billed by the hourly exception or by an amendment that carries a schedule (owner question 7).
+
+### 61.4 The schedule on a contract (`core/contracts.controller.ts`, `core/contract-schedule.ts`)
+
+| Route | Body or query | Answers |
+|---|---|---|
+| `GET contracts/:contractId` | none | §16e's row plus `schedule` (below), `null` when there are no instalments. |
+| `GET contracts` | as §16e | Each row plus `scheduleSummary: {count, total, matchesValue} \| null`. `matchesValue` is `PD612`'s rule, so the row can disable Send with its reason. |
+| `PUT contracts/:contractId/schedule` | `{instalments: [{label, amount, due}]}`; `due` is `"on_signing"` or `"YYYY-MM-DD"`; 0 to 60 rows, in order | 200 the `schedule`. It replaces the whole schedule of a DRAFT in one transaction (delete, then insert positions 1 to N); `[]` clears it. It may not add up to the value yet: the answer says so (`matchesValue: false`), and Send refuses. |
+| `POST contracts/:contractId/send` | none | §16e's answer plus `scheduleSha256`. The UPDATE sets `schedule_sha256 = contract_schedule_sha256(id, currency, value)`. Before it, the handler refuses 400 `schedule_total_mismatch` (`detail: {value, total}`) and 400 `schedule_precision`; the trigger (`PD612`) is the wall. `contracts.send`'s D14 entry gains the precondition `contract_schedule_mismatch`. |
+| `PATCH contracts/:contractId` | as §16e | On a contract that is not a draft, only `{status: 'void'}`. The existing `value: null` refusal keeps its message and comes first; any other field is 400 `only_void_after_send`. On a draft, a change of `value` or `currency` leaves the schedule as it is; Send checks it. |
+
+**The staff `schedule` object.**
+
+```
+{ currency, value, total, matchesValue, scheduleSha256: string | null,
+  instalments: [ { id, position, label, amount,
+                   due: { kind: 'on_signing' | 'date', on: 'YYYY-MM-DD' | null },
+                   state, invoice: { id, invoiceNo: string | null, status } | null } ] }
+```
+
+`due.on` of an `on_signing` instalment is the signed date once the contract is signed, else `null`. Money travels as JSON numbers for display, like `value` today; every sum and comparison is done in SQL `numeric`.
+
+**`PUT` refusals, in order** (after `contract` `update`, which is always first):
+
+| Answer | When |
+|---|---|
+| 404 `contract_not_found` | no live contract with that id in the company |
+| 409 `schedule_frozen` | the contract is not a draft (also `PD610`) |
+| 400 `schedule_invalid` | not an array; more than 60 rows; a label empty or longer than 120 characters after trimming; an amount that is not a positive number; a `due` that is neither form |
+| 400 `schedule_order_invalid` | an `on_signing` row that is not first, a second one, or dates that go backwards |
+| 400 `currency_unknown` | the contract's currency is not in `finance_currencies` |
+| 400 `schedule_precision` | an amount with more decimals than the currency allows |
+| 400 `schedule_needs_value` | rows sent while the contract has no value or a zero value |
+
+Amounts are written as `numeric` from their decimal string (`$n::numeric`), never through float arithmetic.
+
+**Presets.** The editor computes them; one pure function in `platform-ui/src/lib/contracts.ts` does it, and its tests pin the rule.
+- **All on signing:** one row, "Payment on signing", the whole value.
+- **50/50:** "Deposit (50%)" on signing, and "Balance (50%)" on a date the person picks (default the term's end; blank and required when there is none).
+- **Monthly × N** (N from 1 to 60): "Month 1" to "Month N". The first is due on a date the person picks (default the term's start); each next one on the same day of the following month, or that month's last day when it is shorter.
+- Every preset splits the value evenly, rounded down to the currency's minor unit, and puts the remainder on the FIRST row, so the rows always add up exactly.
+- After a preset, the rows are ordinary rows the person may edit.
+
+### 61.5 Invoices from the schedule (`modules/invoice/invoice.controller.ts`, `modules/invoice/contract-billing.ts`)
+
+| Route | Body or query | Answers |
+|---|---|---|
+| `GET invoices/billable-instalments` | `dueBy` (YYYY-MM-DD, default today); `clientId` (optional: every client when absent) | 200 `{dueBy, items: [{instalmentId, client: {id, name}, contract: {id, title, reference, kind, projectId}, position, count, label, amount, currency, due: {kind, on}, state, invoice: {id, status} \| null}]}`: the instalments of signed, unsuperseded contracts with no live invoice (`due` or `upcoming` against `dueBy`), and those on an unissued draft (`invoicing`); the oldest due first; at most 500 rows. |
+| `POST invoices` | `{source: 'instalments', clientId, instalmentIds: [uuid, …] (1 to 60), dueBy?, taxCode?}` | 201 `{id, source: 'instalments', lineCount, total, currency}`. A replay whose instalments are exactly the instalment lines of one live draft of that client answers that draft with `deduped: true` (the contracts route's idempotency shape). |
+| `POST invoices` | `{source?: 'hours', clientId, periodStart, periodEnd, rate, currency?, taxCode?}` | Unchanged (§4), except that it now authorizes before it validates (today it checks the body first, so a denied caller with a thin body gets 400). |
+| `GET invoices/:invoiceId/issue-readiness` | none | Adds three blockers for an invoice with instalment lines (below). |
+| `PATCH invoices/:invoiceId {status: 'void'}`, `POST invoices/:invoiceId/void` | as §4 and §30 | Both answers add `releasedInstalments: n` (0 for an hourly invoice). |
+
+**The draft, in one transaction (`withBilling`).**
+1. Lock the chosen instalments with their contracts (`FOR UPDATE OF ci`).
+2. Check each: of this client; contract signed, not deleted, not superseded; due by `dueBy` (on signing, or `due_on <= dueBy`); unclaimed. All share one currency.
+3. Insert the invoice: `client_id`; `currency` = the contracts' currency; `period_start` and `period_end` = the earliest and latest included due dates (the signed date for an on-signing instalment); `tax_code`; `created_by` = `updated_by` = the caller; `lines` (below); `total` = their sum, computed in SQL.
+4. Claim: `UPDATE contract_instalments SET invoice_id = $invoice, claimed_at = now() WHERE id = ANY($ids) AND invoice_id IS NULL`. Fewer rows than asked rolls everything back as 409 `instalment_unavailable`.
+5. `invoice.created` and the `created` revision, as today.
+
+**The line.**
+
+```
+{ kind: 'instalment', description: '<reference> <title> · <label> (<position> of <count>)',
+  contractId, instalmentId, projectId: <the contract's project, or null>, amount }
+```
+
+New hourly lines also carry `kind: 'hours'`. A line with no `kind` is an hourly line: every line written before 10f.
+
+**How an instalment line reaches the ledger at issue (no change to `issue.ts`).**
+
+| `finance_ar_invoice_lines` | From an instalment line |
+|---|---|
+| `line_no` | its place in `lines` |
+| `description` | `description`, cut to 500 characters |
+| `quantity` | 1 (the line has no `hours`, so it is not a per-hour line) |
+| `unit_price`, `line_subtotal` | `amount` |
+| `revenue_account_id` | the billing profile's default revenue account, as for every line |
+| `tax_code`, `tax_rate`, `tax_amount` | the invoice's tax code through `finance_tax_compute()` on the issue date, as for every line |
+
+The number's service line defaults from the lines' `projectId` as today (`billing-numbering.ts`). A master agreement has no project, so staff pick the line (`NO_SERVICE_LINE`). A group client's invoice posts to the intercompany receivable (PV5-05). Void posts the credit note (§30), and the trigger releases the instalments.
+
+**New readiness blockers** (only for an invoice with instalment lines):
+- `INSTALMENT_LINES_INVALID`: an instalment line that this invoice does not claim, an instalment named twice, or an amount that differs from the instalment's.
+- `INSTALMENT_CONTRACT_NOT_SIGNED`: a line's contract was voided after the draft. Cancel the draft; that releases the instalments.
+- `INSTALMENT_SUPERSEDED`: a signed version now supersedes a line's contract.
+
+**Draft refusals, in order:**
+
+| Answer | When |
+|---|---|
+| 403 | `invoice` `create` is denied. Always first: no body is read before it. |
+| 400 `source_invalid` | `source` is neither `hours` nor `instalments`. |
+| 400 `source_fields_mixed` | `periodStart`, `periodEnd` or `rate` sent with `source: 'instalments'` (one source per draft). |
+| 400 `instalment_ids_invalid` | missing, empty, more than 60, a non-uuid or a repeated id. |
+| 400 `due_by_invalid`, `tax_code_invalid` | malformed. |
+| 404 `client_not_found` | no live, non-internal client with that id. |
+| 409 `instalment_unavailable` | `detail.items: [{instalmentId, reason, invoiceId?}]`, `reason` one of `not_found`, `other_client`, `not_signed`, `superseded`, `not_due`, `already_invoiced` (with the claiming `invoiceId`). Nothing is written. Also when the claim lost a race (step 4). |
+| 400 `currency_mixed` | the instalments are in more than one currency. |
+
+### 61.6 The client portal (`core/portal-commerce.controller.ts`)
+
+- `GET portal/contracts/:contractId` adds `schedule`: `null` without instalments, else `{currency, total, scheduleSha256, instalments: [{position, label, amount, due: {kind, on}, state, invoice: {id, invoiceNo} | null}]}`. `state` is the portal column of §61.3.
+- `invoice` is set only when the claiming invoice is client-visible (`invoiceClientVisible`: issued). A draft or approved invoice never surfaces. Its id is within the caller's reach, because invoices reach the whole client (§16b) and the contract is already in the caller's scope.
+- Never an instalment id, a claim time or an internal invoice status.
+- `GET portal/invoices/:invoiceId`: each line keeps `kind`, `description`, `hours`, `rate` and `amount`. `projectId`, `contractId` and `instalmentId` are removed, as `projectId` is today.
+- The contract list and the sign route are unchanged for the caller; the signature row records `schedule_sha256`.
+
+### 61.7 Freelancers: the vendor link and the rates (`modules/finance/freelancer-bills.controller.ts`, `modules/finance/finance.controller.ts`)
+
+| Route | Authorizes as | Body | Answers |
+|---|---|---|---|
+| `GET finance/freelancers` | `finance_ap` `read` | none | 200 `[{user: {id, name, email}, vendor: {id, code, name, withholdingCode} \| null, currentRate \| null, rates: [{id, hourlyRate, currency, expenseAccountCode, validFrom, validTo, note, used}], onPayroll}]`: every person with a rate or a linked vendor, by name. `used` = a claimed time entry falls in the rate's range. |
+| `POST finance/freelancers/:userId/rates` | `finance_ap` `vendor_master` | `{hourlyRate, validFrom, expenseAccountCode, currency?, note?}` | 201 the rate. An open rate that started before `validFrom` is closed the day before, in the same transaction. |
+| `PATCH finance/freelancers/:userId/rates/:rateId` | `finance_ap` `vendor_master` | `{validTo?: date \| null, note?}` | 200 the rate: ends it, or reopens the person's last rate. |
+| `DELETE finance/freelancers/:userId/rates/:rateId` | `finance_ap` `vendor_master` | none | 200 `{deleted: true}`, only for a rate that priced no claimed entry. |
+| `POST finance/ap/vendors` | `finance_ap` `vendor_master` (unchanged) | gains `userId?` | as today, plus `userId`. |
+| `PATCH finance/ap/vendors/:vendorId/person` | `finance_ap` `vendor_master` | `{userId: uuid \| null}` | 200 `{vendorId, userId}`: links or unlinks. |
+
+**Refusals** (the authorization is always first):
+
+| Answer | When |
+|---|---|
+| 404 `person_not_found` | not a human (`users.kind = 'employee'`) with an active membership in this company (a new rate, or a link) |
+| 409 `freelancer_on_payroll` | the person has an `hr_compensation` row in force in this company on a day of the rate's range (read with the `hr` scope): payroll would pay them twice |
+| 400 `rate_invalid`, `date_invalid` | not a positive amount within the currency's precision; a malformed date; `validTo` before `validFrom` |
+| 400 `currency_not_functional` | not the company's functional currency (the ledger books at rate 1, as `CURRENCY_NOT_FUNCTIONAL` says for invoices) |
+| 400 `expense_account_invalid` | not a live, active, postable, non-control account |
+| 409 `rate_overlap` | the range overlaps another rate of the person (the `EXCLUDE` is the wall) |
+| 409 `rate_used` | deleting a rate that priced a claimed entry |
+| 409 `person_has_vendor` | another live vendor already names the person |
+| 404 `vendor_not_found`, `rate_not_found` | |
+
+### 61.8 Freelancer bills (`modules/finance/freelancer-bills.{controller,service}.ts`)
+
+| Route | Authorizes as | Body or query | Answers |
+|---|---|---|---|
+| `GET finance/freelancer-bills/preview` | `finance_ap` `read` | `periodStart`, `periodEnd` (at most 366 days), `userId?` | 200 `{periodStart, periodEnd, freelancers: [{user, vendor \| null, lines: [{project: {id, name}, minutes, hours, hourlyRate, amount}], subtotal, withholding: {code, amount} \| null, amountPayable, currency, entryCount, earlierUnbilled: {count, minutes, oldest} \| null, blockers: [{code, message}], warnings: [{code, message}]}]}`: each person with a rate who has unbilled time in the period, or the one asked. |
+| `POST finance/freelancer-bills` | `finance_ap` `bill_entry` | `{userId, periodStart, periodEnd, billDate?}` | 201 `{billId, billNo, status: 'draft', subtotal, withholdingAmount, amountPayable, currency, entryCount}`. A replay for exactly that person and period, with a live draft for it and nothing left unbilled, answers that draft with `deduped: true`. |
+| `GET finance/freelancer-bills` | `finance_ap` `read` | `from?`, `to?`, `status?` (`draft`, `approved`, `paid`, `void`) | 200 `[{billId, billNo, user, vendor, periodStart, periodEnd, minutes, subtotal, withholdingAmount, amountPayable, status, createdAt, createdBy}]` |
+| `DELETE finance/freelancer-bills/:billId` | `finance_ap` `bill_entry` | none | 200 `{billId, discarded: true, releasedEntries}`. A draft only. |
+| `POST finance/ap/bills/:billId/approve` | `finance_ap` `approve` (unchanged) | none | Unchanged: posts the expense, the payable and the withholding liability. |
+
+**The draft, in one transaction** (`withTenants([company], …, {modules: ['finance', 'hr']})`).
+1. The person's unclaimed, undeleted time entries in the company dated in the period, locked (`FOR UPDATE`). Every project counts, client or internal. `billable` is ignored: it is about clients.
+2. Each entry is priced at the rate in force on its date.
+3. The blockers below, all at once; nothing is written when there is one. The preview shows the same list.
+4. The AP bill, `status 'draft'`: `vendor_id` = the person's vendor; `bill_no` = `{prefix}/FB/{yyyy}/{nnnn}` from `next_document_no(company, 'freelancer_bill', yyyy)` with the billing profile's invoice prefix (receipts and credit notes are numbered the same way; a discarded draft leaves a gap in this internal series); `bill_date` = `billDate` or today; `due_date` = `bill_date` + the vendor's payment terms; `currency_code` = the rates' currency; `notes` = "Freelancer hours <period>".
+5. The lines, one per (project, rate): description "<project> · <hours> h × <rate> (<first date> to <last date>)"; `quantity` = the hours to 4 decimals; `unit_price` = the rate; `line_subtotal` = `round(sum(minutes) × rate / 60, minor unit)`, so the money is rounded once per line and the hours never are; `expense_account_id` from the rate's code; no PPN.
+6. Withholding: `round(finance_tax_compute(company, code, subtotal, bill_date), minor unit)` with the vendor's `default_withholding_code`. The bill's `withholding_rate` is that code's `rate × base_multiplier / 100`, its account is the code's `account_id`, and `amount_payable` = total − withholding.
+7. The `finance_freelancer_bills` row, then the claim: `UPDATE time_entries SET ap_bill_id = $bill WHERE id = ANY($ids) AND ap_bill_id IS NULL`, which must touch every locked entry, or everything rolls back (409 `conflict`).
+8. The activity `freelancer_bill_drafted` on the bill.
+
+Every amount is computed in SQL `numeric`. The existing manual bill route's float arithmetic is not reused.
+
+**Blockers** (`POST` answers 409 `bill_blocked` with `blockers`):
+
+| Code | Means |
+|---|---|
+| `NO_VENDOR` | no live vendor names the person: link one (§61.7) |
+| `NO_RATE` | entries on dates no rate covers (`detail.dates`) |
+| `ON_PAYROLL` | a compensation is in force on an entry's date |
+| `VENDOR_IS_PKP` | the vendor charges PPN: enter that bill by hand, with its e-Faktur |
+| `CURRENCY_NOT_FUNCTIONAL` | a rate's currency is not the functional currency |
+| `NO_EXPENSE_ACCOUNT` | a rate's expense account is not a live, postable, non-control account |
+| `WITHHOLDING_CODE_NOT_IN_FORCE` | the vendor names a withholding code with no `pph21`, `pph23` or `pph42` tax code in force on the bill date, or one with no account |
+| `NO_OPEN_PERIOD` | no open fiscal period holds the bill date, so approval would fail |
+| `TOO_MANY_ENTRIES` | more than 2,000 entries: narrow the period |
+
+**Warnings**, which never block: `NO_WITHHOLDING` (the vendor names no withholding code; owner question 1) and `EARLIER_UNBILLED` (unclaimed entries dated before the period).
+
+**Other refusals.** 403 first. 400 `period_invalid` (malformed, the end before the start, more than 366 days) and `bill_date_invalid`. 404 `person_not_found`. 409 `nothing_to_bill`: no unclaimed entry in the period and no draft for it. On `DELETE`: 404 `freelancer_bill_not_found` (also for a manual AP bill, which this route never deletes) and 409 `bill_not_draft`.
+
+**Time entries.** `PATCH time-entries/:entryId` answers 409 `time_entry_billed` when the entry is claimed and the body changes `minutes`, after its authorization. `billable` and `notes` still change. The trigger (`PD615`) is the wall; no other route writes a time entry.
+
+### 61.9 UI contract (`platform-ui`)
+
+- **The contract editor** (`/clients/[clientId]/billing`: `ContractForm` and a new `ScheduleEditor`), on a draft agreement or amendment:
+  - a "Payment schedule" section under Value and Currency, with the presets (All on signing, 50/50, Monthly × N) and custom rows (label, amount, "On signing" or a date; add, remove, move);
+  - a live line: "Adds up to IDR 120,000,000 of 120,000,000", or "IDR 5,000 short", or "IDR 5,000 over";
+  - Save sends `PUT …/schedule` through a new action, `saveScheduleAction` (`{ok, error?, field?}`); every 400 code reads as a sentence;
+  - the row's Send is disabled while `scheduleSummary.matchesValue` is false, with "The payment schedule must add up to the value before sending";
+  - a sent or signed contract shows the schedule read-only, each instalment with its state (§61.3) and a link to its invoice;
+  - a contract from before 10f with a value and no schedule says so.
+- **The invoice draft** (`/invoices/new`):
+  - pick a client and "Due up to" (default today); a checklist from `GET invoices/billable-instalments`, every `due` row ticked, `upcoming` rows shown with their date and not selectable, `invoicing` rows linking to their draft;
+  - an optional tax code; Create sends `source: 'instalments'` through `createInvoiceFromScheduleAction`, and every 409 reason reads as a sentence;
+  - "From logged hours (exception)" opens today's form, unchanged;
+  - a failed read says so; an empty list says "Nothing is due for this client up to <date>".
+- **The invoice page** (`/invoices/[invoiceId]`): an instalment line reads "Fixed fee", quantity 1, linked to its contract; it never prints `undefined` for hours or a rate (the page reads `l.hours` and `l.rate` today). A draft or approved invoice that was never issued gets **Cancel draft** (`PATCH {status: 'void'}`), saying "The instalments go back to the payment schedule". The three new blockers link to the contract.
+- **The portal contract page** (`/portal/contracts/[contractId]`): a "Payment schedule" table (label, amount, due, the state words of §61.3), with the invoice number linking `/portal/invoices/:id`; nothing when `schedule` is `null`. The portal invoice page already shows a line with no hours as one amount.
+- **The sealed copy** (`/print/contracts/[jobToken]`): `ContractPrintPayload` gains `schedule: {currency, total, sha256, instalments: [{position, label, amount, due}]} | null`, and the evidence page prints it with its hash. The job checks `contract_schedule_sha256()` against the stored hash before sealing; a difference is refused (`schedule_changed`), never sealed.
+- **Finance › Payables gains a Freelancers tab** (`/finance/payables/freelancers`, in the Payables row; `/finance` is already owned by the Finance workspace, so the area needs no rule):
+  - **Rates:** the list from `GET finance/freelancers`; "Add a rate" (a person picker over the company's active members, the hourly rate, the start date, the expense account); End; Withdraw (only when `used` is false); Link a vendor. A 403 for assurance asks for the fresh second factor.
+  - **Bills:** a period picker (default last month); the preview per freelancer with its lines, withholding, warnings and blockers; "Draft bill" per ready freelancer, and "Draft all ready"; the drafted bills with Discard (drafts only) and a link to approve them in Payables.
+- **The Finance Overview pulse** gains "Instalments due to invoice" (source `finance-instalments-due`: the count of `due` items from `GET invoices/billable-instalments`, linking `/invoices/new`). A failed read is "unavailable", never 0.
+- **DEMO_MODE:** a draft with a 50/50 schedule, a signed agreement with one instalment invoiced and one due, an amendment with its own schedule, an agreement from before 10f, the billable list, a freelancer with two rates, a preview with a blocker, and a drafted bill.
+- **Gates mirror the server:** the schedule editor shows wherever the draft form shows today; `/invoices/new` keeps `company.manage`; the Freelancers tab is ungated like Payables (DW-7b: `finance_ap` has no UI capability) and renders each refusal.
+
+### 61.10 Agents and automation (the agentic bar)
+
+| Tool | Route | Impact | Notes |
+|---|---|---|---|
+| `contracts.get` (existing) | `GET contracts/:contractId` | read | now carries `schedule` |
+| `contracts.setSchedule` (new) | `PUT contracts/:contractId/schedule` | low | draft only; a preset is the caller's arithmetic |
+| `invoices.billableInstalments` (new) | `GET invoices/billable-instalments` | read | |
+| `invoices.draftFromSchedule` (new) | `POST invoices` with `source: 'instalments'` | low | a draft reaches nobody, and a replay answers the same draft; approving and issuing stay human (`invoices.issue` is high, and maker-checker is unchanged) |
+| `freelancerBills.preview` (new) | `GET finance/freelancer-bills/preview` | read | |
+| `freelancerBills.draft` (new) | `POST finance/freelancer-bills` | low | a replay for the same person and period answers the same draft |
+
+- **Not tools:** rates, the vendor link and discarding a draft (money terms and payees stay a person's act, at high assurance for the first two), and approving a bill (no AP tool exists).
+- **Who the call runs as.** An agent, or an n8n flow, calls through the hub's identity envelope as the person it acts for, with that person's rights; so a flow acting for a Finance person can draft the due instalments, or last month's freelancer bills, on a schedule. A bot or automation principal calling directly is minted `low` and fails every `notLow` condition on these kinds. Nothing is issued, approved or paid without a person.
+
+### 61.11 Side effects
+
+- **Activity.** On the contract: `schedule_updated` (`{count, total}`), and `sent` gains `scheduleSha256`. On the invoice: `created` gains `{source, instalmentIds}`, and both voids gain `releasedInstalments`. On the vendor: `freelancer_rate_added`, `freelancer_rate_ended`, `freelancer_rate_withdrawn`, `vendor_person_linked` and `vendor_person_unlinked`. On the AP bill: `freelancer_bill_drafted` and `freelancer_bill_discarded`. Each carries the actor and, for an agent or a workflow, `via`.
+- **Outbox.** `invoice.created` gains `source` and `instalmentIds` (ids only). No new event type: nothing would consume one, and n8n reads due work through the routes.
+- **Notifications: none new.** Finance sees due instalments on its Overview and in the draft form. The client hears when the invoice is issued, as today. There is no recipient set for "Finance" that would not become a storm (the reasoning of the portal's `notifyInternal`). A freelancer has no view of their bill in 10f (owner question 6).
+- **Portal live:** no new topic. The `contracts` and `invoices` topics already refresh the pages that change.
+
+### 61.12 RLS and tenancy
+
+- `contract_instalments` is on the plain tenant wall, like `contracts`. Every portal read goes through `ownedContract` and the portal's predicates; every staff read through `contract` `read` in the company's own scope.
+- `finance_freelancer_rates` and `finance_freelancer_bills` compose `app_module_allowed('finance')`. Every read and write runs in a finance-scoped transaction, and the payroll check adds `hr`. A test proves the zero-row trap: without the scope the routes fail loudly, never "nothing to bill".
+- `time_entries.ap_bill_id` changes only in a finance-scoped session (`PD616`), so a session that cannot see AP bills can never release a claim.
+- Every statement runs in one company. No `withGlobal`, no `crossRoot`. A group client is billed in the agency's own scope, as today.
+- A rate names a person in its own company; a bill only ever claims that company's time entries.
+
+### 61.13 What else in this contract changes when 10f lands
+
+The build updates these rows in the same change as the code: §4 (`POST invoices` `source`, the line `kind`, authorization first, `releasedInstalments`); §16b (the portal contract detail's `schedule`, the invoice lines' keys); §16e (`schedule` and `scheduleSummary`, `PUT …/schedule`, `send`'s `scheduleSha256`, `PATCH` void-only after send, the signatures' `scheduleSha256`, the tools); §30 (the three readiness blockers); §30a (the sealed copy's schedule and its check); §48a (`PATCH time-entries` 409 `time_entry_billed`); §60.6a and §60.8 (a group company is billed by the schedule); the Finance & Accounting section (the vendor `userId`, the freelancer routes); PERMISSION-CONTRACT §21 (freelancer bills are AP bills).
+
+### 61.14 Proofs required before ticking (Linux CI gate, real Postgres and Cerbos)
+
+**Seed.** One company with the finance and invoice modules on, a billing profile, IDR as the functional currency, an open period, a `PPH21` tax code (kind `pph21`, rate 5, base multiplier 0.5, the account 2150) and a `PPH23` code. Two clients, one of them a group client. Two company_admins A and B (maker-checker), a manager, a member, a viewer, a `finance_staff`, a `finance_manager`, a bot and an automation account. A signer contact for each client. A freelancer F (a member with a vendor), a freelancer G with no vendor, and an employee E on payroll. A second company.
+
+- **The schedule (10f-1, 10f-2a).**
+  - PUT a 50/50 schedule on a draft and read it back with `matchesValue: true`. A schedule that does not add up saves with `matchesValue: false`; Send answers 400 `schedule_total_mismatch` and writes nothing; a direct UPDATE to `sent` raises `PD612`, and so does one with a wrong `schedule_sha256`.
+  - Each 400 of §61.4 in order: an `on_signing` row that is not first, a second one, dates going backwards, an IDR amount with decimals, rows on an unvalued contract.
+  - After send: PUT answers 409 `schedule_frozen`; a direct INSERT, an UPDATE of `amount` and a DELETE raise `PD610`; `schedule_sha256` equals `contract_schedule_sha256(id, currency, value)`; `PATCH {status: 'void', title: 'x'}` answers 400 `only_void_after_send`; a direct UPDATE of `value` raises `PD613`. The PV5-F1 cases keep their answers.
+  - Both signatures (the portal's sign and the countersign) carry the contract's `schedule_sha256`; the portal detail shows the schedule with the portal's states; a contact scoped to another project still gets 404.
+  - The sealed copy prints the schedule. With a row altered by a superuser (trigger off), the job refuses `schedule_changed`.
+  - An amendment with its own value and schedule is sent and signed on its own; the amended agreement's rows do not move.
+  - The PV-5 suites that send a valued contract (`contract-fixed-content.test.ts`, `contracts-billing-tools.test.ts`) pass with a one-row schedule added in their helpers, and no assertion of theirs changes.
+- **Invoices (10f-1, 10f-3a).**
+  - Sign a 50/50 agreement: the on-signing instalment is `due` and the dated one `upcoming`; with `dueBy` past the date it is `due`.
+  - Draft from both: two lines of `kind 'instalment'`, the total equals the value, both claimed, no new readiness blocker. B approves, A issues. The AR lines are quantity 1 at each amount; the group client's invoice posts to the intercompany receivable.
+  - A second draft with either instalment: 409 `instalment_unavailable` (`already_invoiced`). A replay of the first body: 201 `deduped: true` with the same id.
+  - Two concurrent drafts of one instalment: exactly one wins; the other gets 409 and writes nothing.
+  - Cancel the draft (`PATCH void`): released, and drafting again works. Void the issued invoice: the credit note, released, `releasedInstalments: 2`. A direct un-void of a void instalment invoice raises `PD614`.
+  - The claim guard: a direct claim to an invoice of another client, of another currency, already issued, void, whose lines lack the instalment or carry another amount, or for an unsigned contract raises `PD611`; so does a release while the invoice is live.
+  - Voiding the contract after the draft gives `INSTALMENT_CONTRACT_NOT_SIGNED`. A signed superseding version makes the old instalments `not_billed`, and `INSTALMENT_SUPERSEDED` blocks.
+  - The portal: an `invoicing` instalment reads `Due` with no invoice; once issued, "Invoiced, <no.>". The invoice detail's lines carry no `contractId`, `instalmentId` or `projectId`.
+  - The hourly draft is unchanged, and now answers 403 before 400 (a denied caller with a bad body).
+  - 403 on `POST invoices` for a manager, a member, a viewer and a company_admin of the second company. A bot or automation principal gets 403 on the draft (minted `low`) and on issue (PV5-02's DENY).
+- **Freelancers (10f-1, 10f-4a).**
+  - Rates: add; the automatic close of the open rate; `rate_overlap` (and a direct INSERT raising the `EXCLUDE`); end; reopen; withdraw an unused rate; `rate_used`; `freelancer_on_payroll` for E; `currency_not_functional`; `expense_account_invalid`; `person_not_found` for a client contact and for a member of the second company.
+  - `vendor_master` needs high assurance: a finance_manager at low assurance gets 403, a finance_staff gets 403, and a company_admin or finance_manager at high passes.
+  - The link: `person_has_vendor` for a second vendor.
+  - Preview and draft for F over a month with two rates and three projects: a line per (project, rate), the money rounded once per line, withholding = `finance_tax_compute()` with `PPH21`, `amount_payable` = total − withholding; the AP bill is a draft; every entry is claimed.
+  - Blockers: `NO_VENDOR` for G, `NO_RATE` for an uncovered day, `ON_PAYROLL` for E, a PKP vendor, a withholding code with no tax code in force, a closed period; nothing written for any of them.
+  - A late entry dated in a billed period is drafted by the next call. A replay of the same body answers `deduped`. `nothing_to_bill` when nothing is left and no draft exists.
+  - `PATCH time-entries` changing `minutes` of a claimed entry: 409. A direct UPDATE raises `PD615`. `notes` still change.
+  - Discard: the bill, its lines and its row are gone, and the entries are free. Discarding an approved bill: 409. A direct DELETE of an approved bill raises `PD617`. A direct change of `ap_bill_id` in a session without the finance scope raises `PD616`.
+  - Approving through the AP route posts the expense debit, the payable credit and the 2150 withholding credit; the AP reconciliation ties.
+  - The zero-row trap: the module tables read nothing without the finance scope, and no route ever answers "nothing to bill" for that reason.
+- **The migrations.** Both apply twice; every assertion holds; no existing row changes.
+- **IAM.** No policy, catalog or bundle change (a static pin that the 10f commits touch none of them), and the denials above.
+- **The screens (10f-2b, 10f-3b, 10f-4b).** vitest for the presets (the remainder rule, month ends), the readers and the actions; `next build` in DEMO_MODE; the sumopod e2e `contract-billing` (the editor and its presets, Send gating, the invoice draft, Cancel draft) and `freelancer-bills` (rates, preview, draft, discard), one gate at a time; axe on the new and changed pages.
+- **Live (10f-5),** as hansel@ on the live ERP (mock seed, labelled records, a teardown list): a 50/50 agreement for a placeholder client, sent, signed by its `portal@<client>.test` contact and countersigned; the draft from the on-signing instalment; the portal shows `Due`; Cancel draft releases it. A rate for a seeded member with labelled time; preview, draft and approve one bill, and discard a second. Issuing an instalment invoice needs a second staff login (maker-checker): an owner step.
+
+### 61.15 Owner questions (each with the default the build uses until ruled)
+
+1. **Tax on freelancer bills** (for the accountant): PPh 21 (an individual who is not an employee) or PPh 23 (a business)? Default: each freelancer's vendor names a withholding code that Finance sets up under Finance › Tax, and the bill computes it with `finance_tax_compute()`. A vendor with no code is drafted with no withholding, and the preview flags it.
+2. **Does the hourly draft stay?** Default: yes, as an exception Finance chooses explicitly.
+3. **May one invoice mix fixed and hourly lines?** Default: no; one source per draft.
+4. **Retainer end dates.** Default: a retainer is "monthly × N" (N up to 60) inside the agreement's term. There is no open-ended schedule; a renewal is an amendment, or a new agreement, with the next months.
+5. **Revenue on advance invoices** (for the accountant). An upfront or retainer invoice is booked as revenue when issued, as hourly invoices are. Should it go to deferred revenue until the work is done (PSAK 72)? Default: unchanged in 10f; a Finance follow-up if ruled.
+6. **Who records a freelancer's rate, and do freelancers see it?** Default: Finance records it under vendor master (a finance manager or a company admin, with a fresh second factor), and a freelancer sees neither their rate nor their bills in the ERP in 10f.
+7. **Agreements signed before 10f** with a value and no schedule. Default: nothing is backfilled, because a schedule is a signed term. They are billed by the hourly exception, or by an amendment that carries a schedule.
+8. **Certified signing with a schedule.** A PSrE envelope covers the document's bytes only, not the schedule. Default: nothing changes while PV-D44 keeps certified signing off; when it returns, the envelope's document carries the schedule as an annex.
+
+### 61.16 Build order and tiers
+
+Plan §12.2, "10f design". 10f-1 the data; 10f-2a the schedule (backend) and 10f-2b its screens; 10f-3a invoices from the schedule (backend) and 10f-3b their screens; 10f-4a freelancer bills (backend) and 10f-4b their screens; 10f-5 the gates, the release and a live drive. After 10f-1, the contract track (10f-2, then 10f-3) and the freelancer track (10f-4) can run side by side. Invoices and contracts are PV-5's code, so each ticket rebases on main and coordinates with the PV sessions.

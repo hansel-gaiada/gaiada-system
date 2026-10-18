@@ -2577,3 +2577,51 @@ Also the UI mirror: the capabilities `work_request.send_across` (company_admin, 
     3. Probe a denial: a member of company H who holds an `org_unit_lead` grant on node X whose seat is in another company is denied a lead action on H's X.
     4. Probe an allow: one live seat-backed head is still allowed, e.g. azlan@ on the agency's `d-webdev` (post a test notice there, or read the department's report document, then remove the test record).
     5. Census on 2026-10-18: all 6 live `org_unit_lead` grants are backed by a seat with its role row on the same unit, so nobody's access changes.
+
+## 50. DW-10f — contract billing and freelancer bills, BFF §61 (2026-10-18, PLANNED): no new kind, no new action
+
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §61 (rulings DW-D45 and DW-D46; plan `docs/plans/2026-10-13-department-workspaces.md` §11.4 and §12.2, "10f design"). Status: **PLANNED (the contract only; nothing is built)**.
+
+**Every route reuses an existing kind and action.** Nothing in `cerbos/policies/`, `derived_roles.yaml`, `cerbos.ts`, the permission catalog, the groups, the IAM seed, the bundles, the pins or the live matrix changes, and no Cerbos restart is needed for 10f.
+
+| Route (BFF §61) | Authorizes as | Who passes today |
+|---|---|---|
+| `GET contracts`, `GET contracts/:contractId` (now with the schedule) | `contract` `read` | `company_admin`, `manager`, `perm_contract_read` (the permission-native `owner` through it), `platform_admin` |
+| `PUT contracts/:contractId/schedule` | `contract` `update` | `company_admin`, `perm_contract_update`, `platform_admin` |
+| `POST contracts/:contractId/send` (now also fixes the schedule) | `contract` `send` (unchanged) | `company_admin`, `perm_contract_send`, `platform_admin` |
+| `GET portal/contracts/:contractId` (now with the schedule) | `portal` `read`, then the portal scope (unchanged) | the client's contacts in scope |
+| `GET invoices/billable-instalments` | `invoice` `read`, then `contract` `read` | `company_admin`, `manager`, both read mirrors, `platform_admin` |
+| `POST invoices` with `source: 'instalments'` | `invoice` `create` | `company_admin`, `perm_invoice_create`, `platform_admin` |
+| approve, issue, void an invoice | unchanged (IAM-GAP-01/02, §32) | unchanged |
+| `GET finance/freelancers`, `GET finance/freelancer-bills`, `GET finance/freelancer-bills/preview` | `finance_ap` `read` | `finance_staff`, `finance_manager`, `company_admin`, `platform_admin` |
+| `POST`, `PATCH`, `DELETE finance/freelancers/:userId/rates…`; `PATCH finance/ap/vendors/:vendorId/person`; `POST finance/ap/vendors` with `userId` | `finance_ap` `vendor_master` | `finance_manager` and `company_admin` at **high** assurance; `platform_admin` |
+| `POST finance/freelancer-bills`, `DELETE finance/freelancer-bills/:billId` | `finance_ap` `bill_entry` | `finance_staff`, `finance_manager`, `platform_admin` (not `company_admin`) |
+| `POST finance/ap/bills/:billId/approve` | `finance_ap` `approve` (unchanged) | `finance_manager` and `company_admin` at **high** assurance; `platform_admin` |
+| `PATCH time-entries/:entryId` (409 once billed) | `time_entry` `update` (unchanged) | unchanged |
+
+**Why each one.**
+- **The schedule is part of the draft.** Writing it is editing the draft, and sending it is sending. A separate action would split one edit across two grants.
+- **Drafting from the schedule is drafting an invoice.** The same people draft today. Maker-checker stays on `approve`; `issue` and `void_issued` keep their bot and automation DENY (§32).
+- **The billable list reads two kinds, so it asks both.** A caller who may read invoices but not contracts gets 403, never contract amounts.
+- **Rates and the vendor link are vendor master.** They decide how much the company pays and to whom: the same leverage as a vendor's bank details, which is why `vendor_master` is its own right (§21). So: high assurance, `finance_manager` or `company_admin`, never `finance_staff`.
+- **Freelancer drafts are bill entry.** The duty split holds: the person who drafts (`bill_entry`) is not, by role, the person who approves (`approve`), and the seeded conflict `ap_bill_entry` + `ap_payment_approve` still applies. Discarding a draft is bill entry too: it removes a bill that was never posted.
+- **The handler checks what Cerbos cannot see.** The person must be an active member of the company and not on payroll; the time entries must be the person's own and unclaimed; the instalment must be signed, due and unclaimed. Those are rows, and the database walls of BFF §61.2 (`PD610` to `PD617`) hold them when a handler is wrong. Cerbos decides who may act; the database decides what may be written.
+
+**What stays as it is.**
+- `finance_ap` has no permission arm (§17 to §21: role arm only). The permission-native `owner` therefore reaches rates and freelancer bills only through a role it also holds (`company_admin`, a finance role). Unchanged.
+- `company_admin` holds no `bill_entry` (§21), so a company admin can set rates and approve freelancer bills but not draft them. Unchanged.
+- A portal contact reads the schedule through the portal's own scope, never through `contract`.
+
+**Agents and automation.**
+- The new low-impact tools (`contracts.setSchedule`, `invoices.draftFromSchedule`, `freelancerBills.draft`) are called through the hub's identity envelope, as the person the agent or n8n flow acts for, with that person's rights. Each makes a draft that reaches nobody.
+- A bot or automation principal calling directly is minted `low` (platform-nest's rule), so every role-arm rule used here refuses it: each carries `notLow`, or needs `high`. Only the `platform_admin` wildcard has no condition, as on every kind (the operator tier). No new DENY is needed.
+- `vendor_master` and `approve` need high assurance, so rates, vendor links and approvals stay a person's act at a fresh second factor.
+- Issuing stays human: `invoices.issue` is high impact (D14), and the DENY of §32 refuses a bot or automation principal.
+
+**If the owner rules otherwise** (BFF §61.15, question 6): if someone outside Finance is to record rates (for example the head who hired the freelancer), that is a new action, and the six artifacts follow: the policy, the catalog, the groups, the IAM seed, the bundles, and the pins with the live matrix.
+
+**Proof** (BFF §61.14, Linux CI gate).
+- A static pin: the 10f commits change nothing under `cerbos/policies/`, `permission-catalog.json`, `permission-groups.json` or `role-permission-bundles.json`, and add no `permission_catalog` row.
+- The HTTP denials: 403 before any 400 on every new route, for the roles above that do not pass.
+- Assurance: a `finance_manager` or `company_admin` at low assurance gets 403 on every `vendor_master` route; at high they pass. A `finance_staff` gets 403 on them at any assurance.
+- A bot or automation principal holding `company_admin` or a finance role gets 403 on every write route here.
