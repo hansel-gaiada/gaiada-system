@@ -40,8 +40,9 @@ export interface RoleGrant {
    *  matches nothing in Cerbos (has() guard), so an unresolved scope fails closed. */
   editorialScopes?: EditorialScope[];
   /** DW-10g-2 Part B (PERMISSION-CONTRACT §50). Only set on an `org_unit_lead` grant (always scopeType `org_unit`, a bare node
-   *  id with no company): the companies whose OWN lead seat backs it -- an active `positions.is_lead` row of that company on the
-   *  grant's node, carrying the `org_unit_lead` role row at `own_unit`, held by this user through an OPEN assignment -- and in
+   *  id with no company): the companies whose OWN lead seat backs it -- an active `positions` row of that company on the grant's
+   *  node carrying the `org_unit_lead` role row at `own_unit` (the role row is the source; `is_lead` is display only), held by
+   *  this user through an OPEN assignment -- and in
    *  which the user is an active member. Read by `assemblePrincipal()` under the seat tables' `principal_lookup` policies
    *  (migration 202610180911), never from a request. The `org_unit_lead` derived role requires
    *  `resource.attr.tenantId in g.tenantIds`, so a grant no seat backs (`[]`) matches nothing, and a grant made for another
@@ -498,7 +499,7 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
                  JOIN positions p ON p.id = pa.position_id AND p.tenant_id = pa.tenant_id
                  JOIN position_roles pr ON pr.position_id = p.id AND pr.tenant_id = p.tenant_id AND pr.scope_kind = 'own_unit'
                  JOIN roles r ON r.id = pr.role_id AND r.name = 'org_unit_lead' AND (r.company_id IS NULL OR r.company_id = p.tenant_id)
-                WHERE pa.user_id = $1 AND pa.valid_to IS NULL AND p.is_lead AND p.status = 'active'
+                WHERE pa.user_id = $1 AND pa.valid_to IS NULL AND p.status = 'active'
                 ORDER BY p.tenant_id, p.unit_node_id`,
               [userId],
             )

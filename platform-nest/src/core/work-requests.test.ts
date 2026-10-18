@@ -22,7 +22,7 @@ import { buildApp } from "../main";
 import { agencyModule } from "../modules/agency";
 import { applyOrgStructure, sanitizeStructure } from "../admin/org-structure.service";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
-import { createCompany, createUser, addMembership, createRole, grantRole, createProject, createClient } from "../testing/fixtures";
+import { createCompany, createUser, addMembership, createRole, grantRole, createProject, createClient, grantLeadSeat } from "../testing/fixtures";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -171,6 +171,7 @@ describe.skipIf(!TEST_URL)("DW-5c requests between departments (HTTP, real Postg
     await grantRole(viewer, viewerRole, "company", A);
     await grantRole(leadCreative, leadRole, "org_unit", "d-creative");
     await grantRole(leadSeo, leadRole, "org_unit", "d-seo");
+    await grantLeadSeat(A, "d-seo", leadSeo); // DW-10g-2: a head of d-seo is a real seat in A (Cerbos reads the seat-backed grant)
     await grantRole(outsider, memberRole, "company", B);
     await grantRole(memberB, memberRole, "company", B);
     await grantRole(memberC, memberRole, "company", C);

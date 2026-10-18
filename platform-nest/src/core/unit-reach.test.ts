@@ -217,7 +217,9 @@ describe("DW-10e-6 · loadLeadSeatUnits: the units a person heads in ONE company
     expect(calls[0].params).toEqual([OTHER_T, "u-me"]);
     const sql = calls[0].sql.replace(/\s+/g, " ");
     expect(sql).toContain("JOIN position_assignments pa ON pa.position_id = p.id AND pa.tenant_id = p.tenant_id");
-    expect(sql).toContain("p.tenant_id = $1 AND p.is_lead AND p.status = 'active' AND pa.valid_to IS NULL AND pa.user_id = $2");
+    expect(sql).toContain("p.tenant_id = $1 AND p.status = 'active' AND pa.valid_to IS NULL AND pa.user_id = $2");
+    // the ROLE ROW is the source of lead power; `is_lead` is display only and never read (a role row without it is a head)
+    expect(sql).not.toContain("is_lead");
     expect(sql).not.toMatch(/user_roles/);
   });
 

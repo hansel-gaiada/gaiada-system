@@ -25,7 +25,7 @@
 //
 // ══════════════════════════ WHO IS TOLD (§43.1) ══════════════════════════
 // DW-10g-2: the holders of THIS company's own lead seat on the department's node EXACTLY (`loadSeatHoldersByNode`: an active
-// `is_lead` position carrying the `org_unit_lead` role row, held through an assignment with no `valid_to`) who are active members
+// position carrying the `org_unit_lead` role row (`is_lead` is display only), held through an assignment with no `valid_to`) who are active members
 // of the company. The same seat `loadLedUnitScope` reads, so what is told here is who heads the unit there. Not told: the heads
 // of enclosing units, a manager placed in the unit, a lead position without its role row, and the holder of an `org_unit_lead`
 // GRANT alone. Before DW-10g-2 this read `user_roles`, whose `org_unit` grant carries no company: only the membership conjunct

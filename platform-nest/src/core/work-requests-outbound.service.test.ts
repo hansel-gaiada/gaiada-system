@@ -315,7 +315,8 @@ describe("DW-10e §60.11 Tenancy: static pins of the sender files", () => {
     const from = seats.slice(seats.indexOf("const LEAD_SEAT_FROM ="), seats.indexOf("export async function loadLeadSeatNodes("));
     expect(from).toContain("JOIN position_assignments pa ON pa.position_id = p.id AND pa.tenant_id = p.tenant_id");
     expect(from).toContain("JOIN position_roles pr ON pr.position_id = p.id AND pr.tenant_id = p.tenant_id AND pr.scope_kind = 'own_unit'");
-    expect(from).toContain("const LEAD_SEAT_LIVE = `p.is_lead AND p.status = 'active' AND pa.valid_to IS NULL`");
+    expect(from).toContain("const LEAD_SEAT_LIVE = `p.status = 'active' AND pa.valid_to IS NULL`");
+    expect(from).not.toContain("is_lead"); // the role row is the source; is_lead is display only
     const nodes = seats.slice(seats.indexOf("export async function loadLeadSeatNodes("), seats.indexOf("export async function loadLeadSeatUnits("));
     expect(nodes).toContain("WHERE p.tenant_id = $1 AND ${LEAD_SEAT_LIVE} AND pa.user_id = $2");
     const units = seats.slice(seats.indexOf("export async function loadLeadSeatUnits("), seats.indexOf("export async function loadAnchoredLeadGrantNodes("));

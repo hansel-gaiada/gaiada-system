@@ -309,9 +309,11 @@ export async function loadOrgStructure(c: PoolClient, tenantId: string): Promise
 // An `org_unit_lead` GRANT carries no company: its scopeType is `org_unit` and its scopeId a bare node id, and node ids repeat
 // across group companies (`d-webdev`, `d-hr`). Read as leadership on its own, a grant made for company P's `d-web` would make its
 // holder a head of company H's `d-web` too, wherever they are a member. So no access decision reads the grant as leadership.
-// Leadership in a company is that company's OWN lead seat: a `positions` row of the company with `is_lead` and
-// `status = 'active'`, carrying a `position_roles` row for the `org_unit_lead` role at `own_unit` (0109 design §2.2: a lead
-// position without it confers nothing), held through a `position_assignments` row with no `valid_to`. Plus the placement-derived
+// Leadership in a company is that company's OWN lead seat: an ACTIVE `positions` row of the company (`status = 'active'`)
+// carrying a `position_roles` row for the `org_unit_lead` role at `own_unit`, held through a `position_assignments` row with no
+// `valid_to`. The ROLE ROW is the source of lead power (0109 design §2.2, and what the position reconciler grants from);
+// `positions.is_lead` is display only and is not read: an `is_lead` position without the role row confers nothing, and a role
+// row on a position without `is_lead` is a head. Plus the placement-derived
 // path for a caller whose unit-scoped grant (`manager`, `org_unit_lead`) is anchored on THIS company (a company or global grant,
 // or a project grant on one of its projects). Every helper below reads inside `withTenants([tenantId])` (positions,
 // position_roles and position_assignments are FORCE RLS: an unset tenant GUC reads ZERO seats, a silent "heads nothing").
@@ -321,7 +323,7 @@ const LEAD_SEAT_FROM = `positions p
        JOIN position_assignments pa ON pa.position_id = p.id AND pa.tenant_id = p.tenant_id
        JOIN position_roles pr ON pr.position_id = p.id AND pr.tenant_id = p.tenant_id AND pr.scope_kind = 'own_unit'
        JOIN roles r ON r.id = pr.role_id AND r.name = 'org_unit_lead' AND (r.company_id IS NULL OR r.company_id = p.tenant_id)`;
-const LEAD_SEAT_LIVE = `p.is_lead AND p.status = 'active' AND pa.valid_to IS NULL`;
+const LEAD_SEAT_LIVE = `p.status = 'active' AND pa.valid_to IS NULL`;
 
 /** The EXACT units (no subtree) `userId` holds a lead seat on in `tenantId`, sorted. */
 export async function loadLeadSeatNodes(c: PoolClient, tenantId: string, userId: string | null): Promise<string[]> {

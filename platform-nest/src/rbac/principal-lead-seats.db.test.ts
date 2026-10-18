@@ -67,6 +67,19 @@ describe.skipIf(!TEST_URL)("DW-10g-2 assemblePrincipal() resolves the companies 
     expect((await leadOf(head))[0].tenantIds).not.toContain(P);
   });
 
+  it("the ROLE ROW is the source of lead power: a role row on a position without is_lead is a head; is_lead without the role row is not", async () => {
+    const roleOnly = await createUser("seat-role-only@lead-seats.test");
+    const titleOnly = await createUser("seat-title-only@lead-seats.test");
+    for (const u of [roleOnly, titleOnly]) {
+      await addMembership(H, u);
+      await grantRole(u, await createRole("org_unit_lead"), "org_unit", "d-fin");
+    }
+    await grantLeadSeat(H, "d-fin", roleOnly, { isLead: false }); // what the position reconciler grants from
+    await grantLeadSeat(H, "d-fin", titleOnly, { noRole: true }); // display only
+    expect((await leadOf(roleOnly))[0].tenantIds).toEqual([H]);
+    expect((await leadOf(titleOnly))[0].tenantIds).toEqual([]);
+  });
+
   it("(b) only the principal's OWN OPEN assignments count: a seat on another node, an ended assignment, a company they are not a member of", async () => {
     expect(await leadOf(other)).toEqual([{ role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web", tenantIds: [] }]);
     expect(await leadOf(ended)).toEqual([{ role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-web", tenantIds: [] }]);

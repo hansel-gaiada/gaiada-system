@@ -29,7 +29,7 @@ import { agencyModule } from "../modules/agency";
 import { applyOrgStructure, sanitizeStructure } from "../admin/org-structure.service";
 import { setStorageForTest } from "./storage";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
-import { createCompany, createUser, addMembership, createRole, grantRole } from "../testing/fixtures";
+import { createCompany, createUser, addMembership, createRole, grantRole, grantLeadSeat } from "../testing/fixtures";
 
 const mem = new Map<string, Buffer>();
 const svc = { authorization: "Bearer svc-token" };
@@ -142,6 +142,7 @@ describe.skipIf(!TEST_URL)("DW-6h asset versions and review rounds (HTTP, real P
     await grantRole(viewer, viewerRole, "company", A);
     await grantRole(leadCreative, leadRole, "org_unit", "d-creative");
     await grantRole(leadSeo, leadRole, "org_unit", "d-seo");
+    await grantLeadSeat(A, "d-seo", leadSeo); // DW-10g-2: a head of d-seo is a real seat in A (Cerbos reads the seat-backed grant)
     await grantRole(adminB, adminRole, "company", B);
     await q().query(`UPDATE users SET kind = 'bot' WHERE id = $1`, [botManager]);
 

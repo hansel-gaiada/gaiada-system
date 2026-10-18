@@ -567,7 +567,7 @@ export async function loadAuthFacts(c: PoolClient, tenantId: string, requestId: 
 }
 
 /** §32.7 `request.received`: the active holders of a lead seat on the receiving unit (migration 0109). DW-10g-2: the SAME seat
- *  every head check reads (`loadSeatHoldersByNode`): an `active` `is_lead` position that carries the `org_unit_lead` role row
+ *  every head check reads (`loadSeatHoldersByNode`): an `active` position that carries the `org_unit_lead` role row (`is_lead` is display only)
  *  (0109 §2.2: a lead position without it confers nothing), held through an assignment with no `valid_to`. With no head, nobody
  *  is told. Runs inside `withTenants([tenantId])`. */
 export async function loadUnitHeads(c: PoolClient, tenantId: string, unitId: string): Promise<string[]> {

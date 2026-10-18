@@ -64,7 +64,7 @@ export function tierReachesUnit(tier: OutboundTier, requesterUnitId: string | nu
 }
 
 /** One principal's own tier, act-for aside: `company` when `read_across` allows; else `unit` when they hold an active lead seat
- *  in H (`loadLeadSeatUnits`: H's own `positions.is_lead`, read in H's scope, never the `org_unit_lead` role, whose grant carries
+ *  in H (`loadLeadSeatUnits`: H's own lead seats (the `org_unit_lead` role row), read in H's scope, never the `org_unit_lead` role, whose grant carries
  *  no company); else `own`. */
 async function tierOf(principal: Principal, tenantId: string, resource: Resource): Promise<OutboundTier> {
   if ((await check(principal, resource, "read_across")).allow) return COMPANY_TIER;
