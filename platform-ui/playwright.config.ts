@@ -29,7 +29,7 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ".auth/user.json" },
       dependencies: ["setup"],
-      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, /workspace-shell\.spec\.ts/, /me-performance\.spec\.ts/, /workspace-departments\.spec\.ts/, /workspace-functional\.spec\.ts/, /workspace-personas\.spec\.ts/, /a11y-axe-workspaces\.spec\.ts/, /overview-personalise\.spec\.ts/, /dept-notices\.spec\.ts/, /dept-kpi-months\.spec\.ts/, /dept-calendar\.spec\.ts/, /requests-across\.spec\.ts/, WEBDESK_STUB_SPECS],
+      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, /workspace-shell\.spec\.ts/, /me-performance\.spec\.ts/, /workspace-departments\.spec\.ts/, /workspace-functional\.spec\.ts/, /workspace-personas\.spec\.ts/, /a11y-axe-workspaces\.spec\.ts/, /overview-personalise\.spec\.ts/, /dept-notices\.spec\.ts/, /dept-kpi-months\.spec\.ts/, /dept-calendar\.spec\.ts/, /requests-across\.spec\.ts/, /freelancer-bills\.spec\.ts/, WEBDESK_STUB_SPECS],
     },
     {
       // CP-17 client portal. Its OWN project with NO stored session, because every test here signs in as
@@ -184,6 +184,16 @@ export default defineConfig({
       fullyParallel: false,
       use: { ...devices["Desktop Chrome"] },
       testMatch: /requests-across\.spec\.ts/,
+    },
+    {
+      // DW-10f-4b: freelancer rates and bills (BFF §61.7 to §61.9). Finance adds a rate, reads the preview with the DW-D47 no-withholding warning,
+      // drafts one bill and discards it. The spec signs in itself as demo-hansel (the one demo identity with finance access) and plants the
+      // tenant cookie, so NO stored session. Serial: the tests share the demo freelancer store (module state in the dev server), and the last one
+      // withdraws the rate the second added. Runs on the test server only, with the other workspace projects.
+      name: "freelancer-bills",
+      fullyParallel: false,
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /freelancer-bills\.spec\.ts/,
     },
     {
       // P3-12 CI build-gate smoke check. Self-contained (does its own login),

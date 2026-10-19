@@ -117,7 +117,10 @@ export default async function FinancePayablesPage({
       </Card>
 
       <div style={{ marginTop: 22, display: "grid", gap: 22 }}>
-        <ApApprovalQueue drafts={draftBills} />
+        {/* DW-10f-4b: a drafted freelancer bill (Payables > Freelancers) links here to be approved; it is an ordinary AP draft. */}
+        <div id="bills-awaiting-approval">
+          <ApApprovalQueue drafts={draftBills} />
+        </div>
         <EnterBillForm vendors={vendors} expenseAccounts={expenseAccounts} liabilityAccounts={liabilityAccounts} />
         <ReleasePaymentForm vendors={vendors} openBills={openBills} bankAccounts={bankAccounts} />
         <CreateVendorForm />

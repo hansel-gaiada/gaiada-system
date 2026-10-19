@@ -1,0 +1,42 @@
+/* DW-10f-4b — Finance > Payables > Freelancers. Tokens only (tokens.test.ts forbids a colour literal here); the page frame, the
+   form fields and the muted text are the finance ones in ui.css (`fin-page`, `fin-form`, `fin-muted`). */
+
+.fin-fl { display: grid; gap: var(--space-3); }
+.fin-fl__person { display: grid; gap: var(--space-2); padding-block: var(--space-3); border-bottom: 1px solid var(--hairline); }
+.fin-fl__person:last-child { border-bottom: none; }
+.fin-fl__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-3); }
+.fin-fl__name { margin: 0; font-size: var(--type-md, 1rem); font-weight: 600; }
+.fin-fl__sub { margin: 0; color: var(--text-muted); font-size: var(--type-sm); }
+.fin-fl__inline { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.fin-fl__inline select,
+.fin-fl__inline input {
+  border: 1px solid var(--hairline); background: var(--surface); color: var(--text); padding: var(--space-1) var(--space-2); font: inherit;
+}
+.fin-fl__inline select:focus-visible,
+.fin-fl__inline input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* A warning never blocks a draft; a blocker does. Both read as a labelled sentence, never as a colour alone. */
+.fin-fl__notes { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
+.fin-fl__note { padding: var(--space-1) var(--space-2); border-inline-start: 3px solid var(--hairline); font-size: var(--type-sm); }
+.fin-fl__note--warn { border-inline-start-color: var(--status-warning); }
+.fin-fl__note--block { border-inline-start-color: var(--status-danger); }
+.fin-fl__note strong { font-weight: 600; }
+.fin-fl__hint { display: block; color: var(--text-muted); }
+
+.fin-fl__totals { display: grid; grid-template-columns: max-content max-content; justify-content: end; gap: var(--space-1) var(--space-4); margin: 0; font-size: var(--type-sm); }
+.fin-fl__totals dt { color: var(--text-muted); }
+.fin-fl__totals dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.fin-fl__totals dd.fin-fl__payable { font-weight: 600; }
+
+.fin-fl__period { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-3); margin-block-end: var(--space-3); }
+.fin-fl__period label { display: flex; flex-direction: column; gap: var(--space-1); }
+.fin-fl__period label > span { font-size: var(--type-sm); color: var(--text-muted); }
+.fin-fl__period input { border: 1px solid var(--hairline); background: var(--surface); color: var(--text); padding: var(--space-2); font: inherit; }
+.fin-fl__period input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+.fin-fl__outcomes { margin: var(--space-2) 0 0; padding-inline-start: var(--space-4); font-size: var(--type-sm); }
+.fin-fl__num { text-align: right; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 640px) {
+  .fin-fl__totals { justify-content: stretch; }
+}

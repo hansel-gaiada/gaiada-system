@@ -791,7 +791,14 @@ const FINANCE: Workspace = {
           gate: { kind: "all", gates: [{ kind: "agencyRow", row: "invoices" }, { kind: "cap", cap: "company.manage" }] } },
       ],
     },
-    { key: "payables", label: "Payables", icon: "wallet", tabs: [{ key: "payables", label: "Payables", href: "/finance/payables", icon: "wallet" }] },
+    {
+      // Ungated like Payables itself (DW-7b: `finance_ap` has no UI capability, the server decides). Freelancers (DW-10f-4b) is a sub-route of it.
+      key: "payables", label: "Payables", icon: "wallet",
+      tabs: [
+        { key: "payables", label: "Payables", href: "/finance/payables", icon: "wallet" },
+        { key: "freelancers", label: "Freelancers", href: "/finance/payables/freelancers", icon: "wallet" },
+      ],
+    },
     {
       key: "treasury", label: "Treasury & assets", icon: "finance",
       tabs: [
