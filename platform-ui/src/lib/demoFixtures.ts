@@ -30,6 +30,7 @@ import { noticesDemo } from "./demoNotices";
 import { deptCalendarDemo } from "./demoDeptCalendar";
 import { deptAppraisalsDemo } from "./demoDeptAppraisals";
 import { financeDemo } from "./demoFinance";
+import { freelancersDemo } from "./demoFreelancers";
 import { loansDemo } from "./demoLoans";
 import { assistantDemo } from "./demoAssistant";
 import { itSecurityDemo } from "./demoItSecurity";
@@ -2471,6 +2472,12 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // high for the same reason as the notices: no later catch-all may answer it with an empty list, which the page would read as "nothing on".
   const deptCalendar = deptCalendarDemo(method, p, url.searchParams, userId);
   if (deptCalendar) return deptCalendar;
+
+  // DW-10f-4b — freelancer rates and bills (`/finance/freelancers*`, `/finance/freelancer-bills*`, the vendor link, BFF §61.7 and §61.8). Stateful
+  // (lib/demoFreelancers.ts) and placed BEFORE the finance fixtures for the same reason as the finance fixtures below: it also answers `GET finance/ap/vendors` with the people the
+  // vendors name, which the finance fixture's static list cannot.
+  const freelancers = freelancersDemo(method, p, url.searchParams, body, userId);
+  if (freelancers) return freelancers;
 
   // Finance (/api/:t/finance/*) — fixture store (lib/demoFinance.ts). Placed beside
   // LMS and for the same reason: high enough that no later `/api/:t/...` catch-all can answer a
