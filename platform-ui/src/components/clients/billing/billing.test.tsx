@@ -17,6 +17,8 @@ const markCertified = vi.fn();
 vi.mock("next/link", () => ({ default: ({ href, children, ...r }: { href: string; children: React.ReactNode }) => <a href={href} {...r}>{children}</a> }));
 vi.mock("@/lib/contractsActions", () => ({
   markCertifiedAction: (...a: unknown[]) => markCertified(...a),
+  saveScheduleAction: vi.fn(),
+  addScheduleAfterSigningAction: vi.fn(),
   sendContractAction: (...a: unknown[]) => send(...a),
   voidContractAction: (...a: unknown[]) => voidIt(...a),
   countersignContractAction: (...a: unknown[]) => countersign(...a),

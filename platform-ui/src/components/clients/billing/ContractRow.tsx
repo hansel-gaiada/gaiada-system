@@ -6,12 +6,16 @@ import {
 } from "@/lib/contractsActions";
 import { contractDocumentState, DOCUMENT_PREPARING_TEXT, tierLabel } from "@/lib/billingView";
 import { CopyHash } from "@/components/billing/CopyHash";
-import { awaitingText, certifiedWaitingText, contractActions, signatureLine, type Contract, type ContractSignature } from "@/lib/contracts";
+import {
+  awaitingText, certifiedWaitingText, contractActions, signatureLine, type Contract, type ContractSchedule, type ContractSignature,
+} from "@/lib/contracts";
 import { formatDate, money } from "@/lib/format";
 import { StatusBadge } from "@/components/ui";
 import { ClientVisibilityMarker } from "../ClientVisibilityMarker";
 import { ContractForm } from "./ContractForm";
 import { FileLink } from "./FileLink";
+import { ScheduleEditor } from "./ScheduleEditor";
+import { ScheduleView } from "./ScheduleView";
 import "./billing.css";
 
 // PV3-08 — one contract and the buttons that apply to it.
@@ -42,6 +46,15 @@ import "./billing.css";
 //   - The Signing fact says "simulated: not a real PSrE signature" when `signatureSimulated`; the signed copy is the
 //     "Certified copy" (the provider's signed PDF), not the sealed one.
 //
+// DW-10f-2b (BFF §61.9), the payment schedule, from `contractActions()` and the backend's own fields:
+//   - A DRAFT's Edit panel carries the ScheduleEditor under the form that edits its value and currency; Send is disabled with
+//     "The payment schedule must add up to the value before sending" while `scheduleSummary` says it does not.
+//   - A sent or signed contract shows its schedule READ-ONLY (ScheduleView): each instalment's state and a link to its invoice.
+//   - A signed contract the backend marks `scheduleAddable` offers "Add a payment schedule" (DW-D49), only to `canBill`
+//     (`company.manage`, the gate the invoice screens use): the same editor, then a confirm step, then the one-time addition.
+//   - The schedule itself comes from the DETAIL read. When that read fails the row says so and offers no editor: saving a
+//     schedule replaces the whole list, so editing one that could not be read would overwrite it blind.
+//
 // A refusal the server gives (a 403, a 400) is shown in words under the row, never swallowed.
 
 function Msg({ state }: { state: BillingActionState | null }) {
@@ -66,6 +79,9 @@ export function ContractRow({
   projects,
   signatures,
   signaturesRefused,
+  schedule,
+  scheduleRefused,
+  canBill = false,
 }: {
   contract: Contract;
   clientId: string;
@@ -74,9 +90,15 @@ export function ContractRow({
   signatures?: ContractSignature[];
   /** The detail read failed or was refused: say we cannot tell, never "nobody has signed". */
   signaturesRefused?: string;
+  /** The detail read's payment schedule: `null` = none, `undefined` = not read (an older server, or no read was asked for). */
+  schedule?: ContractSchedule | null;
+  /** The detail read failed or was refused: say we cannot tell, never "no schedule". */
+  scheduleRefused?: string;
+  /** `company.manage` (or elevated): who is offered "Add a payment schedule". The server decides either way. */
+  canBill?: boolean;
 }) {
   const a = contractActions(contract);
-  const [panel, setPanel] = useState<"edit" | "sign" | null>(null);
+  const [panel, setPanel] = useState<"edit" | "sign" | "schedule" | null>(null);
   const [sendState, sendAction, sending] = useActionState<BillingActionState | null, FormData>(sendContractAction, null);
   const [voidState, voidAction, voiding] = useActionState<BillingActionState | null, FormData>(voidContractAction, null);
   const [signState, signAction, signing] = useActionState<BillingActionState | null, FormData>(countersignContractAction, null);
@@ -92,7 +114,7 @@ export function ContractRow({
   const dates = [contract.startsOn, contract.endsOn].filter(Boolean).map((d) => formatDate(d)).join(" to ");
 
   return (
-    <li className="bl-contract" style={{ listStyle: "none" }}>
+    <li className="bl-contract" id={`contract-${contract.id}`} style={{ listStyle: "none" }}>
       <div className="bl-contract__head">
         <h4 className="bl-contract__title">{contract.title}</h4>
         <span>
@@ -103,6 +125,7 @@ export function ContractRow({
       </div>
       <p className="bl-contract__meta">
         {[
+          contract.kind === "amendment" ? "Amendment" : null,
           contract.reference ? `Ref ${contract.reference}` : null,
           contract.version > 1 ? `Version ${contract.version}` : null,
           contract.projectName ? `Project: ${contract.projectName}` : "Whole relationship",
@@ -146,6 +169,18 @@ export function ContractRow({
         )}
       </div>
 
+      {/* DW-10f-2b: the schedule, read-only. While the draft is being edited, the editor below takes its place. */}
+      {scheduleRefused ? (
+        <p className="bl-msg bl-msg--error">The payment schedule cannot be read right now ({scheduleRefused}). That is not a statement that there is none.</p>
+      ) : schedule && !(panel === "edit" && a.editSchedule) ? (
+        <ScheduleView schedule={schedule} />
+      ) : !schedule && contract.status === "draft" && panel !== "edit" ? (
+        <p className="bl-contract__meta">
+          <span className="bl-contract__k">Payment schedule</span>{" "}
+          {contract.value != null && contract.value > 0 ? "None yet. Press Edit to add one; it must add up to the value before the contract can be sent." : "None. A contract with no value carries no schedule."}
+        </p>
+      ) : null}
+
       {contract.status === "sent" && (
         <>
           {signaturesRefused ? (
@@ -169,6 +204,7 @@ export function ContractRow({
           <form action={sendAction}>
             <input type="hidden" name="clientId" value={clientId} />
             <input type="hidden" name="contractId" value={contract.id} />
+            <input type="hidden" name="currency" value={contract.currency} />
             <button
               type="submit" className="lux-btn lux-btn--solid lux-btn--sm"
               disabled={!a.send.enabled || sending}
@@ -206,6 +242,11 @@ export function ContractRow({
             Countersign
           </button>
         )}
+        {a.addSchedule && canBill && !scheduleRefused && (
+          <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={() => setPanel(panel === "schedule" ? null : "schedule")} aria-expanded={panel === "schedule"}>
+            Add a payment schedule
+          </button>
+        )}
         {a.void && (
           <form action={voidAction}>
             <input type="hidden" name="clientId" value={clientId} />
@@ -228,6 +269,12 @@ export function ContractRow({
 
       {panel === "edit" && a.edit && (
         <ContractForm clientId={clientId} projects={projects} contract={contract} onDone={() => setPanel(null)} />
+      )}
+      {panel === "edit" && a.editSchedule && !scheduleRefused && (
+        <ScheduleEditor clientId={clientId} contract={contract} schedule={schedule ?? null} mode="draft" />
+      )}
+      {panel === "schedule" && a.addSchedule && canBill && (
+        <ScheduleEditor clientId={clientId} contract={contract} mode="after-signing" onDone={() => setPanel(null)} />
       )}
 
       {panel === "sign" && a.countersign && (

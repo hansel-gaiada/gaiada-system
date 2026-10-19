@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
+import { can, isElevated } from "@/lib/rbac";
 import { listProjects } from "@/lib/entities";
 import { readResult, type ReadResult } from "@/lib/readResult";
 import { getContract, listClientDocuments, listClientInvoices, listClientPayments, listContracts } from "@/lib/contracts-data";
@@ -61,14 +62,18 @@ export default async function ClientBillingPage({ params }: { params: Promise<{ 
     readResult(listClientDocuments(userId, tenant, clientId)),
   ]);
   const projects = projectsRes.kind === "ok" ? projectsRes.data.map((p) => ({ id: p.id, name: p.name })) : null;
+  // DW-10f-2b: "Add a payment schedule" is offered to the people the invoice screens offer billing to (`company.manage`).
+  // Cosmetic: the server authorizes `contract` `update` and `invoice` `create` and is the authority.
+  const canBill = can(me, "company.manage", tenant) || isElevated(me);
 
-  // Who has signed is on the DETAIL read, not the list. Only a contract that is out with the client needs
-  // it, and there are few of those, so one read per sent contract (each refusal kept per row).
+  // Who has signed, and the payment schedule, are on the DETAIL read, not the list. Only a contract that is out with the
+  // client needs the first, and only one with instalments needs the second, and there are few of either, so one read per
+  // such contract (each refusal kept per row).
   const detailById = new Map<string, ReadResult<ContractDetail>>();
   if (contractsRes.kind === "ok") {
-    const sent = contractsRes.data.filter((c) => c.status === "sent");
-    const details = await Promise.all(sent.map((c) => readResult(getContract(userId, tenant, c.id))));
-    sent.forEach((c, i) => detailById.set(c.id, details[i]));
+    const wanted = contractsRes.data.filter((c) => c.status === "sent" || (c.scheduleSummary ?? null) !== null);
+    const details = await Promise.all(wanted.map((c) => readResult(getContract(userId, tenant, c.id))));
+    wanted.forEach((c, i) => detailById.set(c.id, details[i]));
   }
 
   function renderContracts(): ReactNode {
@@ -104,6 +109,9 @@ export default async function ClientBillingPage({ params }: { params: Promise<{ 
                         projects={projects}
                         signatures={d?.kind === "ok" ? d.data.signatures : undefined}
                         signaturesRefused={d && d.kind !== "ok" ? (d.kind === "forbidden" ? "you may not read it" : d.reason) : undefined}
+                        schedule={d?.kind === "ok" ? (d.data.schedule ?? null) : undefined}
+                        scheduleRefused={d && d.kind !== "ok" && (c.scheduleSummary ?? null) !== null ? (d.kind === "forbidden" ? "you may not read it" : d.reason) : undefined}
+                        canBill={canBill}
                       />
                     );
                   })}
