@@ -83,7 +83,7 @@ describe("Finance rows (DW-7b)", () => {
     // Ungated: no capability mirrors `finance_ledger`, `finance_config`, `finance_ap`, `finance_tax`, `finance_period`,
     // `finance_bank` or `finance_ownership` read (listed in the registry's comment), so these stay offered.
     expect(rows.ledger).toEqual(["Journals", "General ledger", "Chart of accounts"]);
-    expect(rows.payables).toEqual(["Payables"]);
+    expect(rows.payables).toEqual(["Payables", "Freelancers"]);
     expect(rows.treasury).toEqual(["Treasury", "Fixed assets"]);
     expect(rows.tax).toEqual(["Tax"]);
     expect(rows.close).toEqual(["Period close", "Ownership", "Cutover", "Settings", "Billing profile"]);
