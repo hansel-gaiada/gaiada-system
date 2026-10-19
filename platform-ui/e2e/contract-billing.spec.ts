@@ -123,9 +123,7 @@ test.describe("contract billing (DW-10f)", () => {
     await press(main(page).getByText("New draft contract", { exact: true }));
     await main(page).getByLabel("Title", { exact: true }).fill(OWN_TITLE);
     await main(page).getByLabel("Value", { exact: true }).fill("10000000");
-    // `Field` puts its hint inside the wrapping <label>, so the Terms textarea's accessible name is "Terms" plus the hint: no exact
-    // label match. Reach it by its form field name inside the New draft form instead.
-    await main(page).getByRole("form", { name: "New draft contract", exact: true }).locator('textarea[name="bodyMd"]').fill("Retainer terms.");
+    await main(page).getByLabel("Terms", { exact: true }).fill("Retainer terms.");
     await press(main(page).getByRole("button", { name: "Save draft", exact: true }));
     await expect(main(page).getByRole("status").filter({ hasText: "Draft saved" })).toBeVisible();
 
