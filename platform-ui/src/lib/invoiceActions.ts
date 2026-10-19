@@ -5,14 +5,17 @@ import { getSessionUserId } from "./session-server";
 import { getMe, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
 import { can, isElevated } from "./rbac";
-import { createInvoice, approveInvoice, issueInvoice, voidInvoice, setInvoiceServiceLine, type IssueBlocker } from "./invoice";
+import { createInvoice, createInvoiceFromSchedule, approveInvoice, issueInvoice, setInvoiceStatus, voidInvoice, setInvoiceServiceLine, type IssueBlocker } from "./invoice";
 import { voidErrorText, voidReasonOk } from "./billingView";
+import { cancelErrorText, draftErrorText, cancelledWords, type UnavailableItem } from "./contractBilling";
 
 export interface InvoiceFormState { error?: string }
+/** The draft from the payment schedule: a refusal in words, and for a 409 `instalment_unavailable` the items it names. */
+export interface ScheduleDraftState { error?: string; items?: UnavailableItem[] }
 // Shared shape for the status-transition actions below (approve/mark-sent/mark-paid), driven by
 // useActionState from a client component so a refusal renders as a real message next to the
 // button that produced it — never a silent no-op.
-export interface InvoiceActionState { error?: string; ok?: boolean; blockers?: IssueBlocker[] }
+export interface InvoiceActionState { error?: string; ok?: boolean; blockers?: IssueBlocker[]; /** Cancel draft: the sentence to show, with how many instalments went back to the schedule. */ notice?: string }
 
 async function ctx() {
   const userId = await getSessionUserId();
@@ -47,6 +50,63 @@ export async function createInvoiceAction(_prev: InvoiceFormState | null, formDa
   }
   revalidatePath("/invoices");
   redirect(`/invoices/${id}`);
+}
+
+// DW-10f-3b (BFF §61.5, §61.9, DW-D48): the draft FROM THE PAYMENT SCHEDULE. The same gate as the hourly draft (`company.manage`); the
+// server authorizes `invoice` `create` first and is the authority. Every 400 and 409 reads as a sentence; for `instalment_unavailable`
+// the items it names come back so the picker can say which row and why. On success the draft opens (a replay of the same ticks answers
+// the same draft, `deduped`, and opens it too: nothing new was made, and nothing is lost by showing it).
+export async function createInvoiceFromScheduleAction(_prev: ScheduleDraftState | null, formData: FormData): Promise<ScheduleDraftState> {
+  const c = await ctx();
+  if ("error" in c) return { error: c.error };
+  const clientId = String(formData.get("clientId") ?? "").trim();
+  if (!clientId) return { error: "Pick a client." };
+  const ids = [...new Set(formData.getAll("instalmentId").map((v) => String(v).trim()).filter(Boolean))];
+  if (ids.length === 0) return { error: "Tick at least one instalment that is due." };
+  const dueBy = String(formData.get("dueBy") ?? "").trim();
+  const taxCode = String(formData.get("taxCode") ?? "").trim();
+  let id: string;
+  try {
+    id = (await createInvoiceFromSchedule(c.userId, c.tenant, {
+      clientId, instalmentIds: ids, ...(dueBy ? { dueBy } : {}), ...(taxCode ? { taxCode } : {}),
+    })).id;
+  } catch (e) {
+    if (e instanceof PlatformError) {
+      if (e.status === 404 && !e.reason) return { error: "Invoicing isn't available yet — the backend endpoint is pending." };
+      const items = (e.body as { detail?: { items?: UnavailableItem[] } } | undefined)?.detail?.items;
+      return {
+        error: draftErrorText(e.status, e.reason, e.message),
+        ...(e.reason === "instalment_unavailable" && Array.isArray(items) && items.length > 0 ? { items } : {}),
+      };
+    }
+    throw e;
+  }
+  revalidatePath("/invoices");
+  revalidatePath("/invoices/new");
+  revalidatePath(`/clients/${clientId}/billing`);
+  redirect(`/invoices/${id}`);
+}
+
+// DW-10f-3b (BFF §61.5, §61.9): "Cancel draft". It is `PATCH {status: 'void'}` on an invoice that was never issued; the database
+// releases the instalments it claimed and the answer counts them. An ISSUED invoice is refused (409): it is voided with a reason and a
+// credit note instead (`voidInvoiceAction`). The confirm step is the component's.
+export async function cancelDraftInvoiceAction(invoiceId: string, _prev: InvoiceActionState | null, _formData?: FormData): Promise<InvoiceActionState> {
+  const userId = await getSessionUserId();
+  if (!userId) return { error: "Session expired — sign in again." };
+  const me = await getMe(userId);
+  const tenant = await getActiveTenant(me);
+  if (!tenant) return { error: "Select a company first." };
+  let released = 0;
+  try {
+    released = (await setInvoiceStatus(userId, tenant, invoiceId, "void")).releasedInstalments ?? 0;
+  } catch (e) {
+    if (e instanceof PlatformError) return { error: cancelErrorText(e.status, e.reason, e.message) };
+    throw e;
+  }
+  revalidatePath(`/invoices/${invoiceId}`);
+  revalidatePath("/invoices");
+  revalidatePath("/invoices/new");
+  return { ok: true, notice: cancelledWords(released) };
 }
 
 // PV5-04 (PV-D7): "mark as sent" and "mark paid" are gone. An approved invoice is ISSUED: numbered, posted to the

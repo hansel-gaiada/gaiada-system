@@ -8,6 +8,8 @@
 //   voidContractAction       PATCH /contracts/:id {status:"void"}
 //   countersignContractAction POST /contracts/:id/countersign
 //   decidePaymentAction      POST  /invoice-payments/:id/decide   (client hub, and Finance's queue on Receivables: no clientId there)
+//   saveScheduleAction       PUT   /contracts/:id/schedule                   (DW-10f-2b, BFF §61.4: a DRAFT's whole schedule)
+//   addScheduleAfterSigningAction POST /contracts/:id/schedule/after-signing (DW-10f-2b, DW-D49, BFF §61.4a: once, signed contracts)
 //
 // ── NO CAPABILITY GATE HERE, AND WHY ─────────────────────────────────────────────────────────────
 // `lib/rbac.ts` has no contract or payment-decision capability, and inventing a mirror would be a second,
@@ -27,9 +29,10 @@ import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
+import { can, isElevated } from "./rbac";
 import {
   MAX_CONTRACT_FILE_BYTES, countersignErrorText, decideErrorText, validateContractForm, paymentDecisionState,
-  markCertifiedErrorText,
+  markCertifiedErrorText, scheduleBody, scheduleErrorText, validateScheduleRows, type ContractSchedule, type ScheduleDraftRow,
 } from "./contracts";
 import { simulatedSignErrorText } from "./simulatedPsre";
 
@@ -56,6 +59,16 @@ function fail(e: unknown, text?: (status: number | null, message: string) => str
   if (e instanceof PlatformError) {
     const message = text ? text(e.status, e.message) : e.message;
     return { ok: false, error: message, ...(e.field ? { field: e.field } : {}) };
+  }
+  throw e;
+}
+
+/** A refusal of a schedule route or of Send, in a sentence: branches on the server's `reason`, never on its message, and reads
+ *  the figures of `schedule_total_mismatch` from the raw body's `detail` (BFF §61.17 "Refusal shape"). */
+function failSchedule(e: unknown, currency: string): BillingActionState {
+  if (e instanceof PlatformError) {
+    const detail = (e.body as { detail?: { value?: number; total?: number } } | undefined)?.detail ?? null;
+    return { ok: false, error: scheduleErrorText(e.status, e.reason, e.message, detail, currency), ...(e.field ? { field: e.field } : {}) };
   }
   throw e;
 }
@@ -174,7 +187,7 @@ export async function sendContractAction(_prev: BillingActionState | null, formD
     refresh(clientId);
     const n = r.notified ?? 0;
     return { ok: true, id: contractId, notice: n > 0 ? `Sent. ${n} ${n === 1 ? "contact was" : "contacts were"} notified.` : "Sent. No portal contact has an address to notify, so tell the client yourself." };
-  } catch (e) { return fail(e); }
+  } catch (e) { return failSchedule(e, str(formData, "currency")); }
 }
 
 export async function voidContractAction(_prev: BillingActionState | null, formData: FormData): Promise<BillingActionState> {
@@ -304,4 +317,86 @@ export async function decidePaymentAction(_prev: BillingActionState | null, form
       notice: decision === "reject" ? "Rejected. The client has been told why." : r.invoicePaid ? "Confirmed. The invoice is now settled." : "Confirmed. The balance is updated.",
     };
   } catch (e) { return fail(e, decideErrorText); }
+}
+
+// ── the payment schedule (DW-10f-2b, BFF §61.4 and §61.4a) ─────────────────────────────────────────────────────
+
+/** The rows a form carries, as the editor posted them (`instalments`, JSON), or null when it is not a list of three strings. */
+function rowsOf(fd: FormData): ScheduleDraftRow[] | null {
+  let raw: unknown;
+  try { raw = JSON.parse(String(fd.get("instalments") ?? "")); } catch { return null; }
+  if (!Array.isArray(raw)) return null;
+  const rows: ScheduleDraftRow[] = [];
+  for (const r of raw) {
+    if (!r || typeof r !== "object") return null;
+    const x = r as Record<string, unknown>;
+    if (typeof x.label !== "string" || typeof x.amount !== "string" || typeof x.due !== "string") return null;
+    rows.push({ label: x.label, amount: x.amount, due: x.due });
+  }
+  return rows;
+}
+
+/**
+ * Save a DRAFT's payment schedule: `PUT contracts/:id/schedule` replaces the whole list in one transaction, and `[]` clears
+ * it. It need not add up yet (the answer says `matchesValue`, and Send stays disabled until it does). The browser's checks
+ * run first; the server repeats every one and is the authority. A sent contract answers 409 `schedule_frozen`.
+ */
+export async function saveScheduleAction(_prev: BillingActionState | null, formData: FormData): Promise<BillingActionState> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  const clientId = str(formData, "clientId");
+  const contractId = str(formData, "contractId");
+  const currency = str(formData, "currency") || "IDR";
+  if (!clientId || !contractId) return { ok: false, error: "Missing contract." };
+  const rows = rowsOf(formData);
+  if (!rows) return { ok: false, error: "The schedule could not be read. Reload the page and try again." };
+  const bad = validateScheduleRows(rows, currency);
+  if (bad) return { ok: false, error: bad.message, field: bad.field };
+  try {
+    const r = await platformFetch<Pick<ContractSchedule, "matchesValue" | "instalments">>(
+      `/api/${c.tenant}/contracts/${encodeURIComponent(contractId)}/schedule`, c.userId,
+      { method: "PUT", body: JSON.stringify(scheduleBody(rows)) },
+    );
+    refresh(clientId);
+    return {
+      ok: true, id: contractId,
+      notice: rows.length === 0
+        ? "Schedule cleared."
+        : r.matchesValue ? "Schedule saved. It adds up to the value, so the contract can be sent." : "Schedule saved, but it does not add up to the value yet. The contract cannot be sent until it does.",
+    };
+  } catch (e) { return failSchedule(e, currency); }
+}
+
+/**
+ * DW-D49: add a payment schedule to an agreement that is ALREADY signed, once (`POST contracts/:id/schedule/after-signing`).
+ * A person's act: it is not a tool, and the route refuses an envelope call. The page offers the control to `company.manage`,
+ * the gate the invoice screens use; the server authorizes `contract` `update` and `invoice` `create` and is the authority.
+ * Every refusal of §61.4a is a sentence.
+ */
+export async function addScheduleAfterSigningAction(_prev: BillingActionState | null, formData: FormData): Promise<BillingActionState> {
+  const userId = await getSessionUserId();
+  if (!userId) return { ok: false, error: "Your session has expired. Sign in again." };
+  const me = await getMe(userId);
+  const tenant = await getActiveTenant(me);
+  if (!tenant) return { ok: false, error: "Select a company first." };
+  if (!can(me, "company.manage", tenant) && !isElevated(me)) {
+    return { ok: false, error: "Adding a payment schedule to a signed agreement is limited to finance administrators." };
+  }
+  const clientId = str(formData, "clientId");
+  const contractId = str(formData, "contractId");
+  const currency = str(formData, "currency") || "IDR";
+  if (!clientId || !contractId) return { ok: false, error: "Missing contract." };
+  const rows = rowsOf(formData);
+  if (!rows) return { ok: false, error: "The schedule could not be read. Reload the page and try again." };
+  const bad = validateScheduleRows(rows, currency, { requireOne: true });
+  if (bad) return { ok: false, error: bad.message, field: bad.field };
+  try {
+    await platformFetch<ContractSchedule>(
+      `/api/${tenant}/contracts/${encodeURIComponent(contractId)}/schedule/after-signing`, userId,
+      { method: "POST", body: JSON.stringify(scheduleBody(rows)) },
+    );
+    refresh(clientId);
+    revalidatePath("/invoices/new");
+    return { ok: true, id: contractId, notice: "Payment schedule added. It is now fixed and its instalments can be invoiced." };
+  } catch (e) { return failSchedule(e, currency); }
 }
