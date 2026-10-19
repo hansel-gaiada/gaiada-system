@@ -25,7 +25,7 @@ export function EmployeeForm({
           <Field name="title" label="Job title" />
           <label className="lux-field">
             <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Initial role (this company)</Eyebrow>
-            <select name="roleId" className="lux-field__control" defaultValue="">
+            <select name="roleId" aria-label="Initial role (this company)" className="lux-field__control" defaultValue="">
               <option value="">— no role yet —</option>
               {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>

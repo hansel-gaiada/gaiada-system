@@ -20,7 +20,7 @@ export function CampaignForm({
       <Field name="name" label="Name" required />
       <label className="lux-field">
         <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Project</Eyebrow>
-        <select name="projectId" defaultValue="" required className="lux-field__control">
+        <select name="projectId" aria-label="Project" defaultValue="" required className="lux-field__control">
           <option value="" disabled hidden />
           {projects.map((p) => (
             <option key={p.id} value={p.id}>{p.name}</option>

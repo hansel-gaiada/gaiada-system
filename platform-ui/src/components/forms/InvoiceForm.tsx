@@ -16,7 +16,7 @@ export function InvoiceForm({
     <form action={formAction} className="lux-form-grid" style={{ maxWidth: 640 }}>
       <label className="lux-field">
         <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Client</Eyebrow>
-        <select name="clientId" className="lux-field__control" defaultValue="">
+        <select name="clientId" aria-label="Client" className="lux-field__control" defaultValue="">
           <option value="" disabled hidden />
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>

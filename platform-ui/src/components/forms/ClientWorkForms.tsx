@@ -17,7 +17,7 @@ function Select({ name, label, options, placeholder, required }: { name: string;
   return (
     <label className="lux-field">
       <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>{label}</Eyebrow>
-      <select name={name} className="lux-field__control" defaultValue="" required={required}>
+      <select name={name} aria-label={label} className="lux-field__control" defaultValue="" required={required}>
         <option value="" disabled={required} hidden={required}>{placeholder}</option>
         {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
       </select>
@@ -32,7 +32,7 @@ function OwnerSelect({ owners, defaultValue }: { owners: OwnerOpt[]; defaultValu
   return (
     <label className="lux-field">
       <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Owner (account manager)</Eyebrow>
-      <select name="ownerUserId" className="lux-field__control" defaultValue={defaultValue ?? ""}>
+      <select name="ownerUserId" aria-label="Owner (account manager)" className="lux-field__control" defaultValue={defaultValue ?? ""}>
         <option value="">No owner</option>
         {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
       </select>
@@ -48,7 +48,7 @@ function BusinessTypeSelect({ defaultValue }: { defaultValue?: string | null }) 
   return (
     <label className="lux-field">
       <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Business type</Eyebrow>
-      <select name="businessType" className="lux-field__control" required defaultValue={defaultValue ?? ""}>
+      <select name="businessType" aria-label="Business type" className="lux-field__control" required defaultValue={defaultValue ?? ""}>
         <option value="" disabled hidden>Choose a business type…</option>
         {registry.businessTypes.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
       </select>
@@ -62,7 +62,7 @@ function GroupCompanySelect({ options, defaultValue }: { options: GroupCompanyOp
   return (
     <label className="lux-field">
       <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Group company</Eyebrow>
-      <select name="groupCompanyId" className="lux-field__control" defaultValue={defaultValue ?? ""}>
+      <select name="groupCompanyId" aria-label="Group company" className="lux-field__control" defaultValue={defaultValue ?? ""}>
         <option value="">Not a group company</option>
         {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
       </select>

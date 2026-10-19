@@ -48,7 +48,14 @@ export function Field({
   // of the label's accessible name ("Summary*"), which breaks every getByLabelText("Summary") and,
   // worse, is read aloud as "Summary star". The `required` attribute on the control is what actually
   // conveys the state to assistive tech; this is purely the visual cue.
-  const labelEl = <span className={`lux-field__label${required ? " lux-field__label--req" : ""}`}>{label}</span>;
+  //
+  // Naming (DW-10h). The control sits inside a wrapping <label> (click-to-focus, layout) that also holds the
+  // hint and the error, and a wrapping label's whole text is the control's accessible name: a screen
+  // reader read "Terms Markdown. The client reads this in their portal..." and getByLabel("Terms",
+  // { exact: true }) never matched. So the label TEXT has its own id and the control names itself from
+  // it with aria-labelledby; the hint and the error stay descriptions (aria-describedby), not names.
+  const labelId = `${id}-label`;
+  const labelEl = <span id={labelId} className={`lux-field__label${required ? " lux-field__label--req" : ""}`}>{label}</span>;
   const below = (
     <>
       {error && <span id={errId} className="lux-field__error" role="alert">{error}</span>}
@@ -59,6 +66,7 @@ export function Field({
     name,
     required,
     disabled,
+    "aria-labelledby": labelId,
     "aria-invalid": error ? true : undefined,
     "aria-describedby": describedBy,
     className: `lux-field__control${error ? " lux-field__control--error" : ""}`,
@@ -74,6 +82,7 @@ export function Field({
           required={required}
           disabled={disabled}
           className="lux-field__checkbox"
+          aria-labelledby={labelId}
           aria-describedby={describedBy}
         />
         <span className="lux-field__checkbox-text">{labelEl}{below}</span>

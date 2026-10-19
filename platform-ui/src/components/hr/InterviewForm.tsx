@@ -56,11 +56,11 @@ export function InterviewForm({ schedule, tenantId, applicationId, people }: {
       <Field name="meetingUrl" label="Meeting link" hint="https://…" />
       {people.length > 0 && (
         <label className="lux-field" style={fullRow}>
-          <span className="lux-field__label">Panelists</span>
-          <select name="panelists" multiple size={Math.min(6, people.length)} className="lux-field__control">
+          <span id="interview-panelists-label" className="lux-field__label">Panelists</span>
+          <select name="panelists" aria-labelledby="interview-panelists-label" aria-describedby="interview-panelists-hint" multiple size={Math.min(6, people.length)} className="lux-field__control">
             {people.map((p) => <option key={p.userId} value={p.userId}>{p.name}</option>)}
           </select>
-          <span className="lux-field__hint">Hold Ctrl or Cmd to pick several. Each is told they are on the panel.</span>
+          <span id="interview-panelists-hint" className="lux-field__hint">Hold Ctrl or Cmd to pick several. Each is told they are on the panel.</span>
         </label>
       )}
       {msg && <div style={fullRow}><ResultMessage msg={msg} /></div>}

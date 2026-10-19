@@ -27,7 +27,7 @@ export function FieldControl({
   return (
     <label className={`cc-field${def.type === "textarea" ? " cc-field--wide" : ""}`} htmlFor={inputId}>
       <span className="cc-field__label">
-        {def.label}
+        <span id={`${inputId}-label`}>{def.label}</span>
         {others.length > 0 && (
           <em className="cc-shared" title={`Also used in: ${others.join(", ")}`}>
             Shared · {others.length}
@@ -36,10 +36,12 @@ export function FieldControl({
       </span>
       {canEdit ? (
         def.type === "textarea" ? (
-          <textarea id={inputId} className="cc-textarea" rows={3} value={value} onChange={(e) => onChange(fieldKey, e.target.value)} />
+          <textarea id={inputId} aria-labelledby={`${inputId}-label`} aria-describedby={def.help ? `${inputId}-help` : undefined} className="cc-textarea" rows={3} value={value} onChange={(e) => onChange(fieldKey, e.target.value)} />
         ) : (
           <input
             id={inputId}
+            aria-labelledby={`${inputId}-label`}
+            aria-describedby={def.help ? `${inputId}-help` : undefined}
             className="cc-input"
             type={def.type}
             value={value}
@@ -50,7 +52,7 @@ export function FieldControl({
       ) : (
         <span className="cc-readonly-value">{value || "—"}</span>
       )}
-      {def.help && <small className="cc-field__help">{def.help}</small>}
+      {def.help && <small id={`${inputId}-help`} className="cc-field__help">{def.help}</small>}
     </label>
   );
 }

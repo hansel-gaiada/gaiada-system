@@ -38,7 +38,7 @@ export function TaskForm({
           <Field name="priority" label="Priority" type="select" options={PRIORITY_OPTIONS} defaultValue={task.priority ?? undefined} />
           <label className="lux-field">
             <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Assignee</Eyebrow>
-            <select name="assigneeId" defaultValue={task.assignee_id ?? ""} className="lux-field__control">
+            <select name="assigneeId" aria-label="Assignee" defaultValue={task.assignee_id ?? ""} className="lux-field__control">
               <option value="">Unassigned</option>
               {members.map((m) => (
                 <option key={m.user_id} value={m.user_id}>

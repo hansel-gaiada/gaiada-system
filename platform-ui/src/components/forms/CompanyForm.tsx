@@ -33,7 +33,7 @@ export function CompanyForm({
       )}
       <label className="lux-field">
         <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Parent (holding)</Eyebrow>
-        <select name="parentCompanyId" className="lux-field__control" defaultValue={company?.parent_company_id ?? (companies[0]?.id ?? "")}>
+        <select name="parentCompanyId" aria-label="Parent (holding)" className="lux-field__control" defaultValue={company?.parent_company_id ?? (companies[0]?.id ?? "")}>
           <option value="">— none (top level) —</option>
           {parents.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
@@ -52,7 +52,7 @@ export function CompanyForm({
         </div>
       ) : (
         <label className="lux-field lux-field--checkbox">
-          <input type="checkbox" name="module_agency" className="lux-field__checkbox" />
+          <input type="checkbox" name="module_agency" aria-label="Enable Agency module" className="lux-field__checkbox" />
           <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Enable Agency module</Eyebrow>
         </label>
       )}

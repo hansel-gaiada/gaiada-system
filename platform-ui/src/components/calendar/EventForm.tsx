@@ -274,10 +274,10 @@ export function EventForm({
 
       {canRecord && mode === "create" && (
         <label className="lux-field lux-field--checkbox">
-          <input type="checkbox" className="lux-field__checkbox" checked={v.record} disabled={v.allDay} onChange={(e) => set("record", e.target.checked)} />
+          <input type="checkbox" className="lux-field__checkbox" aria-labelledby="event-record-label" aria-describedby="event-record-hint" checked={v.record} disabled={v.allDay} onChange={(e) => set("record", e.target.checked)} />
           <span className="lux-field__checkbox-text">
-            <span className="lux-field__label">Record this meeting</span>
-            <span className="lux-field__hint">
+            <span id="event-record-label" className="lux-field__label">Record this meeting</span>
+            <span id="event-record-hint" className="lux-field__hint">
               Recordings are visible to everyone in the company.
               {v.allDay ? " A recording needs a start time, so it can't be set on an all-day event." : ""}
             </span>
