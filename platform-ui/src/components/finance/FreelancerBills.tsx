@@ -245,7 +245,7 @@ function BillsTable({
       ]}
       rows={bills.map((b) => [
         <div key="no">
-          {b.billNo}
+          <span>{b.billNo}</span>
           {b.warnings.length > 0 ? (
             <ul className="fin-fl__notes" aria-label={`Warnings on ${b.billNo}`}>
               {b.warnings.map((w) => (

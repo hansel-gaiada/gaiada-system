@@ -214,7 +214,7 @@ export function FreelancerRates({
                   <HairlineTable
                     columns={[{ label: "Applies" }, { label: "Hourly rate", align: "right" }, { label: "Account" }, { label: "Note" }, { label: "" }]}
                     rows={f.rates.map((r) => [
-                      <span key="range">{rangeLabel(r)}{r.validTo === null ? <> <StatusBadge label="current" /></> : null}</span>,
+                      <span key="range"><span>{rangeLabel(r)}</span>{r.validTo === null ? <> <StatusBadge label="current" /></> : null}</span>,
                       formatAmount(r.hourlyRate, r.currency),
                       r.expenseAccountCode,
                       r.note ?? "—",
