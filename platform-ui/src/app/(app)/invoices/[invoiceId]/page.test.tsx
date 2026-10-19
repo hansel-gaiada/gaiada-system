@@ -24,6 +24,7 @@ vi.mock("@/lib/invoice", () => ({ getInvoice: vi.fn(), getIssueReadiness: vi.fn(
 vi.mock("@/lib/entities", () => ({ listMembers: vi.fn(async () => []) }));
 vi.mock("@/lib/invoiceActions", () => ({
   approveInvoiceAction: vi.fn(), issueInvoiceAction: vi.fn(), voidInvoiceAction: vi.fn(), setServiceLineAction: vi.fn(),
+  cancelDraftInvoiceAction: vi.fn(),
 }));
 // PV5-04b: the company's service lines, for the picker. `null` (the default here) = the viewer cannot read them: no picker.
 vi.mock("@/lib/billingNumbering-data", () => ({ serviceLinesOrNull: vi.fn(async () => null) }));

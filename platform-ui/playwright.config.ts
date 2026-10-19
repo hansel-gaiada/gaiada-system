@@ -29,7 +29,7 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ".auth/user.json" },
       dependencies: ["setup"],
-      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, /workspace-shell\.spec\.ts/, /me-performance\.spec\.ts/, /workspace-departments\.spec\.ts/, /workspace-functional\.spec\.ts/, /workspace-personas\.spec\.ts/, /a11y-axe-workspaces\.spec\.ts/, /overview-personalise\.spec\.ts/, /dept-notices\.spec\.ts/, /dept-kpi-months\.spec\.ts/, /dept-calendar\.spec\.ts/, /requests-across\.spec\.ts/, /freelancer-bills\.spec\.ts/, WEBDESK_STUB_SPECS],
+      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, /workspace-shell\.spec\.ts/, /me-performance\.spec\.ts/, /workspace-departments\.spec\.ts/, /workspace-functional\.spec\.ts/, /workspace-personas\.spec\.ts/, /a11y-axe-workspaces\.spec\.ts/, /overview-personalise\.spec\.ts/, /dept-notices\.spec\.ts/, /dept-kpi-months\.spec\.ts/, /dept-calendar\.spec\.ts/, /requests-across\.spec\.ts/, /freelancer-bills\.spec\.ts/, /contract-billing\.spec\.ts/, WEBDESK_STUB_SPECS],
     },
     {
       // CP-17 client portal. Its OWN project with NO stored session, because every test here signs in as
@@ -194,6 +194,17 @@ export default defineConfig({
       fullyParallel: false,
       use: { ...devices["Desktop Chrome"] },
       testMatch: /freelancer-bills\.spec\.ts/,
+    },
+    {
+      // DW-10f-2b/3b: the contract-billing screens (BFF §61.9): the payment schedule's editor and presets, sending, adding a schedule to a signed
+      // agreement (DW-D49), the invoice drafted from instalments, its fixed-fee line, Cancel draft, and the portal's Payment schedule. Same reasoning
+      // as `requests-across`: every test signs in as its own demo identity (the superadmin on staff pages, Northwind's Dana in the portal) and plants
+      // the tenant cookie itself, so NO stored session. Serial and order-dependent: the tests spend what the earlier ones made in the demo store
+      // (Viceroy, cl-4, is this spec's own client), so run the file fresh to re-seed. Runs on sumopod only, like the workspace projects.
+      name: "contract-billing",
+      fullyParallel: false,
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /contract-billing\.spec\.ts/,
     },
     {
       // P3-12 CI build-gate smoke check. Self-contained (does its own login),

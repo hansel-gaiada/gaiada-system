@@ -35,7 +35,10 @@ import { loansDemo } from "./demoLoans";
 import { assistantDemo } from "./demoAssistant";
 import { itSecurityDemo } from "./demoItSecurity";
 import { websiteAccessDemo } from "./demoWebsiteAccess";
-import { billingDemo, demoBillingNeedsClient, demoBillingNeedsUs, demoBillingPendingTotal } from "./demoBilling";
+import {
+  billingDemo, demoBillingNeedsClient, demoBillingNeedsUs, demoBillingPendingTotal, demoClaimedInstalments, demoInstalmentBlockers,
+  demoInvoiceFromSchedule, demoReleaseInstalments,
+} from "./demoBilling";
 import { clientReportsDemo } from "./demoClientReports";
 import { buildDemoClientHealth } from "./demoClientHealth";
 import { buildDemoClientHealthBoard } from "./demoClientHealthBoard";
@@ -907,6 +910,19 @@ INVOICES.push({
   createdAt: "2026-07-01T09:00:00Z", createdBy: "u-other-demo", approvedBy: "u-other-demo-2", approvedAt: "2026-07-02T09:00:00Z", updatedBy: DEMO_USER_ID,
   invoiceNo: "DEMO/2026/0001", issuedAt: "2026-07-03T09:00:00Z", issuedBy: "u-other-demo-2", issueDate: "2026-07-03", dueDate: "2026-08-02",
   subtotal: 1000, taxTotal: 110, taxCode: "PPN", arInvoiceId: "ar-demo-1", legacyUnissued: false, pdfFileId: null,
+  issuer: { legalName: "Example Agency Ltd", address: "1 Example Street, Example City", npwp: "00.000.000.0-000.000", isPkp: true,
+    bank: { name: "Example Bank", accountName: "Example Agency Ltd", accountNo: "0000000000" } },
+});
+// DW-10f-3b: the ISSUED invoice that bills the first instalment of Viceroy's signed "Website build agreement" (demoBilling's dk-12), so the
+// "Invoiced, <number>" state, the invoice link on the schedule and an instalment line ("Fixed fee", quantity 1, linked to its contract) are all
+// drivable. An instalment line carries no hours and no rate (BFF §61.5). Invented placeholders only: the repo is public.
+INVOICES.push({
+  id: "inv-sch-1", clientId: "cl-4", clientName: "Viceroy", periodStart: "2026-09-01", periodEnd: "2026-09-01", status: "sent",
+  currency: "IDR", total: 30000000,
+  lines: [{ kind: "instalment", description: "GDA-2026-041 Website build agreement (signed) · Deposit (1 of 3)", contractId: "dk-12", instalmentId: "di-dk-12-1", projectId: null, amount: 30000000 }],
+  createdAt: "2026-09-02T09:00:00Z", createdBy: "u-other-demo", approvedBy: "u-other-demo-2", approvedAt: "2026-09-02T12:00:00Z", updatedBy: DEMO_USER_ID,
+  invoiceNo: "DEMO/2026/0002", issuedAt: "2026-09-03T09:00:00Z", issuedBy: "u-other-demo-2", issueDate: "2026-09-03", dueDate: "2026-10-03",
+  subtotal: 30000000, taxTotal: 0, taxCode: null, arInvoiceId: "ar-demo-2", legacyUnissued: false, pdfFileId: null,
   issuer: { legalName: "Example Agency Ltd", address: "1 Example Street, Example City", npwp: "00.000.000.0-000.000", isPkp: true,
     bank: { name: "Example Bank", accountName: "Example Agency Ltd", accountNo: "0000000000" } },
 });
@@ -2432,7 +2448,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
 
   // PV3-08 — the staff Contracts & billing area: `/contracts*` and `/invoice-payments*`. Stateful
   // (lib/demoBilling.ts), and placed before the generic matchers so none of them answers one of these paths.
-  const billing = billingDemo(method, p, url.searchParams, body, userId);
+  const billing = billingDemo(method, p, url.searchParams, body, userId, INVOICES);
   if (billing) return billing;
 
   // DW-4h-3 / DW-4i — the all-work activity series and a day's detail (BFF section 44), with the real person-axis gate.
@@ -3014,6 +3030,8 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     const inv = INVOICES.find((x) => x.id === invIssue[1]) as { status: string; invoiceNo?: string | null; issueDate?: string | null; dueDate?: string | null } | undefined;
     if (!inv) return { status: 404, json: { error: "invoice not found" } };
     const blockers: { code: string; message: string }[] = inv.status === "approved" ? [] : [{ code: "NOT_APPROVED", message: `only an approved invoice can be issued (this one is ${inv.status})` }];
+    // DW-10f-3a (BFF §61.5): an invoice with instalment lines is also blocked by a contract voided or superseded after the draft.
+    if (!inv.invoiceNo) blockers.push(...demoInstalmentBlockers({ id: invIssue[1], lines: (inv as { lines?: { kind?: string; instalmentId?: string; amount?: number }[] }).lines }));
     // PV5-04b: the number carries a service-line code, so an invoice needs a (switched-on) line, as on the server.
     const chosenLine = DEMO_SERVICE_LINES.find((l) => l.key === (inv as { serviceLineKey?: string | null }).serviceLineKey);
     if (!inv.invoiceNo && (!chosenLine || !chosenLine.active)) {
@@ -3163,9 +3181,20 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       if (!["draft", "void"].includes(status)) {
         return { status: 400, json: { error: "valid status required (draft|void)" } };
       }
+      // DW-10f-3a (BFF §61.5): an ISSUED invoice changes only through POST .../void; "Cancel draft" is this void on an unissued one,
+      // which releases the instalments it claimed. A cancelled instalment invoice cannot come back (PD614).
+      if ((inv as { invoiceNo?: string | null }).invoiceNo) {
+        return { status: 409, json: { error: status === "void" ? "this invoice is issued; void it with POST /api/:tenantId/invoices/:invoiceId/void, which reverses it in the ledger" : "this invoice is issued and can no longer be edited" } };
+      }
+      const wasVoid = inv.status === "void";
+      if (wasVoid && status !== "void" && (inv as { lines?: { kind?: string }[] }).lines?.some((l) => l.kind === "instalment")) {
+        return { status: 409, json: { error: "invoice_unvoid_refused", reason: "invoice_unvoid_refused" } };
+      }
+      const released = status === "void" && !wasVoid ? demoClaimedInstalments(invOne[1]) : 0;
+      if (status === "void" && !wasVoid) demoReleaseInstalments(invOne[1]);
       inv.status = status;
       inv.updatedBy = userId;
-      return ok({ ok: true });
+      return ok({ ok: true, releasedInstalments: released });
     }
     return ok({ ...inv, clientVisible: demoInvoiceVisible(inv) });
   }
@@ -3173,6 +3202,10 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   if (invMatch) {
     if (m === "POST") {
       const b = JSON.parse(body || "{}");
+      // DW-10f-3a (BFF §61.5, DW-D48): an invoice is made from the payment schedule or from hours, never both.
+      if (b.source === "instalments") return demoInvoiceFromSchedule(INVOICES, b, userId, () => demoId("inv"));
+      if (b.source !== undefined && b.source !== null && b.source !== "hours") return { status: 400, json: { error: "source_invalid", reason: "source_invalid" } };
+      if (b.instalmentIds !== undefined || b.dueBy !== undefined) return { status: 400, json: { error: "source_fields_mixed", reason: "source_fields_mixed" } };
       const rate = Number(b.rate ?? 0);
       const start = String(b.periodStart ?? ""), end = String(b.periodEnd ?? "");
       const inPeriod = TIME_ENTRIES.filter((e) => e.billable && (!start || String(e.entry_date) >= start) && (!end || String(e.entry_date) <= end));

@@ -10,7 +10,7 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("next/link", () => ({ default: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a> }));
 vi.mock("@/lib/session-server", () => ({ getSessionUserId: vi.fn(async () => "u1") }));
-vi.mock("@/lib/platform", () => ({ getMe: vi.fn(async () => ({})), PlatformError: class extends Error {} }));
+vi.mock("@/lib/platform", () => ({ getMe: vi.fn(async () => ({ roles: [] })), PlatformError: class extends Error {} }));
 vi.mock("@/lib/tenant", () => ({ getActiveTenant: vi.fn(async () => "t1") }));
 vi.mock("@/lib/entities", () => ({ listProjects: vi.fn(async () => []) }));
 vi.mock("@/lib/contracts-data", () => ({

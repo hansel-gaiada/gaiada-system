@@ -24,8 +24,8 @@ import "@/components/billing/billing-screens.css";
 type BoundAction = (invoiceId: string, prev: InvoiceActionState | null, formData?: FormData) => Promise<InvoiceActionState>;
 
 function StatusButton({
-  invoiceId, action, label, pendingLabel, blockedReasonId,
-}: { invoiceId: string; action: BoundAction; label: string; pendingLabel: string; blockedReasonId?: string }) {
+  invoiceId, action, label, pendingLabel, blockedReasonId, contractsHref,
+}: { invoiceId: string; action: BoundAction; label: string; pendingLabel: string; blockedReasonId?: string; contractsHref?: string | null }) {
   const bound = action.bind(null, invoiceId);
   const [state, formAction, pending] = useActionState<InvoiceActionState | null, FormData>(bound, null);
   return (
@@ -40,7 +40,7 @@ function StatusButton({
       {state?.error && !state.blockers && <Toast message={state.error} />}
       {state?.blockers && state.blockers.length > 0 && (
         <div style={{ margin: "6px 0 0", maxWidth: 420, textAlign: "left" }}>
-          <IssueBlockers blockers={state.blockers} lead={state.error ?? "This invoice can't be issued yet:"} role="alert" />
+          <IssueBlockers blockers={state.blockers} lead={state.error ?? "This invoice can't be issued yet:"} role="alert" contractsHref={contractsHref} />
         </div>
       )}
     </form>
@@ -56,6 +56,7 @@ export function InvoiceActions({
   legacyUnknownCreator,
   invoiceNo,
   blockerCount = null,
+  contractsHref = null,
 }: {
   invoiceId: string;
   status: InvoiceStatus;
@@ -72,6 +73,8 @@ export function InvoiceActions({
   /** PV5-09: how many reasons the readiness read found before any click. `null` = the read gave no answer (an older
    *  server, or a refusal): Issue stays enabled and the server's own check is the gate. */
   blockerCount?: number | null;
+  /** DW-10f-3a: where the invoice's instalment contracts are listed, for the three instalment blockers' links. */
+  contractsHref?: string | null;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
@@ -83,6 +86,7 @@ export function InvoiceActions({
           <StatusButton
             invoiceId={invoiceId} action={issueInvoiceAction} label="Issue" pendingLabel="Issuing…"
             blockedReasonId={blockerCount && blockerCount > 0 ? "issue-blocked-reason" : undefined}
+            contractsHref={contractsHref}
           />
         )}
       </div>

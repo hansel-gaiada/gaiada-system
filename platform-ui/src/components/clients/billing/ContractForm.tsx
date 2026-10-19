@@ -75,6 +75,12 @@ export function ContractForm({
           <Field name="startsOn" label="Starts" type="date" defaultValue={contract?.startsOn ?? ""} error={fieldError("startsOn")} />
           <Field name="endsOn" label="Ends" type="date" defaultValue={contract?.endsOn ?? ""} error={fieldError("endsOn")} />
         </div>
+        {/* DW-10f-2b: the payment schedule belongs to a contract that exists, so it is edited from the saved draft's Edit panel. */}
+        {!editing && (
+          <p className="bl-form__hint">
+            A contract with a value needs a payment schedule that adds up to it before it can be sent. Save the draft, then press Edit on it to build the schedule.
+          </p>
+        )}
 
         <Field
           name="bodyMd" label="Terms" type="textarea" defaultValue={contract?.bodyMd ?? ""}

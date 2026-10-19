@@ -73,8 +73,14 @@ export interface BlockerFix { href: string; label: string }
 
 /** Where a person goes to clear a blocker, when there is a place. The codes are the API's (docs §4, §30); a code this
  *  file does not know has no link, never a guessed one. */
-export function blockerFix(code: string): BlockerFix | null {
+export function blockerFix(code: string, where: { contractsHref?: string | null } = {}): BlockerFix | null {
   switch (code) {
+    // DW-10f-3a (BFF §61.5): an instalment line's contract is where the problem is, and the client's Contracts & billing page
+    // lists it. The page passes the link (the invoice's client); with none there is no place to send the person, so no link.
+    case "INSTALMENT_LINES_INVALID":
+    case "INSTALMENT_CONTRACT_NOT_SIGNED":
+    case "INSTALMENT_SUPERSEDED":
+      return where.contractsHref ? { href: where.contractsHref, label: "Open the client's contracts" } : null;
     case "NO_BILLING_PROFILE":
     case "NO_BANK_DETAILS":
     case "NO_REVENUE_ACCOUNT":

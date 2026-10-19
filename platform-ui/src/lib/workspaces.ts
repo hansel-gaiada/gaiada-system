@@ -140,6 +140,7 @@ export type PulseSource =
   | "social-posts-scheduled" | "social-posts-failed" | "it-account-requests"
   | "hr-leave-pending" | "hr-onboarding-open" | "hr-cases-open" | "hr-payroll-waiting" | "it-devices-offline"
   | "finance-payments-to-confirm" | "finance-overdue-receivables" | "finance-close-progress" | "finance-integrity-findings"
+  | "finance-instalments-due"
   | "it-security-alerts"
   | "automation-failures";
 
@@ -834,6 +835,8 @@ const FINANCE: Workspace = {
   pulse: [
     { key: "payments-to-confirm", label: "Client payments to confirm", source: "finance-payments-to-confirm", href: "/finance/receivables#payments-to-confirm" },
     { key: "overdue-receivables", label: "Overdue receivables", source: "finance-overdue-receivables", href: "/finance/receivables" },
+    // DW-10f-3b (BFF §61.9): the instalments of signed agreements that are due and not yet on an invoice. Drafting them is /invoices/new.
+    { key: "instalments-due", label: "Instalments due to invoice", source: "finance-instalments-due", href: "/invoices/new" },
     { key: "close-progress", label: "Close progress", source: "finance-close-progress", href: "/finance/close" },
     { key: "integrity-findings", label: "Integrity findings", source: "finance-integrity-findings", href: "/finance" },
   ],

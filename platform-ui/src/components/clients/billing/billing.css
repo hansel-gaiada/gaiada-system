@@ -79,3 +79,50 @@
 .bl-payment__meta { margin: 0; font: 400 12px/1.5 var(--font-body); color: var(--ink-muted); }
 .bl-payment__decide { display: grid; gap: 8px; }
 .bl-payment__buttons { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* ── DW-10f-2b: the payment schedule (BFF §61.9). Tokens only; labels use the ink tokens, never `opacity`. ───────────────────── */
+.bl-sched { display: grid; gap: 10px; padding: 12px 0 2px; }
+.bl-sched__title { margin: 0; font: 600 13px/1.4 var(--font-body); color: var(--ink-strong); }
+.bl-sched__presets { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-page); }
+.bl-sched__presetlabel { font: 600 12px/1.4 var(--font-body); color: var(--ink-subtle); }
+.bl-sched__presetrow { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.bl-sched__inline { display: grid; gap: 2px; font: 600 12px/1.4 var(--font-body); color: var(--ink-strong); }
+.bl-sched__inline input,
+.bl-sched__cell input,
+.bl-sched__cell select {
+  font: 400 13px/1.4 var(--font-body);
+  color: var(--ink-strong);
+  background: var(--surface-page);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 6px 8px;
+  min-width: 0;
+}
+.bl-sched__inline input { width: 12em; }
+.bl-sched__inline input[type="number"] { width: 6em; }
+.bl-sched__inline input:focus-visible,
+.bl-sched__cell input:focus-visible,
+.bl-sched__cell select:focus-visible { outline: 2px solid var(--accent-fg); outline-offset: 2px; }
+.bl-sched__rows { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.bl-sched__row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; padding-bottom: 8px; border-bottom: 1px solid var(--hairline); }
+.bl-sched__cell { display: grid; gap: 2px; font: 600 12px/1.4 var(--font-body); color: var(--ink-strong); }
+.bl-sched__cell--label { flex: 1 1 14em; }
+.bl-sched__cell--label input { width: 100%; }
+.bl-sched__cell input[inputmode="decimal"] { width: 11em; }
+.bl-sched__rowactions { display: flex; gap: 6px; flex-wrap: wrap; }
+.bl-sched__addrow { display: flex; gap: 8px; }
+.bl-sched__line { margin: 0; font: 600 13px/1.5 var(--font-body); }
+.bl-sched__line--ok { color: var(--status-ok-fg); }
+.bl-sched__line--short,
+.bl-sched__line--over,
+.bl-sched__line--invalid,
+.bl-sched__line--no_value { color: var(--status-warning-fg); }
+.bl-sched__line--empty { color: var(--ink-muted); font-weight: 400; }
+.bl-sched__warn { margin: 0; font: 600 13px/1.5 var(--font-body); color: var(--ink-strong); padding: 10px 12px; border: 1px solid var(--status-warning); border-radius: var(--radius-md); }
+.bl-sched__table { width: 100%; border-collapse: collapse; font: 400 13px/1.5 var(--font-body); color: var(--ink-body); }
+.bl-sched__table th,
+.bl-sched__table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+.bl-sched__table thead th { font: 600 12px/1.4 var(--font-body); color: var(--ink-subtle); }
+.bl-sched__table tfoot th,
+.bl-sched__table tfoot td { font-weight: 600; color: var(--ink-strong); border-bottom: 0; }
+.bl-sched__table .bl-sched__num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }

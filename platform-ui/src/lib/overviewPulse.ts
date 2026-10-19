@@ -13,6 +13,7 @@ import type { PayrollRun } from "./hr-full";
 import { money } from "./finance";
 import type { ArAgingRow, CloseReadiness, FiscalPeriod } from "./finance";
 import type { InvoicePayment } from "./contracts";
+import { BILLABLE_LIMIT, countDue, type BillableAnswer } from "./contractBilling";
 import type { Guarded } from "./socialShared";
 import { WORKSPACES, hrefFor, isPlanned, type PulseSource, type PulseTile } from "./workspaces";
 
@@ -92,6 +93,15 @@ export function readingOfPendingPayments(r: ReadResult<Pick<InvoicePayment, "id"
     value: rows.length,
     ...(rows.length >= PENDING_PAYMENTS_LIMIT ? { detail: `${PENDING_PAYMENTS_LIMIT} or more` } : {}),
   }));
+}
+
+/** DW-10f-3b: the instalments that are DUE (ready to invoice) in `GET invoices/billable-instalments`. A failed read is "Unavailable"
+ *  and a refused one "No access", never 0. The read lists at most 500 rows, oldest due first, so a full page is "N or more". */
+export function readingOfInstalmentsDue(r: ReadResult<BillableAnswer>): PulseReading {
+  return readingOfResult(r, (a) => {
+    const due = countDue(a.items);
+    return { value: due, ...(a.items.length >= BILLABLE_LIMIT ? { detail: `${due} or more` } : {}) };
+  });
 }
 
 const OVERDUE_BUCKETS = ["d1To30", "d31To60", "d61To90", "d90Plus"] as const;

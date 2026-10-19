@@ -84,6 +84,15 @@ export interface ContractPrintPayload {
     bodyMd: string | null;
   };
   parties: { issuerLegalName: string; clientName: string };
+  /** DW-10f-2a (BFF §61.9): the payment schedule FIXED AT SEND, with its own hash. Amounts are decimal strings, `due` is `"on_signing"` or
+   *  `YYYY-MM-DD`. `null` (or absent, an older sealed payload) when the contract had none, and ALWAYS null for a schedule added after signing
+   *  (DW-D49): nobody signed that one, so the sealed copy never prints it. */
+  schedule?: {
+    currency: string;
+    total: string;
+    sha256: string;
+    instalments: { position: number; label: string; amount: string; due: string }[];
+  } | null;
   document: { source: "attached_pdf" | "attached_file" | "body"; filename: string | null; sha256: string };
   signatures: ContractPrintSignature[];
   seal: {
