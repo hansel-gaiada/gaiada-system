@@ -625,3 +625,14 @@
 .cp-results { display: grid; gap: 18px; }
 .cp-results__grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 .cp-results__unknown { font: 400 14px/1.4 var(--font-body); color: var(--ink-subtle); }
+
+/* ── DW-10f-2b: the agreement's payment schedule (BFF §61.6). Tokens only; ink tokens, no `opacity` on text. ───────────────────── */
+.cp-sched { width: 100%; border-collapse: collapse; font: 400 14px/1.5 var(--font-body); color: var(--ink-body); }
+.cp-sched th,
+.cp-sched td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+.cp-sched thead th { font: 600 12px/1.4 var(--font-body); color: var(--ink-subtle); }
+.cp-sched tfoot th,
+.cp-sched tfoot td { font-weight: 600; color: var(--ink-strong); border-bottom: 0; }
+.cp-sched .cp-sched__num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cp-sched__link { color: var(--accent-fg); text-decoration: underline; text-underline-offset: 2px; }
+.cp-sched__note { margin: 10px 0 0; font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); }

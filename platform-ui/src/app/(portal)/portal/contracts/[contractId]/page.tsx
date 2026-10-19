@@ -13,6 +13,7 @@ import { PortalAmendmentBanner } from "@/components/portal/PortalAmendmentBanner
 import { PortalSignForm } from "@/components/portal/PortalSignForm";
 import { PortalCertifiedSign } from "@/components/portal/PortalCertifiedSign";
 import { PortalSignedNote } from "@/components/portal/PortalSignedNote";
+import { PortalSchedule } from "@/components/portal/PortalSchedule";
 import { PortalFacts, PortalLink, PortalPageHead, PortalStatus } from "@/components/portal/PortalBits";
 import "@/components/pipeline/pipeline.css";
 import "@/components/signing/simulatedPsre.css";
@@ -51,7 +52,8 @@ export default async function PortalContractPage({ params }: { params: Promise<{
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
-  const tenant = (await getActivePortalCompany(me))?.id ?? null;
+  const company = await getActivePortalCompany(me);
+  const tenant = company?.id ?? null;
   if (!tenant) return <EmptyNote>No client account is linked to your sign-in, so there is nothing to show here. Overview explains why.</EmptyNote>;
 
   const k = await getPortalContract(userId, tenant, contractId);
@@ -121,6 +123,10 @@ export default async function PortalContractPage({ params }: { params: Promise<{
             </EmptyNote>
           )}
         </Card>
+
+        {/* DW-10f-2b (BFF §61.6): how the price is invoiced, with the terms and above the signature, so what is signed is all in view.
+            Nothing renders for an agreement with no schedule. */}
+        <PortalSchedule schedule={k.schedule} company={company?.name} />
 
         {k.status === "signed" && (
           <Card
