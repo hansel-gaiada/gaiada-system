@@ -1359,6 +1359,8 @@ blocking conflicts and is where money actually leaves.
 redirected payment on a genuine one. An AR customer's bank details move no company money; a
 vendor's do. The asymmetry between the two kinds is deliberate, not an inconsistency.
 
+**Freelancer bills are AP bills (DW-10f, 2026-10-19; PROTOTYPED, §51, BFF §61.18).** A freelancer's bill is an `finance_ap_bills` row, so it uses these six keys and no new one. Drafting or discarding it is `bill_entry`; approving it is the unchanged `approve`; a freelancer's rates and the link of a vendor to a person are `vendor_master` (high assurance, never `finance_staff`). Reading the freelancers, the preview and the bills is `read`. The two seeded conflicts above apply as they do to any bill. Nothing in `cerbos/policies/`, the catalog or the bundles changed.
+
 **`payment_release` is the narrowest grant in the finance module** - `finance_manager` only, high
 assurance, and explicitly **not** `company_admin`. An administrative role may authorise a commitment
 (`approve`); it should not be able to move cash.
@@ -2580,7 +2582,7 @@ Also the UI mirror: the capabilities `work_request.send_across` (company_admin, 
 
 ## 51. DW-10f — contract billing and freelancer bills, BFF §61 (2026-10-18; revised 2026-10-18 for DW-D47 to DW-D49; PLANNED): no new kind, no new action
 
-Design: `docs/FRONTEND-BFF-CONTRACT.md` §61 (rulings DW-D45 to DW-D49; plan `docs/plans/2026-10-13-department-workspaces.md` §11.4 and §12.2, "10f design"). Status: **PLANNED (the contract only; nothing is built)**.
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §61 (rulings DW-D45 to DW-D49; plan `docs/plans/2026-10-13-department-workspaces.md` §11.4 and §12.2, "10f design"). Status: **PLANNED (the contract only; nothing is built)**. **(2026-10-19)** The backend is built and PROTOTYPED on `dw/10f` (BFF §61.17 and §61.18); no policy, catalog or bundle changed, as this section says. The HTTP suites run on the Linux CI gate.
 
 **Every route reuses an existing kind and action.** Nothing in `cerbos/policies/`, `derived_roles.yaml`, `cerbos.ts`, the permission catalog, the groups, the IAM seed, the bundles, the pins or the live matrix changes, and no Cerbos restart is needed for 10f.
 
