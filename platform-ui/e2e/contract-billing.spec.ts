@@ -18,7 +18,7 @@ import { tenantCookie } from "./appCookies";
 //   - Viceroy (`cl-4`) carries every case. No other spec reads or changes it, so nothing here disturbs the Northwind (cl-1), Cedar (cl-2) and Lumen
 //     (cl-3) specs, which assert their own seeds. The store is module state in the dev server: the tests are SERIAL and ORDER-DEPENDENT (the later ones
 //     spend what the earlier ones made), so a retry sees a spent store; run the file fresh to re-seed.
-//   - dk-10 draft, 120,000,000 IDR, 50/50 saved. dk-11 draft, 10,000,000 IDR, no schedule. dk-12 signed, 90,000,000: Deposit invoiced (inv-sch-1),
+//   - dk-10 draft, 120,000,000 IDR, 50/50 saved. dk-12 signed, 90,000,000: Deposit invoiced (inv-sch-1),
 //     "Milestone: design approved" due, "Milestone: launch" upcoming. dk-13 signed amendment, "Amendment fee" due. dk-14 signed, 24,000,000, no
 //     schedule (addable). dk-15 signed, schedule added after signing by Olive Owner.
 //   - hansel@gaiada.com is demo-hansel (platform_admin): company.manage, and every contract and invoice right.
@@ -56,6 +56,10 @@ const main = (page: Page) => page.locator("#main-content");
 const BILLING = "/clients/cl-4/billing";
 const contractRow = (page: Page, id: string) => main(page).locator(`#contract-${id}`);
 const draftUrl: { value: string } = { value: "" };
+// The presets and Send tests make their own draft (value 10,000,000 IDR, terms, no schedule) under a unique title, so a re-run on the same dev
+// server does not meet the previous run's sent contract. The seeded ones (dk-10 to dk-15) are only read, except dk-14 (see the header).
+const OWN_TITLE = `DEMO e2e retainer ${Date.now()}`;
+const ownRow = (page: Page) => main(page).getByRole("listitem").filter({ hasText: OWN_TITLE });
 
 test.describe("contract billing (DW-10f)", () => {
   test.beforeEach(({ page }) => {
@@ -115,7 +119,15 @@ test.describe("contract billing (DW-10f)", () => {
     await signInStaff(page, context);
     await page.goto(BILLING);
 
-    const draft = contractRow(page, "dk-11");
+    // A new draft with a value and terms, and no schedule.
+    await press(main(page).getByText("New draft contract", { exact: true }));
+    await main(page).getByLabel("Title", { exact: true }).fill(OWN_TITLE);
+    await main(page).getByLabel("Value", { exact: true }).fill("10000000");
+    await main(page).getByLabel("Terms", { exact: true }).fill("Retainer terms.");
+    await press(main(page).getByRole("button", { name: "Save draft", exact: true }));
+    await expect(main(page).getByRole("status").filter({ hasText: "Draft saved" })).toBeVisible();
+
+    const draft = ownRow(page);
     const send = draft.getByRole("button", { name: "Send to client", exact: true });
     await expect(send).toBeDisabled();
     await expect(draft.getByText("The payment schedule must add up to the value before sending.", { exact: true })).toBeVisible();
@@ -155,9 +167,9 @@ test.describe("contract billing (DW-10f)", () => {
     await signInStaff(page, context);
     await page.goto(BILLING);
 
-    await press(contractRow(page, "dk-11").getByRole("button", { name: "Send to client", exact: true }));
+    await press(ownRow(page).getByRole("button", { name: "Send to client", exact: true }));
     // It left Draft: the row now says what a sent contract waits for, offers no Edit and no Send, and carries its fixed schedule.
-    const sent = contractRow(page, "dk-11");
+    const sent = ownRow(page);
     await expect(sent.getByText("Waiting for both parties to sign.", { exact: true })).toBeVisible();
     await expect(sent.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);
     await expect(sent.getByRole("button", { name: "Send to client", exact: true })).toHaveCount(0);
@@ -266,7 +278,7 @@ test.describe("contract billing (DW-10f)", () => {
     await expect(confirm).toBeVisible();
     await expect(confirm.getByText(/go back to the payment schedule, due again and ready to invoice\./)).toBeVisible();
     await press(confirm.getByRole("button", { name: "Cancel this draft", exact: true }));
-    await expect(main(page).getByText(/^Draft cancelled\. \d+ instalments? goes? back to the payment schedule, ready to invoice again\.$/)).toBeVisible();
+    await expect(main(page).getByText(/^Draft cancelled\. \d+ instalments? (?:goes|go) back to the payment schedule, ready to invoice again\.$/)).toBeVisible();
 
     // They are on the schedule again: ticked, ready to invoice.
     await page.goto("/invoices/new?clientId=cl-4");

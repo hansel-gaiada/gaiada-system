@@ -560,7 +560,7 @@ export function billingDemo(method: string, p: string, params: URLSearchParams, 
       }
       const id = `dk-${++s.seq}`;
       s.contracts.unshift({
-        id, clientId: String(b.clientId), clientName: String(b.clientId) === "cl-3" ? "Lumen Studio" : "Northwind Traders", projectId: (b.projectId as string) ?? null,
+        id, clientId: String(b.clientId), clientName: ({ "cl-3": "Lumen Studio", "cl-4": "Viceroy" } as Record<string, string>)[String(b.clientId)] ?? "Northwind Traders", projectId: (b.projectId as string) ?? null,
         projectName: b.projectId ? "Website redesign" : null, title: String(b.title).slice(0, 300), reference, version: 1, status: "draft",
         fileId: (b.fileId as string) ?? null, bodyMd: (b.bodyMd as string) ?? null, value: b.value == null ? null : Number(b.value),
         currency: String(b.currency || "USD").slice(0, 8), startsOn: (b.startsOn as string) ?? null, endsOn: (b.endsOn as string) ?? null,
