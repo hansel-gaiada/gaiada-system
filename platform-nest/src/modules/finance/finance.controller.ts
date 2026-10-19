@@ -24,10 +24,38 @@ import { withTenants } from "../../db";
 import { authorize, writeActivity } from "../../core/http";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
+import { UUID_RE as FL_UUID, activeHuman, mapFreelancerDbError } from "./freelancer-bills.service";
 
 /** The ONLY way this module reaches the database. See the header. */
 function withFinance<T>(tenantId: string, fn: (c: PoolClient) => Promise<T>): Promise<T> {
   return withTenants([tenantId], fn, { modules: ["finance"] });
+}
+
+/**
+ * DW-10f (BFF §61.7): the vendor-link writes. withFinance, plus the two database walls of the link mapped to their answers
+ * (a racing second link meets `ux_finance_ap_vendors_user_live`: 409 `person_has_vendor`).
+ */
+async function withFinanceLink<T>(tenantId: string, fn: (c: PoolClient) => Promise<T>): Promise<T> {
+  try {
+    return await withFinance(tenantId, fn);
+  } catch (e) {
+    return mapFreelancerDbError(e);
+  }
+}
+
+/** A person a vendor may name: an active human member of the company, named by no OTHER live vendor (BFF §61.7). */
+async function assertLinkablePerson(c: PoolClient, tenantId: string, userId: string, vendorId: string | null): Promise<void> {
+  if (!(await activeHuman(c, tenantId, userId))) {
+    throw new NotFoundException({ message: "no person with an active membership in this company has that id", reason: "person_not_found" });
+  }
+  const other = await c.query(
+    `SELECT 1 FROM finance_ap_vendors
+      WHERE tenant_id = $1 AND user_id = $2 AND deleted_at IS NULL AND ($3::uuid IS NULL OR id <> $3::uuid) LIMIT 1`,
+    [tenantId, userId, vendorId],
+  );
+  if (other.rowCount) {
+    throw new ConflictException({ message: "another live vendor already names this person", reason: "person_has_vendor" });
+  }
 }
 
 /** ISO date or nothing. Rejects rather than silently coercing — a bad date that becomes `null`
@@ -2225,7 +2253,8 @@ export class FinanceController {
         `SELECT id, code, name, npwp, is_pkp AS "isPkp",
                 default_withholding_code AS "defaultWithholdingCode",
                 default_withholding_rate AS "defaultWithholdingRate",
-                payment_terms_days AS "paymentTermsDays"
+                payment_terms_days AS "paymentTermsDays",
+                user_id AS "userId"
            FROM finance_ap_vendors
           WHERE tenant_id = $1 AND status = 'active'
           ORDER BY code`,
@@ -3094,6 +3123,8 @@ export class FinanceController {
     @Body() body: {
       code?: string; name?: string; npwp?: string; isPkp?: boolean;
       defaultWithholdingCode?: string; defaultWithholdingRate?: number; paymentTermsDays?: number;
+      /** DW-10f (BFF §61.7): the person this vendor pays (a freelancer). */
+      userId?: string | null;
     },
   ) {
     await authorize(req.principal, { kind: "finance_ap", tenantId, module: "finance" }, "vendor_master");
@@ -3106,19 +3137,68 @@ export class FinanceController {
     if (rate !== null && (!Number.isFinite(rate) || rate < 0 || rate > 1)) {
       throw new BadRequestException("defaultWithholdingRate is a rate between 0 and 1 (0.02 for PPh 23 at 2%), not a percentage");
     }
+    const userId = body?.userId ?? null;
+    if (userId !== null && typeof userId !== "string") throw new BadRequestException("userId must be a person's id or null");
 
-    return withFinance(tenantId, async (c) => {
+    const created = await withFinanceLink(tenantId, async (c) => {
       const dup = await c.query(`SELECT 1 FROM finance_ap_vendors WHERE tenant_id = $1 AND code = $2`, [tenantId, code]);
       if (dup.rowCount) throw new BadRequestException(`a vendor with code ${code} already exists`);
+      if (userId !== null) await assertLinkablePerson(c, tenantId, userId, null);
       const r = await c.query<{ id: string }>(
         `INSERT INTO finance_ap_vendors
-           (tenant_id, code, name, npwp, is_pkp, default_withholding_code, default_withholding_rate, payment_terms_days)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+           (tenant_id, code, name, npwp, is_pkp, default_withholding_code, default_withholding_rate, payment_terms_days, user_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
         [tenantId, code, name, body?.npwp?.trim() || null, body?.isPkp ?? null,
-         body?.defaultWithholdingCode?.trim() || null, rate, body?.paymentTermsDays ?? 30],
+         body?.defaultWithholdingCode?.trim() || null, rate, body?.paymentTermsDays ?? 30, userId],
       );
-      return { id: r.rows[0].id, code, name };
+      return { id: r.rows[0].id, code, name, userId };
     });
+    if (userId !== null) {
+      await writeActivity(tenantId, req.principal.userId, "vendor_person_linked", "finance_ap_vendor", created.id, { userId });
+    }
+    return created;
+  }
+
+  /**
+   * DW-10f (BFF §61.7): link a vendor to the person it pays, or unlink it (`{userId: null}`). Vendor master: the link decides
+   * where a freelancer's money goes, so it carries the same right (and high assurance) as a vendor's bank details. Cerbos first,
+   * then the body, then the rows: 404 `vendor_not_found`, 404 `person_not_found`, 409 `person_has_vendor`.
+   */
+  @Patch(":tenantId/finance/ap/vendors/:vendorId/person")
+  async linkVendorPerson(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("vendorId") vendorId: string,
+    @Body() body: { userId?: unknown },
+  ) {
+    await authorize(req.principal, { kind: "finance_ap", tenantId, module: "finance" }, "vendor_master");
+    if (body == null || !Object.prototype.hasOwnProperty.call(body, "userId") || (body.userId !== null && typeof body.userId !== "string")) {
+      throw new BadRequestException({ message: "userId is required: a person's id, or null to unlink", reason: "user_id_required", field: "userId" });
+    }
+    const userId = body.userId as string | null;
+    if (!FL_UUID.test(vendorId)) throw new NotFoundException({ message: "no live vendor with that id in this company", reason: "vendor_not_found" });
+    const out = await withFinanceLink(tenantId, async (c) => {
+      const v = await c.query<{ user_id: string | null }>(
+        `SELECT user_id FROM finance_ap_vendors WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE`,
+        [tenantId, vendorId],
+      );
+      if (!v.rows[0]) throw new NotFoundException({ message: "no live vendor with that id in this company", reason: "vendor_not_found" });
+      const before = v.rows[0].user_id;
+      if (userId !== null) await assertLinkablePerson(c, tenantId, userId, vendorId);
+      if (before !== userId) {
+        await c.query(`UPDATE finance_ap_vendors SET user_id = $3, updated_at = now() WHERE tenant_id = $1 AND id = $2`, [tenantId, vendorId, userId]);
+      }
+      return { before };
+    });
+    if (out.before !== userId) {
+      if (out.before) {
+        await writeActivity(tenantId, req.principal.userId, "vendor_person_unlinked", "finance_ap_vendor", vendorId, { userId: out.before });
+      }
+      if (userId) {
+        await writeActivity(tenantId, req.principal.userId, "vendor_person_linked", "finance_ap_vendor", vendorId, { userId });
+      }
+    }
+    return { vendorId, userId };
   }
 
 

@@ -3,7 +3,7 @@
 // module-gated. The `clients` CRM resource was moved to the clients MODULE (WSA-2 —
 // src/modules/clients/clients.controller.ts, ModuleEnabledGuard("clients")).
 // authorize() → RLS query → activity; time-entry owned by the logger.
-import { BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
@@ -199,18 +199,32 @@ export class ClientWorkController {
   @Patch(":tenantId/time-entries/:entryId")
   async updateTime(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("entryId") entryId: string, @Body() b: { minutes?: number; billable?: boolean; notes?: string }) {
     const owner = await withTenants([tenantId], (c) =>
-      c.query<{ user_id: string }>(`SELECT user_id FROM time_entries WHERE id = $1 AND deleted_at IS NULL`, [entryId]),
+      c.query<{ user_id: string; minutes: number; billed: boolean }>(
+        `SELECT user_id, minutes, ap_bill_id IS NOT NULL AS billed FROM time_entries WHERE id = $1 AND deleted_at IS NULL`,
+        [entryId],
+      ),
     );
     if (!owner.rows[0]) throw new NotFoundException("time entry not found");
     await authorize(req.principal, { kind: "time_entry", id: entryId, tenantId, ownerId: owner.rows[0].user_id }, "update");
     if (b.minutes != null && (!Number.isInteger(b.minutes) || b.minutes <= 0)) throw new BadRequestException("minutes must be a positive integer");
-    await withTenants([tenantId], (c) =>
-      c.query(
-        `UPDATE time_entries SET minutes = COALESCE($2, minutes), billable = COALESCE($3, billable), notes = COALESCE($4, notes), updated_at = now()
-         WHERE id = $1`,
-        [entryId, b.minutes ?? null, b.billable ?? null, b.notes ?? null],
-      ),
-    );
+    // DW-10f (BFF §61.8, §48a): an entry on a freelancer bill keeps its minutes (the trigger's PD615 is the wall; this is the
+    // clean answer, after the authorization). `billable` and `notes` still change.
+    const timeEntryBilled = () =>
+      new ConflictException({ message: "this time entry is on a freelancer bill; its minutes cannot change (notes and billable can)", reason: "time_entry_billed" });
+    if (owner.rows[0].billed && b.minutes != null && b.minutes !== owner.rows[0].minutes) throw timeEntryBilled();
+    try {
+      await withTenants([tenantId], (c) =>
+        c.query(
+          `UPDATE time_entries SET minutes = COALESCE($2, minutes), billable = COALESCE($3, billable), notes = COALESCE($4, notes), updated_at = now()
+           WHERE id = $1`,
+          [entryId, b.minutes ?? null, b.billable ?? null, b.notes ?? null],
+        ),
+      );
+    } catch (e) {
+      // The entry was claimed between the read above and this write.
+      if ((e as { code?: string })?.code === "PD615") throw timeEntryBilled();
+      throw e;
+    }
     await writeActivity(tenantId, req.principal.userId, "updated", "time_entry", entryId);
     return { id: entryId };
   }

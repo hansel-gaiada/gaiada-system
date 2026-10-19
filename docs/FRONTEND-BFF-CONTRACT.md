@@ -11596,3 +11596,39 @@ Code: `core/contract-schedule.ts` (the body rules, the state SQL, the reads, the
 9. `issue.ts` books unchanged (a line with no `hours` is quantity 1, verified); only the readiness facts and the void's `releasedInstalments` were added.
 
 **Not done here (follow-ups).** The rows of §61.13 in the other sections (§4, §16b, §16d, §16e, §30, §30a) are left for integration. The portal seed's scheduled agreement (plan §12.2, 10f-2a row) is not added. Not proven by these suites: an amendment with its own schedule, the group client's intercompany posting from an instalment invoice, and a bot or automation principal's "minted low" refusal on the draft (the dev `x-user-id` path assembles every principal at high assurance; issue and void keep their bot DENY, pinned in `invoice-issue-tools.test.ts`).
+
+### 61.18 As built (10f-4a, freelancer bills backend; PROTOTYPED on branch `dw/10f-freelance`, its HTTP suite runs on the Linux CI gate)
+
+Code: `modules/finance/freelancer-bills.service.ts` (the plan, the draft and the claim, every amount in SQL `numeric`), `modules/finance/freelancer-bills.controller.ts` (the eight routes below), `modules/finance/finance.controller.ts` (the vendor link), `core/client-work.controller.ts` (the time-entry 409), two MCP tools in `modules/finance/index.ts`. Suites: `modules/finance/freelancer-bills.test.ts` (HTTP, real Postgres and Cerbos) and `freelancer-bills.unit.test.ts` (pure). No migration, no policy, catalog or bundle change.
+
+**Routes as built** (all under `/api/:tenantId/`, `ModuleEnabledGuard("finance")`, Cerbos first on every one, every query in one finance-and-hr scoped transaction):
+
+| Route | Authorizes as | Answers |
+|---|---|---|
+| `GET finance/freelancers` | `finance_ap` `read` | as §61.7; each rate is `{id, userId, hourlyRate, currency, expenseAccountCode, validFrom, validTo, note, used}`; `currentRate` is the rate in force today |
+| `POST finance/freelancers/:userId/rates` | `vendor_master` | 201 the rate plus `closedRate: {id, validTo} \| null` (the open rate the new one closed) |
+| `PATCH finance/freelancers/:userId/rates/:rateId` | `vendor_master` | 200 the rate |
+| `DELETE finance/freelancers/:userId/rates/:rateId` | `vendor_master` | 200 `{deleted: true}` |
+| `POST finance/ap/vendors` (gains `userId`) | `vendor_master` | 201 `{id, code, name, userId}`; `GET finance/ap/vendors` rows gain `userId` |
+| `PATCH finance/ap/vendors/:vendorId/person` | `vendor_master` | 200 `{vendorId, userId}`; 400 `user_id_required` when `userId` is missing |
+| `GET finance/freelancer-bills/preview` | `read` | as §61.8; each line also carries `firstDate`, `lastDate` |
+| `POST finance/freelancer-bills` | `bill_entry` | as §61.8 (a replay adds `deduped: true`) |
+| `GET finance/freelancer-bills` | `read` | as §61.8, with `user: {id, name, email}`, `vendor: {id, code, name}`, `currency`, `createdBy: {id, name} \| null`; `from`/`to` keep bills whose period overlaps them |
+| `DELETE finance/freelancer-bills/:billId` | `bill_entry` | as §61.8 |
+| `PATCH time-entries/:entryId` | `time_entry` `update` (unchanged) | 409 `time_entry_billed` when the entry is claimed and `minutes` changes (also when `PD615` fires on a race); `notes` and `billable` change |
+
+Every refusal is `{error, reason}` (plus `blockers` on `bill_blocked`, `field` on input errors). Database walls: the `EXCLUDE` (`23P01`) is 409 `rate_overlap`; `ux_finance_ap_vendors_user_live` (`23505`) is 409 `person_has_vendor`; `PD615`/`PD616` on the claim are 409 `conflict`; `PD617` is 409 `bill_not_draft`. Money in the JSON answers is a number for display (`float8`), computed in `numeric`; withholding is `round(finance_tax_compute(company, code, subtotal, bill date), minor unit)` and the bill's `withholding_rate` is `rate × base_multiplier / 100` (a rate, 0.025 for PPH21 at 5% on half the base). The PPh 23 path of the manual AP bill route is untouched (§61.1 row 14 only rules it out for freelancer bills). The PM time routes only insert time entries (an entry is born unclaimed), so the 409 mapping is needed on `PATCH time-entries` only.
+
+**MCP tools** (§61.10): `freelancerBills.preview` (read) and `freelancerBills.draft` (write, impact `low`), both `minAssurance: "verified"` like the rest of the finance module's tools.
+
+**Deviations, each with its reason:**
+1. **A blocker §61.8 does not list, `NO_BILLING_PROFILE`:** the bill number is `{prefix}/FB/{yyyy}/{nnnn}` with the billing profile's invoice prefix, and a company with no profile has none. Refusing is the honest answer; inventing a prefix would number bills in a format nothing else uses.
+2. **`rate_used` also guards a rate's end, not only its deletion:** `PATCH …/rates/:rateId` that ends a rate before a claimed entry it priced, and `POST …/rates` whose automatic close would do the same, answer 409 `rate_used`. Otherwise a billed hour would lose the rate it was billed at (or gain another), and `used` would stop meaning what it says.
+3. **Who a bill is drafted for:** a human (`users.kind = 'employee'`) with a membership row in the company of any status, not only an active one. A freelancer who has left still has hours to be paid for; their rate and vendor were checked (active membership) when they were recorded. A new rate and a vendor link still need an active membership (§61.7).
+4. **The preview lists every person with a rate OR a linked vendor** who has unbilled time (§61.8 says "with a rate"): the same set as `GET finance/freelancers`, so a linked freelancer whose rate is missing shows `NO_RATE` instead of not showing at all.
+5. **Rate activity is on the rate,** `target_entity_type = 'finance_freelancer_rate'`, with `userId` and `vendorId` in the metadata (§61.11 says "on the vendor"): a rate can be recorded before any vendor names the person. Two verbs beyond §61.11: `freelancer_rate_reopened` (`validTo: null`) and `freelancer_rate_updated` (a note only). A note over 500 characters is 400 `note_invalid`; a `PATCH` with neither field is 400 `date_invalid`.
+6. **Maker-checker on approval is the role split, as AP has it today:** `bill_entry` and `approve` are separate actions, so a `finance_staff` drafts and a `finance_manager` or `company_admin` approves, but nothing refuses the same person doing both when one role holds both (`finance_manager` holds `bill_entry` and `approve`, and `finance_ap_bills` records no creator). The approve route is unchanged, as §61.8 says; a person-level check (the drafter in `finance_freelancer_bills.created_by` may not approve) is a follow-up for the owner, not built here.
+7. **A withholding that rounds to zero** stores the code and rate with amount 0 and no account (`ck_finance_ap_bills_wht` requires that pairing).
+8. **The draft's default bill date** is the database's `current_date` (as invoice issue uses), and the preview prices at today.
+
+**Not done here (10f-4a's brief limits the docs to this note):** the rows §61.13 names for this track (§48a's `PATCH time-entries` 409, the Finance & Accounting section's vendor `userId` and the freelancer routes, PERMISSION-CONTRACT §21) are for the merge.

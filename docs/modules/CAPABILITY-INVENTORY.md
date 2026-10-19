@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **277** capabilities across **16** owners
-- **146** writes · 131 reads
-- Writes by impact: **high 26** · medium 41 · low 79
+- **279** capabilities across **16** owners
+- **147** writes · 132 reads
+- Writes by impact: **high 26** · medium 41 · low 80
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -132,6 +132,8 @@ unfalsifiable after.
 | finance | `finance.closeReadiness` | `GET` | `/api/:tenantId/finance/periods/:periodId/close-readiness` | read | — |
 | finance | `finance.profitAndLoss` | `GET` | `/api/:tenantId/finance/profit-and-loss` | read | — |
 | finance | `finance.trialBalance` | `GET` | `/api/:tenantId/finance/trial-balance` | read | — |
+| finance | `freelancerBills.draft` | `POST` | `/api/:tenantId/finance/freelancer-bills` | write | `low` |
+| finance | `freelancerBills.preview` | `GET` | `/api/:tenantId/finance/freelancer-bills/preview` | read | — |
 | hr | `hr.fileLeave` | `POST` | `/api/:tenantId/modules/hr/leave` | write | `medium` |
 | hr | `hr.getAnalytics` | `GET` | `/api/:tenantId/modules/hr/analytics` | read | — |
 | hr | `hr.getEmployee` | `GET` | `/api/:tenantId/hr/employees/:employeeId` | read | — |
