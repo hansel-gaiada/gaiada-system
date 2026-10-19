@@ -134,9 +134,10 @@ function AddRateForm({ people, accounts, a }: { people: PersonOption[]; accounts
           );
         }}
       >
+        {/* The selects carry an aria-label as well: a label that wraps a select has the options in its text, so an exact label match (Playwright) never finds it. */}
         <label className="fin-form__field">
           <span>Person</span>
-          <select value={form.userId} onChange={set("userId")}>
+          <select aria-label="Person" value={form.userId} onChange={set("userId")}>
             <option value="">Choose a person</option>
             {people.map((p) => <option key={p.id} value={p.id}>{p.name}{p.email ? ` (${p.email})` : ""}</option>)}
           </select>
@@ -151,7 +152,7 @@ function AddRateForm({ people, accounts, a }: { people: PersonOption[]; accounts
         </label>
         <label className="fin-form__field">
           <span>Expense account</span>
-          <select value={form.expenseAccountCode} onChange={set("expenseAccountCode")}>
+          <select aria-label="Expense account" value={form.expenseAccountCode} onChange={set("expenseAccountCode")}>
             <option value="">Choose an account</option>
             {accounts.map((x) => <option key={x.code} value={x.code}>{x.code} · {x.name}</option>)}
           </select>
