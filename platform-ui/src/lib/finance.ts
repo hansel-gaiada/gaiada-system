@@ -618,6 +618,8 @@ export interface ApVendor {
   /** A RATE (e.g. "0.02" for PPh 23 at 2%), not a percentage — matches the database column. */
   defaultWithholdingCode: string | null; defaultWithholdingRate: string | null;
   paymentTermsDays: number;
+  /** DW-10f (BFF §61.7): the person this vendor pays, when it is a freelancer's. Absent from an older server. */
+  userId?: string | null;
 }
 export interface ApOpenBill {
   id: string; billNo: string; billDate: string; dueDate: string;
