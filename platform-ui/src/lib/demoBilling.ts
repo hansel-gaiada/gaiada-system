@@ -6,6 +6,8 @@ import "server-only";
 //   POST  /api/:t/contracts                            PATCH /api/:t/contracts/:id      (draft edit, void)
 //   POST  /api/:t/contracts/:id/send                   POST  /api/:t/contracts/:id/countersign
 //   GET   /api/:t/invoice-payments[?clientId&status]   POST  /api/:t/invoice-payments/:id/decide
+//   PUT   /api/:t/contracts/:id/schedule               POST  /api/:t/contracts/:id/schedule/after-signing   (DW-10f, BFF §61.4, §61.4a)
+//   GET   /api/:t/invoices/billable-instalments        (DW-10f, BFF §61.5; the invoice POST and void live beside the invoice store)
 // and by the hub Overview fixture (`demoBillingNeedsUs` / `demoBillingNeedsClient`), so the Overview's
 // items, the tab badge and this area can never disagree: deciding a payment here removes it from "waiting
 // on us" there.
@@ -22,16 +24,28 @@ import "server-only";
 //   dept-manager (a manager) may read contracts only.
 //   everyone else is refused every one of these routes (403 with the Cerbos denial text).
 import type { DemoResult } from "./demoFixtures";
+import { isIsoDate, minorUnitOf } from "./contracts";
 
 const CLIENT_ID = "cl-1";
 
 type Status = "draft" | "sent" | "signed" | "declined" | "expired" | "void";
 interface Signature { party: "client" | "provider"; signer: string | null; signerName: string; signerTitle: string | null; signedAt: string }
+/** DW-10f: one row of a contract's payment schedule (`contract_instalments`). `invoiceId` is the claim: set when a live invoice bills it,
+ *  released when that invoice is voided. The state is DERIVED on read (`stateOf`), never stored, exactly as the server does (§61.3). */
+interface DemoInstalment {
+  id: string; position: number; label: string; amount: number; dueKind: "on_signing" | "date"; dueOn: string | null; invoiceId: string | null;
+}
 interface DemoContract {
   id: string; clientId: string; clientName: string; projectId: string | null; projectName: string | null;
   title: string; reference: string | null; version: number; status: Status; fileId: string | null; bodyMd: string | null;
   value: number | null; currency: string; startsOn: string | null; endsOn: string | null;
   sentAt: string | null; signedAt: string | null; declineReason: string | null; createdAt: string; signatures: Signature[];
+  /** DW-10f: an agreement (the default) or an amendment with its own value and schedule. */
+  kind?: "agreement" | "amendment"; amendsId?: string | null;
+  /** DW-10f: the payment schedule; absent = none. */
+  instalments?: DemoInstalment[];
+  /** DW-D49: who added the schedule after the contract was signed, and when. */
+  scheduleAdded?: { at: string; by: string } | null;
 }
 interface DemoPayment {
   id: string; invoiceId: string; clientId: string; clientName: string; amount: number; currency: string; paidOn: string;
@@ -49,6 +63,17 @@ const dayOnly = (n: number): string => daysAgo(n).slice(0, 10);
 // shared across parallel specs, so each spec needs a client of its own.
 const LUMEN = { clientId: "cl-3", clientName: "Lumen Studio", projectId: null, projectName: null, version: 1, currency: "USD", startsOn: null, endsOn: null, declineReason: null };
 
+/** A schedule row for a seed: `due` is `"on_signing"` or a YYYY-MM-DD date. */
+const inst = (cid: string, n: number, label: string, amount: number, due: string, invoiceId: string | null = null): DemoInstalment => ({
+  id: `di-${cid}-${n}`, position: n, label, amount, dueKind: due === "on_signing" ? "on_signing" : "date", dueOn: due === "on_signing" ? null : due, invoiceId,
+});
+
+// Viceroy (`cl-4`, a group company that is OUR client) carries the payment-schedule cases (DW-10f, BFF §61.9), in IDR, so that
+// `e2e/contract-billing.spec.ts` can drive the whole flow without touching Northwind's items (the hub specs assert them by
+// name), Cedar Group's empty state, or Lumen Studio's send/countersign flow (`client-billing.spec.ts`). The store is shared by every
+// spec on the same server, so each spec needs a client of its own.
+const VICEROY = { clientId: "cl-4", clientName: "Viceroy", projectId: null, projectName: null, version: 1, currency: "IDR", declineReason: null };
+
 const seedContracts = (): DemoContract[] => [
   { id: "dk-1", clientId: CLIENT_ID, clientName: "Northwind Traders", projectId: "p-web-1", projectName: "Website redesign", title: "Statement of Work: redesign", reference: "GDA-2026-014", version: 1, status: "sent", fileId: "f-1", bodyMd: null, value: 18000, currency: "USD", startsOn: dayOnly(30), endsOn: dayOnly(-120), sentAt: daysAgo(4), signedAt: null, declineReason: null, createdAt: daysAgo(6), signatures: [] },
   { id: "dk-2", clientId: CLIENT_ID, clientName: "Northwind Traders", projectId: null, projectName: null, title: "Master services agreement 2026", reference: "GDA-2026-020", version: 1, status: "draft", fileId: null, bodyMd: "## Master services agreement\n\nThe parties agree to the terms set out here.", value: null, currency: "USD", startsOn: null, endsOn: null, sentAt: null, signedAt: null, declineReason: null, createdAt: daysAgo(2), signatures: [] },
@@ -61,9 +86,56 @@ const seedContracts = (): DemoContract[] => [
       { party: "provider", signer: "demo-owner", signerName: "Olive Owner", signerTitle: "Owner", signedAt: daysAgo(35) },
     ] },
   { id: "dk-6", clientId: CLIENT_ID, clientName: "Northwind Traders", projectId: null, projectName: null, title: "Pilot agreement (superseded)", reference: "GDA-2026-002", version: 1, status: "void", fileId: null, bodyMd: "Pilot terms.", value: 2500, currency: "USD", startsOn: null, endsOn: null, sentAt: daysAgo(80), signedAt: null, declineReason: null, createdAt: daysAgo(82), signatures: [] },
-  { ...LUMEN, id: "dk-7", title: "Onboarding agreement", reference: "GDA-2026-031", status: "draft", fileId: null, bodyMd: "Onboarding terms.", value: 900, sentAt: null, signedAt: null, createdAt: daysAgo(1), signatures: [] },
+  // A draft with a value must carry a schedule that adds up to it before it can be sent (BFF §61.1 row 3): this one is "all on signing".
+  { ...LUMEN, id: "dk-7", title: "Onboarding agreement", reference: "GDA-2026-031", status: "draft", fileId: null, bodyMd: "Onboarding terms.", value: 900, sentAt: null, signedAt: null, createdAt: daysAgo(1), signatures: [],
+    instalments: [inst("dk-7", 1, "Payment on signing", 900, "on_signing")] },
   { ...LUMEN, id: "dk-8", title: "Retainer agreement", reference: "GDA-2026-029", status: "sent", fileId: null, bodyMd: "Monthly retainer.", value: 2000, sentAt: daysAgo(6), signedAt: null, createdAt: daysAgo(7),
     signatures: [{ party: "client", signer: "lumen-1", signerName: "Lena Lumen", signerTitle: "Director", signedAt: daysAgo(2) }] },
+
+  // ── DW-10f: the payment-schedule cases (Viceroy, cl-4) ──
+  // A draft with a 50/50 schedule that adds up (120,000,000 = 60,000,000 + 60,000,000): the editor, and Send enabled.
+  { ...VICEROY, id: "dk-10", title: "Website build agreement", reference: "GDA-2026-040", status: "draft", fileId: null, bodyMd: "Build terms.", value: 120_000_000,
+    startsOn: dayOnly(-10), endsOn: dayOnly(-70), sentAt: null, signedAt: null, createdAt: daysAgo(3), signatures: [],
+    instalments: [inst("dk-10", 1, "Deposit (50%)", 60_000_000, "on_signing"), inst("dk-10", 2, "Balance (50%)", 60_000_000, dayOnly(-70))] },
+  // A draft with a value and NO schedule: Send is disabled until one is saved. 10,000,000 / 3 leaves a remainder of 1 on Month 1.
+  { ...VICEROY, id: "dk-11", title: "Retainer 2027", reference: "GDA-2026-043", status: "draft", fileId: null, bodyMd: "Retainer terms.", value: 10_000_000,
+    startsOn: dayOnly(-30), endsOn: null, sentAt: null, signedAt: null, createdAt: daysAgo(2), signatures: [] },
+  // A signed agreement: one instalment already invoiced (the issued invoice `inv-sch-1`), one due, one upcoming.
+  { ...VICEROY, id: "dk-12", title: "Website build agreement (signed)", reference: "GDA-2026-041", status: "signed", fileId: null, bodyMd: "Signed build terms.", value: 90_000_000,
+    startsOn: dayOnly(40), endsOn: null, sentAt: daysAgo(45), signedAt: daysAgo(40), createdAt: daysAgo(46),
+    signatures: [
+      { party: "client", signer: "viceroy-1", signerName: "Wayan Viceroy", signerTitle: "Finance Director", signedAt: daysAgo(41) },
+      { party: "provider", signer: "demo-owner", signerName: "Olive Owner", signerTitle: "Owner", signedAt: daysAgo(40) },
+    ],
+    instalments: [
+      inst("dk-12", 1, "Deposit", 30_000_000, "on_signing", "inv-sch-1"),
+      inst("dk-12", 2, "Milestone: design approved", 30_000_000, dayOnly(10)),
+      inst("dk-12", 3, "Milestone: launch", 30_000_000, dayOnly(-45)),
+    ] },
+  // A signed amendment with its own value and its own schedule (its one instalment is on signing, so it is due).
+  { ...VICEROY, id: "dk-13", title: "Amendment 1: extra pages", reference: "GDA-2026-041-A1", status: "signed", fileId: null, bodyMd: "Amendment terms.", value: 15_000_000,
+    kind: "amendment", amendsId: "dk-12", startsOn: null, endsOn: null, sentAt: daysAgo(7), signedAt: daysAgo(5), createdAt: daysAgo(8),
+    signatures: [
+      { party: "client", signer: "viceroy-1", signerName: "Wayan Viceroy", signerTitle: "Finance Director", signedAt: daysAgo(6) },
+      { party: "provider", signer: "demo-owner", signerName: "Olive Owner", signerTitle: "Owner", signedAt: daysAgo(5) },
+    ],
+    instalments: [inst("dk-13", 1, "Amendment fee", 15_000_000, "on_signing")] },
+  // A signed agreement with a value and NO schedule (sent before 10f): `scheduleAddable`, so Finance may add one once (DW-D49).
+  { ...VICEROY, id: "dk-14", title: "Hosting agreement", reference: "GDA-2026-042", status: "signed", fileId: null, bodyMd: "Hosting terms: 24,000,000 a year, billed in two halves.", value: 24_000_000,
+    startsOn: dayOnly(20), endsOn: null, sentAt: daysAgo(25), signedAt: daysAgo(20), createdAt: daysAgo(26),
+    signatures: [
+      { party: "client", signer: "viceroy-1", signerName: "Wayan Viceroy", signerTitle: "Finance Director", signedAt: daysAgo(21) },
+      { party: "provider", signer: "demo-owner", signerName: "Olive Owner", signerTitle: "Owner", signedAt: daysAgo(20) },
+    ] },
+  // A signed agreement whose schedule was ADDED AFTER SIGNING (DW-D49): read-only, says who and when.
+  { ...VICEROY, id: "dk-15", title: "Maintenance agreement", reference: "GDA-2026-044", status: "signed", fileId: null, bodyMd: "Maintenance terms.", value: 6_000_000,
+    startsOn: dayOnly(60), endsOn: null, sentAt: daysAgo(65), signedAt: daysAgo(60), createdAt: daysAgo(66),
+    signatures: [
+      { party: "client", signer: "viceroy-1", signerName: "Wayan Viceroy", signerTitle: "Finance Director", signedAt: daysAgo(61) },
+      { party: "provider", signer: "demo-owner", signerName: "Olive Owner", signerTitle: "Owner", signedAt: daysAgo(60) },
+    ],
+    scheduleAdded: { at: daysAgo(3), by: "demo-owner" },
+    instalments: [inst("dk-15", 1, "Month 1", 3_000_000, dayOnly(-20)), inst("dk-15", 2, "Month 2", 3_000_000, dayOnly(-50))] },
 ];
 
 const seedPayments = (): DemoPayment[] => [
@@ -108,9 +180,228 @@ const demoHash = (id: string): string => {
   return hex.slice(0, 64);
 };
 
+// ══ DW-10f: the payment schedule (BFF §61.3 to §61.5) ═════════════════════════════════════════════════════════════════════════════
+
+type InvoiceRow = Record<string, unknown>;
+const USER_NAMES: Record<string, string> = { "demo-hansel": "Hansel (demo)", "demo-owner": "Olive Owner" };
+const nameOf = (id: string): string => USER_NAMES[id] ?? id;
+const KNOWN_CURRENCIES = new Set(["IDR", "USD", "EUR", "GBP", "SGD", "JPY", "AUD"]);
+const KNOWN_CLIENTS = new Set(["cl-1", "cl-2", "cl-3", "cl-4"]);
+const today = (): string => new Date().toISOString().slice(0, 10);
+const insts = (k: DemoContract): DemoInstalment[] => k.instalments ?? [];
+const sumOf = (k: DemoContract): number => insts(k).reduce((n, i) => n + i.amount, 0);
+const valued = (k: DemoContract): boolean => k.value != null && k.value > 0;
+/** A refusal in the server's shape: `{error: <code>, reason: <code>}` plus `detail` where §61 names one (BFF §61.17 "Refusal shape"). */
+const refuse = (status: number, code: string, detail?: Record<string, unknown>): DemoResult => ({ status, json: { error: code, reason: code, ...(detail ? { detail } : {}) } });
+
+/** A signed version that supersedes it would make its instalments unbillable (§61.1 row 6). The demo has no `supersedes` chains. */
+const superseded = (_k: DemoContract): boolean => false;
+
+/** When an instalment is due: its date, or the signed date for an on-signing one (null until signed). */
+const effectiveDue = (k: DemoContract, i: DemoInstalment): string | null => (i.dueKind === "on_signing" ? (k.signedAt ? k.signedAt.slice(0, 10) : null) : i.dueOn);
+
+/** §61.3, derived on read, never stored: the same ladder as `instalmentStateSql`. */
+function stateOf(k: DemoContract, i: DemoInstalment, invoices: InvoiceRow[], dueBy: string): { state: string; invoice: InvoiceRow | null; reason: string | null } {
+  const inv = i.invoiceId ? (invoices.find((x) => x.id === i.invoiceId) ?? null) : null;
+  if (inv) {
+    const st = String(inv.status);
+    return { state: st === "draft" || st === "approved" ? "invoicing" : st === "paid" ? "paid" : "invoiced", invoice: inv, reason: null };
+  }
+  if (k.status === "draft" || k.status === "sent") return { state: "scheduled", invoice: null, reason: null };
+  if (k.status !== "signed" || superseded(k)) return { state: "not_billed", invoice: null, reason: superseded(k) ? "superseded" : k.status };
+  const due = effectiveDue(k, i);
+  return { state: i.dueKind === "on_signing" || (due != null && due <= dueBy) ? "due" : "upcoming", invoice: null, reason: null };
+}
+
+/** The staff `schedule` object (§61.4); null without instalments, or an object with none when `emptyAsObject` (the PUT's answer after a clear). */
+function scheduleOf(k: DemoContract, invoices: InvoiceRow[], emptyAsObject = false) {
+  const rows = insts(k);
+  if (rows.length === 0 && !emptyAsObject) return null;
+  const total = sumOf(k);
+  return {
+    currency: k.currency, value: k.value, total,
+    matchesValue: valued(k) ? rows.length > 0 && total === k.value : rows.length === 0,
+    scheduleSha256: k.sentAt != null && rows.length > 0 ? demoHash(`schedule-${k.id}`) : null,
+    addedAfterSigning: k.scheduleAdded ? { at: k.scheduleAdded.at, by: { id: k.scheduleAdded.by, name: nameOf(k.scheduleAdded.by) } } : null,
+    instalments: rows.map((i) => {
+      const st = stateOf(k, i, invoices, today());
+      return {
+        id: i.id, position: i.position, label: i.label, amount: i.amount, due: { kind: i.dueKind, on: effectiveDue(k, i) },
+        state: st.state, notBilledReason: st.state === "not_billed" ? st.reason : null,
+        invoice: st.invoice ? { id: String(st.invoice.id), invoiceNo: (st.invoice.invoiceNo as string | null | undefined) ?? null, status: String(st.invoice.status) } : null,
+      };
+    }),
+  };
+}
+
+/** `scheduleAddable` (§61.4a, the state half): signed, a value above zero, no schedule, not superseded. */
+const addable = (k: DemoContract): boolean => k.status === "signed" && valued(k) && insts(k).length === 0 && !k.scheduleAdded && !superseded(k);
+
+/** The server's body rules for `PUT …/schedule` and the addition, in its order (§61.4): shape, order, currency, precision. Returns rows or a refusal. */
+function parseSchedule(body: unknown, k: DemoContract, requireOne: boolean): DemoInstalment[] | DemoResult {
+  const raw = (body as { instalments?: unknown } | null)?.instalments;
+  if (!Array.isArray(raw) || raw.length > 60 || (requireOne && raw.length === 0)) return refuse(400, "schedule_invalid");
+  const rows: DemoInstalment[] = [];
+  for (const [n, item] of raw.entries()) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return refuse(400, "schedule_invalid");
+    const it = item as { label?: unknown; amount?: unknown; due?: unknown };
+    const label = typeof it.label === "string" ? it.label.trim() : "";
+    if (!label || label.length > 120) return refuse(400, "schedule_invalid");
+    const amountText = typeof it.amount === "number" ? String(it.amount) : typeof it.amount === "string" ? it.amount.trim() : "";
+    if (!/^\d+(\.\d+)?$/.test(amountText) || Number(amountText) <= 0) return refuse(400, "schedule_invalid");
+    const due = it.due;
+    const isDate = typeof due === "string" && isIsoDate(due);
+    if (due !== "on_signing" && !isDate) return refuse(400, "schedule_invalid");
+    rows.push({ id: `di-${k.id}-${n + 1}`, position: n + 1, label, amount: Number(amountText), dueKind: due === "on_signing" ? "on_signing" : "date", dueOn: due === "on_signing" ? null : (due as string), invoiceId: null });
+    (rows[rows.length - 1] as DemoInstalment & { _text?: string })._text = amountText;
+  }
+  let last: string | null = null;
+  for (const [n, r] of rows.entries()) {
+    if (r.dueKind === "on_signing") { if (n !== 0) return refuse(400, "schedule_order_invalid"); continue; }
+    if (last !== null && (r.dueOn as string) < last) return refuse(400, "schedule_order_invalid");
+    last = r.dueOn;
+  }
+  if (rows.length > 0) {
+    if (!KNOWN_CURRENCIES.has(k.currency)) return refuse(400, "currency_unknown");
+    const mu = minorUnitOf(k.currency);
+    for (const r of rows) {
+      const text = (r as DemoInstalment & { _text?: string })._text ?? "";
+      if ((text.split(".")[1] ?? "").replace(/0+$/, "").length > mu) return refuse(400, "schedule_precision");
+    }
+  }
+  for (const r of rows) delete (r as DemoInstalment & { _text?: string })._text;
+  return rows;
+}
+const isRefusal = (x: DemoInstalment[] | DemoResult): x is DemoResult => !Array.isArray(x);
+
+/** One instalment as `GET invoices/billable-instalments` lists it (§61.5). */
+function billableRow(k: DemoContract, i: DemoInstalment, st: { state: string; invoice: InvoiceRow | null }) {
+  return {
+    instalmentId: i.id, client: { id: k.clientId, name: k.clientName },
+    contract: { id: k.id, title: k.title, reference: k.reference, kind: k.kind ?? "agreement", projectId: k.projectId },
+    position: i.position, count: insts(k).length, label: i.label, amount: i.amount, currency: k.currency,
+    due: { kind: i.dueKind, on: effectiveDue(k, i) }, state: st.state,
+    invoice: st.invoice ? { id: String(st.invoice.id), status: String(st.invoice.status) } : null,
+  };
+}
+
+/** `GET invoices/billable-instalments` (§61.5): signed, live, unsuperseded contracts' instalments with no live invoice (`due` or `upcoming`), and those on an unissued draft (`invoicing`), oldest due first. */
+function billableList(invoices: InvoiceRow[], dueBy: string, clientId: string | null) {
+  const items: ReturnType<typeof billableRow>[] = [];
+  for (const k of store().contracts) {
+    if (k.status !== "signed" || superseded(k) || (clientId && k.clientId !== clientId)) continue;
+    for (const i of insts(k)) {
+      const st = stateOf(k, i, invoices, dueBy);
+      if (st.state === "due" || st.state === "upcoming" || st.state === "invoicing") items.push(billableRow(k, i, st));
+    }
+  }
+  return items.sort((a, b) => String(a.due.on ?? "9999").localeCompare(String(b.due.on ?? "9999")) || a.contract.title.localeCompare(b.contract.title) || a.position - b.position).slice(0, 500);
+}
+
+const findInstalment = (id: string): { k: DemoContract; i: DemoInstalment } | null => {
+  for (const k of store().contracts) { const i = insts(k).find((x) => x.id === id); if (i) return { k, i }; }
+  return null;
+};
+
+/**
+ * `POST invoices {source: 'instalments'}` (§61.5): authorize first, then validate in the server's order, check each instalment, claim them and
+ * add the DRAFT invoice to the invoice store the caller owns. A replay of exactly the instalments of one live draft answers that draft
+ * (`deduped`). Nothing is written on a refusal.
+ */
+export function demoInvoiceFromSchedule(invoices: InvoiceRow[], body: Record<string, unknown>, userId: string, newId: () => string): DemoResult {
+  if (!INVOICE_UPDATE.has(userId)) return deny("create", "invoice");
+  if (body.periodStart !== undefined || body.periodEnd !== undefined || body.rate !== undefined) return refuse(400, "source_fields_mixed");
+  const ids = body.instalmentIds;
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > 60 || !ids.every((x) => typeof x === "string" && x) || new Set(ids).size !== ids.length) return refuse(400, "instalment_ids_invalid");
+  let dueBy = today();
+  if (body.dueBy !== undefined && body.dueBy !== null) {
+    if (typeof body.dueBy !== "string" || !isIsoDate(body.dueBy)) return refuse(400, "due_by_invalid");
+    dueBy = body.dueBy;
+  }
+  let taxCode: string | null = null;
+  if (body.taxCode !== undefined && body.taxCode !== null && !(typeof body.taxCode === "string" && body.taxCode.trim() === "")) {
+    if (typeof body.taxCode !== "string" || !/^[A-Za-z0-9_.-]{1,32}$/.test(body.taxCode.trim())) return refuse(400, "tax_code_invalid");
+    taxCode = body.taxCode.trim();
+  }
+  const clientId = typeof body.clientId === "string" ? body.clientId : "";
+  if (!KNOWN_CLIENTS.has(clientId)) return refuse(404, "client_not_found");
+  const chosen = (ids as string[]).map((id) => ({ id, hit: findInstalment(id) }));
+
+  // The replay rule: every instalment claimed by ONE live, unissued draft of this client whose instalment lines are exactly these.
+  const claimers = new Set(chosen.map((c) => c.hit?.i.invoiceId ?? null));
+  if (chosen.every((c) => c.hit) && claimers.size === 1 && !claimers.has(null)) {
+    const inv = invoices.find((x) => x.id === [...claimers][0]) as { id: string; clientId: string; status: string; invoiceNo?: string | null; total: number; currency: string; lines: { kind?: string; instalmentId?: string }[] } | undefined;
+    if (inv && inv.clientId === clientId && !inv.invoiceNo && (inv.status === "draft" || inv.status === "approved")) {
+      const have = inv.lines.filter((l) => l.kind === "instalment").map((l) => l.instalmentId).sort();
+      if (JSON.stringify(have) === JSON.stringify([...(ids as string[])].sort())) {
+        return { status: 201, json: { id: inv.id, source: "instalments", lineCount: inv.lines.length, total: inv.total, currency: inv.currency, deduped: true } };
+      }
+    }
+  }
+  const items: { instalmentId: string; reason: string; invoiceId?: string }[] = [];
+  for (const c of chosen) {
+    if (!c.hit) items.push({ instalmentId: c.id, reason: "not_found" });
+    else if (c.hit.k.clientId !== clientId) items.push({ instalmentId: c.id, reason: "other_client" });
+    else if (c.hit.k.status !== "signed") items.push({ instalmentId: c.id, reason: "not_signed" });
+    else if (superseded(c.hit.k)) items.push({ instalmentId: c.id, reason: "superseded" });
+    else if (c.hit.i.invoiceId) items.push({ instalmentId: c.id, reason: "already_invoiced", invoiceId: c.hit.i.invoiceId });
+    else if (!(c.hit.i.dueKind === "on_signing" || (c.hit.i.dueOn != null && c.hit.i.dueOn <= dueBy))) items.push({ instalmentId: c.id, reason: "not_due" });
+  }
+  if (items.length > 0) return refuse(409, "instalment_unavailable", { items });
+  const rows = chosen.map((c) => c.hit as { k: DemoContract; i: DemoInstalment });
+  if (new Set(rows.map((r) => r.k.currency)).size !== 1) return refuse(400, "currency_mixed");
+  const sorted = [...rows].sort((a, b) => String(effectiveDue(a.k, a.i) ?? "9999").localeCompare(String(effectiveDue(b.k, b.i) ?? "9999")) || a.i.position - b.i.position);
+  const dates = sorted.map((r) => effectiveDue(r.k, r.i)).filter((d): d is string => d != null);
+  const id = newId();
+  const lines = sorted.map((r) => ({
+    kind: "instalment", description: `${[r.k.reference, r.k.title].filter(Boolean).join(" ")} · ${r.i.label} (${r.i.position} of ${insts(r.k).length})`,
+    contractId: r.k.id, instalmentId: r.i.id, projectId: r.k.projectId, amount: r.i.amount,
+  }));
+  const total = sorted.reduce((n, r) => n + r.i.amount, 0);
+  invoices.push({
+    id, clientId, clientName: sorted[0].k.clientName, periodStart: dates[0] ?? null, periodEnd: dates[dates.length - 1] ?? null, status: "draft",
+    currency: sorted[0].k.currency, total, lines, createdAt: new Date().toISOString(), createdBy: userId, approvedBy: null, approvedAt: null, updatedBy: userId,
+    taxCode,
+  });
+  for (const r of sorted) r.i.invoiceId = id;
+  return { status: 201, json: { id, source: "instalments", lineCount: lines.length, total, currency: sorted[0].k.currency } };
+}
+
+/** Voiding (cancelling) an invoice releases the instalments it claimed; returns how many (`releasedInstalments`). */
+export function demoReleaseInstalments(invoiceId: string): number {
+  let n = 0;
+  for (const k of store().contracts) for (const i of insts(k)) if (i.invoiceId === invoiceId) { i.invoiceId = null; n += 1; }
+  return n;
+}
+
+/** How many instalments an invoice claims (what voiding it will release). */
+export function demoClaimedInstalments(invoiceId: string): number {
+  return store().contracts.reduce((n, k) => n + insts(k).filter((i) => i.invoiceId === invoiceId).length, 0);
+}
+
+/** §61.5's three readiness blockers, for an invoice with instalment lines (the demo twin of `issue.ts`). */
+export function demoInstalmentBlockers(invoice: { id: string; lines?: { kind?: string; instalmentId?: string; amount?: number }[] }): { code: string; message: string }[] {
+  const lines = (invoice.lines ?? []).filter((l) => l.kind === "instalment");
+  if (lines.length === 0) return [];
+  const out: { code: string; message: string }[] = [];
+  const hits = lines.map((l) => (l.instalmentId ? findInstalment(l.instalmentId) : null));
+  const seen = new Set<string>();
+  const invalid = lines.some((l, n) => {
+    const hit = hits[n];
+    const dup = l.instalmentId ? seen.has(l.instalmentId) : false;
+    if (l.instalmentId) seen.add(l.instalmentId);
+    return !hit || hit.i.invoiceId !== invoice.id || dup || hit.i.amount !== l.amount;
+  });
+  if (invalid) out.push({ code: "INSTALMENT_LINES_INVALID", message: "an instalment line names an instalment this invoice does not claim, names one twice, or carries another amount than the instalment's" });
+  if (hits.some((h) => h && h.k.status !== "signed")) out.push({ code: "INSTALMENT_CONTRACT_NOT_SIGNED", message: "a line's contract is no longer signed (it was voided after this draft); cancel the draft, which releases its instalments" });
+  if (hits.some((h) => h && superseded(h.k))) out.push({ code: "INSTALMENT_SUPERSEDED", message: "a signed version now supersedes a line's contract, so its instalments are no longer billable; cancel the draft" });
+  return out;
+}
+
 /** The contract as the list serves it: no `signatures`, plus the derived flags. */
-function row(k: DemoContract, userId: string) {
-  const { signatures, ...rest } = k;
+function row(k: DemoContract, userId: string, invoices: InvoiceRow[] = []) {
+  const { signatures, instalments: _i, scheduleAdded: _a, ...rest } = k;
+  void invoices;
   const clientSigned = signatures.some((s) => s.party === "client");
   const providerSigned = signatures.some((s) => s.party === "provider");
   // PV5-06: sending FIXES the content (the hash and the tier); a draft has neither. PV5-07: the sealed signed copy
@@ -118,6 +409,11 @@ function row(k: DemoContract, userId: string) {
   const fixed = k.sentAt != null;
   return {
     ...rest, supersedesId: null, createdBy: "demo-hansel", clientSigned, providerSigned,
+    kind: k.kind ?? "agreement",
+    scheduleSummary: insts(k).length > 0
+      ? { count: insts(k).length, total: sumOf(k), matchesValue: valued(k) ? sumOf(k) === k.value : false }
+      : null,
+    scheduleAddable: addable(k),
     signatureTier: fixed ? "attested" : null, contentSha256: fixed ? demoHash(k.id) : null,
     contentFixedAt: fixed ? k.sentAt : null, certifiedRequested: false,
     signedCopyFileId: k.id === "dk-5" ? "f-signed-dk5" : null,
@@ -153,10 +449,52 @@ export function demoBillingPendingTotal(clientId: string): number {
   return store().payments.filter((p) => p.clientId === clientId && p.status === "pending").reduce((n, p) => n + p.amount, 0);
 }
 
-export function billingDemo(method: string, p: string, params: URLSearchParams, body: string | undefined, userId: string): DemoResult | null {
+export function billingDemo(method: string, p: string, params: URLSearchParams, body: string | undefined, userId: string, invoices: InvoiceRow[] = []): DemoResult | null {
   const m = method.toUpperCase();
   const s = store();
   let hit: RegExpMatchArray | null;
+
+  // ── DW-10f-3a (BFF §61.5): what Finance can draft from the schedule. `invoice` read, then `contract` read. ──
+  if (/^\/api\/[^/]+\/invoices\/billable-instalments$/.test(p) && m === "GET") {
+    if (!INVOICE_READ.has(userId)) return deny("read", "invoice");
+    if (!CONTRACT_READ.has(userId)) return deny("read", "contract");
+    const dueByRaw = params.get("dueBy");
+    if (dueByRaw && !isIsoDate(dueByRaw)) return refuse(400, "due_by_invalid");
+    const dueBy = dueByRaw || today();
+    return ok({ dueBy, items: billableList(invoices, dueBy, params.get("clientId") || null) });
+  }
+
+  // ── DW-10f-2a (BFF §61.4): a DRAFT's whole schedule; refusals in the server's order ──
+  if ((hit = p.match(/^\/api\/[^/]+\/contracts\/([^/]+)\/schedule$/)) && m === "PUT") {
+    if (!CONTRACT_WRITE.has(userId)) return deny("update", "contract");
+    const k = s.contracts.find((x) => x.id === hit![1]);
+    if (!k) return refuse(404, "contract_not_found");
+    if (k.status !== "draft") return refuse(409, "schedule_frozen");
+    const rows = parseSchedule(JSON.parse(body || "{}"), k, false);
+    if (isRefusal(rows)) return rows;
+    if (rows.length > 0 && !valued(k)) return refuse(400, "schedule_needs_value");
+    k.instalments = rows;
+    return ok(scheduleOf(k, invoices, true));
+  }
+  // ── DW-10f-2a (BFF §61.4a, DW-D49): ONCE, on a signed contract with a value and no schedule ──
+  if ((hit = p.match(/^\/api\/[^/]+\/contracts\/([^/]+)\/schedule\/after-signing$/)) && m === "POST") {
+    if (!CONTRACT_WRITE.has(userId)) return deny("update", "contract");
+    if (!INVOICE_UPDATE.has(userId)) return deny("create", "invoice");
+    const k = s.contracts.find((x) => x.id === hit![1]);
+    if (!k) return refuse(404, "contract_not_found");
+    if (k.status === "draft" || k.status === "sent") return refuse(409, "contract_not_signed");
+    if (k.status !== "signed") return refuse(409, "contract_closed");
+    if (superseded(k)) return refuse(409, "contract_superseded");
+    if (insts(k).length > 0 || k.scheduleAdded) return refuse(409, "schedule_exists");
+    if (!valued(k)) return refuse(400, "schedule_needs_value");
+    const rows = parseSchedule(JSON.parse(body || "{}"), k, true);
+    if (isRefusal(rows)) return rows;
+    const total = rows.reduce((n, r) => n + r.amount, 0);
+    if (Math.abs(total - (k.value as number)) > 1e-6) return refuse(400, "schedule_total_mismatch", { value: k.value, total });
+    k.instalments = rows;
+    k.scheduleAdded = { at: new Date().toISOString(), by: userId };
+    return { status: 201, json: scheduleOf(k, invoices) };
+  }
 
   // ── documents (PV5-08, BFF §30b): signed agreements and payment proofs of one client, newest first ──
   if ((hit = p.match(/^\/api\/[^/]+\/clients\/([^/]+)\/documents$/)) && m === "GET") {
@@ -206,7 +544,7 @@ export function billingDemo(method: string, p: string, params: URLSearchParams, 
       const cid = params.get("clientId"), st = params.get("status");
       let rows = s.contracts.filter((k) => !st || k.status === st);
       if (cid) rows = cid.toLowerCase() === "internal" ? [] : rows.filter((k) => k.clientId === cid);
-      return ok(rows.map((k) => row(k, userId)));
+      return ok(rows.map((k) => row(k, userId, invoices)));
     }
     if (m === "POST") {
       // Authorize BEFORE validating (PV3-06), as on the other writes.
@@ -238,14 +576,14 @@ export function billingDemo(method: string, p: string, params: URLSearchParams, 
     if (m === "GET") {
       if (!CONTRACT_READ.has(userId)) return deny("read", "contract");
       if (!k) return err(404, "contract not found");
-      return ok({ ...row(k, userId), signatures: k.signatures });
+      return ok({ ...row(k, userId, invoices), signatures: k.signatures, schedule: scheduleOf(k, invoices) });
     }
     if (m === "PATCH") {
       if (!CONTRACT_WRITE.has(userId)) return deny("update", "contract");
       if (!k) return err(404, "contract not found");
       const b = JSON.parse(body || "{}") as Record<string, unknown>;
       const voiding = b.status === "void";
-      if (k.status !== "draft" && !voiding) return err(400, `a ${k.status} contract cannot be edited — issue a new version with supersedesId instead`);
+      if (k.status !== "draft" && !voiding) return { status: 400, json: { error: `a ${k.status} contract cannot be edited, only voided; issue a new version with supersedesId instead`, reason: "only_void_after_send" } };
       if (b.status && b.status !== "void" && b.status !== "draft") return err(400, "status here may only be set to void; use /send to issue");
       if (voiding) { k.status = "void"; return ok({ ok: true }); }
       if (typeof b.title === "string" && b.title) k.title = b.title.slice(0, 300);
@@ -267,8 +605,10 @@ export function billingDemo(method: string, p: string, params: URLSearchParams, 
     if (!k) return err(404, "contract not found");
     if (k.status !== "draft") return err(400, `this contract is already ${k.status}`);
     if (!k.fileId && !k.bodyMd) return err(400, "attach a document or write the terms before sending");
+    // BFF §61.1 row 3: a contract with a value above zero cannot be sent unless its schedule adds up exactly to the value.
+    if (valued(k) && !(insts(k).length > 0 && Math.abs(sumOf(k) - (k.value as number)) < 1e-6)) return refuse(400, "schedule_total_mismatch", { value: k.value, total: sumOf(k) });
     k.status = "sent"; k.sentAt = new Date().toISOString();
-    return ok({ ok: true, status: "sent", notified: 2 });
+    return ok({ ok: true, status: "sent", notified: 2, ...(insts(k).length > 0 ? { scheduleSha256: demoHash(`schedule-${k.id}`) } : {}) });
   }
 
   // PV5-06/PV-D25: certified signing is parked, so marking a draft certified is refused and writes nothing.

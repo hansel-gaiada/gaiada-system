@@ -20,6 +20,7 @@ import "server-only";
 // the dev session, so the flows are drivable end to end (and by Playwright) rather than resetting on
 // every navigation.
 import type { DemoResult } from "./demoFixtures";
+import type { PortalSchedule } from "./portal";
 import { isDemoPortalClient } from "./demoPortalClients";
 import { demoPortalNewReports, demoPortalReportFile, demoPortalReportIdForDeliverable, portalReportsDemo } from "./demoClientReports";
 import { portalCallerContact, portalProfileContacts } from "./demoWebsiteAccess";
@@ -197,6 +198,9 @@ interface DemoContract {
   kind?: "agreement" | "amendment"; amendsId?: string | null; amendsReference?: string | null; changeRequestId?: string | null;
   /** PV5-11: a certified contract signed through the SIMULATED PSrE (review stage): its provider and envelope. */
   signatureProvider?: string | null; providerEnvelopeId?: string | null;
+  /** DW-10f (BFF §61.6): the payment schedule as the PORTAL reads it (the portal column of §61.3): never an instalment id, never an
+   *  unissued invoice, never who added it. Absent = none. */
+  schedule?: PortalSchedule | null;
 }
 
 const CONTRACTS: DemoContract[] = [
@@ -211,6 +215,15 @@ const CONTRACTS: DemoContract[] = [
     ],
     contentSha256: "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90", signatureTier: "attested",
     signedCopyFileId: "file-ctr-msa-signed",
+    // DW-10f: one instalment invoiced (the issued invoice below, so its number links `/portal/invoices/inv-2026-014`), one due, one upcoming.
+    schedule: {
+      currency: "IDR", total: 240_000_000, scheduleSha256: "5c4b3a29187060f5e4d3c2b1a09f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d", addedAfterSigning: null,
+      instalments: [
+        { position: 1, label: "Deposit", amount: 80_000_000, due: { kind: "on_signing", on: day(-90) }, state: "invoiced", invoice: { id: "inv-2026-014", invoiceNo: "DEMO/2026/0014" } },
+        { position: 2, label: "Milestone: design approved", amount: 80_000_000, due: { kind: "date", on: day(-5) }, state: "due", invoice: null },
+        { position: 3, label: "Milestone: launch", amount: 80_000_000, due: { kind: "date", on: day(60) }, state: "upcoming", invoice: null },
+      ],
+    },
   },
   {
     // The actionable one: sent, provider already countersigned, waiting on the client. This is the
@@ -251,6 +264,12 @@ const CONTRACTS: DemoContract[] = [
       { party: "provider", signerName: "D. Syrowatka", signerTitle: "Director", signedAt: stamp(-21) },
       { party: "client", signerName: "Dana Whitfield", signerTitle: "Marketing Lead", signedAt: stamp(-20) },
     ],
+    // DW-10f (DW-D49): the amendment was signed with its payment terms in its text and no schedule; Finance added this one afterwards.
+    // The portal says so with the date, never who.
+    schedule: {
+      currency: "IDR", total: 12_000_000, scheduleSha256: "3e2d1c0b9a8f7e6d5c4b3a2918070f6e5d4c3b2a1908f7e6d5c4b3a2918070f6e", addedAfterSigning: { on: day(-3) },
+      instalments: [{ position: 1, label: "Amendment fee", amount: 12_000_000, due: { kind: "date", on: day(25) }, state: "upcoming", invoice: null }],
+    },
     kind: "amendment", amendsId: "ctr-msa-2026", amendsReference: "GDA-2026-004", changeRequestId: "wcr-seed-1",
     // Signed, and its sealed copy is not rendered yet: the page says "being prepared".
     contentSha256: "5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d", signatureTier: "attested", signedCopyFileId: null,
@@ -946,6 +965,7 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
       value: k.value, currency: k.currency, startsOn: k.startsOn, endsOn: k.endsOn,
       sentAt: k.sentAt, signedAt: k.signedAt, projectId: k.projectId,
       bodyMd: k.bodyMd, declineReason: null, termEnded: s.termEnded,
+      schedule: k.schedule ?? null,
       kind: s.kind, amendsId: s.amendsId, amendsReference: s.amendsReference, changeRequestId: s.changeRequestId,
       canSign: k.status === "sent" && !s.clientSigned && !s.termEnded && k.signatureTier !== "certified",
       viewOnly: false,
