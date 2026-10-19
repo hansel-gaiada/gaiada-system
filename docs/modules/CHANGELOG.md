@@ -11,6 +11,12 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.195.0` - DW-10h: form controls are named from the label text alone (2026-10-19) - PROTOTYPED
+
+- `Field` (text, number, date, textarea, select, checkbox) wraps the control in a `<label>` that also holds the hint and the error, and a wrapping label's whole text is the control's accessible name: a screen reader read "Terms Markdown. The client reads this in their portal..." and `getByLabel("Terms", { exact: true })` never matched. The label text now has its own id and the control names itself from it with `aria-labelledby`; the hint and the error stay in `aria-describedby` (descriptions, not names). Layout and class names unchanged.
+- The same fix on the other places a label wraps more than its text: the plain selects in the Campaign, Invoice, Task, Employee, Company and client-work forms (`aria-label`: a wrapping label read every option into the name for Playwright), the Client Centre `FieldControl` (the "Shared" badge and help text), the interview Panelists select and the calendar's Record checkbox.
+- New `Field.test.tsx` proves the exact accessible name and the description for each control kind and for an error; the contract-billing e2e reaches the Terms textarea by `getByLabel("Terms", { exact: true })` again.
+
 ### platform-ui `0.194.0` - DW-10f-2b, 3b and 4b: the contract-billing screens and the Freelancers tab (BFF §61.9, §61.19, §61.20) (2026-10-19) - PROTOTYPED
 
 - The contract editor's Payment schedule (presets All on signing, 50/50, Monthly × N; the live "adds up / short / over" line; Send held until it adds up), the read-only schedule with each instalment's state, and **Add a payment schedule** on an already-signed agreement (DW-D49) with a confirm step.
