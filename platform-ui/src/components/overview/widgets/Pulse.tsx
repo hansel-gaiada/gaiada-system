@@ -15,11 +15,12 @@ import {
   getArAgingResult, getCloseReadinessResult, getTrialBalanceResult, listPendingPaymentsResult, listPeriodsResult,
   reconcileApResult, reconcileArResult, reconcileAssetsResult, reconcileTreasuryResult, verifyLedgerResult,
 } from "@/lib/finance-data";
+import { listBillableInstalmentsResult } from "@/lib/contractBilling-data";
 import { todayIsoInDisplayZone } from "@/lib/format";
 import type { Me } from "@/lib/platform";
 import {
   NO_CURRENT_PERIOD, UNAVAILABLE_READING, currentPeriod, everyTileFailed, pulseHref, readingOfAccounts, readingOfAllResults, readingOfClose,
-  readingOfAlerts, readingOfDevices, readingOfFailures, readingOfGuarded, hidesTile, readingOfIntegrity, readingOfOverdue, readingOfPayrollRuns, readingOfPendingPayments, readingOfResult,
+  readingOfAlerts, readingOfDevices, readingOfInstalmentsDue, readingOfFailures, readingOfGuarded, hidesTile, readingOfIntegrity, readingOfOverdue, readingOfPayrollRuns, readingOfPendingPayments, readingOfResult,
   readingOfSummary, runsWaiting, type PulseReading, type PulseTileModel,
 } from "@/lib/overviewPulse";
 import { PulseBlock } from "./PulseBlock";
@@ -65,6 +66,8 @@ const READERS: Record<PulseSource, (userId: string, tenantId: string, me: Me) =>
   // Finance (DW-7e-2). Every route refuses outright (no own-rows fallback), so no scope check is needed here.
   "finance-payments-to-confirm": async (u, t) => readingOfPendingPayments(await listPendingPaymentsResult(u, t)),
   "finance-overdue-receivables": async (u, t) => readingOfOverdue(await getArAgingResult(u, t)),
+  // DW-10f-3b: due instalments across every client, against today. `invoice` read then `contract` read: a caller without either reads "No access".
+  "finance-instalments-due": async (u, t) => readingOfInstalmentsDue(await listBillableInstalmentsResult(u, t)),
   // The CURRENT period only. No period today is "Unavailable: No current period", never a count and never "Ready to close".
   "finance-close-progress": async (u, t) => {
     const periods = await listPeriodsResult(u, t);

@@ -28,7 +28,19 @@ import "server-only";
 import { platformFetch, PlatformError } from "./platform";
 
 export type InvoiceStatus = "draft" | "approved" | "sent" | "paid" | "void";
-export interface InvoiceLine { description: string; hours: number; rate: number; amount: number }
+/** An invoice line. An hourly line (every line written before 10f, `kind: 'hours'` after) carries `hours` and `rate`; an
+ *  INSTALMENT line (DW-10f-3a, BFF §61.5) carries neither, only its `amount` and the ids of its contract and instalment.
+ *  Never read `hours` or `rate` without `lineCells()` (lib/contractBilling.ts): printing them raw gave "undefined". */
+export interface InvoiceLine {
+  description: string;
+  kind?: "hours" | "instalment" | null;
+  hours?: number | null;
+  rate?: number | null;
+  amount: number;
+  contractId?: string | null;
+  instalmentId?: string | null;
+  projectId?: string | null;
+}
 export interface Invoice {
   id: string;
   clientId: string | null;
@@ -104,9 +116,17 @@ export const getInvoice = (u: string, t: string, id: string) =>
   skip(platformFetch<Invoice | null>(`/api/${t}/invoices/${id}`, u), null);
 export const createInvoice = (u: string, t: string, body: { clientId: string; periodStart: string; periodEnd: string; rate: number; currency: string }) =>
   platformFetch<{ id: string }>(`/api/${t}/invoices`, u, { method: "POST", body: JSON.stringify(body) });
+// DW-10f-3a (BFF §61.5): the draft from the payment schedule. Left uncaught so the action can word every 409 and 400.
+//   POST /api/:t/invoices {source:'instalments', clientId, instalmentIds, dueBy?, taxCode?} -> {id, source, lineCount, total, currency, deduped?}
+export const createInvoiceFromSchedule = (u: string, t: string, body: { clientId: string; instalmentIds: string[]; dueBy?: string; taxCode?: string }) =>
+  platformFetch<{ id: string; source: "instalments"; lineCount: number; total: number; currency: string; deduped?: true }>(
+    `/api/${t}/invoices`, u, { method: "POST", body: JSON.stringify({ source: "instalments", ...body }) },
+  );
 // PV5-04: `draft` and `void` only. `sent` is reached by issueInvoice(), and `paid` follows from confirmed payments.
+// DW-10f-3a: voiding an unissued invoice is "Cancel draft". The answer counts the instalments the trigger released back to the
+// schedule (`releasedInstalments`, 0 for an hourly invoice); an older server omits it.
 export const setInvoiceStatus = (u: string, t: string, id: string, status: "draft" | "void") =>
-  platformFetch<{ ok: true }>(`/api/${t}/invoices/${id}`, u, { method: "PATCH", body: JSON.stringify({ status }) });
+  platformFetch<{ ok: true; releasedInstalments?: number }>(`/api/${t}/invoices/${id}`, u, { method: "PATCH", body: JSON.stringify({ status }) });
 // PV5-04b: pick (or clear, with null) the invoice's service line. Left uncaught so the action can word the refusal.
 export const setInvoiceServiceLine = (u: string, t: string, id: string, serviceLineKey: string | null) =>
   platformFetch<{ ok: true; serviceLineKey: string | null }>(`/api/${t}/invoices/${id}/service-line`, u, {

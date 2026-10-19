@@ -366,6 +366,28 @@ export interface PortalContractDetail extends Omit<PortalContract, "hasDocument"
   /** PV5-11: null for an attested contract. `canStart` is the backend's answer to "may THIS caller press Sign with
    *  <label> now"; `simulated` means the provider is the SIMULATED PSrE of the review stage. */
   certifiedSigning?: PortalCertifiedSigning | null;
+  /** DW-10f-2a (BFF §61.6): the payment schedule. Absent (an older server) and null read alike: nothing is shown. */
+  schedule?: PortalSchedule | null;
+}
+
+/** DW-10f-2a (BFF §61.6): one row of the portal's payment schedule. `state` is the PORTAL column of §61.3. Never an instalment id,
+ *  a claim time or an internal invoice status: `invoice` is set only for an issued invoice the client can read. */
+export interface PortalInstalment {
+  position: number;
+  label: string;
+  amount: number;
+  due: { kind: "on_signing" | "date"; on: string | null };
+  state: "scheduled" | "upcoming" | "due" | "invoiced" | "paid" | "not_billed" | string;
+  invoice: { id: string; invoiceNo: string | null } | null;
+}
+
+/** DW-10f-2a (BFF §61.6): `null` (or absent) when the contract has no instalments. `addedAfterSigning` is the date only, never who. */
+export interface PortalSchedule {
+  currency: string;
+  total: number;
+  scheduleSha256: string | null;
+  addedAfterSigning: { on: string } | null;
+  instalments: PortalInstalment[];
 }
 
 export interface PortalCertifiedSigning {
@@ -1102,4 +1124,33 @@ export function portalPeriod(start: string | null | undefined, end: string | nul
   const a = portalDate(start);
   const b = portalDate(end);
   return a === b ? a : `${a} to ${b}`;
+}
+
+// ── the payment schedule, in the CLIENT's words (DW-10f, BFF §61.3's portal column and §61.6) ────────────────────────────────
+
+/** When an instalment is due: "On signing" or "Due 12 Oct 2026". A signed agreement's on-signing instalment names the signed date. */
+export function portalInstalmentDue(due: PortalInstalment["due"]): string {
+  if (due.kind === "on_signing") return due.on ? `On signing (${portalDate(due.on)})` : "On signing";
+  return due.on ? `Due ${portalDate(due.on)}` : "Due date to be confirmed";
+}
+
+/** §61.3's portal column: "On signing" or "Due <date>" before signing (`scheduled`), "Due <date>" (`upcoming`), "Due", "Invoiced, <no.>", "Paid",
+ *  "Not billed". An unissued invoice is never mentioned (PV3-02d): it reads "Due" whatever the staff side says. A state this
+ *  file does not know prints as it came. */
+export function portalInstalmentState(i: Pick<PortalInstalment, "state" | "due" | "invoice">): string {
+  switch (i.state) {
+    case "scheduled": return i.due.kind === "on_signing" ? "On signing" : i.due.on ? `Due ${portalDate(i.due.on)}` : "Scheduled";
+    case "upcoming": return i.due.on ? `Due ${portalDate(i.due.on)}` : "Upcoming";
+    case "due": return "Due";
+    case "invoiced": return i.invoice?.invoiceNo ? `Invoiced, ${i.invoice.invoiceNo}` : "Invoiced";
+    case "paid": return "Paid";
+    case "not_billed": return "Not billed";
+    default: return String(i.state);
+  }
+}
+
+/** "Added by Gaia Digital Agency on 18 Oct 2026, after the agreement was signed" (BFF §61.9). The company is the provider the portal
+ *  is showing; with no name the sentence says "us" rather than guess one. Never says who added it. */
+export function portalAddedAfterSigning(a: { on: string }, company?: string | null): string {
+  return `Added by ${company && company.trim() ? company.trim() : "us"} on ${portalDate(a.on)}, after the agreement was signed`;
 }
