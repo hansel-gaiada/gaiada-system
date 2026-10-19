@@ -158,6 +158,52 @@ export const financeModule: ModuleContract = {
         required: ["tenantId", "periodId"],
       },
     },
+    // ── DW-10f-4a (BFF §61.10): the freelancer bills, a read and ONE low-impact write ─────────────────────────────────
+    // The draft is the one write tool in this module, and it is the exception the header above anticipates rather than a
+    // reversal of it: it posts NOTHING. It makes a draft AP bill that reaches nobody, a replay answers the same draft, and
+    // approving (which is what posts) stays a person's act at high assurance with no tool. Rates, the vendor link and
+    // discarding a draft are deliberately not tools (money terms and payees stay a person's act).
+    {
+      name: "freelancerBills.preview",
+      description:
+        "Preview freelancer bills for a period: each person with a rate or a linked vendor who has unbilled time, their lines " +
+        "(a line per project and rate), the withholding, what would be paid, and what blocks a draft. Reads only.",
+      minAssurance: "verified",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/finance/freelancer-bills/preview",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" },
+          periodStart: { type: "string", description: "YYYY-MM-DD" },
+          periodEnd: { type: "string", description: "YYYY-MM-DD, at most 366 days after periodStart" },
+          userId: { type: "string", description: "Optional: one person" },
+        },
+        required: ["tenantId", "periodStart", "periodEnd"],
+      },
+    },
+    {
+      name: "freelancerBills.draft",
+      description:
+        "Draft one freelancer's AP bill from their unbilled hours in a period (status draft; Finance approves it). A replay " +
+        "for the same person and period answers the same draft with deduped: true. Refuses with bill_blocked and the blockers.",
+      minAssurance: "verified",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/finance/freelancer-bills",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" },
+          userId: { type: "string", description: "The freelancer" },
+          periodStart: { type: "string", description: "YYYY-MM-DD" },
+          periodEnd: { type: "string", description: "YYYY-MM-DD" },
+          billDate: { type: "string", description: "Optional, YYYY-MM-DD; today by default" },
+        },
+        required: ["tenantId", "userId", "periodStart", "periodEnd"],
+      },
+    },
   ],
 
   // Rollups deliberately empty this wave. A finance metric that reached the group dashboard would
