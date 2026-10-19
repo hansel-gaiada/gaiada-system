@@ -11,6 +11,13 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.194.0` - DW-10f-2b, 3b and 4b: the contract-billing screens and the Freelancers tab (BFF §61.9, §61.19, §61.20) (2026-10-19) - PROTOTYPED
+
+- The contract editor's Payment schedule (presets All on signing, 50/50, Monthly × N; the live "adds up / short / over" line; Send held until it adds up), the read-only schedule with each instalment's state, and **Add a payment schedule** on an already-signed agreement (DW-D49) with a confirm step.
+- `/invoices/new` drafts from the due instalments (hourly kept as the exception, never mixed, DW-D48); the invoice page reads an instalment line as "Fixed fee" and offers Cancel draft; the portal and the sealed copy show the schedule; the Finance pulse gains "Instalments due to invoice".
+- Finance › Payables › Freelancers: rates (add, end, withdraw, link a vendor), the period preview with withholding, the DW-D47 no-withholding warning and blockers, Draft bill / Draft all ready, Discard. The two selects carry their own `aria-label` (a wrapping label read every option as the name).
+- DEMO_MODE data for every case; Playwright projects `contract-billing` (9) and `freelancer-bills` (6).
+
 ### platform-nest `0.168.0` - DW-10f-1, 2a, 3a and 4a: contract billing and freelancer bills, the data layer and the backend: payment schedules, invoices from due instalments (each billed once; never mixed with hourly, DW-D48), DW-D49's one-time addition, freelancer rates, vendor links and bill drafts with the vendor's withholding (DW-D47) (BFF §61.2 to §61.8, §61.17, §61.18; PERMISSION §51: no IAM change) (2026-10-19) - PROTOTYPED
 
 The backend tracks (10f-2a/3a: `core/contract-schedule.ts`, `modules/invoice/contract-billing.ts`, the contract, invoice, issue, portal and document routes; 10f-4a: `modules/finance/freelancer-bills.{service,controller}.ts`, the vendor link, the time-entry 409) are described as built in BFF §61.17 and §61.18, with their deviations. A finance manager may draft and approve the same payables bill (AP's maker-checker is the role split); the owner kept it (DW-D50, 2026-10-19).

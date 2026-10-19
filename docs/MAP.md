@@ -498,6 +498,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/finance/ledger`
 - `/finance/ownership`
 - `/finance/payables`
+- `/finance/payables/freelancers`
 - `/finance/receivables`
 - `/finance/reports`
 - `/finance/settings`
