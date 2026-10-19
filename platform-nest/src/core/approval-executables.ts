@@ -2181,6 +2181,19 @@ async function contractSendPrecondition(client: PoolClient, args: Record<string,
   // Already sent (a lost-response retry), signed, or voided while the approval waited.
   if (k.status !== "draft") return { ok: false, reason: "contract_not_draft" };
   if (!k.file_id && !k.body_md) return { ok: false, reason: "contract_has_no_document" };
+  // DW-10f-2a (BFF §61.4): a valued contract is sent only with a schedule that adds up to its value; an unvalued one
+  // carries none. Compared in SQL numeric, the send route's own rule (and the database's PD612 underneath).
+  const sched = await client.query<{ matches: boolean }>(
+    `SELECT CASE WHEN COALESCE(k.value, 0) > 0
+                 THEN count(ci.id) > 0 AND COALESCE(sum(ci.amount), 0) = k.value
+                 ELSE count(ci.id) = 0 END AS matches
+       FROM contracts k
+       LEFT JOIN contract_instalments ci ON ci.contract_id = k.id AND ci.tenant_id = k.tenant_id
+      WHERE k.tenant_id = $1 AND k.id = $2
+      GROUP BY k.id`,
+    [tenantId, id],
+  );
+  if (sched.rows[0]?.matches !== true) return { ok: false, reason: "contract_schedule_mismatch" };
   return { ok: true };
 }
 

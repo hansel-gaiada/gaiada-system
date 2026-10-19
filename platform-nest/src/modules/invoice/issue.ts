@@ -110,6 +110,11 @@ interface IssueFacts {
   badLines: number;
   linesTotalMatches: boolean;
   precisionOk: boolean;
+  // DW-10f-3a (BFF §61.5): the instalment lines (0 for an hourly invoice) and what is wrong with them.
+  instalmentLines: number;
+  instalmentLinesInvalid: boolean;
+  instalmentContractNotSigned: number;
+  instalmentSuperseded: number;
 }
 
 const LOAD_INVOICE = `
@@ -183,9 +188,34 @@ async function loadFacts(
     [invoiceId, h.minorUnit],
   );
 
+  // DW-10f-3a (BFF §61.5): an instalment line must name an instalment THIS invoice claims, once, at its amount; its
+  // contract must still be signed and not superseded by a signed version. Read in SQL (amounts as numeric).
+  const inst = await c.query<{ n: number; bad: number; dup: boolean; unsigned: number; superseded: number }>(
+    `WITH l AS (
+       SELECT lower(x.l->>'instalmentId') AS iid,
+              CASE WHEN jsonb_typeof(x.l->'amount') = 'number' THEN (x.l->>'amount')::numeric END AS amt
+         FROM invoices i
+         CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(i.lines) = 'array' THEN i.lines ELSE '[]'::jsonb END) AS x(l)
+        WHERE i.id = $1 AND x.l->>'kind' = 'instalment'
+     )
+     SELECT count(*)::int AS n,
+            count(*) FILTER (WHERE ci.id IS NULL OR ci.invoice_id IS DISTINCT FROM $1::uuid
+                                OR l.amt IS NULL OR l.amt <> ci.amount)::int AS bad,
+            (count(DISTINCT l.iid) <> count(*)) AS dup,
+            count(*) FILTER (WHERE ci.id IS NOT NULL AND (k.id IS NULL OR k.status <> 'signed' OR k.deleted_at IS NOT NULL))::int AS unsigned,
+            count(*) FILTER (WHERE k.id IS NOT NULL AND EXISTS (
+              SELECT 1 FROM contracts s WHERE s.tenant_id = k.tenant_id AND s.supersedes_id = k.id
+                 AND s.status = 'signed' AND s.deleted_at IS NULL))::int AS superseded
+       FROM l
+       LEFT JOIN contract_instalments ci ON ci.id::text = l.iid
+       LEFT JOIN contracts k ON k.id = ci.contract_id AND k.tenant_id = ci.tenant_id`,
+    [invoiceId],
+  );
+
   const sl = await readServiceLineFacts(c, invoiceId);
 
   const L = ledger.rows[0];
+  const I = inst.rows[0];
   const ln = lines.rows[0];
   return {
     ...h,
@@ -205,6 +235,10 @@ async function loadFacts(
     badLines: Number(ln.bad),
     linesTotalMatches: ln.sumMatches === true,
     precisionOk: ln.precisionOk === true,
+    instalmentLines: Number(I.n),
+    instalmentLinesInvalid: Number(I.bad) > 0 || I.dup === true,
+    instalmentContractNotSigned: Number(I.unsigned),
+    instalmentSuperseded: Number(I.superseded),
   } as IssueFacts;
 }
 
@@ -247,6 +281,18 @@ function blockersFor(f: IssueFacts): IssueBlocker[] {
     if (!f.precisionOk) add("AMOUNT_PRECISION", `a line amount has more decimals than ${f.currency} allows`);
   }
   if (f.lineCount > 0 && f.linesTotalMatches && !(Number(f.total) > 0)) add("EMPTY_INVOICE", "the invoice total is zero");
+  // DW-10f-3a (BFF §61.5): only for an invoice with instalment lines.
+  if (f.instalmentLines > 0) {
+    if (f.instalmentLinesInvalid) {
+      add("INSTALMENT_LINES_INVALID", "an instalment line names an instalment this invoice does not claim, names one twice, or carries another amount than the instalment's");
+    }
+    if (f.instalmentContractNotSigned > 0) {
+      add("INSTALMENT_CONTRACT_NOT_SIGNED", "a line's contract is no longer signed (it was voided after this draft); cancel the draft, which releases its instalments");
+    }
+    if (f.instalmentSuperseded > 0) {
+      add("INSTALMENT_SUPERSEDED", "a signed version now supersedes a line's contract, so its instalments are no longer billable; cancel the draft");
+    }
+  }
   if (f.taxCode) {
     // PV-D7 (owner, 2026-10-12): until Finance records the company as PKP, an invoice that carries tax cannot be issued.
     if (f.isPkp !== true) add("PKP_NOT_CONFIRMED", "the invoice carries tax but the company is not recorded as PKP");
@@ -515,7 +561,7 @@ export async function issueInvoice(
  */
 export async function voidIssuedInvoice(
   tenantId: string, invoiceId: string, actorId: string | null, reason: string,
-): Promise<{ id: string; status: "void"; creditNoteId: string | null; alreadyVoid: boolean }> {
+): Promise<{ id: string; status: "void"; creditNoteId: string | null; alreadyVoid: boolean; releasedInstalments: number }> {
   if (!actorId) throw new ForbiddenException("voiding needs a known user");
   // PV5-F4: the invoice's open online checkout is retired in the same transaction (a client must not be able to pay a void
   // invoice) and expired at the provider after commit.
@@ -534,7 +580,7 @@ export async function voidIssuedInvoice(
       if (!row.issuedAt || !row.arInvoiceId) {
         throw new ConflictException({ message: "this invoice was never issued; cancel it with PATCH status=void instead", reason: "not_issued" });
       }
-      if (row.status === "void") return { id: invoiceId, status: "void" as const, creditNoteId: null, alreadyVoid: true };
+      if (row.status === "void") return { id: invoiceId, status: "void" as const, creditNoteId: null, alreadyVoid: true, releasedInstalments: 0 };
       if (row.status !== "sent") {
         throw new ConflictException({ message: `a ${row.status} invoice cannot be voided; raise a credit note in Finance`, reason: "not_voidable" });
       }
@@ -593,6 +639,11 @@ export async function voidIssuedInvoice(
       await c.query(`SELECT finance_ar_apply_credit($1, $2, $3::numeric, $4)`, [cnId, row.arInvoiceId, a.total, actorId]);
       await c.query(`UPDATE finance_ar_invoices SET status = 'void', updated_at = now() WHERE id = $1`, [row.arInvoiceId]);
 
+      // DW-10f-3a (BFF §61.5): the instalments this invoice claims. The UPDATE below releases them (the database trigger
+      // invoices_release_instalments); this only counts them for the answer, and never touches the claim itself.
+      const releasedInstalments = Number((await c.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM contract_instalments WHERE invoice_id = $1`, [invoiceId],
+      )).rows[0].n);
       const upd = await c.query(
         `UPDATE invoices SET status = 'void', updated_by = $2, updated_at = now() WHERE id = $1 AND status = 'sent'`,
         [invoiceId, actorId],
@@ -601,7 +652,7 @@ export async function voidIssuedInvoice(
       await emitEvent(c, tenantId, "invoice", invoiceId, "invoice.voided", { arInvoiceId: row.arInvoiceId, creditNoteId: cnId, creditNoteNo: cnNo });
       await recordInvoiceRevision(c, tenantId, invoiceId, actorId, "status_changed", before);
       retired = await retireAllCheckouts(c, invoiceId);
-      return { id: invoiceId, status: "void" as const, creditNoteId: cnId, alreadyVoid: false };
+      return { id: invoiceId, status: "void" as const, creditNoteId: cnId, alreadyVoid: false, releasedInstalments };
     }),
   );
   // After commit, outside the transaction, logged, never blocking the void (same pattern as the checkout route's retire).

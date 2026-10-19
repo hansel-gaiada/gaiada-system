@@ -67,6 +67,8 @@ const TOPIC_BY_EVENT: Record<string, PortalTopic> = {
   "contract.sent": "contracts",
   "contract.client_signed": "contracts",
   "contract.signed": "contracts",
+  // DW-10f-2a (BFF §61.11, DW-D49): Finance added a schedule to a signed contract; the producer carries the clientId.
+  "contract.schedule_added": "contracts",
   "client_contact.created": "profile",
   "client_contact.updated": "profile",
   // MI-02/MI-03 (webdev maintenance intake, D-7): submit (portal) and triage/convert (staff) both

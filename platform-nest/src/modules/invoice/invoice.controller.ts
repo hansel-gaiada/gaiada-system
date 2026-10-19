@@ -17,6 +17,11 @@ import { invoiceClientVisible, staffClientVisible } from "../../core/portal-visi
 import { issueInvoice, readIssueReadiness, voidIssuedInvoice, withBilling } from "./issue";
 import { INVOICE_PDF_FILE_ID } from "../../core/document-read-fields";
 import { readServiceLineFacts, SERVICE_LINE_KEY } from "./billing-numbering";
+import { DatabaseError } from "pg";
+import {
+  claimedInstalmentCount, draftInvoiceFromSchedule, parseDraftFromSchedule, readBillableInstalments, sourceOf, UUID_ANY_CASE,
+} from "./contract-billing";
+import { isIsoDate } from "../../core/contract-schedule";
 
 // IAM-GAP-01: `approved` is a real status (migration 0107 widened the CHECK) but is DELIBERATELY
 // NOT in this set — the only way INTO 'approved' is the dedicated /approve endpoint below, which
@@ -72,6 +77,32 @@ export class InvoiceController {
     return rows.rows;
   }
 
+  /** DW-10f-3a (BFF §61.5) — what Finance can draft from the schedule: the instalments of signed, unsuperseded contracts
+   *  with no live invoice (`due` or `upcoming` against `dueBy`) and those already on an unissued draft (`invoicing`),
+   *  oldest due first, at most 500. It reads two kinds, so it asks both (PERMISSION-CONTRACT §51): `invoice` `read`, then
+   *  `contract` `read` (a caller who may read invoices but not contracts gets 403, never contract amounts). The query is
+   *  checked after both. */
+  @Get(":tenantId/invoices/billable-instalments")
+  async billableInstalments(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("dueBy") dueBy?: string,
+    @Query("clientId") clientId?: string,
+  ) {
+    await authorize(req.principal, { kind: "invoice", tenantId }, "read");
+    await authorize(req.principal, { kind: "contract", tenantId }, "read");
+    if (dueBy !== undefined && dueBy !== "" && !isIsoDate(dueBy)) {
+      throw new BadRequestException({ message: "due_by_invalid", reason: "due_by_invalid" });
+    }
+    if (clientId !== undefined && clientId !== "" && !UUID_ANY_CASE.test(clientId)) {
+      throw new BadRequestException({ message: "client_id_invalid", reason: "client_id_invalid" });
+    }
+    return withTenants([tenantId], async (c) => {
+      const by = dueBy || (await c.query<{ d: string }>(`SELECT to_char(current_date, 'YYYY-MM-DD') AS d`)).rows[0].d;
+      return readBillableInstalments(c, { dueBy: by, clientId: clientId ? clientId.toLowerCase() : null });
+    });
+  }
+
   @Get(":tenantId/invoices/:invoiceId")
   async detail(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("invoiceId") invoiceId: string) {
     await authorize(req.principal, { kind: "invoice", id: invoiceId, tenantId }, "read");
@@ -103,20 +134,44 @@ export class InvoiceController {
     });
   }
 
-  // Generate an invoice: sum billable time on the client's projects in [periodStart, periodEnd],
-  // one line per project (hours × rate). Frozen onto the invoice at creation time.
+  // Draft an invoice (BFF §4, §61.5). Two sources, never mixed in one invoice (DW-D48):
+  //   * `source: 'instalments'` (DW-10f-3a): the chosen instalments of signed contracts, one fixed-fee line each, claimed
+  //     in the same transaction (contract-billing.ts);
+  //   * `source: 'hours'` (the default, the explicit exception): sum billable time on the client's projects in
+  //     [periodStart, periodEnd], one line per project (hours × rate). Frozen onto the invoice at creation time.
+  // AUTHORIZED FIRST (`invoice` `create`): no body is read before it. This used to validate the hourly body first, so a
+  // denied caller with a thin body got 400 instead of 403 (the "validation pre-empts authz" trap).
   @Post(":tenantId/invoices")
   @HttpCode(201)
   async create(
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
-    @Body() b: { clientId?: string; periodStart?: string; periodEnd?: string; rate?: number; currency?: string; taxCode?: string },
+    @Body() b: {
+      source?: string; clientId?: string; periodStart?: string; periodEnd?: string; rate?: number; currency?: string;
+      taxCode?: string; instalmentIds?: unknown; dueBy?: unknown;
+    },
   ) {
+    await authorize(req.principal, { kind: "invoice", tenantId }, "create");
+    const source = sourceOf(b as Record<string, unknown>);
+    if (source === "instalments") {
+      const input = parseDraftFromSchedule((b ?? {}) as Record<string, unknown>);
+      const out = await draftInvoiceFromSchedule(tenantId, req.principal.userId, input);
+      if (!out.deduped) {
+        await writeActivity(tenantId, req.principal.userId, "created", "invoice", out.id, {
+          total: out.total, source: "instalments", instalmentIds: input.instalmentIds,
+        });
+      }
+      const { totalText: _totalText, ...answer } = out;
+      return answer;
+    }
+    // DW-D48: one source per draft. Instalment fields on an hourly draft are refused, not ignored.
+    if (b?.instalmentIds !== undefined || b?.dueBy !== undefined) {
+      throw new BadRequestException({ message: "source_fields_mixed", reason: "source_fields_mixed" });
+    }
     const { clientId, periodStart, periodEnd } = b ?? {};
     const rate = Number(b?.rate);
     if (!clientId || !periodStart || !periodEnd) throw new BadRequestException("clientId, periodStart and periodEnd required");
     if (!Number.isFinite(rate) || rate < 0) throw new BadRequestException("rate must be a non-negative number");
-    await authorize(req.principal, { kind: "invoice", tenantId }, "create");
     // PV5-04: an optional tax code (a finance_tax_codes code). It is applied at ISSUE, through finance_tax_compute()
     // on the issue date; here it is only recorded on the draft. Issue readiness refuses it until the code is in force
     // and the company is recorded as PKP.
@@ -150,7 +205,8 @@ export class InvoiceController {
         const hours = Math.round((Number(r.minutes) / 60) * 100) / 100;
         const amount = Math.round(hours * rate * scale) / scale;
         // PV5-04b: `projectId` lets issue default the service line from the project's department (billing-numbering.ts).
-        return { description: r.project, projectId: r.projectId, hours, rate, amount };
+        // DW-10f-3a (BFF §61.5): new hourly lines carry `kind: 'hours'` (a line with no kind is an hourly line too).
+        return { kind: "hours", description: r.project, projectId: r.projectId, hours, rate, amount };
       });
       const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * scale) / scale;
       // IAM-GAP-02: `updated_by` is set to the creator at INSERT time too — right after creation
@@ -161,12 +217,12 @@ export class InvoiceController {
          VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8, $9, $10, $10, $11)`,
         [id, tenantId, clientId, periodStart, periodEnd, currency, JSON.stringify(lines), total, config.originSite, req.principal.userId, taxCode],
       );
-      await emitEvent(c, tenantId, "invoice", id, "invoice.created", { clientId, total, currency });
+      await emitEvent(c, tenantId, "invoice", id, "invoice.created", { clientId, total, currency, source: "hours" });
       // IAM-GAP-02: revision #1 — before=null (nothing existed), after=the row just inserted.
       await recordInvoiceRevision(c, tenantId, id, req.principal.userId, "created", null);
       return { total, lineCount: lines.length };
     });
-    await writeActivity(tenantId, req.principal.userId, "created", "invoice", id, { total: invoice.total });
+    await writeActivity(tenantId, req.principal.userId, "created", "invoice", id, { total: invoice.total, source: "hours" });
     return { id };
   }
 
@@ -190,7 +246,8 @@ export class InvoiceController {
       );
     }
     if (!b?.status || !STATUSES.has(b.status)) throw new BadRequestException("valid status required (draft|void)");
-    await withTenants([tenantId], async (c) => {
+    let releasedInstalments = 0;
+    await mapUnvoidRefusal(withTenants([tenantId], async (c) => {
       // IAM-GAP-02: snapshot BEFORE the mutation — the row must still exist to 404 correctly, and
       // the revision needs the pre-edit state to be reconstructible.
       const before = await snapshotInvoice(c, invoiceId);
@@ -204,6 +261,10 @@ export class InvoiceController {
             : "this invoice is issued and can no longer be edited",
         );
       }
+      // DW-10f-3a (BFF §61.5): "Cancel draft" is this void. The database trigger releases the instalments the invoice
+      // claims (invoices_release_instalments); this only counts them for the answer and never fights the trigger. Moving
+      // a void instalment invoice back out of `void` is refused by the database (PD614, mapped below).
+      if (b.status === "void" && before.status !== "void") releasedInstalments = await claimedInstalmentCount(c, invoiceId);
       const res = await c.query(
         `UPDATE invoices SET status = $2, updated_by = $3, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`,
         [invoiceId, b.status, req.principal.userId],
@@ -211,9 +272,11 @@ export class InvoiceController {
       if (res.rowCount === 0) throw new NotFoundException("invoice not found");
       await emitEvent(c, tenantId, "invoice", invoiceId, "invoice.updated", { status: b.status });
       await recordInvoiceRevision(c, tenantId, invoiceId, req.principal.userId, "status_changed", before);
+    }));
+    await writeActivity(tenantId, req.principal.userId, "updated", "invoice", invoiceId, {
+      status: b.status, ...(b.status === "void" ? { releasedInstalments } : {}),
     });
-    await writeActivity(tenantId, req.principal.userId, "updated", "invoice", invoiceId, { status: b.status });
-    return { ok: true };
+    return { ok: true, releasedInstalments };
   }
 
   // PV5-04b (PV-D35) — choose the invoice's SERVICE LINE, which sets the `{code}` of its number at issue. Staff do this
@@ -345,8 +408,26 @@ export class InvoiceController {
     if (reason.length < 4) throw new BadRequestException("a reason (at least 4 characters) is required to void an issued invoice");
     const out = await voidIssuedInvoice(tenantId, invoiceId, req.principal.userId, reason.slice(0, 500));
     if (!out.alreadyVoid) {
-      await writeActivity(tenantId, req.principal.userId, "voided", "invoice", invoiceId, { creditNoteId: out.creditNoteId, reason: reason.slice(0, 200) });
+      await writeActivity(tenantId, req.principal.userId, "voided", "invoice", invoiceId, {
+        creditNoteId: out.creditNoteId, reason: reason.slice(0, 200), releasedInstalments: out.releasedInstalments,
+      });
     }
     return out;
+  }
+}
+
+/** DW-10f-3a (BFF §61.2, PD614): an invoice that carried instalment lines cannot leave `void` (its instalments were
+ *  released and may be on another invoice by now). The database refuses it; this answers 409 instead of a 500. */
+async function mapUnvoidRefusal<T>(p: Promise<T>): Promise<T> {
+  try {
+    return await p;
+  } catch (e) {
+    if (e instanceof DatabaseError && e.code === "PD614") {
+      throw new ConflictException({
+        message: "this invoice carried contract instalments and was voided; it cannot be restored (draft a new invoice)",
+        reason: "invoice_unvoid_refused",
+      });
+    }
+    throw e;
   }
 }

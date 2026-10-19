@@ -20,7 +20,7 @@
 // to the staff surface must not be able to widen the client's.
 import {
   BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, HttpCode, NotFoundException,
-  Param, Patch, Post, Query, Req, UseGuards,
+  Param, Patch, Post, Put, Query, Req, UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import type { PoolClient } from "pg";
@@ -46,6 +46,10 @@ import { SIMULATED_PROVIDER } from "../signatures/simulated-psre";
 import { lockChangeRequest } from "./webdev-cr-lock";
 import { UUID_RE, assertAmendable, isDeadContractStatus } from "./webdev-amendment";
 import { CONTRACT_SIGNED_COPY_FILE_ID } from "./document-read-fields";
+import {
+  addScheduleAfterSigning, mapScheduleDbErrors, minorUnitOf, readStaffSchedule, refusal, replaceDraftSchedule, requireActor,
+  scheduleSummaryColumnsSql, withScheduleSummary,
+} from "./contract-schedule";
 
 // PV3-07: `clientVisible` (a client-wide contact of the contract's client can read it in the portal) is
 // composed from the portal's own predicate, so a draft reads `false` here for exactly the reason the
@@ -72,7 +76,9 @@ const CONTRACT_SELECT = `
          (k.ends_on IS NOT NULL AND k.ends_on < current_date) AS "termEnded",
          ${staffClientVisible("k", contractClientVisible("k"))} AS "clientVisible",
          -- PV5-07: the sealed signed copy. NULL = not signed, or signed and still being prepared.
-         ${CONTRACT_SIGNED_COPY_FILE_ID("k")} AS "signedCopyFileId"
+         ${CONTRACT_SIGNED_COPY_FILE_ID("k")} AS "signedCopyFileId",
+         -- DW-10f-2a (BFF §61.4): scheduleSummary (folded by withScheduleSummary) and scheduleAddable (the DW-D49 state rule).
+         ${scheduleSummaryColumnsSql("k")}
     FROM contracts k
     LEFT JOIN clients cl ON cl.id = k.client_id
     LEFT JOIN projects p ON p.id = k.project_id
@@ -205,7 +211,7 @@ export class ContractsController {
       ),
       mayCountersign(req.principal, { kind: "contract", tenantId }),
     ]);
-    return rows.rows.map((r) => withCountersign(r, may, tenantId));
+    return rows.rows.map((r) => withScheduleSummary(withCountersign(r, may, tenantId)));
   }
 
   @Get(":tenantId/contracts/:contractId")
@@ -217,11 +223,13 @@ export class ContractsController {
       if (!rows.rows[0]) throw new NotFoundException("contract not found");
       const sigs = await c.query(
         `SELECT party, signer, signer_name AS "signerName", signer_title AS "signerTitle", signed_at AS "signedAt",
-                content_sha256 AS "contentSha256", provider
+                content_sha256 AS "contentSha256", schedule_sha256 AS "scheduleSha256", provider
            FROM contract_signatures WHERE contract_id = $1 ORDER BY signed_at ASC`,
         [contractId],
       );
-      return { ...withCountersign(rows.rows[0], may, tenantId), signatures: sigs.rows };
+      // DW-10f-2a (BFF §61.4): the payment schedule, null when the contract has none.
+      const schedule = await readStaffSchedule(c, contractId);
+      return { ...withScheduleSummary(withCountersign(rows.rows[0], may, tenantId)), schedule, signatures: sigs.rows };
     });
   }
 
@@ -408,27 +416,41 @@ export class ContractsController {
     if (currentVia() && b?.status !== undefined) {
       throw new BadRequestException("status_not_allowed_via_automation");
     }
-    await withTenants([tenantId], async (c) => {
+    await mapScheduleDbErrors(withTenants([tenantId], async (c) => {
+      // FOR UPDATE: a send racing this edit is serialised, so the branch below is decided on the status the UPDATE meets.
       const cur = await c.query<{ status: string }>(
-        `SELECT status FROM contracts WHERE id = $1 AND deleted_at IS NULL`, [contractId],
+        `SELECT status FROM contracts WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, [contractId],
       );
       if (!cur.rows[0]) throw new NotFoundException("contract not found");
       // `void` is the one status transition allowed from anywhere — cancelling a sent contract must
       // stay possible. Everything else requires the contract to still be a draft.
       const voiding = b?.status === "void";
-      if (cur.rows[0].status !== "draft" && !voiding) {
-        throw new BadRequestException(
-          `a ${cur.rows[0].status} contract cannot be edited — issue a new version with supersedesId instead`,
+      const status = cur.rows[0].status;
+      if (status !== "draft") {
+        // PV5-F1: the value-clearing refusal keeps its message and comes first.
+        if (clearValue) throw new BadRequestException("a value can only be cleared on a draft contract");
+        // DW-10f-2a (BFF §61.1 row 16, §61.4): once sent, a contract's money and term columns are frozen (PD613), so PATCH
+        // on a contract that is not a draft accepts `{status: 'void'}` and nothing else. This used to COALESCE every field
+        // into the UPDATE, so `{status: 'void', value: …}` rewrote a signed contract's value while voiding it.
+        const others = Object.entries(b ?? {}).filter(([key, v]) => key !== "status" && v !== undefined);
+        if (!voiding || others.length > 0) {
+          throw new BadRequestException({
+            message: `a ${status} contract cannot be edited, only voided — issue a new version with supersedesId instead`,
+            reason: "only_void_after_send",
+          });
+        }
+        const res = await c.query(
+          `UPDATE contracts SET status = 'void', updated_at = now() WHERE id = $1 AND deleted_at IS NULL`, [contractId],
         );
-      }
-      if (clearValue && cur.rows[0].status !== "draft") {
-        throw new BadRequestException("a value can only be cleared on a draft contract");
+        if (res.rowCount === 0) throw new NotFoundException("contract not found");
+        return;
       }
       if (b?.status && b.status !== "void" && b.status !== "draft") {
         // `send` and `countersign` have their own routes precisely so the transitions that matter are
         // not reachable by poking this field.
         throw new BadRequestException("status here may only be set to void; use /send to issue");
       }
+      // A draft: a change of value or currency leaves the schedule as it is; Send checks it (BFF §61.4).
       const res = await c.query(
         `UPDATE contracts SET
            title = COALESCE($2, title), reference = COALESCE($3, reference),
@@ -447,9 +469,61 @@ export class ContractsController {
         ],
       );
       if (res.rowCount === 0) throw new NotFoundException("contract not found");
-    });
+    }), "put");
     await writeActivity(tenantId, req.principal.userId, "updated", "contract", contractId, {});
     return { ok: true };
+  }
+
+  /** DW-10f-2a (BFF §61.4) — replace a DRAFT contract's payment schedule: `{instalments: [{label, amount, due}]}`, 0 to 60
+   *  rows in order (`due` is "on_signing" or "YYYY-MM-DD"); `[]` clears it. It need not add up to the value yet: the
+   *  answer says so (`matchesValue: false`) and Send refuses. Presets are the editor's arithmetic, never this route's.
+   *  Authorized FIRST (`contract` `update`), then 404, 409 `schedule_frozen`, and the body's 400s (contract-schedule.ts). */
+  @Put(":tenantId/contracts/:contractId/schedule")
+  @HttpCode(200)
+  async putSchedule(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("contractId") contractId: string,
+    @Body() b: unknown,
+  ) {
+    await authorize(req.principal, { kind: "contract", id: contractId, tenantId }, "update");
+    const out = await mapScheduleDbErrors(withTenants([tenantId], async (c) => {
+      const w = await replaceDraftSchedule(c, tenantId, contractId, b);
+      return { ...w, schedule: await readStaffSchedule(c, contractId, { emptyAsObject: true }) };
+    }), "put");
+    await writeActivity(tenantId, req.principal.userId, "schedule_updated", "contract", contractId, {
+      count: out.count, total: out.total,
+    });
+    // After a clear, an object with no instalments (matchesValue says whether Send would pass). No hash on a draft.
+    return out.schedule;
+  }
+
+  /** DW-10f-2a (BFF §61.4a, DW-D49) — Finance adds a payment schedule ONCE to an already-signed contract that has a value
+   *  and none (one sent before 10f). Both authorizations come first (`contract` `update`, then `invoice` `create`,
+   *  PERMISSION-CONTRACT §51), then the envelope refusal (a person's act: no tool exists for it), then every rule on the
+   *  LOCKED row. The addition opens, inserts and closes in one transaction; the deferred trigger refuses anything left
+   *  open at COMMIT. Nobody signed this schedule, so no signature and no sealed copy ever says they did. */
+  @Post(":tenantId/contracts/:contractId/schedule/after-signing")
+  @HttpCode(201)
+  async addScheduleAfterSigning(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("contractId") contractId: string,
+    @Body() b: unknown,
+  ) {
+    await authorize(req.principal, { kind: "contract", id: contractId, tenantId }, "update");
+    await authorize(req.principal, { kind: "invoice", tenantId }, "create");
+    if (currentVia()) throw refusal(400, "not_allowed_via_automation");
+    const actorId = requireActor(req.principal.userId);
+    const out = await mapScheduleDbErrors(withTenants([tenantId], async (c) => {
+      const added = await addScheduleAfterSigning(c, tenantId, contractId, actorId, b);
+      await emitEvent(c, tenantId, "contract", contractId, "contract.schedule_added", { clientId: added.clientId });
+      return { ...added, schedule: await readStaffSchedule(c, contractId) };
+    }), "after_signing");
+    await writeActivity(tenantId, actorId, "schedule_added_after_signing", "contract", contractId, {
+      count: out.count, total: out.total, scheduleSha256: out.scheduleSha256,
+    });
+    return out.schedule;
   }
 
   /** Issue the contract to the client: `draft` -> `sent`, and notify their portal contacts.
@@ -477,7 +551,7 @@ export class ContractsController {
   @HttpCode(200)
   async send(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("contractId") contractId: string) {
     await authorize(req.principal, { kind: "contract", id: contractId, tenantId }, "send");
-    const out = await withTenants([tenantId], async (c) => {
+    const out = await mapScheduleDbErrors(withTenants([tenantId], async (c) => {
       // FOR UPDATE: two concurrent sends must not both fix content (the second sees `sent` and is refused).
       const cur = await c.query<{
         status: string; client_id: string; project_id: string | null; title: string; file_id: string | null; body_md: string | null;
@@ -493,28 +567,57 @@ export class ContractsController {
       if (k.status !== "draft") throw new BadRequestException(`this contract is already ${k.status}`);
       if (!k.file_id && !k.body_md) throw new BadRequestException("attach a document or write the terms before sending");
 
+      // DW-10f-2a (BFF §61.1 row 3, §61.4): a contract with a value above zero is sent only with a schedule that adds up
+      // exactly to it; an unvalued one carries none. Checked here, in SQL numeric, so the caller gets the figures; the
+      // database's send trigger (PD612) stays the wall underneath.
+      const sched = await c.query<{ n: number; total: string; matches: boolean }>(
+        `SELECT count(*)::int AS n, COALESCE(sum(amount), 0)::text AS total,
+                CASE WHEN COALESCE($2::numeric, 0) > 0 THEN count(*) > 0 AND COALESCE(sum(amount), 0) = $2::numeric
+                     ELSE count(*) = 0 END AS matches
+           FROM contract_instalments WHERE contract_id = $1`,
+        [contractId, k.value],
+      );
+      const sc = sched.rows[0];
+      if (!sc.matches) {
+        throw refusal(400, "schedule_total_mismatch", { value: k.value === null ? null : Number(k.value), total: Number(sc.total) });
+      }
+      if (Number(sc.n) > 0) {
+        // The currency may have changed since the rows were written: re-check their precision against it.
+        const mu = await minorUnitOf(c, k.currency);
+        if (mu === null) throw refusal(400, "currency_unknown");
+        const prec = await c.query<{ ok: boolean }>(
+          `SELECT COALESCE(bool_and(amount = round(amount, $2::int)), true) AS ok FROM contract_instalments WHERE contract_id = $1`,
+          [contractId, mu],
+        );
+        if (prec.rows[0].ok !== true) throw refusal(400, "schedule_precision");
+      }
+
       const tier = await signatureTierFor(c, tenantId, k);
       if (tier === "certified" && !certifiedSigningProvider()) {
         throw new ConflictException({ message: NO_CERTIFIED_PROVIDER, reason: "no_certified_provider" });
       }
       const sha = await contractContentSha256(c, tenantId, k);
       // DW-10f-1 (BFF §61.2): the send also fixes the payment schedule, storing its hash from the one SQL function. The
-      // database refuses (PD612) a valued contract whose schedule does not add up to the value, or a wrong hash.
-      // 10f-2a adds the handler's own 400 schedule_total_mismatch before this UPDATE and returns scheduleSha256.
-      const upd = await c.query(
+      // database refuses (PD612) a valued contract whose schedule does not add up to the value, or a wrong hash; the
+      // handler's own 400s above come first, and PD612 is mapped to the same answer (mapScheduleDbErrors).
+      const upd = await c.query<{ scheduleSha256: string | null }>(
         `UPDATE contracts
             SET status = 'sent', sent_at = now(), content_sha256 = $2, content_fixed_at = now(), signature_tier = $3,
                 schedule_sha256 = contract_schedule_sha256(id, currency, value), updated_at = now()
-          WHERE id = $1 AND status = 'draft'`,
+          WHERE id = $1 AND status = 'draft'
+          RETURNING schedule_sha256 AS "scheduleSha256"`,
         [contractId, sha, tier],
       );
       if (upd.rowCount === 0) throw new ConflictException("this contract was sent by someone else a moment ago");
+      const scheduleSha256 = upd.rows[0].scheduleSha256;
       await emitEvent(c, tenantId, "contract", contractId, "contract.sent", { clientId: k.client_id, title: k.title });
       // Resolved inside the transaction; the notify() calls happen after it commits.
       const recipients = await resolveClientRecipients(c, { clientId: k.client_id, projectId: k.project_id, kind: "signature" });
-      return { title: k.title, recipients, sha, tier };
+      return { title: k.title, recipients, sha, tier, scheduleSha256 };
+    }), "send");
+    await writeActivity(tenantId, req.principal.userId, "sent", "contract", contractId, {
+      contentSha256: out.sha, signatureTier: out.tier, scheduleSha256: out.scheduleSha256,
     });
-    await writeActivity(tenantId, req.principal.userId, "sent", "contract", contractId, { contentSha256: out.sha, signatureTier: out.tier });
     await notifyBestEffort(tenantId, req.principal.userId, out.recipients, "contract.sent", {
       title: `Please review and sign: ${out.title}`,
       href: `/portal/contracts/${contractId}`,
@@ -522,7 +625,10 @@ export class ContractsController {
       entityId: contractId,
       severity: "warning",
     });
-    return { ok: true, status: "sent", notified: out.recipients.length, contentSha256: out.sha, signatureTier: out.tier };
+    return {
+      ok: true, status: "sent", notified: out.recipients.length, contentSha256: out.sha, signatureTier: out.tier,
+      scheduleSha256: out.scheduleSha256,
+    };
   }
 
   /** PV5-06 — "Mark certified" (PV-D8): staff ask for the certified (PSrE) signature tier for a DRAFT contract.
@@ -617,9 +723,13 @@ export class ContractsController {
         }
       }
       await c.query(
+        // DW-10f-2a (BFF §61.2): the signature also records the schedule it covers, copied from the contract (never from
+        // the request), exactly as content_sha256 is.
         `INSERT INTO contract_signatures
-           (id, tenant_id, contract_id, party, signer, signer_name, signer_title, ip_hash, user_agent, content_sha256, origin_site)
-         VALUES ($1, $2, $3, 'provider', $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (contract_id, party) DO NOTHING`,
+           (id, tenant_id, contract_id, party, signer, signer_name, signer_title, ip_hash, user_agent, content_sha256,
+            schedule_sha256, origin_site)
+         VALUES ($1, $2, $3, 'provider', $4, $5, $6, $7, $8, $9,
+                 (SELECT schedule_sha256 FROM contracts WHERE id = $3), $10) ON CONFLICT (contract_id, party) DO NOTHING`,
         [
           newId(), tenantId, contractId, req.principal.userId,
           scrubText(signerName).text.slice(0, 200),

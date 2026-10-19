@@ -353,6 +353,9 @@ interface ContractRow {
   sentAt: string | null; signedAt: string | null; contentSha256: string | null; contentFixedAt: string | null;
   signatureTier: string | null; fileId: string | null; bodyMd: string | null; clientName: string | null;
   legalName: string | null;
+  // DW-10f-2a (BFF §61.2, §61.9): the schedule hash stored at send (or by DW-D49's addition), when an addition happened,
+  // and the hash the rows give NOW, from the one SQL function.
+  scheduleSha256: string | null; scheduleAddedAt: Date | null; scheduleNow: string | null; scheduleTotal: string;
 }
 
 const isPdfFile = (contentType: string | null, bytes: Buffer): boolean =>
@@ -375,7 +378,11 @@ export async function runContractSealJob(tenantId: string, contractId: string): 
                 to_char(k.starts_on, 'YYYY-MM-DD') AS "startsOn", to_char(k.ends_on, 'YYYY-MM-DD') AS "endsOn",
                 k.sent_at AS "sentAt", k.signed_at AS "signedAt", k.content_sha256 AS "contentSha256",
                 k.content_fixed_at AS "contentFixedAt", k.signature_tier AS "signatureTier",
-                k.file_id AS "fileId", k.body_md AS "bodyMd", cl.name AS "clientName", bp.legal_name AS "legalName"
+                k.file_id AS "fileId", k.body_md AS "bodyMd", cl.name AS "clientName", bp.legal_name AS "legalName",
+                k.schedule_sha256 AS "scheduleSha256", k.schedule_added_at AS "scheduleAddedAt",
+                contract_schedule_sha256(k.id, k.currency, k.value) AS "scheduleNow",
+                (SELECT trim_scale(COALESCE(sum(x.amount), 0))::text FROM contract_instalments x
+                  WHERE x.contract_id = k.id AND x.tenant_id = k.tenant_id) AS "scheduleTotal"
            FROM contracts k
            LEFT JOIN clients cl ON cl.id = k.client_id
            LEFT JOIN company_billing_profiles bp ON bp.tenant_id = k.tenant_id
@@ -400,6 +407,15 @@ export async function runContractSealJob(tenantId: string, contractId: string): 
             [k.fileId],
           )).rows[0] ?? null
         : null;
+      // DW-10f-2a: the instalments of a schedule fixed at send (none for one added after signing: it is never printed).
+      const instalments = k.scheduleSha256 && !k.scheduleAddedAt
+        ? (await c.query<{ position: number; label: string; amount: string; due: string }>(
+            `SELECT position::int AS position, label, trim_scale(amount)::text AS amount,
+                    CASE WHEN due_kind = 'on_signing' THEN 'on_signing' ELSE to_char(due_on, 'YYYY-MM-DD') END AS due
+               FROM contract_instalments WHERE contract_id = $1 ORDER BY position`,
+            [contractId],
+          )).rows
+        : [];
       const certs = await c.query<{ serial: string; subject: string; fingerprint: string; validTo: Date; pem: string }>(
         `SELECT serial, subject, fingerprint_sha256 AS fingerprint, valid_to AS "validTo", certificate_pem AS pem
            FROM company_seal_certificates
@@ -407,13 +423,13 @@ export async function runContractSealJob(tenantId: string, contractId: string): 
           ORDER BY valid_from DESC`,
         [tenantId],
       );
-      return { k, sigs: sigs.rows, file, certs: certs.rows };
+      return { k, sigs: sigs.rows, file, certs: certs.rows, instalments };
     });
     if (!loaded || loaded.k.status !== "signed") return { status: "skipped", reason: "not_signed" };
     // PV5-11: a CERTIFIED contract's document is the provider's signed copy (stored at completion, src/signatures/), never
     // a company-sealed one. Nothing is owed here, and nothing is recorded as a failure.
     if (loaded.k.signatureTier === "certified") return { status: "skipped", reason: "certified_tier" };
-    const { k, sigs, file, certs } = loaded;
+    const { k, sigs, file, certs, instalments } = loaded;
     const label = k.reference ? `${k.title} (${k.reference})` : k.title;
     notice = { what: `The signed copy of "${label}"`, href: `/clients/${k.clientId}/billing` };
 
@@ -430,6 +446,12 @@ export async function runContractSealJob(tenantId: string, contractId: string): 
     if (sigs.some((s) => s.contentSha256 && s.contentSha256 !== k.contentSha256)) {
       return recordFailure(tenantId, role, contractId, "refused", "signature_hash_mismatch",
         "a signature on record covers different content than the contract's fixed content", notice);
+    }
+    // DW-10f-2a (BFF §61.9): a schedule fixed at send must still be exactly the rows both parties signed. The hash is
+    // recomputed by contract_schedule_sha256() (the one place it is computed); any difference is refused, never sealed.
+    if (k.scheduleSha256 && !k.scheduleAddedAt && k.scheduleNow !== k.scheduleSha256) {
+      return recordFailure(tenantId, role, contractId, "refused", "schedule_changed",
+        "the contract's payment schedule no longer matches the schedule fixed when it was sent; it was not sealed", notice);
     }
 
     // 1. The key FIRST: on live, "no key yet" is the likeliest blocker, and nothing is rendered without one.
@@ -501,6 +523,14 @@ export async function runContractSealJob(tenantId: string, contractId: string): 
         signatureTier: k.signatureTier, bodyMd: source === "body" ? k.bodyMd : null,
       },
       parties: { issuerLegalName: legalName, clientName: k.clientName ?? "" },
+      schedule: k.scheduleSha256 && !k.scheduleAddedAt && instalments.length > 0
+        ? {
+            currency: k.currency,
+            total: k.scheduleTotal,
+            sha256: k.scheduleSha256,
+            instalments,
+          }
+        : null,
       document: { source, filename: file?.filename ?? null, sha256: k.contentSha256 },
       signatures: sigs.map((s) => ({
         party: s.party, signerName: s.signerName, signerTitle: s.signerTitle, signedAt: new Date(s.signedAt).toISOString(),

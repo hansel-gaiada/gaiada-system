@@ -738,7 +738,9 @@ const CONTRACT_BILLING_CORE_TOOLS: McpToolDef[] = [
     name: "contracts.get",
     description:
       "One contract with its terms (`bodyMd`, `fileId`), value, term dates, `canCountersign` and its signatures " +
-      "(party, signer, signer name and title, signedAt). 404 if it does not exist; a 403 is a distinct refusal.",
+      "(party, signer, signer name and title, signedAt). DW-10f: `schedule` (its payment instalments, each with a state: " +
+      "scheduled, upcoming, due, invoicing, invoiced, paid or not_billed; null when it has none), `scheduleSummary` and " +
+      "`scheduleAddable`. 404 if it does not exist; a 403 is a distinct refusal.",
     minAssurance: "verified",
     method: "GET",
     pathTemplate: "/api/:tenantId/contracts/:contractId",
@@ -832,14 +834,55 @@ const CONTRACT_BILLING_CORE_TOOLS: McpToolDef[] = [
       required: ["tenantId", "contractId"],
     },
   },
+  // DW-10f-2a (BFF §61.4, §61.10): the payment schedule of a DRAFT. LOW like updateDraft: a draft reaches nobody, and the
+  // route refuses once the contract is sent (409 schedule_frozen). A preset (all on signing, 50/50, monthly x N) is the
+  // caller's arithmetic: the tool takes explicit rows. Adding a schedule to a SIGNED contract (DW-D49) is deliberately
+  // NOT a tool: a person's act, and the route refuses an envelope call.
+  {
+    name: "contracts.setSchedule",
+    description:
+      "Replace a DRAFT contract's payment schedule with `instalments` (0 to 60 rows, in order; `[]` clears it). Each row is " +
+      "`{label, amount, due}`: `amount` a positive number in the contract's currency with no more decimals than it allows " +
+      "(IDR: whole rupiah), `due` either \"on_signing\" (at most one, and only first) or a date YYYY-MM-DD (never going " +
+      "backwards). A contract with a value above zero can be SENT only when its schedule adds up exactly to the value; the " +
+      "answer says so (`matchesValue`). 409 `schedule_frozen` once sent; 400 `schedule_invalid`, `schedule_order_invalid`, " +
+      "`currency_unknown`, `schedule_precision`, `schedule_needs_value` (rows on an unvalued contract).",
+    minAssurance: "verified",
+    method: "PUT",
+    pathTemplate: "/api/:tenantId/contracts/:contractId/schedule",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        contractId: { type: "string" },
+        instalments: {
+          type: "array",
+          maxItems: 60,
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string", description: "1 to 120 characters, e.g. Deposit, Month 3, Final payment" },
+              amount: { type: "number", description: "positive, in the contract's currency" },
+              due: { type: "string", description: "\"on_signing\" or YYYY-MM-DD" },
+            },
+            required: ["label", "amount", "due"],
+          },
+        },
+      },
+      required: ["tenantId", "contractId", "instalments"],
+    },
+  },
 
   // ── medium / high: D14, each with an executor entry in approval-executables.ts ─────────────────
   {
     name: "contracts.send",
     description:
       "Issue a DRAFT contract to the client: draft -> sent, and notify their portal contacts. Refused (400) when it is " +
-      "not a draft or has neither terms nor a file. impact:'medium': an unattended caller SUSPENDS for human approval, " +
-      "and approving it runs the send.",
+      "not a draft or has neither terms nor a file, and (400 `schedule_total_mismatch`) when it has a value and its payment " +
+      "schedule (contracts.setSchedule) does not add up exactly to it. Sending fixes the schedule (`scheduleSha256`). " +
+      "impact:'medium': an unattended caller SUSPENDS for human approval, and approving it runs the send.",
     minAssurance: "verified",
     method: "POST",
     pathTemplate: "/api/:tenantId/contracts/:contractId/send",
@@ -993,6 +1036,57 @@ const INVOICE_ISSUE_CORE_TOOLS: McpToolDef[] = [
     method: "GET",
     pathTemplate: "/api/:tenantId/billing-profile/masked",
     inputSchema: { type: "object", properties: { tenantId: { type: "string" } }, required: ["tenantId"] },
+  },
+  // DW-10f-3a (BFF §61.5, §61.10): invoicing from the payment schedule. A read, and a LOW draft: a draft reaches nobody,
+  // a replay answers the same draft (`deduped: true`), and approving and issuing stay human (`invoices.issue` is HIGH and
+  // maker-checker is unchanged). An n8n flow acting for a Finance person can draft the due instalments on a schedule.
+  {
+    name: "invoices.billableInstalments",
+    description:
+      "One client's contract instalments that can be invoiced: those of signed, unsuperseded contracts with no live invoice " +
+      "(`state` `due`, or `upcoming` when due after `dueBy`) and those already on an unissued draft (`invoicing`, with the " +
+      "draft's id). Each row: `instalmentId`, the contract, position of count, label, amount, currency, `due`. Oldest due " +
+      "first, at most 500. `dueBy` is YYYY-MM-DD (today to invoice what is due now; later to invoice ahead). A 403 is a " +
+      "refusal (it needs both invoice and contract read), never an empty list.",
+    minAssurance: "verified",
+    method: "GET",
+    pathTemplate: "/api/:tenantId/invoices/billable-instalments?clientId=:clientId&dueBy=:dueBy",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        clientId: { type: "string", description: "the client's uuid" },
+        dueBy: { type: "string", description: "YYYY-MM-DD" },
+      },
+      required: ["tenantId", "clientId", "dueBy"],
+    },
+  },
+  {
+    name: "invoices.draftFromSchedule",
+    description:
+      "Draft ONE invoice for a client from contract instalments (`instalmentIds`, 1 to 60, from invoices.billableInstalments): " +
+      "one fixed-fee line each, every instalment claimed by this draft so it is invoiced once. Each must be of this client, " +
+      "its contract signed and not superseded, due by `dueBy` (default today) and not on another live invoice; otherwise " +
+      "409 `instalment_unavailable` with `detail.items[{instalmentId, reason}]` and nothing is written. One currency per " +
+      "draft (400 `currency_mixed`). An invoice is either instalments or logged hours, never both (DW-D48). IDEMPOTENT: the " +
+      "same instalments again answer the same draft with `deduped:true`. The draft still needs approval and issuing by people.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/invoices",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        source: { type: "string", enum: ["instalments"], description: "REQUIRED: always \"instalments\" for this tool" },
+        clientId: { type: "string" },
+        instalmentIds: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 60 },
+        dueBy: { type: "string", description: "YYYY-MM-DD; defaults to today" },
+        taxCode: { type: "string", description: "optional tax code, applied at issue" },
+      },
+      required: ["tenantId", "source", "clientId", "instalmentIds"],
+    },
   },
 ];
 

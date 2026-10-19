@@ -305,10 +305,12 @@ export async function syncEnvelope(
           ? ((await c.query<{ id: string }>(`SELECT id FROM users WHERE id = $1`, [s.signerRef])).rows[0]?.id ?? null)
           : null;
         const ins = await c.query(
+          // DW-10f-2a (BFF §61.2): the schedule hash is copied from the contract row, as content_sha256 is.
           `INSERT INTO contract_signatures
              (id, tenant_id, contract_id, party, signer, signer_name, signer_title, ip_hash, user_agent, content_sha256,
-              provider, provider_envelope_id, signed_at, origin_site)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, $8, $9, $10, $11::timestamptz, $12)
+              schedule_sha256, provider, provider_envelope_id, signed_at, origin_site)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, $8, (SELECT schedule_sha256 FROM contracts WHERE id = $3),
+                   $9, $10, $11::timestamptz, $12)
            ON CONFLICT (contract_id, party) DO NOTHING`,
           [newId(), tenantId, contractId, party, signerId, (s.signerName ?? "").slice(0, 200) || null,
            s.signerTitle ? s.signerTitle.slice(0, 200) : null, k.contentSha256, account.name, envelopeId, s.signedAt, config.originSite],

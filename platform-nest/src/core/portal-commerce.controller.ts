@@ -45,6 +45,8 @@ import type { PoolClient } from "pg";
 import { claimHeadroom, hasCurrencyPrecision } from "../modules/invoice/issue";
 import { CONTRACT_SIGNED_COPY_FILE_ID, INVOICE_PDF_FILE_ID } from "./document-read-fields";
 import { CLIENT_REPORT_FILE_ROLE } from "./client-reports";
+// DW-10f-2a (BFF §61.6): the contract's payment schedule, as the portal reads it.
+import { readPortalSchedule } from "./contract-schedule";
 // PV5-10: online payment through the provider's hosted checkout. The decision and the checkout rows live in
 // src/payments/; this controller only admits the invoice through the portal scope first.
 import { providerForTenant } from "../payments/registry";
@@ -237,10 +239,11 @@ export class PortalCommerceController {
       const visible: Record<string, unknown> = { ...inv };
       delete visible.arInvoiceId;
       // PV5-04b: the tracker's lines carry the internal `projectId` (it defaults the service line at issue). The client
-      // sees what each line says and costs, never our project ids.
+      // sees what each line says and costs, never our project ids. DW-10f-3a (BFF §61.6): an instalment line's
+      // `contractId` and `instalmentId` are internal too; `kind`, `description`, `hours`, `rate` and `amount` stay.
       if (Array.isArray(visible.lines)) {
         visible.lines = (visible.lines as Array<Record<string, unknown>>).map((l) => {
-          const { projectId: _projectId, ...rest } = l ?? {};
+          const { projectId: _projectId, contractId: _contractId, instalmentId: _instalmentId, ...rest } = l ?? {};
           return rest;
         });
       }
@@ -510,8 +513,12 @@ export class PortalCommerceController {
           : Promise.resolve({ rows: [] as Array<Record<string, unknown>> }),
       ]);
       const clientSigned = signatures.rows.some((s: Record<string, unknown>) => s.party === "client");
+      // DW-10f-2a (BFF §61.6): the contract is already admitted through the portal scope (ownedContract), so its schedule
+      // is the caller's to read. Null without instalments; the date of an addition after signing, never who.
+      const schedule = await readPortalSchedule(c, contractId);
       return {
         ...k,
+        schedule,
         certifiedSigning: this.certifiedSigningView(tenantId, k, canSignFor(scope, k.clientId), clientSigned),
         // `canSign` is the exact conjunction the POST below enforces, surfaced so the UI disables the
         // button for the same reasons the server would refuse — rather than offering an action that
@@ -611,9 +618,12 @@ export class PortalCommerceController {
       }
 
       const ins = await c.query(
+        // DW-10f-2a (BFF §61.2): the signature also records the schedule it covers, copied from the contract row
+        // (never from the request), exactly as content_sha256 is.
         `INSERT INTO contract_signatures
-           (id, tenant_id, contract_id, party, signer, signer_name, signer_title, ip_hash, user_agent, content_sha256, origin_site)
-         VALUES ($1, $2, $3, 'client', $4, $5, $6, $7, $8, $9, $10)
+           (id, tenant_id, contract_id, party, signer, signer_name, signer_title, ip_hash, user_agent, content_sha256,
+            schedule_sha256, origin_site)
+         VALUES ($1, $2, $3, 'client', $4, $5, $6, $7, $8, $9, (SELECT schedule_sha256 FROM contracts WHERE id = $3), $10)
          ON CONFLICT (contract_id, party) DO NOTHING`,
         [
           newId(), tenantId, contractId, req.principal.userId,
