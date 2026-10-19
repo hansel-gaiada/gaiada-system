@@ -135,9 +135,11 @@ describe("preparing a return", () => {
     fireEvent.click(screen.getByRole("button", { name: "Prepare return" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("the ppn return for 2026-9 is already filed");
     fa.prepareTaxReturn.mockResolvedValue({ ok: false, error: "You don't have permission to prepare tax returns." });
-    fireEvent.click(screen.getByRole("button", { name: "Prepare return" }));
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("You don't have permission to prepare tax returns."));
-  });
+    // Under CI's loaded full-suite run the button can still read its pending text when the first refusal shows (CI 39208850989:
+    // "Unable to find … button … Prepare return"), so wait for it to come back before the second click.
+    fireEvent.click(await screen.findByRole("button", { name: "Prepare return" }, { timeout: 10_000 }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("You don't have permission to prepare tax returns."), { timeout: 10_000 });
+  }, 30_000);
 
   it("Show figures asks the server and shows its live answer on that draft, marked as not stored", async () => {
     fa.prepareTaxReturn.mockResolvedValue({
