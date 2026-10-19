@@ -32,6 +32,7 @@ import {
 } from "./document-jobs";
 import { readPdfTitle, verifySealedPdf } from "./document-seal";
 import { createCompanySealKey, verifyAgainstCompanyCertificates } from "../ops/seal-key";
+import { insertSentContractWithSchedule } from "../testing/contract-fixtures";
 
 const REDIS_TEST_URL = process.env.REDIS_URL_TEST ?? "";
 const svc = { authorization: "Bearer svc-token" };
@@ -418,6 +419,78 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("PV5-07 — invoice PDFs and seale
       const k = await signedContract(A, clientA, { bodyMd: "Unsigned." });
       await adminPool().query(`UPDATE contracts SET status = 'void' WHERE id = $1`, [k]);
       expect(await runContractSealJob(A, k)).toEqual({ status: "skipped", reason: "not_signed" });
+    });
+
+    // ── DW-10f-2a (BFF §61.9): the payment schedule on the sealed copy ─────────────────────────────
+    /** A contract sent WITH a schedule (the send's hash stored) and signed by both parties, each signature carrying the
+     *  schedule hash, the way the routes leave it. */
+    async function signedWithSchedule(bodyMd: string): Promise<{ id: string; sha: string }> {
+      const conn = await adminPool().connect();
+      let id: string;
+      try {
+        id = (await insertSentContractWithSchedule(conn, {
+          tenantId: A, clientId: clientA, value: "90000000", bodyMd,
+          instalments: [
+            { label: "Deposit", amount: "45000000", due: "on_signing" },
+            { label: "Balance", amount: "45000000", due: "2099-06-30" },
+          ],
+        })).contractId;
+      } finally {
+        conn.release();
+      }
+      await adminPool().query(`UPDATE contracts SET status = 'signed', signed_at = now() WHERE id = $1`, [id]);
+      const k = (await adminPool().query(`SELECT content_sha256, schedule_sha256 FROM contracts WHERE id = $1`, [id])).rows[0];
+      for (const [party, signer] of [["client", contact], ["provider", admin]] as const) {
+        await adminPool().query(
+          `INSERT INTO contract_signatures (id, tenant_id, contract_id, party, signer, signer_name, signer_title, ip_hash, user_agent,
+                                            content_sha256, schedule_sha256, origin_site)
+           VALUES ($1, $2, $3, $4, $5, 'Someone', 'Director', $6, 'Mozilla/5.0 (test)', $7, $8, 'test')`,
+          [newId(), A, id, party, signer, sha256Hex(`ip-${party}`), k.content_sha256, k.schedule_sha256],
+        );
+      }
+      return { id, sha: k.schedule_sha256 };
+    }
+
+    it("a schedule fixed at send is printed with its hash, after the hash is checked", async () => {
+      const { id, sha } = await signedWithSchedule("## Terms\nPaid in two parts.\n");
+      const out = await runContractSealJob(A, id);
+      expect(out.status, JSON.stringify(out)).toBe("stored");
+      const p = seen.payloads.find((x) => x.kind === "contract" && x.contract.id === id);
+      expect(p && p.kind === "contract" ? p.schedule : "missing").toEqual({
+        currency: "IDR", total: "90000000", sha256: sha,
+        instalments: [
+          { position: 1, label: "Deposit", amount: "45000000", due: "on_signing" },
+          { position: 2, label: "Balance", amount: "45000000", due: "2099-06-30" },
+        ],
+      });
+    });
+
+    it("a schedule row changed behind the freeze (trigger off, superuser) is REFUSED schedule_changed, never sealed", async () => {
+      const { id } = await signedWithSchedule("## Terms\nPaid in two parts, then quietly changed.\n");
+      const pool = adminPool();
+      await pool.query(`ALTER TABLE contract_instalments DISABLE TRIGGER contract_instalments_guard`);
+      try {
+        await pool.query(`UPDATE contract_instalments SET label = 'Something else' WHERE contract_id = $1 AND position = 2`, [id]);
+      } finally {
+        await pool.query(`ALTER TABLE contract_instalments ENABLE TRIGGER contract_instalments_guard`);
+      }
+      const out = await runContractSealJob(A, id);
+      expect(out).toEqual({ status: "refused", reason: "schedule_changed" });
+      expect(await liveRoleFiles(id, "contract_signed_copy")).toEqual([]);
+      expect((await job(A, "contract_signed_copy", id))?.last_error).toMatch(/^schedule_changed:/);
+    });
+
+    it("a schedule added after signing (DW-D49) is never printed: nobody signed it", async () => {
+      const k = await signedContract(A, clientA, { bodyMd: "## Terms\nSigned before schedules existed.\n" });
+      const added = await app.inject({
+        method: "POST", url: `/api/${A}/contracts/${k}/schedule/after-signing`, headers: asUser(admin),
+        payload: { instalments: [{ label: "All of it", amount: 150000000, due: "on_signing" }] },
+      });
+      expect(added.statusCode, added.body).toBe(201);
+      const out = await runContractSealJob(A, k);
+      expect(out.status, JSON.stringify(out)).toBe("stored");
+      const p = seen.payloads.find((x) => x.kind === "contract" && x.contract.id === k);
+      expect(p && p.kind === "contract" ? p.schedule : "missing").toBeNull();
     });
   });
 

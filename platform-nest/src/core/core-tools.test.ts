@@ -61,6 +61,8 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
       "invoicePayments.list",
       "contracts.createDraft",
       "contracts.updateDraft",
+      // DW-10f-2a (BFF §61.10): the draft's payment schedule (LOW, like updateDraft). Driven in contract-schedule-routes.test.ts.
+      "contracts.setSchedule",
       "contracts.send",
       "contracts.countersign",
       "invoicePayments.decide",
@@ -69,6 +71,9 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
       "invoices.issue",
       "invoices.voidIssued",
       "billingProfile.read",
+      // DW-10f-3a (BFF §61.10): invoicing from the schedule. A read and a LOW draft (a replay answers the same draft).
+      "invoices.billableInstalments",
+      "invoices.draftFromSchedule",
       // PV5-08: the client's legal and money documents (read, per client). Pinned in client-documents.db.test.ts.
       "documents.list",
       // PV4-07: client Conversation and meeting minutes for agents (PV-D23: agents draft, staff send). Two reads, the

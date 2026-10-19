@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **274** capabilities across **16** owners
-- **144** writes · 130 reads
-- Writes by impact: **high 26** · medium 41 · low 77
+- **277** capabilities across **16** owners
+- **146** writes · 131 reads
+- Writes by impact: **high 26** · medium 41 · low 79
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -43,10 +43,10 @@ unfalsifiable after.
 | assistant | `assistant` | 15 |
 | automation-console | `admin/automation` | 3 |
 | clients | `clients` | 25 |
-| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `notices?unitNodeId=:unitNodeId&scope=:scope&state=:state` · `positions` · `role-grants` | 76 |
+| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `notices?unitNodeId=:unitNodeId&scope=:scope&state=:state` · `positions` · `role-grants` | 78 |
 | finance | `finance` | 4 |
 | hr | `hr` | 14 |
-| invoice | `invoices` | 14 |
+| invoice | `invoices` | 16 |
 | it | `it` | 5 |
 | knowledge | `knowledge` | 3 |
 | monitoring | `monitoring` | 3 |
@@ -95,6 +95,7 @@ unfalsifiable after.
 | core | `contracts.get` | `GET` | `/api/:tenantId/contracts/:contractId` | read | — |
 | core | `contracts.list` | `GET` | `/api/:tenantId/contracts?clientId=:clientId` | read | — |
 | core | `contracts.send` | `POST` | `/api/:tenantId/contracts/:contractId/send` | write | `medium` |
+| core | `contracts.setSchedule` | `PUT` | `/api/:tenantId/contracts/:contractId/schedule` | write | `low` |
 | core | `contracts.updateDraft` | `PATCH` | `/api/:tenantId/contracts/:contractId` | write | `low` |
 | core | `conversation.closeThread` | `PATCH` | `/api/:tenantId/conversation/:threadId` | write | `low` |
 | core | `conversation.draftReply` | `POST` | `/api/:tenantId/conversation/:threadId/drafts` | write | `low` |
@@ -116,6 +117,8 @@ unfalsifiable after.
 | core | `iam.unassignPosition` | `POST` | `/api/:tenantId/positions/:positionId/unassign` | write | `medium` |
 | core | `invoicePayments.decide` | `POST` | `/api/:tenantId/invoice-payments/:paymentId/decide` | write | `high` |
 | core | `invoicePayments.list` | `GET` | `/api/:tenantId/invoice-payments?clientId=:clientId` | read | — |
+| core | `invoices.billableInstalments` | `GET` | `/api/:tenantId/invoices/billable-instalments?clientId=:clientId&dueBy=:dueBy` | read | — |
+| core | `invoices.draftFromSchedule` | `POST` | `/api/:tenantId/invoices` | write | `low` |
 | core | `invoices.issue` | `POST` | `/api/:tenantId/invoices/:invoiceId/issue` | write | `high` |
 | core | `invoices.issueReadiness` | `GET` | `/api/:tenantId/invoices/:invoiceId/issue-readiness` | read | — |
 | core | `invoices.voidIssued` | `POST` | `/api/:tenantId/invoices/:invoiceId/void` | write | `high` |
