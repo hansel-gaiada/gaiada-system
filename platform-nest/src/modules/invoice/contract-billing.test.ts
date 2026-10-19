@@ -43,6 +43,8 @@ describe.skipIf(!TEST_URL)("DW-10f-3a · invoices from the schedule (HTTP)", () 
   let signerA: string;  // client A's portal signer
   let clientA: string;
   let clientB: string;
+  let groupClient: string; // a client whose group_company_id is `sister` (PV-D2 / PV5-04 / PV5-05)
+  let sister: string;      // a company of the same root, the group client's counterparty
   let seq = 0;
   const ADMIN_OBO = { provider: "platform", externalId: "dw10f3a-admin" };
 
@@ -139,6 +141,9 @@ describe.skipIf(!TEST_URL)("DW-10f-3a · invoices from the schedule (HTTP)", () 
 
     clientA = await createClient(co, "DW10f-3a Client A");
     clientB = await createClient(co, "DW10f-3a Client B");
+    sister = await createCompany("DW10f Sister Co");
+    groupClient = await createClient(co, "DW10f-3a Group Client");
+    await withTenants([co], (c) => c.query(`UPDATE clients SET group_company_id = $2 WHERE id = $1`, [groupClient, sister]));
     await withTenants([co], (c) =>
       c.query(
         `INSERT INTO client_contacts (id, tenant_id, client_id, user_id, project_id, capability, status, activated_at, origin_site)
@@ -427,6 +432,81 @@ describe.skipIf(!TEST_URL)("DW-10f-3a · invoices from the schedule (HTTP)", () 
       expect(act.metadata.via).toMatchObject({ externalId: ADMIN_OBO.externalId });
       const again = await callTool("invoices.draftFromSchedule", { tenantId: co, source: "instalments", clientId: clientA, instalmentIds: k.ids });
       expect(again.json()).toMatchObject({ id: d.json().id, deduped: true });
+    });
+  });
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  describe("group clients and amendments (§61.14)", () => {
+    const journal = async (entryId: string) =>
+      (await adminPool().query<{ code: string; cp: string | null; side: string; amount: string }>(
+        `SELECT a.code, a.counterparty_company_id AS cp, l.side, l.amount::text AS amount
+           FROM finance_journal_lines l JOIN finance_accounts a ON a.id = l.account_id
+          WHERE l.entry_id = $1 ORDER BY l.line_no`, [entryId],
+      )).rows.map((r) => ({ code: r.code, cp: r.cp, side: r.side, amount: Number(r.amount) }));
+
+    it("a group client's instalment invoice posts to the intercompany 1290-* receivable; the void releases the claim and reverses", async () => {
+      const { ids } = await signedContract(groupClient, "40000000", [{ label: "Milestone 1", amount: "25000000", due: "on_signing" }, { label: "Milestone 2", amount: "15000000", due: FUTURE }]);
+      const r = await draftFrom({ clientId: groupClient, instalmentIds: [ids[0]] });
+      expect(r.statusCode, r.body).toBe(201);
+      const invId = r.json().id;
+      expect((await claimOf(ids[0])).invoice_id).toBe(invId);
+      expect((await claimOf(ids[1])).invoice_id).toBeNull();
+      expect((await req("POST", `/api/${co}/invoices/${invId}/approve`, adminB)).statusCode).toBe(200);
+      expect((await req("PATCH", `/api/${co}/invoices/${invId}/service-line`, adminA, { serviceLineKey: "services" })).statusCode).toBe(200);
+      const issued = await req("POST", `/api/${co}/invoices/${invId}/issue`, adminA);
+      expect(issued.statusCode, issued.body).toBe(200);
+      expect((await claimOf(ids[0])).invoice_id).toBe(invId);
+
+      const cu = (await adminPool().query(
+        `SELECT cu.counterparty_company_id AS cp, i.id AS ar, i.total::text AS total, i.journal_entry_id AS entry
+           FROM invoices v JOIN finance_ar_invoices i ON i.id = v.ar_invoice_id
+           JOIN finance_ar_customers cu ON cu.id = i.customer_id WHERE v.id = $1`, [invId],
+      )).rows[0];
+      expect(cu.cp).toBe(sister);
+      const ar = (await adminPool().query(
+        `SELECT quantity::text AS q, unit_price::text AS p FROM finance_ar_invoice_lines WHERE invoice_id = $1 ORDER BY line_no`, [cu.ar],
+      )).rows;
+      expect(ar.map((x: { q: string; p: string }) => [Number(x.q), Number(x.p)])).toEqual([[1, 25000000]]);
+      const tagged = (await adminPool().query<{ v: string }>(
+        `SELECT code AS v FROM finance_accounts WHERE tenant_id = $1 AND counterparty_company_id = $2 AND code LIKE '1290-%'`, [co, sister],
+      )).rows[0]?.v;
+      expect(tagged).toMatch(/^1290-[0-9A-F]{6}$/);
+      const total = Number(cu.total);
+      const post = await journal(cu.entry);
+      expect(post).toContainEqual({ code: tagged, cp: sister, side: "debit", amount: total });
+      expect(post.some((l) => l.code === "1130")).toBe(false); // never the AR control account
+
+      const v = await req("POST", `/api/${co}/invoices/${invId}/void`, adminA, { reason: "group invoice voided" });
+      expect(v.statusCode, v.body).toBe(200);
+      expect(v.json()).toMatchObject({ status: "void", releasedInstalments: 1, creditNoteId: expect.any(String) });
+      expect(await claimOf(ids[0])).toEqual({ invoice_id: null, claimed_at: null });
+      const cn = (await adminPool().query<{ entry: string }>(`SELECT journal_entry_id AS entry FROM finance_ar_credit_notes WHERE id = $1`, [v.json().creditNoteId])).rows[0];
+      expect(cn.entry).toBeTruthy();
+      expect(await journal(cn.entry)).toContainEqual({ code: tagged, cp: sister, side: "credit", amount: total });
+    });
+
+    it("an amendment with its own value and schedule bills apart from its agreement", async () => {
+      const base = await signedContract(clientB, "60000000", FIFTY);
+      const am = await signedContract(clientB, "20000000", [
+        { label: "Change A", amount: "5000000", due: "on_signing" },
+        { label: "Change B", amount: "15000000", due: FUTURE },
+      ], { cols: { kind: "amendment", amends_id: base.contractId, title: "DW10f-3a amendment" } });
+      const rows = (await billable(`?clientId=${clientB}&dueBy=${FUTURE}`)).json().items as Array<{
+        instalmentId: string; state: string; position: number; count: number; amount: number; contract: { id: string; kind: string };
+      }>;
+      const of = (id: string) => rows.filter((i) => i.contract.id === id);
+      expect(of(base.contractId).map((i) => [i.instalmentId, i.amount, i.position, i.count, i.contract.kind]))
+        .toEqual([[base.ids[0], 30000000, 1, 2, "agreement"], [base.ids[1], 30000000, 2, 2, "agreement"]]);
+      expect(of(am.contractId).map((i) => [i.instalmentId, i.amount, i.position, i.count, i.contract.kind]))
+        .toEqual([[am.ids[0], 5000000, 1, 2, "amendment"], [am.ids[1], 15000000, 2, 2, "amendment"]]);
+
+      const d = await draftFrom({ clientId: clientB, instalmentIds: [am.ids[0]] });
+      expect(d.statusCode, d.body).toBe(201);
+      expect(d.json()).toMatchObject({ lineCount: 1, total: 5000000 });
+      expect((await claimOf(am.ids[0])).invoice_id).toBe(d.json().id);
+      for (const id of [am.ids[1], ...base.ids]) expect((await claimOf(id)).invoice_id).toBeNull();
+      const after = (await billable(`?clientId=${clientB}&dueBy=${FUTURE}`)).json().items as Array<{ instalmentId: string; state: string }>;
+      const st = (id: string) => after.find((i) => i.instalmentId === id)?.state;
+      expect([st(am.ids[0]), st(am.ids[1]), st(base.ids[0]), st(base.ids[1])]).toEqual(["invoicing", "due", "due", "due"]);
     });
   });
 });
