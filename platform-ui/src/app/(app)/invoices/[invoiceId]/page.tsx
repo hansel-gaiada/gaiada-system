@@ -6,6 +6,7 @@ import { getActiveTenant } from "@/lib/tenant";
 import { can, isElevated } from "@/lib/rbac";
 import { getInvoice, getIssueReadiness } from "@/lib/invoice";
 import { invoiceDocumentState, DOCUMENT_PREPARING_TEXT } from "@/lib/billingView";
+import { contractHref, hasInstalmentLines, lineCells } from "@/lib/contractBilling";
 import { listMembers } from "@/lib/entities";
 import { serviceLinesOrNull } from "@/lib/billingNumbering-data";
 import { decodeText } from "@/lib/billingNumbering";
@@ -20,6 +21,7 @@ import { MaskedAccount } from "@/components/billing/MaskedAccount";
 import { InvoiceActions } from "./InvoiceActions";
 import { ServiceLinePicker } from "./ServiceLinePicker";
 import { VoidInvoice } from "./VoidInvoice";
+import { CancelDraft } from "./CancelDraft";
 import "@/components/billing/billing-screens.css";
 
 type Params = Promise<{ invoiceId: string }>;
@@ -30,6 +32,9 @@ type Params = Promise<{ invoiceId: string }>;
 //   issued (`sent`)  : the invoice of record: number, dates, the PDF, the issuer as it was frozen at issue, tax and
 //                      totals, a ledger link for the finance read tier, and Void behind a confirm;
 //   void / paid      : the same record, read-only.
+// DW-10f-3b: a line billed from a contract's payment schedule is a FIXED FEE (quantity 1, no rate) and links its contract; it never
+// prints the hours or rate it does not have (`lineCells`). A draft or approved invoice that was never issued gets "Cancel draft",
+// which hands its instalments back to the schedule; an issued one is voided with a reason, below.
 // Every figure is the API's, formatted and never recomputed. Whether the client sees the invoice is the backend's
 // `clientVisible` (PV3-09), never a guess from the status.
 export default async function InvoiceDetailPage({ params }: { params: Params }) {
@@ -43,6 +48,10 @@ export default async function InvoiceDetailPage({ params }: { params: Params }) 
   const inv = await getInvoice(userId, tenant, invoiceId);
   if (!inv) notFound();
   const canBill = can(me, "company.manage", tenant) || isElevated(me);
+  // DW-10f-3b: the invoice's instalment lines (BFF §61.5). The blockers about them link the client's contracts; an invoice that
+  // claims instalments is cancelled, not edited, and says what that gives back.
+  const instalmentLines = inv.lines.filter((l) => l.kind === "instalment");
+  const contractsHref = hasInstalmentLines(inv.lines) && inv.clientId ? `/clients/${encodeURIComponent(inv.clientId)}/billing` : null;
 
   // IAM-GAP-01/02 — per-INSTANCE narrowing `can()` cannot express: the invoice's own createdBy is
   // data, not a role, so it is read here rather than baked into a capability. A capability answers
@@ -101,6 +110,7 @@ export default async function InvoiceDetailPage({ params }: { params: Params }) 
             legacyUnknownCreator={legacyUnknownCreator}
             invoiceNo={inv.invoiceNo ?? null}
             blockerCount={readiness ? blockers.length : null}
+            contractsHref={contractsHref}
           />
         )}
       />
@@ -154,7 +164,7 @@ export default async function InvoiceDetailPage({ params }: { params: Params }) 
 
       {inv.status === "approved" && blockers.length > 0 && (
         <div style={{ marginBottom: 20 }}>
-          <IssueBlockers blockers={blockers} lead="This invoice can't be issued yet. Clear these first:" />
+          <IssueBlockers blockers={blockers} lead="This invoice can't be issued yet. Clear these first:" contractsHref={contractsHref} />
         </div>
       )}
 
@@ -209,8 +219,22 @@ export default async function InvoiceDetailPage({ params }: { params: Params }) 
 
       <Card title="Line items">
         <HairlineTable
-          columns={[{ label: "Description" }, { label: "Hours", align: "right" }, { label: "Rate", align: "right" }, { label: "Amount", align: "right" }]}
-          rows={inv.lines.map((l) => [l.description, String(l.hours), money(l.rate, inv.currency), money(l.amount, inv.currency)])}
+          columns={[{ label: "Description" }, { label: "Quantity", align: "right" }, { label: "Rate", align: "right" }, { label: "Amount", align: "right" }]}
+          rows={inv.lines.map((l) => {
+            // An instalment line has no hours and no rate: quantity 1 at a fixed fee, linked to the contract it bills.
+            const cells = lineCells(l);
+            return [
+              <span key="d">
+                {cells.description}
+                {cells.fixedFee && cells.contractId && inv.clientId ? (
+                  <>{" · "}<Link className="bs-link" href={contractHref(inv.clientId, cells.contractId)}>Contract</Link></>
+                ) : null}
+              </span>,
+              cells.quantity,
+              cells.fixedFee ? "Fixed fee" : money(l.rate, inv.currency),
+              money(cells.amount, inv.currency),
+            ];
+          })}
           tcols="2.4fr 0.6fr 0.8fr 0.8fr"
         />
         {issued && (
@@ -223,6 +247,16 @@ export default async function InvoiceDetailPage({ params }: { params: Params }) 
           </div>
         )}
       </Card>
+
+      {/* DW-10f-3b: an invoice never issued is cancelled, not voided: no credit note, and its instalments go back to the schedule.
+          The card stays once the invoice is void, so the answer to the click ("N instalments go back") is not lost on re-render. */}
+      {canBill && !issued && (inv.status === "draft" || inv.status === "approved" || inv.status === "void") && (
+        <div style={{ marginTop: 20 }}>
+          <Card title="Cancel draft">
+            <CancelDraft invoiceId={inv.id} status={inv.status} instalments={instalmentLines.length} />
+          </Card>
+        </div>
+      )}
 
       {issued && inv.status === "sent" && (
         <div style={{ marginTop: 20 }}>

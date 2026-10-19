@@ -95,3 +95,21 @@
 .bs-picker__row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
 .bs-picker__row .bs-field { min-width: 220px; }
 .bs-code { font: 600 14px/1.4 var(--font-mono, monospace); letter-spacing: 0.06em; color: var(--ink-strong); }
+
+/* ── DW-10f-3b: the instalment checklist on /invoices/new, and the exception disclosure ───────────────────────────────────── */
+.bs-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.bs-sched { width: 100%; border-collapse: collapse; font: 400 13px/1.5 var(--font-body); color: var(--ink-body); }
+.bs-sched th,
+.bs-sched td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+.bs-sched thead th { font: 600 12px/1.4 var(--font-body); color: var(--ink-subtle); }
+.bs-sched .bs-sched__num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bs-sched tr[data-state="upcoming"] td,
+.bs-sched tr[data-state="invoicing"] td { color: var(--ink-muted); }
+.bs-error__lead { margin: 0 0 4px; font: 500 13px/1.5 var(--font-body); }
+.bs-error ul { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+.bs-error li { font: 400 13px/1.5 var(--font-body); color: var(--ink-body); }
+.bs-pickform { display: grid; gap: 12px; }
+.bs-pickform__row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.bs-exception > summary { cursor: pointer; font: 600 13px var(--font-body); color: var(--accent-fg); padding: 6px 0; }
+.bs-exception[open] > summary { margin-bottom: 10px; }
+.bs-exception__body { display: grid; gap: 12px; }

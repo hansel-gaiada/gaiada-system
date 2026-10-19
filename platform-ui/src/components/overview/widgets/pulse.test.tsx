@@ -24,6 +24,7 @@ import * as itData from "@/lib/it-data";
 import * as itSecurity from "@/lib/itSecurity";
 import * as automation from "@/lib/automationFailures";
 import * as finData from "@/lib/finance-data";
+import * as billingData from "@/lib/contractBilling-data";
 import type { MonitoringSummary } from "@/lib/monitoringShared";
 import type { SocialPost } from "@/lib/socialShared";
 import type { PipelineGate } from "@/lib/pipeline";
@@ -45,6 +46,9 @@ vi.mock("@/lib/finance-data", () => ({
   reconcileTreasuryResult: vi.fn(), getTrialBalanceResult: vi.fn(),
 }));
 
+// DW-10f-3b: the Finance tile "Instalments due to invoice" reads the billable-instalments list (BFF §61.5).
+vi.mock("@/lib/contractBilling-data", () => ({ listBillableInstalmentsResult: vi.fn() }));
+
 const person = meFixture([member()]);
 const listRequests = vi.mocked(cr.listChangeRequests);
 const listGates = vi.mocked(pipeline.listInternalPendingGates);
@@ -58,6 +62,7 @@ const devices = vi.mocked(itData.listDevicesResult);
 const alerts = vi.mocked(itSecurity.listAlertsResult);
 const failures = vi.mocked(automation.listFailuresResult);
 const pendingPayments = vi.mocked(finData.listPendingPaymentsResult);
+const instalmentsDue = vi.mocked(billingData.listBillableInstalmentsResult);
 const arAging = vi.mocked(finData.getArAgingResult);
 const periodsRead = vi.mocked(finData.listPeriodsResult);
 const closeRead = vi.mocked(finData.getCloseReadinessResult);
@@ -87,16 +92,17 @@ const props = (pulse: readonly PulseTile[] | undefined, extra: Partial<OverviewW
 const tile = (name: string) => within(screen.getByRole("region", { name: "Pulse" })).getByText(name).closest("li")!;
 
 beforeEach(() => {
-  for (const m of [listRequests, listGates, summary, posts, accounts, leave, hrCases, payroll, devices, alerts, failures, pendingPayments, arAging, periodsRead, closeRead, ...Object.values(integrityReads)]) m.mockReset();
+  for (const m of [listRequests, listGates, summary, posts, accounts, leave, hrCases, payroll, devices, alerts, failures, pendingPayments, instalmentsDue, arAging, periodsRead, closeRead, ...Object.values(integrityReads)]) m.mockReset();
 });
 afterEach(() => vi.restoreAllMocks());
 
 describe("the registry's built tiles (DW-3e)", () => {
-  it("builds exactly Web Dev's three, Social Media's two, HR's four, Finance's four and IT's four, and no other", () => {
+  it("builds exactly Web Dev's three, Social Media's two, HR's four, Finance's five and IT's four, and no other", () => {
     const built: string[] = [];
     for (const w of [...WORKSPACES, GENERIC_WORKSPACE]) for (const t of w.pulse) if (!isPlanned(t)) built.push(`${w.key}/${t.key}`);
     expect(built.sort()).toEqual([
       "finance/close-progress",
+      "finance/instalments-due",
       "finance/integrity-findings",
       "finance/overdue-receivables",
       "finance/payments-to-confirm",
@@ -474,6 +480,55 @@ describe("Pulse, IT threat alerts (the widget, DW-7h)", () => {
   });
 });
 
+describe("Pulse, Finance: Instalments due to invoice (DW-10f-3b)", () => {
+  const due = (...states: string[]) => ({ kind: "ok", data: { dueBy: "2026-10-19", items: states.map((state, i) => ({ instalmentId: `i${i}`, state })) } }) as never;
+  const finTiles = () => props(tilesOf("finance"), { deptId: null });
+  const others = () => {
+    pendingPayments.mockResolvedValue({ kind: "ok", data: [] as never });
+    arAging.mockResolvedValue({ kind: "ok", data: [] as never });
+    periodsRead.mockResolvedValue({ kind: "ok", data: [] as never });
+    for (const r of Object.values(integrityReads)) r.mockResolvedValue({ kind: "ok", data: { clean: true, balanced: true, problems: [] } } as never);
+  };
+
+  it("counts only the due instalments, across every client, as the signed-in person, and links the invoice draft", async () => {
+    others();
+    instalmentsDue.mockResolvedValue(due("due", "upcoming", "invoicing", "due", "due"));
+    render(await Pulse(finTiles()));
+    expect(instalmentsDue).toHaveBeenCalledWith("u-1", "co-a");
+    const t = tile("Instalments due to invoice");
+    expect(within(t).getByText("3")).toBeInTheDocument();
+    expect(within(t).getByRole("link")).toHaveAttribute("href", "/invoices/new");
+  });
+
+  it("an honest zero is 0", async () => {
+    others();
+    instalmentsDue.mockResolvedValue(due("upcoming"));
+    render(await Pulse(finTiles()));
+    expect(within(tile("Instalments due to invoice")).getByText("0")).toBeInTheDocument();
+  });
+
+  it("🔴 a failed read is Unavailable (a thrown one too) and a refused one No access: never 0, and the other tiles still read", async () => {
+    others();
+    pendingPayments.mockResolvedValue({ kind: "ok", data: [{ id: "p" }] as never });
+    instalmentsDue.mockResolvedValue({ kind: "unavailable", reason: "502" });
+    const first = render(await Pulse(finTiles()));
+    const failed = tile("Instalments due to invoice");
+    expect(within(failed).getByText("Unavailable")).toBeInTheDocument();
+    expect(within(failed).queryByText("0")).toBeNull();
+    expect(within(tile("Client payments to confirm")).getByText("1")).toBeInTheDocument();
+    first.unmount();
+
+    instalmentsDue.mockRejectedValue(new Error("boom"));
+    const second = render(await Pulse(finTiles()));
+    expect(within(tile("Instalments due to invoice")).getByText("Unavailable")).toBeInTheDocument();
+    second.unmount();
+
+    instalmentsDue.mockResolvedValue({ kind: "forbidden" });
+    render(await Pulse(finTiles()));
+    expect(within(tile("Instalments due to invoice")).getByText("No access")).toBeInTheDocument();
+  });
+});
+
 describe("Pulse, Finance (the widget, DW-7e-2)", () => {
   const fin = () => tilesOf("finance");
   const finProps = () => props(fin(), { deptId: null });
@@ -488,6 +543,7 @@ describe("Pulse, Finance (the widget, DW-7e-2)", () => {
   };
   const happy = () => {
     pendingPayments.mockResolvedValue({ kind: "ok", data: pay(3) });
+    instalmentsDue.mockResolvedValue({ kind: "ok", data: { dueBy: "2026-10-19", items: [] } });
     arAging.mockResolvedValue({ kind: "ok", data: aging(["100", "0", "0", "0", "0"]) });
     periodsRead.mockResolvedValue({ kind: "ok", data: [period()] });
     closeRead.mockResolvedValue({ kind: "ok", data: { blockers: [], ready: true } });
