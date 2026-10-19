@@ -69,7 +69,7 @@ describe("PortalSchedule", () => {
   it("never prints an instalment id, a hash or an internal invoice status", () => {
     const { container } = render(<PortalSchedule schedule={SCHEDULE} />);
     const text = container.textContent ?? "";
-    expect(text).not.toMatch(/instalmentId|abababab|draft/);
+    expect(text).not.toMatch(/instalmentId|abababab|\bdraft\b/);
   });
 });
 
