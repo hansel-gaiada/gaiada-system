@@ -270,7 +270,25 @@ describe.skipIf(!TEST_URL)("DW-10f-1 · contract_instalments, the schedule hash,
       const { k, rows: [i1] } = await signedFiftyFifty();
       const inv = await invoice([line(k, i1)], { status: "approved" });
       await q(A, `UPDATE invoices SET approved_by = $2, approved_at = now(), service_line_key = $3 WHERE id = $1`, [inv, actor, SEED_SERVICE_LINES[0][0]]);
+      // DW-10f-3a: issue readiness now refuses an instalment line its invoice does not claim (INSTALMENT_LINES_INVALID),
+      // so the invoice is issued WITH its claim, and the claim is then cleared behind the guard (superuser, trigger off)
+      // to leave an issued invoice and an unclaimed instalment for the guard to judge. The guard is skipped for THIS session's
+      // transaction only (`session_replication_role = replica`, superuser), never with ALTER TABLE ... DISABLE TRIGGER, which
+      // would switch it off for every suite running in parallel against the same database.
+      await claim(i1.id, inv);
       await issueInvoice(A, inv, actor);
+      const sc = await adminPool().connect();
+      try {
+        await sc.query("BEGIN");
+        await sc.query("SET LOCAL session_replication_role = replica");
+        await sc.query(`UPDATE contract_instalments SET invoice_id = NULL, claimed_at = NULL WHERE id = $1`, [i1.id]);
+        await sc.query("COMMIT");
+      } catch (e) {
+        await sc.query("ROLLBACK");
+        throw e;
+      } finally {
+        sc.release();
+      }
       await expect(claim(i1.id, inv)).rejects.toMatchObject({ code: "PD611" });
     });
 

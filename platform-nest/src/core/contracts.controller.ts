@@ -567,6 +567,12 @@ export class ContractsController {
       if (k.status !== "draft") throw new BadRequestException(`this contract is already ${k.status}`);
       if (!k.file_id && !k.body_md) throw new BadRequestException("attach a document or write the terms before sending");
 
+      // PV-5's signature checks come FIRST (BFF §61.14: the PV-5 suites' assertions do not change): the threshold, a value in
+      // another currency than the threshold's, the certified provider. Only then the payment schedule (DW-10f-2a).
+      const tier = await signatureTierFor(c, tenantId, k);
+      if (tier === "certified" && !certifiedSigningProvider()) {
+        throw new ConflictException({ message: NO_CERTIFIED_PROVIDER, reason: "no_certified_provider" });
+      }
       // DW-10f-2a (BFF §61.1 row 3, §61.4): a contract with a value above zero is sent only with a schedule that adds up
       // exactly to it; an unvalued one carries none. Checked here, in SQL numeric, so the caller gets the figures; the
       // database's send trigger (PD612) stays the wall underneath.
@@ -592,10 +598,6 @@ export class ContractsController {
         if (prec.rows[0].ok !== true) throw refusal(400, "schedule_precision");
       }
 
-      const tier = await signatureTierFor(c, tenantId, k);
-      if (tier === "certified" && !certifiedSigningProvider()) {
-        throw new ConflictException({ message: NO_CERTIFIED_PROVIDER, reason: "no_certified_provider" });
-      }
       const sha = await contractContentSha256(c, tenantId, k);
       // DW-10f-1 (BFF §61.2): the send also fixes the payment schedule, storing its hash from the one SQL function. The
       // database refuses (PD612) a valued contract whose schedule does not add up to the value, or a wrong hash; the
