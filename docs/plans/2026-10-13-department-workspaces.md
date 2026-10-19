@@ -1361,6 +1361,7 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 | DW-D47 | DW-10f: which withholding applies to a freelancer's bill, PPh 21 or PPh 23 (BFF §61.15)? | **Owner (2026-10-18), first-hand: per the vendor's tax code.** Finance sets the withholding code on each freelancer's vendor record, and the bill computes it with `finance_tax_compute()`. With no code there is no withholding, and the draft shows a warning (BFF §61.8) |
 | DW-D48 | DW-10f: may one invoice mix the schedule's fixed-fee lines with hourly lines? | **Owner (2026-10-18), first-hand: no.** An invoice is either instalments or hours. The hourly draft stays as an explicit exception (BFF §61.5) |
 | DW-D49 | DW-10f: how is an agreement billed that was signed before 10f, with a value and no schedule? The contract's default was the hourly exception or an amendment | **Owner (2026-10-18), first-hand: Finance may add a payment schedule once to an already-signed agreement that has a value and no schedule.** It must add up to the value; the addition is recorded in the contract's history (who and when); afterwards it is frozen with its own `schedule_sha256`, like a schedule fixed at send. It is the only way a signed contract's schedule can change: the database refuses every other path (BFF §61.4a, PERMISSION-CONTRACT §51) |
+| DW-D50 | DW-10f: freelancer bills go through the existing payables approval, where one finance manager may both draft and approve a bill (AP's maker-checker is the role split only; client invoices need a different approver). Require a second person? | **Owner (2026-10-19), first-hand: keep as today.** The role split (`bill_entry` vs `approve`) is the control; one finance manager may draft and approve a freelancer bill |
 
 ---
 
@@ -1650,7 +1651,7 @@ written by the orchestrating session.
 5. 10e after its contract (cross-company authorization: the orchestrating session reviews every line,
    and the core may take an Opus implementer).
 
-**Numbers.** Rulings DW-D32 to DW-D35, and DW-D39 to DW-D49 for 10e and 10f. BFF §57 (10a), §58 (10b), §59 (10c), §60 (10e), §61 (10f).
+**Numbers.** Rulings DW-D32 to DW-D35, and DW-D39 to DW-D50 for 10e and 10f. BFF §57 (10a), §58 (10b), §59 (10c), §60 (10e), §61 (10f).
 PERMISSION-CONTRACT §47 (10a), §48 (10c), §49 (10e), §51 (10f). Migrations take the next free prefix after main's newest at landing
 (`lint-migration-names.mjs` after every rebase). Branches `dw/10*`.
 
@@ -1971,6 +1972,7 @@ These are built in code but give no real data until someone outside engineering 
 
 ## Decision log
 
+- **2026-10-19 (owner, first-hand, on DW-10f-4a's finding):** DW-D50: payables approval stays as today; one finance manager may draft and approve a freelancer bill (the role split is the control), §11.4.
 - **2026-10-18 (owner, first-hand, on DW-10f's owner questions):** DW-D47 (withholding on a freelancer bill follows the tax code Finance sets on the freelancer's vendor; no code, no withholding, and the draft shows a warning), DW-D48 (no mixed invoices: instalments or hours; the hourly draft stays as an explicit exception) and DW-D49 (Finance may add a payment schedule once to an already-signed agreement with a value and none: it adds up to the value, who and when are recorded, and it is then frozen with its own hash; the only way a signed contract's schedule changes), all §11.4; BFF §61 and PERMISSION-CONTRACT §51 revised to match. The other four questions keep their defaults (BFF §61.15). 10f is built next after 10g-2, once 10g-2 is released (§12.2, "10f design").
 - **2026-10-18 (owner, first-hand, on DW-10e's owner questions):** DW-D43 (heads also see what their department sent: DW-10e-6, from the requesting company's own lead seats), DW-D44 (the portal shows group clients their work like any client's), DW-D45 (clients pay the agency per contract: a payment schedule on the signed agreement becomes fixed-fee invoice lines; time logs count effort and pay freelancers; Billable unchanged, §60.12 step 7 withdrawn) and DW-D46 (freelancers' logged hours draft their vendor bill). DW-D45 and DW-D46 are planned as DW-10f, built later ("Plan it, build later"), §11.4 and §12.2.
 - **2026-10-17 (owner, first-hand, on DW-10e's live setup):** go for the live setup ("do all of it": read the assignments, create the holding's client record at the agency, create the four routes, one labelled drive), and DW-D42 (signers: the company admins), §11.4. 2026-10-18: the holding has no company admin, so the owner named hansel@ for both. Done on live 2026-10-18 (BFF §60.12).
