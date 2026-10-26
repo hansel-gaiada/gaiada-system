@@ -49,7 +49,7 @@ The phase has three kinds of work. Only the first is code.
    treats clients as third parties to be "detected and excluded". The portal holds clients' own personal data, which
    the pack never covers:
    - contact names and emails;
-   - typed signatures with their hash, time and IP;
+   - typed signatures with their content hash, time, a salted hash of the IP and the user agent;
    - messages and files;
    - payment status from Midtrans.
 
@@ -195,7 +195,7 @@ The phase has three kinds of work. Only the first is code.
 - **What:** `legal/client-portal-addendum.md`, shaped like `legal/website-visitor-addendum.md`. It must cover:
   - **Scope:** the portal's data subjects (client contacts) and data categories:
     - identity and contact details;
-    - the signature record (name, content hash, time, IP and user agent);
+    - the signature record (name, content hash, time, a salted IP hash and the user agent; PGL-03 found the raw IP is not stored);
     - Conversation messages and files;
     - payment status (no card data, which stays with Midtrans);
     - notifications and mail.
