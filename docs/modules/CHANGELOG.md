@@ -11,6 +11,21 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.173.0` - M6-P6p: a delivered domain's DNS records become a Web Dev task that the ERP's own DNS check closes (WSK-D89 (4)) (2026-10-27) - PROTOTYPED
+
+- **When a site's DNS checklist first exists** (after `claimProvisionedSiteDomain` or `bindSiteDelivery`), `syncSiteDnsTask` creates ONE `pm_tasks` row in the site's project, with PM's own `createPmTaskInTx`.
+  - The task names the domain, lists every record (type, name, target) and links the console.
+  - It is best-effort after commit: a failure is logged and never fails the write.
+  - A re-run updates the same task. One open task per site is enforced by a lock on the site row and by the partial unique index `ux_wsdt_one_open_per_site`.
+- **Assignee:** the project's active owner (`project_owner`); otherwise the holder of the company's own Web Dev lead seat (`web_dev_head`, the same seat join as `person-scope.ts`, whose two consts are now exported); otherwise unassigned on the site's project board. A site with no project gets no task.
+- **Closing.** `checkSiteDnsTask` reuses P6i's `readSiteDns` (one read-only resolver lookup).
+  - With every record `pointing`, it completes the task (`erp_check`, with a note in the task).
+  - A task already completed by hand is recorded as `manual`, with `erp_saw_pointing` set to what the check saw.
+  - A domain change closes the old task (`domain_changed`) and opens a new one; an archived site closes it (`site_archived`).
+- **Routes and sweep:** `POST sites/:id/dns/recheck` (as `webdev_site` update; a malformed id is 404) and `GET sites/:id/dns/task` (as read). A sweep re-checks only open tasks every 15 minutes (`WEBDEV_DNS_SWEEP_INTERVAL_MS`). No DNS credential and no DNS API; the egress inventory stays green.
+- **Migration** `202610270910_webdev_site_dns_tasks.sql`: one new table, third-wall RLS (tenant plus `app_module_allowed('webdev')`, FORCE), no backfill.
+- **Tests:** 17 DB tests and 3 unit tests; CI 40357876555 platform-nest shards green on the branch. Not built yet: the console UI for the task link and the re-check button.
+
 ### platform-ui `0.199.0` - SCP-K visual review: four layout fixes found by looking at the Social skin (2026-10-26) - PROTOTYPED
 
 - **How they were found.** The first visual review of the Social skin: screenshots of a DEMO_MODE production build with `SHELL_SKIN_PREVIEW=social`, desktop and phone, light and dark. The behaviour and axe tests passed on all four.
