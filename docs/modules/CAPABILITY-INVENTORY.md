@@ -43,7 +43,7 @@ unfalsifiable after.
 | assistant | `assistant` | 15 |
 | automation-console | `admin/automation` | 3 |
 | clients | `clients` | 26 |
-| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `notices?unitNodeId=:unitNodeId&scope=:scope&state=:state` · `positions` · `role-grants` | 79 |
+| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `notices?unitNodeId=:unitNodeId&scope=:scope&state=:state` · `positions` · `role-grants` | 80 |
 | finance | `finance` | 4 |
 | hr | `hr` | 14 |
 | invoice | `invoices` | 16 |
