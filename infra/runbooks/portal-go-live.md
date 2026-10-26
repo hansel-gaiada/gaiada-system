@@ -61,8 +61,8 @@ The ERP box is `gda-aicenter`, the checkout is `~/gaiada`, the compose directory
 
 ## Preconditions (all must hold before step 1)
 
-1. **Staging is done (PV-D45).** Real MFA and real billing come after staging, never before it.
-2. **The owner actions are done.** None of these can be done by code or by this runbook:
+1. **Staging has happened (PV-D45).** Real MFA and real billing come after staging, never before it.
+2. **The owner actions have been carried out.** None of these can be done by code or by this runbook:
    - the Midtrans merchant account, with its production server key and the id of the company that owns it;
    - the real billing values for each company that bills clients (legal name, address, tax id, bank, account, invoice
      prefix);
@@ -170,7 +170,7 @@ recreate (rule 3); verify (rule 4 and the named id); and know the revert before 
 - **Open item for the owner:** the steps to register the Payment Notification URL and the redirect URLs in the PRODUCTION
   Midtrans dashboard are only the values in `midtrans-payments.md` section 3 (`https://erp.gaiada.com/api/webhooks/payments/midtrans`
   and the portal invoices page). This repo has no record of the production dashboard's own screens or of a
-  production-notification test; the sandbox drive (PV5-13 part B) is itself not yet done. Record who registered them
+  production-notification test; the sandbox drive (PV5-13 part B) has not happened yet either. Record who registered them
   and when.
 - **`signatures.simulation`:** PV-D44 dropped PSrE and `SIGNATURE_SIMULATION_ENABLED=0` is already on live. There is no
   certified signing step in this cut-over. Verify it reads PASS now and again at step 6; if it reads BLOCK, set it to `0`
