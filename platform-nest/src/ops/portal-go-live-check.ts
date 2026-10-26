@@ -95,9 +95,9 @@ export interface EnvSnapshot {
     host: string;
     /** MAIL_STREAM_NOTIFY_FROM (an address is not a secret). */
     from: string;
-    /** CLIENT_MAIL_ENABLED === "1" (the flag PGL-09 introduces; the code does not read it yet). */
+    /** CLIENT_MAIL_ENABLED === "1" (the client-mail flag, PGL-09; the platform reads it through `readClientMailEnabled`). */
     clientMailEnabled: boolean;
-    /** CONVERSATION_CLIENT_MAIL_ENABLED === "1" (the flag the code reads today: config.mail.conversationClientMailEnabled). */
+    /** CONVERSATION_CLIENT_MAIL_ENABLED === "1" (its read-only alias for one release, PGL-09). */
     conversationClientMailEnabled: boolean;
   };
 }
@@ -110,7 +110,8 @@ function keyClass(key: string): "SIM-" | "SB-" | "other" | null {
 }
 
 /** Reads the running process's configuration, through the SAME `config` object the platform reads (so a name or a parse rule
- *  can never drift from the code). Only CLIENT_MAIL_ENABLED is read from the environment directly: no code reads it yet. */
+ *  can never drift from the code). The two client-mail names are read from the environment directly, each on its own, so the
+ *  evidence can say which one is set; the platform treats either as on (`readClientMailEnabled`). */
 export function snapshotFromConfig(env: NodeJS.ProcessEnv = process.env): EnvSnapshot {
   const notify = config.mail.streams.notify;
   const m = config.payments.midtrans;
@@ -130,7 +131,7 @@ export function snapshotFromConfig(env: NodeJS.ProcessEnv = process.env): EnvSna
       host: (notify.transport === "brevo" ? notify.brevo.host : notify.relay.host).trim(),
       from: notify.from.trim(),
       clientMailEnabled: env.CLIENT_MAIL_ENABLED === "1",
-      conversationClientMailEnabled: config.mail.conversationClientMailEnabled,
+      conversationClientMailEnabled: env.CONVERSATION_CLIENT_MAIL_ENABLED === "1",
     },
   };
 }
@@ -421,7 +422,7 @@ export function checkMailClient(env: EnvSnapshot): CheckResult {
   const m = env.mail;
   if (m.clientMailEnabled) return { id: "mail.client", status: "PASS", evidence: "CLIENT_MAIL_ENABLED is 1" };
   if (m.conversationClientMailEnabled) {
-    return { id: "mail.client", status: "PASS", evidence: "CONVERSATION_CLIENT_MAIL_ENABLED is 1 (the alias the code reads until CLIENT_MAIL_ENABLED lands in PGL-09)" };
+    return { id: "mail.client", status: "PASS", evidence: "CONVERSATION_CLIENT_MAIL_ENABLED is 1 (the alias of CLIENT_MAIL_ENABLED for one release)" };
   }
   return { id: "mail.client", status: "BLOCK", evidence: "client mail is off: neither CLIENT_MAIL_ENABLED nor CONVERSATION_CLIENT_MAIL_ENABLED is 1, so clients receive no mail" };
 }

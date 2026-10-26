@@ -50,8 +50,9 @@ secret: a key is reported as set or unset and by its prefix class (`SIM-`, `SB-`
 | `legal.gate1`, `mail.deliverability`, `contrast.manual` | nothing: always MANUAL | never. Each prints the runbook step that clears it |
 
 Environment names are read through the same `config` object the platform uses, so a name or a parsing rule cannot drift.
-`CLIENT_MAIL_ENABLED` is the one exception: no code reads it yet (PGL-09 introduces it), so it is read from the environment
-directly and the conversation flag counts as its alias until then.
+The client-mail flag is the one exception: `CLIENT_MAIL_ENABLED` and its one-release alias `CONVERSATION_CLIENT_MAIL_ENABLED`
+are each read from the environment directly, so the evidence can say which one is set. The platform treats either as on
+(`readClientMailEnabled` in `config.ts`, PGL-09).
 
 ### `mfa.real` is MANUAL on purpose
 

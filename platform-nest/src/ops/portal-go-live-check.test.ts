@@ -451,7 +451,7 @@ describe("PGL-01 · the snapshot reads the code's own names and never keeps a se
   const saved = {
     mfa: config.mfaSimulationEnabled, sig: config.signatureSimulationEnabled,
     pay: { ...config.payments.midtrans }, paySim: config.payments.simulationEnabled,
-    mail: config.mail.enabled, conv: config.mail.conversationClientMailEnabled,
+    mail: config.mail.enabled, clientMail: config.mail.clientMailEnabled,
     transport: config.mail.streams.notify.transport, from: config.mail.streams.notify.from,
     relay: { ...config.mail.streams.notify.relay }, brevo: { ...config.mail.streams.notify.brevo },
   };
@@ -461,7 +461,7 @@ describe("PGL-01 · the snapshot reads the code's own names and never keeps a se
     Object.assign(config.payments.midtrans, saved.pay);
     config.payments.simulationEnabled = saved.paySim;
     config.mail.enabled = saved.mail;
-    config.mail.conversationClientMailEnabled = saved.conv;
+    config.mail.clientMailEnabled = saved.clientMail;
     config.mail.streams.notify.transport = saved.transport;
     config.mail.streams.notify.from = saved.from;
     Object.assign(config.mail.streams.notify.relay, saved.relay);
