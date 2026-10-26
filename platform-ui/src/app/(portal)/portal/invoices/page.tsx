@@ -108,7 +108,7 @@ function Row({ i }: { i: Awaited<ReturnType<typeof listPortalInvoices>>[number] 
         </div>
       </div>
       <div style={{ textAlign: "right" }}>
-        <Eyebrow style={{ display: "block", fontSize: 10, opacity: 0.55 }}>
+        <Eyebrow style={{ display: "block", fontSize: 10, color: "var(--ink-subtle)" }}>
           {i.balance > 0 ? "Due" : "Total"}
         </Eyebrow>
         <span className="cp-money cp-money--sm" style={i.balance > 0 && i.overdue ? { color: "var(--status-danger-fg)" } : undefined}>
