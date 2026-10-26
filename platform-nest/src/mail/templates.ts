@@ -251,6 +251,66 @@ function renderConversationMessageStaff(payload: ConversationMessageStaffPayload
   return { subject, html, text };
 }
 
+/** PGL-09 (PV-D47) — a contract was sent to the client to sign. A POINTER mail, like the conversation one: it names the
+ *  contract by its title and nothing else (no clauses, no amounts, no dates), links to the portal page and nothing more.
+ *  No token, no session and no capability in the link (M11): an expired session takes the normal sign-in path at the door.
+ *  It is informational: signing happens in the portal, never by replying to this mail and never by clicking a link here. */
+export interface ContractSentPayload {
+  href: string;
+  /** The contract's own title (intake.ts copies it from the notification's `contractTitle`). */
+  contractTitle?: string;
+  [key: string]: unknown;
+}
+
+function renderContractSent(payload: ContractSentPayload): RenderedMail {
+  const href = asStr(payload.href);
+  const named = asStr(payload.contractTitle);
+  const subject = stripHeaderInjection("A contract is ready for you to review and sign");
+  const text =
+    `A contract${named ? ` ("${named}")` : ""} is ready for you to review and sign in your client portal. ` +
+    `Sign in to read it: ${href}`;
+  const html =
+    `<p>A contract${named ? ` (<strong>${escapeHtml(named)}</strong>)` : ""} is ready for you to review and sign in your client portal.</p>` +
+    `<p>Sign in to read it:</p>` +
+    `<p><a href="${escapeHtml(safeHref(href))}">${escapeHtml(href)}</a></p>`;
+  return { subject, html, text };
+}
+
+/** Group the integer part of a plain decimal string with commas, without ever turning money into a JS float. Anything that
+ *  is not a plain non-negative decimal returns null (the mail then omits the amount rather than print something odd). */
+function groupedAmount(raw: string): string | null {
+  const m = /^(\d{1,18})(?:\.(\d{1,6}))?$/.exec(raw);
+  if (!m) return null;
+  const whole = m[1].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return m[2] ? `${whole}.${m[2]}` : whole;
+}
+
+/** PGL-09 (PV-D47) — an invoice was issued to the client. A POINTER mail: the invoice number and the total, and no other
+ *  figure (no lines, no tax split, no bank details, no due date). The link is the plain portal page; no token (M11). */
+export interface InvoiceIssuedPayload {
+  href: string;
+  invoiceNo?: string;
+  total?: string;
+  currency?: string;
+  [key: string]: unknown;
+}
+
+function renderInvoiceIssued(payload: InvoiceIssuedPayload): RenderedMail {
+  const href = asStr(payload.href);
+  const no = asStr(payload.invoiceNo);
+  const currency = /^[A-Za-z]{3}$/.test(asStr(payload.currency)) ? asStr(payload.currency).toUpperCase() : "";
+  const amount = groupedAmount(asStr(payload.total));
+  const total = amount ? `${currency ? `${currency} ` : ""}${amount}` : "";
+  const subject = stripHeaderInjection(no ? `Invoice ${no} is ready` : "A new invoice is ready");
+  const what = `${no ? `Invoice ${no}` : "A new invoice"}${total ? `, total ${total},` : ""}`;
+  const text = `${what} is ready in your client portal. Sign in to view it and pay: ${href}`;
+  const html =
+    `<p>${no ? `Invoice <strong>${escapeHtml(no)}</strong>` : "A new invoice"}${total ? `, total <strong>${escapeHtml(total)}</strong>,` : ""} is ready in your client portal.</p>` +
+    `<p>Sign in to view it and pay:</p>` +
+    `<p><a href="${escapeHtml(safeHref(href))}">${escapeHtml(href)}</a></p>`;
+  return { subject, html, text };
+}
+
 const TEMPLATES
 : Record<string, (payload: Record<string, unknown>) => RenderedMail> = {
   "approval.warning": (p) => renderApprovalWarning(p as ApprovalMailPayload),
@@ -260,6 +320,8 @@ const TEMPLATES
   "social.post_failed": (p) => renderSocialPostFailed(p as SocialPostFailedPayload),
   "monitoring.alert": (p) => renderMonitoringAlert(p as MonitoringAlertPayload),
   "conversation.message.staff": (p) => renderConversationMessageStaff(p as ConversationMessageStaffPayload),
+  "contract.sent": (p) => renderContractSent(p as ContractSentPayload),
+  "invoice.issued": (p) => renderInvoiceIssued(p as InvoiceIssuedPayload),
 };
 
 export function knownTemplateKeys(): string[] {

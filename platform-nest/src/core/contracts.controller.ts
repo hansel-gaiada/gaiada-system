@@ -33,7 +33,7 @@ import { contractClientVisible, staffClientVisible, staffInvoicePaymentClientVis
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { scrubText } from "./scrub";
-import { notifyBestEffort, resolveClientRecipients } from "./client-notify";
+import { notifyBestEffort, resolveClientRecipients, resolvePortalReachRecipients } from "./client-notify";
 import { recordInvoiceRevision, snapshotInvoice } from "../modules/invoice/invoice-revisions";
 import { mapLedgerErrors, postConfirmedPayment } from "../modules/invoice/issue";
 import { check, type Resource } from "../rbac/cerbos";
@@ -614,7 +614,10 @@ export class ContractsController {
       const scheduleSha256 = upd.rows[0].scheduleSha256;
       await emitEvent(c, tenantId, "contract", contractId, "contract.sent", { clientId: k.client_id, title: k.title });
       // Resolved inside the transaction; the notify() calls happen after it commits.
-      const recipients = await resolveClientRecipients(c, { clientId: k.client_id, projectId: k.project_id, kind: "signature" });
+      // PGL-09 (PV-D47): the contacts who can SIGN THIS contract, by the portal's own rule (core/client-notify.ts): a signer or
+      // admin of this client who can reach it (a project-limited signer only for their project, or a project-less master
+      // agreement). A viewer is never told to sign. These are also the mail's recipients when the client-mail flag is on.
+      const recipients = await resolvePortalReachRecipients(c, { clientId: k.client_id, entity: "contract", entityId: contractId, signersOnly: true });
       return { title: k.title, recipients, sha, tier, scheduleSha256 };
     }), "send");
     await writeActivity(tenantId, req.principal.userId, "sent", "contract", contractId, {
@@ -626,6 +629,7 @@ export class ContractsController {
       entityType: "contract",
       entityId: contractId,
       severity: "warning",
+      contractTitle: out.title,
     });
     return {
       ok: true, status: "sent", notified: out.recipients.length, contentSha256: out.sha, signatureTier: out.tier,
