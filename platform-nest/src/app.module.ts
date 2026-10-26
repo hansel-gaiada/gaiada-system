@@ -150,6 +150,9 @@ import { SocialController } from "./modules/social/social.controller";
 // social.controller.ts's edit surface this wave). Shares SocialController's exact route prefix; no
 // individual route path collides (social-reports.controller.ts's own header).
 import { SocialReportsController } from "./modules/social/social-reports.controller";
+// SCP-1c: the settings and the cycles (deadline table, ready-by, schedule health), on their OWN controller class under SocialController's
+// route prefix; no route path collides (`settings`, `cycles`, `cycles/:cycleId/health` are new).
+import { SocialCyclesController } from "./modules/social/pipeline/cycles.controller";
 // SMM-38 phase 38c — LinkedIn's OAuth grant flow. `LinkedInOAuthController` shares SocialController's
 // route prefix (same reasoning as SocialReportsController above); `LinkedInOAuthCallbackController`
 // is tenant-agnostic at a FIXED path, mirroring SearchGoogleOauthCallbackController below for the
@@ -259,6 +262,8 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     // surface this wave). Shares SocialController's exact route prefix; no individual route path
     // collides (social-reports.controller.ts's own header).
     SocialReportsController,
+    // SCP-1c: settings + cycles (BFF §63.4, §63.5), own controller class, same prefix.
+    SocialCyclesController,
     // SMM-38 phase 38c: LinkedIn's OAuth grant flow — `LinkedInOAuthController` shares
     // SocialController's route prefix (same reasoning as SocialReportsController above);
     // `LinkedInOAuthCallbackController` is tenant-agnostic at a fixed path, same reason as

@@ -143,6 +143,7 @@ import { startInboxTriageLoop, startInboxSlaGuardLoop } from "./modules/social/i
 // rather than edit this file; not one of them has collided here.
 import { startBestTimePullLoop } from "./modules/social/best-time-job";
 import { startContentBriefSweepLoop } from "./modules/social/content-brief-job";
+import { startCycleReadyByLoop } from "./modules/social/pipeline/cycle-ready-by-job";
 // SMM-10 — the reconcile safety poll + D-22's creator-info verifier install. Registering the
 // verifier is a pure in-memory decision (no network I/O — see publish-precondition.ts's own seam
 // doc), so it runs unconditionally at boot, unlike the interval-driven loop below.
@@ -641,6 +642,12 @@ async function bootstrap(): Promise<void> {
       startContentBriefSweepLoop(config.social.contentBrief.weeklySweep.intervalMs);
       // eslint-disable-next-line no-console
       console.log(`social content-brief sweep (smm-content-brief-sweep) on: every ${config.social.contentBrief.weeklySweep.intervalMs}ms`);
+    }
+    // SCP-1c: the nightly recompute of every open cycle's ready_by (holiday changes). Dark by default; spends nothing.
+    if (config.social.cycleReadyBy.enabled) {
+      startCycleReadyByLoop(config.social.cycleReadyBy.intervalMs);
+      // eslint-disable-next-line no-console
+      console.log(`social cycle ready-by (social-cycle-ready-by) on: every ${config.social.cycleReadyBy.intervalMs}ms`);
     }
     if (config.social.triage.classifyEnabled) {
       startInboxTriageLoop(config.social.triage.classifyIntervalMs);

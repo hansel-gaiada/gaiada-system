@@ -1252,6 +1252,14 @@ const configBase = {
         intervalMs: Number(process.env.SOCIAL_CONTENT_BRIEF_SWEEP_INTERVAL_MS ?? 7 * 24 * 3600 * 1000),
       },
     },
+    // SCP-1c — `social-cycle-ready-by` (pipeline/cycle-ready-by-job.ts): the nightly recompute of every open cycle's `ready_by`
+    // (the deadline less the buffer in working days), because the HR holiday calendar changes under a stored value. DARK BY DEFAULT like
+    // every sweep here, though it spends nothing (no gateway call): the routes that move a deadline or the buffer recompute on their own,
+    // so a company that never switches this on only misses holiday-driven drift. Once a day is enough: holidays change at most daily.
+    cycleReadyBy: {
+      enabled: process.env.SOCIAL_CYCLE_READY_BY_ENABLED === "1" || process.env.SOCIAL_CYCLE_READY_BY_ENABLED === "true",
+      intervalMs: Number(process.env.SOCIAL_CYCLE_READY_BY_INTERVAL_MS ?? 24 * 3600 * 1000),
+    },
     // SMM-27 — best-time-to-post: a nightly CLASSICAL STATS sweep (best-time-job.ts), never a
     // gateway call — no model, no prompt, deliberate per the ticket's own binding instruction.
     // ── NO DATA EXISTS, AND WON'T SOON (D-23) — every threshold below is a SELF-IMPOSED config
