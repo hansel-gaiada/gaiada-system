@@ -986,6 +986,23 @@ export function isLeadOf(me: Me, unitPath: readonly string[], companyId: string 
   return unitPath.some((id) => led.includes(id));
 }
 
+/** SCP-Q19 (owner, 2026-10-26), PERMISSION §53.4 `canLeadSocial`: the four Social approvers of `companyId`. True when the person
+ *  leads, in that company, its Social Media unit or its GM unit (`units`: the company's node ids for each, as the shell resolves its
+ *  departments; a lead grant is a live §50 lead seat, which the server assembles into `org_unit_lead` grants with `tenantIds`), holds
+ *  `owner` at global scope or on that company, or is `platform_admin`. Nobody else: not company_admin, not manager, no social grant.
+ *  A mirror for hiding rows; the server decides. */
+export function canLeadSocial(
+  me: Me,
+  companyId: string | null | undefined,
+  units: { social: readonly string[]; gm: readonly string[] },
+): boolean {
+  if (isElevated(me)) return true;
+  if (companyId == null) return false;
+  if (me.roles.some((r) => r.role === "owner" && (r.scopeType === "global" || (r.scopeType === "company" && r.scopeId === companyId)))) return true;
+  const led = leadUnits(me, companyId);
+  return [...units.social, ...units.gm].some((id) => led.includes(id));
+}
+
 /** `can()` OR a unit-lead grant covering `unitPath` in a company the person belongs to. */
 export function canInUnit(
   me: Me,
