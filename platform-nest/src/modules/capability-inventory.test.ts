@@ -38,30 +38,13 @@ import { join } from "node:path";
 import { resetModules, registerModule, allModules } from "./registry";
 import { allCoreTools, resetCoreTools, registerAllCoreTools } from "../core/core-tools";
 import type { McpToolDef } from "./contract";
+import { COMPILED_IN_MODULES } from "./compiled-in-modules";
 
-import { agencyModule } from "./agency";
-import { pmModule } from "./pm";
-import { itModule } from "./it";
-import { monitoringModule } from "./monitoring";
-import { invoiceModule } from "./invoice";
-import { clientsModule } from "./clients";
-import { knowledgeModule } from "./knowledge";
-import { automationConsoleModule } from "./automation-console";
-import { hrModule } from "./hr";
-import { assistantModule } from "./assistant";
-import { searchModule } from "./search";
-import { reportsModule } from "./reports";
-import { webdevModule } from "./webdev";
-import { socialModule } from "./social";
-import { financeModule } from "./finance";
 
 const ARTIFACT = join(__dirname, "..", "..", "..", "docs", "modules", "CAPABILITY-INVENTORY.md");
 
-const ALL_MODULES = [
-  agencyModule, pmModule, itModule, monitoringModule, invoiceModule, clientsModule,
-  knowledgeModule, automationConsoleModule, hrModule, assistantModule, searchModule,
-  reportsModule, webdevModule, socialModule, financeModule,
-];
+// ONE source of truth: the same list main.ts registers.
+const ALL_MODULES = COMPILED_IN_MODULES;
 
 interface GoldenRow { owner: string; families: string[]; drivers: number }
 

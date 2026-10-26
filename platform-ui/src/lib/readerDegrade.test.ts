@@ -37,6 +37,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { scanAppAndComponents } from "./readerDegradeAppScan";
+import { APP_DEGRADE_ALLOWLIST } from "./readerDegradeAppAllowlist";
 
 const LIB = join(__dirname);
 
@@ -178,5 +180,34 @@ describe("AGN-3 · the reader-degrade invariant", () => {
       "skipMissing() started degrading a 403 — the one helper that was already correct is the one " +
         "every other file is supposed to converge on",
     ).toBe(false);
+  });
+});
+
+// T4 (agentic-native close-out) - the same invariant over `src/app` and `src/components`, as a RATCHET.
+// The lib sweep above cannot see a page that folds a refusal into `[]` inline, and the audit found
+// ~90 of them. Fixing all at once is T5; this makes sure the number can only go down.
+describe("T4 - reader-degrade ratchet over src/app and src/components", () => {
+  const found = scanAppAndComponents(join(LIB, ".."));
+
+  it("scans something - a sweep that matches nothing would pass vacuously", () => {
+    expect(Object.keys(found).length, "scan found no degrade sites at all - the patterns or paths broke").toBeGreaterThan(20);
+  });
+
+  it("no NEW file folds a failed read into an empty value, and no listed file gains a site", () => {
+    const worse = Object.entries(found)
+      .filter(([f, n]) => n > (APP_DEGRADE_ALLOWLIST[f] ?? 0))
+      .map(([f, n]) => `${f}: ${n} site(s), allowed ${APP_DEGRADE_ALLOWLIST[f] ?? 0}`);
+    expect(
+      worse,
+      "a denied read rendered as nothing found is the worst agentic failure. Use readResult() and render " +
+        "<ReadRefusal> instead of .catch(() => []). Do NOT raise the allowlist.",
+    ).toEqual([]);
+  });
+
+  it("the allowlist only shrinks - lower it when a file improves", () => {
+    const better = Object.entries(APP_DEGRADE_ALLOWLIST)
+      .filter(([f, n]) => (found[f] ?? 0) < n)
+      .map(([f, n]) => `${f}: allowlist says ${n}, found ${found[f] ?? 0} - lower or delete the entry in readerDegradeAppAllowlist.ts`);
+    expect(better, "good news: sites were removed. Ratchet the allowlist down to match.").toEqual([]);
   });
 });
