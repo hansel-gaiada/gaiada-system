@@ -56,6 +56,9 @@ export type Gate =
   | { kind: "hasRoutes"; routeKind?: RequestKind }
   /** `isElevated(me)`: global `platform_admin`. */
   | { kind: "elevated" }
+  /** The four Social approvers (SCP-Q19, PERMISSION §53.4): rbac.ts's `canLeadSocial` over the active company's Social Media and GM units
+   *  (`GateContext.units`). For the Social rows only they may open (Settings, SCP-1c; the Team dashboard, SCP-5d). */
+  | { kind: "leadSocial" }
   /** `isPlatformOperator(me)` (PV-D18). */
   | { kind: "platformOperator" }
   /** The Group area: the root owner or `platform_admin`, while the active company is the root (PV-D11). */

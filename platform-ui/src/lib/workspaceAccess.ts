@@ -15,7 +15,7 @@
 // Nothing here is a security boundary. `gateAllows` mirrors the retired classic nav and the consoles; the server
 // refuses everything it must, and every read is narrowed there.
 import type { Me } from "@/lib/platform";
-import { can, canInUnit, isElevated, isLeadOf, leadUnits, unitPathOf, type Capability } from "@/lib/rbac";
+import { can, canInUnit, canLeadSocial, isElevated, isLeadOf, leadUnits, unitPathOf, type Capability } from "@/lib/rbac";
 import { packFor, ROW_MODULE } from "@/lib/packs";
 import { activeCompany, isPlatformOperator, isRootCompany, isRootOwner, moduleOn } from "@/lib/companyContext";
 import { gmAccessFor } from "@/lib/gm";
@@ -53,6 +53,9 @@ export interface GateContext {
    *  `hasWorkspace` gate. Absent means "not known", and that gate then hides: it never offers a link to a department the
    *  caller cannot show exists. */
   workspaces?: readonly string[];
+  /** The active company's department node ids per workspace key (`workspaceUnitsOf`). Read only by the `leadSocial` gate, for the Social
+   *  Media and GM units. Absent: no unit is known, so only that gate's owner and platform_admin arms can allow. */
+  units?: Readonly<Record<string, readonly string[]>>;
   /** The active company's routes to other group companies' departments (`GET requests/routes`, DW-10e, BFF §60.9), read once by the
    *  shell. Read only by the `hasRoutes` gate and by `routeActionsFor`. `undefined` = not known and `null` = the read failed: both
    *  HIDE, like `workspaces`, so a person is never offered a link to a form that can only refuse.
@@ -132,6 +135,8 @@ export function gateAllows(gate: Gate | undefined, ctx: GateContext): boolean {
       return Array.isArray(ctx.routes) && (ctx.routes as readonly RequestRoute[]).some((r) => !gate.routeKind || r.kind === gate.routeKind);
     case "elevated":
       return isElevated(ctx.me);
+    case "leadSocial":
+      return canLeadSocial(ctx.me, ctx.tenantId, { social: ctx.units?.["social-media"] ?? [], gm: ctx.units?.gm ?? [] });
     case "platformOperator":
       return isPlatformOperator(ctx.me);
     case "rootGroup":
@@ -252,6 +257,18 @@ export function resolveMyWorkspaces(input: { me: Me; tenantId: string | null; ro
  *  count: there is no department to send a request to). */
 export function workspaceKeysOf(ws: MyWorkspaces): string[] {
   return [...new Set(ws.all.filter((r) => r.deptId !== null).map((r) => r.workspace.key))];
+}
+
+/** The active company's department node ids per workspace key, for the `leadSocial` gate (SCP-Q19): its Social Media unit and its GM unit
+ *  are found the way every GM surface finds them, by the workspace each department resolves to. */
+export function workspaceUnitsOf(ws: MyWorkspaces): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const r of ws.all) {
+    if (r.deptId === null) continue;
+    const ids = (out[r.workspace.key] ??= []);
+    if (!ids.includes(r.deptId)) ids.push(r.deptId);
+  }
+  return out;
 }
 
 /** The active company's department whose workspace is `workspaceKey` (`workspaceFor`, the one name match: the agency

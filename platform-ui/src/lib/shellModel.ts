@@ -12,7 +12,7 @@ import { ADMIN_ROWS, ASSISTANT_ROW, COMPANY_ROWS, hrefFor, isPlanned, sidebarRow
 import { can } from "@/lib/rbac";
 import type { RequestRoute } from "@/lib/requests";
 import { routeAskLabel, routeHref } from "@/lib/requests";
-import { concreteRows, gateAllows, homeArea, routeActionsFor, withheldTabPaths, workspaceKeysOf, type ApprovalsRead, type ConcreteRow, type GateContext, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
+import { concreteRows, gateAllows, homeArea, routeActionsFor, withheldTabPaths, workspaceKeysOf, workspaceUnitsOf, type ApprovalsRead, type ConcreteRow, type GateContext, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
 import type { Area } from "@/lib/areas";
 import { effectiveSkin, type SkinChoice, type SkinKey } from "@/lib/skins";
 
@@ -87,6 +87,8 @@ export function buildShellModel(input: {
   const homeRef = workspaces.home.kind === "workspace" ? workspaces.home.ref : null;
   // Which departments this company has, for the `hasWorkspace` gate (DW-5f: "Ask Creatives" needs a Creatives).
   const departments = workspaceKeysOf(workspaces);
+  // Their node ids per workspace, for the `leadSocial` gate (SCP-Q19: the company's Social Media and GM units).
+  const units = workspaceUnitsOf(workspaces);
 
   const seen = new Set<string>();
   const out: ShellWorkspace[] = [];
@@ -95,7 +97,7 @@ export function buildShellModel(input: {
     const dedupe = `${ref.workspace.key}:${ref.deptId ?? ""}`;
     if (seen.has(dedupe)) return;
     seen.add(dedupe);
-    const ctx = { me, tenantId, unitPath: ref.unitPath, deptId: ref.deptId, workspaces: departments, approvals, routes };
+    const ctx = { me, tenantId, unitPath: ref.unitPath, deptId: ref.deptId, workspaces: departments, units, approvals, routes };
     const raw = sidebarRows(ref.workspace);
     const creates = ref.workspace.creates.flatMap((key) => {
       const action = ref.workspace.quickActions.find((a) => a.key === key);
@@ -130,7 +132,7 @@ export function buildShellModel(input: {
   for (const ref of workspaces.all) add(ref, false);
 
   // The Company and Admin areas belong to no department.
-  const flat = { me, tenantId, unitPath: [] as string[], deptId: null, workspaces: departments, approvals, routes };
+  const flat = { me, tenantId, unitPath: [] as string[], deptId: null, workspaces: departments, units, approvals, routes };
   const company = concreteRows(COMPANY_ROWS, flat);
   const admin = concreteRows(ADMIN_ROWS, flat);
   const companyTop = concreteRows([ASSISTANT_ROW], flat);
