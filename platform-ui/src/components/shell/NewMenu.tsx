@@ -10,9 +10,9 @@ import { useRailTooltip } from "./railTooltip";
 // SCP-Kc: `row` draws the trigger as a menu row (the Social skin's "Create") instead of the gold button. It is the same menu with the same
 // items. The sidebar's nav column scrolls, which would clip an absolutely placed menu, so in row mode the menu is placed by the trigger's
 // rectangle (CSS reads `--pin-menu-top` and `--pin-menu-left`) and Escape closes it.
-export function NewMenu({ items, row }: { items: { label: string; href: string }[]; row?: { label: string; icon: IconName } }) {
+export function NewMenu({ items, row }: { items: { label: string; href: string }[]; row?: { label: string; icon: IconName; bar?: boolean } }) {
   const [open, setOpen] = useState(false);
-  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
+  const [at, setAt] = useState<{ top: number; left: number; bottom: number } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const { tip, triggerProps } = useRailTooltip(row?.label ?? "New");
   useEffect(() => {
@@ -28,9 +28,9 @@ export function NewMenu({ items, row }: { items: { label: string; href: string }
 
   const menu = open && (
     <div
-      className={`erp-new__menu${row ? " erp-new__menu--pin" : ""}`}
+      className={`erp-new__menu${row ? (row.bar ? " erp-new__menu--bar" : " erp-new__menu--pin") : ""}`}
       role="menu"
-      {...(row && at ? { style: { "--pin-menu-top": `${at.top}px`, "--pin-menu-left": `${at.left}px` } as CSSProperties } : {})}
+      {...(row && at ? { style: { "--pin-menu-top": `${at.top}px`, "--pin-menu-left": `${at.left}px`, "--pin-menu-bottom": `${at.bottom}px` } as CSSProperties } : {})}
     >
       {items.map((it) => (
         <Link key={it.href} href={it.href} role="menuitem" className="erp-new__item" onClick={() => setOpen(false)}>
@@ -39,6 +39,29 @@ export function NewMenu({ items, row }: { items: { label: string; href: string }
       ))}
     </div>
   );
+
+  if (row?.bar) {
+    // The phone's bottom bar (SCP-Ke): an icon-only button, its menu opening upward from it.
+    return (
+      <div className="erp-new erp-new--bar" ref={ref}>
+        <button
+          type="button"
+          className="ws-bar__btn"
+          aria-label={row.label}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            setAt({ top: r.top, left: r.left, bottom: window.innerHeight - r.top + 8 });
+            setOpen((o) => !o);
+          }}
+        >
+          <Icon name={row.icon} size={24} stroke={2} />
+        </button>
+        {menu}
+      </div>
+    );
+  }
 
   if (row) {
     return (
@@ -50,7 +73,7 @@ export function NewMenu({ items, row }: { items: { label: string; href: string }
           aria-expanded={open}
           onClick={(e) => {
             const r = e.currentTarget.getBoundingClientRect();
-            setAt({ top: r.top, left: r.right + 8 });
+            setAt({ top: r.top, left: r.right + 8, bottom: 0 });
             setOpen((o) => !o);
           }}
           {...triggerProps}
@@ -72,4 +95,10 @@ export function NewMenu({ items, row }: { items: { label: string; href: string }
       {menu}
     </div>
   );
+}
+
+/** The New menu's items: the workspace's own create actions first, then the shell's, a later item with the same href dropped (DW-2f). The
+ *  sidebar and the phone's bottom bar (SCP-Ke) both open the menu with exactly these. */
+export function menuItemsFor(creates: readonly { label: string; href: string }[], newItems: readonly { label: string; href: string }[]): { label: string; href: string }[] {
+  return [...creates, ...newItems.filter((it) => !creates.some((c) => c.href === it.href))];
 }

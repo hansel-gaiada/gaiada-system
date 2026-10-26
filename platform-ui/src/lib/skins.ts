@@ -39,6 +39,11 @@ export interface Skin {
   label: string;
   /** The menu's pinned entries, in order. Null: no pinned menu, every row in its group (the Standard shell). */
   pinned: readonly PinnedItem[] | null;
+  /** On a phone (SCP-Ke): the keys of the pinned entries drawn in the bottom bar, in order. An entry that is not offered (ticketed, or a row the person
+   *  lacks) is simply absent from the bar. */
+  phoneBar: readonly string[];
+  /** On a phone: the keys drawn at the top right of the top bar, in order. Whatever is in neither list is listed in the More sheet's first section. */
+  phoneTop: readonly string[];
 }
 
 /** The Social Media team's design (plan §6.2). Kc draws it; rows whose page is not built yet carry the ticket that builds it. */
@@ -63,8 +68,13 @@ const SOCIAL_PINNED: readonly PinnedItem[] = [
 ];
 
 export const SKINS: Readonly<Record<SkinKey, Skin>> = {
-  standard: { key: "standard", label: "Standard", pinned: null },
-  social: { key: "social", label: "Social", pinned: SOCIAL_PINNED },
+  standard: { key: "standard", label: "Standard", pinned: null, phoneBar: [], phoneTop: [] },
+  // The design's phone: bottom bar Home, Search, Create, Tasks, Profile; Notifications and Messages at the top (plan §6.2).
+  social: {
+    key: "social", label: "Social", pinned: SOCIAL_PINNED,
+    phoneBar: ["home", "search", "create", "tasks", "profile"],
+    phoneTop: ["notifications", "messages"],
+  },
 };
 
 /** The skins drawn for everyone. Standard always; Kg adds Social once SCP-1d, 1e and 1k are live (plan §8). */
@@ -123,4 +133,21 @@ export function pinnedFor(skin: SkinKey, rows: readonly ConcreteRow[]): Concrete
 export function activePinKey(pins: readonly ConcretePinned[], active: { rowKey: string; tabKey: string } | null): string | null {
   if (!active) return null;
   return pins.find((p) => p.kind === "link" && p.row === active.rowKey && (p.wholeRow || p.tab === active.tabKey))?.key ?? null;
+}
+
+/** The entries of `pins` named by `keys`, in the order of `keys` (an entry that is not in `pins` is absent). */
+const pickPins = (pins: readonly ConcretePinned[], keys: readonly string[]): ConcretePinned[] =>
+  keys.flatMap((k) => pins.find((p) => p.key === k) ?? []);
+
+/** The phone's bottom bar for a skin (SCP-Ke): its `phoneBar` entries the person is offered, in the skin's order. */
+export const phoneBarFor = (skin: SkinKey, pins: readonly ConcretePinned[]): ConcretePinned[] => pickPins(pins, SKINS[skin].phoneBar);
+
+/** The phone's top-right entries for a skin: its `phoneTop` entries the person is offered, in order. */
+export const phoneTopFor = (skin: SkinKey, pins: readonly ConcretePinned[]): ConcretePinned[] => pickPins(pins, SKINS[skin].phoneTop);
+
+/** The pinned links a phone has no other place for: neither in the bottom bar nor at the top (a phone has no menu column), in the menu's order.
+ *  The More sheet lists them first, so every pinned page, the AI Assistant included, stays one tap away. Shell entries are always in the bar or at the top. */
+export function phoneMenuFor(skin: SkinKey, pins: readonly ConcretePinned[]): Extract<ConcretePinned, { kind: "link" }>[] {
+  const placed = new Set([...SKINS[skin].phoneBar, ...SKINS[skin].phoneTop]);
+  return pins.filter((p): p is Extract<ConcretePinned, { kind: "link" }> => p.kind === "link" && !placed.has(p.key));
 }

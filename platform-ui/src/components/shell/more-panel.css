@@ -101,3 +101,16 @@ html[data-sidebar="collapsed"] .erp-app[data-skin="social"] .ws-more .ws-switch 
 @media (max-width: 760px) {
   .erp-app[data-skin="social"] .ws-more { left: 0; right: 0; width: auto; max-width: none; z-index: 110; }
 }
+
+/* ---- The phone's full-screen sheet (SCP-Ke): the same panel, opened from the top bar's More button ---- */
+/* Above 760px the sheet's button is not drawn, so a sheet left open by a resize is hidden rather than drawn beside the menu. */
+@media (min-width: 761px) {
+  .erp-app[data-skin="social"] .ws-more--sheet { display: none; }
+}
+@media (max-width: 760px) {
+  .erp-app[data-skin="social"] .ws-more--sheet { padding-top: env(safe-area-inset-top); animation: ws-sheet-in var(--dur-base) var(--erp-ease); }
+  .erp-app[data-skin="social"] .ws-more--sheet .ws-more__foot { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+  .erp-app[data-skin="social"] .ws-more--sheet .ws-more__close { top: calc(20px + env(safe-area-inset-top)); }
+}
+@keyframes ws-sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .erp-app[data-skin="social"] .ws-more--sheet { animation: none; } }

@@ -4,6 +4,7 @@ import type { Theme } from "@/lib/prefs";
 import { NavToggle } from "./NavToggle";
 import { NotificationBell } from "./NotificationBell";
 import { WorkspaceTopBarBell } from "./WorkspaceTopBarBell";
+import { SkinPhoneTop } from "./SkinPhoneTop";
 import { SpecialAccessChip } from "./SpecialAccessChip";
 import { TopBarSearch } from "./TopBarSearch";
 import { UserMenu } from "./UserMenu";
@@ -34,6 +35,8 @@ export function WorkspaceTopBar({ me, tenantId, theme, special, unrestricted }: 
         <Suspense fallback={<NotificationBell unread={null} items={[]} loading />}>
           <WorkspaceTopBarBell me={me} tenantId={tenantId} />
         </Suspense>
+        {/* SCP-Ke: the Social skin's phone controls (Notifications, More); nothing for Standard. */}
+        <SkinPhoneTop />
         <UserMenu name={me.name} secondary={me.title ?? me.email} initials={initials} compact clientView={(me.clientOf ?? []).length > 0} theme={theme} />
       </div>
     </header>
