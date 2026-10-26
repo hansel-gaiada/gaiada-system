@@ -171,6 +171,44 @@ derivedRoles:
             request.principal.attr.clientAdminOf.exists(a,
               a.clientId == request.resource.attr.clientId && a.tenantId == request.resource.attr.tenantId)
 
+    # ═══════ SCP-1b (PERMISSION-CONTRACT §53.4, §53.9) -- the Social Media content pipeline ═══════════════════════
+    # social_copywriter / social_designer -- two scope-only ROLES (global `roles` rows, granted at company scope directly or
+    #   through a Social Media seat's role set). The SAFE shape (an unconditional global branch and an unconditional
+    #   company-tenant branch, no attribute gate), so they mix with any rule and raise no Pattern C finding. Mapped to
+    #   themselves in the bundle generator.
+    - name: social_copywriter
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.grants.exists(g, g.role == "social_copywriter" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    - name: social_designer
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.grants.exists(g, g.role == "social_designer" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    # social_approver_seat -- the HoD and the GM: the principal is one of `approverIds`, the live lead-seat holders of the
+    #   company's Social Media unit and its GM unit, computed by the handler per company from that company's own positions
+    #   (modules/social/pipeline-authz.ts loadSocialApproverIds, the §50 seat rule), never from a grant or a body. A seat is a
+    #   relationship, not a grant: no bundle carries a key through it (DIRECT maps it to no real role, the
+    #   client_website_editor precedent) and no perm_* mirror reads it. Written in the client_contact_admin shape (a top-level
+    #   attribute gate before the `.exists`), so the hazard scan classes it on the attribute-gate axis. An unfed list ([])
+    #   contains nobody. Every rule naming it keeps `variables.inTenant`, so another company's seat holders never reach here.
+    - name: social_approver_seat
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.approverIds) &&
+            request.resource.attr.approverIds.exists(id, id == request.principal.id)
+
     # ═══════ M5-W1a -- the writers' room: four editorial roles as SCOPED grants ═══════════════════════════════
     # docs/plans/2026-10-11-m5-writers-room-design.md §2.2. The ROLES `webdesk_writer`, `webdesk_translator`,
     # `webdesk_seo_reviewer`, `webdesk_editor` are grants stored as data: a `user_roles` row at scopeType
@@ -2581,6 +2619,66 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "social.ledger.admin" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # SCP-1b (PERMISSION-CONTRACT §53.10): seven social mirrors, the generic global-or-company shape. `proofread` (one
+    # scope-only role holds it); the five approver-only actions (social_post approve, social_engagement plan and budget,
+    # social_report approve and deliver: the permission-native owner's arm; uiGrantable:false keys no real role reaches
+    # through a self-scoped rule); and social_report read (so the owner opens what it checks).
+    - name: perm_social_post_proofread
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.post.proofread" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_social_post_approve
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.post.approve" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_social_engagement_plan
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.engagement.plan" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_social_engagement_budget
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.engagement.budget" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_social_report_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.report.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_social_report_approve
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.report.approve" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_social_report_deliver
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "social.report.deliver" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_portal_* (IAM-04-B7, 2026-08-13) — WIRED, after IAM-04-B6 found this kind BLOCKED.
     # `resource_portal.yaml`'s `client` rule is company-scope-ONLY (no global branch,
     # `missing-scope-branch`) — a live Pattern-C "other-narrow" finding
@@ -2686,6 +2784,16 @@ derivedRoles:
         match:
           expr: >-
             request.principal.attr.perms.exists(g, g.key == "portal.converse" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
+    # SCP-1b (2026-10-26, PERMISSION-CONTRACT §53.8): the 10th `perm_portal_*` mirror, same shape and same safety argument
+    # as the 9 above (company-scope-only, faithfully mirroring the `client` role-arm rule). The handler requires signing
+    # capability on top (`requireSignerFor`).
+    - name: perm_portal_approve_spend
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "portal.approve_spend" &&
               g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
 
     # ══════════ IAM-14b (2026-08-22) — integration_connection, SELF-SCOPED MIRROR ONLY ══════════

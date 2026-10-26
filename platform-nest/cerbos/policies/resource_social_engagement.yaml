@@ -104,3 +104,37 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_social_engagement_set_scope"]
       condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+
+    # ═══ SCP-1b (PERMISSION-CONTRACT §53.2, §53.6) — the content pipeline ═══
+    # Every rule above is byte-for-byte unchanged. company_admin, manager and the module tiers are named in no rule below.
+    # The brand book is read by the copywriter and the in-team designer.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["social_copywriter", "social_designer"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # `plan` (the allocation, the deadline table, the settings, the Team dashboard) and `budget` (the monthly boost budget
+    # and the client's money answers) belong to the four social approvers only (SCP-Q18, SCP-Q19): the seat arm, the owner's
+    # mirrors, and the platform_admin wildcard. Handlers send {kind:"social_engagement", id?, tenantId, module:"social",
+    # approverIds}.
+    - actions: ["plan", "budget"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["social_approver_seat"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["plan"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_engagement_plan"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["budget"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_engagement_budget"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    # Unattended automations and bots neither plan nor commit a client's money (§53.3; the resource_work_request.yaml
+    # shape). Beats every ALLOW, the wildcard included.
+    - actions: ["plan", "budget"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot"]

@@ -162,6 +162,16 @@ export interface Resource {
    *  Cerbos rule compares it (the per-unit narrowing needs the caller's placement as of today, which Cerbos cannot read, so the
    *  handler and the SQL mirrors apply it); it is in the payload so the decision carries the unit the event names. Omitted -> "". */
   unitNodeId?: string;
+  /** SCP-1b (docs/PERMISSION-CONTRACT.md §53.4, §53.5) -- the company's live lead-seat holders of its Social Media unit and
+   *  its GM unit (the HoD and the GM), for `social_post` / `social_engagement` / `social_report`. Backs the
+   *  `social_approver_seat` derived role (`approverIds.exists(id, id == principal.id)`). Computed BY THE HANDLER per company
+   *  (`modules/social/pipeline-authz.ts` loadSocialApproverIds), never from a body. Omitted -> [] -> contains nobody, so no
+   *  seat approver matches (fail closed). */
+  approverIds?: string[];
+  /** SCP-1b (§53.4, §53.5) -- a pipeline post's design route, `creatives` or `in_team` (`social_posts.creative_source`).
+   *  Backs the two `design` rules, each of which tests it. Read from the post row, never from a body. Omitted -> "" -> neither
+   *  designer rule matches (fail closed). */
+  creativeSource?: string;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -308,6 +318,11 @@ function resourcePayload(r: Resource) {
       // DW-10c. Listed here or it never reaches resource_calendar_event.yaml (this is an allow-list). No rule reads it today; "" is
       // "no unit".
       unitNodeId: r.unitNodeId ?? "",
+      // SCP-1b. Listed here or they never reach resource_social_*.yaml / derived_roles.yaml (this is an allow-list; the
+      // social handlers build the Resource through an object spread of pipeline-authz.ts's facts, where TypeScript's
+      // excess-property check does not fire). Both fail closed: [] contains nobody, and "" matches no designer rule.
+      approverIds: r.approverIds ?? [],
+      creativeSource: r.creativeSource ?? "",
     },
   };
 }

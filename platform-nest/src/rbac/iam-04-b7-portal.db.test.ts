@@ -31,7 +31,8 @@ import { config } from "../config";
 const live = !!process.env.CERBOS_URL;
 const T1 = "bbbbbbbb-0000-0000-0000-000000000001";
 const T2 = "bbbbbbbb-0000-0000-0000-000000000002";
-const PORTAL_ACTIONS = ["read", "decide", "sign", "pay", "update_profile", "request_change", "approve_post", "edit_company_profile", "converse"] as const;
+// SCP-1b (2026-10-26, PERMISSION-CONTRACT §53.8): +approve_spend, the 10th portal action (the client's money answers).
+const PORTAL_ACTIONS = ["read", "decide", "sign", "pay", "update_profile", "request_change", "approve_post", "edit_company_profile", "converse", "approve_spend"] as const;
 
 // MON-00i: `rootCompanies` defaults to `companies` (single-root fixture world) now that
 // `resource_portal.yaml`'s role-arm rule and all 7 `perm_portal_*` mirrors carry `&& variables.
@@ -66,7 +67,7 @@ describe.skipIf(!live)("IAM-04-B7 · portal permission arm ALONE (roles: [] — 
   it("PERMISSION ARM ALONE does not bleed a granted action into a sibling one", async () => {
     const p = principal([], [{ key: "portal.read", scopeType: "company", scopeId: T1 }]);
     expect(await allow(p, portalResource(T1), "read")).toBe(true);
-    for (const other of ["decide", "sign", "pay", "update_profile", "request_change", "approve_post", "edit_company_profile", "converse"]) {
+    for (const other of ["decide", "sign", "pay", "update_profile", "request_change", "approve_post", "edit_company_profile", "converse", "approve_spend"]) {
       expect(await allow(p, portalResource(T1), other), other).toBe(false);
     }
   });
@@ -164,7 +165,7 @@ describe.skipIf(!TEST_URL || !live)("IAM-04-B7 · LIVE CERBOS + real DB — the 
     }
   });
 
-  it("REGRESSION CONTROL: a LEGITIMATE client@company grant's reach is byte-identical to before this ticket — ALLOW in own tenant, all 9 actions (PV4-02: +converse; CLIENT-CENTRE CC-D4: +edit_company_profile)", async () => {
+  it("REGRESSION CONTROL: a LEGITIMATE client@company grant's reach is byte-identical to before this ticket — ALLOW in own tenant, all 10 actions (SCP-1b: +approve_spend; PV4-02: +converse; CLIENT-CENTRE CC-D4: +edit_company_profile)", async () => {
     const p = await assemblePrincipal(clientLegitId, "high");
     expect(p).not.toBeNull();
     expect(p!.companies).toContain(companyA);

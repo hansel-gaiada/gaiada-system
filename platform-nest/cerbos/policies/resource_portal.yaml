@@ -77,7 +77,12 @@ resourcePolicy:
     #                    would silently re-tighten the owner's ruling. Row-level reach (which client, which
     #                    project) is portal-scope.ts + portal-visibility.ts, never
     #                    this policy; the capability is not a Cerbos attribute and no rule here reads it.
-    - actions: ["read", "decide", "sign", "pay", "update_profile", "request_change", "approve_post", "edit_company_profile", "converse"]
+    #   approve_spend  — SCP-1b (PERMISSION-CONTRACT §53.8; SCP-Q11, SCP-Q14, SCP-Q15): agree or decline a cycle's
+    #                    monthly boost budget, and approve or decline a boost over what remains of it. Its own action,
+    #                    not `approve_post`: agreeing to spend the client's money is a different power from saying a
+    #                    caption reads right. Cerbos grants "may attempt"; the handler then requires SIGNING capability
+    #                    on the target's client (`requireSignerFor`, 403 `view_only`), unlike approve_post.
+    - actions: ["read", "decide", "sign", "pay", "update_profile", "request_change", "approve_post", "edit_company_profile", "converse", "approve_spend"]
       effect: EFFECT_ALLOW
       derivedRoles: ["client"]
       condition: { match: { expr: "variables.inTenant && variables.inRoot" } }
@@ -187,4 +192,10 @@ resourcePolicy:
     - actions: ["converse"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_portal_converse"]
+      condition: { match: { expr: "variables.inTenant && variables.inRoot" } }
+    # SCP-1b (2026-10-26, §53.8): the 10th mirror, same shape and same safety argument as the 9 above. The handler's signer
+    # requirement (`requireSignerFor`) applies on top, as for the role arm.
+    - actions: ["approve_spend"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_portal_approve_spend"]
       condition: { match: { expr: "variables.inTenant && variables.inRoot" } }

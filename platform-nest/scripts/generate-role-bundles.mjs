@@ -99,6 +99,22 @@ const REAL_ROLES = [
   // look for. Seeded by 202608241340; without those rows service-reconciler.ts::moduleRoleId returns
   // NULL and materializes nothing, which is the silent half of the unreachable-tier defect.
   "lms_staff", "lms_manager",
+  // SCP-1b (2026-10-26, PERMISSION-CONTRACT §53.9): the Social Media content pipeline's two scope-only roles, global
+  // `roles` rows granted at company scope (202610261501_iam_social_pipeline.sql). NOT module tiers: their names are
+  // literal in derived_roles.yaml, so DIRECT maps each to itself.
+  "social_copywriter", "social_designer",
+];
+
+/** SCP-1b (PERMISSION-CONTRACT §53.11, owner ruling SCP-Q19): the five approver-only keys `owner` holds and `company_admin`
+ *  does not. `owner` is company_admin's envelope PLUS exactly these (amending IAM-14 D-8's derivation for these five only).
+ *  Each has a perm_* mirror, is uiGrantable:false, is named by no real role's rule, and is absent from company_admin's
+ *  bundle: cerbos-social-pipeline.test.ts pins all four. Kept byte-aligned with the migration's DO block. */
+const OWNER_EXTENSION = [
+  "social.engagement.budget",
+  "social.engagement.plan",
+  "social.post.approve",
+  "social.report.approve",
+  "social.report.deliver",
 ];
 
 /** Roles with NO Cerbos rules, whose reach is their bundle alone (IAM-04c §3). `owner` is the first.
@@ -215,6 +231,13 @@ const DIRECT = {
   webdesk_translator: [],
   webdesk_seo_reviewer: [],
   webdesk_editor: [],
+  // SCP-1b (PERMISSION-CONTRACT §53.4, §53.9): the two scope-only social roles map to themselves; the seat approver maps to
+  // NO real role on purpose. A seat is a relationship computed per company from that company's own positions (fed as
+  // `approverIds`), not a grant, so no bundle carries a key through it; its reach is proved by the live matrix
+  // (cerbos-social-pipeline.test.ts). Kept byte-aligned across generate-role-bundles.mjs and role-permission-parity.db.test.ts.
+  social_copywriter: ["social_copywriter"],
+  social_designer: ["social_designer"],
+  social_approver_seat: [],
 };
 
 const LMS_KINDS = new Set(["lms_course", "lms_enrollment"]);
@@ -556,7 +579,15 @@ export function generate() {
   if (!roles.company_admin) {
     throw new Error("generate-role-bundles: company_admin missing — cannot derive the owner envelope");
   }
-  roles.owner = [...roles.company_admin];
+  // SCP-1b (§53.11): plus OWNER_EXTENSION, the five approver-only keys. Each must be a catalog key and must NOT already be in
+  // company_admin's envelope (else the extension would be a silent no-op hiding a widened company_admin).
+  for (const k of OWNER_EXTENSION) {
+    if (!catalogKeys.has(k)) throw new Error(`generate-role-bundles: OWNER_EXTENSION key "${k}" is not in the catalog`);
+    if (roles.company_admin.includes(k)) {
+      throw new Error(`generate-role-bundles: OWNER_EXTENSION key "${k}" is already in company_admin's bundle`);
+    }
+  }
+  roles.owner = [...new Set([...roles.company_admin, ...OWNER_EXTENSION])].sort();
   totalPairs += roles.owner.length;
 
   const doc = {
@@ -616,7 +647,7 @@ export function serialize(doc) {
 
 // One export list, matching this file's existing convention — an inline `export const`
 // alongside it type-resolved inconsistently from the .ts consumers.
-export { REAL_ROLES, PERMISSION_NATIVE_ROLES };
+export { REAL_ROLES, PERMISSION_NATIVE_ROLES, OWNER_EXTENSION };
 
 function main() {
   const args = new Set(process.argv.slice(2));

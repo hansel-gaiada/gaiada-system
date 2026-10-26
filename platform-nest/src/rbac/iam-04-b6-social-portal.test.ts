@@ -85,20 +85,27 @@ describe("IAM-04-B6 · portal + social_* permission-arm rollout (static, re-deri
     // PV4-02 (2026-10-12): +1 action, `converse` (the client door to the conversation kind; 8 -> 9 wired).
     // CLIENT-CENTRE CC-D4 (2026-09-29): +1 action, `edit_company_profile` — see
     // `iam-04-b7-portal.test.ts` for the full structural pin of the (now 8-action) wired set.
+    // SCP-1b (2026-10-26, PERMISSION-CONTRACT §53.8): +1 action, `approve_spend` (the client's money answers; 9 -> 10 wired).
     expect([...wiredPermActions(kinds, "portal")].sort()).toEqual(
-      ["approve_post", "converse", "decide", "edit_company_profile", "pay", "read", "request_change", "sign", "update_profile"],
+      ["approve_post", "approve_spend", "converse", "decide", "edit_company_profile", "pay", "read", "request_change", "sign", "update_profile"],
     );
   });
 
-  it("REGRESSION PIN: social_engagement wires exactly read/create/update/delete/set_scope", () => {
+  // SCP-1b (2026-10-26, PERMISSION-CONTRACT §53.10): + plan and budget, the owner's arm on two approver-only actions.
+  it("REGRESSION PIN: social_engagement wires exactly read/create/update/delete/set_scope + SCP-1b's plan/budget", () => {
     expect([...wiredPermActions(kinds, "social_engagement")].sort()).toEqual(
-      ["create", "delete", "read", "set_scope", "update"],
+      ["budget", "create", "delete", "plan", "read", "set_scope", "update"],
     );
   });
 
-  it("REGRESSION PIN: social_post wires exactly read/create/update/delete/import_native — NEVER submit/publish/cancel/delete_published", () => {
+  // SCP-1b (2026-10-26, PERMISSION-CONTRACT §53.10): + proofread and approve. The six self-scoped or attribute-dependent
+  // pipeline actions (author, design, schedule, manage, record_client, boost) stay unmirrored.
+  it("REGRESSION PIN: social_post wires exactly read/create/update/delete/import_native + SCP-1b's proofread/approve — NEVER submit/publish/cancel/delete_published", () => {
     const wired = wiredPermActions(kinds, "social_post");
-    expect([...wired].sort()).toEqual(["create", "delete", "import_native", "read", "update"]);
+    expect([...wired].sort()).toEqual(["approve", "create", "delete", "import_native", "proofread", "read", "update"]);
+    for (const selfScoped of ["author", "design", "schedule", "manage", "record_client", "boost"]) {
+      expect(wired.has(selfScoped), `social_post.${selfScoped} must stay unmirrored (§53.10)`).toBe(false);
+    }
     for (const outboundAction of ["submit", "publish", "cancel", "delete_published"]) {
       expect(
         wired.has(outboundAction),
@@ -113,16 +120,22 @@ describe("IAM-04-B6 · portal + social_* permission-arm rollout (static, re-deri
     expect([...wiredPermActions(kinds, "social_ledger")]).toEqual(["admin"]);
   });
 
-  it("REGRESSION PIN: the other 5 social_* kinds get ZERO perm_* rules (no real handler exists for any of them yet)", () => {
+  it("REGRESSION PIN: the other 4 social_* kinds get ZERO perm_* rules (no real handler exists for any of them yet)", () => {
     for (const kind of [
       "social_account",
       "social_client_review",
       "social_inbox",
       "social_platform_app",
-      "social_report",
     ]) {
       expect([...wiredPermActions(kinds, kind)], `kind "${kind}"`).toEqual([]);
     }
+  });
+
+  // SCP-1b (2026-10-26, PERMISSION-CONTRACT §53.7, §53.10): social_report now has a real handler
+  // (social-reports.controller.ts, every call site sending module "social"), and wires read (so the owner opens what it
+  // checks) and the owner's arm on approve and deliver. create/update/delete stay unmirrored.
+  it("REGRESSION PIN: social_report wires exactly read/approve/deliver", () => {
+    expect([...wiredPermActions(kinds, "social_report")].sort()).toEqual(["approve", "deliver", "read"]);
   });
 
   it("every wired perm_* rule on the 3 landed social kinds resolves to a real permission-catalog key", () => {
@@ -133,9 +146,10 @@ describe("IAM-04-B6 · portal + social_* permission-arm rollout (static, re-deri
       raw.permissions.filter((p) => p.class === "grantable").map((p) => `${p.cerbosKind}.${p.cerbosAction}`),
     );
     for (const [kind, actions] of [
-      ["social_engagement", ["read", "create", "update", "delete", "set_scope"]],
-      ["social_post", ["read", "create", "update", "delete", "import_native"]],
+      ["social_engagement", ["read", "create", "update", "delete", "set_scope", "plan", "budget"]],
+      ["social_post", ["read", "create", "update", "delete", "import_native", "proofread", "approve"]],
       ["social_ledger", ["admin"]],
+      ["social_report", ["read", "approve", "deliver"]],
     ] as const) {
       for (const action of actions) {
         expect(grantable.has(`${kind}.${action}`), `${kind}.${action}`).toBe(true);

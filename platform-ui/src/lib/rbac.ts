@@ -49,6 +49,10 @@ export type Role =
   // decides the Cerbos role string never changed). Company-scoped; may be reconciler-materialized
   // onto a SERVED company exactly like search_staff/search_manager.
   | "social_staff" | "social_manager"
+  // SCP-1b (PERMISSION-CONTRACT §53.9): the Social Media content pipeline's two scope-only roles, granted at company scope
+  // (directly or through a Social Media seat's role set). Literal role names in derived_roles.yaml, not module tiers.
+  // The four social approvers are NOT a role: the HoD and GM are seats, mirrored by `canLeadSocial`.
+  | "social_copywriter" | "social_designer"
   // IAM-02a-FIX / DR-2b — `agency_approver` is a REAL, LIVE-HELD role (1 real holder, IAM-02a-0's
   // live query 2026-08-10) that was entirely absent from this union — same defect shape as Gap 1/2/3
   // above: a raw grant role exists in Cerbos but has no `Role` member here, so `ROLE_CAPS[g.role]`
@@ -776,6 +780,11 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // one-tier-up reasoning as `manager` above).
     "social.ledger.read",
   ],
+  // SCP-1b: exactly their bundles (role-permission-bundles.json): social.post.read + social.engagement.read, i.e.
+  // `social.view`, plus one pipeline step each (social.post.proofread / social.post.design) that no UI capability names yet;
+  // the pipeline pages that use them gate on the server's computed actions (BFF §63.6.2), not on a role name.
+  social_copywriter: ["social.view"],
+  social_designer: ["social.view"],
   // §8's served-dept column: department + project grain ONLY. Deliberately NO `reports.person.view`
   // — §8's person-grain cell for this column ("only persons acting under the assignment, via the
   // provider view") is NOT enforceable, because no endpoint can bound a person read that way, so

@@ -114,3 +114,112 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_social_post_import_native"]
       condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+
+    # ═══ SCP-1b (PERMISSION-CONTRACT §53.2-§53.4, §53.10) — the content pipeline's eight actions ═══
+    # author, proofread, approve, design, schedule, manage, record_client, boost. Every rule above is byte-for-byte
+    # unchanged. Each attribute-dependent rule stands alone (the HIER-2 authoring rule), every relationship condition on a
+    # real role is INLINE (never a policy variable, so the bundle generator and the hazard scans see the self-scope), and
+    # every ALLOW keeps `variables.inTenant && variables.notLow`. company_admin, manager, module_manager and module_staff
+    # are named in NONE of these rules (SCP-Q9, SCP-Q18, SCP-Q19). `client` stays absent. platform_admin has them through
+    # the wildcard above.
+    #
+    # Handlers send {kind:"social_post", id, tenantId, module:"social", ownerId, creatorId, approverIds, assigneeIds,
+    # creativeSource}, every value read from the rows (modules/social/pipeline-authz.ts), never from a body.
+
+    # The read tier gains the two scope-only roles (the copywriter reads what they proofread; the in-team designer reads
+    # what they design). No `member` rule: a self-scoped read beside perm_social_post_read is a Pattern B hazard.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["social_copywriter", "social_designer"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # The client's OFFICER (`ownerId` = the engagement's owner_id), held as `member`: the writing, the hand scheduling, and
+    # the team's own steps. Self-scoped, inline: an unfed ownerId ("") matches nobody.
+    - actions: ["author", "schedule", "manage", "record_client", "boost"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.ownerId) && request.resource.attr.ownerId != "" &&
+            request.resource.attr.ownerId == request.principal.id
+
+    # The COPYWRITER: suggest, approve the copy, return it.
+    - actions: ["proofread"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["social_copywriter"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # The SEAT approvers (the HoD and the GM: the company's live lead seats on its Social Media and GM units, fed as
+    # `approverIds`). `approve` is one of the five approver-only actions: its arms are exactly this rule, its perm_* mirror
+    # and the platform_admin wildcard.
+    - actions: ["approve"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["social_approver_seat"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # The seats also hold the team's own steps, beside the officer. The owner does not (no mirror: Pattern B).
+    - actions: ["manage", "record_client", "boost"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["social_approver_seat"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # The DESIGNER, per the post's creative source (SCP-Q2). `creatives`: an assignee of the month request's PM task, held
+    # as `member`, self-scoped by membership. `in_team`: a holder of social_designer. Each rule tests creativeSource, so a
+    # designer of one route never acts on a post of the other, and an unfed source ("") matches neither.
+    - actions: ["design"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.creativeSource == "creatives" &&
+            has(request.resource.attr.assigneeIds) &&
+            request.principal.id in request.resource.attr.assigneeIds
+    - actions: ["design"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["social_designer"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.creativeSource == "in_team"
+
+    # Permission arm: proofread (one scope-only role, so the mirror grants no more than the role arm) and approve (the
+    # owner's arm; no real role reaches the key through a self-scoped rule, and the key is uiGrantable:false). author,
+    # design, schedule, manage, record_client and boost are deliberately UNMIRRORED (§53.10).
+    - actions: ["proofread"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_post_proofread"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["approve"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_post_approve"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+
+    # ═══ The two DENY rules (§53.3). `roles: ["user"]`, so under deny-overrides they beat every ALLOW above, the
+    # platform_admin wildcard and the mirrors included. ═══
+    # Maker/checker: nobody passes proofread or approve on a post they drafted (creatorId = author_id) or whose client they
+    # are the officer of (ownerId). The invoice `approve` shape: `has() && != ""` before the equality, so it fires only on a
+    # KNOWN maker (a scope-level probe that sends no post is not denied by it).
+    - actions: ["proofread", "approve"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            (has(request.resource.attr.creatorId) && request.resource.attr.creatorId != "" &&
+              request.resource.attr.creatorId == request.principal.id) ||
+            (has(request.resource.attr.ownerId) && request.resource.attr.ownerId != "" &&
+              request.resource.attr.ownerId == request.principal.id)
+    # Unattended automations and bots never act in the pipeline (the resource_work_request.yaml shape). An agent acting for
+    # a person arrives as that person (users.kind = 'employee'), so this does not fire for it. `read` stays allowed.
+    - actions: ["author", "proofread", "approve", "design", "schedule", "manage", "record_client", "boost"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot"]

@@ -139,7 +139,8 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // DW-10a (2026-10-15): +4 grantable (core.dept_notice.{read,post,edit,withdraw} on the NEW dept_notice kind, in 1 NEW authoring group `notices`, not sensitive, not advancedOnly). 464 -> 468.
     // DW-10c (2026-10-15): +1 grantable (core.org_structure.read_calendar on the EXISTING org_structure kind, added to the existing `company_overview` group, not sensitive, not advancedOnly). 468 -> 469.
     // DW-10e (2026-10-16): +2 grantable (core.work_request.{send_across,read_across} on the EXISTING work_request kind, both in the existing `work_requests` group). 469 -> 471.
-    expect(grantable.length).toBe(471);
+    // SCP-1b (2026-10-26): +11 grantable on EXISTING kinds; +2 authoring groups (`social_pipeline`, `social_boosts`), and portal.approve_spend joins `portal_pay`. 471 -> 482.
+    expect(grantable.length).toBe(482);
     expect(relationshipKeys.size).toBe(15);
   });
 
