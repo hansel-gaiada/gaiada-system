@@ -11,6 +11,22 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.196.0` - PGL-02: the client portal's colour-contrast pass, ink tokens instead of opacity on text (2026-10-26) - PROTOTYPED
+
+- The three labels still dimmed with `opacity` (the `PortalFigure` label, the invoice list's Due and Total, the profile's "Need something changed?") now use `--ink-subtle`: light 3.0-3.4:1 became 5.35:1. An ink token is already an alpha of the ink colour, so `opacity` multiplied it, and axe could not see it over the portal's glass cards.
+- Measuring every portal text style against its real background, light and dark, found more under the bar, each fixed with a portal-only rule (`cp-` classes, or rules under `.cp-shell`; no shared token changed, so the staff app is unchanged):
+  - card-head meta (the live indicator, the certified badge);
+  - form-control borders (`--line` 1.4:1 became `--line-control` 3.8 to 4.5:1);
+  - placeholders on portal inputs and on the website editor's field;
+  - the 10px tab count;
+  - the editor's pressed tool;
+  - the media drop hint.
+- New `docs/a11y/portal-contrast.md`: 111 usage rows over 22 surfaces in both themes, generated from `colors.css` by `docs/a11y/portal-contrast.mjs`, which composites the translucent surfaces first. `src/styles/portalContrast.test.ts` fails when a row is under its WCAG bar or the table is stale. **A token change anywhere therefore needs `node docs/a11y/portal-contrast.mjs --write` (from `platform-ui/`) and a read of the diff.**
+- New guard `portalNoOpacityText.test.ts` fails on `opacity` applied to text in the portal's own files. Disabled, hover, transition, keyframes and `opacity: 1` are allowed. Teeth: two reintroduced dimmings both failed with file:line.
+- Proof: CI 40304582630 green on the branch (`efbe5fa0`); `e2e/a11y-axe-portal.spec.ts` on sumopod, two runs on that sha, both green. Follow-ups:
+  - `--status-neutral-fg` is used by `PortalStatus` but defined nowhere; it falls back to `--ink-body`, which passes.
+  - The staff app's `KpiTile` and `.erp-quiet` still dim text with `opacity: 0.6`.
+
 ### platform-ui `0.195.0` - DW-10h: form controls are named from the label text alone (2026-10-19) - PROTOTYPED
 
 - `Field` (text, number, date, textarea, select, checkbox) wraps the control in a `<label>` that also holds the hint and the error, and a wrapping label's whole text is the control's accessible name: a screen reader read "Terms Markdown. The client reads this in their portal..." and `getByLabel("Terms", { exact: true })` never matched. The label text now has its own id and the control names itself from it with `aria-labelledby`; the hint and the error stay in `aria-describedby` (descriptions, not names). Layout and class names unchanged.
