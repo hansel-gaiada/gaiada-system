@@ -132,6 +132,8 @@ export const socialModule: ModuleContract = {
     // SMM-27 — `social_best_time_suggestions`, the cached classical-stats best-hour-to-post verdict
     // per connected account; registered at write time.
     "202608221603_social_best_time_suggestions.sql",
+    // SCP-1b — the content pipeline's data (BFF §63.1 file 1): allocation, brand book, settings, cycles, designs, copy edits.
+    "202610261500_social_pipeline.sql",
     // SCP-1b (PERMISSION-CONTRACT §53.13) — the content pipeline's IAM seed: the two roles, the eleven keys, the report
     // narrowing. Lands after 202610261500_social_pipeline.sql (SCP-1b's schema file).
     "202610261501_iam_social_pipeline.sql",
