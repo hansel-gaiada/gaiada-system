@@ -150,7 +150,12 @@ describe("Blocks: the Block address form", () => {
     fireEvent.click(within(form).getByRole("button", { name: "Block address" }));
     expect(await screen.findByText(/3 people use this address/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Block address" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Block anyway" }));
+    // The question can render before the first transition ends (setShared runs after the await, outside the transition's batch);
+    // while it is pending the button reads "Blocking…" and is disabled. Wait for "Block anyway", enabled, before the click
+    // (the same race the presence page's test had; CI 40357876555 could not find it).
+    const anyway = await screen.findByRole("button", { name: "Block anyway" }, { timeout: 10_000 });
+    await waitFor(() => expect(anyway).toBeEnabled());
+    fireEvent.click(anyway);
     await waitFor(() => expect(blockAddress).toHaveBeenCalledTimes(2));
     expect(vi.mocked(blockAddress).mock.calls[1][0]).toEqual({ ip: "203.0.113.77", reason: "scanner", hours: 24, confirmShared: true });
     expect(await screen.findByText("203.0.113.77 is blocked for 24 hours.")).toBeInTheDocument();
