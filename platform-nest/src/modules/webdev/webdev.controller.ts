@@ -471,6 +471,9 @@ export class WebdevController {
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
   ): Promise<DnsTaskCheckResult> {
+    // A malformed id can match no row, and `update`'s resource lookup would die at the uuid cast as a 500: it is a 404, decided on the
+    // id's SHAPE alone, so it reveals nothing authorization should hide.
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw new NotFoundException("webdev site not found");
     await authorize(req.principal, { kind: "webdev_site", tenantId, id, module: "webdev" }, "update");
     const site = await getWebdevSite(tenantId, id);
     if (!site) throw new NotFoundException("webdev site not found");
