@@ -11,6 +11,14 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.200.0` - SCP-Kg: the Social skin is ON for Social Media (owner, 2026-10-27) (2026-10-27) - PROTOTYPED
+
+- **What changes on screen.** Every Social Media workspace now wears the team's own design: the pinned menu (Home, Search, Notifications, Tasks, Create, Calendar, Reports, Saved, AI Assistant, More), the More panel, the phone bar and sheet, and the flat white or black look. Every other workspace, Company and Admin stay Standard. Anyone may choose the Standard look for themselves: More › Appearance › Standard look (and back from the avatar menu).
+- **Ahead of plan.** Plan §8 had Kg wait for SCP-1d, 1e and 1k; the owner switched it on now ("deploy it"). No pinned entry points at a page that does not exist: Messages (SCP-1j), Profile (SCP-1k), Dashboard (SCP-5d) and Settings (SCP-1c) keep their `ticket` and stay hidden until their pages land; a test pins that list.
+- `SKINS_ON` is `["standard", "social"]`; `SHELL_SKIN_PREVIEW` stays for a future department's skin.
+- The current menu entry's icon is drawn heavier, so the icon rail marks where you are.
+- **Tests.** The Standard-menu checks of Social Media in workspace-personas and workspace-departments run in the Standard look (the person's own choice); workspace-shell's "+ New" check uses the skin's pinned Create there; skin-social.spec gains "`/` lands on the Social Media home" and "every link in the Social menu and the More panel opens". A sumopod run of every Playwright project on the switch-on (`c007e791`) found exactly those five Standard-menu failures; the twelve others (WebDesk assist and dashboard specs without their stub server, a Web Dev change-request test) are outside the Social workspace.
+
 ### platform-nest `0.174.0` - M5-W1d: the fenced `contributor` principal for freelance writers (WSK-D84; PERMISSION-CONTRACT §27.6, BFF §27) (2026-10-27) - PROTOTYPED
 
 - **`users.kind` gains `contributor`.** Migration `202610270900_contributor_principal.sql` rebuilds the CHECK from the live definition (it refuses to run unless the four existing values are there, and re-reads after the swap). It adds:
