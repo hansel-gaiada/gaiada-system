@@ -297,6 +297,34 @@ The owner's condition: "you need to be able to test it with all the accounts we 
   - a hub check that the billing-chaser scope is unchanged;
   - teardown: label each test contract and request "ZZ TEST PGL-08", and revoke the temporary grant.
 
+**Result, 2026-10-26 on 1.0.0-alpha.430 (DEV-VERIFIED live, 6/6).** Driven by the lead with the owner's approval
+(`tmp/pgl08/` in the workspace, not in git), logging in once as `hansel@gaiada.com` and once as `qa.finance.staff@gaiada.com`.
+The rows were filed through the agent path (`origin: "agent"`, the human's own token, as the agent runner files).
+
+- **The grant actually used:** `company_admin` on Gaia Digital Agency for `qa.finance.staff@` (grant `01a17887-2ef9-…`).
+  - A plain `owner` cannot read or decide approvals (PGL-05's finding).
+  - `owner` cannot be granted from the admin route at all: `elevated_role_forbidden` (design §6.3.6, IAM-16) means it is
+    reachable only through a two-person `iam:appointment` (one platform_admin and one owner) or a seed. So the plan's
+    temporary `owner` grant was not made, and case 5 below is partial.
+  - The grant was registered as P-05 in `docs/PLACEHOLDER-PRINCIPALS.md` and revoked the same evening (`revoked: true`).
+
+| # | Filer | Approver | Result |
+|---|---|---|---|
+| 1 | hansel@, `contracts.countersign` (high) | hansel@ | 403 `self_approval`, row stays pending; the detail's `approveRefusal` hint is `self_approval` |
+| 2 | hansel@, `pm.createTask` filed as high | qa.finance.staff@ (company_admin) | approved and executed (`outcome: ok`, a test task created) |
+| 3 | qa.finance.staff@, `contracts.countersign` | qa.finance.staff@ | 403 `self_approval` |
+| 4 | hansel@, `contracts.countersign` | qa.finance.staff@ (no countersign right) | 403 `countersign_right_required`; the hint says the same |
+| 5 (partial) | qa.finance.staff@ (case 3's row), `contracts.countersign` | hansel@ (holds countersign, not the filer) | the decide gates pass (200). Execution then stopped at its precondition `contract_not_sent`, because the target is a draft that was never sent, so nothing was signed. The positive path through a second countersigner, and the executor's check of the FILER's right, are proved by CI (`pgl-05-approvals.db.test.ts`), not live |
+| 6 | hansel@, `pm.createTask` | hansel@ rejects | allowed, rejected, nothing executed |
+
+- **Teardown:** the case-2 task was deleted (`DELETE /pm/tasks/:id`, 200), the two pending rows (cases 1 and 4) were rejected,
+  and the temporary grant was revoked.
+- **Left in place:** one draft contract, `ZZ TEST PGL-08 countersign target (draft, never sent)` on Hubble Bali
+  (`01a17897-7d49-…`). There is no contract delete route, and a draft binds nobody. The five test approval rows stay as
+  history.
+- **For a full live case 5:** appoint a second owner through the two-person appointment. `anthony@gaiada.com` holds the
+  holding's ownership (`PLACEHOLDER-PRINCIPALS`, "Not placeholders"). This is the owner's decision, not a go-live blocker.
+
 ### PGL-09: client mail for the things to act on (backend + templates)
 
 - **Rule (PV-D47):** mail reaches a client contact for:
@@ -336,6 +364,15 @@ The owner's condition: "you need to be able to test it with all the accounts we 
   - a contact limited to some projects gets mail only for their projects.
 - **Honesty rule (mail design):** a Mailpit catch proves rendering and wiring, nothing about deliverability.
   Deliverability is a MANUAL readiness item at cut-over.
+
+**Result, 2026-10-26 (DEV-VERIFIED on sumopod).** `platform-nest/src/mail/pgl11-mailpit.qa.test.ts`, run by
+`platform-nest/scripts/gate-pgl11.sh` (`gate-files.sh` plus a throwaway Mailpit) on main `b99e7117`: 11 of 11 passed (gate
+`g2`). The real sender delivered all five types over SMTP. Each type reached exactly its recipients, and each mail had
+exactly one portal link, with no query and no token-like string. The mailed invite link accepted once; after a resend the old
+link failed and the new one worked. With the flag off, nothing was mailed and no `mail_log` row was written, and a control send
+proved the sink was live. Teeth (gate `g3`): a wrong invoice path and the flag left on turned 2 tests red. Found: the sign-off
+gate mail still sets a Reply-To on `MAIL_REPLY_DOMAIN` (default `notify.gaiada.invalid`), so set a real reply domain or drop it
+at cut-over.
 
 ## Open for the owner
 

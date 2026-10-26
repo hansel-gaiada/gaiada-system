@@ -39,6 +39,7 @@ So: use the stand-in to unblock, record it here, and retire it before anyone rel
 | P-02 | `hansel@gaiada.com` | **Finance manager** — approves, signs off periods | same grant as P-01 | 2026-08-25 | **Before the first period sign-off** |
 | P-03 | 19 × `portal@<slug>.test` (one per client) | **The client's own representative** — a real person at that company | Global `client` role, `company` scope = Gaia Digital Agency; `client_contacts.capability = 'signer'` | 2026-08-31 | **Before the first contract is sent to any of these clients** |
 | P-04 | `hansel@gaiada.com` | **Each client's own representative** — the person on the client side who signs | Client-wide `client_contacts` row, `capability='signer'`, on **all 19** live clients | 2026-08-31 | **Before any real client contract is signed, and before real client reps get portal logins** |
+| P-05 | `qa.finance.staff@gaiada.com` (a QA test principal) | Nobody: a temporary grant for the PGL-08 live proof of PV-D46, so a second person could decide approvals | `company_admin`, company scope, Gaia Digital Agency (grant `01a17887-2ef9-769a-9819-ffc783f1f0c5`) | 2026-10-26 | **REVOKED 2026-10-26**, the same evening, after the drive (`revoked: true`) |
 
 ### Not placeholders — real, and deliberately so
 
