@@ -87,6 +87,8 @@
 }
 .erp-app[data-skin="social"] .ws-more__close:hover { background: var(--tint-hover); color: var(--text-primary); }
 .erp-app[data-skin="social"] .ws-more :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Except the field itself: its box (`.ws-more__find:focus-within`) already draws the ring, and a second one inside it read as a glitch. */
+.erp-app[data-skin="social"] .ws-more .ws-more__input:focus-visible { outline: none; }
 
 /* ---- The switcher inside the panel: the same component, as a row, its list opening beneath it ---- */
 html[data-sidebar="collapsed"] .erp-app[data-skin="social"] .ws-more .ws-switch { display: block; }

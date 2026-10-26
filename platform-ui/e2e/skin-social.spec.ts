@@ -110,6 +110,18 @@ test.describe("the Social skin on a desktop (1280x800)", () => {
     await expect(top.getByRole("button", { name: /^Notifications/ })).toBeHidden();
     // The avatar menu moved into More; the access marks stay in the bar (an elevated person sees the chip, this one does not).
     await expect(top.locator(".erp-usermenu")).toBeHidden();
+    // With nothing left to show, the bar is not drawn and the page starts at the top (visual review of 430: an empty 66px band).
+    await expect(top).toBeHidden();
+    expect((await page.locator("#main-content").boundingBox())!.y).toBeLessThan(10);
+  });
+
+  test("Find a page draws one focus ring, its box's, not a second one on the input inside it", async ({ page, context }) => {
+    await signIn(page, context);
+    await press(menu(page).getByRole("button", { name: /^More/ }));
+    const find = page.getByRole("searchbox", { name: "Find a page" });
+    await expect(find).toBeFocused();
+    expect(await find.evaluate((el) => getComputedStyle(el).outlineStyle)).toBe("none");
+    expect(await page.locator(".ws-more__find").evaluate((el) => getComputedStyle(el).outlineStyle)).toBe("solid");
   });
 
   test("More opens the panel with focus in Find a page; Escape closes it and focus returns to More", async ({ page, context }) => {
@@ -184,6 +196,9 @@ test.describe("the Social skin on a phone (390x844)", () => {
     await expect(top.getByRole("button", { name: "More" })).toBeVisible();
     const topBox = (await top.boundingBox())!;
     expect(topBox.y).toBeLessThan(80);
+    // Top RIGHT, as the design draws them (visual review of 430: they sat at the left edge).
+    expect(topBox.x + topBox.width).toBeGreaterThan(390 - 24);
+    expect(topBox.x).toBeGreaterThan(390 / 2);
     await press(bar(page).getByRole("button", { name: "Search" }));
     await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible();
     await page.keyboard.press("Escape");
@@ -207,6 +222,27 @@ test.describe("the Social skin on a phone (390x844)", () => {
     await page.keyboard.press("Escape");
     await expect(panel).toBeHidden();
     await expect(more).toBeFocused();
+  });
+
+  test.describe("on a touch screen", () => {
+    test.use({ hasTouch: true, isMobile: true });
+
+    test("the sheet's theme options stay inside their outline at touch size", async ({ page, context }) => {
+      await signIn(page, context);
+      await press(page.locator(".erp-top__phone").getByRole("button", { name: "More" }));
+      const panel = sheet(page);
+      await expect(panel).toBeVisible();
+      // Visual review of 430: the 44px touch targets spilled out of the control's fixed 36px outline.
+      const group = (await panel.locator(".erp-theme").boundingBox())!;
+      const opts = await panel.locator(".erp-theme__opt").all();
+      expect(opts.length).toBeGreaterThan(1);
+      for (const opt of opts) {
+        const b = (await opt.boundingBox())!;
+        expect(b.height).toBeGreaterThanOrEqual(44);
+        expect(b.y).toBeGreaterThanOrEqual(group.y);
+        expect(b.y + b.height).toBeLessThanOrEqual(group.y + group.height + 0.5);
+      }
+    });
   });
 
   test("nothing is hidden behind the bottom bar at the end of the page", async ({ page, context }) => {

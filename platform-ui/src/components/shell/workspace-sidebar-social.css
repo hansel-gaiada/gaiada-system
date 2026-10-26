@@ -40,6 +40,13 @@
 /* The avatar menu moves into the More panel's foot (SCP-Kd); it still renders, and the access chip and the SIMULATED badge beside it stay. */
 .erp-app[data-skin="social"] .erp-top .erp-usermenu { display: none; }
 
+/* On a desktop that leaves the top bar empty (its phone controls are phone-only), so unless the access chip or the SIMULATED badge is drawn the
+   bar is not drawn at all and the page starts at the top, as in the design. Hidden, not removed: the bell inside it still settles the menu's count. */
+@media (min-width: 761px) {
+  .erp-app[data-skin="social"]:not(:has(.erp-top .erp-top__chipwrap, .erp-top .erp-sf-badge)) { grid-template-rows: 0 1fr; }
+  .erp-app[data-skin="social"]:not(:has(.erp-top .erp-top__chipwrap, .erp-top .erp-sf-badge)) .erp-top { display: none; }
+}
+
 /* ---- Brand: the group's name in the display face, no logo ---- */
 .erp-app[data-skin="social"] .ws-side .erp-side__mark,
 .erp-app[data-skin="social"] .ws-side .erp-side__tagline { display: none; }
@@ -109,7 +116,9 @@
   /* The drawer is never opened: no hamburger. (The scrim and the drawer itself only appear when `html[data-nav="open"]`, which nothing sets.) */
   .erp-app[data-skin="social"] .erp-navtoggle { display: none; }
 
-  /* Top right: Notifications, Messages (once built) and More. The access chip and the SIMULATED badge beside them stay. */
+  /* Top right: Notifications, Messages (once built) and More. The access chip and the SIMULATED badge beside them stay. The Standard phone bar
+     packs its actions left, after the hamburger and the search icon (workspace-topbar.css); with both gone here, they go to the right edge. */
+  .erp-app[data-skin="social"] .erp-top--ws .erp-top__actions { margin-left: auto; }
   .erp-app[data-skin="social"] .erp-top__phone { display: flex; align-items: center; gap: 4px; }
   .erp-app[data-skin="social"] .ws-phone__btn {
     position: relative; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 44px; height: 44px;
