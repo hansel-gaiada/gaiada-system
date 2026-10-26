@@ -11,6 +11,22 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.170.0` - PGL-09: mail to client contacts for the things they must act on, behind one `CLIENT_MAIL_ENABLED` flag (PV-D47, BFF §62) (2026-10-26) - PROTOTYPED
+
+- **One flag for every client mail.** `CLIENT_MAIL_ENABLED` (read by `readClientMailEnabled` in `config.ts`, exactly `1`) gates the four client types: the sign-off gate, the Conversation pointer, and the two new ones below.
+  - `CONVERSATION_CLIENT_MAIL_ENABLED` is its read-only alias for one release; `config.mail.conversationClientMailEnabled` is gone.
+  - Off means `mailIntake` returns before any query or enqueue: no `mail_log` row.
+  - **Behaviour change:** the sign-off gate mail used to need only `MAIL_ENABLED=1`; it is now behind the client flag too, as the plan asks.
+  - `STAFF_MAIL_TYPES` (`approval.requested`) is unchanged, and a test pins that staff and client types partition the allow-list.
+  - The compose passthrough is NOT added; it comes at cut-over (`infra/runbooks/portal-go-live.md`, step 4b).
+- **A contract to sign (`contract.sent`).** `POST /contracts/:id/send` mails the contacts who can sign THAT contract: `resolvePortalScope`, then `canSignFor`, then `contractInPortalScope`, in `core/client-notify.ts` over the portal's own scope code.
+  - Viewers, another client's contacts, revoked or invited contacts and the actor get nothing.
+  - The in-app "to sign" notice uses the same recipients, so a project-limited signer now also hears about a project-less master agreement the portal already showed them.
+  - The mail names the contract by its title only.
+- **An issued invoice (`invoice.issued`, new client notification).** Sent from `POST /invoices/:id/issue`, only when that call issued it (a repeat or a seed sends nothing). It reaches every active contact who can open the invoice in the portal (invoices are client-scoped, not project-scoped), and shows the number and total only.
+- **No duplicates and no tokens.** The same contact is never mailed twice about the same contract or invoice, and a notice without an entity id is not mailed. Every mail is a pointer to `/portal/...` with no query string, no token and no action-by-reply. Each template renders through `GET /api/admin/mail/log/:id/preview`. No migration.
+- **Tests:** 20 DB tests compare each contact's mail with what the portal itself answers (`canSign`, 200 or not); 15 flag tests and 14 template tests. CI 40309657063 green on the branch (`270fbd7c`). Landed with a fix to PGL-01's readiness check, which read the removed config field.
+
 ### platform-nest `0.169.0` - PGL-01: the portal go-live readiness check, an ops script (2026-10-26) - PROTOTYPED
 
 - New `src/ops/portal-go-live-check.ts`, run in the live container as `docker exec gaiada-platform-1 node dist/ops/portal-go-live-check.js [--json]`. It is strictly read-only: one `BEGIN READ ONLY` transaction, confirmed with `SHOW transaction_read_only` before any read, always ended with ROLLBACK. Output is one line per go-live blocker: PASS, BLOCK, WARN, INFO, MANUAL or ERROR. Exit codes: 0 means no BLOCK, 1 means a BLOCK, 2 means a check could not run (an error is never a PASS; when both occur, 2 wins).
