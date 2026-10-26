@@ -1,6 +1,6 @@
 # Before real clients use the portal (tickets)
 
-**Status: STARTED 2026-10-15** (owner: "start this phase Before real clients use the portal"). Nothing is built yet.
+**Status: IN PROGRESS** (started 2026-10-15, paused the same day, resumed 2026-10-26; owner: "start this phase Before real clients use the portal"). Wave 1 is being built.
 This phase blocks go-live: no real client signs in to the portal until every item below is done.
 
 - **Parent plan:** `docs/plans/2026-10-10-three-perspectives.md` §8 ("Blocks any real client seeing the new portal")
@@ -13,7 +13,7 @@ This phase blocks go-live: no real client signs in to the portal until every ite
   - **PV-D47 (new):** client mail covers the things a client must act on.
   - The placeholder register (`docs/PLACEHOLDER-PRINCIPALS.md`, P-03 and P-04).
   - The mail design (`docs/superpowers/specs/2026-08-04-zone-a-mail-design.md`) and its staging reopen register.
-- **Base:** `origin/main` at `2fcf2911` (1.0.0-alpha.413), read 2026-10-15 from a clean worktree.
+- **Base:** `origin/main` at `57846487` (1.0.0-alpha.427), rebased 2026-10-26 from the draft read at `2fcf2911` (413).
 - **Paths:** `PN` = `platform-nest/`, `UI` = `platform-ui/src/`, `HUB` = `mcp-hub/src/`.
 
 ## The shape of this phase
@@ -108,12 +108,12 @@ The phase has three kinds of work. Only the first is code.
 ## Contract and numbering
 
 - **Reserved:**
-  - FRONTEND-BFF-CONTRACT §64 (client mail: the invite route's response when mail is on, and the new client
+  - FRONTEND-BFF-CONTRACT §62 (client mail: the invite route's response when mail is on, and the new client
     notification types);
-  - PERMISSION-CONTRACT §53 (PV-D46 approver rules);
-  - migration slot `202610161100` (PGL-10, if it needs one).
+  - PERMISSION-CONTRACT §52 (PV-D46 approver rules);
+  - migration slot `202610261100` (PGL-10, if it needs one).
 
-  DW-10 holds BFF §57 to §60 and PERMISSION §47 to §49. Check the files' highest numbers again at landing.
+  On main at 427, DW-10 used BFF §57 to §61 and PERMISSION §47 to §51. Check the files' highest numbers again at landing.
 - **Rulings:** PV-D46 and PV-D47 are recorded with this plan. The next free ruling number is PV-D48.
 - **Ticket prefix:** `PGL-` (portal go-live).
 
@@ -251,7 +251,7 @@ The phase has three kinds of work. Only the first is code.
 - **Generic:** this is a decide-gate rule, not a per-entry `approverCheck`, so a future high-impact tool is covered
   without new code. Find where impact is known at decide time: the row, or the hub's tool definition. Document the
   source.
-- **Contracts:** PERMISSION-CONTRACT §53. The approvals UI shows why Approve is refused; a disabled button with the
+- **Contracts:** PERMISSION-CONTRACT §52. The approvals UI shows why Approve is refused; a disabled button with the
   reason is enough.
 
 ### PGL-06: approving an agent's countersign needs the countersign right (backend, authz)
@@ -310,7 +310,7 @@ The owner's condition: "you need to be able to test it with all the accounts we 
 - **Templates:** pointer mails only. No amounts beyond the invoice number and total, no contract text, and no
   action-by-reply. Approval-style deep links go to the portal, and an expired session takes the normal SSO path (mail
   design rule: never a magic link). Each template is rendered by `GET /api/admin/mail/log/:id/preview`.
-- **Contract:** BFF §64.
+- **Contract:** BFF §62.
 - **Seat:** Sonnet, senior integrator.
 
 ### PGL-10: the invitation email (backend, security)
@@ -324,7 +324,7 @@ The owner's condition: "you need to be able to test it with all the accounts we 
   - expiry, single use and a resend that issues a new token;
   - the PV-6 revoke and Keycloak fixes (release 386).
 - **Teeth:** a test that fails if any `mail_log.payload` or log line contains a token that hashes to a live invite.
-- **Contract:** BFF §64 (the invite route says whether the invite was mailed). Migration slot `202610161100` if needed.
+- **Contract:** BFF §62 (the invite route says whether the invite was mailed). Migration slot `202610261100` if needed.
 
 ### PGL-11: client mail proved on sumopod (QA)
 
