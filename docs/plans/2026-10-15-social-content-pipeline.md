@@ -80,24 +80,21 @@ client's photos". Resolving it returns the post to the step it left.
 | # | Question | Ruling |
 |---|---|---|
 | SCP-Q2 | Who does the Creative step? | **Either, per client.** Each client's allocation sets its creative source. `creatives`: the Creatives department, through one work request per client per month (DW-D14); a post joins it when the HoD approves it for design. `in_team`: a designer inside the Social Media team, with no request. (The default had been Creatives for every client.) |
+| SCP-Q5 | What is in the first release? | **SCP-K, SCP-1 to SCP-4 and SCP-S, plus SCP-5a (the monthly report) and SCP-5d (the Team dashboard)**, proved by SCP-7. The rest of SCP-5 (5b, 5c, 5e to 5h) comes after; SCP-6 waits for real data. (The default had been SCP-5 after the first release.) |
 | SCP-Q7 | A skin per department? | **Yes, per department** (DW-D51), by the rule in §6.1. Standard and Social are the first two. |
 | SCP-Q8 | How does the client reach the approval page? | **Portal login.** The link we send, shareable to WhatsApp, opens the portal page; staff record decisions the client gives by WhatsApp or email. No no-login link is built. |
 | SCP-Q9 | Who fills each role? | **The HoD or the GM**, with equal authority, plus anyone given a `social_manager` grant, pass the HoD approval and the final check. The Copywriter is a role any member can hold. The Officer authors and never approves their own post. Replaces SCP-Q4 and SCP-Q6. |
 | SCP-Q10 | How are deadlines set? | **The deadline table:** a deadline per client per cycle. The A/B batch rule pre-fills it and the HoD may change any date. Ready-by is a buffer of working days earlier (default 1); step estimates are optional; holidays come from the HR holiday calendar. |
 | SCP-Q11 | Who approves boost money? | **A monthly boost budget.** The client agrees a boost budget per cycle in advance, in the portal's approvals, or staff record it. A boost that fits what remains of that budget starts without asking; a boost over it waits for the client's approval in the portal. (The default had been the client approving every boost.) |
 | SCP-Q12 | Keep the board and the spreadsheet table? | **Drop both** from SCP-1. The home feed, the client's List and the Team dashboard cover the board; pasting from a sheet moves to the one-off import (SCP-6). |
+| SCP-Q13 | Does changing an approved post's date need the client again? (raised by SCP-0b) | **Yes, always.** The client's approval covers the content and the date, time and placement. Today's hash rule stays: the date is in the review hash. Any change to the date, time or placement of an approved or scheduled post sends it back to the client and asks again on every network (a scheduled one is unscheduled first, cancelling any dispatch). Scheduling at exactly the approved date, time and placement keeps the approval; a feed-preview swap asks again for both posts. |
+| SCP-Q14 | Who in the portal may agree boost money? (SCP-0b) | **Signers only:** a contact with signing capability on that client (`signer` or `admin`). A viewer sees the request but cannot agree; staff can record the client's answer instead. |
+| SCP-Q15 | The monthly boost budget's edges (SCP-0b) | **Lowering is allowed.** A signer in the portal, or a social approver recording the client's answer, may lower a cycle's agreed budget as long as it still covers what is committed. Committed is the full budget of approved and running boosts, plus the actual spend of stopped and completed ones: a stopped boost counts only what it spent, so its spend is recorded when it stops. The per-cycle lock stays. A boost still draws from the month it starts in. |
+| SCP-Q16 | Who files a schedule through the publisher? (SCP-0b) | **The HoD or GM files it, and a second person decides it** (PV-D46: the filer never approves their own high-impact request). The officer schedules by hand ("Schedule in Meta"). |
+| SCP-Q17 | May agents move posts? (SCP-0b) | **Yes, with the rights of the person who asked.** The owner's words: "same right as the person login or ask. so if the one that ask ai to do something is staff, than the ai will follow staff permission." The existing on-behalf-of model applies: the person is the author and Cerbos decides on them, the agent is recorded alongside (`via`), and the maker/checker rule applies to the person. Writes classed high go through the agent's write gate and the in-thread confirm. Unattended automations with no person behind them stay refused every new action. |
+| SCP-Q18 | Who edits allocations, deadlines and boost budgets? (SCP-0b) | **The social approvers only:** the Social Media unit head (lead seat), the GM (lead seat), or a `social_manager` grant (plus platform admin), not `manager`. That covers the allocations (officer, creative source, target, report), the deadline table and settings (buffer, step estimates), and recording, setting, raising or lowering boost budgets on the client's behalf. |
 
-**Open, with the default in force** (the owner may overrule it at any time):
-
-| # | Question | Default in force |
-|---|---|---|
-| SCP-Q5 | What is in the first release? | SCP-K, SCP-1 to SCP-4 and SCP-S, proved by SCP-7. SCP-5 comes after. SCP-6 waits for real data. |
-| SCP-Q13 | Does moving an approved post's date need the client again? (raised by SCP-0b) | No. The client approves the content: the review hash leaves the date out, so the officer may reschedule an approved post. A change of placement or content still goes back to the client. Today's Composer rule, where the date is part of the client's hash, stays for Composer posts. |
-| SCP-Q14 | Who in the portal may agree boost money? (SCP-0b) | A contact with signing capability on that client (`signer` or `admin`). A viewer sees the request but cannot agree; staff can record the client's answer instead. |
-| SCP-Q15 | The monthly boost budget's edges (SCP-0b) | Only "set or raise", as ruled: no lowering. A `stopped` boost counts at its full budget, like a `completed` one. A boost draws from the cycle of the month it starts in; with no cycle there, it waits for the client. |
-| SCP-Q16 | Who files a schedule through the publisher? (SCP-0b) | A holder of `social_post` · `publish` (the HoD or GM), and another person decides it (PV-D46, the filer never approves their own high-impact request). The officer schedules by hand ("Schedule in Meta"). |
-| SCP-Q17 | May agents move posts? (SCP-0b) | Not in the first release: agents read the pipeline through read tools, and Cerbos denies every new action to automation and bot principals. Writes come under the separate AI plan. |
-| SCP-Q18 | Who edits allocations, deadlines and boost budgets? (SCP-0b) | As today: `social_engagement` · `update` and `set_scope`, which every department head holds through `manager`. Narrowing them to the social approvers is a later owner call. |
+**Open, with the default in force:** None open.
 
 **Superseded on 2026-10-26:** SCP-Q3 (the client page's look) by SCP-D5 and SCP-Q8; SCP-Q4 (two internal approvers) and
 SCP-Q6 (the PM is the account manager) by SCP-Q9.
@@ -251,12 +248,12 @@ officer, the GM or another approver takes its HoD approval and final check.
   `social_post_copy_edits` (the copy edit log, append-only).
 - **Variants** are created at the final check, one per placement network, from the master caption. Per-network changes
   stay in the Composer, and the existing rule that an edit clears an approval still holds. An Instagram Story is an
-  Instagram variant with `settings.igType='story'`. Variants gain `content_sha256` (the publish-args hash without the
-  date).
+  Instagram variant with `settings.igType='story'`. Variants gain no column: the client's approval keeps today's hash
+  rule, with the date in the hash (SCP-Q13).
 - **Client review:** `social_post_client_reviews` stays per variant. One decision per post applies to all of its variants
-  in one transaction. New columns: `reviewed_content_sha256` (the client approves the content, not the date, SCP-Q13),
-  `change_kind`, `anchor` (a pin on the image), `recorded_by`, `channel` (`whatsapp|email|meeting`), `decision_id`,
-  `undo_until`.
+  in one transaction. New columns: `change_kind`, `anchor` (a pin on the image), `recorded_by`, `channel`
+  (`whatsapp|email|meeting`), `decision_id`, `undo_until`. The review keeps comparing `reviewed_args_sha256` with the
+  variant's `args_sha256`, so it covers the content, the date, the time and the placement.
 - **Comments:** `visibility` (`team|client`) and `anchor` (`{x, y, fileId}`) on the shared `comments`.
 - **Creative assets:** `source` (`own|client|stock|ai|unknown`) and `ai_note`.
 - **Metrics:** `social_post_metrics.source` (`pull|manual|simulated`), `reach` (the table has none today) and `entered_by`,
@@ -264,19 +261,22 @@ officer, the GM or another approver takes its HoD approval and final check.
   least 1.25 × its account's average.
 - **`social_boost_budgets`** (the monthly boost budget, SCP-Q11): one row per proposal or recording for a cycle,
   `amount_minor`, `currency`, `status` (`pending|agreed|declined|withdrawn|superseded`), `decided_via` (`portal|recorded`),
-  who and when. The cycle's agreed budget is its one `agreed` row. It is a table on the plain tenant wall rather than
-  columns on `social_cycles`, because the portal writes it (the 0105 D-16 rule).
+  who and when. The cycle's agreed budget is its one `agreed` row; a new agreement may be higher or lower, never below
+  what is committed (SCP-Q15). It is a table on the plain tenant wall rather than columns on `social_cycles`, because
+  the portal writes it (the 0105 D-16 rule).
 - **`social_boosts`** (plain tenant wall too): `post_id`; `cycle_id` (the month the boost starts in); `status`
   (`requested|approved|running|stopped|completed|cancelled|declined`); `goal` (`profile_visits|website|messages`);
   `audience` (`automatic|local|custom`, plus a description); `daily_budget_minor` with `currency` (IDR); `days`;
   `total_budget_minor`; `starts_on`; `approved_by`, `approved_via` (`budget|portal|recorded`; `budget` means within the
-  cycle's agreed boost budget) and `budget_id`; `spend_minor`, `paid_reach`, `clicks`; `simulated`. The client sees their
-  own budget and spend (PV-D38), never our fees.
+  cycle's agreed boost budget) and `budget_id`; `spend_minor` (recorded when the boost stops or completes),
+  `paid_reach`, `clicks`; `simulated`. Committed is the full budget of approved and running boosts plus the spend of
+  stopped and completed ones (SCP-Q15). The client sees their own budget and spend (PV-D38), never our fees.
 - **Simulation (SCP-S):** `social_accounts.simulated`, `social_post_variants.simulated`, `social_metrics_daily.source`.
 - **`social_ideas`** ("Ideas for next month"): `engagement_id`, `cycle_id`, `saw`, `metric`, `suggestion`, `status`
   (`proposed|planned|shared`), `post_id`.
-- **`social_reports`:** a `weekly` kind, `notes` (one insight and one suggestion per area), `action_plan`. The design's
-  Draft, HoD check, Ready, Sent map to the existing `draft`, `in_review`, `approved`, `delivered`.
+- **`social_reports`:** `notes` (one insight and one suggestion per area), `action_plan` and `simulated` in the first
+  release (SCP-5a, SCP-Q5); the `weekly` kind with SCP-5b. The design's Draft, HoD check, Ready, Sent map to the
+  existing `draft`, `in_review`, `approved`, `delivered`.
 - **Tasks:** `pm_tasks` gain `linked_type` (`social_post|social_cycle`) and `linked_id`: a task can point at a post, and
   the content-month task points at its cycle. No new task table (SCP-D4).
 
@@ -308,27 +308,31 @@ officer, the GM or another approver takes its HoD approval and final check.
 | `submit_design` | `design`, or `changes` (design) → `final` | The client's designer | Needs an asset version or a shared link |
 | `final_approve` | `final` → `client` | HoD or GM, not the author | Creates the variants and requests client review on each |
 | `final_changes` | `final` → `changes` (return to final), copy or design | HoD or GM | A note is required. A design change sets `creative_state` to `revision` |
-| `client_approve` | `client` → `approved` | The client in the portal; or the Officer, HoD or GM recording it with channel and note | Every variant's review approved with its hash |
+| `client_approve` | `client` → `approved` | The client in the portal; or the Officer, HoD or GM recording it with channel and note | Every variant's review approved with its hash, which covers the content, the date, the time and the placement |
 | `client_change` | `client` → `changes`: copy (return to proofread, the before-text kept) or design (return to the final check, revision: loop d) | The client, or recorded by staff | A note is required; a pin on the image is optional |
-| `schedule` | `approved` → `scheduled` | Officer | Date and time; the placement is the one the client approved (chosen while drafting); the media validator passes; by hand or through the publisher |
-| `unschedule` | `scheduled` → `approved` | Officer | Cancels a dispatch |
+| `schedule` | `approved` → `scheduled` | Officer | By hand ("Schedule in Meta"), at exactly the approved date, time and placement; the media validator passes. An approved time that has passed needs `reschedule` |
+| `schedule_publisher` | `approved` → `scheduled` | HoD or GM, not the author | Through the publisher, at the approved date, time and placement: one publish approval per variant, decided by a second person (SCP-Q16, PV-D46) |
+| `unschedule` | `scheduled` → `approved` | Officer (by hand); HoD or GM (through the publisher) | Cancels a dispatch; the client's approval stands |
+| `reschedule` | `approved`, `scheduled` → `client` | Officer | A new date, time or placement: the client approves again on every network (SCP-Q13). A scheduled post is unscheduled first, cancelling any dispatch |
 | `mark_live` | `scheduled` → `live` | Officer, or the publisher's result | The post's link; metrics start |
 | `block` | any status before `client` → `blocked` | Officer, HoD or GM | A reason and who we wait on; `blocked_from` kept |
 | `resolve` | `blocked` → the status it left | Officer, HoD or GM | |
-| `agree_boost_budget` | on the cycle | The client in the portal's approvals, or a manager recording it with channel and note | Sets or raises the cycle's monthly boost budget (SCP-Q11) |
+| `agree_boost_budget` | on the cycle | A signer in the portal's approvals, or a social approver recording it with channel and note | Sets, raises or lowers the cycle's monthly boost budget, never below what is committed (SCP-Q11, SCP-Q14, SCP-Q15) |
 | `request_boost` | on `live` | Officer, HoD or GM | Budget and days above zero; no open boost. If daily budget × days fits what remains of the cycle's agreed boost budget, it is approved at once (`approved_via` = `budget`); otherwise it waits for the client |
-| `approve_boost` | `requested` → `approved` (or `declined`) | The client in the portal, or recorded by a manager | Only for a boost over what remains of the monthly budget (SCP-Q11) |
-| `start_boost`, `stop_boost`, `complete_boost` | `approved` → `running` → `stopped` or `completed` | Officer, HoD or GM | Completing needs spend and paid reach; spend above budget warns |
+| `approve_boost` | `requested` → `approved` (or `declined`) | A signer in the portal, or recorded by a social approver | Only for a boost over what remains of the monthly budget (SCP-Q11) |
+| `start_boost`, `stop_boost`, `complete_boost` | `approved` → `running` → `stopped` or `completed` | Officer, HoD or GM | Stopping records the spend; completing needs spend and paid reach; spend above budget warns |
 | delete | `planned`, `drafting` | Officer, HoD or GM | Later statuses are archived instead |
 
-A content edit after the client approved sends the post back to the client: the existing hash rule does this. A date
-change alone does not, because the client's review hash leaves the date out (SCP-Q13). Every action is checked as one
-of eight Cerbos actions on `social_post`, grouped by who acts: `author`, `proofread`, `approve`, `design`, `schedule`,
-`manage`, `record_client` and `boost`; there is no `social_boost` kind, and the client acts through the portal's
-`approve_post` and `approve_spend` (PERMISSION-CONTRACT §53). The attributes conditions read go on the resource's
-allow-list: `ownerId` (the officer), `creatorId` (the author), `approverIds` (the Social Media and GM lead seats),
-`assigneeIds` (the request's designers) and `creativeSource`. The machine itself is the fixture
-`platform-nest/src/modules/social/scp-stage-machine.json` (FRONTEND-BFF-CONTRACT §63.3).
+Any change after the client approved, to the content, the date, the time or the placement, sends the post back to the
+client: the existing hash rule does this (SCP-Q13). Every action is checked as one of eight Cerbos actions on
+`social_post`, grouped by who acts: `author`, `proofread`, `approve`, `design`, `schedule`, `manage`, `record_client`
+and `boost`. The allocation, the deadline table and the settings are `plan`, and recording boost budgets is `budget`, on
+`social_engagement` (SCP-Q18). Neither `manager` nor `company_admin` holds any of them. There is no `social_boost` kind,
+and the client acts through the portal's `approve_post` and `approve_spend` (PERMISSION-CONTRACT §53). An agent acts
+with the rights of the person who asked; an unattended automation acts on none of them (SCP-Q17). The attributes
+conditions read go on the resource's allow-list: `ownerId` (the officer), `creatorId` (the author), `approverIds` (the
+Social Media and GM lead seats), `assigneeIds` (the request's designers) and `creativeSource`. The machine itself is the
+fixture `platform-nest/src/modules/social/scp-stage-machine.json` (FRONTEND-BFF-CONTRACT §63.3).
 
 ### 4.4 Cycles and schedule health
 
@@ -440,16 +444,21 @@ move, without any real network account.
 | Notifications | The notification feed (`/me/inbox`) | |
 | Tasks | PM tasks: for me, given by me, whole team | A task can point at a post |
 | Create | The New menu | New post, Extra post, New task, Ask Creatives for assets |
-| Calendar | `{D}/calendar`, all clients | Added: not in the design |
-| Reports | Social reports | The existing reports until SCP-5a |
-| Saved | The content bank | The Asset Library until SCP-5e |
-| Profile | The client page, with a switcher across your clients | |
+| Calendar | `{D}/calendar`, all clients (the Publish row's Calendar tab) | Added: not in the design |
+| Reports | Social reports, `{D}/social-reports` (a tab of the shared Reports row) | The shared Reports row until SCP-5a |
+| Saved | The content bank | The Asset Library (`{D}/assets`, a Publish tab) until SCP-5e |
+| Profile | The client page: Plan, Stories, Feed preview, Calendar, List and the brand book, with a switcher across your clients | |
 | AI Assistant | The assistant drawer | Added: not in the design |
 | Dashboard (HoD, GM) | The Overview's Team view | The existing Team view until SCP-5d |
 | Settings (HoD, GM) | Cycles, estimates, targets, the buffer | Built in SCP-1c |
 
+Each pinned row is a registry row or tab, named by its key in FRONTEND-BFF-CONTRACT §63.17 (row keys are unique inside a
+workspace). Calendar, Reports and Saved are tabs of existing rows; Messages, Profile and Settings are new rows, and so are
+Allocation, Design queue and Boosting, which sit in More.
+
 **More** (the design's Account row becomes More): the menu shrinks to icons and a panel slides out, with Find a page and
-three groups. **Work:** Project Management, Requests, Campaigns, Clients, Social inbox, Tools & connections.
+three groups. **Work:** Project Management, Allocation, Design queue, Boosting, Requests, Campaigns, Clients, Social
+inbox, Tools & connections.
 **Performance:** My performance, Reports, Analytics, Appraisals, Learning. **You:** Approvals, Mail, My calendar, Me.
 The account sits at its foot: Switch workspace, Appearance, Log out. A badge inside More also shows on More.
 
@@ -461,7 +470,8 @@ a full-screen sheet from ☰ on the profile.
 URLs never move, new pages get new URLs under the department, and every page keeps exactly one area (the DW-1c test).
 The top-level `/pipeline` and `/monitoring` are Web Dev's. A post opens at `{D}/posts/[postId]` as a drawer over any list
 (the `TaskDrawer` intercepting-route pattern). The Composer stays at `{D}/composer/[postId]` as the per-network step,
-findable from ⌘K. SCP-0b names the other new pages.
+findable from ⌘K. SCP-0b names the other new pages and their registry keys (FRONTEND-BFF-CONTRACT §63.17). Social
+reports get `{D}/social-reports`, because `{D}/reports` is SEO's reports page in every department.
 
 ### 6.4 The Overview
 
@@ -517,7 +527,7 @@ The orchestrating session reviews every agent diff before it lands, owns all ser
 
 Then **Kg** switches the skin on for Social Media once 1d, 1e and 1k are live, and **1p** walks every role (QA, Sonnet).
 
-**Wave 3 · Client, publishing, money** (after wave 2; lanes in parallel).
+**Wave 3 · Client, publishing, money, reports** (after wave 2; lanes in parallel).
 
 | Lane | Tickets | Model |
 |---|---|---|
@@ -525,12 +535,12 @@ Then **Kg** switches the skin on for Social Media once 1d, 1e and 1k are live, a
 | Simulation | Sa and Sf (Opus); Sb to Se and Sg (Sonnet) | |
 | Schedule and calendar | 3a to 3f | Sonnet |
 | Boost | 4a (Opus), then 4b and 4c (Sonnet) | After Sa |
+| Reports | 5a, then 5d (SCP-Q5) | Sonnet; Opus reviews 5d's people data against the DW-4 privacy rules. 5a after 3c (the metrics) and 4a (the boost table it reads spend from); 5d after 1c (health) |
 
 **Wave 4 · Proof and the first release.** 7a to 7d (QA, Sonnet; the orchestrator drives 7b live and runs 7d with the
-team). The first release is complete when SCP-7 is ticked (SCP-Q5).
+team), covering 5a and 5d too. The first release is complete when SCP-7 is ticked (SCP-Q5).
 
-**After:** SCP-5 (Sonnet; Opus reviews 5d's people data against the DW-4 privacy rules), then SCP-6 when real data is
-allowed.
+**After:** the rest of SCP-5 (5b, 5c, 5e to 5h; Sonnet), then SCP-6 when real data is allowed.
 
 At most three implementer agents run at once, and only one sumopod gate at a time, with memory caps.
 
@@ -569,7 +579,7 @@ once deployed, checked on the live ERP's mock seed.
 |---|---|
 | Ka Skins in the shell | The registry carries a skin per workspace and pinned rows per skin; `Shell` sets the skin on the page. The Standard skin renders exactly as before (a test proves it). The Social skin is off until Kg. |
 | Kb Social tokens | Light and dark token sets with the design's white, black and blue. Stage colours keep the meaning of the status families. The token contrast test covers both skins. |
-| Kc The Social menu | The design's rows, icons and badges; Calendar and AI Assistant added; Dashboard and Settings for the HoD and GM by role. Search, Notifications, Create and Profile do what the top bar's search, bell, New and avatar did. |
+| Kc The Social menu | The design's rows, icons and badges; Calendar and AI Assistant added; Dashboard and Settings for the HoD and GM by role. Search, Notifications, Create and Profile do what the top bar's search, bell, New and avatar did. Rows and tabs use the keys of FRONTEND-BFF-CONTRACT §63.17. Publish gains the Asset Library tab (`assets`, declared in the social-media toolkit), in the Standard menu too; Saved opens it until 5e. |
 | Kd More | The menu shrinks to icons and the More panel slides out: Find a page, Work, Performance, You, and the account (Switch workspace, Appearance, Log out). It lists exactly the rows the registry gives the person. Badges show on More. Complete by keyboard and screen reader. |
 | Ke Phone | The bottom bar (Home, Search, Create, Tasks, Profile); Notifications and Messages at the top; More as a full-screen sheet. |
 | Kf Tests | The palette, page-home, one-area and sidebar tests pass in both skins; axe passes in light and dark, desktop and phone. |
@@ -579,7 +589,7 @@ once deployed, checked on the live ERP's mock seed.
 
 | Ticket | Acceptance |
 |---|---|
-| 1a Allocation and brand book | The officer, the creative source (Creatives or in-team, SCP-Q2), posts per cycle, report format and due day, platforms, formats, default time, pillars, tone, must-have notes, brand rules, hashtag sets, channels, key dates and links can be set per client. Clients › Allocation lists every client with its officer and target. Refused for non-managers. |
+| 1a Allocation and brand book | The officer, the creative source (Creatives or in-team, SCP-Q2), posts per cycle, report format and due day, platforms, formats, default time, pillars, tone, must-have notes, brand rules, hashtag sets, channels, key dates and links can be set per client. The Allocation page (`{D}/allocation`) lists every client with its officer and target. Edits are refused for anyone but the social approvers (SCP-Q18). |
 | 1b Stage machine | Every row of §4.3 is enforced on the server with its own refusal code. The fixture runs green in nest and ui. Activity is written. The phase and status mappings are pinned. |
 | 1c Cycles and health | The deadline table, the buffer and step estimates, edited on the HoD's Settings page. Ready-by and the latest safe hand-off on working days from the HR holiday calendar. On track, Tight, At risk and Late, tested on month ends, weekends, holidays and the year turn. |
 | 1d Home | "Your turn" per role with the next allowed action as the main button; "Waiting on others"; tasks given to you; reports due; client stories with state rings; "Your accounts this cycle". Read on the server; fast at 600 posts. |
@@ -589,7 +599,7 @@ once deployed, checked on the live ERP's mock seed.
 | 1h Creative | On "approve for design" the post goes to the client's designer: it joins the client-month Creatives request, or the in-team design queue (SCP-Q2). The designer's queue; start; a version in the Asset Library or a Drive link; submit for the final check; asset source and AI note; revision notes shown. |
 | 1i Hand-off checks | The checks of §4.6 run on the server. "Send anyway" needs a reason, logged on the post and shown in its activity. |
 | 1j Blocked and follow-up | Block with a reason and who we wait on; resolve returns to the same step. Messages lists who holds each of your posts; Follow up sends a notification and logs it. "Needs you" gains the pipeline per role (§6.4). |
-| 1k Client page | The profile header (counts, cycle line, tone), cycle highlights, the Plan grid with slots placed for the target, Stories (not counted), the List with bulk "Send to proofread", the Calendar tab, Client profile (the brand book) and Extra post. |
+| 1k Client page | The profile header (counts, cycle line, tone), cycle highlights, the Plan grid with slots placed for the target, Stories (not counted), the List with bulk "Send to proofread", the Calendar tab, Client profile (the brand book) and Extra post. The Feed preview tab comes with 3d. |
 | 1l Comments | The shared thread gains team-only or client-visible, and a pin on the image. Pins show on the post and in the portal. |
 | 1m Create | + New post inside a client's cycle; Extra post, flagged and outside the target; New task; Ask Creatives for assets. |
 | 1n Content month in PM | One task per client and cycle, due on its ready-by, Ball on the Officer, progress from the pipeline, done when every post is client-approved. No PM task per post (a test proves it). A task can point at a post. |
@@ -624,11 +634,11 @@ once deployed, checked on the live ERP's mock seed.
 
 | Ticket | Acceptance |
 |---|---|
-| 3a Schedule | Date, time and placement (Instagram and Facebook feed; Instagram Reels and Facebook; Instagram Story) with the existing validator. "Schedule in Meta" by hand marks it scheduled; unschedule works. |
+| 3a Schedule | Date, time and placement (Instagram and Facebook feed; Instagram Reels and Facebook; Instagram Story) with the existing validator. "Schedule in Meta" by hand marks it scheduled; unschedule works. Scheduling at the approved date, time and placement keeps the client's approval; any other date, time or placement asks the client again (SCP-Q13). |
 | 3b Live | "Mark live" with the link when posting by hand; the simulated publisher in dev; the real publisher after DW-11. A failed publish shows on the Failed posts tile. |
 | 3c Metrics | Pulled, typed in or simulated; engagement rate; boost candidates as in §4.2. |
-| 3d Feed preview | The client's grid with planned posts; dragging swaps publish dates; live posts are locked. |
-| 3e Calendar | The pinned row: every client's posts, Monday-first, stage colours with a legend, holidays and approved leave from the department calendar; plan a post on a day; drag to change a date. |
+| 3d Feed preview | The client page's Feed preview tab: the client's grid with planned posts; dragging swaps publish dates, and an approved or scheduled post in a swap goes back to the client (SCP-Q13); live posts are locked. |
+| 3e Calendar | The pinned row: every client's posts, Monday-first, stage colours with a legend, holidays and approved leave from the department calendar; plan a post on a day; drag to change a date (an approved or scheduled post goes back to the client, SCP-Q13). |
 | 3f Readers and tiles | The KPI readers (posts on schedule, client approval turnaround) and the Overview tiles of §6.4 read the pipeline. |
 
 ### SCP-4 · Boosting
@@ -639,14 +649,14 @@ once deployed, checked on the live ERP's mock seed.
 | 4b Monthly boost budget | The client agrees a boost budget per cycle in the portal's approvals, or staff record it (SCP-Q11). The remaining budget shows on the client page and the Boosting list. A boost over what remains waits for the client's approval. |
 | 4c Run and results | Start, stop, or complete with spend, paid reach and clicks. The Boosting list shows candidates, running boosts and totals. |
 
-### SCP-5 · Reports and management (after the first release, SCP-Q5)
+### SCP-5 · Reports and management (5a and 5d in the first release, the rest after it; SCP-Q5)
 
 | Ticket | Acceptance |
 |---|---|
-| 5a Monthly report | Numbers filled from metrics; one insight and one suggestion per area (followers, engagement, audience); an action plan; Draft, HoD check, Ready, Sent; a PDF; published to the client's portal reports (PV7-04a); "Draft with AI" from the brand-draft lookup. |
+| 5a Monthly report | In the first release, at `{D}/social-reports` (the Reports row's Social reports tab). Numbers filled from metrics; one insight and one suggestion per area (followers, engagement, audience); an action plan; Draft, HoD check, Ready, Sent; a PDF; published to the client's portal reports (PV7-04a); "Draft with AI" from the brand-draft lookup. |
 | 5b Weekly report | A summary and next week's plan, on the same reports. |
 | 5c Ideas for next month | What we saw, the metric and the suggestion. "Add to next plan" creates a planned post linked to the idea; "Mark shared". |
-| 5d Team dashboard | Needs attention, workload per person, clients this cycle, where work waits longest (against the holder, never the Officer), estimates not set. On the Overview's Team view and Reports › Team, following the activity privacy rules. |
+| 5d Team dashboard | In the first release. Needs attention, workload per person, clients this cycle, where work waits longest (against the holder, never the Officer), estimates not set. On the Overview's Team view and Reports › Team, following the activity privacy rules. |
 | 5e Saved | The content bank per client: the Asset Library's photos and videos (used, unused, source) and saved captions, hashtag sets, templates and references. |
 | 5f Monthly cycle | Report, planning, copy lock, client window, artwork and deploy as PM tasks per client and cycle. Steps the pipeline can see close themselves. |
 | 5g Audit | The twelve-dimension scorecard: automatic from pipeline data for existing clients, typed in for prospects. |
@@ -661,7 +671,7 @@ once deployed, checked on the live ERP's mock seed.
 ### SCP-7 · Proof: a simulated month, end to end
 
 - **7a.** e2e on sumopod: one mock client's month through all eight steps as every role, all five loops, a block, a
-  failed publish, a boost and the month report.
+  failed publish, a boost, the month report and the Team dashboard.
 - **7b.** A live drive on the ERP's mock seed, as each role login and a portal placeholder.
 - **7c.** axe, light and dark, desktop and phone, on every new page in the Social skin and on the portal page; the
   Standard skin unchanged.
