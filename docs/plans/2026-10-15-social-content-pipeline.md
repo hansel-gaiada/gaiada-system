@@ -92,6 +92,12 @@ client's photos". Resolving it returns the post to the step it left.
 | # | Question | Default in force |
 |---|---|---|
 | SCP-Q5 | What is in the first release? | SCP-K, SCP-1 to SCP-4 and SCP-S, proved by SCP-7. SCP-5 comes after. SCP-6 waits for real data. |
+| SCP-Q13 | Does moving an approved post's date need the client again? (raised by SCP-0b) | No. The client approves the content: the review hash leaves the date out, so the officer may reschedule an approved post. A change of placement or content still goes back to the client. Today's Composer rule, where the date is part of the client's hash, stays for Composer posts. |
+| SCP-Q14 | Who in the portal may agree boost money? (SCP-0b) | A contact with signing capability on that client (`signer` or `admin`). A viewer sees the request but cannot agree; staff can record the client's answer instead. |
+| SCP-Q15 | The monthly boost budget's edges (SCP-0b) | Only "set or raise", as ruled: no lowering. A `stopped` boost counts at its full budget, like a `completed` one. A boost draws from the cycle of the month it starts in; with no cycle there, it waits for the client. |
+| SCP-Q16 | Who files a schedule through the publisher? (SCP-0b) | A holder of `social_post` · `publish` (the HoD or GM), and another person decides it (PV-D46, the filer never approves their own high-impact request). The officer schedules by hand ("Schedule in Meta"). |
+| SCP-Q17 | May agents move posts? (SCP-0b) | Not in the first release: agents read the pipeline through read tools, and Cerbos denies every new action to automation and bot principals. Writes come under the separate AI plan. |
+| SCP-Q18 | Who edits allocations, deadlines and boost budgets? (SCP-0b) | As today: `social_engagement` · `update` and `set_scope`, which every department head holds through `manager`. Narrowing them to the social approvers is a later owner call. |
 
 **Superseded on 2026-10-26:** SCP-Q3 (the client page's look) by SCP-D5 and SCP-Q8; SCP-Q4 (two internal approvers) and
 SCP-Q6 (the PM is the account manager) by SCP-Q9.
@@ -218,44 +224,61 @@ The design's demo account switch does not exist in the ERP: the signed-in person
 each role a login (SCP-0c). No approval step may be passed by the post's author: if a HoD drafted a post as a client's
 officer, the GM or another approver takes its HoD approval and final check.
 
-### 4.2 Data (names are proposals; SCP-0b fixes them, and migrations take a timestamp after main's newest)
+### 4.2 Data (names fixed by SCP-0b: FRONTEND-BFF-CONTRACT §63.1 is the authority; migrations take a timestamp after main's newest)
 
-- **Allocation and brand book, on `social_engagements`** (real columns where they are queried): `smm_officer_user_id`,
-  `posts_per_cycle`, `report_format` (`email|meeting`), `report_due_day`, `platforms text[]`, `formats text[]`,
-  `default_post_time`, `creative_source` (`creatives|in_team`, SCP-Q2), `content_pillars text[]`, `tone`, `must_have_notes text[]`, `brand_rules text[]`, `hashtag_sets`,
-  `channels`, `key_dates`, `links` (jsonb where they are only shown). The brand fields also feed the brand knowledge that
-  "Draft with AI" reads.
-- **`social_cycles`:** `engagement_id`, `month` (the first of the month), `deadline`, `ready_by` (computed),
-  `estimates` (working days per step, optional), and the monthly boost budget (SCP-Q11): `boost_budget_minor`,
-  `boost_budget_agreed_by`, `boost_budget_agreed_via` (`portal|recorded`), `boost_budget_agreed_at`. A company
-  setting holds the buffer (working days, default 1).
+- **Allocation, on `social_engagements`:** the officer is the existing `owner_id` (the engagement owner, who already gets
+  every notification about the client's posts; there is no `smm_officer_user_id`); `posts_per_cycle`; `creative_source`
+  (`creatives|in_team`, SCP-Q2); `delivery_batch` (`A|B`, pre-fills the deadline table); `report_format` (`email|meeting`);
+  `report_due_day`; `platforms text[]`; `formats text[]`; `default_post_time`; `step_estimates` (working days per step,
+  optional, per client).
+- **Brand book, on the existing `social_brand_profiles`** (one per client, already read by "Draft with AI"): the existing
+  `tone` (gains `summary`) and `hashtag_strategy` (gains `sets`), plus `content_pillars text[]`, `must_have_notes text[]`,
+  `brand_rules text[]`, `channels`, `key_dates`, `links`.
+- **`social_settings`** (one row per company): `buffer_working_days` (default 1), `boost_candidate_factor` (1.25).
+- **`social_cycles`:** `engagement_id`, `month` (the first of the month), `deadline`, `ready_by` (computed by the server),
+  `creative_request_id` (the client-month Creatives request).
 - **On `social_posts`:** `cycle_id`; `format` (`feed|carousel|reel|story`); `pillar`; `angle`; `objective`; `key_message`;
-  `caption` (the master caption); `on_asset_text`; `cta`; `hashtags`; `visual_direction`; `raw_assets_url`; `placement`;
-  `pipeline_status` (§4.3) and `status_since`; `change_by`, `change_kind` (`copy|visual`), `change_note`, `return_to`;
-  `changed_only`; `suggestions` (the Copywriter's pending edits); `block_reason`, `block_waiting_on`, `blocked_from`;
-  `must_haves text[]` (ticked checks); `skipped_checks` (reason, who, when); `creative_state`
-  (`not_started|in_progress|revision|submitted`); `is_extra`; `idea_id`; `live_url`, `went_live_at`; `simulated`.
-  The publish engine's `status` stays, held to `pipeline_status` by one mapping (§4.3) that the 0b fixture pins.
+  `caption` (the master caption); `on_asset_text`; `cta`; `hashtags`; `visual_direction`; `raw_assets` (a list of
+  `{url, label, source, aiNote}`, replacing `raw_assets_url`); `placement`; `pipeline_status` (§4.3) and `status_since`;
+  `change_by`, `change_kind` (`copy|design`), `change_note`, `return_to`; `changed_only` and `copy_before`; `suggestions`
+  (the Copywriter's pending edits); `block_reason`, `block_waiting_on`, `blocked_from`, `blocked_at`; `must_haves text[]`
+  (ticked checks); `skipped_checks` (reason, who, when); `creative_source` (the post's own, copied at approval for design),
+  `creative_state` (`not_started|in_progress|revision|submitted`), `creative_request_id`; `is_extra`; `idea_id`;
+  `author_id` (the maker); `client_first_sent_at`; `schedule_via` (`manual|publisher`); `live_url`, `went_live_at`;
+  `simulated`; `archived_at`, `archived_by`, `archive_reason`; `last_action_id`, `last_action_at`. The publish engine's
+  `status` stays, held to `pipeline_status` by one mapping (§4.3) that the 0b fixture pins.
+- **New tables:** `social_post_designs` (the designs in order: an Asset Library version group or a link) and
+  `social_post_copy_edits` (the copy edit log, append-only).
 - **Variants** are created at the final check, one per placement network, from the master caption. Per-network changes
   stay in the Composer, and the existing rule that an edit clears an approval still holds. An Instagram Story is an
-  Instagram variant with `settings.igType='story'`.
+  Instagram variant with `settings.igType='story'`. Variants gain `content_sha256` (the publish-args hash without the
+  date).
 - **Client review:** `social_post_client_reviews` stays per variant. One decision per post applies to all of its variants
-  in one transaction. New columns: `change_kind`, `anchor` (a pin on the image), `recorded_by`, `channel`
-  (`whatsapp|email|meeting`).
-- **Comments:** `visibility` (`team|client`) and `anchor` (`{x, y, version}`) on the shared `comments`.
+  in one transaction. New columns: `reviewed_content_sha256` (the client approves the content, not the date, SCP-Q13),
+  `change_kind`, `anchor` (a pin on the image), `recorded_by`, `channel` (`whatsapp|email|meeting`), `decision_id`,
+  `undo_until`.
+- **Comments:** `visibility` (`team|client`) and `anchor` (`{x, y, fileId}`) on the shared `comments`.
 - **Creative assets:** `source` (`own|client|stock|ai|unknown`) and `ai_note`.
-- **Metrics:** `social_post_metrics.source` (`pull|manual|simulated`) and a manual-entry endpoint. Engagement rate is
-  (likes + comments + saves + shares) ÷ reach; a boost candidate is at least 1.25 × its account's average.
-- **`social_boosts`:** `post_id`; `status` (`requested|approved|running|stopped|completed|cancelled`); `goal`
-  (`profile_visits|website|messages`); `audience` (`automatic|local|custom`, plus a description); `daily_budget_minor`
-  with `currency` (IDR); `days`; `starts_on`; `approved_by`, `approved_via` (`budget|portal|recorded`; `budget` means within the cycle's agreed
-  boost budget); `spend_minor`,
-  `paid_reach`, `clicks`; `simulated`. The client sees their own budget and spend (PV-D38), never our fees.
+- **Metrics:** `social_post_metrics.source` (`pull|manual|simulated`), `reach` (the table has none today) and `entered_by`,
+  and a manual-entry endpoint. Engagement rate is (likes + comments + saves + shares) ÷ reach; a boost candidate is at
+  least 1.25 × its account's average.
+- **`social_boost_budgets`** (the monthly boost budget, SCP-Q11): one row per proposal or recording for a cycle,
+  `amount_minor`, `currency`, `status` (`pending|agreed|declined|withdrawn|superseded`), `decided_via` (`portal|recorded`),
+  who and when. The cycle's agreed budget is its one `agreed` row. It is a table on the plain tenant wall rather than
+  columns on `social_cycles`, because the portal writes it (the 0105 D-16 rule).
+- **`social_boosts`** (plain tenant wall too): `post_id`; `cycle_id` (the month the boost starts in); `status`
+  (`requested|approved|running|stopped|completed|cancelled|declined`); `goal` (`profile_visits|website|messages`);
+  `audience` (`automatic|local|custom`, plus a description); `daily_budget_minor` with `currency` (IDR); `days`;
+  `total_budget_minor`; `starts_on`; `approved_by`, `approved_via` (`budget|portal|recorded`; `budget` means within the
+  cycle's agreed boost budget) and `budget_id`; `spend_minor`, `paid_reach`, `clicks`; `simulated`. The client sees their
+  own budget and spend (PV-D38), never our fees.
+- **Simulation (SCP-S):** `social_accounts.simulated`, `social_post_variants.simulated`, `social_metrics_daily.source`.
 - **`social_ideas`** ("Ideas for next month"): `engagement_id`, `cycle_id`, `saw`, `metric`, `suggestion`, `status`
   (`proposed|planned|shared`), `post_id`.
 - **`social_reports`:** a `weekly` kind, `notes` (one insight and one suggestion per area), `action_plan`. The design's
   Draft, HoD check, Ready, Sent map to the existing `draft`, `in_review`, `approved`, `delivered`.
-- **Tasks:** PM tasks gain a link to a post. No new task table (SCP-D4).
+- **Tasks:** `pm_tasks` gain `linked_type` (`social_post|social_cycle`) and `linked_id`: a task can point at a post, and
+  the content-month task points at its cycle. No new task table (SCP-D4).
 
 ### 4.3 The stage machine (server-side; every action writes `work_activity`; each refusal has its own code)
 
@@ -281,26 +304,31 @@ officer, the GM or another approver takes its HoD approval and final check.
 | `approve_for_design` | `hod` → `design` | HoD or GM, not the author | Hands the post to the client's designer: with creative source `creatives` it joins the client-month Creatives request (opened if none exists); with `in_team` it enters the in-team design queue |
 | `hod_changes` | `hod` → `changes` (return to hod) | HoD or GM | A note is required |
 | `resend` | `changes` → `hod` or `final`, as the return says | Officer | For copy fixes asked at the HoD approval or the final check |
-| `start_design` | `design` | The client's designer (on the request, or an in-team designer) | `creative_state` becomes `in_progress`, or stays `revision` |
+| `start_design` | `design`, or `changes` (design) | The client's designer (on the request, or an in-team designer) | `creative_state` becomes `in_progress`, or stays `revision` |
 | `submit_design` | `design`, or `changes` (design) → `final` | The client's designer | Needs an asset version or a shared link |
 | `final_approve` | `final` → `client` | HoD or GM, not the author | Creates the variants and requests client review on each |
 | `final_changes` | `final` → `changes` (return to final), copy or design | HoD or GM | A note is required. A design change sets `creative_state` to `revision` |
 | `client_approve` | `client` → `approved` | The client in the portal; or the Officer, HoD or GM recording it with channel and note | Every variant's review approved with its hash |
-| `client_change` | `client` → `changes`: copy (return to proofread, the before-text kept) or design (return to client, revision) | The client, or recorded by staff | A note is required; a pin on the image is optional |
-| `schedule` | `approved` → `scheduled` | Officer | Date, time and placement; the media validator passes; by hand or through the publisher |
+| `client_change` | `client` → `changes`: copy (return to proofread, the before-text kept) or design (return to the final check, revision: loop d) | The client, or recorded by staff | A note is required; a pin on the image is optional |
+| `schedule` | `approved` → `scheduled` | Officer | Date and time; the placement is the one the client approved (chosen while drafting); the media validator passes; by hand or through the publisher |
 | `unschedule` | `scheduled` → `approved` | Officer | Cancels a dispatch |
 | `mark_live` | `scheduled` → `live` | Officer, or the publisher's result | The post's link; metrics start |
 | `block` | any status before `client` → `blocked` | Officer, HoD or GM | A reason and who we wait on; `blocked_from` kept |
 | `resolve` | `blocked` → the status it left | Officer, HoD or GM | |
-| `agree_boost_budget` | on the cycle | The client in the portal's approvals, or staff recording it with channel and note | Sets or raises the cycle's monthly boost budget (SCP-Q11) |
+| `agree_boost_budget` | on the cycle | The client in the portal's approvals, or a manager recording it with channel and note | Sets or raises the cycle's monthly boost budget (SCP-Q11) |
 | `request_boost` | on `live` | Officer, HoD or GM | Budget and days above zero; no open boost. If daily budget × days fits what remains of the cycle's agreed boost budget, it is approved at once (`approved_via` = `budget`); otherwise it waits for the client |
-| `approve_boost` | `requested` → `approved` | The client in the portal, or recorded by staff | Only for a boost over what remains of the monthly budget (SCP-Q11) |
+| `approve_boost` | `requested` → `approved` (or `declined`) | The client in the portal, or recorded by a manager | Only for a boost over what remains of the monthly budget (SCP-Q11) |
 | `start_boost`, `stop_boost`, `complete_boost` | `approved` → `running` → `stopped` or `completed` | Officer, HoD or GM | Completing needs spend and paid reach; spend above budget warns |
 | delete | `planned`, `drafting` | Officer, HoD or GM | Later statuses are archived instead |
 
-A content edit after the client approved sends the post back to the client: the existing hash rule does this. Every
-action is a Cerbos action on `social_post` (and on `social_boost` if 0b makes it a kind). The attributes conditions read
-go on the resource's allow-list: the officer, the author, the unit lead ids, the request's designers and the client.
+A content edit after the client approved sends the post back to the client: the existing hash rule does this. A date
+change alone does not, because the client's review hash leaves the date out (SCP-Q13). Every action is checked as one
+of eight Cerbos actions on `social_post`, grouped by who acts: `author`, `proofread`, `approve`, `design`, `schedule`,
+`manage`, `record_client` and `boost`; there is no `social_boost` kind, and the client acts through the portal's
+`approve_post` and `approve_spend` (PERMISSION-CONTRACT §53). The attributes conditions read go on the resource's
+allow-list: `ownerId` (the officer), `creatorId` (the author), `approverIds` (the Social Media and GM lead seats),
+`assigneeIds` (the request's designers) and `creativeSource`. The machine itself is the fixture
+`platform-nest/src/modules/social/scp-stage-machine.json` (FRONTEND-BFF-CONTRACT §63.3).
 
 ### 4.4 Cycles and schedule health
 
