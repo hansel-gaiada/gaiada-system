@@ -12375,7 +12375,7 @@ PipelinePost {
 **63.6.3 Edit.** **`PATCH posts/:postId/pipeline`** (`social_post` · `author`) takes `{expectedStatus, fields: {…}}`. The fields allowed depend on the status (fixture `editRules`):
 - planning fields in `planned`; planning and copy in `drafting`;
 - copy, `scheduledAt`, `mustHaves` and `placement` in a copy `changes` case asked inside the team, where each copy edit is also written to the copy log (`via: 'fix'`);
-- the same without `placement` after a client copy change: the client has seen the networks.
+- copy and `mustHaves` only after a client copy change: the client has seen the networks and the date, so the placement and the date stay (fixture `systemRules.date_moves`; loop e re-syncs only the copy to the variants). A new date after the client's next approval is `reschedule` (plan SCP-D6).
 
 Any other field is 409 `field_locked` (`detail: {field, status}`). Answers the `PipelinePost`. Date and placement moves after the client are `reschedule` (63.10). The placement is chosen while drafting and is required to send (63.3.4), because the client approves one preview per placed network.
 
@@ -12405,8 +12405,8 @@ Any other field is 409 `field_locked` (`detail: {field, status}`). Answers the `
 | `record_client_approve` | client → approved | `record_client` | `channel`, `note` |
 | `record_client_change` | client → changes | `record_client` | `changeKind`, `channel`, `note`, `anchor?` |
 | `schedule` | approved → scheduled, by hand, at the approved date and time | `schedule` | |
-| `schedule_publisher` | approved → scheduled, through the publisher (SCP-Q16) | `approve` and `publish` | |
-| `unschedule` | scheduled → approved | by hand `schedule`; through the publisher `approve` and `cancel` | |
+| `schedule_publisher` | approved → scheduled, through the publisher (SCP-Q16) | `approve` (the whole gate: no extra `publish` check, SCP-Q19, 63.10) | |
+| `unschedule` | scheduled → approved | by hand `schedule`; through the publisher `approve` (no extra `cancel` check, PERMISSION §53.2) | |
 | `reschedule` | approved, scheduled → client (the client approves again, SCP-Q13) | `schedule` (and `cancel` when scheduled through the publisher) | `at?`, `placement?` |
 | `mark_live` | scheduled → live | `schedule` | `url`, `at?` |
 | `block` | any status before client → blocked | `manage` | `reason`, `waitingOn` |
