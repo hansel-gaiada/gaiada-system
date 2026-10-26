@@ -139,6 +139,9 @@ describe("Approve selected and Reject selected", () => {
     fireEvent.click(screen.getByRole("button", { name: "Approve selected" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("not authorized Nothing was decided.");
     vi.mocked(decideTargetsBatchAction).mockResolvedValueOnce({ ok: false, error: "target_not_found", failedId: "gone" });
+    // The alert can render before the first transition ends (setMsg runs after the await, outside the transition's batch), and the
+    // buttons stay disabled while it is pending, so a click then is dropped and the second refusal never comes (CI 40308955191, twice).
+    await waitFor(() => expect(screen.getByRole("button", { name: "Reject selected" })).toBeEnabled(), { timeout: 10_000 });
     fireEvent.click(screen.getByRole("button", { name: "Reject selected" }));
     // The second refusal replaces the first after a transition: under a loaded full-suite run that can take longer than the default 1 s,
     // and the whole test longer than vitest's default 5 s (CI 39053572191 attempt 2: 5053 ms), so both limits are raised.

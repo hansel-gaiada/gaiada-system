@@ -193,7 +193,12 @@ describe("Connected: Block address", () => {
     expect(screen.getByText(/Block anyway\?/)).toBeInTheDocument();
     expect(blockAddress).toHaveBeenCalledTimes(1);
     expect(vi.mocked(blockAddress).mock.calls[0][0]).not.toHaveProperty("confirmShared");
-    fireEvent.click(screen.getByRole("button", { name: "Block anyway" }));
+    // The question can render before the first transition ends (setShared runs after the await, outside the transition's batch);
+    // while it is pending the button reads "Blocking…" and is disabled. Wait for "Block anyway", enabled, before the click
+    // (CI 40309245212 could not find it).
+    const anyway = await screen.findByRole("button", { name: "Block anyway" }, { timeout: 10_000 });
+    await waitFor(() => expect(anyway).toBeEnabled());
+    fireEvent.click(anyway);
     await waitFor(() => expect(blockAddress).toHaveBeenCalledTimes(2));
     expect(vi.mocked(blockAddress).mock.calls[1][0]).toEqual({ ip: "198.51.100.24", reason: "scanning us", hours: 24, confirmShared: true });
     expect(await screen.findByText("198.51.100.24 is blocked for 24 hours.")).toBeInTheDocument();
@@ -203,7 +208,10 @@ describe("Connected: Block address", () => {
     vi.mocked(blockAddress).mockResolvedValue({ ok: false, error: "shared", reason: "shared_address", users: 3 });
     const form = await open();
     fireEvent.click(within(form).getByRole("button", { name: "Block address" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Don't block" }));
+    // Same race as above: a click on the still-disabled button would be dropped.
+    const dont = await screen.findByRole("button", { name: "Don't block" }, { timeout: 10_000 });
+    await waitFor(() => expect(dont).toBeEnabled());
+    fireEvent.click(dont);
     expect(screen.queryByText(/Block anyway\?/)).toBeNull();
     expect(blockAddress).toHaveBeenCalledTimes(1);
   });
