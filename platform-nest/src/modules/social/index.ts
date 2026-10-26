@@ -132,6 +132,9 @@ export const socialModule: ModuleContract = {
     // SMM-27 — `social_best_time_suggestions`, the cached classical-stats best-hour-to-post verdict
     // per connected account; registered at write time.
     "202608221603_social_best_time_suggestions.sql",
+    // SCP-1b (PERMISSION-CONTRACT §53.13) — the content pipeline's IAM seed: the two roles, the eleven keys, the report
+    // narrowing. Lands after 202610261500_social_pipeline.sql (SCP-1b's schema file).
+    "202610261501_iam_social_pipeline.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is
@@ -186,6 +189,10 @@ export const socialModule: ModuleContract = {
     { key: "social.report.update", description: "Edit a report's narrative, submit it for review, or send it back" },
     { key: "social.report.approve", description: "Approve a reviewed engagement report (delivery gate)" },
     { key: "social.report.deliver", description: "Deliver an approved engagement report to the client" },
+    // SCP-1b — the publish decision on a pipeline post (PERMISSION-CONTRACT §53.12, SCP-Q21): the `social.publishPost`
+    // approverCheck (core/approval-executables.ts) asks `social_post · approve` on the post. The other pipeline keys are
+    // declared by the tickets that build their routes (this file's rule: no key before the endpoint that honours it).
+    { key: "social.post.approve", description: "Approve a client's pipeline post (the HoD approval and the final check); the four social approvers only" },
     // SMM-22 — the usage panel's own read gate. Already a catalog row + Cerbos action (0106 /
     // resource_social_ledger.yaml, forward-seeded by SMM-30 exactly like social.report.*/
     // social.client_review.* were) — this is the first ticket whose endpoint
