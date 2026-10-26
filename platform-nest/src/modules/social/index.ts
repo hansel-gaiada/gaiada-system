@@ -195,6 +195,15 @@ export const socialModule: ModuleContract = {
     // approverCheck (core/approval-executables.ts) asks `social_post · approve` on the post. The other pipeline keys are
     // declared by the tickets that build their routes (this file's rule: no key before the endpoint that honours it).
     { key: "social.post.approve", description: "Approve a client's pipeline post (the HoD approval and the final check); the four social approvers only" },
+    // SCP-1b-sm — the keys the pipeline's post routes honour (pipeline/pipeline.controller.ts, BFF §63.6). `boost` is
+    // SCP-4's, declared with its routes.
+    { key: "social.post.author", description: "Write a client's pipeline post as its officer: draft, edit, accept a suggestion, send to proofread, resend" },
+    { key: "social.post.proofread", description: "Proofread a pipeline post as a copywriter: suggest edits, approve the copy, return it" },
+    { key: "social.post.design", description: "Design a pipeline post: start the design, add and remove designs, submit for the final check" },
+    { key: "social.post.schedule", description: "Schedule an approved pipeline post by hand, unschedule or reschedule it, mark it live" },
+    { key: "social.post.manage", description: "Run the team's own steps on a pipeline post: block, resolve, follow up, discard, archive" },
+    { key: "social.post.record_client", description: "Record a decision the client gave outside the portal on a pipeline post" },
+    { key: "social.post.cancel", description: "Cancel a post's scheduled dispatch (rescheduling a publisher schedule)" },
     // SMM-22 — the usage panel's own read gate. Already a catalog row + Cerbos action (0106 /
     // resource_social_ledger.yaml, forward-seeded by SMM-30 exactly like social.report.*/
     // social.client_review.* were) — this is the first ticket whose endpoint
