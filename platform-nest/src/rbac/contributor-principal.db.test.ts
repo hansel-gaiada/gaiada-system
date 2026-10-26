@@ -441,7 +441,10 @@ describe.skipIf(!TEST_URL)("M5-W1d: the contributor principal in the database", 
       const rules = doc.resourcePolicy.rules;
       const all = new Set(rules.flatMap((r) => r.actions).filter((a) => a !== "*"));
       const denied = new Set(
-        rules.filter((r) => r.effect === "EFFECT_DENY" && /kind == "contributor"/.test(r.condition?.match?.expr ?? "")).flatMap((r) => r.actions),
+        // a contributor DENY is `kind == "contributor"`, or a `kind in [...]` list naming it (W1a's approve DENY)
+        rules
+          .filter((r) => r.effect === "EFFECT_DENY" && /kind == "contributor"|kind in \[[^\]]*"contributor"/.test(r.condition?.match?.expr ?? ""))
+          .flatMap((r) => r.actions),
       );
       return { all, denied };
     };
