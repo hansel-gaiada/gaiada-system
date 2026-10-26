@@ -82,6 +82,12 @@
   html[data-sidebar="collapsed"] .erp-app[data-skin="social"] .ws-side__nav { padding: 12px 8px; }
   html[data-sidebar="collapsed"] .erp-app[data-skin="social"] .ws-side .erp-side__head { padding: 16px 0 10px; }
   html[data-sidebar="collapsed"] .erp-app[data-skin="social"] .ws-side .ws-pin .ws-row__count { top: 4px; left: calc(50% + 6px); }
+  /* The rail draws icons only, but shell.css hides a row's label with `display: none`, and a link or button with no name is announced as nothing (axe
+     `link-name`, `button-name`, found by the SCP-Kf scan of the open More panel, whose rail the menu becomes). So in this skin the label stays in the
+     accessibility tree, visually hidden, and the rail tooltip still shows it to the eye. */
+  html[data-sidebar="collapsed"] .erp-app[data-skin="social"] .ws-side .ws-pin > span {
+    display: block; position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
 }
 
 /* ---- Phone: the menu is the off-canvas drawer, with labels; Create's menu opens under its row, inside the screen ---- */

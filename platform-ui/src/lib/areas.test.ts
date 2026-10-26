@@ -6,6 +6,9 @@ import {
   WORKSPACES, GENERIC_WORKSPACE, sidebarRows, COMPANY_ROWS, ADMIN_ROWS, YOU_ROWS, PERFORMANCE_ROWS, isPlanned,
   type Workspace, type WorkspaceRow, type WorkspaceTab,
 } from "./workspaces";
+import { SKIN_PERSONAS, modelFor, tabHrefsOf } from "./skinTestKit";
+import { allRows, workspaceForArea } from "./shellModel";
+import { phoneBarFor, phoneMenuFor, phoneTopFor, pinnedFor } from "./skins";
 
 const APP = resolve(__dirname, "../app/(app)");
 
@@ -195,5 +198,51 @@ describe("resolveArea", () => {
     expect(sameArea({ kind: "workspace", deptId: "a" }, { kind: "workspace", deptId: "a" })).toBe(true);
     expect(sameArea({ kind: "workspace", deptId: "a" }, { kind: "workspace", deptId: "b" })).toBe(false);
     expect(sameArea({ kind: "workspace", slug: "hr" }, { kind: "workspace", deptId: "a" })).toBe(false);
+  });
+});
+
+// ── SCP-Kf (plan §8): the one-area rule holds in the Social skin ──────────────────────────────────────────────────────────────────────
+// A skin adds no page and moves none. What it adds is a way to REACH pages (the pinned menu, the phone's bar and sheet), so what must hold is
+// that every page those open belongs to one area, the one the registry gave it, and that the area decides the same workspace in both skins.
+describe.each(SKIN_PERSONAS)("the Social skin keeps every page in one area: $name", (persona) => {
+  const std = modelFor(persona, undefined);
+  const soc = modelFor(persona, { on: ["standard", "social"] });
+  const socials = soc.workspaces.filter((w) => w.skin !== "standard");
+
+  it("has a Social workspace to test (the person is placed in it, or only visits it)", () => {
+    expect(socials.map((w) => w.key)).toEqual(["social-media"]);
+  });
+
+  it("puts every page a pin, the phone bar, the top or the sheet opens in this workspace, personal, performance or a shared area, as the registry does", () => {
+    for (const ws of socials) {
+      const pins = pinnedFor(ws.skin, allRows(ws))!;
+      const links = [...pins, ...phoneBarFor(ws.skin, pins), ...phoneTopFor(ws.skin, pins), ...phoneMenuFor(ws.skin, pins)].flatMap((p) => (p.kind === "link" ? [p] : []));
+      expect(links.length).toBeGreaterThan(3);
+      for (const p of links) {
+        const a = areaFor(p.href);
+        const own = a.kind === "workspace" && (a.deptId === ws.deptId || a.slug === ws.key);
+        expect(own || ["personal", "performance", "shared"].includes(a.kind), `${p.key}: ${p.href} -> ${JSON.stringify(a)}`).toBe(true);
+        // The same page, asked of the Standard model's own rows, is in the same area: a skin does not re-home it.
+        const stdWs = std.workspaces.find((w) => w.id === ws.id)!;
+        expect(tabHrefsOf(stdWs), `${p.key}: ${p.href}`).toContain(p.href);
+      }
+      // Home is the workspace's own Overview.
+      const home = pins.find((p) => p.key === "home")!;
+      expect(home.kind === "link" && areaFor(home.href)).toMatchObject({ kind: "workspace", deptId: ws.deptId });
+    }
+  });
+
+  it("chooses the same workspace for every page in both skins (the area decides, the skin only dresses it)", () => {
+    const hrefs = new Set<string>();
+    for (const ws of std.workspaces) for (const h of tabHrefsOf(ws)) hrefs.add(h.split(/[?#]/)[0]);
+    expect(hrefs.size).toBeGreaterThan(50);
+    for (const href of hrefs) {
+      const area = (m: typeof std) => workspaceForArea(m, resolveArea(areaFor(href), null, m.home))?.id ?? null;
+      expect(area(soc), href).toBe(area(std));
+    }
+  });
+
+  it("gives the Social workspace its skin only on its own pages, and every other area stays Standard", () => {
+    for (const ws of soc.workspaces) expect(ws.skin === "social", ws.key).toBe(ws.key === "social-media");
   });
 });

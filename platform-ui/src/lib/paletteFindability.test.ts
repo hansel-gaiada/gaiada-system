@@ -10,10 +10,13 @@ import { resolveMyWorkspaces, type ConcreteRow, type OrgTreeNode } from "./works
 import { buildShellModel, type ShellModel, type ShellWorkspace } from "./shellModel";
 import { buildWorkspaceEntries, mergePaletteEntries, workspacePaletteEntries } from "./palette";
 import { AGENCY, HOTEL, ROOT, agencyTree, me, member, node, person } from "./workspaceFixtures";
+import { SKIN_PERSONAS, SKIN_RUNS, agencyWithSocial, modelFor, tabHrefsOf, type SkinsInput } from "./skinTestKit";
+import { allRows } from "./shellModel";
+import { phoneBarFor, phoneMenuFor, phoneTopFor, pinnedFor } from "./skins";
 
 /** Everything `Shell` does for the workspace shell, from a persona. */
-function build(m: Me, tenantId: string, root: OrgTreeNode) {
-  const model = buildShellModel({ me: m, tenantId, workspaces: resolveMyWorkspaces({ me: m, tenantId, root }) });
+function build(m: Me, tenantId: string, root: OrgTreeNode, skins?: SkinsInput) {
+  const model = buildShellModel({ me: m, tenantId, workspaces: resolveMyWorkspaces({ me: m, tenantId, root }), ...(skins ? { skins } : {}) });
   return { model, entries: workspacePaletteEntries(model, m, tenantId) };
 }
 
@@ -51,12 +54,17 @@ const PERSONAS: [string, Me, string, OrgTreeNode, string[]][] = [
     [...EVERYONE, ...AGENCY_ROWS, ...AGENCY_DEPTS, "/learning/compliance"]],
   ["a member of a generic-pack company", me([member("co-h")], [HOTEL]), "co-h", hotelTree,
     [...EVERYONE, "/departments/d-hk"]],
+  // SCP-Kf: a Social Media employee, the person the Social skin is drawn for. Run in both skins below.
+  ["a placed Social Media employee", me([member()]), "co-a", agencyWithSocial("social"),
+    [...EVERYONE, ...AGENCY_ROWS, ...AGENCY_DEPTS, "/departments/d-soc", "/departments/d-soc/calendar", "/departments/d-soc/composer", "/departments/d-soc/inbox", "/departments/d-soc/assets"]],
   ["platform_admin", me([{ role: "platform_admin", scopeType: "global", scopeId: null }], [ROOT, AGENCY]), "co-root", agencyTree(),
     [...EVERYONE, ...AGENCY_DEPTS, ...COMPANY_ADMIN_TIER, "/appraisals/cycles", ...GROUP_AREA, ...PLATFORM_AREA, "/admin"]],
 ];
 
-describe.each(PERSONAS)("the workspace shell's palette finds everything: %s", (_name, m, tenantId, root, wasFindable) => {
-  const { model, entries } = build(m, tenantId, root);
+// SCP-Kf (plan §8): the same suite, in BOTH skins. A skin changes the menu's shape, never which pages the person may open, so ⌘K must find exactly what
+// it found before; the persona list is unchanged and a Social Media employee is added to it.
+describe.each(SKIN_RUNS)("$name", ({ skins }) => describe.each(PERSONAS)("the workspace shell's palette finds everything: %s", (_name, m, tenantId, root, wasFindable) => {
+  const { model, entries } = build(m, tenantId, root, skins);
   const hrefs = entries.map((e) => e.href);
 
   it("still finds every page the classic nav offered (pinned from navFor before its removal)", () => {
@@ -87,7 +95,7 @@ describe.each(PERSONAS)("the workspace shell's palette finds everything: %s", (_
     expect(new Set(entries.map((e) => e.id)).size).toBe(entries.length);
     expect(new Set(hrefs).size).toBe(hrefs.length);
   });
-});
+}));
 
 // ── Labels and sections ──────────────────────────────────────────────────────────────────────────
 
@@ -198,5 +206,33 @@ describe("a tab the person may not open is not offered (M5-V3-i, ported from bui
 
   it("still offers the Website tabs that carry no gate", () => {
     expect(hrefsFor([member()])).toContain("/departments/d-web/website/analytics");
+  });
+});
+
+
+// ── SCP-Kf: the palette is the same in both skins, and finds every page the Social menu opens ──────────────────────────────────────────
+
+describe.each(SKIN_PERSONAS)("the Social skin leaves ⌘K as it was: $name", (persona) => {
+  const std = modelFor(persona, undefined);
+  const soc = modelFor(persona, { on: ["standard", "social"] });
+  const entriesOf = (model: ReturnType<typeof modelFor>) => workspacePaletteEntries(model, persona.who, persona.tenantId);
+
+  it("offers identical entries in both skins: same ids, hrefs, labels, sections, in the same order", () => {
+    expect(entriesOf(soc)).toEqual(entriesOf(std));
+    expect(entriesOf(std).length).toBeGreaterThan(20);
+  });
+
+  it("finds every page the Social menu, its phone bar, top and sheet open", () => {
+    const hrefs = new Set(entriesOf(soc).map((e) => e.href));
+    for (const ws of soc.workspaces.filter((w) => w.skin !== "standard")) {
+      const pins = pinnedFor(ws.skin, allRows(ws))!;
+      const opened = [...pins, ...phoneBarFor(ws.skin, pins), ...phoneTopFor(ws.skin, pins), ...phoneMenuFor(ws.skin, pins)]
+        .flatMap((p) => (p.kind === "link" ? [p.href] : []));
+      expect(opened.length, ws.key).toBeGreaterThan(3);
+      for (const href of opened) expect(hrefs.has(href), `${ws.key}: ${href}`).toBe(true);
+      // And no more: a pin names no page the registry's tabs do not.
+      const tabs = new Set(tabHrefsOf(ws));
+      for (const href of opened) expect(tabs.has(href), `${ws.key}: ${href} is not a tab of the workspace`).toBe(true);
+    }
   });
 });

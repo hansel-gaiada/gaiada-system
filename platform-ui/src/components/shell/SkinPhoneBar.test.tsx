@@ -50,7 +50,7 @@ function draw(model: ShellModel, pathname = "/departments/d-soc", extra?: ReactE
   return render(tree(model, extra));
 }
 
-const bar = () => screen.getByRole("navigation", { name: "Quick actions" });
+const bar = () => screen.getByRole("navigation", { name: "Bottom navigation" });
 const sidebarNav = () => screen.getByRole("navigation", { name: "Social Media menu" });
 const topMore = () => document.querySelector<HTMLButtonElement>(".erp-top__phone button")!;
 const sheet = () => screen.getByRole("dialog", { name: "More" });
@@ -65,7 +65,7 @@ beforeEach(() => {
 describe("the phone's bottom bar", () => {
   it("draws nothing for Standard: a workspace with no skin on, the Company area, or a person who chose Standard", () => {
     const off = draw(modelFor(officer, ["standard"]));
-    expect(screen.queryByRole("navigation", { name: "Quick actions" })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Bottom navigation" })).toBeNull();
     expect(off.container.querySelector(".ws-bar, .erp-top__phone")).toBeNull();
     off.unmount();
     nav.pathname = "/organization";
@@ -190,7 +190,7 @@ describe("More as a full-screen sheet", () => {
     draw(model);
     fireEvent.click(topMore());
     const groups = within(sheet()).getAllByRole("group");
-    expect(groups.map((g) => g.querySelector("h3")?.textContent)).toEqual(["Menu", "Work", "Performance", "You"]);
+    expect(groups.map((g) => g.querySelector("h3")?.textContent)).toEqual(["Menu", "Work", "Performance", "You", "Company and Admin"]);
     const menu = groups[0];
     expect(Array.from(menu.querySelectorAll(".ws-more__label")).map((l) => l.textContent)).toEqual(["Calendar", "Reports", "Saved", "AI Assistant"]);
     expect(within(menu).getByRole("link", { name: "Calendar" })).toHaveAttribute("href", "/departments/d-soc/calendar");

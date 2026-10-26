@@ -26,8 +26,9 @@ import "./more-panel.css";
 // server half (a sibling of the sidebar inside the frame), and NOT inside `.erp-side`: on a phone that is a fixed, transformed drawer, which would trap a
 // fixed child. It draws nothing for Standard, so the Standard frame is unchanged. Hidden above 760px by CSS (`workspace-sidebar-social.css`).
 
-/** The bottom bar's name as a landmark: distinct from the menu's own `<nav>`, which is named for the workspace. */
-const BAR_LABEL = "Quick actions";
+/** The bottom bar's name as a landmark: distinct from the menu's own `<nav>` (named for the workspace) and from the Overview's "Quick actions" card, which
+ *  an e2e scan found on the same page. */
+const BAR_LABEL = "Bottom navigation";
 
 export function SkinPhoneBar({ tenantId, newItems, company, companies, account }: {
   /** The active company, for the page context the Assistant drawer opens with, as the sidebar's own Assistant entry. */
@@ -63,11 +64,19 @@ function Bar({ ws, tenantId, newItems, company, companies, account }: {
     key: `${MENU_PREFIX}${p.key}`, label: p.label, icon: p.icon, ...(p.count ? { count: p.count } : {}),
     tabs: [{ key: p.tab, label: p.label, href: p.href, icon: p.icon }],
   }));
+  // The sidebar's foot links, Company and Admin (a workspace's menu offers them below its rows): a phone has no sidebar, so they are listed here, or those
+  // two areas would be one tap away on every other skin and none on a phone. Each opens the area's first page, as the foot link does.
+  const areaRow = (key: string, label: string, icon: ConcreteRow["icon"], rows: readonly ConcreteRow[]): ConcreteRow[] => {
+    const tab = rows[0]?.tabs[0];
+    return tab ? [{ key: `${MENU_PREFIX}${key}`, label, icon, tabs: [{ key: tab.key, label, href: tab.href, icon }] }] : [];
+  };
+  const areaRows = [...areaRow("company", "Company", "sitemap", shell.model.company), ...areaRow("admin", "Admin", "settings", shell.model.admin)];
   const groups: MoreGroup[] = [
     { key: "menu", label: "Menu", rows: menuRows },
     { key: "work", label: "Work", rows: ws.rows.work },
     { key: "performance", label: "Performance", rows: ws.rows.performance },
     { key: "you", label: "You", rows: ws.rows.you },
+    { key: "areas", label: "Company and Admin", rows: areaRows },
   ];
 
   return (

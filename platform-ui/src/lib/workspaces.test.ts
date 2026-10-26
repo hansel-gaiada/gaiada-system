@@ -8,6 +8,8 @@ import {
   OVERVIEW_BANDS, REPORT_PERIODS, workspaceFor, workspaceBySlug, hrefFor, isPlanned, sidebarRows, departmentOverviewHref, deptCalendarTab,
   type Gate, type Workspace, type WorkspaceRow, type WorkspaceTab,
 } from "./workspaces";
+import { SKINS } from "./skins";
+import { SKIN_PERSONAS, modelFor } from "./skinTestKit";
 
 const APP = resolve(__dirname, "../app/(app)");
 const ALL = [...WORKSPACES, GENERIC_WORKSPACE];
@@ -503,5 +505,57 @@ describe("the Department calendar tab on the Overview row (DW-10c-3, BFF section
     expect(overviewRow(workspaceBySlug("social-media")!).tabs.map((t) => t.href)).not.toContain("/departments/{dept}/calendar");
     // Social Media's own Calendar tab is still at /calendar.
     expect(rowsOf(workspaceBySlug("social-media")!).flatMap((r) => r.tabs).some((t) => t.href === "/departments/{dept}/calendar")).toBe(true);
+  });
+});
+
+// ── SCP-Kf (plan §8): nothing loses its home in the Social skin ───────────────────────────────────────────────────────────────────────
+// The Social skin rearranges the menu (a pinned list, then More). The registry's rows must still each have a place in it, and what it pins must
+// be pages that exist.
+describe("nothing loses its home in the Social skin (plan §8)", () => {
+  const social = workspaceBySlug("social-media")!;
+  const reg = sidebarRows(social);
+
+  it("gives every row of the Social Media menu a place: the top rows are pinned, the rest are listed by More", () => {
+    const pinnedRows = new Set(SKINS.social.pinned!.filter((p) => p.kind === "row").map((p) => (p as { row: string }).row));
+    // Overview and the AI Assistant lead the menu as Home and AI Assistant; Work, Performance and You are More's three groups.
+    for (const row of reg.top) expect(pinnedRows.has(row.key), `top row ${row.key}`).toBe(true);
+    const more = new Set([...reg.work, ...reg.performance, ...reg.you].map((r) => r.key));
+    for (const row of [...reg.work, ...reg.performance, ...reg.you]) expect(more.has(row.key), row.key).toBe(true);
+    expect(more.size).toBe(reg.work.length + reg.performance.length + reg.you.length);
+  });
+
+  it("pins only tabs the registry has, and every built one lands on a page file that exists", () => {
+    const rows = [...reg.top, ...reg.work, ...reg.performance, ...reg.you];
+    const missing: string[] = [];
+    for (const p of SKINS.social.pinned!) {
+      if (p.kind !== "row" || p.ticket) continue;
+      const row = rows.find((r) => r.key === p.row);
+      if (!row) { missing.push(`${p.key}: no row ${p.row}`); continue; }
+      // A fallback pin (Reports) opens the row's first tab until the tab it names exists.
+      const tab = (p.tab ? row.tabs.find((t) => t.key === p.tab) : row.tabs[0]) ?? (p.tabFallback ? row.tabs[0] : undefined);
+      if (!tab) { missing.push(`${p.key}: no tab ${p.row}/${p.tab}`); continue; }
+      if (!isPlanned(tab) && !existsSync(pageFile(tab.href))) missing.push(`${p.key} -> ${tab.href}`);
+    }
+    expect(missing).toEqual([]);
+  });
+
+  it("keeps the Asset Library the Saved pin opens a built, gated-as-before page of the Social Media toolkit", () => {
+    const assets = reg.work.find((r) => r.key === "publish")!.tabs.find((t) => t.key === "assets")!;
+    expect(assets.href).toBe("/departments/{dept}/assets");
+    expect(isPlanned(assets)).toBe(false);
+    expect(existsSync(pageFile(assets.href))).toBe(true);
+  });
+
+  it.each(SKIN_PERSONAS)("offers a person every row the registry gives them, in both skins: $name", (persona) => {
+    const std = modelFor(persona, undefined);
+    const soc = modelFor(persona, { on: ["standard", "social"] });
+    for (const ws of std.workspaces) {
+      const other = soc.workspaces.find((w) => w.id === ws.id)!;
+      expect(other.rows, ws.key).toEqual(ws.rows);
+      expect(other.creates, ws.key).toEqual(ws.creates);
+      expect(other.withheld, ws.key).toEqual(ws.withheld);
+    }
+    expect(soc.company).toEqual(std.company);
+    expect(soc.admin).toEqual(std.admin);
   });
 });
