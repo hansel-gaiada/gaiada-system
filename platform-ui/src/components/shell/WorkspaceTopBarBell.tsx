@@ -2,6 +2,7 @@ import type { Me } from "@/lib/platform";
 import { listNotifications } from "@/lib/entities";
 import { noticePostedLine } from "@/lib/notices";
 import { NotificationBell, type BellItem } from "./NotificationBell";
+import { ShellNotificationsSettle } from "./WorkspaceShellContext";
 
 // DW-2c: the bell of the workspace top bar, split out of `WorkspaceTopBar` so its read can stream (the bar draws the bell with no
 // count behind a <Suspense> until this resolves). Bell text is unchanged once resolved.
@@ -29,5 +30,11 @@ export async function WorkspaceTopBarBell({ me, tenantId }: { me: Me; tenantId: 
       unread = null;
     }
   }
-  return <NotificationBell unread={unread?.count ?? null} items={unread?.items ?? []} />;
+  // The same count goes to the shell (SCP-Kc), so the Social menu's Notifications entry needs no second read.
+  return (
+    <>
+      <NotificationBell unread={unread?.count ?? null} items={unread?.items ?? []} />
+      <ShellNotificationsSettle unread={unread?.count ?? null} />
+    </>
+  );
 }

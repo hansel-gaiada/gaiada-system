@@ -78,6 +78,9 @@ export interface WorkspaceShellValue {
   covers: (hrefs: readonly string[]) => boolean;
   /** True when the current page IS a tab of the view (exact path), not a record below one. */
   onToolPage: boolean;
+  /** The person's unread notifications, as the top bar's one read settled it (`ShellNotificationsSettle`); null while that read is in flight
+   *  or when it failed. Never 0 for "unknown". Read by the Social skin's menu, which carries the count the bell hides there (SCP-Kc). */
+  unread: number | null;
 }
 
 const Ctx = createContext<WorkspaceShellValue | null>(null);
@@ -123,6 +126,20 @@ export function ShellRoutesSettle({ read }: { read: readonly RequestRoute[] | nu
   return null;
 }
 
+// SCP-Kc: the unread count of the notification bell, handed over the same way. `WorkspaceTopBarBell` already makes the one `listNotifications`
+// read behind its own <Suspense>; it also renders `ShellNotificationsSettle`, so a menu that draws the count (the Social skin) needs no second
+// read. Unknown (in flight, or the read failed) is null and draws no badge, never 0.
+const NotificationsSetterCtx = createContext<((unread: number | null) => void) | null>(null);
+
+/** Renders nothing: hands the bell's settled unread count to the shell (see above). Rendered by the server's `WorkspaceTopBarBell`. */
+export function ShellNotificationsSettle({ unread }: { unread: number | null }) {
+  const set = useContext(NotificationsSetterCtx);
+  useEffect(() => {
+    set?.(unread);
+  }, [set, unread]);
+  return null;
+}
+
 /** Renders no DOM: `.erp-app`'s grid relies on its direct children. */
 export function WorkspaceShellProvider({ model: built, children }: { model: ShellModel; children: ReactNode }) {
   const pathname = usePathname() ?? "/";
@@ -131,6 +148,7 @@ export function WorkspaceShellProvider({ model: built, children }: { model: Shel
   // does not stream it) has no row awaiting it and passes through as is.
   const [approvals, setApprovals] = useState<ApprovalsRead>("inflight");
   const [routes, setRoutes] = useState<RoutesRead>("inflight");
+  const [unread, setUnread] = useState<number | null>(null);
   const model = useMemo(() => applyRoutes(applyApprovals(built, approvals), routes), [built, approvals, routes]);
 
   useEffect(() => {
@@ -167,12 +185,15 @@ export function WorkspaceShellProvider({ model: built, children }: { model: Shel
     // (`withheld`) are pages their read gate refuses them, mirroring the server, so they need no second strip to find them.
     covers: (hrefs) => hrefs.every((h) => tabPaths.has(pathOf(h)) || withheld.has(pathOf(h))),
     onToolPage: tabPaths.has(pathOf(pathname)),
+    unread,
   };
 
   return (
     <ApprovalsSetterCtx.Provider value={setApprovals}>
       <RoutesSetterCtx.Provider value={setRoutes}>
-        <Ctx.Provider value={value}>{children}</Ctx.Provider>
+        <NotificationsSetterCtx.Provider value={setUnread}>
+          <Ctx.Provider value={value}>{children}</Ctx.Provider>
+        </NotificationsSetterCtx.Provider>
       </RoutesSetterCtx.Provider>
     </ApprovalsSetterCtx.Provider>
   );

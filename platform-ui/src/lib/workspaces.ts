@@ -509,7 +509,7 @@ const SOCIAL_MEDIA: Workspace = {
   work: [
     PM_ROW,
     // Publish › Analytics moves to the Analytics row (§4).
-    { key: "publish", label: "Publish", icon: "gateway", tabs: ["calendar", "composer", "inbox"].map((k) => fromToolkit("social-media", k)) },
+    { key: "publish", label: "Publish", icon: "gateway", tabs: ["calendar", "composer", "inbox", "assets"].map((k) => fromToolkit("social-media", k)) },
     REQUESTS_ROW,
     {
       key: "campaigns", label: "Campaigns", icon: "sales", gate: AGENCY_ONLY,

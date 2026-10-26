@@ -343,6 +343,8 @@ const SOCIAL_MEDIA: DeptToolkit = {
         { key: "composer", label: "Composer", path: "composer", icon: "pulse", blurb: "Draft a master post and its per-network content." },
         { key: "inbox", label: "Inbox", path: "inbox", icon: "bell", blurb: "Comments and DMs across every connected account." },
         { key: "analytics", label: "Analytics", path: "analytics", icon: "pulse", blurb: "Reach, engagement and delivery metrics per network." },
+        // SCP-Kc: the Social skin's "Saved" pin opens the department's saved-asset library, the same page Creatives uses.
+        { key: "assets", label: "Asset Library", path: "assets", icon: "hub", blurb: "Saved photos and videos for the team's posts." },
       ],
     },
     CONNECTIONS_GROUP,

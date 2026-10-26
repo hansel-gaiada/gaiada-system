@@ -8,12 +8,15 @@ import { SidebarToggle } from "./SidebarToggle";
 import { NewMenu } from "./NewMenu";
 import { TenantSwitcher } from "./TenantSwitcher";
 import { Eyebrow } from "@/components/ui";
-import { overviewHref, type ShellModel, type ShellWorkspace } from "@/lib/shellModel";
+import { allRows, overviewHref, type ShellModel, type ShellWorkspace } from "@/lib/shellModel";
 import { assistantDrawerHref } from "@/lib/assistantContext";
 import { ASSISTANT_ROW } from "@/lib/workspaces";
 import type { ConcreteRow } from "@/lib/workspaceAccess";
+import { activePinKey, pinnedFor, type ConcretePinned } from "@/lib/skins";
+import type { PaletteOpenDetail } from "./CommandPalette";
 import { useWorkspaceShell } from "./WorkspaceShellContext";
 import "./workspace-sidebar.css";
+import "./workspace-sidebar-social.css";
 
 // DW-2a: the department workspace sidebar (plan §2.2), the only sidebar (DW-D38).
 //
@@ -21,6 +24,10 @@ import "./workspace-sidebar.css";
 // the tab strip and the breadcrumbs share one answer. Rows arrive already gated and concrete
 // (`lib/shellModel.ts`). This only draws them. A row carries a count only when the model read a real one above 0
 // (DW-8m: Approvals); nothing here makes a number up, and a row with no `count` draws no pill.
+//
+// SCP-Kc (DW-D51): a workspace whose skin is not Standard draws its PINNED menu in place of the Overview, Work, Performance and You groups
+// (`PinnedMenu`, below): one row per entry the person's model offers, then a "More" disclosure holding today's groups until the More panel
+// (SCP-Kd) replaces it. It is the same rows, links and gates, only arranged differently, and Standard never reaches that code.
 
 export interface SidebarCompany { id: string; name: string; badge?: string | null }
 
@@ -48,13 +55,16 @@ export function WorkspaceSidebar({ tenantId, company, companies, newItems, brand
   // DW-2f: the current workspace's own create actions lead "+ New"; a later item with the same href is dropped.
   const createItems = view.kind === "workspace" ? view.ws.creates : [];
   const menuItems = [...createItems, ...newItems.filter((it) => !createItems.some((c) => c.href === it.href))];
+  // SCP-Kc: the pinned entries of a skinned workspace; null for Standard (and for Company and Admin, which are always Standard).
+  const ws = view.kind === "workspace" ? view.ws : null;
+  const pins = ws && ws.skin !== "standard" ? pinnedFor(ws.skin, allRows(ws)) : null;
 
   return (
     <aside className="erp-side ws-side" id="app-nav">
       <div className="erp-side__head">
         <Link href="/" className="erp-side__brand" aria-label="Home">
           <span className="erp-side__mark" aria-hidden="true"><Icon name="pulse" size={17} /></span>
-          {brand ? <div className="erp-side__wordmark">{brand}</div> : null}
+          {brand ? <div className="erp-side__wordmark">{brand}</div> : pins ? <div className="erp-side__wordmark">{title}</div> : null}
           <Eyebrow className="erp-side__tagline">Operating Platform</Eyebrow>
         </Link>
         <SidebarToggle />
@@ -69,7 +79,9 @@ export function WorkspaceSidebar({ tenantId, company, companies, newItems, brand
             {showBack && model.homeHref && <BackLink href={model.homeHref} label={model.homeLabel} />}
           </div>
         )}
-        {view.kind === "workspace" ? (
+        {ws && pins ? (
+          <PinnedMenu ws={ws} pins={pins} active={active} pathname={pathname} tenantId={tenantId} menuItems={menuItems} />
+        ) : view.kind === "workspace" ? (
           <>
             <RowGroup rows={view.ws.rows.top} active={active} pathname={pathname} tenantId={tenantId} />
             <RowGroup label="Work" rows={view.ws.rows.work} active={active} pathname={pathname} tenantId={tenantId} />
@@ -145,11 +157,139 @@ function RowLink({ row, active, pathname, tenantId }: { row: ConcreteRow; active
 /** The count after a row's label (DW-8m). `role="img"` gives it the one accessible name, "3 waiting for you", in place of
  *  the bare digits; it is a `<b>`, not a `<span>`, so the collapsed rail (which hides every row `span`) keeps it, drawn as
  *  a dot-sized pill on the icon. Past 99 the figure reads "99+" and the name still says the real count. */
-function RowCount({ count }: { count: number }) {
+function RowCount({ count, label }: { count: number; label?: string }) {
   return (
-    <b className="ws-row__count" role="img" aria-label={`${count} waiting for you`}>
+    <b className="ws-row__count" role="img" aria-label={label ?? `${count} waiting for you`}>
       {count > 99 ? "99+" : count}
     </b>
+  );
+}
+
+// ── The pinned menu (SCP-Kc) ──────────────────────────────────────────────────────────────────────
+// What a skinned workspace draws instead of the groups: the pinned entries in the skin's order (a link to a page the model offers, or one of
+// the shell's own items), then "More". Which entry is current is `activePinKey` over the shell's one answer for where the person is.
+
+/** The bell's page: the Inbox row's Notifications tab (`YOU_ROWS`). */
+const INBOX_HREF = "/me/inbox";
+
+/** Whether `pathname` is `base` or a page below it. */
+const isUnder = (pathname: string, base: string) => pathname === base || pathname.startsWith(`${base}/`);
+
+function PinnedMenu({ ws, pins, active, pathname, tenantId, menuItems }: {
+  ws: ShellWorkspace; pins: ConcretePinned[]; active: { rowKey: string; tabKey: string } | null; pathname: string; tenantId: string | null;
+  menuItems: { label: string; href: string }[];
+}) {
+  const shell = useWorkspaceShell();
+  const unread = shell?.unread ?? null;
+  const activeKey = activePinKey(pins, active);
+  // Notifications is a shell entry, so it is current by its own page; that page is also the Inbox row's first tab, which More still lists.
+  const inboxHere = isUnder(pathname, INBOX_HREF);
+  const moreRows = [...ws.rows.work, ...ws.rows.performance, ...ws.rows.you];
+  const moreCount = moreRows.reduce((n, r) => n + (r.count ?? 0), 0);
+  // A page that only More offers opens More, so the current row is never hidden on a fresh load.
+  const [moreOpen, setMoreOpen] = useState(() => !inboxHere && activeKey === null && !!active && moreRows.some((r) => r.key === active.rowKey));
+  const moreId = useId();
+  const more = useRailTooltip("More");
+
+  return (
+    <>
+      <div className="ws-side__group ws-pins">
+        {pins.map((pin) =>
+          pin.kind === "link" ? (
+            <PinLink key={pin.key} pin={pin} active={activeKey === pin.key} pathname={pathname} tenantId={tenantId} />
+          ) : pin.item === "search" ? (
+            <PinSearch key={pin.key} pin={pin} />
+          ) : pin.item === "notifications" ? (
+            <PinNotifications key={pin.key} pin={pin} unread={unread} active={inboxHere} />
+          ) : (
+            <NewMenu key={pin.key} items={menuItems} row={{ label: pin.label, icon: pin.icon }} />
+          ),
+        )}
+      </div>
+      <div className="ws-side__group ws-pins ws-pins__more">
+        <button
+          type="button"
+          className="erp-navbtn ws-row ws-pin"
+          aria-expanded={moreOpen}
+          aria-controls={moreId}
+          onClick={() => setMoreOpen((v) => !v)}
+          {...more.triggerProps}
+        >
+          <Icon name="menu" size={24} stroke={2} />
+          <span>More</span>
+          {moreCount > 0 ? <RowCount count={moreCount} /> : null}
+        </button>
+        {more.tip}
+        {moreOpen && (
+          <div className="ws-pins__body" id={moreId}>
+            <RowGroup label="Work" rows={ws.rows.work} active={active} pathname={pathname} tenantId={tenantId} />
+            <RowGroup label="Performance" rows={ws.rows.performance} active={active} pathname={pathname} tenantId={tenantId} />
+            <RowGroup label="You" rows={ws.rows.you} active={active} pathname={pathname} tenantId={tenantId} />
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+/** A pinned link. The AI Assistant entry is today's Assistant row exactly: the drawer's href, the button's `id`, no prefetch. */
+function PinLink({ pin, active, pathname, tenantId }: { pin: Extract<ConcretePinned, { kind: "link" }>; active: boolean; pathname: string; tenantId: string | null }) {
+  const { tip, triggerProps } = useRailTooltip(pin.label);
+  const assistant = pin.row === ASSISTANT_ROW.key;
+  return (
+    <>
+      <Link
+        href={assistant && pathname !== pin.href ? assistantDrawerHref(pathname, tenantId) : pin.href}
+        {...(assistant ? { id: "asst-fab-trigger", prefetch: false } : {})}
+        className={`erp-navbtn ws-row ws-pin${active ? " erp-navbtn--active ws-row--active ws-pin--active" : ""}`}
+        aria-current={active ? "page" : undefined}
+        {...triggerProps}
+      >
+        <Icon name={pin.icon} size={24} stroke={2} />
+        <span>{pin.label}</span>
+        {pin.count ? <RowCount count={pin.count} /> : null}
+      </Link>
+      {tip}
+    </>
+  );
+}
+
+/** Search opens the command palette, as the top bar's field does (`TopBarSearch`); the shortcut itself lives in `CommandPalette`. */
+function PinSearch({ pin }: { pin: Extract<ConcretePinned, { kind: "shell" }> }) {
+  const { tip, triggerProps } = useRailTooltip(pin.label);
+  return (
+    <>
+      <button
+        type="button"
+        className="erp-navbtn ws-row ws-pin"
+        onClick={() => window.dispatchEvent(new CustomEvent<PaletteOpenDetail>("gaiada:palette:open", { detail: {} }))}
+        {...triggerProps}
+      >
+        <Icon name={pin.icon} size={24} stroke={2} />
+        <span>{pin.label}</span>
+      </button>
+      {tip}
+    </>
+  );
+}
+
+/** Notifications opens the inbox and carries the unread count the top bar's one read settled. Unknown (null) draws no badge, never 0. */
+function PinNotifications({ pin, unread, active }: { pin: Extract<ConcretePinned, { kind: "shell" }>; unread: number | null; active: boolean }) {
+  const { tip, triggerProps } = useRailTooltip(pin.label);
+  return (
+    <>
+      <Link
+        href={INBOX_HREF}
+        className={`erp-navbtn ws-row ws-pin${active ? " erp-navbtn--active ws-row--active ws-pin--active" : ""}`}
+        aria-current={active ? "page" : undefined}
+        {...triggerProps}
+      >
+        <Icon name={pin.icon} size={24} stroke={2} />
+        <span>{pin.label}</span>
+        {unread !== null && unread > 0 ? <RowCount count={unread} label={`${unread} unread`} /> : null}
+      </Link>
+      {tip}
+    </>
   );
 }
 

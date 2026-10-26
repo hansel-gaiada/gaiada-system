@@ -206,7 +206,8 @@ describe("Social Media toolkit (SMM-11)", () => {
     expect(tk.slug).toBe("social-media");
     expect(tk.groups.map((g) => g.key)).toEqual(["home", "work", "publish", "connections"]);
     const publish = tk.groups.find((g) => g.key === "publish");
-    expect(publish?.tabs.map((t) => t.path)).toEqual(["calendar", "composer", "inbox", "analytics"]);
+    // SCP-Kc: "assets" is the Social skin's Saved pin (the Asset Library page the Creatives toolkit also uses).
+    expect(publish?.tabs.map((t) => t.path)).toEqual(["calendar", "composer", "inbox", "analytics", "assets"]);
   });
 
   it("advertises only tab paths that exist as routes", () => {
@@ -214,7 +215,7 @@ describe("Social Media toolkit (SMM-11)", () => {
     expect(paths).toEqual([
       "", // Home
       "projects", "board", "ball", "timeline", "charts", "activity", // Project Management (generic)
-      "calendar", "composer", "inbox", "analytics",
+      "calendar", "composer", "inbox", "analytics", "assets",
       "connections",
     ]);
   });
