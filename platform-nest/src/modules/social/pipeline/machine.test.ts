@@ -578,7 +578,13 @@ describe("SCP mappings · phase, holder, engine status and primary action", () =
     expect(team.copyLog).toBe(true);
     const client = editableFields(postIn("changes", "client_copy"));
     expect(client.fields.includes("placement")).toBe(false);
-    expect(client.fields.includes("scheduledAt")).toBe(true);
+    // SCP-D6 (orchestrator ruling, 2026-10-27): after a client copy change the date stays too, as systemRules
+    // date_moves says; loop e re-syncs only the copy to the variants.
+    expect(client.fields.includes("scheduledAt")).toBe(false);
+    expect(new Set(client.fields)).toEqual(new Set([...SCP.fieldGroups.copy, "mustHaves"]));
+    expect(SCP.editRules.find((r) => r.changeCases?.includes("client_copy"))!.note).toBe(
+      "the client has seen the networks and the date: the placement and the date stay (systemRules date_moves); a new date after the client's approval is reschedule (plan SCP-D6)",
+    );
     for (const s of ["proofread", "hod", "design", "final", "client", "approved", "scheduled", "live", "blocked"]) {
       expect(editableFields(postIn(s)), s).toEqual({ fields: [], copyLog: false, refusal: "field_locked" });
     }
