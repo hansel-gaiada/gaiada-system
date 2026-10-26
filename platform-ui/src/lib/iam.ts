@@ -113,6 +113,9 @@ export interface Position {
   orphaned: boolean;
   roleSet: RoleSetEntry[];
   currentHolders: number;
+  /** SCP-1q (SCP-Q23): the viewer holds this seat, so the server refuses them any edit of it (the `position` update self-EDIT
+   *  DENY). Optional: a server older than this field omits it, which reads as "not held" (the server still decides). */
+  heldByMe?: boolean;
   createdAt: string;
   updatedAt: string;
 }

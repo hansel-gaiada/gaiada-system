@@ -28,6 +28,9 @@ interface Props {
   attachedRoles: { roleId: string; role: string }[];
   canCompose: boolean;
   canPlace: boolean;
+  /** SCP-1q (SCP-Q23): the viewer holds this seat. The server refuses them any edit of it (fields, unit, role-set), so those
+   *  controls are replaced by the reason. The server decides; this only stops offering a control that would 403. */
+  heldByMe?: boolean;
   attachRole: (fd: FormData) => Promise<ActionResult>;
   detachRole: (fd: FormData) => Promise<ActionResult>;
   assignPosition: (fd: FormData) => Promise<ActionResult>;
@@ -90,7 +93,17 @@ export function PositionRow(p: Props) {
         />
       ) : null}
 
-      {p.canCompose ? (
+      {p.canCompose && p.heldByMe ? (
+        <span
+          className="iam-roleset--empty"
+          data-testid="position-self-edit-note"
+          title="Nobody edits a position they hold. Ask another administrator to change it."
+        >
+          you hold this seat, so another administrator edits it
+        </span>
+      ) : null}
+
+      {p.canCompose && !p.heldByMe ? (
         <>
           <IamAction
             label="Attach role"
@@ -146,18 +159,19 @@ export function PositionRow(p: Props) {
             ]}
             action={p.updatePosition}
           />
-
-          {p.status !== "retired" ? (
-            <IamAction
-              label="Retire"
-              immediate
-              hidden={{ positionId: p.positionId }}
-              fields={[]}
-              action={p.retirePosition}
-              confirm="Retire this position? Every open placement is closed and the holders are re-reconciled."
-            />
-          ) : null}
         </>
+      ) : null}
+
+      {/* Retire is not an edit: it closes the seat and cannot promote a holder, so the self-EDIT DENY does not cover it. */}
+      {p.canCompose && p.status !== "retired" ? (
+        <IamAction
+          label="Retire"
+          immediate
+          hidden={{ positionId: p.positionId }}
+          fields={[]}
+          action={p.retirePosition}
+          confirm="Retire this position? Every open placement is closed and the holders are re-reconciled."
+        />
       ) : null}
     </span>
   );
