@@ -103,7 +103,7 @@ describe.skipIf(!TEST_URL)("social settings and cycles (SCP-1c)", () => {
     tenant: string, e: { id: string }, cycleId: string | null, title: string,
     o: {
       status?: string | null; changeBy?: string; changeKind?: string; returnTo?: string; blockedFrom?: string; waitingOn?: string;
-      isExtra?: boolean; format?: string; archivedBy?: string;
+      isExtra?: boolean; format?: string; archivedBy?: string; changedOnly?: boolean;
     } = {},
   ): Promise<string> {
     const id = newId();
@@ -114,13 +114,14 @@ describe.skipIf(!TEST_URL)("social settings and cycles (SCP-1c)", () => {
         `INSERT INTO social_posts (id, tenant_id, engagement_id, title, cycle_id, pipeline_status, status_since,
                                    change_by, change_kind, return_to, change_note,
                                    blocked_from, block_waiting_on, block_reason, blocked_at,
-                                   is_extra, format, archived_at, archived_by, archive_reason)
+                                   is_extra, format, archived_at, archived_by, archive_reason, changed_only, copy_before)
          VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6::text IS NULL THEN NULL ELSE now() END,
                  $7, $8, $9, CASE WHEN $7::text IS NULL THEN NULL ELSE 'a note' END,
                  $10, $11, CASE WHEN $10::text IS NULL THEN NULL ELSE 'waiting' END, CASE WHEN $10::text IS NULL THEN NULL ELSE now() END,
-                 $12, $13, CASE WHEN $14::uuid IS NULL THEN NULL ELSE now() END, $14, CASE WHEN $14::uuid IS NULL THEN NULL ELSE 'archived' END)`,
+                 $12, $13, CASE WHEN $14::uuid IS NULL THEN NULL ELSE now() END, $14, CASE WHEN $14::uuid IS NULL THEN NULL ELSE 'archived' END,
+                 $15::boolean, CASE WHEN $15::boolean THEN '{"caption":"before"}'::jsonb ELSE NULL END)`,
         [id, tenant, e.id, title, cycleId, status, o.changeBy ?? null, o.changeKind ?? null, o.returnTo ?? null,
-         o.blockedFrom ?? null, o.waitingOn ?? null, o.isExtra ?? false, o.format ?? null, o.archivedBy ?? null],
+         o.blockedFrom ?? null, o.waitingOn ?? null, o.isExtra ?? false, o.format ?? null, o.archivedBy ?? null, o.changedOnly ?? false],
       ),
       { modules: ["social"] },
     );
@@ -547,6 +548,9 @@ describe.skipIf(!TEST_URL)("social settings and cycles (SCP-1c)", () => {
     await insertPost(A, engEst, cycleId, "client post", { status: "client" });
     await insertPost(A, engEst, cycleId, "design change", { status: "changes", changeBy: "final", changeKind: "design", returnTo: "final" });
     await insertPost(A, engEst, cycleId, "blocked from hod", { status: "blocked", blockedFrom: "hod", waitingOn: "approver" });
+    // loop e: the client asked for a copy change; the fixed copy goes proofread -> client, skipping the HoD, Creative and the final check
+    await insertPost(A, engEst, cycleId, "client copy change", { status: "changes", changeBy: "client", changeKind: "copy", returnTo: "proofread", changedOnly: true });
+    await insertPost(A, engEst, cycleId, "fixed copy in proofread", { status: "proofread", changedOnly: true });
     const body = (await get(U.staff, `cycles/${cycleId}/health`)).json();
     const readyBy = body.readyBy as string;
     expect(readyBy).toBe(walkBack(deadlineFor(6), 1));
@@ -557,6 +561,8 @@ describe.skipIf(!TEST_URL)("social settings and cycles (SCP-1c)", () => {
     expect(handoff("client post")).toBe(walkBack(readyBy, 1)); // only scheduling
     expect(handoff("design change")).toBe(walkBack(readyBy, 4)); // from the return step (final) inclusive: final, client, schedule
     expect(handoff("blocked from hod")).toBe(walkBack(readyBy, 7)); // counts as hod: design, final, client, schedule
+    expect(handoff("client copy change")).toBe(walkBack(readyBy, 4)); // loop e: proofread, client, schedule (1 + 2 + 1)
+    expect(handoff("fixed copy in proofread")).toBe(walkBack(readyBy, 3)); // loop e: client, schedule (2 + 1), not the eight of a first pass
     expect(body.posts.find((p: { title: string }) => p.title === "design change").holder).toBe("designer");
     expect(body.client.latestSafeHandoff).toBe(walkBack(readyBy, 9)); // the earliest
   });

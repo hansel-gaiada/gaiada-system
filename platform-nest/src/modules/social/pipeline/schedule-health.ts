@@ -48,6 +48,18 @@
 //     approved, scheduled, live   DONE: nothing remains (BFF §63.5: "`done` from `approved` on").
 // A missing estimate counts as 0. With no estimates at all `remaining` is 0 and the latest safe handoff is ready-by itself.
 //
+// LOOP E (`changed_only`, plan section 1, fixture `approve_copy`): after the client asked for a COPY change, the fixed copy goes
+// proofread -> client, skipping the HoD approval, Creative and the final check (`approve_copy`'s `to` is `client` when `changedOnly`).
+// So for a post with `changed_only` true that is in `proofread`, or in `changes` returning to `proofread` (the `client_copy` case, which
+// `return_copy` also sets while `changedOnly`), or blocked from either of those, the steps `hod`, `design` and `final` do not remain:
+//     changes (client_copy)   proofread, client, schedule
+//     proofread               client, schedule
+// The skipped steps are DERIVED from the fixture, never retyped: the steps strictly between `proofread` and the status `approve_copy`
+// goes to when `changedOnly` is true (`changedOnlySkippedSteps`). A fixture edit that moves that target changes the answer, and the test
+// pins what it derives. `changed_only` on any OTHER status (which the database allows only with a client or no change case, so it does not
+// arise there) is ignored: the cautious, longer path. Likewise a `client_copy` post whose `changedOnly` is false or absent counts the full
+// path from proofread (all six steps): the cautious answer, pinned in the golden table as a contrast.
+//
 // LATEST SAFE HANDOFF = ready-by less `remaining` working days (`addWorkingDays`, the same stepping as above). It is reported
 // literally, so with no estimates and a ready-by that is itself a holiday it is that holiday; only the SPARE count snaps it.
 //
@@ -129,6 +141,8 @@ export interface HealthPost {
   changeKind?: string | null;
   /** `return_to`: the step a `changes` post re-enters. */
   returnTo?: string | null;
+  /** `changed_only` (loop e): the client asked for a copy change, so the fixed copy skips the HoD, Creative and the final check. */
+  changedOnly?: boolean | null;
   /** `blocked_from`, `block_waiting_on`. */
   blockedFrom?: string | null;
   blockWaitingOn?: string | null;
@@ -144,6 +158,7 @@ interface FixtureSlice {
   phases: Array<{ key: string; label: string }>;
   phaseOf: Record<string, string>;
   holders: Record<string, string | null>;
+  actions: Array<{ action: string; to?: unknown }>;
   changeCases: Array<{ key: string; changeBy: string; changeKind: string; returnTo: string; phase: string; holder: string }>;
 }
 let slice: FixtureSlice | null = null;
@@ -153,7 +168,7 @@ export function fixtureSlice(): FixtureSlice {
     const raw = JSON.parse(readFileSync(join(__dirname, "..", "scp-stage-machine.json"), "utf8")) as FixtureSlice;
     slice = {
       statuses: raw.statuses, blockableStatuses: raw.blockableStatuses, phases: raw.phases, phaseOf: raw.phaseOf,
-      holders: raw.holders, changeCases: raw.changeCases,
+      holders: raw.holders, actions: raw.actions, changeCases: raw.changeCases,
     };
   }
   return slice;
@@ -270,11 +285,34 @@ export function remainingSteps(post: HealthPost): StepKey[] | null {
   if (status === "planned" || status === "drafting") return [...STEP_KEYS];
   if (status === "changes") {
     const i = stepIndex(post.returnTo ?? "");
-    return i >= 0 ? STEP_KEYS.slice(i) : [...STEP_KEYS];
+    const from = i >= 0 ? STEP_KEYS.slice(i) : [...STEP_KEYS];
+    // Loop e: only a copy change returning to proofread skips the middle steps.
+    return post.changedOnly === true && i === stepIndex("proofread") ? withoutChangedOnlySkips(from) : from;
   }
   const i = stepIndex(status);
-  return i >= 0 ? STEP_KEYS.slice(i + 1) : [...STEP_KEYS];
+  if (i < 0) return [...STEP_KEYS];
+  const after = STEP_KEYS.slice(i + 1);
+  return post.changedOnly === true && status === "proofread" ? withoutChangedOnlySkips(after) : after;
 }
+
+/**
+ * The steps loop e skips, DERIVED from the fixture: those strictly between `proofread` and the status `approve_copy` goes to when
+ * `changedOnly` is true (the fixture's `to` is a list of `{when: {changedOnly}, status}`). Empty when the fixture names no such rule or a
+ * target that is not an estimated step, so a fixture change cannot silently leave the old three hard-coded.
+ */
+export function changedOnlySkippedSteps(): StepKey[] {
+  const action = fixtureSlice().actions.find((a) => a.action === "approve_copy");
+  const to = Array.isArray(action?.to) ? (action!.to as Array<{ when?: { changedOnly?: boolean }; status?: string }>) : [];
+  const target = to.find((t) => t.when?.changedOnly === true)?.status;
+  const from = stepIndex("proofread");
+  const end = target ? stepIndex(target) : -1;
+  return from >= 0 && end > from ? STEP_KEYS.slice(from + 1, end) : [];
+}
+
+const withoutChangedOnlySkips = (steps: readonly StepKey[]): StepKey[] => {
+  const skip = new Set<StepKey>(changedOnlySkippedSteps());
+  return steps.filter((k) => !skip.has(k));
+};
 
 /** The sum of `estimates` over `steps`; a missing, negative or non-integer value counts as 0 (the route validates 0 to 30; this never trusts it). */
 export function remainingWorkingDays(steps: readonly StepKey[], estimates: StepEstimates): number {

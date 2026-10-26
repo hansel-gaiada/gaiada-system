@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { addDays, countWorkingDays, type WorkingCalendar } from "../../hr/working-days";
 import {
-  APPROVAL_WINDOW_DAYS, COUNT_OF_PHASE, HEALTH_SEVERITY, STEP_KEYS, addWorkingDays, averageApprovalDays, clientHealth,
+  APPROVAL_WINDOW_DAYS, COUNT_OF_PHASE, changedOnlySkippedSteps, HEALTH_SEVERITY, STEP_KEYS, addWorkingDays, averageApprovalDays, clientHealth,
   firstWorkingDayOnOrAfter, fixtureSlice, isClientSlower, isMonthKey, lastDayOfMonth, lastWorkingDayOnOrBefore, parseStepEstimates,
   postHealth, postHolder, postPhase, prefillDeadline, previousMonth, readyByFor, remainingSteps, remainingWorkingDays,
   spareDaysBetween, tallyCounts, workingDaysBetween,
@@ -152,6 +152,25 @@ describe("pinned to the stage-machine fixture (never retyped)", () => {
       expect(postHolder({ status: s }), s).toBe(String(fx.holders[s]).split(" ")[0]);
     }
     expect(postHolder({ status: "live" })).toBeNull();
+  });
+
+  it("loop e: the steps it skips are derived from approve_copy's `to` rule, and the rule is pinned here so a fixture edit forces a review", () => {
+    const approveCopy = fx.actions.find((a) => a.action === "approve_copy");
+    expect(approveCopy?.to).toEqual([{ when: { changedOnly: false }, status: "hod" }, { when: { changedOnly: true }, status: "client" }]);
+    expect(changedOnlySkippedSteps()).toEqual(["hod", "design", "final"]);
+    // the case it applies to is the fixture's client_copy (return to proofread), and it is set by return_copy while changedOnly
+    const clientCopy = fx.changeCases.find((c) => c.key === "client_copy")!;
+    expect(clientCopy.returnTo).toBe("proofread");
+    const withLoopE = remainingSteps({ status: "changes", changeBy: clientCopy.changeBy, changeKind: clientCopy.changeKind, returnTo: clientCopy.returnTo, changedOnly: true });
+    expect(withLoopE).toEqual(["proofread", "client", "schedule"]);
+    // without changed_only (which the database does not produce for this case) the answer is the cautious full path, never the short one
+    expect(remainingSteps({ status: "changes", changeBy: clientCopy.changeBy, changeKind: clientCopy.changeKind, returnTo: clientCopy.returnTo })).toEqual([...STEP_KEYS]);
+    expect(remainingSteps({ status: "changes", changeBy: clientCopy.changeBy, changeKind: clientCopy.changeKind, returnTo: clientCopy.returnTo, changedOnly: false })).toEqual([...STEP_KEYS]);
+    // every other change case ignores changed_only
+    for (const cc of fx.changeCases.filter((c) => c.key !== "client_copy")) {
+      const post: HealthPost = { status: "changes", changeBy: cc.changeBy, changeKind: cc.changeKind, returnTo: cc.returnTo };
+      expect(remainingSteps({ ...post, changedOnly: true }), cc.key).toEqual(remainingSteps(post));
+    }
   });
 
   it("every blockable status counts as itself when blocked, and every status is either counted or done", () => {
