@@ -172,6 +172,12 @@ export interface Resource {
    *  Backs the two `design` rules, each of which tests it. Read from the post row, never from a body. Omitted -> "" -> neither
    *  designer rule matches (fail closed). */
   creativeSource?: string;
+  /** SCP-1q (SCP-Q23, docs/PERMISSION-CONTRACT.md §53.4) -- the OPEN holders of a `position` (`position_assignments` with no
+   *  `valid_to`, the §50 seat rule), for `resource_position.yaml`'s self-EDIT DENY on `update` (nobody edits a position they
+   *  hold, superadmin included). Fed BY THE HANDLER from the rows (positions.controller.ts `loadPositionHolderIds`), never
+   *  from a body. Omitted -> [] -> contains nobody, so the DENY matches nobody (the self-assign DENY's convention: fail-open
+   *  for a DENY, so an unfed caller loses nothing it had). A dropped allow-list line below makes the DENY never fire. */
+  holderIds?: string[];
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -323,6 +329,10 @@ function resourcePayload(r: Resource) {
       // excess-property check does not fire). Both fail closed: [] contains nobody, and "" matches no designer rule.
       approverIds: r.approverIds ?? [],
       creativeSource: r.creativeSource ?? "",
+      // SCP-1q. Listed here or it never reaches resource_position.yaml (this is an allow-list; a handler that builds the
+      // Resource through an object spread gets no excess-property check). A dropped attribute means the self-EDIT DENY
+      // never fires, which is the unsafe direction, so a test pins that it is carried (cerbos-position-self-edit.test.ts).
+      holderIds: r.holderIds ?? [],
     },
   };
 }
