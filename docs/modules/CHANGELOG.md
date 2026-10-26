@@ -11,6 +11,16 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.199.0` - SCP-K visual review: four layout fixes found by looking at the Social skin (2026-10-26) - PROTOTYPED
+
+- **How they were found.** The first visual review of the Social skin: screenshots of a DEMO_MODE production build with `SHELL_SKIN_PREVIEW=social`, desktop and phone, light and dark. The behaviour and axe tests passed on all four.
+- **Social skin only (still OFF for everyone):**
+  - Desktop: the top bar was an empty 66px band once the menu took its search, bell, New and avatar. It is not drawn unless it holds the access chip or the SIMULATED badge, so the page starts at the top as in the design. It is hidden, not removed, so the bell still settles the menu's unread count.
+  - Phone: Notifications and More sat at the top left; they are top right, as the design draws them.
+  - More panel: "Find a page" drew two focus rings; the box keeps its ring and the input's is dropped.
+- **Both skins, touch screens:** the theme control's 44px touch targets spilled out of its fixed 36px outline (`theme-toggle.css`); the outline now grows with them. The Standard avatar menu uses the same control.
+- **Tests.** `e2e/skin-social.spec.ts` gains a check for each: the top bar hidden with main at the top, one focus ring, the phone controls at the right, and a touch-screen test of the theme control. Sumopod (`11e847bd`): social-skin 23/23; workspace-shell and workspace-a11y 90/90 plus one known flake (the Standard "assistant drawer open, dark, phone" scan caught the page before its title; passed on retry). CI 40352455683 green.
+
 ### platform-ui `0.198.0` - SCP-Ka to SCP-Kf: department skins in the shell, and the Social Media skin built but OFF (DW-D51, SCP plan §6) (2026-10-26) - PROTOTYPED
 
 - **Nothing changes on screen for anyone except one menu tab.** `SKINS_ON` is `["standard"]`; the Social skin is drawn only on a box with `SHELL_SKIN_PREVIEW=social` (dev and test). SCP-Kg switches it on in code once SCP-1d, 1e and 1k are live. The one visible change: Social Media's Publish row gains the Asset Library tab (`{D}/assets`), by the SCP orchestrator's decision; its reads authorise as the generic `file` kind, so no permission changes.
