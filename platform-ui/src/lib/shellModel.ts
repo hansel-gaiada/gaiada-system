@@ -43,6 +43,10 @@ export interface ShellWorkspace {
   withheld: string[];
   /** The skin this workspace is drawn in for this person (`effectiveSkin`, DW-D51): Standard unless its own skin is on and they kept it. */
   skin: SkinKey;
+  /** The skin this workspace would wear if the person had not chosen Standard (SCP-Kd, DW-D51): the workspace's own skin when that skin is
+   *  switched on, whatever the person's choice; null for a Standard workspace or a skin that is off. The Standard avatar menu offers the way
+   *  back ("Use the Social look") only where this is set and `skin` is Standard. */
+  skinOffered: SkinKey | null;
 }
 
 export interface ShellModel {
@@ -119,6 +123,7 @@ export function buildShellModel(input: {
       },
       withheld: withheldTabPaths([...raw.top, ...raw.work, ...raw.performance, ...raw.you], ctx),
       skin: effectiveSkin(ref.workspace.skin, skins?.on ?? [], skins?.choice),
+      skinOffered: ref.workspace.skin && ref.workspace.skin !== "standard" && (skins?.on ?? []).includes(ref.workspace.skin) ? ref.workspace.skin : null,
     });
   };
   for (const ref of workspaces.mine) add(ref, true);

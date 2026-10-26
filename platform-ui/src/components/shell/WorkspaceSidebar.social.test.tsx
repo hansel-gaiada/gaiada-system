@@ -93,10 +93,10 @@ describe("the Social menu: which entries a person sees", () => {
     expect(within(menu()).queryByRole("group", { name: "You" })).toBeNull();
   });
 
-  it("keeps the workspace switcher and draws the brand as the group's name", () => {
+  it("draws the brand as the group's name, and the one workspace switcher is in the More panel (MorePanel.test.tsx), not above the menu", () => {
     renderAt(socialModel(officer), "/departments/d-soc");
-    expect(screen.getByRole("button", { name: /Switch workspace/ })).toHaveTextContent("Social Media");
     expect(document.querySelector(".erp-side__wordmark")).toHaveTextContent("Gaiada");
+    expect(screen.queryByRole("button", { name: /Switch workspace/ })).toBeNull();
   });
 
   it("is the Standard menu, exactly, when Social is not switched on", () => {
@@ -188,58 +188,6 @@ describe("the Social menu: Search, Create and Notifications", () => {
     // The next read failed: the count is unknown again, not 0 and not the stale 3.
     await act(async () => { out.rerender(ui(null)); });
     expect(screen.queryByRole("img", { name: /unread/ })).toBeNull();
-  });
-});
-
-describe("the Social menu: More", () => {
-  it("is closed to begin with, and its button says so", () => {
-    renderAt(socialModel(officer), "/departments/d-soc");
-    expect(moreButton()).toHaveAttribute("aria-expanded", "false");
-    expect(within(menu()).queryByRole("group", { name: "Work" })).toBeNull();
-  });
-
-  it("reveals today's Work, Performance and You groups, so no page is lost, and hides them again", () => {
-    const model = socialModel(officer);
-    renderAt(model, "/departments/d-soc");
-    fireEvent.click(moreButton());
-    expect(moreButton()).toHaveAttribute("aria-expanded", "true");
-    for (const [label, rows] of [["Work", socialWs(model).rows.work], ["Performance", socialWs(model).rows.performance], ["You", socialWs(model).rows.you]] as const) {
-      const group = within(menu()).getByRole("group", { name: label });
-      for (const row of rows) expect(within(group).getByRole("link", { name: new RegExp(`^${row.label}`) })).toHaveAttribute("href", row.tabs[0].href);
-    }
-    // Every row of the workspace is reachable: the pinned ones above, the rest in More.
-    const hrefs = new Set(within(menu()).getAllByRole("link").map((a) => a.getAttribute("href")));
-    for (const row of [...socialWs(model).rows.work, ...socialWs(model).rows.performance, ...socialWs(model).rows.you]) expect(hrefs.has(row.tabs[0].href), row.key).toBe(true);
-    fireEvent.click(moreButton());
-    expect(within(menu()).queryByRole("group", { name: "Work" })).toBeNull();
-  });
-
-  it("carries the sum of the counts inside it, and no badge when there are none", () => {
-    renderAt(socialModel(officer), "/departments/d-soc");
-    expect(within(moreButton()).queryByRole("img")).toBeNull();
-  });
-
-  it("sums the counts of the rows it holds (Approvals is one of them)", async () => {
-    const model = socialModel(me([member(), { role: "company_admin", scopeType: "company", scopeId: "co-a" }]), { approvals: { pending: 3 } });
-    // A second counted row, so the figure is a sum and not just Approvals.
-    const ws = socialWs(model);
-    const counted = { ...model, workspaces: model.workspaces.map((w) => (w === ws ? { ...w, rows: { ...w.rows, work: w.rows.work.map((r, i) => (i === 0 ? { ...r, count: 2 } : r)) } } : w)) };
-    expect(ws.rows.you.find((r) => r.key === "approvals")?.count).toBe(3);
-    await act(async () => { renderAt(counted, "/departments/d-soc"); });
-    expect(within(moreButton()).getByRole("img", { name: "5 waiting for you" })).toHaveTextContent("5");
-    fireEvent.click(moreButton());
-    // Inside More the rows keep their own counts.
-    expect(within(menu()).getByRole("img", { name: "3 waiting for you" })).toBeInTheDocument();
-    expect(within(menu()).getByRole("img", { name: "2 waiting for you" })).toBeInTheDocument();
-  });
-
-  it("opens by itself when the page belongs to a row only More holds, so the current row is not hidden", () => {
-    renderAt(socialModel(officer), "/departments/d-soc/composer");
-    expect(moreButton()).toHaveAttribute("aria-expanded", "true");
-    expect(within(menu()).getByRole("link", { name: "Publish" })).toHaveAttribute("aria-current", "page");
-    // ...and no pinned entry claims the page: Calendar is the same row, a different tab.
-    expect(link("Calendar")).not.toHaveAttribute("aria-current");
-    expect(link("Home")).not.toHaveAttribute("aria-current");
   });
 });
 

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon } from "./icons";
@@ -15,6 +15,10 @@ import type { ConcreteRow } from "@/lib/workspaceAccess";
 import { activePinKey, pinnedFor, type ConcretePinned } from "@/lib/skins";
 import type { PaletteOpenDetail } from "./CommandPalette";
 import { useWorkspaceShell } from "./WorkspaceShellContext";
+import { RowCount } from "./RowCount";
+import { MorePanel, type SidebarAccount } from "./MorePanel";
+import { useSidebarState } from "./sidebarState";
+import { moreCountOf, type MoreGroup } from "@/lib/morePanel";
 import "./workspace-sidebar.css";
 import "./workspace-sidebar-social.css";
 
@@ -26,12 +30,13 @@ import "./workspace-sidebar-social.css";
 // (DW-8m: Approvals); nothing here makes a number up, and a row with no `count` draws no pill.
 //
 // SCP-Kc (DW-D51): a workspace whose skin is not Standard draws its PINNED menu in place of the Overview, Work, Performance and You groups
-// (`PinnedMenu`, below): one row per entry the person's model offers, then a "More" disclosure holding today's groups until the More panel
-// (SCP-Kd) replaces it. It is the same rows, links and gates, only arranged differently, and Standard never reaches that code.
+// (`PinnedMenu`, below): one row per entry the person's model offers, then "More", which slides the More panel out beside the menu (SCP-Kd,
+// `MorePanel`): Find a page, today's Work, Performance and You rows, and the account. It is the same rows, links and gates, only arranged
+// differently, and Standard never reaches that code.
 
 export interface SidebarCompany { id: string; name: string; badge?: string | null }
 
-export function WorkspaceSidebar({ tenantId, company, companies, newItems, brand }: {
+export function WorkspaceSidebar({ tenantId, company, companies, newItems, brand, account = null }: {
   /** The active company, for the page context the Assistant drawer opens with (DW-2d). */
   tenantId: string | null;
   company: SidebarCompany | null;
@@ -40,6 +45,8 @@ export function WorkspaceSidebar({ tenantId, company, companies, newItems, brand
   newItems: { label: string; href: string }[];
   /** The wordmark: the group's name (PV-D13). Omitted when unknown, and the tagline stays. */
   brand?: string | null;
+  /** The person, for the Social skin's More panel (SCP-Kd): the account the top bar's avatar menu offers, which that skin moves into the panel. */
+  account?: SidebarAccount | null;
 }) {
   const shell = useWorkspaceShell();
   // Only the workspace shell draws this, inside its provider. Outside it there is nothing to draw.
@@ -70,7 +77,8 @@ export function WorkspaceSidebar({ tenantId, company, companies, newItems, brand
         <SidebarToggle />
       </div>
 
-      <WorkspaceSwitcher model={model} title={title} current={view.kind === "workspace" ? view.ws.id : null} company={company} companies={companies} />
+      {/* A skinned workspace carries its one switcher inside the More panel (SCP-Kd), so every skin still has exactly one. */}
+      {!pins && <WorkspaceSwitcher model={model} title={title} current={view.kind === "workspace" ? view.ws.id : null} company={company} companies={companies} />}
 
       <nav className="erp-side__nav erp-scroll ws-side__nav" aria-label={`${title} menu`}>
         {(visiting || showBack) && (
@@ -80,7 +88,10 @@ export function WorkspaceSidebar({ tenantId, company, companies, newItems, brand
           </div>
         )}
         {ws && pins ? (
-          <PinnedMenu ws={ws} pins={pins} active={active} pathname={pathname} tenantId={tenantId} menuItems={menuItems} />
+          <PinnedMenu
+            ws={ws} pins={pins} active={active} pathname={pathname} tenantId={tenantId} menuItems={menuItems} account={account}
+            switcher={<WorkspaceSwitcher model={model} title={title} current={ws.id} company={company} companies={companies} inline />}
+          />
         ) : view.kind === "workspace" ? (
           <>
             <RowGroup rows={view.ws.rows.top} active={active} pathname={pathname} tenantId={tenantId} />
@@ -154,17 +165,6 @@ function RowLink({ row, active, pathname, tenantId }: { row: ConcreteRow; active
   );
 }
 
-/** The count after a row's label (DW-8m). `role="img"` gives it the one accessible name, "3 waiting for you", in place of
- *  the bare digits; it is a `<b>`, not a `<span>`, so the collapsed rail (which hides every row `span`) keeps it, drawn as
- *  a dot-sized pill on the icon. Past 99 the figure reads "99+" and the name still says the real count. */
-function RowCount({ count, label }: { count: number; label?: string }) {
-  return (
-    <b className="ws-row__count" role="img" aria-label={label ?? `${count} waiting for you`}>
-      {count > 99 ? "99+" : count}
-    </b>
-  );
-}
-
 // ── The pinned menu (SCP-Kc) ──────────────────────────────────────────────────────────────────────
 // What a skinned workspace draws instead of the groups: the pinned entries in the skin's order (a link to a page the model offers, or one of
 // the shell's own items), then "More". Which entry is current is `activePinKey` over the shell's one answer for where the person is.
@@ -175,21 +175,48 @@ const INBOX_HREF = "/me/inbox";
 /** Whether `pathname` is `base` or a page below it. */
 const isUnder = (pathname: string, base: string) => pathname === base || pathname.startsWith(`${base}/`);
 
-function PinnedMenu({ ws, pins, active, pathname, tenantId, menuItems }: {
+function PinnedMenu({ ws, pins, active, pathname, tenantId, menuItems, account, switcher }: {
   ws: ShellWorkspace; pins: ConcretePinned[]; active: { rowKey: string; tabKey: string } | null; pathname: string; tenantId: string | null;
-  menuItems: { label: string; href: string }[];
+  menuItems: { label: string; href: string }[]; account: SidebarAccount | null; switcher: ReactNode;
 }) {
   const shell = useWorkspaceShell();
   const unread = shell?.unread ?? null;
   const activeKey = activePinKey(pins, active);
   // Notifications is a shell entry, so it is current by its own page; that page is also the Inbox row's first tab, which More still lists.
   const inboxHere = isUnder(pathname, INBOX_HREF);
-  const moreRows = [...ws.rows.work, ...ws.rows.performance, ...ws.rows.you];
-  const moreCount = moreRows.reduce((n, r) => n + (r.count ?? 0), 0);
-  // A page that only More offers opens More, so the current row is never hidden on a fresh load.
-  const [moreOpen, setMoreOpen] = useState(() => !inboxHere && activeKey === null && !!active && moreRows.some((r) => r.key === active.rowKey));
+  // The rows More lists, exactly as the model gives them: Work, Performance and You.
+  const groups: MoreGroup[] = [
+    { key: "work", label: "Work", rows: ws.rows.work },
+    { key: "performance", label: "Performance", rows: ws.rows.performance },
+    { key: "you", label: "You", rows: ws.rows.you },
+  ];
+  const moreCount = moreCountOf(groups);
+  const [moreOpen, setMoreOpen] = useState(false);
   const moreId = useId();
+  const moreButton = useRef<HTMLButtonElement>(null);
   const more = useRailTooltip("More");
+  const close = useCallback((returnFocus: boolean) => {
+    setMoreOpen(false);
+    if (returnFocus) moreButton.current?.focus();
+  }, []);
+
+  // While the panel is open the menu is its icon rail. The rail is the collapsed sidebar's own CSS, keyed on `<html data-sidebar="collapsed">`, so
+  // that is what is set, and removed on close unless the person had collapsed the menu themselves. Their saved choice (the cookie and the
+  // toggle's state, `sidebarState.tsx`) is never touched. It follows `collapsed`, so using the toggle while the panel is open stays consistent.
+  const { collapsed } = useSidebarState();
+  const collapsedNow = useRef(collapsed);
+  collapsedNow.current = collapsed;
+  useEffect(() => {
+    if (!moreOpen) return;
+    const root = document.documentElement;
+    root.setAttribute("data-sidebar", "collapsed");
+    return () => {
+      if (!collapsedNow.current) root.removeAttribute("data-sidebar");
+    };
+  }, [moreOpen, collapsed]);
+
+  // Another page was chosen (a link anywhere), so the panel has done its job.
+  useEffect(() => setMoreOpen(false), [pathname]);
 
   return (
     <>
@@ -209,9 +236,11 @@ function PinnedMenu({ ws, pins, active, pathname, tenantId, menuItems }: {
       <div className="ws-side__group ws-pins ws-pins__more">
         <button
           type="button"
+          ref={moreButton}
           className="erp-navbtn ws-row ws-pin"
           aria-expanded={moreOpen}
           aria-controls={moreId}
+          aria-haspopup="dialog"
           onClick={() => setMoreOpen((v) => !v)}
           {...more.triggerProps}
         >
@@ -221,11 +250,10 @@ function PinnedMenu({ ws, pins, active, pathname, tenantId, menuItems }: {
         </button>
         {more.tip}
         {moreOpen && (
-          <div className="ws-pins__body" id={moreId}>
-            <RowGroup label="Work" rows={ws.rows.work} active={active} pathname={pathname} tenantId={tenantId} />
-            <RowGroup label="Performance" rows={ws.rows.performance} active={active} pathname={pathname} tenantId={tenantId} />
-            <RowGroup label="You" rows={ws.rows.you} active={active} pathname={pathname} tenantId={tenantId} />
-          </div>
+          <MorePanel
+            id={moreId} groups={groups} active={active} pathname={pathname} tenantId={tenantId}
+            account={account} switcher={switcher} anchor={moreButton} onClose={close}
+          />
         )}
       </div>
     </>
@@ -325,12 +353,15 @@ function FootLink({ href, label, icon }: { href: string; label: string; icon: "s
 // department (ungated, like the org chart, GM-01), then the company switch. Escape and an outside click
 // close it, and Escape hands focus back to the button. Arrow keys move through the links.
 
-function WorkspaceSwitcher({ model, title, current, company, companies }: {
+// `inline` (SCP-Kd): the Social skin's More panel carries the switcher as its "Switch workspace" row, naming the current workspace on a second
+// line, with the same list opening beneath it instead of floating. The same component, so the list, the keys and the company switch are one.
+function WorkspaceSwitcher({ model, title, current, company, companies, inline = false }: {
   model: ShellModel;
   title: string;
   current: string | null;
   company: SidebarCompany | null;
   companies: SidebarCompany[];
+  inline?: boolean;
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -395,19 +426,21 @@ function WorkspaceSwitcher({ model, title, current, company, companies }: {
   );
 
   return (
-    <div className="ws-switch" ref={wrap} onKeyDown={onKeyDown}>
+    <div className={`ws-switch${inline ? " ws-switch--inline" : ""}`} ref={wrap} onKeyDown={onKeyDown}>
       <button
         type="button"
         ref={btn}
         className="ws-switch__btn"
         aria-expanded={open}
         aria-controls={panelId}
-        aria-label={`${title}${company ? `, ${company.name}` : ""}. Switch workspace`}
+        aria-label={inline ? `Switch workspace, ${title}${company ? `, ${company.name}` : ""}` : `${title}${company ? `, ${company.name}` : ""}. Switch workspace`}
         onClick={() => setOpen((v) => !v)}
       >
         <span className="ws-switch__text">
-          <span className="ws-switch__ws">{title}</span>
-          {company && (
+          <span className="ws-switch__ws">{inline ? "Switch workspace" : title}</span>
+          {inline ? (
+            <span className="ws-switch__co">{title}</span>
+          ) : company && (
             <span className="ws-switch__co">
               {company.name}
               {company.badge && <span className="erp-company__served-badge">· {company.badge}</span>}

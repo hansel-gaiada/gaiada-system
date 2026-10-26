@@ -7,6 +7,7 @@
 // cookie.
 import { revalidatePath } from "next/cache";
 import { getPrefs, writePrefs, type Theme, type OfficeZoom } from "./prefs";
+import { SKIN_CHOICES, type SkinChoice } from "./skins";
 import { MAX_PINNED_TOOLS, pinnedToolsFor } from "./pinnedTools";
 import { GENERIC_WORKSPACE, isPlanned, workspaceBySlug } from "./workspaces";
 import { MAX_OVERVIEW_KEYS, overviewPrefsFor, overviewWidgetsForKey } from "./overviewPrefs";
@@ -30,6 +31,16 @@ export async function setAssistantRailCollapsedAction(collapsed: boolean): Promi
 export async function setThemeAction(theme: Theme): Promise<void> {
   const current = await getPrefs();
   await writePrefs({ ...current, theme });
+}
+
+/** SCP-Kd (DW-D51): the person's own choice of look, "standard" to always wear the Standard skin or "workspace" for the workspace's own. Same shape
+ *  as `setThemeAction` (it only writes the prefs cookie's `skin`), but the shell model is built from this cookie on the server, so the caller
+ *  follows it with `router.refresh()` and the layout redraws the workspace's skin. A value that is not a choice is refused with no write. */
+export async function setSkinChoiceAction(choice: SkinChoice): Promise<void> {
+  if (!SKIN_CHOICES.includes(choice)) return;
+  const current = await getPrefs();
+  await writePrefs({ ...current, skin: choice });
+  revalidatePath("/", "layout");
 }
 
 /** Same optimistic shape as `setThemeAction` above — `OfficeCanvas.tsx` has already applied the

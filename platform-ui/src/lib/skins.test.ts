@@ -181,12 +181,32 @@ describe("skins: the shell model", () => {
   it("changes nothing but the skin: the rows, creates and gates are the same in every skin", () => {
     const off = model(me([member()]), socialTree);
     const on = model(me([member()]), socialTree, { on: ["standard", "social"] });
-    const strip = (mod: ShellModel) => ({ ...mod, workspaces: mod.workspaces.map(({ skin: _s, ...w }) => w) });
+    const strip = (mod: ShellModel) => ({ ...mod, workspaces: mod.workspaces.map(({ skin: _s, skinOffered: _o, ...w }) => w) });
     expect(strip(on)).toEqual(strip(off));
   });
 
   it("leaves a company with no Social Media department exactly as it was", () => {
     const m = me([member()]);
     expect(model(m, agencyTree({ web: ["u-1"] }), { on: ["standard", "social"] })).toEqual(model(m, agencyTree({ web: ["u-1"] })));
+  });
+});
+
+describe("skins: the skin a workspace offers (SCP-Kd)", () => {
+  it("is null for every workspace while Social is off, so the Standard menu offers nothing", () => {
+    for (const mod of [model(me([member()]), socialTree), model(me([member()]), socialTree, { on: skinsOn(undefined) })]) {
+      expect(mod.workspaces.map((w) => w.skinOffered)).toEqual(mod.workspaces.map(() => null));
+    }
+  });
+
+  it("is 'social' on Social Media once Social is on, and null on every other workspace", () => {
+    const mod = model(me([member()]), socialTree, { on: ["standard", "social"] });
+    expect(wsByKey(mod, "social-media").skinOffered).toBe("social");
+    expect(mod.workspaces.filter((w) => w.key !== "social-media").every((w) => w.skinOffered === null)).toBe(true);
+  });
+
+  it("stays 'social' when the person chose Standard, while the skin drawn is Standard: the way back", () => {
+    const soc = wsByKey(model(me([member()]), socialTree, { on: ["standard", "social"], choice: "standard" }), "social-media");
+    expect(soc.skin).toBe("standard");
+    expect(soc.skinOffered).toBe("social");
   });
 });

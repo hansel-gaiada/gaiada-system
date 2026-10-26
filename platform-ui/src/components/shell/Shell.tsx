@@ -42,7 +42,7 @@ export function Shell({ me, tenantId, prefs = DEFAULT_PREFS, workspaceModel, app
         <a href="#main-content" className="skip-link">Skip to content</a>
         {approvalsFeed}
         {routesFeed}
-        <WorkspaceShellSidebar me={me} tenantId={tenantId} />
+        <WorkspaceShellSidebar me={me} tenantId={tenantId} theme={prefs.theme} />
         {/* DW-2c: the workspace top bar shows the access notice as a chip, not as a strip above the page. */}
         <WorkspaceTopBar me={me} tenantId={tenantId} theme={prefs.theme} special={special} unrestricted={isUnrestricted(me)} />
         <main id="main-content" className="erp-main erp-scroll" tabIndex={-1}>
