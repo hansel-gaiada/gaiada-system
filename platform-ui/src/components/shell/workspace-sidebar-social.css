@@ -1,0 +1,89 @@
+/* SCP-Kc: the Social skin's menu and frame (WorkspaceSidebar.tsx's PinnedMenu; plan docs/plans/2026-10-15-social-content-pipeline.md §6.1, §6.2).
+   Everything here is scoped to `.erp-app[data-skin="social"]`, which ShellFrame sets (server-rendered) for a workspace wearing the Social skin, so
+   the Standard shell never reads a rule of this file. Tokens only (src/styles/tokens.test.ts): no colour, radius or shadow literals, no uppercase.
+   The colours, the hairline and the type face come from tokens/skin-social.css; this file only arranges: a flat 245px menu with a hairline on its
+   edge, 48px rows with 24px icons and 16px labels, the current row bold with no pill, and the 72px rail. */
+
+/* ---- Frame: flat, no floating gap, no glass ---- */
+/* `--shell-gap` is what makes the menu and top bar float (shell.css); zero it, density included. `--rail` is the collapsed column. */
+.erp-app[data-skin="social"][data-density] { --shell-gap: 0px; }
+.erp-app[data-skin="social"] { --rail: 72px; }
+
+@media (min-width: 761px) {
+  /* workspace-sidebar.css sets 222px (and shell.css 208px below 1025px); the collapsed rail keeps its own rule, which reads --rail. */
+  html:not([data-sidebar="collapsed"]) .erp-app[data-skin="social"]:has(> .ws-side) { grid-template-columns: 245px 1fr; }
+}
+
+/* The panels are plain: no radius, no blur, no ring. The hairline is on the menu's right edge and under the top bar. */
+.erp-app[data-skin="social"] .erp-side,
+.erp-app[data-skin="social"] .erp-top,
+.erp-app[data-skin="social"] .erp-side::before,
+.erp-app[data-skin="social"] .erp-top::before { border-radius: var(--radius-none); }
+.erp-app[data-skin="social"] .erp-side.ws-side::before,
+.erp-app[data-skin="social"] .erp-top::before {
+  background: var(--surface-page);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+.erp-app[data-skin="social"] .erp-side.ws-side::before { border-right: 1px solid var(--line); }
+.erp-app[data-skin="social"] .erp-top::before { border-bottom: 1px solid var(--line); }
+/* The phone drawer floats over the page with its own shadow (shell.css); it keeps that and gets the same flat face. */
+
+/* ---- Top bar: search, notifications and create live in the menu now ---- */
+/* They still render, so the bell's one read keeps feeding the menu's count (ShellNotificationsSettle); only the drawing is hidden. The avatar
+   menu, the access chip and the SIMULATED badge stay. The phone's search icon is the same field in its small form. */
+.erp-app[data-skin="social"] .erp-top__search,
+.erp-app[data-skin="social"] .erp-top__searchbtn,
+.erp-app[data-skin="social"] .erp-bell,
+.erp-app[data-skin="social"] .ws-side__foot .erp-side__new { display: none; }
+
+/* ---- Brand: the group's name in the display face, no logo ---- */
+.erp-app[data-skin="social"] .ws-side .erp-side__mark,
+.erp-app[data-skin="social"] .ws-side .erp-side__tagline { display: none; }
+.erp-app[data-skin="social"] .ws-side .erp-side__head { padding: 24px 24px 12px; }
+.erp-app[data-skin="social"] .ws-side .erp-side__wordmark { font: 700 22px/1.2 var(--font-display); letter-spacing: 0; color: var(--text-primary); }
+
+/* ---- Rows: 48px, 24px icons (stroke 2, from the Icon), 16px labels, the current one bold with no pill ---- */
+.erp-app[data-skin="social"] .ws-side__nav { padding: 4px 12px 12px; }
+.erp-app[data-skin="social"] .ws-side .ws-pin {
+  box-sizing: border-box; min-height: 48px; gap: 16px; padding: 0 12px;
+  border: none; border-radius: var(--radius-md); background: transparent;
+  color: var(--text-primary); font: 400 16px var(--font-body);
+}
+.erp-app[data-skin="social"] .ws-side .ws-pin > svg { color: inherit; }
+.erp-app[data-skin="social"] .ws-side .ws-pin:hover { background: var(--tint-hover); }
+.erp-app[data-skin="social"] .ws-side .ws-pin--active,
+.erp-app[data-skin="social"] .ws-side .ws-pin--active:hover { border: none; background: transparent; color: var(--text-primary); font-weight: 700; }
+.erp-app[data-skin="social"] .ws-side .ws-pin--active:hover { background: var(--tint-hover); }
+.erp-app[data-skin="social"] .ws-side .ws-pin--active > svg { color: inherit; }
+/* Create is a wrapper around its button row: it takes the full width like the link rows. */
+.erp-app[data-skin="social"] .ws-side .erp-new--pin { width: 100%; }
+
+/* The count: the accent pair, on the row's right edge (the collapsed rail moves it onto the icon, below). */
+.erp-app[data-skin="social"] .ws-side .ws-pin .ws-row__count { border-radius: var(--radius-pill); }
+
+/* More: the rows it reveals keep today's Standard sizes, indented under the button, until the More panel (SCP-Kd) replaces this. */
+.erp-app[data-skin="social"] .ws-pins__more { margin-top: 2px; }
+.erp-app[data-skin="social"] .ws-pins__body { padding: 0 0 4px; }
+
+/* ---- Create: the New menu, opened from a row. It sits beside the menu, placed by the row's rectangle (NewMenu), because the nav column scrolls
+   and would clip a menu drawn inside it. ---- */
+.erp-app[data-skin="social"] .erp-new__menu--pin {
+  position: fixed; top: var(--pin-menu-top); left: var(--pin-menu-left); right: auto; bottom: auto;
+  min-width: 200px; max-width: calc(100vw - 24px); z-index: 210;
+  background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--elev-overlay);
+}
+
+/* ---- The collapsed rail: 72px, icons only; the labels are the rail tooltip (railTooltip.tsx) ---- */
+@media (min-width: 761px) {
+  html[data-sidebar="collapsed"] .erp-app[data-skin="social"] .ws-side .ws-pin { justify-content: center; gap: 0; padding: 0; }
+  html[data-sidebar="collapsed"] .erp-app[data-skin="social"] .ws-side__nav { padding: 12px 8px; }
+  html[data-sidebar="collapsed"] .erp-app[data-skin="social"] .ws-side .erp-side__head { padding: 16px 0 10px; }
+  html[data-sidebar="collapsed"] .erp-app[data-skin="social"] .ws-side .ws-pin .ws-row__count { top: 4px; left: calc(50% + 6px); }
+}
+
+/* ---- Phone: the menu is the off-canvas drawer, with labels; Create's menu opens under its row, inside the screen ---- */
+@media (max-width: 760px) {
+  .erp-app[data-skin="social"] .erp-new__menu--pin { left: 12px; top: calc(var(--pin-menu-top) + 52px); }
+}

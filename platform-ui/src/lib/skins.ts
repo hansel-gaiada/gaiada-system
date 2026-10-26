@@ -27,10 +27,11 @@ export const SKIN_CHOICES: readonly SkinChoice[] = ["workspace", "standard"];
 export type ShellItem = "search" | "notifications" | "create";
 
 /** One pinned menu entry. `row` names a row of the workspace's model, and `tab` one of its tabs (the first when omitted); the entry is
- *  dropped when the person is not offered that row or tab. `ticket` marks an entry whose page is not built yet: never rendered while set,
- *  as in the registry. */
+ *  dropped when the person is not offered that row or tab, unless `tabFallback` is set: then a tab the model lacks (one a later ticket
+ *  builds) opens the row's first tab instead. `ticket` marks an entry whose page is not built yet: never rendered while set, as in the
+ *  registry. */
 export type PinnedItem =
-  | { kind: "row"; key: string; row: string; tab?: string; label?: string; icon?: IconName; ticket?: string }
+  | { kind: "row"; key: string; row: string; tab?: string; tabFallback?: boolean; label?: string; icon?: IconName; ticket?: string }
   | { kind: "shell"; key: string; item: ShellItem; label: string; icon: IconName; ticket?: string };
 
 export interface Skin {
@@ -44,19 +45,21 @@ export interface Skin {
 const SOCIAL_PINNED: readonly PinnedItem[] = [
   { kind: "row", key: "home", row: "overview", tab: "overview", label: "Home", icon: "home" },
   { kind: "shell", key: "search", item: "search", label: "Search", icon: "search" },
-  { kind: "row", key: "messages", row: "messages", label: "Messages", ticket: "SCP-1j" },
-  { kind: "shell", key: "notifications", item: "notifications", label: "Notifications", icon: "bell" },
-  // The person's tasks (`/me/tasks`); Kc decides whether "given by me" and "whole team" open from there or from PM.
-  { kind: "row", key: "tasks", row: "tasks", label: "Tasks" },
-  { kind: "shell", key: "create", item: "create", label: "Create", icon: "plus" },
-  { kind: "row", key: "calendar", row: "publish", tab: "calendar", label: "Calendar" },
-  { kind: "row", key: "reports", row: "reports", label: "Reports" },
-  { kind: "row", key: "saved", row: "saved", label: "Saved", ticket: "SCP-Kc" },
-  { kind: "row", key: "profile", row: "profile", label: "Profile", ticket: "SCP-1k" },
+  { kind: "row", key: "messages", row: "messages", label: "Messages", icon: "messages", ticket: "SCP-1j" },
+  { kind: "shell", key: "notifications", item: "notifications", label: "Notifications", icon: "heart" },
+  // The person's tasks (`/me/tasks`); "given by me" and "whole team" stay in Project Management, under More.
+  { kind: "row", key: "tasks", row: "tasks", label: "Tasks", icon: "tasks" },
+  { kind: "shell", key: "create", item: "create", label: "Create", icon: "createSquare" },
+  { kind: "row", key: "calendar", row: "publish", tab: "calendar", label: "Calendar", icon: "calendar" },
+  // The Social reports tab (`{D}/social-reports`) is SCP-5a's; until it is in the model this opens the shared Reports row's first tab.
+  { kind: "row", key: "reports", row: "reports", tab: "social", tabFallback: true, label: "Reports", icon: "chart" },
+  // The asset library (`{D}/assets`, the `assets` tab of the Social Media toolkit).
+  { kind: "row", key: "saved", row: "publish", tab: "assets", label: "Saved", icon: "bookmark" },
+  { kind: "row", key: "profile", row: "profile", label: "Profile", icon: "user", ticket: "SCP-1k" },
   { kind: "row", key: "assistant", row: "assistant", label: "AI Assistant" },
-  // The HoD and the GM: the Team view's gate (`reports.department.view` in the unit) is what shows it, not the skin.
-  { kind: "row", key: "dashboard", row: "reports", tab: "team", label: "Dashboard" },
-  { kind: "row", key: "settings", row: "settings", label: "Settings", ticket: "SCP-1c" },
+  // A future Social page ({D}/dashboard, for the four Social approvers).
+  { kind: "row", key: "dashboard", row: "dashboard", label: "Dashboard", icon: "dashboard", ticket: "SCP-5d" },
+  { kind: "row", key: "settings", row: "settings", label: "Settings", icon: "settings", ticket: "SCP-1c" },
 ];
 
 export const SKINS: Readonly<Record<SkinKey, Skin>> = {
@@ -79,14 +82,16 @@ export function effectiveSkin(own: SkinKey | undefined, on: readonly SkinKey[], 
   return own;
 }
 
-/** A pinned entry made concrete for one person: a link to a page their model offers, or one of the shell's items. */
+/** A pinned entry made concrete for one person: a link to a page their model offers, or one of the shell's items. A link names the row
+ *  and tab it opens (`row`, `tab`), so the menu can tell which entry the current page belongs to; `wholeRow` marks an entry that stands
+ *  for its whole row (it fell back to the row's first tab, or named no tab). */
 export type ConcretePinned =
-  | { kind: "link"; key: string; label: string; icon: IconName; href: string; count?: number }
+  | { kind: "link"; key: string; label: string; icon: IconName; href: string; row: string; tab: string; wholeRow: boolean; count?: number }
   | { kind: "shell"; key: string; item: ShellItem; label: string; icon: IconName };
 
 /** The skin's pinned entries for a workspace's rows (the gated, settled rows the shell draws). Null for a skin with no pinned menu.
- *  An entry whose row or tab the person is not offered, or that is still planned, is dropped. A row's count rides on the entry that
- *  opens the row's first tab. */
+ *  An entry whose row or tab the person is not offered, or that is still planned, is dropped. A row's count rides on the entry that opens
+ *  the row's first tab. */
 export function pinnedFor(skin: SkinKey, rows: readonly ConcreteRow[]): ConcretePinned[] | null {
   const pinned = SKINS[skin].pinned;
   if (!pinned) return null;
@@ -98,10 +103,24 @@ export function pinnedFor(skin: SkinKey, rows: readonly ConcreteRow[]): Concrete
       continue;
     }
     const row = rows.find((r) => r.key === p.row);
-    const tab = row ? (p.tab ? row.tabs.find((t) => t.key === p.tab) : row.tabs[0]) : undefined;
-    if (!row || !tab) continue;
+    if (!row) continue;
+    const named = p.tab ? row.tabs.find((t) => t.key === p.tab) : row.tabs[0];
+    const fellBack = !named && !!p.tabFallback;
+    const tab = named ?? (fellBack ? row.tabs[0] : undefined);
+    if (!tab) continue;
     const count = tab === row.tabs[0] ? row.count : undefined;
-    out.push({ kind: "link", key: p.key, label: p.label ?? row.label, icon: p.icon ?? row.icon, href: tab.href, ...(count ? { count } : {}) });
+    out.push({
+      kind: "link", key: p.key, label: p.label ?? row.label, icon: p.icon ?? row.icon, href: tab.href, row: row.key, tab: tab.key,
+      wholeRow: !p.tab || p.tabFallback === true, ...(count ? { count } : {}),
+    });
   }
   return out;
+}
+
+/** The pinned entry the current page belongs to, by key (or null). `active` is the shell's own answer (`activeLocation`: the deepest tab
+ *  prefix across every row of the workspace), so an unpinned page lights nothing instead of lighting Home for being a prefix. An entry
+ *  matches when it opens the active row and either stands for its whole row or opens the active tab. */
+export function activePinKey(pins: readonly ConcretePinned[], active: { rowKey: string; tabKey: string } | null): string | null {
+  if (!active) return null;
+  return pins.find((p) => p.kind === "link" && p.row === active.rowKey && (p.wholeRow || p.tab === active.tabKey))?.key ?? null;
 }

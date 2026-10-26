@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { SKINS, SKINS_ON, effectiveSkin, pinnedFor, skinsOn, type PinnedItem } from "./skins";
+import { SKINS, SKINS_ON, activePinKey, effectiveSkin, pinnedFor, skinsOn, type ConcretePinned, type PinnedItem } from "./skins";
+import type { ConcreteRow } from "./workspaceAccess";
 import { WORKSPACES, GENERIC_WORKSPACE, sidebarRows, workspaceBySlug } from "./workspaces";
 import { buildShellModel, allRows, type ShellModel } from "./shellModel";
 import { resolveMyWorkspaces, type OrgTreeNode } from "./workspaceAccess";
 import { agencyTree, lead, me, member, node, person } from "./workspaceFixtures";
 import type { Me } from "./platform";
+import { bespokeToolkit } from "./deptToolkits";
 
 // SCP-Ka (DW-D51, plan §6.1): the skin seam. What a skin may change, what it never changes, and that Social stays off until Kg.
 
@@ -71,10 +73,12 @@ describe("skins: the pinned menu", () => {
         expect(p.ticket, p.key).toMatch(/^SCP-/);
         continue;
       }
-      if (p.kind !== "row") continue;
+      if (p.kind === "shell") continue;
       const row = rows.find((r) => r.key === p.row);
       expect(row, `${p.key} -> ${p.row}`).toBeDefined();
-      if (p.tab) expect(row!.tabs.some((t) => t.key === p.tab), `${p.key} -> ${p.row}/${p.tab}`).toBe(true);
+      // A tab a later ticket builds may be missing while the entry falls back to the row's first tab (Reports, until SCP-5a).
+      const fallsBack = p.kind === "row" && p.tabFallback === true;
+      if (p.tab && !fallsBack) expect(row!.tabs.some((t) => t.key === p.tab), `${p.key} -> ${p.row}/${p.tab}`).toBe(true);
     }
     expect(new Set(SKINS.social.pinned!.map((p) => p.key)).size).toBe(SKINS.social.pinned!.length);
   });
@@ -82,22 +86,77 @@ describe("skins: the pinned menu", () => {
   it("resolves only to pages the person's model offers, in order, and never a planned one", () => {
     const soc = wsByKey(model(me([member()]), socialTree, { on: ["standard", "social"] }), "social-media");
     const pinned = pinnedFor(soc.skin, allRows(soc))!;
-    expect(pinned.map((p) => p.key)).toEqual(["home", "search", "notifications", "tasks", "create", "calendar", "reports", "assistant"]);
+    expect(pinned.map((p) => p.key)).toEqual(["home", "search", "notifications", "tasks", "create", "calendar", "reports", "saved", "assistant"]);
     const offered = new Set(allRows(soc).flatMap((r) => r.tabs.map((t) => t.href)));
     for (const p of pinned) if (p.kind === "link") expect(offered.has(p.href), p.key).toBe(true);
     expect(pinned.find((p) => p.key === "home")).toMatchObject({ kind: "link", label: "Home", href: "/departments/d-soc" });
   });
 
-  it("shows the Dashboard to the unit's head by the Team view's own gate, not by the skin", () => {
-    const head = wsByKey(model(me([member(), lead("d-soc")]), socialTree, { on: ["standard", "social"] }), "social-media");
-    const dash = pinnedFor(head.skin, allRows(head))!.find((p) => p.key === "dashboard");
-    expect(dash).toMatchObject({ kind: "link", label: "Dashboard" });
-    expect(dash && dash.kind === "link" ? dash.href : "").toMatch(/^\/reports\/team\?unit=d-soc/);
+  const pinsOf = (m: Me) => {
+    const soc = wsByKey(model(m, socialTree, { on: ["standard", "social"] }), "social-media");
+    return pinnedFor(soc.skin, allRows(soc))!.map((p) => p.key);
+  };
+
+  it("keeps the Dashboard hidden while its page (SCP-5d) is not built, so an officer and a head see the same pins", () => {
+    expect(SKINS.social.pinned!.find((p) => p.key === "dashboard")).toMatchObject({ kind: "row", row: "dashboard", ticket: "SCP-5d" });
+    const officer = pinsOf(me([member()]));
+    expect(officer).not.toContain("dashboard");
+    expect(pinsOf(me([member(), lead("d-soc")]))).toEqual(officer);
+    expect(pinsOf(me([member(), lead("root")]))).toEqual(officer);
+  });
+
+  it("opens the shared Reports row's first tab until a Social reports tab is in the model, then that tab", () => {
+    const soc = wsByKey(model(me([member()]), socialTree, { on: ["standard", "social"] }), "social-media");
+    const reportsRow = allRows(soc).find((r) => r.key === "reports")!;
+    expect(reportsRow.tabs.some((t) => t.key === "social")).toBe(false);
+    const now = pinnedFor("social", allRows(soc))!.find((p) => p.key === "reports");
+    expect(now).toMatchObject({ kind: "link", label: "Reports", href: reportsRow.tabs[0].href, tab: reportsRow.tabs[0].key, wholeRow: true });
+    // The tab SCP-5a builds, as a synthetic row: the entry now opens it.
+    const withSocial: ConcreteRow = { ...reportsRow, tabs: [...reportsRow.tabs, { key: "social", label: "Social", href: "/departments/d-soc/social-reports", icon: "chart" }] };
+    const later = pinnedFor("social", [withSocial])!.find((p) => p.key === "reports");
+    expect(later).toMatchObject({ kind: "link", href: "/departments/d-soc/social-reports", tab: "social" });
+  });
+
+  it("does not fall back for an entry that did not ask to: Calendar is dropped when its tab is not offered", () => {
+    const rows: ConcreteRow[] = [{ key: "publish", label: "Publish", icon: "gateway", tabs: [{ key: "composer", label: "Composer", href: "/departments/d-soc/composer", icon: "pulse" }] }];
+    expect(pinnedFor("social", rows)!.some((p) => p.key === "calendar")).toBe(false);
+  });
+
+  it("Saved opens the department's Asset Library, and the Social Media toolkit declares that tab", () => {
+    const soc = wsByKey(model(me([member()]), socialTree, { on: ["standard", "social"] }), "social-media");
+    expect(pinnedFor("social", allRows(soc))!.find((p) => p.key === "saved")).toMatchObject({ kind: "link", label: "Saved", href: "/departments/d-soc/assets", row: "publish", tab: "assets" });
+    expect(bespokeToolkit("social-media")!.groups.flatMap((g) => g.tabs).some((t) => t.key === "assets" && t.path === "assets")).toBe(true);
   });
 
   it("carries a row's count on the entry that opens the row's first tab", () => {
     const rows = [{ key: "assistant", label: "AI Assistant", icon: "assistant" as const, count: 3, tabs: [{ key: "assistant", label: "AI Assistant", href: "/assistant", icon: "assistant" as const }] }];
     expect(pinnedFor("social", rows)!.find((p) => p.key === "assistant")).toMatchObject({ count: 3 });
+  });
+});
+
+describe("skins: which pinned entry the page belongs to", () => {
+  const link = (key: string, row: string, tab: string, over: Partial<Extract<ConcretePinned, { kind: "link" }>> = {}): ConcretePinned =>
+    ({ kind: "link", key, label: key, icon: "home", href: `/${key}`, row, tab, wholeRow: false, ...over });
+  const pins: ConcretePinned[] = [
+    link("home", "overview", "overview"),
+    link("calendar", "publish", "calendar"),
+    link("reports", "reports", "mine", { wholeRow: true }),
+    { kind: "shell", key: "search", item: "search", label: "Search", icon: "search" },
+  ];
+
+  it("is the entry that opens the active row and tab", () => {
+    expect(activePinKey(pins, { rowKey: "overview", tabKey: "overview" })).toBe("home");
+    expect(activePinKey(pins, { rowKey: "publish", tabKey: "calendar" })).toBe("calendar");
+  });
+
+  it("is none for a page the menu does not pin, instead of lighting Home for being a prefix", () => {
+    expect(activePinKey(pins, { rowKey: "publish", tabKey: "composer" })).toBeNull();
+    expect(activePinKey(pins, { rowKey: "overview", tabKey: "notices" })).toBeNull();
+    expect(activePinKey(pins, null)).toBeNull();
+  });
+
+  it("lights an entry that stands for its whole row on any tab of the row", () => {
+    expect(activePinKey(pins, { rowKey: "reports", tabKey: "team" })).toBe("reports");
   });
 });
 

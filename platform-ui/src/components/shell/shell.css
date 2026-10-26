@@ -85,7 +85,7 @@
 /* Main is transparent so the wash shows behind the content column. */
 .erp-main { background: transparent; }
 
-.erp-app { --rail: 64px; position: relative; display: grid; grid-template-columns: 248px 1fr; grid-template-rows: 66px 1fr; grid-template-areas: "side top" "side main"; gap: var(--shell-gap); padding: var(--shell-gap); height: 100vh; width: 100%; background: var(--surface-page); font-family: var(--font-body); }
+.erp-app { --rail: 64px; position: relative; display: grid; grid-template-columns: 248px 1fr; grid-template-rows: 66px 1fr; grid-template-areas: "side top" "side main"; gap: var(--shell-gap); padding: var(--shell-gap); height: 100vh; width: 100%; background: var(--surface-page); color: var(--text-primary); font-family: var(--font-body); }
 .erp-side { grid-area: side; display: flex; flex-direction: column; min-height: 0; }
 /* Brand + collapse control share the header row. */
 .erp-side__head { position: relative; display: flex; align-items: flex-start; gap: 8px; padding: 20px 22px 15px; border-bottom: 0.5px solid var(--line-soft); }

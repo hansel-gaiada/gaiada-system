@@ -46,14 +46,23 @@ const PATHS = {
   sun: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10z M12 2v2 M12 20v2 M4.2 4.2l1.4 1.4 M18.4 18.4l1.4 1.4 M2 12h2 M20 12h2 M4.2 19.8l1.4-1.4 M18.4 5.6l1.4-1.4",
   moon: "M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z",
   auto: "M12 20a8 8 0 1 0 0-16v16z M12 4a8 8 0 1 0 0 16",
+  // SCP-Kc: the Social skin's menu glyphs, 24px line icons drawn for it. Plain shapes, nothing taken from any other set.
+  heart: "M12 20.5C6 16.2 3.5 12.6 3.5 9a4.5 4.5 0 0 1 8.5-2 4.5 4.5 0 0 1 8.5 2c0 3.6-2.5 7.2-8.5 11.5z",
+  messages: "M21 11.5a8 8 0 0 1-11.8 7L4 20l1.6-4.3A8 8 0 1 1 21 11.5z",
+  createSquare: "M6 3.5h12a2.5 2.5 0 0 1 2.5 2.5v12a2.5 2.5 0 0 1-2.5 2.5H6A2.5 2.5 0 0 1 3.5 18V6A2.5 2.5 0 0 1 6 3.5z M12 8v8 M8 12h8",
+  bookmark: "M6.5 3.5h11v17L12 16.5l-5.5 4z",
+  calendar: "M4 6h16v14H4z M4 10.5h16 M8.5 3.5V8 M15.5 3.5V8",
+  dashboard: "M4 4h7v7H4z M13 4h7v4h-7z M13 10h7v10h-7z M4 13h7v7H4z",
+  tasks: "M5 3.5h14a1.5 1.5 0 0 1 1.5 1.5v14a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19V5A1.5 1.5 0 0 1 5 3.5z M8 12.5l3 3 5-6",
 };
 
 export type IconName = keyof typeof PATHS;
 
-export function Icon({ name, size = 19 }: { name: IconName; size?: number }) {
+/** `stroke` defaults to 1.6, the width every Standard icon is drawn at; the Social menu draws its icons at 2 (SCP-Kc). */
+export function Icon({ name, size = 19, stroke = 1.6 }: { name: IconName; size?: number; stroke?: number }) {
   const d = PATHS[name];
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={stroke}
       strokeLinecap="round" strokeLinejoin="round" width={size} height={size} aria-hidden="true">
       {d.split(/(?= M)/).map((seg, i) => (
         <path key={i} d={seg.trim()} />
