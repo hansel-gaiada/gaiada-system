@@ -10,6 +10,7 @@ import { AuthGuard } from "../auth/guards";
 import { isElevated } from "../admin/elevated";
 import { authorizeThreadParent } from "./thread-authz";
 import { renderTemplate, UnknownMailTemplateError } from "./templates";
+import { CLIENT_INVITE_TEMPLATE, renderInvitePreview } from "./invite-mail";
 import type { StoredAttachment } from "./inbound/intake";
 import type { ThreadMessageView } from "./thread.controller";
 
@@ -184,7 +185,11 @@ export class AdminMailController {
     // the key, which is actionable, instead of an opaque server error.
     try {
       const payload = row.payload ?? {};
-      const rendered = renderTemplate(row.template_key, payload);
+      // PGL-10: an invitation's link is minted at send time and never stored. The preview renders the stored payload
+      // only (any `href` stripped, never a mint), so it shows a placeholder sentence where the link was and can never
+      // show, or create, a live token.
+      const isInvite = row.template_key === CLIENT_INVITE_TEMPLATE;
+      const rendered = isInvite ? renderInvitePreview(payload) : renderTemplate(row.template_key, payload);
       // Some templates interpolate a value that is DELIBERATELY never persisted, so a faithful
       // preview cannot reproduce it. The magic-link URL is the case that exists today: it carries a
       // bearer token, so storing it on `mail_log` would put a live credential at rest — verified
@@ -192,7 +197,7 @@ export class AdminMailController {
       // `href`). The template therefore renders `<a href=""></a>`, which looks like a broken
       // template to anyone reviewing mail quality. Say so explicitly instead: the omission is the
       // security property working, not a defect, and the UI must not imply otherwise.
-      const linkOmitted = !("href" in payload) && rendered.html.includes('href=""');
+      const linkOmitted = isInvite || (!("href" in payload) && rendered.html.includes('href=""'));
       return {
         mailLogId: id,
         templateKey: row.template_key,

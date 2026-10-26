@@ -15,6 +15,12 @@ import {
   hashToken,
   pruneExpiredInvites,
   ClientInviteError,
+  createMailInvite,
+  mintMailInviteToken,
+  resealMailInvite,
+  convertMailInviteToLink,
+  spendOpenInvites,
+  signLegacyInviteToken,
 } from "./client-invites";
 import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setup";
 import { createCompany, createUser, createClient } from "../testing/fixtures";
@@ -74,6 +80,7 @@ describe.skipIf(!TEST_URL)("W0: client invite tokens", () => {
     expect(row.rows[0].token_hash).not.toBe(token);
     // A database read must not yield a usable link (A4).
     expect(row.rows[0].token_hash).not.toContain("inv1.");
+    expect(row.rows[0].token_hash).not.toContain("inv2.");
   });
 
   // ---- A1: forgery / tenant pivot ----
@@ -90,7 +97,9 @@ describe.skipIf(!TEST_URL)("W0: client invite tokens", () => {
   it("refuses a token whose TENANT segment has been swapped (the pivot attempt)", async () => {
     const { token, inviteId } = await createInvite({ tenantId: co, clientContactId: contactId, email: "a@b.test", invitedBy: null });
     const parts = token.split(".");
-    const swapped = [parts[0], parts[1], Buffer.from(other, "utf8").toString("base64url"), parts[3]].join(".");
+    // PGL-10: a v2 token is five segments (prefix, id, tenant, nonce, HMAC); only the tenant is swapped.
+    expect(parts).toHaveLength(5);
+    const swapped = [parts[0], parts[1], Buffer.from(other, "utf8").toString("base64url"), parts[3], parts[4]].join(".");
     await expect(consumeInvite(swapped)).rejects.toMatchObject({ reason: "bad_signature" });
     // …and the original invite is untouched, so a failed pivot does not deny the real contact.
     const still = await adminPool().query(`SELECT consumed_at FROM client_invites WHERE id = $1`, [inviteId]);
@@ -98,16 +107,19 @@ describe.skipIf(!TEST_URL)("W0: client invite tokens", () => {
   });
 
   it("rejects a re-spelled but equivalent encoding (canonical re-encoding, not the caller's bytes)", async () => {
-    const { inviteId } = await createInvite({ tenantId: co, clientContactId: contactId, email: "a@b.test", invitedBy: null });
-    const good = signInviteToken(inviteId, co);
+    const { token: good, inviteId } = await createInvite({ tenantId: co, clientContactId: contactId, email: "a@b.test", invitedBy: null });
     const parts = good.split(".");
     // Padded base64 decodes to the same id but is a different spelling. Verifying over the caller's own
     // segments (rather than a canonical re-encode) would accept this as a SECOND valid form of one invite.
-    const padded = [parts[0], `${parts[1]}==`, parts[2], parts[3]].join(".");
+    const padded = [parts[0], `${parts[1]}==`, parts[2], parts[3], parts[4]].join(".");
     await expect(consumeInvite(padded)).rejects.toBeInstanceOf(ClientInviteError);
+    // PGL-10: the hash is in the claim predicate, so the refused re-spelling spent nothing and the real link still works.
+    const still = await adminPool().query(`SELECT consumed_at FROM client_invites WHERE id = $1`, [inviteId]);
+    expect(still.rows[0].consumed_at).toBeNull();
+    await expect(consumeInvite(good)).resolves.toMatchObject({ tenantId: co });
   });
 
-  it.each([["nonsense"], ["inv1.a.b"], ["inv2.a.b.c"], [""], ["....."]])("refuses malformed token %s", async (bad) => {
+  it.each([["nonsense"], ["inv1.a.b"], ["inv2.a.b.c"], ["inv2.a.b.c.d.e"], [""], ["....."]])("refuses malformed token %s", async (bad) => {
     await expect(consumeInvite(bad)).rejects.toBeInstanceOf(ClientInviteError);
   });
 
@@ -207,5 +219,113 @@ describe.skipIf(!TEST_URL)("W0: client invite tokens", () => {
     } finally {
       config.integrationTokenKey = saved;
     }
+  });
+
+  // ---- PGL-10: token v2, the sealed mail invite, the send-time mint ----
+
+  it("PGL-10: a v2 token has a random part, so two mints for ONE invite differ (v1 was a pure function of id + tenant + key)", async () => {
+    const id = newId();
+    const a = signInviteToken(id, co);
+    const b = signInviteToken(id, co);
+    expect(a.startsWith("inv2.")).toBe(true);
+    expect(a.split(".")).toHaveLength(5);
+    expect(a).not.toBe(b);
+    expect(signLegacyInviteToken(id, co)).toBe(signLegacyInviteToken(id, co));
+  });
+
+  it("PGL-10: a v1 (legacy) token whose hash is stored still consumes, for invites issued before this release", async () => {
+    const inviteId = newId();
+    const legacy = signLegacyInviteToken(inviteId, co);
+    await adminPool().query(
+      `INSERT INTO client_invites (id, tenant_id, client_contact_id, email, token_hash, expires_at, origin_site)
+       VALUES ($1, $2, $3, 'legacy@b.test', $4, now() + interval '1 hour', $5)`,
+      [inviteId, co, contactId, hashToken(legacy), config.originSite],
+    );
+    await expect(consumeInvite(legacy)).resolves.toMatchObject({ inviteId, email: "legacy@b.test" });
+  });
+
+  it("PGL-10: a stale token for an open invite (a superseded mint) spends NOTHING; the live one still works", async () => {
+    const { token, inviteId } = await createInvite({ tenantId: co, clientContactId: contactId, email: "a@b.test", invitedBy: null });
+    const stale = signInviteToken(inviteId, co); // validly signed, not the stored one
+    await expect(consumeInvite(stale)).rejects.toMatchObject({ reason: "unknown_or_expired" });
+    const still = await adminPool().query(`SELECT consumed_at FROM client_invites WHERE id = $1`, [inviteId]);
+    expect(still.rows[0].consumed_at).toBeNull();
+    await expect(consumeInvite(token)).resolves.toMatchObject({ inviteId });
+  });
+
+  it("PGL-10: a MAIL invite is born sealed: delivery 'mail', no token returned, and no token can open it", async () => {
+    const created = await createMailInvite({ tenantId: co, clientContactId: contactId, email: "Mail@B.Test", invitedBy: null });
+    expect(Object.keys(created).sort()).toEqual(["expiresAt", "inviteId"]);
+    const row = await adminPool().query(`SELECT delivery, token_hash, email FROM client_invites WHERE id = $1`, [created.inviteId]);
+    expect(row.rows[0]).toMatchObject({ delivery: "mail", email: "mail@b.test" });
+    expect(row.rows[0].token_hash).toMatch(/^[0-9a-f]{64}$/);
+    await expect(consumeInvite(signInviteToken(created.inviteId, co))).rejects.toMatchObject({ reason: "unknown_or_expired" });
+  });
+
+  it("PGL-10: the send-time mint makes exactly the minted token usable, once; a second mint kills the first", async () => {
+    const { inviteId } = await createMailInvite({ tenantId: co, clientContactId: contactId, email: "mint@b.test", invitedBy: null });
+    const first = await mintMailInviteToken(co, inviteId, "MINT@b.test");
+    const second = await mintMailInviteToken(co, inviteId, "mint@b.test");
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    expect(first!.token).not.toBe(second!.token);
+    const stored = await adminPool().query(`SELECT token_hash FROM client_invites WHERE id = $1`, [inviteId]);
+    expect(stored.rows[0].token_hash).toBe(hashToken(second!.token));
+    await expect(consumeInvite(first!.token)).rejects.toMatchObject({ reason: "unknown_or_expired" });
+    await expect(consumeInvite(second!.token)).resolves.toMatchObject({ inviteId, email: "mint@b.test" });
+    await expect(consumeInvite(second!.token)).rejects.toMatchObject({ reason: "unknown_or_expired" });
+    expect(await mintMailInviteToken(co, inviteId, "mint@b.test")).toBeNull(); // spent: nothing more can be minted
+  });
+
+  it("PGL-10: the mint refuses a LINK invite, another address, an expired invite, a non-invited contact and another tenant", async () => {
+    const link = await createInvite({ tenantId: co, clientContactId: contactId, email: "link@b.test", invitedBy: null });
+    expect(await mintMailInviteToken(co, link.inviteId, "link@b.test")).toBeNull();
+    await expect(consumeInvite(link.token)).resolves.toMatchObject({ inviteId: link.inviteId }); // untouched
+
+    const bound = await createMailInvite({ tenantId: co, clientContactId: contactId, email: "bound@b.test", invitedBy: null });
+    expect(await mintMailInviteToken(co, bound.inviteId, "someone-else@b.test")).toBeNull();
+    // Another tenant cannot mint it at all: under RLS the row is not there.
+    expect(await mintMailInviteToken(other, bound.inviteId, "bound@b.test")).toBeNull();
+
+    const old = await createMailInvite({ tenantId: co, clientContactId: contactId, email: "old@b.test", invitedBy: null });
+    await adminPool().query(`UPDATE client_invites SET expires_at = now() - interval '1 second' WHERE id = $1`, [old.inviteId]);
+    expect(await mintMailInviteToken(co, old.inviteId, "old@b.test")).toBeNull();
+
+    const revokedUser = await createUser("revoked-mint@client.test");
+    const revokedContact = await contactFor(co, clientRow, revokedUser);
+    const r = await createMailInvite({ tenantId: co, clientContactId: revokedContact, email: "revoked-mint@client.test", invitedBy: null });
+    await adminPool().query(`UPDATE client_contacts SET status = 'revoked' WHERE id = $1`, [revokedContact]);
+    expect(await mintMailInviteToken(co, r.inviteId, "revoked-mint@client.test")).toBeNull();
+  });
+
+  it("PGL-10: re-sealing after a failed send kills that attempt's token, and only if it is still the stored one", async () => {
+    const { inviteId } = await createMailInvite({ tenantId: co, clientContactId: contactId, email: "reseal@b.test", invitedBy: null });
+    const attempt = await mintMailInviteToken(co, inviteId, "reseal@b.test");
+    await resealMailInvite(co, inviteId, attempt!.tokenHash);
+    await expect(consumeInvite(attempt!.token)).rejects.toMatchObject({ reason: "unknown_or_expired" });
+    const next = await mintMailInviteToken(co, inviteId, "reseal@b.test");
+    await resealMailInvite(co, inviteId, attempt!.tokenHash); // a stale hash: a no-op
+    await expect(consumeInvite(next!.token)).resolves.toMatchObject({ inviteId });
+  });
+
+  it("PGL-10: the route's fallback turns a sealed mail invite into a usable LINK invite that no mail can re-mint", async () => {
+    const { inviteId } = await createMailInvite({ tenantId: co, clientContactId: contactId, email: "fallback@b.test", invitedBy: null });
+    const token = await convertMailInviteToLink(co, inviteId);
+    expect(token).toBeTruthy();
+    expect(await mintMailInviteToken(co, inviteId, "fallback@b.test")).toBeNull();
+    const row = await adminPool().query(`SELECT delivery FROM client_invites WHERE id = $1`, [inviteId]);
+    expect(row.rows[0].delivery).toBe("link");
+    await expect(consumeInvite(token!)).resolves.toMatchObject({ inviteId });
+  });
+
+  it("PGL-10: spendOpenInvites spends every open invite of the contact (a resend invalidates the old link)", async () => {
+    const u = await createUser("resend-spend@client.test");
+    const cid = await contactFor(co, clientRow, u);
+    const a = await createInvite({ tenantId: co, clientContactId: cid, email: "resend-spend@client.test", invitedBy: null });
+    const b = await createMailInvite({ tenantId: co, clientContactId: cid, email: "resend-spend@client.test", invitedBy: null });
+    const n = await withTenants([co], (c) => spendOpenInvites(c, cid));
+    expect(n).toBe(2);
+    await expect(consumeInvite(a.token)).rejects.toMatchObject({ reason: "unknown_or_expired" });
+    expect(await mintMailInviteToken(co, b.inviteId, "resend-spend@client.test")).toBeNull();
   });
 });

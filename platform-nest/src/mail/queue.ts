@@ -8,6 +8,7 @@ import { stripHeaderInjection, isPlausibleEmail } from "./sanitize";
 import { isSuppressed } from "./suppressions";
 import { renderTemplate } from "./templates";
 import { recordEnqueued, recordSuppressed } from "./metrics";
+import { CLIENT_INVITE_TEMPLATE, assertInvitePayloadHoldsNoCredential } from "./invite-mail";
 import type { MailStream } from "./types";
 
 export interface EnqueueMailInput {
@@ -48,6 +49,9 @@ export async function enqueueMail(input: EnqueueMailInput): Promise<EnqueueMailR
   if (!isPlausibleEmail(input.toEmail)) {
     throw new Error(`enqueueMail: implausible recipient address ${JSON.stringify(input.toEmail)}`);
   }
+  // PGL-10: the invite mail's link is a credential minted at SEND time and never stored, so its stored payload is an
+  // allow-list of four non-secret fields. Anything else (an `href`, a token) is refused here, before any row exists.
+  if (input.templateKey === CLIENT_INVITE_TEMPLATE) assertInvitePayloadHoldsNoCredential(input.payload);
   // Renders now so `mail_log.subject` is populated for the admin log list without a re-render —
   // also the earliest point an unknown template_key is caught (UnknownMailTemplateError), so a
   // typo'd key fails loudly at enqueue time rather than three retries later at send time.

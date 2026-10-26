@@ -10,7 +10,8 @@ import { resolveAdapter } from "./provider";
 import { stripHeaderInjection } from "./sanitize";
 import { config } from "../config";
 import { recordSent, recordFailed, recordSuppressed, recordSendDuration } from "./metrics";
-import type { ClaimedMail, MailStream, OutboundMail } from "./types";
+import { CLIENT_INVITE_TEMPLATE, composeInviteForSend, type ComposedInvite } from "./invite-mail";
+import type { ClaimedMail, MailStream, OutboundMail, RenderedMail } from "./types";
 
 export const MAIL_MAX_ATTEMPTS = 5;
 
@@ -34,7 +35,7 @@ export function backoffMinutes(attemptsAfter: number): number {
 export async function claimDueMail(limit = 20): Promise<ClaimedMail[]> {
   return withMailContext(async (c) => {
     const { rows } = await c.query<ClaimedMail>(
-      `SELECT id, stream, to_email, template_key, payload, subject, entity_type, entity_id, reply_token, attempts
+      `SELECT id, stream, tenant_id, to_email, template_key, payload, subject, entity_type, entity_id, reply_token, attempts
          FROM mail_log
         WHERE status = 'queued' AND next_attempt_at <= now()
         ORDER BY (stream = 'auth') DESC, next_attempt_at ASC
@@ -96,7 +97,16 @@ async function markFailedOrRetry(id: string, attemptsBefore: number, errorMessag
  *  re-check → adapter send"), then render + send, then persist the outcome. Never throws — every
  *  failure path (suppressed, send error) is captured and turned into a row update, so one bad row
  *  in a batch can never abort the rest of the batch. */
-export async function processClaimedMail(row: ClaimedMail): Promise<"sent" | "suppressed" | "failed" | "retry"> {
+/** PGL-10: a send-time-composed mail that must not go out (its invitation is no longer open). Terminal, with a plain
+ *  reason, and NOT counted as a delivery failure: nothing was attempted. */
+async function markDropped(id: string, reason: string): Promise<void> {
+  await withMailContext((c) =>
+    c.query(`UPDATE mail_log SET status = 'failed', last_error = $2, updated_at = now() WHERE id = $1`, [id, reason]),
+  );
+}
+
+export async function processClaimedMail(row: ClaimedMail): Promise<"sent" | "suppressed" | "failed" | "retry" | "dropped"> {
+  // The suppression re-check runs FIRST, so a suppressed client.invite row never mints a token (PGL-10).
   const suppressedNow = await withMailContext((c) => isSuppressed(c, row.to_email, row.stream));
   if (suppressedNow) {
     await markSuppressedRow(row.id);
@@ -104,7 +114,34 @@ export async function processClaimedMail(row: ClaimedMail): Promise<"sent" | "su
     return "suppressed";
   }
 
-  const rendered = renderTemplate(row.template_key, row.payload);
+  // PGL-10: `client.invite` is the one template composed at send time (invite-mail.ts): its link is a credential
+  // minted now and never stored, so it can never be rendered from `row.payload` alone. Every other template is
+  // re-rendered from the stored payload, as before.
+  let rendered: RenderedMail;
+  let onSendFailure: (() => Promise<void>) | null = null;
+  let redact: (s: string) => string = (s) => s;
+  if (row.template_key === CLIENT_INVITE_TEMPLATE) {
+    let composed: ComposedInvite;
+    try {
+      composed = await composeInviteForSend(row);
+    } catch (err) {
+      // A database or configuration fault BEFORE any send: retry with the normal backoff. The message cannot hold a
+      // token (none reached a send).
+      recordFailed(row.stream);
+      const attemptsAfter = row.attempts + 1;
+      await markFailedOrRetry(row.id, row.attempts, (err as Error).message ?? String(err));
+      return attemptsAfter >= MAIL_MAX_ATTEMPTS ? "failed" : "retry";
+    }
+    if (composed.kind === "drop") {
+      await markDropped(row.id, composed.reason);
+      return "dropped";
+    }
+    rendered = composed.rendered;
+    onSendFailure = composed.onSendFailure;
+    redact = composed.redact;
+  } else {
+    rendered = renderTemplate(row.template_key, row.payload);
+  }
   const adapter = resolveAdapter(row.stream as MailStream);
   const mail: OutboundMail = {
     stream: row.stream,
@@ -126,7 +163,18 @@ export async function processClaimedMail(row: ClaimedMail): Promise<"sent" | "su
     recordSendDuration(row.stream, Date.now() - startedAt);
     recordFailed(row.stream);
     const attemptsAfter = row.attempts + 1;
-    await markFailedOrRetry(row.id, row.attempts, (err as Error).message ?? String(err));
+    // PGL-10: a failed invite attempt re-seals the invite before the row goes back to the queue, so the token that
+    // attempt carried is dead whether or not it reached anyone. Best effort: if it fails, the next attempt's mint
+    // overwrites the hash anyway, and a final failure leaves an undelivered token that expires with the invite.
+    if (onSendFailure) {
+      try {
+        await onSendFailure();
+      } catch (resealErr) {
+        // eslint-disable-next-line no-console
+        console.error(`[mail-sender] re-seal after a failed invite send failed (mail_log=${row.id}):`, redact((resealErr as Error).message ?? ""));
+      }
+    }
+    await markFailedOrRetry(row.id, row.attempts, redact((err as Error).message ?? String(err)));
     return attemptsAfter >= MAIL_MAX_ATTEMPTS ? "failed" : "retry";
   }
 }

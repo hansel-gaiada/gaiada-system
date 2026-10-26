@@ -37,7 +37,16 @@ import { authorize, notify, writeActivity } from "./http";
 import { emitEvent } from "../events/outbox.service";
 import { insertGrantRow, revokeClientWebsiteEditor, CLIENT_WEBSITE_EDITOR_ROLE } from "../admin/grant-write.service";
 import { writeClientAccessAuditTx } from "./client-website-access.controller";
-import { createInvite, consumeInvite, generatePassword } from "./client-invites";
+import {
+  createInvite,
+  createMailInvite,
+  consumeInvite,
+  convertMailInviteToLink,
+  generatePassword,
+  spendOpenInvites,
+} from "./client-invites";
+import { enqueueMail } from "../mail/queue";
+import { CLIENT_INVITE_TEMPLATE } from "../mail/invite-mail";
 import { clientContactClientVisible, staffClientVisible } from "./portal-visibility";
 import {
   createUser as kcCreateUser,
@@ -148,7 +157,7 @@ export class ClientContactsController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("clientId") clientId: string,
-    @Body() body: { email?: string; name?: string; capability?: string; projectId?: string | null },
+    @Body() body: { email?: string; name?: string; capability?: string; projectId?: string | null; delivery?: string },
   ) {
     await authorize(req.principal, { kind: "client_contact", tenantId }, "create");
 
@@ -162,6 +171,14 @@ export class ClientContactsController {
       throw new BadRequestException("capability must be 'signer' or 'viewer'");
     }
     const projectId = body?.projectId ?? null;
+    // PGL-10 (BFF §62.5): `delivery` is the PM's choice. "link" (the default, today's behaviour) returns the link to
+    // forward by hand; "mail" sends the invitation by mail, only when BOTH mail gates are on (MAIL_ENABLED and
+    // CLIENT_MAIL_ENABLED). With either off the route answers exactly as for "link" and says it was not mailed.
+    const delivery = body?.delivery ?? "link";
+    if (delivery !== "link" && delivery !== "mail") throw new BadRequestException("delivery must be 'link' or 'mail'");
+    const mailRequested = delivery === "mail";
+    const mailOn = config.mail.enabled && config.mail.clientMailEnabled;
+    const mailPath = mailRequested && mailOn;
 
     const clientRow = await withTenants([tenantId], (c) =>
       c.query<{ id: string; name: string }>(`SELECT id, name FROM clients WHERE id = $1 AND deleted_at IS NULL`, [clientId]),
@@ -234,36 +251,92 @@ export class ClientContactsController {
           [contactId, tenantId, clientId, userId, projectId, capability, req.principal.userId, config.originSite],
         );
       }
-      const invite = await createInvite({ tenantId, clientContactId: contactId, email, invitedBy: req.principal.userId }, c);
+      // PGL-10: a re-invite is a RESEND. Every open invite of this contact is spent first, in this transaction, so
+      // the contact holds at most ONE usable invitation: the old link (or a mail still queued for it) stops working.
+      await spendOpenInvites(c, contactId);
+      const inviteInput = { tenantId, clientContactId: contactId, email, invitedBy: req.principal.userId };
+      // Mail: a SEALED invite and no token at all here (the sender mints it when it composes the mail).
+      const invite = mailPath
+        ? { ...(await createMailInvite(inviteInput, c)), token: null as string | null }
+        : await createInvite(inviteInput, c);
+      // The event carries the delivery the PM chose, never a token.
       await emitEvent(c, tenantId, "client_contact", contactId, "client_contact.invited", {
         clientId,
         projectId,
         capability,
         actorId: req.principal.userId,
+        delivery: mailPath ? "mail" : "link",
       });
-      return { contactId, invite };
+      const company = await c.query<{ name: string }>(`SELECT name FROM companies WHERE id = $1`, [tenantId]);
+      return { contactId, invite, userId, companyName: company.rows[0]?.name ?? null };
     });
+
+    // PGL-10: hand the mail invite to the queue AFTER the invite commits (mail_log lives behind its own RLS context).
+    // The stored payload is a REFERENCE (the invite id) plus the two names and the expiry: never a link, never a token
+    // (enqueueMail refuses anything else for this template). If the mail cannot be queued (the address is suppressed,
+    // or the enqueue failed), the route falls back to the hand-forwarded link on the SAME invite, so the PM is never
+    // left with an invitation nobody can use.
+    let token: string | null = result.invite.token;
+    let mail: { requested: boolean; mailed: boolean; reason: string | null; mailLogId: string | null } = {
+      requested: mailRequested,
+      mailed: false,
+      reason: mailRequested ? (mailOn ? null : "mail_off") : "not_requested",
+      mailLogId: null,
+    };
+    if (mailPath) {
+      let queued: { id: string; status: string } | null = null;
+      let reason: string | null = null;
+      try {
+        const r = await enqueueMail({
+          stream: "notify",
+          templateKey: CLIENT_INVITE_TEMPLATE,
+          toEmail: email,
+          tenantId,
+          userId: result.userId,
+          withReplyToken: false,
+          payload: {
+            inviteId: result.invite.inviteId,
+            companyName: result.companyName ?? undefined,
+            clientName: clientRow.rows[0].name,
+            expiresAt: result.invite.expiresAt,
+          },
+        });
+        if (r.skipped) reason = "mail_off";
+        else if (r.status === "suppressed") reason = "suppressed";
+        else queued = { id: r.id, status: r.status };
+      } catch (e) {
+        reason = "enqueue_failed";
+        // Ids and the error only: no token exists on this path.
+        console.error(`[client-contacts] invite mail could not be queued (contact=${result.contactId}):`, (e as Error)?.message ?? e);
+      }
+      if (queued) {
+        mail = { requested: true, mailed: true, reason: null, mailLogId: queued.id };
+      } else {
+        token = await convertMailInviteToLink(tenantId, result.invite.inviteId);
+        mail = { requested: true, mailed: false, reason, mailLogId: null };
+      }
+    }
 
     await writeActivity(tenantId, req.principal.userId, "invited_client_contact", "client_contact", result.contactId, {
       clientId,
       capability,
+      delivery: mail.mailed ? "mail" : "link",
     });
 
     const row = await withTenants([tenantId], (c) =>
       c.query<ContactRow>(`${SELECT_CONTACT} AND cc.id = $1`, [result.contactId]),
     );
 
-    // ⚠ The RAW token is returned HERE AND NOWHERE ELSE. It is stored only as a sha256 hash, so it
-    // cannot be re-read or re-sent — a lost link means issuing a new invite. There is no email
-    // transport in this estate (verified: no mail dependency anywhere), so W0 hands the link to the PM
-    // to forward. Automated send is a later change that does not alter this contract.
+    // ⚠ The RAW token is returned HERE AND NOWHERE ELSE, and only for a hand-forwarded invite. It is stored only as a
+    // sha256 hash, so it cannot be re-read or re-sent: a lost link means issuing a new invite. A MAILED invite returns
+    // no token at all: the link goes only to the invitee's mailbox, which is what makes the IdP's emailVerified flag
+    // honest on accept (the PM never holds a mailed credential). `mail` says whether it was mailed (BFF §62.5).
     return {
       contact: view(row.rows[0]),
-      invite: {
-        token: result.invite.token,
-        expiresAt: result.invite.expiresAt,
-        acceptPath: `/invite/${result.invite.token}`,
-      },
+      invite: token
+        ? { delivery: "link" as const, token, expiresAt: result.invite.expiresAt, acceptPath: `/invite/${token}` }
+        : { delivery: "mail" as const, expiresAt: result.invite.expiresAt },
+      mail,
     };
   }
 
@@ -364,8 +437,8 @@ export class ClientInviteAcceptController {
   // ⚠ THE TOKEN TRAVELS IN THE BODY, NOT THE PATH. Two independent reasons, and the first one is a bug
   // this route actually had:
   //
-  //  1. ROUTING. A real token is `inv1.<b64url(uuid)>.<b64url(uuid)>.<b64url(32-byte hmac)>` = **146
-  //     characters**, measured. Fastify's router (find-my-way) refuses to match a `:param` segment
+  //  1. ROUTING. A real v1 token was `inv1.<b64url(uuid)>.<b64url(uuid)>.<b64url(32-byte hmac)>` = **146
+  //     characters**, measured (a v2 token, PGL-10, adds a 16-byte nonce segment: about 170). Fastify's router (find-my-way) refuses to match a `:param` segment
   //     longer than `maxParamLength`, which defaults to **100** and is not overridden anywhere in
   //     main.ts. As `POST invites/:token/accept` this route therefore 404'd at the raw router — before
   //     Nest, DI or this controller were reached — for EVERY invite it has ever minted. The magic-link
