@@ -46,11 +46,11 @@ allocation tab, one tab per officer, the content plan rows) and the separate con
 |---|---|---|---|---|
 | 1 | Draft | The client's SMM Officer | Topic, format, pillar, angle, caption, on-image text, call to action, hashtags, date and time, a reference image. The hand-off checks run (§4.6) | Brief |
 | 2 | Proofread | Copywriter | Suggests edits. "Approve copy" applies them and logs each before and after; or the copy goes back with a note | In production |
-| 3 | HoD approval | HoD or GM | Approves it for design, which hands the post to the client's designer (the client-month Creatives request, or the in-team design queue, SCP-Q2); or asks for changes | In production |
+| 3 | HoD approval | HoD or GM (or the owner or the superadmin: the four approvers, SCP-Q19) | Approves it for design, which hands the post to the client's designer (the client-month Creatives request, or the in-team design queue, SCP-Q2); or asks for changes | In production |
 | 4 | Creative | The client's designer: Creatives, or the Social Media team's own designer | Designs from the Creative brief, uploads versions, submits for the final check | In production |
-| 5 | Final check | HoD or GM | Sends it to the client, or asks for a copy change (Officer) or a design change (Creative) | In production |
+| 5 | Final check | HoD or GM (or the owner or the superadmin, SCP-Q19) | Sends it to the client, or asks for a copy change (Officer) or a design change (Creative) | In production |
 | 6 | Client | The client | Approves, or asks for a copy or a design change, with a note and an optional pin on the image | With client; Client changes |
-| 7 | Schedule | Officer | Date, time and placement; scheduled by hand ("Schedule in Meta") or through the publisher | Client approved |
+| 7 | Schedule | Officer by hand; one of the four approvers through the publisher (SCP-Q16, SCP-Q19) | Date, time and placement; scheduled by hand ("Schedule in Meta") or through the publisher | Client approved |
 | 8 | Live | Officer, or the publisher | The post's link; metrics; a boost when it is worth one | Posted |
 
 **Loops:**
@@ -83,18 +83,24 @@ client's photos". Resolving it returns the post to the step it left.
 | SCP-Q5 | What is in the first release? | **SCP-K, SCP-1 to SCP-4 and SCP-S, plus SCP-5a (the monthly report) and SCP-5d (the Team dashboard)**, proved by SCP-7. The rest of SCP-5 (5b, 5c, 5e to 5h) comes after; SCP-6 waits for real data. (The default had been SCP-5 after the first release.) |
 | SCP-Q7 | A skin per department? | **Yes, per department** (DW-D51), by the rule in §6.1. Standard and Social are the first two. |
 | SCP-Q8 | How does the client reach the approval page? | **Portal login.** The link we send, shareable to WhatsApp, opens the portal page; staff record decisions the client gives by WhatsApp or email. No no-login link is built. |
-| SCP-Q9 | Who fills each role? | **The HoD or the GM**, with equal authority, plus anyone given a `social_manager` grant, pass the HoD approval and the final check. The Copywriter is a role any member can hold. The Officer authors and never approves their own post. Replaces SCP-Q4 and SCP-Q6. |
+| SCP-Q9 | Who fills each role? | **The HoD or the GM**, with equal authority, plus anyone given a `social_manager` grant, pass the HoD approval and the final check. The Copywriter is a role any member can hold. The Officer authors and never approves their own post. Replaces SCP-Q4 and SCP-Q6. (refined by SCP-Q19) |
 | SCP-Q10 | How are deadlines set? | **The deadline table:** a deadline per client per cycle. The A/B batch rule pre-fills it and the HoD may change any date. Ready-by is a buffer of working days earlier (default 1); step estimates are optional; holidays come from the HR holiday calendar. |
 | SCP-Q11 | Who approves boost money? | **A monthly boost budget.** The client agrees a boost budget per cycle in advance, in the portal's approvals, or staff record it. A boost that fits what remains of that budget starts without asking; a boost over it waits for the client's approval in the portal. (The default had been the client approving every boost.) |
 | SCP-Q12 | Keep the board and the spreadsheet table? | **Drop both** from SCP-1. The home feed, the client's List and the Team dashboard cover the board; pasting from a sheet moves to the one-off import (SCP-6). |
 | SCP-Q13 | Does changing an approved post's date need the client again? (raised by SCP-0b) | **Yes, always.** The client's approval covers the content and the date, time and placement. Today's hash rule stays: the date is in the review hash. Any change to the date, time or placement of an approved or scheduled post sends it back to the client and asks again on every network (a scheduled one is unscheduled first, cancelling any dispatch). Scheduling at exactly the approved date, time and placement keeps the approval; a feed-preview swap asks again for both posts. |
 | SCP-Q14 | Who in the portal may agree boost money? (SCP-0b) | **Signers only:** a contact with signing capability on that client (`signer` or `admin`). A viewer sees the request but cannot agree; staff can record the client's answer instead. |
 | SCP-Q15 | The monthly boost budget's edges (SCP-0b) | **Lowering is allowed.** A signer in the portal, or a social approver recording the client's answer, may lower a cycle's agreed budget as long as it still covers what is committed. Committed is the full budget of approved and running boosts, plus the actual spend of stopped and completed ones: a stopped boost counts only what it spent, so its spend is recorded when it stops. The per-cycle lock stays. A boost still draws from the month it starts in. |
-| SCP-Q16 | Who files a schedule through the publisher? (SCP-0b) | **The HoD or GM files it, and a second person decides it** (PV-D46: the filer never approves their own high-impact request). The officer schedules by hand ("Schedule in Meta"). |
+| SCP-Q16 | Who files a schedule through the publisher? (SCP-0b) | **The HoD or GM files it, and a second person decides it** (PV-D46: the filer never approves their own high-impact request). The officer schedules by hand ("Schedule in Meta"). (refined by SCP-Q19) |
 | SCP-Q17 | May agents move posts? (SCP-0b) | **Yes, with the rights of the person who asked.** The owner's words: "same right as the person login or ask. so if the one that ask ai to do something is staff, than the ai will follow staff permission." The existing on-behalf-of model applies: the person is the author and Cerbos decides on them, the agent is recorded alongside (`via`), and the maker/checker rule applies to the person. Writes classed high go through the agent's write gate and the in-thread confirm. Unattended automations with no person behind them stay refused every new action. |
-| SCP-Q18 | Who edits allocations, deadlines and boost budgets? (SCP-0b) | **The social approvers only:** the Social Media unit head (lead seat), the GM (lead seat), or a `social_manager` grant (plus platform admin), not `manager`. That covers the allocations (officer, creative source, target, report), the deadline table and settings (buffer, step estimates), and recording, setting, raising or lowering boost budgets on the client's behalf. |
+| SCP-Q18 | Who edits allocations, deadlines and boost budgets? (SCP-0b) | **The social approvers only:** the Social Media unit head (lead seat), the GM (lead seat), or a `social_manager` grant (plus platform admin), not `manager`. That covers the allocations (officer, creative source, target, report), the deadline table and settings (buffer, step estimates), and recording, setting, raising or lowering boost budgets on the client's behalf. (refined by SCP-Q19) |
+| SCP-Q19 | Who exactly are the social approvers? (raised in the review of SCP-0b) | **Exactly four:** the Social Media unit head (lead seat), the GM (lead seat), the owner (the IAM `owner` role) and the superadmin (`platform_admin`). The owner's words: "no. social media HOD, GM, Owner and Superadmin only. or the social media team, but need HOD or the other high level mentioned." A company admin is not one, and no grant can make anyone one. A `social_manager` grant is no longer an approver path anywhere (this supersedes that part of SCP-Q9 and SCP-Q18). The Social Media team keeps its own steps. Every approver-only action needs one of the four: the HoD approval, the final check, filing through the publisher, the allocation, the deadlines and settings, boost budgets, and recording the client's money answers. The maker/checker rule stays on top: an approver who authored the post, or is its officer, still cannot approve it, even as superadmin. |
+| SCP-Q20 | Who checks and sends a client's monthly report? (raised in the review of SCP-0b) | **Only the four approvers** approve it (the HoD check) and send it. The officer writes it and submits it for the HoD check, but does not send it. |
 
-**Open, with the default in force:** None open.
+**Open, with the default in force** (the owner may overrule it at any time):
+
+| # | Question | Default in force |
+|---|---|---|
+| SCP-Q21 | Who decides a pipeline post's publish approval? (raised by SCP-0b, from SCP-Q19) | **One of the four who also holds the approvals decide right, or the superadmin.** Deciding any approval needs that right, which today only a company admin and the superadmin hold. SCP-Q19 adds that the decider must be one of the four, and PV-D46 that it is never the filer. So the HoD, the GM or the owner decides only if they also hold the company-admin role. The recommendation is to let the four decide pipeline publish approvals without it, through a decide right of the publish approval itself. That changes the approvals model, so it is the owner's call. |
 
 **Superseded on 2026-10-26:** SCP-Q3 (the client page's look) by SCP-D5 and SCP-Q8; SCP-Q4 (two internal approvers) and
 SCP-Q6 (the PM is the account manager) by SCP-Q9.
@@ -211,15 +217,16 @@ The frontend is `platform-ui/src`, and `{D}` below stands for `app/(app)/departm
 
 | Design role | In the ERP | Acts on |
 |---|---|---|
-| SMM Officer | A Social Media member set as the client's officer on the allocation (SCP-1a) | Their clients: drafts, fixes, schedules, marks live, follows up. Never approves their own post |
+| SMM Officer | A Social Media member set as the client's officer on the allocation (SCP-1a) | Their clients: drafts, fixes, schedules, marks live, follows up; writes the monthly report and submits it for the HoD check. Never approves their own post, and never sends the report (SCP-Q20) |
 | Copywriter | Holder of the copywriter role (SCP-Q9), any member | The proofread step on every client |
 | Designer | Per the client's creative source (SCP-Q2): a Creatives member working the client-month request, or a Social Media member holding the in-team designer role | Design, versions, submit for the final check |
-| PM / Head of SMM, GM | The Social Media unit head, the GM, or a `social_manager` grant; equal authority | HoD approval, final check, tasks, settings, the report check |
+| PM / Head of SMM, GM: the four approvers | Exactly four, with equal authority (SCP-Q19): the Social Media unit head and the GM (their lead seats), the owner (the IAM `owner` role) and the superadmin. Not a company admin, a head's `manager` role or a `social_manager` grant | HoD approval, final check, filing through the publisher, the allocation, deadlines and settings, boost budgets, the report check and sending the report (SCP-Q20), the Team dashboard. The HoD and the GM also run the team's own steps (block, resolve, a client's recorded decision, boosts) and get the queue and the notifications |
 | Client | A portal contact of that client | Approves or asks for changes; agrees the monthly boost budget and any boost over it (SCP-Q11) |
 
 The design's demo account switch does not exist in the ERP: the signed-in person acts and Cerbos decides. Mock seed gives
 each role a login (SCP-0c). No approval step may be passed by the post's author: if a HoD drafted a post as a client's
-officer, the GM or another approver takes its HoD approval and final check.
+officer, the GM or another approver takes its HoD approval and final check. That holds for the owner and the superadmin
+too (SCP-Q19).
 
 ### 4.2 Data (names fixed by SCP-0b: FRONTEND-BFF-CONTRACT §63.1 is the authority; migrations take a timestamp after main's newest)
 
@@ -301,18 +308,18 @@ officer, the GM or another approver takes its HoD approval and final check.
 | `send_to_proofread` | `drafting`, `changes` (return to proofread) → `proofread` | Officer | The hand-off checks pass, or "send anyway" with a reason, logged. After a client copy change, `changed_only` is set |
 | `approve_copy` | `proofread` → `hod`; → `client` when `changed_only` | Copywriter | Applies the suggestions and logs each field's before and after. With `changed_only` the HoD is notified |
 | `return_copy` | `proofread` → `changes` (return to proofread) | Copywriter | A note is required |
-| `approve_for_design` | `hod` → `design` | HoD or GM, not the author | Hands the post to the client's designer: with creative source `creatives` it joins the client-month Creatives request (opened if none exists); with `in_team` it enters the in-team design queue |
-| `hod_changes` | `hod` → `changes` (return to hod) | HoD or GM | A note is required |
+| `approve_for_design` | `hod` → `design` | An approver (§4.1), not the author or the officer | Hands the post to the client's designer: with creative source `creatives` it joins the client-month Creatives request (opened if none exists); with `in_team` it enters the in-team design queue |
+| `hod_changes` | `hod` → `changes` (return to hod) | An approver | A note is required |
 | `resend` | `changes` → `hod` or `final`, as the return says | Officer | For copy fixes asked at the HoD approval or the final check |
 | `start_design` | `design`, or `changes` (design) | The client's designer (on the request, or an in-team designer) | `creative_state` becomes `in_progress`, or stays `revision` |
 | `submit_design` | `design`, or `changes` (design) → `final` | The client's designer | Needs an asset version or a shared link |
-| `final_approve` | `final` → `client` | HoD or GM, not the author | Creates the variants and requests client review on each |
-| `final_changes` | `final` → `changes` (return to final), copy or design | HoD or GM | A note is required. A design change sets `creative_state` to `revision` |
+| `final_approve` | `final` → `client` | An approver, not the author or the officer | Creates the variants and requests client review on each |
+| `final_changes` | `final` → `changes` (return to final), copy or design | An approver | A note is required. A design change sets `creative_state` to `revision` |
 | `client_approve` | `client` → `approved` | The client in the portal; or the Officer, HoD or GM recording it with channel and note | Every variant's review approved with its hash, which covers the content, the date, the time and the placement |
 | `client_change` | `client` → `changes`: copy (return to proofread, the before-text kept) or design (return to the final check, revision: loop d) | The client, or recorded by staff | A note is required; a pin on the image is optional |
 | `schedule` | `approved` → `scheduled` | Officer | By hand ("Schedule in Meta"), at exactly the approved date, time and placement; the media validator passes. An approved time that has passed needs `reschedule` |
-| `schedule_publisher` | `approved` → `scheduled` | HoD or GM, not the author | Through the publisher, at the approved date, time and placement: one publish approval per variant, decided by a second person (SCP-Q16, PV-D46) |
-| `unschedule` | `scheduled` → `approved` | Officer (by hand); HoD or GM (through the publisher) | Cancels a dispatch; the client's approval stands |
+| `schedule_publisher` | `approved` → `scheduled` | An approver, not the author or the officer | Through the publisher, at the approved date, time and placement: one publish approval per variant, decided by a second person (SCP-Q16, PV-D46) |
+| `unschedule` | `scheduled` → `approved` | Officer (by hand); an approver (through the publisher) | Cancels a dispatch; the client's approval stands |
 | `reschedule` | `approved`, `scheduled` → `client` | Officer | A new date, time or placement: the client approves again on every network (SCP-Q13). A scheduled post is unscheduled first, cancelling any dispatch |
 | `mark_live` | `scheduled` → `live` | Officer, or the publisher's result | The post's link; metrics start |
 | `block` | any status before `client` → `blocked` | Officer, HoD or GM | A reason and who we wait on; `blocked_from` kept |
@@ -327,12 +334,13 @@ Any change after the client approved, to the content, the date, the time or the 
 client: the existing hash rule does this (SCP-Q13). Every action is checked as one of eight Cerbos actions on
 `social_post`, grouped by who acts: `author`, `proofread`, `approve`, `design`, `schedule`, `manage`, `record_client`
 and `boost`. The allocation, the deadline table and the settings are `plan`, and recording boost budgets is `budget`, on
-`social_engagement` (SCP-Q18). Neither `manager` nor `company_admin` holds any of them. There is no `social_boost` kind,
-and the client acts through the portal's `approve_post` and `approve_spend` (PERMISSION-CONTRACT §53). An agent acts
-with the rights of the person who asked; an unattended automation acts on none of them (SCP-Q17). The attributes
-conditions read go on the resource's allow-list: `ownerId` (the officer), `creatorId` (the author), `approverIds` (the
-Social Media and GM lead seats), `assigneeIds` (the request's designers) and `creativeSource`. The machine itself is the
-fixture `platform-nest/src/modules/social/scp-stage-machine.json` (FRONTEND-BFF-CONTRACT §63.3).
+`social_engagement` (SCP-Q18). Only the four approvers of §4.1 pass `approve`, `plan`, `budget` and the report check;
+`manager`, `company_admin` and a `social_manager` grant hold none of the new actions (SCP-Q19). There is no
+`social_boost` kind, and the client acts through the portal's `approve_post` and `approve_spend` (PERMISSION-CONTRACT
+§53). An agent acts with the rights of the person who asked; an unattended automation acts on none of them (SCP-Q17).
+The attributes conditions read go on the resource's allow-list: `ownerId` (the officer), `creatorId` (the author),
+`approverIds` (the Social Media and GM lead seats), `assigneeIds` (the request's designers) and `creativeSource`. The
+machine itself is the fixture `platform-nest/src/modules/social/scp-stage-machine.json` (FRONTEND-BFF-CONTRACT §63.3).
 
 ### 4.4 Cycles and schedule health
 
@@ -449,12 +457,13 @@ move, without any real network account.
 | Saved | The content bank | The Asset Library (`{D}/assets`, a Publish tab) until SCP-5e |
 | Profile | The client page: Plan, Stories, Feed preview, Calendar, List and the brand book, with a switcher across your clients | |
 | AI Assistant | The assistant drawer | Added: not in the design |
-| Dashboard (HoD, GM) | The Overview's Team view | The existing Team view until SCP-5d |
-| Settings (HoD, GM) | Cycles, estimates, targets, the buffer | Built in SCP-1c |
+| Dashboard (the four approvers) | The Team dashboard, `{D}/dashboard` | Built in SCP-5d. The Overview's Team view stays the HoD's |
+| Settings (the four approvers) | Cycles, estimates, targets, the buffer | Built in SCP-1c |
 
 Each pinned row is a registry row or tab, named by its key in FRONTEND-BFF-CONTRACT §63.17 (row keys are unique inside a
-workspace). Calendar, Reports and Saved are tabs of existing rows; Messages, Profile and Settings are new rows, and so are
-Allocation, Design queue and Boosting, which sit in More.
+workspace). Calendar, Reports and Saved are tabs of existing rows; Messages, Profile, Settings and Dashboard are new
+rows, and so are Allocation, Design queue and Boosting, which sit in More. Settings and Dashboard show to the four
+approvers only: both gate on `canLeadSocial` (PERMISSION-CONTRACT §53.4).
 
 **More** (the design's Account row becomes More): the menu shrinks to icons and a panel slides out, with Find a page and
 three groups. **Work:** Project Management, Allocation, Design queue, Boosting, Requests, Campaigns, Clients, Social
@@ -476,8 +485,9 @@ reports get `{D}/social-reports`, because `{D}/reports` is SEO's reports page in
 ### 6.4 The Overview
 
 - **Needs you,** per role: Officer (drafts to send, fixes asked, ready to schedule, metrics missing two days after going
-  live); Copywriter (the proofread queue); HoD and GM (HoD approvals, final checks, reports to check, boosts approved
-  but not started); Creative (designs and revisions).
+  live); Copywriter (the proofread queue); HoD and GM (HoD approvals, final checks, reports to check and to send,
+  boosts approved but not started); Creative (designs and revisions). The owner and the superadmin act from the same
+  pages without a queue.
 - **Pulse tiles:** In production · With client (closes DW-3e's "Waiting client review") · Late · Scheduled this week ·
   Failed posts · Boosts waiting. The KPI strip and banner stay.
 
@@ -579,23 +589,23 @@ once deployed, checked on the live ERP's mock seed.
 |---|---|
 | Ka Skins in the shell | The registry carries a skin per workspace and pinned rows per skin; `Shell` sets the skin on the page. The Standard skin renders exactly as before (a test proves it). The Social skin is off until Kg. |
 | Kb Social tokens | Light and dark token sets with the design's white, black and blue. Stage colours keep the meaning of the status families. The token contrast test covers both skins. |
-| Kc The Social menu | The design's rows, icons and badges; Calendar and AI Assistant added; Dashboard and Settings for the HoD and GM by role. Search, Notifications, Create and Profile do what the top bar's search, bell, New and avatar did. Rows and tabs use the keys of FRONTEND-BFF-CONTRACT §63.17. Publish gains the Asset Library tab (`assets`, declared in the social-media toolkit), in the Standard menu too; Saved opens it until 5e. |
+| Kc The Social menu | The design's rows, icons and badges; Calendar and AI Assistant added; Dashboard and Settings for the four approvers only, through one gate kind built from `canLeadSocial` (PERMISSION-CONTRACT §53.4). Search, Notifications, Create and Profile do what the top bar's search, bell, New and avatar did. Rows and tabs use the keys of FRONTEND-BFF-CONTRACT §63.17. Publish gains the Asset Library tab (`assets`, declared in the social-media toolkit), in the Standard menu too; Saved opens it until 5e. |
 | Kd More | The menu shrinks to icons and the More panel slides out: Find a page, Work, Performance, You, and the account (Switch workspace, Appearance, Log out). It lists exactly the rows the registry gives the person. Badges show on More. Complete by keyboard and screen reader. |
 | Ke Phone | The bottom bar (Home, Search, Create, Tasks, Profile); Notifications and Messages at the top; More as a full-screen sheet. |
 | Kf Tests | The palette, page-home, one-area and sidebar tests pass in both skins; axe passes in light and dark, desktop and phone. |
-| Kg Switch on | The skin is on for Social Media once 1d, 1e and 1k are live, so no menu row points at a page that does not exist. |
+| Kg Switch on | The skin is on for Social Media once 1d, 1e and 1k are live, so no menu row points at a page that does not exist. Pinned rows whose page comes from a later ticket stay hidden until that page is live: Messages until 1j, Settings until 1c, Dashboard until 5d (the skin's pin list carries each row's ticket, and Kg's test checks it). |
 
 ### SCP-1 · The pipeline for staff: draft to final check
 
 | Ticket | Acceptance |
 |---|---|
-| 1a Allocation and brand book | The officer, the creative source (Creatives or in-team, SCP-Q2), posts per cycle, report format and due day, platforms, formats, default time, pillars, tone, must-have notes, brand rules, hashtag sets, channels, key dates and links can be set per client. The Allocation page (`{D}/allocation`) lists every client with its officer and target. Edits are refused for anyone but the social approvers (SCP-Q18). |
+| 1a Allocation and brand book | The officer, the creative source (Creatives or in-team, SCP-Q2), posts per cycle, report format and due day, platforms, formats, default time, pillars, tone, must-have notes, brand rules, hashtag sets, channels, key dates and links can be set per client. The Allocation page (`{D}/allocation`) lists every client with its officer and target. Edits are refused for anyone but the four approvers (SCP-Q18, SCP-Q19). |
 | 1b Stage machine | Every row of §4.3 is enforced on the server with its own refusal code. The fixture runs green in nest and ui. Activity is written. The phase and status mappings are pinned. |
 | 1c Cycles and health | The deadline table, the buffer and step estimates, edited on the HoD's Settings page. Ready-by and the latest safe hand-off on working days from the HR holiday calendar. On track, Tight, At risk and Late, tested on month ends, weekends, holidays and the year turn. |
 | 1d Home | "Your turn" per role with the next allowed action as the main button; "Waiting on others"; tasks given to you; reports due; client stories with state rings; "Your accounts this cycle". Read on the server; fast at 600 posts. |
 | 1e Post page | `{D}/posts/[id]` as a drawer: the image and its versions, the status chip, the eight-step stepper, health, Post and Creative brief tabs, the field rows, the copy edit log, comments and activity, and the Composer link. Buttons the person may not use are disabled with the reason. |
 | 1f Proofread | The Copywriter's suggestions show to the Officer as suggestions. "Approve copy" applies them and logs before and after per field. "Return with edits" needs a note. "Approve all" per client. |
-| 1g HoD approval and final check | Approve for design, or changes with a note. At the final check a copy change goes to the Officer and a design change to Creative as a revision; both come back to the final check. The author cannot pass these steps (a test proves it). |
+| 1g HoD approval and final check | Approve for design, or changes with a note. At the final check a copy change goes to the Officer and a design change to Creative as a revision; both come back to the final check. The author cannot pass these steps (a test proves it). Only the four approvers pass them; a company admin, a head's `manager` role and a `social_manager` grant cannot (SCP-Q19). |
 | 1h Creative | On "approve for design" the post goes to the client's designer: it joins the client-month Creatives request, or the in-team design queue (SCP-Q2). The designer's queue; start; a version in the Asset Library or a Drive link; submit for the final check; asset source and AI note; revision notes shown. |
 | 1i Hand-off checks | The checks of §4.6 run on the server. "Send anyway" needs a reason, logged on the post and shown in its activity. |
 | 1j Blocked and follow-up | Block with a reason and who we wait on; resolve returns to the same step. Messages lists who holds each of your posts; Follow up sends a notification and logs it. "Needs you" gains the pipeline per role (§6.4). |
@@ -653,10 +663,10 @@ once deployed, checked on the live ERP's mock seed.
 
 | Ticket | Acceptance |
 |---|---|
-| 5a Monthly report | In the first release, at `{D}/social-reports` (the Reports row's Social reports tab). Numbers filled from metrics; one insight and one suggestion per area (followers, engagement, audience); an action plan; Draft, HoD check, Ready, Sent; a PDF; published to the client's portal reports (PV7-04a); "Draft with AI" from the brand-draft lookup. |
+| 5a Monthly report | In the first release, at `{D}/social-reports` (the Reports row's Social reports tab). The officer writes and submits it; only the four approvers check it and send it (SCP-Q20). Numbers filled from metrics; one insight and one suggestion per area (followers, engagement, audience); an action plan; Draft, HoD check, Ready, Sent; a PDF; published to the client's portal reports (PV7-04a); "Draft with AI" from the brand-draft lookup. |
 | 5b Weekly report | A summary and next week's plan, on the same reports. |
 | 5c Ideas for next month | What we saw, the metric and the suggestion. "Add to next plan" creates a planned post linked to the idea; "Mark shared". |
-| 5d Team dashboard | In the first release. Needs attention, workload per person, clients this cycle, where work waits longest (against the holder, never the Officer), estimates not set. On the Overview's Team view and Reports › Team, following the activity privacy rules. |
+| 5d Team dashboard | In the first release, on its own page `{D}/dashboard` for the four approvers (SCP-Q19), with a block on Reports › Team. Needs attention, workload per person, clients this cycle, where work waits longest (against the holder, never the Officer), estimates not set. Per-person data follows the activity privacy rules, with the four counting as the Social Media unit's heads. The Overview's Team view is unchanged. |
 | 5e Saved | The content bank per client: the Asset Library's photos and videos (used, unused, source) and saved captions, hashtag sets, templates and references. |
 | 5f Monthly cycle | Report, planning, copy lock, client window, artwork and deploy as PM tasks per client and cycle. Steps the pipeline can see close themselves. |
 | 5g Audit | The twelve-dimension scorecard: automatic from pipeline data for existing clients, typed in for prospects. |
@@ -721,6 +731,9 @@ once deployed, checked on the live ERP's mock seed.
   review.
 - **Real publishing** needs Meta Business Verification and App Review (DW-11, D-23), Postiz deployed and the AGPL counsel
   sign-off (OQ-3). "Schedule in Meta" by hand covers the dev review.
+- **Self-promotion into a lead seat.** Whoever may edit positions can move a position they hold onto the Social Media
+  unit, or add the lead role to it, and so become one of the four approvers (PERMISSION-CONTRACT §53.4). It reaches
+  every lead-seat authority, not only SCP, so an IAM ticket closes it: the self-assignment refusal, applied to edits too.
 - **The prototypes' names.** Both designs carry real client and staff names in their sample data. Seeds, fixtures, tests
   and docs use mock names only.
 
@@ -745,6 +758,8 @@ the social store in `lib/demoSocial.ts`.
 | GM | `u-gm`, the General Manager's lead seat on `dept-5` | `gm@gaiada.com` | New login, existing person |
 | Client | The demo portal client | any `@northwind.example` | Exists |
 
+- **The four approvers.** The existing superadmin identity (the default demo login) and owner identity (`demo-owner`,
+  `group-owner@gaiada.com`) complete them with the HoD and the GM (SCP-Q19).
 - **Matching.** Each new address matches exactly. It sits after the "client" test and before the "manager" and "ic"
   tests, as DW-9a's do. None of the new tokens contains "ic" or "client", and a test pins each address to its identity.
 - **The store.** `lib/demoSocial.ts` keeps Northwind Traders and gains two invented clients, a spa and a hotel brand.
@@ -760,7 +775,8 @@ the social store in `lib/demoSocial.ts`.
 
 `seedPersonaTenant` gains the role keys SCP-0b names for the Copywriter and the social approver, and a helper that
 places an Officer on a client's allocation. Every stage-machine test seeds: two Officers, the Copywriter, the HoD, a
-second approver (the GM), a designer on the client-month request, and a client contact.
+second approver (the GM), the owner, a company admin with no Social seat (refused, SCP-Q19), a designer on the
+client-month request, and a client contact.
 
 ### 11.3 The live mock seed (gda-aicenter, under the owner's 2026-10-13 ruling)
 

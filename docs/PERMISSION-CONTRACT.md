@@ -2631,17 +2631,21 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §61 (rulings DW-D45 to DW-D49; plan `do
 - A bot or automation principal holding `company_admin` or a finance role gets 403 on every write route here.
 - `POST …/schedule/after-signing`: 403 for a `manager`, and for a custom role holding only one of `contract` `update` and `invoice` `create`; 400 `not_allowed_via_automation` through the hub's envelope.
 
-## 53. SCP — the Social Media content pipeline: eight actions on `social_post`, two on `social_engagement`, the report check, two roles, and `approve_spend` on `portal` (2026-10-26, PLANNED)
+## 53. SCP — the Social Media content pipeline: the four social approvers, eight actions on `social_post`, two on `social_engagement`, the report check, two roles, and `approve_spend` on `portal` (2026-10-26, PLANNED)
 
-Design: `docs/FRONTEND-BFF-CONTRACT.md` §63 (plan `docs/plans/2026-10-15-social-content-pipeline.md` §4.1 and §4.3; owner rulings of 2026-10-26: SCP-Q2, SCP-Q5, SCP-Q9, SCP-Q11 and SCP-Q13 to SCP-Q18). Status: **PLANNED (the contract only; nothing is built)**. The stage machine's actors and refusal codes are the fixture `platform-nest/src/modules/social/scp-stage-machine.json`.
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §63 (plan `docs/plans/2026-10-15-social-content-pipeline.md` §4.1 and §4.3; owner rulings of 2026-10-26: SCP-Q2, SCP-Q5, SCP-Q9, SCP-Q11 and SCP-Q13 to SCP-Q20). Status: **PLANNED (the contract only; nothing is built)**. The stage machine's actors and refusal codes are the fixture `platform-nest/src/modules/social/scp-stage-machine.json`.
 
 **What does not change.**
 - The existing nine `social_post` actions keep their rules; `read` gains two roles (below).
 - `social_engagement`'s five existing actions keep theirs; `read` gains the same two roles.
 - The invariant of every `social_*` policy holds: the `client` derived role appears nowhere in them. A client acts only through narrow `portal` actions.
-- `publish` and `cancel` stay as they are (SMM-30), so filing or cancelling through the publisher keeps needing them.
+- `publish` and `cancel` stay as they are (SMM-30). The Composer's publishing keeps needing them. The pipeline's filing and unscheduling through the publisher need `approve` instead (53.2); rescheduling a publisher schedule still needs `cancel`.
 
-**What does change on an existing action.** `social_report` · `approve` and `deliver` are narrowed to the pipeline's own actors (53.7). It is a narrowing only.
+**What does change on existing actions and roles.**
+- `social_report` · `approve` and `deliver` narrow to the four social approvers (SCP-Q20, 53.7). Sending a report back from the HoD check moves from `update` to `approve`.
+- `social_report` · `read` gains a permission mirror, so the `owner` can open the reports it checks (53.7, 53.10).
+- `owner`'s bundle gains five keys that `company_admin` does not hold (53.11). That amends IAM-14 D-8's derivation (`owner` is `company_admin`'s envelope) for these five keys only, by the owner's ruling SCP-Q19.
+- Deciding a pipeline post's publish approval also needs `approve` on the post (53.12).
 
 ### 53.1 No new kind: `social_boost` is not made one
 
@@ -2651,22 +2655,25 @@ If the owner later wants boosts granted apart from posts, the six artifacts are:
 
 ### 53.2 The eight new actions on `social_post`
 
-Each attribute-dependent rule stands alone (the HIER-2 authoring rule), and every relationship condition is written inline in its rule, never behind a policy variable, so the bundle generator and the hazard scans see the self-scope. Every ALLOW keeps `variables.inTenant && variables.notLow`. `platform_admin` keeps the house wildcard on all of them.
+Each attribute-dependent rule stands alone (the HIER-2 authoring rule). Every relationship condition on a real role is written inline in its rule, never behind a policy variable, so the bundle generator and the hazard scans see the self-scope. The one relationship that is not inline is the seat approver's: it lives in its own derived role, which feeds no bundle (53.4). Every ALLOW keeps `variables.inTenant && variables.notLow`. `platform_admin` keeps the house wildcard on all of them.
 
 | Action | Key | Reach | What it is |
 |---|---|---|---|
 | `author` | `social.post.author` | **its own rule** for the client's officer (`member` + `variables.owns`, `ownerId` = the engagement's `owner_id`) | the officer's writing: start a draft, edit in the statuses the machine allows, accept a suggestion, send to proofread (and "send anyway"), resend |
 | `proofread` | `social.post.proofread` | `social_copywriter` | the Copywriter: suggest edits, approve the copy, return it |
-| `approve` | `social.post.approve` | **its own rule** for a seat approver (`member` + `principal.id in approverIds`); **its own rule** for `module_manager` (`social_manager`) | the HoD approval and the final check: approve for design, ask for changes, final approve, final changes. With `publish`, filing through the publisher (`schedule_publisher`); with `cancel`, unscheduling it |
+| `approve` | `social.post.approve` | **the four social approvers** (53.4): the derived role `social_approver_seat`; the mirror `perm_social_post_approve` (the `owner`); `platform_admin` | the HoD approval and the final check: approve for design, ask for changes, final approve, final changes. Also filing through the publisher (`schedule_publisher`) and unscheduling a publisher schedule, with no extra `publish` or `cancel` check: the four are the whole gate (SCP-Q19) |
 | `design` | `social.post.design` | **its own rule** for a designer on the month request (`member` + `principal.id in assigneeIds` + `creativeSource == "creatives"`); **its own rule** for `social_designer` (+ `creativeSource == "in_team"`) | start the design, add and remove designs, submit for the final check |
-| `schedule` | `social.post.schedule` | **its own rule** for the officer | schedule by hand at the approved date and time, unschedule it, reschedule (the client approves again; through the publisher also `cancel`), mark live, enter metrics |
-| `manage` | `social.post.manage` | the officer's rule; the seat approver's rule; `module_manager` | block, resolve, follow up, discard, archive |
+| `schedule` | `social.post.schedule` | **its own rule** for the officer | schedule by hand at the approved date and time, unschedule it, reschedule (the client approves again; a publisher schedule also needs `cancel`), mark live, enter metrics |
+| `manage` | `social.post.manage` | the officer's rule; `social_approver_seat` | block, resolve, follow up, discard, archive |
 | `record_client` | `social.post.record_client` | as `manage` | record a decision the client gave by WhatsApp, email or a meeting; write a client-visible comment |
 | `boost` | `social.post.boost` | as `manage` | request, cancel, start, stop and complete a boost. Committing money is only possible within the budget the client agreed: the handler's rule |
 
-**Only the actors the owner named act** (SCP-Q9 and SCP-Q18).
+**Creating a pipeline post** (`POST cycles/:cycleId/posts`, BFF §63.6.1) keeps `create` and adds one check in the same `checkMany`: `author` (the cycle's officer) or `approve` (the four) on the would-be post. So a company admin or another department's head, who hold `create`, cannot put a post in a client's plan (403 `not_officer_or_approver`).
+
+**Only the actors the owner named act** (SCP-Q9 and SCP-Q18, refined by SCP-Q19).
 - `manager` holds none of the eight. Every department head's lead position carries `manager` company-wide, so it cannot mean "the Social Media head" (the `dept_kpi_target` reasoning, §38). A Web Dev head must not approve a client's post.
-- `company_admin` holds none of them either: the rulings name the HoD seat, the GM seat and `social_manager`, and the pipeline's other actors by role or relationship. A company admin who must act grants a role, for example `social_manager`. That is an audited IAM act, and the maker/checker DENY still applies afterwards.
+- `company_admin` holds none of them, and no grant makes it a social approver (53.4).
+- `social_manager` holds none of them either: SCP-Q19 ends the grant path that SCP-Q9 and SCP-Q18 had named.
 
 **`read`** gains `social_copywriter` and `social_designer` (scope-only roles, in the existing unconditional rule's shape). It gains **no** `member` rule: a self-scoped rule beside the existing `perm_social_post_read` mirror is a Pattern B hazard (`permission-arm-hazard-scan.test.ts`). A Creatives designer who is only a `member` reads the posts they work on through `design` instead: the post page asks `read`, and when that is refused, `design` on the same post (BFF §63.6.2).
 
@@ -2680,12 +2687,12 @@ Both use `roles: ["user"]`, so under deny-overrides they beat every ALLOW, the `
 
   `(has(request.resource.attr.creatorId) && request.resource.attr.creatorId != "" && request.resource.attr.creatorId == request.principal.id) || (has(request.resource.attr.ownerId) && request.resource.attr.ownerId != "" && request.resource.attr.ownerId == request.principal.id)`
 
-  - `creatorId` is the post's `author_id`, the person who drafted it. `ownerId` is the client's current officer. So a HoD who is a client's officer never approves that client's posts, and the GM or another approver takes them.
+  - `creatorId` is the post's `author_id`, the person who drafted it. `ownerId` is the client's current officer. So an approver who drafted the post, or is its client's officer, never approves it: the HoD, the GM, the owner and the superadmin alike (SCP-Q19). Another of the four takes it.
   - Because `approve` also gates `schedule_publisher`, the author and the officer never file a publish either.
   - It has the invoice `approve` shape (`has() && != ""` before the equality), and fires only on a known maker. The handler always feeds both from the rows. A fail-closed form would make every scope-level probe that sends no post report `approve` as unreachable for `platform_admin`.
   - The handler also checks it before it asks Cerbos, so the refusal carries its own code (403 `author_cannot_approve`, BFF §63.3.2). The DENY is the wall for any path that forgets.
   - When an agent drives the call, the principal is the person who asked (53.4), so the rule applies to that person.
-- **Unattended automations, on all eight actions and on `plan` and `budget` (53.6):** `has(request.principal.attr.kind) && request.principal.attr.kind in ["automation","bot"]`, the `resource_work_request.yaml` shape.
+- **Unattended automations, on all eight actions, on `plan` and `budget` (53.6), and on `social_report` · `approve` and `deliver` (53.7):** `has(request.principal.attr.kind) && request.principal.attr.kind in ["automation","bot"]`, the `resource_work_request.yaml` shape.
   - It fires only for a principal whose own `users.kind` is `automation` or `bot`: a call with no person behind it, such as an n8n workflow's service account. The handler answers 403 `automation_cannot_act`.
   - It does not fire for an agent acting for a person: through the OBO envelope the principal is that person (`users.kind = 'employee'`), so Cerbos decides on the person's own rights (SCP-Q17, 53.4).
   - `read` stays allowed.
@@ -2694,11 +2701,38 @@ Both use `roles: ["user"]`, so under deny-overrides they beat every ALLOW, the `
 
 - **The officer:** `social_engagements.owner_id` of the post's engagement, fed as `ownerId`. It is the engagement owner, who already receives every notification about the client's posts. Assigning the officer is `social_engagement` · `plan` (the allocation, BFF §63.4).
 - **The copywriter:** a holder of the new role `social_copywriter` (SCP-Q9: "a role any member can hold").
-- **The social approver (the HoD or the GM, equal authority, SCP-Q9 and SCP-Q18):** one of two, each its own rule, plus the `platform_admin` wildcard.
-  - **A seat approver:** a holder of a live lead seat on the company's Social Media unit or on its GM unit. The seat rule is §50's (DW-10g-2): an active `positions` row of the company carrying its `org_unit_lead` role row at `own_unit`, held through an assignment with no `valid_to`. The role row is the source; `is_lead` is not read. The handler feeds the holders' ids as `approverIds` (`loadSeatHoldersByNode` over the unit ids whose workspace slug is `social-media` or `gm`, read in the company's own scope).
-    - The `org_unit_lead` derived role is not used here: the GM's unit is not an ancestor of Social Media, and one list covers both seats.
+- **The four social approvers (SCP-Q19, ruled).** The owner: "social media HOD, GM, Owner and Superadmin only." Exactly these four, with equal authority. The UI mirrors the rule as `canLeadSocial` (below).
+  1. **The Social Media unit head:** a holder of a live lead seat on the company's Social Media unit.
+  2. **The GM:** a holder of a live lead seat on the company's GM unit (the Office of the GM).
+  3. **The owner:** a holder of the IAM `owner` role reaching the company (global, or company scope on it).
+  4. **The superadmin:** `platform_admin`.
+
+  How Cerbos sees each:
+  - **1 and 2, the seats.** The handler feeds the seat holders as `approverIds` (`loadSeatHoldersByNode` over the unit ids whose workspace slug is `social-media` or `gm`, read in the company's own scope). The seat rule is §50's (DW-10g-2): an active `positions` row of the company carrying its `org_unit_lead` role row at `own_unit`, held through an assignment with no `valid_to`. The role row is the source; `is_lead` is not read.
+  - The new derived role `social_approver_seat` matches them: `parentRoles: ["user"]`, condition `has(request.resource.attr.approverIds) && request.resource.attr.approverIds.exists(id, id == request.principal.id)`.
+    - It is written in the `client_contact_admin` shape: a top-level attribute gate before the `.exists`. So the hazard scan classes it on the attribute-gate axis (as `client_contact_admin` and the `module_*` roles), never as a scope-constrained role.
+    - It maps to no real role in the bundle generator (`DIRECT`, the `client_website_editor` precedent). A seat is a relationship computed per company, not a grant, so no bundle carries a key through it, and its reach is proved by the live matrix (53.14).
+    - The `org_unit_lead` derived role is not used: the GM's unit is not an ancestor of Social Media, and the rule names the two units exactly. A head of an ancestor unit is not one of the four.
     - The slug matching is the one every GM surface uses. `core/automation-failures-audience.ts` (DW-7i-1) still reads `is_lead` for its GM; SCP follows §50.
-  - **A `social_manager` grant** (`module_manager`).
+  - **3, the owner.** `owner` is permission-native (IAM-04c §3: zero policy rules). It reaches the five approver actions through their `perm_*` mirrors and the five keys in its bundle (53.10, 53.11).
+  - **4, the superadmin.** The wildcard.
+
+  **The five approver-only actions:** `social_post` · `approve`; `social_engagement` · `plan` and `budget`; `social_report` · `approve` and `deliver`. Each has exactly the three arms above (the seat role, its mirror, the wildcard), and a static test pins that no other role is named on them.
+
+  **The team's own steps** (`manage`, `record_client`, `boost`) are the officer's and the seats' (and the superadmin's, by the wildcard). The `owner` does not hold them. Its only arm would be a mirror, and a mirror beside the officer's self-scoped rule would let every officer act on every client (Pattern B).
+
+  **No route into the four.** No grant makes anyone a social approver.
+  - The five keys are `uiGrantable: false` and in no bundle but `owner`'s and `platform_admin`'s, so no role, custom role or request can carry them. The migration removes any custom-role pair it finds (53.13).
+  - A lead seat is assigned by someone else: `position` · `assign` refuses a self-assignment (its `EFFECT_DENY`), superadmin included.
+  - `owner` and `platform_admin` are elevated roles: only the IAM-16 two-person appointment grants them.
+  - **A gap outside SCP:** `position` · `update` has no self-DENY. Whoever holds it can move a position they hold onto the Social Media unit, or attach `org_unit_lead` to it (`PATCH positions/:id`, `POST positions/:id/roles`). That reaches every lead-seat authority (DW-4, DW-10g-2), not only this one, so closing it is an IAM ticket. The recommended shape is the `assign` self-DENY applied to `update` as well, fed the position's open holders.
+
+  **The UI mirror, `canLeadSocial(me, companyId)`.** It is true when:
+  - `leadUnits(me, companyId)` holds the company's Social Media unit or its GM unit; or
+  - `me` holds `owner` at global scope, or at company scope on `companyId`; or
+  - `me` is `platform_admin`.
+
+  The registry's `settings` and `dashboard` rows gate on it (BFF §63.17; SCP-Kc builds the one gate kind). It only hides pages; the server decides. A new head whose `org_unit_lead` grant is not reconciled yet sees no row until the reconcile, while the server, which reads the seat itself, already lets them act.
 - **The designer** (SCP-Q2: either, per client). The post's `creative_source` is copied from the client's allocation when the post is approved for design, and fed as `creativeSource`.
   - `creatives`: an assignee of the client-month Creatives request's PM task (the task's responsible person and person assignees: the `work_request` `assigneeIds` computation, §36), fed as `assigneeIds`.
   - `in_team`: a holder of the new role `social_designer`.
@@ -2708,28 +2742,28 @@ Both use `roles: ["user"]`, so under deny-overrides they beat every ALLOW, the `
 
 ### 53.5 Resource attributes
 
-The `social_post` handlers send `{kind: "social_post", id, tenantId, module: "social", ownerId, creatorId, approverIds, assigneeIds, creativeSource}`, every value read from the rows and never from a body. The planning and money routes send `{kind: "social_engagement", id?, tenantId, module: "social", approverIds}`. The report routes send `{kind: "social_report", id, tenantId, module: "social", ownerId, approverIds}`, with the report's engagement owner.
+The `social_post` handlers send `{kind: "social_post", id, tenantId, module: "social", ownerId, creatorId, approverIds, assigneeIds, creativeSource}`, every value read from the rows and never from a body. The planning and money routes send `{kind: "social_engagement", id?, tenantId, module: "social", approverIds}`. The report routes send `{kind: "social_report", id, tenantId, module: "social", approverIds}`: no `ownerId`, because the officer no longer sends a report (SCP-Q20).
 
 | Attribute | Status in `cerbos.ts` | Value | Unfed |
 |---|---|---|---|
 | `ownerId` | existing | the engagement's `owner_id` | `""`: no officer rule matches, the DENY does not fire |
 | `creatorId` | existing (the invoice maker/checker seam) | the post's `author_id` | `""` |
 | `assigneeIds` | existing (§36) | the month request task's assignees | `[]` |
-| `approverIds` | **new**, default `[]` | the company's Social Media and GM lead-seat holders | `[]`: no seat approver |
+| `approverIds` | **new**, default `[]` | the company's Social Media and GM lead-seat holders (the owner and the superadmin need no entry) | `[]`: no seat approver |
 | `creativeSource` | **new**, default `""` | the post's `creative_source` | `""`: no designer rule matches |
 
 Both new attributes go in the `Resource` type and in the `resourcePayload()` allow-list. An attribute missing from that list is silently dropped, and the rules then deny: test it.
 
-**The tenant trap.** `approverIds` is computed per company from that company's own positions, so the head of company A's same-id unit is never an approver in company B. Every ALLOW keeps `inTenant`. A proof must show it: an `org_unit_lead` grant and a seat on another company's same-id Social Media unit are both refused.
+**The tenant trap.** `approverIds` is computed per company from that company's own positions, so the head of company A's same-id unit is never an approver in company B. Every ALLOW keeps `inTenant`, and the mirrors test the grant's scope, so an `owner` grant on another company does not reach this one. A proof must show it: an `org_unit_lead` grant and a seat on another company's same-id Social Media unit are both refused, and so is an `owner` of another company.
 
-### 53.6 `plan` and `budget` on `social_engagement` (SCP-Q18, ruled)
+### 53.6 `plan` and `budget` on `social_engagement` (SCP-Q18, refined by SCP-Q19)
 
-The owner: editing the allocations (officer, creative source, target, report), the deadline table and the settings (buffer, step estimates), and recording, setting, raising or lowering boost budgets on the client's behalf, belong to the Social Media unit head (lead seat), the GM (lead seat) or a `social_manager` grant (plus `platform_admin`), not `manager`.
+The owner (SCP-Q18): editing the allocations (officer, creative source, target, report), the deadline table and the settings (buffer, step estimates), and recording, setting, raising or lowering boost budgets on the client's behalf, belong to the social approvers, not `manager`. SCP-Q19 fixed who they are: the four of 53.4. A `social_manager` grant is no longer one.
 
 | Action | Key | Reach | What it is |
 |---|---|---|---|
-| `plan` | `social.engagement.plan` | **its own rule** for a seat approver (`member` + `principal.id in approverIds`); **its own rule** for `module_manager` | the allocation (`PATCH engagements/:id/allocation`, and naming an officer on `POST engagements`), the deadline table (`PUT cycles`), the settings (`PUT settings`) |
-| `budget` | `social.engagement.budget` | as `plan` | propose, withdraw and record a cycle's monthly boost budget (set, raise or lower it), and record the client's answer to a boost over the budget |
+| `plan` | `social.engagement.plan` | **the four** (53.4): `social_approver_seat`; the mirror `perm_social_engagement_plan` (the owner); `platform_admin` | the allocation (`PATCH engagements/:id/allocation`, and naming an officer on `POST engagements`), the deadline table (`PUT cycles`), the settings (`PUT settings`), and reading the Team dashboard (BFF §63.19) |
+| `budget` | `social.engagement.budget` | as `plan`, with the mirror `perm_social_engagement_budget` | propose, withdraw and record a cycle's monthly boost budget (set, raise or lower it), and record the client's answer to a boost over the budget |
 
 **Why new actions, not a condition on `update` and `set_scope`.**
 - `update` and `set_scope` keep their holders (`company_admin`, `manager`, `module_manager`, the mirrors) for the routes that use them today: an engagement's name, status and dates; the brand book; the tool scope and the metered budget.
@@ -2737,22 +2771,27 @@ The owner: editing the allocations (officer, creative source, target, report), t
 - Two narrow actions change nothing that exists and say in the decision log who planned and who committed the client's money.
 - `budget` is its own action, apart from `plan`: committing a client's money is a different power from assigning an officer, the `allocate` precedent of §35.
 
-The handler answers a refusal with 403 `not_a_social_approver`. The unattended-automation DENY of 53.3 covers both actions. Neither is mirrored (53.10). `budget` is `sensitive`; `plan` is not.
+The handler answers a refusal with 403 `not_a_social_approver`. The unattended-automation DENY of 53.3 covers both actions. Both are mirrored for the owner (53.10), and both keys are `uiGrantable: false`. `budget` is `sensitive`; `plan` is not.
 
 `PATCH engagements/:engagementId` (§19) stops accepting `ownerId` (409 `officer_set_by_allocation`), so the officer can no longer be set through `update`.
 
-### 53.7 The report check: `social_report` · `approve` and `deliver` (SCP-5a)
+### 53.7 The report check: `social_report` · `approve` and `deliver` (SCP-5a, SCP-Q20)
 
-The monthly report's HoD check (plan §4.1: the PM / Head of SMM and the GM do "the report check") and its sending follow the same actors as the posts.
+The owner (SCP-Q20): a client's monthly report is approved (the HoD check) and sent only by the four approvers. The officer writes it and submits it for the HoD check, but does not send it.
 
 | Action | Today (SMM-30) | From SCP-5a |
 |---|---|---|
-| `approve` | `company_admin`, `manager`, `module_manager`, `platform_admin` | **its own rule** for a seat approver (`member` + `principal.id in approverIds`); `module_manager`; `platform_admin` |
-| `deliver` | `company_admin`, `manager`, `module_manager`, `platform_admin` | **its own rule** for the engagement's officer (`member` + `variables.owns`); **its own rule** for a seat approver; `module_manager`; `platform_admin` |
+| `approve` | `company_admin`, `manager`, `module_manager`, `platform_admin` | **the four**: `social_approver_seat`; the mirror `perm_social_report_approve` (the owner); `platform_admin` |
+| `deliver` | `company_admin`, `manager`, `module_manager`, `platform_admin` | **the four**, the same three arms (the mirror `perm_social_report_deliver`) |
 
-- `read`, `create`, `update` and `delete` keep their rules. The kind has no permission arm, so no mirror is affected.
-- The bundles lose `social.report.approve` and `deliver` for `company_admin`, `owner` (it mirrors `company_admin`) and `manager`. `member` gains both, self-scoped.
-- The migration deletes those six pairs with DELTA assertions (the 0112 shape): a re-run deletes 0 and an environment seeded after the change is tolerated. It asserts the remaining holders exactly.
+- **Sending back** a report from the HoD check (`in_review` to `draft`, `PATCH reports/:id`) authorizes as `approve`, not `update`: it is the other answer of the same check.
+- `read`, `create`, `update` and `delete` keep their holders. The two rules that named `company_admin`, `manager` and `module_manager` for six actions are cut to those four.
+- `read` gains the mirror `perm_social_report_read`, so the owner can open what it checks.
+  - Its holders hold it unconditionally (no self-scoped rule).
+  - Every `social_report` call site sends `module: "social"` (`social-reports.controller.ts`, six sites), the IAM-04-B6 condition for a faithful mirror.
+- The automation DENY of 53.3 covers `approve` and `deliver`.
+- **Bundles:** `company_admin`, `manager` and `social_manager` lose `social.report.approve` and `deliver` (six pairs). `owner` keeps both (the owner extension, 53.11), and so does `platform_admin`. Nobody gains them.
+- The migration deletes the six pairs with DELTA assertions (the 0112 shape): a re-run deletes 0, and an environment seeded after the change is tolerated. It asserts the remaining holders exactly, `owner` and `platform_admin`, and sets both keys `ui_grantable = false`.
 - The UI mirror's social report capabilities and their parity register follow.
 
 ### 53.8 `approve_spend` on `portal` (SCP-Q11, SCP-Q14 and SCP-Q15)
@@ -2771,106 +2810,138 @@ The monthly report's HoD check (plan §4.1: the PM / Head of SMM and the GM do "
 - **Granted at company scope:** directly, or through a Social Media seat's role set (`position_roles`, `scope_kind = 'company'`). Their keys are `uiGrantable: true`.
 - **Wiring:** `scripts/generate-role-bundles.mjs` adds both to `REAL_ROLES`. `platform-ui/src/lib/rbac.ts` adds them to the `Role` union and `ROLE_CAPS`. `role-catalog-drift.db.test.ts` and `role-bundle-completeness.db.test.ts` then cover them.
 
-**The Social Media team's read tier.** A self-assignment cannot materialize `social_staff` in the agency's own company: `service_assignments` has `CHECK (provider_tenant_id <> target_tenant_id)`. So the team's seats carry `social_staff` at company scope, and the HoD's lead seat may carry `social_manager`. That is seat data and needs no policy change. The mock seed does the same (SCP-0c).
+**The Social Media team's read tier.** A self-assignment cannot materialize `social_staff` in the agency's own company: `service_assignments` has `CHECK (provider_tenant_id <> target_tenant_id)`. So the team's seats carry `social_staff` at company scope. A seat may still carry `social_manager` for the module's existing routes, but it confers no pipeline action (SCP-Q19). That is seat data and needs no policy change. The mock seed does the same (SCP-0c).
 
 ### 53.10 The permission arm
 
-- **Mirrored: `proofread` only.** `perm_social_post_proofread` uses `variables.inTenant && variables.notLow && variables.inRoot`. Its ALLOW names one scope-only role, so a mirror grants no more than the role arm (it lets a custom role holding the key proofread), and the maker/checker DENY still beats it.
-- **Not mirrored:** the other seven `social_post` actions, `plan`, `budget`, and the narrowed report actions. Each carries a self-scoped rule (`variables.owns` or a membership: Pattern B) or an attribute-dependent one (`creativeSource`: `iam-04-reg1-mirror-reach-invariant`). That is a shape a flat `perms` mirror cannot express.
-- **Consequence:** the permission-native `owner` holds none of these keys, because `company_admin` holds none. It reads as before.
+- **Mirrored: `proofread`.** `perm_social_post_proofread` uses `variables.inTenant && variables.notLow && variables.inRoot`. Its ALLOW names one scope-only role, so a mirror grants no more than the role arm (it lets a custom role holding the key proofread), and the maker/checker DENY still beats it.
+- **Mirrored, for the owner: the five approver actions.** `perm_social_post_approve`, `perm_social_engagement_plan`, `perm_social_engagement_budget`, `perm_social_report_approve` and `perm_social_report_deliver`, each in the generic global-or-company shape with `variables.inTenant && variables.notLow && variables.inRoot`. They are safe because:
+  - no real role holds these keys through a self-scoped rule: the seat arm is `social_approver_seat`, which feeds no bundle, so a seat holder's `perms` never carries the key and the mirror cannot widen them. That is what the Pattern B scan guards against, and it cannot arise here;
+  - the keys are `uiGrantable: false`, so only the platform-managed `owner` and `platform_admin` bundles carry them;
+  - the maker/checker DENY still beats the mirror;
+  - the `iam-04-reg1` mirror-reach invariant exempts `owner` (permission-native) by its existing rule.
+- **Mirrored: `social_report` · `read`** (53.7).
+- **Not mirrored:** `author`, `design`, `schedule`, `manage`, `record_client`, `boost`. Each carries a self-scoped rule (`variables.owns` or a membership: Pattern B) or an attribute-dependent one (`creativeSource`: `iam-04-reg1-mirror-reach-invariant`). That is a shape a flat `perms` mirror cannot express.
+- **Consequence:** among these, the `owner` reaches exactly the five approver actions and report `read`, and none of the officer's or the designer's steps.
 
 ### 53.11 Bundles and markers
 
 | Role | New keys it holds | Keys it loses |
 |---|---|---|
-| `platform_admin` | all eight, `plan`, `budget`, `portal.approve_spend` (wildcards) | none |
-| `company_admin`, `owner` | none | `social.report.approve`, `social.report.deliver` |
+| `platform_admin` | all eleven new keys (wildcards) | none |
+| `owner` | `social.post.approve`, `social.engagement.plan`, `social.engagement.budget`; it keeps `social.report.approve` and `deliver` | none |
+| `company_admin` | none | `social.report.approve`, `social.report.deliver` |
 | `manager` | none | `social.report.approve`, `social.report.deliver` |
-| `member` | `author`, `approve`, `design`, `schedule`, `manage`, `record_client`, `boost`, `plan`, `budget`, `social.report.approve`, `social.report.deliver`: all **self-scoped** (`selfScoped.member`) | none |
-| `social_manager` | `approve`, `manage`, `record_client`, `boost`, `plan`, `budget` (it keeps every `social.report.*` key) | none |
+| `social_manager` | none | `social.report.approve`, `social.report.deliver` |
+| `member` | `author`, `design`, `schedule`, `manage`, `record_client`, `boost`: all **self-scoped** (`selfScoped.member`) | none |
 | `social_copywriter` (new) | `social.post.read`, `social.post.proofread`, `social.engagement.read` | |
 | `social_designer` (new) | `social.post.read`, `social.post.design`, `social.engagement.read` | |
 | `client` | `portal.approve_spend` | none |
 | `viewer`, `social_staff`, `org_unit_lead`, every other role | none | none |
 
+**The owner extension.** `scripts/generate-role-bundles.mjs` derives `owner` as `company_admin`'s envelope (IAM-14 D-8: "it CANNOT DRIFT"). SCP-Q19 makes the owner an approver and `company_admin` not one, so the derivation becomes `company_admin`'s envelope plus `OWNER_EXTENSION`. That is exactly `social.post.approve`, `social.engagement.plan`, `social.engagement.budget`, `social.report.approve` and `social.report.deliver`.
+- A generator test pins the list. It also pins that each key has a `perm_*` mirror, is `uiGrantable: false`, is named by no real role's rule, and is not in `company_admin`'s bundle.
+- The `DIRECT` map gains `social_approver_seat: []`, byte-aligned with `role-permission-parity.db.test.ts`.
+
 **Sensitive:** `approve`, `record_client`, `boost`, `budget` and `portal.approve_spend`.
+
+**Not UI-grantable:** the five approver keys. The two new roles' keys stay `uiGrantable: true`.
 
 **Groups:** `social_pipeline` (`author`, `proofread`, `approve`, `design`, `schedule`, `manage`, `record_client`, `plan`) and `social_boosts` (`boost`, `budget`); `portal.approve_spend` joins the existing portal group.
 
 ### 53.12 The existing actions SCP routes reuse
 
-No change to these: `social_post` · `read`, `create`, `publish` and `cancel`; `social_engagement` · `read`, `update` and `set_scope`; `social_report` · `read`, `create` and `update`; `work_request` · `read` and `create`; `comment` · `read` and `create`; `portal` · `read` and `approve_post`.
+No change to these: `social_post` · `read`, `create`, `publish` and `cancel`; `social_engagement` · `read`, `update` and `set_scope`; `social_report` · `create` and `update`; `work_request` · `read` and `create`; `comment` · `read` and `create`; `portal` · `read` and `approve_post`.
 
 | Route family (BFF §63) | Authorizes as |
 |---|---|
 | the allocation, the deadline table, the settings | `social_engagement` · `plan` (53.6) |
 | the brand book; an engagement's name, status and dates | `social_engagement` · `update` (unchanged) |
 | monthly boost budget proposals and recordings; recording the client's answer to a boost over the budget | `social_engagement` · `budget` (53.6) |
+| creating a pipeline post | `social_post` · `create`, then `author` or `approve` on the would-be post (53.2) |
 | opening the client-month request (`approve_for_design`) | `social_post` · `approve`, then `work_request` · `create` for the acting approver |
-| filing a publish through the publisher (`schedule_publisher`) | `social_post` · `approve`, then `publish` |
-| unscheduling a publisher schedule | `social_post` · `approve`, then `cancel` |
+| filing a publish through the publisher (`schedule_publisher`) | `social_post` · `approve` |
+| unscheduling a publisher schedule | `social_post` · `approve` |
 | rescheduling a publisher schedule | `social_post` · `schedule`, then `cancel` |
+| deciding a pipeline post's publish approval (D14) | `automation_approval` · `decide` (unchanged), then the entry's `approverCheck` (below) |
 | the design queue | `work_request` · `read`, then the handler's row narrowing |
-| the Team dashboard | `social_post` · `read`, then the DW-4 person-axis gate on every per-person row (code, not Cerbos: PERMISSION §38c) |
-| the monthly report | `social_report` · `create`, `update`, `read` (unchanged); `approve`, `deliver` (53.7) |
+| the Team dashboard | `social_engagement` · `plan` (the four), then BFF §63.19's per-person rule (the DW-4 person-axis gate for anyone outside the Social Media unit: code, not Cerbos, PERMISSION §38c) |
+| the monthly report | `social_report` · `create`, `update`, `read`; sending back, `approve` and `deliver` (53.7) |
 | a `social_post` comment | `comment` · `create`, then `social_post` · `read` (or `design`); a client-visible one also `social_post` · `record_client` |
 | a `social_post` file | `file` · `read`, then `social_post` · `read` (or `design`) with the attributes of 53.5 |
+
+**The publish decision on a pipeline post (SCP-Q19 with PV-D46).** `social.publishPost` and `social.publishPostMetered` declare an `approverCheck` (the PGL-06 shape, §52.3). It applies when the variant's post is a pipeline post: the decider must pass `social_post` · `approve` on that post, with its attributes.
+- So a company admin who holds the generic `decide` cannot publish a client's post, and neither can the post's author or officer (the DENY).
+- The refusal is 403 `{error, reason: "social_approver_required"}`, and the row stays pending. It runs after §52.1's `self_approval`.
+- Composer posts are unchanged.
+- With today's decide right (`company_admin`, `module_manager` for hr rows, `platform_admin`; §52.3), the people who can decide are the superadmin, and those of the four who also hold `company_admin`. Whether the four should decide without `company_admin` is SCP-Q21, open with this default in force (BFF §63.10).
 
 ### 53.13 The six artifacts (the §36 template)
 
 1. **Policies.**
-   - `resource_social_post.yaml`: the eight actions' ALLOW rules, the two DENY rules, the `proofread` mirror, and `read` for the two roles.
-   - `resource_social_engagement.yaml`: `read` for the two roles; `plan` and `budget` with their rules and the automation DENY.
-   - `resource_social_report.yaml`: `approve` and `deliver` rewritten as 53.7.
+   - `resource_social_post.yaml`: the eight actions' ALLOW rules (the seat arm through `social_approver_seat`), the two DENY rules, the `proofread` and `approve` mirrors, and `read` for the two roles.
+   - `resource_social_engagement.yaml`: `read` for the two roles; `plan` and `budget` with the three arms and the automation DENY.
+   - `resource_social_report.yaml`: `approve` and `deliver` rewritten as 53.7, with the automation DENY; the `company_admin`/`manager` and `module_manager` rules cut to `read`, `create`, `update`, `delete`; the `read`, `approve` and `deliver` mirrors.
    - `resource_portal.yaml`: `approve_spend` and its mirror.
-2. **`derived_roles.yaml`:** `social_copywriter`, `social_designer`, `perm_social_post_proofread` and `perm_portal_approve_spend`.
+2. **`derived_roles.yaml`:** `social_copywriter`, `social_designer` and `social_approver_seat`; the mirrors `perm_social_post_proofread`, `perm_social_post_approve`, `perm_social_engagement_plan`, `perm_social_engagement_budget`, `perm_social_report_read`, `perm_social_report_approve`, `perm_social_report_deliver` and `perm_portal_approve_spend`.
 3. **`cerbos.ts`:** `approverIds` and `creativeSource`, in the type and the allow-list.
-4. **`permission-catalog.json`:** eleven keys (the eight `social.post.*`, `social.engagement.plan`, `social.engagement.budget`, and `portal.approve_spend`).
+4. **`permission-catalog.json`:** eleven keys (the eight `social.post.*`, `social.engagement.plan`, `social.engagement.budget`, and `portal.approve_spend`). `social.report.approve` and `deliver` become `uiGrantable: false`.
 5. **`permission-groups.json`:** `social_pipeline`, `social_boosts`, and the portal key in its group.
-6. **Migration `<prefix+1>_iam_social_pipeline.sql`:** the two roles, the eleven keys and their `role_permissions` rows, and the six deletes of 53.7. Its DO block asserts:
+6. **Migration `<prefix+1>_iam_social_pipeline.sql`:** the two roles, the eleven keys and their `role_permissions` rows (the owner's five included), the six deletes of 53.7, `ui_grantable = false` on the five approver keys, and the removal of any custom-role pair on them (DELTA-logged). Its DO block asserts:
    - the exact holders of each new key in both directions;
-   - the exact holders of `social.report.approve` and `deliver` after the deletes;
-   - `owner` == `company_admin` over every `social_*` kind;
-   - the eleven self-scoped `member` markers;
+   - the five approver keys held by exactly `owner` and `platform_admin`;
+   - `owner` == `company_admin` plus the five keys, over every `social_*` kind;
+   - the six self-scoped `member` markers;
    - the two new roles' exact bundles;
    - `client` holds `portal.approve_spend` and nothing new besides.
 
-Then `role-permission-bundles.json` regenerated from a clean worktree, `REAL_ROLES` in the generator, the UI mirror in `rbac.ts` with its parity register, and the pinned literals moved: catalogue pairs +11, grantable +11, sensitive +5, kinds unchanged. Take the numbers from main at landing.
+Then:
+- `role-permission-bundles.json` is regenerated from a clean worktree;
+- the generator gets `REAL_ROLES`, `OWNER_EXTENSION` and `social_approver_seat: []`;
+- the UI mirror in `rbac.ts` follows, with its parity register and `canLeadSocial`;
+- `core/approval-executables.ts` gets the `approverCheck` of 53.12;
+- the pinned literals move: catalogue pairs +11, grantable +11, sensitive +5, kinds unchanged. Take the numbers from main at landing.
 
 ### 53.14 Proof
 
 `src/rbac/cerbos-social-pipeline.test.ts`: static pins always; the live matrix needs `CERBOS_URL`.
 
 - **Static:**
-  - no `perm_*` rule for the seven unmirrored `social_post` actions, `plan`, `budget`, or `social_report` `approve` and `deliver`;
+  - the five approver actions name exactly `social_approver_seat`, their own `perm_*` mirror and the `platform_admin` wildcard, and no other role;
+  - no `perm_*` rule for `author`, `design`, `schedule`, `manage`, `record_client` or `boost`;
   - both DENY rules present and on `roles: ["user"]`;
   - every ALLOW keeps `variables.inTenant`;
-  - `company_admin` and `manager` named in no rule of the eight actions, `plan`, `budget`, or `social_report` `approve` and `deliver`;
-  - `client` named in no `social_*` policy.
+  - `company_admin`, `manager` and `module_manager` named in no rule of the eight actions, `plan`, `budget`, or `social_report` `approve` and `deliver`;
+  - `client` named in no `social_*` policy;
+  - the generator's `OWNER_EXTENSION` is exactly the five keys, each mirrored, `uiGrantable: false` and absent from `company_admin`'s bundle;
+  - the hazard scan classes `social_approver_seat` as an attribute-gate role, with no Pattern C finding.
 - **Allowed:**
-  - the officer's `author` and `schedule` on their own client's post;
+  - the officer's `author` and `schedule` on their own client's post, and their report `create`, `update` and submit;
   - the copywriter's `proofread`;
-  - a GM-unit seat holder's and a Social Media seat holder's `approve`, `plan` and `budget`, and `social_manager`'s;
+  - a Social Media seat holder's and a GM-unit seat holder's `approve`, `plan`, `budget`, report `approve` and `deliver`, and their `manage`, `record_client` and `boost`;
+  - an `owner`'s `approve`, `plan`, `budget`, and report `read`, `approve` and `deliver`, through the mirrors;
   - a request assignee's `design` on a `creatives` post;
   - a `social_designer`'s `design` on an `in_team` post;
-  - the officer's and an approver's report `deliver`, and an approver's report `approve`;
   - a client contact's `approve_spend`;
   - `platform_admin` on each action where it is not the maker;
   - the same person's decisions unchanged when the call arrives through the OBO envelope with `x-obo-agent` set.
 - **Denied:**
   - another officer's `author`;
-  - a Web Dev head holding only `manager`, and a `company_admin`, for `approve`, `plan`, `budget` and the report `approve`;
-  - a seat or grant on another company's same-id unit;
+  - a `company_admin`, a Web Dev head holding only `manager`, and a `social_manager` holder, for `approve`, `plan`, `budget`, report `approve`, `deliver` and sending back, and for creating a pipeline post;
+  - the officer's report `deliver` (SCP-Q20);
+  - the owner's `manage`, `record_client` and `boost`;
+  - a seat on another company's same-id unit, and an `owner` grant on another company;
   - the request assignee on an `in_team` post, and the `social_designer` on a `creatives` post;
-  - `approve` and `proofread` for the author and for the officer, also as `platform_admin`;
-  - every new action for `automation` and `bot` principals, also when they hold `company_admin`;
+  - `approve` and `proofread` for the author and for the officer, also as `owner` and as `platform_admin`;
+  - every new action, and report `approve` and `deliver`, for `automation` and `bot` principals, also when they hold `company_admin`;
   - a viewer, a low-assurance session, and a portal contact on every `social_post` action;
   - `approve_spend` for staff;
-  - an unfed `creativeSource` or `approverIds`.
-- **Replay:** every existing `social_post`, `social_engagement` and `social_report` decision, unchanged, except the narrowed report `approve` and `deliver`.
+  - an unfed `creativeSource` or `approverIds`;
+  - a pipeline publish approval decided by a `company_admin` who is not one of the four (`social_approver_required`).
+- **Replay:** every existing `social_post`, `social_engagement` and `social_report` decision, unchanged, except the narrowed report `approve`, `deliver` and send-back, and the owner's new reach.
 
 **Deploy.** The migration runs on boot. Restart the live Cerbos sidecar and `gaiada-test-cerbos` (nothing hot-reloads; healthy is not proof), then probe:
 - the officer's `author` on their own post allowed, on another officer's denied;
 - the author's `approve` denied as `platform_admin`;
-- a `manager`'s `plan` denied and a seat approver's allowed;
+- a `company_admin`'s and a `manager`'s `plan` denied; a seat approver's and an `owner`'s allowed;
 - a client contact's `approve_spend` allowed, and a staff member's denied.

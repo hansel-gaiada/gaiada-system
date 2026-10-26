@@ -1,7 +1,7 @@
 {
   "_about": "SCP stage machine, the single source both sides test against (FRONTEND-BFF-CONTRACT §63.3, PERMISSION-CONTRACT §53; plan docs/plans/2026-10-15-social-content-pipeline.md §4.3). platform-nest loads this file in its stage-machine suites; platform-ui keeps a byte-identical twin (platform-ui/src/lib/scpStageMachine.json, added by the first UI ticket that needs it at runtime) and a test that compares the bytes, the clientHealthGolden.json pattern. Edit this file first, then the twin. Every value here is data: no client or staff names.",
   "version": 2,
-  "rulings": "Owner rulings of 2026-10-26 encoded here: SCP-Q2 (creative source per client), SCP-Q9 and SCP-Q18 (only the social approvers decide), SCP-Q11, SCP-Q14 and SCP-Q15 (the monthly boost budget), SCP-Q13 (the client approves the content, the date, the time and the placement), SCP-Q16 (the HoD or GM files through the publisher), SCP-Q17 (an agent acts as the person who asked), SCP-Q5 (the monthly report in the first release).",
+  "rulings": "Owner rulings of 2026-10-26 encoded here: SCP-Q2 (creative source per client), SCP-Q9 and SCP-Q18 refined by SCP-Q19 (exactly four social approvers decide: the Social Media and GM lead seats, the owner and the superadmin), SCP-Q11, SCP-Q14 and SCP-Q15 (the monthly boost budget), SCP-Q13 (the client approves the content, the date, the time and the placement), SCP-Q16 (one of the four files through the publisher), SCP-Q17 (an agent acts as the person who asked), SCP-Q5 and SCP-Q20 (the monthly report in the first release, checked and sent only by the four). Open with its default in force: SCP-Q21 (who decides a pipeline publish approval: systemRules publish_decision).",
   "statuses": ["planned", "drafting", "proofread", "hod", "design", "final", "client", "approved", "scheduled", "live", "changes", "blocked"],
   "blockableStatuses": ["planned", "drafting", "proofread", "hod", "design", "final", "changes"],
   "pseudoTargets": {
@@ -94,14 +94,16 @@
   "actors": {
     "officer": "the client's officer: social_engagements.owner_id of the post's engagement (Cerbos attribute ownerId, rule member + variables.owns)",
     "copywriter": "a holder of the social_copywriter role in the company (Cerbos derived role social_copywriter)",
-    "approver": "a social approver (SCP-Q9, SCP-Q18): a holder of a live lead seat on the company's Social Media unit or its GM unit (Cerbos attribute approverIds), or a social_manager grant (module_manager); platform_admin through its wildcard. Never manager or company_admin. Never the post's author or the client's officer for proofread and approve (the maker/checker DENY).",
+    "approver": "one of the four social approvers (SCP-Q19; the UI mirrors the rule as canLeadSocial): a holder of a live lead seat on the company's Social Media unit or its GM unit (Cerbos attribute approverIds, derived role social_approver_seat), the IAM owner role reaching the company (the perm_* mirrors of the five approver-only actions), or platform_admin (its wildcard). Never manager, company_admin or a social_manager grant. Never the post's author or the client's officer for proofread and approve (the maker/checker DENY), the owner and the superadmin included",
+    "seat_approver": "the HoD or the GM: a holder of a live lead seat on the company's Social Media unit or its GM unit (approverIds, social_approver_seat); platform_admin also passes through its wildcard. The team's own steps (manage, record_client, boost) and report drafting are the officer's and theirs; the owner holds none of them",
     "designer": "creativeSource 'creatives': an assignee of the client-month Creatives request's PM task (Cerbos attribute assigneeIds); creativeSource 'in_team': a holder of the social_designer role (Cerbos derived role social_designer)",
     "client": "an active portal contact of the post's client (Cerbos portal action approve_post); for money, a contact with signing capability (approve_spend, SCP-Q14)",
-    "recorder": "a member of staff recording a decision the client gave outside the portal: officer or approver (Cerbos record_client); for money, a social approver (social_engagement budget, SCP-Q18)",
+    "recorder": "a member of staff recording a decision the client gave outside the portal: the officer or a seat approver (Cerbos record_client); for money, one of the four approvers (social_engagement budget, SCP-Q18, SCP-Q19)",
     "agent": "an agent acting for a person (SCP-Q17): the OBO envelope names the person, x-obo-agent names the agent. The principal IS the person, so every check here decides on the person, the maker/checker DENY included; the agent is recorded in activity metadata.via, never decides",
     "automation": "an unattended automation or bot principal (users.kind automation or bot): no person behind the call. Refused every new action (403 automation_cannot_act, and a Cerbos EFFECT_DENY); it may read",
     "publisher": "the system: the publisher's result through the dispatch path, or the simulator when SOCIAL_SIMULATION_ENABLED is on",
-    "company_admin": "holds none of the new actions (SCP-Q9, SCP-Q18): it acts by granting a role, for example social_manager"
+    "company_admin": "holds none of the new actions and is not a social approver (SCP-Q19); no grant can make it one. It cannot put a post in a client's plan either: create also needs author or approve",
+    "social_manager": "a social_manager grant: no pipeline action (SCP-Q19 ends the approver path SCP-Q9 and SCP-Q18 had named); it keeps the module's existing routes"
   },
   "cerbosActions": {
     "author": { "actors": ["officer"], "refusal": "not_the_officer" },
@@ -109,14 +111,15 @@
     "approve": { "actors": ["approver"], "refusal": "not_an_approver", "makerChecker": true },
     "design": { "actors": ["designer"], "refusal": "not_the_designer" },
     "schedule": { "actors": ["officer"], "refusal": "not_the_officer" },
-    "manage": { "actors": ["officer", "approver"], "refusal": "not_officer_or_approver" },
-    "record_client": { "actors": ["officer", "approver"], "refusal": "not_officer_or_approver" },
-    "boost": { "actors": ["officer", "approver"], "refusal": "not_officer_or_approver" },
+    "manage": { "actors": ["officer", "seat_approver"], "refusal": "not_officer_or_approver" },
+    "record_client": { "actors": ["officer", "seat_approver"], "refusal": "not_officer_or_approver" },
+    "boost": { "actors": ["officer", "seat_approver"], "refusal": "not_officer_or_approver" },
     "create": { "actors": ["existing social_post create holders"], "refusal": "403 as today" },
-    "publish": { "actors": ["existing social_post publish holders"], "refusal": "publish_required" },
     "cancel": { "actors": ["existing social_post cancel holders"], "refusal": "cancel_required" },
     "social_engagement:plan": { "actors": ["approver"], "refusal": "not_a_social_approver" },
     "social_engagement:budget": { "actors": ["approver"], "refusal": "not_a_social_approver" },
+    "social_report:approve": { "actors": ["approver"], "refusal": "403 (the report routes keep authorize()'s generic 403); also gates sending a report back" },
+    "social_report:deliver": { "actors": ["approver"], "refusal": "403 (the report routes keep authorize()'s generic 403)" },
     "portal:approve_post": { "actors": ["client"], "refusal": "404 outside the portal scope" },
     "portal:approve_spend": { "actors": ["client with signing capability on the client"], "refusal": "view_only" }
   },
@@ -157,7 +160,7 @@
     { "order": 5, "guard": "post_not_archived", "refusal": "post_archived", "http": 409 },
     { "order": 6, "guard": "not_unattended_automation", "refusal": "automation_cannot_act", "http": 403, "note": "users.kind automation or bot; an agent acting for a person arrives as that person and is not this case" },
     { "order": 7, "guard": "maker_checker", "refusal": "author_cannot_approve", "http": 403, "appliesTo": ["proofread", "approve"] },
-    { "order": 8, "guard": "cerbos", "refusal": "the cerbosAction's refusal code; for an extra publish or cancel check, publish_required or cancel_required", "http": 403 },
+    { "order": 8, "guard": "cerbos", "refusal": "the cerbosAction's refusal code; for reschedule's extra cancel check, cancel_required; for create's author-or-approve check, not_officer_or_approver", "http": 403 },
     { "order": 9, "guard": "expected_status_matches", "refusal": "status_changed", "http": 409 },
     { "order": 10, "guard": "status_in_from", "refusal": "invalid_transition", "http": 409 },
     { "order": 11, "guard": "params_valid", "refusal": "missing_field or invalid_field, with field", "http": 400 },
@@ -168,6 +171,8 @@
       "action": "create",
       "kind": "create",
       "cerbosAction": "create",
+      "extraCerbos": { "anyOf": ["author", "approve"] },
+      "extraCerbosRefusal": "not_officer_or_approver",
       "actors": ["officer", "approver"],
       "from": [],
       "to": "planned",
@@ -486,7 +491,6 @@
     {
       "action": "schedule_publisher",
       "cerbosAction": "approve",
-      "extraCerbos": ["publish"],
       "actors": ["approver"],
       "from": [{ "status": "approved" }],
       "to": "scheduled",
@@ -497,12 +501,11 @@
         { "guard": "media_rules_pass", "refusal": "media_rules_failed" }
       ],
       "effects": ["file_one_publish_approval_per_variant", "set_schedule_via_publisher", "set_status_since", "set_engine_status"],
-      "plan": "SCP-Q16 ruled: the HoD or GM files through the publisher and a second person decides (PV-D46); the author and the officer never file (the maker/checker DENY on approve)"
+      "plan": "SCP-Q16 and SCP-Q19 ruled: one of the four files through the publisher, and approve is the whole gate (no extra publish check); a second person decides (PV-D46, systemRules publish_decision); the author and the officer never file (the maker/checker DENY on approve)"
     },
     {
       "action": "unschedule",
       "cerbosAction": { "manual": "schedule", "publisher": "approve" },
-      "extraCerbos": { "publisher": ["cancel"] },
       "actors": { "manual": ["officer"], "publisher": ["approver"] },
       "from": [{ "status": "scheduled" }],
       "to": "approved",
@@ -546,7 +549,7 @@
     {
       "action": "block",
       "cerbosAction": "manage",
-      "actors": ["officer", "approver"],
+      "actors": ["officer", "seat_approver"],
       "from": [{ "status": "planned" }, { "status": "drafting" }, { "status": "proofread" }, { "status": "hod" }, { "status": "design" }, { "status": "final" }, { "status": "changes" }],
       "to": "blocked",
       "params": { "reason": "3..500, required", "waitingOn": "client|designer|copywriter|approver|officer|external, required" },
@@ -557,7 +560,7 @@
     {
       "action": "resolve",
       "cerbosAction": "manage",
-      "actors": ["officer", "approver"],
+      "actors": ["officer", "seat_approver"],
       "from": [{ "status": "blocked" }],
       "to": { "from": "blockedFrom" },
       "params": {},
@@ -568,7 +571,7 @@
     {
       "action": "follow_up",
       "cerbosAction": "manage",
-      "actors": ["officer", "approver"],
+      "actors": ["officer", "seat_approver"],
       "from": [{ "status": "proofread" }, { "status": "hod" }, { "status": "design" }, { "status": "final" }, { "status": "client" }, { "status": "changes" }, { "status": "blocked" }],
       "to": null,
       "params": { "note": "0..500, optional" },
@@ -582,7 +585,7 @@
     {
       "action": "discard",
       "cerbosAction": "manage",
-      "actors": ["officer", "approver"],
+      "actors": ["officer", "seat_approver"],
       "from": [{ "status": "planned" }, { "status": "drafting" }],
       "to": "deleted",
       "params": {},
@@ -593,7 +596,7 @@
     {
       "action": "archive",
       "cerbosAction": "manage",
-      "actors": ["officer", "approver"],
+      "actors": ["officer", "seat_approver"],
       "from": [{ "status": "planned" }, { "status": "drafting" }, { "status": "proofread" }, { "status": "hod" }, { "status": "design" }, { "status": "final" }, { "status": "changes" }, { "status": "blocked" }, { "status": "client" }, { "status": "approved" }],
       "to": "archived",
       "params": { "reason": "3..500, required" },
@@ -626,6 +629,12 @@
       "when": "scheduledAt or placement changes (the post page, the calendar drag, the feed-preview swap)",
       "then": "planned, drafting and a team copy changes case: an edit; approved and scheduled: reschedule, which asks the client again; proofread, hod, design, final, client, blocked and the client copy changes case: 409 field_locked; live: 409 post_is_live. A feed-preview swap applies this to both posts, all or nothing",
       "plan": "SCP-Q13 ruled; §8 3d and 3e"
+    },
+    {
+      "rule": "publish_decision",
+      "when": "a second person decides a pipeline post's publish approval in /approvals (D14)",
+      "then": "they need today's decide right and must pass approve on the post: one of the four, never the post's author or officer, else 403 social_approver_required and the row stays pending. The filer never decides (PV-D46's self_approval runs first). Composer posts are unchanged",
+      "plan": "SCP-Q19 with PV-D46; SCP-Q21 is open with this default in force (FRONTEND-BFF-CONTRACT §63.10, PERMISSION-CONTRACT §53.12)"
     }
   ],
   "boosts": {
@@ -634,15 +643,15 @@
     "committedBy": { "approved": "total budget", "running": "total budget", "stopped": "actual spend", "completed": "actual spend", "requested": "nothing", "cancelled": "nothing", "declined": "nothing" },
     "remainingRule": "remaining = the agreed monthly budget of the boost's cycle (0 when none) minus committed; committed sums each boost of that cycle by committedBy (SCP-Q15). Every write that moves committed or the agreement runs under the cycle's lock; never below 0 for display",
     "actions": [
-      { "action": "request_boost", "cerbosAction": "boost", "actors": ["officer", "approver"], "from": ["(new)"], "to": [{ "when": { "fitsRemaining": true }, "status": "approved", "approvedVia": "budget" }, { "when": { "fitsRemaining": false }, "status": "requested" }], "guards": [{ "guard": "post_live", "refusal": "post_not_live" }, { "guard": "no_open_boost", "refusal": "open_boost_exists" }, { "guard": "currency_matches_budget", "refusal": "currency_mismatch" }], "effects": ["set_cycle_from_starts_on", "when requested: notify:client_spend"] },
+      { "action": "request_boost", "cerbosAction": "boost", "actors": ["officer", "seat_approver"], "from": ["(new)"], "to": [{ "when": { "fitsRemaining": true }, "status": "approved", "approvedVia": "budget" }, { "when": { "fitsRemaining": false }, "status": "requested" }], "guards": [{ "guard": "post_live", "refusal": "post_not_live" }, { "guard": "no_open_boost", "refusal": "open_boost_exists" }, { "guard": "currency_matches_budget", "refusal": "currency_mismatch" }], "effects": ["set_cycle_from_starts_on", "when requested: notify:client_spend"] },
       { "action": "approve_boost", "cerbosAction": "portal:approve_spend", "actors": ["client"], "from": ["requested"], "to": "approved", "approvedVia": "portal", "guards": [{ "guard": "boost_waiting", "refusal": "boost_not_waiting" }], "effects": ["notify:requester"] },
       { "action": "decline_boost", "cerbosAction": "portal:approve_spend", "actors": ["client"], "from": ["requested"], "to": "declined", "guards": [{ "guard": "boost_waiting", "refusal": "boost_not_waiting" }], "effects": ["notify:requester"] },
       { "action": "record_boost_approval", "cerbosAction": "social_engagement:budget", "actors": ["approver"], "from": ["requested"], "to": "approved", "approvedVia": "recorded", "params": { "channel": "required", "note": "required" }, "guards": [{ "guard": "boost_waiting", "refusal": "boost_not_waiting" }], "effects": ["notify:requester"] },
       { "action": "record_boost_decline", "cerbosAction": "social_engagement:budget", "actors": ["approver"], "from": ["requested"], "to": "declined", "params": { "channel": "required", "note": "required" }, "guards": [{ "guard": "boost_waiting", "refusal": "boost_not_waiting" }], "effects": ["notify:requester"] },
-      { "action": "cancel_boost", "cerbosAction": "boost", "actors": ["officer", "approver"], "from": ["requested", "approved"], "to": "cancelled", "guards": [], "effects": ["releases_its_budget"] },
-      { "action": "start_boost", "cerbosAction": "boost", "actors": ["officer", "approver"], "from": ["approved"], "to": "running", "guards": [], "effects": ["set_started"] },
-      { "action": "stop_boost", "cerbosAction": "boost", "actors": ["officer", "approver"], "from": ["running"], "to": "stopped", "params": { "spendMinor": "required, >= 0", "paidReach": "optional, >= 0", "clicks": "optional, >= 0" }, "guards": [], "effects": ["set_ended", "record_spend", "commits_only_its_spend"] },
-      { "action": "complete_boost", "cerbosAction": "boost", "actors": ["officer", "approver"], "from": ["running", "stopped"], "to": "completed", "params": { "spendMinor": "required, >= 0", "paidReach": "required, >= 0", "clicks": "optional, >= 0" }, "guards": [], "effects": ["set_results", "commits_only_its_spend", "warning spend_above_budget when spend exceeds the total budget"] }
+      { "action": "cancel_boost", "cerbosAction": "boost", "actors": ["officer", "seat_approver"], "from": ["requested", "approved"], "to": "cancelled", "guards": [], "effects": ["releases_its_budget"] },
+      { "action": "start_boost", "cerbosAction": "boost", "actors": ["officer", "seat_approver"], "from": ["approved"], "to": "running", "guards": [], "effects": ["set_started"] },
+      { "action": "stop_boost", "cerbosAction": "boost", "actors": ["officer", "seat_approver"], "from": ["running"], "to": "stopped", "params": { "spendMinor": "required, >= 0", "paidReach": "optional, >= 0", "clicks": "optional, >= 0" }, "guards": [], "effects": ["set_ended", "record_spend", "commits_only_its_spend"] },
+      { "action": "complete_boost", "cerbosAction": "boost", "actors": ["officer", "seat_approver"], "from": ["running", "stopped"], "to": "completed", "params": { "spendMinor": "required, >= 0", "paidReach": "required, >= 0", "clicks": "optional, >= 0" }, "guards": [], "effects": ["set_results", "commits_only_its_spend", "warning spend_above_budget when spend exceeds the total budget"] }
     ]
   },
   "boostBudgets": {
@@ -658,7 +667,7 @@
     ]
   },
   "reports": {
-    "about": "The monthly report (SCP-5a, SCP-Q5): the existing social_reports row and its SMM-23 machine; FRONTEND-BFF-CONTRACT §63.18. Its refusals keep the SMM-23 codes and statuses (400 from the module's refuse(), 503 for the renderer).",
+    "about": "The monthly report (SCP-5a, SCP-Q5): the existing social_reports row and its SMM-23 machine; FRONTEND-BFF-CONTRACT §63.18. SCP-Q20: the officer drafts and submits it; only the four approvers approve it, send it back and send it. Its refusals keep the SMM-23 codes and statuses (400 from the module's refuse(), 503 for the renderer).",
     "statuses": [
       { "status": "draft", "label": "Draft" },
       { "status": "in_review", "label": "HoD check" },
@@ -666,12 +675,12 @@
       { "status": "delivered", "label": "Sent" }
     ],
     "actions": [
-      { "action": "draft_report", "route": "POST engagements/:engagementId/reports", "cerbosAction": "social_report:create", "actors": ["officer", "approver"], "to": "draft", "refusals": ["invalid_kind", "internal_client_no_reports"] },
-      { "action": "edit_report", "route": "PATCH reports/:id", "cerbosAction": "social_report:update", "actors": ["officer", "approver"], "from": ["draft", "in_review"], "to": null, "refusals": ["report_not_editable", "status_changed_concurrently"] },
+      { "action": "draft_report", "route": "POST engagements/:engagementId/reports", "cerbosAction": "social_report:create", "actors": ["officer", "seat_approver"], "to": "draft", "refusals": ["invalid_kind", "internal_client_no_reports"] },
+      { "action": "edit_report", "route": "PATCH reports/:id", "cerbosAction": "social_report:update", "actors": ["officer", "seat_approver"], "from": ["draft", "in_review"], "to": null, "refusals": ["report_not_editable", "status_changed_concurrently"] },
       { "action": "submit_report", "route": "PATCH reports/:id {status: 'in_review'}", "cerbosAction": "social_report:update", "actors": ["officer"], "from": ["draft"], "to": "in_review", "refusals": ["cannot_submit_from_this_status", "status_changed_concurrently"] },
-      { "action": "send_back_report", "route": "PATCH reports/:id {status: 'draft'}", "cerbosAction": "social_report:update", "actors": ["approver"], "from": ["in_review"], "to": "draft", "refusals": ["cannot_send_back_from_this_status", "status_changed_concurrently"] },
+      { "action": "send_back_report", "route": "PATCH reports/:id {status: 'draft'}", "cerbosAction": "social_report:approve", "actors": ["approver"], "from": ["in_review"], "to": "draft", "refusals": ["cannot_send_back_from_this_status", "status_changed_concurrently"] },
       { "action": "approve_report", "route": "POST reports/:id/approve", "cerbosAction": "social_report:approve", "actors": ["approver"], "from": ["in_review"], "to": "approved", "refusals": ["cannot_approve_from_this_status", "notes_incomplete"] },
-      { "action": "deliver_report", "route": "POST reports/:id/deliver", "cerbosAction": "social_report:deliver", "actors": ["officer", "approver"], "from": ["approved"], "to": "delivered", "refusals": ["cannot_deliver_from_this_status", "internal_client_not_deliverable", "pdf_render_not_configured", "pdf_render_failed", "status_changed_concurrently"] }
+      { "action": "deliver_report", "route": "POST reports/:id/deliver", "cerbosAction": "social_report:deliver", "actors": ["approver"], "from": ["approved"], "to": "delivered", "refusals": ["cannot_deliver_from_this_status", "internal_client_not_deliverable", "pdf_render_not_configured", "pdf_render_failed", "status_changed_concurrently"] }
     ],
     "refusals": {
       "invalid_kind": { "http": 400 },
@@ -711,8 +720,8 @@
     "not_officer_or_approver": { "http": 403 },
     "not_a_social_approver": { "http": 403 },
     "not_your_decision": { "http": 403 },
-    "publish_required": { "http": 403 },
     "cancel_required": { "http": 403 },
+    "social_approver_required": { "http": 403, "shape": "{error, reason}", "route": "POST /api/:t/automation-approvals/:id/decide (systemRules publish_decision)" },
     "view_only": { "http": 403 },
     "not_a_pipeline_post": { "http": 409 },
     "post_archived": { "http": 409 },
@@ -753,6 +762,15 @@
     "pipeline_post": { "http": 409 },
     "officer_not_member": { "http": 409 },
     "officer_set_by_allocation": { "http": 409 }
+  },
+  "scenarioPersonas": {
+    "approver": "the HoD: the Social Media unit's lead seat",
+    "second_approver": "the GM: the GM unit's lead seat",
+    "owner": "a holder of the IAM owner role on the company, with no seat",
+    "platform_admin": "the superadmin",
+    "company_admin": "a company admin with no Social seat",
+    "social_manager": "a social_manager grant with no seat",
+    "manager_of_another_department": "a Web Dev head holding manager"
   },
   "scenarios": [
     {
@@ -862,11 +880,11 @@
       ]
     },
     {
-      "name": "the HoD or GM files through the publisher; the officer cannot",
+      "name": "one of the four files through the publisher; the officer and a company admin cannot",
       "start": { "status": "approved", "publisherRegistered": true },
       "steps": [
         { "action": "schedule_publisher", "actor": "officer", "refusal": "author_cannot_approve" },
-        { "action": "schedule_publisher", "actor": "approver_without_publish", "refusal": "publish_required" },
+        { "action": "schedule_publisher", "actor": "company_admin", "refusal": "not_an_approver" },
         { "action": "schedule_publisher", "actor": "approver", "expect": { "status": "scheduled", "scheduleVia": "publisher", "publishApprovalsFiled": true } },
         { "action": "unschedule", "actor": "officer", "refusal": "not_an_approver" },
         { "action": "unschedule", "actor": "approver", "expect": { "status": "approved", "scheduleVia": null } }
@@ -897,13 +915,24 @@
       ]
     },
     {
-      "name": "only the social approvers decide; agents act as their person; unattended automations are refused",
+      "name": "only the four approvers decide; agents act as their person; unattended automations are refused",
       "start": { "status": "hod" },
       "steps": [
         { "action": "approve_for_design", "actor": "company_admin", "refusal": "not_an_approver" },
         { "action": "approve_for_design", "actor": "manager_of_another_department", "refusal": "not_an_approver" },
+        { "action": "approve_for_design", "actor": "social_manager", "refusal": "not_an_approver" },
         { "action": "approve_for_design", "actor": "automation", "refusal": "automation_cannot_act" },
         { "action": "approve_for_design", "actor": "agent_acting_for_approver", "expect": { "status": "design", "activityVia": "agent" } }
+      ]
+    },
+    {
+      "name": "a company admin cannot approve",
+      "start": { "status": "hod" },
+      "steps": [
+        { "action": "create", "actor": "company_admin", "refusal": "not_officer_or_approver", "note": "a new post in the same cycle: create also needs author or approve" },
+        { "action": "approve_for_design", "actor": "company_admin", "refusal": "not_an_approver" },
+        { "action": "hod_changes", "actor": "company_admin", "params": { "note": "Shorter, please." }, "refusal": "not_an_approver" },
+        { "action": "approve_for_design", "actor": "owner", "expect": { "status": "design", "activityActor": "owner" } }
       ]
     },
     {
@@ -936,6 +965,7 @@
         { "action": "stop_boost", "actor": "officer", "target": "boost A", "params": { "spendMinor": 200000 }, "expect": { "boostStatus": "stopped", "committedMinor": 1200000, "remainingMinor": 0 } },
         { "action": "cancel_boost", "actor": "officer", "target": "boost B", "expect": { "boostStatus": "cancelled", "committedMinor": 200000, "remainingMinor": 800000 } },
         { "action": "record_boost_budget", "actor": "officer", "params": { "amountMinor": 600000, "channel": "whatsapp", "note": "Client lowered the month's budget." }, "refusal": "not_a_social_approver" },
+        { "action": "record_boost_budget", "actor": "company_admin", "params": { "amountMinor": 600000, "channel": "whatsapp", "note": "Client lowered the month's budget." }, "refusal": "not_a_social_approver" },
         { "action": "record_boost_budget", "actor": "approver", "params": { "amountMinor": 100000, "channel": "whatsapp", "note": "Client lowered the month's budget." }, "refusal": "budget_below_committed" },
         { "action": "record_boost_budget", "actor": "approver", "params": { "amountMinor": 600000, "channel": "whatsapp", "note": "Client lowered the month's budget." }, "expect": { "agreedMinor": 600000, "committedMinor": 200000, "remainingMinor": 400000 } },
         { "action": "request_boost", "actor": "officer", "target": "boost C", "params": { "dailyBudgetMinor": 100000, "days": 5 }, "expect": { "boostStatus": "requested", "remainingMinor": 400000 } }
@@ -948,8 +978,10 @@
         { "action": "submit_report", "actor": "officer", "expect": { "reportStatus": "in_review" } },
         { "action": "approve_report", "actor": "approver", "precondition": "an area lacks its insight", "refusal": "notes_incomplete" },
         { "action": "approve_report", "actor": "manager_of_another_department", "refusalHttp": 403, "note": "the report routes keep authorize()'s generic 403" },
+        { "action": "approve_report", "actor": "company_admin", "refusalHttp": 403 },
         { "action": "approve_report", "actor": "approver", "expect": { "reportStatus": "approved" } },
-        { "action": "deliver_report", "actor": "officer", "expect": { "reportStatus": "delivered", "publishedToPortal": true } }
+        { "action": "deliver_report", "actor": "officer", "refusalHttp": 403, "note": "SCP-Q20: the officer writes and submits, but never sends" },
+        { "action": "deliver_report", "actor": "owner", "expect": { "reportStatus": "delivered", "publishedToPortal": true } }
       ]
     }
   ]

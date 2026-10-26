@@ -11974,14 +11974,19 @@ Cerbos decides who may attempt an action; the stage machine decides whether the 
 |---|---|---|
 | Officer | the engagement's `owner_id` | `ownerId`, rule `member` + `variables.owns` |
 | Copywriter | a holder of the role `social_copywriter` (any member, SCP-Q9) | the derived role `social_copywriter` |
-| Social approver (the HoD or the GM, equal authority; SCP-Q9, SCP-Q18) | a holder of a live lead seat on the company's Social Media unit or its GM unit (the DW-10g-2 seat rule: an active position with its `org_unit_lead` role row and an open assignment; `loadSeatHoldersByNode`), or a `social_manager` grant | `approverIds`, rule `member` + `principal.id in approverIds`; `module_manager` |
+| Social approver: exactly four, with equal authority (SCP-Q19; SCP-Q9 and SCP-Q18 refined) | (1) the Social Media unit head and (2) the GM: a holder of a live lead seat on the company's Social Media unit or its GM unit (the DW-10g-2 seat rule: an active position with its `org_unit_lead` role row and an open assignment; `loadSeatHoldersByNode`); (3) the owner: the IAM `owner` role reaching the company; (4) the superadmin: `platform_admin`. The UI mirrors the rule as `canLeadSocial` (PERMISSION §53.4) | (1) and (2): `approverIds` and the derived role `social_approver_seat`; (3): the `perm_*` mirrors of the five approver-only actions; (4): the wildcard |
 | Designer | creative source `creatives`: an assignee of the month request's PM task; `in_team`: a holder of the role `social_designer` | `assigneeIds` with `creativeSource == "creatives"`; the derived role `social_designer` with `creativeSource == "in_team"` |
 | Client | an active portal contact of the post's client; for money, one with signing capability (SCP-Q14) | the portal kind: `approve_post`; money `approve_spend` |
 | Maker | the post's `author_id` and the client's officer | `creatorId`, `ownerId`: an `EFFECT_DENY` on `proofread` and `approve` |
 | An agent acting for a person | the person who asked: the OBO envelope names them, `x-obo-agent` names the agent (SCP-Q17) | the person's own principal; `via.agent` is recorded, never decides |
 | An unattended automation | a principal whose `users.kind` is `automation` or `bot`: no person behind it | refused every new action (an `EFFECT_DENY`) |
 
-- **Only the social approvers decide.** `manager` decides nothing new: every head's lead position carries `manager` company-wide, so it cannot mean "the Social Media head" (the `dept_kpi_target` reasoning). `company_admin` holds none of the new actions either: authority in the pipeline comes from the roles the owner named (SCP-Q9, SCP-Q18). A company admin who must act grants the role, for example `social_manager`, which is an audited IAM act. `platform_admin` keeps its wildcard, and the maker/checker DENY still beats it.
+- **Only the four decide** (SCP-Q19). The approver-only actions are the HoD approval, the final check, filing and unscheduling through the publisher, the allocation, the deadlines and settings, boost budgets and the client's money answers, and the report check and sending (SCP-Q20).
+  - `manager` decides nothing new: every head's lead position carries `manager` company-wide, so it cannot mean "the Social Media head" (the `dept_kpi_target` reasoning).
+  - `company_admin` holds none of the new actions, and neither does a `social_manager` grant.
+  - No grant makes anyone one of the four (PERMISSION §53.4).
+  - The maker/checker DENY beats all four, the owner and the superadmin included.
+- **The team's own steps** (block, resolve, follow up, discard, archive, recording a client's post decision, boosts) belong to the officer and to the HoD and GM seats, and to the superadmin by the wildcard. The owner holds the approver-only actions, not these.
 - **The units are found by name,** as every GM surface finds its unit: departments whose workspace slug is `social-media` or `gm` (`workspaceSlugFor`, `gmUnitIds`), never a hard-coded node id (PV-D13).
 - **The Social Media team's read tier.** Reading posts needs `social_post` · `read`: `social_staff` or `social_manager` (module roles), the two new roles, `manager`, `company_admin`, or the permission mirror. A self-assignment cannot give the agency's own team `social_staff` (`service_assignments` has `CHECK (provider_tenant_id <> target_tenant_id)`), so the team's seats carry it: `social_staff` at company scope in the Social Media positions' role set (`position_roles`), or a direct grant. The mock seed does the same (SCP-0c). The officer rule grants the officer's actions, not the read, so an officer needs the read tier as well.
 
@@ -12012,7 +12017,7 @@ Edits (`PATCH …/pipeline`), suggestions, designs and the bulk route are separa
 4. An archived post: 409 `post_archived`.
 5. An unattended automation or bot principal (`users.kind` `automation` or `bot`): 403 `automation_cannot_act` (Cerbos denies it too). An agent acting for a person is not this case: it arrives as that person (63.15).
 6. Maker/checker, on the `proofread` and `approve` actions: the caller (the person, also when an agent drives the call) is the post's author or the client's officer: 403 `author_cannot_approve`. This runs before Cerbos so the refusal names itself; the Cerbos `EFFECT_DENY` is the backstop for any path that forgets.
-7. Cerbos, with the resource of 63.3.3. A denial is audited exactly as `authorize()` audits it (one helper, `authorizeStage()`), then answers 403 with the action's code: `not_the_officer`, `not_a_copywriter`, `not_an_approver`, `not_the_designer` or `not_officer_or_approver`. Where an action also needs `publish` or `cancel`, a denial of that one is 403 `publish_required` or `cancel_required`.
+7. Cerbos, with the resource of 63.3.3. A denial is audited exactly as `authorize()` audits it (one helper, `authorizeStage()`), then answers 403 with the action's code: `not_the_officer`, `not_a_copywriter`, `not_an_approver`, `not_the_designer` or `not_officer_or_approver`. Rescheduling a publisher schedule also needs `cancel` (403 `cancel_required`), and creating a pipeline post also needs `author` or `approve` (403 `not_officer_or_approver`, 63.6.1).
 8. `expectedStatus` differs from the post's status: 409 `status_changed`, `detail: {status, phase}`.
 9. The status (and, for `changes`, the change case) is not in the action's `from`: 409 `invalid_transition`, `detail: {status, changeCase}`.
 10. The body: 400 `missing_field` or `invalid_field` with `field`.
@@ -12022,11 +12027,11 @@ Edits (`PATCH …/pipeline`), suggestions, designs and the bulk route are separa
 **63.3.3 The Cerbos resource.** `{kind: "social_post", id: <postId>, tenantId, module: "social", ownerId, creatorId, approverIds, assigneeIds, creativeSource}`, every value from the rows, never from a body:
 - `ownerId`: the engagement's `owner_id` (`""` when none).
 - `creatorId`: the post's `author_id` (`""` before `start_draft`).
-- `approverIds`: the seat approvers of 63.2 for this company.
+- `approverIds`: the HoD and GM seat holders of 63.2 for this company (the owner and the superadmin need no entry).
 - `assigneeIds`: the PM task's responsible person and person assignees of the post's month request (the §32 computation; `[]` without a request).
 - `creativeSource`: the post's `creative_source` (`""` before `approve_for_design`).
 
-The planning and money routes send `{kind: "social_engagement", id?, tenantId, module: "social", approverIds}`; the report routes send `{kind: "social_report", id, tenantId, module: "social", ownerId, approverIds}`.
+The planning and money routes send `{kind: "social_engagement", id?, tenantId, module: "social", approverIds}`; the report routes send `{kind: "social_report", id, tenantId, module: "social", approverIds}`.
 
 **63.3.4 The hand-off checks** (plan §4.6) run on the server at `send_to_proofread`:
 - Hard requirements, never skippable: `format_missing`, `caption_missing`, `date_missing`, `placement_missing`. Any failure is 409 `incomplete_post` with `blockers`.
@@ -12057,7 +12062,7 @@ The planning and money routes send `{kind: "social_engagement", id?, tenantId, m
 
 ### 63.4 Allocation, brand book and settings (SCP-1a, SCP-1c)
 
-**The planning routes are the social approvers' (SCP-Q18, ruled).** Editing the allocation, the deadline table (63.5) and the settings is `social_engagement` · `plan`. Its holders are the seat approvers, `social_manager` and `platform_admin`; not `manager`, not `company_admin`. A refusal is 403 `not_a_social_approver` (PERMISSION §53.6).
+**The planning routes are the social approvers' (SCP-Q18, refined by SCP-Q19).** Editing the allocation, the deadline table (63.5) and the settings is `social_engagement` · `plan`. Its holders are the four of 63.2: the HoD and GM seats, the owner and the superadmin. Not `manager`, `company_admin` or a `social_manager` grant. A refusal is 403 `not_a_social_approver` (PERMISSION §53.6).
 
 **`GET allocation?mine=`** (`social_engagement` · `read`). Every engagement that is not closed, with its allocation: `{items: [AllocationRow]}`, sorted by client name. `mine=1` keeps the caller's clients (officer = caller), for the Profile switcher.
 
@@ -12122,7 +12127,7 @@ The rules (plan §4.4; pinned by SCP-1c in a golden table beside the fixture, wi
 
 ### 63.6 Posts (SCP-1b, 1e, 1f, 1g, 1h, 1i, 1j, 1m)
 
-**63.6.1 Create.** **`POST cycles/:cycleId/posts`** (`social_post` · `create`) takes `{id?, title, isExtra?, format?, pillar?, scheduledAt?, placement?}` and answers 201 `{post: PipelinePost, created}`. The post starts `planned` in the cycle's engagement. 404 `cycle_not_found`; 400 `{field}`. An extra post is `isExtra: true` and stays outside the target. The engagement and the cycle come from the path, never the body.
+**63.6.1 Create.** **`POST cycles/:cycleId/posts`** (`social_post` · `create`, plus `author` or `approve` on the would-be post in the same `checkMany`: the cycle's officer or one of the four, SCP-Q19) takes `{id?, title, isExtra?, format?, pillar?, scheduledAt?, placement?}` and answers 201 `{post: PipelinePost, created}`. The post starts `planned` in the cycle's engagement. 403 `not_officer_or_approver` for anyone else who holds `create` (a company admin, another department's head); 404 `cycle_not_found`; 400 `{field}`. An extra post is `isExtra: true` and stays outside the target. The engagement and the cycle come from the path, never the body.
 
 **63.6.2 Read.** **`GET posts/:postId/pipeline`**: `social_post` · `read`; when `read` is refused, `design` on the same post (one `checkMany` for both). So a Creatives designer on the month request opens the posts they work on without a social read tier. 404 `post_not_found`, 409 `not_a_pipeline_post`.
 
@@ -12251,7 +12256,7 @@ The KPI strip and banner stay. While the simulator flag is on, the tiles count s
 **`GET needs-you`** (`social_post` · `read`). The pipeline's leg of `lib/queue.ts`, per the caller's roles (plan §6.4):
 - **Officer:** drafts to send, fixes asked, ready to schedule, live for two days without metrics, a monthly report due (63.18).
 - **Copywriter:** the proofread queue.
-- **HoD and GM:** HoD approvals, final checks, reports to check (`social_reports` `in_review`), boosts approved but not started.
+- **HoD and GM (the two seats):** HoD approvals, final checks, reports to check (`social_reports` `in_review`) and reports ready to send (`approved`), boosts approved but not started. The owner and the superadmin act from the same pages but get no queue: it would hold every client's work.
 - **Designer:** designs and revisions.
 
 Items: `{id: 'social:<tenant>:<post or report or boost id>:<kind>', kind, role, title, clientName, since, due?, href}`, at most 50, oldest first. A failed source is named, never silently dropped (`partial: string[]`).
@@ -12327,15 +12332,21 @@ The client's approval covers the date, the time and the placement (SCP-Q13, rule
 - **`schedule`** (the officer, by hand: "Schedule in Meta") takes no date: the post is scheduled at the approved date and time (`approvedSchedule`).
   - 409 `approved_time_passed` when that time is more than 5 minutes in the past: a later date is a new date, so it needs `reschedule` and the client's approval.
   - Every variant must pass the media validator (`media-rules.ts`), else 409 `media_rules_failed` with `detail.variants`.
-- **`schedule_publisher`** (SCP-Q16, ruled): the HoD or GM files the publish through the publisher. It needs `social_post` · `approve` (a social approver, never the author or the client's officer) and `publish` (403 `publish_required`), a registered publisher (409 `publisher_unavailable`), the approved time not passed, and the media validator.
+- **`schedule_publisher`** (SCP-Q16 and SCP-Q19, ruled): one of the four files the publish through the publisher. It needs:
+  - `social_post` · `approve`: one of the four, never the author or the client's officer. That is the whole gate: there is no extra `publish` check (SCP-Q19);
+  - a registered publisher (409 `publisher_unavailable`);
+  - the approved time not passed, and the media validator.
   - It files one D14 publish approval per variant through SMM-40's helper (`insertAutomationApprovalRow`), bound to the approved content, date and placement.
-  - Under PV-D46 (PGL-05, PERMISSION-CONTRACT §52, released in 428) the filer never approves their own high-impact request, so a second person decides it under `/approvals`.
+  - **The decision.** Under PV-D46 (PGL-05, PERMISSION-CONTRACT §52, released in 428) the filer never approves their own high-impact request, so a second person decides it under `/approvals`.
+    - That person must also be one of the four. The entry's `approverCheck` asks `social_post` · `approve` on the post, so the post's author and officer are refused too (403 `{error, reason: "social_approver_required"}`; PERMISSION §53.12).
+    - With today's decide right (`company_admin`, `platform_admin`), that leaves the superadmin, and those of the four who also hold `company_admin`.
+    - Whether the HoD, the GM and the owner should decide without `company_admin` is SCP-Q21, open with this default in force (plan §2).
 - **`unschedule`** puts the post back to `approved` and keeps the client's approval.
   - Scheduled by hand: the officer (`schedule`).
-  - Scheduled through the publisher: a social approver with `cancel` (403 `not_an_approver`, `cancel_required`). It withdraws undecided approvals and cancels queued dispatches.
+  - Scheduled through the publisher: one of the four (`approve`; 403 `not_an_approver`). It withdraws undecided approvals and cancels queued dispatches.
   - A variant mid-publish is 409 `dispatch_in_flight`.
 - **`reschedule`** (the officer, `schedule`) takes `{at?, placement?}`; at least one must differ from the approved values, else 409 `no_change`. In one transaction it:
-  1. unschedules the post if it is scheduled (through the publisher this also needs `cancel`: 403 `cancel_required`; a variant mid-publish is 409 `dispatch_in_flight`);
+  1. unschedules the post if it is scheduled (through the publisher this also needs `cancel`: 403 `cancel_required`, so the officer asks one of the four to unschedule it first; a variant mid-publish is 409 `dispatch_in_flight`);
   2. writes the new date and placement and syncs the variants: dates, and the networks for a new placement (409 `no_account_for_network` or `ambiguous_account`);
   3. requests every variant's review again, sends the post back to `client`, and tells the client once.
 - **`mark_live`** (officer) takes `{url, at?}`. Each variant becomes a native-import bookkeeping row (`native_import = true`, `status = 'published'`, `approval_id` and `provider_post_id` NULL, `published_url`, `published_at`): 0105's existing law for "posted by hand".
@@ -12355,7 +12366,7 @@ The client's approval covers the date, the time and the placement (SCP-Q13, rule
     - A post is a boost candidate when its rate is at least `boostCandidateFactor` (1.25) times its account's average over the last 90 days.
 - **The KPI readers** (SCP-3f). "Posts on schedule" reads the pipeline: posts that went live within 15 minutes of `scheduled_at`, hand-posted ones included. Today's reader excludes native imports, which is every hand-posted pipeline post. "Client approval turnaround" keeps reading the reviews.
 
-### 63.11 Boosts and the monthly boost budget (SCP-4; SCP-Q11, SCP-Q14, SCP-Q15 and SCP-Q18 ruled)
+### 63.11 Boosts and the monthly boost budget (SCP-4; SCP-Q11, SCP-Q14, SCP-Q15, SCP-Q18 and SCP-Q19 ruled)
 
 **No ads are bought by the ERP.** A boost records what the team runs in Meta's own tools, or what the simulator runs: the agreement, the budget, the start and stop, and the results. No tool spends money, so the D14 doctrine that bars money-spending tools is untouched. This lifts the old "no ad spend in v1" line (0105's header, `social.controller.ts` `createCampaign`) for recording only, by the owner's SCP-Q11 ruling.
 
@@ -12369,7 +12380,7 @@ The client's approval covers the date, the time and the placement (SCP-Q13, rule
 - **The lock.** Every write that moves `committed` or the agreement (a boost request, an approval, a stop, a completion, a cancellation, an agreement, a recording) runs under the cycle's advisory lock, so two writers can never both take the last of a budget.
 - **Lowering** (SCP-Q15) is allowed down to `committed`. An agreement below it is 409 `budget_below_committed` (`detail: {committedMinor, currency}`), checked when the amount is proposed, recorded, or agreed in the portal.
 
-**Who records money for the client: the social approvers only** (SCP-Q18, ruled): `social_engagement` · `budget` (the seat approvers, `social_manager`, `platform_admin`), not `manager`, not `company_admin`, and not the officer who will spend it. A refusal is 403 `not_a_social_approver`.
+**Who records money for the client: the four approvers only** (SCP-Q18, refined by SCP-Q19): `social_engagement` · `budget`, held by the HoD and GM seats, the owner and the superadmin. Not `manager`, `company_admin` or a `social_manager` grant, and not the officer who will spend it. A refusal is 403 `not_a_social_approver`.
 
 | Route | Gate | What it does |
 |---|---|---|
@@ -12380,7 +12391,7 @@ The client's approval covers the date, the time and the placement (SCP-Q13, rule
 
 An unknown cycle is 404 `cycle_not_found`, an unknown proposal 404 `proposal_not_found`, an unknown boost 404 `boost_not_found`.
 
-**Boosts** (`social_post` · `boost`: the officer, the HoD or GM):
+**Boosts** (`social_post` · `boost`: the officer, or the HoD or GM seat; the owner agrees money through `budget`, but runs no boost):
 
 | Route | What it does |
 |---|---|
@@ -12443,15 +12454,15 @@ BoostRow { id, postId, postTitle, clientName, cycleId, status, goal, audience, a
 
 | Type | To |
 |---|---|
-| `social.post.your_turn` | the new holder(s): copywriters, approvers, designers (the month request's assignees, or every `social_designer` for in-team) or the officer |
+| `social.post.your_turn` | the new holder(s): copywriters, approvers (the HoD and GM seat holders; the owner and the superadmin are not notified), designers (the month request's assignees, or every `social_designer` for in-team) or the officer |
 | `social.post.client_changed` | the HoD and GM when the client asks for a change, and on loop e's `approve_copy` ("the HoD is told") |
 | `social.post.client_decided` | the officer |
 | `social.post.follow_up` | the holder; for the client, a portal reminder (PV-D47's client action mail, §62, applies) |
 | `social.client_review.requested` | the client, once per post at `final_approve`, on loop e and on every change after the client (the existing event, with `postId` added) |
 | `social.boost.waiting_client`, `social.budget.proposed` | the client's contacts with signing capability |
 | `social.boost.decided`, `social.budget.decided` | the requester, the officer |
-| `social.report.to_check` | the social approvers, when a monthly report is submitted for the HoD check |
-| `social.report.ready` | the officer, when the HoD check passes; the client hears through PV7-04a's existing notice when it is sent |
+| `social.report.to_check` | the HoD and GM seat holders, when a monthly report is submitted for the HoD check |
+| `social.report.ready` | the officer, for information, when the HoD check passes. Sending is the four's (SCP-Q20); the report waits in the HoD's and GM's Needs you. The client hears through PV7-04a's existing notice when it is sent |
 
 `follow_up` is limited to once per holder per post per 24 hours (409 `follow_up_too_soon`, `retryAfterSeconds`). It is refused when the caller holds the post or nobody does (409 `nobody_to_follow_up`).
 
@@ -12479,7 +12490,7 @@ The owner's words: "same right as the person login or ask. so if the one that as
 
 ### 63.16 DEMO_MODE
 
-`lib/demoSocial.ts` answers every route of this section in the server's order of checks, from the fixture twin, with the personas of plan §11.1. That includes `social-design@gaiada.com` for the in-team designer, and three invented clients: one in-team, two on Creatives. Its store covers:
+`lib/demoSocial.ts` answers every route of this section in the server's order of checks, from the fixture twin, with the personas of plan §11.1. That includes `social-design@gaiada.com` for the in-team designer, the existing superadmin and owner identities as the other two of the four approvers (SCP-Q19), and three invented clients: one in-team, two on Creatives. Its store covers:
 - all twelve statuses and the six change cases;
 - a blocked post, suggestions waiting, and a rescheduled post back with the client;
 - a live post with metrics, one boost inside and one over the monthly budget;
@@ -12493,12 +12504,12 @@ Tests that seed "a few days after today" pin the clock to mid-month.
 | Page | URL | Registry row key |
 |---|---|---|
 | Home (the feed) | `{D}`, the Overview, laid out as the design's feed (existing URL) | `overview` (existing) |
-| Team dashboard (HoD, GM) | `{D}?view=team`, the Overview's Team view (existing URL), and a block on Reports › Team (`/reports/team?unit={dept}`, existing) | `overview` (existing). The menu pins the Team view as a head-gated view of `{D}`, not a separate row. The second block is on the shared `reports` row's `team` tab (existing) |
+| Team dashboard (the four approvers, 63.19) | `{D}/dashboard`, and a block on Reports › Team (`/reports/team?unit={dept}`, existing) | `dashboard` (new), gated by `canLeadSocial`. The second block is on the shared `reports` row's `team` tab (existing) |
 | Post page (a drawer over any list) | `{D}/posts/[postId]`; a new post `{D}/posts/new?cycle=` | None: opened from lists, never a menu row |
 | Client page (Profile: five tabs and the brand book) | `{D}/profile/[engagementId]?tab=plan\|stories\|preview\|calendar\|list\|brand`: Plan, Stories, Feed preview, Calendar, List, and the Client profile (the brand book) | `profile` (new) |
 | Messages | `{D}/messages` | `messages` (new) |
 | Allocation | `{D}/allocation` | `allocation` (new) |
-| Settings (HoD, GM) | `{D}/settings` | `settings` (new) |
+| Settings (the four approvers) | `{D}/settings` | `settings` (new), gated by `canLeadSocial` |
 | Design queue | `{D}/design-queue` | `design-queue` (new) |
 | Boosting | `{D}/boosts` | `boosts` (new) |
 | Social reports (63.18) | `{D}/social-reports` (the list) and `{D}/social-reports/[reportId]` (one report, in the same area) | No row: the `social` tab, "Social reports", that `Workspace.reports` adds to the shared `reports` row |
@@ -12508,13 +12519,20 @@ Tests that seed "a few days after today" pin the clock to mid-month.
 
 `{D}` is `/departments/[deptId]` of the Social Media department. Each new page needs its `AREA_RULES` entry.
 
-- **Row keys are unique inside a workspace.** The shell lights, pins and strips rows by key, and the Social skin's pinned rows (plan §6.2) name these keys. The six new rows (`messages`, `profile`, `settings`, `allocation`, `design-queue`, `boosts`) are free in the workspace today; Admin's `settings` row is a separate list. Calendar is not a new row: `calendar` is the You block's row, and the posts calendar stays `publish` › `calendar`. Reports is not one either: `reports` is the shared Performance row.
+- **Row keys are unique inside a workspace.** The shell lights, pins and strips rows by key, and the Social skin's pinned rows (plan §6.2) name these keys.
+  - The seven new rows (`messages`, `profile`, `settings`, `allocation`, `design-queue`, `boosts`, `dashboard`) are free in the workspace today. Admin's `settings` row is a separate list.
+  - Calendar is not a new row: `calendar` is the You block's row, and the posts calendar stays `publish` › `calendar`.
+  - Reports is not one either: `reports` is the shared Performance row.
+- **`settings` and `dashboard` show to the four approvers only.** Both rows gate on `canLeadSocial` (PERMISSION §53.4), the one UI gate kind SCP-Kc builds from it.
+  - The gate hides pages and never grants anything.
+  - The Settings page itself is readable by the team (`GET settings`, 63.4) and editable only with `plan` (`canPlan`).
+  - The dashboard's read is `plan` itself (63.19), so anyone else who opens `{D}/dashboard` gets the page's 403.
+- **The Overview's Team view** (`{D}?view=team`, DW-3) stays as it is, the HoD's, and SCP adds nothing to it. The Team dashboard is its own page, because the Team view reaches only the unit's own heads: `canSwitchToTeam` is `isLeadOf` the Social Media unit or its ancestors, which leaves out the GM's sibling unit, the owner and the superadmin.
 - **Social reports never use `{D}/reports`.** That page (`departments/[deptId]/reports/page.tsx`) is SEO's client reports (SM-22, `search_reports`), and the one file serves every department.
 - **Saved** opens the Asset Library until SCP-5e. SCP-Kc declares `assets` in the social-media toolkit (`lib/deptToolkits.ts`, the tab's source through `fromToolkit`). No permission changes: the creative-asset routes authorise as the generic `file` kind (§35). It is a registry change, not a skin change, so the tab shows in the Standard menu too.
 - **Feed preview** (`tab=preview`, SCP-3d) is the client's grid with drag-to-swap: it reads `GET engagements/:engagementId/feed-preview` and swaps through `POST engagements/:engagementId/feed-preview/swap` (63.10). A swap that moves an approved or scheduled post asks the client again (SCP-Q13), and the page says so before the drop.
-- **Settings** is the HoD's and GM's row in the menu (plan §6.2), behind the registry gate SCP-Kc picks. The page itself is readable by the team (`GET settings`, 63.4) and editable only with `plan` (`canPlan`; SCP-Q18, PERMISSION §53.6), so the row's gate hides a page and never grants an edit.
 
-### 63.18 The monthly report (SCP-5a, in the first release by SCP-Q5)
+### 63.18 The monthly report (SCP-5a, in the first release by SCP-Q5; SCP-Q20 ruled)
 
 The report is the existing `social_reports` row (SMM-23, §19), kind `monthly`, one per engagement and month (`period` `YYYY-MM`). Its four states are the design's: Draft (`draft`), HoD check (`in_review`), Ready (`approved`), Sent (`delivered`). Sending renders the PDF and publishes it to the client's portal reports, as today (PV7-04a, §55). There is no social reports page today: the list is the new `{D}/social-reports` and a report is `{D}/social-reports/[reportId]`, the Reports row's "Social reports" tab (63.17); never `{D}/reports`, which is SEO's.
 
@@ -12522,10 +12540,10 @@ The report is the existing `social_reports` row (SMM-23, §19), kind `monthly`, 
 - **One insight and one suggestion per area** (`notes`: followers, engagement, audience) and an **action plan** (`action_plan`), both editable while `draft` or `in_review`.
 - **Numbers from metrics:** the existing frozen snapshot, which now includes manual and simulated metric rows, and the month's boosts as the client's own ad spend (PV7-Q3: never our fees). Any simulated input sets `simulated`, and the page and PDF carry the SIMULATED watermark.
 - **"Draft with AI"** drafts the narrative, the three notes and the action plan from the snapshot and the client's own brand corpus (the brand-draft lookup, `queryBrandKnowledge`, DW-D31). It falls back to a plain template when the gateway is down, as `create` does today (`draftedVia: 'ai'|'template'`).
-- **Who does what:**
-  - The officer drafts, edits and submits (`social_report` · `create`, `update`: unchanged).
-  - **The HoD check is the social approvers'** (`approve`: the seat approvers, `social_manager`, `platform_admin`; no longer `manager` or `company_admin`, the same rule as SCP-Q9 and SCP-Q18; PERMISSION §53.7).
-  - **Sending is the officer's or an approver's** (`deliver`: the officer rule plus the social approvers).
+- **Who does what** (SCP-Q20, ruled: "approved (HoD check) and sent only by the four approvers"):
+  - The officer drafts, edits and submits it for the HoD check (`social_report` · `create`, `update`: unchanged). The officer never sends it.
+  - **The HoD check is the four's** (`approve`: the HoD and GM seats, the owner, the superadmin; no longer `manager`, `company_admin` or `social_manager`; PERMISSION §53.7). Both answers are the check: approving, and sending back to `draft`, which now needs `approve` instead of `update`.
+  - **Sending is the four's only** (`deliver`, the same holders).
 
 **Routes** (all under the module; the existing codes and statuses stay as SMM-23 built them):
 
@@ -12534,18 +12552,20 @@ The report is the existing `social_reports` row (SMM-23, §19), kind `monthly`, 
 | `POST engagements/:engagementId/reports` | `create` (unchanged) | `kind: 'monthly'` also drafts `notes` and `actionPlan`. Unchanged idempotency: an existing report for the engagement, period and kind is returned (`draftedVia: 'existing'`) |
 | `GET reports?engagementId=&status=&period=` | `read` (unchanged) | Adds `period`, `notesComplete: boolean` and `simulated` to each row |
 | `GET reports/:id` | `read` (unchanged) | The document gains `notes`, `actionPlan` and `simulated`, and the row gains `canApprove`, `canDeliver` |
-| `PATCH reports/:id` | `update` (unchanged) | Gains `notes` and `actionPlan`. 400 `{field: 'notes'}` or `{field: 'actionPlan'}` when outside 63.1's shapes. The existing status moves stay: `in_review` from `draft` (submit), `draft` from `in_review` (send back) |
+| `PATCH reports/:id` | `update` (unchanged); sending back needs `approve` | Gains `notes` and `actionPlan`. 400 `{field: 'notes'}` or `{field: 'actionPlan'}` when outside 63.1's shapes. The existing status moves stay: `in_review` from `draft` (submit, `update`), and `draft` from `in_review` (send back: now `approve`, the four, else the generic 403) |
 | `POST reports/:id/ai-draft` | `update` | New. Answers `{narrativeMd, notes, actionPlan, draftedVia}` as a proposal; nothing is saved until a `PATCH`. Only while `draft` or `in_review` (400 `report_not_editable`) |
-| `POST reports/:id/approve` | `approve`, now the social approvers | `in_review` to `approved` (Ready), as today. 400 `notes_incomplete` when an area lacks its insight or suggestion |
-| `POST reports/:id/deliver` | `deliver`, now the officer and the social approvers | `approved` to `delivered` (Sent): the PDF, the deliverable and the PV7-04a publication, as today |
+| `POST reports/:id/approve` | `approve`, now the four | `in_review` to `approved` (Ready), as today. 400 `notes_incomplete` when an area lacks its insight or suggestion |
+| `POST reports/:id/deliver` | `deliver`, now the four (no longer the officer, SCP-Q20) | `approved` to `delivered` (Sent): the PDF, the deliverable and the PV7-04a publication, as today |
 
 The SMM-23 refusals stay as built (all 400, per the module's `refuse()`): `invalid_kind`, `internal_client_no_reports`, `cannot_submit_from_this_status`, `cannot_send_back_from_this_status`, `invalid_status_transition`, `report_not_editable`, `status_changed_concurrently`, `cannot_approve_from_this_status`, `internal_client_not_deliverable`, `cannot_deliver_from_this_status`; and 503 `pdf_render_not_configured`, `pdf_render_failed`. New: 400 `notes_incomplete`. The fixture's `reports` block lists the states, moves, gates and codes.
 
 **Reports due.** A monthly report is due on the engagement's `report_due_day` of the month after its period. Until it is `delivered`, it shows in the officer's Needs you (63.7) and on the Team dashboard's needs attention (63.19).
 
-### 63.19 The Team dashboard (SCP-5d, in the first release by SCP-Q5)
+### 63.19 The Team dashboard (SCP-5d, in the first release by SCP-Q5; for the four approvers by SCP-Q19)
 
-**`GET team?month=YYYY-MM`** (`social_post` · `read`). One read for the Overview's Team view and the block on Reports › Team:
+**The page** is the Social Media workspace's own `{D}/dashboard` (registry row `dashboard`, 63.17), for the four approvers. A block of it sits on Reports › Team. The Overview's Team view is not used (63.17).
+
+**`GET team?month=YYYY-MM`** (`social_engagement` · `plan`: the four of 63.2, with `approverIds` fed). Anyone else gets 403 `not_a_social_approver`, and the block on Reports › Team then hides. One read for the page and the block:
 
 ```
 { month,
@@ -12562,16 +12582,15 @@ The SMM-23 refusals stay as built (all 400, per the module's `refuse()`): `inval
 ```
 
 - **Where work waits longest** is counted against the holder of each post (fixture `holders`), never the officer for time the post spent with someone else (plan §4.4). `stepAverages` comes from the month's stage-action activity rows (the time between a post entering and leaving each step, in working days).
-- **The activity privacy rules (DW-4: BFF §44, PERMISSION §38c).** Every per-person row (`workload`, `waits[].people`) passes the shared person-axis gate, `assertPersonAxisReadAllowed`:
-  - yourself;
-  - the `unrestricted` or `company_wide` tier;
-  - a head for the people in their led scope, read from the company's own lead seats (DW-10g-2);
-  - anyone else's row is left out, and `personRowsLimited` says so.
+- **Per-person data: the four count as the Social Media unit's heads** on this read (SCP-Q19).
+  - Every per-person row (`workload`, `waits[].people`) of a person in the Social Media unit, or a unit under it, is shown to them.
+  - A person outside it, such as a Creatives designer or the GM's own row, passes the shared DW-4 person-axis gate, `assertPersonAxisReadAllowed` (BFF §44, PERMISSION §38c): yourself; the `unrestricted` or `company_wide` tier; or a head for the people in their led scope, read from the company's own lead seats (DW-10g-2).
+  - Any other row is left out, and `personRowsLimited` says so.
+  - The rows carry only what DW-4 lets a head see. Anything DW-4 withholds stays out.
 
   The team-level sections (needs attention, clients, role totals, step averages, estimates not set) carry no person and are not narrowed.
 - **No last sign-in.** It is not part of the dashboard: it is IT's data (DW-7h), and plan §10's privacy note holds.
-- **A GM without a company-wide tier** sees the team-level sections and the per-role totals, but no per-person rows outside their own led scope. That is the DW-4 rule, applied as it stands.
-- **Agents** read it through `social.teamDashboard`, as the person who asked, so the same narrowing applies.
+- **Agents** read it through `social.teamDashboard`, as the person who asked, so the same rules apply.
 
 ### 63.20 Later, not contracted here: the rest of SCP-5
 
@@ -12580,11 +12599,12 @@ The weekly report (5b: the `weekly` kind on `social_reports`), ideas for next mo
 ### 63.21 Proofs required (Linux CI gate, real Postgres and Cerbos; a skip is not a pass)
 
 - **The fixture, both sides.** Every scenario runs green against the nest stage machine (pure) and the HTTP routes, and against the UI demo store. Every refusal code is reachable. The phase, holder and engine-status mappings are pinned.
-- **Maker/checker:** the author and the client's officer are refused `proofread` and `approve` (403 `author_cannot_approve`), also when an agent drives the call for them and also as `platform_admin`; a second approver passes.
+- **Maker/checker:** the author and the client's officer are refused `proofread` and `approve` (403 `author_cannot_approve`), also when an agent drives the call for them, and also as the owner and as `platform_admin`; another of the four passes.
 - **Who acts:**
   - an officer acts only on their clients' posts;
-  - a Web Dev head holding only `manager` cannot approve, plan, record money or pass the report check, and neither can a `company_admin`;
-  - a seat holder of the GM unit and of the Social Media unit can, and so can `social_manager`; a seat on another company's same-id unit cannot;
+  - a Web Dev head holding only `manager`, a `company_admin` and a `social_manager` holder cannot approve, plan, record money, create a pipeline post, or check, send back or send a report;
+  - each of the four can: a Social Media seat holder, a GM-unit seat holder, an `owner` (through the mirrors) and `platform_admin`. A seat on another company's same-id unit cannot, and neither can an `owner` of another company;
+  - the owner cannot block, record a client's post decision or run a boost (the team's own steps);
   - a Creatives designer acts only on posts of a request whose task names them; an in-team designer acts only on `in_team` posts;
   - unattended automation and bot principals are refused every new action (403 `automation_cannot_act`);
   - an agent acting for an officer, through the OBO envelope, can do exactly what the officer can, and its activity rows carry `via.agent`.
@@ -12609,11 +12629,27 @@ The weekly report (5b: the `weekly` kind on `social_reports`), ideas for next mo
   - a viewer contact gets `view_only`;
   - amounts round-trip as integers.
 - **The portal:** another client's post, file or decision is 404; a team comment never appears in the portal; a pipeline post's review refuses the per-variant decide.
-- **The monthly report:** the four states with their gates; `notes_incomplete` blocks the HoD check; "Draft with AI" saves nothing; the PDF carries the SIMULATED watermark when a number was simulated; sending publishes through PV7-04a.
-- **The Team dashboard:** a head sees their unit's people and no one else's; a member sees only their own row; the team-level sections are the same for every reader; no last sign-in anywhere.
+- **The monthly report:**
+  - the four states with their gates;
+  - the officer submits, but cannot approve, send back or send (SCP-Q20); a `company_admin` cannot approve or send; the owner can;
+  - `notes_incomplete` blocks the HoD check;
+  - "Draft with AI" saves nothing;
+  - the PDF carries the SIMULATED watermark when a number was simulated;
+  - sending publishes through PV7-04a.
+- **The Team dashboard:**
+  - the four read it and nobody else does (403 `not_a_social_approver`);
+  - the four see every Social Media unit person's row, and a person outside the unit only through the DW-4 gate;
+  - the team-level sections are the same for every reader;
+  - no last sign-in anywhere;
+  - the Overview's Team view is unchanged.
+- **The publish decision:** a `company_admin` who is not one of the four cannot decide a pipeline post's publish approval (`social_approver_required`), and neither can the post's author or officer; the filer gets `self_approval` (PV-D46).
 - **Health:** the golden table of 63.5.
 - **Speed:** the feed at 600 posts (SCP-1d).
-- **The pages:** each new page sits in one area (the DW-1c test); the row and tab keys of 63.17 are unique in the workspace (the registry test); `{D}/reports` still serves SEO's reports, unchanged.
+- **The pages:**
+  - each new page sits in one area (the DW-1c test);
+  - the row and tab keys of 63.17 are unique in the workspace (the registry test);
+  - `{D}/reports` still serves SEO's reports, unchanged;
+  - the `settings` and `dashboard` rows show under `canLeadSocial` exactly: to each of the four personas, and not to a company admin, a Web Dev head or an officer.
 - **The migration suite** proves:
   - every CHECK refuses its bad combination and admits its good one, including the NULL cases above;
   - the plain wall of the two boost tables;
@@ -12623,7 +12659,7 @@ The weekly report (5b: the `weekly` kind on `social_reports`), ideas for next mo
 - **Deploy:** the migrations run on boot. Restart Cerbos (the live sidecar and the test container) and probe it:
   - the officer's `author` on their own post is allowed, and on another's denied;
   - the author's `approve` is denied as `platform_admin`;
-  - a `manager`'s `plan` is denied and a seat approver's allowed;
+  - a `company_admin`'s and a `manager`'s `plan` are denied; a seat approver's and an `owner`'s are allowed;
   - a client contact's `approve_spend` is allowed and a staff member's denied.
 
 ### 63.22 The owner's rulings this contract implements (2026-10-26, plan §2)
@@ -12634,8 +12670,10 @@ The weekly report (5b: the `weekly` kind on `social_reports`), ideas for next mo
 | SCP-Q13 | The client approves the content, the date, the time and the placement; any change after approval asks the client again | 63.1, 63.3.5, 63.10, 63.17 |
 | SCP-Q14 | Only contacts with signing capability agree boost money | 63.11 |
 | SCP-Q15 | A budget may be lowered down to `committed`; a stopped boost counts its spend | 63.11 |
-| SCP-Q16 | The HoD or GM files a publish through the publisher, and a second person decides it | 63.10 |
+| SCP-Q16 | The HoD or GM files a publish through the publisher, and a second person decides it (refined by SCP-Q19: any of the four files) | 63.10 |
 | SCP-Q17 | An agent acts with the rights of the person who asked | 63.15 |
-| SCP-Q18 | Only the social approvers edit allocations, deadlines and settings, and record or change boost budgets | 63.4, 63.5, 63.11; PERMISSION §53.6 |
+| SCP-Q18 | Only the social approvers edit allocations, deadlines and settings, and record or change boost budgets (refined by SCP-Q19) | 63.4, 63.5, 63.11; PERMISSION §53.6 |
+| SCP-Q19 | The social approvers are exactly four: the Social Media unit head and the GM (lead seats), the owner and the superadmin. A company admin is not one, a `social_manager` grant no longer makes one, and no grant can | 63.2, 63.4, 63.6.1, 63.10, 63.11, 63.17, 63.19; PERMISSION §53.4 |
+| SCP-Q20 | A client's monthly report is approved (the HoD check) and sent only by the four; the officer writes and submits it | 63.18; PERMISSION §53.7 |
 
-No question is open.
+**Open, with its default in force:** SCP-Q21 (plan §2), who decides a pipeline post's publish approval (63.10). Until the owner rules, the decider needs today's D14 decide right and must be one of the four.
