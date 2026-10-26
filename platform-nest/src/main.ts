@@ -40,12 +40,8 @@ import { assertAuthModeBootSafe } from "./auth/dev-mode-guard";
 import { getPool } from "./db";
 import { seedClockFromDb } from "./events/hlc";
 import { registerModule, validateModulePermissions } from "./modules/registry";
-import { agencyModule } from "./modules/agency";
-import { pmModule } from "./modules/pm";
-import { itModule } from "./modules/it";
-import { financeModule } from "./modules/finance";
+import { COMPILED_IN_MODULES } from "./modules/compiled-in-modules";
 import { FinanceErrorFilter } from "./modules/finance/finance-error.filter";
-import { monitoringModule } from "./modules/monitoring";
 import { registerDriver } from "./modules/monitoring/drivers/registry";
 import { httpDriver, keywordDriver } from "./modules/monitoring/drivers/http";
 import { heartbeatDriver } from "./modules/monitoring/drivers/heartbeat";
@@ -55,17 +51,6 @@ import { rebuildTargets, startSiteBuildsLoop } from "./modules/webdev/site-build
 import { sweepScheduledRebuilds } from "./modules/webdev/scheduled-rebuilds.service";
 import { provisionReconcileStartLine, startProvisionReconcileLoop } from "./modules/webdev/provision-reconcile-loop";
 import { siteDnsTaskStartLine, startSiteDnsTaskLoop } from "./modules/webdev/domain-dns-task.service";
-import { invoiceModule } from "./modules/invoice";
-import { clientsModule } from "./modules/clients";
-import { knowledgeModule } from "./modules/knowledge";
-import { automationConsoleModule } from "./modules/automation-console";
-import { hrModule } from "./modules/hr";
-import { lmsModule } from "./modules/lms";
-import { socialModule } from "./modules/social";
-import { assistantModule } from "./modules/assistant";
-import { searchModule } from "./modules/search";
-import { reportsModule } from "./modules/reports";
-import { webdevModule } from "./modules/webdev";
 // WSK-40 — the WebDesk editorial assertion signer (Ed25519, file-mounted key). Registration only; see
 // the call site below.
 import { wireWebdeskEditorialSigner } from "./modules/webdev/webdesk-editorial-signer";
@@ -486,11 +471,12 @@ async function bootstrap(): Promise<void> {
   // Seed the HLC from the greatest clock this origin_site has already committed, so a restart
   // never mints an HLC that regresses (sync-engine-revision §2, D3 #4).
   await seedClockFromDb(getPool());
-  registerModule(agencyModule);
-  registerModule(pmModule);
-  registerModule(itModule);
-  registerModule(financeModule);
-  registerModule(monitoringModule);
+  // The compiled-in module list lives in ONE file (modules/compiled-in-modules.ts) that the impact and
+  // inventory tests also read, so a module cannot be registered here yet skipped by those audits.
+  // PRV-02/SMM-02 notes: registering a module contributes its permissions, rollup metrics and McpToolDefs
+  // to `GET /mcp/tool-defs`; it does NOT make a tool reachable by automation (hub allowlist + Cerbos
+  // `mcp_tool` row) nor a module reachable for a tenant (enabled_modules or an ACTIVE service_assignment).
+  for (const m of COMPILED_IN_MODULES) registerModule(m);
   // Registering the MODULE does not register DRIVERS. Kept explicit rather than folded into the
   // module contract: a kind with no driver reports available:false and refuses at dispatch, so the
   // failure is visible either way - but this line is what makes http/keyword/heartbeat runnable,
@@ -498,19 +484,9 @@ async function bootstrap(): Promise<void> {
   registerDriver(httpDriver);
   registerDriver(keywordDriver);
   registerDriver(heartbeatDriver);
-  registerModule(invoiceModule);
-  registerModule(clientsModule);
-  registerModule(knowledgeModule);
-  registerModule(automationConsoleModule);
-  registerModule(hrModule);
-  registerModule(lmsModule);
-  registerModule(assistantModule);
-  registerModule(searchModule);
-  registerModule(reportsModule);
   // PRV-02: contributes the `webdev.provisionSite` McpToolDef to `GET /mcp/tool-defs` (nothing is
   // hardcoded hub-side). Registering the module does NOT make the tool reachable by automation —
   // that needs the hub's AUTOMATION_ALLOWLIST entry and its Cerbos `mcp_tool` row, both PRV-03's.
-  registerModule(webdevModule);
   // WSK-40: bind the real editorial-assertion signer into WSK-66's seam when its key file is mounted.
   // Absent or invalid key → WSK-66's refusing default stays (every WebDesk content command answers 503
   // unsent) and one boot log line says why. Reads one local file; no network; never throws, so a
@@ -520,7 +496,6 @@ async function bootstrap(): Promise<void> {
   // against the 0106 catalog rows immediately below), its rollup metrics, and its McpToolDefs to
   // `GET /mcp/tool-defs` — nothing is hardcoded hub-side. It does NOT make the module reachable for
   // any tenant: that still needs 'social' in enabled_modules or an ACTIVE service_assignment.
-  registerModule(socialModule);
   // IAM-01d: fail-closed drift guard — every module's declared ModuleContract.permissions must
   // resolve to a class='grantable' row in the DB catalog (IAM-01c, migration 0093), or boot is
   // refused outright. Runs AFTER every registerModule() call above (needs the full registered set)

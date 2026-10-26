@@ -15,35 +15,18 @@
 //
 // ⚠ WHY THIS REGISTERS THE WHOLE ESTATE. `mcp-tools.controller.test.ts` registers four modules
 // because that is all its assertions need. An audit that did the same would pass while leaving ten
-// modules unexamined — the exact shape of "green because we didn't look". This file mirrors main.ts's
-// registration block instead, and asserts the count so a NEW module cannot be added to main.ts and
-// quietly skipped here.
+// modules unexamined — the exact shape of "green because we didn't look". This file reads the same
+// COMPILED_IN_MODULES list main.ts registers from, so a NEW module cannot be added and quietly
+// skipped here.
 import { describe, it, expect, beforeAll } from "vitest";
 import { resetModules, registerModule, allModules } from "./registry";
 import { allCoreTools, resetCoreTools, registerAllCoreTools } from "../core/core-tools";
 import type { McpToolDef } from "./contract";
+import { COMPILED_IN_MODULES } from "./compiled-in-modules";
 
-import { agencyModule } from "./agency";
-import { pmModule } from "./pm";
-import { itModule } from "./it";
-import { monitoringModule } from "./monitoring";
-import { invoiceModule } from "./invoice";
-import { clientsModule } from "./clients";
-import { knowledgeModule } from "./knowledge";
-import { automationConsoleModule } from "./automation-console";
-import { hrModule } from "./hr";
-import { assistantModule } from "./assistant";
-import { searchModule } from "./search";
-import { reportsModule } from "./reports";
-import { webdevModule } from "./webdev";
-import { socialModule } from "./social";
 
-/** Mirrors main.ts's registration block. Kept as a list so the count can be asserted. */
-const ALL_MODULES = [
-  agencyModule, pmModule, itModule, monitoringModule, invoiceModule, clientsModule,
-  knowledgeModule, automationConsoleModule, hrModule, assistantModule, searchModule,
-  reportsModule, webdevModule, socialModule,
-];
+// ONE source of truth: the same list main.ts registers.
+const ALL_MODULES = COMPILED_IN_MODULES;
 
 let tools: McpToolDef[];
 
@@ -64,7 +47,10 @@ describe("AGN-5 · every write is impact-classified in the registry", () => {
   it("registers the whole estate — an audit over a subset is 'green because we didn't look'", () => {
     // Positive control, and a tripwire: if main.ts gains a module and this list does not, the count
     // drifts and this fails, which is the only way a new module cannot silently escape the audit.
-    expect(allModules().length, "module count drifted from main.ts's registration block").toBe(14);
+    // The list is imported from compiled-in-modules.ts, the file main.ts registers from, so drift is
+    // structurally impossible; this still proves every entry actually registered (no key collision).
+    expect(allModules().length, "a compiled-in module failed to register").toBe(COMPILED_IN_MODULES.length);
+    expect(COMPILED_IN_MODULES.map((m) => m.key)).toEqual(expect.arrayContaining(["finance", "lms"]));
     expect(tools.length, "no tools collected — the audit below would pass vacuously").toBeGreaterThan(80);
   });
 
