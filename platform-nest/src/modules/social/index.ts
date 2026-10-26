@@ -195,6 +195,9 @@ export const socialModule: ModuleContract = {
     // approverCheck (core/approval-executables.ts) asks `social_post · approve` on the post. The other pipeline keys are
     // declared by the tickets that build their routes (this file's rule: no key before the endpoint that honours it).
     { key: "social.post.approve", description: "Approve a client's pipeline post (the HoD approval and the final check); the four social approvers only" },
+    // SCP-1c — `PUT settings` and `PUT cycles` (pipeline/cycles.controller.ts) ask `social_engagement · plan`; so do the allocation and the Team
+    // dashboard when those tickets build their routes. The four social approvers only.
+    { key: "social.engagement.plan", description: "Plan a client's social work: the deadline table and the settings (and, with their tickets, the allocation and the Team dashboard); the four social approvers only" },
     // SMM-22 — the usage panel's own read gate. Already a catalog row + Cerbos action (0106 /
     // resource_social_ledger.yaml, forward-seeded by SMM-30 exactly like social.report.*/
     // social.client_review.* were) — this is the first ticket whose endpoint
