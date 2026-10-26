@@ -185,6 +185,15 @@ export async function runStageAction(principal: Principal, req: StageRequest): P
   const { pre, state, resource, cerbos, principalFacts, base, replay, callerId } = await prepareStage(principal, req);
   if (replay) return { postId, applied: replay, out: emptyOutput() };
 
+  // BFF §63.3.5: approving a `creatives` client's post for design may open the cycle's month request, which also needs
+  // `work_request` · `create` for the acting approver (any member holds it). Judged with the other authorization, before
+  // the lock, and audited by `authorize()` itself.
+  if (action === "approve_for_design" && pre.row) {
+    const src = await withTenants([tenantId], (c) => c.query<{ creative_source: string }>(
+      `SELECT creative_source FROM social_engagements WHERE tenant_id = $1 AND id = $2`, [tenantId, pre.row!.engagement_id]), SOCIAL);
+    if (src.rows[0]?.creative_source === "creatives") await authorize(principal, { kind: "work_request", tenantId }, "create");
+  }
+
   // Network work before the lock: cancel a queued dispatch at the publisher (unschedule, reschedule).
   const cancelled = (action === "unschedule" || action === "reschedule") && state?.pipelineStatus === "scheduled"
     ? await cancelQueuedDispatchesBeforeTx(tenantId, postId)

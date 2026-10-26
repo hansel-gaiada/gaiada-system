@@ -1034,6 +1034,28 @@ describe("SCP decide · the column changes", () => {
     expect(probe(a)).toEqual({ action: "approve_for_design", allowed: false, reason: "author_cannot_approve" });
   });
 
+  it("gate mode runs every common step before the action's own guards, the body included, and needs no facts", () => {
+    // the body is judged (step 11)…
+    const noNote = baseline("return_copy");
+    delete noNote.params.note;
+    expect(decide({ ...noNote, facts: {}, mode: "gate" })).toMatchObject({ ok: false, code: "missing_field", field: "note" });
+    // …Cerbos before it (step 8)…
+    const denied = baseline("return_copy");
+    denied.cerbos.proofread = false;
+    delete denied.params.note;
+    expect(decide({ ...denied, facts: {}, mode: "gate" })).toMatchObject({ ok: false, code: "not_a_copywriter" });
+    // …a replay answers alreadyApplied…
+    const rep = baseline("start_draft");
+    rep.post!.lastActionId = UUID_A;
+    rep.actionId = UUID_A;
+    expect(decide({ ...rep, facts: {}, mode: "gate" })).toMatchObject({ ok: true, alreadyApplied: true });
+    // …and the action's own guards wait for the transaction: a failing one passes the gate and refuses in apply mode.
+    const guard = baseline("final_approve");
+    guard.facts.designCount = 0;
+    expect(decide({ ...guard, facts: {}, mode: "gate" })).toMatchObject({ ok: true, alreadyApplied: false, set: {} });
+    expect(decide(guard)).toMatchObject({ ok: false, code: "design_missing" });
+  });
+
   it("a missing fact is the caller's bug, not a pass", () => {
     const c = baseline("final_approve");
     delete c.facts.unstoredDesignIds;
