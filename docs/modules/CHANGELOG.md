@@ -11,6 +11,29 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.174.0` - M5-W1d: the fenced `contributor` principal for freelance writers (WSK-D84; PERMISSION-CONTRACT §27.6, BFF §27) (2026-10-27) - PROTOTYPED
+
+- **`users.kind` gains `contributor`.** Migration `202610270900_contributor_principal.sql` rebuilds the CHECK from the live definition (it refuses to run unless the four existing values are there, and re-reads after the swap). It adds:
+  - the anchor table `editorial_contributors`: at most 180 days, FORCE RLS, tenant wall plus `principal_lookup`, never `company_memberships`;
+  - the invite table `editorial_contributor_invites`;
+  - five guard triggers (no membership, no client contact, a contributor holds only writer, translator and SEO-reviewer grants);
+  - a closing self-check.
+- **Invite, accept, end.**
+  - Staff routes are `GET|POST /api/:t/modules/webdev/editorial/contributors[/invite|/:userId/end]`, as Cerbos `webdesk_collection:manage_editorial`, the publisher tier.
+  - The public accept is `POST /api/editorial-invites/accept` (token in the body). The token is single-use and stored only as a hash, like PGL-10's.
+  - Accept creates the Keycloak account in group `contributors` with `CONFIGURE_TOTP` required.
+  - End revokes the grants, bumps the session, disables the login and cuts the anchor.
+  - Client and contributor invites can never cross.
+- **The HTTP fence** (`AuthGuard`, `enforceContributorFence`):
+  - A contributor reaches only handlers marked `@ContributorRoute()` (23 of 1182 routes, pinned by an inventory test), and only at a real `high` assurance; `linked` and the simulated step-up are refused.
+  - Every other route answers 403 `contributor_route_forbidden`; a DB test drives every unmarked route.
+- **Cerbos, the second wall:** contributor DENYs on `assistant_thread`, `assistant_memory`, `agent_run`, `automation_approval`, and the editorial actions of `webdesk_content_item`, `webdesk_collection` and `webdesk_media_asset`. **Media upload stays denied until M5-W1q** builds the quarantine. Cerbos must be restarted and probed after deploy.
+- **Also:** `oidc.ts` lets an IdP login link to a contributor row (human kinds only, as for clients). `/api/me` now returns `kind`.
+- **Tests:**
+  - five new suites: `contributor-principal.db` (27), `contributor-fence.db` (6), `editorial-contributors` (10), `contributor-route` (10), `contributor-invites` (10). CI 40363655248 green on `13c88ac1`;
+  - `cerbos compile --tests` on sumopod: the writers'-room matrix 5377/5377. The 10 failures in `search_visitors_test.yaml` are pre-existing on main and not this change.
+- **Not built yet:** W1e (the WebDesk `xc` claim), W1f (the contributor shell and the accept page), W1g (the real Keycloak group, OTP and AMR mapper; until then no real contributor reaches high assurance), and W1q.
+
 ### platform-nest `0.173.0` - M6-P6p: a delivered domain's DNS records become a Web Dev task that the ERP's own DNS check closes (WSK-D89 (4)) (2026-10-27) - PROTOTYPED
 
 - **When a site's DNS checklist first exists** (after `claimProvisionedSiteDomain` or `bindSiteDelivery`), `syncSiteDnsTask` creates ONE `pm_tasks` row in the site's project, with PM's own `createPmTaskInTx`.

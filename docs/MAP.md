@@ -173,7 +173,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 329 (121 legacy `NNNN_`, 208 timestamped)
+- Applied files on disk: 330 (121 legacy `NNNN_`, 209 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -265,6 +265,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/modules/module-catalog.controller.ts` |
 | `/api` | `platform-nest/src/modules/monitoring/monitoring.controller.ts` |
 | `/api` | `platform-nest/src/modules/pm/pm.controller.ts` |
+| `/api` | `platform-nest/src/modules/webdev/editorial-contributors.controller.ts` |
 | `/api` | `platform-nest/src/modules/webdev/webdesk-client-website.controller.ts` |
 | `/api` | `platform-nest/src/payments/redrive.controller.ts` |
 | `/api` | `platform-nest/src/payments/simulator-portal.controller.ts` |
@@ -310,6 +311,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/webdev/content` | `platform-nest/src/modules/webdev/webdesk-editorial-grants.controller.ts` |
 | `/api/:tenantId/modules/webdev/content` | `platform-nest/src/modules/webdev/webdesk-site-clients.controller.ts` |
 | `/api/:tenantId/modules/webdev/control` | `platform-nest/src/modules/webdev/webdesk-control.controller.ts` |
+| `/api/:tenantId/modules/webdev/editorial/contributors` | `platform-nest/src/modules/webdev/editorial-contributors.controller.ts` |
 | `/api/:tenantId/notices` | `platform-nest/src/core/dept-notices.controller.ts` |
 | `/api/:tenantId/reports` | `platform-nest/src/modules/reports/reports.controller.ts` |
 | `/api/:tenantId/reports/group` | `platform-nest/src/modules/reports/group-report.controller.ts` |
