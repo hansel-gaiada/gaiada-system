@@ -204,6 +204,8 @@ P2 is not broken down here. Recommended split: P2-core (the consumer, gate, ledg
 
 ## 11. Open questions for the owner (each default holds if it goes unanswered)
 
+**ANSWERED 2026-10-13: the owner accepted every default below. Recorded as WSK-D87 (2026-10-26).**
+
 | # | Question | Default |
 |---|---|---|
 | O1 | The stage list and labels: enquiry, contacted, qualified, proposal, won, lost? | As listed. Adding one later is a data row, not a CHECK rebuild |

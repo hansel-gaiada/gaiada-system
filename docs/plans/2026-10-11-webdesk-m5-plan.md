@@ -98,9 +98,9 @@ Cerbos restart or a deploy. Release numbers are claimed one step at a time.
 | ~~O-1~~ | **Settled 2026-10-11: Umami goes to `sumopod`** (D66 amended), so it no longer waits on M4's CPU budget for `gda-aicenter` (measured: `e2-highmem-2`, 2 vCPU) | — | — |
 | O-2 | The collector's name under `erp.gaiada.com` (proposed `insights.erp.gaiada.com`, a CNAME to `sumopod.erp.gaiada.com`) and its record in the gaiada.com zone | **owner** (DNS) | A3 |
 | O-3 | Counsel for the addendum: who, and when | **owner** | G2, and everything live after it |
-| O-4 | Freelance writers get ERP logins (staff-side, writers' room only)? The plan assumes yes; it adds a new kind of external principal | **owner** | W1 |
-| O-5 | Does our own replay (V6) replace Clarity, or run beside it? Until then, Clarity is a session recorder filed under "analytics", so the banner must say so, and its masking must cover typed input (addendum §11.10) | **owner** | V6; the banner wording before launch |
-| O-9 | **GA4 advanced vs basic Consent Mode.** The site, as built, sends cookieless pings to Google before consent; D67 allows only our own counts before consent. Basic mode (no Google contact until consent) matches D67; advanced keeps Google's modelled conversions. Recommended: basic. Not live anywhere yet; the site session has the change ready (hold the gtag.js load in `vendors.ts` until consent, keep the inline denied defaults) | **owner** | the site's launch |
+| ~~O-4~~ | **Settled 2026-10-13 (WSK-D84): yes, as fenced contributor logins, and contributors may upload media into a quarantine.** W1d to W1g are unblocked | — | W1 |
+| ~~O-5~~ | **Settled 2026-10-13 (WSK-D86): our replay replaces Clarity once V6 is live.** Until then Clarity runs only with the recorder wording and Strict masking | — | V6 |
+| ~~O-9~~ | **Settled 2026-10-13 (WSK-D85): basic Consent Mode.** No Google contact until consent; the site's held change ships with its launch | — | the site's launch |
 | ~~O-10~~ | **Settled 2026-10-12 (WSK-D75): no Web3Forms, not even as an interim.** The forms launch only on the WebDesk path (L1) | — | — |
 | O-11 | Sumopod is contracted personally: move the contract to the controller entity, or a written arrangement with the contract holder (addendum R-V18, item 20) | **owner**, counsel | A5 live |
 | O-6 | Production Turnstile keys for gaiada.com's forms | **owner** (Cloudflare) | L1 live |
@@ -108,6 +108,8 @@ Cerbos restart or a deploy. Release numbers are claimed one step at a time.
 | O-8 | The purpose of Google Ads `AW-630595339`, and an access audit of the old GTM container and both Ads accounts (the handoff found ~50 unknown linker domains) | ads team / owner | P2 |
 
 ## Session log
+
+**2026-10-26.** The owner's answers of 2026-10-13 (given in the PV-6 session's pick-list) had reached no decision log. They are now WSK-D84 (O-4, with media upload), WSK-D85 (O-9), WSK-D86 (the phase-5 questions, including O-5 and O-12) and WSK-D87 (P1's questions).
 
 **2026-10-11.** M5 started. The owner ruled D66 to D69 in one round of questions. The ERP sweep corrected the
 handoff in five places: scheduled publish exists; `form.received` carries no attribution; the intake flow

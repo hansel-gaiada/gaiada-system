@@ -403,6 +403,8 @@ Seats default to their own model; Opus only where flagged. Nothing runs Docker o
 
 ## 10. Open questions for the owner (each default holds if unanswered)
 
+**ANSWERED 2026-10-13: the owner accepted every default below. Recorded as WSK-D86 (2026-10-26), with O1 as an amendment of D66 and O2 of D32.**
+
 | # | Question | Default |
 |---|---|---|
 | O1 | D66 says the ERP "pushes nothing". May it send the collector one delete-only `forget` command over WireGuard (D6)? | Yes, narrowly: delete-only, its own key, idempotent; recorded as an amendment of D66 |
