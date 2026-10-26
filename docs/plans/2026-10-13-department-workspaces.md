@@ -253,6 +253,10 @@ has no area, or two.
    - Agency-only rows stay pack-gated (PV-D15, PV-D17).
    - No company names go in code (PV-D13).
 6. **One work queue.** "Needs you" is a projection of `getMyWorkQueue` (WS-UX R-1).
+7. **One shell; a workspace may have its own skin (DW-D51).** A skin changes only the look and the arrangement: the
+   menu's shape and which rows are pinned (the rest sit under More), colours and type in light and dark, and the
+   workspace's home layout. Rules 1 to 6 hold in every skin, and so do ⌘K, notifications, the AI Assistant, the
+   workspace switcher and the SIMULATED and access marks.
 
 ---
 
@@ -1362,6 +1366,7 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 | DW-D48 | DW-10f: may one invoice mix the schedule's fixed-fee lines with hourly lines? | **Owner (2026-10-18), first-hand: no.** An invoice is either instalments or hours. The hourly draft stays as an explicit exception (BFF §61.5) |
 | DW-D49 | DW-10f: how is an agreement billed that was signed before 10f, with a value and no schedule? The contract's default was the hourly exception or an amendment | **Owner (2026-10-18), first-hand: Finance may add a payment schedule once to an already-signed agreement that has a value and no schedule.** It must add up to the value; the addition is recorded in the contract's history (who and when); afterwards it is frozen with its own `schedule_sha256`, like a schedule fixed at send. It is the only way a signed contract's schedule can change: the database refuses every other path (BFF §61.4a, PERMISSION-CONTRACT §51) |
 | DW-D50 | DW-10f: freelancer bills go through the existing payables approval, where one finance manager may both draft and approve a bill (AP's maker-checker is the role split only; client invoices need a different approver). Require a second person? | **Owner (2026-10-19), first-hand: keep as today.** The role split (`bill_entry` vs `approve`) is the control; one finance manager may draft and approve a freelancer bill |
+| DW-D51 | SCP (2026-10-26): the Social Media team designed their workspace as an Instagram-style app, and the owner asked for that UI with all of the ERP behind it. May a department have its own skin of the one shell (DW-D38)? | **Open, default in force** (owner leaning, 2026-10-26: "i kinda agree that each department can have their own skin that they are comfortable"). Default: yes, by the rule in the SCP plan §6.1 (`docs/plans/2026-10-15-social-content-pipeline.md`). A skin may change the menu's shape and pinned rows, the colours and type in light and dark, and the home layout. It never changes the pages or their addresses, who may see or do what, the data, what the status colours mean, or the items every skin keeps (⌘K, notifications, the AI Assistant, More with the workspace switcher, the SIMULATED and access marks), and it passes the same accessibility checks. The skin follows the workspace; light or dark, density and width stay personal, and anyone may choose the Standard skin. Skins are built in code with the department, never typed in by users; the client portal keeps the company's look. First two: Standard (today's, unchanged) and Social (built in SCP-K). It is still the one shell, so DW-D38 holds |
 
 ---
 
