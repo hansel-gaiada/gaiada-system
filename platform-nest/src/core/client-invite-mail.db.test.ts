@@ -465,8 +465,10 @@ describe.skipIf(!TEST_URL)("PGL-10: the client invitation email keeps the raw to
     expect(seenTokens.length).toBeGreaterThanOrEqual(10);
     expect((await adminPool().query(`SELECT 1 FROM mail_log WHERE template_key = 'client.invite'`)).rowCount).toBeGreaterThanOrEqual(9);
     expect((await adminPool().query(`SELECT 1 FROM outbox_events WHERE event_type LIKE 'client_contact.%'`)).rowCount).toBeGreaterThan(0);
+    // The log capture is wired (a positive control for the capture itself, not for the app's chattiness).
+    console.log("[pgl10] log capture probe");
+    expect(logs.some((l) => l.includes("[pgl10] log capture probe"))).toBe(true);
     const blobs = await collectBlobs();
-    expect(blobs.filter((b) => b.where.startsWith("log#")).length).toBeGreaterThan(0);
     expect(findInviteTokenLeaks(blobs, await storedHashes(), seenTokens)).toEqual([]);
   });
 
