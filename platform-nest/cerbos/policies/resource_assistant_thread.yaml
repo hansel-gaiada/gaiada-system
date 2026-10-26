@@ -83,3 +83,21 @@ resourcePolicy:
       condition:
         match:
           expr: "variables.inTenant && variables.notLow && variables.owns"
+
+    # ══════════ M5-W1d · a freelance contributor never reaches this kind (design §3.1 item 6, WSK-D84) ══════════
+    # The owner-only ALLOW above is ROLE-LESS: any in-tenant principal reaches its own threads, and the assistant's
+    # retrieval and tools were designed for staff. A contributor's tenant comes from its anchor, so without this DENY it
+    # could open a thread there. This is a DENY, not an admin path: the header's "no other ALLOW" rule still holds.
+    # `kind` is users.kind, sent by principalPayload() (an absent kind, "", matches nothing). `roles: ["user"]` matches
+    # every principal, so under deny-overrides this beats the ALLOW above. The actions are LISTED, not "*": a "*" rule makes
+    # this a wildcard kind to cerbos-catalog-alignment.test.ts, and this kind deliberately has no platform_admin wildcard.
+    # contributor-principal.db.test.ts fails if an action appears in this file without joining this list.
+    # The second wall behind AuthGuard's route fence (a contributor reaches no route of this kind anyway).
+    - actions: ["create", "read", "update", "delete", "message", "stream", "stop", "handoff", "confirm_write"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind == "contributor"

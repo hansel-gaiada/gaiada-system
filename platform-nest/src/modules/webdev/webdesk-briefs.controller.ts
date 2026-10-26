@@ -9,11 +9,15 @@
 import { Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Query, Req, UseFilters, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { AuthGuard } from "../../auth/guards";
+import { ContributorRoute } from "../../auth/contributor-route";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { WebdeskProblemFilter } from "./webdesk-content.controller";
 import { authorizeSite, idempotencyKeyOf } from "./webdesk-content.service";
 import { webdeskBriefs } from "./webdesk-briefs.service";
 
+// M5-W1d: the two brief READS are open to a contributor (`@ContributorRoute()`, assurance high): an assigned writer reads the
+// brief of its own item (Cerbos `comment` on the linked item, PERMISSION-CONTRACT §27.5). Creating, editing, assigning and
+// listing briefs stay closed to contributors (403 `contributor_route_forbidden` in AuthGuard).
 @Controller("api/:tenantId/modules/webdev/content")
 @UseGuards(AuthGuard, ModuleEnabledGuard("webdev"))
 @UseFilters(WebdeskProblemFilter)
@@ -40,6 +44,7 @@ export class WebdeskBriefsController {
   }
 
   @Get("sites/:tenantSlug/:siteId/briefs/:briefId")
+  @ContributorRoute()
   async get(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string, @Param("briefId") briefId: string,
@@ -84,6 +89,7 @@ export class WebdeskBriefsController {
 
   /** The brief of one item: the writer's path ("what am I writing, and why"). Authorised as `comment` on the item. */
   @Get("sites/:tenantSlug/:siteId/items/:itemId/brief")
+  @ContributorRoute()
   async forItem(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string, @Param("itemId") itemId: string,

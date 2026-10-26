@@ -14,6 +14,7 @@ import { departmentFilterSql, parseDepartmentFilter } from "./department-filter"
 import { projectClientVisible, staffClientVisible } from "./portal-visibility";
 import { recomputeRollups } from "../rollups/engine";
 import { AuthGuard } from "../auth/guards";
+import { ContributorRoute } from "../auth/contributor-route";
 import { getServiceScopes } from "./service-scopes";
 import { deriveUniqueShortCode } from "./project-short-codes";
 import { isProjectStatus, unknownProjectStatusError } from "./project-status";
@@ -44,7 +45,9 @@ export class CoreController {
     return rows.rows;
   }
 
+  // M5-W1d: open to the contributor principal (design §3.1 items 5 and 8): its shell needs to know who it is.
   @Get("me")
+  @ContributorRoute()
   async me(@Req() req: FastifyRequest) {
     if (!req.principal.userId) throw new UnauthorizedException("no user");
     const profile = await withGlobal((c) =>
@@ -104,6 +107,9 @@ export class CoreController {
     });
     return {
       userId: req.principal.userId,
+      // M5-W1d: ADDITIVE. `users.kind` (employee | client | automation | bot | contributor), so the UI can route a contributor
+      // to its own shell (W1f). Display only: the server's fence and Cerbos decide, never this field.
+      kind: req.principal.kind ?? null,
       assurance: req.principal.assurance,
       // PV5-14 / PV-D40: present only while a SIMULATED second factor holds this session at "high" (dev stage),
       // so the UI can badge it and never present it as real MFA. Absent otherwise (a real `amr` "high" included).

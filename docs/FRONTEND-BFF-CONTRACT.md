@@ -5802,8 +5802,10 @@ Cerbos `webdesk_collection` · `manage_editorial`** (company_admin, owner, webde
 
 **Rules a consumer must not "simplify".** An empty list never means "all": send `allCollections: true` / `allLocales: true`. Lists are de-duplicated and
 sorted in the answer. `collections` must exist on the site (WebDesk `collection.list`) and `locales` must be the tenant's (`tenant.list`), else
-**400 `unknown_collection`** / **`unknown_locale`**. The target must be an active **employee** with an active membership of THIS company (**400
-`editorial_target_not_eligible`**; freelance contributors are not built yet). **400 `self_grant_forbidden`** for yourself. The expiry belongs to the
+**400 `unknown_collection`** / **`unknown_locale`**. The target must be an active **employee** with an active membership of THIS company, or (M5-W1d) an active **contributor** with a live
+engagement here (see "Freelance contributors" below), else **400 `editorial_target_not_eligible`**. For a contributor the role must be
+`webdesk_writer`, `webdesk_translator` or `webdesk_seo_reviewer` (**400 `contributor_role_forbidden`** otherwise, `webdesk_editor` included), and
+`expiresAt` is required (**400 `contributor_grant_expiry_required`**) and may not pass the engagement's end (**400 `contributor_grant_outlives_anchor`**). **400 `self_grant_forbidden`** for yourself. The expiry belongs to the
 person's grant across all sites: a different `expiresAt` for an existing grant is **409 `editorial_grant_expiry_mismatch`** (revoke, then grant again).
 A site that is not this company's is the uniform **404 problem `…/errors/site-not-found`**. WebDesk unavailable on a POST: the typed **503
 `editorial_unavailable` / `webdesk_not_configured`** of this section. Every change bumps the target's session (they re-authenticate) and writes one
@@ -5953,6 +5955,51 @@ Design: `docs/plans/2026-10-11-m5-writers-room-design.md` §5 (W8). Code: `webde
 **Why the search and lead reads are not gated by `resource_search_property` / `agency_lead`.** The dashboard's authority is the WebDesk read above; what leaves is counts for the caller's own site's pages. The search tables are reached through `withTenants([tenant], …, { modules: ["search"] })` (the module scope is a property of the TABLE, as in `webdesk-brief-store.ts`); `agency_leads` through the plain tenant wall (as `listWebLeads`). A lead's identity still needs `agency_lead:read`, which no editorial role holds.
 
 **MCP tool** (`modules/webdev/index.ts`, same route): `webdesk.writers.dashboard` (read, `minAssurance: "low"`; the hub drops a GET's query, so it returns the default view: 28 days, the first page). **UI consumer (M5-W8):** `platform-ui/src/lib/webdeskDashboard{,Model}.ts` (the STRICT parser: a figure with both or neither of `value`/`reason`, a raw view count under 5, a trend without two numbers, or a path without its reason is `contract_drift`), `components/webdesk/editorial/WritersDashboard.tsx`, pages `…/website/writers/dashboard[/[tenant]/[site]]` (cards per article, arrows with words, "Unavailable" in words, the decay badge linking to the finding on the card, filters: period, collection, language, my articles / all I can see). The board page gains a "Writer dashboard" link.
+
+### Freelance contributors (M5-W1d, 2026-10-27 — STATUS: PROTOTYPED (backend): typechecked + unit-tested locally; the DB/Cerbos/HTTP suites `editorial-contributors.test.ts`, `contributor-fence.db.test.ts` and `contributor-principal.db.test.ts` run on the GitHub Actions gate; UI: M5-W1f (the contributor shell, the staff invite form, the `/contributor-invite/<token>` page); the real Keycloak group, OTP and AMR mapper: M5-W1g)
+
+Owner ruling WSK-D84; design `docs/plans/2026-10-11-m5-writers-room-design.md` §3.1, §3.2, D10; PERMISSION-CONTRACT §27.6. Code:
+`modules/webdev/editorial-contributors.{controller,service}.ts`, `core/contributor-invites.ts`, `auth/contributor-route.ts` (the fence),
+migration `202610270900_contributor_principal.sql`. A freelance writer is a `users.kind = 'contributor'` principal with its OWN anchor
+(`editorial_contributors`, never `company_memberships`), so it never appears in `/members`, `/users` or any people surface.
+
+**The staff routes** (`AuthGuard` + `ModuleEnabledGuard("webdev")`; **the first statement is Cerbos `webdesk_collection` · `manage_editorial`** on
+`{tenantId, module: webdev}`, the publisher tier that grants the writers' room roles: company_admin, owner, webdev_manager, platform_admin; everyone
+else gets **403 for any body**). No new Cerbos action or kind.
+
+| Method | Path | Body → Response |
+|---|---|---|
+| GET | `/api/:t/modules/webdev/editorial/contributors` | → `{contributors: [{contributorId, userId, name, email, status: "invited"\|"active"\|"ended", live, validUntil, sponsorUserId, invitedAt, activatedAt, endedAt, hasAccount}]}`, newest first. `live` = active and unexpired (what the principal honours). Never a token. |
+| POST | `/api/:t/modules/webdev/editorial/contributors/invite` | `{email, name?, validUntil: ISO}` (strict; `validUntil` in the future and **at most 180 days** ahead; 400 `invalid_request` after authorization) → **201** `{contributor: <row>, invite: {delivery: "link", token, expiresAt, acceptPath: "/contributor-invite/<token>"}, account: "created"\|"converted"\|"existing"}`. **The raw token is returned HERE ONLY** (only its sha256 is stored; a lost link means a new invite; a new invite spends the old link). The link lives 72 hours. |
+| POST | `/api/:t/modules/webdev/editorial/contributors/:userId/end` | no body → **200** `{userId, contributorId, status: "ended", changed, revokedGrantIds, sessionBumped: true, idpDisabled, idpError, keptLoginForOtherEngagements}`. Revokes EVERY writers' room grant of the person in this company, spends open links, ends the engagement and cuts `validUntil` to now, bumps the session (D11) and disables the Keycloak login (and ends its sessions) unless another company's engagement is still live. Idempotent (`changed:false`). **404 `contributor_not_found`** when the person has no engagement here. |
+
+**The public accept** (no `AuthGuard`; its only authority is the token): `POST /api/editorial-invites/accept` `{token, password?}` (the token in the
+BODY, never the path, as for the client invite) → **200** `{ok: true, email, status: "active", accountPath: "created"\|"existing_reenabled", secondFactor:
+"otp_required", existingAccount}`. Creates the Keycloak account (email verified, the chosen password or a generated one, group `contributors`, required
+action `CONFIGURE_TOTP`), or for an EXISTING account (an earlier engagement) adds the group and the OTP action and re-enables it **without touching its
+password**; then the engagement goes `active`. An unknown, expired, spent, superseded or withdrawn link is one coarse **400** (`reason:
+"contributor_invite_invalid"`); **a client invite token is refused here, and a contributor token is refused by the client accept** `POST /api/invites/accept`
+(own prefix `ctr1`, own HMAC key, own table). Keycloak unconfigured: the typed 503 `keycloak_admin_not_configured`.
+
+**Refusals a consumer must render:** **409 `contributor_conversion_refused`** (the address belongs to a staff member or ex-staff, a client contact or
+ex-contact, a grant holder, an automation or bot account, or an inactive account: only a clean row converts); **409 `contributor_already_active`**
+(`existing.contributorId`; end it first to change it); **400 `self_invite_forbidden`**. The CLIENT invite answers **409
+`contributor_cannot_be_client_contact`** for a contributor's address. Every change writes `activities` rows with identifiers only:
+`webdesk.editorial.contributor_invited` / `_activated` / `_ended` (`target_entity_type user`) and one `webdesk.editorial.role_revoked` per revoked grant.
+
+**What a contributor reaches over HTTP (the fence).** In `AuthGuard`, a contributor reaches ONLY handlers marked `@ContributorRoute()`, and only at a real
+`assurance: "high"` (a `linked` envelope, a `low` principal and the dev-stage SIMULATED step-up are all refused); everything else is **403
+`{error: "contributor_route_forbidden", reason: "route_not_open_to_contributors" | "assurance_high_required"}`** before the handler runs. The marked set
+(pinned by `src/auth/contributor-route.test.ts`): `GET /api/me` (which now also returns `kind`, ADDITIVE, for every principal) and, under
+`/api/:t/modules/webdev/content/sites/:tenantSlug/:siteId/` (plus `GET …/content/sites`): the collections and item reads, item versions, the media
+library list, item create / PUT / PATCH / restore / preview, `editorial/board`, `items/:id/editorial`, `editorial/submit`, `/withdraw`,
+`/request-changes`, `/seo-signoff`, `/comments`, `/comments/:c/resolve`, `briefs/:briefId` and `items/:id/brief`. Cerbos still decides each one on the
+contributor's own grants. Not open: every media write (upload stays closed until the W1q quarantine), forms, assist, publish requests, unpublish,
+delete, approve, assign, the editorial policy, grants, the contributor admin routes, the calendar, the writers' dashboard. There is no backend
+logout route: sign-out is the UI's and Keycloak's.
+
+**No MCP tools yet.** The design's `webdesk.editorial.inviteContributor` (high) and `.endContributor` (medium) need D14 executables in
+`core/approval-executables.ts`, which another session holds: a follow-up.
 
 ### Writers' room calendar and workflow board (M5-W5, 2026-10-12 — STATUS: PROTOTYPED (backend): typechecked + unit-tested locally; the DB/Cerbos/HTTP suite `webdesk-calendar.test.ts` is written and needs the Linux gate; UI: `writers/calendar` and the board of `writers/[tenant]/[site]`)
 

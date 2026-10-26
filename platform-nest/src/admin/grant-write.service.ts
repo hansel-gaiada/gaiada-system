@@ -92,6 +92,7 @@ import {
   type EditorialRole, type NormalisedEditorialScope,
 } from "../rbac/editorial-roles";
 import type { PermissionGrant } from "../rbac/principal";
+import { CONTRIBUTOR_KIND, CONTRIBUTOR_ROLES, isContributorRole } from "../rbac/contributor";
 import { assertRoleScopeAllowed } from "./admin-identity.controller";
 
 export type GrantOrigin = "legacy_admin" | "ui" | "trusted_internal" | "two_person_appointment";
@@ -377,6 +378,21 @@ export async function assertGrantAllowed(c: PoolClient, spec: GrantSpec): Promis
         "the client website-editor endpoints, never through the generic grant surfaces (WSK-D60)",
     );
   }
+  // M5-W1d (design §3.1 item 4): a contributor (`users.kind = 'contributor'`) holds ONLY the writer, translator and
+  // SEO-reviewer roles, and only through `grantEditorialRole()` below (which also binds the grant to the contributor's
+  // anchor). Every generic origin, trusted_internal included, is refused here: a pure tightening (no trusted caller grants
+  // a contributor anything; the client accept path grants `client`, which a contributor can never be offered because a
+  // contributor is never a client contact). The DB trigger `user_roles_contributor_guard` (202610270900) is the layer
+  // behind this one.
+  if (spec.targetUserId) {
+    const target = await c.query<{ kind: string }>(`SELECT kind FROM users WHERE id = $1`, [spec.targetUserId]);
+    if (target.rows[0]?.kind === CONTRIBUTOR_KIND) {
+      throw new BadRequestException(
+        `contributor_role_forbidden: a contributor may hold only ${CONTRIBUTOR_ROLES.join(", ")}, granted through the ` +
+          "writers' room grant endpoints (never through a generic grant surface)",
+      );
+    }
+  }
   if (spec.origin === "trusted_internal") return null; // see this file's ORIGINS block
   const roleName = await resolveRoleName(c, spec.roleId);
   if (roleName === CLIENT_WEBSITE_EDITOR_ROLE) {
@@ -593,9 +609,11 @@ export async function revokeClientWebsiteEditor(c: PoolClient, spec: ClientWebsi
 //     from WebDesk (`resolveEditableSite` + `collection.list`) and hands the proven facts in as a
 //     `VerifiedEditorialSite`; this function refuses any requested key or locale outside them;
 //   * the target is an ACTIVE `employee` user with an ACTIVE membership of this company (read on the caller's
-//     `withTenants([tenantId])` connection, so another company's member is simply not found). Contributors
-//     (`users.kind = 'contributor'`, design §3, W1d) do not exist yet: every non-employee kind is refused, which is
-//     the fail-closed side of owner question O-4;
+//     `withTenants([tenantId])` connection, so another company's member is simply not found), OR (M5-W1d, design §3.1
+//     item 4) an ACTIVE `contributor` with a LIVE anchor (`editorial_contributors`, invited or active, unexpired) in this
+//     company, for one of the three contributor roles only (never `webdesk_editor`), with an `expires_at` no later than
+//     the anchor's `valid_until`. Every other kind is refused. The DB trigger `user_roles_contributor_guard` enforces the
+//     contributor rules again for any writer;
 //   * no self-grant (D-9's no-self-escalation, the same refusal as every other surface);
 //   * the grant row and its scope row are written in the caller's ONE transaction, together with the caller's
 //     audit row, so a grant without its scope (or without its audit) cannot be committed.
@@ -718,19 +736,48 @@ export async function grantEditorialRole(
   if (!target.rows[0] || target.rows[0].status !== "active") {
     throw new BadRequestException("editorial_target_not_eligible: the target is not an active user");
   }
-  if (target.rows[0].kind !== "employee") {
-    throw new BadRequestException(
-      `editorial_target_not_eligible: a writers' room role can only be held by an employee today (the target is a ` +
-        `${target.rows[0].kind} principal; freelance contributors are a separate, not-yet-built principal class)`,
+  if (target.rows[0].kind === CONTRIBUTOR_KIND) {
+    if (!isContributorRole(role)) {
+      throw new BadRequestException(
+        `contributor_role_forbidden: a contributor may hold only ${CONTRIBUTOR_ROLES.join(", ")} (approval is a staff ` +
+          "function, so never webdesk_editor)",
+      );
+    }
+    const anchor = await c.query<{ valid_until: Date }>(
+      `SELECT valid_until FROM editorial_contributors
+        WHERE tenant_id = $1 AND user_id = $2 AND status IN ('invited', 'active') AND valid_until > now()`,
+      [spec.tenantId, spec.targetUserId],
     );
-  }
-  const member = await c.query(
-    `SELECT 1 FROM company_memberships
-      WHERE tenant_id = $1 AND user_id = $2 AND status = 'active' AND deleted_at IS NULL`,
-    [spec.tenantId, spec.targetUserId],
-  );
-  if (!member.rowCount) {
-    throw new BadRequestException("editorial_target_not_eligible: the target is not an active member of this company");
+    if (!anchor.rows[0]) {
+      throw new BadRequestException(
+        "editorial_target_not_eligible: the contributor has no live engagement with this company (invite them first, or renew it)",
+      );
+    }
+    if (expiresAt === null) {
+      throw new BadRequestException(
+        "contributor_grant_expiry_required: a contributor's grant must carry expiresAt (no later than the engagement's end)",
+      );
+    }
+    const until = new Date(anchor.rows[0].valid_until).toISOString();
+    if (Date.parse(expiresAt) > Date.parse(until)) {
+      throw new BadRequestException(
+        `contributor_grant_outlives_anchor: the grant may not run past the engagement, which ends ${until}`,
+      );
+    }
+  } else if (target.rows[0].kind !== "employee") {
+    throw new BadRequestException(
+      `editorial_target_not_eligible: a writers' room role can only be held by an employee or a contributor (the target ` +
+        `is a ${target.rows[0].kind} principal)`,
+    );
+  } else {
+    const member = await c.query(
+      `SELECT 1 FROM company_memberships
+        WHERE tenant_id = $1 AND user_id = $2 AND status = 'active' AND deleted_at IS NULL`,
+      [spec.tenantId, spec.targetUserId],
+    );
+    if (!member.rowCount) {
+      throw new BadRequestException("editorial_target_not_eligible: the target is not an active member of this company");
+    }
   }
 
   const roleId = await editorialRoleId(c, role);
@@ -844,6 +891,26 @@ export async function revokeEditorialRole(c: PoolClient, spec: EditorialRevokeSp
   const removedGrant = grantDel.rows.length > 0;
   if (!removedScope && !removedGrant) return null;
   return { grantId, removedScope, removedGrant };
+}
+
+/** M5-W1d (design §3.1 item 9): ending a contributor's engagement revokes EVERY writers' room grant it holds in this
+ *  company, through the choke point. Pinned on user, company scope and the four editorial role NAMES, never a
+ *  reconciler- or position-owned row (an editorial grant can be neither). The scope rows cascade. Returns the removed
+ *  grant ids (empty when there was nothing: idempotent). Must run on a `withTenants([tenantId])` connection. */
+export async function revokeContributorEditorialGrants(c: PoolClient, tenantId: string, userId: string): Promise<string[]> {
+  if (!UUID_RE_GRANT.test(tenantId) || !UUID_RE_GRANT.test(userId)) {
+    throw new BadRequestException("tenantId and userId must be uuids");
+  }
+  const { rows } = await c.query<{ id: string }>(
+    `DELETE FROM user_roles ur USING roles r
+      WHERE ur.role_id = r.id AND r.company_id IS NULL
+        AND r.name IN ('webdesk_writer', 'webdesk_translator', 'webdesk_seo_reviewer', 'webdesk_editor')
+        AND ur.user_id = $1 AND ur.scope_type = 'company' AND ur.scope_id = $2
+        AND ur.managed_by IS NULL AND ur.managed_by_position IS NULL
+      RETURNING ur.id`,
+    [userId.toLowerCase(), tenantId.toLowerCase()],
+  );
+  return rows.map((r) => r.id).sort();
 }
 
 /** THE admin revoke — `revokeRole`'s statement, verbatim (`id` + `user_id` both pinned so a grant

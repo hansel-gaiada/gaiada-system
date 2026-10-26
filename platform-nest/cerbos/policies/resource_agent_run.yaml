@@ -83,3 +83,19 @@ resourcePolicy:
           expr: >-
             variables.inTenant && variables.notLow && variables.owns &&
             request.resource.attr.origin == "assistant_handoff"
+
+    # ══════════ M5-W1d · a freelance contributor never reaches this kind (design §3.1 item 6, WSK-D84) ══════════
+    # The owner-only read above is ROLE-LESS (any in-tenant principal); agent runs are the staff assistant's handoffs.
+    # `kind` is users.kind, sent by principalPayload() (an absent kind, "", matches nothing). `roles: ["user"]` matches
+    # every principal, so under deny-overrides this beats the ALLOW above. The actions are LISTED, not "*": a "*" rule makes
+    # this a wildcard kind to cerbos-catalog-alignment.test.ts, and this kind deliberately has no platform_admin wildcard.
+    # contributor-principal.db.test.ts fails if an action appears in this file without joining this list.
+    # The second wall behind AuthGuard's route fence (a contributor reaches no route of this kind anyway).
+    - actions: ["read"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind == "contributor"

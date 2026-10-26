@@ -239,7 +239,10 @@ describe("the choke point refuses BEFORE any database read", () => {
           actorUserId: ACTOR, tenantId: T, onConflict: "unique_columns",
         }));
         expect(r, `${origin} ${role}`).toMatch(/^editorial_role_dedicated_path/);
-        expect(queries.length, `${origin} ${role}: only the role-name read`).toBe(1);
+        // M5-W1d: the target's `users.kind` is read first (a contributor target is refused on every generic origin),
+        // then the role name; nothing else is read before the refusal.
+        expect(queries.length, `${origin} ${role}: only the target-kind read and the role-name read`).toBe(2);
+        expect(queries[0], `${origin} ${role}`).toMatch(/SELECT kind FROM users/);
       }
     }
   });

@@ -119,3 +119,21 @@ resourcePolicy:
           expr: >-
             variables.inTenant && variables.notLow &&
             request.resource.attr.module == "webdev"
+
+    # ══════════ M5-W1d · a freelance contributor never writes to the media library (design §3.1 item 6) ══════════
+    # EVERY media write: upload (minting an upload token), update and delete. `read` (picking an image) is untouched.
+    # `contributor-principal.db.test.ts` parses this file and fails if a new action appears without joining this list.
+    #
+    # !! W1q NARROWS THIS DENY, AND ONLY W1q MAY. Owner ruling WSK-D84 allows contributors to UPLOAD, but only INTO A
+    # !! QUARANTINE: an asset a contributor uploads is not served until a staff editor accepts it (on top of WSK-D80's scan).
+    # !! That quarantine is ticket M5-W1q and does not exist yet. Until it does, `upload` stays in this list: opening it
+    # !! now would let an outsider's file be served from our domain. W1q removes `upload` from this rule (or adds a
+    # !! quarantine-only condition to it) in the SAME change that ships the quarantine; `update` and `delete` stay denied.
+    - actions: ["upload", "update", "delete"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind == "contributor"

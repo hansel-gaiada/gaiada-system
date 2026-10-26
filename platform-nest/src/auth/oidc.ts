@@ -99,10 +99,12 @@ export async function provisionUser(tok: VerifiedToken): Promise<string> {
       if (!tok.emailVerified) {
         throw new Error("email collides with an existing account but is not IdP-verified — refusing to link");
       }
-      // PV5-10 review: only a HUMAN account (users.kind employee or client) may be claimed by an IdP login. An automation
-      // or bot principal (a payment provider's, an n8n workflow's) carries an address nobody should own; an IdP that
-      // verified it anyway must not turn a login into that principal.
-      if (byEmail.rows[0].kind !== "employee" && byEmail.rows[0].kind !== "client") {
+      // PV5-10 review: only a HUMAN account (users.kind employee, client or, since M5-W1d, contributor) may be claimed by
+      // an IdP login. An automation or bot principal (a payment provider's, an n8n workflow's) carries an address nobody
+      // should own; an IdP that verified it anyway must not turn a login into that principal. A contributor's first login
+      // links here like a client contact's: the accept route created its account email-verified after the person consumed
+      // the single-use token; AuthGuard's fence then holds the principal to @ContributorRoute() routes at assurance high.
+      if (byEmail.rows[0].kind !== "employee" && byEmail.rows[0].kind !== "client" && byEmail.rows[0].kind !== "contributor") {
         // eslint-disable-next-line no-console
         console.warn(`[oidc] refused to link an IdP login to ${byEmail.rows[0].kind} principal ${byEmail.rows[0].id}`);
         throw new Error(`email belongs to a ${byEmail.rows[0].kind} principal, not a person — refusing to link`);

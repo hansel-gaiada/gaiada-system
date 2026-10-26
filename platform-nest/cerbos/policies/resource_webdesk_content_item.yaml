@@ -467,9 +467,9 @@ resourcePolicy:
     # ══════════ M5-W1a · machine and outside principals never approve (design D7, §3.1) ═════════════
     # Approval and the SEO sign-off are recorded human judgements. `kind` is users.kind, sent by
     # principalPayload(); an absent kind ("") matches nothing. `contributor` (design §3.1, owner question
-    # O-4) is listed for approve now so the wall exists before the kind does; a contributor MAY sign off
-    # SEO (its command allow-list includes seoSignoff), so seo_signoff names automation and bot only. The
-    # rest of the contributor DENYs (§3.1 item 6) belong to W1d.
+    # O-4) is listed for approve; a contributor MAY sign off SEO (its command allow-list includes
+    # seoSignoff), so seo_signoff names automation and bot only. The rest of the contributor DENYs
+    # (§3.1 item 6) are the M5-W1d block at the end of this file.
     - actions: ["approve"]
       effect: EFFECT_DENY
       roles: ["user"]
@@ -486,3 +486,18 @@ resourcePolicy:
           expr: >-
             has(request.principal.attr.kind) &&
             request.principal.attr.kind in ["automation", "bot"]
+
+    # ══════════ M5-W1d · what a freelance contributor never does here (design §3.1 item 6, WSK-D84) ══════════
+    # A contributor (users.kind = contributor) holds only the writer, translator and SEO-reviewer roles, and those already
+    # lack these actions; this DENY makes it structural, so a mis-granted role (even webdesk_editor or a staff tier) or a
+    # future ALLOW still cannot give a contributor assign, filing a publish request, publish, schedule, unpublish or delete.
+    # `approve` is denied above (with automation and bot). Left OPEN for contributors, decided by their grants: read,
+    # create, update, submit, comment, request_changes and seo_signoff (WebDesk's CONTRIBUTOR_COMMANDS, W1e).
+    - actions: ["assign", "request_publish", "publish", "schedule", "unpublish", "delete"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind == "contributor"

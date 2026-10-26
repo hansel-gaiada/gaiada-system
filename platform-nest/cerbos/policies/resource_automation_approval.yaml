@@ -195,3 +195,18 @@ resourcePolicy:
           expr: >-
             !has(request.resource.attr.creatorId) || request.resource.attr.creatorId == "" ||
             request.resource.attr.creatorId == request.principal.id
+
+    # ══════════ M5-W1d · a freelance contributor never reaches this kind (design §3.1 item 6, WSK-D84) ══════════
+    # The requester's own-row read above is ROLE-LESS (any in-tenant principal that is not a client). A contributor
+    # files no approval (request_publish is DENIED to it on webdesk_content_item), and approvals are staff-side data.
+    # `kind` is users.kind, sent by principalPayload() (an absent kind, "", matches nothing). `roles: ["user"]` matches
+    # every principal, so under deny-overrides this beats the ALLOW above for every action, present and future ("*").
+    # The second wall behind AuthGuard's route fence (a contributor reaches no route of this kind anyway).
+    - actions: ["*"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind == "contributor"

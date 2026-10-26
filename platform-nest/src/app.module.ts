@@ -210,6 +210,8 @@ import { WebdeskControlController } from "./modules/webdev/webdesk-control.contr
 import { WebdeskContentController } from "./modules/webdev/webdesk-content.controller";
 import { WebdeskSiteClientsController } from "./modules/webdev/webdesk-site-clients.controller";
 import { WebdeskEditorialGrantsController } from "./modules/webdev/webdesk-editorial-grants.controller";
+// M5-W1d: freelance contributors (invite / end / list, publisher tier) and the PUBLIC token accept (no AuthGuard).
+import { EditorialContributorAcceptController, EditorialContributorsController } from "./modules/webdev/editorial-contributors.controller";
 // M5-W4: /api/:t/modules/webdev/content/sites/:slug/:siteId/briefs — content briefs from search, linked to a WebDesk draft.
 import { WebdeskBriefsController } from "./modules/webdev/webdesk-briefs.controller";
 import { WebdeskClientWebsiteController } from "./modules/webdev/webdesk-client-website.controller";
@@ -307,6 +309,9 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     // portal's own prefix, /api/:t/portal/clients/:clientId/website/*.
     WebdeskSiteClientsController,
     WebdeskEditorialGrantsController,
+    // M5-W1d: freelance contributors. The accept controller carries NO AuthGuard (its only authority is the token).
+    EditorialContributorsController,
+    EditorialContributorAcceptController,
     WebdeskBriefsController,
     WebdeskClientWebsiteController,
     // WSK-60: build-status + rebuild-requests (the staging rebuild ledger).

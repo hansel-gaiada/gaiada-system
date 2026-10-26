@@ -8,6 +8,7 @@
 import { withGlobal, withTenants } from "../db";
 import { isGrantScopeReachable } from "./scope-constrained-roles";
 import { attachEditorialScopes, isEditorialRole, type EditorialScopeRow } from "./editorial-roles";
+import { CONTRIBUTOR_KIND, contributorGrants } from "./contributor";
 
 /** Local copy (2 lines, zero deps) rather than importing `isUuidShaped` from `core/dept-resolution.ts`:
  *  this file is the authz substrate and must not gain a dependency on a domain module. See
@@ -71,8 +72,9 @@ export interface PermissionGrant {
   scopeId: string | null;
 }
 
-/** `users.kind` (PK-01, migration 202608201442): what the ACCOUNT is. */
-export type PrincipalKind = "employee" | "client" | "automation" | "bot";
+/** `users.kind` (PK-01, migration 202608201442): what the ACCOUNT is. M5-W1d (migration 202610270900) adds `contributor`,
+ *  a freelance writer: an EXTERNAL principal fenced by `AuthGuard` (auth/contributor-route.ts) and Cerbos. */
+export type PrincipalKind = "employee" | "client" | "automation" | "bot" | "contributor";
 
 export interface Principal {
   userId: string | null; // null = unknown external identity
@@ -389,7 +391,10 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
   // Fixing it here is not a scope departure: MON-00i's own new client_contacts anchor (below) reads
   // the identical FORCE-RLS/`principal_lookup` shape, so it would have shipped with the exact same
   // defect if the two queries stayed apart.
-  const { companies, rootCompanies, clientContacts, scopeRows, leadSeats } = await withGlobal(async (c) => {
+  // M5-W1d: a contributor's tenants come from its OWN anchor rows (editorial_contributors), never from memberships or
+  // client contacts (the DB guards refuse both for a contributor anyway). See the anchor read below.
+  const isContributor = user.rows[0].kind === CONTRIBUTOR_KIND;
+  const { companies, rootCompanies, clientContacts, scopeRows, leadSeats, anchorTenants } = await withGlobal(async (c) => {
     await c.query("BEGIN");
     try {
       await c.query("SELECT set_config('app.principal_user_id', $1, true)", [userId]);
@@ -505,6 +510,25 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
             )
           ).rows;
 
+      // M5-W1d (design §3.1 item 2). The contributor's LIVE anchors: active and unexpired. Read under the SAME
+      // `principal_lookup` GUC: `editorial_contributors` is FORCE RLS, and its principal_lookup policy exposes only this
+      // user's rows. Outside this transaction the read would return ZERO rows and no error, and every contributor would
+      // silently reach nothing (the zero-row trap). Skipped for every other kind (the common case costs nothing), and the
+      // kind is re-checked in SQL so an anchor row can never root a non-contributor.
+      const anchorTenants = !isContributor
+        ? []
+        : (
+            await c.query<{ tenant_id: string }>(
+              `SELECT ec.tenant_id
+                 FROM editorial_contributors ec
+                 JOIN users u ON u.id = ec.user_id AND u.kind = 'contributor'
+                 JOIN companies co ON co.id = ec.tenant_id AND co.deleted_at IS NULL
+                WHERE ec.user_id = $1 AND ec.status = 'active' AND ec.valid_until > now()
+                ORDER BY ec.tenant_id`,
+              [userId],
+            )
+          ).rows.map((r) => r.tenant_id);
+
       await c.query("COMMIT");
       return {
         companies: companiesRes,
@@ -512,6 +536,7 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
         clientContacts: contactRes.rows,
         scopeRows,
         leadSeats,
+        anchorTenants,
       };
     } catch (err) {
       await c.query("ROLLBACK");
@@ -547,6 +572,30 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
   const clientAdminOf = clientContacts
     .filter((r) => r.capability === "admin")
     .map((r) => ({ tenantId: r.tenant_id, clientId: r.client_id }));
+
+  if (isContributor) {
+    // M5-W1d (design §3.1 items 2 and 4). A contributor is assembled from its anchors ALONE, and every part fails closed:
+    //   * `companies` = the companies of its LIVE anchors (active, unexpired); nothing from memberships or contacts;
+    //   * `rootCompanies` = those same companies, and only when no staff anchor exists (the portal precedence above). It is
+    //     deliberately the anchor companies THEMSELVES, not their whole root tree: a contributor is engaged by one company,
+    //     and nothing it may do needs the group's other companies;
+    //   * `roles` = only the three contributor roles, at company scope, in a company whose anchor is live. An ended or
+    //     expired anchor therefore takes every grant in that company with it at the next request;
+    //   * `perms` = [] (the contributor roles carry no bundle; an empty list cannot arm any perm_* mirror) and
+    //     `clientAdminOf` = [].
+    const live = new Set(anchorTenants);
+    return {
+      userId,
+      kind: CONTRIBUTOR_KIND,
+      assurance,
+      companies: [...anchorTenants],
+      rootCompanies: rootCompanies.length > 0 ? rootCompanies : [...anchorTenants],
+      roles: contributorGrants(resolvedRoles, live),
+      clientAdminOf: [],
+      perms: [],
+      sessionVersion: user.rows[0].session_version,
+    };
+  }
 
   return {
     userId,

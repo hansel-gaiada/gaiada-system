@@ -65,3 +65,16 @@ resourcePolicy:
           expr: >-
             variables.inTenant && variables.notLow &&
             request.resource.attr.module == "webdev"
+
+    # ══════════ M5-W1d · a freelance contributor never changes a collection (design §3.1 item 6, WSK-D84) ══════════
+    # `apply_schema` and `manage_editorial` (granting the writers' room roles, setting the review policy) are staff functions.
+    # This names every action of this kind except `read`; `contributor-principal.db.test.ts` parses this file and fails if a
+    # new action appears here without joining the list. `roles: ["user"]` beats the platform_admin wildcard and every ALLOW.
+    - actions: ["apply_schema", "manage_editorial"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind == "contributor"

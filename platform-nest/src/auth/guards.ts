@@ -10,6 +10,7 @@ import { setRequestVia } from "../core/request-context";
 import { sessionPrincipalFromToken } from "./oidc";
 import { withGlobal } from "../db";
 import { enforceRequestSecurity } from "../core/security/request-guard";
+import { enforceContributorFence } from "./contributor-route";
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -43,6 +44,12 @@ export class AuthGuard implements CanActivate {
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const req = ctx.switchToHttp().getRequest<FastifyRequest>();
     await this.authenticate(req);
+    // M5-W1d (design §3.1 item 5): the contributor fence, right after the principal is assembled and before anything
+    // else reads it. A `users.kind = 'contributor'` principal reaches only handlers marked `@ContributorRoute()`, and only
+    // at a real `high` assurance; everything else is 403 `contributor_route_forbidden`. Every other kind passes untouched.
+    // Outside `authenticate()`'s OIDC try/catch for the same reason as the security hook below: a 403 must not be swallowed
+    // into "not a JWT, try the service token". See auth/contributor-route.ts.
+    enforceContributorFence(req.principal, ctx.getHandler());
     // DW-7h (BFF §52.3 to §52.5): IT's sign-outs, login blocks and address blocks, then the connection record. Here,
     // once, after whichever path below resolved the principal, and OUTSIDE the OIDC branch's try/catch, which turns
     // anything but a 401 into "not a JWT, try the service token" and would swallow the 403 `ip_blocked`.

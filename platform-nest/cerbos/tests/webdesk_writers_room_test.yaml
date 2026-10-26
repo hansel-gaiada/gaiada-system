@@ -58,6 +58,31 @@ principals:
       grants: [{"role":"webdesk_editor","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000001","editorialScopes":[{"siteId":"site-1","allCollections":false,"collections":["post","guide"],"allLocales":true,"locales":[]}]}]
       clientAdminOf: []
       perms: []
+  # M5-W1d: a contributor holding the writer role (same id as `writer`, so it owns the w_* items), and a contributor
+  # holding a MIS-GRANTED staff tier (webdev_manager: the grant path and the DB guard refuse it, so only a raw write could
+  # produce it). The second proves the contributor DENYs beat every ALLOW.
+  contributor_writer:
+    id: "u-writer"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "contributor"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"webdesk_writer","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000001","editorialScopes":[{"siteId":"site-1","allCollections":false,"collections":["post"],"allLocales":false,"locales":["en"]}]}]
+      clientAdminOf: []
+      perms: []
+  contributor_webdev_manager:
+    id: "u-cpub"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "contributor"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"webdev_manager","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
   contributor_editor:
     id: "u-ceditor"
     roles: ["user"]
@@ -589,52 +614,52 @@ tests:
     expected:
       - principal: contributor_editor
         resource: w_draft
-        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW}
       - principal: contributor_editor
         resource: w_changes
-        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW}
       - principal: contributor_editor
         resource: w_review
-        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW}
       - principal: contributor_editor
         resource: w_review_by_editor
-        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW}
       - principal: contributor_editor
         resource: w_review_by_pub
-        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW}
       - principal: contributor_editor
         resource: w_review_by_cadmin
-        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW}
       - principal: contributor_editor
         resource: w_review_by_padmin
-        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW}
       - principal: contributor_editor
         resource: w_review_creator_unknown
-        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW}
       - principal: contributor_editor
         resource: w_approved
-        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW}
       - principal: contributor_editor
         resource: other_author_draft
-        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW}
       - principal: contributor_editor
         resource: w_other_collection
-        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW}
       - principal: contributor_editor
         resource: w_other_locale
-        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW}
       - principal: contributor_editor
         resource: t_draft_id
-        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW}
       - principal: contributor_editor
         resource: twin_of_approved
-        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW}
       - principal: contributor_editor
         resource: twin_of_live
-        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW}
       - principal: contributor_editor
         resource: twin_of_draft
-        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW}
   - name: contributor_editor on webdesk_collection
     input:
       principals: [contributor_editor]
@@ -652,6 +677,164 @@ tests:
     expected:
       - principal: contributor_editor
         resource: media_site1
+        actions: {read: EFFECT_ALLOW}
+  # M5-W1d: a contributor writer gets exactly the writer's answers (the contributor DENYs touch none of its actions).
+  - name: contributor_writer on webdesk_content_item
+    input:
+      principals: [contributor_writer]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:
+      - principal: contributor_writer
+        resource: w_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: contributor_writer
+        resource: w_changes
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: contributor_writer
+        resource: w_review
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: contributor_writer
+        resource: w_review_by_editor
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: contributor_writer
+        resource: w_review_by_pub
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: contributor_writer
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: contributor_writer
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: contributor_writer
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: contributor_writer
+        resource: w_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: contributor_writer
+        resource: other_author_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW}
+      - principal: contributor_writer
+        resource: w_other_locale
+        actions: {read: EFFECT_ALLOW}
+      - principal: contributor_writer
+        resource: t_draft_id
+        actions: {read: EFFECT_ALLOW}
+      - principal: contributor_writer
+        resource: twin_of_approved
+        actions: {read: EFFECT_ALLOW}
+      - principal: contributor_writer
+        resource: twin_of_live
+        actions: {read: EFFECT_ALLOW}
+      - principal: contributor_writer
+        resource: twin_of_draft
+        actions: {read: EFFECT_ALLOW}
+  - name: contributor_writer on webdesk_collection
+    input:
+      principals: [contributor_writer]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:
+      - principal: contributor_writer
+        resource: coll_site1
+        actions: {read: EFFECT_ALLOW}
+  - name: contributor_writer on webdesk_media_asset
+    input:
+      principals: [contributor_writer]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:
+      - principal: contributor_writer
+        resource: media_site1
+        actions: {read: EFFECT_ALLOW}
+  # M5-W1d: a contributor holding a mis-granted webdev_manager keeps only what the contributor DENYs leave open.
+  - name: contributor_webdev_manager on webdesk_content_item
+    input:
+      principals: [contributor_webdev_manager]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:
+      - principal: contributor_webdev_manager
+        resource: w_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: w_changes
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: w_review
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: w_review_by_editor
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: w_review_by_pub
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: w_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: other_author_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: w_other_collection
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: w_other_locale
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: t_draft_id
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: twin_of_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: twin_of_live
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: twin_of_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: w_other_site
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: w_site_unfed
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+  - name: contributor_webdev_manager on webdesk_collection
+    input:
+      principals: [contributor_webdev_manager]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:
+      - principal: contributor_webdev_manager
+        resource: coll_site1
+        actions: {read: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: coll_site2
+        actions: {read: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: coll_site_unfed
+        actions: {read: EFFECT_ALLOW}
+  - name: contributor_webdev_manager on webdesk_media_asset
+    input:
+      principals: [contributor_webdev_manager]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:
+      - principal: contributor_webdev_manager
+        resource: media_site1
+        actions: {read: EFFECT_ALLOW}
+      - principal: contributor_webdev_manager
+        resource: media_site2
         actions: {read: EFFECT_ALLOW}
   - name: writer_global on webdesk_content_item
     input:

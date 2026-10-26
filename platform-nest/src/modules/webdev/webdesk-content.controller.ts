@@ -20,6 +20,7 @@
 import { ArgumentsHost, Body, Catch, Controller, Delete, ExceptionFilter, Get, Headers, HttpCode, Param, Patch, Post, Put, Query, Req, Res, UseFilters, UseGuards } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { AuthGuard } from "../../auth/guards";
+import { ContributorRoute } from "../../auth/contributor-route";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import {
   WebdeskProblem,
@@ -49,18 +50,28 @@ function send(reply: FastifyReply, r: ZoneBResult): void {
   void reply.status(r.status).header("content-type", "application/json; charset=utf-8").send(r.body);
 }
 
+// M5-W1d (design §3.1 items 5 and 7): the routes marked `@ContributorRoute()` below are the ONLY ones in this controller a
+// freelance contributor (`users.kind = 'contributor'`) reaches, at assurance high; every other route here answers it 403
+// `contributor_route_forbidden` in AuthGuard before the handler runs. The marked set mirrors WebDesk's CONTRIBUTOR_COMMANDS
+// (content read/create/update/restore, preview, and the editorial submit/withdraw/comment/requestChanges/seoSignoff family)
+// plus the reads its editor needs. Cerbos still decides every one of them on the contributor's own grants and the
+// contributor DENYs. NOT marked, on purpose: forms, media usage and every media write (upload stays closed until the W1q
+// quarantine exists), assist, publish requests, unpublish, delete, approve, assign, the editorial policy, the calendar
+// and the writers' dashboard. The full list is pinned by src/auth/contributor-route.test.ts.
 @Controller("api/:tenantId/modules/webdev/content")
 @UseGuards(AuthGuard, ModuleEnabledGuard("webdev"))
 @UseFilters(WebdeskProblemFilter)
 export class WebdeskContentController {
   // ── reads ──────────────────────────────────────────────────────────────────────────────────────
   @Get("sites")
+  @ContributorRoute()
   async listSites(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Res() reply: FastifyReply) {
     const gate = await authorizeSites(req.principal, tenantId);
     send(reply, await webdeskContent.listSites(gate));
   }
 
   @Get("sites/:tenantSlug/:siteId/collections")
+  @ContributorRoute()
   async listCollections(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string, @Res() reply: FastifyReply,
@@ -70,6 +81,7 @@ export class WebdeskContentController {
   }
 
   @Get("sites/:tenantSlug/:siteId/collections/:collectionKey/items")
+  @ContributorRoute()
   async listItems(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
@@ -80,6 +92,7 @@ export class WebdeskContentController {
   }
 
   @Get("sites/:tenantSlug/:siteId/items/:itemId")
+  @ContributorRoute()
   async getItem(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
@@ -90,6 +103,7 @@ export class WebdeskContentController {
   }
 
   @Get("sites/:tenantSlug/:siteId/items/:itemId/versions")
+  @ContributorRoute()
   async listVersions(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
@@ -100,6 +114,7 @@ export class WebdeskContentController {
   }
 
   @Get("sites/:tenantSlug/:siteId/items/:itemId/versions/:n")
+  @ContributorRoute()
   async getVersion(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
@@ -160,6 +175,7 @@ export class WebdeskContentController {
   // Zone B's problems, `media-in-use` and its using items included, leave here untouched.
 
   @Get("sites/:tenantSlug/:siteId/media")
+  @ContributorRoute()
   async listMedia(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
@@ -217,6 +233,7 @@ export class WebdeskContentController {
 
   // ── writes (immediate; the editorial assertion is signed server-side as the caller) ─────────────
   @Post("sites/:tenantSlug/:siteId/collections/:collectionKey/items")
+  @ContributorRoute()
   async create(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
@@ -228,6 +245,7 @@ export class WebdeskContentController {
   }
 
   @Put("sites/:tenantSlug/:siteId/items/:itemId")
+  @ContributorRoute()
   async update(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
@@ -240,6 +258,7 @@ export class WebdeskContentController {
 
   /** The MCP hub's method union has no PUT, so `webdesk.content.update` calls this alias: same path, same body, same semantics. */
   @Patch("sites/:tenantSlug/:siteId/items/:itemId")
+  @ContributorRoute()
   async updatePatch(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
@@ -251,6 +270,7 @@ export class WebdeskContentController {
   }
 
   @Post("sites/:tenantSlug/:siteId/items/:itemId/restore")
+  @ContributorRoute()
   async restore(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
@@ -263,6 +283,7 @@ export class WebdeskContentController {
 
   /** WSK-46: mint a one-time preview link to a DRAFT. Authorised as the item's `update` (a link discloses the draft). */
   @Post("sites/:tenantSlug/:siteId/items/:itemId/preview")
+  @ContributorRoute()
   async preview(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
@@ -352,6 +373,7 @@ export class WebdeskContentController {
   // `webdesk_collection:manage_editorial`. The static `editorial/…` paths cannot collide with `items/:itemId`.
 
   @Get("sites/:tenantSlug/:siteId/editorial/board")
+  @ContributorRoute()
   async editorialBoard(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
@@ -374,6 +396,7 @@ export class WebdeskContentController {
   }
 
   @Get("sites/:tenantSlug/:siteId/items/:itemId/editorial")
+  @ContributorRoute()
   async editorialHistory(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
@@ -395,6 +418,7 @@ export class WebdeskContentController {
   }
 
   @Post("sites/:tenantSlug/:siteId/items/:itemId/editorial/submit")
+  @ContributorRoute()
   @HttpCode(200)
   async editorialSubmit(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
@@ -407,6 +431,7 @@ export class WebdeskContentController {
   }
 
   @Post("sites/:tenantSlug/:siteId/items/:itemId/editorial/withdraw")
+  @ContributorRoute()
   @HttpCode(200)
   async editorialWithdraw(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
@@ -419,6 +444,7 @@ export class WebdeskContentController {
   }
 
   @Post("sites/:tenantSlug/:siteId/items/:itemId/editorial/request-changes")
+  @ContributorRoute()
   @HttpCode(200)
   async editorialRequestChanges(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
@@ -431,6 +457,7 @@ export class WebdeskContentController {
   }
 
   @Post("sites/:tenantSlug/:siteId/items/:itemId/editorial/seo-signoff")
+  @ContributorRoute()
   @HttpCode(200)
   async editorialSeoSignoff(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
@@ -469,6 +496,7 @@ export class WebdeskContentController {
 
   /** 201 (WebDesk's status, passed through). */
   @Post("sites/:tenantSlug/:siteId/items/:itemId/editorial/comments")
+  @ContributorRoute()
   async editorialComment(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
@@ -480,6 +508,7 @@ export class WebdeskContentController {
   }
 
   @Post("sites/:tenantSlug/:siteId/items/:itemId/editorial/comments/:commentId/resolve")
+  @ContributorRoute()
   @HttpCode(200)
   async editorialCommentResolve(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,

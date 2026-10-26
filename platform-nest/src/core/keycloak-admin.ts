@@ -219,6 +219,12 @@ export interface CreateUserInput {
   /** Set on the new account. Optional so a caller may create-then-set separately, but the invite flow
    *  passes it so acceptance is one round trip fewer. */
   password?: string | null;
+  /** M5-W1d: group PATHS the new account joins at creation (Keycloak's `UserRepresentation.groups`, honoured on create),
+   *  e.g. `["contributors"]` for a freelance contributor. Omitted for every other caller, whose request is unchanged. */
+  groups?: string[];
+  /** M5-W1d: required actions the new account must complete at its first login, e.g. `["CONFIGURE_TOTP"]` (OTP for a
+   *  contributor, design §3.1 item 3). Omitted for every other caller. */
+  requiredActions?: string[];
 }
 
 /** Create an ENABLED, EMAIL-VERIFIED user and return its Keycloak id.
@@ -244,6 +250,8 @@ export async function createUser(input: CreateUserInput, fetchImpl: FetchImpl = 
         enabled: true,
         ...(input.firstName ? { firstName: input.firstName } : {}),
         ...(input.lastName ? { lastName: input.lastName } : {}),
+        ...(input.groups && input.groups.length > 0 ? { groups: input.groups.map((g) => (g.startsWith("/") ? g : `/${g}`)) } : {}),
+        ...(input.requiredActions && input.requiredActions.length > 0 ? { requiredActions: [...input.requiredActions] } : {}),
       }),
     },
     "createUser",
@@ -329,6 +337,56 @@ export async function disableUser(userId: string, fetchImpl: FetchImpl = fetch):
     fetchImpl,
   );
   if (!res.ok) throw new KeycloakAdminError("disableUser", res.status);
+}
+
+// ── M5-W1d: the contributor's group and second factor on an account that ALREADY exists ─────────────────────────────
+// The create path above sets both in the one POST. These two cover an existing account (an earlier contributor engagement
+// whose login was disabled at its end). Keycloak's documented admin REST API; covered here by an injected fetch only, and
+// proven against the real realm by W1g (the `contributors` group, OTP and the AMR mapper are server work).
+//   GET /admin/realms/{realm}/groups?search=&exact=true   -> 200 [ { id, name, path } ]
+//   PUT /admin/realms/{realm}/users/{id}/groups/{groupId} -> 204
+//   GET /admin/realms/{realm}/users/{id}                  -> 200 { requiredActions, ... }
+//   PUT /admin/realms/{realm}/users/{id}  {requiredActions}  -> 204
+
+/** The group does not exist in the realm: a deployment fault (W1g creates it), never a reason to skip the step. */
+export class KeycloakGroupMissingError extends KeycloakAdminError {
+  constructor(readonly groupName: string) {
+    super("addUserToGroup", 404, `the realm has no group named ${groupName}`);
+    this.name = "KeycloakGroupMissingError";
+  }
+}
+
+/** Put an existing account into the top-level group `groupName`. Throws when the group is missing (fail closed). */
+export async function addUserToGroup(userId: string, groupName: string, fetchImpl: FetchImpl = fetch): Promise<void> {
+  const q = new URLSearchParams({ search: groupName, exact: "true" });
+  const res = await adminFetch(`/groups?${q}`, { method: "GET" }, "findGroup", fetchImpl);
+  if (!res.ok) throw new KeycloakAdminError("findGroup", res.status);
+  const rows = (await res.json().catch(() => [])) as Array<Record<string, unknown>>;
+  const group = Array.isArray(rows) ? rows.find((g) => g && g.name === groupName && typeof g.id === "string") : undefined;
+  if (!group) throw new KeycloakGroupMissingError(groupName);
+  const put = await adminFetch(
+    `/users/${encodeURIComponent(userId)}/groups/${encodeURIComponent(group.id as string)}`,
+    { method: "PUT" },
+    "addUserToGroup",
+    fetchImpl,
+  );
+  if (!put.ok) throw new KeycloakAdminError("addUserToGroup", put.status);
+}
+
+/** Add `action` (e.g. `CONFIGURE_TOTP`) to an existing account's required actions, keeping the ones it already has. */
+export async function addRequiredAction(userId: string, action: string, fetchImpl: FetchImpl = fetch): Promise<void> {
+  const res = await adminFetch(`/users/${encodeURIComponent(userId)}`, { method: "GET" }, "getUser", fetchImpl);
+  if (!res.ok) throw new KeycloakAdminError("getUser", res.status);
+  const body = (await res.json().catch(() => ({}))) as { requiredActions?: unknown };
+  const held = Array.isArray(body.requiredActions) ? body.requiredActions.filter((a): a is string => typeof a === "string") : [];
+  if (held.includes(action)) return;
+  const put = await adminFetch(
+    `/users/${encodeURIComponent(userId)}`,
+    { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ requiredActions: [...held, action] }) },
+    "addRequiredAction",
+    fetchImpl,
+  );
+  if (!put.ok) throw new KeycloakAdminError("addRequiredAction", put.status);
 }
 
 /** Re-enable a previously revoked account (re-invite of a known contact). */

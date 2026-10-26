@@ -201,7 +201,17 @@ export class ClientContactsController {
     // Find-or-create rather than create: the same person may already be staff, or a contact of another
     // client, and minting a second users row for one human is how an identity model rots.
     const userId = await withGlobal(async (c) => {
-      const found = await c.query<{ id: string }>(`SELECT id FROM users WHERE lower(email) = $1 AND deleted_at IS NULL`, [email]);
+      const found = await c.query<{ id: string; kind: string }>(`SELECT id, kind FROM users WHERE lower(email) = $1 AND deleted_at IS NULL`, [email]);
+      // M5-W1d: a freelance contributor is a different principal class on the other side of the staff/client boundary, and
+      // the two invites are siblings, never one another's widening: a client invite never adopts a contributor (and the
+      // contributor invite never adopts a client contact). The DB trigger `client_contacts_contributor_guard` refuses the
+      // row anyway; this is the typed answer in front of it. Nothing has been written at this point.
+      if (found.rows[0]?.kind === "contributor") {
+        throw new ConflictException({
+          message: "this address belongs to a freelance contributor, who cannot also be a client contact",
+          reason: "contributor_cannot_be_client_contact",
+        });
+      }
       if (found.rows[0]) return found.rows[0].id;
       const id = newId();
       await c.query(`INSERT INTO users (id, email, name, origin_site) VALUES ($1, $2, $3, $4)`, [

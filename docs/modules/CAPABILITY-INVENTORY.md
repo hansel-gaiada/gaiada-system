@@ -40,10 +40,10 @@ unfalsifiable after.
 | Owner | Route families | Suites driving the real endpoint |
 |---|---|---|
 | agency | `agency` | 22 |
-| assistant | `assistant` | 15 |
+| assistant | `assistant` | 16 |
 | automation-console | `admin/automation` | 3 |
-| clients | `clients` | 26 |
-| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `notices?unitNodeId=:unitNodeId&scope=:scope&state=:state` · `positions` · `role-grants` | 79 |
+| clients | `clients` | 27 |
+| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `notices?unitNodeId=:unitNodeId&scope=:scope&state=:state` · `positions` · `role-grants` | 80 |
 | finance | `finance` | 4 |
 | hr | `hr` | 14 |
 | invoice | `invoices` | 16 |
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 24 |
 | search | `search` | 30 |
 | social | `social` | 13 |
-| webdev | `webdev` | 37 |
+| webdev | `webdev` | 38 |
 
 ## Capabilities
 
