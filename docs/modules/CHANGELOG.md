@@ -11,6 +11,22 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.171.0` + platform-ui `0.197.0` - PGL-05, PGL-06 and PGL-07: approvals tighten before real clients use the portal (PV-D46, PERMISSION-CONTRACT §52) (2026-10-26) - PROTOTYPED
+
+- **PGL-05: nobody approves their own agent's high-impact request**, `platform_admin` included (PV-D27 (1) revisited).
+  - The rule is one generic function, `selfApprovalVerdict` (`core/approval-self-approval.ts`). It applies to agent and automation rows whose effective impact is high, and refuses when the decider, or the human the decide call acts for, is the row's filer. The refusal is a 403 `self_approval`; the row stays pending, and rejecting is always allowed.
+  - **Two walls:** `AutomationApprovalsController.decide()` checks after `authorize()` and before the entry's own `approverCheck`. The executor (`approval-execute.ts`) re-checks the stored `decided_by` after its claim.
+  - **Effective impact** is the HIGHEST of the platform's own tool definition, the executable registry's declared tier (for the hub-local `deploy.*` and `pm.*` tools only) and the stored value, so a filer cannot dodge the rule by labelling a tool lower. A test pins that every executable tool has a server-side tier.
+  - **New refusal:** a filing that acts for someone else (`x-act-for` naming another person) would lose that human, so `POST /automation-approvals` refuses it with 400 `act_for_filing_unsupported`. No live channel sends one today; nothing in the hub sets `actFor` outside tests.
+- **PGL-06: approving an agent's `contracts.countersign` needs the countersign right.** A new `approverCheck` asks Cerbos `contract · countersign` as the approver (and as the act-for human); without it the refusal is 403 `countersign_right_required`. No Cerbos policy changed.
+- **PGL-07: no n8n workflow may name a write tool in `contracts.*` or `invoicePayments.*`.** A structural test over every allow-list entry (`mcp-hub/src/automation-policy.pgl07.test.ts`) permits only `contracts.list`, `contracts.get` and `invoicePayments.list`. Its teeth: adding `contracts.setSchedule` to `wf:billing-chaser` turned it red. The old test had missed `contracts.setSchedule`.
+- **UI:** a new additive `approveRefusal` field (a reason, or null) on `GET /:t/automation-approvals/:id` and on pending automation and agent items of `GET /api/approvals`. The detail page and the inbox row disable Approve and say why. It is a hint only (null fails open), and the decide gate stays the authority.
+- **Existing tests:** about a dozen tests had a filer approve their own high-impact row (D14 registries, SMM, billing, invoices, search apply, agency privacy); each now decides as a second person.
+- **Found for PGL-08:** a plain `owner` cannot read or decide approvals (only `company_admin`, `module_manager` for HR rows, and `platform_admin` can). So the live proof's temporary QA grant must be `owner` AND `company_admin`.
+- **Tests and CI:**
+  - new: `pgl-05-approvals.db.test.ts` (16), `approval-self-approval.test.ts` (13), the PGL-07 hub test (7), `ApprovalRow.test.tsx` (4);
+  - CI 40310894076 green on the branch (`ed245a7b`): platform-nest shards 225/225, 225/225, 224 + 1 skipped, 222 + 3 skipped; platform-ui 721/721; mcp-hub 46 + 6 skipped.
+
 ### platform-nest `0.170.0` - PGL-09: mail to client contacts for the things they must act on, behind one `CLIENT_MAIL_ENABLED` flag (PV-D47, BFF §62) (2026-10-26) - PROTOTYPED
 
 - **One flag for every client mail.** `CLIENT_MAIL_ENABLED` (read by `readClientMailEnabled` in `config.ts`, exactly `1`) gates the four client types: the sign-off gate, the Conversation pointer, and the two new ones below.
