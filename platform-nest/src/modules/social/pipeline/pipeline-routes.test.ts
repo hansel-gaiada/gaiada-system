@@ -204,8 +204,12 @@ describe.skipIf(!TEST_URL)("SCP-1b · the pipeline routes (BFF §63.6)", () => {
     for (const p of people) {
       U[p] = await createUser(`scp1b-${p.toLowerCase()}@mock.test`, `Mock ${p}`);
       await addMembership(A, U[p]);
+      // The `member` ROLE at company scope, which every staff member holds: the officer's and the designer's rules are
+      // `member` + a relationship (derived_roles.yaml `member`), and a company membership row alone is not that grant.
+      await grantSocialRole(A, U[p], "member");
     }
     await addMembership(B, U.foreignHead);
+    await grantSocialRole(B, U.foreignHead, "member");
     await withGlobal((c) => c.query(`UPDATE users SET kind = 'automation' WHERE id = $1`, [U.bot]));
 
     // The team's read tier (social_staff) for the officers and the copywriter (PERMISSION §53.2 `read`).
