@@ -11,6 +11,32 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.172.0` - PGL-10: the client invitation email, its one-time link minted at send time and never stored (PV-D47, BFF §62.5) (2026-10-26) - PROTOTYPED
+
+- **The choice.** `POST /api/:t/clients/:clientId/contacts` takes an optional `delivery: "link" | "mail"` (default `"link"`, anything else is a 400).
+  - The invite is mailed only when `MAIL_ENABLED` and `CLIENT_MAIL_ENABLED` are both on; otherwise the route answers as before, with a link.
+  - The response adds `mail: {requested, mailed, reason, mailLogId}` and `invite.delivery`.
+  - A mailed invite returns no `token` and no `acceptPath`.
+- **The raw token is never at rest.**
+  - A mail invite is created SEALED: its `token_hash` is the hash of random bytes nobody keeps, so nothing can open it.
+  - The queued `client.invite` mail stores four fields only (`inviteId`, `companyName`, `clientName`, `expiresAt`); `enqueueMail` refuses any other key and any token-shaped value.
+  - The sender mints a fresh token after its send-time suppression re-check, in one guarded UPDATE: the invite must still be `mail`, unspent and unexpired, its contact still `invited`, and its address must match the recipient. The link lives in memory for that one mail.
+  - A failed send re-seals (compare-and-swap), so the retry mints a new token, and the adapter's error has the token scrubbed before it becomes `last_error`.
+  - The preview strips the link and never mints.
+- **Lifecycle.**
+  - A resend, of either delivery, spends every open invite of the contact, and a queued mail for a spent, revoked, accepted or expired invite is dropped unsent. There is one live credential per contact.
+  - A suppressed address gets the PM a working link instead.
+- **Security changes beyond the plan:**
+  - Tokens are `inv2` with a 16-byte nonce. `inv1` had no random part, so a database read plus the signing key could rebuild an open link; `inv1` is still accepted for one release.
+  - Accept now claims by id AND token hash, so a stale, superseded, sealed or forged token spends nothing.
+  - A re-invite of a still-invited contact now spends the old hand-forwarded link (same response shape).
+- **Migration** `202610261100_client_invites_delivery.sql`: `client_invites.delivery text NOT NULL DEFAULT 'link'` with a CHECK of `link` or `mail`. No data is changed; the table is already FORCE RLS.
+- **Tests.**
+  - `client-invite-mail.db.test.ts` (18) scans every `mail_log` column, the outbox, `activities`, `notifications`, `client_invites`, `client_contacts` and the captured console for any string that hashes to a stored invite token or equals a raw token the suite saw, and expects zero.
+  - A permanent positive control plants one and must find it. Teeth: a scratch change that wrote the link into the payload turned CI 40317353623 red with 12 findings.
+  - `client-invites.test.ts` has 29 tests, `invite-mail.test.ts` 19. CI 40318512613 green on the branch (`9afa7328`).
+- **Not built yet:** the staff UI does not send `delivery`, so it stays on the link flow until it handles `mail.mailed` and the missing token.
+
 ### platform-nest `0.171.0` + platform-ui `0.197.0` - PGL-05, PGL-06 and PGL-07: approvals tighten before real clients use the portal (PV-D46, PERMISSION-CONTRACT §52) (2026-10-26) - PROTOTYPED
 
 - **PGL-05: nobody approves their own agent's high-impact request**, `platform_admin` included (PV-D27 (1) revisited).
