@@ -47,14 +47,14 @@ describe("the three resource shapes (pure)", () => {
 
 describe.skipIf(!TEST_URL)("SCP-1b · loadSocialApproverIds and loadSocialPostAuthz (real Postgres)", () => {
   let A: string; // the agency
-  let B: string; // another agency of the group, with the SAME node ids
+  let B: string; // another agency of the same group (a child of A), with the SAME node ids
   let G: string; // a company with no agency vertical (no Social Media workspace)
   let hod: string, gm: string, webHead: string, divisionHead: string, endedHod: string, noRoleHod: string, hodB: string, officer: string, author: string, designer: string;
 
   beforeAll(async () => {
     await initTestDb();
     A = await createCompany("SCP1b Agency A", ["social"]);
-    B = await createCompany("SCP1b Agency B", ["social"]);
+    B = await createCompany("SCP1b Agency B", ["social"], A); // a group company under A: one root, so a session may span both
     G = await createCompany("SCP1b Generic", ["social"]);
     await seedSocialOrgTree(A);
     await seedSocialOrgTree(B); // the same ids, on purpose
