@@ -1,0 +1,988 @@
+{
+  "_about": "SCP stage machine, the single source both sides test against (FRONTEND-BFF-CONTRACT §63.3, PERMISSION-CONTRACT §53; plan docs/plans/2026-10-15-social-content-pipeline.md §4.3). platform-nest loads this file in its stage-machine suites; platform-ui keeps a byte-identical twin (platform-ui/src/lib/scpStageMachine.json, added by the first UI ticket that needs it at runtime) and a test that compares the bytes, the clientHealthGolden.json pattern. Edit this file first, then the twin. Every value here is data: no client or staff names.",
+  "version": 2,
+  "rulings": "Owner rulings of 2026-10-26 encoded here: SCP-Q2 (creative source per client), SCP-Q9 and SCP-Q18 refined by SCP-Q19 (exactly four social approvers decide: the Social Media and GM lead seats, the owner and the superadmin), SCP-Q11, SCP-Q14 and SCP-Q15 (the monthly boost budget), SCP-Q13 (the client approves the content, the date, the time and the placement), SCP-Q16 (one of the four files through the publisher), SCP-Q17 (an agent acts as the person who asked), SCP-Q5 and SCP-Q20 (the monthly report in the first release, checked and sent only by the four). SCP-Q21 (the four decide a pipeline publish approval directly: systemRules publish_decision), SCP-Q22 (a report's writer may approve it). Nothing is open.",
+  "statuses": ["planned", "drafting", "proofread", "hod", "design", "final", "client", "approved", "scheduled", "live", "changes", "blocked"],
+  "blockableStatuses": ["planned", "drafting", "proofread", "hod", "design", "final", "changes"],
+  "pseudoTargets": {
+    "deleted": "discard soft-deletes the post (deleted_at); it is in no list and reads 404",
+    "archived": "archive sets archived_at; pipeline_status keeps the status it had, the engine status becomes 'archived', and the post leaves every list"
+  },
+  "portalStatusRefusal": "On the portal routes a post the caller may not see is 404 post_not_found, and a visible post outside the action's 'from' is 409 post_not_with_client (not invalid_transition).",
+  "phases": [
+    { "key": "brief", "label": "Brief" },
+    { "key": "in_production", "label": "In production" },
+    { "key": "with_client", "label": "With client" },
+    { "key": "client_changes", "label": "Client changes" },
+    { "key": "client_approved", "label": "Client approved" },
+    { "key": "posted", "label": "Posted" }
+  ],
+  "phaseOf": {
+    "planned": "brief",
+    "drafting": "brief",
+    "blocked": "brief",
+    "proofread": "in_production",
+    "hod": "in_production",
+    "design": "in_production",
+    "final": "in_production",
+    "client": "with_client",
+    "approved": "client_approved",
+    "scheduled": "client_approved",
+    "live": "posted",
+    "changes": "from the change case: see changeCases[].phase"
+  },
+  "changeCases": [
+    { "key": "copywriter_copy", "changeBy": "copywriter", "changeKind": "copy", "returnTo": "proofread", "phase": "brief", "holder": "officer", "setBy": ["return_copy"] },
+    { "key": "hod_copy", "changeBy": "hod", "changeKind": "copy", "returnTo": "hod", "phase": "brief", "holder": "officer", "setBy": ["hod_changes"] },
+    { "key": "final_copy", "changeBy": "final", "changeKind": "copy", "returnTo": "final", "phase": "in_production", "holder": "officer", "setBy": ["final_changes"] },
+    { "key": "final_design", "changeBy": "final", "changeKind": "design", "returnTo": "final", "phase": "in_production", "holder": "designer", "setBy": ["final_changes"] },
+    { "key": "client_copy", "changeBy": "client", "changeKind": "copy", "returnTo": "proofread", "phase": "client_changes", "holder": "officer", "setBy": ["client_change", "record_client_change", "return_copy while changedOnly"] },
+    { "key": "client_design", "changeBy": "client", "changeKind": "design", "returnTo": "final", "phase": "client_changes", "holder": "designer", "setBy": ["client_change", "record_client_change"] }
+  ],
+  "phaseRule": "phase = phaseOf[status]; for status 'changes', phase = changeCases[the post's (changeBy, changeKind, returnTo)].phase. Equivalently: changeBy 'client' gives client_changes; else returnTo 'final' or changeKind 'design' gives in_production; else brief.",
+  "engineStatus": {
+    "byPipelineStatus": {
+      "planned": "draft",
+      "drafting": "draft",
+      "proofread": "draft",
+      "hod": "draft",
+      "design": "draft",
+      "final": "draft",
+      "changes": "draft",
+      "blocked": "draft",
+      "client": "in_review",
+      "approved": "approved",
+      "scheduled": "scheduled",
+      "live": "published"
+    },
+    "overrides": [
+      { "when": { "archived": true }, "engineStatus": "archived" },
+      { "when": { "pipelineStatus": "scheduled", "anyVariantStatus": "failed" }, "engineStatus": "failed" },
+      { "when": { "pipelineStatus": "scheduled", "anyVariantStatus": "publishing" }, "engineStatus": "publishing" },
+      { "when": { "pipelineStatus": "live", "anyVariantStatus": "failed" }, "engineStatus": "partially_published" }
+    ],
+    "rule": "social_posts.status of a pipeline post is written only by the stage machine, in the same UPDATE as pipeline_status: byPipelineStatus, then the first matching override, top to bottom."
+  },
+  "holders": {
+    "planned": "officer",
+    "drafting": "officer",
+    "proofread": "copywriter",
+    "hod": "approver",
+    "design": "designer",
+    "final": "approver",
+    "client": "client",
+    "approved": "officer",
+    "scheduled": "officer when scheduleVia is 'manual'; publisher when 'publisher'",
+    "live": null,
+    "changes": "from the change case: see changeCases[].holder",
+    "blocked": "from blockWaitingOn"
+  },
+  "primaryAction": {
+    "planned": "start_draft",
+    "drafting": "send_to_proofread",
+    "proofread": "approve_copy",
+    "hod": "approve_for_design",
+    "design": "start_design while creativeState is 'not_started', else submit_design",
+    "final": "final_approve",
+    "client": "follow_up",
+    "approved": "schedule",
+    "scheduled": "mark_live",
+    "live": "request_boost",
+    "blocked": "resolve",
+    "changes": { "copywriter_copy": "send_to_proofread", "client_copy": "send_to_proofread", "hod_copy": "resend", "final_copy": "resend", "final_design": "submit_design", "client_design": "submit_design" }
+  },
+  "actors": {
+    "officer": "the client's officer: social_engagements.owner_id of the post's engagement (Cerbos attribute ownerId, rule member + variables.owns)",
+    "copywriter": "a holder of the social_copywriter role in the company (Cerbos derived role social_copywriter)",
+    "approver": "one of the four social approvers (SCP-Q19; the UI mirrors the rule as canLeadSocial): a holder of a live lead seat on the company's Social Media unit or its GM unit (Cerbos attribute approverIds, derived role social_approver_seat), the IAM owner role reaching the company (the perm_* mirrors of the five approver-only actions), or platform_admin (its wildcard). Never manager, company_admin or a social_manager grant. Never the post's author or the client's officer for proofread and approve (the maker/checker DENY), the owner and the superadmin included",
+    "seat_approver": "the HoD or the GM: a holder of a live lead seat on the company's Social Media unit or its GM unit (approverIds, social_approver_seat); platform_admin also passes through its wildcard. The team's own steps (manage, record_client, boost) and report drafting are the officer's and theirs; the owner holds none of them",
+    "designer": "creativeSource 'creatives': an assignee of the client-month Creatives request's PM task (Cerbos attribute assigneeIds); creativeSource 'in_team': a holder of the social_designer role (Cerbos derived role social_designer)",
+    "client": "an active portal contact of the post's client (Cerbos portal action approve_post); for money, a contact with signing capability (approve_spend, SCP-Q14)",
+    "recorder": "a member of staff recording a decision the client gave outside the portal: the officer or a seat approver (Cerbos record_client); for money, one of the four approvers (social_engagement budget, SCP-Q18, SCP-Q19)",
+    "agent": "an agent acting for a person (SCP-Q17): the OBO envelope names the person, x-obo-agent names the agent. The principal IS the person, so every check here decides on the person, the maker/checker DENY included; the agent is recorded in activity metadata.via, never decides",
+    "automation": "an unattended automation or bot principal (users.kind automation or bot): no person behind the call. Refused every new action (403 automation_cannot_act, and a Cerbos EFFECT_DENY); it may read",
+    "publisher": "the system: the publisher's result through the dispatch path, or the simulator when SOCIAL_SIMULATION_ENABLED is on",
+    "company_admin": "holds none of the new actions and is not a social approver (SCP-Q19); no grant can make it one. It cannot put a post in a client's plan either: create also needs author or approve",
+    "social_manager": "a social_manager grant: no pipeline action (SCP-Q19 ends the approver path SCP-Q9 and SCP-Q18 had named); it keeps the module's existing routes"
+  },
+  "cerbosActions": {
+    "author": { "actors": ["officer"], "refusal": "not_the_officer" },
+    "proofread": { "actors": ["copywriter"], "refusal": "not_a_copywriter", "makerChecker": true },
+    "approve": { "actors": ["approver"], "refusal": "not_an_approver", "makerChecker": true },
+    "design": { "actors": ["designer"], "refusal": "not_the_designer" },
+    "schedule": { "actors": ["officer"], "refusal": "not_the_officer" },
+    "manage": { "actors": ["officer", "seat_approver"], "refusal": "not_officer_or_approver" },
+    "record_client": { "actors": ["officer", "seat_approver"], "refusal": "not_officer_or_approver" },
+    "boost": { "actors": ["officer", "seat_approver"], "refusal": "not_officer_or_approver" },
+    "create": { "actors": ["existing social_post create holders"], "refusal": "403 as today" },
+    "cancel": { "actors": ["existing social_post cancel holders"], "refusal": "cancel_required" },
+    "social_engagement:plan": { "actors": ["approver"], "refusal": "not_a_social_approver" },
+    "social_engagement:budget": { "actors": ["approver"], "refusal": "not_a_social_approver" },
+    "social_report:approve": { "actors": ["approver"], "refusal": "403 (the report routes keep authorize()'s generic 403); also gates sending a report back" },
+    "social_report:deliver": { "actors": ["approver"], "refusal": "403 (the report routes keep authorize()'s generic 403)" },
+    "portal:approve_post": { "actors": ["client"], "refusal": "404 outside the portal scope" },
+    "portal:approve_spend": { "actors": ["client with signing capability on the client"], "refusal": "view_only" }
+  },
+  "fieldGroups": {
+    "planning": ["title", "format", "pillar", "angle", "objective", "keyMessage", "visualDirection", "rawAssets", "placement", "scheduledAt", "mustHaves"],
+    "copy": ["caption", "onAssetText", "cta", "hashtags"],
+    "suggestible": ["caption", "onAssetText", "cta", "hashtags"]
+  },
+  "editRules": [
+    { "status": "planned", "fieldGroups": ["planning"] },
+    { "status": "drafting", "fieldGroups": ["planning", "copy"] },
+    { "status": "changes", "changeCases": ["copywriter_copy", "hod_copy", "final_copy"], "fieldGroups": ["copy"], "alsoFields": ["scheduledAt", "mustHaves", "placement"], "copyLog": true },
+    { "status": "changes", "changeCases": ["client_copy"], "fieldGroups": ["copy"], "alsoFields": ["scheduledAt", "mustHaves"], "copyLog": true, "note": "the client has seen the networks, so the placement stays" },
+    { "status": "any other", "fieldGroups": [], "refusal": "field_locked", "note": "the date and placement of an approved or scheduled post change only through reschedule" }
+  ],
+  "requiredToSend": [
+    { "code": "format_missing", "rule": "format is set" },
+    { "code": "caption_missing", "rule": "caption is not blank" },
+    { "code": "date_missing", "rule": "scheduledAt is set" },
+    { "code": "placement_missing", "rule": "placement names at least one network, each one of the client's platforms" }
+  ],
+  "handoffChecks": [
+    { "code": "must_haves_unticked", "rule": "all ten must-haves are ticked: logo, brand_colours, brand_fonts, contact_info, handle_and_tags, mandatory_words, no_forbidden_claims, price_terms_checked, location_tag, hashtag_set" },
+    { "code": "caption_too_long", "rule": "caption plus hashtags within each placement network's limit (2,200 characters on Instagram)" },
+    { "code": "too_many_hashtags", "rule": "at most 30 hashtags when Instagram is placed" },
+    { "code": "on_image_text_missing", "rule": "onAssetText is not blank when the format needs it (feed, carousel, story)" },
+    { "code": "asset_link_missing", "rule": "every rawAssets entry has a link; until the Drive OAuth client exists (DW-11) a present link passes" },
+    { "code": "asset_source_unknown", "rule": "every rawAssets entry has a source other than 'unknown'" },
+    { "code": "ai_note_missing", "rule": "every rawAssets entry with source 'ai' has an AI note" },
+    { "code": "date_before_ready_by", "rule": "scheduledAt is not before the cycle's ready-by (such a post needs an earlier hand-off than the rest)" }
+  ],
+  "handoffCheckRule": "send_to_proofread refuses 409 checks_failed with blockers[] listing every failing handoff check, unless sendAnyway is true with a sendAnywayReason (10 to 500 characters); then the skipped codes, the reason, the actor and the time are appended to skipped_checks and written to the activity. requiredToSend failures are 409 incomplete_post and can never be sent anyway.",
+  "commonGuards": [
+    { "order": 1, "guard": "action_known", "refusal": "unknown_action", "http": 400 },
+    { "order": 2, "guard": "post_exists", "refusal": "post_not_found", "http": 404 },
+    { "order": 3, "guard": "post_in_pipeline", "refusal": "not_a_pipeline_post", "http": 409 },
+    { "order": 4, "guard": "replay_of_last_action_id", "outcome": "200 alreadyApplied: the same actionId as the post's last applied action" },
+    { "order": 5, "guard": "post_not_archived", "refusal": "post_archived", "http": 409 },
+    { "order": 6, "guard": "not_unattended_automation", "refusal": "automation_cannot_act", "http": 403, "note": "users.kind automation or bot; an agent acting for a person arrives as that person and is not this case" },
+    { "order": 7, "guard": "maker_checker", "refusal": "author_cannot_approve", "http": 403, "appliesTo": ["proofread", "approve"] },
+    { "order": 8, "guard": "cerbos", "refusal": "the cerbosAction's refusal code; for reschedule's extra cancel check, cancel_required; for create's author-or-approve check, not_officer_or_approver", "http": 403 },
+    { "order": 9, "guard": "expected_status_matches", "refusal": "status_changed", "http": 409 },
+    { "order": 10, "guard": "status_in_from", "refusal": "invalid_transition", "http": 409 },
+    { "order": 11, "guard": "params_valid", "refusal": "missing_field or invalid_field, with field", "http": 400 },
+    { "order": 12, "guard": "action_guards", "refusal": "the action's own codes, in the order listed" }
+  ],
+  "actions": [
+    {
+      "action": "create",
+      "kind": "create",
+      "cerbosAction": "create",
+      "extraCerbos": { "anyOf": ["author", "approve"] },
+      "extraCerbosRefusal": "not_officer_or_approver",
+      "actors": ["officer", "approver"],
+      "from": [],
+      "to": "planned",
+      "params": { "id": "uuid, optional idempotency key", "title": "1..200", "isExtra": "boolean, default false", "format": "optional", "pillar": "optional", "scheduledAt": "optional", "placement": "optional" },
+      "guards": [
+        { "guard": "cycle_exists", "refusal": "cycle_not_found" }
+      ],
+      "effects": ["set_cycle_and_engagement", "set_status_since", "set_engine_status", "content_month_progress"],
+      "plan": "§1 step 1; §6.2 Create"
+    },
+    {
+      "action": "start_draft",
+      "cerbosAction": "author",
+      "actors": ["officer"],
+      "from": [{ "status": "planned" }],
+      "to": "drafting",
+      "params": {},
+      "guards": [],
+      "effects": ["set_author_if_null", "set_status_since", "set_engine_status"],
+      "plan": "§4.3 start_draft"
+    },
+    {
+      "action": "edit",
+      "kind": "edit",
+      "cerbosAction": "author",
+      "actors": ["officer"],
+      "from": [{ "status": "planned" }, { "status": "drafting" }, { "status": "changes", "changeCase": ["copywriter_copy", "hod_copy", "final_copy", "client_copy"] }],
+      "to": null,
+      "params": { "fields": "only the fields editRules allows in the post's status" },
+      "guards": [
+        { "guard": "fields_allowed_in_status", "refusal": "field_locked" }
+      ],
+      "effects": ["write_fields", "copy_log_when_in_changes"],
+      "plan": "§4.3 edit copy: only in drafting and changes; in proofread the Copywriter's edits are suggestions"
+    },
+    {
+      "action": "accept_suggestion",
+      "kind": "edit",
+      "cerbosAction": "author",
+      "actors": ["officer"],
+      "from": [{ "status": "drafting" }, { "status": "changes", "changeCase": ["copywriter_copy", "client_copy"] }],
+      "to": null,
+      "params": { "field": "one of fieldGroups.suggestible" },
+      "guards": [
+        { "guard": "suggestion_exists", "refusal": "suggestion_not_found" }
+      ],
+      "effects": ["apply_one_suggestion", "copy_log"],
+      "plan": "§1 loop a: the copy goes back with suggestions"
+    },
+    {
+      "action": "send_to_proofread",
+      "cerbosAction": "author",
+      "actors": ["officer"],
+      "from": [{ "status": "drafting" }, { "status": "changes", "changeCase": ["copywriter_copy", "client_copy"] }],
+      "to": "proofread",
+      "params": { "sendAnyway": "boolean, default false", "sendAnywayReason": "10..500, required when sendAnyway" },
+      "guards": [
+        { "guard": "required_to_send", "refusal": "incomplete_post" },
+        { "guard": "handoff_checks_pass_or_send_anyway", "refusal": "checks_failed" }
+      ],
+      "effects": ["clear_change_keep_changed_only", "append_skipped_checks", "set_status_since", "set_engine_status", "notify:copywriters"],
+      "plan": "§4.3 send_to_proofread; §4.6"
+    },
+    {
+      "action": "suggest",
+      "kind": "edit",
+      "cerbosAction": "proofread",
+      "actors": ["copywriter"],
+      "from": [{ "status": "proofread" }],
+      "to": null,
+      "params": { "field": "one of fieldGroups.suggestible", "value": "the suggested text, or null to drop the suggestion" },
+      "guards": [],
+      "effects": ["set_or_drop_suggestion_with_base"],
+      "plan": "§4.3: in proofread the Copywriter's edits are suggestions"
+    },
+    {
+      "action": "approve_copy",
+      "cerbosAction": "proofread",
+      "actors": ["copywriter"],
+      "from": [{ "status": "proofread" }],
+      "to": [
+        { "when": { "changedOnly": false }, "status": "hod" },
+        { "when": { "changedOnly": true }, "status": "client" }
+      ],
+      "params": {},
+      "guards": [
+        { "guard": "suggestions_not_stale", "refusal": "suggestion_stale" }
+      ],
+      "effects": ["apply_suggestions", "copy_log_each_field", "clear_suggestions", "set_status_since", "set_engine_status", "when changedOnly: sync_variants_copy_from_master", "when changedOnly: request_client_reviews", "when changedOnly: clear_changed_only", "when changedOnly: notify:approvers_told", "when changedOnly: notify:client", "else: notify:approvers"],
+      "plan": "§4.3 approve_copy; loop e"
+    },
+    {
+      "action": "return_copy",
+      "cerbosAction": "proofread",
+      "actors": ["copywriter"],
+      "from": [{ "status": "proofread" }],
+      "to": "changes",
+      "setsChangeCase": [
+        { "when": { "changedOnly": false }, "changeCase": "copywriter_copy" },
+        { "when": { "changedOnly": true }, "changeCase": "client_copy" }
+      ],
+      "params": { "note": "1..2000, required" },
+      "guards": [],
+      "effects": ["set_change", "keep_suggestions", "set_status_since", "set_engine_status", "notify:officer"],
+      "plan": "§4.3 return_copy; loop a"
+    },
+    {
+      "action": "approve_for_design",
+      "cerbosAction": "approve",
+      "actors": ["approver"],
+      "from": [{ "status": "hod" }],
+      "to": "design",
+      "params": {},
+      "guards": [
+        { "guard": "creatives_unit_exists_when_source_creatives", "refusal": "creatives_unit_missing" }
+      ],
+      "effects": ["copy_creative_source_from_engagement", "creative_state_not_started", "when creatives: join_or_open_month_request", "when in_team: enter_in_team_queue", "set_status_since", "set_engine_status", "notify:designers"],
+      "plan": "§4.3 approve_for_design (SCP-Q2 ruled: either, per client)"
+    },
+    {
+      "action": "hod_changes",
+      "cerbosAction": "approve",
+      "actors": ["approver"],
+      "from": [{ "status": "hod" }],
+      "to": "changes",
+      "setsChangeCase": "hod_copy",
+      "params": { "note": "1..2000, required" },
+      "guards": [],
+      "effects": ["set_change", "set_status_since", "set_engine_status", "notify:officer"],
+      "plan": "§4.3 hod_changes; loop b"
+    },
+    {
+      "action": "resend",
+      "cerbosAction": "author",
+      "actors": ["officer"],
+      "from": [{ "status": "changes", "changeCase": ["hod_copy", "final_copy"] }],
+      "to": [
+        { "when": { "returnTo": "hod" }, "status": "hod" },
+        { "when": { "returnTo": "final" }, "status": "final" }
+      ],
+      "params": {},
+      "guards": [],
+      "effects": ["clear_change", "set_status_since", "set_engine_status", "notify:approvers"],
+      "plan": "§4.3 resend; loops b and c"
+    },
+    {
+      "action": "start_design",
+      "cerbosAction": "design",
+      "actors": ["designer"],
+      "from": [{ "status": "design" }, { "status": "changes", "changeCase": ["final_design", "client_design"] }],
+      "to": null,
+      "params": {},
+      "guards": [],
+      "effects": ["creative_state: not_started becomes in_progress; revision stays revision; in_progress replays as alreadyApplied"],
+      "plan": "§4.3 start_design"
+    },
+    {
+      "action": "add_design",
+      "kind": "edit",
+      "cerbosAction": "design",
+      "actors": ["designer"],
+      "from": [{ "status": "design" }, { "status": "changes", "changeCase": ["final_design", "client_design"] }],
+      "to": null,
+      "params": { "assetGroupId": "an Asset Library version group, or", "linkUrl": "an http(s) link", "linkSource": "own|client|stock|ai|unknown, with a link", "linkAiNote": "required when linkSource is 'ai'", "position": "1..20" },
+      "guards": [
+        { "guard": "asset_exists", "refusal": "asset_not_found" }
+      ],
+      "effects": ["insert_design", "link_asset_to_month_request"],
+      "plan": "§8 1h: a version in the Asset Library or a Drive link"
+    },
+    {
+      "action": "remove_design",
+      "kind": "edit",
+      "cerbosAction": "design",
+      "actors": ["designer"],
+      "from": [{ "status": "design" }, { "status": "changes", "changeCase": ["final_design", "client_design"] }],
+      "to": null,
+      "params": { "designId": "uuid" },
+      "guards": [
+        { "guard": "design_exists", "refusal": "design_not_found" }
+      ],
+      "effects": ["mark_design_removed"],
+      "plan": "§8 1h"
+    },
+    {
+      "action": "submit_design",
+      "cerbosAction": "design",
+      "actors": ["designer"],
+      "from": [{ "status": "design" }, { "status": "changes", "changeCase": ["final_design", "client_design"] }],
+      "to": "final",
+      "params": {},
+      "guards": [
+        { "guard": "design_present", "refusal": "design_missing" }
+      ],
+      "effects": ["creative_state_submitted", "clear_change", "warn_on_unknown_source", "set_status_since", "set_engine_status", "notify:approvers"],
+      "plan": "§4.3 submit_design: needs an asset version or a shared link; loops c and d. An AI-made design always carries its note: the database refuses one without"
+    },
+    {
+      "action": "final_approve",
+      "cerbosAction": "approve",
+      "actors": ["approver"],
+      "from": [{ "status": "final" }],
+      "to": "client",
+      "params": {},
+      "guards": [
+        { "guard": "design_present", "refusal": "design_missing" },
+        { "guard": "designs_stored", "refusal": "design_not_stored" },
+        { "guard": "one_account_per_placement_network", "refusal": "no_account_for_network" },
+        { "guard": "account_not_ambiguous", "refusal": "ambiguous_account" }
+      ],
+      "effects": ["sync_variants_from_master", "materialize_design_files", "request_client_reviews", "set_client_first_sent_at_if_null", "set_status_since", "set_engine_status", "notify:client_once_per_post"],
+      "plan": "§4.3 final_approve: creates the variants and requests client review on each"
+    },
+    {
+      "action": "final_changes",
+      "cerbosAction": "approve",
+      "actors": ["approver"],
+      "from": [{ "status": "final" }],
+      "to": "changes",
+      "setsChangeCase": [
+        { "when": { "changeKind": "copy" }, "changeCase": "final_copy" },
+        { "when": { "changeKind": "design" }, "changeCase": "final_design" }
+      ],
+      "params": { "changeKind": "copy|design, required", "note": "1..2000, required" },
+      "guards": [],
+      "effects": ["set_change", "when design: creative_state_revision", "set_status_since", "set_engine_status", "when copy: notify:officer", "when design: notify:designers"],
+      "plan": "§4.3 final_changes; loop c"
+    },
+    {
+      "action": "client_approve",
+      "cerbosAction": "portal:approve_post",
+      "actors": ["client"],
+      "from": [{ "status": "client" }],
+      "to": "approved",
+      "params": { "seenHash": "the reviewHash the client was shown" },
+      "guards": [
+        { "guard": "seen_hash_matches", "refusal": "content_changed" },
+        { "guard": "every_variant_review_pending", "refusal": "client_review_already_decided" }
+      ],
+      "effects": ["approve_every_variant_review_with_args_hash_in_one_transaction", "decision_id", "undo_window_10s", "set_status_since", "set_engine_status", "content_month_progress", "notify_after_undo_window:officer"],
+      "plan": "§4.3 client_approve; §8 2c. The approval covers the content, the date, the time and the placement (SCP-Q13)"
+    },
+    {
+      "action": "client_change",
+      "cerbosAction": "portal:approve_post",
+      "actors": ["client"],
+      "from": [{ "status": "client" }],
+      "to": "changes",
+      "setsChangeCase": [
+        { "when": { "changeKind": "copy" }, "changeCase": "client_copy" },
+        { "when": { "changeKind": "design" }, "changeCase": "client_design" }
+      ],
+      "params": { "changeKind": "copy|design, required", "note": "1..2000, required", "anchor": "optional pin {x, y, fileId}", "seenHash": "the reviewHash the client was shown" },
+      "guards": [
+        { "guard": "seen_hash_matches", "refusal": "content_changed" },
+        { "guard": "every_variant_review_pending", "refusal": "client_review_already_decided" }
+      ],
+      "effects": ["changes_requested_on_every_variant_review_in_one_transaction", "decision_id", "undo_window_10s", "set_change", "when copy: set_changed_only_and_copy_before", "when design: creative_state_revision", "set_status_since", "set_engine_status", "notify_after_undo_window:officer", "notify_after_undo_window:approvers_told", "when design: notify_after_undo_window:designers"],
+      "plan": "§4.3 client_change; loops d and e. A design change returns to the final check (loop d), not straight to the client"
+    },
+    {
+      "action": "client_undo",
+      "cerbosAction": "portal:approve_post",
+      "actors": ["client"],
+      "from": [{ "status": "approved", "decidedBy": "this contact" }, { "status": "changes", "changeCase": ["client_copy", "client_design"], "decidedBy": "this contact" }],
+      "to": "client",
+      "params": {},
+      "guards": [
+        { "guard": "own_decision", "refusal": "not_your_decision" },
+        { "guard": "within_undo_window", "refusal": "undo_window_passed" },
+        { "guard": "nothing_happened_since", "refusal": "undo_window_passed" }
+      ],
+      "effects": ["reviews_back_to_pending", "restore_pre_decision_fields", "drop_pending_notifications", "set_status_since", "set_engine_status", "content_month_progress"],
+      "plan": "§8 2c: a short undo; §10: undo is a recorded reverse of the person's own last step"
+    },
+    {
+      "action": "record_client_approve",
+      "cerbosAction": "record_client",
+      "actors": ["recorder"],
+      "from": [{ "status": "client" }],
+      "to": "approved",
+      "params": { "channel": "whatsapp|email|meeting, required", "note": "1..2000, required" },
+      "guards": [],
+      "effects": ["approve_every_variant_review_with_args_hash_in_one_transaction", "recorded_by_and_channel", "decision_id", "set_status_since", "set_engine_status", "content_month_progress", "notify:officer", "notify:client_recorded"],
+      "plan": "§4.3 client_approve (recorded); §8 2e"
+    },
+    {
+      "action": "record_client_change",
+      "cerbosAction": "record_client",
+      "actors": ["recorder"],
+      "from": [{ "status": "client" }],
+      "to": "changes",
+      "setsChangeCase": [
+        { "when": { "changeKind": "copy" }, "changeCase": "client_copy" },
+        { "when": { "changeKind": "design" }, "changeCase": "client_design" }
+      ],
+      "params": { "changeKind": "copy|design, required", "channel": "whatsapp|email|meeting, required", "note": "1..2000, required", "anchor": "optional pin" },
+      "guards": [],
+      "effects": ["changes_requested_on_every_variant_review_in_one_transaction", "recorded_by_and_channel", "decision_id", "set_change", "when copy: set_changed_only_and_copy_before", "when design: creative_state_revision", "set_status_since", "set_engine_status", "notify:officer", "notify:approvers_told", "when design: notify:designers", "notify:client_recorded"],
+      "plan": "§4.3 client_change (recorded); §8 2e"
+    },
+    {
+      "action": "schedule",
+      "cerbosAction": "schedule",
+      "actors": ["officer"],
+      "from": [{ "status": "approved" }],
+      "to": "scheduled",
+      "params": {},
+      "guards": [
+        { "guard": "approved_time_not_passed", "refusal": "approved_time_passed" },
+        { "guard": "media_rules_pass", "refusal": "media_rules_failed" }
+      ],
+      "effects": ["schedule_by_hand_at_approved_date_time_and_placement", "set_schedule_via_manual", "set_status_since", "set_engine_status"],
+      "plan": "§4.3 schedule; §8 3a ('Schedule in Meta'). The approved date, time and placement are used as they are (SCP-Q13)"
+    },
+    {
+      "action": "schedule_publisher",
+      "cerbosAction": "approve",
+      "actors": ["approver"],
+      "from": [{ "status": "approved" }],
+      "to": "scheduled",
+      "params": {},
+      "guards": [
+        { "guard": "publisher_available", "refusal": "publisher_unavailable" },
+        { "guard": "approved_time_not_passed", "refusal": "approved_time_passed" },
+        { "guard": "media_rules_pass", "refusal": "media_rules_failed" }
+      ],
+      "effects": ["file_one_publish_approval_per_variant", "set_schedule_via_publisher", "set_status_since", "set_engine_status"],
+      "plan": "SCP-Q16 and SCP-Q19 ruled: one of the four files through the publisher, and approve is the whole gate (no extra publish check); a second person decides (PV-D46, systemRules publish_decision); the author and the officer never file (the maker/checker DENY on approve)"
+    },
+    {
+      "action": "unschedule",
+      "cerbosAction": { "manual": "schedule", "publisher": "approve" },
+      "actors": { "manual": ["officer"], "publisher": ["approver"] },
+      "from": [{ "status": "scheduled" }],
+      "to": "approved",
+      "params": {},
+      "guards": [
+        { "guard": "no_variant_publishing", "refusal": "dispatch_in_flight" }
+      ],
+      "effects": ["when publisher: cancel_queued_dispatches_and_withdraw_pending_approvals", "clear_schedule_via", "set_status_since", "set_engine_status"],
+      "plan": "§4.3 unschedule: cancels a dispatch. The client's approval stands: nothing it covered changed"
+    },
+    {
+      "action": "reschedule",
+      "cerbosAction": "schedule",
+      "extraCerbos": { "publisher": ["cancel"] },
+      "actors": ["officer"],
+      "from": [{ "status": "approved" }, { "status": "scheduled" }],
+      "to": "client",
+      "params": { "at": "ISO date-time, optional", "placement": "network list, optional; at least one of the two must change" },
+      "guards": [
+        { "guard": "something_changes", "refusal": "no_change" },
+        { "guard": "no_variant_publishing", "refusal": "dispatch_in_flight" },
+        { "guard": "one_account_per_placement_network", "refusal": "no_account_for_network" },
+        { "guard": "account_not_ambiguous", "refusal": "ambiguous_account" }
+      ],
+      "effects": ["when scheduled: unschedule_cancelling_dispatches_and_withdrawing_approvals", "write_date_and_placement", "sync_variants_dates_and_networks", "request_client_reviews_on_every_variant", "clear_schedule_via", "set_status_since", "set_engine_status", "content_month_progress", "notify:client_once_per_post"],
+      "plan": "SCP-Q13 ruled: any change to the date, time or placement of an approved or scheduled post asks the client again"
+    },
+    {
+      "action": "mark_live",
+      "cerbosAction": "schedule",
+      "actors": ["officer", "publisher"],
+      "from": [{ "status": "scheduled" }],
+      "to": "live",
+      "params": { "url": "http(s) link to the post, required from the officer", "at": "ISO date-time, default now" },
+      "guards": [
+        { "guard": "no_variant_publishing", "refusal": "dispatch_in_flight" }
+      ],
+      "effects": ["officer: variants_become_native_import_published", "publisher: from_published_variants", "set_live_url_and_went_live_at", "set_simulated_from_variants", "start_metrics", "set_status_since", "set_engine_status", "notify:officer_when_by_publisher"],
+      "plan": "§4.3 mark_live; §8 3b"
+    },
+    {
+      "action": "block",
+      "cerbosAction": "manage",
+      "actors": ["officer", "seat_approver"],
+      "from": [{ "status": "planned" }, { "status": "drafting" }, { "status": "proofread" }, { "status": "hod" }, { "status": "design" }, { "status": "final" }, { "status": "changes" }],
+      "to": "blocked",
+      "params": { "reason": "3..500, required", "waitingOn": "client|designer|copywriter|approver|officer|external, required" },
+      "guards": [],
+      "effects": ["set_blocked_from_and_reason", "keep_change_case", "set_status_since", "set_engine_status"],
+      "plan": "§4.3 block: any status before client"
+    },
+    {
+      "action": "resolve",
+      "cerbosAction": "manage",
+      "actors": ["officer", "seat_approver"],
+      "from": [{ "status": "blocked" }],
+      "to": { "from": "blockedFrom" },
+      "params": {},
+      "guards": [],
+      "effects": ["clear_block", "set_status_since", "set_engine_status", "notify:holder"],
+      "plan": "§4.3 resolve: back to the status it left"
+    },
+    {
+      "action": "follow_up",
+      "cerbosAction": "manage",
+      "actors": ["officer", "seat_approver"],
+      "from": [{ "status": "proofread" }, { "status": "hod" }, { "status": "design" }, { "status": "final" }, { "status": "client" }, { "status": "changes" }, { "status": "blocked" }],
+      "to": null,
+      "params": { "note": "0..500, optional" },
+      "guards": [
+        { "guard": "holder_is_someone_else", "refusal": "nobody_to_follow_up" },
+        { "guard": "once_per_holder_per_24h", "refusal": "follow_up_too_soon" }
+      ],
+      "effects": ["notify:holder", "activity_only"],
+      "plan": "§8 1j: Follow up sends a notification and logs it"
+    },
+    {
+      "action": "discard",
+      "cerbosAction": "manage",
+      "actors": ["officer", "seat_approver"],
+      "from": [{ "status": "planned" }, { "status": "drafting" }],
+      "to": "deleted",
+      "params": {},
+      "guards": [],
+      "effects": ["soft_delete", "content_month_progress"],
+      "plan": "§4.3 delete: planned, drafting"
+    },
+    {
+      "action": "archive",
+      "cerbosAction": "manage",
+      "actors": ["officer", "seat_approver"],
+      "from": [{ "status": "planned" }, { "status": "drafting" }, { "status": "proofread" }, { "status": "hod" }, { "status": "design" }, { "status": "final" }, { "status": "changes" }, { "status": "blocked" }, { "status": "client" }, { "status": "approved" }],
+      "to": "archived",
+      "params": { "reason": "3..500, required" },
+      "guards": [],
+      "effects": ["set_archived", "withdraw_pending_client_reviews", "withdraw_pending_publish_approvals", "set_engine_status", "content_month_progress"],
+      "plan": "§4.3 delete: later statuses are archived instead. Not from scheduled (unschedule first) or live"
+    }
+  ],
+  "systemRules": [
+    {
+      "rule": "change_after_client",
+      "when": "a variant's args hash changes (its content, date, time or settings, through a Composer edit or a media attach) while the post is approved or scheduled",
+      "then": "the post returns to client: a scheduled post is unscheduled first (queued dispatches cancelled, undecided publish approvals withdrawn), every variant's review is re-requested (pending), scheduleVia is cleared, the client is told once; activity 'changed_after_client'",
+      "plan": "SCP-Q13 ruled: the client approves the content, the date, the time and the placement; §4.3: a content edit after the client approved sends the post back to the client"
+    },
+    {
+      "rule": "publisher_results",
+      "when": "the dispatch path reports every variant of a scheduled post published",
+      "then": "mark_live by the publisher (liveUrl from the first published variant)",
+      "plan": "§4.3 mark_live: or the publisher's result"
+    },
+    {
+      "rule": "publisher_failure",
+      "when": "a variant of a scheduled post fails",
+      "then": "the post stays scheduled; its engine status becomes failed; the Failed posts tile counts it; an approver may unschedule it, or the officer reschedule it",
+      "plan": "§8 3b: a failed publish shows on the Failed posts tile"
+    },
+    {
+      "rule": "date_moves",
+      "when": "scheduledAt or placement changes (the post page, the calendar drag, the feed-preview swap)",
+      "then": "planned, drafting and a team copy changes case: an edit; approved and scheduled: reschedule, which asks the client again; proofread, hod, design, final, client, blocked and the client copy changes case: 409 field_locked; live: 409 post_is_live. A feed-preview swap applies this to both posts, all or nothing",
+      "plan": "SCP-Q13 ruled; §8 3d and 3e"
+    },
+    {
+      "rule": "publish_decision",
+      "when": "a second person decides a pipeline post's publish approval in /approvals (D14)",
+      "then": "passing approve on the post is the decide right for these rows (SCP-Q21): one of the four, never the post's author or officer, else 403 social_approver_required and the row stays pending; today's generic decide right alone is not enough. The filer never decides (PV-D46's self_approval runs first). Composer posts are unchanged",
+      "plan": "SCP-Q19 with PV-D46 and SCP-Q21, ruled 2026-10-26 (FRONTEND-BFF-CONTRACT §63.10, PERMISSION-CONTRACT §53.12)"
+    }
+  ],
+  "boosts": {
+    "statuses": ["requested", "approved", "running", "stopped", "completed", "cancelled", "declined"],
+    "approvedVia": ["budget", "portal", "recorded"],
+    "committedBy": { "approved": "total budget", "running": "total budget", "stopped": "actual spend", "completed": "actual spend", "requested": "nothing", "cancelled": "nothing", "declined": "nothing" },
+    "remainingRule": "remaining = the agreed monthly budget of the boost's cycle (0 when none) minus committed; committed sums each boost of that cycle by committedBy (SCP-Q15). Every write that moves committed or the agreement runs under the cycle's lock; never below 0 for display",
+    "actions": [
+      { "action": "request_boost", "cerbosAction": "boost", "actors": ["officer", "seat_approver"], "from": ["(new)"], "to": [{ "when": { "fitsRemaining": true }, "status": "approved", "approvedVia": "budget" }, { "when": { "fitsRemaining": false }, "status": "requested" }], "guards": [{ "guard": "post_live", "refusal": "post_not_live" }, { "guard": "no_open_boost", "refusal": "open_boost_exists" }, { "guard": "currency_matches_budget", "refusal": "currency_mismatch" }], "effects": ["set_cycle_from_starts_on", "when requested: notify:client_spend"] },
+      { "action": "approve_boost", "cerbosAction": "portal:approve_spend", "actors": ["client"], "from": ["requested"], "to": "approved", "approvedVia": "portal", "guards": [{ "guard": "boost_waiting", "refusal": "boost_not_waiting" }], "effects": ["notify:requester"] },
+      { "action": "decline_boost", "cerbosAction": "portal:approve_spend", "actors": ["client"], "from": ["requested"], "to": "declined", "guards": [{ "guard": "boost_waiting", "refusal": "boost_not_waiting" }], "effects": ["notify:requester"] },
+      { "action": "record_boost_approval", "cerbosAction": "social_engagement:budget", "actors": ["approver"], "from": ["requested"], "to": "approved", "approvedVia": "recorded", "params": { "channel": "required", "note": "required" }, "guards": [{ "guard": "boost_waiting", "refusal": "boost_not_waiting" }], "effects": ["notify:requester"] },
+      { "action": "record_boost_decline", "cerbosAction": "social_engagement:budget", "actors": ["approver"], "from": ["requested"], "to": "declined", "params": { "channel": "required", "note": "required" }, "guards": [{ "guard": "boost_waiting", "refusal": "boost_not_waiting" }], "effects": ["notify:requester"] },
+      { "action": "cancel_boost", "cerbosAction": "boost", "actors": ["officer", "seat_approver"], "from": ["requested", "approved"], "to": "cancelled", "guards": [], "effects": ["releases_its_budget"] },
+      { "action": "start_boost", "cerbosAction": "boost", "actors": ["officer", "seat_approver"], "from": ["approved"], "to": "running", "guards": [], "effects": ["set_started"] },
+      { "action": "stop_boost", "cerbosAction": "boost", "actors": ["officer", "seat_approver"], "from": ["running"], "to": "stopped", "params": { "spendMinor": "required, >= 0", "paidReach": "optional, >= 0", "clicks": "optional, >= 0" }, "guards": [], "effects": ["set_ended", "record_spend", "commits_only_its_spend"] },
+      { "action": "complete_boost", "cerbosAction": "boost", "actors": ["officer", "seat_approver"], "from": ["running", "stopped"], "to": "completed", "params": { "spendMinor": "required, >= 0", "paidReach": "required, >= 0", "clicks": "optional, >= 0" }, "guards": [], "effects": ["set_results", "commits_only_its_spend", "warning spend_above_budget when spend exceeds the total budget"] }
+    ]
+  },
+  "boostBudgets": {
+    "statuses": ["pending", "agreed", "declined", "withdrawn", "superseded"],
+    "agreedVia": ["portal", "recorded"],
+    "lowering": "allowed down to committed (SCP-Q15 ruled); below it is 409 budget_below_committed, checked when proposed, recorded and agreed",
+    "actions": [
+      { "action": "propose_boost_budget", "cerbosAction": "social_engagement:budget", "actors": ["approver"], "to": "pending", "guards": [{ "guard": "no_pending_proposal", "refusal": "proposal_pending" }, { "guard": "covers_committed", "refusal": "budget_below_committed" }], "effects": ["notify:client_spend"] },
+      { "action": "agree_boost_budget", "cerbosAction": "portal:approve_spend", "actors": ["client"], "from": ["pending"], "to": "agreed", "agreedVia": "portal", "guards": [{ "guard": "proposal_pending_now", "refusal": "budget_already_decided" }, { "guard": "covers_committed", "refusal": "budget_below_committed" }], "effects": ["previous_agreed_becomes_superseded", "notify:proposer"] },
+      { "action": "decline_boost_budget", "cerbosAction": "portal:approve_spend", "actors": ["client"], "from": ["pending"], "to": "declined", "guards": [{ "guard": "proposal_pending_now", "refusal": "budget_already_decided" }], "effects": ["notify:proposer"] },
+      { "action": "record_boost_budget", "cerbosAction": "social_engagement:budget", "actors": ["approver"], "to": "agreed", "agreedVia": "recorded", "params": { "amountMinor": "required: higher or lower than the agreement", "channel": "required", "note": "required" }, "guards": [{ "guard": "covers_committed", "refusal": "budget_below_committed" }], "effects": ["a pending proposal becomes superseded", "previous_agreed_becomes_superseded", "notify:client_recorded"] },
+      { "action": "withdraw_boost_budget", "cerbosAction": "social_engagement:budget", "actors": ["approver"], "from": ["pending"], "to": "withdrawn", "guards": [{ "guard": "proposal_pending_now", "refusal": "budget_already_decided" }], "effects": [] }
+    ]
+  },
+  "reports": {
+    "about": "The monthly report (SCP-5a, SCP-Q5): the existing social_reports row and its SMM-23 machine; FRONTEND-BFF-CONTRACT §63.18. SCP-Q20: the officer drafts and submits it; only the four approvers approve it, send it back and send it. Its refusals keep the SMM-23 codes and statuses (400 from the module's refuse(), 503 for the renderer).",
+    "statuses": [
+      { "status": "draft", "label": "Draft" },
+      { "status": "in_review", "label": "HoD check" },
+      { "status": "approved", "label": "Ready" },
+      { "status": "delivered", "label": "Sent" }
+    ],
+    "actions": [
+      { "action": "draft_report", "route": "POST engagements/:engagementId/reports", "cerbosAction": "social_report:create", "actors": ["officer", "seat_approver"], "to": "draft", "refusals": ["invalid_kind", "internal_client_no_reports"] },
+      { "action": "edit_report", "route": "PATCH reports/:id", "cerbosAction": "social_report:update", "actors": ["officer", "seat_approver"], "from": ["draft", "in_review"], "to": null, "refusals": ["report_not_editable", "status_changed_concurrently"] },
+      { "action": "submit_report", "route": "PATCH reports/:id {status: 'in_review'}", "cerbosAction": "social_report:update", "actors": ["officer"], "from": ["draft"], "to": "in_review", "refusals": ["cannot_submit_from_this_status", "status_changed_concurrently"] },
+      { "action": "send_back_report", "route": "PATCH reports/:id {status: 'draft'}", "cerbosAction": "social_report:approve", "actors": ["approver"], "from": ["in_review"], "to": "draft", "refusals": ["cannot_send_back_from_this_status", "status_changed_concurrently"] },
+      { "action": "approve_report", "route": "POST reports/:id/approve", "cerbosAction": "social_report:approve", "actors": ["approver"], "from": ["in_review"], "to": "approved", "refusals": ["cannot_approve_from_this_status", "notes_incomplete"] },
+      { "action": "deliver_report", "route": "POST reports/:id/deliver", "cerbosAction": "social_report:deliver", "actors": ["approver"], "from": ["approved"], "to": "delivered", "refusals": ["cannot_deliver_from_this_status", "internal_client_not_deliverable", "pdf_render_not_configured", "pdf_render_failed", "status_changed_concurrently"] }
+    ],
+    "refusals": {
+      "invalid_kind": { "http": 400 },
+      "internal_client_no_reports": { "http": 400 },
+      "report_not_editable": { "http": 400 },
+      "status_changed_concurrently": { "http": 400 },
+      "cannot_submit_from_this_status": { "http": 400 },
+      "cannot_send_back_from_this_status": { "http": 400 },
+      "invalid_status_transition": { "http": 400 },
+      "cannot_approve_from_this_status": { "http": 400 },
+      "notes_incomplete": { "http": 400, "new": true },
+      "cannot_deliver_from_this_status": { "http": 400 },
+      "internal_client_not_deliverable": { "http": 400 },
+      "pdf_render_not_configured": { "http": 503 },
+      "pdf_render_failed": { "http": 503 }
+    }
+  },
+  "refusals": {
+    "unknown_action": { "http": 400 },
+    "missing_field": { "http": 400, "with": "field" },
+    "invalid_field": { "http": 400, "with": "field" },
+    "post_not_found": { "http": 404 },
+    "cycle_not_found": { "http": 404 },
+    "engagement_not_found": { "http": 404 },
+    "decision_not_found": { "http": 404 },
+    "design_not_found": { "http": 404 },
+    "asset_not_found": { "http": 404 },
+    "suggestion_not_found": { "http": 404 },
+    "boost_not_found": { "http": 404 },
+    "proposal_not_found": { "http": 404 },
+    "automation_cannot_act": { "http": 403 },
+    "author_cannot_approve": { "http": 403 },
+    "not_the_officer": { "http": 403 },
+    "not_a_copywriter": { "http": 403 },
+    "not_an_approver": { "http": 403 },
+    "not_the_designer": { "http": 403 },
+    "not_officer_or_approver": { "http": 403 },
+    "not_a_social_approver": { "http": 403 },
+    "not_your_decision": { "http": 403 },
+    "cancel_required": { "http": 403 },
+    "social_approver_required": { "http": 403, "shape": "{error, reason}", "route": "POST /api/:t/automation-approvals/:id/decide (systemRules publish_decision)" },
+    "view_only": { "http": 403 },
+    "not_a_pipeline_post": { "http": 409 },
+    "post_archived": { "http": 409 },
+    "status_changed": { "http": 409, "with": "detail {status, phase}" },
+    "invalid_transition": { "http": 409, "with": "detail {status, changeCase}" },
+    "field_locked": { "http": 409, "with": "detail {field, status}" },
+    "incomplete_post": { "http": 409, "with": "blockers [{code, message}]" },
+    "checks_failed": { "http": 409, "with": "blockers [{code, message}]" },
+    "suggestion_stale": { "http": 409, "with": "detail {fields}" },
+    "creatives_unit_missing": { "http": 409 },
+    "design_missing": { "http": 409 },
+    "design_not_stored": { "http": 409, "with": "detail {designIds}" },
+    "no_account_for_network": { "http": 409, "with": "detail {networks}" },
+    "ambiguous_account": { "http": 409, "with": "detail {networks}" },
+    "content_changed": { "http": 409 },
+    "post_not_with_client": { "http": 409 },
+    "client_review_already_decided": { "http": 409 },
+    "undo_window_passed": { "http": 409 },
+    "approved_time_passed": { "http": 409 },
+    "no_change": { "http": 409 },
+    "media_rules_failed": { "http": 409, "with": "detail {variants: [{variantId, errors}]}" },
+    "publisher_unavailable": { "http": 409 },
+    "dispatch_in_flight": { "http": 409 },
+    "post_is_live": { "http": 409 },
+    "nobody_to_follow_up": { "http": 409 },
+    "follow_up_too_soon": { "http": 409, "with": "retryAfterSeconds" },
+    "post_not_live": { "http": 409 },
+    "open_boost_exists": { "http": 409 },
+    "currency_mismatch": { "http": 409 },
+    "boost_not_waiting": { "http": 409 },
+    "boost_already_decided": { "http": 409 },
+    "boost_status_changed": { "http": 409, "with": "detail {status}" },
+    "invalid_boost_transition": { "http": 409, "with": "detail {status}" },
+    "proposal_pending": { "http": 409 },
+    "budget_below_committed": { "http": 409, "with": "detail {committedMinor, currency}" },
+    "budget_already_decided": { "http": 409 },
+    "decide_per_post": { "http": 409 },
+    "pipeline_post": { "http": 409 },
+    "officer_not_member": { "http": 409 },
+    "officer_set_by_allocation": { "http": 409 }
+  },
+  "scenarioPersonas": {
+    "approver": "the HoD: the Social Media unit's lead seat",
+    "second_approver": "the GM: the GM unit's lead seat",
+    "owner": "a holder of the IAM owner role on the company, with no seat",
+    "platform_admin": "the superadmin",
+    "company_admin": "a company admin with no Social seat",
+    "social_manager": "a social_manager grant with no seat",
+    "manager_of_another_department": "a Web Dev head holding manager"
+  },
+  "scenarios": [
+    {
+      "name": "happy path, Creatives as the creative source, scheduled by hand",
+      "creativeSource": "creatives",
+      "steps": [
+        { "action": "create", "actor": "officer", "expect": { "status": "planned", "phase": "brief", "engineStatus": "draft" } },
+        { "action": "start_draft", "actor": "officer", "expect": { "status": "drafting", "phase": "brief" } },
+        { "action": "send_to_proofread", "actor": "officer", "expect": { "status": "proofread", "phase": "in_production" } },
+        { "action": "approve_copy", "actor": "copywriter", "expect": { "status": "hod", "phase": "in_production" } },
+        { "action": "approve_for_design", "actor": "approver", "expect": { "status": "design", "phase": "in_production", "creativeState": "not_started", "joinedMonthRequest": true } },
+        { "action": "start_design", "actor": "designer", "expect": { "status": "design", "creativeState": "in_progress" } },
+        { "action": "add_design", "actor": "designer", "expect": { "status": "design" } },
+        { "action": "submit_design", "actor": "designer", "expect": { "status": "final", "phase": "in_production", "creativeState": "submitted" } },
+        { "action": "final_approve", "actor": "approver", "expect": { "status": "client", "phase": "with_client", "engineStatus": "in_review", "variantsCreated": true } },
+        { "action": "client_approve", "actor": "client", "expect": { "status": "approved", "phase": "client_approved", "engineStatus": "approved" } },
+        { "action": "schedule", "actor": "officer", "expect": { "status": "scheduled", "phase": "client_approved", "engineStatus": "scheduled", "scheduleVia": "manual", "scheduledAtIsApproved": true } },
+        { "action": "mark_live", "actor": "officer", "params": { "url": "https://example.invalid/p/1" }, "expect": { "status": "live", "phase": "posted", "engineStatus": "published" } }
+      ]
+    },
+    {
+      "name": "in-team designer",
+      "creativeSource": "in_team",
+      "start": { "status": "hod" },
+      "steps": [
+        { "action": "approve_for_design", "actor": "approver", "expect": { "status": "design", "creativeState": "not_started", "joinedMonthRequest": false } },
+        { "action": "start_design", "actor": "in_team_designer", "expect": { "creativeState": "in_progress" } },
+        { "action": "start_design", "actor": "request_designer", "refusal": "not_the_designer" }
+      ]
+    },
+    {
+      "name": "loop a: proofread returns to draft",
+      "loop": "a",
+      "start": { "status": "proofread" },
+      "steps": [
+        { "action": "return_copy", "actor": "copywriter", "params": { "note": "Tighten the opening line." }, "expect": { "status": "changes", "changeCase": "copywriter_copy", "phase": "brief" } },
+        { "action": "send_to_proofread", "actor": "officer", "expect": { "status": "proofread", "phase": "in_production" } },
+        { "action": "approve_copy", "actor": "copywriter", "expect": { "status": "hod" } }
+      ]
+    },
+    {
+      "name": "loop b: the HoD's fix goes straight back to the HoD",
+      "loop": "b",
+      "start": { "status": "hod" },
+      "steps": [
+        { "action": "hod_changes", "actor": "approver", "params": { "note": "Use the new promo name." }, "expect": { "status": "changes", "changeCase": "hod_copy", "phase": "brief" } },
+        { "action": "resend", "actor": "officer", "expect": { "status": "hod", "phase": "in_production" } }
+      ]
+    },
+    {
+      "name": "loop c (copy): the final check asks the officer",
+      "loop": "c",
+      "start": { "status": "final" },
+      "steps": [
+        { "action": "final_changes", "actor": "approver", "params": { "changeKind": "copy", "note": "Fix the price." }, "expect": { "status": "changes", "changeCase": "final_copy", "phase": "in_production" } },
+        { "action": "resend", "actor": "officer", "expect": { "status": "final" } }
+      ]
+    },
+    {
+      "name": "loop c (design): the final check asks the designer",
+      "loop": "c",
+      "start": { "status": "final", "creativeState": "submitted" },
+      "steps": [
+        { "action": "final_changes", "actor": "approver", "params": { "changeKind": "design", "note": "Logo too small." }, "expect": { "status": "changes", "changeCase": "final_design", "phase": "in_production", "creativeState": "revision" } },
+        { "action": "start_design", "actor": "designer", "expect": { "creativeState": "revision" } },
+        { "action": "submit_design", "actor": "designer", "expect": { "status": "final", "creativeState": "submitted" } }
+      ]
+    },
+    {
+      "name": "loop d: the client asks for a design change",
+      "loop": "d",
+      "start": { "status": "client" },
+      "steps": [
+        { "action": "client_change", "actor": "client", "params": { "changeKind": "design", "note": "Brighter photo, please." }, "expect": { "status": "changes", "changeCase": "client_design", "phase": "client_changes", "creativeState": "revision" } },
+        { "action": "submit_design", "actor": "designer", "expect": { "status": "final", "phase": "in_production" } },
+        { "action": "final_approve", "actor": "approver", "expect": { "status": "client", "phase": "with_client" } }
+      ]
+    },
+    {
+      "name": "loop e: the client asks for a copy change; the HoD and Creative are skipped and the HoD is told",
+      "loop": "e",
+      "start": { "status": "client" },
+      "steps": [
+        { "action": "client_change", "actor": "client", "params": { "changeKind": "copy", "note": "Say 'from Friday'." }, "expect": { "status": "changes", "changeCase": "client_copy", "phase": "client_changes", "changedOnly": true } },
+        { "action": "edit", "actor": "officer", "params": { "fields": { "caption": "Open from Friday." } }, "expect": { "status": "changes", "copyLogged": true } },
+        { "action": "send_to_proofread", "actor": "officer", "expect": { "status": "proofread", "phase": "in_production", "changedOnly": true } },
+        { "action": "approve_copy", "actor": "copywriter", "expect": { "status": "client", "phase": "with_client", "changedOnly": false, "notified": ["approvers_told", "client"] } }
+      ]
+    },
+    {
+      "name": "rescheduling an approved post goes back to the client",
+      "start": { "status": "approved" },
+      "steps": [
+        { "action": "reschedule", "actor": "officer", "params": {}, "refusal": "no_change" },
+        { "action": "schedule", "actor": "officer", "expect": { "status": "scheduled", "scheduleVia": "manual", "scheduledAtIsApproved": true } },
+        { "action": "reschedule", "actor": "officer", "params": { "at": "a later date and time" }, "expect": { "status": "client", "phase": "with_client", "scheduleVia": null, "everyReviewPending": true, "notified": ["client"] } },
+        { "action": "client_approve", "actor": "client", "expect": { "status": "approved" } },
+        { "action": "reschedule", "actor": "officer", "params": { "placement": "a different network list" }, "expect": { "status": "client", "variantsSyncedToPlacement": true, "everyReviewPending": true } }
+      ]
+    },
+    {
+      "name": "the approved time has passed",
+      "start": { "status": "approved", "approvedTimeIsPast": true },
+      "steps": [
+        { "action": "schedule", "actor": "officer", "refusal": "approved_time_passed" },
+        { "action": "reschedule", "actor": "officer", "params": { "at": "a future date and time" }, "expect": { "status": "client" } }
+      ]
+    },
+    {
+      "name": "one of the four files through the publisher; the officer and a company admin cannot",
+      "start": { "status": "approved", "publisherRegistered": true },
+      "steps": [
+        { "action": "schedule_publisher", "actor": "officer", "refusal": "author_cannot_approve" },
+        { "action": "schedule_publisher", "actor": "company_admin", "refusal": "not_an_approver" },
+        { "action": "schedule_publisher", "actor": "approver", "expect": { "status": "scheduled", "scheduleVia": "publisher", "publishApprovalsFiled": true } },
+        { "action": "unschedule", "actor": "officer", "refusal": "not_an_approver" },
+        { "action": "unschedule", "actor": "approver", "expect": { "status": "approved", "scheduleVia": null } }
+      ]
+    },
+    {
+      "name": "blocked and resolved keeps the step and the change case",
+      "start": { "status": "changes", "changeCase": "final_design" },
+      "steps": [
+        { "action": "block", "actor": "officer", "params": { "reason": "Waiting for the client's photos.", "waitingOn": "client" }, "expect": { "status": "blocked", "phase": "brief", "blockedFrom": "changes", "changeCase": "final_design" } },
+        { "action": "resolve", "actor": "approver", "expect": { "status": "changes", "changeCase": "final_design", "phase": "in_production" } }
+      ]
+    },
+    {
+      "name": "the author never approves",
+      "start": { "status": "hod", "authorIs": "approver" },
+      "steps": [
+        { "action": "approve_for_design", "actor": "approver", "refusal": "author_cannot_approve" },
+        { "action": "approve_for_design", "actor": "second_approver", "expect": { "status": "design" } }
+      ]
+    },
+    {
+      "name": "the client's officer never approves, even as platform admin or through an agent",
+      "start": { "status": "final", "officerIs": "platform_admin" },
+      "steps": [
+        { "action": "final_approve", "actor": "platform_admin", "refusal": "author_cannot_approve" },
+        { "action": "final_approve", "actor": "agent_acting_for_platform_admin", "refusal": "author_cannot_approve" }
+      ]
+    },
+    {
+      "name": "only the four approvers decide; agents act as their person; unattended automations are refused",
+      "start": { "status": "hod" },
+      "steps": [
+        { "action": "approve_for_design", "actor": "company_admin", "refusal": "not_an_approver" },
+        { "action": "approve_for_design", "actor": "manager_of_another_department", "refusal": "not_an_approver" },
+        { "action": "approve_for_design", "actor": "social_manager", "refusal": "not_an_approver" },
+        { "action": "approve_for_design", "actor": "automation", "refusal": "automation_cannot_act" },
+        { "action": "approve_for_design", "actor": "agent_acting_for_approver", "expect": { "status": "design", "activityVia": "agent" } }
+      ]
+    },
+    {
+      "name": "a company admin cannot approve",
+      "start": { "status": "hod" },
+      "steps": [
+        { "action": "create", "actor": "company_admin", "refusal": "not_officer_or_approver", "note": "a new post in the same cycle: create also needs author or approve" },
+        { "action": "approve_for_design", "actor": "company_admin", "refusal": "not_an_approver" },
+        { "action": "hod_changes", "actor": "company_admin", "params": { "note": "Shorter, please." }, "refusal": "not_an_approver" },
+        { "action": "approve_for_design", "actor": "owner", "expect": { "status": "design", "activityActor": "owner" } }
+      ]
+    },
+    {
+      "name": "hand-off checks: send anyway needs a reason",
+      "start": { "status": "drafting", "failingChecks": ["must_haves_unticked"] },
+      "steps": [
+        { "action": "send_to_proofread", "actor": "officer", "refusal": "checks_failed" },
+        { "action": "send_to_proofread", "actor": "officer", "params": { "sendAnyway": true }, "refusal": "missing_field", "field": "sendAnywayReason" },
+        { "action": "send_to_proofread", "actor": "officer", "params": { "sendAnyway": true, "sendAnywayReason": "Client confirmed the tagline by phone." }, "expect": { "status": "proofread", "skippedChecks": ["must_haves_unticked"] } }
+      ]
+    },
+    {
+      "name": "wrong actor and wrong status",
+      "start": { "status": "proofread" },
+      "steps": [
+        { "action": "approve_copy", "actor": "officer", "refusal": "author_cannot_approve" },
+        { "action": "approve_copy", "actor": "designer", "refusal": "not_a_copywriter" },
+        { "action": "approve_for_design", "actor": "approver", "refusal": "invalid_transition" },
+        { "action": "send_to_proofread", "actor": "officer", "expectedStatus": "drafting", "refusal": "status_changed" }
+      ]
+    },
+    {
+      "name": "monthly boost budget: committed, lowering and the stopped boost's spend",
+      "budget": { "agreedMinor": 1000000, "currency": "IDR" },
+      "steps": [
+        { "action": "request_boost", "actor": "officer", "target": "boost A", "params": { "dailyBudgetMinor": 100000, "days": 5 }, "expect": { "boostStatus": "approved", "approvedVia": "budget", "committedMinor": 500000, "remainingMinor": 500000 } },
+        { "action": "request_boost", "actor": "officer", "target": "boost B", "params": { "dailyBudgetMinor": 200000, "days": 5 }, "expect": { "boostStatus": "requested", "committedMinor": 500000, "remainingMinor": 500000 } },
+        { "action": "approve_boost", "actor": "client", "target": "boost B", "expect": { "boostStatus": "approved", "approvedVia": "portal", "committedMinor": 1500000, "remainingMinor": 0 } },
+        { "action": "start_boost", "actor": "officer", "target": "boost A", "expect": { "boostStatus": "running" } },
+        { "action": "stop_boost", "actor": "officer", "target": "boost A", "params": { "spendMinor": 200000 }, "expect": { "boostStatus": "stopped", "committedMinor": 1200000, "remainingMinor": 0 } },
+        { "action": "cancel_boost", "actor": "officer", "target": "boost B", "expect": { "boostStatus": "cancelled", "committedMinor": 200000, "remainingMinor": 800000 } },
+        { "action": "record_boost_budget", "actor": "officer", "params": { "amountMinor": 600000, "channel": "whatsapp", "note": "Client lowered the month's budget." }, "refusal": "not_a_social_approver" },
+        { "action": "record_boost_budget", "actor": "company_admin", "params": { "amountMinor": 600000, "channel": "whatsapp", "note": "Client lowered the month's budget." }, "refusal": "not_a_social_approver" },
+        { "action": "record_boost_budget", "actor": "approver", "params": { "amountMinor": 100000, "channel": "whatsapp", "note": "Client lowered the month's budget." }, "refusal": "budget_below_committed" },
+        { "action": "record_boost_budget", "actor": "approver", "params": { "amountMinor": 600000, "channel": "whatsapp", "note": "Client lowered the month's budget." }, "expect": { "agreedMinor": 600000, "committedMinor": 200000, "remainingMinor": 400000 } },
+        { "action": "request_boost", "actor": "officer", "target": "boost C", "params": { "dailyBudgetMinor": 100000, "days": 5 }, "expect": { "boostStatus": "requested", "remainingMinor": 400000 } }
+      ]
+    },
+    {
+      "name": "the monthly report: Draft, HoD check, Ready, Sent",
+      "start": { "reportStatus": "draft" },
+      "steps": [
+        { "action": "submit_report", "actor": "officer", "expect": { "reportStatus": "in_review" } },
+        { "action": "approve_report", "actor": "approver", "precondition": "an area lacks its insight", "refusal": "notes_incomplete" },
+        { "action": "approve_report", "actor": "manager_of_another_department", "refusalHttp": 403, "note": "the report routes keep authorize()'s generic 403" },
+        { "action": "approve_report", "actor": "company_admin", "refusalHttp": 403 },
+        { "action": "approve_report", "actor": "approver", "expect": { "reportStatus": "approved" } },
+        { "action": "deliver_report", "actor": "officer", "refusalHttp": 403, "note": "SCP-Q20: the officer writes and submits, but never sends" },
+        { "action": "deliver_report", "actor": "owner", "expect": { "reportStatus": "delivered", "publishedToPortal": true } }
+      ]
+    }
+  ]
+}
