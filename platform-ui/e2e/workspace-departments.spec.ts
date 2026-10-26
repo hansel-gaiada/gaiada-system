@@ -64,6 +64,8 @@ interface DeptSpec {
   title: string;
   /** The Work group's rows, in order (the workspace's own sections, then Tools & connections). */
   rows: readonly RowSpec[];
+  /** SCP-Kg: a skinned workspace (Social Media) is checked in the Standard look, the person's own choice (DW-D51); its skin has `skin-social.spec.ts`. */
+  look?: "standard";
 }
 
 // Project Management (PM_ROW): Projects, then the toolkit's Board tab, which PM_TERMS.board labels "Board" (DW-D21)
@@ -107,6 +109,7 @@ const DEPARTMENTS: readonly DeptSpec[] = [
     // SOCIAL_MEDIA. Publish › Analytics moved to the Analytics row; Campaigns is ticketed (DW-5b).
     id: "dept-4",
     title: "Social Media",
+    look: "standard",
     rows: [PM, { row: "Publish", tabs: ["Calendar", "Composer", "Inbox"], click: { tab: "Composer", url: /\/departments\/dept-4\/composer$/ } }, TOOLS],
   },
   {
@@ -128,6 +131,7 @@ test.describe("department workspaces (superadmin)", () => {
   for (const dept of DEPARTMENTS) {
     test(`${dept.title}: the Work menu draws the registry's rows in order, and each multi-tab row has its strip`, async ({ page, context }) => {
       await signInSuperadmin(page, context);
+      if (dept.look) await context.addCookies([{ name: "gaiada_prefs", value: encodeURIComponent(JSON.stringify({ skin: dept.look })), url: new URL("/", page.url()).toString() }]);
       await page.goto(`/departments/${dept.id}`);
       const nav = menu(page, dept.title);
       await expect(nav).toBeVisible();

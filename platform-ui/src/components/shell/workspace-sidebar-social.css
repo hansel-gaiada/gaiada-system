@@ -65,7 +65,8 @@
 .erp-app[data-skin="social"] .ws-side .ws-pin--active,
 .erp-app[data-skin="social"] .ws-side .ws-pin--active:hover { border: none; background: transparent; color: var(--text-primary); font-weight: 700; }
 .erp-app[data-skin="social"] .ws-side .ws-pin--active:hover { background: var(--tint-hover); }
-.erp-app[data-skin="social"] .ws-side .ws-pin--active > svg { color: inherit; }
+.erp-app[data-skin="social"] .ws-side .ws-pin--active > svg { color: inherit; stroke-width: 2.75; }
+/* The heavier icon is what marks the current entry on the icon rail, where the bold label is hidden (as the phone bar does). */
 /* Create is a wrapper around its button row: it takes the full width like the link rows. */
 .erp-app[data-skin="social"] .ws-side .erp-new--pin { width: 100%; }
 

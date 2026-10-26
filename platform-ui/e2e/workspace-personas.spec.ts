@@ -78,6 +78,9 @@ interface Persona {
   admin: boolean;
   /** The Admin area's rows, when `admin`. */
   adminRows?: string[];
+  /** SCP-Kg: the person's workspace wears a skin (Social Media). These checks are of the Standard menu, so they run with the person's own choice
+   *  of the Standard look (DW-D51, the prefs cookie's `skin`); the skin's menu has its own spec, `skin-social.spec.ts`. */
+  look?: "standard";
   adminUrls: AdminUrl[];
 }
 
@@ -152,7 +155,7 @@ const PERSONAS: Persona[] = [
   },
   {
     name: "Social Media employee (social@gaiada.com, u-social: member, placed in Social Media)",
-    login: loginAsPlacedSocial, tenant: "co-agency",
+    login: loginAsPlacedSocial, tenant: "co-agency", look: "standard",
     home: /\/departments\/dept-4$/, menuTitle: "Social Media", switcherName: "Social Media, Gaia Digital Agency. Switch workspace",
     work: [
       "Project Management",
@@ -312,7 +315,10 @@ const PERSONAS: Persona[] = [
 
 async function signIn(page: Page, context: BrowserContext, p: Persona) {
   await p.login(page);
-  await context.addCookies([tenantCookie(page.url(), p.tenant)]);
+  await context.addCookies([
+    tenantCookie(page.url(), p.tenant),
+    ...(p.look ? [{ name: "gaiada_prefs", value: encodeURIComponent(JSON.stringify({ skin: p.look })), url: new URL("/", page.url()).toString() }] : []),
+  ]);
 }
 
 /** The visible labels of a group's links, with the Approvals row's pending count (DW-8m) taken off. */

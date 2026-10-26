@@ -155,6 +155,44 @@ test.describe("the Social skin on a desktop (1280x800)", () => {
     await expect(panel.getByRole("button", { name: /^Switch workspace/ })).toBeVisible();
   });
 
+  // SCP-Kg: the skin is on for Social Media, so these two take over, for the skin, what workspace-personas.spec.ts proves of the Standard menu
+  // (that spec now runs the Social Media employee in the Standard look, their own choice).
+  test("`/` lands on the Social Media home, and More's Switch workspace names it", async ({ page, context }) => {
+    await loginAsPlacedSocial(page);
+    await context.addCookies([tenantCookie(page.url(), TENANT)]);
+    await page.goto("/");
+    await expect(page).toHaveURL(new RegExp(`${SOCIAL_HOME}$`));
+    await expect(frame(page)).toHaveAttribute("data-skin", "social");
+    await press(menu(page).getByRole("button", { name: /^More/ }));
+    await expect(sheet(page).getByRole("button", { name: /^Switch workspace/ })).toContainText("Social Media");
+  });
+
+  test("every link in the Social menu and the More panel opens: no 4xx, no 404 page, no error page", async ({ page, context }) => {
+    test.setTimeout(240_000);
+    await signIn(page, context);
+    await press(menu(page).getByRole("button", { name: /^More/ }));
+    await expect(sheet(page)).toBeVisible();
+    // The pinned links, then every row and the account foot's links in More (the panel lists exactly the model's rows).
+    const hrefs = await page.locator("nav[aria-label='Social Media menu'] a[href], .ws-more a[href]").evaluateAll((as) =>
+      [...new Set(as.map((a) => a.getAttribute("href") ?? "").filter((h) => h.startsWith("/")))],
+    );
+    expect(hrefs.length).toBeGreaterThan(15);
+    const failures: string[] = [];
+    for (const href of hrefs) {
+      try {
+        const res = await page.goto(href);
+        const status = res?.status() ?? 0;
+        if (!res || status >= 400) failures.push(`${href}: status ${status || "none"}`);
+        await page.waitForLoadState("networkidle");
+        if ((await page.getByRole("heading", { name: /page not found/i }).count()) > 0) failures.push(`${href}: "Page not found" heading`);
+        if ((await page.getByText(/something went wrong/i).count()) > 0) failures.push(`${href}: error boundary text`);
+      } catch (e) {
+        failures.push(`${href}: ${(e as Error).message.split("\n")[0]}`);
+      }
+    }
+    expect(failures, `${hrefs.length} links walked`).toEqual([]);
+  });
+
   test("another department is Standard: no skin on the frame or <html>, and the Standard menu", async ({ page, context }) => {
     await signIn(page, context, "light", WEB_DEV_HOME);
     await expect(page.getByRole("navigation", { name: "Web Dev menu" })).toBeVisible();

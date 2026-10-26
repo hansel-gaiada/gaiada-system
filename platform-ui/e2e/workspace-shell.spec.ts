@@ -299,7 +299,11 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
     ];
     for (const [dept, label] of owns) {
       await page.goto(`/departments/${dept}`);
-      await press(sidebar(page).getByRole("button", { name: "New" }));
+      // SCP-Kg: Social Media wears its skin, whose pinned "Create" is the same New menu (the sidebar foot's "+ New" is hidden there).
+      const trigger = dept === "dept-4"
+        ? page.getByRole("navigation", { name: "Social Media menu" }).getByRole("button", { name: "Create" })
+        : sidebar(page).getByRole("button", { name: "New" });
+      await press(trigger);
       const items = page.getByRole("menu").getByRole("menuitem");
       await expect(items.first()).toHaveText(label);
       // The general items follow, without a duplicate of the lead one.
