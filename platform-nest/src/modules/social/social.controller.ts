@@ -101,6 +101,20 @@ import { getPublisher } from "./publisher/registry";
 import { getCachedBestTime, computeAccountBestTime, applyBestTimeSuggestion } from "./best-time";
 // SCP-1b — the phase people see for a pipeline post; the rule lives in the machine, never restated here.
 import { phaseOf } from "./pipeline/machine";
+// SCP-1b — systemRules change_after_client: a Composer edit of an approved or scheduled pipeline post goes back to the client.
+import { changeAfterClientInTx, recordChangeAfterClient } from "./pipeline/pipeline.service";
+
+/** SCP-1b: lock the variant's post (when it has one) before the variant, the order the pipeline takes them in, so a
+ *  Composer edit and a stage action on the same post never deadlock. Answers the post id, or null. */
+async function lockPostOfVariant(c: PoolClient, tenantId: string, variantId: string): Promise<string | null> {
+  const v = await c.query<{ post_id: string }>(
+    `SELECT post_id::text AS post_id FROM social_post_variants WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+    [tenantId, variantId],
+  );
+  const postId = v.rows[0]?.post_id ?? null;
+  if (postId) await c.query(`SELECT 1 FROM social_posts WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, [tenantId, postId]);
+  return postId;
+}
 
 const ENGAGEMENT_STATUSES = new Set(["draft", "active", "paused", "closed"]);
 const NETWORKS = new Set([
@@ -982,6 +996,8 @@ export class SocialController {
     const result = await withTenants(
       [tenantId],
       async (c) => {
+        // SCP-1b: the post's lock before the variant's, the order the pipeline's action route takes them in.
+        const postId = await lockPostOfVariant(c, tenantId, variantId);
         const { rows } = await c.query<{
           id: string; account_id: string; body: string; first_comment: string | null;
           media: unknown; settings: Record<string, unknown>; scheduled_at: Date | null;
@@ -1030,12 +1046,16 @@ export class SocialController {
           [next.body, next.firstComment, JSON.stringify(next.media), JSON.stringify(next.settings),
            next.scheduledAt, argsSha256, variantId],
         );
-        return { kind: "ok" as const, accountId: row.account_id, next, argsSha256, wasApproved };
+        // SCP-1b, systemRules change_after_client (BFF §63.3.5): an edit of an approved or scheduled pipeline post's
+        // variant moved what the client approved, so the post goes back to the client, in this same transaction.
+        const sentBack = postId ? await changeAfterClientInTx(c, tenantId, postId, req.principal.userId) : null;
+        return { kind: "ok" as const, accountId: row.account_id, next, argsSha256, wasApproved, sentBack };
       },
       { modules: ["social"] },
     );
     if (result.kind === "not_found") throw new NotFoundException("post variant not found");
     if (result.kind === "refuse") refuse(result.reason);
+    if (result.sentBack) await recordChangeAfterClient(tenantId, req.principal.userId, result.sentBack, variantId);
 
     // Re-validate against the account's live rules OUTSIDE the write transaction, then store the
     // verdict. Split deliberately: validation reads the connector registry, and holding the row
@@ -1369,6 +1389,8 @@ export class SocialController {
     const result = await withTenants(
       [tenantId],
       async (c) => {
+        // SCP-1b: the post's lock before the variant's (the pipeline's lock order).
+        const postId = await lockPostOfVariant(c, tenantId, variantId);
         const { rows } = await c.query<{
           id: string; account_id: string; body: string; first_comment: string | null; media: unknown;
           settings: Record<string, unknown>; scheduled_at: Date | null; status: string; approval_id: string | null; native_import: boolean;
@@ -1409,13 +1431,16 @@ export class SocialController {
             WHERE id = $3`,
           [JSON.stringify(nextMedia), argsSha256, variantId],
         );
+        // SCP-1b, systemRules change_after_client: a media attach after the client approved sends the post back.
+        const sentBack = postId ? await changeAfterClientInTx(c, tenantId, postId, req.principal.userId) : null;
         return {
           kind: "ok" as const, accountId: row.account_id, media: nextMedia, argsSha256, wasApproved,
-          body: row.body, firstComment: row.first_comment, settings: row.settings, scheduledAt: row.scheduled_at,
+          body: row.body, firstComment: row.first_comment, settings: row.settings, scheduledAt: row.scheduled_at, sentBack,
         };
       },
       { modules: ["social"] },
     );
+    if (result.kind === "ok" && result.sentBack) await recordChangeAfterClient(tenantId, req.principal.userId, result.sentBack, variantId);
     if (result.kind === "not_found") throw new NotFoundException("post variant not found");
     if (result.kind === "refuse") refuse(result.reason);
 

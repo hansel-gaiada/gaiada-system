@@ -141,7 +141,7 @@ export interface StageFacts {
   preDecisionCreativeState?: string | null;
   // follow_up
   callerHoldsPost?: boolean;
-  /** The caller's last follow-up of the current holder; null when none. */
+  /** The last follow-up of the current holder on this post (by anyone: the holder hears once a day); null when none. */
   lastFollowUpAt?: string | null;
   // send_to_proofread
   handoff?: { platforms: string[]; hashtagSets: Array<{ name: string; tags: string[] }>; readyBy: string | null; timeZone?: string };
@@ -165,8 +165,11 @@ export interface StageContext {
   facts: StageFacts;
   /** `portal`: the client's routes (BFF §63.9). Default `staff`. */
   surface?: "staff" | "portal";
-  /** `probe`: decide for `actions[]` (BFF §63.6.2): the steps that need no body, no replay, no effects. */
-  mode?: "apply" | "probe";
+  /** `probe`: decide for `actions[]` (BFF §63.6.2): the steps that need no body, no replay, no effects.
+   *  `gate`: every common step BEFORE the action's own guards (replay, Cerbos, expectedStatus, from, the body), and no
+   *  facts. The route runs it outside its transaction, so a refused caller is answered (and audited) before any row is
+   *  locked; it then re-runs the whole decision under the lock (BFF §63.3.2 step 12). */
+  mode?: "apply" | "probe" | "gate";
   /** Routes without a body (DELETE …/designs/:id, DELETE …/suggestions/:field) pass false. Default true. */
   requireExpectedStatus?: boolean;
 }
@@ -1334,13 +1337,14 @@ export function decide(ctx: StageContext): StageResult {
   };
 
   for (const g of [...SCP.commonGuards].sort((a, b) => a.order - b.order)) {
+    if (ctx.mode === "gate" && g.guard === "action_guards") break;
     const out = STEPS[g.guard](env);
     if (out === null) continue;
     if ("alreadyApplied" in out) return replayed(action!, ctx.post!);
     return out;
   }
 
-  if (isProbe) return probeAllowed(action!, ctx.post);
+  if (isProbe || ctx.mode === "gate") return probeAllowed(action!, ctx.post);
   return apply(action!, ctx, env.skipped);
 }
 

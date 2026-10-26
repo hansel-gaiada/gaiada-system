@@ -31,6 +31,8 @@ const GOLDEN: string[] = [
   "automation_approval|webdesk.site.promote|landed -> webdesk|webdesk_publish|promoted|webdesk.publishes",
   "webdev_provisioned_site|provisioned -> webdesk|webdev_provisioned_site|provisioned|webdesk.publishes",
   "social_post|created -> social|social_post|created|social.posts",
+  "social_post|schedule -> social|social_post|scheduled|social.posts",
+  "social_post|schedule_publisher -> social|social_post|scheduled|social.posts",
   "social_post_variant|dispatched -> social|social_post_variant|dispatched|social.posts",
   "search_audit|ingested -> seo|search_audit|ingested|seo.audits",
   "search_content_brief|drafted -> seo|search_content_brief|drafted|seo.briefs",

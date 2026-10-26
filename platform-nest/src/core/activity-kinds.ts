@@ -146,6 +146,10 @@ export const ACTIVITY_BRIDGE: readonly BridgeEntry[] = [
   { entity: "webdev_provisioned_site", auditVerb: "provisioned", source: "webdesk", objectKind: "webdev_provisioned_site", verb: "provisioned", kind: "webdesk.publishes", titleFrom: "slug", title: "Site provisioned" },
 
   { entity: "social_post", auditVerb: "created", source: "social", objectKind: "social_post", verb: "created", kind: "social.posts", titleFrom: "title", title: "Post scheduled" },
+  // SCP-1b (BFF §63.12, last paragraph): a pipeline post is created as a plan (its activity verb is `create`, which is not
+  // bridged), so it counts when it is scheduled, by hand or through the publisher. `dispatched` stays as it is.
+  { entity: "social_post", auditVerb: "schedule", source: "social", objectKind: "social_post", verb: "scheduled", kind: "social.posts", title: "Post scheduled" },
+  { entity: "social_post", auditVerb: "schedule_publisher", source: "social", objectKind: "social_post", verb: "scheduled", kind: "social.posts", title: "Post scheduled" },
   { entity: "social_post_variant", auditVerb: "dispatched", source: "social", objectKind: "social_post_variant", verb: "dispatched", kind: "social.posts", title: "Post sent" },
 
   { entity: "search_audit", auditVerb: "ingested", source: "seo", objectKind: "search_audit", verb: "ingested", kind: "seo.audits", title: "Audit" },
