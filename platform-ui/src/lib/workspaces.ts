@@ -522,6 +522,15 @@ const SOCIAL_MEDIA: Workspace = {
       ],
     },
     CLIENTS_ROW,
+    // SCP-1c (BFF §63.17): the HoD's Settings page (the ready-by buffer, the deadline table). Shown to the four Social approvers only; the page itself is
+    // readable by the team and editable with `plan`. The row key `settings` is the Social skin's pin (`lib/skins.ts`); Admin's `settings` row is another list.
+    {
+      key: "settings", label: "Settings", icon: "settings", gate: { kind: "leadSocial" },
+      tabs: [{
+        key: "settings", label: "Settings", href: deptPath("settings"), icon: "settings",
+        blurb: "The ready-by buffer, the boost-candidate factor and each client's deadline for the month.",
+      }],
+    },
   ],
   reports: [],
   analytics: [fromToolkit("social-media", "analytics", { key: "reach", label: "Reach and engagement" })],
