@@ -1390,7 +1390,7 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
   - the IA doc of 2026-08-22, §2.4;
   - Perspectives §4.1.
 - `docs/sidebar-nav-map.md` gains the workspace model.
-- The separate AI plan is started (DW-D17). It is its own document, not this program's phases.
+- The separate AI plan is started (DW-D17): [`docs/plans/2026-10-27-ai-plan.md`](2026-10-27-ai-plan.md). It is its own document, not this program's phases.
 
 **DW-1 · Foundations (no visible change)**
 - **1a** (Opus) The workspace registry `UI/lib/workspaces.ts`, grown out of `deptToolkits.ts`. It
