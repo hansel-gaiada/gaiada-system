@@ -95,7 +95,7 @@ const tab = (key: string, label: string, href: string) => ({ key, label, href, i
 const row = (key: string, label: string, tabs: ConcreteRow["tabs"]): ConcreteRow => ({ key, label, icon: "home", tabs });
 function ws(id: string, label: string, over: Partial<ShellWorkspace["rows"]> = {}, home = false): ShellWorkspace {
   return {
-    id, key: id, label, kind: "department", deptId: id, mine: home, home, lead: false, creates: [], withheld: [], skin: "standard",
+    id, key: id, label, kind: "department", deptId: id, mine: home, home, lead: false, creates: [], withheld: [], skin: "standard", skinOffered: null,
     rows: {
       top: [row("overview", "Overview", [tab("overview", "Overview", "/departments/" + id)])],
       work: [], performance: [row("learning", "My learning", [tab("learning", "My learning", "/learning")])],

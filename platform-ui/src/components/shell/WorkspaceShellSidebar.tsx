@@ -1,4 +1,6 @@
 import type { Me } from "@/lib/platform";
+import type { Theme } from "@/lib/prefs";
+import { logout } from "@/app/(app)/account/actions";
 import { getSidebarState } from "@/lib/prefs";
 import { accessibleCompanies, can, canSwitchCompany } from "@/lib/rbac";
 import { servedCompanyBadge } from "@/lib/serviceAssignments";
@@ -22,7 +24,7 @@ export function newMenuItems(me: Me, tenantId?: string | null): { label: string;
 // DW-2a: the server half of the workspace sidebar. It reads what only the server can (the collapse
 // cookie, the company list with its service badges, the New menu's gates) and hands it to the client
 // half; the shell model and the area (from the URL) live in the WorkspaceShellProvider around it.
-export async function WorkspaceShellSidebar({ me, tenantId }: { me: Me; tenantId: string | null }) {
+export async function WorkspaceShellSidebar({ me, tenantId, theme = "auto" }: { me: Me; tenantId: string | null; theme?: Theme }) {
   const collapsed = (await getSidebarState()) === "collapsed";
   const companies = accessibleCompanies(me);
   const current = companies.find((c) => c.id === tenantId) ?? companies[0] ?? null;
@@ -37,6 +39,15 @@ export async function WorkspaceShellSidebar({ me, tenantId }: { me: Me; tenantId
         companies={canSwitchCompany(me) ? companies.map((c) => ({ id: c.id, name: c.name, badge: servedCompanyBadge(me, c.id) })) : []}
         newItems={newMenuItems(me, tenantId)}
         brand={brand}
+        // SCP-Kd: what the top bar's avatar menu offers, for the Social skin's More panel (the same name, title, initials and client-view rule as the top bar).
+        account={{
+          name: me.name,
+          secondary: me.title ?? me.email,
+          initials: me.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase(),
+          clientView: (me.clientOf ?? []).length > 0,
+          theme,
+          logout,
+        }}
       />
     </SidebarState>
   );

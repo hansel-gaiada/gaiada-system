@@ -36,7 +36,9 @@
 .erp-app[data-skin="social"] .erp-top__search,
 .erp-app[data-skin="social"] .erp-top__searchbtn,
 .erp-app[data-skin="social"] .erp-bell,
-.erp-app[data-skin="social"] .ws-side__foot .erp-side__new { display: none; }
+.erp-app[data-skin="social"] .ws-side__foot .erp-side__new,
+/* The avatar menu moves into the More panel's foot (SCP-Kd); it still renders, and the access chip and the SIMULATED badge beside it stay. */
+.erp-app[data-skin="social"] .erp-top .erp-usermenu { display: none; }
 
 /* ---- Brand: the group's name in the display face, no logo ---- */
 .erp-app[data-skin="social"] .ws-side .erp-side__mark,
@@ -63,9 +65,8 @@
 /* The count: the accent pair, on the row's right edge (the collapsed rail moves it onto the icon, below). */
 .erp-app[data-skin="social"] .ws-side .ws-pin .ws-row__count { border-radius: var(--radius-pill); }
 
-/* More: the rows it reveals keep today's Standard sizes, indented under the button, until the More panel (SCP-Kd) replaces this. */
+/* More: its panel is drawn by more-panel.css, which is imported by MorePanel. */
 .erp-app[data-skin="social"] .ws-pins__more { margin-top: 2px; }
-.erp-app[data-skin="social"] .ws-pins__body { padding: 0 0 4px; }
 
 /* ---- Create: the New menu, opened from a row. It sits beside the menu, placed by the row's rectangle (NewMenu), because the nav column scrolls
    and would clip a menu drawn inside it. ---- */
