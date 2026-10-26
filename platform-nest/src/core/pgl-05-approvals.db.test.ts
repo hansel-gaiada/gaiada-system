@@ -40,8 +40,11 @@ describe.skipIf(!TEST_URL)("PGL-05/06 · approval tightening (PV-D46) through th
   let tenant: string;
   let filer: string; // company_admin: files through their agent, and could otherwise decide
   let checker: string; // a second company_admin: an eligible approver, no countersign right
-  let owner: string; // owner: holds countersign
-  let coOwner: string; // a second owner: an eligible countersign approver
+  // `owner` is permission-native and holds NO `automation_approval` read/decide (only company_admin and platform_admin
+  // decide these rows), so a person who can both decide and countersign holds owner AND company_admin. Both owners
+  // below do; on the live estate that pairing is what PGL-08's temporary grant must give one QA login.
+  let owner: string; // owner + company_admin: holds countersign and may decide
+  let coOwner: string; // a second owner + company_admin: an eligible countersign approver
   let platformAdmin: string; // global platform_admin
   let clientA: string;
 
@@ -76,6 +79,8 @@ describe.skipIf(!TEST_URL)("PGL-05/06 · approval tightening (PV-D46) through th
     await grantRole(checker, companyAdmin, "company", tenant);
     await grantRole(owner, ownerRole, "company", tenant);
     await grantRole(coOwner, ownerRole, "company", tenant);
+    await grantRole(owner, companyAdmin, "company", tenant);
+    await grantRole(coOwner, companyAdmin, "company", tenant);
     await grantRole(platformAdmin, await createRole("platform_admin"), "global", null);
     const pool = adminPool();
     for (const u of [filer, checker, owner, coOwner, platformAdmin]) {
