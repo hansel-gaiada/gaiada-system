@@ -207,7 +207,10 @@
   border-radius: var(--radius-pill);
   font: 600 10px/1.6 var(--font-body);
   text-align: center;
-  background: var(--status-warning);
+  /* The text-tier warning colour, not the graphic one: 10px card-coloured text on `--status-warning`
+     measured 3.95:1 in the light theme. `--status-warning-fg` is the same amber hue, darkened (5.03:1
+     here), and in the dark theme it is the same value as `--status-warning` (9.11:1). */
+  background: var(--status-warning-fg);
   color: var(--surface-card-solid);
 }
 
@@ -431,13 +434,17 @@
   font: 400 14px/1.4 var(--font-body);
   color: var(--ink-body);
   background: var(--surface-page);
-  border: 1px solid var(--line);
+  /* `--line-control` is the interactive-boundary tier (WCAG 1.4.11, 3:1). The decorative `--line` it
+     replaces measured 1.4:1 against the card in both themes (PGL-02). */
+  border: 1px solid var(--line-control);
   border-radius: var(--radius-md);
   padding: 10px 13px;
   width: 100%;
   transition: border-color 0.2s var(--erp-ease);
 }
-.cp-input:hover, .cp-select:hover, .cp-textarea:hover { border-color: var(--line-strong); }
+.cp-input:hover, .cp-select:hover, .cp-textarea:hover { border-color: var(--accent-fg); }
+/* A placeholder is text. The browser default is not a token and was never measured. */
+.cp-input::placeholder, .cp-textarea::placeholder { color: var(--ink-subtle); opacity: 1; }
 .cp-textarea { min-height: 88px; resize: vertical; }
 .cp-input:focus-visible,
 .cp-select:focus-visible,
@@ -636,3 +643,26 @@
 .cp-sched .cp-sched__num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cp-sched__link { color: var(--accent-fg); text-decoration: underline; text-underline-offset: 2px; }
 .cp-sched__note { margin: 10px 0 0; font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); }
+
+/* ── PGL-02: contrast fixes that reach shared (staff) rules without editing them ─────────────────── */
+/* Measured in docs/a11y/portal-contrast.md. Each rule is scoped to `.cp-shell`, so the staff app is
+   untouched, and each outranks the shared rule it corrects on specificity, not on source order.
+
+   1. A card header's right-hand meta (the live indicator, the certified badge) fell to `--ink-faint`
+      (2.8:1 light, 3.4:1 dark) because `.lux-card__head > :not(.lux-card__title)` out-specifies a bare
+      `.cp-live`. `--ink-faint` is decorative-only; this is a real sentence. An element that sets its own
+      colour inline (PortalStatus, the accent links) is unaffected. */
+.cp-shell .lux-card__head > :not(.lux-card__title) { color: var(--ink-subtle); }
+.cp-shell .lux-card__head > .sp-cert-badge { color: var(--ink-strong); }
+
+/* 2. The shared website-editor field: `--ink-faint` placeholder and a `--line` boundary. Rest, hover
+      and focus/error keep their own colours. */
+.cp-shell .lux-field__control::placeholder { color: var(--ink-subtle); opacity: 1; }
+.cp-shell .lux-field__control:not(:hover):not(:focus):not(:disabled):not(.lux-field__control--error) { border-color: var(--line-control); }
+.cp-shell .lux-field__control:hover:not(:focus):not(:disabled):not(.lux-field__control--error) { border-color: var(--accent-fg); }
+
+/* 3. The editor's pressed tool and the media drop hint set accent text on the accent tint, 3.6:1 and
+      4.4:1 in the light theme. Strong ink on the same tint is 11.6:1 and 14.0:1. The tint and border
+      still say "pressed" and "drop here". */
+.cp-shell .wc-md__toolbar .wc-md__tb[aria-pressed="true"] { color: var(--ink-strong); }
+.cp-shell .wm-drop-hint { color: var(--ink-strong); }

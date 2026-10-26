@@ -118,7 +118,7 @@ export default async function PortalProfilePage() {
               ]}
             />
             <div style={{ marginTop: 20 }}>
-              <Eyebrow style={{ display: "block", marginBottom: 8, opacity: 0.6 }}>Need something changed?</Eyebrow>
+              <Eyebrow style={{ display: "block", marginBottom: 8, color: "var(--ink-subtle)" }}>Need something changed?</Eyebrow>
               <PortalChangeRequestForm clientId={client.id} />
             </div>
           </Card>

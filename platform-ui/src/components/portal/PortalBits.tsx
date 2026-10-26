@@ -88,7 +88,8 @@ export function PortalFigure({ label, value, tone, foot }: {
 }) {
   return (
     <div>
-      <Eyebrow style={{ display: "block", marginBottom: 4, opacity: 0.6 }}>{label}</Eyebrow>
+      {/* `--ink-subtle`, not `opacity`: dimming the inherited ink to 0.6 measured 3.4:1 in the light theme (PGL-02). */}
+      <Eyebrow style={{ display: "block", marginBottom: 4, color: "var(--ink-subtle)" }}>{label}</Eyebrow>
       <div style={{
         font: "600 22px/1.1 var(--font-display)",
         color: tone === "danger" ? "var(--status-danger-fg)" : "var(--ink-strong)",
