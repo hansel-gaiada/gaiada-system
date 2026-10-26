@@ -1,4 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterAll } from "vitest";
+
+// The demo store seeds some events a few days after today, so from about the 26th of a month they fall into the next month and the
+// "next month" read below finds them. Pin the clock to mid-month (Friday 16 October 2026, midday in Singapore) before the store seeds,
+// which it does when it is imported, hence vi.hoisted. Only Date is faked.
+vi.hoisted(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-16T04:00:00Z"));
+});
+afterAll(() => vi.useRealTimers());
+
 import { deptCalendarDemo } from "./demoDeptCalendar";
 import { calendarEventsDemo, demoMonthDay } from "./demoCalendarEvents";
 import { todayIsoInDisplayZone } from "./format";
