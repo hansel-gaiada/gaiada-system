@@ -14,6 +14,7 @@ import type { RequestRoute } from "@/lib/requests";
 import { routeAskLabel, routeHref } from "@/lib/requests";
 import { concreteRows, gateAllows, homeArea, routeActionsFor, withheldTabPaths, workspaceKeysOf, type ApprovalsRead, type ConcreteRow, type GateContext, type MyWorkspaces, type WorkspaceRef } from "@/lib/workspaceAccess";
 import type { Area } from "@/lib/areas";
+import { effectiveSkin, type SkinChoice, type SkinKey } from "@/lib/skins";
 
 export interface ShellRows {
   /** Overview and AI Assistant. */
@@ -40,6 +41,8 @@ export interface ShellWorkspace {
   /** The paths of the registry tabs this person is not offered because a gate refuses them (`withheldTabPaths`), so a console
    *  strip can tell "the shell lacks this tab" from "this page is not theirs". */
   withheld: string[];
+  /** The skin this workspace is drawn in for this person (`effectiveSkin`, DW-D51): Standard unless its own skin is on and they kept it. */
+  skin: SkinKey;
 }
 
 export interface ShellModel {
@@ -73,8 +76,10 @@ export function buildShellModel(input: {
   /** The active company's routes to other group companies (`GET requests/routes`, DW-10e), for the `hasRoutes` gate and the per-route
    *  "Ask ..." actions. Omitted or null (unread, failed) offers none of them. */
   routes?: GateContext["routes"];
+  /** The skins switched on (`skinsOn`) and the person's own choice (DW-D51). Omitted: every workspace is drawn Standard. */
+  skins?: { on: readonly SkinKey[]; choice?: SkinChoice };
 }): ShellModel {
-  const { me, tenantId, workspaces, approvals, routes } = input;
+  const { me, tenantId, workspaces, approvals, routes, skins } = input;
   const homeRef = workspaces.home.kind === "workspace" ? workspaces.home.ref : null;
   // Which departments this company has, for the `hasWorkspace` gate (DW-5f: "Ask Creatives" needs a Creatives).
   const departments = workspaceKeysOf(workspaces);
@@ -113,6 +118,7 @@ export function buildShellModel(input: {
         you: concreteRows(raw.you, ctx),
       },
       withheld: withheldTabPaths([...raw.top, ...raw.work, ...raw.performance, ...raw.you], ctx),
+      skin: effectiveSkin(ref.workspace.skin, skins?.on ?? [], skins?.choice),
     });
   };
   for (const ref of workspaces.mine) add(ref, true);

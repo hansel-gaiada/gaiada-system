@@ -14,6 +14,7 @@ import { listApprovals } from "@/lib/approvals";
 import { layoutHomeRedirect } from "@/lib/overview";
 import { PATHNAME_HEADER } from "@/lib/pathnameHeader";
 import { buildShellModel } from "@/lib/shellModel";
+import { skinsOn } from "@/lib/skins";
 import { routesForShell } from "@/lib/requests-data";
 import { needsRoutesRead } from "@/lib/workspaceAccess";
 import { ShellRoutesFeed } from "@/components/shell/ShellRoutesFeed";
@@ -55,7 +56,10 @@ export default async function AppLayout({ children, drawer }: { children: React.
   // DW-8m / DW-D23: the Approvals row's gate and count. The model is built with the read IN FLIGHT: the row is shown to a person who
   // holds a decide right (computed here, with no read) and hidden from one who does not, until `ShellApprovalsFeed` settles it: shown
   // when something waits on them or they may decide, with the pending count as its badge; an unavailable read shows it.
-  const workspaceModel = buildShellModel({ me, tenantId, workspaces, approvals: "inflight", ...(routesRead ? { routes: "inflight" as const } : {}) });
+  // SCP-Ka (DW-D51): a workspace wears its own skin only once that skin is on (`SKINS_ON`, or `SHELL_SKIN_PREVIEW` on a dev or test box) and
+  // the person has not chosen Standard for themselves.
+  const skins = { on: skinsOn(process.env.SHELL_SKIN_PREVIEW), choice: prefs.skin };
+  const workspaceModel = buildShellModel({ me, tenantId, workspaces, approvals: "inflight", skins, ...(routesRead ? { routes: "inflight" as const } : {}) });
   // DW-3a2: `/` for a person whose home is a workspace is answered HERE, with a real 307. The page's own
   // redirect would stream (it sits under loading.tsx) and leave a meta refresh that breaks client navigation.
   const homeHref = layoutHomeRedirect({ pathname: (await headers()).get(PATHNAME_HEADER), home: workspaces.home, tenantId });

@@ -5,6 +5,7 @@ import { DEFAULT_PREFS } from "@/lib/prefs";
 import { canViewAllCompanies, isUnrestricted } from "@/lib/rbac";
 import { WorkspaceShellSidebar } from "./WorkspaceShellSidebar";
 import { WorkspaceShellProvider } from "./WorkspaceShellContext";
+import { ShellFrame } from "./ShellFrame";
 import { WorkspaceTabStrip } from "./WorkspaceTabStrip";
 import { WorkspaceTopBar } from "./WorkspaceTopBar";
 import { CommandPalette } from "./CommandPalette";
@@ -33,11 +34,12 @@ export function Shell({ me, tenantId, prefs = DEFAULT_PREFS, workspaceModel, app
   // explicit `/approvals` entry for everyone (`STATIC_PALETTE_ENTRIES`).
   const paletteEntries = workspacePaletteEntries(applyRoutes(applyApprovals(workspaceModel, "inflight"), "inflight"), me, tenantId);
 
+  // The provider renders no DOM and sits OUTSIDE the frame: the frame (`.erp-app`) reads the workspace being drawn to wear its skin
+  // (SCP-Ka, DW-D51), and `.erp-app`'s grid still sees the frame's parts as its direct children.
   return (
-    <div className="erp-app" data-density={prefs.density} data-width={prefs.width}>
-      <a href="#main-content" className="skip-link">Skip to content</a>
-      {/* The provider renders no DOM, so `.erp-app`'s grid still sees the frame's parts as its direct children. */}
-      <WorkspaceShellProvider model={workspaceModel}>
+    <WorkspaceShellProvider model={workspaceModel}>
+      <ShellFrame density={prefs.density} width={prefs.width}>
+        <a href="#main-content" className="skip-link">Skip to content</a>
         {approvalsFeed}
         {routesFeed}
         <WorkspaceShellSidebar me={me} tenantId={tenantId} />
@@ -53,7 +55,7 @@ export function Shell({ me, tenantId, prefs = DEFAULT_PREFS, workspaceModel, app
         {/* The assistant has no floating button: the sidebar's AI Assistant row opens the drawer (DW-2d). Command palette (§4):
             mounted once, renders nothing until opened (Cmd/Ctrl-K or the top bar's search field). */}
         <CommandPalette entries={paletteEntries} />
-      </WorkspaceShellProvider>
-    </div>
+      </ShellFrame>
+    </WorkspaceShellProvider>
   );
 }

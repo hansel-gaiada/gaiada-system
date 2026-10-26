@@ -4,6 +4,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { parsePinnedTools } from "./pinnedTools";
 import { parseOverviewPrefs, type OverviewPrefs } from "./overviewPrefs";
+import { SKIN_CHOICES, type SkinChoice } from "./skins";
 
 export type Density = "comfortable" | "compact";
 export type Width = "standard" | "wide";
@@ -32,6 +33,8 @@ export interface Prefs {
   pinnedTools: Record<string, string[]>;
   /** DW-10d (DW-D34): the Overview blocks a person hid or switched on, per workspace (`lib/overviewPrefs.ts`). No entry = today's Overview. */
   overview: OverviewPrefs;
+  /** DW-D51: the workspace's own skin of the shell, or always Standard (`lib/skins.ts`). */
+  skin: SkinChoice;
 }
 
 // Width defaults to "wide" (no max-width): the suite is dominated by tables, boards and console
@@ -45,7 +48,7 @@ export interface Prefs {
 // 1.0.0-alpha.301 were INERT for every user on the default. The design draws a
 // centred column; "standard" is that. "wide" survives untouched as the opt-in
 // full-bleed mode for anyone who wants it.
-export const DEFAULT_PREFS: Prefs = { density: "comfortable", width: "standard", theme: "auto", assistantRailCollapsed: false, officeZoom: "fit", pinnedTools: {}, overview: {} };
+export const DEFAULT_PREFS: Prefs = { density: "comfortable", width: "standard", theme: "auto", assistantRailCollapsed: false, officeZoom: "fit", pinnedTools: {}, overview: {}, skin: "workspace" };
 const COOKIE = "gaiada_prefs";
 
 const DENSITIES: Density[] = ["comfortable", "compact"];
@@ -71,6 +74,7 @@ export async function getPrefs(): Promise<Prefs> {
       officeZoom: OFFICE_ZOOMS.includes(parsed.officeZoom as OfficeZoom) ? (parsed.officeZoom as OfficeZoom) : DEFAULT_PREFS.officeZoom,
       pinnedTools: parsePinnedTools(parsed.pinnedTools),
       overview: parseOverviewPrefs(parsed.overview),
+      skin: SKIN_CHOICES.includes(parsed.skin as SkinChoice) ? (parsed.skin as SkinChoice) : DEFAULT_PREFS.skin,
     };
   } catch {
     return DEFAULT_PREFS;

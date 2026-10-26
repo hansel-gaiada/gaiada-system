@@ -31,6 +31,7 @@ import { packFor, type AgencyRowKey, type PackKey } from "@/lib/packs";
 import { bespokeToolkit, deptSlug, type DeptLauncher, type DeptTab } from "@/lib/deptToolkits";
 import { PM_TERMS } from "@/lib/pmVocabulary";
 import type { RequestKind } from "@/lib/requests";
+import type { SkinKey } from "@/lib/skins";
 
 // ── Types ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -195,6 +196,8 @@ export interface Workspace {
   assistantPrompts: readonly { label: string; prompt: string }[];
   /** Route prefixes OUTSIDE `/departments/{dept}` that belong to this workspace (`areaFor`, DW-1c). */
   ownedRoutes: readonly string[];
+  /** The workspace's skin of the shell (DW-D51, `lib/skins.ts`). Absent = Standard. Drawn only once the skin is switched on. */
+  skin?: SkinKey;
 }
 
 // ── Helpers for building the data ─────────────────────────────────────────────────────────────────
@@ -499,6 +502,8 @@ const SOCIAL_MEDIA: Workspace = {
   key: "social-media",
   kind: "department",
   label: "Social Media",
+  // The team's own design (SCP-K). Off for everyone until SCP-Kg adds it to `SKINS_ON`.
+  skin: "social",
   mission: bespokeToolkit("social-media")?.mission ?? "",
   overviewHref: deptPath(""),
   work: [
