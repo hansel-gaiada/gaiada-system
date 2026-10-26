@@ -235,6 +235,7 @@ The phase has three kinds of work. Only the first is code.
   - The house rules for flag flips: back up `.env`, pass `GAIADA_TAG`/`APP_VERSION` inline, and recreate only
     `platform` with `--no-deps`.
 - Written after PGL-01, so it can cite the check ids.
+- Runbook: `infra/runbooks/portal-go-live.md` (PLANNED).
 
 ### PGL-05: nobody approves their own agent's high-impact request (backend, authz)
 

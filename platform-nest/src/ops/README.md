@@ -23,6 +23,8 @@ docker exec gaiada-platform-1 node dist/ops/portal-go-live-check.js --json   # t
 Each line is `PASS`, `BLOCK`, `WARN`, `INFO`, `MANUAL` or `ERROR`, then the check id, then the evidence. It never prints a
 secret: a key is reported as set or unset and by its prefix class (`SIM-`, `SB-`, other) only.
 
+The cut-over runbook that uses this check as its gate: `infra/runbooks/portal-go-live.md` (PGL-04, PLANNED).
+
 ### Exit codes
 
 | Code | Meaning |
