@@ -112,6 +112,9 @@ describe.skipIf(!TEST_URL)("PV5-12 · invoice-issue tools through the real endpo
   let admin: string;  // company_admin: may issue and void
   let bot: string;    // company_admin, users.kind = 'bot': refused issue and void by Cerbos
   let member: string; // a member with no authority over invoices
+  // PGL-05 (PV-D46 (1)): the approver of the D14 rows below. Before PV-D46 they were approved by `admin`, who also filed
+  // most of them; the self-approval rule now refuses that at decide time and again at execution.
+  let checker: string;
   let clientA: string;
 
   const as = (ext: string) => ({ provider: "platform", externalId: ext });
@@ -183,9 +186,11 @@ describe.skipIf(!TEST_URL)("PV5-12 · invoice-issue tools through the real endpo
     admin = await createUser("admin@pv512.test");
     bot = await createUser("bot@pv512.test");
     member = await createUser("member@pv512.test");
+    checker = await createUser("checker@pv512.test");
     const companyAdmin = await createRole("company_admin");
-    for (const u of [admin, bot, member]) await addMembership(tenant, u);
+    for (const u of [admin, bot, member, checker]) await addMembership(tenant, u);
     await grantRole(admin, companyAdmin, "company", tenant);
+    await grantRole(checker, companyAdmin, "company", tenant);
     await grantRole(bot, companyAdmin, "company", tenant);
     await grantRole(member, await createRole("member"), "company", tenant);
     const pool = adminPool();
@@ -350,7 +355,7 @@ describe.skipIf(!TEST_URL)("PV5-12 · invoice-issue tools through the real endpo
              (id, tenant_id, workflow_id, tool_name, tool_args, impact, status, requested_by, decided_by, decided_at,
               origin, origin_site, execution_status)
            VALUES ($1,$2,'wf:pv512-agent',$3,$4,'high','approved',$5,$6,now(),'agent','main','pending')`,
-          [id, tenant, tool, JSON.stringify(args), filedBy, admin],
+          [id, tenant, tool, JSON.stringify(args), filedBy, checker],
         ),
       );
       return id;

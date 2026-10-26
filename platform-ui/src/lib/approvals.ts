@@ -59,6 +59,8 @@ export interface AutomationApprovalDetail {
   executionError: string | null;
   executionResult: unknown;
   executionAttempts: number | null;
+  /** PGL-05/06: the typed reason this viewer's Approve would be refused with, or null (BFF §8). Optional: older backends. */
+  approveRefusal?: string | null;
 }
 
 export interface AgencyApprovalDetail {

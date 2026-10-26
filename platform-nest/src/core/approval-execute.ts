@@ -82,6 +82,8 @@ import {
   type HubObo,
 } from "./hub-client";
 import { notifyBestEffort } from "./client-notify";
+// PGL-05: the generic self-approval rule; the executor is its second wall.
+import { selfApprovalVerdict } from "./approval-self-approval";
 import type { OutboxEvent } from "../events/types";
 
 /** How long an `executing` row must have sat un-updated before D14-07's retry may reclaim it. Long
@@ -135,7 +137,8 @@ export const EXEC_ERROR = {
   notExecutable: "not_executable",
   /** The entry's `approverCheck` refused the human who approved the row (e.g. the payment's own
    *  recorder approved its confirmation). Re-checked at execution against the stored `decided_by`, so
-   *  a row approved by any path is held to the same rule. The hub is never called. */
+   *  a row approved by any path is held to the same rule. The hub is never called. PGL-05: also the
+   *  prefix of the generic self-approval rule's refusal, `approver_refused: self_approval`. */
   approverRefused: "approver_refused",
 } as const;
 
@@ -156,10 +159,13 @@ interface ApprovalRow {
   requested_by: string | null;
   decided_by: string | null;
   execution_attempts: number;
+  /** The STORED impact (filer-supplied). PGL-05 reads it only through `effectiveApprovalImpact`, which can raise it to
+   *  the server-side tier but never lower the server-side tier to it. */
+  impact: string | null;
 }
 
 const CLAIM_RETURNING =
-  "id, tenant_id, workflow_id, tool_name, tool_args, origin, requested_by, decided_by, execution_attempts";
+  "id, tenant_id, workflow_id, tool_name, tool_args, origin, requested_by, decided_by, execution_attempts, impact";
 
 /**
  * Put an entry's declared module scope in force for the rest of THIS transaction, immediately before
@@ -268,6 +274,22 @@ export async function executeApprovedAutomationWrite(
       // afterwards). Fail closed: an unregistered tool has no precondition, and "call it anyway"
       // is precisely the unattended-dispatcher failure this program exists to prevent.
       const error = `${EXEC_ERROR.notExecutable}: no executable registry entry for '${row.tool_name}'`;
+      await markFailedInTx(c, approvalId, row, error);
+      return { kind: "failed" as const, row, error };
+    }
+
+    // PGL-05 (PV-D46 (1)) — THE SECOND WALL of the self-approval rule, against the STORED decider. decide() already
+    // refused a filer approving their own high-impact row; this catches a row that reached `approved` any other way (a
+    // hand edit, a future decide surface, a row decided before the rule, a D14-07 retry of one). Before the lock and the
+    // precondition: it reads only the claimed row, whose `requested_by`/`decided_by`/`impact` cannot change under us,
+    // and a refused row must not even take the domain lock. Only the stored `decided_by` exists here (the decide call's
+    // act-for is not stored), so this wall compares the decider; decide() also compared the human it acted for.
+    const self = selfApprovalVerdict(
+      { origin: row.origin, toolName: row.tool_name, impact: row.impact, requestedBy: row.requested_by },
+      { userId: row.decided_by },
+    );
+    if (!self.ok) {
+      const error = `${EXEC_ERROR.approverRefused}: ${self.reason}`;
       await markFailedInTx(c, approvalId, row, error);
       return { kind: "failed" as const, row, error };
     }

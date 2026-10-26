@@ -47,6 +47,23 @@ export interface UnifiedApprovalItem {
   urgencyScore: number;
   decidable: boolean;
   status: string;
+  // PGL-05/06 (PERMISSION-CONTRACT §52, BFF §8): on a pending automation/agent item, the typed reason the viewer's
+  // Approve would be refused with, or null. Optional: an older backend omits it, and "absent" means "not known to be
+  // refused", never "refused".
+  approveRefusal?: string | null;
+}
+
+// PGL-05/06 — the sentence shown beside a disabled Approve. A reason not listed here still disables Approve (the server
+// said it will refuse), with a generic sentence, so a new server-side rule never needs a UI release to be honest.
+const APPROVE_REFUSAL_SENTENCE: Record<string, string> = {
+  self_approval: "You can't approve this: it is a high-impact request from you or from an agent acting for you. Another approver must decide it. You can still deny it.",
+  countersign_right_required: "You can't approve this: approving an agent's countersignature needs the right to countersign this contract yourself.",
+  approver_recorded_this_payment: "You can't approve this: you recorded this payment, so someone else must decide it.",
+  approver_unknown: "You can't approve this: your account could not be identified as the approver.",
+};
+
+export function approveRefusalSentence(reason: string): string {
+  return APPROVE_REFUSAL_SENTENCE[reason] ?? `You can't approve this (${reason.replace(/_/g, " ")}). Another approver must decide it.`;
 }
 
 // D14-08 — the second, honest axis. `status` (above, on UnifiedApprovalItem) is the DECISION;
