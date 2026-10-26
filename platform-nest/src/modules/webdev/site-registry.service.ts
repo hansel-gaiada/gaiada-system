@@ -33,6 +33,7 @@ import { emitEvent } from "../../events/outbox.service";
 import { PROVISIONED_PLACEHOLDER_DOMAIN_SUFFIX } from "./provision-completion";
 import { DeliveryRefusal, deliveryStateOf, vaultRecordRefusal, type BindingInput, type DeliveryState } from "./delivery-binding";
 import { PropertyDomainConflict, linkPropertyForSite, type PropertyLinkResult } from "./site-property-link";
+import { syncSiteDnsTaskQuietly } from "./domain-dns-task.service";
 
 export const SITE_ENVIRONMENTS = new Set(["production", "staging", "preview", "development"]);
 export const SITE_HOST_KINDS = new Set(["our-box", "client-cpanel", "shared-hosting", "external", "unknown"]);
@@ -320,6 +321,8 @@ export async function claimProvisionedSiteDomain(
       },
       { modules: ["webdev", "search"] },
     );
+    // M6-P6p: the claimed domain may already have its records to create (a binding exists): make the Web Dev task (best-effort, after commit).
+    await syncSiteDnsTaskQuietly(tenantId, row.row.id, actorId);
     return { ...toDto(row.row), property: row.property };
   } catch (err) {
     if (err instanceof PropertyDomainConflict) throw new ConflictException("property_domain_conflict");
@@ -358,7 +361,7 @@ export async function bindSiteDelivery(
   actorId: string | null,
 ): Promise<DeliverySiteDto> {
   if (!looksLikeUuid(siteId)) throw new DeliveryRefusal("not_found", "webdev site not found");
-  return withTenants(
+  const bound = await withTenants(
     [tenantId],
     async (c) => {
       const cur = await c.query<SiteRow>(
@@ -408,6 +411,9 @@ export async function bindSiteDelivery(
     },
     { modules: ["webdev"] },
   );
+  // M6-P6p: the binding is what gives a claimed domain its records to create: make or refresh the Web Dev DNS task (best-effort, after commit).
+  await syncSiteDnsTaskQuietly(tenantId, bound.id, actorId);
+  return bound;
 }
 
 /** Create a provisioned site's PRODUCTION row from its STAGING row.

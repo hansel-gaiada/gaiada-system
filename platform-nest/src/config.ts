@@ -850,6 +850,8 @@ const configBase = {
     targetsJson: process.env.WEBDEV_DNS_TARGETS ?? "",
     /** One resolver query's own deadline (two tries each). */
     timeoutMs: positiveIntFromEnv("WEBDEV_DNS_TIMEOUT_MS", 3_000),
+    /** M6-P6p: how often the sweep re-checks the open DNS tasks (read-only resolver lookups of their domains; default 15 min). */
+    sweepIntervalMs: positiveIntFromEnv("WEBDEV_DNS_SWEEP_INTERVAL_MS", 15 * 60_000),
   },
   // WSK-61 — a scheduled publish going live rebuilds staging (scheduled-rebuilds.service.ts).
   webdeskSchedule: {

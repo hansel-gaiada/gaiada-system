@@ -319,11 +319,11 @@ export async function loadOrgStructure(c: PoolClient, tenantId: string): Promise
 // position_roles and position_assignments are FORCE RLS: an unset tenant GUC reads ZERO seats, a silent "heads nothing").
 
 /** The seat join, shared by every seat read so they cannot drift: `p` the position, `pa` the open assignment, the role row. */
-const LEAD_SEAT_FROM = `positions p
+export const LEAD_SEAT_FROM = `positions p
        JOIN position_assignments pa ON pa.position_id = p.id AND pa.tenant_id = p.tenant_id
        JOIN position_roles pr ON pr.position_id = p.id AND pr.tenant_id = p.tenant_id AND pr.scope_kind = 'own_unit'
        JOIN roles r ON r.id = pr.role_id AND r.name = 'org_unit_lead' AND (r.company_id IS NULL OR r.company_id = p.tenant_id)`;
-const LEAD_SEAT_LIVE = `p.status = 'active' AND pa.valid_to IS NULL`;
+export const LEAD_SEAT_LIVE = `p.status = 'active' AND pa.valid_to IS NULL`;
 
 /** The EXACT units (no subtree) `userId` holds a lead seat on in `tenantId`, sorted. */
 export async function loadLeadSeatNodes(c: PoolClient, tenantId: string, userId: string | null): Promise<string[]> {

@@ -54,6 +54,7 @@ import { startClientTargetsLoop } from "./modules/monitoring/client-targets";
 import { rebuildTargets, startSiteBuildsLoop } from "./modules/webdev/site-builds.service";
 import { sweepScheduledRebuilds } from "./modules/webdev/scheduled-rebuilds.service";
 import { provisionReconcileStartLine, startProvisionReconcileLoop } from "./modules/webdev/provision-reconcile-loop";
+import { siteDnsTaskStartLine, startSiteDnsTaskLoop } from "./modules/webdev/domain-dns-task.service";
 import { invoiceModule } from "./modules/invoice";
 import { clientsModule } from "./modules/clients";
 import { knowledgeModule } from "./modules/knowledge";
@@ -886,6 +887,11 @@ async function bootstrap(): Promise<void> {
   startProvisionReconcileLoop(config.provision.reconcileIntervalMs);
   // eslint-disable-next-line no-console
   console.log(provisionReconcileStartLine());
+  // M6-P6p: the ERP's own read-only DNS check closes a delivered domain's DNS task once its records point (domain-dns-task.service.ts).
+  // It looks up only the domains of OPEN tasks, over the P6i resolver path; no DNS API, no credential.
+  startSiteDnsTaskLoop(config.webdevDns.sweepIntervalMs);
+  // eslint-disable-next-line no-console
+  console.log(siteDnsTaskStartLine());
   // WSK-60: the build stamp poller. It reads only ledger rows that exist and GETs only the stamp URL each row recorded. M6-P6h:
   // targets now come from the registry too (and a production promote rides the same ledger), so the env JSON can no longer
   // be its gate. A build can only be dispatched by an approved WebDesk publish, rebuild or promote, every one of which needs

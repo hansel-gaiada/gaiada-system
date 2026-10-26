@@ -13,6 +13,8 @@
 //   POST /api/:tenantId/modules/webdev/sites/:id/delivery-binding       -> 200 registry site + deliveryState | 400 | 404 | 409 | 422 (M6-P6g)
 //   POST /api/:tenantId/modules/webdev/sites/:id/production             -> 201 registry site + deliveryState + deployGrant | 400 | 404 | 409 (M6-P6g; deployGrant M6-P6h2)
 //   GET  /api/:tenantId/modules/webdev/sites/:id/dns                    -> 200 DNS checklist + read-only check | 404 (M6-P6i)
+//   GET  /api/:tenantId/modules/webdev/sites/:id/dns/task               -> 200 the site's DNS task link (state none|open|closed) | 404 (M6-P6p)
+//   POST /api/:tenantId/modules/webdev/sites/:id/dns/recheck            -> 200 {task, check} | 404 (M6-P6p: re-run the read-only check now; closes the task when every record points)
 //
 // This controller is DELIBERATELY THIN. It validates route/body input, resolves the principal,
 // authorizes, builds the driver, and maps a typed outcome onto a status code. Every decision that
@@ -71,6 +73,7 @@ import {
 } from "./site-registry.service";
 import { DeliveryRefusal, parseBindingBody } from "./delivery-binding";
 import { readSiteDns, type SiteDnsDto } from "./domain-dns.service";
+import { checkSiteDnsTask, readSiteDnsTask, type DnsTaskCheckResult, type SiteDnsTaskDto } from "./domain-dns-task.service";
 import type { PropertyLinkResult } from "./site-property-link";
 import { readDeliveryForProvisioned, type SiteDeliveryDto } from "./delivery-binding.service";
 import { ScaffoldRefusal } from "./scaffold-commit";
@@ -442,6 +445,36 @@ export class WebdevController {
   ): Promise<SiteDnsDto> {
     await authorize(req.principal, { kind: "webdev_site", tenantId, id, module: "webdev" }, "read");
     return readSiteDns(tenantId, id);
+  }
+
+  /** M6-P6p — the Web Dev task that asks a person to create this domain's DNS records (WSK-D89 (4)): the newest link row for the
+   *  site, `state: "none"` when it never had one. A READ, authorized like the row itself (`webdev_site · read`). */
+  @Get("sites/:id/dns/task")
+  async getSiteDnsTask(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+  ): Promise<SiteDnsTaskDto> {
+    await authorize(req.principal, { kind: "webdev_site", tenantId, id, module: "webdev" }, "read");
+    const site = await getWebdevSite(tenantId, id);
+    if (!site) throw new NotFoundException("webdev site not found");
+    return readSiteDnsTask(tenantId, id);
+  }
+
+  /** M6-P6p — run the P6i read-only DNS check for this site NOW and let it close the DNS task: every record `pointing` completes
+   *  the PM task with the note that the ERP's DNS check closed it. No body. It can write (close the task), so it is authorized as the
+   *  registry's `update`, not `read`; the closing itself depends only on what public DNS answers, never on the caller. */
+  @Post("sites/:id/dns/recheck")
+  @HttpCode(200)
+  async recheckSiteDns(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+  ): Promise<DnsTaskCheckResult> {
+    await authorize(req.principal, { kind: "webdev_site", tenantId, id, module: "webdev" }, "update");
+    const site = await getWebdevSite(tenantId, id);
+    if (!site) throw new NotFoundException("webdev site not found");
+    return checkSiteDnsTask(tenantId, id, req.principal.userId);
   }
 
   /** THE `vault_ref` pointer write. Accepts EXACTLY `{ vaultRef }` — any other top-level key in the
