@@ -11,6 +11,23 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.169.0` - PGL-01: the portal go-live readiness check, an ops script (2026-10-26) - PROTOTYPED
+
+- New `src/ops/portal-go-live-check.ts`, run in the live container as `docker exec gaiada-platform-1 node dist/ops/portal-go-live-check.js [--json]`. It is strictly read-only: one `BEGIN READ ONLY` transaction, confirmed with `SHOW transaction_read_only` before any read, always ended with ROLLBACK. Output is one line per go-live blocker: PASS, BLOCK, WARN, INFO, MANUAL or ERROR. Exit codes: 0 means no BLOCK, 1 means a BLOCK, 2 means a check could not run (an error is never a PASS; when both occur, 2 wins).
+- **Checks:**
+  - simulations: `mfa.simulation`, `payments.simulation`, `signatures.simulation`;
+  - `mfa.real` (MANUAL: the platform records no real second factor, only the simulated step-up);
+  - `payments.keys` (key set and not a `SIM-` key, the merchant company live, its clearing account set);
+  - mock data: `billing.mock` (DEV MOCK, MOCK BANK, all-zero account, `-DEV` prefix, "seed data") and `seal.mock`;
+  - placeholder logins: `placeholders.p03` (`portal@%.test` contacts) and `placeholders.p04` (non-client signer or admin contacts; viewers are WARN);
+  - mail: `mail.sender` (mail on, not Mailpit, no reserved From domain) and `mail.client` (`CLIENT_MAIL_ENABLED`, or the conversation alias until PGL-09);
+  - `data.simulated` (INFO counts);
+  - MANUAL items for Legal Gate 1, deliverability and contrast.
+- **It never prints a secret:** a key is kept only as set/unset and its prefix class, and an account number only as "all zeros" or not.
+- **The RLS zero-row trap is closed by positive controls.** Each company is read in its own tenant context in a savepoint, and the tenant setting is read back and must equal that company's id. Estate-wide controls require at least one visible row for the checks that depend on them. A failed control is ERROR (exit 2), never PASS.
+- **Tests:** 78 unit tests and 20 DB tests. Every bad state is seeded, seen as BLOCK and cleared. An unset or wrong tenant setting turns every DB line into ERROR. A raw read without context returns zero rows while the rows exist (the trap is real). A write inside the run is refused. CI 40304841489 green on the branch (`1ff0f32a`), both files ran.
+- New `src/ops/README.md` covers the three ops scripts. No endpoint, no migration, no Cerbos change.
+
 ### platform-ui `0.196.0` - PGL-02: the client portal's colour-contrast pass, ink tokens instead of opacity on text (2026-10-26) - PROTOTYPED
 
 - The three labels still dimmed with `opacity` (the `PortalFigure` label, the invoice list's Due and Total, the profile's "Need something changed?") now use `--ink-subtle`: light 3.0-3.4:1 became 5.35:1. An ink token is already an alpha of the ink colour, so `opacity` multiplied it, and axe could not see it over the portal's glass cards.
