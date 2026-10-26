@@ -10,7 +10,7 @@
 //
 // The skin follows the workspace (`Workspace.skin` in the registry), so everyone sees a department the same way; a person may choose
 // the Standard skin for themselves (`SkinChoice`, in the prefs cookie). A skin other than Standard is drawn only once it is switched
-// on: `SKINS_ON` in code (Kg switches Social on), or `SHELL_SKIN_PREVIEW` on a dev or test box.
+// on: `SKINS_ON` in code (Social since SCP-Kg), or `SHELL_SKIN_PREVIEW` on a dev or test box.
 //
 // Pure and client-safe, like the registry.
 import type { IconName } from "@/components/shell/icons";
@@ -77,8 +77,10 @@ export const SKINS: Readonly<Record<SkinKey, Skin>> = {
   },
 };
 
-/** The skins drawn for everyone. Standard always; Kg adds Social once SCP-1d, 1e and 1k are live (plan §8). */
-export const SKINS_ON: readonly SkinKey[] = ["standard"];
+/** The skins drawn for everyone. Standard always; Social since SCP-Kg, switched on by the owner on 2026-10-27 ahead of SCP-1d, 1e and 1k (plan §8
+ *  had it wait for them). No pinned entry points at a page that does not exist: Messages, Profile, Dashboard and Settings keep their `ticket` and
+ *  stay hidden until their pages land. Anyone may still choose the Standard look for themselves (More › Appearance). */
+export const SKINS_ON: readonly SkinKey[] = ["standard", "social"];
 
 /** The skins switched on: `SKINS_ON`, plus the comma-separated keys of `SHELL_SKIN_PREVIEW` (a dev or test box; unknown keys ignored). */
 export function skinsOn(preview: string | undefined): SkinKey[] {

@@ -142,8 +142,8 @@ export default defineConfig({
     },
     {
       // SCP-Kf: the Social skin (DW-D51) in a real browser, desktop and phone, with its axe sweep. Same reasoning as `workspace-a11y`: every test signs in as
-      // the placed Social Media employee itself and plants the tenant and theme cookies, so NO stored session. The skin is off in code, so the spec skips unless
-      // the server is started with `SHELL_SKIN_PREVIEW=social` (the webServer inherits the runner's env). Gated on sumopod with the other workspace projects.
+      // the placed Social Media employee itself and plants the tenant and theme cookies, so NO stored session. The skin is on in code since SCP-Kg, so the spec
+      // needs no setting. Gated on sumopod with the other workspace projects.
       name: "social-skin",
       use: { ...devices["Desktop Chrome"] },
       testMatch: /skin-social\.spec\.ts/,

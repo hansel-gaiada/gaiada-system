@@ -22,15 +22,20 @@ function model(m: Me, root: OrgTreeNode, skins?: Parameters<typeof buildShellMod
 const wsByKey = (mod: ShellModel, key: string) => mod.workspaces.find((w) => w.key === key)!;
 
 describe("skins: switched on", () => {
-  it("draws only Standard for everyone until Kg switches Social on", () => {
-    expect(SKINS_ON).toEqual(["standard"]);
-    expect(skinsOn(undefined)).toEqual(["standard"]);
+  it("draws Standard and, since SCP-Kg (owner, 2026-10-27), Social for everyone", () => {
+    expect(SKINS_ON).toEqual(["standard", "social"]);
+    expect(skinsOn(undefined)).toEqual(["standard", "social"]);
   });
 
-  it("adds the preview's skins on a dev or test box, and ignores keys it does not know", () => {
+  it("the preview adds nothing new now that Social is on, and ignores keys it does not know", () => {
     expect(skinsOn("social")).toEqual(["standard", "social"]);
     expect(skinsOn(" social , nope,,standard")).toEqual(["standard", "social"]);
-    expect(skinsOn("")).toEqual(["standard"]);
+    expect(skinsOn("")).toEqual(["standard", "social"]);
+  });
+
+  it("Social is on, yet no pinned entry points at a page that does not exist: the unbuilt ones stay ticketed", () => {
+    const ticketed = SKINS.social.pinned!.filter((p) => p.ticket).map((p) => p.key).sort();
+    expect(ticketed).toEqual(["dashboard", "messages", "profile", "settings"]);
   });
 });
 
@@ -162,7 +167,7 @@ describe("skins: which pinned entry the page belongs to", () => {
 
 describe("skins: the shell model", () => {
   it("draws every workspace Standard when no skin is on, Social Media included", () => {
-    for (const mod of [model(me([member()]), socialTree), model(me([member()]), socialTree, { on: skinsOn(undefined) })]) {
+    for (const mod of [model(me([member()]), socialTree), model(me([member()]), socialTree, { on: ["standard"] })]) {
       expect(mod.workspaces.map((w) => w.skin)).toEqual(mod.workspaces.map(() => "standard"));
     }
   });
@@ -193,7 +198,7 @@ describe("skins: the shell model", () => {
 
 describe("skins: the skin a workspace offers (SCP-Kd)", () => {
   it("is null for every workspace while Social is off, so the Standard menu offers nothing", () => {
-    for (const mod of [model(me([member()]), socialTree), model(me([member()]), socialTree, { on: skinsOn(undefined) })]) {
+    for (const mod of [model(me([member()]), socialTree), model(me([member()]), socialTree, { on: ["standard"] })]) {
       expect(mod.workspaces.map((w) => w.skinOffered)).toEqual(mod.workspaces.map(() => null));
     }
   });

@@ -505,7 +505,7 @@ const SOCIAL_MEDIA: Workspace = {
   key: "social-media",
   kind: "department",
   label: "Social Media",
-  // The team's own design (SCP-K). Off for everyone until SCP-Kg adds it to `SKINS_ON`.
+  // The team's own design (SCP-K), on for everyone since SCP-Kg (`SKINS_ON`).
   skin: "social",
   mission: bespokeToolkit("social-media")?.mission ?? "",
   overviewHref: deptPath(""),

@@ -8,10 +8,9 @@ import { tenantCookie } from "./appCookies";
 // and its axe sweep, light and dark.
 //
 // ── WHAT IT NEEDS ─────────────────────────────────────────────────────────────────────────────────────────────────────
-// The skin is off for everyone in code (`SKINS_ON`); `SHELL_SKIN_PREVIEW=social` switches it on for a dev or test box. Playwright's webServer inherits the
-// runner's environment, so START THE RUN WITH IT SET (the gate does). Without it this whole file is skipped, so a run that forgot it is not a pass:
+// Since SCP-Kg the skin is on for everyone in code (`SKINS_ON`), so this file runs on any server with no extra setting:
 //
-//     SHELL_SKIN_PREVIEW=social npx playwright test --project=social-skin
+//     npx playwright test --project=social-skin
 //
 // ── WHO ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // `social@gaiada.com` is `u-social` (src/lib/demoFixtures.ts): a plain `member` of the agency, placed in Social Media (`dept-4`). It is the person the
@@ -29,7 +28,6 @@ import { tenantCookie } from "./appCookies";
 // ── THE JSON SUMMARY ──────────────────────────────────────────────────────────────────────────────────────────────────
 // As a11y-axe-workspaces.spec.ts: each scan also writes its violations to `test-results/axe-social-skin/<test title>.json` (gitignored).
 
-test.skip(!(process.env.SHELL_SKIN_PREVIEW ?? "").split(",").map((s) => s.trim()).includes("social"), "needs SHELL_SKIN_PREVIEW=social on the server (and so on the runner)");
 
 type Theme = "light" | "dark";
 const OUT_DIR = "test-results/axe-social-skin";
