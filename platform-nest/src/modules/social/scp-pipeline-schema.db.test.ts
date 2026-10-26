@@ -102,11 +102,13 @@ describe.skipIf(!TEST_URL)("SCP-1b · the pipeline schema", () => {
   const refuses = async (p: Promise<unknown>, constraint: string) => {
     await expect(p).rejects.toThrow(new RegExp(`violates check constraint "${constraint}"`));
   };
-  const count = async (table: string, tenant: string | null, scoped: boolean): Promise<number> => {
-    const sql = `SELECT count(*)::text AS n FROM ${table}`;
+  // `ofTenant` counts only that tenant's rows (B has rows of its own, which B may of course read).
+  const count = async (table: string, tenant: string | null, scoped: boolean, ofTenant?: string): Promise<number> => {
+    const sql = `SELECT count(*)::text AS n FROM ${table}${ofTenant ? " WHERE tenant_id = $1" : ""}`;
+    const args = ofTenant ? [ofTenant] : [];
     const r = tenant === null
-      ? await withGlobal((c) => c.query<{ n: string }>(sql))
-      : await withTenants([tenant], (c) => c.query<{ n: string }>(sql), scoped ? S : undefined);
+      ? await withGlobal((c) => c.query<{ n: string }>(sql, args))
+      : await withTenants([tenant], (c) => c.query<{ n: string }>(sql, args), scoped ? S : undefined);
     return Number(r.rows[0]!.n);
   };
 
@@ -368,7 +370,8 @@ describe.skipIf(!TEST_URL)("SCP-1b · the pipeline schema", () => {
       await insert("social_post_copy_edits", copyEdit(p.id as string), A);
       for (const t of NEW_TABLES) {
         expect(await count(t, A, true), `${t} own scope`).toBeGreaterThan(0);
-        expect(await count(t, B, true), `${t} other tenant`).toBe(0);
+        expect(await count(t, A, true, A), `${t} own scope, own rows`).toBeGreaterThan(0);
+        expect(await count(t, B, true, A), `${t} other tenant reading A's rows`).toBe(0);
         expect(await count(t, null, false), `${t} unset tenant GUC`).toBe(0);
         expect(await count(t, A, false), `${t} module scope missing`).toBe(0);
       }
