@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { usePathname } from "next/navigation";
 import { areaFor, resolveArea, sameArea, type Area } from "@/lib/areas";
 import { activeLocation, allRows, applyApprovals, applyRoutes, workspaceForArea, type RoutesRead, type ShellModel, type ShellWorkspace } from "@/lib/shellModel";
@@ -81,6 +81,13 @@ export interface WorkspaceShellValue {
   /** The person's unread notifications, as the top bar's one read settled it (`ShellNotificationsSettle`); null while that read is in flight
    *  or when it failed. Never 0 for "unknown". Read by the Social skin's menu, which carries the count the bell hides there (SCP-Kc). */
   unread: number | null;
+  /** Which More panel is open (SCP-Kd, SCP-Ke): the menu's, beside the icon rail, or the phone's full-screen sheet opened from the top bar's button;
+   *  null when neither. One value, so only one can be open at a time, and any navigation closes it. */
+  more: "menu" | "sheet" | null;
+  setMore: (more: "menu" | "sheet" | null) => void;
+  /** The phone's More button (in the top bar), which the sheet returns focus to, and the sheet's element id for its `aria-controls`. */
+  sheetAnchor: RefObject<HTMLButtonElement | null>;
+  sheetId: string;
 }
 
 const Ctx = createContext<WorkspaceShellValue | null>(null);
@@ -149,6 +156,9 @@ export function WorkspaceShellProvider({ model: built, children }: { model: Shel
   const [approvals, setApprovals] = useState<ApprovalsRead>("inflight");
   const [routes, setRoutes] = useState<RoutesRead>("inflight");
   const [unread, setUnread] = useState<number | null>(null);
+  const [more, setMore] = useState<"menu" | "sheet" | null>(null);
+  const sheetAnchor = useRef<HTMLButtonElement | null>(null);
+  const sheetId = useId();
   const model = useMemo(() => applyRoutes(applyApprovals(built, approvals), routes), [built, approvals, routes]);
 
   useEffect(() => {
@@ -164,6 +174,9 @@ export function WorkspaceShellProvider({ model: built, children }: { model: Shel
     writeLastArea(a);
     setLast((prev) => (prev && sameArea(prev, a) ? prev : a));
   }, [pathname, model.home]);
+
+  // Choosing a page anywhere closes whichever More panel is open.
+  useEffect(() => setMore(null), [pathname]);
 
   const area = resolveArea(areaFor(pathname), last, model.home);
 
@@ -186,6 +199,10 @@ export function WorkspaceShellProvider({ model: built, children }: { model: Shel
     covers: (hrefs) => hrefs.every((h) => tabPaths.has(pathOf(h)) || withheld.has(pathOf(h))),
     onToolPage: tabPaths.has(pathOf(pathname)),
     unread,
+    more,
+    setMore,
+    sheetAnchor,
+    sheetId,
   };
 
   return (

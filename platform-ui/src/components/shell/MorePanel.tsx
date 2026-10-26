@@ -34,7 +34,7 @@ export interface SidebarAccount {
   logout: () => void | Promise<void>;
 }
 
-export function MorePanel({ id, groups, active, pathname, tenantId, account, switcher, anchor, onClose }: {
+export function MorePanel({ id, groups, active, pathname, tenantId, account, switcher, anchor, onClose, sheet = false, currentKey = null }: {
   id: string;
   groups: readonly MoreGroup[];
   active: { rowKey: string; tabKey: string } | null;
@@ -46,6 +46,10 @@ export function MorePanel({ id, groups, active, pathname, tenantId, account, swi
   /** The More button: a press on it is its own toggle, not "outside", and Escape returns focus to it. */
   anchor: RefObject<HTMLElement | null>;
   onClose: (returnFocus: boolean) => void;
+  /** The phone's full-screen sheet (SCP-Ke): the same panel, drawn over the whole screen from the top bar's button. */
+  sheet?: boolean;
+  /** The key of the current entry among the rows a caller adds that are not rows of the model (the sheet's "Menu" section: `menu:<pin key>`). */
+  currentKey?: string | null;
 }) {
   const titleId = useId();
   const [query, setQuery] = useState("");
@@ -91,7 +95,7 @@ export function MorePanel({ id, groups, active, pathname, tenantId, account, swi
   }
 
   return (
-    <div className="ws-more" id={id} role="dialog" aria-labelledby={titleId} ref={panel}>
+    <div className={`ws-more${sheet ? " ws-more--sheet" : ""}`} id={id} role="dialog" aria-labelledby={titleId} ref={panel}>
       <h2 className="ws-more__title" id={titleId}>More</h2>
 
       <div className="ws-more__find">
@@ -115,7 +119,7 @@ export function MorePanel({ id, groups, active, pathname, tenantId, account, swi
         {sections.length === 0 ? (
           <p className="ws-more__empty">No pages match “{query.trim()}”. Press Enter to search everywhere.</p>
         ) : (
-          sections.map((s) => <Section key={s.key} label={s.label} results={s.results} active={active} pathname={pathname} tenantId={tenantId} onChoose={() => onClose(false)} />)
+          sections.map((s) => <Section key={s.key} label={s.label} results={s.results} active={active} currentKey={currentKey} pathname={pathname} tenantId={tenantId} onChoose={() => onClose(false)} />)
         )}
       </div>
 
@@ -149,17 +153,20 @@ export function MorePanel({ id, groups, active, pathname, tenantId, account, swi
   );
 }
 
+/** The key prefix of a row the sheet adds for a pinned entry (`menu:<pin key>`), so it can never collide with a row of the model. */
+export const MENU_PREFIX = "menu:";
+
 const resultKey = (r: MoreResult) => (r.kind === "row" ? r.row.key : `${r.row.key}/${r.tab.key}`);
 
-function Section({ label, results, active, pathname, tenantId, onChoose }: {
-  label: string; results: MoreResult[]; active: { rowKey: string; tabKey: string } | null; pathname: string; tenantId: string | null; onChoose: () => void;
+function Section({ label, results, active, currentKey, pathname, tenantId, onChoose }: {
+  label: string; results: MoreResult[]; active: { rowKey: string; tabKey: string } | null; currentKey: string | null; pathname: string; tenantId: string | null; onChoose: () => void;
 }) {
   const id = useId();
   return (
     <div className="ws-more__group" role="group" aria-labelledby={id}>
       <h3 className="ws-more__group-label" id={id}>{label}</h3>
       {results.map((r) => (
-        <ResultLink key={resultKey(r)} result={r} active={active} pathname={pathname} tenantId={tenantId} onChoose={onChoose} />
+        <ResultLink key={resultKey(r)} result={r} active={active} currentKey={currentKey} pathname={pathname} tenantId={tenantId} onChoose={onChoose} />
       ))}
     </div>
   );
@@ -167,8 +174,8 @@ function Section({ label, results, active, pathname, tenantId, onChoose }: {
 
 /** One result: a row (its icon, label, the grey list of its tabs where it holds several pages, its count) or a found tab (its label, the row it
  *  belongs to as the grey line). The AI Assistant row, were it listed, opens the drawer like the menu's own entry (no prefetch). */
-function ResultLink({ result, active, pathname, tenantId, onChoose }: {
-  result: MoreResult; active: { rowKey: string; tabKey: string } | null; pathname: string; tenantId: string | null; onChoose: () => void;
+function ResultLink({ result, active, currentKey, pathname, tenantId, onChoose }: {
+  result: MoreResult; active: { rowKey: string; tabKey: string } | null; currentKey: string | null; pathname: string; tenantId: string | null; onChoose: () => void;
 }) {
   const uid = useId();
   const labelId = `${uid}-l`;
@@ -178,8 +185,10 @@ function ResultLink({ result, active, pathname, tenantId, onChoose }: {
   const isRow = result.kind === "row";
   const sub = isRow ? rowSubline(row) : row.label;
   const count = isRow ? row.count : undefined;
-  const current = active?.rowKey === row.key && (isRow || active.tabKey === result.tab.key);
-  const assistant = row.key === ASSISTANT_ROW.key && isRow;
+  // A "menu:" row is one of the sheet's pinned entries (not a row of the model): the caller says which is current.
+  const current = row.key.startsWith(MENU_PREFIX) ? row.key === currentKey : active?.rowKey === row.key && (isRow || active.tabKey === result.tab.key);
+  // The AI Assistant entry, wherever it is listed, opens the drawer and is not prefetched; it never takes the sidebar pin's `id`.
+  const assistant = (row.key === ASSISTANT_ROW.key || row.key === `${MENU_PREFIX}${ASSISTANT_ROW.key}`) && isRow;
   const href = resultHref(result);
   return (
     <Link

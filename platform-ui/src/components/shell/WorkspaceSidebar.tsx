@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Icon } from "./icons";
 import { useRailTooltip } from "./railTooltip";
 import { SidebarToggle } from "./SidebarToggle";
-import { NewMenu } from "./NewMenu";
+import { NewMenu, menuItemsFor } from "./NewMenu";
 import { TenantSwitcher } from "./TenantSwitcher";
 import { Eyebrow } from "@/components/ui";
 import { allRows, overviewHref, type ShellModel, type ShellWorkspace } from "@/lib/shellModel";
@@ -60,8 +60,7 @@ export function WorkspaceSidebar({ tenantId, company, companies, newItems, brand
   const companyHref = model.company[0]?.tabs[0]?.href ?? null;
   const adminHref = model.admin[0]?.tabs[0]?.href ?? null;
   // DW-2f: the current workspace's own create actions lead "+ New"; a later item with the same href is dropped.
-  const createItems = view.kind === "workspace" ? view.ws.creates : [];
-  const menuItems = [...createItems, ...newItems.filter((it) => !createItems.some((c) => c.href === it.href))];
+  const menuItems = menuItemsFor(view.kind === "workspace" ? view.ws.creates : [], newItems);
   // SCP-Kc: the pinned entries of a skinned workspace; null for Standard (and for Company and Admin, which are always Standard).
   const ws = view.kind === "workspace" ? view.ws : null;
   const pins = ws && ws.skin !== "standard" ? pinnedFor(ws.skin, allRows(ws)) : null;
@@ -191,14 +190,17 @@ function PinnedMenu({ ws, pins, active, pathname, tenantId, menuItems, account, 
     { key: "you", label: "You", rows: ws.rows.you },
   ];
   const moreCount = moreCountOf(groups);
-  const [moreOpen, setMoreOpen] = useState(false);
+  // Open or closed lives in the shell (`more`), because the phone's sheet is the same panel and only one may be open at a time (SCP-Ke).
+  const setMore = shell?.setMore;
+  const moreOpen = shell?.more === "menu";
+  const setMoreOpen = useCallback((open: boolean) => setMore?.(open ? "menu" : null), [setMore]);
   const moreId = useId();
   const moreButton = useRef<HTMLButtonElement>(null);
   const more = useRailTooltip("More");
   const close = useCallback((returnFocus: boolean) => {
     setMoreOpen(false);
     if (returnFocus) moreButton.current?.focus();
-  }, []);
+  }, [setMoreOpen]);
 
   // While the panel is open the menu is its icon rail. The rail is the collapsed sidebar's own CSS, keyed on `<html data-sidebar="collapsed">`, so
   // that is what is set, and removed on close unless the person had collapsed the menu themselves. Their saved choice (the cookie and the
@@ -214,9 +216,6 @@ function PinnedMenu({ ws, pins, active, pathname, tenantId, menuItems, account, 
       if (!collapsedNow.current) root.removeAttribute("data-sidebar");
     };
   }, [moreOpen, collapsed]);
-
-  // Another page was chosen (a link anywhere), so the panel has done its job.
-  useEffect(() => setMoreOpen(false), [pathname]);
 
   return (
     <>
@@ -241,7 +240,7 @@ function PinnedMenu({ ws, pins, active, pathname, tenantId, menuItems, account, 
           aria-expanded={moreOpen}
           aria-controls={moreId}
           aria-haspopup="dialog"
-          onClick={() => setMoreOpen((v) => !v)}
+          onClick={() => setMoreOpen(!moreOpen)}
           {...more.triggerProps}
         >
           <Icon name="menu" size={24} stroke={2} />
@@ -355,7 +354,7 @@ function FootLink({ href, label, icon }: { href: string; label: string; icon: "s
 
 // `inline` (SCP-Kd): the Social skin's More panel carries the switcher as its "Switch workspace" row, naming the current workspace on a second
 // line, with the same list opening beneath it instead of floating. The same component, so the list, the keys and the company switch are one.
-function WorkspaceSwitcher({ model, title, current, company, companies, inline = false }: {
+export function WorkspaceSwitcher({ model, title, current, company, companies, inline = false }: {
   model: ShellModel;
   title: string;
   current: string | null;

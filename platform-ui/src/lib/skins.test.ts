@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SKINS, SKINS_ON, activePinKey, effectiveSkin, pinnedFor, skinsOn, type ConcretePinned, type PinnedItem } from "./skins";
+import { SKINS, SKINS_ON, activePinKey, effectiveSkin, phoneBarFor, phoneMenuFor, phoneTopFor, pinnedFor, skinsOn, type ConcretePinned, type PinnedItem } from "./skins";
 import type { ConcreteRow } from "./workspaceAccess";
 import { WORKSPACES, GENERIC_WORKSPACE, sidebarRows, workspaceBySlug } from "./workspaces";
 import { buildShellModel, allRows, type ShellModel } from "./shellModel";
@@ -208,5 +208,45 @@ describe("skins: the skin a workspace offers (SCP-Kd)", () => {
     const soc = wsByKey(model(me([member()]), socialTree, { on: ["standard", "social"], choice: "standard" }), "social-media");
     expect(soc.skin).toBe("standard");
     expect(soc.skinOffered).toBe("social");
+  });
+});
+
+describe("skins: the phone (SCP-Ke)", () => {
+  const socialPins = () => {
+    const soc = wsByKey(model(me([member()]), socialTree, { on: ["standard", "social"] }), "social-media");
+    return pinnedFor(soc.skin, allRows(soc))!;
+  };
+
+  it("Standard has no phone bar and no top entries", () => {
+    expect(SKINS.standard.phoneBar).toEqual([]);
+    expect(SKINS.standard.phoneTop).toEqual([]);
+  });
+
+  it("every phone entry names a pin of the skin, and no pin is in both places", () => {
+    const keys = new Set(SKINS.social.pinned!.map((p) => p.key));
+    for (const k of [...SKINS.social.phoneBar, ...SKINS.social.phoneTop]) expect(keys.has(k), k).toBe(true);
+    expect(SKINS.social.phoneBar.filter((k) => SKINS.social.phoneTop.includes(k))).toEqual([]);
+    // The design: Home, Search, Create, Tasks, Profile at the bottom; Notifications and Messages at the top.
+    expect(SKINS.social.phoneBar).toEqual(["home", "search", "create", "tasks", "profile"]);
+    expect(SKINS.social.phoneTop).toEqual(["notifications", "messages"]);
+  });
+
+  it("the bar holds the entries the person is offered, in the skin's order; Profile is absent while ticketed", () => {
+    expect(phoneBarFor("social", socialPins()).map((p) => p.key)).toEqual(["home", "search", "create", "tasks"]);
+  });
+
+  it("the top holds Notifications; Messages is absent while ticketed", () => {
+    expect(phoneTopFor("social", socialPins()).map((p) => p.key)).toEqual(["notifications"]);
+  });
+
+  it("the sheet's Menu section is every pinned link the bar and the top do not hold, in the menu's order", () => {
+    expect(phoneMenuFor("social", socialPins()).map((p) => p.key)).toEqual(["calendar", "reports", "saved", "assistant"]);
+  });
+
+  it("an entry that arrives with its ticket (Dashboard, Settings) lands in the Menu section by itself", () => {
+    const link = (key: string): ConcretePinned => ({ kind: "link", key, label: key, icon: "home", href: `/${key}`, row: key, tab: key, wholeRow: true });
+    const pins = ["home", "tasks", "dashboard", "settings", "profile"].map(link);
+    expect(phoneMenuFor("social", pins).map((p) => p.key)).toEqual(["dashboard", "settings"]);
+    expect(phoneBarFor("social", pins).map((p) => p.key)).toEqual(["home", "tasks", "profile"]);
   });
 });
