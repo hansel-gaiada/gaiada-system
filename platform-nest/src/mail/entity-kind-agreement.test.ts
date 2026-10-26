@@ -56,12 +56,14 @@ describe.skipIf(!TEST_URL)("mail — MAIL-33 mailIntake only ever stamps an acce
   beforeAll(async () => {
     await initTestDb();
     config.mail.enabled = true;
+    config.mail.clientMailEnabled = true; // PGL-09: pipeline.gate.opened is a client mail, behind the one flag
     co = await createCompany("Entity Kind Agreement Co");
     admin = await createUser("agreement-admin@a.test");
     await addMembership(co, admin);
   });
   afterAll(async () => {
     config.mail.enabled = false;
+    config.mail.clientMailEnabled = false;
     await teardownTestDb();
   });
   afterEach(async () => {

@@ -11,13 +11,19 @@
 // template key surfacing as `UnknownMailTemplateError`) — swallowing errors HERE too would hide
 // exactly the kind of mistake the caller's single log line exists to surface.
 //
-// ALLOWLIST is {approval.requested, pipeline.gate.opened} (design §7.2) plus, since PV4-06,
-// `conversation.message.staff` — nothing else in the bell produces mail. `mention`, `comment`,
-// `approval_decided`, and every other notification type return immediately without a query, let alone
-// a mail_log row (probed in tap.test.ts). The conversation type is the one entry that mails people
-// OUTSIDE the company, so it sits behind its OWN flag (`config.mail.conversationClientMailEnabled`,
-// env `CONVERSATION_CLIENT_MAIL_ENABLED`, default OFF) on top of the master gate, and it is throttled:
-// at most one mail per contact per thread until that contact has read the thread.
+// ALLOWLIST (two audiences, declared apart on purpose, see STAFF_MAIL_TYPES / CLIENT_MAIL_TYPES below):
+//   staff:  approval.requested                                    (design §7.2)
+//   client: pipeline.gate.opened                                  (design §7.2: a sign-off gate)
+//           conversation.message.staff                            (PV4-06: staff wrote in Conversation; throttled)
+//           contract.sent                                         (PGL-09 / PV-D47: a contract to sign)
+//           invoice.issued                                        (PGL-09 / PV-D47: an invoice to pay)
+// Nothing else in the bell produces mail. `mention`, `comment`, `approval_decided`, and every other notification type
+// return immediately without a query, let alone a mail_log row (probed in tap.test.ts).
+//
+// EVERY client-recipient type mails people OUTSIDE the company, so all of them sit behind ONE flag
+// (`config.mail.clientMailEnabled`, env `CLIENT_MAIL_ENABLED`, alias `CONVERSATION_CLIENT_MAIL_ENABLED` for one release,
+// default OFF) on top of the master gate. Off = return before any query, address lookup or enqueue: no mail_log row.
+// A new allow-listed type must be declared in exactly one of the two sets; a test pins that the sets partition the list.
 import { config } from "../config";
 import { withGlobal, withMailContext, withTenants } from "../db";
 import { enqueueMail } from "./queue";
@@ -26,7 +32,22 @@ import { MAIL_THREAD_ENTITY_KINDS } from "./thread-authz";
 /** PV4-06 — staff wrote to a client contact in Conversation. */
 export const CONVERSATION_STAFF_MAIL_TYPE = "conversation.message.staff";
 
-const MAIL_NOTIFICATION_TYPES = new Set(["approval.requested", "pipeline.gate.opened", CONVERSATION_STAFF_MAIL_TYPE]);
+/** PGL-09 — a contract was sent to the client to sign. Mailed to the contacts who can SIGN it (core/client-notify.ts). */
+export const CONTRACT_SENT_MAIL_TYPE = "contract.sent";
+/** PGL-09 — an invoice was issued to the client. Mailed to the contacts who can SEE it in the portal. */
+export const INVOICE_ISSUED_MAIL_TYPE = "invoice.issued";
+
+/** Types whose recipients are always the company's own people. Not behind the client flag. */
+const STAFF_MAIL_TYPES: ReadonlySet<string> = new Set(["approval.requested"]);
+/** Types whose recipients are client contacts, by construction of every `notify()` call site. ALL of them are gated by the
+ *  one client-mail flag. A type added here is a mail path to people outside the company: review its recipients first. */
+const CLIENT_MAIL_TYPES: ReadonlySet<string> = new Set([
+  "pipeline.gate.opened",
+  CONVERSATION_STAFF_MAIL_TYPE,
+  CONTRACT_SENT_MAIL_TYPE,
+  INVOICE_ISSUED_MAIL_TYPE,
+]);
+const MAIL_NOTIFICATION_TYPES: ReadonlySet<string> = new Set([...STAFF_MAIL_TYPES, ...CLIENT_MAIL_TYPES]);
 
 /** M12/§7.4 — origins whose DECIDE today re-drives NOTHING (the D14 gap) get the purely
  *  informational `approval.warning` template; everything else (pipeline/hr/agency — deciding
@@ -39,10 +60,17 @@ const MAIL_NOTIFICATION_TYPES = new Set(["approval.requested", "pipeline.gate.op
  *  KNOWN automation/agent origin, never a guess. */
 const WARNING_ORIGINS = new Set(["automation", "agent"]);
 
-export type MailTemplateKey = "approval.warning" | "approval.actionable" | "conversation.message.staff";
+export type MailTemplateKey =
+  | "approval.warning"
+  | "approval.actionable"
+  | "conversation.message.staff"
+  | "contract.sent"
+  | "invoice.issued";
 
 export function wordingClassFor(type: string, payload: Record<string, unknown>): MailTemplateKey {
   if (type === CONVERSATION_STAFF_MAIL_TYPE) return "conversation.message.staff";
+  if (type === CONTRACT_SENT_MAIL_TYPE) return "contract.sent";
+  if (type === INVOICE_ISSUED_MAIL_TYPE) return "invoice.issued";
   if (type === "pipeline.gate.opened") return "approval.actionable";
   const origin = typeof payload.origin === "string" ? payload.origin : "";
   return WARNING_ORIGINS.has(origin) ? "approval.warning" : "approval.actionable";
@@ -101,6 +129,27 @@ async function alreadyMailedSinceRead(tenantId: string, userId: string, threadId
   return prior.rows.length > 0;
 }
 
+/** PGL-09 idempotency: every webhook and event is assumed to fire twice, and a contract or invoice is a one-time ask. This
+ *  contact has already been mailed this template about this entity: skip. Any status counts (queued, sent, suppressed,
+ *  failed): the question is whether we already tried. The entity id rides in the row's `payload.entityId` (the row's
+ *  `entity_*` columns are reserved for the thread-authz kinds, which neither contracts nor invoices are). */
+async function alreadyMailedForEntity(tenantId: string, userId: string, templateKey: string, entityId: string): Promise<boolean> {
+  const prior = await withMailContext((c) =>
+    c.query(
+      `SELECT 1 FROM mail_log
+        WHERE user_id = $1 AND tenant_id = $2 AND template_key = $3 AND payload->>'entityId' = $4
+        LIMIT 1`,
+      [userId, tenantId, templateKey, entityId],
+    ),
+  );
+  return prior.rows.length > 0;
+}
+
+/** A short plain string for a payload field, or undefined. Length-capped so a pathological title cannot bloat a mail row. */
+function shortString(v: unknown, max = 160): string | undefined {
+  return typeof v === "string" && v.trim() ? v.replace(/\s+/g, " ").trim().slice(0, max) : undefined;
+}
+
 export interface MailIntakeInput {
   notificationId: string;
   tenantId: string;
@@ -115,16 +164,24 @@ export interface MailIntakeInput {
 export async function mailIntake(input: MailIntakeInput): Promise<void> {
   if (!config.mail.enabled) return;
   if (!MAIL_NOTIFICATION_TYPES.has(input.type)) return;
+  // PGL-09 — the ONE client-mail flag. OFF = return before any lookup: no address read, no throttle query, no row, no enqueue.
+  if (CLIENT_MAIL_TYPES.has(input.type) && !config.mail.clientMailEnabled) return;
 
-  // PV4-06 — the conversation type: its own flag first (OFF = no query, no address lookup, no row), then the throttle.
+  // PV4-06 — the conversation type: the throttle (the client-mail flag was already checked above).
   const isConversation = input.type === CONVERSATION_STAFF_MAIL_TYPE;
   const conversationThreadId = isConversation && typeof input.payload.entityId === "string" ? input.payload.entityId : null;
   if (isConversation) {
-    if (!config.mail.conversationClientMailEnabled) return;
     // No thread id means no way to throttle, so no mail: never an unthrottled path.
     if (!conversationThreadId) return;
     if (await alreadyMailedSinceRead(input.tenantId, input.userId, conversationThreadId)) return;
   }
+
+  // PGL-09 — a contract or an invoice is a one-time ask: the same contact is never mailed twice about the same entity.
+  const isActionAsk = input.type === CONTRACT_SENT_MAIL_TYPE || input.type === INVOICE_ISSUED_MAIL_TYPE;
+  const askEntityId = isActionAsk && typeof input.payload.entityId === "string" ? input.payload.entityId : null;
+  // No entity id means no way to dedupe, so no mail: never an un-deduplicable path.
+  if (isActionAsk && !askEntityId) return;
+  if (askEntityId && (await alreadyMailedForEntity(input.tenantId, input.userId, wordingClassFor(input.type, input.payload), askEntityId))) return;
 
   const email = await resolveRecipientEmail(input.userId);
   // Defensive only — users.email is NOT NULL, so a live miss here would mean the row vanished
@@ -162,9 +219,21 @@ export async function mailIntake(input: MailIntakeInput): Promise<void> {
     // §7.6 — every threads-eligible outbound mail mints a fresh VERP reply token. The two approval
     // types hang off a real ERP entity a reply should thread onto, so they always request one.
     // PV4-06: a conversation mail is a pointer to the portal, not a thread to reply into by email.
-    withReplyToken: !isConversation,
+    // PGL-09: the contract and invoice mails are pointers too, never a thread to reply into.
+    withReplyToken: !isConversation && !isActionAsk,
     payload: {
       ...(conversationThreadId ? { threadId: conversationThreadId } : {}),
+      ...(askEntityId ? { entityId: askEntityId } : {}),
+      // PGL-09: the invoice mail shows the invoice number and the total, and nothing else about the money.
+      // PGL-09: the contract mail names the contract by its title only (no clauses, amounts or dates).
+      ...(input.type === CONTRACT_SENT_MAIL_TYPE ? { contractTitle: shortString(input.payload.contractTitle, 120) } : {}),
+      ...(input.type === INVOICE_ISSUED_MAIL_TYPE
+        ? {
+            invoiceNo: shortString(input.payload.invoiceNo, 80),
+            total: shortString(input.payload.total, 40),
+            currency: shortString(input.payload.currency, 8),
+          }
+        : {}),
       href,
       subjectTitle: typeof input.payload.title === "string" ? input.payload.title : undefined,
       companyName: typeof input.payload.companyName === "string" ? input.payload.companyName : undefined,
@@ -178,4 +247,14 @@ export async function mailIntake(input: MailIntakeInput): Promise<void> {
  *  literal set. */
 export function mailAllowlistedNotificationTypes(): string[] {
   return [...MAIL_NOTIFICATION_TYPES];
+}
+
+/** The allow-listed types whose recipients are client contacts: every one of them is behind the client-mail flag. */
+export function clientMailNotificationTypes(): string[] {
+  return [...CLIENT_MAIL_TYPES];
+}
+
+/** The allow-listed types whose recipients are the company's own people. */
+export function staffMailNotificationTypes(): string[] {
+  return [...STAFF_MAIL_TYPES];
 }

@@ -67,14 +67,14 @@ async function addContact(
 }
 
 describe("PV4-06 unit: the mail allow-list and the client-mail flag", () => {
-  it("the allow-list is the two approval types plus conversation.message.staff, and nothing else", () => {
-    expect(mailAllowlistedNotificationTypes().sort()).toEqual(["approval.requested", "conversation.message.staff", "pipeline.gate.opened"]);
+  it("the allow-list is the approval, gate, conversation, contract and invoice types, and nothing else (PGL-09 added the last two)", () => {
+    expect(mailAllowlistedNotificationTypes().sort()).toEqual(["approval.requested", "contract.sent", "conversation.message.staff", "invoice.issued", "pipeline.gate.opened"]);
   });
 
   it("the client-mail flag defaults OFF (only the exact string '1' turns it on)", () => {
     // Skipped when an operator exported it for this very run; CI does not.
-    if (process.env.CONVERSATION_CLIENT_MAIL_ENABLED !== undefined) return;
-    expect(config.mail.conversationClientMailEnabled).toBe(false);
+    if (process.env.CLIENT_MAIL_ENABLED !== undefined || process.env.CONVERSATION_CLIENT_MAIL_ENABLED !== undefined) return;
+    expect(config.mail.clientMailEnabled).toBe(false);
   });
 });
 
@@ -181,7 +181,7 @@ describe.skipIf(!TEST_URL)("PV4-06: conversation notifications (portal + staff +
 
   afterAll(async () => {
     config.mail.enabled = false;
-    config.mail.conversationClientMailEnabled = false;
+    config.mail.clientMailEnabled = false;
     setStorageForTest(diskStorage);
     await app?.close();
     await teardownTestDb();
@@ -406,12 +406,12 @@ describe.skipIf(!TEST_URL)("PV4-06: conversation notifications (portal + staff +
 
     afterEach(() => {
       config.mail.enabled = false;
-      config.mail.conversationClientMailEnabled = false;
+      config.mail.clientMailEnabled = false;
     });
 
-    it("OFF by default: with the master gate on and the conversation flag off, NO mail_log row and NO enqueue; the in-app notice still lands", async () => {
+    it("OFF by default: with the master gate on and the client-mail flag off, NO mail_log row and NO enqueue; the in-app notice still lands", async () => {
       config.mail.enabled = true;
-      config.mail.conversationClientMailEnabled = false;
+      config.mail.clientMailEnabled = false;
       const rowsBefore = (await adminPool().query(`SELECT count(*)::int AS n FROM mail_log WHERE template_key = 'conversation.message.staff'`)).rows[0].n;
       const inAppBefore = (await notified("conversation.message.staff", threadP2)).rows.length;
 
@@ -422,9 +422,9 @@ describe.skipIf(!TEST_URL)("PV4-06: conversation notifications (portal + staff +
       expect(rowsAfter).toBe(rowsBefore);
     });
 
-    it("the conversation flag alone does nothing while the master gate is off", async () => {
+    it("the client-mail flag alone does nothing while the master gate is off", async () => {
       config.mail.enabled = false;
-      config.mail.conversationClientMailEnabled = true;
+      config.mail.clientMailEnabled = true;
       const before = (await adminPool().query(`SELECT count(*)::int AS n FROM mail_log WHERE template_key = 'conversation.message.staff'`)).rows[0].n;
       await staffPostReply(admin, threadP2);
       const after = (await adminPool().query(`SELECT count(*)::int AS n FROM mail_log WHERE template_key = 'conversation.message.staff'`)).rows[0].n;
@@ -433,7 +433,7 @@ describe.skipIf(!TEST_URL)("PV4-06: conversation notifications (portal + staff +
 
     it("two staff messages queue ONE mail per contact; after the contact reads the thread, the next queues a second", async () => {
       config.mail.enabled = true;
-      config.mail.conversationClientMailEnabled = true;
+      config.mail.clientMailEnabled = true;
       await adminPool().query(`DELETE FROM mail_log WHERE template_key = 'conversation.message.staff'`);
 
       await staffPostReply(admin, threadP1);
@@ -465,7 +465,7 @@ describe.skipIf(!TEST_URL)("PV4-06: conversation notifications (portal + staff +
 
     it("the throttle is per thread: a different thread still mails a contact who is up to date on the first", async () => {
       config.mail.enabled = true;
-      config.mail.conversationClientMailEnabled = true;
+      config.mail.clientMailEnabled = true;
       await adminPool().query(`DELETE FROM mail_log WHERE template_key = 'conversation.message.staff'`);
       await staffPostReply(admin, threadP2);
       await staffPostReply(admin, generalA);

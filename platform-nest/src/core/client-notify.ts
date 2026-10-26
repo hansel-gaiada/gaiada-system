@@ -8,8 +8,12 @@
 // The recipient-resolution rules below (migration 0072) are non-trivial enough to deserve ONE place
 // rather than several inlined copies — a client gate opening and a scope sign-off completing both need
 // "which client_contacts do I tell" answered identically, and there will be more callers.
+import { ForbiddenException } from "@nestjs/common";
 import type { PoolClient } from "pg";
+import { withTenants } from "../db";
 import { notify, type NotificationPayload } from "./http";
+import { canSignFor, resolvePortalScope, scopeValues } from "./portal-scope";
+import { contractInPortalScope, invoiceInPortalScope, scopeAt } from "./portal-visibility";
 
 // Gate kinds that ask the client to actually SIGN something, vs. everything else (feedback, progress)
 // which any active contact can be told about. Kept as an independent literal set rather than an import
@@ -66,6 +70,62 @@ export async function resolveClientRecipients(
   return rows.rows.map((r) => r.user_id);
 }
 
+/** The portal entities whose recipients are resolved through the portal's OWN visibility rule (PGL-09). */
+export type PortalReachEntity = "contract" | "invoice";
+
+/**
+ * PGL-09 (PV-D47): the contacts of a client who can actually REACH one entity in the portal, by the portal's own rules.
+ *
+ * It does not re-derive the rule. Each candidate (an active contact of the client, or the legacy `portal_user_id`) is run
+ * through `resolvePortalScope` (the same call the portal makes for a signed-in contact), and the entity is then checked with
+ * the portal's own row predicate (`contractInPortalScope` / `invoiceInPortalScope`, `portal-visibility.ts`). So a rule the
+ * portal changes later is followed here, and a mail can never point at a page the contact would get a 404 on.
+ *  - `signersOnly` adds the portal's signing rule, `canSignFor` (the same per-client check `requireSignerFor` makes): a signer
+ *    or an admin of THIS client. A viewer is never asked to sign. Being a signer of another client counts for nothing.
+ *  - contract: client-wide contacts, contacts of the contract's project, and (for a contract with no project, a master
+ *    agreement) project-limited contacts of that client too, exactly as `contractInPortalScope` admits them.
+ *  - invoice: invoices carry no project (`invoiceInPortalScope` reaches by client only), so EVERY active contact of the
+ *    client is a recipient, project-limited ones included.
+ * An invoice or contract that is not client-visible yet (a draft) reaches nobody.
+ *
+ * Caller holds a PoolClient from `withTenants([tenantId], ...)`. Reads only; ordered by user id.
+ */
+export async function resolvePortalReachRecipients(
+  c: PoolClient,
+  params: { clientId: string | null; entity: PortalReachEntity; entityId: string; signersOnly: boolean },
+): Promise<string[]> {
+  const { clientId, entity, entityId, signersOnly } = params;
+  if (!clientId) return [];
+  const candidates = await c.query<{ user_id: string }>(
+    `SELECT DISTINCT user_id FROM (
+       SELECT cc.user_id FROM client_contacts cc
+        WHERE cc.client_id = $1 AND cc.status = 'active' AND cc.deleted_at IS NULL
+       UNION
+       SELECT cl.portal_user_id FROM clients cl
+        WHERE cl.id = $1 AND cl.portal_user_id IS NOT NULL AND cl.deleted_at IS NULL
+     ) x WHERE user_id IS NOT NULL ORDER BY user_id`,
+    [clientId],
+  );
+  const out: string[] = [];
+  for (const { user_id: userId } of candidates.rows) {
+    let scope;
+    try {
+      scope = await resolvePortalScope(c, { userId });
+    } catch (err) {
+      // Not a portal contact of anything (an internal sentinel client, say): the portal would refuse them too.
+      if (err instanceof ForbiddenException) continue;
+      throw err;
+    }
+    if (!scope.clientIds.includes(clientId)) continue;
+    if (signersOnly && !canSignFor(scope, clientId)) continue;
+    const seen = entity === "contract"
+      ? await c.query(`SELECT 1 FROM contracts k WHERE k.id = $1 AND ${contractInPortalScope("k", scopeAt(2))}`, [entityId, ...scopeValues(scope)])
+      : await c.query(`SELECT 1 FROM invoices i WHERE i.id = $1 AND ${invoiceInPortalScope("i", { clients: 2 })}`, [entityId, scope.clientIds]);
+    if (seen.rows.length > 0) out.push(userId);
+  }
+  return out;
+}
+
 /**
  * Fan out notify() to a list of recipients, each in its own try/catch. Best-effort per this ticket's
  * hard constraint: a notify() failure — for one recipient or all of them — must never propagate out of
@@ -118,5 +178,45 @@ export async function notifyScopeSignedBothSides(
     await notifyBestEffort(tenantId, actorId, clientRecipients, "scope.signed", {
       title, href: `/portal/approvals/${runId}`, entityType: "pipeline_run", entityId: runId, severity: "info",
     });
+  }
+}
+
+/** PGL-09 (PV-D47): an invoice was issued; tell the client contacts who can see it in the portal. Called by the issue route
+ *  AFTER the issue transaction commits, and only when this call issued it (a repeat answers `alreadyIssued` and never reaches
+ *  here). Best effort, like every notice: any failure is logged loudly and never rethrown, so a notification problem can
+ *  neither fail nor undo an invoice that has been posted to the ledger. Returns the recipients handed to `notify()`.
+ *
+ *  The payload carries what the mail may show, and nothing more: the invoice number, the total and its currency. The mail's
+ *  link is the portal page `/portal/invoices/:id`. Whether it is MAILED at all is the client-mail flag's decision (intake.ts). */
+export async function notifyClientInvoiceIssued(tenantId: string, actorId: string | null, invoiceId: string): Promise<string[]> {
+  try {
+    const found = await withTenants([tenantId], async (c) => {
+      const r = await c.query<{ clientId: string | null; invoiceNo: string | null; total: string; currency: string }>(
+        `SELECT client_id AS "clientId", invoice_no AS "invoiceNo", total::text AS total, currency
+           FROM invoices WHERE id = $1 AND deleted_at IS NULL`,
+        [invoiceId],
+      );
+      const inv = r.rows[0];
+      if (!inv || !inv.clientId) return null;
+      const recipients = await resolvePortalReachRecipients(c, { clientId: inv.clientId, entity: "invoice", entityId: invoiceId, signersOnly: false });
+      return { inv, recipients };
+    });
+    if (!found || found.recipients.length === 0) return [];
+    await notifyBestEffort(tenantId, actorId, found.recipients, "invoice.issued", {
+      title: found.inv.invoiceNo ? `New invoice ${found.inv.invoiceNo}` : "A new invoice is ready",
+      // The portal page. Kept as a literal ON this `href` line: the UI's deep-link ledger (portal-links.guard.test.ts)
+      // finds the links the backend sends by scanning for them here.
+      href: `/portal/invoices/${invoiceId}`,
+      entityType: "invoice",
+      entityId: invoiceId,
+      severity: "info",
+      invoiceNo: found.inv.invoiceNo ?? undefined,
+      total: found.inv.total,
+      currency: found.inv.currency,
+    });
+    return found.recipients;
+  } catch (err) {
+    console.error(`[client-notify] invoice.issued failed (invoice=${invoiceId}):`, (err as Error)?.message ?? err);
+    return [];
   }
 }

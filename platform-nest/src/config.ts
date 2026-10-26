@@ -247,6 +247,20 @@ export function readIntervalMs(raw: string | undefined, fallback: number, floor:
   return n;
 }
 
+/**
+ * PGL-09 (PV-D47): the ONE flag for mail to client contacts. `CLIENT_MAIL_ENABLED=1` turns it on.
+ *
+ * `CONVERSATION_CLIENT_MAIL_ENABLED` (PV4-06) is kept as a READ-ONLY ALIAS for one release, so a box that already set it
+ * keeps its behaviour across the upgrade: either variable being exactly "1" turns client mail on. Nothing writes the alias.
+ * REMOVAL: the release after the one that ships PGL-09 deletes the alias read below (one line), its test in
+ * `src/mail/client-mail-flag.test.ts`, and the alias mentions in docs/FRONTEND-BFF-CONTRACT.md §62.2.
+ *
+ * Only the exact string "1" counts, so the empty value a compose `${VAR:-}` passthrough writes reads as OFF.
+ */
+export function readClientMailEnabled(env: Record<string, string | undefined>): boolean {
+  return env.CLIENT_MAIL_ENABLED === "1" || env.CONVERSATION_CLIENT_MAIL_ENABLED === "1";
+}
+
 /** PV5-10: an open hosted checkout is handed out again only while it has at least this long left (src/payments/checkout.ts).
  *  PAYMENTS_CHECKOUT_EXPIRY_MINUTES must be greater, or no checkout could ever be reused. */
 export const PAYMENTS_REUSE_MARGIN_MINUTES = 10;
@@ -1786,14 +1800,14 @@ const configBase = {
     // zero side effects, not merely "nothing gets sent". 1 = live (still routes through the
     // dev-log adapter with no per-stream host configured — see provider.ts's resolveAdapter).
     enabled: process.env.MAIL_ENABLED === "1",
-    // PV4-06 — a SECOND, narrower gate for mail to CLIENT CONTACTS about Conversation messages
-    // (`conversation.message.staff`). The master gate above is on in the live estate (it feeds the
-    // staff-facing approval mail), so a new mail type that reaches people OUTSIDE the company must not
-    // ride on it: this one defaults OFF and only the exact string "1" turns it on (an empty value that
-    // a compose `${VAR:-}` passthrough writes reads as off, never as on). Off = `mailIntake` returns
-    // before it resolves an address, throttles, or enqueues: no `mail_log` row at all. The in-app
-    // notification still lands either way. Turn on only once a real client-delivery sender exists.
-    conversationClientMailEnabled: process.env.CONVERSATION_CLIENT_MAIL_ENABLED === "1",
+    // PGL-09 (PV-D47) — the ONE gate for mail to CLIENT CONTACTS: a contract to sign, an issued invoice, a sign-off gate
+    // and a staff message in Conversation (`intake.ts`'s CLIENT_MAIL_TYPES). The master gate above is on in the live estate
+    // (it feeds the staff-facing approval mail), so mail that reaches people OUTSIDE the company must not ride on it: this
+    // defaults OFF and only the exact string "1" turns it on (an empty value that a compose `${VAR:-}` passthrough writes
+    // reads as off, never as on). Off = `mailIntake` returns before it resolves an address, throttles, or enqueues: no
+    // `mail_log` row at all. The in-app notification still lands either way. `CONVERSATION_CLIENT_MAIL_ENABLED` is its
+    // read-only alias for one release (see `readClientMailEnabled`). Turn on only once a real client-delivery sender exists.
+    clientMailEnabled: readClientMailEnabled(process.env),
     senderIntervalMs: Number(process.env.MAIL_SENDER_INTERVAL_MS ?? 15000),
     // VERP reply-token domain (§7.6). The local part (`reply+<token>@`) is built by the caller;
     // this is only the host half.

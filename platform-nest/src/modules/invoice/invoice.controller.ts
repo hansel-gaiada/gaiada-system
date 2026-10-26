@@ -8,6 +8,7 @@ import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../../db";
 import { config } from "../../config";
 import { authorize, writeActivity } from "../../core/http";
+import { notifyClientInvoiceIssued } from "../../core/client-notify";
 import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
@@ -389,6 +390,9 @@ export class InvoiceController {
       await writeActivity(tenantId, req.principal.userId, "issued", "invoice", invoiceId, {
         invoiceNo: out.invoiceNo, total: out.total, currency: out.currency, arInvoiceId: out.arInvoiceId,
       });
+      // PGL-09 (PV-D47): tell the client contacts who can see it. Only when THIS call issued it, so a repeat of the request
+      // never notifies twice; best effort (never throws), after the issue has committed.
+      await notifyClientInvoiceIssued(tenantId, req.principal.userId, invoiceId);
     }
     return out;
   }

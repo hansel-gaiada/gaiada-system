@@ -6260,7 +6260,7 @@ Payload (stored in `notifications.payload`, plus `actorId`): `{title, href, enti
 
 **Mail to client contacts** (`conversation.message.staff` is the third type on the mail allow-list, with its own template `conversation.message.staff`): the mail has no message text, a fixed subject `You have a new message`, no reply token, and its **only link is the plain deep link** (`<MAIL_LINK_BASE_URL>/portal/conversation/<threadId>`), never a token or a session.
 - **Throttle: at most one mail per contact per thread until that contact has read the thread.** A mail is skipped when `mail_log` already holds a `conversation.message.staff` row for this (contact, thread) newer than the contact's `conversation_reads.last_read_at`, or any such row at all when the contact has no read marker. Every status counts (queued, sent, suppressed, failed). The thread is recorded in the mail row's `payload.threadId`.
-- **Flag, default OFF: `CONVERSATION_CLIENT_MAIL_ENABLED=1`** (`config.mail.conversationClientMailEnabled`; only the exact string `1` enables it). It is separate from the master `MAIL_ENABLED` because this is the one mail type that reaches people outside the company. Off means `mailIntake` returns before any lookup: **no `mail_log` row and no enqueue**; the in-app notification above still lands. Turn it on only once a real client-delivery sender exists (the board's "Before real clients use the portal"). The compose file does not pass the variable through yet, so it cannot be turned on by accident.
+- **Flag, default OFF: `CLIENT_MAIL_ENABLED=1`** (`config.mail.clientMailEnabled`; only the exact string `1` enables it). PGL-09 (§62.2) made this the ONE flag for every client-recipient mail type; it replaces the per-conversation flag `CONVERSATION_CLIENT_MAIL_ENABLED`, which stays as a read-only alias for one release (either being `1` turns client mail on). Off means `mailIntake` returns before any lookup: **no `mail_log` row and no enqueue**; the in-app notification above still lands. Turn it on only once a real client-delivery sender exists (the board's "Before real clients use the portal"). The compose file does not pass the variable through yet, so it cannot be turned on by accident.
 
 **Counts (additive)**
 - `GET /api/:t/portal/overview` (§16a) gains **`conversationUnread: number`**: the number of threads in the caller's scope with at least one unread message from STAFF. It is the same predicate (`conversationThreadInPortalScope`) and the same unread rule (`unreadCountSql`) as the per-thread `unreadCount` on `GET /portal/conversation`, so it equals the number of rows in that list with `unreadCount > 0`. A project-scoped contact does not count the client-wide thread. The portal nav's Projects badge adds it to the open gates (PV4-08).
@@ -11722,3 +11722,65 @@ Code: page `app/(app)/finance/payables/freelancers/page.tsx`; components `compon
 7. **Not offered:** unlinking a vendor (the route takes `userId: null`), editing a rate's note alone, and a view of a freelancer's own bills (§61.15).
 8. **DEMO_MODE.** The store holds a freelancer with two rates (the older one `used`), one whose vendor names no withholding code, one with no vendor (`NO_VENDOR`), a member with no rate, a seeded draft, and the free vendor V-003 to link. Unbilled hours are a fixed pile per person shown for any period asked, priced at the rate in force on the period's last day (the server prices each entry at its own date); there is no second factor to be refused. The e2e withdraws the rate it adds, so a run leaves the store as it found it.
 9. **The build.** `next build` under DEMO_MODE passed with `--webpack`: the default Turbopack build refuses a worktree whose `node_modules` is a junction to another checkout ("Symlink node_modules is invalid, it points out of the filesystem root"). CI and a real checkout are unaffected.
+
+## 62. Client mail: the things a client must act on (PGL-09, PV-D47, 2026-10-26) — `platform-nest/src/mail/{intake,templates}.ts`, `src/core/client-notify.ts`, `src/core/contracts.controller.ts`, `src/modules/invoice/invoice.controller.ts`, `src/config.ts` — **STATUS: PROTOTYPED on branch `pgl/09-client-mail` (backend and templates; no new route, no migration. Run anywhere: `client-mail-flag.test.ts`, `client-mail-templates.test.ts`, `templates.test.ts`. Written for the Linux CI gate against real Postgres and Cerbos: `client-mail.db.test.ts`, with `tap.test.ts`, `entity-kind-agreement.test.ts` and `conversation-notify.test.ts` adjusted to the one flag. A skip is not a pass. Not driven live; nothing is sent anywhere until the real sender and the flag are switched on at cut-over)**
+
+**Why.** Owner ruling PV-D47 (2026-10-15): a client contact is emailed for the things they must act on. Reports and other news stay in the portal. Mail is built and proved against the Mailpit sink now; the real sender comes at staging. Every mail is a pointer to the portal, never action-by-reply and never a magic link (mail design §7, M9 to M12). This section covers the client mail types and the flag. The invitation mail is PGL-10 and is not here (62.5).
+
+### 62.1 The client mail types
+
+Five kinds of mail reach a client contact. Four are sent through `notify()` and the mail tap (`mailIntake`, `src/mail/intake.ts`); a notification that is not on the allow-list never produces mail. The recipient rule for each is one function, so the mail and the portal cannot disagree.
+
+| Notification type | Trigger | Who receives it | Where the rule lives | Link (a plain portal page) | Template key |
+|---|---|---|---|---|---|
+| `contract.sent` (new to the mail allow-list) | staff send a contract (`POST /api/:t/contracts/:id/send`, `core/contracts.controller.ts`) | the contacts who can **sign THAT contract** | `resolvePortalReachRecipients(..., signersOnly)` in `core/client-notify.ts`, which runs the portal's own `resolvePortalScope` + `canSignFor` (the check `requireSignerFor` makes) and then `contractInPortalScope` | `/portal/contracts/:contractId` | `contract.sent` |
+| `invoice.issued` (new) | staff issue an invoice (`POST /api/:t/invoices/:id/issue`, `modules/invoice/invoice.controller.ts`), only the call that actually issued it | the contacts who can **see that invoice in the portal** | `resolvePortalReachRecipients(...)` with `invoiceInPortalScope` (`portal-visibility.ts`); `notifyClientInvoiceIssued` in `core/client-notify.ts` | `/portal/invoices/:invoiceId` | `invoice.issued` |
+| `pipeline.gate.opened` (already mailed) | a client sign-off gate opens (`core/pipeline.controller.ts`, `core/webdev-change-requests.controller.ts`) | unchanged: `resolveClientRecipients` (signers and admins for a signature gate, every contact otherwise) | `core/client-notify.ts` | `/portal/approvals/:runId` | `approval.actionable` (unchanged) |
+| `conversation.message.staff` (already mailed, PV4-06) | staff post, or a draft is sent (`core/conversation-notify.ts`) | unchanged: the thread's in-scope contacts, throttled to one mail per contact per thread until read (§29d) | `core/conversation-notify.ts`, `mail/intake.ts` | `/portal/conversation/:threadId` | `conversation.message.staff` |
+
+The staff mail type `approval.requested` is not a client type, is not behind the client flag and is unchanged (§62.2).
+
+**Who gets a contract-to-sign mail (`contract.sent`).** An active contact of the contract's client with capability `signer` or `admin` (`admin` implies signer, WSK-49f) who can reach that contract:
+- a client-wide contact reaches every contract of the client;
+- a contact limited to a project reaches the contracts of **that** project, and the client's contracts **with no project** (a master agreement), exactly as `contractInPortalScope` admits them;
+- a **viewer never gets a "to sign" mail**, and no in-app "to sign" notice either. A viewer can still read the contract in the portal;
+- signing is **per client**: a signer of client B who is only a viewer of client A is not mailed about A's contract;
+- a revoked or invited contact, a contact of another client, and the actor are never mailed.
+- This is a change from before PGL-09 for the in-app notice too: the recipients used to come from `resolveClientRecipients(kind: 'signature')` with the contract's project, which left a project-limited signer out of a project-less contract that the portal shows them. The notice and the mail now share the portal's rule. A test compares them with the portal itself (`GET /portal/contracts/:id` answers `canSign` for each contact).
+
+**Who gets an invoice mail (`invoice.issued`).** Every active contact of the invoice's client. Invoices carry no project (`invoiceInPortalScope` reaches by client only), so a contact limited to some projects is mailed too, and so is a viewer. A draft or `approved` invoice reaches nobody (it is not client-visible). The contacts mailed are exactly the contacts for whom `GET /portal/invoices/:id` answers 200 (asserted against the portal).
+
+**Idempotency.** A contract or an invoice is a one-time ask. `mailIntake` skips a contact who already has a `mail_log` row for the same template and entity (any status counts: queued, sent, suppressed, failed). The entity id rides in the row's `payload.entityId` (the row's `entity_*` columns stay reserved for the thread-authz kinds). A repeat of the issue request answers `alreadyIssued` and does not notify. A notification with no entity id is not mailed at all, because it could not be deduplicated. These two types request no reply token.
+
+**Failure.** Best effort after the write commits, like every notice (BFF §29): a failure to resolve or notify is logged and never fails or undoes the send or the issue.
+
+### 62.2 The flag: one switch for every client mail
+
+- **`CLIENT_MAIL_ENABLED=1`** (`config.mail.clientMailEnabled`) gates **every client-recipient mail type**: `pipeline.gate.opened`, `conversation.message.staff`, `contract.sent` and `invoice.issued`. Only the exact string `1` turns it on, so the empty value a compose `${VAR:-}` passthrough writes reads as off. Default OFF.
+- **Off** means `mailIntake` returns before any lookup: **no address read, no throttle query, no `mail_log` row and no enqueue.** The in-app notification still lands. This is how the conversation flag has always behaved, now for all four client types.
+- It sits on top of the master gate `MAIL_ENABLED`: with the master gate off nothing is mailed whatever this flag says.
+- **`CONVERSATION_CLIENT_MAIL_ENABLED` is a read-only alias for ONE release.** Either variable being `1` turns client mail on (`readClientMailEnabled`, `src/config.ts`), so a box that already set the old one keeps its behaviour across the upgrade. Nothing writes the alias. **Removal:** the release after the one that ships PGL-09 deletes the alias read (one line in `src/config.ts`), its cases in `src/mail/client-mail-flag.test.ts`, and this paragraph.
+- **A behaviour change to know about.** The sign-off gate mail used to be on whenever `MAIL_ENABLED=1`, with no client flag. It is now behind `CLIENT_MAIL_ENABLED`, because it reaches people outside the company. Staff mail (`approval.requested`) is unaffected.
+- **Compose.** The compose file does not pass either variable through, so client mail cannot be turned on by accident. The passthrough is added at cut-over only, in the runbook's mail step (after the real sender is in place, before the flag is switched on).
+- **A new allow-listed notification type must be declared** as a staff type or a client type in `mail/intake.ts` (`STAFF_MAIL_TYPES`, `CLIENT_MAIL_TYPES`); a test pins that the two sets partition the allow-list, so a type cannot reach clients without the flag.
+
+### 62.3 What each mail says, and what the preview shows
+
+Every template is a **pointer mail**: a fixed sentence, the portal link, and at most the one or two facts named below. English only for v1 (Indonesian waits for counsel's translated notices, PGL-03).
+- **No action by reply, no magic link, no token.** The only link in a mail is the plain portal page (`<MAIL_LINK_BASE_URL>/portal/...`): no query string, no fragment, no session or capability. A contact whose session has expired takes the normal sign-in path when the page opens. `contract.sent` and `invoice.issued` carry no reply token.
+- **`contract.sent`:** subject `A contract is ready for you to review and sign`. Body: the contract's title in quotes (up to 120 characters), the sentence that it is ready in the client portal, `Sign in to read it:` and the link. It carries **no contract text, no amounts and no dates**, and nothing offers signing by mail.
+- **`invoice.issued`:** subject `Invoice <number> is ready` (`A new invoice is ready` when the number is missing). Body: the invoice number and the **total** with its currency, grouped with commas and never passed through a float (`IDR 15,000,000.00`), then `Sign in to view it and pay:` and the link. **No other figure**: no lines, no tax split, no due date, no bank details. A malformed total is left out rather than printed.
+- `pipeline.gate.opened` and `conversation.message.staff` are unchanged (`approval.actionable` wording; `You have a new message`).
+- **Stored payload (`mail_log.payload`, never a body):** `href` and `entityId` for all; `contractTitle` and `subjectTitle` for a contract; `invoiceNo`, `total` and `currency` for an invoice. Nothing else. The rendered text is recomposed at send time from `(template_key, payload)`.
+- **Preview.** `GET /api/admin/mail/log/:id/preview` (elevated callers only, unchanged) renders all of these from the stored row, with `renderedFromCurrentTemplate: true`. For these four types it shows the portal link, `linkOmitted: false`, and no token.
+
+### 62.4 Not in this section
+
+- The **invitation mail** (PGL-10): see 62.5.
+- Deliverability of the real sender (a MANUAL readiness item at cut-over). A Mailpit catch proves rendering and wiring and nothing about deliverability (mail design honesty rule); PGL-11 proves the wiring on sumopod.
+- Reports and other news: in-app only, by ruling.
+- Mailing a notice that was missed because the process stopped between the commit and the notice. There is no sweep for it; the portal list still shows the contract or the invoice.
+
+### 62.5 PGL-10: the invite route and "was it mailed" (PLANNED, not built)
+
+*Placeholder, reserved for PGL-10 (the invitation mail). PGL-10 adds its text here: the invite route's response field that says whether the invite was mailed, the template, and how the raw token stays out of `mail_log`, logs and the outbox. It reuses the one flag (62.2) and the pointer-mail rules (62.3). Nothing about the invite is decided or built by PGL-09.*

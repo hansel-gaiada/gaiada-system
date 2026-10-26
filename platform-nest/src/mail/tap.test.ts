@@ -83,6 +83,7 @@ describe.skipIf(!TEST_URL)("mail — MAIL-05 approval/risk tap", () => {
     await initTestDb();
     config.serviceToken = "svc-token";
     config.mail.enabled = true;
+    config.mail.clientMailEnabled = true; // PGL-09: the sign-off gate mail is a client mail, behind the one flag (flag-off case: client-mail.db.test.ts)
     co = await createCompany("Mail Tap Test Co");
     admin = await createUser("tap-admin@a.test");
     await addMembership(co, admin);
@@ -91,6 +92,7 @@ describe.skipIf(!TEST_URL)("mail — MAIL-05 approval/risk tap", () => {
   });
   afterAll(async () => {
     config.mail.enabled = false;
+    config.mail.clientMailEnabled = false;
     await app.close();
     await teardownTestDb();
   });
