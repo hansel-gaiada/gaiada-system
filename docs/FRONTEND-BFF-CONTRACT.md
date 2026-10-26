@@ -11786,6 +11786,97 @@ Every template is a **pointer mail**: a fixed sentence, the portal link, and at 
 - Reports and other news: in-app only, by ruling.
 - Mailing a notice that was missed because the process stopped between the commit and the notice. There is no sweep for it; the portal list still shows the contract or the invoice.
 
-### 62.5 PGL-10: the invite route and "was it mailed" (PLANNED, not built)
+### 62.5 PGL-10: the invitation email, and "was it mailed" (PGL-10, PV-D47, 2026-10-26) — `platform-nest/src/core/{client-contacts.controller,client-invites}.ts`, `src/mail/{invite-mail,sender,queue,templates,admin-mail.controller}.ts`, migration `202610261100_client_invites_delivery.sql` — **STATUS: PROTOTYPED on branch `pgl/10-invite-mail` (backend, template, one migration. Run anywhere: `src/mail/invite-mail.test.ts`, `templates.test.ts`. Written for the Linux CI gate against real Postgres and Cerbos: `src/core/client-invite-mail.db.test.ts` (the end to end flows and the structural leak scan) and `src/core/client-invites.test.ts` (the token layer). A skip is not a pass. Not driven live; no mail leaves the ERP until the real sender and the flag are switched on at cut-over. The staff UI does not offer the choice yet: see 62.5.6)**
 
-*Placeholder, reserved for PGL-10 (the invitation mail). PGL-10 adds its text here: the invite route's response field that says whether the invite was mailed, the template, and how the raw token stays out of `mail_log`, logs and the outbox. It reuses the one flag (62.2) and the pointer-mail rules (62.3). Nothing about the invite is decided or built by PGL-09.*
+**Why.** PV-D47: an invitation can go by mail. An invite token is a bearer credential that **creates a login**, so it is the one client mail that must carry a credential. Every other client mail is a pointer with no token (62.3, mail design M11). The rule for this one: **the raw token is never at rest**: not in `mail_log` (payload or any other column), not in a log line, not in the outbox, not in any table.
+
+#### 62.5.1 The route: `POST /api/:t/clients/:clientId/contacts` (changed, additive)
+
+Request body gains one optional field:
+
+| Field | Values | Default | Meaning |
+|---|---|---|---|
+| `delivery` | `"link"` \| `"mail"` | `"link"` | `"link"` is today's behaviour: the PM forwards the link by hand. `"mail"` asks the ERP to mail the invitation. Anything else is `400 delivery must be 'link' or 'mail'` (nothing is created). |
+
+Mail is sent only when **both** gates are on: the master gate `MAIL_ENABLED=1` and the client-mail flag `CLIENT_MAIL_ENABLED=1` (62.2). Otherwise the route answers exactly as for `"link"` and says it was not mailed. Authorization, validation, the 404s and the `409 already_active` refusal are unchanged.
+
+Response `201`, with a new `mail` object and a `delivery` field on `invite`:
+
+```jsonc
+// mailed (both gates on, the address is not suppressed)
+{ "contact": { …unchanged… },
+  "invite": { "delivery": "mail", "expiresAt": "2026-10-29T14:05:00.000Z" },        // NO token, NO acceptPath
+  "mail":   { "requested": true, "mailed": true, "reason": null, "mailLogId": "<uuid>" } }
+
+// not mailed: today's answer, plus `mail`
+{ "contact": { … },
+  "invite": { "delivery": "link", "token": "inv2.…", "expiresAt": "…", "acceptPath": "/invite/inv2.…" },
+  "mail":   { "requested": <bool>, "mailed": false, "reason": "<reason>", "mailLogId": null } }
+```
+
+| `mail.reason` | When | What the PM gets |
+|---|---|---|
+| `null` | mailed (`mailed: true`) | no token; the link went to the invitee's mailbox only |
+| `"not_requested"` | `delivery` omitted or `"link"` | the link, as today |
+| `"mail_off"` | `"mail"` asked, but `MAIL_ENABLED` or `CLIENT_MAIL_ENABLED` is off | the link, as today. **No `mail_log` row is written.** |
+| `"suppressed"` | `"mail"` asked, the address is on the suppression list | the link (the same invite, converted to a link invite). A `status='suppressed'` `mail_log` row records the attempt, as for every suppressed mail; it holds no token and is never sent. |
+| `"enqueue_failed"` | `"mail"` asked, the mail could not be queued (logged server-side, ids only) | the link |
+
+**`mailed: true` means queued, not delivered.** The sender sends it on its next sweep and retries on failure (62.5.3). Delivery is not reported back to this route; the admin mail log shows the row's status.
+
+**A mailed invite never returns its token.** The link goes only to the invitee's mailbox. That is also what makes the identity provider's `emailVerified: true` honest on accept (the accept route provisions the address the invite was issued for, and with a mailed invite the PM never holds the credential). A PM who also wants a link to forward asks for one (`delivery: "link"`); that is a resend (62.5.4).
+
+**Every re-invite is a resend now (a behaviour change for the link path too).** Before PGL-10, re-inviting a still-`invited` contact minted a second token and left the first one working. Now every open invite of that contact is spent first, in the same transaction, so **a contact holds at most one usable invitation**: the old link, or a mail still queued for it, stops working. The response is unchanged.
+
+The outbox event `client_contact.invited` gains `delivery: "mail" | "link"`; the `invited_client_contact` activity row records the delivery actually used. Neither ever carries a token.
+
+#### 62.5.2 The design: the token is minted at send time and never stored
+
+The mail spool stores `(template_key, payload)` and recomposes the mail at send time, possibly minutes later and up to five times. So the payload can hold a **reference**, never the link:
+
+1. **The route creates the invite SEALED.** `client_invites.delivery = 'mail'` (new column, migration `202610261100`), and `token_hash` is the sha256 of 32 random bytes that are thrown away at once: no token can match it, and nothing can tell it from a real hash. It enqueues one `client.invite` mail (stream `notify`, no reply token, `entity_*` null) whose **stored payload is exactly four fields**: `inviteId`, `companyName`, `clientName`, `expiresAt`. `enqueueMail` refuses a `client.invite` payload with any other key (an `href`, a token, a hash) or with an invite-token-shaped value, before any row exists.
+2. **The sender mints at send time.** After its suppression re-check (so a suppressed row never mints) and immediately before the adapter call, the sender's `client.invite` composer (`src/mail/invite-mail.ts`) runs one atomic `UPDATE`: a fresh token's hash replaces the stored one, only if the invite is still a `mail` invite, unspent, unexpired, its contact still `invited`, and bound to the address the mail is going to. The raw token goes into the link **in memory**; the mail is rendered and handed to the adapter. Nothing writes the link, the token or the rendered body anywhere.
+3. **A failed send re-seals.** The attempt's token dies (the invite is sealed again) and the row goes back to the queue with the normal backoff; the retry mints a **new** token. The adapter's error message is scrubbed of the token before it is stored as `last_error`.
+
+**Why this design and not the alternatives.**
+- *Send inline and never retry* (what the magic link does, `mail/magic-link/service.ts`) would put no token at rest either, but a client whose one send failed never gets their invitation and nothing retries it.
+- *A sealed secret record the sender redeems and clears* stores the raw token encrypted at rest for the life of the queue row. Minting at send time stores nothing to redeem, so there is nothing to clear and nothing for a backup to keep.
+- *Store the link in the payload* (as every other template does) is the one thing ruled out: it leaves a live credential in a queryable, admin-readable, backed-up row.
+
+**Token v2.** The invite token was `inv1.<id>.<tenant>.<HMAC(id, tenant)>`, a pure function of the row's id, its tenant and the signing key: a database read plus the key could rebuild every open link, so the stored hash refused nothing the key could not forge. New tokens are `inv2.<id>.<tenant>.<nonce>.<HMAC(id, tenant, nonce)>` with 16 random bytes that are never stored: a leaked database **and** a leaked key together still cannot produce a usable link, and each mint gives a different token. All new invites (link and mail) are v2 (about 170 characters; the accept route takes it in the body, so length is not a routing problem). **v1 tokens are still accepted for one release** (invites issued before PGL-10, for their TTL); the release after drops `LEGACY_TOKEN_PREFIX` in `client-invites.ts`.
+
+**The consume now claims on the hash too** (`WHERE id = $1 AND token_hash = $2 AND consumed_at IS NULL AND expires_at > now()`). Before, it claimed by id and compared the hash afterwards, spending the invite on a mismatch. With send-time minting a mismatch is normal (a link from a failed attempt, a superseded resend), and spending on it would let a stale link burn the live one. A stale, superseded, sealed or forged token now matches no row, spends nothing, and gets the one coarse `400 client_invite_invalid` (unchanged: no oracle between unknown, expired and used).
+
+#### 62.5.3 Each case
+
+| Case | What happens |
+|---|---|
+| send fails, then retried | each attempt mints a new token; the failed attempt's token is dead (re-sealed, then overwritten); only the last sent link works |
+| resend (`POST` again, either delivery) | the route spends every open invite of the contact; a mail still queued for the old invite is **dropped** when its turn comes (`status='failed'`, `last_error` = "not sent: the invitation is no longer open …", `attempts` unchanged, not counted as a delivery failure); the old link fails, the new one works |
+| revoke while queued | revoke already spends open invites (PV-6): the mail is dropped the same way; the Keycloak disable is unchanged |
+| accepted or expired before the mail goes | dropped the same way; a mail never carries a dead link |
+| suppressed address | at the route: not queued for sending, the PM gets a link (62.5.1). At send time: the suppression re-check runs before the mint, so the row is marked suppressed and no token is minted |
+| expired link | `400 client_invite_invalid` (the TTL is enforced in the consume predicate, as before) |
+| second accept | `400 client_invite_invalid` (single use, as before) |
+| PM also wants a link | ask for one (`delivery: "link"`): a resend. The mailed invite is spent and its mail, if not yet sent, dropped. One live credential per contact |
+| the admin preview (`GET /api/admin/mail/log/:id/preview`) | renders the **stored** payload only, with any `href` stripped: the body says `[the one-time link is created when the mail is sent and is not stored]` where the link would be, renders no anchor, answers `linkOmitted: true`, and never mints |
+
+The `client_invites` row is FORCE-RLS tenant-scoped (0072); every read and write of it, the send-time mint included, runs under `withTenants([tenantId])` with the tenant from the `mail_log` row. `mail_log` stays FORCE-RLS behind `mail_context`.
+
+#### 62.5.4 The template `client.invite`
+
+- **Subject:** `<inviting company> invited you to your client portal`. It never carries the token (the dev-log adapter prints subjects).
+- **Body (English, v1):** `<company> has invited you to the client portal for <client>.`, `Open this link to set up your access:`, the **one** accept link `<MAIL_LINK_BASE_URL>/invite/<token>`, `The link expires on <d Month yyyy, HH:MM UTC> and can be used once. If it has expired, ask <company> for a new invitation.`, and `If you were not expecting this invitation, you can ignore this email.`
+- **Brand:** the inviting company is the tenant (the client's provider) and the client is the `clients` row. The platform operator's own name never appears (Internal now, SaaS later).
+- **Exactly one link**, and it is the only link in any client mail that carries a token. No action by reply, no reply token.
+- The expiry shown is the invite row's own, read at send time.
+
+#### 62.5.5 What the tests prove (`src/core/client-invite-mail.db.test.ts`)
+
+Mailed invite → no token in the response → the sender mints → the link accepts once (Keycloak created with the chosen password) → a second accept fails → revoke disables the Keycloak login. A failed-then-retried send (with an adapter error that echoes the body): a new token per attempt, the first one dead, `last_error` scrubbed. Resend, resend while queued, a link after a mail, expiry before and after sending, revoke while queued, a suppressed address, both gates off, the unchanged link path, and the preview. Then **the structural scan**: every `mail_log` row (all columns), every outbox row, `activities`, `notifications`, `client_invites`, `client_contacts` and every captured log line (console and the raw process streams) are searched for any string that sha256-hashes to a stored invite token and for every raw token the suite saw. It expects zero, and a positive control then plants one live token in a payload and must find it.
+
+#### 62.5.6 Not in this section (follow-ups)
+
+- **The staff UI** (`platform-ui/src/lib/clientContactsActions.ts`) does not send `delivery` yet, so it keeps today's link flow. To offer the choice it must send `delivery: "mail"`, branch on `mail.mailed`, show "invitation mailed to <email>" with no link when true, and show the link with the reason in plain words when false.
+- **Delivery is not proven here.** A Mailpit catch on sumopod (PGL-11) proves rendering and wiring; deliverability of the real sender is a manual readiness item at cut-over. With `MAIL_ENABLED=1` but no SMTP host the dev-log adapter "sends" nothing, so `CLIENT_MAIL_ENABLED` must not be turned on before a real sender exists (the readiness check, PGL-01).
+- A final failed send (after five attempts) leaves the invite sealed: the PM sees the contact still `invited` and re-invites.

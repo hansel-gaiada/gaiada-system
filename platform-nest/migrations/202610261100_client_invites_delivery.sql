@@ -1,0 +1,32 @@
+-- 202610261100_client_invites_delivery.sql — PGL-10 (owner ruling PV-D47): the client invitation email.
+-- Contract: docs/FRONTEND-BFF-CONTRACT.md §62.5. Plan: docs/plans/2026-10-15-portal-go-live-tickets.md, PGL-10.
+-- Slot reserved for PGL-10 by that plan ("migration slot 202610261100").
+--
+-- ── WHAT THIS ADDS ──────────────────────────────────────────────────────────────────────────────────────
+-- One column, `client_invites.delivery`: how the invite reaches the person.
+--   'link'  today's path. The invite route returns the raw token once and the PM forwards the link by hand.
+--   'mail'  the invite is mailed. The row is created SEALED (its token_hash is the hash of random bytes that
+--           were thrown away), and the mail sender mints the real token at the moment it composes the mail,
+--           storing only that token's hash. The raw token never reaches mail_log, a log line or the outbox.
+--
+-- ── WHY THE SENDER NEEDS THE COLUMN ─────────────────────────────────────────────────────────────────────
+-- The send-time mint overwrites token_hash. The sender may only do that to an invite that was created to be
+-- mailed (`WHERE delivery = 'mail'`, src/core/client-invites.ts mintMailInviteToken). Without the column, a
+-- stray mail row naming a hand-forwarded invite would rotate the PM's link away. With it, that is impossible
+-- by construction, and the route's fallback (mail could not be queued, so the PM gets a link) flips the row
+-- to 'link' so no mail row can touch it afterwards.
+--
+-- ── RLS ─────────────────────────────────────────────────────────────────────────────────────────────────
+-- client_invites is tenant-scoped and already ENABLE + FORCE ROW LEVEL SECURITY with `tenant_isolation`
+-- (0072 §7). Adding a column changes no policy, and every read and write of the column runs through
+-- `withTenants([tenantId], …)`.
+--
+-- ── ROLLOUT ─────────────────────────────────────────────────────────────────────────────────────────────
+-- Additive. NO DML, so no exposure to the RLS zero-row trap (migrations run as platform_owner, which has no
+-- BYPASSRLS). ADD COLUMN with a constant DEFAULT is a catalogue change in Postgres 11+: every existing row
+-- reads 'link', which is the truth for every invite issued before this release. The CHECK is validated
+-- against existing rows by the DDL itself (not a query, so row security does not hide rows from it).
+-- Brief ACCESS EXCLUSIVE lock on client_invites only.
+ALTER TABLE client_invites
+  ADD COLUMN delivery text NOT NULL DEFAULT 'link',
+  ADD CONSTRAINT client_invites_delivery_check CHECK (delivery IN ('link', 'mail'));

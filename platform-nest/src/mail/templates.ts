@@ -311,8 +311,68 @@ function renderInvoiceIssued(payload: InvoiceIssuedPayload): RenderedMail {
   return { subject, html, text };
 }
 
+/** PGL-10 (PV-D47) — a client contact is invited to their client portal. THE ONE CLIENT MAIL THAT CARRIES A CREDENTIAL,
+ *  so it is its own case, like `auth.magic_link`, and never a pattern for any other mail:
+ *  - `href` (the accept link, `<MAIL_LINK_BASE_URL>/invite/<token>`) is NEVER in the stored payload. The sender mints the
+ *    token at send time and passes `href` to this function in memory only (src/mail/invite-mail.ts). `enqueueMail`
+ *    refuses a `client.invite` payload with any key beyond the four below.
+ *  - Rendered from the STORED payload (the enqueue-time subject, the admin preview) there is no `href`, so the body says
+ *    where the link would be and renders no anchor at all.
+ *  - It names the inviting company (the tenant: the client's provider) and the client, never the platform operator's own
+ *    brand (Internal now, SaaS later). It states the expiry and that the link works once. It has exactly ONE link.
+ *  - The subject carries no token (the dev-log adapter prints subjects). */
+export interface ClientInvitePayload {
+  /** In memory at send time only. Never stored. */
+  href?: string;
+  companyName?: string;
+  clientName?: string;
+  /** ISO timestamp of the invite's expiry. */
+  expiresAt?: string;
+  [key: string]: unknown;
+}
+
+/** What the stored-payload render shows instead of the link. */
+export const CLIENT_INVITE_LINK_PLACEHOLDER = "[the one-time link is created when the mail is sent and is not stored]";
+
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/** `29 October 2026, 14:05 UTC`. Deterministic (no locale), UTC because the recipient's zone is unknown. */
+function formatExpiryUtc(iso: string): string | null {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  const d = new Date(t);
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${hh}:${mm} UTC`;
+}
+
+function renderClientInvite(payload: ClientInvitePayload): RenderedMail {
+  const company = asStr(payload.companyName, "Your provider");
+  const client = asStr(payload.clientName);
+  const href = safeHref(asStr(payload.href));
+  const expiry = formatExpiryUtc(asStr(payload.expiresAt));
+  const expiresLine = expiry ? `The link expires on ${expiry} and can be used once.` : "The link expires soon and can be used once.";
+  const subject = stripHeaderInjection(`${company} invited you to your client portal`);
+  const who = `${company} has invited you to the client portal${client ? ` for ${client}` : ""}.`;
+  const text =
+    `${who}\n\n` +
+    `Open this link to set up your access:\n${href || CLIENT_INVITE_LINK_PLACEHOLDER}\n\n` +
+    `${expiresLine} If it has expired, ask ${company} for a new invitation.\n\n` +
+    `If you were not expecting this invitation, you can ignore this email.`;
+  const html =
+    `<p>${escapeHtml(company)} has invited you to the client portal${client ? ` for <strong>${escapeHtml(client)}</strong>` : ""}.</p>` +
+    `<p>Open this link to set up your access:</p>` +
+    (href
+      ? `<p><a href="${escapeHtml(href)}">${escapeHtml(href)}</a></p>`
+      : `<p><em>${escapeHtml(CLIENT_INVITE_LINK_PLACEHOLDER)}</em></p>`) +
+    `<p>${escapeHtml(expiresLine)} If it has expired, ask ${escapeHtml(company)} for a new invitation.</p>` +
+    `<p>If you were not expecting this invitation, you can ignore this email.</p>`;
+  return { subject, html, text };
+}
+
 const TEMPLATES
 : Record<string, (payload: Record<string, unknown>) => RenderedMail> = {
+  "client.invite": (p) => renderClientInvite(p as ClientInvitePayload),
   "approval.warning": (p) => renderApprovalWarning(p as ApprovalMailPayload),
   "approval.actionable": (p) => renderApprovalActionable(p as ApprovalMailPayload),
   "auth.shell": (p) => renderAuthShell(p as AuthShellPayload),

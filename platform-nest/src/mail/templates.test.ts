@@ -68,6 +68,7 @@ describe("mail/templates", () => {
       "approval.warning",
       "auth.magic_link",
       "auth.shell",
+      "client.invite",
       "contract.sent",
       "conversation.message.staff",
       "invoice.issued",

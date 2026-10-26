@@ -34,6 +34,8 @@ export interface MailProviderAdapter {
 export interface ClaimedMail {
   id: string;
   stream: MailStream;
+  /** PGL-10: the send-time invite composer opens the invite under this tenant. Optional so older fixtures type-check. */
+  tenant_id?: string | null;
   to_email: string;
   template_key: string;
   payload: Record<string, unknown>;
