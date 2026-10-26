@@ -11880,3 +11880,957 @@ Mailed invite → no token in the response → the sender mints → the link acc
 - **The staff UI** (`platform-ui/src/lib/clientContactsActions.ts`) does not send `delivery` yet, so it keeps today's link flow. To offer the choice it must send `delivery: "mail"`, branch on `mail.mailed`, show "invitation mailed to <email>" with no link when true, and show the link with the reason in plain words when false.
 - **Delivery is not proven here.** A Mailpit catch on sumopod (PGL-11) proves rendering and wiring; deliverability of the real sender is a manual readiness item at cut-over. With `MAIL_ENABLED=1` but no SMTP host the dev-log adapter "sends" nothing, so `CLIENT_MAIL_ENABLED` must not be turned on before a real sender exists (the readiness check, PGL-01).
 - A final failed send (after five attempts) leaves the invite sealed: the PM sees the contact still `invited` and re-invites.
+
+## 63. The Social Media content pipeline (SCP, 2026-10-26) — `platform-nest/src/modules/social/` (the stage machine, cycles, boosts, the Team dashboard and their routes: new files), `src/modules/social/social-reports.controller.ts`, `src/core/social-pipeline-portal.controller.ts` (new), `src/core/collab.controller.ts`, `src/core/files.controller.ts`, `src/core/portal-commerce.controller.ts`; migrations `<prefix>_social_pipeline.sql`, `<prefix+1>_iam_social_pipeline.sql`, `<prefix+2>_comments_visibility_anchor.sql`, `<prefix+3>_creative_assets_source.sql`, `<prefix+4>_pm_task_links.sql`, `<prefix+5>_social_post_metrics_manual.sql`, `<prefix+6>_social_boosts.sql`, `<prefix+7>_social_simulation.sql`, `<prefix+8>_social_reports_monthly.sql` (prefixes: the next free after main's newest at landing; `202610181101` is main's newest today and `202610261100` is taken); fixture `platform-nest/src/modules/social/scp-stage-machine.json`; UI under `/departments/[deptId]` (63.17) and `/portal/social` — **STATUS: PLANNED (contract only; nothing is built)**
+
+**Why.** Plan `docs/plans/2026-10-15-social-content-pipeline.md` (SCP), decisions SCP-D1 to SCP-D5 and the owner's rulings of 2026-10-26 (plan §2: SCP-Q2, Q5 and Q7 to Q18). The Social Media team plans, writes, proofreads, approves, designs, gets client approval, schedules, monitors, boosts and reports on every post in the ERP, in their own design's eight steps. The first release includes the monthly report (SCP-5a) and the Team dashboard (SCP-5d) (SCP-Q5). The authorization is PERMISSION-CONTRACT §53.
+
+**What it builds on (SCP-D2).** Posts stay `social_posts`, per-network content stays `social_post_variants`, client approval stays `social_post_client_reviews`, publishing stays the D14 gate (§19, SMM-09/10/40), and reports stay `social_reports` (SMM-23, §19), published through client reports (PV7-04a, §55). Comments, activity, notifications, "Needs you", work requests (§32, DW-D14), PM tasks and the Asset Library (§35) are shared, not rebuilt (SCP-D4). No PM task is made per post.
+
+**What this contract does not cover:** SCP-5b, 5c and 5e to 5h, and SCP-6 (63.20); the skin (SCP-K, UI only); the simulator's containment (SCP-Sa, its own Opus ticket; 63.10 names only the seams it uses).
+
+### 63.0 Conventions
+
+- **Base paths.** Staff routes are under `api/:tenantId/modules/social`, behind `AuthGuard` and `ModuleEnabledGuard("social")`, as §19. Portal routes are under `api/:tenantId/portal/social`, behind `AuthGuard`, gated by Cerbos `portal`, and narrowed by `resolvePortalScope` (§16).
+- **The module wall.** Every query on a third-walled `social_*` table declares `{ modules: ["social"] }`. Portal code declares it with `declareSocialModuleScope(c)` before it joins a social table, as `social-client-review-portal.controller.ts` does. The two portal-written tables of 63.11 take the plain tenant wall instead (63.1).
+- **Refusals.** The body is `{ error: "<code>" }`. The thrower sets `message`, never `error` (`src/http-error.filter.ts`). A 400 also carries `field`. A 409 may carry `detail` (figures), `blockers` (`[{code, message}]`, every failed check at once) or `retryAfterSeconds`. A 403 from a stage action, a planning route (63.4, 63.5) or a money route (63.11) carries its own code (63.3.2); a 403 from any other route here is today's `not authorized: …`, with `reason: "assurance_required"` where PV5-14 applies. Every new code is listed in the fixture's `refusals`; the report routes keep their SMM-23 codes (63.18).
+- **Authorization before validation.** A route reads only what it needs to build the Cerbos resource (the path ids and, on the action route, `action`) before it asks Cerbos. Everything else in the body is validated afterwards, so a refused caller always gets 403, never 400.
+- **Idempotency.** A create takes a caller-supplied `id` (uuid) and answers 201 `{…, created: false}` on a replay. A stage action takes `expectedStatus` (required) and `actionId` (optional uuid): the same `actionId` as the post's last applied action answers 200 `{alreadyApplied: true}`. A portal decision replayed answers 200 `{alreadyDecided: true}`; a different decision after one was made is 409.
+- **Pagination.** `limit` 1 to 100 (default 30) and an opaque `cursor`. A list answers `{items, nextCursor}`; `nextCursor` is null at the end.
+- **Money.** Integers in minor units of `currency`. IDR has no minor digits (`finance_currencies.minor_unit` = 0), so 1 is one rupiah. Answers carry `currency` and `minorUnit`. No amount exceeds 10^12. The client sees their own budgets and spend, never our fees (PV-D38).
+- **Days and time zone.** "Today" and working days use the company's report day (`todayIsoInTz(config.reportsTz)`); `REPORTS_TZ` is unset on live, so live counts UTC days until DW-4 sets it. Working days are the company's default HR holiday calendar (`loadWorkingCalendar`), and Monday to Friday without one.
+- **Pipeline posts and Composer posts.** A post with `pipeline_status` NULL is a Composer post and behaves exactly as today. The routes of this section refuse it with 409 `not_a_pipeline_post`. Today's routes refuse writes on a pipeline post where 63.12 says (409 `pipeline_post`).
+- **Agents.** An agent acts with the rights of the person who asked (SCP-Q17, ruled; 63.15). It arrives as that person, so every gate in this section decides on the person.
+- **Simulated rows.** Any row with `simulated = true` says so in every answer (`simulated: true`), and every screen that shows it carries the SIMULATED mark (plan §5).
+
+### 63.1 Data: the migration list
+
+Each file takes the next free prefix after main's newest at landing, in this order. Social migrations are added to `socialModule.migrations` (`modules/social/index.ts`) in the same change. No file moves an existing row into the pipeline: every existing `social_posts` row keeps `pipeline_status` NULL and stays a Composer post. So the only "backfill" is column defaults, and no file runs DML against a forced-RLS table with an unset tenant GUC (the 0050 trap). The IAM file's `role_permissions` deletes run on global role rows, which carry no RLS. Each file ends with a DO block that asserts its own columns, constraints and indexes, and that no existing row changed (`count(*) WHERE pipeline_status IS NOT NULL` = 0 after the pipeline file).
+
+**1. `<prefix>_social_pipeline.sql` (written by SCP-1b).** Third wall (`tenant_id = ANY(app_current_tenants()) AND app_module_allowed('social')`, USING and WITH CHECK, FORCE RLS) on every new table, written in 0105's DO-loop form.
+
+`social_engagements`, the allocation (new columns):
+
+| Column | Type and rule |
+|---|---|
+| `owner_id` | **existing**: the client's SMM Officer. There is no `smm_officer_user_id`: the engagement owner already receives every notification about the client's posts (`event-handlers.ts`), and a second column would drift from it |
+| `posts_per_cycle` | `smallint NULL`, `CHECK (posts_per_cycle IS NULL OR posts_per_cycle BETWEEN 0 AND 200)`. The target; NULL means not set |
+| `creative_source` | `text NOT NULL DEFAULT 'creatives'`, `CHECK (creative_source IN ('creatives','in_team'))` (SCP-Q2). The default for a post approved for design; each post keeps its own (below) |
+| `delivery_batch` | `text NULL`, `CHECK (delivery_batch IN ('A','B'))`. Only pre-fills the deadline table (63.5) |
+| `report_format` | `text NULL`, `CHECK (report_format IN ('email','meeting'))` |
+| `report_due_day` | `smallint NULL`, `CHECK (report_due_day BETWEEN 1 AND 31)`; a day past the month's end means its last day |
+| `platforms` | `text[] NOT NULL DEFAULT '{}'`, `CHECK (platforms <@ ARRAY['instagram','facebook','tiktok','linkedin','x','youtube','threads','pinterest','bluesky','mastodon'])`. What we produce for. Publishing through the ERP still needs `tool_scope.networks` (§19), a different fact |
+| `formats` | `text[] NOT NULL DEFAULT '{}'`, `CHECK (formats <@ ARRAY['feed','carousel','reel','story'])` |
+| `default_post_time` | `time NULL`, in the company's time zone |
+| `step_estimates` | `jsonb NOT NULL DEFAULT '{}'`, `CHECK (jsonb_typeof(step_estimates) = 'object')`. Working days per step, keys `proofread`, `hod`, `design`, `final`, `client`, `schedule`, each an integer 0 to 30 (validated by the route). Per client, as plan §4.4 says; the cycle holds none |
+
+Index `ix_social_engagements_owner ON social_engagements (tenant_id, owner_id) WHERE deleted_at IS NULL` (an officer's clients, the home feed).
+
+`social_brand_profiles`, the brand book. The brand book is the client's, and this table already holds the client's voice per client and feeds "Draft with AI" (`ai-drafts.ts`), so it lives here rather than on the engagement:
+- `tone` (**existing** jsonb) gains the key `summary` (the design's one-line tone, ≤ 200 characters).
+- `hashtag_strategy` (**existing** jsonb; `requiredTags`, `bannedTags`, `maxCount`, `placement`) gains the key `sets`: `[{name ≤ 60, tags: string[] ≤ 30}]`, at most 10 sets. The hand-off check "the client's hashtag set" reads it.
+- New: `content_pillars text[] NOT NULL DEFAULT '{}'` (≤ 20, each ≤ 60), `must_have_notes text[] NOT NULL DEFAULT '{}'` (≤ 20, each ≤ 300), `brand_rules text[] NOT NULL DEFAULT '{}'` (≤ 30, each ≤ 300), `channels jsonb NOT NULL DEFAULT '[]'` (`[{network, handle, url?}]`), `key_dates jsonb NOT NULL DEFAULT '[]'` (`[{date: 'MM-DD' or 'YYYY-MM-DD', label}]`), `links jsonb NOT NULL DEFAULT '[]'` (`[{label, url}]`). `CHECK (jsonb_typeof(…) = 'array')` on each jsonb and `cardinality(…) <= n` on each array.
+
+`social_settings` (new, one row per company; no row means the defaults):
+
+| Column | Type and rule |
+|---|---|
+| `tenant_id` | `uuid PRIMARY KEY → companies` |
+| `buffer_working_days` | `smallint NOT NULL DEFAULT 1`, `CHECK (buffer_working_days BETWEEN 0 AND 10)` |
+| `boost_candidate_factor` | `numeric(4,2) NOT NULL DEFAULT 1.25`, `CHECK (boost_candidate_factor BETWEEN 1.00 AND 10.00)` |
+| `updated_by`, `updated_at`, `origin_site` | as usual |
+
+`social_cycles` (new): one client's content month.
+
+| Column | Type and rule |
+|---|---|
+| `id` | uuid PK |
+| `tenant_id`, `engagement_id` | `NOT NULL`; composite FK `(engagement_id, tenant_id) → social_engagements (id, tenant_id)` |
+| `month` | `date NOT NULL`, `CHECK (month = date_trunc('month', month)::date)` |
+| `deadline` | `date NOT NULL`, `CHECK (deadline BETWEEN (month - interval '3 months')::date AND (month + interval '1 month' - interval '1 day')::date)` |
+| `ready_by` | `date NOT NULL`, `CHECK (ready_by <= deadline)`. Written by the server only: the deadline less the buffer in working days. Recomputed by every write to the cycle or to the buffer, and nightly by `social-cycle-ready-by` (holiday changes) |
+| `creative_request_id` | `uuid NULL → work_requests`: the cycle's latest client-month Creatives request; once it is closed, the next post approved for design opens a new one here (63.6.6) |
+| `created_by`, `updated_by`, `created_at`, `updated_at`, `deleted_at`, `origin_site` | as usual |
+
+Constraints: `ux_social_cycles_id_tenant UNIQUE (id, tenant_id)`; `ux_social_cycles_month UNIQUE (tenant_id, engagement_id, month) WHERE deleted_at IS NULL`; `ux_social_cycles_request UNIQUE (creative_request_id) WHERE creative_request_id IS NOT NULL`; index `(tenant_id, month)`.
+
+`social_posts`, the pipeline (new columns; `scheduled_at` is the existing planned date and time):
+
+| Column | Type and rule |
+|---|---|
+| `cycle_id` | `uuid NULL`, composite FK `(cycle_id, tenant_id) → social_cycles` |
+| `pipeline_status` | `text NULL`, the twelve statuses (fixture `statuses`). NULL is a Composer post |
+| `status_since` | `timestamptz NULL`, set by every status change |
+| `format` | `text NULL`, `feed`, `carousel`, `reel`, `story`. A story is never counted toward the target |
+| `pillar` ≤ 60, `angle` ≤ 500, `objective` ≤ 200, `key_message` ≤ 500, `visual_direction` ≤ 2,000, `on_asset_text` ≤ 500, `cta` ≤ 120 | `text NULL` |
+| `caption` | `text NOT NULL DEFAULT ''`, ≤ 5,000 (the network limits are checks, 63.3.4) |
+| `hashtags` | `text[] NOT NULL DEFAULT '{}'`, `cardinality ≤ 60`, each without `#` |
+| `raw_assets` | `jsonb NOT NULL DEFAULT '[]'`: `[{url, label?, source, aiNote?}]`, ≤ 10, `source` one of `own`, `client`, `stock`, `ai`, `unknown`. Replaces the plan's single `raw_assets_url`, because the hand-off checks are per asset |
+| `placement` | `text[] NOT NULL DEFAULT '{}'`, `<@` the ten networks. One placement per network; `format` decides the surface (`reel` is a Reel, `story` a Story) |
+| `must_haves` | `text[] NOT NULL DEFAULT '{}'`, `<@` the ten must-have keys (fixture `handoffChecks`) |
+| `skipped_checks` | `jsonb NOT NULL DEFAULT '[]'`, append-only by the server: `[{codes, reason, by, at}]` |
+| `suggestions` | `jsonb NOT NULL DEFAULT '{}'`: `{<field>: {value, base, by, at}}` for `caption`, `on_asset_text`, `cta`, `hashtags`; `base` is the field's value when the suggestion was made |
+| `change_by`, `change_kind`, `return_to`, `change_note` | `text NULL`: `copywriter\|hod\|final\|client`, `copy\|design`, `proofread\|hod\|final`, ≤ 2,000. The plan's `copy\|visual` is `copy\|design` here |
+| `changed_only` | `boolean NOT NULL DEFAULT false` (loop e) |
+| `copy_before` | `jsonb NULL`: the copy fields as the client saw them when they asked for a copy change |
+| `block_reason` ≤ 500, `block_waiting_on`, `blocked_from`, `blocked_at` | `block_waiting_on` one of `client`, `designer`, `copywriter`, `approver`, `officer`, `external`; `blocked_from` one of the blockable statuses |
+| `creative_source` | `text NULL`, `creatives\|in_team`: copied from the engagement at `approve_for_design`, so revisions keep the route the design took |
+| `creative_state` | `text NULL`: `not_started`, `in_progress`, `revision`, `submitted` |
+| `creative_request_id` | `uuid NULL → work_requests`: the month request this post joined |
+| `is_extra` | `boolean NOT NULL DEFAULT false`: outside the target |
+| `idea_id` | `uuid NULL` (SCP-5c adds its FK) |
+| `author_id` | `uuid NULL → users`: who drafted it (set by `start_draft`); the maker of maker/checker |
+| `client_first_sent_at` | `timestamptz NULL`: the first `final_approve`; from then the client may see the post |
+| `schedule_via` | `text NULL`, `manual\|publisher` |
+| `live_url` (http(s), ≤ 500), `went_live_at` | NULL until live |
+| `simulated` | `boolean NOT NULL DEFAULT false` |
+| `archived_at`, `archived_by`, `archive_reason` (≤ 500) | an archived post leaves every list; its `pipeline_status` stays as it was |
+| `last_action_id`, `last_action_at` | the idempotency key of the last applied stage action |
+
+CHECKs on `social_posts` (each is NULL-safe: a CHECK passes on NULL, so the ones that matter use `IS NULL`, `IS NOT DISTINCT FROM` or NOT NULL columns):
+- `pipeline_status IS NULL OR cycle_id IS NOT NULL`; `(pipeline_status IS NULL) = (status_since IS NULL)`.
+- All or none: `(change_by IS NULL) = (change_kind IS NULL)`, `(change_by IS NULL) = (return_to IS NULL)`, `(change_by IS NULL) = (change_note IS NULL)`.
+- The six change cases only: `change_by IS NULL OR (change_by, change_kind, return_to) IN (('copywriter','copy','proofread'), ('hod','copy','hod'), ('final','copy','final'), ('final','design','final'), ('client','copy','proofread'), ('client','design','final'))`. With the all-or-none rule above, the row comparison never meets a NULL.
+- `pipeline_status IS DISTINCT FROM 'changes' OR change_by IS NOT NULL`.
+- `change_by IS NULL OR pipeline_status IS NOT DISTINCT FROM 'changes' OR (pipeline_status IS NOT DISTINCT FROM 'blocked' AND blocked_from IS NOT DISTINCT FROM 'changes')`.
+- `changed_only = (copy_before IS NOT NULL)`; `NOT changed_only OR change_by IS NULL OR change_by = 'client'`.
+- `(pipeline_status IS NOT DISTINCT FROM 'blocked') = (blocked_from IS NOT NULL)`, and the same for `block_reason`, `block_waiting_on` and `blocked_at`.
+- `pipeline_status IS DISTINCT FROM 'design' OR (creative_state IS NOT NULL AND creative_source IS NOT NULL)`.
+- `creative_request_id IS NULL OR creative_source IS NOT DISTINCT FROM 'creatives'`.
+- `pipeline_status IS NULL OR (pipeline_status IN ('scheduled','live')) = (schedule_via IS NOT NULL)`.
+- `pipeline_status IS DISTINCT FROM 'live' OR (live_url IS NOT NULL AND went_live_at IS NOT NULL)`.
+- `(archived_at IS NULL) = (archived_by IS NULL)`, `(archived_at IS NULL) = (archive_reason IS NULL)`.
+- The value lists, lengths and `jsonb_typeof` shapes above.
+
+Indexes for the home feed (about 600 live posts across two months; reads stay index-only on the status and cycle):
+- `ix_social_posts_pipeline ON (tenant_id, pipeline_status, status_since) WHERE pipeline_status IS NOT NULL AND deleted_at IS NULL AND archived_at IS NULL`;
+- `ix_social_posts_cycle ON (tenant_id, cycle_id, pipeline_status) WHERE cycle_id IS NOT NULL AND deleted_at IS NULL`;
+- `ix_social_posts_request ON (tenant_id, creative_request_id) WHERE creative_request_id IS NOT NULL AND deleted_at IS NULL`;
+- `ix_social_posts_engagement_date ON (tenant_id, engagement_id, scheduled_at) WHERE pipeline_status IS NOT NULL AND deleted_at IS NULL` (calendar, feed preview, the client page).
+
+`social_post_designs` (new): the post's designs, in order.
+
+| Column | Type and rule |
+|---|---|
+| `id` | uuid PK |
+| `tenant_id`, `post_id` | composite FK to `social_posts (id, tenant_id)` |
+| `position` | `smallint NOT NULL`, 1 to 20 |
+| `asset_group_id` | `uuid NULL → creative_assets`: the version group (`COALESCE(version_group_id, id)`); the latest live version is the design |
+| `link_url` | `text NULL`, http(s), ≤ 500: a shared link, for the final check only |
+| `link_source`, `link_ai_note` | `text NULL`: a link's source (`own\|client\|stock\|ai\|unknown`) and AI note (≤ 1,000); an asset's are on `creative_assets` (file 4) |
+| `file_id`, `file_version_no` | `uuid NULL → files`, `int NULL`: the version materialized for the client at `final_approve` |
+| `added_by`, `added_at`, `removed_by`, `removed_at`, `origin_site` | as usual |
+
+CHECKs: `(asset_group_id IS NULL) <> (link_url IS NULL)`; `link_url IS NOT NULL OR (link_source IS NULL AND link_ai_note IS NULL)`; `link_url IS NULL OR link_source IS NOT NULL`; `link_source IS DISTINCT FROM 'ai' OR link_ai_note IS NOT NULL`; `(removed_at IS NULL) = (removed_by IS NULL)`. Unique `(post_id, position) WHERE removed_at IS NULL`.
+
+`social_post_copy_edits` (new, append-only: a BEFORE UPDATE OR DELETE trigger raises, the 0087 shape): the copy edit log.
+
+| Column | Type and rule |
+|---|---|
+| `id`, `tenant_id`, `post_id` | composite FK to the post |
+| `field` | `caption`, `on_asset_text`, `cta`, `hashtags` |
+| `before`, `after` | `jsonb NOT NULL` (text, or an array for hashtags) |
+| `via` | `suggestion` (a Copywriter's suggestion applied) or `fix` (an officer's edit while the post is in `changes`) |
+| `suggested_by` | `uuid NULL → users`, `CHECK (via <> 'suggestion' OR suggested_by IS NOT NULL)` |
+| `edited_by` | `uuid NOT NULL → users` |
+| `stage` | `text NOT NULL`: the post's status at the time |
+| `edited_at`, `origin_site` | as usual |
+
+Index `(tenant_id, post_id, edited_at DESC)`. The first draft is not logged; the log starts at the first review.
+
+**The client's approval keeps today's hash rule** (SCP-Q13, ruled): the client approves the content, the date, the time and the placement. `social_post_variants.args_sha256` already includes the variant's `scheduledAt` (`social.controller.ts:928`), and the client-review gate compares it with the review's `reviewed_args_sha256` (`client-review.ts:151`). Variants therefore gain no column, and neither the gate nor the hash changes.
+
+`social_post_client_reviews` (the plain wall stays, D-16) gains:
+- `change_kind text NULL`, `CHECK (change_kind IS NULL OR (change_kind IN ('copy','design') AND status = 'changes_requested'))`.
+- `anchor jsonb NULL`: a pin `{x, y, fileId}`, `x` and `y` fractions 0 to 1 of the image. `CHECK (anchor IS NULL OR (jsonb_typeof(anchor) = 'object' AND jsonb_typeof(anchor->'x') IS NOT DISTINCT FROM 'number' AND jsonb_typeof(anchor->'y') IS NOT DISTINCT FROM 'number' AND (anchor->>'x')::numeric BETWEEN 0 AND 1 AND (anchor->>'y')::numeric BETWEEN 0 AND 1))`.
+- `recorded_by uuid NULL → users`, `channel text NULL` (`whatsapp|email|meeting`), `CHECK ((recorded_by IS NULL) = (channel IS NULL))`. A recorded decision has `decided_by` NULL: the client decided outside the ERP.
+- `decision_id uuid NULL` (the one decision that covered every variant of the post) and `undo_until timestamptz NULL`; index `(tenant_id, decision_id) WHERE decision_id IS NOT NULL`.
+- Re-requesting a review (the upsert of `final_approve`, of `approve_copy` with `changedOnly`, of `reschedule` and of a change after the client) resets every decision column, these new ones included.
+
+**2. `<prefix+1>_iam_social_pipeline.sql` (SCP-1b).** The roles `social_copywriter` and `social_designer` (global rows, the `NOT EXISTS` idiom of 0106); the eleven catalogue keys and their `role_permissions` rows; and the narrowing of `social.report.approve` and `social.report.deliver` (DELTA-asserted deletes, the 0112 shape). A DO-block self-assertion closes it. PERMISSION-CONTRACT §53.
+
+**3. `<prefix+2>_comments_visibility_anchor.sql` (SCP-1l).** On the shared `comments`:
+- `visibility text NOT NULL DEFAULT 'team'`, `CHECK (visibility IN ('team','client'))`;
+- `anchor jsonb NULL`, the pin shape above;
+- `CHECK (visibility = 'team' OR target_entity_type = 'social_post')` and `CHECK (anchor IS NULL OR target_entity_type = 'social_post')`, so no other thread can ever leak to a portal;
+- index `ix_comments_target ON comments (tenant_id, target_entity_type, target_entity_id, created_at) WHERE deleted_at IS NULL` (there is none today).
+
+Existing rows read `team` by default.
+
+**4. `<prefix+3>_creative_assets_source.sql` (SCP-1h).** On `creative_assets` (plain wall): `source text NOT NULL DEFAULT 'unknown'`, `CHECK (source IN ('own','client','stock','ai','unknown'))`; `ai_note text NULL`, `CHECK (ai_note IS NULL OR char_length(ai_note) BETWEEN 1 AND 1000)`; `CHECK (source <> 'ai' OR ai_note IS NOT NULL)`. Per version: a new version starts `unknown` unless the save says otherwise.
+
+**5. `<prefix+4>_pm_task_links.sql` (SCP-1n).** On `pm_tasks`: `linked_type text NULL`, `CHECK (linked_type IN ('social_post','social_cycle'))`; `linked_id uuid NULL`; `CHECK ((linked_type IS NULL) = (linked_id IS NULL))`; unique `(tenant_id, linked_id) WHERE linked_type = 'social_cycle' AND deleted_at IS NULL` (one content-month task per cycle); index `(tenant_id, linked_type, linked_id) WHERE linked_type IS NOT NULL AND deleted_at IS NULL`. No FK: the linked row is a module row behind its own wall.
+
+**6. `<prefix+5>_social_post_metrics_manual.sql` (SCP-3c).** On `social_post_metrics`: `source text NOT NULL DEFAULT 'pull'`, `CHECK (source IN ('pull','manual','simulated'))`; `reach integer NULL CHECK (reach IS NULL OR reach >= 0)` (the engagement rate needs reach, and the table has none today); `entered_by uuid NULL → users`, `CHECK ((source = 'manual') = (entered_by IS NOT NULL))`.
+
+**7. `<prefix+6>_social_boosts.sql` (SCP-4a).** Two tables on the **plain** tenant wall (`tenant_id = ANY(app_current_tenants())`, FORCE RLS), because the portal writes them: the same reason `social_post_client_reviews` takes it (0105 D-16, 0088 D-2a). A third wall would read zero rows, silently, on a portal path that forgot the module scope. The money facts therefore live here, not as columns on the third-walled `social_cycles` (a refinement of plan §4.2).
+
+`social_boost_budgets`: one row per proposal or recording of a cycle's monthly boost budget (SCP-Q11, SCP-Q15).
+
+| Column | Type and rule |
+|---|---|
+| `id`, `tenant_id` | uuid PK; `ux_social_boost_budgets_id_tenant UNIQUE (id, tenant_id)` |
+| `client_id` | `uuid NOT NULL`, server-derived from the cycle's engagement; FK `(client_id, tenant_id) → clients` |
+| `cycle_id` | `uuid NOT NULL`, composite FK to `social_cycles` |
+| `amount_minor` | `bigint NOT NULL`, `CHECK (amount_minor BETWEEN 0 AND 1000000000000)`. Higher or lower than the agreement it replaces |
+| `currency` | `char(3) NOT NULL DEFAULT 'IDR'`, `CHECK (currency ~ '^[A-Z]{3}$')` |
+| `status` | `text NOT NULL DEFAULT 'pending'`, `pending`, `agreed`, `declined`, `withdrawn`, `superseded` |
+| `requested_by`, `requested_at`, `request_note` (≤ 1,000) | who proposed it, or who recorded it |
+| `decided_via` | `text NULL`, `portal\|recorded` |
+| `decided_by` | `uuid NULL → users`: the portal contact |
+| `recorded_by`, `channel` | the social approver and `whatsapp\|email\|meeting`, for `recorded` |
+| `decision_note` (≤ 2,000), `decided_at` | |
+| `origin_site`, `created_at`, `updated_at` | |
+
+CHECKs: `status <> 'pending' OR (decided_via IS NULL AND decided_at IS NULL AND decided_by IS NULL AND recorded_by IS NULL AND channel IS NULL)`; `status NOT IN ('agreed','declined') OR (decided_via IS NOT NULL AND decided_at IS NOT NULL)`; `decided_via IS DISTINCT FROM 'portal' OR (decided_by IS NOT NULL AND recorded_by IS NULL AND channel IS NULL)`; `decided_via IS DISTINCT FROM 'recorded' OR (recorded_by IS NOT NULL AND channel IS NOT NULL AND decision_note IS NOT NULL)`. Unique `(cycle_id) WHERE status = 'pending'` and `(cycle_id) WHERE status = 'agreed'`: the cycle's agreed budget is its one `agreed` row. Index `(tenant_id, client_id, status)`.
+
+`social_boosts`: one paid boost of one live post.
+
+| Column | Type and rule |
+|---|---|
+| `id`, `tenant_id` | uuid PK |
+| `post_id` | `uuid NOT NULL`, composite FK to `social_posts (id, tenant_id)` |
+| `client_id` | `uuid NOT NULL`, server-derived |
+| `cycle_id` | `uuid NULL`, composite FK to `social_cycles`: the budget cycle, the client's cycle for the month `starts_on` falls in; NULL when there is none (then nothing is agreed and the client must approve) |
+| `status` | `text NOT NULL DEFAULT 'requested'`: `requested`, `approved`, `running`, `stopped`, `completed`, `cancelled`, `declined` (`declined` is added to the plan's list: the client said no) |
+| `goal` | `profile_visits\|website\|messages` |
+| `audience`, `audience_note` | `automatic\|local\|custom`; the note (≤ 500) is required for `custom` |
+| `daily_budget_minor` | `bigint NOT NULL`, 1 to 10^12 |
+| `days` | `smallint NOT NULL`, 1 to 90 |
+| `total_budget_minor` | `bigint GENERATED ALWAYS AS (daily_budget_minor * days) STORED` |
+| `currency` | `char(3) NOT NULL` |
+| `starts_on` | `date NOT NULL` |
+| `reach_estimate_low`, `reach_estimate_high` | `integer NULL`, low ≤ high |
+| `requested_by`, `requested_at` | |
+| `approved_via` | `text NULL`: `budget` (within the cycle's agreed budget), `portal`, `recorded` |
+| `approved_by`, `approved_at` | the requester for `budget`, the contact for `portal`, the recorder for `recorded` |
+| `budget_id` | `uuid NULL`, FK to `social_boost_budgets`: the agreement that covered a `budget` approval |
+| `approval_channel`, `approval_note` | for `recorded` |
+| `started_at`, `started_by`, `ended_at`, `ended_by` | |
+| `spend_minor`, `paid_reach`, `clicks`, `results_entered_by` | results, each ≥ 0. The spend is recorded when the boost stops or completes |
+| `cancelled_at`, `cancelled_by`, `cancel_reason` | |
+| `declined_at`, `declined_via` (`portal\|recorded`), `declined_by`, `decline_note` | |
+| `simulated` | `boolean NOT NULL DEFAULT false` |
+| `origin_site`, `created_at`, `updated_at` | |
+
+CHECKs: `status NOT IN ('approved','running','stopped','completed') OR (approved_via IS NOT NULL AND approved_at IS NOT NULL AND approved_by IS NOT NULL)`; `approved_via IS DISTINCT FROM 'budget' OR budget_id IS NOT NULL`; `approved_via IS DISTINCT FROM 'recorded' OR (approval_channel IS NOT NULL AND approval_note IS NOT NULL)`; `status NOT IN ('running','stopped','completed') OR started_at IS NOT NULL`; `status NOT IN ('stopped','completed') OR (ended_at IS NOT NULL AND spend_minor IS NOT NULL)`; `status <> 'completed' OR paid_reach IS NOT NULL`; `(status = 'cancelled') = (cancelled_at IS NOT NULL)`; `(status = 'declined') = (declined_at IS NOT NULL)`; `audience <> 'custom' OR audience_note IS NOT NULL`. Unique `(post_id) WHERE status IN ('requested','approved','running')` (one open boost per post); indexes `(tenant_id, cycle_id, status)` and `(tenant_id, client_id, status) WHERE status = 'requested'`.
+
+**8. `<prefix+7>_social_simulation.sql` (SCP-Sa and Sb).** `social_accounts.simulated`, `social_post_variants.simulated` (both `boolean NOT NULL DEFAULT false`) and `social_metrics_daily.source text NOT NULL DEFAULT 'pull'` (`pull|simulated`). Named here so the names are fixed; the containment rules are SCP-Sa's.
+
+**9. `<prefix+8>_social_reports_monthly.sql` (SCP-5a).** On the existing `social_reports` (third wall, unchanged):
+- `notes jsonb NOT NULL DEFAULT '{}'`, `CHECK (jsonb_typeof(notes) = 'object')`: one insight and one suggestion per area, keys `followers`, `engagement`, `audience`, each `{insight ≤ 500, suggestion ≤ 500}` (validated by the route);
+- `action_plan jsonb NOT NULL DEFAULT '[]'`, `CHECK (jsonb_typeof(action_plan) = 'array')`: at most 10 `{action ≤ 300, owner: 'agency'|'client', due?: 'YYYY-MM-DD'}`;
+- `simulated boolean NOT NULL DEFAULT false`: the frozen numbers include simulated rows, so the page and the PDF carry the SIMULATED watermark (plan §5).
+
+The `weekly` kind is SCP-5b's (63.20).
+
+### 63.2 Who acts
+
+Cerbos decides who may attempt an action; the stage machine decides whether the post is in a state that allows it. PERMISSION-CONTRACT §53 holds the rules.
+
+| Actor | Who, in the ERP | Fed to Cerbos as |
+|---|---|---|
+| Officer | the engagement's `owner_id` | `ownerId`, rule `member` + `variables.owns` |
+| Copywriter | a holder of the role `social_copywriter` (any member, SCP-Q9) | the derived role `social_copywriter` |
+| Social approver: exactly four, with equal authority (SCP-Q19; SCP-Q9 and SCP-Q18 refined) | (1) the Social Media unit head and (2) the GM: a holder of a live lead seat on the company's Social Media unit or its GM unit (the DW-10g-2 seat rule: an active position with its `org_unit_lead` role row and an open assignment; `loadSeatHoldersByNode`); (3) the owner: the IAM `owner` role reaching the company; (4) the superadmin: `platform_admin`. The UI mirrors the rule as `canLeadSocial` (PERMISSION §53.4) | (1) and (2): `approverIds` and the derived role `social_approver_seat`; (3): the `perm_*` mirrors of the five approver-only actions; (4): the wildcard |
+| Designer | creative source `creatives`: an assignee of the month request's PM task; `in_team`: a holder of the role `social_designer` | `assigneeIds` with `creativeSource == "creatives"`; the derived role `social_designer` with `creativeSource == "in_team"` |
+| Client | an active portal contact of the post's client; for money, one with signing capability (SCP-Q14) | the portal kind: `approve_post`; money `approve_spend` |
+| Maker | the post's `author_id` and the client's officer | `creatorId`, `ownerId`: an `EFFECT_DENY` on `proofread` and `approve` |
+| An agent acting for a person | the person who asked: the OBO envelope names them, `x-obo-agent` names the agent (SCP-Q17) | the person's own principal; `via.agent` is recorded, never decides |
+| An unattended automation | a principal whose `users.kind` is `automation` or `bot`: no person behind it | refused every new action (an `EFFECT_DENY`) |
+
+- **Only the four decide** (SCP-Q19). The approver-only actions are the HoD approval, the final check, filing and unscheduling through the publisher, the allocation, the deadlines and settings, boost budgets and the client's money answers, and the report check and sending (SCP-Q20).
+  - `manager` decides nothing new: every head's lead position carries `manager` company-wide, so it cannot mean "the Social Media head" (the `dept_kpi_target` reasoning).
+  - `company_admin` holds none of the new actions, and neither does a `social_manager` grant.
+  - No grant makes anyone one of the four (PERMISSION §53.4).
+  - The maker/checker DENY beats all four, the owner and the superadmin included.
+- **The team's own steps** (block, resolve, follow up, discard, archive, recording a client's post decision, boosts) belong to the officer and to the HoD and GM seats, and to the superadmin by the wildcard. The owner holds the approver-only actions, not these.
+- **The units are found by name,** as every GM surface finds its unit: departments whose workspace slug is `social-media` or `gm` (`workspaceSlugFor`, `gmUnitIds`), never a hard-coded node id (PV-D13).
+- **The Social Media team's read tier.** Reading posts needs `social_post` · `read`: `social_staff` or `social_manager` (module roles), the two new roles, `manager`, `company_admin`, or the permission mirror. A self-assignment cannot give the agency's own team `social_staff` (`service_assignments` has `CHECK (provider_tenant_id <> target_tenant_id)`), so the team's seats carry it: `social_staff` at company scope in the Social Media positions' role set (`position_roles`), or a direct grant. The mock seed does the same (SCP-0c). The officer rule grants the officer's actions, not the read, so an officer needs the read tier as well.
+
+### 63.3 The stage machine and its fixture
+
+**The fixture is the contract.** `platform-nest/src/modules/social/scp-stage-machine.json` holds:
+- the twelve statuses, the six phases and the status-to-phase rule, with the six `changes` cases split by `changeBy`, `changeKind` and `returnTo`;
+- the engine-status mapping, the holders and the primary action per status;
+- every action: from, to or its rule, actors, the Cerbos action, guards with their refusal codes, and effects;
+- the boost, budget and report machines, and the refusal catalogue;
+- golden scenarios: the happy path, an in-team designer, loops a to e, blocking, maker/checker, the hand-off checks, rescheduling after the client, the monthly budget with its lowering, and the monthly report's states.
+
+It reproduces plan §4.3.
+- **Who loads it.** The nest stage-machine suites (pure and HTTP) load it with `readFileSync`. platform-ui keeps a byte-identical twin, `platform-ui/src/lib/scpStageMachine.json`, added by the first UI ticket that needs it at runtime (the DEMO_MODE store and the post page's stepper), with a test that compares the two files' bytes: the `clientHealthGolden.json` pattern. Neither side may hard-code a status list, a phase rule or a transition the fixture holds.
+- **Changing the machine** is a fixture edit first, then the code on both sides, in one change.
+
+**63.3.1 One action route.** All stage moves of a post go through `POST posts/:postId/actions` with an `action` enum, not one route per action. Reasons:
+- The machine is data, so one handler reads the action's fixture row, runs its guards in order and applies its effects. A new loop is a fixture change, not a new route.
+- The server-computed `actions[]` (63.6.2) name exactly the values this route accepts.
+- Every refusal has one shape.
+
+Edits (`PATCH …/pipeline`), suggestions, designs and the bulk route are separate because their bodies differ, but each consults the same fixture row.
+
+**63.3.2 Order of checks** (fixture `commonGuards`):
+1. `action` is known, else 400 `unknown_action`.
+2. The post exists and is not deleted, else 404 `post_not_found`. It is a pipeline post, else 409 `not_a_pipeline_post`.
+3. An `actionId` equal to the post's `last_action_id` answers 200 `{alreadyApplied: true, post}`.
+4. An archived post: 409 `post_archived`.
+5. An unattended automation or bot principal (`users.kind` `automation` or `bot`): 403 `automation_cannot_act` (Cerbos denies it too). An agent acting for a person is not this case: it arrives as that person (63.15).
+6. Maker/checker, on the `proofread` and `approve` actions: the caller (the person, also when an agent drives the call) is the post's author or the client's officer: 403 `author_cannot_approve`. This runs before Cerbos so the refusal names itself; the Cerbos `EFFECT_DENY` is the backstop for any path that forgets.
+7. Cerbos, with the resource of 63.3.3. A denial is audited exactly as `authorize()` audits it (one helper, `authorizeStage()`), then answers 403 with the action's code: `not_the_officer`, `not_a_copywriter`, `not_an_approver`, `not_the_designer` or `not_officer_or_approver`. Rescheduling a publisher schedule also needs `cancel` (403 `cancel_required`), and creating a pipeline post also needs `author` or `approve` (403 `not_officer_or_approver`, 63.6.1).
+8. `expectedStatus` differs from the post's status: 409 `status_changed`, `detail: {status, phase}`.
+9. The status (and, for `changes`, the change case) is not in the action's `from`: 409 `invalid_transition`, `detail: {status, changeCase}`.
+10. The body: 400 `missing_field` or `invalid_field` with `field`.
+11. The action's own guards, in the fixture's order (409).
+12. The effects, in one transaction that locks the post (`FOR UPDATE`) and re-checks steps 8 and 9 inside it. Then, after the commit, the notifications and the activity row (63.14).
+
+**63.3.3 The Cerbos resource.** `{kind: "social_post", id: <postId>, tenantId, module: "social", ownerId, creatorId, approverIds, assigneeIds, creativeSource}`, every value from the rows, never from a body:
+- `ownerId`: the engagement's `owner_id` (`""` when none).
+- `creatorId`: the post's `author_id` (`""` before `start_draft`).
+- `approverIds`: the HoD and GM seat holders of 63.2 for this company (the owner and the superadmin need no entry).
+- `assigneeIds`: the PM task's responsible person and person assignees of the post's month request (the §32 computation; `[]` without a request).
+- `creativeSource`: the post's `creative_source` (`""` before `approve_for_design`).
+
+The planning and money routes send `{kind: "social_engagement", id?, tenantId, module: "social", approverIds}`; the report routes send `{kind: "social_report", id, tenantId, module: "social", approverIds}`.
+
+**63.3.4 The hand-off checks** (plan §4.6) run on the server at `send_to_proofread`:
+- Hard requirements, never skippable: `format_missing`, `caption_missing`, `date_missing`, `placement_missing`. Any failure is 409 `incomplete_post` with `blockers`.
+- Soft checks, skippable with "send anyway": `must_haves_unticked`, `caption_too_long` (each placed network's limit, 2,200 characters on Instagram, hashtags included), `too_many_hashtags` (30 on Instagram), `on_image_text_missing` (feed, carousel and story), `asset_link_missing`, `asset_source_unknown`, `ai_note_missing`, `date_before_ready_by`.
+  - Until the Drive OAuth client exists (DW-11), "shared with anyone with the link" is checked only as "a link is present".
+  - Any failure is 409 `checks_failed` with `blockers`, unless the body has `sendAnyway: true` and `sendAnywayReason` (10 to 500 characters; missing, 400 `{field: "sendAnywayReason"}`).
+  - Then the skipped codes, the reason, the actor and the time are appended to `skipped_checks` and written to the activity.
+- The same checks are a read: `GET posts/:postId/pipeline` returns `checks: [{code, ok, message, skippable}]`, so the screen shows them before the officer sends.
+
+**63.3.5 Effects that need a contract.**
+- **`approve_for_design`** copies the engagement's `creative_source` to the post (SCP-Q2, ruled).
+  - `creatives`: the post joins the cycle's month request (63.6.6), opening it if the cycle has none or its request is no longer `open`. Opening one also needs `work_request` · `create` for the acting approver; any member holds it.
+  - `in_team`: the post enters the in-team design queue; there is no request.
+  - In both cases `creative_state` becomes `not_started` and the designers are told.
+- **`final_approve` syncs the variants from the master post.** For each placed network it uses the client's account on that network: none gives 409 `no_account_for_network`, more than one 409 `ambiguous_account` (`detail: {networks}`).
+  - A variant is created, updated in place (`UNIQUE (post_id, account_id)`), or soft-deleted when its network left the placement (its review withdrawn).
+  - `body` is the caption, with the hashtags placed by the brand's `hashtag_strategy.placement` (body or first comment). `settings.igType` follows the format. `scheduled_at` is the post's.
+  - `media` is the designs in order, each version materialized once as a `files` row targeting the post (`target_entity_type = 'social_post'`, `role = 'social_design'`) and remembered on the design row. A design that is only a link has nothing to show the client: 409 `design_not_stored` with its ids.
+  - Validation and `args_sha256` are written as every variant write does. Then one client review per variant is requested (the upsert back to `pending`), and the client is told once per post.
+- **`approve_copy` with `changedOnly`** (loop e) re-syncs only the variants' copy (body, first comment), requests the reviews again, clears `changed_only` and `copy_before`, and tells the HoD and GM (`approvers_told`).
+- **Client decisions** (portal or recorded) update every pending review of the post in one transaction: status, `comment`, `change_kind`, `anchor`, `reviewed_args_sha256`, one shared `decision_id`; `decided_by` (portal) or `recorded_by` and `channel` (recorded).
+- **Any change after the client goes back to the client** (SCP-Q13, ruled; fixture `systemRules`). The client approves the content, the date, the time and the placement. So any change to an `approved` or `scheduled` post's content, date, time or placement sends it back to `client`:
+  - a post scheduled by hand is unscheduled first;
+  - a post scheduled through the publisher has its queued dispatches cancelled and its undecided publish approvals withdrawn first;
+  - then every variant's review is requested again, `schedule_via` is cleared, and the client is told once.
+  - The officer's `reschedule` action (63.10) is the date and placement path; a Composer edit or a media attach (63.12) is the content path.
+- **Engine status.** `social_posts.status` of a pipeline post is written only by the stage machine, in the same UPDATE as `pipeline_status`, by the fixture's `engineStatus` rule. The old free write through `PATCH posts/:postId` is refused for pipeline posts (63.12).
+
+### 63.4 Allocation, brand book and settings (SCP-1a, SCP-1c)
+
+**The planning routes are the social approvers' (SCP-Q18, refined by SCP-Q19).** Editing the allocation, the deadline table (63.5) and the settings is `social_engagement` · `plan`. Its holders are the four of 63.2: the HoD and GM seats, the owner and the superadmin. Not `manager`, `company_admin` or a `social_manager` grant. A refusal is 403 `not_a_social_approver` (PERMISSION §53.6).
+
+**`GET allocation?mine=`** (`social_engagement` · `read`). Every engagement that is not closed, with its allocation: `{items: [AllocationRow]}`, sorted by client name. `mine=1` keeps the caller's clients (officer = caller), for the Profile switcher.
+
+```
+AllocationRow { engagementId, clientId, clientName, status,
+  officer: {id, name} | null, postsPerCycle: number | null, creativeSource: 'creatives'|'in_team',
+  deliveryBatch: 'A'|'B'|null, reportFormat: 'email'|'meeting'|null, reportDueDay: number|null,
+  platforms: string[], formats: string[], defaultPostTime: 'HH:MM'|null,
+  stepEstimates: {proofread?, hod?, design?, final?, client?, schedule?},
+  thisCycle: {cycleId, month: 'YYYY-MM', target: number|null, counted, extra, stories} | null,
+  canPlan: boolean }
+```
+
+**`PATCH engagements/:engagementId/allocation`** (`social_engagement` · `plan`). Any subset of the fields above except `thisCycle` and `canPlan`; `officerId` sets `owner_id`. Unknown keys 400.
+- 403 `not_a_social_approver`.
+- 404 `engagement_not_found`.
+- 409 `officer_not_member`: the officer must be an active employee member of the company.
+- 400 `{field}` for each value outside its rule. Answers the `AllocationRow`.
+
+The officer is set here only: `PATCH engagements/:engagementId` (§19) refuses `ownerId` with 409 `officer_set_by_allocation`, and `POST engagements` naming an officer other than the caller also needs `plan` (63.12).
+
+**The brand book** stays on the existing routes, which keep their gates: **`GET brand-profiles/:clientId`** (`social_engagement` · `read`) and **`PATCH brand-profiles/:clientId`** (`social_engagement` · `update`). They gain the fields of 63.1: `toneSummary`, `contentPillars`, `mustHaveNotes`, `brandRules`, `hashtagSets`, `channels`, `keyDates`, `links`. The PATCH keeps its rule that an absent field is untouched. The copywriter and designer roles read it (PERMISSION §53).
+
+**`GET settings`** (`social_post` · `read`) answers `{bufferWorkingDays, boostCandidateFactor, holidayCalendar: {known: boolean, name: string|null}, canPlan}`; `known: false` means weekends only, and the Settings page says so. **`PUT settings`** (`social_engagement` · `plan`) takes `{bufferWorkingDays?, boostCandidateFactor?}`; it recomputes every open cycle's `ready_by` in the same transaction.
+
+### 63.5 Cycles, deadlines and health (SCP-1c)
+
+**`GET cycles?month=YYYY-MM`** (`social_post` · `read`). The deadline table for one month:
+
+```
+{ month, bufferWorkingDays, holidaysKnown: boolean, canPlan: boolean,
+  rows: [{ engagementId, clientName, officer: {id,name}|null, deliveryBatch,
+           cycleId: string|null, deadline: 'YYYY-MM-DD'|null, readyBy: 'YYYY-MM-DD'|null,
+           prefill: { deadline: 'YYYY-MM-DD'|null, batch: 'A'|'B'|null },
+           target: number|null, counts: { counted, planned, inProduction, withClient, clientChanges, approved, scheduled, live, extra, stories },
+           health: Health | null }] }
+```
+- **The pre-fill** is the A/B rule: batch A is the last working day on or before the 15th of the month before; batch B is the last working day of the month before.
+- **The counts:** `counted` posts exclude stories and extra posts, which are shown beside the target.
+
+**`PUT cycles`** (`social_engagement` · `plan`) takes `{month, rows: [{engagementId, deadline}]}`, at most 100 rows, and upserts each `(engagement, month)`. It writes `ready_by`, and creates or updates the content-month PM task (63.13). Answers the table.
+- 403 `not_a_social_approver`.
+- 400 `{field: "rows[i].deadline"}` for a date outside the cycle's range (63.1).
+- 404 `engagement_not_found` names the row (`failedId`).
+- It is one transaction: one bad row refuses all.
+
+**`GET cycles/:cycleId/health`** (`social_post` · `read`). Per post and for the client:
+
+```
+Health { state: 'on_track'|'tight'|'at_risk'|'late'|'done',
+         spareDays: number|null, lateDays: number|null, lateWith: HolderRole|null,
+         latestSafeHandoff: 'YYYY-MM-DD'|null, readyBy: 'YYYY-MM-DD' }
+```
+
+The rules (plan §4.4; pinned by SCP-1c in a golden table beside the fixture, with an Opus review of the working-day maths):
+- `done` from `approved` on. Below, `remaining` is the sum of the client's estimates for the steps after the post's current step, and a blocked post counts from `blocked_from`.
+- `latestSafeHandoff` = `ready_by` less `remaining` working days. Without estimates it is `ready_by`.
+- `spareDays` = working days from today to `latestSafeHandoff` (negative when past).
+- `on_track` when `spareDays ≥ 1`. `tight` when it is 0, or when the post is with the client and the client's average approval time over the last 90 days exceeds their `client` estimate. `at_risk` when it is below 0 and today is on or before `ready_by`. `late` after `ready_by`: `lateDays` is the working days past it, and `lateWith` is the holder.
+- Waiting time counts against the holder, never the officer (the Team dashboard reads `lateWith`, 63.19).
+- The client's state is the worst post state. Edge cases the golden table must cover: month ends, weekends, holidays, the year turn, a buffer of 0, and no calendar.
+
+### 63.6 Posts (SCP-1b, 1e, 1f, 1g, 1h, 1i, 1j, 1m)
+
+**63.6.1 Create.** **`POST cycles/:cycleId/posts`** (`social_post` · `create`, plus `author` or `approve` on the would-be post in the same `checkMany`: the cycle's officer or one of the four, SCP-Q19) takes `{id?, title, isExtra?, format?, pillar?, scheduledAt?, placement?}` and answers 201 `{post: PipelinePost, created}`. The post starts `planned` in the cycle's engagement. 403 `not_officer_or_approver` for anyone else who holds `create` (a company admin, another department's head); 404 `cycle_not_found`; 400 `{field}`. An extra post is `isExtra: true` and stays outside the target. The engagement and the cycle come from the path, never the body.
+
+**63.6.2 Read.** **`GET posts/:postId/pipeline`**: `social_post` · `read`; when `read` is refused, `design` on the same post (one `checkMany` for both). So a Creatives designer on the month request opens the posts they work on without a social read tier. 404 `post_not_found`, 409 `not_a_pipeline_post`.
+
+```
+PipelinePost {
+  id, engagementId, clientId, clientName, cycleId, cycleMonth: 'YYYY-MM',
+  title, format, pillar, angle, objective, keyMessage, caption, onAssetText, cta, hashtags: string[],
+  visualDirection, rawAssets: [{url, label, source, aiNote}], placement: string[], scheduledAt: string|null,
+  isExtra, isStory, mustHaves: string[],
+  pipelineStatus, phase, statusSince, engineStatus,
+  change: {by, kind, returnTo, note, case} | null, changedOnly, copyBefore: object|null,
+  block: {reason, waitingOn, from, at} | null,
+  creativeSource: 'creatives'|'in_team'|null, creativeState: string|null,
+  creativeRequest: {id, title, status} | null,
+  designs: [{id, position, asset: {groupId, versionId, versionNo, name, source, aiNote} | null,
+             link: {url, source, aiNote} | null, fileId: string|null}],
+  suggestions: { [field]: {value, base, stale: boolean, by: {id,name}, at} },
+  checks: [{code, ok, message, skippable}], skippedChecks: [{codes, reason, by: {id,name}, at}],
+  officer: {id,name}|null, author: {id,name}|null,
+  holder: {role, userIds: string[], label}, health: Health,
+  variants: [{id, network, handle, status, reviewStatus, validation: {ok, errors, warnings}}],
+  approvedSchedule: {scheduledAt, placement: string[]} | null,
+  reviewHash: string|null,
+  liveUrl, wentLiveAt, simulated, archivedAt,
+  boost: BoostRow | null,
+  tasks: [{id, title, status, assignee}],
+  copyLog: [{field, before, after, via, by: {id,name}, suggestedBy: {id,name}|null, stage, at}],
+  history: [{action, from, to, by: {id,name}, agent: string|null, at, recorded: {channel}|null, viaPortal: boolean}],
+  actions: [{action, allowed: boolean, reason?: string}], nextAction: string|null }
+```
+- **`actions`** lists the fixture actions whose `from` matches the post, each decided for the caller by the same steps 5 to 11 of 63.3.2 that need no body. Cerbos runs as one `checkMany` (at most 50 resources a call). `reason` is the code the action route would answer.
+- **`nextAction`** is the fixture's primary action for the status when it is allowed.
+- **The UI** draws a disabled button with the reason's words; the server still decides on the write.
+- **`approvedSchedule`** is the date, time and placement the client approved, null before the client's approval; `schedule` uses exactly these (63.10).
+- **`reviewHash`** is the sha256 of the sorted `variantId:args_sha256` lines, null before `final_approve`. It moves with the content, the date, the time and the placement.
+- **`history`** comes from the post's activity rows, with the co-authoring agent when one drove the action (`metadata.via.agent`); it never shows a note's text.
+
+**63.6.3 Edit.** **`PATCH posts/:postId/pipeline`** (`social_post` · `author`) takes `{expectedStatus, fields: {…}}`. The fields allowed depend on the status (fixture `editRules`):
+- planning fields in `planned`; planning and copy in `drafting`;
+- copy, `scheduledAt`, `mustHaves` and `placement` in a copy `changes` case asked inside the team, where each copy edit is also written to the copy log (`via: 'fix'`);
+- the same without `placement` after a client copy change: the client has seen the networks.
+
+Any other field is 409 `field_locked` (`detail: {field, status}`). Answers the `PipelinePost`. Date and placement moves after the client are `reschedule` (63.10). The placement is chosen while drafting and is required to send (63.3.4), because the client approves one preview per placed network.
+
+**63.6.4 Suggestions** (the Copywriter, `social_post` · `proofread`, status `proofread`).
+- **`PUT posts/:postId/suggestions/:field`** takes `{expectedStatus, value}` and stores `{value, base, by, at}`.
+- **`DELETE posts/:postId/suggestions/:field`** drops one.
+- `field` is one of `caption`, `onAssetText`, `cta`, `hashtags`; another is 400 `{field: "field"}`.
+- A suggestion is stale when its `base` no longer equals the field. `approve_copy` refuses 409 `suggestion_stale` (`detail: {fields}`) rather than overwrite a newer edit.
+- The officer applies one while drafting or fixing with the action `accept_suggestion` (logged `via: 'suggestion'`; 404 `suggestion_not_found`).
+
+**63.6.5 Actions.** **`POST posts/:postId/actions`** takes `{action, expectedStatus, actionId?, …params}` and answers 200 `{post: PipelinePost, applied: {action, from, to}, warnings: string[]}`. The actions, their params and their refusals are the fixture's:
+
+| Action | From → to | Cerbos | Params |
+|---|---|---|---|
+| `start_draft` | planned → drafting | `author` | |
+| `accept_suggestion` | drafting, copy changes | `author` | `field` |
+| `send_to_proofread` | drafting; changes (copywriter or client copy) → proofread | `author` | `sendAnyway?`, `sendAnywayReason?` |
+| `approve_copy` | proofread → hod; → client with `changedOnly` | `proofread` | |
+| `return_copy` | proofread → changes | `proofread` | `note` |
+| `approve_for_design` | hod → design | `approve` | |
+| `hod_changes` | hod → changes | `approve` | `note` |
+| `resend` | changes (HoD or final copy) → hod or final | `author` | |
+| `start_design` | design; design changes | `design` | |
+| `submit_design` | design; design changes → final | `design` | |
+| `final_approve` | final → client | `approve` | |
+| `final_changes` | final → changes | `approve` | `changeKind`, `note` |
+| `record_client_approve` | client → approved | `record_client` | `channel`, `note` |
+| `record_client_change` | client → changes | `record_client` | `changeKind`, `channel`, `note`, `anchor?` |
+| `schedule` | approved → scheduled, by hand, at the approved date and time | `schedule` | |
+| `schedule_publisher` | approved → scheduled, through the publisher (SCP-Q16) | `approve` and `publish` | |
+| `unschedule` | scheduled → approved | by hand `schedule`; through the publisher `approve` and `cancel` | |
+| `reschedule` | approved, scheduled → client (the client approves again, SCP-Q13) | `schedule` (and `cancel` when scheduled through the publisher) | `at?`, `placement?` |
+| `mark_live` | scheduled → live | `schedule` | `url`, `at?` |
+| `block` | any status before client → blocked | `manage` | `reason`, `waitingOn` |
+| `resolve` | blocked → the status it left | `manage` | |
+| `follow_up` | any status with another holder | `manage` | `note?` |
+| `discard` | planned, drafting → deleted | `manage` | |
+| `archive` | planned to approved, not scheduled or live → archived | `manage` | `reason` |
+
+The client's own decisions are portal routes (63.9).
+
+**63.6.6 The client-month request and designs** (SCP-1h).
+- **The month request.** The cycle's month request is an ordinary §32 asset request to the company's Creatives department:
+  - `title` "<client> · <Month YYYY> social designs"; `needed_by` the cycle's `ready_by`; `requested_by` the acting approver;
+  - `form` `{deliverables: [{format: 'image', size: 'per post', quantity: <target or 1>}], channel: 'social', notes}`;
+  - opened lazily by the first `approve_for_design` of a `creatives` client in the cycle. Its PM task is the designers' work in Creatives' own board.
+  - The pipeline never delivers, declines or cancels it: Creatives does, as today. A post approved after the request closed opens a new one, and `social_cycles.creative_request_id` points at it.
+  - 409 `creatives_unit_missing` when the company's tree has no Creatives department.
+  - The request detail (`GET /api/:t/requests/:id`, §32) gains `socialPosts: [{postId, title, clientName, pipelineStatus, creativeState, href}]` (additive), read under the social module scope.
+- **Designs** (`social_post` · `design`, status `design` or a design `changes` case):
+  - **`POST posts/:postId/designs`** takes `{expectedStatus, assetGroupId? | linkUrl?, linkSource?, linkAiNote?, position?}`. An unknown asset is 404 `asset_not_found`; an AI link without a note is 400 `{field: "linkAiNote"}`. An asset added on a `creatives` post is also linked to the month request (`work_request_assets`, `ON CONFLICT DO NOTHING`).
+  - **`PATCH posts/:postId/designs/:designId`** takes `{position?, linkSource?, linkAiNote?}`.
+  - **`DELETE posts/:postId/designs/:designId`** marks the design removed (404 `design_not_found`).
+  - **`submit_design`** needs at least one design (409 `design_missing`). An AI-made design always carries its note, because the database refuses one without (63.1, files 1 and 4). A source left `unknown` is a warning in `warnings`, not a refusal.
+  - An asset's own source and AI note are set where the asset is saved: the Asset Library save (`creative.controller.ts`, §35) gains `source` and `aiNote`, under its existing gate.
+- **The design queue.** **`GET design-queue?cursor=&limit=`** lists the posts the caller may design now (`design`, or a design `changes` case): those whose month request's task names the caller, plus every `in_team` post when the caller holds `social_designer`.
+  - Its outer gate is `work_request` · `read` (every member), and each row is narrowed by those two facts, the same facts Cerbos uses.
+  - Items: `{postId, clientName, title, format, creativeState, revisionNote: string|null, readyBy, health, thumbFileId|null}`.
+
+**63.6.7 Bulk** (SCP-1f "Approve all", SCP-1k "Send to proofread" on the List). **`POST posts/actions`** takes `{action: 'send_to_proofread'|'approve_copy', items: [{postId, expectedStatus, actionId?}]}`, 1 to 50 items. Each item runs 63.3.2 on its own and in its own transaction. Answers 200 `{results: [{postId, ok: true, post} | {postId, ok: false, error, field?, detail?, blockers?}]}`. One item's refusal never undoes another. "Send anyway" is not offered in bulk.
+
+### 63.7 Feed, Messages, Overview and Needs you (SCP-1d, 1j, 3f)
+
+**`GET feed?view=your_turn|waiting|all&engagementId=&cycleId=&phase=&officerId=&cursor=&limit=`** (`social_post` · `read`).
+- **`your_turn`** is the posts whose holder (fixture `holders`) is the caller: as officer, copywriter, approver (never on posts where they are the author or the officer) or designer.
+- **`waiting`** is the caller's posts as officer that someone else holds.
+- **`all`** is the team's view, filtered.
+- **Order:** health first (late, at risk, tight), then `status_since`.
+- **Items:** `PipelineCard {id, engagementId, clientName, title, format, isExtra, isStory, thumbFileId|null, pipelineStatus, phase, holder, yourTurn, health, scheduledAt, statusSince, nextAction: {action, allowed, reason?} | null, simulated}`.
+- **Speed:** the narrowing is one SQL mirror of the relationship facts of 63.3.3. `nextAction` is decided by one `checkMany` over the page.
+- **The bar:** fast at 600 posts, at most three queries and two Cerbos calls a page (SCP-1d), measured on the gate.
+
+**`GET waiting`** (Messages, `social_post` · `read`). The caller's posts that someone else holds, grouped by holder: `{groups: [{holder: {role, label, userIds}, posts: [{id, title, clientName, since, lastFollowUpAt}]}]}`. Client-held posts say "the client"; their threads open the portal conversation (PV-4).
+
+**`GET overview`** (`social_post` · `read`). `{tiles, simulatedIncluded: boolean}` with these tiles:
+- `inProduction`: the phase.
+- `withClient`: the phase; it closes DW-3e's "Waiting client review".
+- `late`: posts whose health is `late`.
+- `scheduledThisWeek`: Monday to Sunday in the company's time zone.
+- `failedPosts`: pipeline posts with engine status `failed` or `partially_published`, plus the failed Composer variants the tile counts now.
+- `boostsWaiting`: `requested`, plus `approved` but not started.
+
+The KPI strip and banner stay. While the simulator flag is on, the tiles count simulated rows and say so.
+
+**`GET needs-you`** (`social_post` · `read`). The pipeline's leg of `lib/queue.ts`, per the caller's roles (plan §6.4):
+- **Officer:** drafts to send, fixes asked, ready to schedule, live for two days without metrics, a monthly report due (63.18).
+- **Copywriter:** the proofread queue.
+- **HoD and GM (the two seats):** HoD approvals, final checks, reports to check (`social_reports` `in_review`) and reports ready to send (`approved`), boosts approved but not started. The owner and the superadmin act from the same pages but get no queue: it would hold every client's work.
+- **Designer:** designs and revisions.
+
+Items: `{id: 'social:<tenant>:<post or report or boost id>:<kind>', kind, role, title, clientName, since, due?, href}`, at most 50, oldest first. A failed source is named, never silently dropped (`partial: string[]`).
+
+### 63.8 Comments and files (SCP-1l, SCP-2b)
+
+**Comments stay the shared thread** (`api/:t/comments`, `CollabController`), entity `social_post`.
+- **`POST /comments`** gains `visibility?: 'team'|'client'` (default `team`) and `anchor?: {x, y, fileId}`, accepted only for `entityType: 'social_post'` (otherwise 400 `{field}`).
+  - For a `social_post` comment the route also checks `social_post` · `read` on that post (or `design`, as 63.6.2).
+  - A `client` comment additionally needs `social_post` · `record_client`, because it speaks to the client. Refused: 403 `not_officer_or_approver`.
+  - A client comment is visible to the client only once the post has reached the client (`client_first_sent_at`).
+- **`GET /comments`** returns `visibility` and `anchor` (additive). For `entityType: 'social_post'` it also checks `social_post` · `read` (or `design`) on that post, so the thread has the post's audience.
+- **Pins** show on the post's image (staff) and in the portal (client comments only, 63.9).
+- **The client** does not write comments in the first release. Their note and pin ride their decision, and the staff thread shows each decision inline from the reviews.
+
+**Files.**
+- **Staff.** `files.controller.ts` learns `social_post` as a target kind (reference images with `role = 'social_reference'`, and the materialized designs). The parent check is `social_post` · `read`, or `design`, with the resource of 63.3.3: today's `targetReadResource` would send no `module` and no attributes, and the module roles would never match.
+- **The portal.** `GET /api/:t/portal/files/:fileId` gains the downloadable kind `social_post`. Only `role` `social_design` files are served, and only for a post of one of the caller's clients that has reached the client. Anything else is the same 404 as a file that does not exist.
+- **Thumbnails.** The portal answers carry `fileId` and `thumbFileId`, which are equal until SCP-2b adds a thumbnail.
+
+### 63.9 The portal (SCP-2)
+
+Every route: Cerbos `portal` (`read`, or `approve_post` for decisions), then `resolvePortalScope`, then the post's client in the caller's clients and `client_first_sent_at` set. A post that is not visible is 404, never 403. Social reads declare the module scope.
+
+**`GET portal/social/posts?tab=to_review|approved|grid&clientId=&month=YYYY-MM&cursor=&limit=`** answers `{items: PortalSocialPost[], nextCursor, counts: {toReview, approved, changesAsked}}`.
+- `to_review` is the posts waiting on the client.
+- `approved` is approved, scheduled and live posts, newest first.
+- `grid` is every visible post of the month by date, approved and live in the client's feed order (the grid preview).
+
+**`GET portal/social/stories`** (the stories circle) answers the story-format posts waiting on the client and the recent live ones. **`GET portal/social/posts/:postId`** answers one post with its client-visible comments and pins.
+
+```
+PortalSocialPost { id, clientId, clientName, month: 'YYYY-MM', title, format, plannedAt: string|null,
+  placement: string[],
+  state: 'to_review'|'changes_asked'|'approved'|'scheduled'|'live',
+  caption, onAssetText, cta, hashtags: string[],
+  images: [{fileId, thumbFileId, position, alt}],
+  variants: [{id, network, handle, surface: 'feed'|'carousel'|'reel'|'story', body, firstComment, scheduledAt}],
+  reviewHash: string,
+  decision: { decisionId, kind: 'approved'|'changes', changeKind?, note?, anchor?, decidedAt,
+              decidedBy: {name}|null, recorded: boolean, channel?: string, undoUntil?: string } | null,
+  comments?: [{id, body, author: {name}, anchor?, createdAt}],
+  liveUrl: string|null, simulated: boolean }
+```
+
+The client sees the content, the date and time, the placement, the decisions and client-visible comments: everything their approval covers. They never see team comments, internal statuses, the copy log, suggestions, checks, holders or names of our staff other than the author of a client comment.
+
+**`POST portal/social/posts/:postId/decide`** (`approve_post`, every active contact, as §16h) takes `{decision: 'approve'|'change', changeKind?: 'copy'|'design', note?, anchor?, seenHash}`. It is one decision for every variant, in one transaction.
+- **Refusals:**
+  - 409 `content_changed` when `seenHash` is not the post's current `reviewHash` (the content, date, time or placement changed while the client looked);
+  - 409 `post_not_with_client` when the post is visible but not waiting;
+  - 400 `{field}` (`note` 1 to 2,000 characters and `changeKind` are required for `change`).
+- **Answer:** 200 `{decisionId, postId, state, undoUntil}`; `undoUntil` is 10 seconds after the decision.
+- **Replays:** the same decision again is 200 `{alreadyDecided: true}`; a different one is 409 `client_review_already_decided` (the §16h code).
+- **Notifications** to staff wait out the undo window. The consumer sends them only if the decision still stands.
+
+**`POST portal/social/posts/approve-all`** takes `{items: [{postId, seenHash}]}`, 1 to 50, and approves exactly the listed posts that still wait with an unchanged hash ("Approve all approves only what waits"). Answers `{results: [{postId, outcome: 'approved'|'skipped', reason?, decisionId?}], undoUntil}`.
+
+**`POST portal/social/decisions/:decisionId/undo`** (`approve_post`, only the contact who decided) puts every review of that decision back to `pending` and the post back to `client`, restoring what the decision changed.
+- 403 `not_your_decision`; 409 `undo_window_passed`, also when anything happened to the post since; 404 `decision_not_found` for a decision outside the scope.
+- Recorded decisions have no undo.
+
+**The way in (SCP-Q8, ruled):** portal login. The link we send, shareable to WhatsApp, is `/portal/social?post=<id>` and passes through the portal sign-in. There is no no-login link.
+
+**Today's routes.** `GET /portal/social-reviews` lists only Composer posts' reviews. `POST /portal/social-reviews/:id/decide` refuses a pipeline post's review with 409 `decide_per_post`.
+
+**Money in the portal** is 63.11.
+
+### 63.10 Schedule, live and metrics (SCP-3; SCP-S seams)
+
+The client's approval covers the date, the time and the placement (SCP-Q13, ruled), so scheduling never changes them. Changing them is `reschedule`, which asks the client again.
+
+- **`schedule`** (the officer, by hand: "Schedule in Meta") takes no date: the post is scheduled at the approved date and time (`approvedSchedule`).
+  - 409 `approved_time_passed` when that time is more than 5 minutes in the past: a later date is a new date, so it needs `reschedule` and the client's approval.
+  - Every variant must pass the media validator (`media-rules.ts`), else 409 `media_rules_failed` with `detail.variants`.
+- **`schedule_publisher`** (SCP-Q16 and SCP-Q19, ruled): one of the four files the publish through the publisher. It needs:
+  - `social_post` · `approve`: one of the four, never the author or the client's officer. That is the whole gate: there is no extra `publish` check (SCP-Q19);
+  - a registered publisher (409 `publisher_unavailable`);
+  - the approved time not passed, and the media validator.
+  - It files one D14 publish approval per variant through SMM-40's helper (`insertAutomationApprovalRow`), bound to the approved content, date and placement.
+  - **The decision.** Under PV-D46 (PGL-05, PERMISSION-CONTRACT §52, released in 428) the filer never approves their own high-impact request, so a second person decides it under `/approvals`.
+    - That person must also be one of the four. The entry's `approverCheck` asks `social_post` · `approve` on the post, so the post's author and officer are refused too (403 `{error, reason: "social_approver_required"}`; PERMISSION §53.12).
+    - For a pipeline post's publish approval, passing that check IS the decide right (SCP-Q21, owner, 2026-10-26): the HoD, the GM, the owner and the superadmin decide it directly, without `company_admin`. Today's generic decide right (`company_admin`, `platform_admin`) is not enough on its own for these rows. PERMISSION §53.12 gives the mechanism.
+- **`unschedule`** puts the post back to `approved` and keeps the client's approval.
+  - Scheduled by hand: the officer (`schedule`).
+  - Scheduled through the publisher: one of the four (`approve`; 403 `not_an_approver`). It withdraws undecided approvals and cancels queued dispatches.
+  - A variant mid-publish is 409 `dispatch_in_flight`.
+- **`reschedule`** (the officer, `schedule`) takes `{at?, placement?}`; at least one must differ from the approved values, else 409 `no_change`. In one transaction it:
+  1. unschedules the post if it is scheduled (through the publisher this also needs `cancel`: 403 `cancel_required`, so the officer asks one of the four to unschedule it first; a variant mid-publish is 409 `dispatch_in_flight`);
+  2. writes the new date and placement and syncs the variants: dates, and the networks for a new placement (409 `no_account_for_network` or `ambiguous_account`);
+  3. requests every variant's review again, sends the post back to `client`, and tells the client once.
+- **`mark_live`** (officer) takes `{url, at?}`. Each variant becomes a native-import bookkeeping row (`native_import = true`, `status = 'published'`, `approval_id` and `provider_post_id` NULL, `published_url`, `published_at`): 0105's existing law for "posted by hand".
+- **The publisher's result.** When every variant of a post scheduled through the publisher is `published` (`dispatch.ts`, `post-status-sync-job.ts`), the post goes live by the publisher. A failure leaves it `scheduled` with engine status `failed`, and the Failed posts tile counts it.
+  - **The simulator** (SCP-Sc) uses this same path: it dispatches only variants that hold a decided approval, and never mints or decides one itself.
+- **Date moves** (the calendar drag, the feed-preview swap; fixture `systemRules.date_moves`):
+  - an edit in `planned`, `drafting` and a team copy `changes` case;
+  - `reschedule` in `approved` and `scheduled`: the UI says the client will be asked again;
+  - 409 `field_locked` while the post is with the copywriter, an approver, the designer or the client, or blocked;
+  - 409 `post_is_live` on a live post.
+- **`GET calendar?from=&to=&engagementId=`** (`social_post` · `read`, at most 62 days): `{items: [{postId, clientName, title, format, scheduledAt, pipelineStatus, phase, simulated}]}`. Holidays and approved leave come from the department calendar (§59), merged by the UI. Monday-first and the phase colours are the UI's.
+- **`GET engagements/:engagementId/feed-preview`** (`social_post` · `read`) answers the client's grid: planned, approved, scheduled and live posts by date, `{items: [{postId, scheduledAt, thumbFileId, pipelineStatus, locked: boolean}]}`; live posts are locked. **`POST engagements/:engagementId/feed-preview/swap`** takes `{postA, postB, expectedA, expectedB}` and swaps the two dates under each post's date-move rule, all or nothing. An approved or scheduled post in a swap goes back to the client, so a swap of two approved posts asks the client about both.
+- **Metrics.**
+  - **`POST variants/:variantId/metrics`** (`social_post` · `schedule`) takes `{capturedAt, reach, impressions?, likes?, comments?, shares?, saves?, videoViews?, clicks?}`, each ≥ 0, and appends a `manual` row. 409 `post_not_live` before the post is live.
+  - **`GET posts/:postId/metrics`** (`social_post` · `read`) answers `{latest: {reach, likes, comments, shares, saves, clicks, videoViews, source, capturedAt} | null, engagementRate: number|null, accountAverageRate: number|null, boostCandidate: boolean, simulated}`.
+    - The engagement rate is (likes + comments + saves + shares) ÷ reach, null without reach.
+    - A post is a boost candidate when its rate is at least `boostCandidateFactor` (1.25) times its account's average over the last 90 days.
+- **The KPI readers** (SCP-3f). "Posts on schedule" reads the pipeline: posts that went live within 15 minutes of `scheduled_at`, hand-posted ones included. Today's reader excludes native imports, which is every hand-posted pipeline post. "Client approval turnaround" keeps reading the reviews.
+
+### 63.11 Boosts and the monthly boost budget (SCP-4; SCP-Q11, SCP-Q14, SCP-Q15, SCP-Q18 and SCP-Q19 ruled)
+
+**No ads are bought by the ERP.** A boost records what the team runs in Meta's own tools, or what the simulator runs: the agreement, the budget, the start and stop, and the results. No tool spends money, so the D14 doctrine that bars money-spending tools is untouched. This lifts the old "no ad spend in v1" line (0105's header, `social.controller.ts` `createCampaign`) for recording only, by the owner's SCP-Q11 ruling.
+
+**The monthly budget.** Each cycle has at most one agreed budget: its `agreed` row in `social_boost_budgets`.
+- **`committed`** (SCP-Q15) is, over the cycle's boosts:
+  - the full budget (`total_budget_minor`) of each `approved` or `running` boost;
+  - the actual spend (`spend_minor`) of each `stopped` or `completed` one, so a stopped boost counts only what it spent;
+  - nothing for `requested`, `cancelled` or `declined` ones.
+- **`remaining`** is `agreed − committed`, shown as 0 when below.
+- **The month.** A boost belongs to the cycle of the month its `starts_on` falls in. With no cycle or no agreed budget, `remaining` is 0.
+- **The lock.** Every write that moves `committed` or the agreement (a boost request, an approval, a stop, a completion, a cancellation, an agreement, a recording) runs under the cycle's advisory lock, so two writers can never both take the last of a budget.
+- **Lowering** (SCP-Q15) is allowed down to `committed`. An agreement below it is 409 `budget_below_committed` (`detail: {committedMinor, currency}`), checked when the amount is proposed, recorded, or agreed in the portal.
+
+**Who records money for the client: the four approvers only** (SCP-Q18, refined by SCP-Q19): `social_engagement` · `budget`, held by the HoD and GM seats, the owner and the superadmin. Not `manager`, `company_admin` or a `social_manager` grant, and not the officer who will spend it. A refusal is 403 `not_a_social_approver`.
+
+| Route | Gate | What it does |
+|---|---|---|
+| `GET cycles/:cycleId/boost-budget` | `social_post` · `read` | `{agreed: {amountMinor, currency, minorUnit, via, agreedAt, agreedBy: {name}, channel?} \| null, pending: Proposal \| null, committedMinor, remainingMinor, history: Proposal[], canRecord: boolean}` |
+| `POST cycles/:cycleId/boost-budget/proposals` | `social_engagement` · `budget` | `{amountMinor, note?}`: a proposal, higher or lower than the agreement, for the client to agree in the portal. 409 `proposal_pending` (one at a time); 409 `budget_below_committed` |
+| `POST boost-budget/proposals/:proposalId/withdraw` | `social_engagement` · `budget` | Withdraws a pending proposal. 409 `budget_already_decided` |
+| `POST cycles/:cycleId/boost-budget/record` | `social_engagement` · `budget` | `{amountMinor, channel, note}`: the client agreed outside the portal, to set, raise or lower the budget. A pending proposal becomes `superseded`, and so does the previous agreement. 409 `budget_below_committed` |
+
+An unknown cycle is 404 `cycle_not_found`, an unknown proposal 404 `proposal_not_found`, an unknown boost 404 `boost_not_found`.
+
+**Boosts** (`social_post` · `boost`: the officer, or the HoD or GM seat; the owner agrees money through `budget`, but runs no boost):
+
+| Route | What it does |
+|---|---|
+| `GET boosts?status=&engagementId=&cycleId=&cursor=&limit=` (`read`) | The Boosting list: `{items: BoostRow[], candidates: [{postId, clientName, title, engagementRate, accountAverageRate}], totals: {committedMinor, spendMinor, currency}}` |
+| `GET posts/:postId/boosts/estimate?dailyBudgetMinor=&days=&audience=` (`read`) | `{reachLow, reachHigh, basis: 'history'\|'simulated'\|'none'}` |
+| `POST posts/:postId/boosts` | `{id?, goal, audience, audienceNote?, dailyBudgetMinor, days, startsOn, currency?}`. Under the cycle lock: when `daily × days ≤ remaining` the boost is `approved` at once (`approvedVia: 'budget'`, `budgetId`), else `requested` and the client is asked. 409 `post_not_live`, `open_boost_exists`, `currency_mismatch`; 400 `{field}`. Answers 201 `{boost: BoostRow, remainingMinor, needsClient: boolean}` |
+| `POST boosts/:boostId/actions` | `{action, expectedStatus, …}` with the fixture's names: `cancel_boost` (requested, approved), `start_boost` (approved), `stop_boost` (running; `spendMinor` required, `paidReach` and `clicks` optional), `complete_boost` (running or stopped; `spendMinor` and `paidReach` required, `clicks` optional). A spend above the budget answers `warnings: ['spend_above_budget']`. 409 `boost_status_changed`, `invalid_boost_transition` |
+| `POST boosts/:boostId/actions` with `record_boost_approval` or `record_boost_decline` | `social_engagement` · `budget`; `{channel, note}`: the client's answer to a boost over the budget, given outside the portal. 409 `boost_not_waiting` |
+
+```
+BoostRow { id, postId, postTitle, clientName, cycleId, status, goal, audience, audienceNote,
+  dailyBudgetMinor, days, totalBudgetMinor, currency, minorUnit, startsOn,
+  approvedVia: 'budget'|'portal'|'recorded'|null, approvedAt, startedAt, endedAt,
+  spendMinor, paidReach, clicks, reachEstimate: {low, high} | null, simulated }
+```
+
+**The portal's approvals** (SCP-4b; `/portal/approvals` gains a "Boost budgets" section):
+- **`GET portal/social/spend`** (`portal` · `read`) answers `{budgets: [{proposalId, clientName, month, amountMinor, agreedMinor, committedMinor, currency, minorUnit, note, requestedAt}], boosts: [{boostId, clientName, postTitle, thumbFileId, totalBudgetMinor, days, startsOn, currency, minorUnit, remainingMinor}], history, canDecide}`. The client never sees our fees.
+- **`POST portal/social/spend/budgets/:proposalId/decide`** takes `{decision: 'agree'|'decline', note?}` (the fixture's `agree_boost_budget` and `decline_boost_budget`).
+- **`POST portal/social/spend/boosts/:boostId/decide`** takes `{decision: 'approve'|'decline', note?}` (`approve_boost` and `decline_boost`).
+- **The rules for both:**
+  - Cerbos `portal` · `approve_spend`, then the target's client in scope (404 otherwise).
+  - Signing capability on that client (`requireSignerFor`), because it commits the client's money: 403 `view_only` for a viewer (SCP-Q14, ruled: signers only).
+  - Agreeing a lower budget re-checks `committed` at that moment (409 `budget_below_committed`).
+  - A replay of the same decision is 200 `{alreadyDecided: true}`; a different one is 409 `budget_already_decided` or `boost_already_decided`.
+  - Agreeing makes the previous agreement `superseded`.
+
+### 63.12 Changes to today's routes
+
+| Route (§19, §16h) | On a pipeline post or engagement |
+|---|---|
+| `GET posts`, `GET posts/:postId` | Unchanged, plus `pipelineStatus` and `phase` (additive) |
+| `PATCH posts/:postId` | 409 `pipeline_post`. Its free `status` write would bypass the machine; pipeline edits are 63.6.3 |
+| `DELETE posts/:postId` | 409 `pipeline_post`: use `discard` or `archive` |
+| `POST posts/:postId/variants` | 409 `pipeline_post`: variants come from `final_approve` |
+| `PATCH variants/:variantId`, `POST variants/:variantId/media/attach` | Allowed as today (the Composer's per-network step). On an approved or scheduled post they send it back to the client (63.3.5) |
+| `DELETE variants/:variantId` | 409 `pipeline_post` |
+| `POST variants/:variantId/client-review`, `…/withdraw` | 409 `pipeline_post`: the machine requests and withdraws reviews |
+| `POST variants/:variantId/approve` | 409 `pipeline_post`: publishing is `schedule_publisher` |
+| `POST variants/:variantId/publish`, `…/publish-metered` | Unchanged (the D14 executor's re-drive) |
+| `PATCH engagements/:engagementId` | `ownerId` is refused, 409 `officer_set_by_allocation`: the officer is set by the allocation (63.4). Everything else unchanged |
+| `POST engagements` | Unchanged, except that naming an officer other than the caller (`ownerId`) also needs `social_engagement` · `plan` (403 `not_a_social_approver`) |
+| `POST /portal/social-reviews/:id/decide` | 409 `decide_per_post` |
+
+`activity-kinds.ts` maps `social_post` · `created` to "Post scheduled", which pipeline posts would inflate, because they are created as plans. SCP-1b bridges `schedule` and `schedule_publisher` instead and keeps `dispatched`.
+
+### 63.13 PM: the content month and task links (SCP-1n)
+
+- **The content-month task.** `PUT cycles` creates one PM task per cycle in the engagement's project (`social_engagements.project_id`; none, no task, and the row says why):
+  - title "<Month YYYY> content"; `due_date` the cycle's `ready_by`; the Ball (assignee, responsible) on the officer; `linked_type = 'social_cycle'`, `linked_id` the cycle.
+  - The pipeline writes its `progress`: counted posts past client approval ÷ the target, or ÷ the counted posts when there is no target.
+  - It sets `done` when every counted post is approved, and reopens it when one goes back to the client. One direction only: moving the task never moves a post.
+- **Task links.** The PM task routes accept `linkedType: 'social_post'` and `linkedId`. The task drawer links to the post. `GET posts/:postId/pipeline` lists them in `tasks`.
+- **No task per post.** A test proves it.
+
+### 63.14 Notifications and activity
+
+- **Activity.** Every stage action writes one activity row with `writeActivity`: entity `social_post`, verb the action, metadata `{from, to, cycleId, engagementId, changeCase?, checksSkipped?, channel?, viaPortal?}`. Never a note, a caption or a comment's text. When an agent drove the call, `writeActivity` stamps `metadata.via` (provider, external id, agent): the person is the author, the agent the co-author (63.15).
+- **Notifications.** Each is sent after the commit with `notify()`, never to the actor, and a failure never undoes the action. Payload: `{title, href: '/departments/<social dept>/posts/<postId>', entityType: 'social_post', entityId, severity, action}`.
+
+| Type | To |
+|---|---|
+| `social.post.your_turn` | the new holder(s): copywriters, approvers (the HoD and GM seat holders; the owner and the superadmin are not notified), designers (the month request's assignees, or every `social_designer` for in-team) or the officer |
+| `social.post.client_changed` | the HoD and GM when the client asks for a change, and on loop e's `approve_copy` ("the HoD is told") |
+| `social.post.client_decided` | the officer |
+| `social.post.follow_up` | the holder; for the client, a portal reminder (PV-D47's client action mail, §62, applies) |
+| `social.client_review.requested` | the client, once per post at `final_approve`, on loop e and on every change after the client (the existing event, with `postId` added) |
+| `social.boost.waiting_client`, `social.budget.proposed` | the client's contacts with signing capability |
+| `social.boost.decided`, `social.budget.decided` | the requester, the officer |
+| `social.report.to_check` | the HoD and GM seat holders, when a monthly report is submitted for the HoD check |
+| `social.report.ready` | the officer, for information, when the HoD check passes. Sending is the four's (SCP-Q20); the report waits in the HoD's and GM's Needs you. The client hears through PV7-04a's existing notice when it is sent |
+
+`follow_up` is limited to once per holder per post per 24 hours (409 `follow_up_too_soon`, `retryAfterSeconds`). It is refused when the caller holds the post or nobody does (409 `nobody_to_follow_up`).
+
+### 63.15 Agents (SCP-Q17, ruled)
+
+The owner's words: "same right as the person login or ask. so if the one that ask ai to do something is staff, than the ai will follow staff permission."
+
+- **The existing on-behalf-of model, nothing new.** The hub calls the platform with the OBO envelope of the person who asked (`x-obo-provider`, `x-obo-external-id`), so the principal is that person, and `x-obo-agent` names the agent (`Principal.via.agent`, `auth/guards.ts`).
+  - Cerbos decides on the person. The maker/checker DENY applies to the person behind the agent, and every typed refusal of this section is the same for them.
+  - `writeActivity` stamps `metadata.via`: the "Co-Authored-By" model (`rbac/principal.ts`). The person is the author, the agent the co-author, recorded alongside and never instead.
+  - An agent never does what its person could not. A persona acting for a person (`x-act-for`) passes only when both pass (`authorize()`'s intersection).
+- **Unattended automations stay out.** A principal with no person behind it (`users.kind` `automation` or `bot`, for example an n8n workflow's service account) is refused every new action of PERMISSION §53, by an `EFFECT_DENY` and by the handler's 403 `automation_cannot_act`. It may still read.
+- **The tools.** `socialModule.mcpTools` exposes the pipeline as tools that call the same routes, so an agent goes through the same Cerbos check and the same order of checks as the person.
+
+| Tool | Route | Class |
+|---|---|---|
+| `social.pipelineFeed`, `social.getPipelinePost`, `social.cycleHealth`, `social.teamDashboard` | the reads of 63.7, 63.6.2, 63.5 and 63.19 | read |
+| `social.editPost`, `social.suggestCopy` | `PATCH posts/:postId/pipeline`, `PUT posts/:postId/suggestions/:field` | `write`, impact `low`: drafts a person can see and change |
+| `social.movePost` | `POST posts/:postId/actions` (every action of 63.6.5) | `write`, impact `high` |
+| `social.requestBoost`, `social.boostAction` | `POST posts/:postId/boosts`, `POST boosts/:boostId/actions` | `write`, impact `high` (money) |
+| `social.draftReport`, `social.editReport`, `social.approveReport`, `social.deliverReport` (existing, SMM-23) | the report routes of 63.18 | as today: `low`, `low`, `low`, `medium`. An agent drafts with its own model and saves through `social.editReport`; `POST reports/:id/ai-draft` is the page's |
+
+- **The confirm step.** Writes classed `medium` or `high` map to the agent's `high_write` (`ai-agents/src/agent.ts`, D14-12: the stricter of the AgentDef label and the registry wins). They go through the existing agent-side write gate and the in-thread confirm chip of the assistant's write intents (ASST-23, §T3b): the person confirms before anything moves. `low` writes run as the person.
+- **The hub's automation gate** (`tool.write && impact !== "low"` for `n8n` principals) stays as it is. It never fires here, because Cerbos already refuses those principals.
+
+### 63.16 DEMO_MODE
+
+`lib/demoSocial.ts` answers every route of this section in the server's order of checks, from the fixture twin, with the personas of plan §11.1. That includes `social-design@gaiada.com` for the in-team designer, the existing superadmin and owner identities as the other two of the four approvers (SCP-Q19), and three invented clients: one in-team, two on Creatives. Its store covers:
+- all twelve statuses and the six change cases;
+- a blocked post, suggestions waiting, and a rescheduled post back with the client;
+- a live post with metrics, one boost inside and one over the monthly budget;
+- a monthly report in each state, and a Team dashboard;
+- simulated rows, marked.
+
+Tests that seed "a few days after today" pin the clock to mid-month.
+
+### 63.17 Pages and their registry keys (plan §6.2, §6.3; every URL new unless marked, one area each)
+
+| Page | URL | Registry row key |
+|---|---|---|
+| Home (the feed) | `{D}`, the Overview, laid out as the design's feed (existing URL) | `overview` (existing) |
+| Team dashboard (the four approvers, 63.19) | `{D}/dashboard`, and a block on Reports › Team (`/reports/team?unit={dept}`, existing) | `dashboard` (new), gated by `canLeadSocial`. The second block is on the shared `reports` row's `team` tab (existing) |
+| Post page (a drawer over any list) | `{D}/posts/[postId]`; a new post `{D}/posts/new?cycle=` | None: opened from lists, never a menu row |
+| Client page (Profile: five tabs and the brand book) | `{D}/profile/[engagementId]?tab=plan\|stories\|preview\|calendar\|list\|brand`: Plan, Stories, Feed preview, Calendar, List, and the Client profile (the brand book) | `profile` (new) |
+| Messages | `{D}/messages` | `messages` (new) |
+| Allocation | `{D}/allocation` | `allocation` (new) |
+| Settings (the four approvers) | `{D}/settings` | `settings` (new), gated by `canLeadSocial` |
+| Design queue | `{D}/design-queue` | `design-queue` (new) |
+| Boosting | `{D}/boosts` | `boosts` (new) |
+| Social reports (63.18) | `{D}/social-reports` (the list) and `{D}/social-reports/[reportId]` (one report, in the same area) | No row: the `social` tab, "Social reports", that `Workspace.reports` adds to the shared `reports` row |
+| Calendar, Composer | `{D}/calendar`, `{D}/composer/[postId]` (existing URLs, unchanged) | `publish` › `calendar` and `composer` (existing tabs) |
+| Saved | `{D}/assets`, the Asset Library (existing page) | `publish` › `assets`, "Asset Library" (a new tab, SCP-Kc) |
+| Portal approval page | `/portal/social`, `/portal/social/[postId]`; money on `/portal/approvals`; published reports on `/portal/reports` (PV7-04b) | None: the portal has its own menu |
+
+`{D}` is `/departments/[deptId]` of the Social Media department. Each new page needs its `AREA_RULES` entry.
+
+- **Row keys are unique inside a workspace.** The shell lights, pins and strips rows by key, and the Social skin's pinned rows (plan §6.2) name these keys.
+  - The seven new rows (`messages`, `profile`, `settings`, `allocation`, `design-queue`, `boosts`, `dashboard`) are free in the workspace today. Admin's `settings` row is a separate list.
+  - Calendar is not a new row: `calendar` is the You block's row, and the posts calendar stays `publish` › `calendar`.
+  - Reports is not one either: `reports` is the shared Performance row.
+- **`settings` and `dashboard` show to the four approvers only.** Both rows gate on `canLeadSocial` (PERMISSION §53.4), the one UI gate kind SCP-Kc builds from it.
+  - The gate hides pages and never grants anything.
+  - The Settings page itself is readable by the team (`GET settings`, 63.4) and editable only with `plan` (`canPlan`).
+  - The dashboard's read is `plan` itself (63.19), so anyone else who opens `{D}/dashboard` gets the page's 403.
+- **The Overview's Team view** (`{D}?view=team`, DW-3) stays as it is, the HoD's, and SCP adds nothing to it. The Team dashboard is its own page, because the Team view reaches only the unit's own heads: `canSwitchToTeam` is `isLeadOf` the Social Media unit or its ancestors, which leaves out the GM's sibling unit, the owner and the superadmin.
+- **Social reports never use `{D}/reports`.** That page (`departments/[deptId]/reports/page.tsx`) is SEO's client reports (SM-22, `search_reports`), and the one file serves every department.
+- **Saved** opens the Asset Library until SCP-5e. SCP-Kc declares `assets` in the social-media toolkit (`lib/deptToolkits.ts`, the tab's source through `fromToolkit`). No permission changes: the creative-asset routes authorise as the generic `file` kind (§35). It is a registry change, not a skin change, so the tab shows in the Standard menu too.
+- **Feed preview** (`tab=preview`, SCP-3d) is the client's grid with drag-to-swap: it reads `GET engagements/:engagementId/feed-preview` and swaps through `POST engagements/:engagementId/feed-preview/swap` (63.10). A swap that moves an approved or scheduled post asks the client again (SCP-Q13), and the page says so before the drop.
+
+### 63.18 The monthly report (SCP-5a, in the first release by SCP-Q5; SCP-Q20 ruled)
+
+The report is the existing `social_reports` row (SMM-23, §19), kind `monthly`, one per engagement and month (`period` `YYYY-MM`). Its four states are the design's: Draft (`draft`), HoD check (`in_review`), Ready (`approved`), Sent (`delivered`). Sending renders the PDF and publishes it to the client's portal reports, as today (PV7-04a, §55). There is no social reports page today: the list is the new `{D}/social-reports` and a report is `{D}/social-reports/[reportId]`, the Reports row's "Social reports" tab (63.17); never `{D}/reports`, which is SEO's.
+
+**What is new.**
+- **One insight and one suggestion per area** (`notes`: followers, engagement, audience) and an **action plan** (`action_plan`), both editable while `draft` or `in_review`.
+- **Numbers from metrics:** the existing frozen snapshot, which now includes manual and simulated metric rows, and the month's boosts as the client's own ad spend (PV7-Q3: never our fees). Any simulated input sets `simulated`, and the page and PDF carry the SIMULATED watermark.
+- **"Draft with AI"** drafts the narrative, the three notes and the action plan from the snapshot and the client's own brand corpus (the brand-draft lookup, `queryBrandKnowledge`, DW-D31). It falls back to a plain template when the gateway is down, as `create` does today (`draftedVia: 'ai'|'template'`).
+- **Who does what** (SCP-Q20, ruled: "approved (HoD check) and sent only by the four approvers"):
+  - The officer drafts, edits and submits it for the HoD check (`social_report` · `create`, `update`: unchanged). The officer never sends it.
+  - **The HoD check is the four's** (`approve`: the HoD and GM seats, the owner, the superadmin; no longer `manager`, `company_admin` or `social_manager`; PERMISSION §53.7). Both answers are the check: approving, and sending back to `draft`, which now needs `approve` instead of `update`.
+  - **Sending is the four's only** (`deliver`, the same holders).
+
+**Routes** (all under the module; the existing codes and statuses stay as SMM-23 built them):
+
+| Route | Gate | What changes |
+|---|---|---|
+| `POST engagements/:engagementId/reports` | `create` (unchanged) | `kind: 'monthly'` also drafts `notes` and `actionPlan`. Unchanged idempotency: an existing report for the engagement, period and kind is returned (`draftedVia: 'existing'`) |
+| `GET reports?engagementId=&status=&period=` | `read` (unchanged) | Adds `period`, `notesComplete: boolean` and `simulated` to each row |
+| `GET reports/:id` | `read` (unchanged) | The document gains `notes`, `actionPlan` and `simulated`, and the row gains `canApprove`, `canDeliver` |
+| `PATCH reports/:id` | `update` (unchanged); sending back needs `approve` | Gains `notes` and `actionPlan`. 400 `{field: 'notes'}` or `{field: 'actionPlan'}` when outside 63.1's shapes. The existing status moves stay: `in_review` from `draft` (submit, `update`), and `draft` from `in_review` (send back: now `approve`, the four, else the generic 403) |
+| `POST reports/:id/ai-draft` | `update` | New. Answers `{narrativeMd, notes, actionPlan, draftedVia}` as a proposal; nothing is saved until a `PATCH`. Only while `draft` or `in_review` (400 `report_not_editable`) |
+| `POST reports/:id/approve` | `approve`, now the four | `in_review` to `approved` (Ready), as today. 400 `notes_incomplete` when an area lacks its insight or suggestion |
+| `POST reports/:id/deliver` | `deliver`, now the four (no longer the officer, SCP-Q20) | `approved` to `delivered` (Sent): the PDF, the deliverable and the PV7-04a publication, as today |
+
+The SMM-23 refusals stay as built (all 400, per the module's `refuse()`): `invalid_kind`, `internal_client_no_reports`, `cannot_submit_from_this_status`, `cannot_send_back_from_this_status`, `invalid_status_transition`, `report_not_editable`, `status_changed_concurrently`, `cannot_approve_from_this_status`, `internal_client_not_deliverable`, `cannot_deliver_from_this_status`; and 503 `pdf_render_not_configured`, `pdf_render_failed`. New: 400 `notes_incomplete`. The fixture's `reports` block lists the states, moves, gates and codes.
+
+**Reports due.** A monthly report is due on the engagement's `report_due_day` of the month after its period. Until it is `delivered`, it shows in the officer's Needs you (63.7) and on the Team dashboard's needs attention (63.19).
+
+### 63.19 The Team dashboard (SCP-5d, in the first release by SCP-Q5; for the four approvers by SCP-Q19)
+
+**The page** is the Social Media workspace's own `{D}/dashboard` (registry row `dashboard`, 63.17), for the four approvers. A block of it sits on Reports › Team. The Overview's Team view is not used (63.17).
+
+**`GET team?month=YYYY-MM`** (`social_engagement` · `plan`: the four of 63.2, with `approverIds` fed). Anyone else gets 403 `not_a_social_approver`, and the block on Reports › Team then hides. One read for the page and the block:
+
+```
+{ month,
+  needsAttention: [{kind: 'late'|'at_risk'|'blocked'|'failed_post'|'boost_waiting'|'report_due'|'report_to_check',
+                    postId?, reportId?, boostId?, engagementId, clientName, title?, since, holder?: {role, label}}],
+  clients: [{engagementId, clientName, officer: {id,name}|null, target, counted, approved, live, extra, stories, health: Health}],
+  workload: [{userId, name, role: 'officer'|'copywriter'|'designer'|'approver', holding: number, late: number, oldestSince: string|null}],
+  waits: [{holderRole: 'officer'|'copywriter'|'approver'|'designer'|'client'|'external', posts: number,
+           oldestSince: string|null, averageWorkingDays: number|null,
+           people: [{userId, name, posts, oldestSince}] }],
+  stepAverages: [{step, averageWorkingDays, samples}],
+  estimatesNotSet: [{engagementId, clientName}],
+  personRowsLimited: boolean, partial: string[] }
+```
+
+- **Where work waits longest** is counted against the holder of each post (fixture `holders`), never the officer for time the post spent with someone else (plan §4.4). `stepAverages` comes from the month's stage-action activity rows (the time between a post entering and leaving each step, in working days).
+- **Per-person data: the four count as the Social Media unit's heads** on this read (SCP-Q19).
+  - Every per-person row (`workload`, `waits[].people`) of a person in the Social Media unit, or a unit under it, is shown to them.
+  - A person outside it, such as a Creatives designer or the GM's own row, passes the shared DW-4 person-axis gate, `assertPersonAxisReadAllowed` (BFF §44, PERMISSION §38c): yourself; the `unrestricted` or `company_wide` tier; or a head for the people in their led scope, read from the company's own lead seats (DW-10g-2).
+  - Any other row is left out, and `personRowsLimited` says so.
+  - The rows carry only what DW-4 lets a head see. Anything DW-4 withholds stays out.
+
+  The team-level sections (needs attention, clients, role totals, step averages, estimates not set) carry no person and are not narrowed.
+- **No last sign-in.** It is not part of the dashboard: it is IT's data (DW-7h), and plan §10's privacy note holds.
+- **Agents** read it through `social.teamDashboard`, as the person who asked, so the same rules apply.
+
+### 63.20 Later, not contracted here: the rest of SCP-5
+
+The weekly report (5b: the `weekly` kind on `social_reports`), ideas for next month (5c, `social_ideas`), the content bank (5e), the monthly cycle's PM tasks (5f), the audit (5g) and onboarding (5h) get their own contract section when they start. Nothing here may be built for them early. Their table and column names are reserved as plan §4.2 lists them.
+
+### 63.21 Proofs required (Linux CI gate, real Postgres and Cerbos; a skip is not a pass)
+
+- **The fixture, both sides.** Every scenario runs green against the nest stage machine (pure) and the HTTP routes, and against the UI demo store. Every refusal code is reachable. The phase, holder and engine-status mappings are pinned.
+- **Maker/checker:** the author and the client's officer are refused `proofread` and `approve` (403 `author_cannot_approve`), also when an agent drives the call for them, and also as the owner and as `platform_admin`; another of the four passes.
+- **Who acts:**
+  - an officer acts only on their clients' posts;
+  - a Web Dev head holding only `manager`, a `company_admin` and a `social_manager` holder cannot approve, plan, record money, create a pipeline post, or check, send back or send a report;
+  - each of the four can: a Social Media seat holder, a GM-unit seat holder, an `owner` (through the mirrors) and `platform_admin`. A seat on another company's same-id unit cannot, and neither can an `owner` of another company;
+  - the owner cannot block, record a client's post decision or run a boost (the team's own steps);
+  - a Creatives designer acts only on posts of a request whose task names them; an in-team designer acts only on `in_team` posts;
+  - unattended automation and bot principals are refused every new action (403 `automation_cannot_act`);
+  - an agent acting for an officer, through the OBO envelope, can do exactly what the officer can, and its activity rows carry `via.agent`.
+- **Order of checks:** 403 before 400 and 409 on every write; `status_changed` on a stale `expectedStatus`; `alreadyApplied` on a replayed `actionId`.
+- **Variants and the client:**
+  - `final_approve` creates one variant per placed network and one review each;
+  - one portal decision updates every review in one transaction, and a failure leaves none changed;
+  - `seenHash` refuses a changed post;
+  - undo works within 10 seconds and not after.
+- **SCP-Q13:**
+  - `schedule` keeps the approval and uses the approved date and placement;
+  - `reschedule` (a new date, or a new placement) sends the post back to the client with every review pending, cancelling a dispatch first;
+  - a feed-preview swap of two approved posts sends both back;
+  - a caption edit in the Composer on an approved post sends it back;
+  - `schedule` after the approved time has passed is 409 `approved_time_passed`.
+- **Loop e:** the HoD is told and the HoD step is skipped.
+- **Money:**
+  - within the budget a boost is approved at once; over it, it waits;
+  - two concurrent requests cannot both take the last of a budget (the lock);
+  - a cancelled boost releases its budget, and a stopped one keeps only its spend;
+  - lowering below `committed` is 409 `budget_below_committed` (proposal, recording and portal agreement), and lowering to it passes;
+  - a viewer contact gets `view_only`;
+  - amounts round-trip as integers.
+- **The portal:** another client's post, file or decision is 404; a team comment never appears in the portal; a pipeline post's review refuses the per-variant decide.
+- **The monthly report:**
+  - the four states with their gates;
+  - the officer submits, but cannot approve, send back or send (SCP-Q20); a `company_admin` cannot approve or send; the owner can;
+  - `notes_incomplete` blocks the HoD check;
+  - "Draft with AI" saves nothing;
+  - the PDF carries the SIMULATED watermark when a number was simulated;
+  - sending publishes through PV7-04a.
+- **The Team dashboard:**
+  - the four read it and nobody else does (403 `not_a_social_approver`);
+  - the four see every Social Media unit person's row, and a person outside the unit only through the DW-4 gate;
+  - the team-level sections are the same for every reader;
+  - no last sign-in anywhere;
+  - the Overview's Team view is unchanged.
+- **The publish decision:** a `company_admin` who is not one of the four cannot decide a pipeline post's publish approval (`social_approver_required`), and neither can the post's author or officer; the filer gets `self_approval` (PV-D46). The HoD, the GM and the owner, holding no `company_admin`, can decide it (SCP-Q21), and a Composer post's approval still needs today's decide right.
+- **Health:** the golden table of 63.5.
+- **Speed:** the feed at 600 posts (SCP-1d).
+- **The pages:**
+  - each new page sits in one area (the DW-1c test);
+  - the row and tab keys of 63.17 are unique in the workspace (the registry test);
+  - `{D}/reports` still serves SEO's reports, unchanged;
+  - the `settings` and `dashboard` rows show under `canLeadSocial` exactly: to each of the four personas, and not to a company admin, a Web Dev head or an officer.
+- **The migration suite** proves:
+  - every CHECK refuses its bad combination and admits its good one, including the NULL cases above;
+  - the plain wall of the two boost tables;
+  - the third wall of the others (an unset GUC reads zero rows, no error);
+  - no existing row changed.
+- **Cerbos:** PERMISSION-CONTRACT §53's static pins and live matrix.
+- **Deploy:** the migrations run on boot. Restart Cerbos (the live sidecar and the test container) and probe it:
+  - the officer's `author` on their own post is allowed, and on another's denied;
+  - the author's `approve` is denied as `platform_admin`;
+  - a `company_admin`'s and a `manager`'s `plan` are denied; a seat approver's and an `owner`'s are allowed;
+  - a client contact's `approve_spend` is allowed and a staff member's denied.
+
+### 63.22 The owner's rulings this contract implements (2026-10-26, plan §2)
+
+| # | Ruling | Where |
+|---|---|---|
+| SCP-Q5 | The first release is SCP-K, SCP-1 to SCP-4, SCP-S, plus SCP-5a and SCP-5d | 63.18, 63.19 |
+| SCP-Q13 | The client approves the content, the date, the time and the placement; any change after approval asks the client again | 63.1, 63.3.5, 63.10, 63.17 |
+| SCP-Q14 | Only contacts with signing capability agree boost money | 63.11 |
+| SCP-Q15 | A budget may be lowered down to `committed`; a stopped boost counts its spend | 63.11 |
+| SCP-Q16 | The HoD or GM files a publish through the publisher, and a second person decides it (refined by SCP-Q19: any of the four files) | 63.10 |
+| SCP-Q17 | An agent acts with the rights of the person who asked | 63.15 |
+| SCP-Q18 | Only the social approvers edit allocations, deadlines and settings, and record or change boost budgets (refined by SCP-Q19) | 63.4, 63.5, 63.11; PERMISSION §53.6 |
+| SCP-Q19 | The social approvers are exactly four: the Social Media unit head and the GM (lead seats), the owner and the superadmin. A company admin is not one, a `social_manager` grant no longer makes one, and no grant can | 63.2, 63.4, 63.6.1, 63.10, 63.11, 63.17, 63.19; PERMISSION §53.4 |
+| SCP-Q20 | A client's monthly report is approved (the HoD check) and sent only by the four; the officer writes and submits it | 63.18; PERMISSION §53.7 |
+
+**No question is open.** Ruled on 2026-10-26, after this contract's review: SCP-Q21, the four approvers decide a pipeline post's publish approval directly (63.10); SCP-Q22, the writer of a monthly report may also approve it, so reports have no maker/checker rule (63.18); SCP-Q23, ticket SCP-1q closes self-promotion into a lead seat before SCP's approvals go live (PERMISSION §53.4).
