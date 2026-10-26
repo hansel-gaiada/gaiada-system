@@ -114,6 +114,9 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
   let recorder: string; // company_admin who RECORDS payments: may not confirm what they recorded
   let outsider: string; // a member with no role
   let checker: string; // a second company_admin: an eligible approver who recorded nothing
+  // PGL-06 (PV-D46 (2)): approving an agent's countersign needs the countersign right, and PGL-05 bars the filer, so the
+  // D14 countersign rows below are approved by a SECOND owner (eligible: holds the right, filed nothing).
+  let coOwner: string;
   let clientA: string;
   let clientB: string;
   let invoiceA: string;
@@ -215,9 +218,12 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
     checker = await createUser("checker@pv306.test");
     await addMembership(tenant, checker);
     await grantRole(checker, await createRole("company_admin"), "company", tenant);
+    coOwner = await createUser("co-owner@pv306.test");
+    await addMembership(tenant, coOwner);
+    await grantRole(coOwner, await createRole("owner"), "company", tenant);
 
     const pool = adminPool();
-    for (const u of [admin, owner, recorder, outsider, checker]) {
+    for (const u of [admin, owner, recorder, outsider, checker, coOwner]) {
       await pool.query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [tenant, u]);
     }
     await linkIdentity(admin, ADMIN.provider, ADMIN.externalId, true);
@@ -581,7 +587,7 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
 
     it("🔴 contracts.countersign: an OWNER-filed approval executes and the provider signature is the owner's", async () => {
       const id = await sentViaTool(clientA, "PV306-D14-2");
-      const a = await fileApproved("contracts.countersign", { tenantId: tenant, contractId: id, signerName: "Olive Owner", signerTitle: "Owner" }, owner, "high");
+      const a = await fileApproved("contracts.countersign", { tenantId: tenant, contractId: id, signerName: "Olive Owner", signerTitle: "Owner" }, owner, "high", coOwner);
       expect(await executeApprovedAutomationWrite(tenant, a)).toEqual({ status: "executed" });
       const sig = await adminPool().query<{ signer: string; content_sha256: string | null; ip_hash: string | null; user_agent: string | null }>(
         `SELECT signer, content_sha256, ip_hash, user_agent FROM contract_signatures WHERE contract_id = $1 AND party = 'provider'`, [id]);
@@ -595,7 +601,7 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
       expect(typeof sig.rows[0].user_agent).toBe("string");
       // Landed: a retry is refused by the precondition, hub not called again.
       const calls = hubCalls;
-      const b = await fileApproved("contracts.countersign", { tenantId: tenant, contractId: id, signerName: "Olive Owner" }, owner, "high");
+      const b = await fileApproved("contracts.countersign", { tenantId: tenant, contractId: id, signerName: "Olive Owner" }, owner, "high", coOwner);
       expect(await executeApprovedAutomationWrite(tenant, b)).toMatchObject({ status: "failed", error: "precondition_failed: contract_already_countersigned" });
       expect(hubCalls).toBe(calls);
     });
@@ -609,7 +615,7 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
       );
       const calls = hubCalls;
       // Filed by the OWNER, who may countersign an attested contract: the refusal is about the tier, not the person.
-      const a = await fileApproved("contracts.countersign", { tenantId: tenant, contractId: id, signerName: "Olive Owner" }, owner, "high");
+      const a = await fileApproved("contracts.countersign", { tenantId: tenant, contractId: id, signerName: "Olive Owner" }, owner, "high", coOwner);
       expect(await executeApprovedAutomationWrite(tenant, a)).toMatchObject({ status: "failed", error: "precondition_failed: contract_certified_tier" });
       expect(hubCalls).toBe(calls);
       expect((await adminPool().query(`SELECT 1 FROM contract_signatures WHERE contract_id = $1`, [id])).rows).toHaveLength(0);
@@ -617,8 +623,10 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
 
     it("🔴 contracts.countersign filed by a company_admin is APPROVED but REFUSED at execution: the approver's authority never replaces the filer's", async () => {
       const id = await sentViaTool(clientA, "PV306-D14-3");
-      // `admin` (a company_admin) is both the filer and, in this fixture, the decider; the owner is not involved.
-      const a = await fileApproved("contracts.countersign", { tenantId: tenant, contractId: id, signerName: "Ada Admin" }, admin, "high");
+      // `admin` (a company_admin) files; an eligible co-owner approves (PGL-05/06: before PV-D46 this fixture had `admin`
+      // approve their own request, which the self-approval rule now refuses before the route is reached). The route
+      // still refuses the FILER at execution.
+      const a = await fileApproved("contracts.countersign", { tenantId: tenant, contractId: id, signerName: "Ada Admin" }, admin, "high", coOwner);
       const out = await executeApprovedAutomationWrite(tenant, a);
       expect(out.status).toBe("failed");
       expect((await rowOf(a)).execution_error).toMatch(/not authorized/);
@@ -634,14 +642,15 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
       expect((await rowOf(byRecorder)).execution_error).toMatch(/someone other than whoever recorded/);
       expect(await paymentStatus(p)).toBe("pending");
 
-      const byAdmin = await fileApproved("invoicePayments.decide", { tenantId: tenant, paymentId: p, decision: "confirm" }, admin, "high");
+      // PGL-05: approved by `checker`, not the filer `admin` (a filer approving their own high-impact request is now refused).
+      const byAdmin = await fileApproved("invoicePayments.decide", { tenantId: tenant, paymentId: p, decision: "confirm" }, admin, "high", checker);
       expect(await executeApprovedAutomationWrite(tenant, byAdmin)).toEqual({ status: "executed" });
       expect(await paymentStatus(p)).toBe("confirmed");
       expect(await activities(p, "confirmed")).toHaveLength(1);
 
       // Decided already: the precondition refuses a second decision before the hub is called.
       const calls = hubCalls;
-      const again = await fileApproved("invoicePayments.decide", { tenantId: tenant, paymentId: p, decision: "reject", reason: "x" }, admin, "high");
+      const again = await fileApproved("invoicePayments.decide", { tenantId: tenant, paymentId: p, decision: "reject", reason: "x" }, admin, "high", checker);
       expect(await executeApprovedAutomationWrite(tenant, again)).toMatchObject({ status: "failed", error: "precondition_failed: payment_not_pending" });
       expect(hubCalls).toBe(calls);
     });
@@ -742,9 +751,9 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
         ),
       );
       expect(await chk({ tenantId: tenant, paymentId: unrecorded }, { userId: recorder })).toEqual({ ok: true });
-      // Only the payment tool declares one; the contract tools keep no approver rule.
+      // `contracts.send` keeps no approver rule; `contracts.countersign` has one since PGL-06 (pgl-05-approvals.db.test.ts).
       expect(getExecutable("contracts.send")!.approverCheck).toBeUndefined();
-      expect(getExecutable("contracts.countersign")!.approverCheck).toBeUndefined();
+      expect(getExecutable("contracts.countersign")!.approverCheck).toBeDefined();
     });
 
     it("preconditions fail closed on bad args and on missing rows, and are RLS-scoped to the approval's tenant", async () => {

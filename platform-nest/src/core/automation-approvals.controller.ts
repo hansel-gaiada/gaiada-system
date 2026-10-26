@@ -54,6 +54,9 @@ import {
 // M6-P4c: a GH-12 repo created for a provisioned site finishes §08 (registry row, WebDesk tenant, pinned
 // contract). The module owns every step; this route only starts it, detached.
 import { completeAfterRepoApproval } from "../modules/webdev/provision-completion.service";
+// PGL-05/06 (PV-D46): the generic self-approval rule, the act-for filing refusal, and the viewer's approve-refusal hint.
+import { actForFilingRefusal, selfApprovalVerdict } from "./approval-self-approval";
+import { approveRefusalHint } from "./approval-approve-hint";
 
 const IMPACTS = new Set(["medium", "high", "unclassified"]);
 const ORIGINS = new Set(["automation", "agent"]);
@@ -181,6 +184,15 @@ export class AutomationApprovalsController {
     if (!ORIGINS.has(origin)) throw new BadRequestException("origin must be automation|agent");
     await authorize(req.principal, { kind: "automation_approval", tenantId }, "create");
     if (!req.principal.userId) throw new BadRequestException("an authenticated user is required");
+    // PGL-05: only `requested_by` is stored, so a filing that acts for SOMEONE ELSE would lose the human the self-approval
+    // rule must exclude. Refused, not silently filed (approval-self-approval.ts's header; no live channel sends one).
+    const actForRefusal = actForFilingRefusal(req.principal);
+    if (actForRefusal) {
+      throw new BadRequestException({
+        message: `${actForRefusal}: an approval cannot be filed on behalf of another person; file it as that person`,
+        reason: actForRefusal,
+      });
+    }
     // M5-G5b: a tool with an args policy may need more than the generic `create` right to be FILED (privacy:
     // `agency_lead:convert`, the route's own gate), so this door cannot plant an approval the tool's own route
     // would never have filed. No policy, no extra check: every other tool is exactly as before.
@@ -227,7 +239,9 @@ export class AutomationApprovalsController {
         [id],
       ),
     );
-    const row = rows[0] as { origin: string; requestedBy: string | null } | undefined;
+    const row = rows[0] as {
+      id: string; origin: string; requestedBy: string | null; status: string; toolName: string; impact: string; toolArgs: unknown;
+    } | undefined;
     if (!row) throw new NotFoundException("approval not found");
     const module = row.origin === "hr" ? "hr" : undefined;
     // T7 (WebDesk M3): the REQUESTER may read their own row. `creatorId` is `requested_by` — the
@@ -240,7 +254,11 @@ export class AutomationApprovalsController {
       { kind: "automation_approval", id, tenantId, module, creatorId: row.requestedBy ?? undefined },
       "read",
     );
-    return row;
+    // PGL-05/06 (PERMISSION-CONTRACT §52, BFF §8): why THIS viewer's Approve would be refused, so the UI can say so
+    // instead of offering a button that 403s. A HINT only: null means "not known to be refused", and the decide gate
+    // stays the authority. Pending rows only; a decided row has nothing to approve.
+    const approveRefusal = row.status === "pending" ? await approveRefusalHint(req.principal, tenantId, row) : null;
+    return { ...row, approveRefusal };
   }
 
   @Get(":tenantId/automation-approvals")
@@ -329,8 +347,8 @@ export class AutomationApprovalsController {
       // `tool_args` joins this pre-authorize SELECT (2026-09-03) because the probe-consent branch
       // below has to know WHICH property is being consented before it can authorize against it —
       // authorizing against an empty id would hand the decision to whatever a policy does with "".
-      c.query<{ origin: string; tool_name: string; workflow_id: string; requested_by: string | null; tool_args: unknown }>(
-        `SELECT origin, tool_name, workflow_id, requested_by, tool_args FROM automation_approvals WHERE id = $1 AND deleted_at IS NULL`,
+      c.query<{ origin: string; tool_name: string; workflow_id: string; requested_by: string | null; tool_args: unknown; impact: string }>(
+        `SELECT origin, tool_name, workflow_id, requested_by, tool_args, impact FROM automation_approvals WHERE id = $1 AND deleted_at IS NULL`,
         [id],
       ),
     );
@@ -480,6 +498,25 @@ export class AutomationApprovalsController {
     // safe from double-application. Rejected decisions and unregistered tools (incl. every
     // money-spending search.* apply tool, permanently barred from this registry) fall through to
     // 'not_applicable', same as today.
+    // ── PGL-05 (PV-D46 (1)): nobody approves their own agent's HIGH-impact request ───────────────────
+    // Generic, not an entry hook: every automation/agent row whose effective impact is high (the highest of the
+    // platform's tool def, the registry's declared tier and the stored value; see approval-self-approval.ts), whether or
+    // not its tool is executable. Refused when the decider, or the human this decide call acts for, is the row's filer.
+    // Runs after authorize() (a caller who may not decide at all keeps the plain 403) and BEFORE the entry's own
+    // `approverCheck`, so the filer gets `self_approval` even where the entry would also refuse them. Nobody is exempt:
+    // this is not a Cerbos rule, so no wildcard reaches past it. Approve only: rejecting executes nothing.
+    if (decision === "approved") {
+      const self = selfApprovalVerdict(
+        { origin: rowOrigin, toolName: rowToolName, impact: existing.rows[0].impact, requestedBy: existing.rows[0].requested_by },
+        { userId: req.principal.userId, actForUserId: req.principal.actFor?.userId },
+      );
+      if (!self.ok) {
+        throw new ForbiddenException({
+          message: `${self.reason}: you may not approve a high-impact request filed by you or by an agent acting for you`,
+          reason: self.reason,
+        });
+      }
+    }
     const executable = decision === "approved" && (rowOrigin === "automation" || rowOrigin === "agent")
       ? getExecutable(rowToolName)
       : undefined;
@@ -499,6 +536,7 @@ export class AutomationApprovalsController {
           runApproverCheck(c, executable, toolArgsOf(existing.rows[0].tool_args), {
             userId: approverId,
             ...(req.principal.actFor?.userId ? { actForUserId: req.principal.actFor.userId } : {}),
+            assurance: req.principal.assurance,
           }),
         );
       if (!verdict.ok) {

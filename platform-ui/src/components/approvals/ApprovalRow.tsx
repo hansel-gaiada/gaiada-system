@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ExecutionInfo, UnifiedApprovalItem } from "@/lib/approvalsShared";
-import { ORIGIN_LABEL, formatAge } from "@/lib/approvalsShared";
+import { ORIGIN_LABEL, approveRefusalSentence, formatAge } from "@/lib/approvalsShared";
 import { StatusBadge } from "@/components/ui";
 import "../dashboard/dashboard.css";
 import "./approvals.css";
@@ -64,6 +64,10 @@ export function ApprovalRow({
         {showExecutionChip && executionInfo!.status === "failed" && executionInfo!.error && (
           <div className="approval-row__exec-error" role="status">{executionInfo!.error}</div>
         )}
+        {/* PGL-05/06: why Approve is disabled for THIS viewer (the server's typed reason, as a sentence). */}
+        {mode === "pending" && item.decidable && item.approveRefusal && (
+          <div className="approval-row__refusal" id={`approve-refusal-${item.id}`}>{approveRefusalSentence(item.approveRefusal)}</div>
+        )}
       </div>
       <div className="needs-me-queue__actions">
         {mode === "decided" ? (
@@ -96,7 +100,15 @@ export function ApprovalRow({
                 aria-label={`Note for ${item.subject}`}
               />
             )}
-            <button type="button" className="lux-btn lux-btn--solid lux-btn--sm" disabled={busy} onClick={() => onDecide?.("approved")}>Approve</button>
+            <button
+              type="button"
+              className="lux-btn lux-btn--solid lux-btn--sm"
+              disabled={busy || !!item.approveRefusal}
+              aria-describedby={item.approveRefusal ? `approve-refusal-${item.id}` : undefined}
+              onClick={() => onDecide?.("approved")}
+            >
+              Approve
+            </button>
             <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" disabled={busy} onClick={() => onDecide?.("rejected")}>Deny</button>
           </>
         ) : item.subjectHref ? (

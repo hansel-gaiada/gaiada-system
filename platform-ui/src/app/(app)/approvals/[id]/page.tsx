@@ -17,6 +17,7 @@ import { isKeyMintApproval, isSiteArchiveApproval, parseKeyMintArgs, parseSiteAr
 import { formatDateTime } from "@/lib/format";
 import { GithubRepoRequestSummary } from "@/components/approvals/GithubRepoRequestSummary";
 import { isGithubRepoRequest } from "@/lib/githubRepoApproval";
+import { approveRefusalSentence } from "@/lib/approvalsShared";
 
 // APPR-01 — the per-approval detail route emailed approval links actually land on now. Before
 // this ticket, `entityHref()` mapped `automation_approval`/`agency_approval` to the bare
@@ -106,6 +107,8 @@ export default async function ApprovalDetailPage({ params }: { params: Promise<{
   const resolvedCompanyName = crossTenant ? me.companies.find((c) => c.id === resolvedTenant)?.name ?? null : null;
 
   const mayDecide = can(me, "approvals.decide", resolvedTenant) && detail.data.status === "pending";
+  // PGL-05/06: the server says when THIS viewer's Approve would be refused (self-approval, the countersign right, …).
+  const approveRefusal = detail.kind === "automation_approval" ? detail.data.approveRefusal ?? null : null;
 
   // A WebDesk key.mint row is NOT a publish: it gets its own label and summary, and its decide control is a client component that
   // keeps the once-only API key in its own state (the generic form below posts to an action that ignores the response body — a
@@ -238,9 +241,19 @@ export default async function ApprovalDetailPage({ params }: { params: Promise<{
                 <span style={{ font: "500 12px var(--font-body)", color: "var(--ink-subtle)" }}>Note (optional)</span>
                 <input type="text" name="note" placeholder="Add a note for the record" />
               </label>
-              <button type="submit" name="decision" value="approved" className="btn btn-primary" style={{ fontSize: 13 }}>Approve</button>
+              <button
+                type="submit" name="decision" value="approved" className="btn btn-primary" style={{ fontSize: 13 }}
+                disabled={!!approveRefusal} aria-describedby={approveRefusal ? "approve-refusal" : undefined}
+              >
+                Approve
+              </button>
               <button type="submit" name="decision" value="rejected" className="btn" style={{ fontSize: 13 }}>Deny</button>
             </form>
+            {approveRefusal && (
+              <p id="approve-refusal" style={{ margin: "10px 0 0", font: "400 13px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
+                {approveRefusalSentence(approveRefusal)}
+              </p>
+            )}
           </Card>
         )}
 

@@ -23,6 +23,7 @@ import { AuthGuard } from "../auth/guards";
 import type { Principal } from "../rbac/principal";
 import type { Envelope, EnvelopeCompany } from "./envelope";
 import { ageBonus, ORIGIN_BASE_WEIGHT, IMPACT_BONUS, type ApprovalOrigin } from "./approvals-urgency";
+import { APPROVER_CHECK_HINT_BUDGET, approveRefusalHint } from "./approval-approve-hint";
 
 export interface UnifiedApprovalItem {
   id: string;
@@ -39,6 +40,10 @@ export interface UnifiedApprovalItem {
   // Additive to the contract's documented shape (D-UX-3's interface is non-exhaustive): the
   // decided-history mode needs SOME terminal-state field, and every origin already has one.
   status: string;
+  /** PGL-05/06 (PERMISSION-CONTRACT §52): on a PENDING automation/agent item the viewer may decide, the typed reason
+   *  their Approve would be refused with (`self_approval`, `countersign_right_required`, an entry's own reason), or
+   *  null. A hint, never the authority (core/approval-approve-hint.ts). Absent on every other item. */
+  approveRefusal?: string | null;
 }
 
 type ApprovalStatus = "pending" | "decided";
@@ -207,9 +212,9 @@ async function automationLeg(
   const { rows } = await withTenants([tenantId], (c) =>
     c.query<{
       id: string; workflow_id: string; tool_name: string; impact: string; reason: string | null;
-      tool_args: { href?: string } | null; origin: string; created_at: string; status: string;
+      tool_args: { href?: string } | null; origin: string; created_at: string; status: string; requested_by: string | null;
     }>(
-      `SELECT id, workflow_id, tool_name, impact, reason, tool_args, origin, created_at, status
+      `SELECT id, workflow_id, tool_name, impact, reason, tool_args, origin, created_at, status, requested_by
        FROM automation_approvals
        WHERE deleted_at IS NULL AND origin = ANY($1::text[])
          AND ${status === "pending" ? "status = 'pending'" : "status IN ('approved','rejected')"}
@@ -240,6 +245,22 @@ async function automationLeg(
       status: r.status,
     };
   });
+  // PGL-05/06: why the viewer's Approve would be refused, for the pending D14 rows they could otherwise decide. One
+  // budget per leg bounds the entry-rule probes (each a query, maybe a Cerbos call); past it only the pure rule runs.
+  if (status === "pending" && decidableOther) {
+    const budget = { remaining: APPROVER_CHECK_HINT_BUDGET };
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    for (const item of items) {
+      if (item.origin !== "automation" && item.origin !== "agent") continue;
+      const r = byId.get(item.id)!;
+      item.approveRefusal = await approveRefusalHint(
+        principal,
+        tenantId,
+        { origin: r.origin, toolName: r.tool_name, impact: r.impact, requestedBy: r.requested_by, toolArgs: r.tool_args },
+        budget,
+      );
+    }
+  }
   return { items, readable: true };
 }
 

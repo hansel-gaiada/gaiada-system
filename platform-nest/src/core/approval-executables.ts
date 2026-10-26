@@ -55,6 +55,9 @@ import { NotFoundException } from "@nestjs/common";
 import { resolveXPricing } from "../modules/social/usage-ledger";
 import { EditorialScopeError, isEditorialRole, normaliseEditorialScope } from "../rbac/editorial-roles";
 import { checkWebdeskEnvironmentDomain } from "../modules/webdev/webdesk-domain";
+// PGL-06: the countersign approver rule asks Cerbos, as the approver, the same question the countersign route asks.
+import { check } from "../rbac/cerbos";
+import { assemblePrincipal, type Assurance } from "../rbac/principal";
 
 /** The result of a server-side precondition re-evaluation. `reason` is a TYPED token (snake_case,
  *  e.g. `run_blocked`, `stage_already_deployed`, `run_not_found`) — it is stored verbatim after the
@@ -181,14 +184,30 @@ export interface ExecutableApprovalEntry {
    *
    * It is NOT a second authorization of the call: Cerbos still runs for real at execution, as the
    * filer. It answers only "may THIS human be the one who lets it through?". Same rules as
-   * `precondition`: a typed snake_case reason, no writes, no network. Absent = no approver rule, which
-   * is every entry that shipped before this field.
+   * `precondition`: a typed snake_case reason, no writes, and no network EXCEPT a read-only Cerbos `check()`
+   * against the local sidecar (PGL-06: `contracts.countersign` asks Cerbos whether the approver could countersign
+   * the contract themselves; the authority for that question is Cerbos, so it is asked, never re-derived). Absent =
+   * no approver rule, which is every entry that shipped before this field.
+   *
+   * PGL-05 (PV-D46 (1)): the generic self-approval rule (`core/approval-self-approval.ts`) runs BEFORE this hook at both
+   * walls, for every high-impact automation/agent row, whether or not the entry declares an `approverCheck`. An entry
+   * never needs to restate "not the filer".
    */
   approverCheck?(
     client: PoolClient,
     toolArgs: Record<string, unknown>,
     approver: ApprovalApprover,
   ): Promise<PreconditionVerdict>;
+
+  /**
+   * PGL-05 — the tool's impact tier, declared ONLY for a tool the PLATFORM does not define (a hub-local dispatcher tool:
+   * `deploy.*` in `mcp-hub/src/delivery-tools.ts`, `pm.*` in `pm-tools.ts`), restated here because platform-nest cannot
+   * read the hub's registry. A platform-defined tool's tier comes from its `McpToolDef.impact` and must NOT be restated
+   * (two copies drift). The self-approval rule reads the highest of this, the platform def and the stored row value, so
+   * the filer, who supplies the stored value, can never lower it. `approval-self-approval.test.ts` pins that every entry
+   * resolves to a server-side tier one way or the other.
+   */
+  impact?: "low" | "medium" | "high";
 }
 
 /** Who approved (or is approving) a D14 row. `actForUserId` is set when the decide call itself arrived
@@ -196,6 +215,9 @@ export interface ExecutableApprovalEntry {
 export interface ApprovalApprover {
   userId: string;
   actForUserId?: string;
+  /** The deciding session's assurance, when known (decide time). At execution only `decided_by` is stored, so a rule
+   *  that needs a Principal assembles one at `linked` (a real, non-low human session; never more than that). */
+  assurance?: Assurance;
 }
 
 /**
@@ -212,7 +234,7 @@ export interface ApprovalApprover {
  *    and notifies), never silently executable.
  */
 export type ExecutableApprovalInput = Pick<ExecutableApprovalEntry, "toolName"> &
-  Partial<Pick<ExecutableApprovalEntry, "lockKey" | "precondition" | "neverAutoRetry" | "preconditionModules" | "approverCheck">>;
+  Partial<Pick<ExecutableApprovalEntry, "lockKey" | "precondition" | "neverAutoRetry" | "preconditionModules" | "approverCheck" | "impact">>;
 
 const registry = new Map<string, ExecutableApprovalEntry>();
 
@@ -249,6 +271,7 @@ export function registerExecutableApproval(entry: ExecutableApprovalInput): void
     // none needed" indistinguishable to anyone auditing the registry.
     ...(entry.preconditionModules?.length ? { preconditionModules: [...entry.preconditionModules] } : {}),
     ...(entry.approverCheck ? { approverCheck: entry.approverCheck } : {}),
+    ...(entry.impact ? { impact: entry.impact } : {}),
   });
 }
 
@@ -342,6 +365,11 @@ export function listBarredExecutables(): BarredExecutableEntry[] {
  */
 export function getExecutable(toolName: string): ExecutableApprovalEntry | undefined {
   return registry.get(toolName);
+}
+
+/** PGL-05: every registered entry, for structural tests (every executable tool must have a server-side impact tier). */
+export function listExecutableApprovals(): ExecutableApprovalEntry[] {
+  return [...registry.values()];
 }
 
 /**
@@ -487,11 +515,14 @@ async function deployPrecondition(
 export function registerCoreExecutableApprovals(): void {
   registerExecutableApproval({
     toolName: "deploy.staging",
+    // PGL-05: hub-local (mcp-hub/src/delivery-tools.ts), so the tier is restated here; see `ExecutableApprovalEntry.impact`.
+    impact: "low",
     lockKey: (args) => deployLockKey(args, "deploy.staging"),
     precondition: (client, args) => deployPrecondition(client, args, "staging"),
   });
   registerExecutableApproval({
     toolName: "deploy.production",
+    impact: "high",
     lockKey: (args) => deployLockKey(args, "deploy.production"),
     precondition: (client, args) => deployPrecondition(client, args, "production"),
   });
@@ -654,11 +685,14 @@ async function pmCreateTaskPrecondition(
 export function registerPmExecutableApprovals(): void {
   registerExecutableApproval({
     toolName: "pm.createTask",
+    // PGL-05: hub-local (mcp-hub/src/pm-tools.ts), so the tier is restated here; see `ExecutableApprovalEntry.impact`.
+    impact: "low",
     lockKey: (args) => pmLockKey(args, "pm.createTask"),
     precondition: pmCreateTaskPrecondition,
   });
   registerExecutableApproval({
     toolName: "pm.createDoc",
+    impact: "low",
     lockKey: (args) => pmLockKey(args, "pm.createDoc"),
     precondition: pmProjectPrecondition,
   });
@@ -2268,6 +2302,43 @@ async function paymentDecideApproverCheck(
   return { ok: true };
 }
 
+/** PGL-06: the typed reason an approval of `contracts.countersign` by someone who could not countersign it is refused with. */
+export const COUNTERSIGN_RIGHT_REQUIRED = "countersign_right_required";
+
+/**
+ * PGL-06 (owner ruling PV-D46 (2), revisiting PV-D27 (2)) — the APPROVER of an agent's `contracts.countersign` must hold
+ * the countersign right on THAT contract, exactly as if countersigning it themselves.
+ *
+ * Before this, the generic `decide` right was enough (a company_admin could clear it), and the countersign then ran as
+ * the FILER, whom Cerbos checks: so the person who let a binding signature through never needed the right to sign. The
+ * question is asked of Cerbos, not re-derived: the same resource (`contract`, this id, this tenant) and the same action
+ * (`countersign`) the POST route authorizes, with the approver as principal. A decide call that acts for someone
+ * (`x-act-for`) must pass for BOTH, mirroring `authorize()`'s intersection, so delegation can never widen it.
+ *
+ * Fails closed: missing args, an approver who no longer assembles into a principal (deleted, disabled), or a deny all
+ * refuse as `countersign_right_required`. A Cerbos outage throws, which the decide surface answers as a 500 deciding
+ * nothing and the executor records as `precondition_error`. Approve only, like every `approverCheck`: rejecting signs
+ * nothing. The self-approval rule (PGL-05) runs first, so the filer gets `self_approval` even when they hold the right.
+ */
+async function contractCountersignApproverCheck(
+  _client: PoolClient,
+  args: Record<string, unknown>,
+  approver: ApprovalApprover,
+): Promise<PreconditionVerdict> {
+  const { tenantId, id } = billingArgs(args, "contractId");
+  if (!tenantId || !id) return { ok: false, reason: "missing_contract_args" };
+  const assurance: Assurance = approver.assurance ?? "linked";
+  const humans = [approver.userId];
+  if (approver.actForUserId && approver.actForUserId !== approver.userId) humans.push(approver.actForUserId);
+  for (const userId of humans) {
+    const principal = await assemblePrincipal(userId, assurance);
+    if (!principal) return { ok: false, reason: COUNTERSIGN_RIGHT_REQUIRED };
+    const decision = await check(principal, { kind: "contract", id, tenantId }, "countersign");
+    if (!decision.allow) return { ok: false, reason: COUNTERSIGN_RIGHT_REQUIRED };
+  }
+  return { ok: true };
+}
+
 /** Registers the three PV3-06 entries. Exported for the same reason the other bootstraps are. */
 export function registerContractBillingExecutableApprovals(): void {
   const key = (ns: string, idKey: "contractId" | "paymentId") => (args: Record<string, unknown>): string => {
@@ -2283,6 +2354,7 @@ export function registerContractBillingExecutableApprovals(): void {
     toolName: "contracts.countersign",
     lockKey: key("contract:countersign", "contractId"),
     precondition: contractCountersignPrecondition,
+    approverCheck: contractCountersignApproverCheck,
   });
   registerExecutableApproval({
     toolName: "invoicePayments.decide",

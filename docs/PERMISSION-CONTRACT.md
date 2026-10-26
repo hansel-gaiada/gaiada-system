@@ -2630,3 +2630,105 @@ Design: `docs/FRONTEND-BFF-CONTRACT.md` §61 (rulings DW-D45 to DW-D49; plan `do
 - Assurance: a `finance_manager` or `company_admin` at low assurance gets 403 on every `vendor_master` route; at high they pass. A `finance_staff` gets 403 on them at any assurance.
 - A bot or automation principal holding `company_admin` or a finance role gets 403 on every write route here.
 - `POST …/schedule/after-signing`: 403 for a `manager`, and for a custom role holding only one of `contract` `update` and `invoice` `create`; 400 `not_allowed_via_automation` through the hub's envelope.
+
+## 52. PGL-05 to PGL-07 — the approval tightening of PV-D46 (2026-10-26, IN PROGRESS): no new kind, no new action, no policy change
+
+Ruling: PV-D46 (`docs/plans/2026-10-10-three-perspectives.md`), which revisits PV-D27. Plan: `docs/plans/2026-10-15-portal-go-live-tickets.md`, PGL-05 to PGL-07. Status: **IN PROGRESS** (built on branch `pgl/05-approvals`; the live proof is PGL-08).
+
+**Nothing in `cerbos/policies/` changes.** The two approver rules live in code at the D14 decide gate and the executor, the same seam as the 2026-10-12 `approverCheck` for `invoicePayments.decide`. PGL-06 reuses the existing `contract · countersign` decision; PGL-07 is a structural test in mcp-hub.
+
+### 52.1 PV-D46 (1): nobody approves their own agent's high-impact request (PGL-05)
+
+An `approved` decision on an `automation_approvals` row is refused with **403 `{error, reason: "self_approval"}`** when all of these hold:
+
+- the row's origin is `agent` or `automation`;
+- its effective impact is `high` (§52.2);
+- the decider is the row's filer (`requested_by`), or the decide call acts for the filer (`x-act-for`).
+
+The row stays `pending` and nothing executes. The rules around it:
+
+- **Nobody is exempt, `platform_admin` included.** The rule is not a Cerbos rule, so the wildcard ALLOW cannot reach past it. It runs after `authorize()`, so a caller who may not decide at all still gets the plain 403.
+- **Rejecting stays allowed.** A reject executes nothing.
+- **Medium, low and unclassified rows are unchanged** (the lead's call in the plan: the high tier PV-D27 (1) named).
+- **It is generic**, not a per-entry `approverCheck`. A future tool declared high is covered with no new code, executable or not.
+- **Code:** `platform-nest/src/core/approval-self-approval.ts` (`selfApprovalVerdict`), called from `AutomationApprovalsController.decide()` before the entry's own `approverCheck`. The `/api/:t/approvals/:id/decide` façade delegates to that method, so both doors refuse alike.
+
+**Who "the human the request acts for" is.** `automation_approvals` has no act-for column, and the rule does not need one:
+
+- An `agent` row is filed under the triggering human's own OBO envelope (the agent is recorded as `agent_name` and `via.agent`, never as the principal), so `requested_by` is that human.
+- The assistant's confirm machinery files as the chatting user, the same human.
+- An `automation` row's `requested_by` is the n8n workflow's own service account, which acts for no human.
+- A filing that carries `x-act-for` naming someone else would lose that human, so `POST /api/:t/automation-approvals` refuses it with **400 `{error, reason: "act_for_filing_unsupported"}`** (after `authorize()`). No live channel sends one: the hub mints no act-for. Recording the acting human instead would need a column (a senior-db decision); until then, refusing keeps the rule complete by construction.
+
+The excluded set is therefore `{requested_by}`, compared with both the decider and the human the decide call acts for.
+
+### 52.2 Where impact comes from at decide time
+
+`automation_approvals.impact` is stored on the row, but the FILER supplies it (the `impact` argument of `approvals.request`), and the filer is exactly the party the rule constrains. So the effective impact is the highest of:
+
+1. the platform's own tool definition, `McpToolDef.impact` (`core/core-tools.ts` and every module's `mcpTools`): the same union `GET /mcp/tool-defs` gives the hub, from which the hub's D14 gate reads the tier it suspends on;
+2. the executable registry entry's declared `impact`, which exists ONLY for the hub-local tools the platform does not define (`deploy.staging` low, `deploy.production` high, `pm.createTask` and `pm.createDoc` low, restated from `mcp-hub/src/delivery-tools.ts` and `pm-tools.ts`);
+3. the stored row value.
+
+The stored value can raise the tier but never lower a server-side one. `approval-self-approval.test.ts` pins two things:
+
+- every executable registry entry resolves to a server-side tier (1 or 2), so a tool that can execute always has an impact the filer cannot lower;
+- no tier is stated in both places.
+
+A tool with no server-side tier has no registry entry, so it cannot execute (`not_applicable`); for it the stored value is the only fact.
+
+### 52.3 PV-D46 (2): approving an agent's countersign needs the countersign right (PGL-06)
+
+`contracts.countersign` declares an `approverCheck` (`contractCountersignApproverCheck`, `core/approval-executables.ts`). The approver must pass Cerbos `contract · countersign` on THAT contract (`{kind: "contract", id: contractId, tenantId}`), exactly as the countersign route asks. Otherwise the refusal is **403 `{error, reason: "countersign_right_required"}`** and the row stays pending.
+
+- A decide call that acts for someone must pass for both humans, like `authorize()`'s intersection.
+- An approver who no longer assembles into a principal is refused as well.
+- Today `owner` of the contract's company and `platform_admin` pass. `company_admin` does not, though it holds the generic `decide`.
+- It stacks on §52.1, which runs first: the filer gets `self_approval` even when they hold the right.
+- Approve only: rejecting signs nothing.
+- `approverCheck` may now make a read-only Cerbos `check()` against the local sidecar. That is the one network call the hook allows, because Cerbos is the authority for the question.
+
+### 52.4 The two walls
+
+| Wall | Where | On refusal |
+|---|---|---|
+| Decide gate | `AutomationApprovalsController.decide()`: §52.1 first, then the entry's `approverCheck` (§52.3), both before the decide UPDATE | 403 with the typed `reason`; the row stays `pending` |
+| Executor | `executeApprovedAutomationWrite()` (`core/approval-execute.ts`): §52.1 against the STORED `decided_by`, right after the claim and before the lock and the precondition; §52.3 after the precondition, as every `approverCheck` | the row lands `failed` with `approver_refused: self_approval` or `approver_refused: countersign_right_required`; the hub is never called |
+
+The executor wall catches a row that reached `approved` any other way: a hand edit, a future decide surface, a row decided before the rule, or a D14-07 retry of one. Only `decided_by` is stored, so the executor wall compares the stored decider. The decide gate also compared the human the decide call acted for. At the executor, the countersign check assembles the stored decider at `linked` assurance.
+
+### 52.5 Typed reasons
+
+| Reason | Status | Raised by |
+|---|---|---|
+| `self_approval` | 403 at decide; `approver_refused: self_approval` at execution | §52.1 |
+| `approver_unknown` | 403 / `approver_refused: approver_unknown` | §52.1 on a high row when the decider has no user id |
+| `countersign_right_required` | 403 at decide; `approver_refused: countersign_right_required` at execution | §52.3 |
+| `act_for_filing_unsupported` | 400 at filing | §52.1 (filing half) |
+
+The read routes say these up front (BFF §8, `approveRefusal`): the approval detail row and the unified inbox's pending automation/agent items carry the reason the viewer's Approve would be refused with, or null. This is a hint and it fails open: a probe that errors yields null. The decide gate stays the authority.
+
+### 52.6 PV-D46 (3): no workflow may hold a contract or payment write tool (PGL-07)
+
+`mcp-hub/src/automation-policy.pgl07.test.ts` checks EVERY `AUTOMATION_ALLOWLIST` entry. Within `contracts.*` and `invoicePayments.*`, only the read set `contracts.list`, `contracts.get` and `invoicePayments.list` may appear. Any other name counts as a write, including a name not defined yet.
+
+- Today only `wf:billing-chaser` names any of these tools, and only reads (PV-D28).
+- The test runs on mutated copies of the list and must report each mutation.
+- The platform side pins the read set: they are the only non-write defs in those namespaces (`approval-self-approval.test.ts`).
+- The older `automation-policy.test.ts` names five forbidden tools. It did not cover `contracts.setSchedule`; this check does.
+
+### 52.7 Proof
+
+The proof runs on the Linux CI gate. Unit cases are in `platform-nest/src/core/approval-self-approval.test.ts`; DB-backed cases through the real routes are in `platform-nest/src/core/pgl-05-approvals.db.test.ts`:
+
+- refused: the filer, the human the agent acts for, a decider acting for the filer, and `platform_admin`;
+- a filer's under-labelled impact is still refused;
+- a different approver succeeds;
+- the filer may reject, and the rejected row executes nothing;
+- a medium self-approval is unchanged;
+- the executor wall holds;
+- the act-for filing is refused;
+- both hints;
+- countersign: no right means 403, the right means 200, the filer with the right gets `self_approval`, and the executor wall holds.
+
+Existing fixtures that had a filer approve their own high row were moved to a second approver (`contracts-billing-tools.test.ts`, `invoice-issue-tools.test.ts`). The live proof with the accounts we have is PGL-08.

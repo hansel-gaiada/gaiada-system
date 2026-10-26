@@ -15,6 +15,8 @@
 /* D14-08 — the failed execution's `execution_error`, shown inline under a decided row. Colour rides
    the existing status-critical text token (same tier StatusBadge itself uses), not a new literal. */
 .approval-row__exec-error { margin-top: 4px; font: 400 12px/1.4 var(--font-body); color: var(--status-critical-fg); }
+/* PGL-05/06: why Approve is disabled for this viewer. A plain sentence in the body's muted ink, not an error colour. */
+.approval-row__refusal { margin-top: 4px; font: 400 12px/1.4 var(--font-body); color: var(--ink-muted); }
 
 .approvals-status-toggle, .approvals-sort-toggle { display: flex; gap: 6px; align-items: center; }
 .approvals-status-toggle a, .approvals-sort-toggle a {
