@@ -1,0 +1,378 @@
+/* =====================================================================
+   SOCIAL SKIN  ·  colours and type for a department workspace that wears it
+   ---------------------------------------------------------------------
+   SCP-Kb  (decision DW-D51, docs/plans/2026-10-15-social-content-pipeline.md §6.1)
+
+   A skin is a variant of the ONE app shell. This file is the Social
+   Media team's Instagram-style look: flat white (or black) surfaces drawn
+   with hairlines, no glass, no ambient wash, one blue, and the system UI
+   face. It is switched on by `data-skin="social"`, which ShellFrame sets in
+   TWO places: on the shell frame `.erp-app` (server-rendered) and on <html>
+   (client effect, so dialogs and drawers rendered outside `.erp-app` wear
+   it too). Standard sets no attribute and never reads this file.
+
+   THE RULE THIS FILE KEEPS (plan §6.1)
+   A skin may change colours and type, in light AND dark. It may NOT change
+   what a status colour MEANS. So this file declares no --status-* token at
+   all: every status family keeps its own hue, in both themes, because it
+   inherits colors.css untouched. (Re-tuning one for contrast on a new
+   surface would be allowed; none needed it. skinTokens.test.ts fails the
+   build if one is ever declared in another family's hue.) Components keep
+   reading only semantic tokens: this file overrides Tier 3 of colors.css and
+   adds no new token name, and skinTokens.test.ts enforces that too.
+
+   HOW THE CASCADE IS KEPT HONEST (verified against the selectors, not assumed)
+   The attribute can sit on <html> or on `.erp-app`, a DESCENDANT of <html>,
+   and colors.css decides dark with selectors on <html>. Custom properties
+   inherit, so on a dark page `.erp-app` starts with <html>'s dark values and
+   the light skin block, written on `.erp-app`, would paint over them. Hence
+   four selector groups:
+     light       [data-skin="social"]                                (0,1,0)
+     OS dark     html:not([data-theme="light"])[data-skin=…]         (0,2,1)  on <html>
+                 html:not([data-theme="light"]) [data-skin=…]        (0,2,1)  on .erp-app
+     pinned dark html[data-theme="dark"][data-skin=…]                (0,2,1)  on <html>
+                 html[data-theme="dark"] [data-skin=…]               (0,2,1)  on .erp-app
+     print       the whole set again, last in the file
+   (0,2,1) beats colors.css's own dark selectors (0,1,1) on <html>, which in
+   turn beat the light skin block (0,1,0): without the dark skin selectors a
+   dark-themed Social page would be Standard dark. Where the specificity is
+   equal the later rule wins, so this file is imported AFTER fonts.css,
+   colors.css, spacing.css and pm.css (see globals.css). globals.css's own
+   :root aliases come later still, but the RE-BIND group below is the same
+   text as theirs, so which of the two wins on <html> makes no difference.
+
+   Two traps that follow from "custom properties inherit":
+   1. A token written as `var(--x)` is resolved on the element that declares
+      it. `--surface-page: var(--brand-color-bg)` is declared on :root, so an
+      override of --brand-color-bg on `.erp-app` would NOT reach it. Every
+      such formula that reads a token this file overrides is therefore
+      re-declared below, VERBATIM (the "RE-BIND" group), so it re-resolves at
+      the element that carries the skin. Same values, new anchor.
+   2. A token the skin sets in its light block but colors.css also sets in
+      its dark block (on <html>) must be set in the skin's dark block too, or
+      <html> would show Standard dark where `.erp-app` shows skin light.
+      skinTokens.test.ts asserts it.
+
+   KEEP THE TWO DARK BLOCKS IN SYNC (the test compares them), and keep the
+   print block equal to the light block (the test compares those too).
+
+   WHERE THE VALUES COME FROM
+   Light is the team's stylesheet: page #fff, ink #000, secondary text
+   #737373, hairline #dbdbdb, soft fill #efefef, hover #f2f2f2, blue #0095f6,
+   error #ed4956, float shadow 0 4px 24px #0000002e. Ink, hairline and wash
+   are alphas of the ink colour (as in colors.css) that RESOLVE to those
+   hexes on white (e.g. 14% black on white is #dbdbdb) and stay correct on
+   a #efefef well. Dark has no prototype; it is Instagram's dark: black page,
+   #121212 / #262626 raised, #f5f5f5 ink, #a8a8a8-equivalent secondary,
+   #363636-equivalent hairline.
+   Departures from the prototype, all for contrast (skinContrast.test.ts):
+     · --accent / --accent-fg (light) is #0068c2, not #0095f6: #0095f6 is
+       3.17:1 on white, which fails as text. The bright blue stays as the dark
+       accent (6.6:1 on black) and as the graphic blue in dark.
+     · --accent-fill is #0074d4, not #0095f6: white on #0095f6 is 3.17:1, white
+       on #0074d4 is 4.72:1, so the familiar white-on-blue button survives.
+     · links read --accent-fg (blue). The prototype's #00376b is 1.8:1 against
+       black body text, so an un-underlined link would be indistinguishable.
+     · line-control is 50% black, not #dbdbdb: a form-control boundary needs
+       3:1 (WCAG 1.4.11) and the prototype hairline is 1.4:1.
+   Type: the prototype's body face is the system UI stack, so --font-body is
+   overridden. --font-display and --font-data are left alone (the prototype's
+   only other face is a script wordmark, not a heading face).
+   ===================================================================== */
+
+/* ---- LIGHT ---------------------------------------------------------- */
+[data-skin="social"] {
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  /* Brand — DECORATIVE only (wordmark, dividers, avatar fills); never --accent. The story-ring's magenta and purple. */
+  --brand-color-primary:   #c13584;
+  --brand-color-secondary: #962fbf;
+  --brand-color-bg:        #ffffff;
+  --brand-color-text-dark: #000000;
+
+  /* Surfaces — flat: every tier is white, the hairline does the separating. Sunken is the soft fill. */
+  --surface-sunken:     #efefef;
+  --surface-card:       #ffffff;
+  --surface-card-solid: #ffffff;
+  --surface-raised:     #ffffff;
+  --surface-overlay:    #ffffff;
+  --surface-modal:      #ffffff;
+  --surface-chrome:     var(--brand-color-bg);
+  --surface-inverse:    #262626;
+  --text-on-inverse:    #ffffff;
+  --accent-on-inverse:  #4cb5f9;
+
+  /* Material — no glass, no ambient wash, no glow. Opaque white with a hairline edge. The zero shadows are valid
+     shadows (not `none`) because components write `var(--elev-2), var(--glass-inner)` and `none` would void the list. */
+  --surface-glass: #ffffff;
+  --glass-line:    rgb(0 0 0 / 0.14);
+  --glass-divider: rgb(0 0 0 / 0.10);
+  --glass-sheen:   transparent;
+  --glass-inner:   inset 0 0 0 0 rgb(0 0 0 / 0);
+  --glow:          0 0 0 0 rgb(0 0 0 / 0);
+  --ambient-1: 0%;
+  --ambient-2: 0%;
+  --ambient-3: 0%;
+  --wash:        rgb(0 0 0 / 0.05);
+  --wash-strong: rgb(0 0 0 / 0.08);
+
+  /* Interactive colour and what sits on it. */
+  --text-on-accent:     #ffffff;
+  --accent:             #0068c2;
+  --accent-fg:          #0068c2;
+  --accent-fill:        #0074d4;
+  --ink-on-accent-fill: #ffffff;
+  --accent-secondary:   #962fbf;
+
+  /* Ink — alphas of black, resolving to #000 / ~#141414 / ~#4d4d4d / #737373 on white. */
+  --ink-strong: rgb(0 0 0);
+  --ink-body:   rgb(0 0 0 / 0.92);
+  --ink-muted:  rgb(0 0 0 / 0.70);
+  --ink-subtle: rgb(0 0 0 / 0.55);
+  --ink-faint:  rgb(0 0 0 / 0.38);
+
+  /* Structure — 14% black on white is the prototype's #dbdbdb hairline. */
+  --line-control: rgb(0 0 0 / 0.50);
+  --line-strong:  rgb(0 0 0 / 0.30);
+  --line:         rgb(0 0 0 / 0.14);
+  --line-soft:    rgb(0 0 0 / 0.08);
+
+  --tint-hover:  color-mix(in srgb, var(--accent) 6%, transparent);
+  --tint-active: color-mix(in srgb, var(--accent) 10%, transparent);
+
+  /* Elevation — flat. Only floating layers cast the prototype's soft float shadow. */
+  --elev-1:       0 0 0 0 rgb(0 0 0 / 0);
+  --elev-2:       0 0 0 1px rgb(0 0 0 / 0.14);
+  --elev-overlay: 0 4px 24px rgb(0 0 0 / 0.18);
+  --elev-4:       0 4px 24px rgb(0 0 0 / 0.18);
+  --scrim:        rgb(0 0 0 / 0.65);
+
+  /* RE-BIND (trap 1 above). Formulas declared on :root in colors.css / globals.css / pm.css / spacing.css /
+     departments.css that read a token overridden here. Verbatim copies: they re-resolve on the element that wears
+     the skin, instead of keeping the value Standard gave <html>. */
+  --surface-page: var(--brand-color-bg);
+  --text-primary: var(--brand-color-text-dark);
+  --hairline:     var(--brand-color-text-dark);
+  --overlay-scrim: color-mix(in srgb, var(--text-primary) 40%, transparent);
+  --cat-1-area: color-mix(in srgb, var(--cat-1) 62%, var(--surface-card));
+  --cat-2-area: color-mix(in srgb, var(--cat-2) 62%, var(--surface-card));
+  --cat-3-area: color-mix(in srgb, var(--cat-3) 62%, var(--surface-card));
+  --cat-4-area: color-mix(in srgb, var(--cat-4) 62%, var(--surface-card));
+  --cat-5-area: color-mix(in srgb, var(--cat-5) 62%, var(--surface-card));
+  --cat-6-area: color-mix(in srgb, var(--cat-6) 62%, var(--surface-card));
+  --cat-7-area: color-mix(in srgb, var(--cat-7) 62%, var(--surface-card));
+  --cat-8-area: color-mix(in srgb, var(--cat-8) 62%, var(--surface-card));
+  --erp-accent:       var(--accent);
+  --erp-accent2:      var(--accent-secondary);
+  --erp-hairline:     var(--line);
+  --erp-hairline-soft: var(--line-soft);
+  --erp-ink-70:       var(--ink-muted);
+  --erp-ink-60:       var(--ink-muted);
+  --erp-ink-50:       var(--ink-subtle);
+  --dept-positive:    var(--erp-accent);
+  --dept-ring-track:  var(--erp-hairline);
+  --pm-surface-page:   var(--surface-page);
+  --pm-surface-card:   var(--surface-card);
+  --pm-surface-raised: var(--surface-raised);
+  --pm-surface-sunken: var(--surface-sunken);
+  --pm-line:           var(--line);
+  --pm-line-soft:      var(--line-soft);
+  --pm-text:           var(--ink-strong);
+  --pm-text-dim:       var(--ink-muted);
+  --pm-text-faint:     var(--ink-subtle);
+  --pm-accent:         var(--accent);
+  --pm-accent-weak:    var(--tint-hover);
+  --pm-accent-fg:      var(--accent-fg);
+  --pm-accent-fill:    var(--accent-fill);
+  --pm-text-on-accent: var(--text-on-accent);
+  --pm-urgency-neutral-fg: var(--ink-muted);
+}
+
+/* ---- DARK ------------------------------------------------------------ */
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"])[data-skin="social"],
+  html:not([data-theme="light"]) [data-skin="social"] {
+    --brand-color-primary:   #e0558f;
+    --brand-color-secondary: #b968d6;
+    --brand-color-bg:        #000000;
+    --brand-color-text-dark: #f5f5f5;
+
+    --surface-sunken:     #000000;
+    --surface-card:       #121212;
+    --surface-card-solid: #121212;
+    --surface-raised:     #262626;
+    --surface-overlay:    #262626;
+    --surface-modal:      #262626;
+    --surface-chrome:     var(--brand-color-bg);
+    --surface-inverse:    #363636;
+    --text-on-inverse:    #ffffff;
+
+    --surface-glass: #121212;
+    --glass-line:    rgb(255 255 255 / 0.21);
+    --glass-divider: rgb(255 255 255 / 0.12);
+    --glass-sheen:   transparent;
+    --glass-inner:   inset 0 0 0 0 rgb(0 0 0 / 0);
+    --glow:          0 0 0 0 rgb(0 0 0 / 0);
+    --ambient-1: 0%;
+    --ambient-2: 0%;
+    --ambient-3: 0%;
+    --wash:        rgb(255 255 255 / 0.06);
+    --wash-strong: rgb(255 255 255 / 0.10);
+
+    --text-on-accent:     #000000;
+    --accent:             #0095f6;
+    --accent-fg:          #0095f6;
+    --accent-fill:        #0074d4;
+    --ink-on-accent-fill: #ffffff;
+    --accent-secondary:   #c07be0;
+
+    --ink-strong: rgb(245 245 245);
+    --ink-body:   rgb(245 245 245 / 0.92);
+    --ink-muted:  rgb(245 245 245 / 0.78);
+    --ink-subtle: rgb(245 245 245 / 0.66);
+    --ink-faint:  rgb(245 245 245 / 0.42);
+
+    --line-control: rgb(255 255 255 / 0.42);
+    --line-strong:  rgb(255 255 255 / 0.34);
+    --line:         rgb(255 255 255 / 0.21);
+    --line-soft:    rgb(255 255 255 / 0.12);
+
+    --tint-hover:  color-mix(in srgb, var(--accent) 10%, transparent);
+    --tint-active: color-mix(in srgb, var(--accent) 16%, transparent);
+
+    --elev-1:       0 0 0 0 rgb(0 0 0 / 0);
+    --elev-2:       0 0 0 1px rgb(255 255 255 / 0.21);
+    --elev-overlay: 0 4px 24px rgb(0 0 0 / 0.60);
+    --elev-4:       0 4px 24px rgb(0 0 0 / 0.75);
+    --scrim:        rgb(0 0 0 / 0.75);
+  }
+}
+
+/* KEEP IN SYNC with the @media block above. */
+html[data-theme="dark"][data-skin="social"],
+html[data-theme="dark"] [data-skin="social"] {
+  --brand-color-primary:   #e0558f;
+  --brand-color-secondary: #b968d6;
+  --brand-color-bg:        #000000;
+  --brand-color-text-dark: #f5f5f5;
+
+  --surface-sunken:     #000000;
+  --surface-card:       #121212;
+  --surface-card-solid: #121212;
+  --surface-raised:     #262626;
+  --surface-overlay:    #262626;
+  --surface-modal:      #262626;
+  --surface-chrome:     var(--brand-color-bg);
+  --surface-inverse:    #363636;
+  --text-on-inverse:    #ffffff;
+
+  --surface-glass: #121212;
+  --glass-line:    rgb(255 255 255 / 0.21);
+  --glass-divider: rgb(255 255 255 / 0.12);
+  --glass-sheen:   transparent;
+  --glass-inner:   inset 0 0 0 0 rgb(0 0 0 / 0);
+  --glow:          0 0 0 0 rgb(0 0 0 / 0);
+  --ambient-1: 0%;
+  --ambient-2: 0%;
+  --ambient-3: 0%;
+  --wash:        rgb(255 255 255 / 0.06);
+  --wash-strong: rgb(255 255 255 / 0.10);
+
+  --text-on-accent:     #000000;
+  --accent:             #0095f6;
+  --accent-fg:          #0095f6;
+  --accent-fill:        #0074d4;
+  --ink-on-accent-fill: #ffffff;
+  --accent-secondary:   #c07be0;
+
+  --ink-strong: rgb(245 245 245);
+  --ink-body:   rgb(245 245 245 / 0.92);
+  --ink-muted:  rgb(245 245 245 / 0.78);
+  --ink-subtle: rgb(245 245 245 / 0.66);
+  --ink-faint:  rgb(245 245 245 / 0.42);
+
+  --line-control: rgb(255 255 255 / 0.42);
+  --line-strong:  rgb(255 255 255 / 0.34);
+  --line:         rgb(255 255 255 / 0.21);
+  --line-soft:    rgb(255 255 255 / 0.12);
+
+  --tint-hover:  color-mix(in srgb, var(--accent) 10%, transparent);
+  --tint-active: color-mix(in srgb, var(--accent) 16%, transparent);
+
+  --elev-1:       0 0 0 0 rgb(0 0 0 / 0);
+  --elev-2:       0 0 0 1px rgb(255 255 255 / 0.21);
+  --elev-overlay: 0 4px 24px rgb(0 0 0 / 0.60);
+  --elev-4:       0 4px 24px rgb(0 0 0 / 0.75);
+  --scrim:        rgb(0 0 0 / 0.75);
+}
+
+/* ---- PRINT · always light --------------------------------------------
+   Paper is light whatever theme the screen was in, so the skin's LIGHT
+   values are re-declared here, and the selector list is every selector above
+   (light, OS dark, pinned dark, plus pinned light) so it ties with the dark
+   blocks at (0,2,1) and wins on source order, the way colors.css's own print
+   block does. Every token a dark block sets is listed. */
+@media print {
+  html[data-skin="social"],
+  html[data-theme="dark"][data-skin="social"],
+  html[data-theme="light"][data-skin="social"],
+  html:not([data-theme="light"])[data-skin="social"],
+  html [data-skin="social"],
+  html[data-theme="dark"] [data-skin="social"],
+  html[data-theme="light"] [data-skin="social"],
+  html:not([data-theme="light"]) [data-skin="social"] {
+    --brand-color-primary:   #c13584;
+    --brand-color-secondary: #962fbf;
+    --brand-color-bg:        #ffffff;
+    --brand-color-text-dark: #000000;
+
+    --surface-sunken:     #efefef;
+    --surface-card:       #ffffff;
+    --surface-card-solid: #ffffff;
+    --surface-raised:     #ffffff;
+    --surface-overlay:    #ffffff;
+    --surface-modal:      #ffffff;
+    --surface-chrome:     var(--brand-color-bg);
+    --surface-inverse:    #262626;
+    --text-on-inverse:    #ffffff;
+
+    --surface-glass: #ffffff;
+    --glass-line:    rgb(0 0 0 / 0.14);
+    --glass-divider: rgb(0 0 0 / 0.10);
+    --glass-sheen:   transparent;
+    --glass-inner:   inset 0 0 0 0 rgb(0 0 0 / 0);
+    --glow:          0 0 0 0 rgb(0 0 0 / 0);
+    --ambient-1: 0%;
+    --ambient-2: 0%;
+    --ambient-3: 0%;
+    --wash:        rgb(0 0 0 / 0.05);
+    --wash-strong: rgb(0 0 0 / 0.08);
+
+    --text-on-accent:     #ffffff;
+    --accent:             #0068c2;
+    --accent-fg:          #0068c2;
+    --accent-fill:        #0074d4;
+    --ink-on-accent-fill: #ffffff;
+    --accent-secondary:   #962fbf;
+
+    --ink-strong: rgb(0 0 0);
+    --ink-body:   rgb(0 0 0 / 0.92);
+    --ink-muted:  rgb(0 0 0 / 0.70);
+    --ink-subtle: rgb(0 0 0 / 0.55);
+    --ink-faint:  rgb(0 0 0 / 0.38);
+
+    --line-control: rgb(0 0 0 / 0.50);
+    --line-strong:  rgb(0 0 0 / 0.30);
+    --line:         rgb(0 0 0 / 0.14);
+    --line-soft:    rgb(0 0 0 / 0.08);
+
+    --tint-hover:  color-mix(in srgb, var(--accent) 6%, transparent);
+    --tint-active: color-mix(in srgb, var(--accent) 10%, transparent);
+
+    --elev-1:       0 0 0 0 rgb(0 0 0 / 0);
+    --elev-2:       0 0 0 1px rgb(0 0 0 / 0.14);
+    --elev-overlay: 0 4px 24px rgb(0 0 0 / 0.18);
+    --elev-4:       0 4px 24px rgb(0 0 0 / 0.18);
+    --scrim:        rgb(0 0 0 / 0.65);
+  }
+}

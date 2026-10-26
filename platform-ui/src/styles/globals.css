@@ -6,6 +6,9 @@
    any other surface; imported here because the PM tree spans several route groups
    and a per-component import would load it many times. See tokens/pm.css header. */
 @import "./tokens/pm.css";
+/* Department skins (SCP-Kb): the Social skin's colours and type, active only under data-skin="social". Imported LAST among the token files:
+   it re-binds formulas declared on :root in the files above, and at equal specificity the later rule wins. */
+@import "./tokens/skin-social.css";
 
 /* Design-system rules (Phase 1, 2026-08-22): hairline borders and opacity
    hovers stay; the zero-radius / no-shadow law is RETIRED. Radius and
