@@ -2684,6 +2684,7 @@ A tool with no server-side tier has no registry entry, so it cannot execute (`no
 - A decide call that acts for someone must pass for both humans, like `authorize()`'s intersection.
 - An approver who no longer assembles into a principal is refused as well.
 - Today `owner` of the contract's company and `platform_admin` pass. `company_admin` does not, though it holds the generic `decide`.
+- `owner` alone cannot decide approvals at all: it holds no `automation_approval` `read` or `decide` (only `company_admin`, `module_manager` for hr rows, and `platform_admin` do). So an approver of an agent's countersign needs BOTH `company_admin` (to decide) and `owner` (to countersign), or `platform_admin`. PGL-08's temporary grant must give one QA login both.
 - It stacks on §52.1, which runs first: the filer gets `self_approval` even when they hold the right.
 - Approve only: rejecting signs nothing.
 - `approverCheck` may now make a read-only Cerbos `check()` against the local sidecar. That is the one network call the hook allows, because Cerbos is the authority for the question.
@@ -2731,4 +2732,14 @@ The proof runs on the Linux CI gate. Unit cases are in `platform-nest/src/core/a
 - both hints;
 - countersign: no right means 403, the right means 200, the filer with the right gets `self_approval`, and the executor wall holds.
 
-Existing fixtures that had a filer approve their own high row were moved to a second approver (`contracts-billing-tools.test.ts`, `invoice-issue-tools.test.ts`). The live proof with the accounts we have is PGL-08.
+Existing fixtures that encoded the old permissive behaviour, a filer approving (or a fixture storing the filer as the decider of) their own high row, were moved to a second approver:
+
+- `contracts-billing-tools.test.ts` and `invoice-issue-tools.test.ts`;
+- `approval-executables.test.ts`, `d14-09-redelivery-storm.test.ts` and `d14-17-assistant-write-registry.test.ts`;
+- `d14-iam-direct-registry.test.ts` and `d14-jml-registry.test.ts`;
+- `d14-smm-09-social-publish-registry.test.ts`, `d14-smm-17-social-reply-registry.test.ts` and `d14-smm-35-social-reply-draft-registry.test.ts`;
+- `modules/search/search-sem-apply.test.ts`.
+
+`agency-privacy.db.test.ts`'s self-approval case now asserts the earlier refusal (403 `self_approval` at decide) and keeps the route's own `self_approved` wall for a row approved around the gate.
+
+The live proof with the accounts we have is PGL-08.

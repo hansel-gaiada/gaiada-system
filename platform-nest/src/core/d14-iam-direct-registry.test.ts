@@ -289,13 +289,16 @@ describe.skipIf(!TEST_URL)("preconditions against real Postgres", () => {
 
     async function fileDecided(tool: string, args: Record<string, unknown>, impact: string): Promise<string> {
       const id = newId();
+      // PGL-05 (PV-D46 (1)): decided by a separate human. This fixture used to store the filer (`wfUser`) as the decider
+      // too, which the executor's self-approval wall now refuses for a high-impact tool (iam.grantRole).
+      const approver = await createUser(`approver-${id}@ex.test`);
       await withTenants([T], (c) =>
         c.query(
           `INSERT INTO automation_approvals
              (id, tenant_id, workflow_id, tool_name, tool_args, impact, status, requested_by, decided_by, decided_at,
               origin, origin_site, execution_status)
-           VALUES ($1,$2,'wf:delivery',$3,$4,$5,'approved',$6,$6,now(),'automation','main','pending')`,
-          [id, T, tool, JSON.stringify(args), impact, wfUser],
+           VALUES ($1,$2,'wf:delivery',$3,$4,$5,'approved',$6,$7,now(),'automation','main','pending')`,
+          [id, T, tool, JSON.stringify(args), impact, wfUser, approver],
         ),
       );
       return id;

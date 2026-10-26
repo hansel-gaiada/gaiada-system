@@ -340,7 +340,19 @@ describe.skipIf(!TEST_URL)("M5-G5 — agency privacy commands: WS4 flow, erase k
   it("a self-approved request never runs (maker != checker), and a rejected one is 409", async () => {
     const p = person();
     const id = await insertLead(co, { status: "new", name: p.name, email: p.email });
-    const self = await fileAndDecide(co, admin, admin, "erase", { email: p.email });
+    // PGL-05 (PV-D46 (1)): `agency_privacy.erase` is high impact, so the DECIDE GATE now refuses the requester's own
+    // approval (403 self_approval, the row stays pending). Before PV-D46 that decide succeeded and only this route refused.
+    const filed = await call(co, admin, "erase", { email: p.email });
+    expect(filed.statusCode, filed.body).toBe(202);
+    const self = filed.json() as { approvalId: string };
+    const d = await decide(co, admin, self.approvalId, "approved");
+    expect(d.statusCode, d.body).toBe(403);
+    expect(d.json()).toMatchObject({ reason: "self_approval" });
+    // The route's own maker != checker wall still holds for a row approved AROUND the gate (a hand edit, an old row).
+    await adminPool().query(
+      `UPDATE automation_approvals SET status = 'approved', decided_by = $2, decided_at = now() WHERE id = $1`,
+      [self.approvalId, admin],
+    );
     const r = await call(co, admin, "erase", { email: p.email, approvalId: self.approvalId });
     expect(r.statusCode).toBe(403);
     expect(r.json()).toMatchObject({ reason: "self_approved" });

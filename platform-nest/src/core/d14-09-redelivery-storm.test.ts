@@ -82,13 +82,16 @@ describe.skipIf(!TEST_URL)("D14-09 adversarial: concurrent redelivery storm + cr
 
   async function fileDecided(toolName: string, args: Record<string, unknown> = {}): Promise<string> {
     const id = newId();
+    // PGL-05 (PV-D46 (1)): decided by a separate human. This fixture used to store the filer as the decider too,
+    // which the executor's self-approval wall now refuses for a high-impact row.
+    const approver = await createUser(`approver-${id}@ex.test`);
     await withTenants([co], (c) =>
       c.query(
         `INSERT INTO automation_approvals
            (id, tenant_id, workflow_id, tool_name, tool_args, impact, status, requested_by, decided_by, decided_at,
             origin, origin_site, execution_status)
-         VALUES ($1, $2, 'wf:delivery', $3, $4, 'high', 'approved', $5, $5, now(), 'automation', 'main', 'pending')`,
-        [id, co, toolName, JSON.stringify(args), wfUser],
+         VALUES ($1, $2, 'wf:delivery', $3, $4, 'high', 'approved', $5, $6, now(), 'automation', 'main', 'pending')`,
+        [id, co, toolName, JSON.stringify(args), wfUser, approver],
       ),
     );
     return id;

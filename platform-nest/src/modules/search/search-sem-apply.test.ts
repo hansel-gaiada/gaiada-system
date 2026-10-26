@@ -56,6 +56,7 @@ describe.skipIf(!TEST_URL)("search-marketing api-mode execution (SM-21)", () => 
   let C: string;
   let uA: string;
   let uC: string;
+  let uApprover: string; // PGL-05: decides the WS4 approvals uA files (a requester may not approve their own high-impact request)
   let clientA: string;
   let engagementId: string;
   let propertyId: string;
@@ -93,7 +94,9 @@ describe.skipIf(!TEST_URL)("search-marketing api-mode execution (SM-21)", () => 
 
   async function decideApproval(approvalId: string, decision: "approved" | "rejected"): Promise<void> {
     const r = await app.inject({
-      method: "POST", url: `/api/${A}/automation-approvals/${approvalId}/decide`, headers: asUser(uA),
+      // PGL-05 (PV-D46 (1)): decided by `uApprover`, not the requester `uA`. The search apply tools are high impact, and
+      // the decide gate now refuses a requester approving their own high-impact request (403 self_approval).
+      method: "POST", url: `/api/${A}/automation-approvals/${approvalId}/decide`, headers: asUser(uApprover),
       payload: { decision },
     });
     expect(r.statusCode).toBe(200);
@@ -193,7 +196,9 @@ describe.skipIf(!TEST_URL)("search-marketing api-mode execution (SM-21)", () => 
     C = await createCompany("SM21 Co C", ["search"]);
     uA = await createUser("sm21-a@a.test");
     uC = await createUser("sm21-c@c.test");
+    uApprover = await createUser("sm21-approver@a.test");
     await addMembership(A, uA);
+    await addMembership(A, uApprover);
     await addMembership(C, uC);
     clientA = await createClient(A, "SM21 Client of A");
 
