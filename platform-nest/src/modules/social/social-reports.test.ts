@@ -18,6 +18,7 @@ import { createCompany, createUser, addMembership, createClient } from "../../te
 import { registerModule, resetModules } from "../registry";
 import { setRedis, closeRedis } from "../../events/redis";
 import { socialModule } from "./index";
+import { check } from "../../rbac/cerbos";
 
 // mintPrintJobToken/renderPdfViaSidecar need a REAL Redis — same requirement TR-21's own
 // reports.controller.export.pdf.db.test.ts documents (`REDIS_URL_TEST`, explicit `setRedis`).
@@ -369,5 +370,64 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("social-media client-facing report
     // approve from a non-'in_review' status is refused too (already 'delivered' here).
     const reapprove = await app.inject({ method: "POST", url: `/api/${A}/modules/social/reports/${id}/approve`, headers: asUser(uA) });
     expect(reapprove.statusCode).toBe(400);
+  });
+
+  // ── SCP-5a / SCP-1b (PERMISSION-CONTRACT §53.7, BFF §63.18): the report check belongs to the four social approvers ──
+  // Cerbos is stubbed here, so this pins what the ROUTES ask: sending back is `approve` (never `update`), and every call site
+  // sends module "social" and the company's seat approvers. The live decisions (company_admin / manager / social_manager
+  // refused, a seat approver and the owner allowed) are cerbos-social-pipeline.test.ts's matrix.
+  it("sending a report back authorizes as approve; every report call carries module social and approverIds", async () => {
+    const mocked = vi.mocked(check);
+    const create = await app.inject({
+      method: "POST", url: `/api/${A}/modules/social/engagements/${engA}/reports`, headers: asUser(uA),
+      payload: { kind: "monthly", period: "2026-07" },
+    });
+    const id = create.json().id as string;
+    const submit = await app.inject({ method: "PATCH", url: `/api/${A}/modules/social/reports/${id}`, headers: asUser(uA), payload: { status: "in_review" } });
+    expect(submit.statusCode).toBe(200);
+
+    mocked.mockClear();
+    const back = await app.inject({ method: "PATCH", url: `/api/${A}/modules/social/reports/${id}`, headers: asUser(uA), payload: { status: "draft" } });
+    expect(back.statusCode).toBe(200);
+    expect(back.json().status).toBe("draft");
+    const reportCalls = mocked.mock.calls.filter(([, r]) => r.kind === "social_report");
+    expect(reportCalls.map(([, , a]) => a)).toEqual(["approve"]);
+    expect(reportCalls[0][1]).toMatchObject({ kind: "social_report", id, tenantId: A, module: "social" });
+    expect(Array.isArray(reportCalls[0][1].approverIds)).toBe(true);
+
+    // A send-back that also edits the narrative needs both answers.
+    await app.inject({ method: "PATCH", url: `/api/${A}/modules/social/reports/${id}`, headers: asUser(uA), payload: { status: "in_review" } });
+    mocked.mockClear();
+    const backEdited = await app.inject({
+      method: "PATCH", url: `/api/${A}/modules/social/reports/${id}`, headers: asUser(uA), payload: { status: "draft", narrativeMd: "edited" },
+    });
+    expect(backEdited.statusCode).toBe(200);
+    expect(mocked.mock.calls.filter(([, r]) => r.kind === "social_report").map(([, , a]) => a)).toEqual(["approve", "update"]);
+
+    // A plain edit and a submit stay `update`.
+    mocked.mockClear();
+    const edit = await app.inject({ method: "PATCH", url: `/api/${A}/modules/social/reports/${id}`, headers: asUser(uA), payload: { narrativeMd: "again" } });
+    expect(edit.statusCode).toBe(200);
+    expect(mocked.mock.calls.filter(([, r]) => r.kind === "social_report").map(([, , a]) => a)).toEqual(["update"]);
+
+    // approve: module social + approverIds.
+    await app.inject({ method: "PATCH", url: `/api/${A}/modules/social/reports/${id}`, headers: asUser(uA), payload: { status: "in_review" } });
+    mocked.mockClear();
+    const approve = await app.inject({ method: "POST", url: `/api/${A}/modules/social/reports/${id}/approve`, headers: asUser(uA) });
+    expect(approve.statusCode).toBe(200);
+    const approveCalls = mocked.mock.calls.filter(([, r]) => r.kind === "social_report");
+    expect(approveCalls.map(([, , a]) => a)).toEqual(["approve"]);
+    expect(approveCalls[0][1]).toMatchObject({ module: "social", id, tenantId: A });
+    expect(Array.isArray(approveCalls[0][1].approverIds)).toBe(true);
+
+    // list and detail: module social + approverIds too.
+    mocked.mockClear();
+    expect((await app.inject({ method: "GET", url: `/api/${A}/modules/social/reports`, headers: asUser(uA) })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: `/api/${A}/modules/social/reports/${id}`, headers: asUser(uA) })).statusCode).toBe(200);
+    for (const [, r, a] of mocked.mock.calls.filter(([, r]) => r.kind === "social_report")) {
+      expect(a).toBe("read");
+      expect(r.module).toBe("social");
+      expect(Array.isArray(r.approverIds)).toBe(true);
+    }
   });
 });

@@ -174,6 +174,13 @@ const DIRECT: Record<string, RealRole[]> = {
   webdesk_translator: [],
   webdesk_seo_reviewer: [],
   webdesk_editor: [],
+  // SCP-1b (PERMISSION-CONTRACT §53.4, §53.9): the two scope-only social roles map to themselves; the seat approver maps to
+  // NO real role on purpose. A seat is a relationship computed per company from that company's own positions (fed as
+  // `approverIds`), not a grant, so no bundle carries a key through it; its reach is proved by the live matrix
+  // (cerbos-social-pipeline.test.ts). Kept byte-aligned across generate-role-bundles.mjs and role-permission-parity.db.test.ts.
+  social_copywriter: ["social_copywriter"],
+  social_designer: ["social_designer"],
+  social_approver_seat: [],
 };
 
 // MON-10b — the five module-tiered monitoring kinds (0117 + the completion migration). BARE names,

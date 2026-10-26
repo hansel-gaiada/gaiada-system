@@ -22,7 +22,8 @@ import { join } from "node:path";
 import * as yaml from "js-yaml";
 
 const POLICIES_DIR = join(__dirname, "../../cerbos/policies");
-const PORTAL_ACTIONS = ["read", "decide", "sign", "pay", "update_profile", "request_change", "approve_post", "edit_company_profile", "converse"] as const;
+// SCP-1b (2026-10-26, PERMISSION-CONTRACT §53.8): +approve_spend, the 10th portal action (the client's money answers).
+const PORTAL_ACTIONS = ["read", "decide", "sign", "pay", "update_profile", "request_change", "approve_post", "edit_company_profile", "converse", "approve_spend"] as const;
 
 interface ParsedRule {
   actions: string[];

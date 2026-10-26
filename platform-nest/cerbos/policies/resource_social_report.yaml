@@ -25,7 +25,11 @@
 # ── TRAP #4 ─────────────────────────────────────────────────────────────────────────────────────
 # `group_executive` gets its own `notLow`-only rule, read-only.
 #
-# ── NO PERMISSION ARM (IAM-04-B6, 2026-08-13) ───────────────────────────────────────────────────
+# ── PERMISSION ARM: read, approve, deliver (SCP-1b, 2026-10-26, PERMISSION-CONTRACT §53.7/§53.10) ──
+# Superseding the deferral below: the kind now has real handlers (social-reports.controller.ts, SMM-23), every one of
+# whose call sites hardcodes `module: "social"`, so the module tiers' gate never excludes anything here in practice.
+#
+# ── (superseded) NO PERMISSION ARM (IAM-04-B6, 2026-08-13) ──────────────────────────────────────
 # Considered and DEFERRED, not overlooked — same reasoning as resource_social_account.yaml: every
 # action (`read`/`create`/`update`/`delete`/`approve`/`deliver`) is also held by `social_manager`/
 # `social_staff` via `module_manager`/`module_staff`, and no real handler for `social_report` exists
@@ -43,13 +47,15 @@ resourcePolicy:
     - actions: ["*"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
-    - actions: ["read", "create", "update", "delete", "approve", "deliver"]
+    # SCP-5a (PERMISSION-CONTRACT §53.7, SCP-Q20): `approve` and `deliver` were cut from the two rules below. They now
+    # belong to the four social approvers only (the seat rule, the owner's mirrors and the wildcard, further down).
+    - actions: ["read", "create", "update", "delete"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    # ORG-6 module tiers -> social_manager / social_staff (0106). Staff draft; the manager signs off
-    # and delivers.
-    - actions: ["read", "create", "update", "delete", "approve", "deliver"]
+    # ORG-6 module tiers -> social_manager / social_staff (0106). Staff draft; the manager edits and deletes. Neither
+    # signs off or delivers any more (SCP-Q20).
+    - actions: ["read", "create", "update", "delete"]
       effect: EFFECT_ALLOW
       derivedRoles: ["module_manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
@@ -57,3 +63,37 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["module_staff"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ═══ SCP-5a / SCP-1b (§53.7, §53.10) — the HoD check and sending ═══
+    # The four social approvers: the Social Media and GM lead seats (`approverIds`, social_approver_seat), the owner
+    # (the two mirrors), platform_admin (the wildcard). Sending a report BACK from in_review to draft is the other answer
+    # of the same check and authorizes as `approve` (social-reports.controller.ts). Every call site sends
+    # {kind:"social_report", id?, tenantId, module:"social", approverIds}; the module literal is what makes the read
+    # mirror faithful (IAM-04-B6 condition).
+    - actions: ["approve", "deliver"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["social_approver_seat"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Permission arm: read (so the permission-native owner opens what it checks; every holder holds it unconditionally),
+    # approve and deliver (the owner's arm; uiGrantable:false keys).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_report_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["approve"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_report_approve"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["deliver"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_social_report_deliver"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    # Unattended automations and bots never sign off or send a client's report (§53.3). Beats the wildcard.
+    - actions: ["approve", "deliver"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot"]

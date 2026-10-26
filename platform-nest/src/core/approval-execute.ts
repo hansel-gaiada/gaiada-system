@@ -202,6 +202,26 @@ export async function runApproverCheck(
   return entry.approverCheck(c, args, approver);
 }
 
+/**
+ * SCP-1b (PERMISSION-CONTRACT §53.12, SCP-Q21): does this entry's `approverCheck` REPLACE the generic decide right for this
+ * row (`ApproverCheck.replacesDecide`, narrowed by `replacesDecideFor`)? Read on `c` with the entry's module scope in force.
+ * false for every entry that does not declare the marker, which is every entry before SCP. A throw propagates: the decide
+ * surface answers 500 and decides nothing.
+ *
+ * The executor needs no call to this: it never re-checked the generic decide right, so its wall is already the self-approval
+ * rule and then the approverCheck alone.
+ */
+export async function approverCheckReplacesDecide(
+  c: PoolClient,
+  entry: ExecutableApprovalEntry,
+  args: Record<string, unknown>,
+): Promise<boolean> {
+  const chk = entry.approverCheck;
+  if (!chk || chk.replacesDecide !== true) return false;
+  await applyPreconditionScopes(c, entry);
+  return chk.replacesDecideFor ? (await chk.replacesDecideFor(c, args)) === true : true;
+}
+
 /** `execution_status='executing'` + untouched for longer than the staleness threshold = wedged by a
  *  dead process. THE crash-wedge predicate; D14-07's retry endpoint imports this instead of
  *  re-deriving the rule (two copies of a staleness threshold is how they drift). */
@@ -320,6 +340,8 @@ export async function executeApprovedAutomationWrite(
     // for a row that got here any other way. No decider on record means the rule cannot be evaluated,
     // so it refuses. Not re-run in the retry loop below: neither `decided_by` nor what it is compared
     // with changes between attempts, and every D14-07 retry re-enters through this claim.
+    // SCP-1b (§53.12): for an entry whose check `replacesDecide` (a pipeline post's publish), this IS the whole approver
+    // authority at execution: the generic decide right is never re-checked here, and the self-approval wall above ran first.
     if (entry.approverCheck) {
       let approverVerdict: PreconditionVerdict;
       if (!row.decided_by) {

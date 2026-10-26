@@ -79,6 +79,8 @@ function approvalGatedKeys(): Set<string> {
   return keys;
 }
 const APPROVAL_GATED_KEYS = approvalGatedKeys();
+/** SCP-1b: the keys whose maker/checker DENY also names the post's officer (`ownerId`), see the live sweep below. */
+const MAKER_CHECKER_OWNER_KEYS: ReadonlySet<string> = new Set(["social.post.approve", "social.post.proofread"]);
 const T1 = "aaaaaaaa-0000-0000-0000-000000000001";
 const T2 = "aaaaaaaa-0000-0000-0000-000000000002";
 
@@ -430,6 +432,11 @@ describe.skipIf(!live)("scopeLevelPermissions vs can() — live parity sweep (su
       const allowed = await can(p, key, {
         id: "probe-1", tenantId: T1, ownerId: "u1", subjectUserId: "u1", attendeeIds: ["u1"], module: "hr", creatorId: "someone-else",
         ...(APPROVAL_GATED_KEYS.has(key) ? { approvalId: "probe-approval" } : {}),
+        // SCP-1b (PERMISSION-CONTRACT §53.3): social_post proofread and approve carry a maker/checker DENY on the post's
+        // officer (`ownerId`) as well as its author (`creatorId`), platform_admin included. The probe's ownerId is the caller
+        // (for the self-scoped keys), which would ask "may the officer approve their own client's post": unsatisfiable by
+        // design. Those two keys alone are probed with an officer who is somebody else.
+        ...(MAKER_CHECKER_OWNER_KEYS.has(key) ? { ownerId: "someone-else" } : {}),
       });
       if (!allowed) mismatches.push(key);
     }

@@ -42,9 +42,20 @@ export const REAL_ROLES: readonly [
   // exact defect the header records for webdev_staff/webdev_manager).
   "finance_staff", "finance_manager",
   "lms_staff", "lms_manager",
+  // SCP-1b (2026-10-26): the Social Media content pipeline's two scope-only roles.
+  "social_copywriter", "social_designer",
 ];
 
 export const PERMISSION_NATIVE_ROLES: readonly ["owner"];
+
+/** SCP-1b (PERMISSION-CONTRACT §53.11): the five keys `owner` holds beyond company_admin's envelope. */
+export const OWNER_EXTENSION: readonly [
+  "social.engagement.budget",
+  "social.engagement.plan",
+  "social.post.approve",
+  "social.report.approve",
+  "social.report.deliver",
+];
 
 export interface RoleBundleDoc {
   _meta: {

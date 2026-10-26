@@ -60,6 +60,9 @@ import {
   type ReportKind, type FrozenSocialReportMetrics, type DailyMetricInput, type PostMetricInput, type KpiTargetInput,
 } from "./reports";
 import { PdfRendererNotConfiguredError, mintPrintJobToken, renderPdfViaSidecar } from "../reports/report-pdf-export";
+// SCP-1b / SCP-5a (PERMISSION-CONTRACT §53.7, BFF §63.18): every social_report call site sends `module: "social"` and the
+// company's seat approvers (`approverIds`), because `approve` and `deliver` belong to the four social approvers only.
+import { loadSocialApproverIds, socialReportResource } from "./pipeline-authz";
 // PV7-04a (BFF §55.2): delivery publishes the report to the client, in the same transaction.
 import {
   announceClientReportPublished, deliveredReportTitle, discardStoredReportFile, publishDeliveredReport, storeClientReportFile,
@@ -96,6 +99,11 @@ interface ReportRow {
   metrics: FrozenSocialReportMetrics;
   narrativeMd: string;
   createdAt: string;
+}
+
+/** SCP-1b: the company's Social Media and GM lead-seat holders, read in the company's own scope (pipeline-authz.ts). */
+async function approverIdsOf(tenantId: string): Promise<string[]> {
+  return withTenants([tenantId], (c) => loadSocialApproverIds(c, tenantId), { modules: ["social"] });
 }
 
 async function loadReport(c: PoolClient, id: string): Promise<ReportRow | null> {
@@ -145,7 +153,7 @@ export class SocialReportsController {
     const kind = (body.kind ?? "monthly") as ReportKind;
     if (!REPORT_KINDS.has(kind)) refuse("invalid_kind");
     const period = body.period ?? null;
-    await authorize(req.principal, { kind: "social_report", tenantId, module: "social" }, "create");
+    await authorize(req.principal, socialReportResource(tenantId, "", await approverIdsOf(tenantId)), "create");
 
     const id = body.id ?? newId();
 
@@ -295,7 +303,7 @@ export class SocialReportsController {
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Query("engagementId") engagementId?: string, @Query("status") status?: string,
   ) {
-    await authorize(req.principal, { kind: "social_report", tenantId, module: "social" }, "read");
+    await authorize(req.principal, socialReportResource(tenantId, "", await approverIdsOf(tenantId)), "read");
     const params: unknown[] = [];
     const where: string[] = ["sr.deleted_at IS NULL"];
     if (engagementId) { params.push(engagementId); where.push(`sr.engagement_id = $${params.length}`); }
@@ -322,7 +330,7 @@ export class SocialReportsController {
     assertUuid(id, "id");
     const report = await withTenants([tenantId], (c) => loadReport(c, id), { modules: ["social"] });
     if (!report) throw new NotFoundException("report not found");
-    await authorize(req.principal, { kind: "social_report", id, tenantId, module: "social" }, "read");
+    await authorize(req.principal, socialReportResource(tenantId, id, await approverIdsOf(tenantId)), "read");
     const document = buildSocialReportDocument({
       tenantId, engagementId: report.engagementId, clientName: report.clientName, kind: report.kind,
       period: report.period, status: report.status, frozen: report.metrics, narrativeText: report.narrativeMd,
@@ -341,7 +349,17 @@ export class SocialReportsController {
     assertUuid(id, "id");
     const report = await withTenants([tenantId], (c) => loadReport(c, id), { modules: ["social"] });
     if (!report) throw new NotFoundException("report not found");
-    await authorize(req.principal, { kind: "social_report", id, tenantId, module: "social" }, "update");
+    // SCP-5a (§53.7, BFF §63.18): sending a report BACK from the HoD check (in_review -> draft) is the other answer of that
+    // check, so it authorizes as `approve` (the four social approvers), not `update`. A narrative edit in the same call also
+    // needs `update`. Decided from the requested move before any validation, so a refused caller gets 403, never 400.
+    const reportResource = socialReportResource(tenantId, id, await approverIdsOf(tenantId));
+    const sendingBack = body.status === "draft";
+    if (sendingBack) {
+      await authorize(req.principal, reportResource, "approve");
+      if (typeof body.narrativeMd === "string") await authorize(req.principal, reportResource, "update");
+    } else {
+      await authorize(req.principal, reportResource, "update");
+    }
 
     let targetStatus = report.status;
     if (body.status !== undefined) {
@@ -395,7 +413,7 @@ export class SocialReportsController {
     assertUuid(id, "id");
     const report = await withTenants([tenantId], (c) => loadReport(c, id), { modules: ["social"] });
     if (!report) throw new NotFoundException("report not found");
-    await authorize(req.principal, { kind: "social_report", id, tenantId, module: "social" }, "approve");
+    await authorize(req.principal, socialReportResource(tenantId, id, await approverIdsOf(tenantId)), "approve");
     if (report.status !== "in_review") refuse("cannot_approve_from_this_status");
     await withTenants(
       [tenantId],
@@ -425,7 +443,7 @@ export class SocialReportsController {
     assertUuid(id, "id");
     const report = await withTenants([tenantId], (c) => loadReport(c, id), { modules: ["social"] });
     if (!report) throw new NotFoundException("report not found");
-    await authorize(req.principal, { kind: "social_report", id, tenantId, module: "social" }, "deliver");
+    await authorize(req.principal, socialReportResource(tenantId, id, await approverIdsOf(tenantId)), "deliver");
     if (report.clientIsInternal) refuse("internal_client_not_deliverable");
     if (report.status !== "approved") refuse("cannot_deliver_from_this_status");
 

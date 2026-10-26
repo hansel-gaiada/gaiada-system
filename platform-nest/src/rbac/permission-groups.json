@@ -6,12 +6,12 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 172,
-      "grantablePermissionsInCatalog": 471,
-      "permissionsCoveredByGroups": 432,
+      "groups": 174,
+      "grantablePermissionsInCatalog": 482,
+      "permissionsCoveredByGroups": 443,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
-      "sensitiveGroups": 115
+      "sensitiveGroups": 117
     }
   },
   "groups": [
@@ -1073,6 +1073,34 @@
       "sensitive": true
     },
     {
+      "key": "social_pipeline",
+      "name": "Run the Social Content Pipeline",
+      "domain": "social",
+      "description": "The content pipeline's steps: write a client's post as its officer, proofread it, approve it (the four social approvers only), design it, schedule it, run its team steps, record the client's answers, and plan the client's month (the four social approvers only).",
+      "permissions": [
+        "social.post.author",
+        "social.post.proofread",
+        "social.post.approve",
+        "social.post.design",
+        "social.post.schedule",
+        "social.post.manage",
+        "social.post.record_client",
+        "social.engagement.plan"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "social_boosts",
+      "name": "Run Paid Boosts",
+      "domain": "social",
+      "description": "Request and run paid boosts of live posts within the client's agreed budget, and propose or record the client's monthly boost budget (the four social approvers only).",
+      "permissions": [
+        "social.post.boost",
+        "social.engagement.budget"
+      ],
+      "sensitive": true
+    },
+    {
       "key": "webdev_file_change_requests",
       "name": "File Website Change Requests",
       "domain": "webdev",
@@ -1155,9 +1183,10 @@
       "key": "portal_pay",
       "name": "Client Portal — Pay Invoices",
       "domain": "portal",
-      "description": "Initiate payment of an invoice from the client portal.",
+      "description": "Initiate payment of an invoice from the client portal, and agree or decline the client's social boost spend (contacts with signing capability only).",
       "permissions": [
-        "portal.pay"
+        "portal.pay",
+        "portal.approve_spend"
       ],
       "sensitive": true
     },

@@ -37,7 +37,8 @@ import { createCompany, createUser, createRole, grantRole, createClient } from "
 import { withTenants, newId } from "../db";
 
 const live = !!process.env.CERBOS_URL;
-const PORTAL_ACTIONS = ["read", "decide", "sign", "pay", "update_profile", "request_change", "approve_post", "edit_company_profile", "converse"] as const;
+// SCP-1b (2026-10-26, PERMISSION-CONTRACT §53.8): +approve_spend, the 10th portal action (the client's money answers).
+const PORTAL_ACTIONS = ["read", "decide", "sign", "pay", "update_profile", "request_change", "approve_post", "edit_company_profile", "converse", "approve_spend"] as const;
 const portalResource = (tenantId: string): Resource => ({ kind: "portal", id: "p-1", tenantId });
 
 // A string that must never appear in a response read by the unrelated root. Same discipline as
