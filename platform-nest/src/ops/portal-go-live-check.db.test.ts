@@ -1,5 +1,5 @@
 // PGL-01 — the portal go-live readiness check against real Postgres + RLS (skips silently without DATABASE_URL_TEST: check the
-// skip count; runs on the Linux CI gate). The unit tests (portal-go-live-check.test.ts) judge each rule on built facts; this file
+// skip count; runs on the Linux CI gate). The unit tests (portal-go-live-check.test.ts) judge each rule on constructed facts; this file
 // proves the part they cannot: that the SQL reads what it claims, through the NOSUPERUSER app role and its tenant context.
 //
 // WHAT IS PROVEN
