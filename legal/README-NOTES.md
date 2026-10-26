@@ -22,6 +22,7 @@ The bot exists for **project progress tracking, workflow efficiency, and making 
 | `retention-and-dsr-procedure.md` | Retention schedule + access/erasure procedure | DRAFT | Confirm retention periods |
 | `trial-consent-notice.md` | Opt-in **trial** consent + notice (enables the near-free trial NOW) | DRAFT | Confirm volunteer list; light review |
 | `website-visitor-addendum.md` | **Separate scope:** gaiada.com visitors and website leads (DPIA, LIA, RoPA rows, retention, rights, a `/privacy-policy/` draft). Not part of the bot's Gate 1 pack; WebDesk ruling WSK-D67 makes each tracking phase wait for counsel's review of it | DRAFT (2026-10-11) | Lawyer review; owner decisions in its §11; Indonesian notice |
+| `client-portal-addendum.md` | **Separate scope:** the client portal (client contacts: identity, typed-signature record, Conversation, payment status, notifications and mail, AI drafting). Roles, lawful basis, RoPA rows P1-P10, retention, rights, a portal privacy notice draft, portal terms of use (attested e-signature under UU ITE / PP 71/2019, not a PSrE signature, PV-D44), and the "Legal Gate 1 green for the portal" checklist (§14). Not part of the bot's Gate 1 pack; ticket PGL-03 | DRAFT (2026-10-26) | Lawyer review and sign-off of §14; owner decisions in its §15; Indonesian notice and terms |
 
 ## Shared assumptions used across the drafts (confirm / correct these)
 
