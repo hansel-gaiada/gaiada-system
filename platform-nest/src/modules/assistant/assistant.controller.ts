@@ -46,6 +46,7 @@ import {
   ASSISTANT_AGENT_TOOLS, DEFAULT_TOOL_AGENT, persistToolCalls, readTurnMode, runToolTurn, turnModePart, type ToolTurnResult,
 } from "./broker";
 import { assembleCapabilities } from "./capabilities";
+import { getBrains } from "./brains";
 import { resolveCitation } from "./citations";
 import { createHandoff, fetchEpisodicHistory, fetchRoster, listHandoffsForThread } from "./handoffs";
 import { confirmWriteIntent, dismissWriteIntent, reapExpiredIntents, storableIntentArgs, type ToolCallIntent } from "./write-intents";
@@ -1267,6 +1268,17 @@ export class AssistantController {
     const userId = req.principal.userId;
     if (!userId) throw new BadRequestException("an authenticated user is required");
     return assembleCapabilities({ userId, tenantId }, tenantId);
+  }
+
+  // ================================================================== BRAINS (AIP-00c) ============
+  // The brain picker's list: which gateway LLM providers can serve right now (`{value, available}`
+  // only, see brains.ts). Authorized like `capabilities` above: an authenticated user, no per-row
+  // resource and no parameter that widens anything — the answer is the same gateway-wide fact for
+  // every caller, so no new Cerbos kind or action. `brains: null` means "could not check".
+  @Get(":tenantId/assistant/brains")
+  async brains(@Req() req: FastifyRequest) {
+    if (!req.principal.userId) throw new BadRequestException("an authenticated user is required");
+    return getBrains();
   }
 
   // ================================================================== CITATIONS (ASST-18) ========
