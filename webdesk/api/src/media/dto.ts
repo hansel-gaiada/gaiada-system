@@ -37,4 +37,8 @@ export type MediaAssetRow = {
   height?: number | null;
   updated_at?: string;
   created_by?: string | null;
+  // M5-W1q (migration 0020): the review state and who judged it. Present on rows read with MEDIA_ASSET_COLUMNS.
+  review_state?: "accepted" | "quarantined" | "rejected";
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
 };

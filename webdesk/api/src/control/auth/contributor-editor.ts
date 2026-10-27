@@ -31,7 +31,7 @@ export function assertContributorMayRun(principal: ContributorMarked, command: C
     403,
     CONTRIBUTOR_COMMAND_NOT_ALLOWED,
     "Command not allowed for a contributor",
-    `A contributor may not run ${command}. Contributors draft, edit, preview, submit, comment and sign off SEO; ` +
-      "they never publish, approve, schedule, unpublish, delete, manage editorial settings or write media. Nothing was changed.",
+    `A contributor may not run ${command}. Contributors draft, edit, preview, submit, comment, sign off SEO and upload media into quarantine; ` +
+      "they never publish, approve, schedule, unpublish, delete, manage editorial settings, edit or delete media or review uploads. Nothing was changed.",
   );
 }

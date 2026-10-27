@@ -78,8 +78,8 @@ export interface FakeCall {
   hadWs4: boolean;
 }
 
-const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "schema.apply", "site.provision", "key.mint", "site.archive", "site.setDomain", "media.uploadToken", "media.update", "media.delete", "forms.define", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
-const EDITORIAL = new Set(["content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "media.uploadToken", "media.update", "media.delete", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
+const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "schema.apply", "site.provision", "key.mint", "site.archive", "site.setDomain", "media.uploadToken", "media.update", "media.delete", "media.review", "forms.define", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
+const EDITORIAL = new Set(["content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "media.uploadToken", "media.update", "media.delete", "media.review", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
 
 /** WSK-43b: one library asset as the fake holds it (the real row is `media_assets`, migration 0014). */
 export interface FakeMediaAsset {
@@ -93,6 +93,9 @@ export interface FakeMediaAsset {
   originalFilename: string;
   createdAt: string;
   deletedAt: string | null;
+  /** M5-W1q: the review state (default accepted) and who uploaded it (the contributor's sub for a quarantined one). */
+  reviewState?: "accepted" | "quarantined" | "rejected";
+  createdBy?: string | null;
   /** The items that use the asset (`media.usage` and the 409 `media-in-use` body list them). */
   usedBy: Array<{ itemId: string; collectionKey: string; locale: string; slug: string; in: string }>;
 }
@@ -225,7 +228,8 @@ export class FakeZoneB {
   private assetJson(a: FakeMediaAsset) {
     return {
       assetId: a.assetId, bucketKey: `media/${a.assetId}`, mime: a.mime, sizeBytes: a.sizeBytes, scanStatus: "clean", createdAt: a.createdAt,
-      title: a.title, alt: a.alt, tags: a.tags, originalFilename: a.originalFilename, width: 640, height: 480, createdBy: null,
+      title: a.title, alt: a.alt, tags: a.tags, originalFilename: a.originalFilename, width: 640, height: 480, createdBy: a.createdBy ?? null,
+      reviewState: a.reviewState ?? "accepted", reviewedBy: null, reviewedAt: null,
       url: `/v1/t/gaiada/media/${a.assetId}`, updatedAt: a.createdAt, deletedAt: a.deletedAt,
     };
   }
@@ -416,6 +420,8 @@ export class FakeZoneB {
           (a) =>
             a.siteId === p.siteId &&
             (q.includeDeleted === "true" || !a.deletedAt) &&
+            (q.reviewState === "all" || (a.reviewState ?? "accepted") === (q.reviewState ?? "accepted")) &&
+            (!q.assetId || a.assetId === q.assetId) &&
             (!q.tag || a.tags.includes(q.tag)) &&
             (!q.mime || (q.mime.endsWith("/*") ? a.mime.startsWith(q.mime.slice(0, -1)) : a.mime === q.mime)) &&
             (!needle || (a.title ?? "").toLowerCase().includes(needle) || a.originalFilename.toLowerCase().includes(needle) || a.tags.some((t) => t.includes(needle))),
@@ -611,6 +617,19 @@ export class FakeZoneB {
           maxBytes: Math.min(typeof b.maxBytes === "number" ? b.maxBytes : 10_485_760, 10_485_760),
           allowedMimes: Array.isArray(b.mime) ? b.mime : typeof b.mime === "string" ? [b.mime] : allowed, replayed: false,
         }, 201);
+      }
+      case "media.review": {
+        // WebDesk media-commands.service#review, reduced to its decisions: only a quarantined asset is judged; the same decision again
+        // is a no-op; the uploader is refused; a reject soft-deletes.
+        const a = this.media.get(p.assetId);
+        if (!a || a.siteId !== p.siteId) return problem(404, "media-asset-not-found");
+        const target = b.decision === "accept" ? "accepted" : "rejected";
+        if ((a.reviewState ?? "accepted") === target && a.createdBy) return ok({ asset: this.assetJson(a), decision: b.decision, alreadyDecided: true, replayed: false });
+        if ((a.reviewState ?? "accepted") !== "quarantined") return problem(409, "media-not-quarantined");
+        if (a.createdBy === sub) return problem(403, "media-self-review");
+        a.reviewState = target;
+        if (target === "rejected") a.deletedAt = now;
+        return ok({ asset: this.assetJson(a), decision: b.decision, alreadyDecided: false, replayed: false });
       }
       case "media.update": {
         const a = this.media.get(p.assetId);

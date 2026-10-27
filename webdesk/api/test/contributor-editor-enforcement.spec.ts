@@ -283,11 +283,7 @@ describe("M5-W1e contributors: enforcement in the write plane (real resolver, si
       expect((await mk(false)).statusCode).toBe(200);
     });
 
-    it("media.uploadToken, media.update and media.delete: refused, nothing changes; as staff each succeeds", async () => {
-      const tok = (xc: boolean) => call({ method: "POST", url: `${mediaBase(fx)}/upload-token`, command: "media.uploadToken", params: params(), body: { bucket: "media" }, xc });
-      expectWellFormedRefusal(await tok(true), "media.uploadToken");
-      expect((await tok(false)).statusCode).toBe(201);
-
+    it("media.update and media.delete: refused, nothing changes; as staff each succeeds (media.uploadToken is allowed: it quarantines, see media-quarantine.spec.ts)", async () => {
       const asset = await seedAsset(fx, { title: "old" });
       const upd = (xc: boolean) =>
         call({ method: "PATCH", url: `${mediaBase(fx)}/${asset.id}`, command: "media.update", params: { ...params(), assetId: asset.id }, body: { title: "new title" }, xc });
@@ -299,6 +295,16 @@ describe("M5-W1e contributors: enforcement in the write plane (real resolver, si
       expectWellFormedRefusal(await del(true), "media.delete");
       expect((await rows(`SELECT deleted_at FROM media_assets WHERE id = $1`, [asset.id]))[0].deleted_at).toBeNull();
       expect((await del(false)).statusCode).toBe(200);
+    });
+
+    it("media.review: refused, the quarantined asset stays quarantined; as staff it is accepted (200)", async () => {
+      const asset = await seedAsset(fx, { title: "held", reviewState: "quarantined", createdBy: "erp-contributor-user-2" });
+      const mk = (xc: boolean) =>
+        call({ method: "POST", url: `${mediaBase(fx)}/${asset.id}/review`, command: "media.review", params: { ...params(), assetId: asset.id }, body: { decision: "accept" }, xc });
+      expectWellFormedRefusal(await mk(true), "media.review");
+      expect((await rows(`SELECT review_state FROM media_assets WHERE id = $1`, [asset.id]))[0].review_state).toBe("quarantined");
+      expect((await mk(false)).statusCode).toBe(200);
+      expect((await rows(`SELECT review_state FROM media_assets WHERE id = $1`, [asset.id]))[0].review_state).toBe("accepted");
     });
 
     it("editorial.approve: refused, the item stays in review", async () => {
@@ -331,7 +337,7 @@ describe("M5-W1e contributors: enforcement in the write plane (real resolver, si
         "content.schedule",
         "content.unpublish",
         "content.delete",
-        "media.uploadToken",
+        "media.review",
         "media.update",
         "media.delete",
         "editorial.approve",

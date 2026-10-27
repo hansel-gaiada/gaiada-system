@@ -55,9 +55,10 @@ function send(reply: FastifyReply, r: ZoneBResult): void {
 // `contributor_route_forbidden` in AuthGuard before the handler runs. The marked set mirrors WebDesk's CONTRIBUTOR_COMMANDS
 // (content read/create/update/restore, preview, and the editorial submit/withdraw/comment/requestChanges/seoSignoff family)
 // plus the reads its editor needs. Cerbos still decides every one of them on the contributor's own grants and the
-// contributor DENYs. NOT marked, on purpose: forms, media usage and every media write (upload stays closed until the W1q
-// quarantine exists), assist, publish requests, unpublish, delete, approve, assign, the editorial policy, the calendar
-// and the writers' dashboard. The full list is pinned by src/auth/contributor-route.test.ts.
+// contributor DENYs. Since M5-W1q the media UPLOAD-TOKEN route is marked too (a contributor uploads INTO THE QUARANTINE: the asset is
+// not served until a staff editor accepts it; WSK-D84). NOT marked, on purpose: forms, media usage, media update, delete and the
+// REVIEW routes (the queue and the decision are staff functions), assist, publish requests, unpublish, delete, approve, assign, the
+// editorial policy, the calendar and the writers' dashboard. The full list is pinned by src/auth/contributor-route.test.ts.
 @Controller("api/:tenantId/modules/webdev/content")
 @UseGuards(AuthGuard, ModuleEnabledGuard("webdev"))
 @UseFilters(WebdeskProblemFilter)
@@ -195,8 +196,33 @@ export class WebdeskContentController {
     send(reply, await webdeskMedia.usage(gate, { tenantSlug, siteId }, assetId, query));
   }
 
+  /** M5-W1q: the contributor upload quarantine's review queue (staff). 200 `{assets: [... + allowed: {review}], page}`. */
+  @Get("sites/:tenantSlug/:siteId/media/quarantine")
+  async mediaQuarantine(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Query() query: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_media_asset", "read");
+    send(reply, await webdeskMedia.quarantine(gate, { tenantSlug, siteId }, query));
+  }
+
+  /** M5-W1q: accept or reject one quarantined upload. Body `{decision: "accept" | "reject"}`. Cerbos `webdesk_media_asset:review`. */
+  @Post("sites/:tenantSlug/:siteId/media/:assetId/review")
+  @HttpCode(200)
+  async mediaReview(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("assetId") assetId: string, @Headers("idempotency-key") idem: string | undefined,
+    @Body() body: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_media_asset", "read");
+    send(reply, await webdeskMedia.review(gate, { tenantSlug, siteId }, assetId, body, idempotencyKeyOf(idem)));
+  }
+
   /** 201 `{uploadUrl, expiresAt, maxBytes, allowedMimes}`: `uploadUrl` carries a ONE-TIME secret, so `no-store`. */
   @Post("sites/:tenantSlug/:siteId/media/upload-token")
+  @ContributorRoute()
   async mediaUploadToken(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,

@@ -5997,9 +5997,9 @@ ex-contact, a grant holder, an automation or bot account, or an inactive account
 `{error: "contributor_route_forbidden", reason: "route_not_open_to_contributors" | "assurance_high_required"}`** before the handler runs. The marked set
 (pinned by `src/auth/contributor-route.test.ts`): `GET /api/me` (which now also returns `kind`, ADDITIVE, for every principal) and, under
 `/api/:t/modules/webdev/content/sites/:tenantSlug/:siteId/` (plus `GET …/content/sites`): the collections and item reads, item versions, the media
-library list, item create / PUT / PATCH / restore / preview, `editorial/board`, `items/:id/editorial`, `editorial/submit`, `/withdraw`,
+library list, the media `upload-token` mint (M5-W1q: INTO THE QUARANTINE), item create / PUT / PATCH / restore / preview, `editorial/board`, `items/:id/editorial`, `editorial/submit`, `/withdraw`,
 `/request-changes`, `/seo-signoff`, `/comments`, `/comments/:c/resolve`, `briefs/:briefId` and `items/:id/brief`. Cerbos still decides each one on the
-contributor's own grants. Not open: every media write (upload stays closed until the W1q quarantine), forms, assist, publish requests, unpublish,
+contributor's own grants. Not open: media update and delete, the quarantine review routes, forms, assist, publish requests, unpublish,
 delete, approve, assign, the editorial policy, grants, the contributor admin routes, the calendar, the writers' dashboard. There is no backend
 logout route: sign-out is the UI's and Keycloak's.
 
@@ -6010,13 +6010,59 @@ the rest, and the approved-command executor when the decider is one) carries the
 `sign(input, principal)`; `EditorialAssertionRequest` has no `xc` field and nothing in a request body, header or argument can set it. It is written only
 when true (an employee's assertion is byte-for-byte what it was; `xc: false` is never emitted, the `ce` convention), and `xc` with `ce` is refused at
 signing. WebDesk (`webdesk/api` README, "Contributors (M5-W1e)") then allows such a principal only `CONTRIBUTOR_COMMANDS`: `content.create`, `update`,
-`restoreVersion`, `previewToken`, `previewTokenRevoke`, `editorial.submit`, `withdraw`, `comment`, `commentResolve`, `requestChanges`, `seoSignoff`; any
+`restoreVersion`, `previewToken`, `previewTokenRevoke`, `media.uploadToken` (M5-W1q: it quarantines), `editorial.submit`, `withdraw`, `comment`, `commentResolve`, `requestChanges`, `seoSignoff`; any
 other editorial command is **403** `{type: ".../errors/contributor-command-not-allowed", title, status: 403, detail}`. A non-boolean `xc`, or `xc` together
-with `ce`, is **401** `editorial-assertion-claims`. Media writes stay refused until the W1q quarantine. The BFF's own answer to a contributor on a refused
+with `ce`, is **401** `editorial-assertion-claims`. `media.update`, `media.delete` and `media.review` stay refused. The BFF's own answer to a contributor on a refused
 route is unchanged (the fence's 403 `contributor_route_forbidden`); this wall only matters if an ERP wall were misconfigured.
 
 **No MCP tools yet.** The design's `webdesk.editorial.inviteContributor` (high) and `.endContributor` (medium) need D14 executables in
 `core/approval-executables.ts`, which another session holds: a follow-up.
+
+### The contributor upload quarantine (M5-W1q, 2026-10-27 — STATUS: PROTOTYPED: typechecked locally (webdesk-api, platform-nest, platform-ui) and the platform-ui suites run locally; the WebDesk, Postgres, Cerbos and BFF suites `media-quarantine.spec.ts`, `0020_media_review_state.test.mjs`, `webdesk-media-quarantine.test.ts` run on the GitHub Actions gate; UI: the staff page `writers/uploads/[tenant]/[site]`)
+
+Owner ruling WSK-D84; design `docs/plans/2026-10-11-m5-writers-room-design.md` §3.1 item 6 and Q2; PERMISSION-CONTRACT §27.6. A contributor's upload is created
+**quarantined**: scanned (WSK-D80) and stored, but served by NO route until a staff editor accepts it. Code: WebDesk `media-commands.service.ts`
+(`media.review`), `media-upload.service.ts`, `media.service.ts` (`getPublicAsset`), `media-review-gate.ts`, migration `0020_media_review_state.sql`; ERP
+`webdesk-media.service.ts` (`quarantine`, `review`), `webdesk-content.controller.ts`, migration `202610271100_iam_webdesk_media_review.sql`.
+
+**The state.** A media asset has a review state: `accepted` (every existing row, staff upload and API-key upload; served), `quarantined` (a contributor's upload
+until decided; served nowhere) or `rejected` (refused; never served). It rides every library asset as `reviewState` (`accepted` | `quarantined` | `rejected`),
+`reviewedBy` and `reviewedAt` (null until judged). The state is fixed at **mint**: `media.uploadToken` for a contributor's signed assertion (`xc`) makes a
+quarantining token, and the asset the token uploads is quarantined; nothing in the upload request can change it.
+
+**Where it is refused.** (1) The public media route and its transform route (`GET /v1/t/:slug/media/:assetId[/transform]`): one lookup, which treats a
+quarantined or rejected asset as an unknown id (404), by id, upper-cased id or any guess of its path. (2) `media.list` hides it by default: the library an
+editor picks images from is the accepted assets; WebDesk's `reviewState=accepted|quarantined|rejected|all` and `assetId` filters exist for the BFF's review
+desk only, and the BFF's plain `GET …/media` does not forward them (a `reviewState` or `assetId` there is 400). (3) `content.publish` and `content.schedule`
+(a schedule that publishes) are **409 `media-not-accepted`** `{assets: [{assetId, reviewState, itemIndex}], total}` when any version in the request names
+`/media/<assetId>` of an unaccepted asset in its blocks or seo; nothing is written, and the whole batch is refused. A draft may name it. (4) A promotion
+bundle exports accepted assets only.
+
+**The routes** (`AuthGuard` + `ModuleEnabledGuard("webdev")`; phase 1 is `webdesk_media_asset:read` on the site, then **Cerbos `webdesk_media_asset:review`**
+is asked BEFORE any body is validated or any row read, so a caller who may not review gets **403 for any body**).
+
+| Method | Path | Body → Response |
+|---|---|---|
+| GET | `/api/:t/modules/webdev/content/sites/:tenantSlug/:siteId/media/quarantine?cursor&limit` | → `{assets: [<library asset> + {allowed: {review: boolean \| null}}], page}`, quarantined uploads of the site, newest first. `reviewState` is forced by the BFF (any other query key is 400). `allowed.review` is the BFF's own Cerbos answer for THAT upload (`false` for the uploader themselves; `null` = Cerbos could not answer: unknown, never "denied"). Staff only: a contributor is refused by the route fence, a writer or client by Cerbos. |
+| POST | `…/media/:assetId/review` | `{decision: "accept" \| "reject"}` (strict; `Idempotency-Key` optional, generated when absent) → **200** `{asset, decision, alreadyDecided}`. The BFF reads the asset's REAL uploader from WebDesk (404 `media-asset-not-found` when it is not on this site) and asks Cerbos with it before it signs the MEDIUM `media.review` command. |
+
+**Refusals a consumer must render** (WebDesk's problems pass through byte for byte): **403** from Cerbos (the uploader, an unknown uploader, a role without
+`review`) or WebDesk's `media-self-review`; **409 `media-not-quarantined`** (never needed a review, or the opposite decision was made: a decision is final;
+the same decision again is 200 `alreadyDecided: true`, keeping the first reviewer); **409 `media-asset-deleted`**; **404 `media-asset-not-found`**. **Reject** soft-deletes
+the upload exactly as `media.delete` does, so the existing `media-purge` job deletes the stored object once the bucket's retention lapses; until then the bytes
+exist, are counted against the quota, and are served by nothing. Ledger verb `webdesk.media.review`, `target_entity_type webdesk_media_asset`, identifiers
+and the decision only.
+
+**What the contributor sees.** `POST …/media/upload-token` is now marked `@ContributorRoute()` (Cerbos `upload`, an ALLOW for contributors only); its answer is
+unchanged (`{uploadUrl, expiresAt, maxBytes, allowedMimes}`) and the browser's POST to `uploadUrl` answers the asset with `reviewState: "quarantined"`; its
+`url` 404s until a reviewer accepts it. The contributor cannot list the queue, decide, edit or delete media.
+
+**The staff page** `/departments/:deptId/website/writers/uploads/:tenant/:site` (a site picker at `…/uploads`): one row per held upload (title or filename, type, size,
+dimensions, who sent it, when) with **Accept** and **Reject** (Reject asks first: it is final). The buttons follow `allowed.review` per row: `false` shows the
+reason and no buttons, `null` leaves them on with the server's refusal as the fallback; a 403 on the queue is the plain "you can't review uploads here" state,
+never an empty list. **Known gap:** the file itself is not previewable while it is quarantined (no staff-authenticated byte route exists yet; the reviewer
+judges by title, type, size, dimensions and sender), so a preview needs its own decision (a short-lived staff-only URL, or a proxied read with `nosniff` and a
+sandbox CSP). No navigation entry links to the page yet.
 
 ### Writers' room calendar and workflow board (M5-W5, 2026-10-12 — STATUS: PROTOTYPED (backend): typechecked + unit-tested locally; the DB/Cerbos/HTTP suite `webdesk-calendar.test.ts` is written and needs the Linux gate; UI: `writers/calendar` and the board of `writers/[tenant]/[site]`)
 

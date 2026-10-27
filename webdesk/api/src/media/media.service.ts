@@ -37,7 +37,7 @@ export type StoredObject = { objectKey: string; storedBucketKey: string };
 
 /** The columns of a media_assets row every read here returns (the library facts included). */
 export const MEDIA_ASSET_COLUMNS =
-  "id, tenant_id, site_id, bucket_key, mime, size_bytes, scan_status, created_at, title, alt, tags, original_filename, width, height, updated_at, created_by";
+  "id, tenant_id, site_id, bucket_key, mime, size_bytes, scan_status, created_at, title, alt, tags, original_filename, width, height, updated_at, created_by, review_state, reviewed_by, reviewed_at";
 
 export type ResolvedAsset = {
   id: string;
@@ -232,11 +232,16 @@ export class MediaService {
       facts?: { originalFilename: string | null; width: number | null; height: number | null };
       /** Extra audit args (the token route names its token id). */
       auditExtra?: Record<string, unknown>;
+      /**
+       * M5-W1q (WSK-D84): 'quarantined' for a contributor's upload (the token says so; see media-upload.service.ts).
+       * Omitted = 'accepted', which is what every staff and API-key upload is.
+       */
+      reviewState?: "accepted" | "quarantined";
     },
   ): Promise<MediaAssetRow> {
     const { rows } = await client.query<MediaAssetRow>(
-      `INSERT INTO media_assets (tenant_id, site_id, bucket_key, mime, size_bytes, scan_status, original_filename, width, height, created_by)
-       VALUES ($1, $2, $3, $4, $5, 'clean', $6, $7, $8, $9)
+      `INSERT INTO media_assets (tenant_id, site_id, bucket_key, mime, size_bytes, scan_status, original_filename, width, height, created_by, review_state)
+       VALUES ($1, $2, $3, $4, $5, 'clean', $6, $7, $8, $9, $10)
        RETURNING ${MEDIA_ASSET_COLUMNS}`,
       [
         p.tenantId,
@@ -248,13 +253,14 @@ export class MediaService {
         p.facts?.width ?? null,
         p.facts?.height ?? null,
         p.actor,
+        p.reviewState ?? "accepted",
       ],
     );
     await this.audit.record(client, {
       tenantId: p.tenantId,
       actor: p.actor,
       action: "webdesk.media.upload",
-      args: { bucket: p.bucket, mediaAssetId: rows[0].id, sizeBytes: p.input.buffer.length, ...(p.auditExtra ?? {}) },
+      args: { bucket: p.bucket, mediaAssetId: rows[0].id, sizeBytes: p.input.buffer.length, reviewState: p.reviewState ?? "accepted", ...(p.auditExtra ?? {}) },
     });
     return rows[0];
   }
@@ -271,12 +277,17 @@ export class MediaService {
    * A's slug with tenant B's real asset id therefore 404s exactly like a nonexistent id would;
    * the two are indistinguishable from the outside, which is the correct failure shape (no
    * existence oracle).
+   *
+   * M5-W1q (WSK-D84): `review_state = 'accepted'` is part of the WHERE. A quarantined or rejected asset (a
+   * contributor's upload no staff editor has accepted, or one that was refused) is the same zero rows as an
+   * unknown id, so every route built on this lookup (serving and transform) refuses it with the one 404, by id
+   * or by any guess of its path: there is no second place that decides what is public.
    */
   async getPublicAsset(tenantId: string, assetId: string): Promise<ResolvedAsset | null> {
     const row = await this.db.withTenant(tenantId, async (db) => {
       const { rows } = await db.query<MediaAssetRow>(
         `SELECT id, tenant_id, site_id, bucket_key, mime, size_bytes, scan_status
-           FROM media_assets WHERE id = $1 AND deleted_at IS NULL`,
+           FROM media_assets WHERE id = $1 AND deleted_at IS NULL AND review_state = 'accepted'`,
         [assetId],
       );
       return rows[0] ?? null;
@@ -303,7 +314,7 @@ export class MediaService {
     const row = await this.db.withTenant(auth.tenantId, async (db) => {
       const { rows } = await db.query<MediaAssetRow>(
         `SELECT id, tenant_id, site_id, bucket_key, mime, size_bytes, scan_status
-           FROM media_assets WHERE id = $1 AND site_id = $2 AND deleted_at IS NULL`,
+           FROM media_assets WHERE id = $1 AND site_id = $2 AND deleted_at IS NULL AND review_state = 'accepted'`,
         [assetId, auth.siteId],
       );
       return rows[0] ?? null;

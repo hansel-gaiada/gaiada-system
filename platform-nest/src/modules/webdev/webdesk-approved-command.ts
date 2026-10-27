@@ -166,6 +166,8 @@ export type WebdeskBffEditorialCommand =
   | "media.uploadToken"
   | "media.update"
   | "media.delete"
+  // M5-W1q (WSK-D84): accept or reject a contributor's quarantined upload (MEDIUM, editorial, staff only; WebDesk's EDITORIAL_COMMANDS).
+  | "media.review"
   // M5-W2d: the review flow (MEDIUM, editorial; WebDesk's EDITORIAL_COMMANDS, writers' room design 4.3).
   | "editorial.submit"
   | "editorial.withdraw"

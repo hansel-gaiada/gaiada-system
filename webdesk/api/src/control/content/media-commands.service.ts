@@ -24,7 +24,7 @@ import { randomUUID } from "node:crypto";
 import { computeCommandHash } from "../auth/ws4-assertion";
 import type { EditorialPrincipal } from "../auth/editorial-principal";
 import { assertClientMayRun } from "../auth/client-editor";
-import { assertContributorMayRun } from "../auth/contributor-editor";
+import { assertContributorMayRun, isContributor } from "../auth/contributor-editor";
 import { CommandEnvelope } from "../command-envelope";
 import type { CommandName } from "../command-types";
 import { hashUploadToken, mintUploadToken, uploadPathFor, UPLOAD_TOKEN_TTL_SECONDS } from "../../media/media-upload-token";
@@ -68,6 +68,11 @@ export interface MintedUploadToken {
   bucket: BucketName;
   maxBytes: number;
   allowedMimes: string[];
+  /**
+   * M5-W1q (WSK-D84): true when the token was minted for a contributor. The asset it uploads is created QUARANTINED: it is
+   * not served anywhere until a staff editor accepts it (media.review). Fixed here, at mint, from the signed principal.
+   */
+  quarantined: boolean;
 }
 
 const withoutToken = ({ token: _token, uploadPath: _uploadPath, ...rest }: MintedUploadToken): { stored: object } => ({ stored: rest });
@@ -121,6 +126,18 @@ export interface DeletedMedia {
   purgeAfter: string;
   /** True when the asset was already deleted: the instants are the ORIGINAL ones, nothing moved. */
   alreadyDeleted: boolean;
+}
+
+// ------------------------------------------------------------------------------------------------
+// media.review (M5-W1q, WSK-D84)
+// ------------------------------------------------------------------------------------------------
+export type MediaReviewDecision = "accept" | "reject";
+
+export interface ReviewedMedia {
+  asset: LibraryAsset;
+  decision: MediaReviewDecision;
+  /** True when the asset already carried this very decision: nothing moved, the original reviewer and instant are kept. */
+  alreadyDecided: boolean;
 }
 
 const iso = (d: Date | string): string => new Date(d).toISOString();
@@ -196,6 +213,8 @@ export class MediaCommandsService {
     const tokenId = randomUUID();
     const token = mintUploadToken();
     const tokenHash = hashUploadToken(token);
+    // M5-W1q (WSK-D84): a contributor's token QUARANTINES what it uploads. Read from the verified principal, never from the request.
+    const quarantine = isContributor(ctx.principal);
 
     return this.envelope.run<MintedUploadToken>({
       command,
@@ -205,14 +224,14 @@ export class MediaCommandsService {
       // request, a different body under the same key is 409 idempotency-key-reused.
       requestHash: computeCommandHash(command, { tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, bucket: requested.bucket, maxBytes: requested.maxBytes, mime: requested.mime }),
       actor: ctx.principal.sub,
-      auditArgs: { tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, tokenId, bucket: input.bucket, maxBytes: input.maxBytes, allowedMimes: input.mimes.join(",") },
+      auditArgs: { tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, tokenId, bucket: input.bucket, maxBytes: input.maxBytes, allowedMimes: input.mimes.join(","), quarantine },
       ws4ApprovalId: null, // MEDIUM: no WS4 approval to claim
       effect: async (client) => {
         const { rows } = await client.query<{ expires_at: Date }>(
-          `INSERT INTO media_upload_tokens (id, tenant_id, site_id, token_hash, bucket, max_bytes, allowed_mimes, expires_at, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, now() + ($8::integer * interval '1 second'), $9)
+          `INSERT INTO media_upload_tokens (id, tenant_id, site_id, token_hash, bucket, max_bytes, allowed_mimes, expires_at, created_by, quarantine)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, now() + ($8::integer * interval '1 second'), $9, $10)
            RETURNING expires_at`,
-          [tokenId, ctx.tenant.id, ctx.siteId, tokenHash, input.bucket, input.maxBytes, input.mimes, UPLOAD_TOKEN_TTL_SECONDS, ctx.principal.sub],
+          [tokenId, ctx.tenant.id, ctx.siteId, tokenHash, input.bucket, input.maxBytes, input.mimes, UPLOAD_TOKEN_TTL_SECONDS, ctx.principal.sub, quarantine],
         );
         return {
           result: {
@@ -223,6 +242,7 @@ export class MediaCommandsService {
             bucket: input.bucket,
             maxBytes: input.maxBytes,
             allowedMimes: input.mimes,
+            quarantined: quarantine,
           },
         };
       },
@@ -331,6 +351,76 @@ export class MediaCommandsService {
           [assetId, retentionDays],
         );
         return { result: { assetId, deletedAt: iso(done[0].deleted_at), purgeAfter: iso(done[0].purge_after), alreadyDeleted: false } };
+      },
+    });
+  }
+
+  // ==============================================================================================
+  // media.review  (M5-W1q, WSK-D84)
+  // ==============================================================================================
+  // A staff editor accepts or rejects a contributor's QUARANTINED upload. Only a quarantined asset can be judged:
+  //   accept  review_state -> 'accepted'. From this instant the public media route serves it (the ONLY place that decides).
+  //   reject  review_state -> 'rejected' AND the row is soft-deleted exactly as media.delete does (deleted_at, purge_after =
+  //           now + the bucket's GOVERNANCE retention). The bytes cannot be deleted before that retention lapses (object lock),
+  //           so they are never served (a rejected row is neither accepted nor undeleted) and the existing `media-purge`
+  //           job deletes every stored version once purge_after passes. There is no second purge path. media-in-use is NOT
+  //           checked: a quarantined asset was never served, so no page can have shown it.
+  // Refusals: 404 media-asset-not-found; 409 media-asset-deleted (a staff delete already took it out); 409
+  // media-not-quarantined (it never needed a review, or it carries the OPPOSITE decision: a decision is final); 403
+  // media-self-review (the reviewer is the uploader: a structural rule, like W1a's approve DENY; the ERP's Cerbos denies it first).
+  // The same decision again is a no-op (`alreadyDecided`), keeping the first reviewer and instant. A contributor or a client
+  // editor is refused 403 before anything else, by the allow-lists (media.review is on neither).
+  async review(ctx: MediaCommandContext, assetId: string, decision: MediaReviewDecision): Promise<ReviewedMedia & { replayed: boolean }> {
+    const command: CommandName = "media.review";
+    assertClientMayRun(ctx.principal, command);
+    assertContributorMayRun(ctx.principal, command);
+    const retentionDays = storageConfig.objectLockRetentionDays; // read before the envelope: a misconfiguration is a loud 500 that claims nothing
+    return this.envelope.run<ReviewedMedia>({
+      command,
+      scope: { kind: "tenant", tenantId: ctx.tenant.id },
+      scopeKey: `${ctx.tenant.slug}:${command}:${ctx.idempotencyKey}`,
+      requestHash: computeCommandHash(command, { tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, assetId, decision }),
+      actor: ctx.principal.sub,
+      auditArgs: { tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, assetId, decision },
+      ws4ApprovalId: null,
+      effect: async (client) => {
+        if (!UUID_RE.test(assetId)) throw assetNotFound();
+        const { rows } = await client.query<{ deleted_at: Date | null; review_state: string; reviewed_at: Date | null; created_by: string | null }>(
+          `SELECT deleted_at, review_state, reviewed_at, created_by FROM media_assets WHERE id = $1 AND site_id = $2 AND tenant_id = $3 FOR UPDATE`,
+          [assetId, ctx.siteId, ctx.tenant.id],
+        );
+        const row = rows[0];
+        if (!row) throw assetNotFound();
+        const target = decision === "accept" ? "accepted" : "rejected";
+
+        if (row.review_state === target && row.reviewed_at) {
+          const { rows: same } = await client.query<MediaAssetRow>(`SELECT ${MEDIA_ASSET_COLUMNS} FROM media_assets WHERE id = $1`, [assetId]);
+          return { result: { asset: toLibraryAsset(same[0], ctx.tenant.slug), decision, alreadyDecided: true } };
+        }
+        if (row.review_state !== "quarantined") {
+          throw problems.conflict(
+            "media-not-quarantined",
+            "Media asset not in quarantine",
+            row.review_state === "rejected" || row.reviewed_at
+              ? `This asset was already ${row.review_state}; a review decision is final. Nothing was changed.`
+              : "This asset never needed a review (it was not uploaded by a contributor). Nothing was changed.",
+          );
+        }
+        if (row.deleted_at) throw problems.conflict("media-asset-deleted", "Media asset deleted", "This asset has been deleted; it can no longer be reviewed.");
+        if (row.created_by !== null && row.created_by === ctx.principal.sub) {
+          throw new ControlProblem(403, "media-self-review", "Media self-review refused", "An upload cannot be reviewed by the person who uploaded it. Nothing was changed.");
+        }
+
+        const { rows: done } = await client.query<MediaAssetRow>(
+          decision === "accept"
+            ? `UPDATE media_assets SET review_state = 'accepted', reviewed_by = $2, reviewed_at = now(), updated_at = now()
+                WHERE id = $1 RETURNING ${MEDIA_ASSET_COLUMNS}`
+            : `UPDATE media_assets SET review_state = 'rejected', reviewed_by = $2, reviewed_at = now(), updated_at = now(),
+                  deleted_at = now(), purge_after = now() + ($3::integer * interval '1 day')
+                WHERE id = $1 RETURNING ${MEDIA_ASSET_COLUMNS}`,
+          decision === "accept" ? [assetId, ctx.principal.sub] : [assetId, ctx.principal.sub, retentionDays],
+        );
+        return { result: { asset: toLibraryAsset(done[0], ctx.tenant.slug), decision, alreadyDecided: false } };
       },
     });
   }

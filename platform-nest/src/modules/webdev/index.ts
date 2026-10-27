@@ -322,6 +322,8 @@ export const webdevModule: ModuleContract = {
     "202610111030_iam_webdesk_media_permissions.sql",
     // M5-W1a (additive): the writers' room roles + review permissions (IAM seed, no DDL).
     "202610111443_iam_writers_room_roles.sql",
+    // M5-W1q (additive): the `review` permission on the media library kind (IAM seed, no DDL).
+    "202610271100_iam_webdesk_media_review.sql",
     // WSK-60 (additive): the staging rebuild ledger + the stale-staging marker (third wall).
     "202610101730_webdev_site_builds.sql",
     // M6-P4c (additive): the provisioning completion state machine's columns (§08: registry row,
@@ -360,6 +362,8 @@ export const webdevModule: ModuleContract = {
     { key: "webdev.webdesk_media_asset.upload", description: "Start a WebDesk media upload (mints a single-use upload token)" },
     { key: "webdev.webdesk_media_asset.update", description: "Edit a WebDesk media asset's title, alt text and tags" },
     { key: "webdev.webdesk_media_asset.delete", description: "Delete a WebDesk media asset that no content uses" },
+    // M5-W1q (additive, WSK-D84): accept or reject a contributor's quarantined upload; never the uploader, a contributor, automation or a bot.
+    { key: "webdev.webdesk_media_asset.review", description: "Accept or reject a freelance contributor's quarantined upload to a WebDesk media library" },
     // M5-W1a (additive): the writers' room review flow (docs/plans/2026-10-11-m5-writers-room-design.md §2). The
     // four scoped roles that also reach these are attribute-gated grants with no bundle; approve is maker != checker.
     { key: "webdev.webdesk_content_item.submit", description: "Submit a WebDesk item for editorial review, or withdraw it" },

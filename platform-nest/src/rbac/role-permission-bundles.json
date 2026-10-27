@@ -15,11 +15,11 @@
     "note": "class='relationship' permissions are NEVER present in any bundle (Ruling 3); enforced here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against the live `role_permissions_reject_relationship` DB trigger (0093).",
     "counts": {
       "roles": 30,
-      "totalPairs": 2173,
+      "totalPairs": 2179,
       "perRole": {
-        "platform_admin": 482,
-        "company_admin": 432,
-        "manager": 221,
+        "platform_admin": 483,
+        "company_admin": 433,
+        "manager": 222,
         "member": 126,
         "viewer": 41,
         "org_unit_lead": 25,
@@ -34,8 +34,8 @@
         "search_manager": 42,
         "reports_staff": 4,
         "reports_manager": 3,
-        "webdev_staff": 21,
-        "webdev_manager": 41,
+        "webdev_staff": 22,
+        "webdev_manager": 42,
         "social_staff": 19,
         "social_manager": 31,
         "monitoring_staff": 10,
@@ -46,7 +46,7 @@
         "lms_manager": 11,
         "social_copywriter": 3,
         "social_designer": 3,
-        "owner": 437
+        "owner": 438
       },
       "selfScopedPairs": 58
     }
@@ -531,6 +531,7 @@
       "webdev.webdesk_content_item.update",
       "webdev.webdesk_media_asset.delete",
       "webdev.webdesk_media_asset.read",
+      "webdev.webdesk_media_asset.review",
       "webdev.webdesk_media_asset.update",
       "webdev.webdesk_media_asset.upload",
       "webdev.zoneb_event.read",
@@ -965,6 +966,7 @@
       "webdev.webdesk_content_item.update",
       "webdev.webdesk_media_asset.delete",
       "webdev.webdesk_media_asset.read",
+      "webdev.webdesk_media_asset.review",
       "webdev.webdesk_media_asset.update",
       "webdev.webdesk_media_asset.upload",
       "webdev.zoneb_event.read",
@@ -1188,6 +1190,7 @@
       "webdev.webdesk_content_item.request_publish",
       "webdev.webdesk_content_item.update",
       "webdev.webdesk_media_asset.read",
+      "webdev.webdesk_media_asset.review",
       "webdev.webdesk_media_asset.update",
       "webdev.webdesk_media_asset.upload",
       "webdev.zoneb_event.read",
@@ -1622,6 +1625,7 @@
       "webdev.webdesk_content_item.submit",
       "webdev.webdesk_content_item.update",
       "webdev.webdesk_media_asset.read",
+      "webdev.webdesk_media_asset.review",
       "webdev.webdesk_media_asset.update",
       "webdev.webdesk_media_asset.upload"
     ],
@@ -1665,6 +1669,7 @@
       "webdev.webdesk_content_item.update",
       "webdev.webdesk_media_asset.delete",
       "webdev.webdesk_media_asset.read",
+      "webdev.webdesk_media_asset.review",
       "webdev.webdesk_media_asset.update",
       "webdev.webdesk_media_asset.upload"
     ],
@@ -2280,6 +2285,7 @@
       "webdev.webdesk_content_item.update",
       "webdev.webdesk_media_asset.delete",
       "webdev.webdesk_media_asset.read",
+      "webdev.webdesk_media_asset.review",
       "webdev.webdesk_media_asset.update",
       "webdev.webdesk_media_asset.upload",
       "webdev.zoneb_event.read",

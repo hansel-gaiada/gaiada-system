@@ -39,12 +39,14 @@ const MARKED = [
   "GET /api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/versions",
   "GET /api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/versions/:n",
   "GET /api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media",
+  // M5-W1q (WSK-D84): a contributor uploads INTO THE QUARANTINE: the token WebDesk mints for its assertion quarantines the asset.
+  "POST /api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media/upload-token",
 ].sort();
 
 /** Never open to a contributor, whatever MARKED becomes: the staff functions the design names (§3.1 item 6) and the
  *  contributor admin itself. A second, independent list, so editing MARKED alone cannot open one of these. */
 const NEVER = [
-  /\/media\/upload-token$/, /\/media\/:assetId$/, /\/editorial\/approve$/, /\/editorial\/assign$/, /\/publish-requests/,
+  /\/media\/quarantine$/, /\/media\/:assetId\/review$/, /\/media\/:assetId$/, /\/editorial\/approve$/, /\/editorial\/assign$/, /\/publish-requests/,
   /\/unpublish$/, /\/items\/:itemId\/delete$/, /\/editorial-policy$/, /\/editorial\/grants/, /\/editorial\/contributors/,
   /\/assistant\//, /\/assist$/, /\/forms/, /\/briefs$/, /\/briefs\/:briefId\/(assign|create-draft)$/,
 ];

@@ -32,6 +32,14 @@ export interface LibraryAsset {
   updatedAt: string;
   /** Who uploaded it: the minting editorial principal (null for rows from before 0014). */
   createdBy: string | null;
+  /**
+   * M5-W1q (WSK-D84): accepted | quarantined | rejected. Only an accepted asset is served on `url`; a quarantined or
+   * rejected asset's url answers 404 until/unless a staff editor accepts it.
+   */
+  reviewState: "accepted" | "quarantined" | "rejected";
+  /** The staff principal that accepted or rejected it (null until judged, and for every asset that never needed a review). */
+  reviewedBy: string | null;
+  reviewedAt: string | null;
 }
 
 const iso = (d: Date | string): string => new Date(d).toISOString();
@@ -55,5 +63,8 @@ export function toLibraryAsset(row: MediaAssetRow, tenantSlug: string): LibraryA
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at ?? row.created_at),
     createdBy: row.created_by ?? null,
+    reviewState: row.review_state ?? "accepted",
+    reviewedBy: row.reviewed_by ?? null,
+    reviewedAt: row.reviewed_at ? iso(row.reviewed_at) : null,
   };
 }

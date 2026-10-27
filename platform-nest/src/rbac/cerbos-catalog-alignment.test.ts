@@ -155,7 +155,8 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // DW-10c (2026-10-15): +1 pair on the EXISTING org_structure kind (`read_calendar`, no new kind). 483 -> 484, kinds stay 112.
     // DW-10e (2026-10-16): +2 pairs on the EXISTING work_request kind (`send_across`, `read_across`, no new kind). 484 -> 486, kinds stay 112.
     // SCP-1b (2026-10-26): +11 pairs on EXISTING kinds (social_post x8, social_engagement plan/budget, portal approve_spend; no new kind). 486 -> 497, kinds stay 112.
-    expect(catalog.length).toBe(497);
+    // M5-W1q (2026-10-27, WSK-D84): +1 pair on the EXISTING webdesk_media_asset kind (`review`, no new kind). 497 -> 498, kinds stay 112.
+    expect(catalog.length).toBe(498);
     expect(catalogKindSet.size).toBe(112);
   });
 

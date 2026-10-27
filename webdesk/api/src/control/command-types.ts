@@ -68,6 +68,8 @@ export type CommandName =
   | "media.update"
   | "media.delete"
   | "media.usage"
+  // M5-W1q (WSK-D84) -- a staff editor accepts or rejects a contributor's quarantined upload. Carries an editorial principal.
+  | "media.review"
   // M5-L1/L2 — one form submission read back by the ERP after it sees a Zone B form.received fact.
   | "forms.submission.get"
   // M5-L1d — a site's form definitions: the write (an upsert by (site, key)) and the two reads.
@@ -202,6 +204,12 @@ export const COMMAND_REGISTRY: Readonly<Record<CommandName, CommandMeta>> = Obje
   "media.update": { command: "media.update", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "media.delete": { command: "media.delete", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "media.usage": { command: "media.usage", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // M5-W1q (WSK-D84): accepting a contributor's quarantined upload is what makes an outsider's file servable from our
+  // domain, so it is a write (never `read`) and a STAFF function: it is on neither CLIENT_EDITOR_COMMANDS nor
+  // CONTRIBUTOR_COMMANDS. MEDIUM / operate like the other media writes: the asset is already scanned and stored, and it goes
+  // public only once content that references it is published (itself HIGH and gated); reject is a soft delete the media-purge
+  // job finishes. No WS4 approval. The ERP's own walls (Cerbos `review`, the uploader may not review their own upload) come first.
+  "media.review": { command: "media.review", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   // M5-L1/L2: read / webdesk:read, the same class and scope as every other control read of tenant data
   // (item.get, media.list, ...): the form.received fact is ids-only, so the ERP fetches the authoritative
   // copy here. A submission is personal data, which is why the route is tenant-scoped, refuses a
@@ -260,6 +268,8 @@ export const EDITORIAL_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>
   "media.uploadToken",
   "media.update",
   "media.delete",
+  // M5-W1q: accept or reject a contributor's quarantined upload (staff only).
+  "media.review",
   // M5-W2b: the review writes. Never on CLIENT_EDITOR_COMMANDS: a client editor cannot review or approve.
   "editorial.submit",
   "editorial.withdraw",
@@ -287,7 +297,7 @@ export function commandMeta(command: CommandName): CommandMeta {
  *                                                         approval flow is the ERP's, WebDesk adds nothing)
  *             content.previewToken / previewTokenRevoke  (a client previews its own draft; revoke only withdraws)
  *             media.uploadToken / media.update           (put a file in, describe it)
- *   refused   content.delete, content.unpublish, content.schedule, media.delete
+ *   refused   content.delete, content.unpublish, content.schedule, media.delete, media.review (a client never moderates uploads)
  *
  * These are DESIGN DEFAULTS in the spirit of D59 ("schema, media deletion and other companies are never
  * reachable"), not owner rulings: the owner may widen the list. Nothing else a client could name is an
@@ -318,10 +328,12 @@ export const CLIENT_EDITOR_COMMANDS: ReadonlySet<CommandName> = new Set<CommandN
  *             editorial.comment / commentResolve         (review conversation)
  *             editorial.requestChanges                   (an SEO reviewer sends a draft back; Cerbos still decides who)
  *             editorial.seoSignoff                       (the SEO reviewer's own sign-off)
+ *             media.uploadToken                          (M5-W1q, WSK-D84: a contributor may upload, but the token is minted
+ *                                                         QUARANTINING: the asset is not served until a staff editor accepts it)
  *   refused   content.publish, schedule, unpublish, delete   (publishing is a staff function)
  *             editorial.approve, assign, policySet           (approval, routing and policy are staff functions)
- *             media.uploadToken, media.update, media.delete  (no media write until the Q2 quarantine exists; WSK-D84 allows
- *                                                             uploads once it does, which is one line here and a ticket)
+ *             media.update, media.delete, media.review       (a contributor never edits or deletes media, and never reviews: the
+ *                                                             quarantine is judged by staff only)
  *
  * Nothing else a contributor could name is an editorial command: schema.apply, key.*, lifecycle, releases and promotion
  * carry no editorial assertion at all, exactly as for a client editor, so the ERP must never route a contributor there.
@@ -334,6 +346,7 @@ export const CONTRIBUTOR_COMMANDS: ReadonlySet<CommandName> = new Set<CommandNam
   "content.restoreVersion",
   "content.previewToken",
   "content.previewTokenRevoke",
+  "media.uploadToken",
   "editorial.submit",
   "editorial.withdraw",
   "editorial.comment",

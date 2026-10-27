@@ -677,7 +677,7 @@ tests:
     expected:
       - principal: contributor_editor
         resource: media_site1
-        actions: {read: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW}
   # M5-W1d: a contributor writer gets exactly the writer's answers (the contributor DENYs touch none of its actions).
   - name: contributor_writer on webdesk_content_item
     input:
@@ -747,7 +747,7 @@ tests:
     expected:
       - principal: contributor_writer
         resource: media_site1
-        actions: {read: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW}
   # M5-W1d: a contributor holding a mis-granted webdev_manager keeps only what the contributor DENYs leave open.
   - name: contributor_webdev_manager on webdesk_content_item
     input:
@@ -832,10 +832,10 @@ tests:
     expected:
       - principal: contributor_webdev_manager
         resource: media_site1
-        actions: {read: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW}
       - principal: contributor_webdev_manager
         resource: media_site2
-        actions: {read: EFFECT_ALLOW}
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW}
   - name: writer_global on webdesk_content_item
     input:
       principals: [writer_global]

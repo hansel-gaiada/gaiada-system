@@ -409,13 +409,26 @@ describe.skipIf(!TEST_URL)("M5-W1d: the contributor principal in the database", 
       }
     });
 
-    it("media: EVERY write (upload included) is DENIED, even with a staff tier (W1q's quarantine does not exist yet)", async () => {
+    it("media (M5-W1q, WSK-D84): a contributor UPLOADS into the quarantine, but never edits or deletes an asset, and never reviews one, even with a staff tier", async () => {
       const media = { kind: "webdesk_media_asset", tenantId: A, module: "webdev", siteId: SITE } as Resource;
-      for (const action of ["upload", "update", "delete"]) {
+      // upload: allowed to the contributor (the quarantine makes it safe); the ALLOW is for contributors only, so the same grant as an
+      // employee writer still cannot upload (the control: the allow comes from the new rule, not from a broad one)
+      expect(await allow(writer, media, "upload"), "upload as the contributor writer").toBe(true);
+      expect(await allow(withStaffTier(writer), media, "upload"), "upload with a staff tier").toBe(true);
+      expect(await allow(asEmployee(writer), media, "upload"), "upload as an EMPLOYEE writer (no staff tier)").toBe(false);
+      for (const action of ["update", "delete"]) {
         expect(await allow(writer, media, action), `${action} as the writer`).toBe(false);
         expect(await allow(withStaffTier(writer), media, action), `${action} with a staff tier`).toBe(false);
         expect(await allow(asEmployee(withStaffTier(writer)), media, action), `${action} control`).toBe(true);
       }
+      // review: never a contributor, whatever it holds; the employee control (a staff tier, an upload that is not its own) is allowed
+      const queued = { ...media, creatorId: newId() } as Resource;
+      expect(await allow(writer, queued, "review"), "review as the contributor writer").toBe(false);
+      expect(await allow(withStaffTier(writer), queued, "review"), "review with a staff tier").toBe(false);
+      expect(await allow(asEmployee(withStaffTier(writer)), queued, "review"), "review control (employee, staff tier)").toBe(true);
+      // and nobody reviews their own upload, or one whose uploader is unknown
+      expect(await allow(asEmployee(withStaffTier(writer)), { ...media, creatorId: writer.userId! } as Resource, "review"), "own upload").toBe(false);
+      expect(await allow(asEmployee(withStaffTier(writer)), media, "review"), "unknown uploader").toBe(false);
     });
 
     it("the role-less ALLOWs: assistant thread, assistant memory, agent run and own approvals are DENIED (employee control allowed)", async () => {
@@ -449,7 +462,7 @@ describe.skipIf(!TEST_URL)("M5-W1d: the contributor principal in the database", 
       return { all, denied };
     };
     it.each([
-      ["resource_webdesk_media_asset.yaml", ["read"]],
+      ["resource_webdesk_media_asset.yaml", ["read", "upload"]], // M5-W1q: a contributor may upload into the quarantine; update, delete and review stay denied
       ["resource_webdesk_collection.yaml", ["read"]],
     ])("%s: every action except %j is in the contributor DENY", (file, open) => {
       const { all, denied } = actionsOf(file);
