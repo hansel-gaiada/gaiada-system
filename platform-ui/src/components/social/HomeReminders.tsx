@@ -9,7 +9,7 @@ import { formatDate } from "@/lib/format";
 import type { NoticeList } from "@/lib/notices";
 import type { ReadResult } from "@/lib/readResult";
 import type { ReportDue } from "@/lib/socialHome";
-import { checkinDue, pinnedNoticeReminder, reportDueSub } from "@/lib/socialHomeReminders";
+import { checkinDue, pinnedNoticeReminder, reportDueSub, reportReminders } from "@/lib/socialHomeReminders";
 import { HomeCheckinReminder } from "./HomeCheckinReminder";
 import "./social-home.css";
 
@@ -62,10 +62,19 @@ export function HomeReminders({ tenantId, deptId, checkin, submitCheckin, notice
 
   if (reportsFailure) items.push(<li key="reports" className="sh-rem__note">{reportsFailure}</li>);
   // "Open" for now; SCP-5a adds Write / Check, which need the report's state.
-  for (const r of reports ?? []) {
+  const { cards, more } = reportReminders(reports ?? []);
+  for (const r of cards) {
     items.push(
       <Card key={`report:${r.engagementId}`} kind="report" icon={r.clientName.charAt(0).toUpperCase()} title={`${r.clientName} monthly report`} sub={reportDueSub(r, formatDate)}
         action={<Link href={profile(r.engagementId)} className="lux-btn lux-btn--solid lux-btn--sm sh-rem__btn" aria-label={`Open ${r.clientName} monthly report`}>Open</Link>} />,
+    );
+  }
+
+  if (more > 0) {
+    items.push(
+      <li key="more-reports" className="sh-rem__note">
+        <Link href={`/departments/${encodeURIComponent(deptId)}/allocation`} className="scp-link">{more} more {more === 1 ? "report" : "reports"} due this week</Link>
+      </li>,
     );
   }
 

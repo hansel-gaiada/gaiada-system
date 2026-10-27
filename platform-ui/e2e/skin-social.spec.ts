@@ -413,9 +413,8 @@ test.describe("the Social Home on a desktop (1280x800)", () => {
     await homeReady(page);
     const rem = home(page).getByRole("region", { name: "Reminders" });
     await expect(rem).toBeVisible();
-    // The check-in card depends on the weekday (the demo expects none at the weekend), so only the notice and the reports are asserted.
+    // The check-in card depends on the weekday (the demo expects none at the weekend), so only the notice is asserted; the report cards are windowed by date and the demo's due day is a fixed day of the month, so they are covered by unit tests.
     await expect(rem.locator('[data-reminder="notice"]').getByRole("link", { name: /Read/ })).toHaveAttribute("href", /\/departments\/dept-4\/notices#/);
-    await expect(rem.locator('[data-reminder="report"]').first().getByRole("link", { name: /Open/ })).toHaveAttribute("href", /\/profile\//);
     const stories = (await home(page).getByRole("region", { name: "Client stories" }).boundingBox())!;
     const turn = (await home(page).getByRole("region", { name: "Your turn" }).boundingBox())!;
     const box = (await rem.boundingBox())!;

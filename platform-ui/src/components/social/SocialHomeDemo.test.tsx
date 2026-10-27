@@ -21,7 +21,8 @@ import type { NoticeList } from "@/lib/notices";
 import { PIPE_POSTS, allocStore } from "@/lib/demoSocialPipeline";
 import { asAllocationRows } from "@/lib/socialAllocation";
 import { asCycleTable } from "@/lib/socialCycles";
-import { asFeedPage } from "@/lib/socialHome";
+import { asFeedPage, reportsDue } from "@/lib/socialHome";
+import { reportReminders } from "@/lib/socialHomeReminders";
 import { asWaitingGroups } from "@/lib/socialMessages";
 import { scpHolderOf } from "@/lib/scpStageMachine";
 import type { ReadResult } from "@/lib/readResult";
@@ -99,7 +100,9 @@ describe("the officer", () => {
     expect(within(section("Your accounts this cycle")).getAllByText(/ of \d+ posts/).length).toBeGreaterThan(0);
     // the reports are reminder cards, one per client, each with a due date
     const reports = section("Reminders").querySelectorAll('[data-reminder="report"]');
-    expect(reports.length).toBe(clientNames("u-social").length);
+    // (only those inside the window, at most three: the demo's due days are fixed days of the month)
+    const expected = reportReminders(reportsDue(asAllocationRows(get("allocation", "u-social", "mine=1")), TODAY)).cards.length;
+    expect(reports.length).toBe(expected);
     for (const r of reports) expect(r).toHaveTextContent(/monthly report.*(Due|Was due) \d{2} \w{3} 2026/);
   });
 

@@ -40,3 +40,16 @@ export function pinnedNoticeReminder(result: ReadResult<NoticeList>, here: strin
 export function reportDueSub(r: Pick<ReportDue, "dueIso" | "daysLeft">, formatDate: (iso: string) => string): string {
   return `${r.daysLeft < 0 ? "Was due" : "Due"} ${formatDate(r.dueIso)}`;
 }
+
+/** The most report cards the Home draws. */
+export const HOME_REPORT_CARDS_MAX = 3;
+/** The window of `daysLeft` a report is a reminder in: just missed (3 days ago) up to due within a week. */
+export const REPORT_WINDOW = { from: -3, to: 7 } as const;
+
+/** The report cards: only reports due within the window, soonest first (the input's order), at most `HOME_REPORT_CARDS_MAX`; `more` counts the in-window ones left out.
+ *  There is no "sent" state until SCP-5a, so without a window a past report would nag all month and an officer with many clients would get a card each. The full list of
+ *  report days is the Allocation page. */
+export function reportReminders(due: readonly ReportDue[]): { cards: ReportDue[]; more: number } {
+  const inWindow = due.filter((r) => r.daysLeft >= REPORT_WINDOW.from && r.daysLeft <= REPORT_WINDOW.to);
+  return { cards: inWindow.slice(0, HOME_REPORT_CARDS_MAX), more: Math.max(0, inWindow.length - HOME_REPORT_CARDS_MAX) };
+}

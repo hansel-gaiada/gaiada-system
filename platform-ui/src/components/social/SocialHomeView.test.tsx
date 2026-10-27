@@ -339,17 +339,30 @@ describe("the reminders", () => {
   });
 
   describe("reports due", () => {
-    it("is one card per client with a due day, soonest first, each opening the client", () => {
-      mount(only({ accounts: ok([alloc("e-1", "Northwind Traders", { reportDueDay: 20 }), alloc("e-2", "Harborlight Hotel", { reportDueDay: 7 }), alloc("e-3", "No Day Brand", { reportDueDay: null })]) }));
+    it("is one card per client due inside the window (3 days ago to a week ahead), soonest first, each opening the client", () => {
+      mount(only({ accounts: ok([alloc("e-1", "Northwind Traders", { reportDueDay: 20 }), alloc("e-2", "Harborlight Hotel", { reportDueDay: 14 }), alloc("e-3", "No Day Brand", { reportDueDay: null }), alloc("e-4", "Long Past Brand", { reportDueDay: 2 }), alloc("e-5", "Far Off Brand", { reportDueDay: 28 })]) }));
       const cards = Array.from(section("Reminders").querySelectorAll<HTMLElement>('[data-reminder="report"]'));
       expect(cards).toHaveLength(2);
       expect(cards[0]).toHaveTextContent("Harborlight Hotel monthly report");
-      expect(cards[0]).toHaveTextContent("Was due 07 Oct 2026");
+      expect(cards[0]).toHaveTextContent("Was due 14 Oct 2026");
       expect(within(cards[0]).getByRole("link", { name: /Open/ })).toHaveAttribute("href", "/departments/d-soc/profile/e-2");
       expect(cards[1]).toHaveTextContent("Northwind Traders monthly report");
       expect(cards[1]).toHaveTextContent("Due 20 Oct 2026");
       expect(within(cards[1]).getByRole("link", { name: /Open/ })).toHaveAttribute("href", "/departments/d-soc/profile/e-1");
       expect(section("Reminders")).not.toHaveTextContent("No Day Brand");
+      expect(section("Reminders")).not.toHaveTextContent("Long Past Brand");
+      expect(section("Reminders")).not.toHaveTextContent("Far Off Brand");
+      expect(screen.queryByText(/more reports? due/)).toBeNull();
+    });
+
+    it("caps the cards at three and links the rest to the Allocation page", () => {
+      const rows = [16, 17, 18, 19, 20].map((d) => alloc(`e-${d}`, `Brand ${d}`, { reportDueDay: d }));
+      mount(only({ accounts: ok(rows) }));
+      expect(section("Reminders").querySelectorAll('[data-reminder="report"]')).toHaveLength(3);
+      expect(within(section("Reminders")).getByRole("link", { name: "2 more reports due this week" })).toHaveAttribute("href", "/departments/d-soc/allocation");
+      cleanup();
+      mount(only({ accounts: ok([16, 17, 18, 19].map((d) => alloc(`e-${d}`, `Brand ${d}`, { reportDueDay: d }))) }));
+      expect(within(section("Reminders")).getByRole("link", { name: "1 more report due this week" })).toBeInTheDocument();
     });
 
     it("says cannot-tell for a failed allocation read, never nothing due", () => {
