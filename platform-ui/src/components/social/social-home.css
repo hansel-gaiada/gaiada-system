@@ -1,0 +1,76 @@
+/* SCP-1d — the Social Media Home, laid out as the team's design (the feed, the stories across the top, a side column). Tokens only: no colour, radius or shadow
+   literal and no uppercase, so the Social skin (SCP-K) draws it by its tokens, light and dark, and the Standard skin never loads it (the page imports it only
+   for the Social Home). The ring of a client's circle is the state's own status token, set by the component as `--sh-ring`; the words under it carry the meaning. */
+
+.sh { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 28px; align-items: start; margin: 0 0 24px; }
+.sh-main { display: grid; gap: 24px; min-width: 0; max-width: 560px; justify-self: center; width: 100%; }
+.sh-side { display: grid; gap: 24px; min-width: 0; }
+.sh-section { min-width: 0; }
+.sh-section__title { font: 700 14px var(--font-body); color: var(--text-primary); margin: 0 0 10px; }
+
+/* The stories row: one circle per client, scrolls sideways when there are many. */
+.sh-stories { list-style: none; margin: 0; padding: 4px 0 8px; display: flex; gap: 16px; overflow-x: auto; scrollbar-width: none; }
+.sh-stories::-webkit-scrollbar { display: none; }
+.sh-story { display: grid; justify-items: center; gap: 4px; width: 72px; color: var(--text-primary); text-decoration: none; }
+.sh-ring { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; border: 3px solid var(--sh-ring, var(--erp-hairline)); padding: 3px; }
+.sh-ring__face {
+  display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; background: var(--surface-card); color: var(--text-primary);
+  font: 700 20px var(--font-body);
+}
+.sh-story:hover .sh-ring, .sh-story:focus-visible .sh-ring { background: var(--tint-hover); }
+.sh-story__name { font: 600 12px var(--font-body); max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-story__state { font: 400 11px var(--font-body); color: var(--erp-ink-60); }
+
+/* The cards: the design's feed post. The title's link is stretched over the whole card (it opens the post drawer), and the main button sits above it. */
+.sh-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 20px; }
+.sh-card { position: relative; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); background: var(--surface-card); overflow: hidden; }
+.sh-card:hover { border-color: var(--text-primary); }
+.sh-card__head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
+.sh-avatar {
+  display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; flex: none;
+  border: 0.5px solid var(--erp-hairline); color: var(--text-primary); font: 700 13px var(--font-body);
+}
+.sh-card__who { display: grid; min-width: 0; flex: 1; }
+.sh-card__client { font: 600 13px var(--font-body); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-card__sub { font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.sh-card__sub--turn { color: var(--accent-fg); font-weight: 600; }
+.sh-card__media { display: grid; place-items: center; aspect-ratio: 1 / 1; background: var(--tint-hover); border-top: 0.5px solid var(--erp-hairline-soft); border-bottom: 0.5px solid var(--erp-hairline-soft); overflow: hidden; }
+.sh-card__media[data-format="reel"], .sh-card__media[data-format="story"] { aspect-ratio: 4 / 5; }
+.sh-card__media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sh-card__ph { font: 600 13px var(--font-body); color: var(--erp-ink-60); }
+.sh-card__body { padding: 10px 12px 12px; display: grid; gap: 6px; }
+.sh-card__title { font: 700 14px/1.35 var(--font-body); margin: 0; color: var(--text-primary); }
+.sh-card__link { color: inherit; text-decoration: none; }
+.sh-card__link::after { content: ""; position: absolute; inset: 0; }
+.sh-card__link:focus-visible { outline: none; }
+.sh-card__link:focus-visible::after { outline: 2px solid var(--accent-fg); outline-offset: -2px; border-radius: var(--radius-md); }
+.sh-card__meta { font: 400 12px var(--font-body); color: var(--erp-ink-60); margin: 0; }
+.sh-card__act { position: relative; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.sh-card__why { font: 400 12px/1.4 var(--font-body); color: var(--erp-ink-60); flex: 1 1 160px; }
+.sh-card__status { position: relative; z-index: 1; margin: 0; }
+.sh-card__status:empty { display: none; }
+.sh-more { margin: 12px 0 0; }
+
+/* Waiting on others, and the side column's lists. */
+.sh-wgroup { margin: 0 0 14px; }
+.sh-wgroup__title { font: 600 12px var(--font-body); color: var(--erp-ink-60); margin: 0 0 4px; }
+.sh-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.sh-list > li { border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.sh-row { display: grid; gap: 2px; padding: 8px 0; color: var(--text-primary); text-decoration: none; min-width: 0; }
+.sh-row:hover .sh-row__main, .sh-row__link:hover .sh-row__main { text-decoration: underline; }
+.sh-row--split { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: start; }
+.sh-row__link { display: grid; gap: 2px; color: inherit; text-decoration: none; min-width: 0; }
+.sh-row__main { font: 600 13px var(--font-body); overflow-wrap: anywhere; }
+.sh-row__sub { font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.sh-more-link { margin: 8px 0 0; }
+
+/* Phone: one column, the side column under the feed (the bottom bar is the skin's). */
+@media (max-width: 900px) {
+  .sh { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .sh-main { max-width: none; }
+}
+@media (max-width: 640px) {
+  .sh-row--split { grid-template-columns: minmax(0, 1fr); }
+}
+
+.sh-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

@@ -27,12 +27,17 @@ vi.mock("@/lib/pm", async () => ({
 vi.mock("@/lib/activity", async () => ({ ...(await vi.importActual<typeof import("@/lib/activity")>("@/lib/activity")), listWorkActivity: vi.fn(async () => []) }));
 vi.mock("@/lib/claudeSeats", async () => ({ ...(await vi.importActual<typeof import("@/lib/claudeSeats")>("@/lib/claudeSeats")), listClaudeSeats: vi.fn(async () => ({ rows: [], unavailable: false })) }));
 vi.mock("@/components/overview/pilot", () => ({ pilotFrame: vi.fn() }));
+// SCP-1d: the Social Media Home is the feed only in the Social skin. The prefs cookie holds the person's own choice; the feed's reads are its own component's (not run here).
+vi.mock("@/lib/prefs", async () => ({ ...(await vi.importActual<typeof import("@/lib/prefs")>("@/lib/prefs")), getPrefs: vi.fn() }));
+vi.mock("@/components/social/SocialHome", () => ({ SocialHome: () => null }));
 
 import { getMe } from "@/lib/platform";
 import { getDepartment, getDepartmentNode } from "@/lib/departments";
 import { listProjects } from "@/lib/entities";
 import { listMilestones, listPmTasks, listProjectStatuses } from "@/lib/pm";
 import { pilotFrame } from "@/components/overview/pilot";
+import { DEFAULT_PREFS, getPrefs } from "@/lib/prefs";
+import { SocialHome } from "@/components/social/SocialHome";
 import { KpiStrip } from "@/components/departments/KpiStrip";
 import DepartmentHomePage from "./page";
 
@@ -70,6 +75,7 @@ beforeEach(() => {
   vi.mocked(listMilestones).mockClear();
   vi.mocked(listProjectStatuses).mockClear();
   vi.mocked(pilotFrame).mockReset();
+  vi.mocked(getPrefs).mockReset().mockResolvedValue({ ...DEFAULT_PREFS });
 });
 
 describe("Department Home: the node check", () => {
@@ -131,5 +137,55 @@ describe("Department Home: not framed", () => {
     expect(listPmTasks).toHaveBeenCalledTimes(2);
     expect(listMilestones).toHaveBeenCalledTimes(2);
     expect(listProjectStatuses).toHaveBeenCalledTimes(2);
+  });
+});
+
+// SCP-1d (plan §6.1, §6.2): the Social Media workspace's Home is laid out as the team's feed WHEN it is drawn in the Social skin, and not otherwise. The feed is handed to the
+// Overview frame as its `lead`, behind its own <Suspense>; a person who chose Standard and every other department are handed the frame exactly as before (one argument).
+describe("Department Home: the Social skin's feed", () => {
+  const frame = vi.fn((legacy: ReactNode, lead?: ReactNode) => (lead ? [lead, legacy] : legacy));
+  const social = () => vi.mocked(getDepartmentNode).mockResolvedValue({ id: "d-web", name: "Social Media" });
+  beforeEach(() => { frame.mockClear(); vi.mocked(pilotFrame).mockResolvedValue(frame as never); });
+
+  it("gives the Social Media workspace, in the Social skin, the feed as the frame's lead: for this person, in this company, in this department", async () => {
+    social();
+    await mount();
+    expect(frame).toHaveBeenCalledTimes(1);
+    expect(frame.mock.calls[0]).toHaveLength(2);
+    const lead = frame.mock.calls[0][1] as El;
+    expect(lead.type).toBe(Suspense);
+    expect(lead.props.fallback).toBeTruthy();
+    const feed = lead.props.children as El;
+    expect(feed.type).toBe(SocialHome);
+    expect(feed.props).toEqual({ userId: "u-1", tenantId: "co-a", deptId: "d-web", noQueue: false });
+    // The body stays (the KPI strip and the rest): the feed is added, nothing is taken out.
+    expect((frame.mock.calls[0][0] as El).type).toBe(Suspense);
+  });
+
+  it("leaves the Social Media Home as it is for a person who chose the Standard skin", async () => {
+    social();
+    vi.mocked(getPrefs).mockResolvedValue({ ...DEFAULT_PREFS, skin: "standard" });
+    await mount();
+    expect(frame).toHaveBeenCalledTimes(1);
+    expect(frame.mock.calls[0]).toHaveLength(1);
+  });
+
+  it("leaves every other department as it is, and does not even read the prefs for it", async () => {
+    await mount(); // Web Dev
+    expect(frame.mock.calls[0]).toHaveLength(1);
+    expect(getPrefs).not.toHaveBeenCalled();
+  });
+
+  it("draws the feed above the body when there is no Overview frame, and the body alone for Standard", async () => {
+    vi.mocked(pilotFrame).mockResolvedValue(null);
+    social();
+    const out = (await mount()) as El;
+    const kids = out.props.children as El[];
+    expect(kids).toHaveLength(2);
+    expect((kids[0].props.children as El).type).toBe(SocialHome);
+    vi.mocked(getPrefs).mockResolvedValue({ ...DEFAULT_PREFS, skin: "standard" });
+    const plain = (await mount()) as El;
+    expect(plain.type).not.toBe(Suspense);
+    expect(plain.props.children).toBeUndefined();
   });
 });

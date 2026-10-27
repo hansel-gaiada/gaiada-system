@@ -17,13 +17,14 @@ import { WorkspaceOverview } from "./WorkspaceOverview";
  *  The page decides this BEFORE it reads its own data, builds its body once, and passes it through `wrap`,
  *  so the page reads exactly what it read before. Today's body stays under the Overview's bands until the
  *  Overview's own blocks replace it (plan §2.6 rule 1: nothing is removed). DW-3z: each page builds a smaller body for this frame,
- *  leaving out the sections the inventory in plan §3.8 (`lib/overviewCoverage.ts`) says a block or a tab now holds. */
+ *  leaving out the sections the inventory in plan §3.8 (`lib/overviewCoverage.ts`) says a block or a tab now holds.
+ *  SCP-1d: `lead` is a workspace skin's own home layout (the Social Media feed), drawn between the header and the bands; omitted, the frame is as before. */
 export async function pilotFrame(
   me: Me,
   tenantId: string,
   target: { deptId: string } | { slug: string },
   searchParams: Promise<{ period?: string | string[]; view?: string | string[] }>,
-): Promise<((legacy: ReactNode) => ReactNode) | null> {
+): Promise<((legacy: ReactNode, lead?: ReactNode) => ReactNode) | null> {
   // Three independent reads (the cookie, the org tree, the modules), started together: serially they added up on the first byte.
   // DW-3g: one read of the company's modules, so a block whose module is off is not placed. It fails open.
   // DW-10e: the company's routes to other group companies, for the Requests block's gate and the per-route actions. The Overview AWAITS them here (it is
@@ -44,8 +45,8 @@ export async function pilotFrame(
   // nothing about a team is read for them. The switch is cosmetic: the server narrows every Team read.
   const canSwitchView = canSwitchToTeam(me, tenantId, subject);
   const mode = resolveOverviewView(view, canSwitchView);
-  return (legacy) => (
-    <WorkspaceOverview me={me} tenantId={tenantId} subject={subject} period={parsed} view={mode} canSwitchView={canSwitchView} legacy={legacy} moduleOn={modules.isEnabled}
+  return (legacy, lead) => (
+    <WorkspaceOverview me={me} tenantId={tenantId} subject={subject} period={parsed} view={mode} canSwitchView={canSwitchView} legacy={legacy} lead={lead} moduleOn={modules.isEnabled}
       customise={{ prefs: prefs.overview ?? {}, setWidget: setOverviewWidgetAction }} />
   );
 }
