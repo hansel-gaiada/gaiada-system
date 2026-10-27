@@ -388,6 +388,9 @@ describe("WSK-51 content reads (real DB + real PDP)", () => {
         "originalFilename",
         "purgeAfter",
         "purgedAt",
+        "reviewState", // M5-W1q (migration 0020): the review state and who judged it
+        "reviewedAt",
+        "reviewedBy",
         "scanStatus",
         "sizeBytes",
         "tags",
