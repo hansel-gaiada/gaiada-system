@@ -85,6 +85,9 @@ import { SocialPublisherError, type OrgHandle, type SocialPublisher, type Varian
 // codes when the (network, capability) switch names `direct`; formatted the same way a
 // `SocialPublisherError` already is below, never left as an untyped message.
 import { OAuthTokenError } from "./publisher/oauth-tokens";
+// SCP-Sa — the simulator's provenance marker and switch: a variant the simulator served is stamped `simulated = true`
+// in the SAME UPDATE as its status (see `stampDispatchOutcome`).
+import { isSimulatedPublisher, isSocialSimulationEnabled } from "./publisher/simulation";
 import { refreshCreatorInfoSnapshot } from "./creator-info-verifier";
 
 /** Refusals that belong to THIS file's own routing question ("who authorized this call"), not to
@@ -452,17 +455,20 @@ async function stampDispatchOutcome(
   variantId: string,
   approvalId: string,
   expectedHash: string,
-  outcome: { status: "queued" | "failed"; providerPostId: string | null; lastError: string | null },
+  outcome: { status: "queued" | "failed"; providerPostId: string | null; lastError: string | null; simulated: boolean },
 ): Promise<boolean> {
   return withTenants([tenantId], async (c) => {
     await declareSocialModuleScope(c);
+    // SCP-Sa — `simulated` rides in this ONE statement, so "the simulator served this variant" and its status/approval
+    // stamp become true together. `OR`: the mark is only ever added here, never cleared (the purge script clears rows).
     const upd = await c.query(
       `UPDATE social_post_variants
           SET approval_id = $2, provider_post_id = $3, status = $4, last_error = $5,
               published_at = CASE WHEN $4 = 'published' THEN now() ELSE published_at END,
+              simulated = (simulated OR $7::boolean),
               updated_at = now()
         WHERE id = $1 AND status = 'approved' AND approval_id IS NULL AND args_sha256 = $6`,
-      [variantId, approvalId, outcome.providerPostId, outcome.status, outcome.lastError, expectedHash],
+      [variantId, approvalId, outcome.providerPostId, outcome.status, outcome.lastError, expectedHash, outcome.simulated],
     );
     return (upd.rowCount ?? 0) > 0;
   });
@@ -579,6 +585,9 @@ export async function dispatchApprovedPublish(
   // `direct`, today; nothing else). When true, this file must NEVER call `schedulePost` for this
   // dispatch — see the block below.
   let uploadIsTerminal = false;
+  // SCP-Sa — set when the driver that actually served this dispatch (media or schedule) is the simulator. Only
+  // `resolveDispatchOrgHandle` can hand one out, only for a simulated account, and only while the switch is on.
+  let servedBySimulator = false;
   try {
     // SMM-39 — resolve the composer's `{fileId}` descriptors to already-uploaded engine refs.
     // A text-only variant (`args.media` empty/absent) never resolves a media handle at all and never
@@ -586,6 +595,7 @@ export async function dispatchApprovedPublish(
     // needed (this ticket's own AC), and (38e) it must not spend a token-resolution round trip either.
     if (mediaDescriptors.length > 0) {
       const media = await resolveDispatchOrgHandle(tenantId, chain, "media_upload");
+      servedBySimulator = servedBySimulator || isSimulatedPublisher(media.driver);
       engineMedia = await resolveEngineMedia(
         tenantId, variantId, mediaDescriptors, media.driver, media.handle, chain.network, args.body,
       );
@@ -653,6 +663,7 @@ export async function dispatchApprovedPublish(
       // a fresh approval) — a new token for this narrower case would not change what anyone does
       // with the answer.
       const scheduled = await resolveDispatchOrgHandle(tenantId, chain, "schedule");
+      servedBySimulator = servedBySimulator || isSimulatedPublisher(scheduled.driver);
       dispatched = await invokePublisher(
         { op: "schedulePost", org: scheduled.handle, network: chain.network, costUsd: 0 },
         () => scheduled.driver.schedulePost(scheduled.handle, dispatch),
@@ -671,6 +682,10 @@ export async function dispatchApprovedPublish(
     status: dispatched ? "queued" : "failed",
     providerPostId: dispatched?.providerPostId ?? null,
     lastError: dispatchError,
+    // SCP-Sa — fence 4 (simulation.ts): the mark is written only while the switch is on. `servedBySimulator` already
+    // implies it (the simulator is unreachable with it off); re-read here rather than asserted, because a throw at this
+    // point would lose the stamp of a dispatch that has already happened.
+    simulated: servedBySimulator && isSocialSimulationEnabled(),
   });
 
   if (!stamped) {

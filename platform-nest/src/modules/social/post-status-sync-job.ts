@@ -27,8 +27,9 @@ import type { PoolClient } from "pg";
 import { withGlobal, withTenants } from "../../db";
 import { declareSocialModuleScope } from "./publish-precondition";
 import { openOrg, type PublisherOrgRow } from "./publisher/provisioning";
-import type { PostStatus } from "./publisher/types";
-import { invokePublisher } from "./publisher/registry";
+import type { OrgHandle, PostStatus, SocialPublisher } from "./publisher/types";
+import { invokePublisher, resolveSimulatedPublisher } from "./publisher/registry";
+import { SimulatedOrgHandle } from "./publisher/simulation";
 import { emitEvent } from "../../events/outbox.service";
 // SMM-33/24 (this pass) — Gap 2: the ONLY writer of `social_post_variants.status -> 'published'`/
 // `'failed'` that reaches this table asynchronously (neither the safety poll nor the webhook intake
@@ -50,6 +51,8 @@ interface InFlightRow {
   provider_post_id: string;
   org_id: string;
   network: string;
+  /** SCP-Sa — `social_accounts.simulated`: a simulated account's posts are asked of the simulator, never of a real engine. */
+  simulated: boolean;
 }
 
 async function loadInFlight(c: PoolClient, providerPostIds?: string[]): Promise<InFlightRow[]> {
@@ -60,7 +63,7 @@ async function loadInFlight(c: PoolClient, providerPostIds?: string[]): Promise<
     filter = "AND v.provider_post_id = ANY($1::text[])";
   }
   const { rows } = await c.query<InFlightRow>(
-    `SELECT v.id AS variant_id, v.provider_post_id, a.publisher_org_id AS org_id, a.network
+    `SELECT v.id AS variant_id, v.provider_post_id, a.publisher_org_id AS org_id, a.network, a.simulated
        FROM social_post_variants v
        JOIN social_accounts a ON a.id = v.account_id AND a.tenant_id = v.tenant_id
       WHERE v.status IN ('queued', 'publishing')
@@ -80,6 +83,17 @@ async function loadOrg(c: PoolClient, orgId: string): Promise<PublisherOrgRow | 
     [orgId],
   );
   return rows[0] ?? null;
+}
+
+/** SCP-Sa — which driver answers for one org's in-flight posts. A SIMULATED account's posts go to the simulator (the one
+ *  road, `registry.ts#resolveSimulatedPublisher`; it refuses `simulation_disabled` while the switch is off, which the
+ *  sweep logs and skips, leaving those rows queued), every other account's to the org's own engine exactly as before.
+ *  The two never mix in one call: the sweep groups by (org, simulated). */
+function openStatusDriver(tenantId: string, org: PublisherOrgRow, simulated: boolean): { driver: SocialPublisher; handle: OrgHandle } {
+  if (simulated) {
+    return { driver: resolveSimulatedPublisher("post_status"), handle: new SimulatedOrgHandle(tenantId, null, org.id) };
+  }
+  return openOrg(org);
 }
 
 /** Postgres `state` -> the CHECK-constrained `social_post_variants.status` vocabulary. `unknown`
@@ -220,11 +234,14 @@ export async function reconcileTenantPostStatus(tenantId: string, now: Date = ne
     await declareSocialModuleScope(c);
     return loadInFlight(c);
   });
+  // SCP-Sa — grouped by (org, simulated), so a simulated account's posts and a real account's are never sent to the same
+  // driver in one call (in practice the boot and runtime fences keep the two from coexisting at all).
   const byOrg = new Map<string, InFlightRow[]>();
   for (const r of rows) {
-    const list = byOrg.get(r.org_id) ?? [];
+    const key = `${r.org_id}|${r.simulated === true ? "sim" : "real"}`;
+    const list = byOrg.get(key) ?? [];
     list.push(r);
-    byOrg.set(r.org_id, list);
+    byOrg.set(key, list);
   }
 
   let applied = 0;
@@ -232,7 +249,9 @@ export async function reconcileTenantPostStatus(tenantId: string, now: Date = ne
   const from = new Date(now.getTime() - 60 * 24 * 3600 * 1000).toISOString().slice(0, 10); // 60d back — comfortably covers any realistic in-flight window
   const to = now.toISOString().slice(0, 10);
 
-  for (const [orgId, orgRows] of byOrg) {
+  for (const [groupKey, orgRows] of byOrg) {
+    const orgId = orgRows[0].org_id;
+    const simulated = orgRows[0].simulated === true;
     try {
       // ⚠ `social_publisher_orgs` carries 0105's third wall too — this transaction is otherwise
       // module-less (matching the executor's own shape elsewhere in this module), so the scope must
@@ -244,7 +263,7 @@ export async function reconcileTenantPostStatus(tenantId: string, now: Date = ne
         return loadOrg(c, orgId);
       });
       if (!org) continue;
-      const { driver, handle } = openOrg(org);
+      const { driver, handle } = openStatusDriver(tenantId, org, simulated);
       if (!driver.capabilities.has("post_status")) continue;
       const ids = orgRows.map((r) => r.provider_post_id);
       const statuses = await invokePublisher(
@@ -256,7 +275,7 @@ export async function reconcileTenantPostStatus(tenantId: string, now: Date = ne
     } catch (err) {
       errors += 1;
       // eslint-disable-next-line no-console
-      console.error(`[SOCIAL-POST-STATUS-SYNC] org ${orgId} (tenant ${tenantId}) failed:`, (err as Error).message);
+      console.error(`[SOCIAL-POST-STATUS-SYNC] org ${groupKey} (tenant ${tenantId}) failed:`, (err as Error).message);
     }
   }
   return { orgs: byOrg.size, applied, errors };
@@ -301,7 +320,7 @@ export async function reconcileOneProviderPost(tenantId: string, providerPostId:
     return loadOrg(c, row.org_id);
   });
   if (!org) return false;
-  const { driver, handle } = openOrg(org);
+  const { driver, handle } = openStatusDriver(tenantId, org, row.simulated === true);
   if (!driver.capabilities.has("post_status")) return false;
   const statuses = await invokePublisher(
     { op: "getPostStatus", org: handle },

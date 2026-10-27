@@ -143,6 +143,9 @@ export const socialModule: ModuleContract = {
     "202610271400_creative_assets_source.sql",
     // SCP-3c (BFF §63.1 file 6, §63.10) — post metrics typed in by hand or simulated: source, reach and who entered them.
     "202610271500_social_post_metrics_manual.sql",
+    // SCP-Sa (BFF §63.1 file 8) — the simulator's marks: social_accounts.simulated, social_post_variants.simulated and
+    // social_metrics_daily.source ('pull' | 'simulated'). The containment rules are code (publisher/boot.ts, simulation.ts).
+    "202610271600_social_simulation.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is

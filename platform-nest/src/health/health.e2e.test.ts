@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { buildApp } from "../main";
+import { config } from "../config";
 
 describe("health (nest port stage 1)", () => {
   let app: NestFastifyApplication;
@@ -28,5 +29,31 @@ describe("health (nest port stage 1)", () => {
     const body = res.json() as { version: string };
     expect(typeof body.version).toBe("string");
     expect(body.version).toBe(process.env.APP_VERSION?.trim() || "unknown");
+  });
+});
+
+// SCP-Sa (plan §8, SCP-S "Sa"): the social simulator's switch is visible from outside, an additive field that is always
+// a real boolean. Read at call time, so flipping config flips the answer without a rebuild.
+describe("health: the social simulator's switch (SCP-Sa)", () => {
+  let app: NestFastifyApplication;
+  const before = config.socialSimulationEnabled;
+  beforeAll(async () => {
+    app = await buildApp();
+  });
+  afterAll(async () => {
+    config.socialSimulationEnabled = before;
+    await app.close();
+  });
+
+  it("GET /health reports socialSimulation, false by default and true while the switch is on", async () => {
+    const off = (await app.inject({ method: "GET", url: "/health" })).json() as { socialSimulation: unknown };
+    expect(off.socialSimulation).toBe(false);
+    config.socialSimulationEnabled = true;
+    const on = (await app.inject({ method: "GET", url: "/health" })).json() as { socialSimulation: unknown; ok: boolean };
+    expect(on.socialSimulation).toBe(true);
+    expect(on.ok).toBe(true);
+    config.socialSimulationEnabled = false;
+    const offAgain = (await app.inject({ method: "GET", url: "/health" })).json() as { socialSimulation: unknown };
+    expect(offAgain.socialSimulation).toBe(false);
   });
 });

@@ -18,11 +18,25 @@ import { config } from "../../../config";
 import type { Network } from "../media-rules";
 import type { OrgHandle, PublisherCapability, PublisherKey, SocialPublisher } from "./types";
 import { SocialPublisherError } from "./types";
+import {
+  SIMULATED_PUBLISHER_KEY, SOCIAL_SIMULATION_ENV, SOCIAL_SIMULATION_REFUSAL, isSimulatedPublisher,
+  isSocialSimulationEnabled, publisherProvenanceViolation,
+} from "./simulation";
 
 const publishers = new Map<PublisherKey, SocialPublisher>();
 const tracer = trace.getTracer("social.publisher");
 
+/** SCP-Sa — every registration is provenance-checked against what is ALREADY registered (simulation.ts's
+ *  `publisherProvenanceViolation`): a simulator under a real key, a real engine under 'simulated', the simulator with the
+ *  switch off, or a real engine beside the simulator THROWS here, at the call that would have created the mix — the
+ *  SM-33 "boot error, never a warning" doctrine applied at the one place a driver can enter the registry, so a test or a
+ *  later refactor cannot assemble the forbidden pair by calling this function in a different order than boot does. */
 export function registerPublisher(p: SocialPublisher): void {
+  const candidate = [...[...publishers.values()].filter((x) => x.key !== p.key), p];
+  const violation = publisherProvenanceViolation(candidate, isSocialSimulationEnabled());
+  if (violation) {
+    throw new Error(`[social] BOOT ERROR: refusing to register publisher '${p.key}': ${violation} (SCP-Sa)`);
+  }
   publishers.set(p.key, p);
 }
 
@@ -31,16 +45,55 @@ export function resetPublishers(): void {
   publishers.clear();
 }
 
+/** SCP-Sa — every registered driver, for boot's object-level provenance re-check. A copy: callers cannot mutate the map. */
+export function listPublishers(): SocialPublisher[] {
+  return [...publishers.values()];
+}
+
+/** Look a driver up by key. SCP-Sa: NEVER the simulator. A caller that names a key from config or a row
+ *  (`SOCIAL_PUBLISHER_DRIVER`, `social_publisher_orgs.driver`) must not be able to land on it by typing its name;
+ *  `resolveSimulatedPublisher` below is the only way to reach it. */
 export function getPublisher(key: PublisherKey): SocialPublisher | undefined {
-  return publishers.get(key);
+  const p = publishers.get(key);
+  return p && isSimulatedPublisher(p) ? undefined : p;
+}
+
+/** SCP-Sa — THE ONE ROAD TO THE SIMULATOR. Called only by `provisioning.ts#resolveDispatchOrgHandle` and the status
+ *  sweep (`post-status-sync-job.ts`), and only for an account whose `social_accounts.simulated` is true. Refuses:
+ *  - `simulation_disabled` when the switch is off or no simulator is registered (an operator switched it off while
+ *    simulated rows remain: they stop publishing, they do not fall through to a real engine);
+ *  - `capability_unsupported` for a capability the simulator does not simulate (inbox, metrics until SCP-Sd), so a
+ *    caller never gets a driver it would then call a missing method on.
+ *  Never falls back to any other driver. */
+export function resolveSimulatedPublisher(capability?: PublisherCapability): SocialPublisher {
+  const p = publishers.get(SIMULATED_PUBLISHER_KEY);
+  if (!isSocialSimulationEnabled() || !p || !isSimulatedPublisher(p)) {
+    throw new SocialPublisherError(
+      SOCIAL_SIMULATION_REFUSAL.disabled,
+      `this account is simulated, and the social simulator is not running (${SOCIAL_SIMULATION_ENV} is off): a `
+      + "simulated account never publishes through a real engine",
+    );
+  }
+  if (capability && !p.capabilities.has(capability)) {
+    throw new SocialPublisherError(
+      "capability_unsupported",
+      `the social simulator does not simulate '${capability}'`,
+    );
+  }
+  return p;
 }
 
 /** Resolve the driver a `social_publisher_orgs` row names (0105's `driver` column: 'postiz' |
  *  'mixpost'). Honor-or-refuse, exactly like the search registry's explicit-provider path: a row
  *  that names a driver this deployment does not run REFUSES rather than quietly using the other
- *  one. Substituting a publishing engine under an operator is never a helpful default. */
+ *  one. Substituting a publishing engine under an operator is never a helpful default.
+ *
+ *  SCP-Sa: the simulator is never resolved by name here (see `getPublisher`), and its registration does not count as
+ *  "something is configured" (see the heuristic below), so a Postiz-shaped call under the switch keeps its honest
+ *  `publisher_not_configured`. */
 export function resolvePublisher(driver: string): SocialPublisher {
-  const p = publishers.get(driver as PublisherKey);
+  const named = publishers.get(driver as PublisherKey);
+  const p = named && !isSimulatedPublisher(named) ? named : undefined;
   if (!p) {
     // SMM-38c — `direct`'s registration must not flip this heuristic. `resolvePublisher` is called
     // ONLY with `org.driver` (0105's `social_publisher_orgs.driver` CHECK admits only
@@ -51,7 +104,9 @@ export function resolvePublisher(driver: string): SocialPublisher {
     // honest `publisher_not_configured` into a confusing `unknown_publisher` — exactly the
     // live-behaviour change `boot.ts`'s own header named as forbidden. `direct` is only ever reached
     // by NAME through `resolvePublisherForCapability` below, never through this function.
-    const anyNonDirectRegistered = [...publishers.keys()].some((k) => k !== "direct");
+    // SCP-Sa: the simulator is excluded for the same reason `direct` is — it is never reached through this function, so
+    // its presence must not turn an honest `publisher_not_configured` into `unknown_publisher`.
+    const anyNonDirectRegistered = [...publishers.keys()].some((k) => k !== "direct" && k !== SIMULATED_PUBLISHER_KEY);
     if (!anyNonDirectRegistered) {
       throw new SocialPublisherError(
         "publisher_not_configured",
@@ -118,7 +173,11 @@ export function resolvePublisherForCapability(
   const overrides = config.social.publisher.capabilityDrivers;
   const override = overrides[`${network}:${capability}`] ?? overrides[`${network}:*`] ?? overrides[`*:${capability}`];
   if (!override) return resolvePublisher(orgDriver);
-  const p = publishers.get(override as PublisherKey);
+  // SCP-Sa — an override can never name the simulator. `*:schedule=simulated` would route EVERY account, real ones
+  // included, to a driver that reports a publish that never happened. Refused as `unknown_publisher` (the name does
+  // not resolve through this door), and boot refuses such a value outright (boot.ts).
+  const named = publishers.get(override as PublisherKey);
+  const p = named && !isSimulatedPublisher(named) && override !== SIMULATED_PUBLISHER_KEY ? named : undefined;
   if (!p) {
     throw new SocialPublisherError(
       "unknown_publisher",
