@@ -13127,7 +13127,7 @@ The weekly report (5b: the `weekly` kind on `social_reports`), ideas for next mo
 
 **No question is open.** Ruled on 2026-10-26, after this contract's review: SCP-Q21, the four approvers decide a pipeline post's publish approval directly (63.10); SCP-Q22, the writer of a monthly report may also approve it, so reports have no maker/checker rule (63.18); SCP-Q23, ticket SCP-1q closes self-promotion into a lead seat before SCP's approvals go live (PERMISSION §53.4).
 
-## 64. The AI usage record, its callers and the price table (AIP-03a and AIP-04, 2026-10-28; plan `docs/plans/2026-10-27-ai-plan.md` §1.4, §4.1, §4.2, AIP-D6, AIP-D11) — `platform-nest/src/modules/ai-usage/` (`gateway-usage.ts`, `prices.ts` new; `writer.ts`), `modules/assistant/{stream,context,thread-cost}.ts`, `modules/search/providers/gateway-client.ts`, `modules/social/gateway-client.ts`; migration `202610271810_ai_model_prices.sql` — **STATUS: PROTOTYPED. No route, no Cerbos kind, no UI: the reads arrive with AIP-15 and the price editor later. Run anywhere: `ai-usage/{gateway-usage,prices,gateway-callers,ai-model-prices-migration}.test.ts`. Written for the Linux CI gate against real Postgres: `ai-usage/ai-model-prices.db.test.ts`. A skip is not a pass.**
+## 64. The AI usage record, its callers and the price table (AIP-03a, AIP-03b and AIP-04, 2026-10-28; plan `docs/plans/2026-10-27-ai-plan.md` §1.4, §4.1, §4.2, AIP-D6, AIP-D11) — `platform-nest/src/modules/ai-usage/` (`gateway-usage.ts`, `prices.ts` new; `writer.ts`), `modules/assistant/{stream,context,thread-cost}.ts`, `modules/search/providers/gateway-client.ts`, `modules/social/gateway-client.ts`; migration `202610271810_ai_model_prices.sql` — **STATUS: PROTOTYPED. No read route, no Cerbos kind, no UI (the one route is the service-token ingest, 64.6): the reads arrive with AIP-15 and the price editor later. Run anywhere: `ai-usage/{gateway-usage,prices,gateway-callers,ai-model-prices-migration,ingest,ingest.controller}.test.ts` and the reporter and call-site suites in `ai-agents`, `mcp-hub` and `wa-chat-bot` (`usage-*.test.ts`). Written for the Linux CI gate against real Postgres: `ai-usage/ai-model-prices.db.test.ts`, `ai-usage/ingest.http.test.ts`. A skip is not a pass.**
 
 ### 64.1 Who writes a row, and how a caller cannot forget
 
@@ -13140,7 +13140,7 @@ Every platform-nest call that reaches the AI gateway writes ONE `ai_usage_events
 | Search (`/complete` and `/embed`) | `search/providers/gateway-client.ts` (`completeViaGateway`, `embedViaGateway`) | `search` for the search routes; `other` for reports, client account summaries and WebDesk assist, which use the same client | `llm`, `embed` | `search.*`, `reports.narrative`, `clients.account_summary`, `webdev.assist` |
 | Social (`/complete`) | `social/gateway-client.ts` (`completeViaGateway`) | `other` | `llm` | `social.*` |
 
-Not recorded here, with the reason: the thread title (a pure function, no call); the knowledge-client files (`search/knowledge-client.ts`, `social/knowledge-client.ts` call the WS8 knowledge service over HTTP, which embeds inside `ai-agents`: that is AIP-03b's side); a tool or agent turn (`orchestrator`, `broker`) reaches the gateway from the `ai-agents` runner, also AIP-03b. `surface` values `title`, `agent`, `knowledge`, `bot` are therefore not written from platform-nest yet.
+Not recorded here, with the reason: the thread title (a pure function, no call); the knowledge-client files (`search/knowledge-client.ts`, `social/knowledge-client.ts` call the WS8 knowledge service over HTTP, which embeds inside `ai-agents`: that is AIP-03b's side); a tool or agent turn (`orchestrator`, `broker`) reaches the gateway from the `ai-agents` runner, also AIP-03b (64.6). `surface` values `agent`, `knowledge`, `bot` are written by those services through the route in 64.6, never from platform-nest; `title` is not written at all (no call).
 
 ### 64.2 What a row holds
 
@@ -13164,4 +13164,30 @@ The rule (AIP-D11), in `ai-usage/prices.ts` and applied by the writer: an event 
 
 ### 64.5 Capability inventory
 
-No route and no HTTP suite is added, so `docs/modules/CAPABILITY-INVENTORY.md` does not change.
+AIP-03a and AIP-04 add no route and no HTTP suite. AIP-03b adds one route (64.6) and one HTTP suite; neither is an MCP tool and the suite's text matches no tool's route family, so `docs/modules/CAPABILITY-INVENTORY.md` does not change (`capability-inventory.test.ts` passes unchanged with the new files present).
+
+### 64.6 AIP-03b: AI callers outside platform-nest report through one route
+
+The `ai-agents` runner, the knowledge service, the MCP hub and the WhatsApp bot call the gateway but have no platform database. Each queues its calls in memory and reports them in batches to `POST /api/internal/ai-usage`, which writes through the SAME writer as 64.1 (validation, never-throw, the price table, `cost_source`). **STATUS: PROTOTYPED.** Code: `platform-nest/src/modules/ai-usage/{ingest.ts,ingest.controller.ts}`; the reporter is `usage-reporter.ts` + `usage-event.ts` in each of `ai-agents/src`, `mcp-hub/src` and `wa-chat-bot/src` (identical copies, no shared library).
+
+| | |
+|---|---|
+| Route | `POST /api/internal/ai-usage` (no tenant in the path or a header). `ServiceGuard`, the guard of `/principal/resolve`, `/auth/magic-link` and `/mcp/tool-defs`: `Authorization: Bearer <PLATFORM_SERVICE_TOKEN>` compared in constant time; an unset token refuses everyone. No token, a wrong token and a user session (an OIDC JWT, a cookie, `x-user-id` alone) are each **401**. |
+| Body | `{ "events": [ ... ] }`, 1 to 100 events; anything else is **400**. Each event is the writer's event shape (`AI_USAGE_EVENT_KEYS`): ids, counts, labels and money only; an unknown key is refused, so no text field can ride in. |
+| Answer | **200** `{ "accepted": n, "rejected": [{ "index", "reason" }], "counted": { "user_not_member": n } }`. A bad event never fails the batch. `reason` is a short code, never an echoed value: `not_an_object`, `unknown_field`, `invalid_<field>` (a validator failure; names a known field only), `surface_not_allowed`, `unknown_tenant`, `write_failed`. `counted` is additive: events stored but adjusted. |
+| Surface fence | `agent`, `knowledge`, `bot` or `other` only. `assistant`, `compaction`, `title` and `search` are platform-nest's own and are refused per index. |
+| Tenant | Each event names its company, which must be a live company, else `unknown_tenant`. A `userId` must be an active member of THAT company; otherwise it is stored as NULL and counted as `user_not_member`, never rejected. A supplied `orgUnitId` is ignored: the department is the member's primary placement today (as in 64.2), or null. |
+| Reporter (each service) | Queue in memory; flush every 5 s or at 50 events (batches of at most 50); never awaited on the call path, never throws; a failed batch is retried once, then dropped with one warning that carries a count and no event content; the queue is capped at 1000 (oldest dropped, counted). `occurredAt` is stamped when the call is reported. Config `PLATFORM_URL` and `PLATFORM_SERVICE_TOKEN`; when either is unset the reporter is off, with one log line at boot. An event with no company uuid is not queued (logged once). |
+
+What each caller knows and sends:
+
+| Caller | Site | `surface` | `capability` | `task` | Company | Person | Run |
+|---|---|---|---|---|---|---|---|
+| Agent runner | `ai-agents/src/deps.ts` `complete` | `agent` | `llm` | the goal's agent name (a supervisor's specialists roll up under the supervisor) | the run's tenant | the goal's `requestedBy` when a uuid, else a `platform` envelope's user id, else null | the goal's top-level run id |
+| Knowledge service | `knowledge/service.ts` `embedViaGateway` | `knowledge` | `embed` | `knowledge.ingest`, `knowledge.search` | the document's company; for a search, the caller's authorized set when it is exactly one company | a `platform` envelope's user id on a search | none |
+| MCP hub | `mcp-hub/src/gateway-client.ts` | `agent` when the principal carries an agent (the runner's `x-obo-agent`), else `other` | `llm` (`/complete`), `media` (`/media`) | the tool name (`llm.summarize`, `llm.extract`, `design.prototype`, `media.extract`) | the tool call's own `tenantId` argument (optional in the three AI tools' schemas; the runner stamps it into every call) | a `platform` envelope's user id | none |
+| WhatsApp bot | `wa-chat-bot/src/llm.ts` | `bot` | `llm`, `media` | `bot.complete`, `bot.media` | `DEFAULT_TENANT_ID`, else `TENANT_ID` when it is a uuid | always null | none |
+
+Tokens and cost are the gateway's `usage` (AIP-02): `tokens_source = provider`, and `cost_source = provider` when it carried `costUsd`. No usage is `none` (these services estimate nothing). Outcome, at every site: HTTP 429 `blocked_budget`, 503 `blocked_dlp`, any other failure (or no answer) `error`, otherwise `ok`; a failed call carries no tokens or cost. A call with no company writes no row.
+
+Known gaps: a public-tier or several-company knowledge search has no single company, so it writes no row; an n8n workflow that calls an AI tool without `tenantId` (today's pipeline workflows) writes no row until it passes one; the gateway's `/complete` still does not name the serving model, so these rows have `provider` but a NULL `model` and the price table cannot cost them (the provider's own cost still does).
