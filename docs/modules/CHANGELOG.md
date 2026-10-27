@@ -11,6 +11,13 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.211.0` - SCP-1u: DEMO_MODE decides the post's actions as the server does, and serves an Asset Library (FRONTEND-BFF-CONTRACT §63.16) (2026-10-27) - PROTOTYPED
+
+- **Found by the role walk (SCP-1p).** The demo's designer picker was always empty, so a demo design could only be a link, which the final check refuses. The demo also showed `submit_design` and the send to the client as live where the server's read disables them.
+- **The actions.** `demoPostActions` now runs the server's body-free guards (`probe`) in the fixture's order. With no design, `design_missing`; with a link-only design, `design_not_stored`; with a stale suggestion, `suggestion_stale`; with an incomplete post, `incomplete_post`; and the follow-up window, as the server counts it. The feed card still skips them, as the server's feed does.
+- **The Asset Library.** DEMO_MODE answers the unfiltered `GET creative/assets` from the demo's invented assets, so a designer can store a design and the walk's own post reaches the client. The walk's `test.fixme` is gone, and the walk touches no seeded post.
+- **Proof.** CI 40482380039 on the car; sumopod social-skin 33/33, social-walk 16/16 with no fixme, standard 91/91. The train passed on its combined run.
+
 ### platform-ui `0.210.0` - SCP-1d: the Social Media Home, laid out as the team's feed; SCP-1p: the pipeline walked by its five roles (plan §6.2, §1; FRONTEND-BFF-CONTRACT §63.7) (2026-10-27) - PROTOTYPED
 
 - **Where.** `{D}` for the Social Media workspace, when it is drawn in the Social skin (`effectiveSkin`, the shell's own answer). A person who chose Standard, and every other department, get the page as before. The Overview's header, banner and bands stay; the feed sits between the header and the bands (`WorkspaceOverview`'s new `lead` slot).

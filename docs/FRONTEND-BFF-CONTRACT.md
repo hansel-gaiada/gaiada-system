@@ -12857,6 +12857,8 @@ The owner's words: "same right as the person login or ask. so if the one that as
 
 Tests that seed "a few days after today" pin the clock to mid-month.
 
+**As built (SCP-1u, 2026-10-27).** The demo's `actions[]` runs the same body-free guards as the server's `probe`, in the fixture's order and after maker/checker and the persona: `required_to_send`, `suggestions_not_stale`, `design_present`, `designs_stored`, `one_account_per_placement_network`, `approved_time_not_passed`, `holder_is_someone_else`, `once_per_holder_per_24h`. A demo button is never live where the server's would be disabled. The feed card's `nextAction` skips them, as the server's feed does. Guards the demo has no data for (`account_not_ambiguous`, `media_rules_pass`, `publisher_available`, `no_variant_publishing`, `creatives_unit_exists_when_source_creatives`) pass, as in the demo runner. The demo answers the unfiltered `GET creative/assets` from its invented assets, so a designer can store a design. As on the server, a design is stored when it has an asset, and its `fileId` is filled at the client send.
+
 ### 63.17 Pages and their registry keys (plan §6.2, §6.3; every URL new unless marked, one area each)
 
 | Page | URL | Registry row key |
