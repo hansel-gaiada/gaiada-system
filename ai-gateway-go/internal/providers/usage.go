@@ -27,6 +27,13 @@ type UsageCompleter interface {
 	CompleteWithUsage(ctx context.Context, prompt string) (text string, usage *Usage, err error)
 }
 
+// NativeStreamGate is an optional switch on a provider that implements StreamingProvider: when it
+// reports false, /complete/stream treats the provider as non-streaming and uses the single-chunk
+// fallback through Complete (or CompleteWithUsage), as if CompleteStream did not exist.
+type NativeStreamGate interface {
+	NativeStreamEnabled() bool
+}
+
 // UsageDetailStreamingProvider is an optional extension of StreamingProvider for providers whose
 // usage carries more than two token counts (a cost). It has the same discipline as
 // UsageStreamingProvider: onUsage is called AT MOST ONCE, after the last onToken call and before

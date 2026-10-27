@@ -35,8 +35,12 @@ type Config struct {
 	// = automatic: on for an openrouter.ai OPENAI_BASE_URL host, off for any other upstream.
 	// 1/true/yes/on forces it on, 0/false/no/off forces it off.
 	OpenAIUsageAccounting string
-	WhisperURL            string
-	WhisperModel          string
+	// OpenAINativeStream (OPENAI_NATIVE_STREAM, AIP-02): let /complete/stream use the openai
+	// provider's real upstream stream. Default off (blank/0/false): the single-chunk fallback, as
+	// before. 1/true/yes/on enables it.
+	OpenAINativeStream string
+	WhisperURL         string
+	WhisperModel       string
 	// HermesURL/HermesModel (ASST-15): hermes-gateway, a SEPARATE standalone shim service (never
 	// this process itself) that runs the local Hermes agent as the brain. Empty URL means
 	// Available()==false — same "unconfigured, not a failure" posture as every other optional
@@ -160,6 +164,7 @@ func Load() Config {
 		OpenAIMaxTokens:          envInt("OPENAI_MAX_TOKENS", 1024),
 		OpenAIReasoningMaxTokens: envInt("OPENAI_REASONING_MAX_TOKENS", 0),
 		OpenAIUsageAccounting:    envOr("OPENAI_USAGE_ACCOUNTING", ""),
+		OpenAINativeStream:       envOr("OPENAI_NATIVE_STREAM", ""),
 		WhisperURL:               envOr("WHISPER_URL", ""),
 		WhisperModel:             envOr("WHISPER_MODEL", "Systran/faster-whisper-small"),
 		HermesURL:                envOr("HERMES_URL", ""),

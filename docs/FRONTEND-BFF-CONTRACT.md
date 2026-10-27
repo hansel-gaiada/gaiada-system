@@ -2492,7 +2492,8 @@ this relay), changing this framing again is a breaking change.
   ASST-06's own ~4-chars/token estimate wearing a "real" label). Absent on every error path, and
   absent whenever the serving provider doesn't report counts.
   **Which providers can report it today: `ollama` and, since AIP-02, `openai`** (the live OpenRouter brain: it
-  streams natively with `stream_options.include_usage` and reports OpenRouter's counts and `usage.cost`; see
+  reports OpenRouter's counts and `usage.cost` on both the default single-chunk path and, with
+  `OPENAI_NATIVE_STREAM` on, a native stream with `stream_options.include_usage`; see
   `ai-gateway-go/CLAUDE.md`, "Usage and cost on the text routes". `POST /complete` gains the same figures as an
   optional `usage` object `{promptTokens,completionTokens,costUsd?,source}` beside the unchanged `{text,provider}`).
   The paragraph below is the ASST-11 record for `ollama` (`internal/providers/ollama.go` —

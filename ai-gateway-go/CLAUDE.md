@@ -93,7 +93,16 @@ reports nothing usable, nothing new is emitted and the platform keeps its labell
   reads only the two counts, so it is unchanged.
 - **`/complete`.** The answer gains an optional `usage` object with the same four fields. `{provider,text}`
   stay byte for byte; without usage the body is exactly the old one.
-- **The `openai` provider now streams natively** (it used to go through the single-chunk fallback):
+- **`OPENAI_NATIVE_STREAM` (default OFF; 1/true/yes/on enables, blank/0/false means off).** With it OFF,
+  `/complete/stream` with `openai` is the single-chunk fallback through `Complete`, exactly as before
+  AIP-02 (one non-stream upstream call, `meta`, ONE text frame, `done`); because that call parses usage,
+  the same `usage` event follows the text, before `session`/`done`, on success only. The frames are
+  byte-identical to the old fallback apart from that event (pinned in `server_usage_off_test.go`).
+  The gate is `providers.NativeStreamGate`: a StreamingProvider that reports false is treated as
+  non-streaming by the route. ON enables the native stream below. It is off because the native stream
+  adds mid-stream failure modes (truncation, idle timeout, an error after the first byte with no
+  failover) to every assistant reply; turn it on deliberately.
+- **Native stream (only with `OPENAI_NATIVE_STREAM` on).** The `openai` provider streams the upstream:
   `stream_options.include_usage`, text deltas relayed as they arrive (outer whitespace trimmed like the
   non-stream path), the usage read from whichever chunk carries it (OpenRouter puts it on the last
   `finish_reason` chunk, others on a separate empty-`choices` chunk; last well-formed one wins). An
@@ -144,5 +153,5 @@ persisted and **shared** — `sync-engine-go`'s `cmd/synccert` issues node certs
 
 ## Known deferrals (per spec §9)
 
-OpenBao-issued provider creds, media DLP classification, native token streaming for providers other than `openai` (AIP-02 gave `openai` one),
+OpenBao-issued provider creds, media DLP classification, native token streaming for providers other than `openai` (AIP-02 gave `openai` an opt-in one),
 DNS control / SIEM rule, automated cert rotation. These are decisions, not oversights.

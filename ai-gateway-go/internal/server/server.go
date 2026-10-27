@@ -277,6 +277,16 @@ func writeSSESession(w http.ResponseWriter, flusher http.Flusher, canFlush bool,
 	}
 }
 
+// nativeStreamAllowed reports whether a StreamingProvider may stream natively on /complete/stream.
+// A provider with no providers.NativeStreamGate always may (every provider before AIP-02); one
+// with a gate (openai, OPENAI_NATIVE_STREAM) may only when it says so.
+func nativeStreamAllowed(p providers.Provider) bool {
+	if g, ok := p.(providers.NativeStreamGate); ok {
+		return g.NativeStreamEnabled()
+	}
+	return true
+}
+
 // modelOf reports a provider's model name via the optional providers.ModelReporter capability, or
 // "" for a provider with no fixed model concept (echo) — truthful absence, not a guess.
 func modelOf(p providers.Provider) string {
@@ -1084,7 +1094,8 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 			// comment for why that is always the provider actually releasing bytes, never a prior
 			// discarded attempt or a later one that hasn't run yet.
 			currentProvider, currentModel = p.Name(), modelOf(p)
-			if sp, isStreaming := p.(providers.StreamingProvider); isStreaming {
+			usage = nil // AIP-02: no attempt inherits another attempt's figures
+			if sp, isStreaming := p.(providers.StreamingProvider); isStreaming && nativeStreamAllowed(p) {
 				serr := callCompleteStream(streamCtx, sp, result.Clean, body.ProviderSession, onToken, func(u providers.Usage) {
 					usage = usagePayloadOf(u)
 				}, func(providerSession string, resumed bool, requestedSession string) {
@@ -1120,6 +1131,16 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 				}
 				streamedAttempt = true
 				return "", nil
+			}
+			// Single-chunk fallback. AIP-02: a UsageCompleter (openai, with native streaming off)
+			// hands back the call's own usage here, emitted below after the text exactly like a
+			// streaming provider's.
+			if uc, ok := p.(providers.UsageCompleter); ok {
+				t, u, cerr := uc.CompleteWithUsage(streamCtx, result.Clean)
+				if cerr == nil && u != nil {
+					usage = usagePayloadOf(*u)
+				}
+				return t, cerr
 			}
 			return p.Complete(streamCtx, result.Clean)
 		})

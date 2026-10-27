@@ -36,7 +36,12 @@ type OpenAIProvider struct {
 	// StreamIdleTimeout bounds the silence between upstream chunks on /complete/stream (AIP-02).
 	// 0 = the 60 s default.
 	StreamIdleTimeout time.Duration
-	Client            *http.Client
+	// NativeStream (OPENAI_NATIVE_STREAM, AIP-02) opts /complete/stream into the provider's real
+	// upstream stream (openai_stream.go). Default OFF: the route then uses the single-chunk
+	// fallback through Complete (one non-stream call, the whole answer in one frame), exactly as
+	// before AIP-02, with the usage the call reported. See NativeStreamEnabled.
+	NativeStream bool
+	Client       *http.Client
 }
 
 func NewOpenAIProvider(baseURL, apiKey, model, visionModel string, maxTokens int, client *http.Client) *OpenAIProvider {

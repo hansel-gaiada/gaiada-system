@@ -37,6 +37,22 @@ func (p *OpenAIProvider) WithStreamIdleTimeout(d time.Duration) *OpenAIProvider 
 	return p
 }
 
+// WithNativeStream applies OPENAI_NATIVE_STREAM: 1/true/yes/on enables the native stream, anything
+// else (including "") leaves it off.
+func (p *OpenAIProvider) WithNativeStream(setting string) *OpenAIProvider {
+	switch strings.ToLower(strings.TrimSpace(setting)) {
+	case "1", "true", "yes", "on":
+		p.NativeStream = true
+	default:
+		p.NativeStream = false
+	}
+	return p
+}
+
+// NativeStreamEnabled implements NativeStreamGate: whether /complete/stream may use this
+// provider's CompleteStream. The methods always exist; the gate decides whether the route uses them.
+func (p *OpenAIProvider) NativeStreamEnabled() bool { return p.NativeStream }
+
 // CompleteStream implements StreamingProvider.
 func (p *OpenAIProvider) CompleteStream(ctx context.Context, prompt string, onToken func(string)) error {
 	return p.completeStream(ctx, prompt, onToken, func(Usage) {})

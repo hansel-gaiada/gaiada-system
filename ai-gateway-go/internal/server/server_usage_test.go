@@ -35,7 +35,13 @@ func sse(lines ...string) string { return strings.Join(lines, "\n\n") + "\n\n" }
 // the audit file path.
 func usageGateway(t *testing.T, upstream *httptest.Server) (string, string) {
 	t.Helper()
-	p := providers.NewOpenAIProvider(upstream.URL, "k", "z-ai/glm-5.3-flash", "", 256, upstream.Client())
+	return usageGatewayWith(t, upstream, "on")
+}
+
+// usageGatewayWith is usageGateway with OPENAI_NATIVE_STREAM set to the given value ("" = default off).
+func usageGatewayWith(t *testing.T, upstream *httptest.Server, nativeStream string) (string, string) {
+	t.Helper()
+	p := providers.NewOpenAIProvider(upstream.URL, "k", "z-ai/glm-5.3-flash", "", 256, upstream.Client()).WithNativeStream(nativeStream)
 	c := chain.NewChain([]providers.Provider{p}, 3, 60_000, time.Now)
 	cfg := config.Config{GatewayToken: "secret", AuditFile: t.TempDir() + "/audit.jsonl", DailyCallCap: 1000, PerTenantDailyCallCap: 1000}
 	srv := newTestServer(t, cfg, c)
