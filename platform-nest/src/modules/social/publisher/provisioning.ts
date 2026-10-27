@@ -28,8 +28,9 @@ import { emitEvent } from "../../../events/outbox.service";
 import { isNetwork, type Network } from "../media-rules";
 import { resolveAccountCapabilities, deriveAccountStatus, KNOWN_NETWORKS, type AccountCapabilities } from "./capabilities";
 import { describeKeyRef, resolveOrgApiKey, DEFAULT_KEY_REF } from "./keys";
-import { invokePublisher, resolvePublisher, resolvePublisherForCapability } from "./registry";
+import { invokePublisher, resolvePublisher, resolvePublisherForCapability, resolveSimulatedPublisher } from "./registry";
 import { resolveActiveAccessToken } from "./oauth-tokens";
+import { SimulatedOrgHandle, assertRealAccountWriteAllowed, realAccountWriteRefusal } from "./simulation";
 import {
   OrgHandle, SocialPublisherError, type IntegrationState, type PublisherCapability,
   type PublisherRefusalCode, type SocialPublisher,
@@ -260,9 +261,23 @@ function directOrgRef(network: Network): string {
  *  proving the no-config-default-stays-inert property by construction, not by a separate branch. */
 export async function resolveDispatchOrgHandle(
   tenantId: string,
-  chain: Pick<DispatchChain, "org" | "network" | "accountId">,
+  chain: Pick<DispatchChain, "org" | "network" | "accountId"> & { simulated?: boolean },
   capability: PublisherCapability,
 ): Promise<{ driver: SocialPublisher; handle: OrgHandle }> {
+  // ── SCP-Sa — THE FORK TO THE SIMULATOR, and the only one ─────────────────────────────────────────────────────────
+  // A SIMULATED ACCOUNT goes to the simulator and NOTHING ELSE does (simulated-driver.ts's header). The account row is the
+  // authority, not the org's `driver` column (0105's CHECK keeps that 'postiz'|'mixpost') and not config. A caller that
+  // already read the chain under its lock (dispatch.ts, the cancel effect) passes `simulated`; one that did not (the inbox
+  // paths build a partial chain) gets it read here, so no caller can route a simulated account to a real engine by
+  // forgetting to say. `resolveSimulatedPublisher` refuses while the switch is off (`simulation_disabled`) and for a
+  // capability it does not simulate, and never falls back to a real driver.
+  const simulated = chain.simulated ?? await accountIsSimulated(tenantId, chain.accountId);
+  if (simulated) {
+    return {
+      driver: resolveSimulatedPublisher(capability),
+      handle: new SimulatedOrgHandle(tenantId, chain.accountId, chain.org.id),
+    };
+  }
   const network = chain.network as Network;
   const driver = resolvePublisherForCapability(chain.org.driver, network, capability);
   if (driver.key !== "direct") {
@@ -275,6 +290,17 @@ export async function resolveDispatchOrgHandle(
   const resolved = await withTenants([tenantId], (c) => resolveActiveAccessToken(c, chain.accountId), MODULES);
   const handle = new OrgHandle(chain.accountId, directOrgRef(network), resolved.secret());
   return { driver, handle };
+}
+
+/** SCP-Sa — is this account one of the seeded simulated accounts? A missing row reads `false` (the real path then
+ *  refuses it on its own terms; this function never invents a simulated account). */
+export async function accountIsSimulated(tenantId: string, accountId: string): Promise<boolean> {
+  const { rows } = await withTenants(
+    [tenantId],
+    (c) => c.query<{ simulated: boolean }>(`SELECT simulated FROM social_accounts WHERE id = $1`, [accountId]),
+    MODULES,
+  );
+  return rows[0]?.simulated === true;
 }
 
 export async function loadOrgByClient(tenantId: string, clientId: string): Promise<PublisherOrgRow | null> {
@@ -344,6 +370,10 @@ export async function syncConnectorRegistry(
   clientId: string,
   actorId: string | null,
 ): Promise<SyncResult> {
+  // SCP-Sa — this mirrors the ENGINE's integrations, which are always real accounts. Refused first, before any read or
+  // network call, while the social simulator is on (simulation.ts fence 3). With the switch on Postiz cannot be
+  // configured anyway (boot refuses), so this is the belt behind those braces, and it names the real reason.
+  assertRealAccountWriteAllowed("connector-registry sync");
   const org = await loadOrgByClient(tenantId, clientId);
   if (!org) {
     throw new SocialPublisherError(
@@ -576,6 +606,10 @@ export async function checkConnectReadiness(
   clientId: string,
   network: string,
 ): Promise<ConnectReadiness> {
+  // SCP-Sa — first of all: while the social simulator is on, no REAL account may be connected (simulation.ts fence 3).
+  // Answered as an ordinary `{ok:false}` so the console's readiness read shows why; `initiateAccountConnect` throws it.
+  const simulationRefusal = realAccountWriteRefusal("account connect");
+  if (simulationRefusal) return simulationRefusal;
   if (!isNetwork(network)) {
     return { ok: false, reason: "network_disabled", detail: `'${network}' is not a network this platform models` };
   }
@@ -730,6 +764,9 @@ export interface DispatchChain {
   integrationId: string;
   org: PublisherOrgRow;
   toolScope: Record<string, Record<string, unknown>>;
+  /** SCP-Sa — `social_accounts.simulated`: true only on a seeded mock account. Read here, under the caller's lock, so
+   *  `resolveDispatchOrgHandle` routes on the same row the precondition just passed. */
+  simulated: boolean;
 }
 
 /** THE WRONG-ACCOUNT-PUBLISH DEFENCE (design §11), at the choke-point.
@@ -763,12 +800,13 @@ export async function assertDispatchChain(c: PoolClient, variantId: string): Pro
     variantId: string; accountId: string; accountClientId: string; accountStatus: string;
     network: string; integrationId: string | null; engagementId: string; engagementClientId: string;
     orgId: string; orgClientId: string; driver: string; postizOrgId: string; apiKeyRef: string;
-    orgStatus: string; toolScope: Record<string, Record<string, unknown>>;
+    orgStatus: string; toolScope: Record<string, Record<string, unknown>>; accountSimulated: boolean;
   }>(
     `SELECT v.id                AS "variantId",
             a.id                AS "accountId",
             a.client_id         AS "accountClientId",
             a.status            AS "accountStatus",
+            a.simulated         AS "accountSimulated",
             a.network           AS "network",
             a.postiz_integration_id AS "integrationId",
             e.id                AS "engagementId",
@@ -842,6 +880,7 @@ export async function assertDispatchChain(c: PoolClient, variantId: string): Pro
       postizOrgId: row.postizOrgId, apiKeyRef: row.apiKeyRef, status: row.orgStatus,
     },
     toolScope: row.toolScope ?? {},
+    simulated: row.accountSimulated === true,
   };
 }
 

@@ -29,6 +29,7 @@ import { hasRegisteredPlatformApp, loadOrgByClient } from "./provisioning";
 import { storeOAuthGrant, registerTokenRefresher } from "./oauth-tokens";
 import { mintSocialOAuthState } from "./oauth-state";
 import { SocialPublisherError } from "./types";
+import { assertRealAccountWriteAllowed, realAccountWriteRefusal } from "./simulation";
 import {
   exchangeAuthorizationCode, hasYouTubeAppCredentials, refreshWithRefreshToken,
 } from "./youtube-client";
@@ -40,13 +41,18 @@ const MODULES: { modules: string[] } = { modules: ["social"] };
 export interface YouTubeConnectReadiness {
   ok: boolean;
   reason?: "network_disabled" | "client_connect_requires_signoff" | "connect_redirect_not_configured"
-    | "platform_app_not_registered" | "org_not_provisioned";
+    | "platform_app_not_registered" | "org_not_provisioned"
+    // SCP-Sa — the social simulator is on: no real account may be connected (simulation.ts fence 3).
+    | "simulation_real_account_refused";
   detail?: string;
 }
 
 /** THE precondition, checked before minting any state or touching Google. Mirrors
  *  `linkedin-oauth.ts#checkLinkedInConnectReadiness`'s ORDER and EXACT refusal vocabulary. */
 export async function checkYouTubeConnectReadiness(tenantId: string, clientId: string): Promise<YouTubeConnectReadiness> {
+  // SCP-Sa — first: while the social simulator is on, a real YouTube account is never connected (simulation.ts fence 3).
+  const simulationRefusal = realAccountWriteRefusal("YouTube connect");
+  if (simulationRefusal) return simulationRefusal;
   if (!config.social.publisher.enabledNetworks.includes("youtube")) {
     return { ok: false, reason: "network_disabled", detail: "'youtube' is disabled in this deployment (SOCIAL_NETWORKS_ENABLED)" };
   }
@@ -175,6 +181,10 @@ export async function completeYouTubeConnect(
   accountId: string,
   args: { code: string; actorId: string | null; fetchImpl?: typeof fetch },
 ): Promise<CompleteYouTubeConnectResult> {
+  // SCP-Sa — before anything else, the OAuth CALLBACK is refused too while the social simulator is on: a connect started
+  // before an operator switched the simulator on must not complete into a real account beside it (simulation.ts fence 3).
+  // Refused before the single-use code is spent, so the human can finish later with the simulator off.
+  assertRealAccountWriteAllowed("YouTube connect callback");
   // Cheapest / most structural check FIRST, before ever spending Google's single-use authorization
   // `code` on an exchange — same doctrine as `linkedin-oauth.ts`'s own ordering.
   const owns = await withTenants(

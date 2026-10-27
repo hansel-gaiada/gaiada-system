@@ -516,7 +516,9 @@ async function bootstrap(): Promise<void> {
   // made here. SMM-38 phase 38c: ALSO registers the `direct` driver (LinkedIn's real capabilities)
   // and LinkedIn's token refresher, unconditionally and regardless of Postiz's own configuration —
   // see boot.ts's own header for why this stays behaviourally inert on every live path today.
-  wireSocialPublisher();
+  // SCP-Sa: async, and the home of the social SIMULATOR's boot errors too (SOCIAL_SIMULATION_ENABLED, dev review only):
+  // beside a usable real publisher or any non-simulated social account it ABORTS startup. See boot.ts's header.
+  await wireSocialPublisher();
   // SMM-38/38b — token custody's purger registration, alongside the publisher-driver wiring above
   // (its own ticket asked for exactly this placement — "at module boot, alongside wherever 38b
   // registers its publisher driver"). Pure in-process registration, no network call, no schedule of

@@ -68,7 +68,12 @@ import type { Network, QuotaSnapshot } from "../media-rules";
 // not expected to be until an owner/db decision widens it). It reaches a live call ONLY through the
 // per-(network, capability) switch (registry.ts's `resolvePublisherForCapability`), which lives in
 // config, not in the row.
-export type PublisherKey = "postiz" | "mixpost" | "direct";
+//
+// SCP-Sa — 'simulated' is the dev-review simulator (simulated-driver.ts, plan SCP-D3). Like 'direct' it is never written
+// to `social_publisher_orgs.driver` (the CHECK refuses it), and unlike 'direct' it is never reachable BY NAME at all:
+// `registry.ts` refuses it in `resolvePublisher`, in `getPublisher` and in every capability override. The one road to it
+// is `registry.ts#resolveSimulatedPublisher`, taken only for an account whose `simulated` column is true.
+export type PublisherKey = "postiz" | "mixpost" | "direct" | "simulated";
 
 /** What a driver can do AT ALL. A capability the driver does not advertise is refused fail-closed
  *  with `capability_unsupported` — never silently no-op'd, and never faked with an empty result.
@@ -283,6 +288,13 @@ export interface SocialPublisher {
   key: PublisherKey;
   capabilities: ReadonlySet<PublisherCapability>;
 
+  /** SCP-Sa — THE STRUCTURAL PROVENANCE MARKER, the same shape as search's SM-33 simulated providers
+   *  (`isSimulatedProvider`). `true` on the dev-review simulator (simulated-driver.ts) and on nothing else; absent means
+   *  REAL, which is the fail-safe reading (claiming "real" for a simulator is caught at boot by the key/marker check,
+   *  claiming "simulated" for a real engine would hide a real publish behind a SIMULATED chip). Read only through
+   *  `simulation.ts#isSimulatedPublisher`. */
+  readonly simulated?: true;
+
   // ── SMM-38e — closing pass (2026-08-21) — the override-safety gap's per-network refinement of
   // `capabilities` above (NOT 38e's own "GAP 2" elsewhere in this file, which was YouTube's
   // uploadMedia metadata channel — a different, already-closed gap) ─────────────────────────────
@@ -477,7 +489,21 @@ export type PublisherRefusalCode =
    *  the browser back to when its OWN OAuth round trip with the network finishes; an empty string is
    *  not a URL and must never be sent. A deployment configuration gap, same class as
    *  `publisher_not_configured` — nothing the caller can fix by retrying. */
-  | "connect_redirect_not_configured";
+  | "connect_redirect_not_configured"
+  // ── SCP-Sa — the simulator's containment (simulation.ts holds the constants and their full reasoning). All five
+  // are deliberate refusals; four are 409 (the state of the data or the switch forbids it), one is the simulated
+  // engine "answering badly" (502), so it lands on the same failed-post path a real engine error does.
+  /** SOCIAL_SIMULATION_ENABLED is on and this path would create or connect a REAL (non-simulated) account. */
+  | "simulation_real_account_refused"
+  /** SOCIAL_SIMULATION_ENABLED is off and this path would write a simulated account or variant, or call the simulator. */
+  | "simulation_disabled"
+  /** The simulator was handed a variant whose account is not `simulated = true` (or an org handle that is not a
+   *  `SimulatedOrgHandle`). Belt and braces behind the routing, which should make this unreachable. */
+  | "simulated_account_required"
+  /** The simulator found no DECIDED publish approval for this variant. It never mints or decides one itself. */
+  | "simulated_approval_not_decided"
+  /** The caption carries `[simulate-fail]`: the simulated engine refuses, exercising the failed-post path. */
+  | "simulated_publish_failed";
 
 export class SocialPublisherError extends Error {
   constructor(

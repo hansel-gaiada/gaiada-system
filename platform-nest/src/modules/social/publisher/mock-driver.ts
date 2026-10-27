@@ -12,7 +12,13 @@
 // reaching a client report is a real hazard. Nothing analogous is wanted here: a "simulated
 // publish" would be a post that never appeared on a client's account while our calendar said it
 // did — worse than an outage, because it is silent. So this driver is exported for tests, is never
-// registered by main.ts under any flag, and containment.test.ts pins that absence.
+// registered by main.ts under any flag, and publisher.test.ts's containment describe pins that absence.
+//
+// SCP-Sa (plan SCP-D3) later reversed the "no simulator" half of this for the dev-review stage ONLY — and did it in a
+// SEPARATE file, `simulated-driver.ts`, behind SOCIAL_SIMULATION_ENABLED and the fences in `simulation.ts`/`boot.ts`.
+// This file did not change role: it is still the test double, still unregistered by boot under every flag (the switch
+// included), and still carries no `simulated` marker. Do not "reuse" it as the simulator: the simulator refuses a variant
+// whose account is not simulated and requires a decided approval it reads from our rows; this double does neither.
 import type { QuotaSnapshot } from "../media-rules";
 import {
   OrgHandle,

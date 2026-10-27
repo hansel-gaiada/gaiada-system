@@ -443,6 +443,20 @@ const configBase = {
   // (`SIGNATURE_SIMULATION_ENABLED: ${SIGNATURE_SIMULATION_ENABLED:-0}`): a `.env` value alone never reaches the container.
   signatureSimulationEnabled:
     process.env.SIGNATURE_SIMULATION_ENABLED === "1" || process.env.SIGNATURE_SIMULATION_ENABLED === "true",
+  // SCP-Sa / plan SCP-D1 + SCP-D3 (DEV REVIEW stage ONLY): the SIMULATED social publisher
+  // (src/modules/social/publisher/simulated-driver.ts). This REVERSES the social module's own "no simulator" rule, so it is
+  // fenced harder than its siblings. Default OFF; "1"/"true" registers the simulator at boot, and a variant whose
+  // `social_accounts.simulated` is true then publishes through it to `https://simulated.invalid/...`. Nothing else ever
+  // reaches it. On, boot REFUSES (an error, not a warning) beside a usable real publisher (Postiz configured, any
+  // SOCIAL_PUBLISHER_CAPABILITY_DRIVERS override, any live OAuth grant) or beside ANY non-simulated `social_accounts`
+  // row, and every account create/connect path refuses a real account (`simulation_real_account_refused`). Off: the
+  // simulator is never registered and nothing may write a `simulated = true` account or variant (`simulation_disabled`).
+  // Must be OFF, and the simulated rows purged, before the ERP holds real client data ("Before real clients use the
+  // portal"). Read at CALL time (publisher/simulation.ts), so a test switches it on this object. Needs the compose
+  // passthrough row (`SOCIAL_SIMULATION_ENABLED: ${SOCIAL_SIMULATION_ENABLED:-0}`): a `.env` value alone never reaches
+  // the container.
+  socialSimulationEnabled:
+    process.env.SOCIAL_SIMULATION_ENABLED === "1" || process.env.SOCIAL_SIMULATION_ENABLED === "true",
   // ORG-6 release train (A4): the whole shared-service reconciler is DARK by default. When off,
   // the reconcile consumer drains its stream but materializes nothing — assignments stay dormant
   // metadata (exactly as ORG-2/ORG-3 left them). Flips on only with the rest of the train green.

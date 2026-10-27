@@ -50,14 +50,42 @@
 // A publisher base URL pointing at a PUBLIC address. That is the inverse of the search module's
 // guard and it is deliberate — read `assertPublisherBaseUrlIsPrivate` below for why the estate's
 // standing "boot errors, not warnings" doctrine applies here too.
+//
+// ── SCP-Sa — THE SIMULATOR'S BOOT ERRORS (the "no simulator" rule, reversed for the dev review only) ──────────────
+// This file used to say "there is deliberately no fallback driver and no simulator". Plan SCP-D3 (owner ruling SCP-D1)
+// reverses that for the dev-review stage: with SOCIAL_SIMULATION_ENABLED on, `wireSocialPublisher` registers
+// simulated-driver.ts. simulation.ts's header lists the six fences; the ones that live HERE are boot errors that abort
+// startup (SM-33's `assertProvenance` doctrine, main.ts: "this must abort startup, not degrade to a warning"):
+//   1. an override in SOCIAL_PUBLISHER_CAPABILITY_DRIVERS that names 'simulated', switch on OR off: it would route real
+//      accounts to a driver that reports publishes that never happened;
+//   and with the switch ON:
+//   2. Postiz configured (SOCIAL_POSTIZ_BASE_URL set): a real engine beside the simulator;
+//   3. any SOCIAL_PUBLISHER_CAPABILITY_DRIVERS override: the only thing that makes `direct` reachable by config;
+//   4. any live (`status = 'active'`) OAuth grant in `social_oauth_tokens`, in any tenant: the other thing that makes
+//      `direct` able to publish for real;
+//   5. ANY non-simulated `social_accounts` row, in any tenant, soft-deleted included (a soft-deleted account is one upsert
+//      away from live again): the simulator and real client accounts never share a database;
+//   6. after registration, the object-level re-check (`simulation.ts#publisherProvenanceViolation`): each registered
+//      driver's structural `simulated` marker matches its key and the switch.
+// With the switch OFF none of 2-5 runs and the DB is not read: a real deployment boots exactly as before, and the
+// simulator is never registered (`registry.ts#registerPublisher` would refuse it). Checks 4 and 5 are the ONLY database
+// reads in this file; they still open no socket to Postiz or any network, so the property above holds. They read each
+// tenant through its own `withTenants` with the social scope declared (the RLS zero-row trap: an unscoped read of a
+// FORCE-RLS table counts zero and would wave the boot through).
 import { config } from "../../../config";
+import { withGlobal, withTenants } from "../../../db";
 import { checkPrivateVendorBaseUrl } from "../../../search-vendor-baseurl-guard";
 import { createPostizDriverFromConfig } from "./postiz";
 import { createDirectDriver } from "./direct";
 import { createDbYouTubeQuotaStore } from "./youtube-quota";
 import { registerLinkedInTokenRefresher } from "./linkedin-oauth";
 import { registerYouTubeTokenRefresher } from "./youtube-oauth";
-import { registerPublisher } from "./registry";
+import { listPublishers, registerPublisher } from "./registry";
+import { createSimulatedPublisher } from "./simulated-driver";
+import {
+  SIMULATED_PUBLISHER_KEY, SIMULATED_URL_ORIGIN, SOCIAL_SIMULATION_ENV, isSocialSimulationEnabled,
+  publisherProvenanceViolation,
+} from "./simulation";
 
 /** Escape hatch for the one legitimate case: an operator deliberately running the engine behind a
  *  reverse proxy on a public name (a staging arrangement nobody has asked for yet). Named, so the
@@ -107,15 +135,122 @@ export function assertPublisherBaseUrlIsPrivate(baseUrl: string, allowOverride: 
   if (!isPrivate) throw new PublicPublisherBaseUrlError(baseUrl);
 }
 
+// ── SCP-Sa — the simulator's boot errors ───────────────────────────────────────────────────────────────────────────
+
+export class SocialSimulationBootError extends Error {
+  constructor(reason: string) {
+    super(
+      `[social] BOOT ERROR: ${reason}. The social simulator (plan SCP-D3, dev review only) never runs beside anything `
+      + `real; this must abort startup, not degrade to a warning. Either switch it off (unset ${SOCIAL_SIMULATION_ENV}) `
+      + "or remove the real publisher or accounts named above.",
+    );
+    this.name = "SocialSimulationBootError";
+  }
+}
+
+/** What boot must know to decide. Every field is a plain value, so `assertSocialSimulationBootSafe` is pure and every
+ *  boot error has a test without a database. */
+export interface SocialSimulationBootFacts {
+  enabled: boolean;
+  postizBaseUrl: string;
+  capabilityOverrides: Record<string, string>;
+  /** `social_oauth_tokens` rows with `status = 'active'`, every tenant. Read only when `enabled`. */
+  liveOAuthGrants: number;
+  /** `social_accounts` rows with `simulated = false`, every tenant, soft-deleted included. Read only when `enabled`. */
+  realAccounts: number;
+}
+
+/** Boot errors 1-5 of this file's header. Throws `SocialSimulationBootError`; returns nothing when the boot may go on. */
+export function assertSocialSimulationBootSafe(f: SocialSimulationBootFacts): void {
+  const routedToSimulator = Object.entries(f.capabilityOverrides).filter(([, d]) => d === SIMULATED_PUBLISHER_KEY);
+  if (routedToSimulator.length > 0) {
+    throw new SocialSimulationBootError(
+      `SOCIAL_PUBLISHER_CAPABILITY_DRIVERS routes ${routedToSimulator.map(([k]) => `'${k}'`).join(", ")} to `
+      + `'${SIMULATED_PUBLISHER_KEY}'; the simulator is reached only through a simulated account, never by config`,
+    );
+  }
+  if (!f.enabled) return;
+  if (f.postizBaseUrl) {
+    throw new SocialSimulationBootError(
+      `${SOCIAL_SIMULATION_ENV} is on while SOCIAL_POSTIZ_BASE_URL is set: Postiz is a real publishing engine`,
+    );
+  }
+  const overrides = Object.keys(f.capabilityOverrides);
+  if (overrides.length > 0) {
+    throw new SocialSimulationBootError(
+      `${SOCIAL_SIMULATION_ENV} is on while SOCIAL_PUBLISHER_CAPABILITY_DRIVERS routes ${overrides.join(", ")} to a `
+      + "real driver ('direct' publishes for real)",
+    );
+  }
+  if (f.liveOAuthGrants > 0) {
+    throw new SocialSimulationBootError(
+      `${SOCIAL_SIMULATION_ENV} is on while ${f.liveOAuthGrants} live OAuth grant(s) exist in social_oauth_tokens: a `
+      + "connected LinkedIn/YouTube account can publish for real through 'direct'",
+    );
+  }
+  if (f.realAccounts > 0) {
+    throw new SocialSimulationBootError(
+      `${SOCIAL_SIMULATION_ENV} is on while ${f.realAccounts} non-simulated social_accounts row(s) exist (any tenant, `
+      + "soft-deleted included): the simulator may run only on a database whose every social account is simulated "
+      + "(mark the seeded mock accounts simulated, SCP-Sb, or remove them)",
+    );
+  }
+}
+
+/** The two DB facts, read tenant by tenant through the third wall (see this file's header). Every company, deleted ones
+ *  included: a real account under a deleted company is still a real account. */
+export async function readSocialSimulationDbFacts(): Promise<{ liveOAuthGrants: number; realAccounts: number }> {
+  const { rows: tenants } = await withGlobal((c) => c.query<{ id: string }>(`SELECT id FROM companies`));
+  let liveOAuthGrants = 0;
+  let realAccounts = 0;
+  for (const { id } of tenants) {
+    const r = await withTenants(
+      [id],
+      (c) => c.query<{ grants: string; accounts: string }>(
+        `SELECT (SELECT count(*) FROM social_oauth_tokens WHERE status = 'active')::text AS grants,
+                (SELECT count(*) FROM social_accounts WHERE simulated = false)::text AS accounts`,
+      ),
+      { modules: ["social"] },
+    );
+    liveOAuthGrants += Number(r.rows[0]?.grants ?? 0);
+    realAccounts += Number(r.rows[0]?.accounts ?? 0);
+  }
+  return { liveOAuthGrants, realAccounts };
+}
+
+/** Test seams for `wireSocialPublisher`. The switch itself is read from config (`isSocialSimulationEnabled`), exactly as
+ *  `registerPublisher` reads it, so a test cannot wire one value and register under another. */
+export interface SocialPublisherWiringDeps {
+  /** Defaults to `readSocialSimulationDbFacts`. Called ONLY when the switch is on. */
+  readDbFacts?: () => Promise<{ liveOAuthGrants: number; realAccounts: number }>;
+}
+
 /** Register the publisher driver, or deliberately register nothing.
  *
  *  KEYLESS/URL-LESS IS THE DEFAULT AND IS SUPPORTED — see config.ts. With no base URL the registry
  *  stays empty and every publisher path fails closed at `resolvePublisher` with
  *  `publisher_not_configured`, exactly as the search registry does for an unfunded vendor. There is
- *  deliberately no fallback driver and no simulator: a "simulated publish" would be a post that
+ *  deliberately no fallback driver and, with SOCIAL_SIMULATION_ENABLED off, no simulator: a "simulated publish" would be a post that
  *  never appeared on a client's account while our calendar said it did — silent, and worse than an
- *  outage (see mock-driver.ts's header for the full contrast with SM-33's simulated providers). */
-export function wireSocialPublisher(): void {
+ *  outage (see mock-driver.ts's header for the full contrast with SM-33's simulated providers).
+ *
+ *  SCP-Sa: that paragraph stays TRUE for every deployment with SOCIAL_SIMULATION_ENABLED off, which is every deployment
+ *  that holds real data. With it on (dev review only), the simulator is registered here, behind the boot errors of this
+ *  file's header, and announces itself on a `[social:simulation-enabled]` warning line on every start. Async since
+ *  SCP-Sa, for the two DB counts those errors need; with the switch off it awaits nothing. */
+export async function wireSocialPublisher(deps: SocialPublisherWiringDeps = {}): Promise<void> {
+  // SCP-Sa — decided FIRST, before anything is registered: a refused boot leaves no half-wired registry behind.
+  const simulation = isSocialSimulationEnabled();
+  const dbFacts = simulation
+    ? await (deps.readDbFacts ?? readSocialSimulationDbFacts)()
+    : { liveOAuthGrants: 0, realAccounts: 0 };
+  assertSocialSimulationBootSafe({
+    enabled: simulation,
+    postizBaseUrl: config.social.publisher.baseUrl,
+    capabilityOverrides: config.social.publisher.capabilityDrivers,
+    ...dbFacts,
+  });
+
   // SMM-38c — registered FIRST and UNCONDITIONALLY, deliberately ahead of the Postiz early-return
   // below: `direct` must be present in the registry regardless of whether Postiz is configured, or
   // `resolvePublisherForCapability` could never find it by name in a Postiz-unconfigured deployment
@@ -145,16 +280,38 @@ export function wireSocialPublisher(): void {
       + "capability is unaffected ('direct' is registered for LinkedIn's own capabilities regardless — "
       + "SMM-38 phase 38c)",
     );
-    return;
+  } else {
+    registerPublisher(driver);
+    // eslint-disable-next-line no-console
+    console.log(
+      `[social] publisher driver '${driver.key}' registered (networks enabled: `
+      + `${config.social.publisher.enabledNetworks.join(", ") || "none"}; `
+      + `live quota probe: ${config.social.publisher.quotaProbeTool ? "on" : "off"}; `
+      // Named at boot because the addendum's biggest P2 finding is invisible at runtime otherwise:
+      // this engine has NO inbound engagement surface for any network.
+      + `inbox surface: ${driver.capabilities.has("inbox_read") ? "yes" : "none (engine has no inbound API)"})`,
+    );
   }
-  registerPublisher(driver);
-  // eslint-disable-next-line no-console
-  console.log(
-    `[social] publisher driver '${driver.key}' registered (networks enabled: `
-    + `${config.social.publisher.enabledNetworks.join(", ") || "none"}; `
-    + `live quota probe: ${config.social.publisher.quotaProbeTool ? "on" : "off"}; `
-    // Named at boot because the addendum's biggest P2 finding is invisible at runtime otherwise:
-    // this engine has NO inbound engagement surface for any network.
-    + `inbox surface: ${driver.capabilities.has("inbox_read") ? "yes" : "none (engine has no inbound API)"})`,
-  );
+
+  // ── SCP-Sa — the simulator: registered ONLY with the switch on, then the object-level re-check ─────────────────────
+  // (the Postiz branch above used to `return` early; it no longer does, so this section runs with or without Postiz).
+  if (simulation) registerPublisher(createSimulatedPublisher());
+  const violation = publisherProvenanceViolation(listPublishers(), simulation);
+  if (violation) throw new SocialSimulationBootError(violation);
+  if (simulation && !listPublishers().some((p) => p.key === SIMULATED_PUBLISHER_KEY)) {
+    throw new SocialSimulationBootError(`${SOCIAL_SIMULATION_ENV} is on but the social simulator did not register`);
+  }
+  // One line on every start, as PV5-11's signing line does: a WARNING while the simulator is on, so a server that still
+  // has it on says so in every boot log.
+  if (simulation) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[social:simulation-enabled] ${SOCIAL_SIMULATION_ENV} is ON: the social simulator publishes simulated accounts' `
+      + `posts to ${SIMULATED_URL_ORIGIN}/ and nothing reaches a real network (plan SCP-D3, dev review only). Turn it `
+      + "OFF and purge the simulated rows before the ERP holds real client data.",
+    );
+  } else {
+    // eslint-disable-next-line no-console
+    console.log(`[social] simulation: off (${SOCIAL_SIMULATION_ENV} unset); the social simulator is not registered`);
+  }
 }

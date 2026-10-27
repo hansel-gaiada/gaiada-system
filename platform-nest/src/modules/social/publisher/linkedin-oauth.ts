@@ -31,6 +31,7 @@ import { hasRegisteredPlatformApp, loadOrgByClient } from "./provisioning";
 import { storeOAuthGrant, registerTokenRefresher } from "./oauth-tokens";
 import { mintSocialOAuthState } from "./oauth-state";
 import { SocialPublisherError } from "./types";
+import { assertRealAccountWriteAllowed, realAccountWriteRefusal } from "./simulation";
 import {
   exchangeAuthorizationCode, hasLinkedInAppCredentials, refreshWithRefreshToken,
 } from "./linkedin-client";
@@ -42,7 +43,9 @@ const MODULES: { modules: string[] } = { modules: ["social"] };
 export interface LinkedInConnectReadiness {
   ok: boolean;
   reason?: "network_disabled" | "client_connect_requires_signoff" | "connect_redirect_not_configured"
-    | "platform_app_not_registered" | "org_not_provisioned";
+    | "platform_app_not_registered" | "org_not_provisioned"
+    // SCP-Sa — the social simulator is on: no real account may be connected (simulation.ts fence 3).
+    | "simulation_real_account_refused";
   detail?: string;
 }
 
@@ -53,6 +56,9 @@ export interface LinkedInConnectReadiness {
  *  it named. Not a call INTO that function (its own driver resolution is Postiz-shaped and would
  *  refuse `direct` outright) — a parallel check against the SAME facts for `direct`'s own flow. */
 export async function checkLinkedInConnectReadiness(tenantId: string, clientId: string): Promise<LinkedInConnectReadiness> {
+  // SCP-Sa — first: while the social simulator is on, a real LinkedIn account is never connected (simulation.ts fence 3).
+  const simulationRefusal = realAccountWriteRefusal("LinkedIn connect");
+  if (simulationRefusal) return simulationRefusal;
   if (!config.social.publisher.enabledNetworks.includes("linkedin")) {
     return { ok: false, reason: "network_disabled", detail: "'linkedin' is disabled in this deployment (SOCIAL_NETWORKS_ENABLED)" };
   }
@@ -177,6 +183,10 @@ export async function completeLinkedInConnect(
   accountId: string,
   args: { code: string; actorId: string | null; fetchImpl?: typeof fetch },
 ): Promise<CompleteLinkedInConnectResult> {
+  // SCP-Sa — before anything else, the OAuth CALLBACK is refused too while the social simulator is on: a connect started
+  // before an operator switched the simulator on must not complete into a real account beside it (simulation.ts fence 3).
+  // Refused before the single-use code is spent, so the human can finish later with the simulator off.
+  assertRealAccountWriteAllowed("LinkedIn connect callback");
   // Cheapest / most structural check FIRST (`publish-precondition.ts`'s own stated doctrine, reused
   // here): confirm the account is really ours and really 'linkedin' BEFORE ever spending LinkedIn's
   // authorization `code` on an exchange — a state signature can name a real tenant/account pair, but
