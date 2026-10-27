@@ -692,6 +692,7 @@ Browser-facing route handlers (`route.ts`) — these exist only where the browse
 - `/api/search/change-proposals/[id]/export-file`
 - `/api/search/google/callback`
 - `/api/search/palette`
+- `/api/webdesk-media-preview/[tenantSlug]/[siteId]/[assetId]`
 - `/auth/callback`
 - `/auth/ended`
 - `/auth/login`
