@@ -399,6 +399,9 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/companies/[companyId]/edit`
 - `/companies/[companyId]/org`
 - `/companies/new`
+- `/contributor`
+- `/contributor-invite/[token]`
+- `/contributor/items/[tenant]/[site]/[collection]/[slug]`
 - `/deliverables`
 - `/deliverables/new`
 - `/departments`

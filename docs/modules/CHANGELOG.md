@@ -11,6 +11,28 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.176.0` + webdesk `0.30.0` + platform-ui `0.202.0` - M5-W1e and M5-W1f: WebDesk holds a contributor to its own command list, and the freelance writer gets their own screens (WSK-D84) (2026-10-27) - PROTOTYPED
+
+- **W1e (platform-nest signer, WebDesk verifier).**
+  - The ERP signer sets the editorial assertion's `xc: true` ONLY from the assembled principal's `users.kind = 'contributor'`. `sign(input, principal)` takes no `xc` from input, and a contributor with `ce` throws.
+  - WebDesk refuses a non-boolean `xc` and `xc` together with `ce` (401 `editorial-assertion-claims`).
+  - A contributor may run only the 11 `CONTRIBUTOR_COMMANDS` (draft, edit, restore a version, preview links, submit, withdraw, comment, request changes, SEO sign-off). Everything else is 403 `contributor-command-not-allowed` (problem+json), enforced in the guard and again in each service.
+  - Media stays refused until M5-W1q.
+  - Tests: 20 real-Postgres enforcement tests and 41 principal tests in webdesk-api; editorial vector v5 byte-matched on both sides. CI 40436692898 green on the branch.
+  - Deploy order: an older WebDesk would ignore `xc`, but no real contributor can sign in before M5-W1g, so there is no exposure.
+- **W1f (platform-ui).**
+  - `Me.kind`, `isContributor(me)`; `isStaff` is false for a contributor.
+  - A contributor, or a session `/api/me` refuses with the fence's `contributor_route_forbidden`, is sent to the new `(contributor)` shell. Staff and client routing is unchanged (tests).
+  - The shell has My assignments and the editor in contributor mode: no publish, schedule, delete, writing assistant, version history or media picker. The review buttons come from `allowed`, with approve and assign closed.
+  - It shows "Your two-step sign-in isn't set up yet" for an `assurance_high_required` refusal, never an empty list.
+  - New public accept page `/contributor-invite/<token>`, matched as a whole path segment (`/contributor` stays behind the session); the token travels in the request body only.
+  - Staff get a Freelance contributors block on the writers' people page: invite with a one-time link shown once, a list, End.
+  - Tests: platform-ui 745 files, CI 40437702841 green on the branch.
+  - Known gaps: other people's names show as ids for a contributor (`/members` is not open to them); there is no "my items" filter.
+- **W1g:** new runbook `infra/runbooks/contributor-logins.md`.
+  - It records a read-only audit of the live realm's 10 clients: no group restriction anywhere; `admin-cli` direct grants are on but its tokens fail the platform's `aud=gaiada-platform` check; no groups exist.
+  - It plans the `contributors` group and points to `enable-mfa.md` for the `amr` claim, which is the after-staging real-MFA step. Nothing applied.
+
 ### platform-nest `0.175.0` + platform-ui `0.201.0` - agentic-native close-out T2 and T4: one module list for the audits, and a reader-degrade ratchet over every page (2026-10-27) - PROTOTYPED
 
 - **T2.** New `platform-nest/src/modules/compiled-in-modules.ts` (`COMPILED_IN_MODULES`, the 16 modules). `main.ts` registers from it in the identical order, and both `impact-registry.test.ts` and `capability-inventory.test.ts` read it.
