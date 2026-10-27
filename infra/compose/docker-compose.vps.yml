@@ -584,6 +584,12 @@ services:
       # row is what makes the flag reach the container. Turn it OFF before the ERP holds real client data
       # (infra/runbooks/certified-signing-simulated.md).
       SIGNATURE_SIMULATION_ENABLED: ${SIGNATURE_SIMULATION_ENABLED:-0}
+      # SCP-Sa (plan SCP-D1, SCP-D3, §5): the social simulator for the Social Media pipeline's dev review on mock data. On,
+      # posts on SEEDED simulated accounts publish to https://simulated.invalid through the real dispatch path, marked
+      # SIMULATED; boot REFUSES it beside Postiz, a capability override, a live OAuth grant or any real social account.
+      # This row is what makes the flag reach the container. Turn it OFF and purge the simulated rows before the ERP holds
+      # real client data. GET /health reports it as `socialSimulation`.
+      SOCIAL_SIMULATION_ENABLED: ${SOCIAL_SIMULATION_ENABLED:-0}
       # Admin/Systems console aggregator (Phase C) — read-only probes of each downstream
       # service. All fail-soft: an unset URL just reports "not configured" in the console.
       GATEWAY_URL: http://ai-gateway:3002
