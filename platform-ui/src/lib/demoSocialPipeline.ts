@@ -505,6 +505,9 @@ const NOT_IN_ACTIONS = new Set(["create", "edit", "suggest", "add_design", "remo
 
 function cerbosAllows(key: string, userId: string, p: PipePost): boolean {
   const officer = store.allocations[p.engagementId]?.officerId ?? null;
+  // PERMISSION §53.2: platform_admin keeps the house wildcard on every social_post action. Only the maker/checker DENY (applied before this, in
+  // `demoPostActions`) beats it. The owner has no wildcard: it holds the approver-only actions alone (`approve`), via the cases below.
+  if (userId === "demo-hansel") return true;
   switch (key) {
     case "author": case "schedule": return userId === officer;
     case "proofread": return userId === COPYWRITER;

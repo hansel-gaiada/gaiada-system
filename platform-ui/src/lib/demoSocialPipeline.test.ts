@@ -239,6 +239,49 @@ describe("GET posts/:postId/pipeline", () => {
     expect(action(read(approved.id, "u-social"), "client_approve")).toBeUndefined(); // the portal's actions are not staff actions
   });
 
+  it("the superadmin has the house wildcard on every listed action, minus the maker/checker DENY; the owner holds only the approve actions", () => {
+    const cerbos = (fixture as unknown as { actions: Array<{ action: string; cerbosAction?: string | Record<string, string> }> }).actions;
+    const keyOf = (name: string, via: string | null) => {
+      const c = cerbos.find((x) => x.action === name)!.cerbosAction;
+      return typeof c === "string" ? c : c?.[via ?? "manual"];
+    };
+    let wild = 0;
+    let ownerAllowed = 0;
+    for (const p of PIPE_POSTS) {
+      const officer = allocStore.byEngagement[p.engagementId].officerId;
+      expect(officer).not.toBe("demo-hansel"); // he is nobody's officer or author, so the DENY never applies to him in the seed
+      for (const a of read(p.id, "demo-hansel").actions) {
+        wild += 1;
+        expect(a, `${p.id} ${a.action}`).toEqual({ action: a.action, allowed: true });
+      }
+      for (const a of read(p.id, "demo-owner").actions) {
+        const key = keyOf(a.action, p.scheduleVia);
+        if (key === "approve") { ownerAllowed += 1; expect(a, `${p.id} ${a.action}`).toEqual({ action: a.action, allowed: true }); }
+        else expect(a.allowed, `${p.id} ${a.action} (${key})`).toBe(false);
+      }
+    }
+    expect(wild).toBeGreaterThan(30);
+    expect(ownerAllowed).toBeGreaterThan(3);
+    // the DENY still beats the wildcard: the superadmin as the officer or author of a post is refused proofread and approve actions
+    const hod = byStatus("hod")[0];
+    const saved = { officer: allocStore.byEngagement[hod.engagementId].officerId, author: hod.authorId };
+    try {
+      allocStore.byEngagement[hod.engagementId].officerId = "demo-hansel";
+      expect(action(read(hod.id, "demo-hansel"), "approve_for_design")).toEqual({ action: "approve_for_design", allowed: false, reason: "author_cannot_approve" });
+      expect(action(read(hod.id, "demo-hansel"), "block")).toEqual({ action: "block", allowed: true });
+      allocStore.byEngagement[hod.engagementId].officerId = saved.officer;
+      hod.authorId = "demo-hansel";
+      expect(action(read(hod.id, "demo-hansel"), "approve_for_design")).toMatchObject({ allowed: false, reason: "author_cannot_approve" });
+    } finally {
+      allocStore.byEngagement[hod.engagementId].officerId = saved.officer;
+      hod.authorId = saved.author;
+    }
+    // the owner has no team step and no author step
+    const planned = byStatus("planned")[0];
+    expect(action(read(planned.id, "demo-owner"), "start_draft")).toMatchObject({ allowed: false, reason: "not_the_officer" });
+    expect(action(read(planned.id, "demo-hansel"), "start_draft")).toEqual({ action: "start_draft", allowed: true });
+  });
+
   it("only the actions whose `from` matches the post are listed", () => {
     expect(read(byStatus("live")[0].id).actions).toEqual([]);
     expect(names(read(byStatus("client")[0].id))).toEqual(expect.arrayContaining(["record_client_approve", "record_client_change", "follow_up", "archive"]));
