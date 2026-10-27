@@ -584,7 +584,7 @@ export class AutomationApprovalsController {
     // WSK-66: an approved webdesk row also starts at 'pending' — the state its in-band executor
     // claims (pending → executing) below. The D14 handler never claims it (origin filter).
     const executionStatus: "pending" | "not_applicable" =
-      executable || ((isReveal || isWebdesk || isConversionUpload || isDeploySecret) && decision === "approved") ? "pending" : "not_applicable";
+      executable || (isDeploySecret && decision === "approved") || ((isReveal || isWebdesk || isConversionUpload) && decision === "approved") ? "pending" : "not_applicable";
     const res = await withTenants([tenantId], async (c) => {
       const upd = await c.query<{ origin: string; tool_args: unknown; workflow_id: string; tool_name: string }>(
         `UPDATE automation_approvals
