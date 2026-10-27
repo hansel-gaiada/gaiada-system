@@ -4,6 +4,7 @@ import { todayIsoInDisplayZone } from "./format";
 import { evaluateClientReviewState, type ClientReviewState, type ClientReviewStatus } from "./socialShared";
 import { validateBrandBook, type BrandBook } from "./socialBrandBook";
 import { demoDesignQueue } from "./demoSocialDesignQueue";
+import { demoSocialMetrics } from "./demoSocialMetrics";
 import {
   DEMO_MEMBER_NAMES, PIPE_ENGAGEMENTS, allocStore, cyclesStore, demoAllocationRow, demoBrandAnswer, demoCalendar, demoCreatePost, demoCycleHealth, demoCycleTable, demoDeadlineRange,
   demoFeed, demoNeedsYou, demoPipelineRead, demoRealDate, demoWaiting, demoSettingsAnswer, demoWalkBack, isDemoSocialApprover, isPipelinePostId, pipelineEngagement,
@@ -1074,6 +1075,8 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
   const isComposerPost = (id: string) => POSTS.some((x) => x.id === id) && !isPipelinePostId(id);
   const pipeActM = tail.match(/^posts\/([^/]+)\/actions$/);
   if (pipeActM && m === "POST") return runDemoPipelineAction(pipeActM[1], b(), userId, { composer: isComposerPost(pipeActM[1]) });
+  // SCP-3c (BFF §63.10): a post's metrics, the read and the officer's entry (`demoSocialMetrics.ts`).
+  const metricsAnswer = demoSocialMetrics(m, tail, body, userId, isComposerPost); if (metricsAnswer) return metricsAnswer;
   if (m !== "GET" && /^posts\/(actions$|[^/]+\/(pipeline$|suggestions\/|designs))/.test(tail)) {
     const piped = runDemoPipelineWrite(m, tail, b(), userId, isComposerPost);
     if (piped) return piped;

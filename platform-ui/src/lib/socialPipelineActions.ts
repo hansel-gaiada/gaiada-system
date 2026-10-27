@@ -7,6 +7,7 @@ import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
 import { asPipelinePost, refusalFromBody, refusalText, type PipelinePost, type Refusal } from "./socialPipeline";
+import { asPostMetrics, asStoredMetrics, type PostMetrics, type StoredMetrics } from "./socialMetrics";
 
 export type WriteResult =
   | { ok: true; post: PipelinePost | null; applied: { action: string; from: string | null; to: string | null } | null; warnings: string[]; alreadyApplied: boolean; designId: string | null }
@@ -79,4 +80,46 @@ export async function addPostDesign(postId: string, expectedStatus: string, inpu
 /** `DELETE posts/:postId/designs/:designId`: marks the design removed (404 `design_not_found`). */
 export async function removePostDesign(postId: string, designId: string): Promise<WriteResult> {
   return run((c) => platformFetch<unknown>(`${base(c.tenant)}/posts/${encodeURIComponent(postId)}/designs/${encodeURIComponent(designId)}`, c.userId, { method: "DELETE" }));
+}
+
+// ── SCP-3c: a post's metrics (BFF §63.10) ──────────────────────────────────────────────────────────────────────────────────────────────
+
+export type MetricsResult = { ok: true; stored: StoredMetrics } | { ok: false; refusal: Refusal; message: string };
+
+/**
+ * `POST variants/:variantId/metrics` (`social_post` · `schedule`): types one snapshot in for one variant (one network of the post). The server judges the body again; a 400
+ * names its `field`, which the form puts beside that input. 409 `post_not_live` while the post is not live.
+ */
+export async function enterPostMetrics(variantId: string, body: Record<string, unknown>): Promise<MetricsResult> {
+  const userId = await getSessionUserId();
+  if (!userId) return { ok: false, refusal: { status: 401, error: "session_expired" }, message: "Session expired — sign in again." };
+  const me = await getMe(userId);
+  const tenant = await getActiveTenant(me);
+  if (!tenant) return { ok: false, refusal: { status: 400, error: "no_company" }, message: "No active company selected." };
+  try {
+    const raw = await platformFetch<unknown>(`${base(tenant)}/variants/${encodeURIComponent(variantId)}/metrics`, userId, { method: "POST", body: JSON.stringify(body) });
+    revalidatePath("/departments", "layout");
+    return { ok: true, stored: asStoredMetrics(raw) };
+  } catch (e) {
+    if (e instanceof PlatformError) {
+      const refusal = refusalFromBody(e.status, e.message, e.body, e.field, e.reason);
+      return { ok: false, refusal, message: refusalText(refusal) };
+    }
+    throw e;
+  }
+}
+
+/** `GET posts/:postId/metrics` again, after a save: the page shows the server's own aggregate (the rate and the boost mark are the server's), or null when it cannot be read. */
+export async function loadPostMetrics(postId: string): Promise<PostMetrics | null> {
+  const userId = await getSessionUserId();
+  if (!userId) return null;
+  const me = await getMe(userId);
+  const tenant = await getActiveTenant(me);
+  if (!tenant) return null;
+  try {
+    return asPostMetrics(await platformFetch<unknown>(`${base(tenant)}/posts/${encodeURIComponent(postId)}/metrics`, userId));
+  } catch (e) {
+    if (e instanceof PlatformError) return null;
+    throw e;
+  }
 }

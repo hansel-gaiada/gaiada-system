@@ -286,6 +286,8 @@ export const FIELD_LABEL: Readonly<Record<string, string>> = {
   waitingOn: "Who you are waiting on", changeKind: "The kind of change", channel: "The channel", url: "The link", at: "The date and time", sendAnywayReason: "The reason",
   sendAnyway: "Send anyway", anchor: "The pin", assetGroupId: "The asset", linkUrl: "The link", linkSource: "The link's source", linkAiNote: "The AI note",
   position: "The position", designId: "The design", fields: "The fields", field: "The field", value: "The value",
+  // SCP-3c: the metrics form's fields (BFF §63.10).
+  capturedAt: "The capture time", reach: "Reach", impressions: "Impressions", likes: "Likes", comments: "Comments", shares: "Shares", saves: "Saves", videoViews: "Video views", clicks: "Clicks",
 };
 const fieldName = (f: string | undefined): string => (f ? FIELD_LABEL[f] ?? f : "A value");
 
