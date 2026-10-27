@@ -23,16 +23,18 @@ vi.mock("@/lib/tenant", () => ({ getActiveTenant: vi.fn(async () => "co-a") }));
 vi.mock("@/lib/companyContext", () => ({ activeCompany: vi.fn(() => ({ id: "co-a", vertical: "agency" })) }));
 vi.mock("@/lib/departments", () => ({ getDepartment: vi.fn() }));
 vi.mock("@/lib/demoMode", () => ({ isDemoMode: vi.fn(() => false) }));
-vi.mock("@/lib/socialPipeline-data", () => ({ readPipelinePost: vi.fn(), readPostComments: vi.fn(), readAssetChoices: vi.fn() }));
+vi.mock("@/lib/socialPipeline-data", () => ({ readPipelinePost: vi.fn(), readPostComments: vi.fn(), readAssetChoices: vi.fn(), readPostMetrics: vi.fn() }));
 vi.mock("@/lib/collabActions", () => ({ postEntityComment: vi.fn() }));
 vi.mock("@/lib/socialPipelineActions", () => ({
   runPostAction: vi.fn(), savePostFields: vi.fn(), saveSuggestion: vi.fn(), dropSuggestion: vi.fn(), addPostDesign: vi.fn(), removePostDesign: vi.fn(),
+  enterPostMetrics: vi.fn(), loadPostMetrics: vi.fn(),
 }));
 
 import { getDepartment } from "@/lib/departments";
 import { PIPE_POSTS, demoPipelineRead } from "@/lib/demoSocialPipeline";
 import { asPipelinePost, type PipelinePost } from "@/lib/socialPipeline";
-import { readAssetChoices, readPipelinePost, readPostComments } from "@/lib/socialPipeline-data";
+import { readAssetChoices, readPipelinePost, readPostComments, readPostMetrics } from "@/lib/socialPipeline-data";
+import type { PostMetrics } from "@/lib/socialMetrics";
 import type { ReadResult } from "@/lib/readResult";
 import { PostView } from "./PostView";
 
@@ -45,6 +47,7 @@ beforeEach(() => {
   vi.mocked(readPipelinePost).mockReset().mockResolvedValue(ok(postFor("Wool care in three steps", "u-social")));
   vi.mocked(readPostComments).mockReset().mockResolvedValue(ok([]));
   vi.mocked(readAssetChoices).mockReset().mockResolvedValue(ok([]));
+  vi.mocked(readPostMetrics).mockReset().mockResolvedValue(ok<PostMetrics>({ latest: null, engagementRate: null, accountAverageRate: null, boostCandidate: false, simulated: false }));
 });
 
 describe("what is asked of the platform", () => {
@@ -117,5 +120,39 @@ describe("each answer in its own words", () => {
     await mount("drawer");
     expect(screen.getByRole("heading", { level: 2, name: "Wool care in three steps" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+});
+
+describe("a live post's metrics (SCP-3c, BFF §63.10)", () => {
+  const live = () => vi.mocked(readPipelinePost).mockResolvedValue(ok(postFor("A day in the warehouse", "u-social")));
+
+  it("reads them for a live post only, for the signed-in person, and draws the block", async () => {
+    await mount("page", "d-soc", "p-1");
+    expect(readPostMetrics).not.toHaveBeenCalled(); // Wool care in three steps is at proofread
+    expect(screen.queryByRole("region", { name: "Metrics" })).toBeNull();
+    live();
+    vi.mocked(readPostMetrics).mockResolvedValue(ok<PostMetrics>({
+      latest: { reach: 3000, impressions: null, likes: 200, comments: 10, shares: 5, saves: 25, clicks: null, videoViews: null, source: "manual", capturedAt: "2026-10-15T08:00:00.000Z" },
+      engagementRate: 0.08, accountAverageRate: 0.04, boostCandidate: true, simulated: false,
+    }));
+    await mount("page", "d-soc", "p-live");
+    expect(readPostMetrics).toHaveBeenCalledWith("u-1", "co-a", "p-live");
+    expect(screen.getByRole("region", { name: "Metrics" })).toBeInTheDocument();
+    expect(screen.getByText("Boost candidate")).toBeInTheDocument();
+    expect(screen.getByText("8.0%")).toBeInTheDocument();
+    // The signed-in person (u-1) is not this client's officer: no form is offered.
+    expect(screen.queryByRole("button", { name: /Enter metrics/ })).toBeNull();
+  });
+
+  it("a metrics read that failed is said beside its section, and the post stays", async () => {
+    live();
+    for (const answer of [{ kind: "unavailable", reason: "platform 500" }, { kind: "forbidden" }] as const) {
+      vi.mocked(readPostMetrics).mockResolvedValue(answer);
+      const { unmount } = await mount();
+      expect(screen.getByText(/The numbers could not be read/)).toBeInTheDocument();
+      expect(screen.queryByText("Engagement rate")).toBeNull();
+      expect(screen.getByRole("heading", { level: 1, name: "A day in the warehouse" })).toBeInTheDocument();
+      unmount();
+    }
   });
 });
