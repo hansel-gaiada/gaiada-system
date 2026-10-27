@@ -30,8 +30,13 @@ type Config struct {
 	// OpenAIReasoningMaxTokens (OPENAI_REASONING_MAX_TOKENS, M6-P4n): OpenRouter's reasoning cap,
 	// sent as body `reasoning.max_tokens` only when > 0. 0 (unset/empty) = not sent.
 	OpenAIReasoningMaxTokens int
-	WhisperURL               string
-	WhisperModel             string
+	// OpenAIUsageAccounting (OPENAI_USAGE_ACCOUNTING, AIP-02): whether to send OpenRouter's
+	// `"usage": {"include": true}` request field so the answer carries the call's cost. "" (unset)
+	// = automatic: on for an openrouter.ai OPENAI_BASE_URL host, off for any other upstream.
+	// 1/true/yes/on forces it on, 0/false/no/off forces it off.
+	OpenAIUsageAccounting string
+	WhisperURL            string
+	WhisperModel          string
 	// HermesURL/HermesModel (ASST-15): hermes-gateway, a SEPARATE standalone shim service (never
 	// this process itself) that runs the local Hermes agent as the brain. Empty URL means
 	// Available()==false — same "unconfigured, not a failure" posture as every other optional
@@ -154,6 +159,7 @@ func Load() Config {
 		OpenAIVisionModel:        envOr("OPENAI_VISION_MODEL", "qwen3.5:397b"),
 		OpenAIMaxTokens:          envInt("OPENAI_MAX_TOKENS", 1024),
 		OpenAIReasoningMaxTokens: envInt("OPENAI_REASONING_MAX_TOKENS", 0),
+		OpenAIUsageAccounting:    envOr("OPENAI_USAGE_ACCOUNTING", ""),
 		WhisperURL:               envOr("WHISPER_URL", ""),
 		WhisperModel:             envOr("WHISPER_MODEL", "Systran/faster-whisper-small"),
 		HermesURL:                envOr("HERMES_URL", ""),

@@ -40,6 +40,11 @@ type EgressAudit struct {
 	Model            string `json:"model,omitempty"`
 	PromptTokens     int    `json:"promptTokens,omitempty"`
 	CompletionTokens int    `json:"completionTokens,omitempty"`
+	// CostUSD (AIP-02) is the upstream's own cost figure for the call (OpenRouter's usage.cost),
+	// set only on a successful `llm` row whose provider reported one. PromptTokens/CompletionTokens
+	// are likewise set on `llm` rows when the provider reported usage. All omitempty: a row
+	// without usage stays byte-identical, and a row NEVER holds text.
+	CostUSD float64 `json:"costUsd,omitempty"`
 }
 
 func WriteAudit(path string, e EgressAudit) error {

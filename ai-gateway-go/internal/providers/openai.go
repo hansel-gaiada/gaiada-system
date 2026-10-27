@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 type OpenAIProvider struct {
@@ -26,7 +27,16 @@ type OpenAIProvider struct {
 	// model's thinking tokens count against MaxTokens, so an uncapped one can spend the whole
 	// budget thinking and return empty content (M6-P4n).
 	ReasoningMaxTokens int
-	Client             *http.Client
+	// UsageAccounting (AIP-02) adds OpenRouter's `"usage": {"include": true}` request field so the
+	// answer carries the call's cost. It is OpenRouter-specific: another OpenAI-compatible upstream
+	// must never receive it, so NewOpenAIProvider turns it on only for an openrouter.ai host and
+	// WithUsageAccounting (OPENAI_USAGE_ACCOUNTING) can override either way. Off, the request body
+	// is byte-identical to what it was before the field existed.
+	UsageAccounting bool
+	// StreamIdleTimeout bounds the silence between upstream chunks on /complete/stream (AIP-02).
+	// 0 = the 60 s default.
+	StreamIdleTimeout time.Duration
+	Client            *http.Client
 }
 
 func NewOpenAIProvider(baseURL, apiKey, model, visionModel string, maxTokens int, client *http.Client) *OpenAIProvider {
@@ -37,7 +47,22 @@ func NewOpenAIProvider(baseURL, apiKey, model, visionModel string, maxTokens int
 		VisionModel: visionModel,
 		MaxTokens:   maxTokens,
 		Client:      client,
+		// Default: on for an openrouter.ai host, off for every other upstream (AIP-02).
+		UsageAccounting: isOpenRouterHost(baseURL),
 	}
+}
+
+// WithUsageAccounting applies OPENAI_USAGE_ACCOUNTING: "1/true/yes/on" forces the OpenRouter
+// usage-accounting field on, "0/false/no/off" forces it off, anything else (including "") keeps
+// the host-based default from NewOpenAIProvider. Returns the provider for chaining.
+func (p *OpenAIProvider) WithUsageAccounting(setting string) *OpenAIProvider {
+	switch strings.ToLower(strings.TrimSpace(setting)) {
+	case "1", "true", "yes", "on":
+		p.UsageAccounting = true
+	case "0", "false", "no", "off":
+		p.UsageAccounting = false
+	}
+	return p
 }
 
 // WithReasoningMaxTokens sets OPENAI_REASONING_MAX_TOKENS (<= 0 leaves the field unsent) and
@@ -54,6 +79,12 @@ func (p *OpenAIProvider) WithReasoningMaxTokens(n int) *OpenAIProvider {
 // (a plain string, or a []any of typed parts for multimodal input) and returns the first choice's
 // trimmed text.
 func (p *OpenAIProvider) chat(ctx context.Context, model string, content any) (string, error) {
+	text, _, err := p.chatUsage(ctx, model, content)
+	return text, err
+}
+
+// chatUsage is chat plus the upstream's own usage (nil when it reported none, or a malformed one).
+func (p *OpenAIProvider) chatUsage(ctx context.Context, model string, content any) (string, *Usage, error) {
 	// Marshal error is safely ignored: the input is always a struct of strings/ints/known parts,
 	// which is always marshalable.
 	reqBody := map[string]any{
@@ -65,23 +96,26 @@ func (p *OpenAIProvider) chat(ctx context.Context, model string, content any) (s
 	if p.ReasoningMaxTokens > 0 {
 		reqBody["reasoning"] = map[string]any{"max_tokens": p.ReasoningMaxTokens}
 	}
+	if p.UsageAccounting {
+		reqBody["usage"] = map[string]any{"include": true}
+	}
 	body, _ := json.Marshal(reqBody)
 	req, err := http.NewRequestWithContext(ctx, "POST", p.BaseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.APIKey)
 	res, err := p.Client.Do(req)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode == http.StatusTooManyRequests {
-		return "", newRateLimitError(res)
+		return "", nil, newRateLimitError(res)
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return "", fmt.Errorf("openai %d", res.StatusCode)
+		return "", nil, fmt.Errorf("openai %d", res.StatusCode)
 	}
 	var data struct {
 		Choices []struct {
@@ -90,9 +124,10 @@ func (p *OpenAIProvider) chat(ctx context.Context, model string, content any) (s
 			} `json:"message"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
+		Usage json.RawMessage `json:"usage"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&data); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	// A response with no choices is a malformed/failed generation → error so the chain fails
 	// over. A choice whose content is a present-but-empty string with finish_reason "stop" is a
@@ -101,13 +136,13 @@ func (p *OpenAIProvider) chat(ctx context.Context, model string, content any) (s
 	// reasoning model that spent the whole max_tokens budget thinking (M6-P4n, live 2026-10-13: HTTP
 	// 200, empty content, stored as a design artifact), so it errors and the chain fails over.
 	if len(data.Choices) == 0 {
-		return "", fmt.Errorf("openai returned no choices")
+		return "", nil, fmt.Errorf("openai returned no choices")
 	}
 	text := strings.TrimSpace(data.Choices[0].Message.Content)
 	if text == "" && data.Choices[0].FinishReason == "length" {
-		return "", fmt.Errorf("openai returned no content: the token budget ran out (finish_reason=length; a reasoning model may have spent it all reasoning)")
+		return "", nil, fmt.Errorf("openai returned no content: the token budget ran out (finish_reason=length; a reasoning model may have spent it all reasoning)")
 	}
-	return text, nil
+	return text, usageOf(data.Usage), nil
 }
 
 func (p *OpenAIProvider) Name() string { return "openai" }
@@ -122,6 +157,11 @@ func (p *OpenAIProvider) Available() bool { return p.BaseURL != "" && p.APIKey !
 
 func (p *OpenAIProvider) Complete(ctx context.Context, prompt string) (string, error) {
 	return p.chat(ctx, p.Model, prompt)
+}
+
+// CompleteWithUsage implements UsageCompleter (AIP-02): Complete plus the upstream's own usage.
+func (p *OpenAIProvider) CompleteWithUsage(ctx context.Context, prompt string) (string, *Usage, error) {
+	return p.chatUsage(ctx, p.Model, prompt)
 }
 
 // Media handles image input via a vision-capable chat model (OpenAI image_url content part).

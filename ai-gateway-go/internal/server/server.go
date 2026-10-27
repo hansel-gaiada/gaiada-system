@@ -194,16 +194,51 @@ func writeSSEMeta(w http.ResponseWriter, flusher http.Flusher, canFlush bool, pr
 // usagePayload is real provider-reported token counts ONLY — see providers.UsageStreamingProvider
 // for why this can never be zero-filled or estimated. ASST-06's own ~4-chars/token estimate is the
 // labelled fallback a consumer keeps using when this frame never arrives.
+//
+// AIP-02: CostUSD (`costUsd`, omitted when the upstream reported no cost; a reported 0 is kept) and
+// Source (`source`, always "provider": the figure is the upstream's own, AIP-D11) are additive, so
+// a consumer that reads only the two counts (platform-nest's stream.ts) is unaffected.
 type usagePayload struct {
-	PromptTokens     int `json:"promptTokens"`
-	CompletionTokens int `json:"completionTokens"`
+	PromptTokens     int      `json:"promptTokens"`
+	CompletionTokens int      `json:"completionTokens"`
+	CostUSD          *float64 `json:"costUsd,omitempty"`
+	Source           string   `json:"source"`
+}
+
+// usageSourceProvider labels every usage figure this gateway reports: the upstream's own.
+const usageSourceProvider = "provider"
+
+func usagePayloadOf(u providers.Usage) *usagePayload {
+	return &usagePayload{PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, CostUSD: u.CostUSD, Source: usageSourceProvider}
+}
+
+// completeAnswer is POST /complete's body. Field order (provider, text) reproduces the sorted-key
+// output the old map[string]string produced, so an answer without usage is byte for byte what it
+// was; `usage` (the usagePayload shape: promptTokens, completionTokens, costUsd?, source) is
+// appended only when the serving provider reported real figures.
+type completeAnswer struct {
+	Provider string        `json:"provider"`
+	Text     string        `json:"text"`
+	Usage    *usagePayload `json:"usage,omitempty"`
+}
+
+// auditUsage copies a reported usage onto an egress row (counts and cost only, never text).
+func auditUsage(e audit.EgressAudit, u *usagePayload) audit.EgressAudit {
+	if u == nil {
+		return e
+	}
+	e.PromptTokens, e.CompletionTokens = u.PromptTokens, u.CompletionTokens
+	if u.CostUSD != nil {
+		e.CostUSD = *u.CostUSD
+	}
+	return e
 }
 
 // writeSSEUsage writes the terminal `event: usage` frame — see its one call site (immediately
 // before writeSSEDone, on the success path only) for why it can never appear on an error path or
 // after `done`.
-func writeSSEUsage(w http.ResponseWriter, flusher http.Flusher, canFlush bool, promptTokens, completionTokens int) {
-	enc, err := json.Marshal(usagePayload{PromptTokens: promptTokens, CompletionTokens: completionTokens})
+func writeSSEUsage(w http.ResponseWriter, flusher http.Flusher, canFlush bool, u usagePayload) {
+	enc, err := json.Marshal(u)
 	if err != nil {
 		// Two ints cannot fail to marshal; guarded for the same reason as above.
 		return
@@ -260,12 +295,18 @@ func modelOf(p providers.Provider) string {
 // a real conflict — but if one someday does, the session-aware call is deliberately the one that
 // runs (session > usage in precedence here has no significance beyond "pick one deterministically";
 // see the ASST-15 addendum for why the two never need to compose).
-func callCompleteStream(ctx context.Context, sp providers.StreamingProvider, prompt, session string, onToken func(string), onUsage func(promptTokens, completionTokens int), onSession func(session string, resumed bool, requestedSession string)) error {
+func callCompleteStream(ctx context.Context, sp providers.StreamingProvider, prompt, session string, onToken func(string), onUsage func(providers.Usage), onSession func(session string, resumed bool, requestedSession string)) error {
 	if ssp, ok := sp.(providers.SessionStreamingProvider); ok {
 		return ssp.CompleteStreamSession(ctx, prompt, session, onToken, onSession)
 	}
+	// AIP-02: a provider whose usage carries a cost (openai) reports it through the detailed form.
+	if dp, ok := sp.(providers.UsageDetailStreamingProvider); ok {
+		return dp.CompleteStreamUsageDetail(ctx, prompt, onToken, onUsage)
+	}
 	if up, ok := sp.(providers.UsageStreamingProvider); ok {
-		return up.CompleteStreamUsage(ctx, prompt, onToken, onUsage)
+		return up.CompleteStreamUsage(ctx, prompt, onToken, func(promptTokens, completionTokens int) {
+			onUsage(providers.Usage{PromptTokens: promptTokens, CompletionTokens: completionTokens})
+		})
 	}
 	return sp.CompleteStream(ctx, prompt, onToken)
 }
@@ -727,13 +768,24 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 				return
 			}
 		}
+		// AIP-02: the serving attempt's own usage, when its provider reports it. Reset at the top of
+		// every attempt so a failed-over provider's figures can never be attributed to the next one.
+		var usage *usagePayload
 		text, provider, taxonomy, err := chain.RunWithHint(chains.LLM, r.Context(), body.Provider, func(p providers.Provider) (string, error) {
+			usage = nil
 			// Fresh per-attempt timeout derived from r.Context(), NOT a single deadline shared
 			// across the whole failover chain: a hung provider costs at most one
 			// PROVIDER_TIMEOUT_MS before failing over, and a client disconnect (r.Context()
 			// canceled) still cancels the in-flight upstream call immediately (B5).
 			ctx, cancel := context.WithTimeout(r.Context(), rt.timeout())
 			defer cancel()
+			if uc, ok := p.(providers.UsageCompleter); ok {
+				t, u, cerr := uc.CompleteWithUsage(ctx, result.Clean)
+				if cerr == nil && u != nil {
+					usage = usagePayloadOf(*u)
+				}
+				return t, cerr
+			}
 			return p.Complete(ctx, result.Clean)
 		})
 		if err != nil {
@@ -741,10 +793,12 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 			writeErr(w, 502, err.Error())
 			return
 		}
-		emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", Provider: strPtr(provider), OK: true, Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()})
+		emit(r.Context(), auditUsage(audit.EgressAudit{TS: started.UnixMilli(), Capability: "llm", Provider: strPtr(provider), OK: true, Redactions: len(result.Redactions), LatencyMs: time.Since(started).Milliseconds()}, usage))
 		// Report the provider that actually served (after any failover) so a WS8 write-capable agent
 		// can enforce the D13 failover gate + WS9 can attribute the run. Additive/back-compatible.
-		writeJSON(w, 200, map[string]string{"text": text, "provider": provider})
+		// AIP-02: `usage` (the upstream's own counts and cost, source "provider") is appended only
+		// when real; {provider,text} are untouched either way.
+		writeJSON(w, 200, completeAnswer{Provider: provider, Text: text, Usage: usage})
 	})
 
 	mux.HandleFunc("POST /media", func(w http.ResponseWriter, r *http.Request) {
@@ -1002,7 +1056,7 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 			// once at the top of this handler) and response-side (scrubber) counts, matching the
 			// non-streaming routes' single "how much PII did this request touch" field while still
 			// surfacing the response-side counters ASST-04 exported for exactly this purpose.
-			emit(r.Context(), audit.EgressAudit{
+			row := audit.EgressAudit{
 				TS:               started.UnixMilli(),
 				Capability:       "llm",
 				Provider:         auditProvider,
@@ -1011,7 +1065,9 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 				Redactions:       len(result.Redactions) + scrubber.Redactions(),
 				ForcedBoundaries: scrubber.ForcedBoundaries(),
 				LatencyMs:        time.Since(started).Milliseconds(),
-			})
+			}
+			// AIP-02: the counts the stream reported (nil on every failure path), never text.
+			emit(r.Context(), auditUsage(row, usage))
 		}()
 
 		onToken := func(token string) { scrubber.Write(token) }
@@ -1029,8 +1085,8 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 			// discarded attempt or a later one that hasn't run yet.
 			currentProvider, currentModel = p.Name(), modelOf(p)
 			if sp, isStreaming := p.(providers.StreamingProvider); isStreaming {
-				serr := callCompleteStream(streamCtx, sp, result.Clean, body.ProviderSession, onToken, func(promptTokens, completionTokens int) {
-					usage = &usagePayload{PromptTokens: promptTokens, CompletionTokens: completionTokens}
+				serr := callCompleteStream(streamCtx, sp, result.Clean, body.ProviderSession, onToken, func(u providers.Usage) {
+					usage = usagePayloadOf(u)
 				}, func(providerSession string, resumed bool, requestedSession string) {
 					session = &providerSession
 					sessionResumed = resumed
@@ -1117,7 +1173,7 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 		// reported real counts (usage is nil otherwise: never zero-filled, never estimated). This
 		// is unreachable on any error path — every error branch above returns before this line.
 		if usage != nil {
-			writeSSEUsage(w, flusher, canFlush, usage.PromptTokens, usage.CompletionTokens)
+			writeSSEUsage(w, flusher, canFlush, *usage)
 		}
 		// ASST-15: session is likewise TERMINAL and ONLY-when-real (never invented, never sent
 		// empty) — written after usage, before done. This is where hermes' late-known session id

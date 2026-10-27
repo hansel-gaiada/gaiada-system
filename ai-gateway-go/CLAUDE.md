@@ -79,6 +79,37 @@ Rules that must not drift:
   registered agent; label cardinality is the registered names plus `unknown`. Alert
   `GatewayAgentNearCap` (ratio >= 0.8 for 5m, ticket) in `infra/observability/prometheus/rules/alerts.yml`.
 
+## Usage and cost on the text routes (AIP-02, plan `docs/plans/2026-10-27-ai-plan.md` §1.4/§4.1, ruling AIP-D11)
+
+The `openai` provider reports the upstream's OWN token counts, and its cost when the upstream returns
+one, on `POST /complete` and `POST /complete/stream`. Source label is always `provider`; the price
+table that fills the gap is AIP-04 (not here). Never estimated, never zero-filled: when the upstream
+reports nothing usable, nothing new is emitted and the platform keeps its labelled estimate.
+
+- **`/complete/stream`.** `event: usage` keeps its position (terminal, before `session`/`done`, success
+  only) and its two original fields, and gains two: `{"promptTokens":12,"completionTokens":34,
+  "costUsd":0.00042,"source":"provider"}`. `costUsd` is omitted when the upstream sent no cost (a
+  reported 0 stays). `source` is on every usage event now, Ollama's included. platform-nest `stream.ts`
+  reads only the two counts, so it is unchanged.
+- **`/complete`.** The answer gains an optional `usage` object with the same four fields. `{provider,text}`
+  stay byte for byte; without usage the body is exactly the old one.
+- **The `openai` provider now streams natively** (it used to go through the single-chunk fallback):
+  `stream_options.include_usage`, text deltas relayed as they arrive (outer whitespace trimmed like the
+  non-stream path), the usage read from whichever chunk carries it (OpenRouter puts it on the last
+  `finish_reason` chunk, others on a separate empty-`choices` chunk; last well-formed one wins). An
+  unparseable chunk is skipped, an `error` chunk or `finish_reason=error` fails the attempt, empty
+  content with `finish_reason=length` fails it (M6-P4n, same as `Complete`), a stream with neither
+  `[DONE]` nor a `finish_reason` is a truncation error. The gap between chunks is bounded by
+  `PROVIDER_TIMEOUT_MS` (a timeout in the audit taxonomy); a streamed answer has no overall deadline.
+- **OpenRouter-only request field.** `"usage": {"include": true}` is sent only when the base URL host is
+  exactly `openrouter.ai`, or when `OPENAI_USAGE_ACCOUNTING` is 1/true/yes/on (0/false/no/off forces it
+  off; blank = automatic). Any other OpenAI-compatible upstream never receives it. Verified 2026-10-27
+  against live OpenRouter: it returns `usage` (incl. `cost`, USD) with or without the field, so the
+  field is belt and braces today. The standard `stream_options.include_usage` goes to every upstream.
+- **Audit.** `llm` rows gain `promptTokens`, `completionTokens` and `costUsd` (all omitempty) when the
+  serving provider reported usage; rows without usage are byte-identical to before. Never text.
+- The agent route (`/v1/chat/completions`) is untouched by all of this.
+
 ## This is the only place provider keys live
 
 Program invariant: **no other service holds a provider credential**, and no caller asserts
@@ -113,5 +144,5 @@ persisted and **shared** — `sync-engine-go`'s `cmd/synccert` issues node certs
 
 ## Known deferrals (per spec §9)
 
-OpenBao-issued provider creds, media DLP classification, native per-provider token streaming,
+OpenBao-issued provider creds, media DLP classification, native token streaming for providers other than `openai` (AIP-02 gave `openai` one),
 DNS control / SIEM rule, automated cert rotation. These are decisions, not oversights.
