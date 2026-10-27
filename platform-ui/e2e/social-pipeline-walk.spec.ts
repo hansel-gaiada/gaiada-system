@@ -86,9 +86,12 @@ async function signIn(page: Page, context: import("@playwright/test").BrowserCon
   await context.addCookies([tenantCookie(page.url(), TENANT)]);
 }
 
-const chip = (page: Page) => page.locator(".scp-post__chips .scp-chip").first();
-// `.first()`: a streamed page can hold two metas for an instant (loading shell and the post), which Playwright refuses as a strict-mode violation.
-const meta = (page: Page) => page.locator(".scp-post__meta").first();
+// The page can hold a second, HIDDEN copy of the post (the diagnostic in `open` reports it); every plain CSS locator here sees visible elements only,
+// because Playwright's strict mode counts hidden ones too (role queries skip them already).
+const seen = (page: Page, css: string) => page.locator(css).filter({ visible: true }).first();
+const chip = (page: Page) => seen(page, ".scp-post__chips .scp-chip");
+const meta = (page: Page) => seen(page, ".scp-post__meta");
+const banner = (page: Page) => seen(page, ".scp-post__banner--changes");
 const bar = (page: Page) => page.getByRole("region", { name: "Actions" });
 const activity = (page: Page) => page.getByRole("list", { name: "Activity" });
 
@@ -100,6 +103,10 @@ const offRow = (page: Page, name: string) => bar(page).locator(".scp-actions__of
 async function open(page: Page, url: string, title?: string) {
   await page.goto(url);
   await expect(bar(page)).toBeVisible();
+  const copies = await page.locator(".scp-post__meta").evaluateAll((els) =>
+    els.map((el) => { const chain: string[] = []; for (let n: Element | null = el.parentElement; n && chain.length < 6; n = n.parentElement) chain.push(`${n.tagName.toLowerCase()}${n.id ? "#" + n.id : ""}${n.className && typeof n.className === "string" ? "." + n.className.split(" ")[0] : ""}${getComputedStyle(n).display === "none" ? "[display:none]" : ""}`); return chain.join(" < "); }),
+  );
+  if (copies.length > 1) console.log(`DIAG ${url}: ${copies.length} copies of the post on screen: ${JSON.stringify(copies)}`);
   if (title) await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
 }
 
@@ -215,7 +222,7 @@ test.describe("SCP-1p: the content pipeline walked by its five roles", () => {
     await act(page, "Return with edits");
     await noteDialog(page, "Return with edits", "What should change?", "The caption reads long. See my suggestion, and soften the call to action.");
     await expectAt(page, "Changes asked by the copywriter: copy", `Officer: ${OFFICER_NAME}`);
-    await expect(page.locator(".scp-post__banner--changes")).toContainText("The caption reads long");
+    await expect(banner(page)).toContainText("The caption reads long");
     // It left the copywriter's turn.
     await expect(live(page, "Approve copy")).toHaveCount(0);
   });
@@ -224,7 +231,7 @@ test.describe("SCP-1p: the content pipeline walked by its five roles", () => {
     await signIn(page, context, OFFICER);
     await open(page, POST_URL, TITLE);
     await expectAt(page, "Changes asked by the copywriter: copy", `Officer: ${OFFICER_NAME}`);
-    await expect(page.locator(".scp-post__banner--changes")).toContainText("The caption reads long");
+    await expect(banner(page)).toContainText("The caption reads long");
     const caption = page.getByRole("group", { name: "Caption", exact: true });
     await expect(caption.locator(".scp-suggest")).toContainText(CAPTION_SUGGESTED);
     await press(caption.getByRole("button", { name: "Accept the suggestion for Caption", exact: true }));
@@ -264,7 +271,7 @@ test.describe("SCP-1p: the content pipeline walked by its five roles", () => {
     await signIn(page, context, OFFICER);
     await open(page, POST_URL, TITLE);
     await expectAt(page, "Changes asked by the HoD: copy", `Officer: ${OFFICER_NAME}`);
-    await expect(page.locator(".scp-post__banner--changes")).toContainText("Add the opening hours");
+    await expect(banner(page)).toContainText("Add the opening hours");
     const toProofread = activity(page).locator("li").filter({ hasText: "to Proofread" });
     const before = await toProofread.count();
     expect(before).toBeGreaterThan(0); // the first pass and the loop-a return left theirs
@@ -341,7 +348,7 @@ test.describe("SCP-1p: the content pipeline walked by its five roles", () => {
     await signIn(page, context, CREATIVE);
     await open(page, POST_URL, TITLE);
     await expectAt(page, "Changes asked by the final check: design", `Designer: ${DESIGNER_NAME}`);
-    await expect(page.locator(".scp-post__banner--changes")).toContainText("The design must be a stored asset");
+    await expect(banner(page)).toContainText("The design must be a stored asset");
     const designs = page.getByRole("region", { name: "Designs" });
     await press(designs.getByRole("button", { name: "Remove design 1", exact: true }));
     await expect(designs.getByRole("link", { name: LINK_ONE })).toBeHidden();
@@ -393,7 +400,7 @@ test.describe("SCP-1p: the content pipeline walked by its five roles", () => {
     await expect(live(page, "Send to the client")).toBeVisible();
     await act(page, "Send to the client");
     await expectAt(page, "With the client", "Client");
-    await expect(page.locator(".scp-post__chips")).toContainText("With client");
+    await expect(seen(page, ".scp-post__chips")).toContainText("With client");
     await expect(live(page, "Send to the client")).toHaveCount(0);
   });
 
