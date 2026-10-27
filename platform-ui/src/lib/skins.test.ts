@@ -34,8 +34,9 @@ describe("skins: switched on", () => {
   });
 
   it("Social is on, yet no pinned entry points at a page that does not exist: the unbuilt ones stay ticketed", () => {
+    // Settings is built (SCP-1c, `{dept}/settings`), so its pin lost its ticket; the rest wait for SCP-1j, SCP-1k and SCP-5d.
     const ticketed = SKINS.social.pinned!.filter((p) => p.ticket).map((p) => p.key).sort();
-    expect(ticketed).toEqual(["dashboard", "messages", "profile", "settings"]);
+    expect(ticketed).toEqual(["dashboard", "messages", "profile"]);
   });
 });
 
