@@ -178,6 +178,13 @@ export interface Resource {
    *  from a body. Omitted -> [] -> contains nobody, so the DENY matches nobody (the self-assign DENY's convention: fail-open
    *  for a DENY, so an unfed caller loses nothing it had). A dropped allow-list line below makes the DENY never fire. */
   holderIds?: string[];
+  /** SCP-1r (SCP-D7, owner ruling SCP-Q23; docs/PERMISSION-CONTRACT.md §53.4) -- the live lead-seat holders (the §50 seat rule) of every
+   *  org unit whose name, kind or parent an `org_structure` `update` changes, or which it removes, for `resource_org_structure.yaml`'s
+   *  unit self-edit DENY (nobody renames, re-types, moves or deletes a unit they lead, superadmin included). Fed BY THE HANDLER from
+   *  the stored tree and the seat rows (admin/org-structure-lead-guard.ts), never from a body. Omitted -> [] -> contains nobody, so the
+   *  DENY matches nobody (fail-open for a DENY: an unfed caller loses nothing it had). A dropped allow-list line below makes the
+   *  DENY never fire. */
+  touchedLeadHolderIds?: string[];
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -333,6 +340,10 @@ function resourcePayload(r: Resource) {
       // Resource through an object spread gets no excess-property check). A dropped attribute means the self-EDIT DENY
       // never fires, which is the unsafe direction, so a test pins that it is carried (cerbos-position-self-edit.test.ts).
       holderIds: r.holderIds ?? [],
+      // SCP-1r. Listed here or it never reaches resource_org_structure.yaml (this is an allow-list). A dropped attribute means the
+      // unit self-edit DENY never fires, which is the unsafe direction, so a test pins that it is carried
+      // (cerbos-org-structure-self-edit.test.ts).
+      touchedLeadHolderIds: r.touchedLeadHolderIds ?? [],
     },
   };
 }

@@ -15,6 +15,8 @@ import { AuthGuard } from "../auth/guards";
 import {
   applyOrgStructure, sanitizeStructure, type OrgStructure,
 } from "./org-structure.service";
+// SCP-1r (SCP-D7): the unit self-edit guard's feed (nobody renames, re-types, moves or deletes a unit they lead).
+import { loadTouchedLeadHolderIds } from "./org-structure-lead-guard";
 
 // ---- Compliance-gate template (the six launch gates; status/evidence persisted per tenant) ----
 const GATE_STATUSES = new Set(["open", "in_progress", "passed", "waived"]);
@@ -52,7 +54,18 @@ export class CompanyAdminController {
       throw new BadRequestException("org structure with a root node required");
     }
     const structure = sanitizeStructure(body);
-    await withTenants([tenantId], (c) => applyOrgStructure(c, tenantId, structure));
+    await withTenants([tenantId], async (c) => {
+      // SCP-1r (SCP-Q23, plan decision SCP-D7; docs/PERMISSION-CONTRACT.md §53.4): nobody renames, re-types, moves or deletes a unit
+      // they hold a live lead seat on, superadmin included. Unit-name-keyed authority (the social approvers' Social Media and GM
+      // units, the GM audience) finds its unit by name in THIS tree, so editing the unit you lead is editing your own authority.
+      // The stored row is locked first, so the diff below, the decision and the write see ONE tree; the diff and the seat rows are
+      // read here, never taken from the body. The decision is `org_structure` · `update` again, now fed `touchedLeadHolderIds`
+      // (resource_org_structure.yaml's EFFECT_DENY): the same 403 as any refusal, no new reason code.
+      await c.query(`SELECT 1 FROM company_org_structure WHERE tenant_id = $1 FOR UPDATE`, [tenantId]);
+      const touchedLeadHolderIds = await loadTouchedLeadHolderIds(c, tenantId, structure);
+      await authorize(req.principal, { kind: "org_structure", tenantId, touchedLeadHolderIds }, "update");
+      await applyOrgStructure(c, tenantId, structure);
+    });
     await writeActivity(tenantId, req.principal.userId, "updated", "org_structure", tenantId);
     return { ok: true };
   }
