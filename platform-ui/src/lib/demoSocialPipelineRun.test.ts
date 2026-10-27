@@ -616,8 +616,9 @@ describe("SCP-1u: the Asset Library read, a stored asset design, and the guards 
 
   it("the read's actions[] runs the guards, and the feed card does not (the server decides a card with no facts and a neutral post)", () => {
     const p = byTitle("Old harbour walk");
-    const saved = p.suggestions;
+    const saved = structuredClone(p); // an earlier test moved this post: put it at proofread for this one, and back after
     try {
+      Object.assign(p, { pipelineStatus: "proofread", changeCase: null, changeBy: null, changeKind: null, returnTo: null, blockedFrom: null, blockWaitingOn: null, history: [] });
       p.suggestions = { caption: { value: "A new caption", base: "an older caption", by: "u-copy", at: "2026-10-15T09:00:00.000Z" } };
       const read = demoPipelineRead(p.id, "u-copy").json as Body;
       expect(read.actions.find((a: Body) => a.action === "approve_copy")).toEqual({ action: "approve_copy", allowed: false, reason: "suggestion_stale" });
@@ -625,7 +626,7 @@ describe("SCP-1u: the Asset Library read, a stored asset design, and the guards 
       const card = ((demoFeed(new URLSearchParams("view=all&limit=50"), "u-copy").json as Body).items as Body[]).find((c) => c.id === p.id)!;
       expect(card.nextAction).toEqual({ action: "approve_copy", allowed: true });
     } finally {
-      p.suggestions = saved;
+      Object.assign(p, saved);
     }
   });
 });

@@ -141,7 +141,20 @@ describe("the page draws every section of the read", () => {
 
 describe("the action bar is the read's actions[]", () => {
   it("the copywriter's primary button is Approve copy; the officer's is disabled, with the reason in words, as are the others they may not take", () => {
+    // this post's second suggestion is stale, so the server's read (and now the demo's) disables Approve copy with the reason in words and offers no primary (SCP-1u)
+    const stale = mount("Wool care in three steps", "u-copy");
+    const staleApprove = bar().getByRole("button", { name: "Approve copy" });
+    expect(staleApprove).toBeDisabled();
+    expect(document.getElementById(staleApprove.getAttribute("aria-describedby")!)).toHaveTextContent(REFUSAL_WORDS.suggestion_stale);
+    expect(bar().getAllByRole("button").filter((b) => b.className.includes("lux-btn--solid"))).toHaveLength(0);
+    stale.unmount();
+
+    // with no stale suggestion it is the primary, and comes first
+    const wool = postOf("Wool care in three steps");
+    const savedSuggestions = wool.suggestions;
+    wool.suggestions = {};
     const { unmount } = mount("Wool care in three steps", "u-copy");
+    wool.suggestions = savedSuggestions;
     const primary = bar().getByRole("button", { name: "Approve copy" });
     expect(primary).toBeEnabled();
     expect(primary.className).toContain("lux-btn--solid");
@@ -170,8 +183,10 @@ describe("the action bar is the read's actions[]", () => {
     expect(await screen.findByText(/Start draft\. Now at Draft\./)).toBeInTheDocument();
     expect(chip("Draft")).toBeInTheDocument();
     expect(nav.refresh).toHaveBeenCalled();
-    // the next action of the new step is the primary
-    expect(bar().getByRole("button", { name: "Send to proofread" }).className).toContain("lux-btn--solid");
+    // the new step's send is disabled while the post is incomplete (no caption yet), with the server's reason in words (SCP-1u)
+    const send = bar().getByRole("button", { name: "Send to proofread" });
+    expect(send).toBeDisabled();
+    expect(document.getElementById(send.getAttribute("aria-describedby")!)).toHaveTextContent(REFUSAL_WORDS.incomplete_post);
     expect(bar().queryByRole("button", { name: "Start draft" })).toBeNull();
   });
 });
@@ -432,12 +447,13 @@ describe("each dialog posts the right body", () => {
 });
 
 describe("a refusal is shown in words", () => {
-  it("a stale suggestion refuses Approve copy, in a sentence that names the field", async () => {
+  it("a stale suggestion disables Approve copy before any click, in a sentence (the server's refusal with its detail, a race, still names the field)", () => {
     mount("Wool care in three steps", "u-copy");
-    open("Approve copy");
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("A suggestion was made against text that has changed since. Ask the copywriter to suggest again, or drop it. Out of date: Call to action.");
-    expect(alert.textContent).not.toMatch(/suggestion_stale/);
+    const approve = bar().getByRole("button", { name: "Approve copy" });
+    expect(approve).toBeDisabled();
+    const why = document.getElementById(approve.getAttribute("aria-describedby")!)!;
+    expect(why).toHaveTextContent("A suggestion was made against text that has changed since. Ask the copywriter to suggest again, or drop it.");
+    expect(why.textContent).not.toMatch(/suggestion_stale/);
   });
 
   it("a post someone else moved: the dialog stays open with the new step in words, and the page is refreshed", async () => {
