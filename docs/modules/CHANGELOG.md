@@ -21,6 +21,11 @@ local stack). None of these mean "production-done".
 - **Alert:** `GatewayAgentNearCap` fires when `gateway_agent_budget_used_ratio >= 0.8` for 5 minutes (severity `ticket`), with a case in `alerts_test.yml`.
 - **Runbook:** `infra/runbooks/aip-00a-hermes-behind-gateway.md` now runs the live move with five scripts in `infra/runbooks/aip-00a/` (tokens, the gateway listener and mesh proxy, the sumopod relay, repointing an agent, deleting its own keys). Each script backs up what it changes. The steps use the paths measured on helios on 2026-10-27: each agent's `HERMES_HOME` is its profile directory; seo has a direct DeepSeek fallback that step 4 removes; bsc's key is in `auth.json`'s credential pool.
 - **Tests:** locally `go test ./...` passes 261, 4 of them new (labels by agent and outcome, the ratio after N calls and after midnight, no token in any label). The rules test runs in CI's `observability-lint`.
+- **Live, done 2026-10-27 (AIP-00a-2 and AIP-00a-3, server steps on the owner's authority, no code):**
+  - The agent listener is ON (`GATEWAY_AGENT_TOKENS` holds the hashes of `hermes-seo` and `hermes-bsc`, with a 25 percent reserve). The mesh path runs `helios` to the `sumopod` relay to the `gda-aicenter` proxy to `127.0.0.1:3012`.
+  - Both Hermes agents' models and every side task point at it. seo's direct DeepSeek fallback is removed, and bsc's daily cron job is re-pinned to the gateway; it had failed 11 days in a row on a dead OpenRouter key.
+  - Each agent's own model keys are deleted.
+  - The gateway's audit shows each agent's `chat` calls, all `ok`. The legal addendum's open item 7 is closed.
 
 ### platform-ui `0.211.0` - SCP-1u: DEMO_MODE decides the post's actions as the server does, and serves an Asset Library (FRONTEND-BFF-CONTRACT §63.16) (2026-10-27) - PROTOTYPED
 
