@@ -12,7 +12,7 @@ import { config } from "../../../config";
 import { validateVariant, isNetwork, type QuotaSnapshot } from "../media-rules";
 import { departmentUnits, workspaceSlugFor } from "../../reports/dept-kpis";
 import { loadOrgStructure } from "../../reports/person-scope";
-import { getPublisher } from "../publisher/registry";
+import { getPublisher, isSimulatedPublisherAvailable } from "../publisher/registry";
 import type { PublisherKey } from "../publisher/types";
 import { scpAction } from "./fixture";
 import { holderOf, postStateFromRow, type PipelinePostState, type SocialPostRow, type StageFacts } from "./machine";
@@ -129,6 +129,13 @@ export interface VariantRow {
   review_id: string | null;
   review_status: string | null;
   reviewed_args_sha256: string | null;
+  // SCP-Sc — what the publisher's result and the post page read: the link and time the network (or the simulator) reported,
+  // the failure it recorded, whether the simulator served the variant, and whether its ACCOUNT is a simulated one.
+  published_url: string | null;
+  published_at: Date | null;
+  last_error: string | null;
+  simulated: boolean;
+  account_simulated: boolean;
 }
 
 /** The post's live variants with their review, by network. */
@@ -136,7 +143,8 @@ export async function loadVariants(c: PoolClient, tenantId: string, postId: stri
   const { rows } = await c.query<VariantRow>(
     `SELECT v.id, v.account_id, a.network, a.handle, a.quota, v.body, v.first_comment, v.media, v.settings, v.validation,
             v.args_sha256, v.status, v.approval_id, v.scheduled_at, v.native_import, v.provider_post_id,
-            r.id AS review_id, r.status AS review_status, r.reviewed_args_sha256
+            r.id AS review_id, r.status AS review_status, r.reviewed_args_sha256,
+            v.published_url, v.published_at, v.last_error, v.simulated, a.simulated AS account_simulated
        FROM social_post_variants v
        JOIN social_accounts a ON a.id = v.account_id AND a.tenant_id = v.tenant_id
        LEFT JOIN social_post_client_reviews r ON r.variant_id = v.id AND r.tenant_id = v.tenant_id
@@ -368,7 +376,13 @@ export async function loadFacts(c: PoolClient, f: FactsInput): Promise<StageFact
       `SELECT driver FROM social_publisher_orgs WHERE tenant_id = $1 AND client_id = $2 AND deleted_at IS NULL AND status = 'active'`,
       [f.tenantId, f.engagement.client_id],
     );
-    facts.publisherAvailable = org.rows[0] !== undefined && getPublisher(org.rows[0].driver as PublisherKey) !== undefined;
+    // SCP-Sc: a post whose placed networks ALL have simulated accounts is schedulable through the publisher while the
+    // simulator runs, though its org's `driver` column (0105's CHECK admits only postiz|mixpost) cannot name it. The
+    // switch and the registration are judged by `resolveSimulatedPublisher`'s own rule (`isSimulatedPublisherAvailable`),
+    // never a second one; a mixed or real set of accounts falls through to the org's engine exactly as before.
+    const allSimulated = variants.length > 0 && variants.every((v) => v.account_simulated === true);
+    facts.publisherAvailable = (allSimulated && isSimulatedPublisherAvailable("schedule"))
+      || (org.rows[0] !== undefined && getPublisher(org.rows[0].driver as PublisherKey) !== undefined);
   }
   if (guards.has("approved_time_not_passed") || guards.has("something_changes") || f.action === "reschedule") {
     facts.approvedSchedule = f.state ? approvedScheduleOf(f.state, variants) : null;

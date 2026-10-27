@@ -12,6 +12,7 @@ import { ModuleEnabledGuard } from "../../module-enabled.guard";
 import { ACTION_ROUTE_ACTIONS } from "./pipeline-read";
 import { createPipelinePost, patchDesign, readPipelinePost, runStageAction, type StageOutcome, type StageRequest } from "./pipeline.service";
 import { ScpRouteError } from "./pipeline-effects";
+import { simulatedPublishNow } from "./simulated-publish";
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -83,6 +84,18 @@ export class SocialPipelineController {
     // unknown_action, through the same orchestration so the refusal shape is one.
     const action = typeof b.action === "string" && ACTION_ROUTE_ACTIONS.includes(b.action) ? b.action : "__unknown__";
     return this.answer(req, await runStageAction(req.principal, { tenantId, postId, action, params: b.params, expectedStatus: b.expectedStatus, actionId: b.actionId }));
+  }
+
+  // ── §63.10 SCP-Sc: "Publish now (simulated)" ──────────────────────────────────────────────────────────────────────────
+  // Not a stage action (the fixture has none for it): a route of its own, which never changes the post's status itself. It moves a
+  // queued simulated dispatch's time up to now and runs the status read, whose result (`publisher-result.ts`) makes the post live.
+  // 403 (automation, `approve`) · 404 · 409 `not_a_pipeline_post` · `simulation_disabled` · `not_scheduled_by_publisher` ·
+  // `simulated_account_required` · `simulated_approval_not_decided` · `simulated_not_dispatched`. See `simulated-publish.ts`.
+  @Post("posts/:postId/simulated-publish-now")
+  @HttpCode(200)
+  async simulatedPublish(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("postId") postId: string) {
+    const out = await simulatedPublishNow(req.principal, tenantId, postId);
+    return { post: await this.readOrNull(req, tenantId, postId), advanced: out.advanced, live: out.live };
   }
 
   // ── §63.6.6 Designs ───────────────────────────────────────────────────────────────────────────────────────────────

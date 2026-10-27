@@ -13,9 +13,9 @@ import { Modal } from "@/components/overlay/Modal";
 import { PinOverlay } from "@/components/social/PinOverlay";
 import { RefusalNote } from "@/components/social/PostRefusal";
 import { formatDateTime } from "@/lib/format";
-import { runPostAction, type WriteResult } from "@/lib/socialPipelineActions";
+import { runPostAction, runSimulatedPublishNow, type WriteResult } from "@/lib/socialPipelineActions";
 import {
-  ACTION_DIALOG, ACTION_LABEL, CHANGE_KIND_LABEL, CHANGE_KINDS, CHANNEL_LABEL, CHANNELS, FOLLOW_UP_NOTE_MAX, NETWORKS, NOTE_MAX, REASON_MAX, SEND_ANYWAY_MAX, SEND_ANYWAY_MIN,
+  ACTION_DIALOG, ACTION_LABEL, PUBLISH_NOW_LABEL, CHANGE_KIND_LABEL, CHANGE_KINDS, CHANNEL_LABEL, CHANNELS, FOLLOW_UP_NOTE_MAX, NETWORKS, NOTE_MAX, REASON_MAX, SEND_ANYWAY_MAX, SEND_ANYWAY_MIN,
   WAITING_ON, WAITING_ON_LABEL, buildActionParams, isoToZoneInput, networkLabel, newActionId, reasonWords, zoneInputToIso,
   type DialogInput, type PipelinePost, type PostImage,
 } from "@/lib/socialPipeline";
@@ -44,6 +44,17 @@ export function PostActionBar({ post, image, onResult }: { post: PipelinePost; i
     });
   }
 
+  // SCP-Sc (BFF §63.10): "Publish now (simulated)" is a route of its own, offered by the read's `simulatedPublishNow` (null: not drawn at all). The server
+  // decides who may and when; this posts straight away (nothing to ask: it publishes what the approvers already decided) and says every refusal in words.
+  const publishNow = post.simulatedPublishNow;
+  function pressPublishNow() {
+    setError(null);
+    start(async () => {
+      const r = await runSimulatedPublishNow(post.id);
+      onResult(r, "Published now (simulated)");
+    });
+  }
+
   function click(action: string) {
     setError(null);
     const needsDialog = ACTION_DIALOG[action] !== null && !(action === "send_to_proofread" && post.checks.every((c) => c.ok));
@@ -53,7 +64,7 @@ export function PostActionBar({ post, image, onResult }: { post: PipelinePost; i
 
   return (
     <section className="scp-actions" aria-label="Actions">
-      {allowed.length > 0 ? (
+      {allowed.length > 0 || publishNow?.allowed ? (
         <div className="scp-actions__row">
           {allowed.map((a) => (
             <button
@@ -63,11 +74,16 @@ export function PostActionBar({ post, image, onResult }: { post: PipelinePost; i
               {ACTION_LABEL[a.action] ?? a.action}
             </button>
           ))}
+          {publishNow?.allowed && (
+            <button type="button" disabled={pending} onClick={pressPublishNow} className="lux-btn lux-btn--ghost lux-btn--sm">
+              {PUBLISH_NOW_LABEL} <span className="scp-chip scp-chip--sim">SIMULATED</span>
+            </button>
+          )}
         </div>
       ) : (
         <p className="scp-note" style={{ margin: 0 }}>Nothing on this post is yours to do right now.</p>
       )}
-      {off.length > 0 && (
+      {(off.length > 0 || (publishNow && !publishNow.allowed)) && (
         <>
           <p className="scp-actions__title">Not available to you</p>
           <ul className="scp-actions__off">
@@ -77,6 +93,12 @@ export function PostActionBar({ post, image, onResult }: { post: PipelinePost; i
                 <span id={`${uid}-${a.action}`} className="scp-actions__why">{reasonWords(a.reason)}</span>
               </li>
             ))}
+            {publishNow && !publishNow.allowed && (
+              <li>
+                <button type="button" disabled aria-describedby={`${uid}-publish-now`} className="lux-btn lux-btn--ghost lux-btn--sm">{PUBLISH_NOW_LABEL}</button>
+                <span id={`${uid}-publish-now`} className="scp-actions__why">{reasonWords(publishNow.reason)}</span>
+              </li>
+            )}
           </ul>
         </>
       )}

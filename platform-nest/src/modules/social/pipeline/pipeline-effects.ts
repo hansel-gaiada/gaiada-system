@@ -507,6 +507,33 @@ async function variantsPostedByHand(run: EffectRun): Promise<void> {
   );
 }
 
+/** `mark_live` by the publisher (fixture effect `publisher: from_published_variants`, systemRules `publisher_results`): the
+ *  post goes live from its variants' own results, so every live variant must already be `published` UNDER THE POST'S LOCK.
+ *  `publisher-result.ts` checks the same thing before it asks the machine; this is the second look, inside the
+ *  transaction that writes the row, so a variant that moved between the two (an unschedule resetting it, a late failure)
+ *  rolls the whole go-live back instead of leaving a live post with an unpublished variant. 409 `dispatch_in_flight`
+ *  is the fixture's own refusal for "a variant is not at rest"; nothing is written. */
+async function variantsMustBePublished(run: EffectRun): Promise<void> {
+  const r = await run.c.query(
+    `SELECT 1 FROM social_post_variants WHERE tenant_id = $1 AND post_id = $2 AND deleted_at IS NULL AND status <> 'published' LIMIT 1`,
+    [run.tenantId, run.postId],
+  );
+  if (r.rowCount) throw new ScpRouteError(409, "dispatch_in_flight");
+}
+
+/** `social_posts.simulated` (BFF §63.1), derived on the way live: true when any live variant was served by the simulator.
+ *  A post is never marked simulated by anything else, and an officer's hand-made `mark_live` of a post none of whose
+ *  variants the simulator served writes false (what it already was). Runs after `variants_become_native_import_published`
+ *  in the officer's path, which leaves a variant's own mark alone. */
+async function setPostSimulatedFromVariants(run: EffectRun): Promise<void> {
+  await run.c.query(
+    `UPDATE social_posts SET simulated = EXISTS (
+       SELECT 1 FROM social_post_variants v WHERE v.tenant_id = $1 AND v.post_id = $2 AND v.deleted_at IS NULL AND v.simulated)
+      WHERE tenant_id = $1 AND id = $2`,
+    [run.tenantId, run.postId],
+  );
+}
+
 /** Before the transaction (no row lock across a network call): cancel each queued dispatch of the post at the publisher,
  *  through the same org-handle resolution the dispatch used. Answers the variant ids cancelled; a cancel that fails leaves
  *  its variant queued, and the transaction then refuses 409 `dispatch_in_flight`. */
@@ -540,9 +567,7 @@ const noop = async (): Promise<void> => {};
 /** Every I/O effect the fixture names, by name. A no-op hook names the ticket that fills it. */
 export const EFFECT_RUNNERS: Record<string, (run: EffectRun) => Promise<void>> = {
   // ── later tickets ──
-  set_simulated_from_variants: noop, // SCP-Sa: `simulated` comes from the variants once file 8 adds the column
   start_metrics: noop, // SCP-3c: metrics start when the post is live
-  from_published_variants: noop, // SCP-3b: the publisher's own result path (systemRules publisher_results)
   reviews_back_to_pending: noop, // SCP-2: client_undo, a portal route
   drop_pending_notifications: noop, // SCP-2
   undo_window_10s: noop, // SCP-2: the portal decision's undo window
@@ -579,6 +604,9 @@ export const EFFECT_RUNNERS: Record<string, (run: EffectRun) => Promise<void>> =
   unschedule_cancelling_dispatches_and_withdrawing_approvals: unscheduleVariants,
   withdraw_pending_publish_approvals: (run) => withdrawApprovals(run),
   variants_become_native_import_published: variantsPostedByHand,
+  // ── going live (SCP-Sc, the server half of SCP-3b) ──
+  from_published_variants: variantsMustBePublished,
+  set_simulated_from_variants: setPostSimulatedFromVariants,
 };
 
 /** Notifications run after the commit (pipeline.service.ts), by their `notify:` names. */

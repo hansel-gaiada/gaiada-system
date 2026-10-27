@@ -89,6 +89,10 @@ import { OAuthTokenError } from "./publisher/oauth-tokens";
 // in the SAME UPDATE as its status (see `stampDispatchOutcome`).
 import { isSimulatedPublisher, isSocialSimulationEnabled } from "./publisher/simulation";
 import { refreshCreatorInfoSnapshot } from "./creator-info-verifier";
+// SCP-Sc (the server half of SCP-3b) — a variant that failed AT DISPATCH (the engine refused it, or the simulator's
+// `[simulate-fail]`) is the publisher's failure result for a pipeline post scheduled through the publisher: the post
+// stays scheduled and its engine status becomes `failed`. Composer posts and posts scheduled by hand are not candidates.
+import { settlePublisherResults } from "./pipeline/publisher-result";
 
 /** Refusals that belong to THIS file's own routing question ("who authorized this call"), not to
  *  the six-stage precondition. A distinct, small vocabulary — same separation
@@ -731,6 +735,8 @@ export async function dispatchApprovedPublish(
     if (actorId) {
       await writeActivity(tenantId, actorId, "failed", "social_post_variant", variantId, { detail: dispatchError });
     }
+    // SCP-Sc: the post's own side of the failure, after the variant's stamp has committed. Never throws.
+    await settlePublisherResults(tenantId, { variantIds: [variantId] });
     return { ok: false, stage: "dispatch", reason: dispatchReason };
   }
 

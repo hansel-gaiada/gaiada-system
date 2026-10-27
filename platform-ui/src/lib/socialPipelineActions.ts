@@ -55,6 +55,14 @@ export async function runPostAction(postId: string, body: { action: string; expe
   return run((c) => platformFetch<unknown>(`${base(c.tenant)}/posts/${encodeURIComponent(postId)}/actions`, c.userId, { method: "POST", body: JSON.stringify(body) }));
 }
 
+/**
+ * `POST posts/:postId/simulated-publish-now` (SCP-Sc, BFF §63.10): "Publish now (simulated)". One of the four approvers; no body. The server moves the queued simulated
+ * dispatch's time up to now and makes the post live through the same path as the due job; it never approves anything. Answers the post as the server reads it after.
+ */
+export async function runSimulatedPublishNow(postId: string): Promise<WriteResult> {
+  return run((c) => platformFetch<unknown>(`${base(c.tenant)}/posts/${encodeURIComponent(postId)}/simulated-publish-now`, c.userId, { method: "POST", body: JSON.stringify({}) }));
+}
+
 /** `PATCH posts/:postId/pipeline`: the fields the post's status allows (409 `field_locked` for any other). */
 export async function savePostFields(postId: string, expectedStatus: string, fields: Record<string, unknown>): Promise<WriteResult> {
   return run((c) => platformFetch<unknown>(`${base(c.tenant)}/posts/${encodeURIComponent(postId)}/pipeline`, c.userId, { method: "PATCH", body: JSON.stringify({ expectedStatus, fields }) }));

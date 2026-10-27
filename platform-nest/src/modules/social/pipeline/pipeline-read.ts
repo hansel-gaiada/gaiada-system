@@ -10,6 +10,7 @@ import type { Resource } from "../../../rbac/cerbos";
 import { SCP } from "./fixture";
 import { readChecks } from "./handoff-checks";
 import { listPostTasks } from "./post-tasks";
+import { readSimulatedPublishOffer } from "./simulated-publish";
 import {
   actionsFromStatus, cerbosActionsToAsk, changeCaseOf, engineStatusOf, holderOf, phaseOf, postStateFromRow, primaryActionOf, probe,
   type PipelinePostState,
@@ -161,7 +162,14 @@ export async function buildPipelinePost(i: ReadInput): Promise<Record<string, un
     author: person(state.authorId),
     holder,
     health: null, // SCP-1c: cycles, deadlines and health (BFF §63.5)
-    variants: variants.map((v) => ({ id: v.id, network: v.network, handle: v.handle, status: v.status, reviewStatus: v.review_status ?? null, validation: v.validation ?? null })),
+    // SCP-Sc: what the page needs to say why a post is failed or simulated: the variant's own mark and its recorded failure
+    // (`<code>: <message>` as dispatch.ts and the status sweep write it: no credential, no caption, never a link a person typed).
+    variants: variants.map((v) => ({
+      id: v.id, network: v.network, handle: v.handle, status: v.status, reviewStatus: v.review_status ?? null, validation: v.validation ?? null,
+      simulated: v.simulated === true, lastError: v.status === "failed" ? v.last_error : null,
+    })),
+    // SCP-Sc: "Publish now (simulated)": null unless the post is a simulated publisher schedule and the switch is on (BFF §63.10).
+    simulatedPublishNow: await readSimulatedPublishOffer(c, tenantId, row, i.cerbos.approve),
     approvedSchedule: approvedScheduleOf(state, variants),
     reviewHash: reviewHashOf(variants),
     liveUrl: row.live_url, wentLiveAt: iso(row.went_live_at), simulated: row.simulated, archivedAt: iso(row.archived_at),

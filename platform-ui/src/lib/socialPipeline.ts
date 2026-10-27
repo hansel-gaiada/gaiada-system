@@ -66,7 +66,10 @@ export interface HistoryRow {
   recorded: { channel: string } | null; viaPortal: boolean;
 }
 export interface CopyLogRow { field: string; before: unknown; after: unknown; via: string; by: PersonRef | null; suggestedBy: PersonRef | null; stage: string; at: string }
-export interface VariantRow { id: string; network: string; handle: string | null; status: string; reviewStatus: string }
+/** SCP-Sc: `simulated` is the variant's own mark (the simulator served it); `lastError` is the failure the server recorded, only on a failed variant. */
+export interface VariantRow { id: string; network: string; handle: string | null; status: string; reviewStatus: string; simulated: boolean; lastError: string | null }
+/** SCP-Sc (BFF §63.10): "Publish now (simulated)". null when the button is not part of this post's page; else whether the caller may press it, and the refusal code if not. */
+export interface SimulatedPublishOffer { allowed: boolean; reason?: string }
 
 /** BFF §63.6.2's PipelinePost, the parts the page draws. */
 export interface PipelinePost {
@@ -90,6 +93,7 @@ export interface PipelinePost {
   approvedSchedule: { scheduledAt: string | null; placement: string[] } | null;
   scheduleVia: "manual" | "publisher" | null; reviewHash: string | null;
   liveUrl: string | null; wentLiveAt: string | null; simulated: boolean; archivedAt: string | null;
+  simulatedPublishNow: SimulatedPublishOffer | null;
   copyLog: CopyLogRow[]; history: HistoryRow[];
   actions: ActionRow[]; nextAction: string | null;
 }
@@ -158,9 +162,12 @@ export function asPipelinePost(raw: unknown): PipelinePost {
     officer: person(o.officer), author: person(o.author),
     holder: { role: str(holder.role), userIds: strList(holder.userIds), label: str(holder.label) ?? "" },
     health: asHealth(o.health),
-    variants: arr(o.variants).filter(isObj).map((v) => ({ id: str(v.id) ?? "", network: str(v.network) ?? "", handle: str(v.handle), status: str(v.status) ?? "", reviewStatus: str(v.reviewStatus) ?? "" })),
+    variants: arr(o.variants).filter(isObj).map((v) => ({ id: str(v.id) ?? "", network: str(v.network) ?? "", handle: str(v.handle), status: str(v.status) ?? "", reviewStatus: str(v.reviewStatus) ?? "", simulated: v.simulated === true, lastError: str(v.lastError) })),
     approvedSchedule: approved, scheduleVia: o.scheduleVia === "manual" || o.scheduleVia === "publisher" ? o.scheduleVia : null, reviewHash: str(o.reviewHash),
     liveUrl: str(o.liveUrl), wentLiveAt: str(o.wentLiveAt), simulated: o.simulated === true, archivedAt: str(o.archivedAt),
+    simulatedPublishNow: isObj(o.simulatedPublishNow) && typeof o.simulatedPublishNow.allowed === "boolean"
+      ? { allowed: o.simulatedPublishNow.allowed, ...(typeof o.simulatedPublishNow.reason === "string" ? { reason: o.simulatedPublishNow.reason } : {}) }
+      : null,
     copyLog: arr(o.copyLog).filter(isObj).map((c) => ({
       field: str(c.field) ?? "", before: c.before, after: c.after, via: str(c.via) ?? "", by: person(c.by), suggestedBy: person(c.suggestedBy), stage: str(c.stage) ?? "", at: str(c.at) ?? "",
     })),
@@ -245,10 +252,23 @@ export const REFUSAL_WORDS: Readonly<Record<string, string>> = {
   officer_set_by_allocation: "The officer is set on the Allocation page.",
 };
 
+/**
+ * SCP-Sc: the refusals of `POST posts/:postId/simulated-publish-now` (BFF §63.10) that are not in the stage machine's fixture, so not in
+ * `REFUSAL_WORDS` (`socialPipeline.test.ts` pins that map to the fixture's codes exactly). `not_an_approver` and `automation_cannot_act`
+ * are the fixture's and are worded there.
+ */
+export const SIMULATED_PUBLISH_WORDS: Readonly<Record<string, string>> = {
+  simulation_disabled: "The social simulator is switched off, so nothing can be published through it.",
+  not_scheduled_by_publisher: "This post is not scheduled through the publisher, so there is nothing to publish now.",
+  simulated_account_required: "A network on this post is not a simulated account, so the simulator will not publish it.",
+  simulated_approval_not_decided: "Every network's publish approval has to be decided in Approvals first. This button never approves anything.",
+  simulated_not_dispatched: "A decided approval has not been sent to the simulator yet, or its send failed. Give it a moment, or unschedule the post.",
+};
+
 /** The reason in words for a disabled button: the code alone, as the read's `actions[].reason` carries it (no detail). */
 export function reasonWords(code: string | undefined): string {
   if (!code) return "You cannot take this step.";
-  return REFUSAL_WORDS[code] ?? genericWords(code);
+  return REFUSAL_WORDS[code] ?? SIMULATED_PUBLISH_WORDS[code] ?? genericWords(code);
 }
 
 function genericWords(code: string): string {
@@ -301,7 +321,7 @@ export const statusLabel = (s: string | null | undefined): string => (s ? STATUS
 /** A refusal in a sentence or two. The code stays the contract; this is the words, with the figures the server added. */
 export function refusalText(r: Refusal): string {
   const d = r.detail ?? {};
-  const base = REFUSAL_WORDS[r.error] ?? genericWords(r.error);
+  const base = REFUSAL_WORDS[r.error] ?? SIMULATED_PUBLISH_WORDS[r.error] ?? genericWords(r.error);
   switch (r.error) {
     case "missing_field": return `${fieldName(r.field)} is required.`;
     case "invalid_field": return `${fieldName(r.field)} is not valid.`;
@@ -344,6 +364,20 @@ export function refusalText(r: Refusal): string {
 export const blockerLines = (r: Refusal): string[] => (r.blockers ?? []).map((b) => b.message || genericWords(b.code));
 
 // ── Actions: labels, dialogs, params ─────────────────────────────────────────────────────────────────────────────────────────
+
+/** SCP-Sc: the label of the simulated publish's own button (it is a route of its own, not a stage action of the fixture). */
+export const PUBLISH_NOW_LABEL = "Publish now (simulated)";
+
+/** SCP-Sc: why a scheduled post is failed, one line per failed variant: the network and the server's recorded message, without its leading code. */
+export function failedPublishLines(post: Pick<PipelinePost, "pipelineStatus" | "engineStatus" | "variants">): Array<{ network: string; text: string }> {
+  if (post.pipelineStatus !== "scheduled" || post.engineStatus !== "failed") return [];
+  return post.variants.filter((v) => v.status === "failed").map((v) => {
+    const raw = v.lastError ?? "";
+    const i = raw.indexOf(": ");
+    const text = (i > 0 && /^[a-z_]+$/.test(raw.slice(0, i)) ? raw.slice(i + 2) : raw).trim();
+    return { network: v.network, text: text || "No reason was recorded." };
+  });
+}
 
 export const ACTION_LABEL: Readonly<Record<string, string>> = {
   start_draft: "Start draft", accept_suggestion: "Accept suggestion", send_to_proofread: "Send to proofread", approve_copy: "Approve copy",
