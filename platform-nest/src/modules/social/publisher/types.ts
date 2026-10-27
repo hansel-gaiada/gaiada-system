@@ -247,6 +247,12 @@ export interface PostMetrics {
   saves?: number;
   videoViews?: number;
   clicks?: number;
+  /** SCP-Sd — ONLY the social simulator sets these two (simulated-driver.ts); no real engine's `PostMetrics` carries either,
+   *  and metrics-job.ts reads them only from the simulator's answer. `reach` is the snapshot's reach (the engine port had none:
+   *  a pulled row keeps NULL). `capturedAt` (ISO) is the moment the snapshot stands for, so one call can answer for the several
+   *  days (1, 3, 7) a simulated post is due, one entry per day, each stamped. Additive and optional: every other driver is unchanged. */
+  reach?: number;
+  capturedAt?: string;
 }
 
 export interface DateRange {

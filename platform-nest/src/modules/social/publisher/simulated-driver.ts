@@ -51,24 +51,38 @@
 //
 // The driver holds no state between calls (types.ts rule 2): everything `getPostStatus` needs is in the id.
 //
+// ── SIMULATED METRICS (SCP-Sd) ─────────────────────────────────────────────────────────────────────────────────────
+// `getAccountMetrics` and `getPostMetrics` answer from `simulated-metrics.ts`'s pure generator, through the SAME seam a real
+// engine's numbers take: the nightly job (`metrics-job.ts`) resolves this driver through `resolveSimulatedPublisher` for a
+// simulated account and writes what comes back; nothing else writes a simulated number. Both answer behind the switch and a
+// `SimulatedOrgHandle`, like every other method here, and read the FACTS they need (the account's network, a post's format
+// and go-live moment) from OUR rows through a seam (`SimulatedMetricsFacts`, below), only for a variant on a SIMULATED account
+// and only for an id this driver minted. The driver holds no state: the same rows and the same clock give the same answer.
+//   - `getPostMetrics(org, ids)`: one entry per (post, due day), `day` in 1, 3, 7 once `went_live_at + day days <= now`, each
+//     stamped `capturedAt = went_live_at + day days` and carrying `reach`. So a post that went live three days ago gets days 1
+//     and 3 in one answer (the catch-up), and the job's idempotency is "a simulated row stamped so already exists".
+//   - `getAccountMetrics(org, _, range)`: one row per date of the range (the job asks a 30-day window for a simulated account).
+//
 // ── SEAMS FOR THE NEXT TICKETS (do not build them here) ────────────────────────────────────────────────────────────
 //   SCP-Sc  the every-minute due job and "Publish now (simulated)": file and get a DECIDED approval, then call the same
 //           `dispatchApprovedPublish`; run `reconcileTenantPostStatus` to move queued -> published without waiting for
 //           the 15-minute safety poll. `pipeline-data.ts`'s `publisherAvailable` still reads the ORG's driver and will say
 //           false for a simulated account until Sc teaches it `resolveSimulatedPublisher`.
-//   SCP-Sd  metrics: add `account_metrics`/`post_metrics` to `SIMULATED_CAPABILITIES` and implement the two methods
-//           below deterministically (seeded by the post id), writing `social_metrics_daily.source = 'simulated'`.
 import { randomUUID } from "node:crypto";
 import { withTenants } from "../../../db";
 import { declareSocialModuleScope } from "../module-scope";
 import { SOCIAL_PUBLISH_METERED_TOOL, SOCIAL_PUBLISH_TOOL } from "../publish-precondition";
+import { dueSnapshotDays, simulatedDailySeries, simulatedPostMetrics, snapshotCapturedAt } from "./simulated-metrics";
 import {
   SIMULATED_PUBLISHER_KEY, SIMULATED_URL_ORIGIN, SIMULATE_FAIL_KEYWORD, SOCIAL_SIMULATION_ENV,
   SOCIAL_SIMULATION_REFUSAL, SimulatedOrgHandle, isSocialSimulationEnabled,
 } from "./simulation";
 import {
   SocialPublisherError,
+  type DailyMetrics,
+  type DateRange,
   type OrgHandle,
+  type PostMetrics,
   type PostStatus,
   type PublisherCapability,
   type SocialPublisher,
@@ -76,10 +90,12 @@ import {
 } from "./types";
 
 /** What the simulator simulates today. `schedule` + `post_status` are the publish; `media_upload` lets a post with
- *  pictures publish (nothing is uploaded anywhere); `cancel` lets `unschedule` withdraw a queued simulated post. NOT
- *  `connect_url`/`integrations`/`org_verify`: simulated accounts are SEEDED (SCP-Sb), never connected. NOT the metrics
- *  pair until SCP-Sd. NOT the inbox. */
-export const SIMULATED_CAPABILITIES: readonly PublisherCapability[] = ["schedule", "post_status", "cancel", "media_upload"];
+ *  pictures publish (nothing is uploaded anywhere); `cancel` lets `unschedule` withdraw a queued simulated post;
+ *  `account_metrics` + `post_metrics` are SCP-Sd's deterministic numbers. NOT `connect_url`/`integrations`/`org_verify`:
+ *  simulated accounts are SEEDED (SCP-Sb), never connected. NOT the inbox. */
+export const SIMULATED_CAPABILITIES: readonly PublisherCapability[] = [
+  "schedule", "post_status", "cancel", "media_upload", "account_metrics", "post_metrics",
+];
 
 /** The ids this driver mints, and only these, are ones it will answer for. */
 const SIMULATED_POST_ID = /^simulated:([a-z]+):(\d+):([0-9a-f-]{36})$/;
@@ -131,9 +147,65 @@ export const dbSimulatedDispatchGuard: SimulatedDispatchGuard = async (handle, r
     return null;
   });
 
+/** What the metrics generator needs from OUR rows about one simulated post: which variant it is (the seed), the network and
+ *  the post's format, and the moment it went live (`social_posts.went_live_at`, else the variant's `published_at`). */
+export interface SimulatedPostFact {
+  providerPostId: string;
+  variantId: string;
+  network: string;
+  format: string | null;
+  wentLiveAt: Date;
+}
+
+/** The two reads the metrics methods make, as a seam so the driver's ordering, due-day arithmetic and refusals can be proved
+ *  without a database; the default reads Postgres. Both answer ONLY for rows on a `social_accounts.simulated = true` account:
+ *  a real account's variant or account is simply absent from the answer. */
+export interface SimulatedMetricsFacts {
+  posts(tenantId: string, providerPostIds: string[]): Promise<SimulatedPostFact[]>;
+  /** The network of a simulated account, or null when it is absent, deleted or NOT simulated. */
+  account(tenantId: string, accountId: string): Promise<{ network: string } | null>;
+}
+
+/** The real reads. Read-only, one transaction each, the social module scope declared (an omitted declaration reads ZERO
+ *  rows silently, which here would mean a simulated account that never gets a number). */
+export const dbSimulatedMetricsFacts: SimulatedMetricsFacts = {
+  async posts(tenantId, providerPostIds) {
+    if (providerPostIds.length === 0) return [];
+    return withTenants([tenantId], async (c) => {
+      await declareSocialModuleScope(c);
+      const { rows } = await c.query<{ provider_post_id: string; variant_id: string; network: string; format: string | null; went_live_at: Date }>(
+        `SELECT v.provider_post_id, v.id::text AS variant_id, a.network, p.format,
+                COALESCE(p.went_live_at, v.published_at) AS went_live_at
+           FROM social_post_variants v
+           JOIN social_accounts a ON a.id = v.account_id AND a.tenant_id = v.tenant_id
+           JOIN social_posts p ON p.id = v.post_id AND p.tenant_id = v.tenant_id
+          WHERE v.provider_post_id = ANY($1::text[]) AND v.status = 'published' AND v.deleted_at IS NULL
+            AND a.simulated = true AND a.deleted_at IS NULL AND p.deleted_at IS NULL
+            AND COALESCE(p.went_live_at, v.published_at) IS NOT NULL`,
+        [providerPostIds],
+      );
+      return rows.map((r) => ({
+        providerPostId: r.provider_post_id, variantId: r.variant_id, network: r.network, format: r.format, wentLiveAt: new Date(r.went_live_at),
+      }));
+    });
+  },
+  async account(tenantId, accountId) {
+    return withTenants([tenantId], async (c) => {
+      await declareSocialModuleScope(c);
+      const { rows } = await c.query<{ network: string }>(
+        `SELECT network FROM social_accounts WHERE id = $1 AND simulated = true AND deleted_at IS NULL`,
+        [accountId],
+      );
+      return rows[0] ?? null;
+    });
+  },
+};
+
 export interface SimulatedPublisherOptions {
   /** Defaults to `dbSimulatedDispatchGuard`. Tests pass a stub to prove ordering without Postgres. */
   guard?: SimulatedDispatchGuard;
+  /** Defaults to `dbSimulatedMetricsFacts`. Tests pass a stub to prove the numbers' wiring without Postgres. */
+  metricsFacts?: SimulatedMetricsFacts;
   /** Defaults to `Date.now`. */
   now?: () => number;
 }
@@ -166,6 +238,7 @@ function unsupported(op: string, why: string): never {
  *  otherwise. */
 export function createSimulatedPublisher(opts: SimulatedPublisherOptions = {}): SocialPublisher {
   const guard = opts.guard ?? dbSimulatedDispatchGuard;
+  const metricsFacts = opts.metricsFacts ?? dbSimulatedMetricsFacts;
   const now = opts.now ?? Date.now;
 
   return {
@@ -247,11 +320,47 @@ export function createSimulatedPublisher(opts: SimulatedPublisherOptions = {}): 
       return { id: `simulated-media:${id}`, url: `${SIMULATED_URL_ORIGIN}/media/${id}` };
     },
 
-    async getAccountMetrics() {
-      unsupported("getAccountMetrics", "simulated metrics arrive with SCP-Sd");
+    async getAccountMetrics(org: OrgHandle, _integrationId: string, range: DateRange): Promise<DailyMetrics[]> {
+      requireSwitch("getAccountMetrics");
+      const handle = requireSimulatedHandle(org, "getAccountMetrics");
+      if (!handle.accountId) {
+        refuse(SOCIAL_SIMULATION_REFUSAL.accountNotSimulated, "social simulator 'getAccountMetrics' refused: the handle names no account");
+      }
+      // Read from OUR row, not trusted from the handle: only a simulated account gets simulated numbers.
+      const account = await metricsFacts.account(handle.tenantId, handle.accountId);
+      if (!account) {
+        refuse(
+          SOCIAL_SIMULATION_REFUSAL.accountNotSimulated,
+          `account ${handle.accountId} is not a simulated account: the social simulator makes up numbers only for those`,
+        );
+      }
+      return simulatedDailySeries(handle.accountId, account.network, range).map((r): DailyMetrics => ({
+        date: r.date, followers: r.followers, impressions: r.impressions, reach: r.reach, engagements: r.engagements,
+        linkClicks: r.linkClicks, videoViews: r.videoViews, raw: { simulated: true },
+      }));
     },
-    async getPostMetrics() {
-      unsupported("getPostMetrics", "simulated metrics arrive with SCP-Sd");
+    async getPostMetrics(org: OrgHandle, providerPostIds: string[]): Promise<PostMetrics[]> {
+      requireSwitch("getPostMetrics");
+      const handle = requireSimulatedHandle(org, "getPostMetrics");
+      // Only ids this driver minted are answered for: anything else (a real engine's id) is silently absent, like the status read.
+      const mine = providerPostIds.filter((id) => SIMULATED_POST_ID.test(id));
+      if (mine.length === 0) return [];
+      const facts = await metricsFacts.posts(handle.tenantId, mine);
+      const at = new Date(now());
+      const out: PostMetrics[] = [];
+      for (const f of facts) {
+        // One entry per DUE day, oldest first. A post that has not been live a day yet has none: "we do not know yet".
+        for (const day of dueSnapshotDays(f.wentLiveAt, at)) {
+          const s = simulatedPostMetrics(f.variantId, f.network, f.format, day);
+          out.push({
+            providerPostId: f.providerPostId,
+            reach: s.reach, impressions: s.impressions, likes: s.likes, comments: s.comments, shares: s.shares, saves: s.saves,
+            clicks: s.clicks, ...(s.videoViews !== undefined ? { videoViews: s.videoViews } : {}),
+            capturedAt: snapshotCapturedAt(f.wentLiveAt, day).toISOString(),
+          });
+        }
+      }
+      return out;
     },
 
     estimateCostUsd(): number {
