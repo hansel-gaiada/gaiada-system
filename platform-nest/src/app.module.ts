@@ -160,6 +160,7 @@ import { SocialCalendarController } from "./modules/social/pipeline/calendar.con
 // SCP-3d: the client's feed preview, its grid and the swap of two posts' dates (BFF §63.10), on its own controller under the same prefix.
 import { SocialFeedPreviewController } from "./modules/social/pipeline/feed-preview.controller";
 import { SocialAllocationController } from "./modules/social/pipeline/allocation.controller";
+import { SocialSimulatedAccountsController } from "./modules/social/simulated-accounts.controller";
 import { SocialFeedController } from "./modules/social/pipeline/feed.controller";
 // SCP-1h: the designer's queue (`GET design-queue`), on its own controller under the same route prefix.
 import { SocialDesignQueueController } from "./modules/social/pipeline/design-queue.controller";
@@ -281,6 +282,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     // SCP-1c: settings + cycles (BFF §63.4, §63.5), own controller class, same prefix.
     SocialCyclesController,
     SocialAllocationController,
+    SocialSimulatedAccountsController,
     SocialFeedController,
     // SCP-1k: the client calendar read (BFF §63.10 `GET calendar`).
     SocialCalendarController,

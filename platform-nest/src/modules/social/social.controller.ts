@@ -2593,6 +2593,7 @@ export class SocialController {
         `SELECT a.id, a.client_id AS "clientId", a.network, a.handle, a.display_name AS "displayName",
                 a.status, a.quota, a.capabilities, a.last_error AS "lastError",
                 a.health_checked_at AS "healthCheckedAt", a.connected_at AS "connectedAt",
+                a.simulated AS "simulated",
                 o.postiz_org_id AS "publisherOrgRef", o.driver
            FROM social_accounts a
            JOIN social_publisher_orgs o ON o.id = a.publisher_org_id AND o.tenant_id = a.tenant_id
