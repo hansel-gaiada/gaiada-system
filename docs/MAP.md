@@ -322,6 +322,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/webdev/control` | `platform-nest/src/modules/webdev/webdesk-control.controller.ts` |
 | `/api/:tenantId/modules/webdev/editorial/contributors` | `platform-nest/src/modules/webdev/editorial-contributors.controller.ts` |
 | `/api/:tenantId/notices` | `platform-nest/src/core/dept-notices.controller.ts` |
+| `/api/:tenantId/portal/social` | `platform-nest/src/core/social-pipeline-portal.controller.ts` |
 | `/api/:tenantId/reports` | `platform-nest/src/modules/reports/reports.controller.ts` |
 | `/api/:tenantId/reports/group` | `platform-nest/src/modules/reports/group-report.controller.ts` |
 | `/api/:tenantId/requests` | `platform-nest/src/core/work-requests-outbound.controller.ts` |

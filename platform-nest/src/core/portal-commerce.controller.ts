@@ -45,6 +45,7 @@ import type { PoolClient } from "pg";
 import { claimHeadroom, hasCurrencyPrecision } from "../modules/invoice/issue";
 import { CONTRACT_SIGNED_COPY_FILE_ID, INVOICE_PDF_FILE_ID } from "./document-read-fields";
 import { CLIENT_REPORT_FILE_ROLE } from "./client-reports";
+import { portalImageVisible } from "../modules/social/pipeline/portal-read";
 // DW-10f-2a (BFF §61.6): the contract's payment schedule, as the portal reads it.
 import { readPortalSchedule } from "./contract-schedule";
 // PV5-10: online payment through the provider's hosted checkout. The decision and the checkout rows live in
@@ -69,7 +70,7 @@ export const MAX_PROOF_BYTES = 10 * 1024 * 1024;
 // (PV5-04 removed the 1% overpayment tolerance: a claim is bounded by the LEDGER's outstanding amount, because an AR
 // allocation can never exceed what is owed. See recordPayment.)
 
-type DownloadableKind = "deliverable" | "contract" | "invoice_payment" | "project" | "conversation" | "invoice" | "client_report";
+type DownloadableKind = "deliverable" | "contract" | "invoice_payment" | "project" | "conversation" | "invoice" | "client_report" | "social_post";
 
 /** Where a client-visible file may live. An entity NOT in this map is unreachable through the portal's
  *  download route even if a file id is guessed, because the route resolves ownership by looking the
@@ -90,6 +91,11 @@ const DOWNLOADABLE: Record<string, DownloadableKind> = {
   // PUBLISHED report in the caller's reach (clientReportInPortalScope, the strict shape), so a draft, a withdrawn report or one
   // outside the caller's projects has no downloadable file, and any other file hung on a report is never served.
   client_report: "client_report",
+  // SCP-2 (BFF §63.8, §63.9): an image of a pipeline post the client is asked to approve. The file is served only when a LIVE design
+  // row of the post names it (`social_post_designs.file_id`, `removed_at` NULL) and the post is visible to the caller (a
+  // pipeline post of one of their clients that has reached the client: `portalImageVisible`), so a reference image or any other
+  // file hung on the post, a design that was removed, and a post still in production are all the same 404 as a missing file.
+  social_post: "social_post",
 };
 
 /**
@@ -712,7 +718,10 @@ export class PortalCommerceController {
       if (kind === "invoice" && f.role !== "invoice_pdf") throw new NotFoundException("file not found");
       // PV7-04a: under a client report, only its own role file is a client document.
       if (kind === "client_report" && f.role !== CLIENT_REPORT_FILE_ROLE) throw new NotFoundException("file not found");
-      if (!(await this.ownsEntity(c, scope, kind, f.target_entity_id))) {
+      // SCP-2: under a pipeline post, only a live design's own file is a client document (a `files` row of the post is not enough).
+      if (kind === "social_post") {
+        if (!(await portalImageVisible(c, tenantId, scope.clientIds, f.target_entity_id, fileId))) throw new NotFoundException("file not found");
+      } else if (!(await this.ownsEntity(c, scope, kind, f.target_entity_id))) {
         // 404, not 403: distinguishing them turns this route into an existence oracle for other
         // clients' file ids.
         throw new NotFoundException("file not found");
@@ -808,7 +817,7 @@ export class PortalCommerceController {
   /** Does the caller's client own this entity? One switch, so the download route's reachability set is
    *  exactly DOWNLOADABLE and adding a kind there without adding a branch here fails CLOSED. */
   private async ownsEntity(
-    c: PoolClient, scope: PortalScope, kind: DownloadableKind, id: string,
+    c: PoolClient, scope: PortalScope, kind: Exclude<DownloadableKind, "social_post">, id: string,
   ): Promise<boolean> {
     const q = {
       // Ownership travels through the project, because `deliverables.client_id` is nullable and a
