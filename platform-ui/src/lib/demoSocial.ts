@@ -2,6 +2,7 @@ import "server-only";
 import { isDemoPortalClient } from "./demoPortalClients";
 import { todayIsoInDisplayZone } from "./format";
 import { evaluateClientReviewState, type ClientReviewState, type ClientReviewStatus } from "./socialShared";
+import { validateBrandBook, type BrandBook } from "./socialBrandBook";
 // SMM-14 — DEMO_MODE fixtures for the Social Media department (calendar + composer, SMM-12).
 // Mirrors demoPipeline.ts's STATEFUL in-memory-store convention exactly (module-level arrays
 // mutate across requests within one running dev-server process; resets on restart). Before this
@@ -1058,6 +1059,87 @@ function demoCycleTable(month: string): Record<string, unknown> {
   return { month, bufferWorkingDays: cyclesStore.bufferWorkingDays, holidaysKnown: true, canPlan: true, rows };
 }
 
+// ── SCP-1a — the allocation and the brand book (BFF §63.4) ─────────────────────────────────────────────────────────────────────
+// `GET allocation`, `PATCH engagements/:engagementId/allocation`, and `GET`/`PATCH brand-profiles/:clientId` for the two demo engagements (both Northwind
+// Traders', the one demo client), in the server's order of checks: validation (400 `{field}`, `unknown_field` for a key it does not know), then 404, then
+// 409 `officer_not_member`. `canPlan` is true: the demo user is the superadmin, one of the four approvers. The officer must be one of the demo company's
+// members (the names of `demoFixtures.ts` MEMBERS, mock names only). `thisCycle` is the cycle of the settings store above with its FIXED counts (the demo
+// has no posts), against this store's target.
+//
+// Its own globalThis-pinned store (see WHY THESE STORES ARE PINNED above). The brand book's absent-field rule is the server's: a PATCH names only what it
+// changes, and the sibling keys of `tone` and `hashtagStrategy` survive.
+const ALLOC_STORE = Symbol.for("gaiada.demoSocial.allocation");
+interface DemoAllocation {
+  officerId: string | null; postsPerCycle: number | null; creativeSource: "creatives" | "in_team"; deliveryBatch: "A" | "B" | null;
+  reportFormat: "email" | "meeting" | null; reportDueDay: number | null; platforms: string[]; formats: string[]; defaultPostTime: string | null;
+  stepEstimates: Record<string, number>;
+}
+interface DemoBrandProfile {
+  id: string; clientId: string; tone: Record<string, unknown>; hashtagStrategy: Record<string, unknown>; knowledgeSourceIds: string[];
+  book: Omit<BrandBook, "toneSummary" | "hashtagSets">; updatedAt: string;
+}
+const DEMO_MEMBER_NAMES: Record<string, string> = {
+  "demo-hansel": "Clement Hansel", "u-pm": "Dewi Santoso", "u-dev": "Made Putra", "u-social": "Komang Lestari", "u-creative": "Putu Rani",
+};
+const allocStore: { byEngagement: Record<string, DemoAllocation>; brands: Record<string, DemoBrandProfile> } = ((globalThis as Record<symbol, unknown>)[ALLOC_STORE] ??= {
+  byEngagement: {
+    "soc-eng-1": {
+      officerId: "u-pm", postsPerCycle: 12, creativeSource: "creatives", deliveryBatch: "B", reportFormat: "email", reportDueDay: 5,
+      platforms: ["instagram", "facebook", "tiktok"], formats: ["feed", "reel", "story"], defaultPostTime: "09:30",
+      stepEstimates: { proofread: 1, hod: 1, design: 3, final: 1, client: 2, schedule: 1 },
+    },
+    "soc-eng-2": {
+      officerId: "u-pm", postsPerCycle: 6, creativeSource: "in_team", deliveryBatch: "A", reportFormat: "meeting", reportDueDay: 10,
+      platforms: ["instagram"], formats: ["feed"], defaultPostTime: "18:00", stepEstimates: {},
+    },
+  } as Record<string, DemoAllocation>,
+  brands: {
+    "cl-1": {
+      id: "soc-brand-cl-1", clientId: "cl-1", tone: { summary: "Warm, direct and a little playful.", traits: ["warm", "direct"] },
+      hashtagStrategy: { maxCount: 5, sets: [{ name: "Always", tags: ["northwind", "madewithcare"] }] }, knowledgeSourceIds: [],
+      book: {
+        contentPillars: ["Behind the scenes", "Product stories"], mustHaveNotes: ["Always tag the store"], brandRules: ["No discount wording"],
+        channels: [{ network: "instagram", handle: "northwindtraders", url: "https://example.com/northwind" }],
+        keyDates: [{ date: "12-24", label: "Holiday campaign ends" }], links: [{ label: "Brand guide", url: "https://example.com/northwind/brand" }],
+      },
+      updatedAt: "2026-09-01T09:00:00Z",
+    },
+  } as Record<string, DemoBrandProfile>,
+}) as { byEngagement: Record<string, DemoAllocation>; brands: Record<string, DemoBrandProfile> };
+
+const ALLOC_KEYS = ["officerId", "postsPerCycle", "creativeSource", "deliveryBatch", "reportFormat", "reportDueDay", "platforms", "formats", "defaultPostTime", "stepEstimates"];
+const STEP_KEYS_DEMO = ["proofread", "hod", "design", "final", "client", "schedule"];
+const demoInt = (v: unknown, lo: number, hi: number): v is number => typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi;
+const demoPick = (v: unknown, allowed: readonly string[]): string[] | null => {
+  if (!Array.isArray(v) || v.length > allowed.length || v.some((x) => typeof x !== "string" || !allowed.includes(x))) return null;
+  return [...new Set(v as string[])];
+};
+
+function demoAllocationRow(e: DemoEngagement): Record<string, unknown> {
+  const a = allocStore.byEngagement[e.id];
+  const month = todayIsoInDisplayZone().slice(0, 7);
+  const cycle = cyclesStore.cycles.find((c) => c.engagementId === e.id && c.month === month);
+  const f = DEMO_CYCLE_FACTS[e.id];
+  return {
+    engagementId: e.id, clientId: e.clientId, clientName: DEMO_CLIENT_NAME, status: e.status,
+    officer: a.officerId ? { id: a.officerId, name: DEMO_MEMBER_NAMES[a.officerId] ?? "" } : null,
+    postsPerCycle: a.postsPerCycle, creativeSource: a.creativeSource, deliveryBatch: a.deliveryBatch, reportFormat: a.reportFormat,
+    reportDueDay: a.reportDueDay, platforms: a.platforms, formats: a.formats, defaultPostTime: a.defaultPostTime, stepEstimates: a.stepEstimates,
+    thisCycle: cycle && f ? { cycleId: cycle.id, month, target: a.postsPerCycle, counted: f.counts.counted, extra: f.counts.extra, stories: f.counts.stories } : null,
+    canPlan: true,
+  };
+}
+
+function demoBrandAnswer(p: DemoBrandProfile): Record<string, unknown> {
+  return {
+    id: p.id, clientId: p.clientId, tone: p.tone, hashtagStrategy: p.hashtagStrategy, knowledgeSourceIds: p.knowledgeSourceIds, updatedAt: p.updatedAt,
+    toneSummary: typeof p.tone.summary === "string" ? p.tone.summary : "",
+    contentPillars: p.book.contentPillars, mustHaveNotes: p.book.mustHaveNotes, brandRules: p.book.brandRules,
+    hashtagSets: Array.isArray(p.hashtagStrategy.sets) ? p.hashtagStrategy.sets : [],
+    channels: p.book.channels, keyDates: p.book.keyDates, links: p.book.links,
+  };
+}
+
 /** Returns a DemoResult for any `/api/:t/modules/social/*` route, or null if it doesn't match. */
 export function socialDemo(method: string, p: string, params: URLSearchParams, body?: string): DemoResult | null {
   const match = p.match(/^\/api\/[^/]+\/modules\/social\/(.*)$/);
@@ -1134,6 +1216,106 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
         post("c", "Launch day announcement", "approved", "client_approved", "officer", { state: "done", spareDays: null, lateDays: null, lateWith: null, latestSafeHandoff: null, readyBy: cycle.readyBy }),
       ] : [],
     });
+  }
+
+  // ── SCP-1a: allocation and brand book (BFF §63.4) ────────────────────────────────────────────────
+  if (tail === "allocation" && m === "GET") {
+    const mine = params.get("mine");
+    if (mine !== null && mine !== "" && !["1", "true", "0", "false"].includes(mine)) return demoField(400, "invalid_field", { field: "mine" });
+    // The demo caller is `demo-hansel` (the superadmin), who is no officer: `mine=1` keeps only the clients whose officer they are.
+    const items = ENGAGEMENTS.filter((e) => e.status !== "closed" && allocStore.byEngagement[e.id])
+      .filter((e) => !(mine === "1" || mine === "true") || allocStore.byEngagement[e.id].officerId === "demo-hansel")
+      .map(demoAllocationRow);
+    return ok({ items });
+  }
+  const allocM = tail.match(/^engagements\/([^/]+)\/allocation$/);
+  if (allocM && m === "PATCH") {
+    const bd = b() as Record<string, unknown>;
+    for (const k of Object.keys(bd)) if (!ALLOC_KEYS.includes(k)) return demoField(400, "unknown_field", { field: k });
+    if (Object.keys(bd).length === 0) return err(400, "no_fields");
+    const bad = (field: string) => demoField(400, "invalid_field", { field });
+    const next: Partial<DemoAllocation> = {};
+    if (bd.officerId !== undefined) {
+      if (bd.officerId !== null && typeof bd.officerId !== "string") return bad("officerId");
+      next.officerId = bd.officerId as string | null;
+    }
+    if (bd.postsPerCycle !== undefined) { if (bd.postsPerCycle !== null && !demoInt(bd.postsPerCycle, 0, 200)) return bad("postsPerCycle"); next.postsPerCycle = bd.postsPerCycle as number | null; }
+    if (bd.creativeSource !== undefined) { if (bd.creativeSource !== "creatives" && bd.creativeSource !== "in_team") return bad("creativeSource"); next.creativeSource = bd.creativeSource; }
+    if (bd.deliveryBatch !== undefined) { if (bd.deliveryBatch !== null && bd.deliveryBatch !== "A" && bd.deliveryBatch !== "B") return bad("deliveryBatch"); next.deliveryBatch = bd.deliveryBatch as "A" | "B" | null; }
+    if (bd.reportFormat !== undefined) { if (bd.reportFormat !== null && bd.reportFormat !== "email" && bd.reportFormat !== "meeting") return bad("reportFormat"); next.reportFormat = bd.reportFormat as "email" | "meeting" | null; }
+    if (bd.reportDueDay !== undefined) { if (bd.reportDueDay !== null && !demoInt(bd.reportDueDay, 1, 31)) return bad("reportDueDay"); next.reportDueDay = bd.reportDueDay as number | null; }
+    if (bd.platforms !== undefined) { const v = demoPick(bd.platforms, ["instagram", "facebook", "tiktok", "linkedin", "x", "youtube", "threads", "pinterest", "bluesky", "mastodon"]); if (!v) return bad("platforms"); next.platforms = v; }
+    if (bd.formats !== undefined) { const v = demoPick(bd.formats, ["feed", "carousel", "reel", "story"]); if (!v) return bad("formats"); next.formats = v; }
+    if (bd.defaultPostTime !== undefined) {
+      if (bd.defaultPostTime !== null && (typeof bd.defaultPostTime !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(bd.defaultPostTime))) return bad("defaultPostTime");
+      next.defaultPostTime = bd.defaultPostTime as string | null;
+    }
+    if (bd.stepEstimates !== undefined) {
+      const s = bd.stepEstimates;
+      if (s === null || typeof s !== "object" || Array.isArray(s)) return bad("stepEstimates");
+      const est: Record<string, number> = {};
+      for (const [k, v] of Object.entries(s as Record<string, unknown>)) {
+        if (!STEP_KEYS_DEMO.includes(k) || !demoInt(v, 0, 30)) return bad("stepEstimates");
+        est[k] = v;
+      }
+      next.stepEstimates = est;
+    }
+    const eng = ENGAGEMENTS.find((e) => e.id === allocM[1]);
+    if (!eng || !allocStore.byEngagement[eng.id]) return err(404, "engagement_not_found");
+    if (typeof next.officerId === "string" && !(next.officerId in DEMO_MEMBER_NAMES)) return err(409, "officer_not_member");
+    Object.assign(allocStore.byEngagement[eng.id], next);
+    return ok(demoAllocationRow(eng));
+  }
+  const brandM = tail.match(/^brand-profiles\/([^/]+)$/);
+  if (brandM && m === "GET") {
+    const p = allocStore.brands[brandM[1]];
+    return p ? ok(demoBrandAnswer(p)) : err(404, "brand profile not found");
+  }
+  if (brandM && m === "PATCH") {
+    const bd = b() as Record<string, unknown>;
+    const NAMES = ["tone", "hashtagStrategy", "knowledgeSourceIds", "toneSummary", "contentPillars", "mustHaveNotes", "brandRules", "hashtagSets", "channels", "keyDates", "links"];
+    if (!NAMES.some((k) => bd[k] !== undefined)) return err(400, "no_fields");
+    const cur: DemoBrandProfile = allocStore.brands[brandM[1]] ?? {
+      id: `soc-brand-${brandM[1]}`, clientId: brandM[1], tone: {}, hashtagStrategy: {}, knowledgeSourceIds: [],
+      book: { contentPillars: [], mustHaveNotes: [], brandRules: [], channels: [], keyDates: [], links: [] }, updatedAt: "",
+    };
+    // Validate the merged book (an absent field is the stored one), then name the first field the server would refuse.
+    const merged = {
+      toneSummary: bd.toneSummary !== undefined ? bd.toneSummary : (typeof cur.tone.summary === "string" ? cur.tone.summary : ""),
+      contentPillars: bd.contentPillars ?? cur.book.contentPillars, mustHaveNotes: bd.mustHaveNotes ?? cur.book.mustHaveNotes, brandRules: bd.brandRules ?? cur.book.brandRules,
+      hashtagSets: bd.hashtagSets ?? (Array.isArray(cur.hashtagStrategy.sets) ? cur.hashtagStrategy.sets : []),
+      channels: bd.channels ?? cur.book.channels, keyDates: bd.keyDates ?? cur.book.keyDates, links: bd.links ?? cur.book.links,
+    };
+    for (const k of ["toneSummary", "contentPillars", "mustHaveNotes", "brandRules", "hashtagSets", "channels", "keyDates", "links"] as const) {
+      const shape = k === "toneSummary" ? typeof merged[k] === "string" : Array.isArray(merged[k]);
+      if (!shape) return demoField(400, "invalid_field", { field: k });
+    }
+    const checked = validateBrandBook(merged as BrandBook);
+    if (!checked.ok) return demoField(400, "invalid_field", { field: checked.field });
+    for (const k of ["tone", "hashtagStrategy"] as const) {
+      if (bd[k] !== undefined && (bd[k] === null || typeof bd[k] !== "object" || Array.isArray(bd[k]))) return demoField(400, "invalid_field", { field: k });
+    }
+    const book = checked.book;
+    const tone = { ...(bd.tone !== undefined ? (bd.tone as Record<string, unknown>) : cur.tone) };
+    if (bd.tone !== undefined && !("summary" in tone) && "summary" in cur.tone) tone.summary = cur.tone.summary;
+    if (bd.toneSummary !== undefined) { if (book.toneSummary === "") delete tone.summary; else tone.summary = book.toneSummary; }
+    const strategy = { ...(bd.hashtagStrategy !== undefined ? (bd.hashtagStrategy as Record<string, unknown>) : cur.hashtagStrategy) };
+    if (bd.hashtagStrategy !== undefined && !("sets" in strategy) && "sets" in cur.hashtagStrategy) strategy.sets = cur.hashtagStrategy.sets;
+    if (bd.hashtagSets !== undefined) strategy.sets = book.hashtagSets;
+    allocStore.brands[brandM[1]] = {
+      ...cur, tone, hashtagStrategy: strategy,
+      knowledgeSourceIds: Array.isArray(bd.knowledgeSourceIds) ? (bd.knowledgeSourceIds as string[]) : cur.knowledgeSourceIds,
+      book: {
+        contentPillars: bd.contentPillars !== undefined ? book.contentPillars : cur.book.contentPillars,
+        mustHaveNotes: bd.mustHaveNotes !== undefined ? book.mustHaveNotes : cur.book.mustHaveNotes,
+        brandRules: bd.brandRules !== undefined ? book.brandRules : cur.book.brandRules,
+        channels: bd.channels !== undefined ? book.channels : cur.book.channels,
+        keyDates: bd.keyDates !== undefined ? book.keyDates : cur.book.keyDates,
+        links: bd.links !== undefined ? book.links : cur.book.links,
+      },
+      updatedAt: new Date().toISOString(),
+    };
+    return ok({ ok: true });
   }
 
   // ── engagements ──────────────────────────────────────────────────────────────────────────────

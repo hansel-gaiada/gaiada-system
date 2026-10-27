@@ -522,6 +522,16 @@ const SOCIAL_MEDIA: Workspace = {
       ],
     },
     CLIENTS_ROW,
+    // SCP-1a (BFF §63.17): the Allocation page: every client with its officer, target, creative source, report day, platforms and this cycle's counts.
+    // No gate: it is a list the whole team reads. Editing is the four Social approvers' (the server's `canPlan`, `social_engagement` · `plan`), and the page
+    // shows a person who is not one the same list with disabled controls and the reason. The row key `allocation` is free in this workspace.
+    {
+      key: "allocation", label: "Allocation", icon: "projects",
+      tabs: [{
+        key: "allocation", label: "Allocation", href: deptPath("allocation"), icon: "projects",
+        blurb: "Each client's officer, monthly target, creative source, report day, platforms and this cycle's counts.",
+      }],
+    },
     // SCP-1c (BFF §63.17): the HoD's Settings page (the ready-by buffer, the deadline table). Shown to the four Social approvers only; the page itself is
     // readable by the team and editable with `plan`. The row key `settings` is the Social skin's pin (`lib/skins.ts`); Admin's `settings` row is another list.
     {
