@@ -36,7 +36,7 @@ Node scripts per component:
 - `platform-ui` — `build`, `dev`, `e2e`, `e2e:a11y`, `gen:office-credits`, `start`, `test`, `test:watch`, `typecheck`
 - `report-renderer` — `dev`, `start`, `test`, `typecheck`
 - `simulation` — `build`, `start`, `typecheck`
-- `wa-chat-bot` — `dev`, `gateway`, `media-worker`, `start`, `test`, `typecheck`
+- `wa-chat-bot` — `dev`, `media-worker`, `start`, `test`, `typecheck`
 - `webdesk` — `check:deploy-copies`, `check:rls`, `check:rls:selftest`, `check:workflows`, `check:wp-template`, `lint:migrations`, `migrate`, `test`, `test:deploy-scripts`
 
 ## Compose
