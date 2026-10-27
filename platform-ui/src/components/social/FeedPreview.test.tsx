@@ -188,6 +188,9 @@ describe("dragging one post onto another", () => {
     expect(status()).toHaveAttribute("data-kind", "error");
     expect(screen.getAllByRole("button").slice(0, 2).map((b) => b.getAttribute("aria-label")?.split(".")[0])).toEqual(["Planned post", "Drafting post"]);
     expect(refresh).toHaveBeenCalledTimes(1);
+    // A drop while the last swap is still pending is ignored on purpose (`if (pending) return`), so wait for the grid to be
+    // idle first: on a slow runner the second drag otherwise lands inside the first one's transition.
+    await waitFor(() => expect(screen.getByRole("list", { name: "The client's posts, newest first" })).toHaveAttribute("aria-busy", "false"));
     swap.mockResolvedValue({ ok: false, error: "not_the_officer", message: "Only the client's officer can do this." });
     drag("Planned post", "Drafting post");
     await waitFor(() => expect(status()).toHaveTextContent("Only the client's officer can do this. Nothing was changed."));

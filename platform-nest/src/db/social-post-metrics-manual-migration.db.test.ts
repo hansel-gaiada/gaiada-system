@@ -142,7 +142,9 @@ describe.skipIf(!TEST_URL)("SCP-3c · social_post_metrics source, reach and ente
     await refuses(pool().query(`UPDATE social_post_metrics SET entered_by = NULL WHERE id = $1`, [id]), "social_post_metrics_entered_by_ck");
     await refuses(pool().query(`UPDATE social_post_metrics SET source = 'pull' WHERE id = $1`, [id]), "social_post_metrics_entered_by_ck");
     await refuses(pool().query(`UPDATE social_post_metrics SET reach = -5 WHERE id = $1`, [id]), "social_post_metrics_reach_ck");
-    await refuses(pool().query(`UPDATE social_post_metrics SET source = 'bogus' WHERE id = $1`, [id]), "social_post_metrics_source_ck");
+    // `entered_by` goes NULL too, so ONLY the source check is broken: on the manual row a bare 'bogus' also breaks
+    // `social_post_metrics_entered_by_ck`, and Postgres names whichever check it evaluates first.
+    await refuses(pool().query(`UPDATE social_post_metrics SET source = 'bogus', entered_by = NULL WHERE id = $1`, [id]), "social_post_metrics_source_ck");
     await pool().query(`UPDATE social_post_metrics SET source = 'pull', entered_by = NULL, reach = NULL WHERE id = $1`, [id]);
     expect(await read(id)).toMatchObject({ source: "pull", entered_by: null, reach: null });
   });
