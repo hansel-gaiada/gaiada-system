@@ -11,6 +11,33 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.176.0` + platform-ui `0.202.0` - SCP-1 wave 1: the Social Media content pipeline's data, permissions and stage machine, cycles and schedule health, allocation and brand book, and two self-promotion guards (FRONTEND-BFF-CONTRACT §63, PERMISSION-CONTRACT §53) (2026-10-27) - PROTOTYPED
+
+- **The data (SCP-1b).** Migration `202610271000_social_pipeline.sql`:
+  - the allocation on `social_engagements` and the brand book on `social_brand_profiles`;
+  - the new tables `social_settings`, `social_cycles`, `social_post_designs` and the append-only `social_post_copy_edits`, each on the social module's third wall;
+  - the pipeline columns on `social_posts`, with every CHECK of §63.1;
+  - the recorded-decision columns on `social_post_client_reviews`, which keep their plain wall.
+  - Every existing post keeps `pipeline_status` NULL and stays a Composer post.
+- **The permissions (SCP-1b).** Migration `202610271001_iam_social_pipeline.sql` and five Cerbos policies:
+  - eight `social_post` actions, `plan` and `budget` on `social_engagement`, and `approve_spend` on `portal`;
+  - the roles `social_copywriter` and `social_designer`, and the derived role `social_approver_seat`;
+  - the four social approvers (the Social Media and GM lead seats, the owner, the superadmin), with the maker/checker and unattended-automation DENYs;
+  - report approve and deliver narrowed to the four;
+  - a pipeline post's publish approval decided by the four directly (`approverCheck.replacesDecide`), with PGL-05's self-approval rule still first on both walls. **Restart Cerbos after the deploy.**
+- **The stage machine (SCP-1b, with SCP-1i).** `modules/social/pipeline/` reads the fixture `scp-stage-machine.json` for every status, phase, holder, transition, edit rule and guard order. It provides:
+  - one action route for the 24 actions, plus create, read (with `actions[]`), edit, suggestions, designs and bulk;
+  - the hand-off checks;
+  - the effects: variants synced at the final check, recorded client decisions, schedule by hand or through the publisher, unschedule, reschedule, mark live, block and resolve, follow-up, discard and archive;
+  - today's Composer routes step aside for pipeline posts (409 `pipeline_post`).
+  - The client-month Creatives request is opened through one shared work-request helper, so Creatives is told as for any request.
+  - The UI keeps a byte-identical twin of the fixture.
+- **Cycles and schedule health (SCP-1c).** The deadline table, ready-by in working days from the HR holiday calendar, step estimates, the five health states and the nightly `social-cycle-ready-by` job (off by default, `SOCIAL_CYCLE_READY_BY_ENABLED`). The HoD's Settings page is `{D}/settings`, a `leadSocial` row.
+- **Allocation and brand book (SCP-1a).** `GET allocation` and `PATCH engagements/:id/allocation` (the four only), the brand book's new fields, the Allocation page `{D}/allocation` and a reusable brand-book form. The officer is set by the allocation only.
+- **Guards (SCP-1q, SCP-1r; owner SCP-Q23, plan SCP-D7).** Nobody edits a position they hold, or renames, re-types, moves or deletes a unit they lead, superadmin included. The positions list gains `heldByMe`.
+- **Decisions recorded:** SCP-D6, SCP-D7, SCP-D8 (plan §2).
+- **Proof.** Every car green on its own branch's CI run, and the train on its combined run: the schema suite, the Cerbos matrix, the pure machine over every fixture scenario, the route suites against real Postgres and Cerbos, the health golden table and the UI suites.
+
 ### platform-nest `0.175.0` + platform-ui `0.201.0` - agentic-native close-out T2 and T4: one module list for the audits, and a reader-degrade ratchet over every page (2026-10-27) - PROTOTYPED
 
 - **T2.** New `platform-nest/src/modules/compiled-in-modules.ts` (`COMPILED_IN_MODULES`, the 16 modules). `main.ts` registers from it in the identical order, and both `impact-registry.test.ts` and `capability-inventory.test.ts` read it.

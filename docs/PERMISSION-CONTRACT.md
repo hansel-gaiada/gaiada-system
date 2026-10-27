@@ -2784,7 +2784,7 @@ The live proof with the accounts we have is PGL-08.
 
 ## 53. SCP — the Social Media content pipeline: the four social approvers, eight actions on `social_post`, two on `social_engagement`, the report check, two roles, and `approve_spend` on `portal` (2026-10-26, PLANNED)
 
-Design: `docs/FRONTEND-BFF-CONTRACT.md` §63 (plan `docs/plans/2026-10-15-social-content-pipeline.md` §4.1 and §4.3; owner rulings of 2026-10-26: SCP-Q2, SCP-Q5, SCP-Q9, SCP-Q11 and SCP-Q13 to SCP-Q20). Status: **PLANNED (the contract only; nothing is built)**. The stage machine's actors and refusal codes are the fixture `platform-nest/src/modules/social/scp-stage-machine.json`.
+Design: `docs/FRONTEND-BFF-CONTRACT.md` §63 (plan `docs/plans/2026-10-15-social-content-pipeline.md` §4.1 and §4.3; owner rulings of 2026-10-26: SCP-Q2, SCP-Q5, SCP-Q9, SCP-Q11 and SCP-Q13 to SCP-Q20). Status: **IN PROGRESS (2026-10-27): §53.1 to §53.13 are built (SCP-1b: migration `202610271001_iam_social_pipeline.sql`, the five policies, `cerbos.ts`, the catalogue, groups and bundles, the UI mirror, the publish decision's `approverCheck`), proved by `src/rbac/cerbos-social-pipeline.test.ts` on the Linux CI gate; the gap of §53.4 is closed by SCP-1q and SCP-1r.** As built: `portal.approve_spend` sits in the `portal_pay` group; the two new roles get `social.view` in the UI mirror, which has no social report capability to narrow. The stage machine's actors and refusal codes are the fixture `platform-nest/src/modules/social/scp-stage-machine.json`.
 
 **What does not change.**
 - The existing nine `social_post` actions keep their rules; `read` gains two roles (below).
@@ -2876,7 +2876,10 @@ Both use `roles: ["user"]`, so under deny-overrides they beat every ALLOW, the `
   - The five keys are `uiGrantable: false` and in no bundle but `owner`'s and `platform_admin`'s, so no role, custom role or request can carry them. The migration removes any custom-role pair it finds (53.13).
   - A lead seat is assigned by someone else: `position` · `assign` refuses a self-assignment (its `EFFECT_DENY`), superadmin included.
   - `owner` and `platform_admin` are elevated roles: only the IAM-16 two-person appointment grants them.
-  - **A gap outside SCP:** `position` · `update` has no self-DENY. Whoever holds it can move a position they hold onto the Social Media unit, or attach `org_unit_lead` to it (`PATCH positions/:id`, `POST positions/:id/roles`). That reaches every lead-seat authority (DW-4, DW-10g-2), not only this one, so closing it is an IAM ticket. The recommended shape is the `assign` self-DENY applied to `update` as well, fed the position's open holders.
+  - **The gap outside SCP, closed (owner SCP-Q23; SCP-1q and SCP-1r, 2026-10-27).** `position` · `update` had no self-DENY: whoever held it could move a position they held onto the Social Media unit, or attach `org_unit_lead` to it. Two DENYs on `roles: ["user"]` close it, superadmin included:
+    - **SCP-1q:** `position` · `update` is denied when the principal is among the position's open holders, fed as `holderIds` (`positions.controller.ts` `authorizePositionUpdate`, on `PATCH positions/:id`, `POST positions/:id/roles` and `DELETE positions/:id/roles/:roleId`).
+    - **SCP-1r (plan SCP-D7):** the units are found by name, so `org_structure` · `update` is denied when the edit renames, re-types, moves or deletes a unit on which the principal holds a live lead seat, fed as `touchedLeadHolderIds` (the PUT diffs the stored tree).
+    - Both attributes are on the `cerbos.ts` allow-list; another administrator makes the change.
 
   **The UI mirror, `canLeadSocial(me, companyId)`.** It is true when:
   - `leadUnits(me, companyId)` holds the company's Social Media unit or its GM unit; or
@@ -3024,6 +3027,7 @@ No change to these: `social_post` · `read`, `create`, `publish` and `cancel`; `
 **The publish decision on a pipeline post (SCP-Q19 with PV-D46).** `social.publishPost` and `social.publishPostMetered` declare an `approverCheck` (the PGL-06 shape, §52.3). It applies when the variant's post is a pipeline post: the decider must pass `social_post` · `approve` on that post, with its attributes.
 - So a company admin who holds the generic `decide` cannot publish a client's post, and neither can the post's author or officer (the DENY).
 - The refusal is 403 `{error, reason: "social_approver_required"}`, and the row stays pending. It runs after §52.1's `self_approval`.
+- As built (SCP-1b): for a replaced row the check runs on a rejection too, because nothing else authorizes that decider. The executor never re-checked the generic decide right, so its wall is `self_approval` then the check, unchanged. Listing and opening these rows in `/approvals` still needs `automation_approval` · `read`: the four see them there with SCP-3g.
 - Composer posts are unchanged.
 - **SCP-Q21 (owner, 2026-10-26): the four decide directly.** For a pipeline post's publish approval, the `approverCheck` REPLACES §52.3's generic decide right instead of adding to it. The registry entry marks it (`approverCheck.replacesDecide: true`); the decide handler then authorizes the decider by `social_post` · `approve` on the post alone, and skips the `company_admin` / `platform_admin` decide check for that row. So the HoD, the GM and the owner decide without `company_admin`, and a `company_admin` who is not one of the four is refused. §52.1's `self_approval` and the maker/checker DENY still run first. Every other approval, Composer posts included, keeps §52.3 unchanged. 1b builds it.
 

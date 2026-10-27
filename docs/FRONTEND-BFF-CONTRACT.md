@@ -4219,7 +4219,7 @@ place the obvious implementation is wrong:
 
 | Method + path | Cerbos | Notes |
 |---|---|---|
-| `GET /api/:tenantId/positions` | `position · read` | `{ positions[], scope: "tenant" \| "subtree" }`. A dept head (`org_unit_lead`) gets **only their subtree** and `scope: "subtree"`; each row carries `roleSet[]`, `currentHolders`, `orphaned`. |
+| `GET /api/:tenantId/positions` | `position · read` | `{ positions[], scope: "tenant" \| "subtree" }`. A dept head (`org_unit_lead`) gets **only their subtree** and `scope: "subtree"`; each row carries `roleSet[]`, `currentHolders`, `orphaned`, and `heldByMe` (the viewer holds an open assignment on it, so `update` refuses them there: SCP-1q, PERMISSION §53.4). |
 | `GET /api/:tenantId/positions/attachable-roles` | `position · read` | The composer's option list: `{ roleId, role, attachable, reason }`. Unattachable roles are **returned with a reason**, not omitted — render them disabled. |
 | `POST /api/:tenantId/positions` | `position · create` | `{ unitNodeId, title, isLead?, roles?: [{roleId, scopeKind}] }`. `unitNodeId` must exist in the org blob (400 otherwise). |
 | `PATCH /api/:tenantId/positions/:positionId` | `position · update` | `{ title?, isLead?, unitNodeId? }`. Moving the unit re-reconciles every holder. |
@@ -11930,7 +11930,7 @@ Mailed invite → no token in the response → the sender mints → the link acc
 - **Delivery is not proven here.** A Mailpit catch on sumopod (PGL-11) proves rendering and wiring; deliverability of the real sender is a manual readiness item at cut-over. With `MAIL_ENABLED=1` but no SMTP host the dev-log adapter "sends" nothing, so `CLIENT_MAIL_ENABLED` must not be turned on before a real sender exists (the readiness check, PGL-01).
 - A final failed send (after five attempts) leaves the invite sealed: the PM sees the contact still `invited` and re-invites.
 
-## 63. The Social Media content pipeline (SCP, 2026-10-26) — `platform-nest/src/modules/social/` (the stage machine, cycles, boosts, the Team dashboard and their routes: new files), `src/modules/social/social-reports.controller.ts`, `src/core/social-pipeline-portal.controller.ts` (new), `src/core/collab.controller.ts`, `src/core/files.controller.ts`, `src/core/portal-commerce.controller.ts`; migrations `<prefix>_social_pipeline.sql`, `<prefix+1>_iam_social_pipeline.sql`, `<prefix+2>_comments_visibility_anchor.sql`, `<prefix+3>_creative_assets_source.sql`, `<prefix+4>_pm_task_links.sql`, `<prefix+5>_social_post_metrics_manual.sql`, `<prefix+6>_social_boosts.sql`, `<prefix+7>_social_simulation.sql`, `<prefix+8>_social_reports_monthly.sql` (prefixes: the next free after main's newest at landing; `202610181101` is main's newest today and `202610261100` is taken); fixture `platform-nest/src/modules/social/scp-stage-machine.json`; UI under `/departments/[deptId]` (63.17) and `/portal/social` — **STATUS: PLANNED (contract only; nothing is built)**
+## 63. The Social Media content pipeline (SCP, 2026-10-26) — `platform-nest/src/modules/social/` (the stage machine, cycles, boosts, the Team dashboard and their routes: new files), `src/modules/social/social-reports.controller.ts`, `src/core/social-pipeline-portal.controller.ts` (new), `src/core/collab.controller.ts`, `src/core/files.controller.ts`, `src/core/portal-commerce.controller.ts`; migrations `<prefix>_social_pipeline.sql`, `<prefix+1>_iam_social_pipeline.sql`, `<prefix+2>_comments_visibility_anchor.sql`, `<prefix+3>_creative_assets_source.sql`, `<prefix+4>_pm_task_links.sql`, `<prefix+5>_social_post_metrics_manual.sql`, `<prefix+6>_social_boosts.sql`, `<prefix+7>_social_simulation.sql`, `<prefix+8>_social_reports_monthly.sql` (prefixes: the next free after main's newest at landing; `202610181101` is main's newest today and `202610261100` is taken); fixture `platform-nest/src/modules/social/scp-stage-machine.json`; UI under `/departments/[deptId]` (63.17) and `/portal/social` — **STATUS: IN PROGRESS (2026-10-27). Built and proved on the Linux CI gate: 63.1 files 1 and 2 (`202610271000_social_pipeline.sql`, `202610271001_iam_social_pipeline.sql`), 63.3, 63.4, 63.5, 63.6 except the design queue and the request detail's `socialPosts` (SCP-1h), 63.12 and the post types of 63.14 (SCP-1b, 1c, 1a). The rest is PLANNED.**
 
 **Why.** Plan `docs/plans/2026-10-15-social-content-pipeline.md` (SCP), decisions SCP-D1 to SCP-D5 and the owner's rulings of 2026-10-26 (plan §2: SCP-Q2, Q5 and Q7 to Q18). The Social Media team plans, writes, proofreads, approves, designs, gets client approval, schedules, monitors, boosts and reports on every post in the ERP, in their own design's eight steps. The first release includes the monthly report (SCP-5a) and the Team dashboard (SCP-5d) (SCP-Q5). The authorization is PERMISSION-CONTRACT §53.
 
@@ -12316,7 +12316,7 @@ The officer is set here only: `PATCH engagements/:engagementId` (§19) refuses `
 - 404 `engagement_not_found` names the row (`failedId`).
 - It is one transaction: one bad row refuses all.
 
-**`GET cycles/:cycleId/health`** (`social_post` · `read`). Per post and for the client:
+**`GET cycles/:cycleId/health`** (`social_post` · `read`). Per post and for the client. As built (SCP-1c) it answers `{cycleId, engagementId, clientName, month, deadline, readyBy, today, bufferWorkingDays, holidaysKnown, estimates, averageApprovalDays, clientSlower, client: Health|null, posts: [{postId, title, status, phase, holder, isExtra, format, health: Health}]}`; 404 `cycle_not_found`. Each Health is:
 
 ```
 Health { state: 'on_track'|'tight'|'at_risk'|'late'|'done',
@@ -12356,7 +12356,7 @@ PipelinePost {
   officer: {id,name}|null, author: {id,name}|null,
   holder: {role, userIds: string[], label}, health: Health,
   variants: [{id, network, handle, status, reviewStatus, validation: {ok, errors, warnings}}],
-  approvedSchedule: {scheduledAt, placement: string[]} | null,
+  approvedSchedule: {scheduledAt, placement: string[]} | null, scheduleVia: 'manual'|'publisher'|null,
   reviewHash: string|null,
   liveUrl, wentLiveAt, simulated, archivedAt,
   boost: BoostRow | null,
