@@ -193,6 +193,41 @@ test.describe("the Social skin on a desktop (1280x800)", () => {
     expect(failures, `${hrefs.length} links walked`).toEqual([]);
   });
 
+  // SCP-Q19 / PERMISSION §53.4: the Settings pin is for the four approvers only (the Social Media head, the GM, the owner, a platform admin).
+  // Demo data: `social-head@` leads dept-4 (Social Media), `gm@` leads dept-5 (the GM unit); `social@` is a plain member.
+  async function signInAs(page: Page, context: import("@playwright/test").BrowserContext, email: string) {
+    await page.goto("/login");
+    await page.getByLabel("Email").fill(email);
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await page.waitForURL((url) => !url.pathname.startsWith("/login"));
+    await context.addCookies([tenantCookie(page.url(), TENANT), prefsCookie(page.url(), "light")]);
+    await page.goto(SOCIAL_HOME);
+  }
+
+  for (const [who, email] of [["the Social Media head", "social-head@gaiada.com"], ["the GM", "gm@gaiada.com"]] as const) {
+    test(`${who} sees the Settings pin, and it opens`, async ({ page, context }) => {
+      await signInAs(page, context, email);
+      await expect(menu(page)).toBeVisible();
+      await expect.poll(() => pinNames(page)).toContain("Settings");
+      const link = menu(page).getByRole("link", { name: "Settings" });
+      await expect(link).toHaveAttribute("href", `${SOCIAL_HOME}/settings`);
+      const res = await page.goto(`${SOCIAL_HOME}/settings`);
+      expect(res?.status() ?? 0).toBeLessThan(400);
+      await page.waitForLoadState("networkidle");
+      await expect(page.getByRole("heading", { name: /page not found/i })).toHaveCount(0);
+      await expect(page.getByText(/something went wrong/i)).toHaveCount(0);
+      await expect(menu(page)).toBeVisible();
+    });
+  }
+
+  test("a plain Social Media member does not see the Settings pin", async ({ page, context }) => {
+    await signIn(page, context);
+    await expect(menu(page)).toBeVisible();
+    await expect.poll(async () => (await pinNames(page))[0]).toBe("Home");
+    expect(await pinNames(page)).not.toContain("Settings");
+    await expect(menu(page).getByRole("link", { name: "Settings" })).toHaveCount(0);
+  });
+
   test("another department is Standard: no skin on the frame or <html>, and the Standard menu", async ({ page, context }) => {
     await signIn(page, context, "light", WEB_DEV_HOME);
     await expect(page.getByRole("navigation", { name: "Web Dev menu" })).toBeVisible();
