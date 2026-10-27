@@ -522,6 +522,17 @@ const SOCIAL_MEDIA: Workspace = {
       ],
     },
     CLIENTS_ROW,
+    // SCP-1k (BFF §63.17): Profile, the client page. Its first tab is the switcher (`{D}/profile`: the caller's clients, or every client for one of the four
+    // Social approvers); each client's own page, `{D}/profile/[engagementId]?tab=plan|stories|calendar|list|brand`, sits below it and lights this tab. The Social
+    // skin pins this row (`lib/skins.ts`); the Feed preview tab is SCP-3d's. No gate: every team member with a social read tier opens it, and the server refuses
+    // the rest. The row key `profile` is free in this workspace.
+    {
+      key: "profile", label: "Profile", icon: "user",
+      tabs: [{
+        key: "profile", label: "Clients", href: deptPath("profile"), icon: "user",
+        blurb: "One page per client: the plan against the monthly target, stories, the calendar, the list of posts and the brand book.",
+      }],
+    },
     // SCP-1a (BFF §63.17): the Allocation page: every client with its officer, target, creative source, report day, platforms and this cycle's counts.
     // No gate: it is a list the whole team reads. Editing is the four Social approvers' (the server's `canPlan`, `social_engagement` · `plan`), and the page
     // shows a person who is not one the same list with disabled controls and the reason. The row key `allocation` is free in this workspace.
@@ -555,10 +566,15 @@ const SOCIAL_MEDIA: Workspace = {
     // Needs the inbox sync backend first (SMM-15).
     { key: "unanswered-inbox", label: "Unanswered inbox", ticket: "DW-3e after SMM-15" },
   ],
-  creates: ["compose-post"],
+  // SCP-1m (plan §6.2 Create): a post needs a client's cycle, so New post and Extra post open the client switcher in "choose a client" mode, and the chosen
+  // client's page opens with its form ready. New task is the shell's own "Task" item (`/tasks/new`), already in this menu; Ask Creatives is the registry's.
+  creates: ["compose-post", "new-post", "extra-post", "ask-creatives"],
   quickActions: [
     { key: "compose-post", label: "Compose a post", href: deptPath("composer") },
     ...ASK_ACTIONS,
+    // After the Asks: the Overview header shows only the first three quick actions (`MAX_QUICK_ACTIONS`), and those three stay as they were.
+    { key: "new-post", label: "New post", href: deptPath("profile?create=post"), gate: AGENCY_ONLY },
+    { key: "extra-post", label: "Extra post", href: deptPath("profile?create=extra"), gate: AGENCY_ONLY },
   ],
   kpis: [
     { key: "posts-on-schedule", label: "Posts published on schedule" },

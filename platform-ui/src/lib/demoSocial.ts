@@ -4,7 +4,7 @@ import { todayIsoInDisplayZone } from "./format";
 import { evaluateClientReviewState, type ClientReviewState, type ClientReviewStatus } from "./socialShared";
 import { validateBrandBook, type BrandBook } from "./socialBrandBook";
 import {
-  DEMO_MEMBER_NAMES, PIPE_ENGAGEMENTS, allocStore, cyclesStore, demoAllocationRow, demoBrandAnswer, demoCycleHealth, demoCycleTable, demoDeadlineRange,
+  DEMO_MEMBER_NAMES, PIPE_ENGAGEMENTS, allocStore, cyclesStore, demoAllocationRow, demoBrandAnswer, demoBulkActions, demoCalendar, demoCreatePost, demoCycleHealth, demoCycleTable, demoDeadlineRange,
   demoPipelineRead, demoRealDate, demoSettingsAnswer, demoWalkBack, isDemoSocialApprover, isPipelinePostId, pipelineEngagement, runDemoPipelineAction,
   type DemoBrandProfile, type DemoAllocation,
 } from "./demoSocialPipeline";
@@ -1049,6 +1049,12 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
   }
   const cycleHealthM = tail.match(/^cycles\/([^/]+)\/health$/);
   if (cycleHealthM && m === "GET") return demoCycleHealth(cycleHealthM[1]);
+  // ── SCP-1k: the client calendar (BFF §63.10) ─────────────────────────────────────────────────────
+  if (tail === "calendar" && m === "GET") return demoCalendar(params);
+  // ── SCP-1m: create a post in a cycle (BFF §63.6.1), and SCP-1k's bulk actions (§63.6.7) ───────────
+  const createPostM = tail.match(/^cycles\/([^/]+)\/posts$/);
+  if (createPostM && m === "POST") return demoCreatePost(createPostM[1], b(), userId);
+  if (tail === "posts/actions" && m === "POST") return demoBulkActions(b(), userId);
 
   // ── SCP-1o: the pipeline read (BFF §63.6.2) and the write hook ────────────────────────────────────────────────
   const pipeM = tail.match(/^posts\/([^/]+)\/pipeline$/);

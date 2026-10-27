@@ -448,6 +448,33 @@ export function demoCycleHealth(cycleId: string): DemoResult {
   });
 }
 
+/**
+ * `GET calendar?from=&to=&engagementId=` (BFF §63.10, SCP-1k), in the server's order of checks: the range (both days real, `to` not before `from`, at most 62 days
+ * both counted: 400 `{field}`), then `engagementId` (400 when it is not a demo client id; an unknown one keeps nothing). The posts are the store's, by the day they
+ * are scheduled on in the display zone, oldest first; a post with no date is left out. Sorted like the server's `ORDER BY scheduled_at, id`.
+ */
+export const DEMO_CALENDAR_MAX_DAYS = 62;
+export function demoCalendar(params: URLSearchParams): DemoResult {
+  const bad = (field: string): DemoResult => ({ status: 400, json: { error: "invalid_field", field } });
+  const from = params.get("from");
+  const to = params.get("to");
+  if (!demoRealDate(from)) return bad("from");
+  if (!demoRealDate(to)) return bad("to");
+  const span = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000 + 1;
+  if (span < 1 || span > DEMO_CALENDAR_MAX_DAYS) return bad("to");
+  const eng = params.get("engagementId");
+  if (eng !== null && eng !== "" && !/^[\w-]{1,64}$/.test(eng)) return bad("engagementId");
+  const items = store.posts
+    .filter((p) => p.scheduledAt !== null && (!eng || p.engagementId === eng))
+    .filter((p) => { const day = todayIsoInDisplayZone(new Date(p.scheduledAt as string)); return day >= from && day <= to; })
+    .sort((a, b) => (a.scheduledAt as string).localeCompare(b.scheduledAt as string) || a.id.localeCompare(b.id))
+    .map((p) => ({
+      postId: p.id, clientName: store.engagements.find((e) => e.id === p.engagementId)?.clientName ?? "", title: p.title, format: p.format,
+      scheduledAt: p.scheduledAt, pipelineStatus: p.pipelineStatus, phase: scpPhaseOf(view(p)), simulated: p.simulated,
+    }));
+  return ok({ items });
+}
+
 export function demoAllocationRow(e: PipeEngagement, userId: string): Record<string, unknown> {
   const a = store.allocations[e.id];
   const month = todayIsoInDisplayZone().slice(0, 7);
@@ -616,4 +643,74 @@ export const demoPipelineMetrics = (postId: string) => store.posts.find((p) => p
  */
 export function runDemoPipelineAction(_postId: string, _body: unknown, _userId: string): DemoResult {
   return err(501, "demo_action_runner_not_built");
+}
+
+// ── SCP-1m: create (BFF §63.6.1) ────────────────────────────────────────────────────────────────────────────────────────────
+
+const NETWORKS_DEMO = ["instagram", "facebook", "tiktok", "linkedin", "x", "youtube", "threads", "pinterest", "bluesky", "mastodon"];
+const FORMATS_DEMO = ["feed", "carousel", "reel", "story"];
+const UUID_DEMO = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * `POST cycles/:cycleId/posts`, in the server's order of checks: who (the cycle's officer or one of the four: 403 `not_officer_or_approver`; a client
+ * contact: 403 `not authorized`), then the cycle (404 `cycle_not_found`), then each field (400 `{field}`), then a replayed `id` (201 `created: false`).
+ * The post starts `planned`, in the cycle's client; `isExtra` keeps it outside the target. It joins the store, so the next read shows it.
+ */
+export function demoCreatePost(cycleId: string, body: Record<string, unknown>, userId: string): DemoResult {
+  if (isClientContact(userId)) return err(403, "not authorized: social_post create");
+  const cycle = cyclesStore.cycles.find((c) => c.id === cycleId) ?? null;
+  const officerId = cycle ? store.allocations[cycle.engagementId]?.officerId ?? null : null;
+  if (!isDemoSocialApprover(userId) && !(officerId !== null && officerId === userId)) return err(403, "not_officer_or_approver");
+  if (!cycle) return err(404, "cycle_not_found");
+  const bad = (field: string): DemoResult => ({ status: 400, json: { error: "invalid_field", field } });
+  if (typeof body.title !== "string" || body.title.trim() === "") return body.title === undefined ? { status: 400, json: { error: "missing_field", field: "title" } } : bad("title");
+  if ([...body.title].length > 200) return bad("title");
+  if (body.id !== undefined && (typeof body.id !== "string" || !UUID_DEMO.test(body.id))) return bad("id");
+  if (body.isExtra !== undefined && typeof body.isExtra !== "boolean") return bad("isExtra");
+  if (body.format !== undefined && body.format !== null && !(typeof body.format === "string" && FORMATS_DEMO.includes(body.format))) return bad("format");
+  if (body.pillar !== undefined && body.pillar !== null && !(typeof body.pillar === "string" && [...body.pillar].length <= 60)) return bad("pillar");
+  if (body.scheduledAt !== undefined && body.scheduledAt !== null && !(typeof body.scheduledAt === "string" && !Number.isNaN(Date.parse(body.scheduledAt)))) return bad("scheduledAt");
+  const placement = body.placement;
+  if (placement !== undefined && !(Array.isArray(placement) && placement.every((n) => typeof n === "string" && NETWORKS_DEMO.includes(n)) && new Set(placement).size === placement.length)) return bad("placement");
+  const id = typeof body.id === "string" ? body.id.toLowerCase() : `soc-post-new-${store.posts.length + 1}`;
+  const existing = store.posts.find((p) => p.id === id);
+  if (existing) return existing.cycleId === cycleId ? { status: 201, json: { post: demoPipelinePost(existing, userId), created: false } } : bad("id");
+  const now = new Date().toISOString();
+  const post: PipePost = {
+    id, engagementId: cycle.engagementId, cycleId, cycleMonth: cycle.month, title: body.title.trim(), format: (body.format as Format | null | undefined) ?? "feed",
+    pillar: typeof body.pillar === "string" ? body.pillar : "", angle: "", objective: "", keyMessage: "", caption: "", onAssetText: "", cta: "", hashtags: [],
+    visualDirection: "", rawAssets: [], placement: Array.isArray(placement) ? [...(placement as string[])] : [],
+    scheduledAt: typeof body.scheduledAt === "string" ? new Date(body.scheduledAt).toISOString() : null, isExtra: body.isExtra === true, mustHaves: [],
+    pipelineStatus: "planned", statusSince: now, changeBy: null, changeKind: null, returnTo: null, changeNote: null, changeCase: null, changedOnly: false, copyBefore: null,
+    blockReason: null, blockWaitingOn: null, blockedFrom: null, blockedAt: null, creativeSource: null, creativeState: null, creativeRequestId: null,
+    designs: [], suggestions: {}, skippedChecks: [], authorId: null, scheduleVia: null, liveUrl: null, wentLiveAt: null, simulated: false, rescheduled: false,
+    healthHint: null, metrics: null, copyLog: [],
+    history: [{ action: "create", from: null, to: "planned", by: who(userId), agent: null, at: now, recorded: null, viaPortal: false }],
+  };
+  store.posts.push(post);
+  return { status: 201, json: { post: demoPipelinePost(post, userId), created: true } };
+}
+
+// ── SCP-1k: bulk (BFF §63.6.7) ──────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `POST posts/actions`: each item runs the single-action runner on its own, so one refusal never undoes another, and the answer is `{results}` in the
+ * items' order. Until SCP-1e's runner is built (`runDemoPipelineAction`), every item answers its refusal (`demo_action_runner_not_built`) in words rather
+ * than pretending; when it lands, this carries its answers through unchanged.
+ */
+export function demoBulkActions(body: Record<string, unknown>, userId: string): DemoResult {
+  const bad = (error: string, field: string): DemoResult => ({ status: 400, json: { error, field } });
+  if (typeof body.action !== "string") return bad("missing_field", "action");
+  if (body.action !== "send_to_proofread" && body.action !== "approve_copy") return bad("invalid_field", "action");
+  if (!Array.isArray(body.items) || body.items.length < 1 || body.items.length > 50) return bad("invalid_field", "items");
+  const results = body.items.map((raw): Record<string, unknown> => {
+    const it = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+    const postId = typeof it.postId === "string" ? it.postId : "";
+    if (!isPipelinePostId(postId)) return { postId, ok: false, error: "post_not_found" };
+    const r = runDemoPipelineAction(postId, { action: body.action, expectedStatus: it.expectedStatus, actionId: it.actionId }, userId);
+    if (r.status === 200) return { postId, ok: true, post: (r.json as { post?: unknown }).post ?? null };
+    const j = (r.json ?? {}) as Record<string, unknown>;
+    return { postId, ok: false, error: typeof j.error === "string" ? j.error : "refused", ...(j.field ? { field: j.field } : {}), ...(j.blockers ? { blockers: j.blockers } : {}) };
+  });
+  return ok({ results });
 }

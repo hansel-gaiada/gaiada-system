@@ -60,7 +60,7 @@ const SOCIAL_PINNED: readonly PinnedItem[] = [
   { kind: "row", key: "reports", row: "reports", tab: "social", tabFallback: true, label: "Reports", icon: "chart" },
   // The asset library (`{D}/assets`, the `assets` tab of the Social Media toolkit).
   { kind: "row", key: "saved", row: "publish", tab: "assets", label: "Saved", icon: "bookmark" },
-  { kind: "row", key: "profile", row: "profile", label: "Profile", icon: "user", ticket: "SCP-1k" },
+  { kind: "row", key: "profile", row: "profile", label: "Profile", icon: "user" },
   { kind: "row", key: "assistant", row: "assistant", label: "AI Assistant" },
   // A future Social page ({D}/dashboard, for the four Social approvers).
   { kind: "row", key: "dashboard", row: "dashboard", label: "Dashboard", icon: "dashboard", ticket: "SCP-5d" },
@@ -78,7 +78,7 @@ export const SKINS: Readonly<Record<SkinKey, Skin>> = {
 };
 
 /** The skins drawn for everyone. Standard always; Social since SCP-Kg, switched on by the owner on 2026-10-27 ahead of SCP-1d, 1e and 1k (plan §8
- *  had it wait for them). No pinned entry points at a page that does not exist: Messages, Profile, Dashboard and Settings keep their `ticket` and
+ *  had it wait for them). No pinned entry points at a page that does not exist: Messages and Dashboard keep their `ticket` and
  *  stay hidden until their pages land. Anyone may still choose the Standard look for themselves (More › Appearance). */
 export const SKINS_ON: readonly SkinKey[] = ["standard", "social"];
 
