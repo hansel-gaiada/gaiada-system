@@ -499,6 +499,32 @@ export class WebdeskZoneB {
     return this.settle(res);
   }
 
+  /**
+   * One read whose 2xx answer is raw BYTES (M5-W1q2: the reviewer's preview of a quarantined image), not JSON. The same egress seam as
+   * `read()`: the same client (mTLS, token, breaker, deadline, transport retry for a GET), the same transport-error mapping, and every
+   * non-2xx answer goes through the SAME `settle()` (a problem is JSON, so Zone B's typed 4xx pass through untouched and a 401/403/5xx
+   * is our own fault, never the caller's). The only difference is the typed `binaryResponse` flag the client already has (the contract
+   * artifact read uses it): an any-type Accept header and a 25 MiB response cap instead of 8, and the bytes come back as received. Never
+   * audited, like `read()`. The caller decides what the bytes are; nothing here trusts the content type it is given.
+   */
+  async readBytes(
+    req: Omit<WebdeskControlRequest, "method" | "body" | "idempotencyKey" | "ws4" | "editorialAssertion" | "binaryResponse" | "query">,
+  ): Promise<{ status: number; bytes: Buffer; contentType: string | null }> {
+    const client = this.client();
+    let res: WebdeskControlResponse;
+    try {
+      res = await client.send({ ...req, method: "GET", binaryResponse: true });
+    } catch (err) {
+      throw this.mapTransport(err, false);
+    }
+    if (res.status >= 200 && res.status < 300) {
+      if (!(res.bodyBytes instanceof Buffer)) throw new BadGatewayException({ message: "webdesk_error", reason: "non_binary_response" });
+      return { status: res.status, bytes: res.bodyBytes, contentType: res.contentType };
+    }
+    this.settle(res); // a non-2xx answer always throws, as the typed error the BFF uses everywhere
+    throw new BadGatewayException({ message: "webdesk_error", reason: `http_${res.status}` });
+  }
+
   /** One write: refuse when unconfigured, sign, ledger row, send, ledger row, map. */
   async write(principal: Principal, tenantId: string, w: EgressWrite): Promise<ZoneBResult> {
     const client = this.client();

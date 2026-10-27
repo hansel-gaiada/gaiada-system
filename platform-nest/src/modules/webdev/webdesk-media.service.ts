@@ -14,6 +14,7 @@
 //   media.delete       DELETE …/media/:assetId              MEDIUM, editorial assertion, Idempotency-Key
 //   media.list (queue) GET    …/media/quarantine           read (M5-W1q: the review queue, with a per-asset `allowed.review`)
 //   media.review       POST   …/media/:assetId/review      MEDIUM, editorial assertion, Idempotency-Key (M5-W1q)
+//   media.reviewPreview GET   …/media/:assetId/review-preview read, BYTES (M5-W1q2: the reviewer sees a raster image before deciding)
 //
 // ── THE CONTRIBUTOR UPLOAD QUARANTINE (M5-W1q, owner ruling WSK-D84) ─────────────────────────────
 // A freelance writer (`users.kind = contributor`) may mint an upload token (Cerbos `webdesk_media_asset:upload`, an ALLOW only for
@@ -27,6 +28,17 @@
 // `webdesk_media_asset`, module `webdev`) can produce; the controller's first statement is that call, so
 // authorization precedes ANY body validation (the "validation pre-empts authz" trap). No attribute is taken
 // from Zone B for the decision: the policy reads only the tenant and the module.
+//
+// ── THE REVIEWER'S BYTE PREVIEW (M5-W1q2, owner ruling WSK-D84, approved 2026-10-27) ────────────────
+// A staff editor decides on an upload they can now SEE. `reviewPreview()` asks the same questions as `review()`, in the same order
+// (the caller may review someone's upload at all; the asset's REAL uploader from WebDesk's own row; `review` again with it), so the
+// uploader previewing their own upload, an unknown uploader, a contributor, a writer, a client editor and a bot are all 403 and the
+// 403 comes BEFORE any byte is fetched. Only then does it ask WebDesk's `media.reviewPreview` (raw bytes over the same control
+// channel: `WebdeskZoneB.readBytes`) and check the bytes ITSELF: the content type must be one of five raster types, the file
+// signature must match it, the size must be within 10 MiB (webdesk-media-preview.ts). A mismatch is 415 and the bytes are dropped.
+// The browser gets exactly six headers (CSP `sandbox; default-src 'none'`, nosniff, inline, no-store, CORP same-origin), never one
+// copied from WebDesk. SVG, HTML, PDF and video are never served: WebDesk answers 415 for them and the page shows the name only.
+// A read: no ledger row, no activity (like `media.list`). `@ContributorRoute()` is NOT on the route, and there is no MCP tool.
 //
 // ── THE UPLOAD TOKEN IS A ONE-TIME SECRET ─────────────────────────────────────────────────────────
 // `media.uploadToken` answers `{token, uploadPath, …}` once; Zone B stores only sha256(token). The browser then
@@ -55,6 +67,13 @@ import { BadGatewayException, Logger } from "@nestjs/common";
 import { config } from "../../config";
 import { authorize } from "../../core/http";
 import { checkActions, checkMany } from "../../rbac/cerbos";
+import {
+  PREVIEW_MAX_BYTES,
+  isPreviewRasterMime,
+  mediaTypeOf,
+  rasterSignatureMatches,
+  type PreviewRasterMime,
+} from "./webdesk-media-preview";
 import {
   UUID_RE,
   WebdeskProblem,
@@ -130,6 +149,33 @@ function mediaAssetNotFound(): WebdeskProblem {
     status: 404,
     detail: "No such media asset on this site.",
   });
+}
+
+/** 415, in Zone B's own problem type: the bytes are not a preview the ERP will send. Carries the declared type only. */
+function previewUnsupported(mime: string | null): WebdeskProblem {
+  return new WebdeskProblem(415, {
+    type: "https://webdesk.gaiada.online/errors/media-preview-unsupported",
+    title: "No preview for this type",
+    status: 415,
+    detail: "Only raster images (png, jpeg, gif, webp, avif) are previewed.",
+    ...(mime !== null ? { mime } : {}),
+  });
+}
+
+/** 413: more bytes than the preview cap. */
+function previewTooLarge(): WebdeskProblem {
+  return new WebdeskProblem(413, {
+    type: "https://webdesk.gaiada.online/errors/media-preview-too-large",
+    title: "Too large to preview",
+    status: 413,
+    detail: `Only images up to ${PREVIEW_MAX_BYTES} bytes are previewed.`,
+  });
+}
+
+/** What `reviewPreview` returns: the checked bytes and the one type they were checked against. */
+export interface MediaPreview {
+  mime: PreviewRasterMime;
+  bytes: Buffer;
 }
 
 /**
@@ -338,6 +384,43 @@ export class WebdeskMediaService {
       entity: { type: "webdesk_media_asset", id: assetId },
       ledger: { tenantSlug: site.tenantSlug, siteId: site.siteId, assetId, decision: b.decision },
     });
+  }
+
+  /**
+   * `GET …/media/:assetId/review-preview` → the bytes of ONE quarantined raster upload, checked. Authorization is `review()`'s, in its
+   * order: (1) the caller may review SOMEONE's upload (OTHER_UPLOADER, before anything is validated or read); (2) the id is a uuid
+   * (404 otherwise); (3) the asset's REAL uploader is read from WebDesk's own row, filtered to the quarantine (any other state, site
+   * or tenant is the one 404); (4) `review` again with that uploader (the uploader themself and an unknown uploader are refused);
+   * (5) only now are the bytes fetched, and (6) checked: allow-listed type, signature, size. Zone B's own refusals pass through
+   * (415 `media-preview-unsupported` for a type that is never previewed, 413 `media-preview-too-large`, 404).
+   */
+  async reviewPreview(gate: ContentGate, site: SiteRef, assetId: string, rawQuery: unknown): Promise<MediaPreview> {
+    gate.require("webdesk_media_asset", "read");
+    const editable = await gate.resolveSite(this.zoneB, site);
+    const siteId = editable.site.siteId;
+    await authorize(gate.principal, this.reviewResource(gate, siteId, OTHER_UPLOADER), "review"); // (1) PHASE 2, before anything is validated
+    strictQuery(rawQuery, []);
+    if (!UUID_RE.test(assetId)) throw mediaAssetNotFound(); // (2)
+    const found = await this.zoneB.read({
+      command: "media.list",
+      path: MEDIA_PATH,
+      params: { tenantSlug: site.tenantSlug, siteId: site.siteId },
+      query: { assetId, reviewState: "quarantined", limit: "1" },
+    });
+    const row = isPlainObject(found.body) && Array.isArray(found.body.assets) ? found.body.assets.find(isPlainObject) : undefined;
+    if (!row || row.assetId !== assetId.toLowerCase()) throw mediaAssetNotFound(); // (3) not in the quarantine of THIS site: the one 404
+    await authorize(gate.principal, this.reviewResource(gate, siteId, typeof row.createdBy === "string" ? row.createdBy : null), "review"); // (4)
+    const got = await this.zoneB.readBytes({
+      command: "media.reviewPreview",
+      path: `${MEDIA_PATH}/:assetId/review-preview`,
+      params: { tenantSlug: site.tenantSlug, siteId: site.siteId, assetId },
+    }); // (5)
+    // (6) the ERP's own wall: nothing Zone B says about the type is believed.
+    const mime = mediaTypeOf(got.contentType);
+    if (mime === null || !isPreviewRasterMime(mime) || (typeof row.mime === "string" && row.mime !== mime)) throw previewUnsupported(mime);
+    if (got.bytes.length > PREVIEW_MAX_BYTES) throw previewTooLarge();
+    if (got.bytes.length === 0 || !rasterSignatureMatches(got.bytes, mime)) throw previewUnsupported(mime);
+    return { mime, bytes: got.bytes };
   }
 
   /** `PATCH …/media/:assetId` body `{title?, alt?, tags?}` (at least one) → 200 `{asset}`. Zone B validates the values. */

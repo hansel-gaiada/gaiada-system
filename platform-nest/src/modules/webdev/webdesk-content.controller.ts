@@ -31,6 +31,7 @@ import {
   type ZoneBResult,
 } from "./webdesk-content.service";
 import { webdeskMedia } from "./webdesk-media.service";
+import { previewHeaders } from "./webdesk-media-preview";
 import { webdeskEditorial } from "./webdesk-editorial.service";
 import { webdeskCalendar } from "./webdesk-calendar.service";
 import { webdeskAssist } from "./webdesk-assist.service";
@@ -218,6 +219,22 @@ export class WebdeskContentController {
   ) {
     const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_media_asset", "read");
     send(reply, await webdeskMedia.review(gate, { tenantSlug, siteId }, assetId, body, idempotencyKeyOf(idem)));
+  }
+
+  /**
+   * M5-W1q2: the reviewer's byte preview of ONE quarantined raster upload (staff; the same Cerbos `review` questions as the decision, in
+   * the same order, all BEFORE a byte is fetched). 200 the image with exactly six headers (webdesk-media-preview.ts `previewHeaders`),
+   * never anything copied from WebDesk; 415 for any other type, 413 over 10 MiB, 404 for every other case. Not `@ContributorRoute()`.
+   */
+  @Get("sites/:tenantSlug/:siteId/media/:assetId/review-preview")
+  async mediaReviewPreview(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("assetId") assetId: string, @Query() query: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_media_asset", "read");
+    const preview = await webdeskMedia.reviewPreview(gate, { tenantSlug, siteId }, assetId, query);
+    void reply.status(200).headers(previewHeaders(preview.mime)).send(preview.bytes);
   }
 
   /** 201 `{uploadUrl, expiresAt, maxBytes, allowedMimes}`: `uploadUrl` carries a ONE-TIME secret, so `no-store`. */
