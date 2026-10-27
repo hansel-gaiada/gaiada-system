@@ -1185,7 +1185,12 @@ const configBase = {
     metricsPull: {
       enabled:
         process.env.SOCIAL_METRICS_PULL_ENABLED === "1" || process.env.SOCIAL_METRICS_PULL_ENABLED === "true",
-      intervalMs: Number(process.env.SOCIAL_METRICS_PULL_INTERVAL_MS ?? 24 * 3600 * 1000),
+      // An empty, non-numeric or tiny value would make this 0 or NaN, a tight loop against the publisher (compose passes
+      // the variable through): anything below a minute falls back to the 24 h default (SCP-Sd's dev cadence is an hour).
+      intervalMs: (() => {
+        const n = Number(process.env.SOCIAL_METRICS_PULL_INTERVAL_MS);
+        return Number.isFinite(n) && n >= 60_000 ? n : 24 * 3600 * 1000;
+      })(),
     },
     // SMM-16 — AI triage (`smm-inbox-triage`) + the SLA/spike guard (`smm-inbox-sla-guard`, named in
     // 0105's own `ix_social_inbox_threads_sla` comment). Both dark by default, same convention as

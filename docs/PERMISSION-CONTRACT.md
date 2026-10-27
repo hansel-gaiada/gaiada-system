@@ -3039,6 +3039,9 @@ No change to these: `social_post` · `read`, `create`, `publish` and `cancel`; `
 | opening the client-month request (`approve_for_design`) | `social_post` · `approve`, then `work_request` · `create` for the acting approver |
 | filing a publish through the publisher (`schedule_publisher`) | `social_post` · `approve` |
 | unscheduling a publisher schedule | `social_post` · `approve` |
+| "Publish now (simulated)" (SCP-Sc; reads approvals only, never mints or decides one) | `social_post` · `approve` (so the officer and the author are refused by the 53.3 DENY; automation 403 `automation_cannot_act`) |
+| seeding or removing a client's simulated accounts (SCP-Sb) | `social_engagement` · `plan` (the four) |
+| the publisher's result moving a post live (SCP-Sc) | none: a system path with no person, run by the status sweep under the post's lock (actor NULL in the activity row) |
 | rescheduling a publisher schedule | `social_post` · `schedule`, then `cancel` |
 | deciding a pipeline post's publish approval (D14) | `automation_approval` · `decide` (unchanged), then the entry's `approverCheck` (below) |
 | the design queue | `work_request` · `read`, then the handler's row narrowing |

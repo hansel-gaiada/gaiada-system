@@ -596,6 +596,11 @@ services:
       # This row is what makes the flag reach the container. Turn it OFF and purge the simulated rows before the ERP holds
       # real client data. GET /health reports it as `socialSimulation`.
       SOCIAL_SIMULATION_ENABLED: ${SOCIAL_SIMULATION_ENABLED:-0}
+      # SCP-Sd: the metrics sweep (metrics-job.ts) is what pulls a simulated account's numbers through the simulator, so
+      # the dev review needs it on (an hour is plenty: 3600000). Off by default, as before. The interval's default is the
+      # real 24 h, never empty: config.ts reads Number(...), and an empty string would make it 0, a tight loop.
+      SOCIAL_METRICS_PULL_ENABLED: ${SOCIAL_METRICS_PULL_ENABLED:-0}
+      SOCIAL_METRICS_PULL_INTERVAL_MS: ${SOCIAL_METRICS_PULL_INTERVAL_MS:-86400000}
       # Admin/Systems console aggregator (Phase C) — read-only probes of each downstream
       # service. All fail-soft: an unset URL just reports "not configured" in the console.
       GATEWAY_URL: http://ai-gateway:3002
