@@ -50,7 +50,8 @@ describe("GET feed", () => {
     allocStore.byEngagement[eng].officerId = "u-gm";
     try {
       const turn = feed("u-gm", "view=your_turn&limit=50").items as Body[];
-      expect(turn.some((c) => PIPE_POSTS.find((p) => p.id === c.id)!.engagementId === eng)).toBe(false);
+      // the posts of that client the approvers hold are no longer theirs (the ones the officer holds now are, as their own client's)
+      expect(turn.some((c) => PIPE_POSTS.find((p) => p.id === c.id)!.engagementId === eng && c.holder.role === "approver")).toBe(false);
       // still in the team's view, as a step they may not take
       const all = (feed("u-gm", "view=all&limit=50").items as Body[]).find((c) => PIPE_POSTS.find((p) => p.id === c.id)!.engagementId === eng && c.holder.role === "approver" && (c.pipelineStatus === "hod" || c.pipelineStatus === "final"))!;
       expect(all.yourTurn).toBe(false);
