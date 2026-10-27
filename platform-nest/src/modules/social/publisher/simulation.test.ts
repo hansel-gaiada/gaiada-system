@@ -478,6 +478,8 @@ function sourceFiles(dir = SRC): string[] {
   return out;
 }
 const rel = (p: string) => relative(SRC, p).split(sep).join("/");
+/** The only file allowed to write a `simulated = true` account (SCP-Sb). */
+const SIMULATED_ACCOUNT_WRITER = "modules/social/simulated-accounts.ts";
 const sqlLiterals = (src: string) => [...src.matchAll(/`[^`]*`/g)].map((m) => m[0]);
 
 describe("SCP-Sa · static inventory of the writers (src/, tests excluded)", () => {
@@ -494,14 +496,17 @@ describe("SCP-Sa · static inventory of the writers (src/, tests excluded)", () 
       "modules/social/publisher/linkedin-oauth.ts",
       "modules/social/publisher/provisioning.ts",
       "modules/social/publisher/youtube-oauth.ts",
+      "modules/social/simulated-accounts.ts",
       "seed/portal-engagement.ts",
     ]);
     for (const f of writers) {
+      // SCP-Sb's seed is the one writer of SIMULATED accounts: it owes the opposite fence (switch OFF refuses) instead.
+      if (rel(f) === SIMULATED_ACCOUNT_WRITER) continue;
       expect(readFileSync(f, "utf8"), rel(f)).toMatch(/\b(assertRealAccountWriteAllowed|realAccountWriteRefusal)\(/);
     }
   });
 
-  it("the ONLY statement that writes a variant's `simulated` mark is dispatch.ts's stamp; nothing writes an account's yet", () => {
+  it("the ONLY statement that writes a variant's `simulated` mark is dispatch.ts's stamp; the ONLY account-mark writer is SCP-Sb's seed", () => {
     const variantMarkWriters: string[] = [];
     const accountMarkWriters: string[] = [];
     for (const f of files) {
@@ -512,8 +517,20 @@ describe("SCP-Sa · static inventory of the writers (src/, tests excluded)", () 
       }
     }
     expect(variantMarkWriters).toEqual(["modules/social/dispatch.ts"]);
-    // SCP-Sb's seed will be the first account writer: it must call `assertSimulatedWriteAllowed` and be added here.
-    expect(accountMarkWriters).toEqual([]);
+    // SCP-Sb's seed is the ONE writer of an account's mark: it calls `assertSimulatedWriteAllowed` before it writes, and its
+    // controller calls it again before the body is read. A second writer fails here until it is fenced the same way.
+    expect([...new Set(accountMarkWriters)]).toEqual([SIMULATED_ACCOUNT_WRITER]);
+    const seed = readFileSync(join(SRC, SIMULATED_ACCOUNT_WRITER), "utf8");
+    const fence = seed.indexOf('assertSimulatedWriteAllowed("simulated-account seed")');
+    expect(fence).toBeGreaterThan(-1);
+    // The fence precedes every statement that writes the SEED path's account rows. (The teardown, which must work with the
+    // switch OFF, comes after the seed in the file and only soft-deletes rows already marked simulated.)
+    expect(fence).toBeLessThan(seed.indexOf("INSERT INTO social_accounts"));
+    expect(fence).toBeLessThan(seed.indexOf("UPDATE social_accounts"));
+    const controller = readFileSync(join(SRC, "modules", "social", "simulated-accounts.controller.ts"), "utf8");
+    expect(controller.indexOf("authorizePlan(")).toBeGreaterThan(-1);
+    expect(controller.indexOf("authorizePlan(")).toBeLessThan(controller.indexOf("assertSimulatedWriteAllowed("));
+    expect(controller.indexOf("assertSimulatedWriteAllowed(")).toBeLessThan(controller.indexOf("parseSeedBody("));
     // And the stamp only ever ADDS the mark, from the simulator's provenance, behind the switch.
     const dispatch = readFileSync(join(SRC, "modules", "social", "dispatch.ts"), "utf8");
     expect(dispatch).toMatch(/simulated = \(simulated OR \$7::boolean\)/);
