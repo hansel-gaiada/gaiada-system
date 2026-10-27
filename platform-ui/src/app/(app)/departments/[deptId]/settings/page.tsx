@@ -9,10 +9,12 @@ import { workspaceFor } from "@/lib/workspaces";
 import { todayIsoInDisplayZone } from "@/lib/format";
 import { monthTitle, parseMonth, shiftMonth } from "@/lib/deptCalendar";
 import { getCycleTable, getSocialSettings } from "@/lib/socialCycles-data";
+import { getAllocation } from "@/lib/socialAllocation-data";
 import { Card } from "@/components/ui";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { SocialSettingsForm } from "@/components/social/SocialSettingsForm";
 import { CycleDeadlineTable } from "@/components/social/CycleDeadlineTable";
+import { StepEstimatesEditor } from "@/components/social/StepEstimatesEditor";
 import "@/components/social/cycles.css";
 
 type Params = Promise<{ deptId: string }>;
@@ -49,7 +51,9 @@ export default async function SocialSettingsPage({ params, searchParams }: { par
   const sp = await searchParams;
   const today = todayIsoInDisplayZone();
   const month = parseMonth(first(sp.month), today.slice(0, 7));
-  const [settings, table] = await Promise.all([getSocialSettings(userId, tenant), getCycleTable(userId, tenant, month)]);
+  const [settings, table, allocation] = await Promise.all([
+    getSocialSettings(userId, tenant), getCycleTable(userId, tenant, month), getAllocation(userId, tenant),
+  ]);
 
   if (settings.kind === "forbidden" || table.kind === "forbidden") {
     return <ReadRefusal subject="the Social Media settings" kind="forbidden" detail="Reading them needs a Social Media read tier (the social_staff role, or a manager)." />;
@@ -64,15 +68,22 @@ export default async function SocialSettingsPage({ params, searchParams }: { par
       <div className="scp-sections">
         <SocialSettingsForm settings={settings.data} />
 
-        {/* SCP-1a SLOT: the per-client step estimates (working days for proofread, HoD approval, design, final check, client approval and scheduling).
-            They are edited through the allocation route SCP-1a builds next (`PATCH engagements/:engagementId/allocation`, `stepEstimates`); this page
-            only reserves the place. Do not build the route here. */}
+        {/* SCP-1a: the per-client step estimates (working days for proofread, HoD approval, design, final check, client approval and scheduling), edited
+            through the allocation route (`PATCH engagements/:engagementId/allocation`, `stepEstimates`). A failed or refused read of the allocation says so
+            here and leaves the rest of the page alone. */}
         <section aria-labelledby="scp-estimates-title" className="scp-slot" data-slot="step-estimates">
           <h3 className="scp-slot__title" id="scp-estimates-title">Step estimates</h3>
-          <p className="scp-note" style={{ marginTop: 0 }}>
+          <p className="scp-note" style={{ marginTop: 0, marginBottom: 12 }}>
             How many working days each step takes for each client: proofread, HoD approval, design, final check, client approval and scheduling. With them a post
-            shows the latest safe day to hand it on; without them, only the ready-by date. They are set per client with its allocation, which arrives next.
+            shows the latest safe day to hand it on; without them, only the ready-by date.
           </p>
+          {allocation.kind === "ok"
+            ? <StepEstimatesEditor rows={allocation.data} />
+            : <p className="scp-note" role="status">
+                {allocation.kind === "forbidden"
+                  ? "The step estimates cannot be shown: reading them needs a Social Media read tier."
+                  : `The step estimates cannot be shown right now (${allocation.reason}).`}
+              </p>}
         </section>
 
         <section aria-labelledby="scp-deadlines-title">

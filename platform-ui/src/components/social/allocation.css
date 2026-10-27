@@ -1,0 +1,31 @@
+/* SCP-1a — the Allocation page, the step-estimates editor and the brand book form. Tokens only, no colour, radius or shadow literal and no
+   uppercase transform (the tokens guard), so the Social skin (SCP-K) restyles it by changing tokens and nothing here. It builds on the
+   `.scp-*` classes of cycles.css (inputs, notes, messages, tables), which every importer of this file also imports. */
+
+.scp-input--wide { min-width: 220px; flex: 1 1 220px; }
+.scp-input--narrow { min-width: 0; width: 72px; }
+.scp-textarea { resize: vertical; font-family: var(--font-body); }
+
+.scp-alloc__select { min-width: 140px; }
+.scp-alloc__pair { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.scp-alloc__checks { display: grid; gap: 2px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.scp-alloc__checks legend { padding: 0; }
+.scp-alloc__check { display: inline-flex; align-items: center; gap: 6px; font: 400 12px var(--font-body); color: var(--text-primary); white-space: nowrap; }
+.scp-alloc__check input { margin: 0; }
+.scp-alloc__rowactions { display: grid; gap: 6px; justify-items: start; }
+.scp-alloc__counts { font-variant-numeric: tabular-nums; }
+.scp-alloc__status { font: 400 11px var(--font-body); color: var(--erp-ink-60); }
+.scp-alloc__rowmsg { font: 400 11px var(--font-body); max-width: 22ch; }
+
+/* The brand book form: a stack of fields, and one line per repeated entry. */
+.scp-brand { display: grid; gap: 16px; max-width: 760px; }
+.scp-fieldset { display: grid; gap: 8px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); padding: 10px 12px; margin: 0; min-width: 0; }
+.scp-fieldset legend { font: 600 11px var(--font-body); letter-spacing: 0.04em; color: var(--erp-ink-60); padding: 0 4px; }
+.scp-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* The step-estimates editor on the Settings page. */
+.scp-estimates { display: grid; gap: 12px; }
+.scp-estimates__cell { width: 88px; }
+
+/* Text for assistive technology only (a legend or a column name the sighted layout already shows another way). */
+.scp-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

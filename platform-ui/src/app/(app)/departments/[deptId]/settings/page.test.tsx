@@ -16,10 +16,15 @@ vi.mock("@/lib/companyContext", () => ({ activeCompany: vi.fn(() => ({ id: "co-a
 vi.mock("@/lib/departments", () => ({ getDepartment: vi.fn() }));
 vi.mock("@/lib/socialCycles-data", () => ({ getSocialSettings: vi.fn(), getCycleTable: vi.fn() }));
 vi.mock("@/lib/socialCyclesActions", () => ({ saveSocialSettings: vi.fn(), saveCycleDeadlines: vi.fn() }));
+vi.mock("@/lib/socialAllocation-data", () => ({ getAllocation: vi.fn() }));
+vi.mock("@/lib/socialAllocationActions", () => ({ saveAllocation: vi.fn() }));
 
 import { getDepartment } from "@/lib/departments";
 import { getCycleTable, getSocialSettings } from "@/lib/socialCycles-data";
 import { saveCycleDeadlines, saveSocialSettings } from "@/lib/socialCyclesActions";
+import { getAllocation } from "@/lib/socialAllocation-data";
+import { saveAllocation } from "@/lib/socialAllocationActions";
+import type { AllocationRow } from "@/lib/socialAllocation";
 import { PLAN_REFUSAL_REASON, type CycleRow, type CycleTable, type SocialSettings } from "@/lib/socialCycles";
 import type { ReadResult } from "@/lib/readResult";
 import SocialSettingsPage from "./page";
@@ -46,6 +51,11 @@ const settings = (over: Partial<SocialSettings> = {}): SocialSettings => ({
 });
 const table = (over: Partial<CycleTable> = {}): CycleTable => ({ month: "2026-10", bufferWorkingDays: 1, holidaysKnown: false, canPlan: true, rows: [alpha, beta, gamma], ...over });
 const ok = <T,>(data: T): ReadResult<T> => ({ kind: "ok", data });
+const alloc = (over: Partial<AllocationRow> = {}): AllocationRow => ({
+  engagementId: "e-alpha", clientId: "c-alpha", clientName: "Brand Alpha", status: "active", officer: null, postsPerCycle: 12, creativeSource: "creatives",
+  deliveryBatch: "A", reportFormat: null, reportDueDay: null, platforms: [], formats: [], defaultPostTime: null, stepEstimates: { hod: 2, design: 3 },
+  thisCycle: null, canPlan: true, ...over,
+});
 
 const mount = async (search: Record<string, string> = {}, deptId = "d-soc") =>
   render(await SocialSettingsPage({ params: Promise.resolve({ deptId }), searchParams: Promise.resolve(search) }));
@@ -60,6 +70,8 @@ beforeEach(() => {
   vi.mocked(getCycleTable).mockReset().mockResolvedValue(ok(table()));
   vi.mocked(saveSocialSettings).mockReset();
   vi.mocked(saveCycleDeadlines).mockReset();
+  vi.mocked(getAllocation).mockReset().mockResolvedValue(ok([alloc(), alloc({ engagementId: "e-beta", clientName: "Brand Beta", stepEstimates: {} })]));
+  vi.mocked(saveAllocation).mockReset();
 });
 afterEach(() => vi.useRealTimers());
 
@@ -86,7 +98,7 @@ describe("what is asked of the platform", () => {
 describe("the deadline table", () => {
   it("draws one row per client with its pre-fill, deadline, ready-by, posts and health chip", async () => {
     await mount();
-    const t = screen.getByRole("table");
+    const t = screen.getByRole("table", { name: /Deadline per client/ });
     expect(within(t).getByText(/Deadline per client for October 2026/)).toBeInTheDocument();
     const rows = within(t).getAllByRole("row").slice(1);
     expect(rows).toHaveLength(3);
@@ -152,11 +164,59 @@ describe("the settings section", () => {
     expect(screen.getByText("Public holidays 2026")).toBeInTheDocument();
     expect(screen.queryByText("Weekends only")).not.toBeInTheDocument();
   });
-  it("holds a marked slot for the step estimates (SCP-1a builds the route)", async () => {
+  it("fills the marked slot with each client's step estimates (SCP-1a)", async () => {
     const { container } = await mount();
-    const slot = container.querySelector('[data-slot="step-estimates"]')!;
+    const slot = container.querySelector('[data-slot="step-estimates"]') as HTMLElement;
     expect(slot).not.toBeNull();
-    expect(within(slot as HTMLElement).getByRole("heading", { name: "Step estimates" })).toBeInTheDocument();
+    const s = within(slot);
+    expect(s.getByRole("heading", { name: "Step estimates" })).toBeInTheDocument();
+    expect(getAllocation).toHaveBeenCalledWith("u-1", "co-a");
+    expect(s.getByLabelText("HoD approval for Brand Alpha (working days)")).toHaveValue(2);
+    expect(s.getByLabelText("Design for Brand Alpha (working days)")).toHaveValue(3);
+    expect(s.getByLabelText("Proofread for Brand Alpha (working days)")).toHaveValue(null);
+    expect(s.getByLabelText("Scheduling for Brand Beta (working days)")).toHaveValue(null);
+  });
+  it("saves a client's estimates through the allocation route: the whole set, an empty box cleared", async () => {
+    vi.mocked(saveAllocation).mockResolvedValue({ ok: true, row: alloc({ stepEstimates: { hod: 2, design: 5 } }) });
+    const { container } = await mount();
+    const s = within(container.querySelector('[data-slot="step-estimates"]') as HTMLElement);
+    const save = s.getByRole("button", { name: "Save step estimates for Brand Alpha" });
+    expect(save).toBeDisabled(); // nothing changed yet
+    fireEvent.change(s.getByLabelText("Design for Brand Alpha (working days)"), { target: { value: "5" } });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await waitFor(() => expect(saveAllocation).toHaveBeenCalledWith("e-alpha", { stepEstimates: { hod: 2, design: 5 } }));
+    expect(await s.findByText("Saved.")).toBeInTheDocument();
+    fireEvent.change(s.getByLabelText("HoD approval for Brand Alpha (working days)"), { target: { value: "" } });
+    vi.mocked(saveAllocation).mockResolvedValue({ ok: true, row: alloc({ stepEstimates: { design: 5 } }) });
+    fireEvent.click(s.getByRole("button", { name: "Save step estimates for Brand Alpha" }));
+    await waitFor(() => expect(saveAllocation).toHaveBeenLastCalledWith("e-alpha", { stepEstimates: { design: 5 } }));
+  });
+  it("will not send an estimate outside 0 to 30 or a fraction", async () => {
+    const { container } = await mount();
+    const s = within(container.querySelector('[data-slot="step-estimates"]') as HTMLElement);
+    const save = s.getByRole("button", { name: "Save step estimates for Brand Alpha" });
+    fireEvent.change(s.getByLabelText("Design for Brand Alpha (working days)"), { target: { value: "31" } });
+    expect(save).toBeDisabled();
+    fireEvent.change(s.getByLabelText("Design for Brand Alpha (working days)"), { target: { value: "2.5" } });
+    expect(save).toBeDisabled();
+    expect(saveAllocation).not.toHaveBeenCalled();
+  });
+  it("is read-only with the reason for anyone who may not plan", async () => {
+    vi.mocked(getAllocation).mockResolvedValue(ok([alloc({ canPlan: false })]));
+    const { container } = await mount();
+    const s = within(container.querySelector('[data-slot="step-estimates"]') as HTMLElement);
+    expect(s.getByLabelText("Design for Brand Alpha (working days)")).toBeDisabled();
+    expect(s.getByRole("button", { name: "Save step estimates for Brand Alpha" })).toBeDisabled();
+    expect(s.getByText(PLAN_REFUSAL_REASON)).toBeInTheDocument();
+  });
+  it("says so in the slot, and leaves the rest of the page, when the allocation cannot be read", async () => {
+    vi.mocked(getAllocation).mockResolvedValue({ kind: "unavailable", reason: "platform 500" });
+    const { container } = await mount();
+    const slot = within(container.querySelector('[data-slot="step-estimates"]') as HTMLElement);
+    expect(slot.getByText(/cannot be shown right now \(platform 500\)/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Buffer \(working days\)/)).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: /Deadline per client/ })).toBeInTheDocument();
   });
 
   it("saves only what changed, and says how many cycles moved", async () => {
@@ -240,19 +300,20 @@ describe("without the right to plan: readable, every control disabled WITH the r
   beforeEach(() => {
     vi.mocked(getSocialSettings).mockResolvedValue(ok(settings({ canPlan: false })));
     vi.mocked(getCycleTable).mockResolvedValue(ok(table({ canPlan: false })));
+    vi.mocked(getAllocation).mockResolvedValue(ok([alloc({ canPlan: false })]));
   });
 
   it("still shows the values and the table", async () => {
     await mount();
     expect(screen.getByLabelText(/Buffer \(working days\)/)).toHaveValue(1);
-    expect(screen.getByText("Brand Alpha")).toBeInTheDocument();
+    expect(within(screen.getByRole("table", { name: /Deadline per client/ })).getByText("Brand Alpha")).toBeInTheDocument();
     expect(screen.getByText("On track · 3 spare days")).toBeInTheDocument();
   });
 
   it("disables the inputs and the buttons, each pointing at the reason in words and as a title", async () => {
     await mount();
     const reasons = screen.getAllByText(PLAN_REFUSAL_REASON);
-    expect(reasons.length).toBeGreaterThanOrEqual(2); // one under the settings, one under the table
+    expect(reasons.length).toBeGreaterThanOrEqual(3); // one under the settings, one under the step estimates, one under the table
     const controls = [
       screen.getByLabelText(/Buffer \(working days\)/), screen.getByLabelText(/Boost-candidate factor/),
       screen.getByRole("button", { name: "Save settings" }), screen.getByLabelText("Deadline for Brand Alpha"),
@@ -280,6 +341,7 @@ describe("without the right to plan: readable, every control disabled WITH the r
   it("with canPlan the same controls are enabled and carry no reason", async () => {
     vi.mocked(getSocialSettings).mockResolvedValue(ok(settings({ canPlan: true })));
     vi.mocked(getCycleTable).mockResolvedValue(ok(table({ canPlan: true })));
+    vi.mocked(getAllocation).mockResolvedValue(ok([alloc({ canPlan: true })]));
     await mount();
     expect(screen.getByLabelText(/Buffer \(working days\)/)).toBeEnabled();
     expect(screen.getByLabelText("Deadline for Brand Alpha")).toBeEnabled();
