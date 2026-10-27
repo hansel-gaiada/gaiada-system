@@ -526,7 +526,7 @@ async function sendNotifications(
       case "client": case "client_once_per_post": break;
       // ⚠ CONTRACT GAP: §63.14 has no type for telling the client that staff recorded their decision.
       case "client_recorded": break;
-      case "officer_when_by_publisher": break; // SCP-3b: the publisher's result path
+      case "officer_when_by_publisher": break; // sent by `publisher-result.ts` (the publisher's result, SCP-Sc), never by a person's own mark_live
       default:
         // eslint-disable-next-line no-console
         console.warn(`[scp] unknown notification '${name}' on ${r.action}`);
