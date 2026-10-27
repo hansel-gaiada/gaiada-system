@@ -209,6 +209,7 @@ export default async function PositionsPage() {
                 attachedRoles={p.roleSet.map((r) => ({ roleId: r.roleId, role: r.role }))}
                 canCompose={canCompose}
                 canPlace={canPlace}
+                heldByMe={p.heldByMe === true}
                 attachRole={attachRole}
                 detachRole={detachRole}
                 assignPosition={assignPosition}

@@ -34,6 +34,29 @@ resourcePolicy:
       derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
+    # Unit self-edit DENY (SCP-1r, plan decision SCP-D7, applying owner ruling SCP-Q23; PERMISSION-CONTRACT §53.4) — nobody renames,
+    # re-types or moves (re-parents) a unit on which they hold a live lead seat, and nobody deletes one. The social approvers'
+    # Social Media and GM units, the GM audience of the failing-workflows list and every other unit-name-keyed authority find
+    # their unit BY NAME and KIND in this tree (`socialApproverUnitIds`, `gmUnitIds`: department nodes whose name resolves to a
+    # workspace slug). Without this, a company admin who leads some other unit could rename it "Social Media" (or re-type it so it
+    # reads as the GM unit) and become an approver alone, seat unchanged. SCP-1q closed the position side; this closes the unit side.
+    # `roles: ["user"]` matches every principal and deny-overrides beats every ALLOW above and the wildcard, so it binds
+    # company_admin and superadmin alike: another administrator makes the change.
+    #
+    # `touchedLeadHolderIds` is the live lead-seat holders (the §50 seat rule: an active position carrying its `org_unit_lead` role
+    # row at `own_unit`, held through an assignment with no `valid_to`) of every unit whose name, kind or parent the submitted tree
+    # changes, or which it removes, fed by the handler from the stored tree and the rows (company-admin.controller.ts putOrg,
+    # admin/org-structure-lead-guard.ts), never from the body. Written in the `has() && list.exists(...)` form: an unfed list is
+    # absent or empty, so the DENY matches nobody (the self-assign and self-edit DENYs' fail-open-for-DENY convention).
+    - actions: ["update"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.touchedLeadHolderIds) &&
+            request.resource.attr.touchedLeadHolderIds.exists(id, id == request.principal.id)
+
     # ══════════ IAM-04-ROLLOUT-B4 — permission-matching arm. PURELY ADDITIVE: every rule above ═══
     # is byte-for-byte unchanged. group_executive's own notLow-only rule above is DELIBERATELY not
     # mirrored (IAM-04c/TRAP-4). No exclusion needed on the mirrored actions (zero team_lead mixing).

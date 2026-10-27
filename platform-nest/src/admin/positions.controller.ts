@@ -13,7 +13,9 @@
 //
 // ── THE THREE LAYERS THAT BOUND A ROLE-SET, AND WHY THE UI IS NEVER THE FILTER ──────────────────
 // Attaching a role to a position is the write that turns "a seat" into "authority". It is bounded by:
-//   1. Cerbos — `position · create/update/retire` (company_admin + hr_people_ops).
+//   1. Cerbos — `position · create/update/retire` (company_admin + hr_people_ops). SCP-1q (SCP-Q23): `update` carries a
+//      self-EDIT DENY, so nobody edits a position they HOLD (its fields, its unit, its role-set), superadmin included;
+//      every `update` route feeds the position's open holders (`authorizePositionUpdate`).
 //   2. `assertRoleUiGrantable()` (P2-03) — the role must carry no key marked `uiGrantable:false`.
 //      Enforced HERE, server-side, before the insert.
 //   3. `position_roles_guard()` (0109 §2.3) — the denied-role registry (`platform_admin`,
@@ -62,7 +64,33 @@ async function loadPositionRow(c: PoolClient, tenantId: string, positionId: stri
   return rows[0];
 }
 
-function shape(p: PositionRecord, roles: { roleId: string; role: string; scopeKind: string }[], holders: number) {
+/** SCP-1q (SCP-Q23) — the OPEN holders of a position: `position_assignments` with no `valid_to`, the §50 seat rule
+ *  (`LEAD_SEAT_LIVE` in modules/reports/person-scope.ts reads the same `valid_to IS NULL`). Any position status counts: an
+ *  orphaned seat still has holders, and editing it is as much a self-edit. Fed to `position` · `update` as `holderIds`, where
+ *  resource_position.yaml's self-EDIT DENY refuses a holder editing their own position (superadmin included). A missing or
+ *  non-uuid position answers [] (nobody is a holder), and the write's own `loadPositionRow` then answers 404 as before, so
+ *  the decision order does not leak whether a position exists to a caller who may not edit it. */
+export async function loadPositionHolderIds(tenantId: string, positionId: string): Promise<string[]> {
+  return withTenants([tenantId], async (c) => {
+    const { rows } = await c.query<{ user_id: string }>(
+      `SELECT DISTINCT user_id::text AS user_id FROM position_assignments
+        WHERE tenant_id = $1 AND position_id::text = $2 AND valid_to IS NULL
+        ORDER BY 1`,
+      [tenantId, positionId],
+    );
+    return rows.map((r) => r.user_id);
+  });
+}
+
+/** Authorize `position` · `update` on one position, with its holders fed so the self-EDIT DENY can fire. The ONE call every
+ *  route that edits a position (its fields, its unit, its role-set) makes, so the feed cannot be present on one path and
+ *  missing on another (the drift shape `attachRoleRow` already guards against for the allow-list). */
+async function authorizePositionUpdate(req: FastifyRequest, tenantId: string, positionId: string): Promise<void> {
+  const holderIds = await loadPositionHolderIds(tenantId, positionId);
+  await authorize(req.principal, { kind: "position", id: positionId, tenantId, holderIds }, "update");
+}
+
+function shape(p: PositionRecord, roles: { roleId: string; role: string; scopeKind: string }[], holders: number, heldByMe: boolean) {
   return {
     id: p.id,
     tenantId: p.tenant_id,
@@ -76,6 +104,10 @@ function shape(p: PositionRecord, roles: { roleId: string; role: string; scopeKi
     orphaned: p.status === "orphaned",
     roleSet: roles,
     currentHolders: holders,
+    // SCP-1q (SCP-Q23): the viewer holds this seat, so `position` · `update` will refuse them on it (the self-EDIT DENY). The
+    // positions page reads it to disable Edit / Attach role / Detach role with the reason; the server still decides. Never the
+    // holders' ids: the list answers a count and a flag about the viewer only.
+    heldByMe,
     createdAt: p.created_at,
     updatedAt: p.updated_at,
   };
@@ -148,7 +180,14 @@ export class PositionsController {
           WHERE tenant_id = $1 AND valid_to IS NULL GROUP BY position_id`,
         [tenantId],
       );
-      return { rows, roleRows: roleRows.rows, holderRows: holderRows.rows };
+      const mineRows = req.principal.userId
+        ? await c.query<{ position_id: string }>(
+            `SELECT DISTINCT position_id::text AS position_id FROM position_assignments
+              WHERE tenant_id = $1 AND user_id = $2 AND valid_to IS NULL`,
+            [tenantId, req.principal.userId],
+          )
+        : { rows: [] as { position_id: string }[] };
+      return { rows, roleRows: roleRows.rows, holderRows: holderRows.rows, mine: new Set(mineRows.rows.map((r) => r.position_id)) };
     });
 
     const rolesByPosition = new Map<string, { roleId: string; role: string; scopeKind: string }[]>();
@@ -159,7 +198,7 @@ export class PositionsController {
     }
     const holders = new Map(out.holderRows.map((h) => [h.position_id, Number(h.n)]));
     return {
-      positions: out.rows.map((p) => shape(p, rolesByPosition.get(p.id) ?? [], holders.get(p.id) ?? 0)),
+      positions: out.rows.map((p) => shape(p, rolesByPosition.get(p.id) ?? [], holders.get(p.id) ?? 0, out.mine.has(p.id))),
       scope: tenantWide.allow ? "tenant" : "subtree",
     };
   }
@@ -245,7 +284,7 @@ export class PositionsController {
     @Param("positionId") positionId: string,
     @Body() body: { title?: string; isLead?: boolean; unitNodeId?: string },
   ) {
-    await authorize(req.principal, { kind: "position", tenantId }, "update");
+    await authorizePositionUpdate(req, tenantId, positionId);
     const moved = await withTenants([tenantId], async (c) => {
       await loadPositionRow(c, tenantId, positionId);
       if (body?.unitNodeId !== undefined) {
@@ -324,7 +363,7 @@ export class PositionsController {
     @Param("positionId") positionId: string,
     @Body() body: { roleId?: string; scopeKind?: string },
   ) {
-    await authorize(req.principal, { kind: "position", tenantId }, "update");
+    await authorizePositionUpdate(req, tenantId, positionId);
     const affected = await withTenants([tenantId], async (c) => {
       await loadPositionRow(c, tenantId, positionId);
       await this.attachRoleRow(c, tenantId, positionId, body ?? {});
@@ -351,7 +390,7 @@ export class PositionsController {
     @Param("positionId") positionId: string,
     @Param("roleId") roleId: string,
   ) {
-    await authorize(req.principal, { kind: "position", tenantId }, "update");
+    await authorizePositionUpdate(req, tenantId, positionId);
     const affected = await withTenants([tenantId], async (c) => {
       await loadPositionRow(c, tenantId, positionId);
       const { rowCount } = await c.query(

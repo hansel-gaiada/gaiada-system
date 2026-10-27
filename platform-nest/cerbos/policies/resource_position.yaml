@@ -5,7 +5,8 @@
 # (D5 gate); targetUserId (assign only — the person BEING assigned, for the self-assign DENY below);
 # unitAncestors (assign/unassign/the dept-head read rule — the POSITION's OWN unit ancestry from
 # org_unit_closure, the SAME attribute name/shape resource_role_grant.yaml's org_unit_lead rule and
-# report_document/appraisal already use).
+# report_document/appraisal already use); holderIds (update only — the position's OPEN holders, for the
+# self-EDIT DENY below, SCP-Q23).
 #
 # ⚠ ACTIONS BEYOND DESIGN §6.2's LITERAL TEXT — flagged, not silently assumed (P2-01's own report set
 # this transparency precedent for this same ticket chain). Design §6.2 names only assign / unassign /
@@ -82,6 +83,27 @@ resourcePolicy:
           expr: >-
             has(request.resource.attr.targetUserId) && request.resource.attr.targetUserId != "" &&
             request.resource.attr.targetUserId == request.principal.id
+
+    # Self-EDIT DENY (SCP-Q23, owner ruling 2026-10-27; PERMISSION-CONTRACT §53.4 "A gap outside SCP") — the `assign`
+    # self-DENY above, applied to `update`. Without it, whoever holds `update` (company_admin, hr_people_ops, platform_admin)
+    # could move a position they HOLD onto another unit, or attach/detach a role row on it (`org_unit_lead` included), and so
+    # make themselves a lead seat: the seat reaches every lead-seat authority (DW-4, DW-10g-2, the four social approvers).
+    # `roles: ["user"]` matches every principal and deny-overrides beats every ALLOW above, platform_admin's wildcard
+    # included: nobody edits a position they hold, superadmin included. Another administrator edits it for them.
+    #
+    # `holderIds` is the position's OPEN holders (`position_assignments.valid_to IS NULL`, the §50 seat rule), fed by the
+    # handler from the rows (positions.controller.ts `loadPositionHolderIds`), never from a body. Written in the
+    # `has() && list.exists(...)` form: an unfed list is absent or empty, so the DENY matches nobody (the same
+    # fail-open-for-DENY convention the self-assign DENY follows). `retire` and `create` are not covered: neither can promote
+    # a holder (retire closes the seat; a new position has no holder).
+    - actions: ["update"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.holderIds) &&
+            request.resource.attr.holderIds.exists(id, id == request.principal.id)
 
     # =========== IAM Phase 2 (P2-02) — NO permission-matching arm on this kind. ==================
     # Same reasoning as resource_role_grant.yaml — the dept-head assign/unassign/read rule is

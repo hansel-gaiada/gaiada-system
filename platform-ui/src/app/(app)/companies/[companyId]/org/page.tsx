@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { can } from "@/lib/rbac";
+import { can, leadUnits } from "@/lib/rbac";
 import { getCompany, listMembers, listCompanies } from "@/lib/entities";
 import { getOrgStructure } from "@/lib/org";
 import { listAssignments, SERVICE_ASSIGNMENTS_ENABLED, SERVICE_MODULE_OPTIONS } from "@/lib/serviceAssignments";
@@ -61,6 +61,9 @@ export default async function OrgPage({ params }: { params: Params }) {
         source={source}
         updatedAt={structure.updatedAt ?? null}
         save={saveOrg}
+        // SCP-1r (SCP-D7): the units the viewer leads in this company; the editor disables rename / type / move / delete on them
+        // and says why. The server refuses it regardless (org_structure update, unit self-edit DENY).
+        ledUnitIds={leadUnits(me, companyId)}
         service={{
           // ORG-13 (A9 + A4): gated on both the flag AND the same org.edit
           // capability the rest of the editor uses — cosmetic only, the

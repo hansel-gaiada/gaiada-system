@@ -45,7 +45,18 @@ interface Props {
   updatedAt: string | null;
   save: (companyId: string, treeJson: string) => Promise<SaveResult>;
   service: ServiceProps;
+  /** SCP-1r (SCP-D7): the ids of the units the viewer holds a live lead seat on in this company (`leadUnits`). The server refuses
+   *  them renaming, re-typing, moving or deleting any of these, superadmin included, so those controls are disabled with the reason.
+   *  A mirror for hiding controls; the server decides. Absent or empty: nothing is disabled. */
+  ledUnitIds?: readonly string[];
 }
+
+/** SCP-1r: why a led unit's rename, type, move and delete controls are off. One sentence, shared by every surface. */
+export const LEAD_LOCK_REASON =
+  "You lead this unit, so you can't rename, re-type, move or delete it. Ask another administrator to make the change.";
+/** SCP-1r: why Remove is off on a unit that merely contains a led unit (deleting it deletes the led unit with it). */
+export const LEAD_LOCK_CONTAINS_REASON =
+  "A unit you lead sits inside this one, so you can't delete it. Ask another administrator to make the change.";
 
 // ---- pure tree ops (return a new root) ----
 const uid = () => "n-" + Math.random().toString(36).slice(2, 9);
@@ -53,6 +64,9 @@ function findNode(n: OrgNode, id: string): OrgNode | null {
   if (n.id === id) return n;
   for (const c of n.children) { const f = findNode(c, id); if (f) return f; }
   return null;
+}
+function holdsAny(node: OrgNode, ids: ReadonlySet<string>): boolean {
+  return ids.has(node.id) || node.children.some((c) => holdsAny(c, ids));
 }
 function isWithin(node: OrgNode, id: string): boolean {
   return node.id === id || node.children.some((c) => isWithin(c, id));
@@ -75,8 +89,13 @@ function moveNode(root: OrgNode, dragId: string, targetId: string): OrgNode {
   return addChildTo(removeNode(root, dragId), targetId, dragNode);
 }
 
-export function OrgBuilder({ companyId, initial, canEdit, members, source, updatedAt, save, service }: Props) {
+export function OrgBuilder({ companyId, initial, canEdit, members, source, updatedAt, save, service, ledUnitIds }: Props) {
   const [root, setRoot] = useState<OrgNode>(initial);
+  // SCP-1r: the units this viewer leads. `locked(node)` = rename / type / move are off; `undeletable(node)` = Remove is off (the
+  // unit, or a unit inside it, is led).
+  const led = new Set(ledUnitIds ?? []);
+  const locked = (n: OrgNode) => led.has(n.id);
+  const undeletable = (n: OrgNode) => led.size > 0 && holdsAny(n, led);
   const [dirty, setDirty] = useState(false);
   const [dropId, setDropId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -101,8 +120,8 @@ export function OrgBuilder({ companyId, initial, canEdit, members, source, updat
   const closeConnectService = () => { setConnectNodeId(null); setExistingAssignments([]); };
 
   const mutate = (next: OrgNode) => { setRoot(next); setDirty(true); setMsg(null); };
-  const rename = (id: string, name: string) => mutate(patchNode(root, id, { name }));
-  const setKind = (id: string, kind: OrgKind) => mutate(patchNode(root, id, { kind }));
+  const rename = (id: string, name: string) => { if (!led.has(id)) mutate(patchNode(root, id, { name })); };
+  const setKind = (id: string, kind: OrgKind) => { if (!led.has(id)) mutate(patchNode(root, id, { kind })); };
   const assign = (id: string, assigneeId: string) => {
     const m = members.find((x) => x.id === assigneeId);
     mutate(patchNode(root, id, { assigneeId: assigneeId || null, assigneeName: m?.name ?? null }));
@@ -114,9 +133,15 @@ export function OrgBuilder({ companyId, initial, canEdit, members, source, updat
     mutate(addChildTo(root, parentId, { id, name: NEW_LABEL[kind], kind, children: [] }));
     setSelectedId(id); // select the new unit so it can be edited immediately
   };
-  const remove = (id: string) => { mutate(removeNode(root, id)); if (selectedId === id) setSelectedId(null); };
+  const remove = (id: string) => {
+    const n = findNode(root, id);
+    if (!n || undeletable(n)) return;
+    mutate(removeNode(root, id));
+    if (selectedId === id) setSelectedId(null);
+  };
   const onDropTo = (targetId: string) => {
-    if (dragId.current) mutate(moveNode(root, dragId.current, targetId));
+    const dragged = dragId.current ? findNode(root, dragId.current) : null;
+    if (dragged && !led.has(dragged.id)) mutate(moveNode(root, dragged.id, targetId));
     dragId.current = null; setDropId(null);
   };
 
@@ -165,6 +190,8 @@ export function OrgBuilder({ companyId, initial, canEdit, members, source, updat
             <NodeInspector
               node={selected}
               isRoot={selected.id === root.id}
+              leadLocked={locked(selected)}
+              deleteLocked={undeletable(selected)}
               members={members}
               onRename={rename}
               onKind={setKind}
@@ -190,6 +217,7 @@ export function OrgBuilder({ companyId, initial, canEdit, members, source, updat
               onDropClear: () => setDropId(null),
               onDrop: onDropTo,
               onAdd: addChild,
+              isLocked: locked,
             }}
           />
         </div>
@@ -217,6 +245,7 @@ export function OrgBuilder({ companyId, initial, canEdit, members, source, updat
           <ul className="org-tree">
             <EditorNode
               node={root} rootId={root.id} depth={0} members={members} dropId={dropId} selectedId={selectedId}
+              isLocked={locked} isUndeletable={undeletable}
               onSelect={setSelectedId}
               onDragStart={(id) => { dragId.current = id; }}
               onDropOver={setDropId}
@@ -232,8 +261,8 @@ export function OrgBuilder({ companyId, initial, canEdit, members, source, updat
 }
 
 // ---- Inspector: click-to-edit panel for the selected node ----
-function NodeInspector({ node, isRoot, members, onRename, onKind, onAssign, onAdd, onRemove, onClose, canConnectService, onConnectService }: {
-  node: OrgNode; isRoot: boolean; members: { id: string; name: string }[];
+function NodeInspector({ node, isRoot, leadLocked, deleteLocked, members, onRename, onKind, onAssign, onAdd, onRemove, onClose, canConnectService, onConnectService }: {
+  node: OrgNode; isRoot: boolean; leadLocked: boolean; deleteLocked: boolean; members: { id: string; name: string }[];
   onRename: (id: string, name: string) => void; onKind: (id: string, kind: OrgKind) => void;
   onAssign: (id: string, assigneeId: string) => void; onAdd: (id: string) => void; onRemove: (id: string) => void; onClose: () => void;
   canConnectService: boolean; onConnectService: () => void;
@@ -241,8 +270,10 @@ function NodeInspector({ node, isRoot, members, onRename, onKind, onAssign, onAd
   return (
     <div className="org-insp">
       <input className="org-insp__name" value={node.name} aria-label="Unit name" autoFocus
+        readOnly={leadLocked} title={leadLocked ? LEAD_LOCK_REASON : undefined}
         onChange={(e) => onRename(node.id, e.target.value)} />
-      <select className="org-insp__sel" value={node.kind} aria-label="Unit type" disabled={isRoot}
+      <select className="org-insp__sel" value={node.kind} aria-label="Unit type" disabled={isRoot || leadLocked}
+        title={leadLocked ? LEAD_LOCK_REASON : undefined}
         onChange={(e) => onKind(node.id, e.target.value as OrgKind)}>
         {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
       </select>
@@ -254,7 +285,13 @@ function NodeInspector({ node, isRoot, members, onRename, onKind, onAssign, onAd
         </select>
       )}
       <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={() => onAdd(node.id)}>＋ Add unit</button>
-      {!isRoot && <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={() => onRemove(node.id)}>Remove</button>}
+      {!isRoot && (
+        <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={() => onRemove(node.id)}
+          disabled={deleteLocked} title={deleteLocked ? (leadLocked ? LEAD_LOCK_REASON : LEAD_LOCK_CONTAINS_REASON) : undefined}>Remove</button>
+      )}
+      {(leadLocked || deleteLocked) && (
+        <span className="org-note" role="note" data-testid="org-lead-lock-note">{leadLocked ? LEAD_LOCK_REASON : LEAD_LOCK_CONTAINS_REASON}</span>
+      )}
       {canConnectService && (
         <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={onConnectService}>Connect service…</button>
       )}
@@ -273,6 +310,8 @@ interface EditProps {
   onDropClear: () => void;
   onDrop: (targetId: string) => void;
   onAdd: (parentId: string) => void;
+  /** SCP-1r: the viewer leads this unit, so it cannot be dragged (re-parented). */
+  isLocked: (node: OrgNode) => boolean;
 }
 function OrgChart({ node, edit }: { node: OrgNode; edit?: EditProps }) {
   return <ul className="org-chart"><ChartNode node={node} edit={edit} isRoot /></ul>;
@@ -284,7 +323,7 @@ function ChartNode({ node, edit, isRoot }: { node: OrgNode; edit?: EditProps; is
     <li>
       <div
         className={`org-box org-box--${node.kind}${selected ? " org-box--sel" : ""}${drop ? " org-box--drop" : ""}${edit ? " org-box--live" : ""}`}
-        draggable={!!edit && !isRoot}
+        draggable={!!edit && !isRoot && !edit.isLocked(node)}
         role={edit ? "button" : undefined}
         tabIndex={edit ? 0 : undefined}
         onClick={edit ? () => edit.onSelect(node.id) : undefined}
@@ -313,10 +352,14 @@ interface EditorNodeProps {
   onDragStart: (id: string) => void; onDropOver: (id: string) => void; onDropClear: () => void; onDrop: (targetId: string) => void;
   onRename: (id: string, name: string) => void; onKind: (id: string, kind: OrgKind) => void;
   onAssign: (id: string, assigneeId: string) => void; onAdd: (parentId: string) => void; onRemove: (id: string) => void;
+  /** SCP-1r: the viewer leads this unit (rename / type / move off), or leads it or one inside it (Remove off). */
+  isLocked: (node: OrgNode) => boolean; isUndeletable: (node: OrgNode) => boolean;
 }
 function EditorNode(props: EditorNodeProps) {
   const { node, rootId, members, dropId, selectedId } = props;
   const isRoot = node.id === rootId;
+  const leadLocked = props.isLocked(node);
+  const deleteLocked = props.isUndeletable(node);
   return (
     <li>
       <div
@@ -325,13 +368,13 @@ function EditorNode(props: EditorNodeProps) {
         onDragLeave={() => props.onDropClear()}
         onDrop={(e) => { e.preventDefault(); props.onDrop(node.id); }}
       >
-        {!isRoot ? (
+        {!isRoot && !leadLocked ? (
           <span className="org-grip" draggable role="button" aria-label={`Drag ${node.name} to re-parent`} title="Drag onto another unit to re-parent"
             onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", node.id); props.onDragStart(node.id); }} />
-        ) : <span className="org-grip org-grip--locked" aria-hidden="true" />}
-        <input className="org-name" value={node.name} aria-label="Unit name"
+        ) : <span className="org-grip org-grip--locked" aria-hidden="true" title={leadLocked ? LEAD_LOCK_REASON : undefined} />}
+        <input className="org-name" value={node.name} aria-label="Unit name" readOnly={leadLocked} title={leadLocked ? LEAD_LOCK_REASON : undefined}
           onFocus={() => props.onSelect(node.id)} onChange={(e) => props.onRename(node.id, e.target.value)} />
-        <select className="org-kind" value={node.kind} aria-label="Unit type" disabled={isRoot} onChange={(e) => props.onKind(node.id, e.target.value as OrgKind)}>
+        <select className="org-kind" value={node.kind} aria-label="Unit type" disabled={isRoot || leadLocked} title={leadLocked ? LEAD_LOCK_REASON : undefined} onChange={(e) => props.onKind(node.id, e.target.value as OrgKind)}>
           {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
         </select>
         {ASSIGNABLE.has(node.kind) && (
@@ -341,7 +384,10 @@ function EditorNode(props: EditorNodeProps) {
           </select>
         )}
         <button type="button" className="org-iconbtn" title="Add unit below" aria-label="Add child unit" onClick={() => props.onAdd(node.id)}>+</button>
-        {!isRoot && <button type="button" className="org-iconbtn org-iconbtn--danger" title="Remove" aria-label="Remove unit" onClick={() => props.onRemove(node.id)}>×</button>}
+        {!isRoot && (
+          <button type="button" className="org-iconbtn org-iconbtn--danger" aria-label="Remove unit" disabled={deleteLocked}
+            title={deleteLocked ? (leadLocked ? LEAD_LOCK_REASON : LEAD_LOCK_CONTAINS_REASON) : "Remove"} onClick={() => props.onRemove(node.id)}>×</button>
+        )}
       </div>
       {node.children.length > 0 && (
         <ul>{node.children.map((c) => <EditorNode key={c.id} {...props} node={c} depth={props.depth + 1} />)}</ul>
