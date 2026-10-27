@@ -367,4 +367,159 @@ describe.skipIf(!TEST_URL)("SCP-1l · the social_post comment thread (BFF §63.8
     expect(await read()).toEqual([]);
     expect(await withTenants([A], (c) => clientVisibleComments(c, A, postId))).toEqual([]); // `postId` never reached the client
   });
+
+  // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  // SCP-1t — the audience follow-ups: reactions, @mentions and replies on a social_post thread
+  // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  const react = (who: string, commentId: string, emoji = "👍") =>
+    app.inject({ method: "POST", url: `${commentsUrl()}/${commentId}/reactions`, headers: as(who), payload: { emoji } });
+  const unreact = (who: string, commentId: string, emoji = "👍") =>
+    app.inject({ method: "DELETE", url: `${commentsUrl()}/${commentId}/reactions/${encodeURIComponent(emoji)}`, headers: as(who) });
+  const reactionCount = async (commentId: string) =>
+    Number((await adminPool().query(`SELECT count(*)::int AS n FROM comment_reactions WHERE comment_id = $1`, [commentId])).rows[0].n);
+  const mentionedUsers = async (commentId: string): Promise<string[]> =>
+    (await adminPool().query(`SELECT user_id::text AS u FROM notifications WHERE type = 'mention' AND payload->>'commentId' = $1`, [commentId])).rows.map((r) => r.u as string).sort();
+  const storedVisibility = async (commentId: string) =>
+    (await adminPool().query(`SELECT visibility FROM comments WHERE id = $1`, [commentId])).rows[0]?.visibility as string | undefined;
+  async function say(who: string, entityType: string, entityId: string, extra: Record<string, unknown> = {}): Promise<string> {
+    const res = await post(who, { entityType, entityId, body: "A mock comment.", ...extra });
+    expect(res.statusCode, res.body).toBe(201);
+    return (res.json() as { id: string }).id;
+  }
+
+  it("1t · a reaction on a social_post comment needs the post's audience: a reader and a designer react, a member with no read is 403 and nothing is stored", async () => {
+    const c = await say(U.officer, "social_post", postId);
+    expect((await react(U.copywriter, c)).statusCode).toBe(201);
+    expect((await react(U.designer, c, "🎉")).statusCode).toBe(201); // through `design`
+    expect(await reactionCount(c)).toBe(2);
+    const refused = await react(U.outsider, c);
+    expect(refused.statusCode).toBe(403);
+    expect((refused.json() as { error: string }).error).toMatch(/^not authorized/);
+    expect(await reactionCount(c)).toBe(2);
+    // removing one is the same gate; a reader removes only their own row
+    const refusedRemove = await unreact(U.outsider, c);
+    expect(refusedRemove.statusCode).toBe(403);
+    expect(await reactionCount(c)).toBe(2);
+    expect((await unreact(U.copywriter, c)).statusCode).toBe(200);
+    expect(await reactionCount(c)).toBe(1);
+  });
+
+  it("1t · the designer has no read on another post's thread, so no reaction there either", async () => {
+    const c = await say(U.officer, "social_post", otherPostId);
+    expect((await react(U.designer, c)).statusCode).toBe(403);
+    expect(await reactionCount(c)).toBe(0);
+    expect((await react(U.officer, c)).statusCode).toBe(201);
+  });
+
+  it("1t · an unrelated thread's reactions are unchanged: the same member reacts to a task comment, and a missing comment is still 404", async () => {
+    const c = await say(U.officer, "task", taskId);
+    expect((await react(U.outsider, c)).statusCode).toBe(201);
+    expect(await reactionCount(c)).toBe(1);
+    expect((await unreact(U.outsider, c)).statusCode).toBe(200);
+    expect(await reactionCount(c)).toBe(0);
+    expect((await react(U.officer, newId())).statusCode).toBe(404);
+  });
+
+  it("1t · an @mention on a social_post comment notifies only people who can read the post; the rest are dropped and the author is told which", async () => {
+    const ghost = newId();
+    const res = await post(U.officer, {
+      entityType: "social_post", entityId: postId, body: "Looping people in.",
+      mentions: [U.hod, U.designer, U.outsider, ghost, "not-a-uuid", U.hod],
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    const body = res.json() as { id: string; mentionsNotNotified?: string[] };
+    expect([...(body.mentionsNotNotified ?? [])].sort()).toEqual([U.outsider, ghost, "not-a-uuid"].sort());
+    expect(await mentionedUsers(body.id)).toEqual([U.hod, U.designer].sort());
+    // The comment itself is stored whatever the mentions were.
+    expect(await storedVisibility(body.id)).toBe("team");
+  });
+
+  it("1t · the designer is told on the post they work on and dropped on another post (read or design, per post)", async () => {
+    const mine = await post(U.officer, { entityType: "social_post", entityId: otherPostId, body: "Hello.", mentions: [U.designer, U.hod] });
+    expect(mine.statusCode, mine.body).toBe(201);
+    const body = mine.json() as { id: string; mentionsNotNotified?: string[] };
+    expect(body.mentionsNotNotified).toEqual([U.designer]);
+    expect(await mentionedUsers(body.id)).toEqual([U.hod]);
+  });
+
+  it("1t · when everyone mentioned can read the post the answer is the old one, just the id", async () => {
+    const res = await post(U.officer, { entityType: "social_post", entityId: postId, body: "Only readers.", mentions: [U.hod, U.copywriter] });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(Object.keys(res.json() as object)).toEqual(["id"]);
+    expect(await mentionedUsers((res.json() as { id: string }).id)).toEqual([U.hod, U.copywriter].sort());
+  });
+
+  it("1t · an unrelated thread's mentions are unchanged: a task comment still notifies the member with no social read, and answers just the id", async () => {
+    const res = await post(U.officer, { entityType: "task", entityId: taskId, body: "Task mention.", mentions: [U.outsider, U.hod] });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(Object.keys(res.json() as object)).toEqual(["id"]);
+    expect(await mentionedUsers((res.json() as { id: string }).id)).toEqual([U.outsider, U.hod].sort());
+  });
+
+  it("1t · a reply takes its parent's visibility: none given, a team parent gives team and a client parent gives client", async () => {
+    const team = await say(U.officer, "social_post", postId);
+    const client = await say(U.officer, "social_post", postId, { visibility: "client" });
+    const replyToTeam = await say(U.officer, "social_post", postId, { parentCommentId: team });
+    const replyToClient = await say(U.officer, "social_post", postId, { parentCommentId: client });
+    expect(await storedVisibility(replyToTeam)).toBe("team");
+    expect(await storedVisibility(replyToClient)).toBe("client");
+    // The read shows both, with their parents.
+    const got = (await list(U.officer, "social_post", postId)).json() as Array<Record<string, any>>;
+    expect(got.find((c) => c.id === replyToClient)).toMatchObject({ visibility: "client", parent_comment_id: client });
+  });
+
+  it("1t · a client reply to a team comment is 400 {field: visibility}, and nothing is stored", async () => {
+    const team = await say(U.officer, "social_post", postId);
+    const before = await rowCount("social_post", postId);
+    const res = await post(U.officer, { entityType: "social_post", entityId: postId, body: "Out of context.", parentCommentId: team, visibility: "client" });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ field: "visibility" });
+    expect(await rowCount("social_post", postId)).toBe(before);
+    // A team reply to it, stated, is fine.
+    expect(await storedVisibility(await say(U.officer, "social_post", postId, { parentCommentId: team, visibility: "team" }))).toBe("team");
+  });
+
+  it("1t · a team reply under a client comment is allowed (the client does not see it), and a client one too", async () => {
+    const client = await say(U.officer, "social_post", postId, { visibility: "client" });
+    expect(await storedVisibility(await say(U.officer, "social_post", postId, { parentCommentId: client, visibility: "team" }))).toBe("team");
+    expect(await storedVisibility(await say(U.officer, "social_post", postId, { parentCommentId: client, visibility: "client" }))).toBe("client");
+  });
+
+  it("1t · a reply that INHERITS client visibility speaks to the client, so it needs record_client like an explicit one (403 not_officer_or_approver)", async () => {
+    const client = await say(U.officer, "social_post", postId, { visibility: "client" });
+    const before = await rowCount("social_post", postId);
+    const inherited = await post(U.copywriter, { entityType: "social_post", entityId: postId, body: "Replying to the client.", parentCommentId: client });
+    expect(inherited.statusCode).toBe(403);
+    expect(inherited.json()).toMatchObject({ error: "not_officer_or_approver" });
+    expect(await rowCount("social_post", postId)).toBe(before);
+    // The same person may answer it as a team aside.
+    expect(await storedVisibility(await say(U.copywriter, "social_post", postId, { parentCommentId: client, visibility: "team" }))).toBe("team");
+  });
+
+  it("1t · a reply answers a comment of THIS post's thread: another post's comment, an unknown id and a malformed one are 400 {field: parentCommentId}", async () => {
+    const elsewhere = await say(U.officer, "social_post", otherPostId);
+    const before = await rowCount("social_post", postId);
+    for (const parentCommentId of [elsewhere, newId(), "not-a-uuid", 7]) {
+      const res = await post(U.officer, { entityType: "social_post", entityId: postId, body: "Wrong parent.", parentCommentId });
+      expect(res.statusCode, String(parentCommentId)).toBe(400);
+      expect(res.json(), String(parentCommentId)).toMatchObject({ field: "parentCommentId" });
+    }
+    expect(await rowCount("social_post", postId)).toBe(before);
+  });
+
+  it("1t · authorization still comes first: a member with no read gets 403 on a reply, whatever its parent or visibility", async () => {
+    const team = await say(U.officer, "social_post", postId);
+    const res = await post(U.outsider, { entityType: "social_post", entityId: postId, body: "x", parentCommentId: team, visibility: "client" });
+    expect(res.statusCode).toBe(403);
+    const res2 = await post(U.outsider, { entityType: "social_post", entityId: postId, body: "x", parentCommentId: "not-a-uuid" });
+    expect(res2.statusCode).toBe(403);
+  });
+
+  it("1t · an unrelated thread's replies are unchanged: a task reply keeps working, with no visibility to inherit", async () => {
+    const parent = await say(U.officer, "task", taskId);
+    const reply = await say(U.officer, "task", taskId, { parentCommentId: parent });
+    expect(await storedVisibility(reply)).toBe("team");
+    const got = (await list(U.officer, "task", taskId)).json() as Array<Record<string, any>>;
+    expect(got.find((c) => c.id === reply)).toMatchObject({ parent_comment_id: parent, visibility: "team" });
+  });
 });
