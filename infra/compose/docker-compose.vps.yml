@@ -301,6 +301,26 @@ services:
       OTEL_ENABLED: ${OTEL_ENABLED:-0}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
       OTEL_SERVICE_NAME: ai-gateway
+      # AIP-00a-1 (plan docs/plans/2026-10-27-ai-plan.md §6.1): the AGENT listener, a second port that
+      # serves ONLY POST /v1/chat/completions and GET /v1/models, for registered agents (the Hermes
+      # agents on helios). OFF unless GATEWAY_AGENT_LISTEN is set; to turn it on set it to
+      # 0.0.0.0:3012 (inside the container; the publish below keeps it on host loopback).
+      # GATEWAY_AGENT_TOKENS is name:sha256hex[,...]: token HASHES only, never the tokens
+      # (`printf %s "$TOKEN" | sha256sum`). Empty or malformed = every agent call is 401.
+      # GATEWAY_AGENT_RESERVE_PCT (empty = 25): agents are refused once the global cap's remaining
+      # share is at or below it, so the ERP's own users keep the last share.
+      # GATEWAY_AGENT_DAILY_CALL_CAP (empty = the per-tenant cap): each agent's own daily cap.
+      GATEWAY_AGENT_LISTEN: ${GATEWAY_AGENT_LISTEN:-}
+      GATEWAY_AGENT_TOKENS: ${GATEWAY_AGENT_TOKENS:-}
+      GATEWAY_AGENT_RESERVE_PCT: ${GATEWAY_AGENT_RESERVE_PCT:-}
+      GATEWAY_AGENT_DAILY_CALL_CAP: ${GATEWAY_AGENT_DAILY_CALL_CAP:-}
+    # LOOPBACK ONLY, never 0.0.0.0 and never the mesh address (plan §6.1 item 4). The mesh reaches it
+    # through a host proxy on 10.88.0.1:3012 whose systemd unit starts after wg-quick@wg0 (AIP-00a-2):
+    # binding a container port to the mesh address directly would stop the gateway starting after a
+    # reboot that raises wg0 late (the Postgres-before-docker0 trap). Nothing answers here while
+    # GATEWAY_AGENT_LISTEN is empty. The main port 3002 stays unpublished, as before.
+    ports:
+      - "127.0.0.1:3012:3012"
     volumes:
       - gateway-data:/app/data # egress audit (JSONL)
     # FAULT REGISTER FINDING 14 (2026-09-08) — measured 15.14MiB working set on gda-aicenter
