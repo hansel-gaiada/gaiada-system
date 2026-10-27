@@ -521,7 +521,7 @@ export class WebdeskZoneB {
           cmd: editorialCmd,
           cmh: computeCommandHash(w.command, commandArgsAsZoneBSeesThem(w.params, w.body)),
           ...(w.clientEditor ? { ce: true } : {}),
-        });
+        }, principal);
       } catch (err) {
         if (err instanceof EditorialSignerNotConfiguredError) throw notConfigured("editorial_signer_not_configured");
         logger.error(`editorial signer failed: ${(err as Error)?.name ?? "error"}`);

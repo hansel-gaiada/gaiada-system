@@ -126,6 +126,8 @@ export class RealEditorialPrincipalResolver implements EditorialPrincipalResolve
     if (claims.apr !== undefined) principal.apr = claims.apr;
     // WSK-49b: only `ce: true` adds anything; absent or false leaves the principal exactly as it was.
     if (claims.ce === true) principal.clientEditor = true;
+    // M5-W1e: likewise for `xc: true`; absent or false adds nothing. (The verifier has already refused `xc` together with `ce`.)
+    if (claims.xc === true) principal.contributor = true;
     return principal;
   }
 

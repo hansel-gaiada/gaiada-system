@@ -9,7 +9,7 @@
 //   x-webdesk-editorial-assertion: <compact JWS>
 //   protected header  {"alg":"EdDSA","typ":"wd-editorial+jwt","kid":"<kid>"}
 //   payload           {"iss":"urn:gaiada:erp:webdev","aud":"urn:gaiada:webdesk:control","sub","pk","agt"?,
-//                      "ten","site","cmd","cmh","req"?,"apr"?,"iat","exp","jti"}
+//                      "ten","site","cmd","cmh","req"?,"apr"?,"ce"?,"xc"?,"iat","exp","jti"}
 //   cmh               = computeCommandHash(cmd, route params ∪ body) from ./ws4-assertion.ts: the SAME
 //                       function and the SAME argument object WS4's commandHash uses. Not re-implemented.
 //
@@ -34,6 +34,12 @@
 // a staff principal, exactly as before. A present `ce` that is not a boolean is 401 -claims (step 6), never
 // coerced and never ignored: "true" must not silently read as "not a client". The marker only restricts, and
 // being signed it can neither be added nor stripped in transit. It is not part of `cmh`.
+//
+// M5-W1e adds ONE more optional boolean claim, `xc` ("contributor", between `ce` and `iat` on the wire): the ERP signer sets it from
+// `users.kind = 'contributor'`, and WebDesk then holds the principal to CONTRIBUTOR_COMMANDS (./contributor-editor.ts). The same
+// rules as `ce`: a present non-boolean is 401 -claims, never coerced; it only ever restricts; it is signed, so it can neither be
+// added nor stripped; it is not part of `cmh`. `xc` and `ce` together are 401 -claims (a contributor is never a client editor),
+// whatever their values.
 import { compactVerify, errors as joseErrors } from "jose";
 import type { CommandName } from "../command-types";
 import { ControlProblem } from "../content/content-problem";
@@ -105,6 +111,8 @@ export interface EditorialClaims {
   apr?: string;
   /** WSK-49b: "client editor". Optional; a present value is always a boolean. */
   ce?: boolean;
+  /** M5-W1e: "contributor". Optional; a present value is always a boolean, and never present together with `ce`. */
+  xc?: boolean;
   iat: number;
   exp: number;
   jti: string;
@@ -221,6 +229,10 @@ export async function verifyEditorialAssertion(
   }
   if ((p.pk === "agent") !== (p.agt !== undefined)) throw refuse401(EDITORIAL_SLUG.claims, "agt is present iff pk = agent");
   if (p.ce !== undefined && typeof p.ce !== "boolean") throw refuse401(EDITORIAL_SLUG.claims, "ce must be a boolean when present");
+  if (p.xc !== undefined && typeof p.xc !== "boolean") throw refuse401(EDITORIAL_SLUG.claims, "xc must be a boolean when present");
+  if (p.xc !== undefined && p.ce !== undefined) {
+    throw refuse401(EDITORIAL_SLUG.claims, "xc and ce are mutually exclusive: a contributor is never a client editor");
+  }
   if (typeof p.cmh !== "string" || !CMH_RE.test(p.cmh)) throw refuse401(EDITORIAL_SLUG.claims, "cmh must be a lowercase sha256 hex digest");
   if (typeof p.jti !== "string" || !UUID_V4_RE.test(p.jti)) throw refuse401(EDITORIAL_SLUG.claims, "jti must be a UUID v4");
   if (!Number.isSafeInteger(p.iat) || !Number.isSafeInteger(p.exp)) {

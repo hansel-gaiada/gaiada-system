@@ -368,11 +368,17 @@ export interface EditorialAssertionRequest {
   ce?: true;
 }
 
+/** M5-W1e: the part of the ASSEMBLED principal a signer reads: `kind` (`users.kind`), from which it alone derives the contributor
+ *  marker `xc`. A `Principal` satisfies it as is. There is deliberately no `xc` field here or on `EditorialAssertionRequest`:
+ *  no caller can name the marker, only hand over the principal it is acting as. */
+export type EditorialSigningPrincipal = Pick<Principal, "kind">;
+
 export interface EditorialAssertionSigner {
   /** false only for the not-configured default. decide()'s preflight refuses (503) on false, so the
    *  row stays pending rather than becoming approved-but-unsendable. */
   readonly configured: boolean;
-  sign(input: EditorialAssertionRequest): string | Promise<string>;
+  /** `principal` is the assembled principal the command runs as (the decider, for an approved command). */
+  sign(input: EditorialAssertionRequest, principal: EditorialSigningPrincipal): string | Promise<string>;
 }
 
 export class EditorialSignerNotConfiguredError extends Error {
@@ -1162,7 +1168,7 @@ export async function executeApprovedWebdeskCommand(
         apr: approvalId,
         // WSK-49c: a CLIENT decider's assertion carries the client marker, so WebDesk applies D59/D62 to what goes live.
         ...(clientDecider ? { ce: true as const } : {}),
-      });
+      }, decider);
     } catch (err) {
       const error = err instanceof EditorialSignerNotConfiguredError
         ? `${WEBDESK_EXEC_ERROR.notConfigured}: ${err.message}`

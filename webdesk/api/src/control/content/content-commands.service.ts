@@ -75,6 +75,7 @@ import { validateCollectionComposition, type CollectionComposition } from "../..
 import { experimentLockViolations, fieldsBlockOf, type ExperimentLockViolation } from "../../delivery/vocabulary/item-fields";
 import { clientCreateViolations, clientEditViolations, collectionAcceptsClientCreate } from "../../delivery/vocabulary/client-editable";
 import { assertClientMayRun, fieldNotClientEditable, isClientEditor, publishNotClientEditable } from "../auth/client-editor";
+import { assertContributorMayRun, isContributor } from "../auth/contributor-editor";
 import {
   assembleItemContent,
   contentHash,
@@ -328,13 +329,18 @@ export class ContentCommandsService {
     // body (a replay would otherwise hand a client the stored result of a write it was not allowed to make),
     // and its audit row says so. Both are untouched for every other principal.
     const client = isClientEditor(ctx.principal);
+    // M5-W1e: the same for a contributor (`xc`): its own idempotency record, and its audit row says so.
+    const contributor = isContributor(ctx.principal);
     return this.envelope.run<R>({
       command: ctx.command,
       scope: { kind: "tenant", tenantId: ctx.tenant.id },
       scopeKey: `${ctx.tenant.slug}:${ctx.command}:${ctx.idempotencyKey}`,
-      requestHash: computeCommandHash(ctx.command, client ? { ...requestArgs, __clientEditor: true } : requestArgs),
+      requestHash: computeCommandHash(
+        ctx.command,
+        client ? { ...requestArgs, __clientEditor: true } : contributor ? { ...requestArgs, __contributor: true } : requestArgs,
+      ),
       actor: ctx.principal.sub,
-      auditArgs: client ? { ...auditArgs, clientEditor: true } : auditArgs,
+      auditArgs: client ? { ...auditArgs, clientEditor: true } : contributor ? { ...auditArgs, contributor: true } : auditArgs,
       ws4ApprovalId: ctx.ws4ApprovalId,
       effect,
       mapError: mapDbError,
@@ -682,6 +688,7 @@ export class ContentCommandsService {
   // ==============================================================================================
   async createItem(ctx: EditorialCommandContext, input: CreateItemInput): Promise<ItemWriteResult> {
     assertClientMayRun(ctx.principal, "content.create");
+    assertContributorMayRun(ctx.principal, "content.create");
     const itemId = randomUUID();
     return this.execute<Omit<ItemWriteResult, "replayed">>(
       ctx,
@@ -791,6 +798,7 @@ export class ContentCommandsService {
   // ==============================================================================================
   async updateItem(ctx: EditorialCommandContext, itemId: string, input: UpdateItemInput): Promise<ItemWriteResult> {
     assertClientMayRun(ctx.principal, "content.update");
+    assertContributorMayRun(ctx.principal, "content.update");
     return this.execute<Omit<ItemWriteResult, "replayed">>(
       ctx,
       { tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, itemId, ...input },
@@ -813,6 +821,7 @@ export class ContentCommandsService {
     input: { version: number; baseVersion: number; note?: string },
   ): Promise<ItemWriteResult> {
     assertClientMayRun(ctx.principal, "content.restoreVersion");
+    assertContributorMayRun(ctx.principal, "content.restoreVersion");
     return this.execute<Omit<ItemWriteResult, "replayed">>(
       ctx,
       { tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, itemId, ...input },
@@ -862,6 +871,7 @@ export class ContentCommandsService {
     input: { items: { itemId: string; version: number }[]; note?: string },
   ): Promise<PublishResult> {
     assertClientMayRun(ctx.principal, "content.publish");
+    assertContributorMayRun(ctx.principal, "content.publish");
     return this.execute<Omit<PublishResult, "replayed">>(
       ctx,
       { tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, ...input },
@@ -930,6 +940,7 @@ export class ContentCommandsService {
   // ==============================================================================================
   async schedule(ctx: EditorialCommandContext, input: ScheduleInput): Promise<ScheduleResult> {
     assertClientMayRun(ctx.principal, "content.schedule");
+    assertContributorMayRun(ctx.principal, "content.schedule");
     return this.execute<Omit<ScheduleResult, "replayed">>(
       ctx,
       { tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, ...input },
@@ -1064,6 +1075,7 @@ export class ContentCommandsService {
   // ==============================================================================================
   async unpublish(ctx: EditorialCommandContext, itemId: string, input: { expectedPublishedVersion: number }): Promise<ItemStateResult> {
     assertClientMayRun(ctx.principal, "content.unpublish");
+    assertContributorMayRun(ctx.principal, "content.unpublish");
     return this.execute<Omit<ItemStateResult, "replayed">>(
       ctx,
       { tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, itemId, ...input },
@@ -1100,6 +1112,7 @@ export class ContentCommandsService {
   // ==============================================================================================
   async deleteItem(ctx: EditorialCommandContext, itemId: string, input: { baseVersion: number }): Promise<ItemStateResult> {
     assertClientMayRun(ctx.principal, "content.delete");
+    assertContributorMayRun(ctx.principal, "content.delete");
     return this.execute<Omit<ItemStateResult, "replayed">>(
       ctx,
       { tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, itemId, ...input },

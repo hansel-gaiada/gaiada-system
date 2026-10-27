@@ -1717,6 +1717,8 @@ enough alone.
 | Roles | `grantEditorialRole` (choke point) + trigger `user_roles_contributor_guard`; `assertGrantAllowed` refuses a contributor target on every generic origin, `trusted_internal` included | Only `webdesk_writer`, `webdesk_translator`, `webdesk_seo_reviewer` (never `webdesk_editor`), always with `expires_at`, never past the anchor's `valid_until`, only while an un-ended, unexpired anchor in that company exists. A grant written with no tenant context cannot see the anchor and is refused (fail closed). |
 | Ending | `POST …/editorial/contributors/:userId/end` (`revokeContributorEditorialGrants` in the choke point) | Revokes every writers' room grant in the company, spends open links, ends the anchor and cuts `valid_until` to now, bumps `session_version` (D11), disables the Keycloak login (and ends its sessions) unless another engagement is live. The expiry alone already cuts access (the assembly rule above). |
 
+| WebDesk, the third wall (M5-W1e) | the editorial-assertion signer (`modules/webdev/webdesk-editorial-signer.ts`) and WebDesk's `EditorialAssertionGuard` + each service method (`webdesk/api/src/control/auth/contributor-editor.ts`) | The signer sets the signed claim `xc: true` from the ASSEMBLED principal's `kind` (`sign(input, principal)`; no `xc` in `EditorialAssertionRequest`, nothing in a body, header or argument can set it; written only when true; refused with `ce`). WebDesk accepts `xc` only as a boolean, refuses `xc` with `ce` (401 `editorial-assertion-claims`), and holds an `xc` principal to `CONTRIBUTOR_COMMANDS`: content create / update / restoreVersion, preview mint / revoke, `editorial.submit`, `withdraw`, `comment`, `commentResolve`, `requestChanges`, `seoSignoff`. Everything else is 403 `contributor-command-not-allowed`. Like `ce` it only ever restricts, so the ERP's duty to set it is the whole of the ERP's side; it cannot gate the two review reads (they carry no assertion). |
+
 **Who manages contributors:** Cerbos `webdesk_collection` · `manage_editorial` on `{tenantId, module: webdev}`, the existing publisher tier (design
 §2.6): company_admin, owner, webdev_manager, platform_admin. No new action.
 
@@ -1729,9 +1731,11 @@ enough alone.
 assembly rules incl. an expired anchor with an unexpired grant, the choke point, and live `check()` probes where each DENY refuses the contributor
 writer AND the same principal with a staff tier while the employee twin is allowed; a static check that each DENY names every non-read action of its
 kind); `src/auth/contributor-route.test.ts`, `src/auth/contributor-fence.db.test.ts`, `src/modules/webdev/editorial-contributors.test.ts`,
-`src/core/contributor-invites.test.ts`.
+`src/core/contributor-invites.test.ts`. W1e: `src/modules/webdev/webdesk-editorial-signer.test.ts` (the vector v5 shared byte for byte with WebDesk, `xc` set for a
+contributor and absent for every other kind, no input path sets it) and, in WebDesk, `test/contributor-editor-principal.spec.ts` and
+`test/contributor-editor-enforcement.spec.ts`.
 
-**Not here (later tickets):** WebDesk's `xc` claim and `CONTRIBUTOR_COMMANDS` (W1e); the contributor shell and `isStaff` in the UI (W1f); the real
+**Not here (later tickets):** the contributor shell and `isStaff` in the UI (W1f); the real
 Keycloak `contributors` group, OTP and the AMR mapper (W1g: until then no real login reaches `high`, so the fence refuses every real contributor
 session, by design); the media quarantine (W1q); an expiry sweep that tidies lapsed anchors (the assembly already ignores them); the MCP tools
 `webdesk.editorial.inviteContributor` / `.endContributor` (need D14 executables).

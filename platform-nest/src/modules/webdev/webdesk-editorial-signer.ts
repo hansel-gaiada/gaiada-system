@@ -15,11 +15,25 @@
 // client's publish). It is written only when true: a staff assertion is byte-for-byte what it was before WSK-49, and
 // `ce: false` is never emitted (WebDesk reads absent and false alike, but one spelling keeps the bytes pinned).
 //
+// ── THE CONTRIBUTOR MARKER `xc` (M5-W1e, ruling WSK-D84; writers' room design D10 and section 3.1 item 7) ───────
+// A write made by a CONTRIBUTOR (a freelance writer, translator or SEO reviewer; `users.kind = 'contributor'`) carries
+// `xc: true`, between `ce` and `iat`. With it WebDesk allows only its CONTRIBUTOR_COMMANDS list (the third wall, after the ERP's
+// route fence and Cerbos); without it nothing changes. Like `ce` it only ever RESTRICTS, so an unmarked contributor would be a
+// full-power staff assertion, and setting it on every contributor call is this file's whole duty here.
+//
+// WHERE IT COMES FROM, AND WHERE IT CANNOT. `xc` is decided in exactly one place, `editorialClaimsFor`, from `principal.kind`
+// of the ASSEMBLED principal (`assemblePrincipal()` reads `users.kind`), which every caller must hand to `sign(input, principal)`.
+// `EditorialAssertionRequest` has no `xc` field, `sign` has no other parameter that could carry one, and the payload is built key
+// by key from named fields, so an `xc` smuggled into `input` at runtime is never copied. It is written only when true (an employee
+// assertion is byte-for-byte what it was before W1e; `xc: false` is never emitted, the same convention as `ce`). `xc` with `ce` is
+// refused here (a contributor is never a client editor; WebDesk refuses the pair with 401 -claims too). The structural pins are in
+// webdesk-editorial-signer.test.ts ("W1e: no input path sets xc").
+//
 // ── WIRE FORMAT (byte-pinned by the three vectors in this file's test AND in
 //    webdesk/api/test/editorial-assertion-vectors.spec.ts; change one side and both go red) ─────────
 //   compact JWS = base64url(header) "." base64url(payload) "." base64url(Ed25519 signature)
 //   header  = {"alg":"EdDSA","typ":"wd-editorial+jwt","kid":"<kid>"}            (this key order)
-//   payload = {"iss","aud","sub","pk","agt"?,"ten","site","cmd","cmh","req"?,"apr"?,"ce"?,"iat","exp","jti"}
+//   payload = {"iss","aud","sub","pk","agt"?,"ten","site","cmd","cmh","req"?,"apr"?,"ce"?,"xc"?,"iat","exp","jti"}
 //             (this key order; absent optionals are omitted, never null)
 //   iss = "urn:gaiada:erp:webdev", aud = "urn:gaiada:webdesk:control", exp = iat + ttl (60 s),
 //   jti = a fresh UUID v4 per assertion (WebDesk consumes it once).
@@ -36,10 +50,12 @@ import { readFileSync, statSync } from "node:fs";
 import { CompactSign } from "jose";
 import { Logger } from "@nestjs/common";
 import { config } from "../../config";
+import { CONTRIBUTOR_KIND } from "../../rbac/contributor";
 import {
   registerEditorialAssertionSigner,
   type EditorialAssertionRequest,
   type EditorialAssertionSigner,
+  type EditorialSigningPrincipal,
 } from "./webdesk-approved-command";
 
 export const EDITORIAL_ALG = "EdDSA";
@@ -74,6 +90,8 @@ export interface EditorialClaimsWire {
   apr?: string;
   /** WSK-49c: the client-editor marker, between `apr` and `iat` (WebDesk's vector v4). Present only for a client principal. */
   ce?: true;
+  /** M5-W1e: the contributor marker, between `ce` and `iat`. Present only when the assembled principal's `users.kind` is `contributor`. */
+  xc?: true;
   iat: number;
   exp: number;
   jti: string;
@@ -98,8 +116,15 @@ function bounded(v: unknown): v is string {
   return typeof v === "string" && v.length > 0 && v.length <= MAX_CLAIM_CHARS;
 }
 
-/** Validates WSK-66's request and builds the payload in wire order. Throws EditorialAssertionInputError. */
-export function editorialClaimsFor(input: EditorialAssertionRequest, iat: number, ttlSec: number, jti: string): EditorialClaimsWire {
+/** Validates WSK-66's request and builds the payload in wire order. Throws EditorialAssertionInputError.
+ *  `principal` is the ASSEMBLED principal the command runs as (the decider for an approved command); its `kind` is the ONLY source of `xc`. */
+export function editorialClaimsFor(
+  input: EditorialAssertionRequest,
+  iat: number,
+  ttlSec: number,
+  jti: string,
+  principal: EditorialSigningPrincipal,
+): EditorialClaimsWire {
   for (const name of ["sub", "ten", "site", "cmd"] as const) {
     if (!bounded(input[name])) throw new EditorialAssertionInputError(`${name} must be a non-empty string (max ${MAX_CLAIM_CHARS})`);
   }
@@ -115,6 +140,9 @@ export function editorialClaimsFor(input: EditorialAssertionRequest, iat: number
   if (!Number.isSafeInteger(iat) || !Number.isInteger(ttlSec) || ttlSec < 1 || ttlSec > MAX_EDITORIAL_TTL_SEC) {
     throw new EditorialAssertionInputError(`iat must be an integer and ttl 1..${MAX_EDITORIAL_TTL_SEC} s`);
   }
+  // M5-W1e: `xc` comes from the principal's kind and from nothing else. A contributor is never a client editor.
+  const contributor = principal.kind === CONTRIBUTOR_KIND;
+  if (contributor && input.ce === true) throw new EditorialAssertionInputError("a contributor is never a client editor (xc and ce are mutually exclusive)");
   // Built key by key so the serialised order is the pinned wire order.
   const c: EditorialClaimsWire = { iss: EDITORIAL_ISS, aud: EDITORIAL_AUD, sub: input.sub, pk: input.pk } as EditorialClaimsWire;
   if (input.agt !== undefined) c.agt = input.agt;
@@ -125,6 +153,7 @@ export function editorialClaimsFor(input: EditorialAssertionRequest, iat: number
   if (input.req !== undefined) c.req = input.req;
   if (input.apr !== undefined) c.apr = input.apr;
   if (input.ce === true) c.ce = true;
+  if (contributor) c.xc = true;
   c.iat = iat;
   c.exp = iat + ttlSec;
   c.jti = jti;
@@ -187,8 +216,8 @@ class WebdeskEditorialSigner implements EditorialAssertionSigner {
     this.#newJti = o.newJti ?? randomUUID;
   }
 
-  async sign(input: EditorialAssertionRequest): Promise<string> {
-    return signEditorialClaims(this.#key, this.kid, editorialClaimsFor(input, this.#now(), this.#ttlSec, this.#newJti()));
+  async sign(input: EditorialAssertionRequest, principal: EditorialSigningPrincipal): Promise<string> {
+    return signEditorialClaims(this.#key, this.kid, editorialClaimsFor(input, this.#now(), this.#ttlSec, this.#newJti(), principal));
   }
 
   toJSON(): Record<string, unknown> {

@@ -304,3 +304,40 @@ export const CLIENT_EDITOR_COMMANDS: ReadonlySet<CommandName> = new Set<CommandN
   "media.uploadToken",
   "media.update",
 ]);
+
+/**
+ * M5-W1e (ruling WSK-D84; writers' room design D10 and section 3.1 item 7) -- the editorial commands a CONTRIBUTOR may
+ * run, an ALLOW-list like CLIENT_EDITOR_COMMANDS: a command added to EDITORIAL_COMMANDS later is refused to a contributor
+ * until it is listed here on purpose. "A contributor" is a principal whose signed editorial assertion carries `xc: true`
+ * (auth/contributor-editor.ts). The ERP's own walls (the route fence, Cerbos, the role allow-list) come first; this is the
+ * third wall, so WebDesk holds a contributor to the same short list even if an ERP wall were misconfigured.
+ *
+ *   allowed   content.create / update / restoreVersion   (a writer or translator drafts; a translator restores)
+ *             content.previewToken / previewTokenRevoke  (a reviewer needs a draft link; revoke only withdraws one)
+ *             editorial.submit / withdraw                (hand a draft in for review, or take it back)
+ *             editorial.comment / commentResolve         (review conversation)
+ *             editorial.requestChanges                   (an SEO reviewer sends a draft back; Cerbos still decides who)
+ *             editorial.seoSignoff                       (the SEO reviewer's own sign-off)
+ *   refused   content.publish, schedule, unpublish, delete   (publishing is a staff function)
+ *             editorial.approve, assign, policySet           (approval, routing and policy are staff functions)
+ *             media.uploadToken, media.update, media.delete  (no media write until the Q2 quarantine exists; WSK-D84 allows
+ *                                                             uploads once it does, which is one line here and a ticket)
+ *
+ * Nothing else a contributor could name is an editorial command: schema.apply, key.*, lifecycle, releases and promotion
+ * carry no editorial assertion at all, exactly as for a client editor, so the ERP must never route a contributor there.
+ * The two review READS (editorial.board, editorial.history) carry no assertion either, so this list cannot gate them; the
+ * ERP's fence and Cerbos do. test/contributor-editor-principal.spec.ts pins the exact membership.
+ */
+export const CONTRIBUTOR_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>([
+  "content.create",
+  "content.update",
+  "content.restoreVersion",
+  "content.previewToken",
+  "content.previewTokenRevoke",
+  "editorial.submit",
+  "editorial.withdraw",
+  "editorial.comment",
+  "editorial.commentResolve",
+  "editorial.requestChanges",
+  "editorial.seoSignoff",
+]);

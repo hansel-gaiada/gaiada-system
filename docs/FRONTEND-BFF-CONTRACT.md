@@ -5998,6 +5998,18 @@ contributor's own grants. Not open: every media write (upload stays closed until
 delete, approve, assign, the editorial policy, grants, the contributor admin routes, the calendar, the writers' dashboard. There is no backend
 logout route: sign-out is the UI's and Keycloak's.
 
+**WebDesk's third wall: the `xc` claim (M5-W1e, 2026-10-27, PROTOTYPED: typechecked; the signer suite `webdesk-editorial-signer.test.ts` and WebDesk's `contributor-editor-principal.spec.ts` ran locally; the HTTP suite `contributor-editor-enforcement.spec.ts` runs on the GitHub Actions `webdesk-api` job).** No BFF route changes. Every
+editorial assertion the ERP signs for a contributor (any `WebdeskZoneB.write` of a contributor's create, update, restore, preview, submit, comment and
+the rest, and the approved-command executor when the decider is one) carries the signed claim `xc: true`, between `ce` and `iat`. The signer
+(`webdesk-editorial-signer.ts`) derives it from `principal.kind === "contributor"` of the ASSEMBLED principal, which both call sites now hand to
+`sign(input, principal)`; `EditorialAssertionRequest` has no `xc` field and nothing in a request body, header or argument can set it. It is written only
+when true (an employee's assertion is byte-for-byte what it was; `xc: false` is never emitted, the `ce` convention), and `xc` with `ce` is refused at
+signing. WebDesk (`webdesk/api` README, "Contributors (M5-W1e)") then allows such a principal only `CONTRIBUTOR_COMMANDS`: `content.create`, `update`,
+`restoreVersion`, `previewToken`, `previewTokenRevoke`, `editorial.submit`, `withdraw`, `comment`, `commentResolve`, `requestChanges`, `seoSignoff`; any
+other editorial command is **403** `{type: ".../errors/contributor-command-not-allowed", title, status: 403, detail}`. A non-boolean `xc`, or `xc` together
+with `ce`, is **401** `editorial-assertion-claims`. Media writes stay refused until the W1q quarantine. The BFF's own answer to a contributor on a refused
+route is unchanged (the fence's 403 `contributor_route_forbidden`); this wall only matters if an ERP wall were misconfigured.
+
 **No MCP tools yet.** The design's `webdesk.editorial.inviteContributor` (high) and `.endContributor` (medium) need D14 executables in
 `core/approval-executables.ts`, which another session holds: a follow-up.
 
