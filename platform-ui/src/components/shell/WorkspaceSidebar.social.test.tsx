@@ -69,14 +69,14 @@ beforeEach(() => {
 });
 
 describe("the Social menu: which entries a person sees", () => {
-  it("an officer sees Home, Search, Notifications, Tasks, Create, Calendar, Reports, Saved, AI Assistant, then More", () => {
+  it("an officer sees Home, Search, Messages, Notifications, Tasks, Create, Calendar, Reports, Saved, AI Assistant, then More", () => {
     renderAt(socialModel(officer), "/departments/d-soc");
-    expect(entries()).toEqual(["Home", "Search", "Notifications", "Tasks", "Create", "Calendar", "Reports", "Saved", "AI Assistant", "More"]);
+    expect(entries()).toEqual(["Home", "Search", "Messages", "Notifications", "Tasks", "Create", "Calendar", "Reports", "Saved", "AI Assistant", "More"]);
   });
 
-  it("a head also sees Settings (SCP-1c); the Dashboard, Messages and Profile pages stay hidden while ticketed", () => {
+  it("a head also sees Settings (SCP-1c); the Dashboard and Profile pages stay hidden while ticketed", () => {
     renderAt(socialModel(head), "/departments/d-soc");
-    expect(entries()).toEqual(["Home", "Search", "Notifications", "Tasks", "Create", "Calendar", "Reports", "Saved", "AI Assistant", "Settings", "More"]);
+    expect(entries()).toEqual(["Home", "Search", "Messages", "Notifications", "Tasks", "Create", "Calendar", "Reports", "Saved", "AI Assistant", "Settings", "More"]);
     expect(within(menu()).queryByRole("link", { name: "Dashboard" })).toBeNull();
     expect(link("Settings")).toHaveAttribute("href", "/departments/d-soc/settings");
   });

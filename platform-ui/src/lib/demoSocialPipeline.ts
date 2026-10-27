@@ -15,7 +15,7 @@ import { todayIsoInDisplayZone } from "./format";
 import type { BrandBook } from "./socialBrandBook";
 import fixture from "./scpStageMachine.json";
 import {
-  scpActionsFromStatus, scpEngineStatusOf, scpHolderOf, scpPhaseOf, scpPrimaryActionOf, type ScpPostView,
+  SCP_PHASES, scpActionsFromStatus, scpEngineStatusOf, scpHolderOf, scpPhaseOf, scpPrimaryActionOf, type ScpPostView,
 } from "./scpStageMachine";
 
 export interface DemoResult { status: number; json: unknown }
@@ -614,6 +614,178 @@ export const demoPipelineMetrics = (postId: string) => store.posts.find((p) => p
  * TODO(SCP-1e): the demo action runner. `POST posts/:postId/actions` is built by SCP-1e with the post page (it applies the fixture's effects to the
  * store above: status, change case, block, history, copy log, suggestions). Until then the route answers this refusal rather than pretend.
  */
-export function runDemoPipelineAction(_postId: string, _body: unknown, _userId: string): DemoResult {
+export function runDemoPipelineAction(postId: string, body: unknown, userId: string): DemoResult {
+  // SCP-1j: `follow_up` is the one action that changes no post, so it is answered here ahead of the runner SCP-1e builds for the rest.
+  if ((body as { action?: unknown } | null)?.action === "follow_up") return demoFollowUp(postId, body as Record<string, unknown>, userId);
   return err(501, "demo_action_runner_not_built");
+}
+
+// ── SCP-1d / SCP-1j: the feed, Messages and the pipeline's leg of Needs you (BFF §63.7) ────────────────────────────────────────
+// The same holder, maker and health rules as the server, over the store above. Health is the store's FIXED mock value (`demoPostHealth`).
+const DEMO_SOCIAL_DEPT = "dept-4";
+const FOLLOW_UPS_KEY = Symbol.for("gaiada.demoSocial.followUps");
+/** `<postId>|<holder role>` -> the ISO time of the last follow-up the demo took. Pinned to globalThis like the store. */
+const followUps: Map<string, string> = ((globalThis as Record<symbol, unknown>)[FOLLOW_UPS_KEY] ??= new Map<string, string>()) as Map<string, string>;
+const HEALTH_RANK: Record<string, number> = { late: 4, at_risk: 3, tight: 2 };
+const FEED_MAX = 50;
+const PHASE_KEYS: readonly string[] = SCP_PHASES.map((p) => p.key);
+
+const officerOfPost = (p: PipePost): string | null => store.allocations[p.engagementId]?.officerId ?? null;
+const HOLDER_LABEL: Record<string, string> = {
+  officer: "The officer", copywriter: "A copywriter", approver: "The HoD or the GM", designer: "The designer", client: "The client", publisher: "The publisher",
+  external: "Someone outside the team",
+};
+const holderLabel = (role: string): string => HOLDER_LABEL[role] ?? role;
+
+/** Whether the post is `userId`'s turn: the holder is them, as officer, copywriter, one of the two seats or the designer; a maker is never the checker. */
+export function demoYourTurn(p: PipePost, userId: string): boolean {
+  const holder = holderRole(p);
+  const officer = officerOfPost(p);
+  const maker = userId === p.authorId || userId === officer;
+  switch (holder) {
+    case "officer": return userId === officer;
+    case "copywriter": return userId === COPYWRITER && !maker;
+    // the owner and the superadmin act from the same pages but hold no seat, so no turn
+    case "approver": return (userId === "u-pm" || userId === "u-gm") && !maker;
+    case "designer": return userId === (p.creativeSource === "in_team" ? IN_TEAM_DESIGNER : CREATIVES_DESIGNER);
+    default: return false;
+  }
+}
+
+/** The posts someone else holds that a follow-up can reach (the server's `isWaitingOn`). */
+const demoWaitingOn = (holder: string | null): boolean => holder !== null && holder !== "officer" && holder !== "publisher";
+
+function demoCard(p: PipePost, userId: string): Record<string, unknown> {
+  const eng = store.engagements.find((e) => e.id === p.engagementId)!;
+  const holder = holderRole(p);
+  const primary = scpPrimaryActionOf(view(p));
+  const entry = primary ? demoPostActions(p, userId).find((a) => a.action === primary) : undefined;
+  return {
+    id: p.id, engagementId: p.engagementId, clientName: eng.clientName, title: p.title, format: p.format, isExtra: p.isExtra, isStory: p.format === "story",
+    thumbFileId: null, pipelineStatus: p.pipelineStatus, phase: scpPhaseOf(view(p)),
+    holder: holder === null ? { role: null, label: "Nobody" } : { role: holder, label: holderLabel(holder) },
+    yourTurn: demoYourTurn(p, userId), health: demoPostHealth(p), scheduledAt: p.scheduledAt, statusSince: p.statusSince,
+    nextAction: entry ? { action: entry.action, allowed: entry.allowed, ...(entry.reason ? { reason: entry.reason } : {}) } : null, simulated: p.simulated,
+  };
+}
+
+/** `GET feed`: `view`, the filters, `cursor` and `limit`, with the server's validation and its order (health first, then `statusSince`). */
+export function demoFeed(params: URLSearchParams, userId: string): DemoResult {
+  if (isClientContact(userId)) return err(403, "not authorized: social_post read");
+  const bad = (field: string): DemoResult => ({ status: 400, json: { error: "invalid_field", field } });
+  const v = params.get("view") ?? "your_turn";
+  if (v !== "your_turn" && v !== "waiting" && v !== "all") return bad("view");
+  const phase = params.get("phase");
+  if (phase && !PHASE_KEYS.includes(phase)) return bad("phase");
+  const limitRaw = params.get("limit");
+  let limit = 30;
+  if (limitRaw !== null && limitRaw !== "") {
+    if (!/^\d+$/.test(limitRaw) || Number(limitRaw) < 1 || Number(limitRaw) > 100) return bad("limit");
+    limit = Number(limitRaw);
+  }
+  const cursorRaw = params.get("cursor");
+  let start = 0;
+  if (cursorRaw) {
+    const n = Number(Buffer.from(cursorRaw, "base64url").toString("utf8"));
+    if (!Number.isInteger(n) || n < 0) return bad("cursor");
+    start = n;
+  }
+  const engagementId = params.get("engagementId");
+  const cycleId = params.get("cycleId");
+  const officerId = params.get("officerId");
+  const rows = store.posts
+    .filter((p) => !engagementId || p.engagementId === engagementId)
+    .filter((p) => !cycleId || p.cycleId === cycleId)
+    .filter((p) => !officerId || officerOfPost(p) === officerId)
+    .filter((p) => !phase || scpPhaseOf(view(p)) === phase)
+    .filter((p) => (v === "your_turn" ? demoYourTurn(p, userId) : v === "waiting" ? officerOfPost(p) === userId && demoWaitingOn(holderRole(p)) : true))
+    .map((p) => ({ p, rank: HEALTH_RANK[String(demoPostHealth(p).state)] ?? 0 }))
+    .sort((a, b) => b.rank - a.rank || (a.p.statusSince < b.p.statusSince ? -1 : a.p.statusSince > b.p.statusSince ? 1 : a.p.id < b.p.id ? -1 : 1));
+  const size = Math.min(limit, FEED_MAX);
+  const page = rows.slice(start, start + size);
+  const next = start + size < rows.length ? Buffer.from(String(start + size), "utf8").toString("base64url") : null;
+  return ok({ items: page.map((r) => demoCard(r.p, userId)), nextCursor: next });
+}
+
+const GROUP_ORDER = ["approver", "copywriter", "designer", "client", "external"];
+
+/** `GET waiting` (Messages): the caller's posts as officer that someone else holds, grouped by holder. */
+export function demoWaiting(userId: string): DemoResult {
+  if (isClientContact(userId)) return err(403, "not authorized: social_post read");
+  const held = store.posts.filter((p) => officerOfPost(p) === userId && demoWaitingOn(holderRole(p)));
+  const roles = [...new Set(held.map((p) => holderRole(p) as string))];
+  const ordered = [...GROUP_ORDER.filter((r) => roles.includes(r)), ...roles.filter((r) => !GROUP_ORDER.includes(r)).sort()];
+  const clientOf = (p: PipePost) => store.engagements.find((e) => e.id === p.engagementId)!;
+  const groups = ordered.map((role) => {
+    const posts = held.filter((p) => holderRole(p) === role).sort((a, b) => (a.statusSince < b.statusSince ? -1 : a.statusSince > b.statusSince ? 1 : a.id < b.id ? -1 : 1));
+    const userIds = [...new Set(posts.flatMap((p) => holderOf(p).userIds))];
+    return {
+      holder: { role, label: holderLabel(role), userIds },
+      posts: posts.map((p) => ({
+        id: p.id, title: p.title, clientName: clientOf(p).clientName, since: p.statusSince, lastFollowUpAt: followUps.get(`${p.id}|${role}`) ?? null,
+        pipelineStatus: p.pipelineStatus, engagementId: p.engagementId, clientId: clientOf(p).clientId,
+      })),
+    };
+  });
+  return ok({ groups });
+}
+
+const NEEDS_KIND: Record<string, { kind: string; role: string }> = {
+  "drafting:officer": { kind: "draft_to_send", role: "officer" }, "changes:officer": { kind: "fix_asked", role: "officer" },
+  "approved:officer": { kind: "ready_to_schedule", role: "officer" }, "proofread:copywriter": { kind: "proofread", role: "copywriter" },
+  "hod:approver": { kind: "hod_approval", role: "approver" }, "final:approver": { kind: "final_check", role: "approver" },
+  "design:designer": { kind: "design", role: "designer" }, "changes:designer": { kind: "design_revision", role: "designer" },
+};
+
+/** `GET needs-you`: the pipeline's leg of "Needs you" for the caller's roles; the owner and the superadmin get none. */
+export function demoNeedsYou(tenantId: string, userId: string): DemoResult {
+  if (isClientContact(userId)) return err(403, "not authorized: social_post read");
+  const items: Array<Record<string, unknown>> = [];
+  const clientName = (p: PipePost) => store.engagements.find((e) => e.id === p.engagementId)!.clientName;
+  for (const p of store.posts) {
+    if (!demoYourTurn(p, userId)) continue;
+    const k = NEEDS_KIND[`${p.pipelineStatus}:${holderRole(p)}`];
+    if (!k) continue;
+    const cycle = cyclesStore.cycles.find((c) => c.id === p.cycleId);
+    const due = k.kind === "ready_to_schedule" ? p.scheduledAt?.slice(0, 10) : cycle?.readyBy;
+    items.push({
+      id: `social:${tenantId}:${p.id}:${k.kind}`, kind: k.kind, role: k.role, title: p.title, clientName: clientName(p), since: p.statusSince,
+      ...(due ? { due } : {}), href: `/departments/${DEMO_SOCIAL_DEPT}/posts/${p.id}`,
+    });
+  }
+  // live for two days with no metrics, on the officer's own clients
+  const twoDaysAgo = Date.now() - 2 * 86400000;
+  for (const p of store.posts) {
+    if (p.pipelineStatus !== "live" || officerOfPost(p) !== userId || p.metrics !== null || !p.wentLiveAt || Date.parse(p.wentLiveAt) > twoDaysAgo) continue;
+    items.push({
+      id: `social:${tenantId}:${p.id}:metrics_missing`, kind: "metrics_missing", role: "officer", title: p.title, clientName: clientName(p), since: p.wentLiveAt,
+      href: `/departments/${DEMO_SOCIAL_DEPT}/posts/${p.id}`,
+    });
+  }
+  items.sort((a, b) => (String(a.since) < String(b.since) ? -1 : String(a.since) > String(b.since) ? 1 : String(a.id) < String(b.id) ? -1 : 1));
+  return ok({ items: items.slice(0, 50), partial: [] });
+}
+
+/** `POST posts/:postId/actions` with `follow_up`, in the server's order of checks (BFF §63.3.2, §63.14); it changes no post, it logs and reminds. */
+function demoFollowUp(postId: string, body: Record<string, unknown>, userId: string): DemoResult {
+  const p = store.posts.find((x) => x.id === postId);
+  if (!p) return err(404, "post_not_found");
+  const officer = officerOfPost(p);
+  // `manage`: the officer, the two seats and the superadmin (its wildcard); the owner holds none of the team's own steps
+  if (!(userId === officer || SEAT_APPROVERS.includes(userId))) return err(403, "not_officer_or_approver");
+  if (body.expectedStatus === undefined) return { status: 400, json: { error: "missing_field", field: "expectedStatus" } };
+  if (body.expectedStatus !== p.pipelineStatus) return { status: 409, json: { error: "status_changed", detail: { status: p.pipelineStatus, phase: scpPhaseOf(view(p)) } } };
+  if (!scpActionsFromStatus(view(p)).includes("follow_up")) return { status: 409, json: { error: "invalid_transition", detail: { status: p.pipelineStatus } } };
+  if (body.note !== undefined && (typeof body.note !== "string" || body.note.length > 500)) return { status: 400, json: { error: "invalid_field", field: "note" } };
+  const holder = holderRole(p);
+  // nobody holds it, or the caller does
+  if (holder === null || demoYourTurn(p, userId) || (holder === "officer" && userId === officer)) return err(409, "nobody_to_follow_up");
+  const key = `${p.id}|${holder}`;
+  const last = followUps.get(key);
+  const windowMs = 24 * 3600 * 1000;
+  if (last && Date.now() - Date.parse(last) < windowMs) {
+    return { status: 409, json: { error: "follow_up_too_soon", retryAfterSeconds: Math.ceil((windowMs - (Date.now() - Date.parse(last))) / 1000) } };
+  }
+  followUps.set(key, new Date().toISOString());
+  return ok({ post: demoPipelinePost(p, userId), alreadyApplied: false, applied: { action: "follow_up", from: p.pipelineStatus, to: p.pipelineStatus } });
 }

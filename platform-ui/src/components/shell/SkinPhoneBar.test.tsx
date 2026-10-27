@@ -146,9 +146,10 @@ describe("the phone's bottom bar", () => {
 describe("the phone's top controls", () => {
   const top = () => document.querySelector<HTMLElement>(".erp-top__phone")!;
 
-  it("are Notifications and More, in that order (Messages is ticketed, so absent), with no count while it is unknown", () => {
+  it("are Notifications, Messages and More, in that order, with no count while it is unknown", () => {
     draw(modelFor(officer));
-    expect(Array.from(top().querySelectorAll("a, button")).map((e) => e.getAttribute("aria-label") ?? e.textContent)).toEqual(["Notifications", "More"]);
+    expect(Array.from(top().querySelectorAll("a, button")).map((e) => e.getAttribute("aria-label") ?? e.textContent)).toEqual(["Notifications", "Messages", "More"]);
+    expect(within(top()).getByRole("link", { name: "Messages" })).toHaveAttribute("href", "/departments/d-soc/messages");
     const bell = within(top()).getByRole("link", { name: "Notifications" });
     expect(bell).toHaveAttribute("href", "/me/inbox");
     expect(within(bell).queryByRole("img")).toBeNull();

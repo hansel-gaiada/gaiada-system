@@ -75,7 +75,7 @@ test.describe("the Social skin on a desktop (1280x800)", () => {
     // <html> gets it from a client effect once the shell has hydrated.
     await expect(page.locator("html")).toHaveAttribute("data-skin", "social");
     await expect(menu(page)).toBeVisible();
-    await expect.poll(() => pinNames(page)).toEqual(["Home", "Search", "Notifications", "Tasks", "Create", "Calendar", "Reports", "Saved", "AI Assistant", "More"]);
+    await expect.poll(() => pinNames(page)).toEqual(["Home", "Search", "Messages", "Notifications", "Tasks", "Create", "Calendar", "Reports", "Saved", "AI Assistant", "More"]);
     await expect(menu(page).getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
     // The phone's parts are not drawn on a desktop.
     await expect(bar(page)).toBeHidden();

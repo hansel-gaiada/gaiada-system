@@ -387,6 +387,8 @@ describe("getMyWorkQueue: client conversations waiting for my reply (DW-5g)", ()
       if (u.includes("/co-a/conversation")) { seen.push(u); return new Response(JSON.stringify({ threads: [thread] }), { status: 200 }); }
       // The KPI alerts source (DW-4j-2) answers its own shape: an empty list is `{alerts: []}`, and an array would be read as a failed read.
       if (u.includes("/co-a/dept-kpis/alerts")) return new Response(JSON.stringify({ alerts: [] }), { status: 200 });
+      // The pipeline's leg (SCP-1j) answers its own shape too: an empty one is `{items: [], partial: []}`, and an array would be read as a failed read.
+      if (u.includes("/co-a/modules/social/needs-you")) return new Response(JSON.stringify({ items: [], partial: [] }), { status: 200 });
       return new Response(JSON.stringify([]), { status: 200 });
     }));
     const queue = await getMyWorkQueue(m, "u1", companies);
@@ -428,6 +430,7 @@ describe("getMyWorkQueue: department KPI alerts waiting for their head (DW-4j-2)
   const stub = (alertsRes: () => Response) =>
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (String(url).includes("/co-a/dept-kpis/alerts")) return alertsRes();
+      if (String(url).includes("/co-a/modules/social/needs-you")) return new Response(JSON.stringify({ items: [], partial: [] }), { status: 200 });
       return new Response(JSON.stringify([]), { status: 200 });
     }));
 
@@ -447,6 +450,7 @@ describe("getMyWorkQueue: department KPI alerts waiting for their head (DW-4j-2)
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       const u = String(url);
       if (u.includes("/co-a/dept-kpis/alerts")) return new Response(JSON.stringify({ alerts: [alert] }), { status: 200 });
+      if (u.includes("/co-a/modules/social/needs-you")) return new Response(JSON.stringify({ items: [], partial: [] }), { status: 200 });
       if (u.includes("/co-a/tasks?assignee=me")) {
         return new Response(JSON.stringify([{ id: "t-1", title: "Ship SEO audit", status: "todo", priority: "high", due_date: "2020-01-01", project_name: "SEO" }]), { status: 200 });
       }
@@ -495,5 +499,82 @@ describe("getMyWorkQueue: department KPI alerts waiting for their head (DW-4j-2)
         : new Response(JSON.stringify([]), { status: 200 })));
     const ids = (await getMyWorkQueue(mm, "u1", two)).items.map((i) => i.id).sort();
     expect(ids).toEqual(["alert:co-a:al-1", "alert:co-b:al-1"]);
+  });
+});
+
+describe("getMyWorkQueue: the Social pipeline's leg (SCP-1j, BFF §63.7)", () => {
+  const companies = [{ id: "co-a", name: "Agency" }];
+  const m = me(companies, [{ role: "member", scopeType: "company", scopeId: "co-a" }]);
+  const item = (kind: string, post: string, over: Record<string, unknown> = {}) => ({
+    id: `social:co-a:${post}:${kind}`, kind, role: "officer", title: `Post ${post}`, clientName: "Mock Bakery", since: "2026-10-20T08:00:00.000Z",
+    href: `/departments/d-soc/posts/${post}`, ...over,
+  });
+  const stub = (res: () => Response) =>
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/co-a/modules/social/needs-you")) return res();
+      if (u.includes("/co-a/dept-kpis/alerts")) return new Response(JSON.stringify({ alerts: [] }), { status: 200 });
+      return new Response(JSON.stringify([]), { status: 200 });
+    }));
+
+  it("asks the company's own needs-you route once and maps each row to a work item that links to the post", async () => {
+    stub(() => new Response(JSON.stringify({
+      items: [item("draft_to_send", "p-1", { due: "2026-10-15" }), item("proofread", "p-2", { role: "copywriter" })], partial: [],
+    }), { status: 200 }));
+    const queue = await getMyWorkQueue(m, "u1", companies);
+    const urls = vi.mocked(fetch).mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/needs-you"));
+    expect(urls).toEqual(["http://p.test/api/co-a/modules/social/needs-you"]);
+    expect(queue.items.find((i) => i.id === "social:co-a:p-1:draft_to_send")).toMatchObject({
+      type: "task", title: "Post p-1", meta: "Mock Bakery · A draft to send", href: "/departments/d-soc/posts/p-1", dueDate: "2026-10-15",
+      createdAt: "2026-10-20T08:00:00.000Z", companyId: "co-a", company: "Agency", decidable: true,
+    });
+    expect(queue.items.find((i) => i.id === "social:co-a:p-2:proofread")).toMatchObject({ meta: "Mock Bakery · To proofread", dueDate: null });
+    expect(queue.companies[0].partialSources).toBeUndefined();
+  });
+
+  it("a post past its ready-by ranks as an overdue task does, above one with no date", async () => {
+    stub(() => new Response(JSON.stringify({ items: [item("proofread", "p-new"), item("draft_to_send", "p-late", { due: "2020-01-01" })], partial: [] }), { status: 200 }));
+    const ids = (await getMyWorkQueue(m, "u1", companies)).items.map((i) => i.id);
+    expect(ids.indexOf("social:co-a:p-late:draft_to_send")).toBeLessThan(ids.indexOf("social:co-a:p-new:proofread"));
+  });
+
+  it("a failed read is named in partialSources, never a silent empty", async () => {
+    stub(() => new Response(JSON.stringify({ error: "boom" }), { status: 500 }));
+    const queue = await getMyWorkQueue(m, "u1", companies);
+    expect(queue.items.some((i) => i.id.startsWith("social:"))).toBe(false);
+    expect(queue.companies[0].included).toBe(true);
+    expect(queue.companies[0].partialSources).toContain("Social pipeline");
+  });
+
+  it("an answer of the wrong shape is a failed read too", async () => {
+    stub(() => new Response(JSON.stringify([]), { status: 200 }));
+    expect((await getMyWorkQueue(m, "u1", companies)).companies[0].partialSources).toContain("Social pipeline");
+  });
+
+  it("a source the server could not read is named beside the rows it did read", async () => {
+    stub(() => new Response(JSON.stringify({ items: [item("proofread", "p-3")], partial: ["post metrics"] }), { status: 200 }));
+    const queue = await getMyWorkQueue(m, "u1", companies);
+    expect(queue.items.some((i) => i.id === "social:co-a:p-3:proofread")).toBe(true);
+    expect(queue.companies[0].partialSources).toEqual(["Social post metrics"]);
+  });
+
+  it("a refusal or a company without the Social Media module is not a lost source: there is no pipeline leg for this person there", async () => {
+    stub(() => new Response(JSON.stringify({ error: "not authorized" }), { status: 403 }));
+    expect((await getMyWorkQueue(m, "u1", companies)).companies[0].partialSources).toBeUndefined();
+    stub(() => new Response(JSON.stringify({ error: "Not Found" }), { status: 404 }));
+    expect((await getMyWorkQueue(m, "u1", companies)).companies[0].partialSources).toBeUndefined();
+  });
+
+  it("does not collide when the same post id appears under two companies", async () => {
+    const two = [{ id: "co-a", name: "Agency" }, { id: "co-b", name: "Resort" }];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const u = String(url);
+      const t = u.includes("/co-b/") ? "co-b" : "co-a";
+      if (u.includes("/modules/social/needs-you")) return new Response(JSON.stringify({ items: [item("proofread", "p-9", { id: `social:${t}:p-9:proofread` })], partial: [] }), { status: 200 });
+      if (u.includes("/dept-kpis/alerts")) return new Response(JSON.stringify({ alerts: [] }), { status: 200 });
+      return new Response(JSON.stringify([]), { status: 200 });
+    }));
+    const ids = (await getMyWorkQueue(me(two, []), "u1", two)).items.map((i) => i.id).sort();
+    expect(ids).toEqual(["social:co-a:p-9:proofread", "social:co-b:p-9:proofread"]);
   });
 });
