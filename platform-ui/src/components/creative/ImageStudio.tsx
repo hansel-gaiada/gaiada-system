@@ -8,6 +8,8 @@ import { aiLookAvailable, predictGrade } from "@/lib/imaging/aiLook";
 import { BeforeAfterSlider } from "./BeforeAfterSlider";
 import { GradeSliders } from "./GradeSliders";
 import { saveCreativeAsset } from "@/lib/creativeActions";
+import { AssetSourceFields } from "./AssetSourceFields";
+import { EMPTY_ASSET_SOURCE, assetSourceBody, assetSourceProblem, type AssetSourceValue } from "@/lib/creativeSource";
 import "./creative.css";
 
 interface Item { id: string; url: string; name: string }
@@ -38,6 +40,8 @@ export function ImageStudio({ deptId, versionOf }: { deptId?: string; versionOf?
   const [activePreset, setActivePreset] = useState<string>("neutral");
   const [busy, setBusy] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  // SCP-1h: where the saved picture came from (and how an AI-made one was made).
+  const [source, setSource] = useState<AssetSourceValue>(EMPTY_ASSET_SOURCE);
   const [dragOver, setDragOver] = useState(false);
   const [aiReady, setAiReady] = useState(false);
 
@@ -178,6 +182,8 @@ export function ImageStudio({ deptId, versionOf }: { deptId?: string; versionOf?
   // correction is reproducible/reversible (and becomes an AI training pair, phase 2).
   const saveToErp = useCallback(async (asVersion?: boolean) => {
     if (!selected || !canvasRef.current) return;
+    const problem = assetSourceProblem(source);
+    if (problem) { setSaveMsg(problem); return; }
     setBusy(true); setSaveMsg(null);
     try {
       const g = grades[selected.id] ?? IDENTITY_GRADE;
@@ -195,6 +201,7 @@ export function ImageStudio({ deptId, versionOf }: { deptId?: string; versionOf?
         original: await blobToBase64(originalBlob),
         originalContentType: originalBlob.type || "image/jpeg",
         departmentId: deptId,
+        ...assetSourceBody(source),
         // DW-6h §35.2: opened from an asset, "Save as a new version" sends `versionOf` (the server inherits the department).
         ...(asVersion && versionOf ? { versionOf: versionOf.id, departmentId: undefined } : {}),
       });
@@ -204,7 +211,7 @@ export function ImageStudio({ deptId, versionOf }: { deptId?: string; versionOf?
     } finally {
       setBusy(false);
     }
-  }, [selected, grades, activePreset, deptId, loadImage, versionOf]);
+  }, [selected, grades, activePreset, deptId, loadImage, versionOf, source]);
 
   // ── Empty state ────────────────────────────────────────────────────────────
   if (items.length === 0) {
@@ -281,6 +288,7 @@ export function ImageStudio({ deptId, versionOf }: { deptId?: string; versionOf?
           </div>
 
           <div className="cs-section">
+            <AssetSourceFields value={source} onChange={setSource} disabled={busy} />
             <div className="cs-actions">
               {versionOf ? (
                 <>

@@ -21,6 +21,8 @@ import "server-only";
 // THE ROUTES (DW-D39): Viceroy and the holding each have two, to the agency's Creatives (assets) and Web Dev (engineering), billed to each as a
 // client of the agency (DW-D41).
 
+import { demoMonthRequests, demoRequestSocialPosts } from "./demoSocialDesignQueue";
+
 interface DemoResult { status: number; json: unknown }
 const ok = (json: unknown, status = 200): DemoResult => ({ status, json });
 const err = (status: number, error: string, extra: Record<string, unknown> = {}): DemoResult => ({ status, json: { error, ...extra } });
@@ -472,14 +474,33 @@ function listReceiving(tenant: string, userId: string, q: URLSearchParams): Demo
   return ok(ordered.slice(0, 200).map(receiverRow));
 }
 
+/** The Social Media department of the agency in this demo (`AGENCY_DEPTS`), where a request's social posts open. */
+const SOCIAL_DEPT = "dept-4";
+
+/** A Creatives month request that a Social Media post names (`creativeRequestId`): open, to Creatives, with the designer on its task. Not in the lists. */
+function monthRequest(tenant: string, id: string): DemoRequest | undefined {
+  const m = tenant === AGENCY ? demoMonthRequests().find((x) => x.id === id) : undefined;
+  if (!m) return undefined;
+  return {
+    id: m.id, tenantId: AGENCY, requesterTenantId: AGENCY, kind: "assets", title: m.title, brief: "", neededBy: m.neededBy,
+    createdAt: `${SEED_BASE}2T03:00:00.000Z`, closedAt: null, status: "open", declineReason: null, requestedBy: "demo-hansel",
+    fromUnit: { id: SOCIAL_DEPT, name: AGENCY_DEPTS[SOCIAL_DEPT] }, toUnit: { id: "dept-2", name: "Creatives" }, requesterUnit: null, routeId: null,
+    form: { deliverables: [{ format: "image", size: "per post", quantity: 4 }], channel: "social" },
+    workStatus: "in_progress", isDone: false, responsibleName: "Putu Rani", price: null, assets: [], files: [],
+  };
+}
+
 function receivingDetail(tenant: string, userId: string, id: string): DemoResult {
   const tier = staffOf(userId, tenant);
   if (typeof tier !== "string") return tier;
-  const r = REQUESTS.find((x) => x.id === id && x.tenantId === tenant);
+  // SCP-1h (§63.6.6): a Creatives month request opened by a Social Media post is read here from the demo posts, never listed (the lists above stay as seeded).
+  const r = REQUESTS.find((x) => x.id === id && x.tenantId === tenant) ?? monthRequest(tenant, id);
   if (!r) return err(404, "that request no longer exists", { reason: "request_not_found" });
   return ok({
     ...receiverRow(r), brief: r.brief, form: r.form, declineReason: r.declineReason,
     assets: r.assets.map((a) => ({ id: a.id, name: a.name, contentType: a.contentType, href: `/api/${tenant}/creative/assets/${a.id}/content` })),
+    // Additive (§63.6.6): the social posts that joined this request, [] for one no post joined.
+    socialPosts: demoRequestSocialPosts(id, SOCIAL_DEPT),
   });
 }
 
