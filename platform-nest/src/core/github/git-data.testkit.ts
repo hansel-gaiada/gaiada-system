@@ -16,7 +16,14 @@
 // `/orgs/<owner>/actions/secrets/<name>[/repositories/<id>]`: a missing secret is 404, a secret whose visibility is not
 // `selected` is 409 on PUT/DELETE, and `orgSecretsPermission = false` answers every org-secret call with GitHub's 403
 // "Resource not accessible by integration" (the App without `organization_secrets`, O-3).
+//
+// M6-P6o adds the secret VALUE calls (WSK-D88): `GET /orgs/<owner>/actions/secrets/public-key` answers the key pair a test
+// installs with `useOrgKeyPair()` (404 until then: a test that forgot it fails loudly), and `PUT /orgs/<owner>/actions/secrets/
+// <name>` stores the sealed `encrypted_value` as GitHub does (201 new, 204 update; a `key_id` that is not the current key is
+// GitHub's 422; visibility and `selected_repository_ids` are applied). The fake never decrypts on its own: a test proves the
+// sealing by opening the stored box with the private key (`openOrgSecretValue`), exactly what GitHub does on its side.
 import { createHash } from "node:crypto";
+import sodium from "libsodium-wrappers";
 import { GithubApiError } from "./errors";
 import { gitBlobSha, type GitCaller } from "./git-data";
 import type { GithubRequest, GithubResponse } from "./http-client";
@@ -42,6 +49,12 @@ export interface FakeOrgSecret {
   repos: Set<number>;
 }
 
+export interface FakeOrgKey {
+  keyId: string;
+  publicKey: Uint8Array;
+  privateKey: Uint8Array;
+}
+
 export interface RecordedCall {
   method: string;
   path: string;
@@ -63,10 +76,13 @@ export class FakeGithub {
   corruptNextBlobSha = false;
   /** GitHub's numeric id for this repo (the org-secret endpoints take it). */
   repoId = 424242;
-  /** org Actions secrets by name: only their visibility and selected repositories (the fake holds no value either). */
+  /** org Actions secrets by name: their visibility and selected repositories (a sealed value, once written, is in `orgSecretValues`). */
   readonly orgSecrets = new Map<string, FakeOrgSecret>();
   /** false: the App lacks `organization_secrets`; every org-secret call is GitHub's 403. */
   orgSecretsPermission = true;
+  /** M6-P6o: the org's Actions key pair (`useOrgKeyPair`), and each secret's stored sealed value. */
+  orgKey: FakeOrgKey | null = null;
+  readonly orgSecretValues = new Map<string, { encryptedValue: string; keyId: string }>();
 
   constructor(
     readonly owner = "acme-org",
@@ -94,6 +110,24 @@ export class FakeGithub {
   /** An org secret the owner created (visibility `selected` and no repository, unless said otherwise). */
   addOrgSecret(name: string, visibility: FakeOrgSecret["visibility"] = "selected", repos: number[] = []): void {
     this.orgSecrets.set(name, { visibility, repos: new Set(repos) });
+  }
+
+  /** M6-P6o: give the org an Actions key pair (a fresh X25519 pair). Rotating it (a second call) makes older key ids stale. */
+  async useOrgKeyPair(keyId = `kid-${Math.random().toString(16).slice(2, 10)}`): Promise<FakeOrgKey> {
+    await sodium.ready;
+    const kp = sodium.crypto_box_keypair();
+    this.orgKey = { keyId, publicKey: kp.publicKey, privateKey: kp.privateKey };
+    return this.orgKey;
+  }
+
+  /** M6-P6o: open a stored sealed value with the org's private key, as GitHub would. Throws if it does not open. */
+  async openOrgSecretValue(name: string): Promise<string> {
+    const stored = this.orgSecretValues.get(name);
+    if (!stored) throw new Error(`no value stored for ${name}`);
+    if (!this.orgKey || stored.keyId !== this.orgKey.keyId) throw new Error(`${name} was sealed to a key this fake no longer holds`);
+    await sodium.ready;
+    const opened = sodium.crypto_box_seal_open(new Uint8Array(Buffer.from(stored.encryptedValue, "base64")), this.orgKey.publicKey, this.orgKey.privateKey);
+    return Buffer.from(opened).toString("utf8");
   }
 
   /** A human commit that deletes paths from the branch head. Returns its sha. */
@@ -189,7 +223,7 @@ export class FakeGithub {
   private handle(method: string, rawPath: string, body: Record<string, unknown> | undefined): { status: number; data: unknown } {
     const [path, query = ""] = rawPath.split("?");
     const orgPrefix = `/orgs/${encodeURIComponent(this.owner)}/actions/secrets/`;
-    if (path.startsWith(orgPrefix)) return this.handleOrgSecret(method, rawPath, path.slice(orgPrefix.length));
+    if (path.startsWith(orgPrefix)) return this.handleOrgSecret(method, rawPath, path.slice(orgPrefix.length), body);
     const prefix = `/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.name)}`;
     if (path !== prefix && !path.startsWith(`${prefix}/`)) this.fail(method, rawPath, 404, "Not Found");
     const rest = path.slice(prefix.length);
@@ -294,11 +328,16 @@ export class FakeGithub {
     return this.fail(method, rawPath, 404, "Not Found");
   }
 
-  private handleOrgSecret(method: string, rawPath: string, rest: string): { status: number; data: unknown } {
+  private handleOrgSecret(method: string, rawPath: string, rest: string, body?: Record<string, unknown>): { status: number; data: unknown } {
     if (!this.orgSecretsPermission) this.fail(method, rawPath, 403, "Resource not accessible by integration");
+    if (rest === "public-key") {
+      if (method !== "GET" || !this.orgKey) this.fail(method, rawPath, 404, "Not Found");
+      return { status: 200, data: { key_id: this.orgKey.keyId, key: Buffer.from(this.orgKey.publicKey).toString("base64") } };
+    }
     const m = /^([^/]+)(?:\/repositories\/(\d+))?$/.exec(rest);
     if (!m) this.fail(method, rawPath, 404, "Not Found");
     const name = decodeURIComponent(m[1]);
+    if (m[2] === undefined && method === "PUT") return this.putOrgSecretValue(method, rawPath, name, body);
     const secret = this.orgSecrets.get(name);
     if (!secret) this.fail(method, rawPath, 404, "Not Found");
     if (m[2] === undefined) {
@@ -316,5 +355,24 @@ export class FakeGithub {
       return { status: 204, data: undefined };
     }
     return this.fail(method, rawPath, 404, "Not Found");
+  }
+
+  /** GitHub's create-or-update of an org secret's value (M6-P6o). */
+  private putOrgSecretValue(method: string, rawPath: string, name: string, body?: Record<string, unknown>): { status: number; data: unknown } {
+    const ev = body?.encrypted_value;
+    const kid = body?.key_id;
+    const visibility = body?.visibility;
+    if (typeof ev !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(ev)) this.fail(method, rawPath, 422, "encrypted_value must be base64");
+    if (!this.orgKey || kid !== this.orgKey.keyId) this.fail(method, rawPath, 422, "Bad request - key_id is not the current key");
+    if (visibility !== "all" && visibility !== "private" && visibility !== "selected") this.fail(method, rawPath, 422, "visibility is required");
+    const ids = body?.selected_repository_ids;
+    if (ids !== undefined && (visibility !== "selected" || !Array.isArray(ids) || !ids.every((i) => Number.isSafeInteger(i)))) {
+      this.fail(method, rawPath, 422, "selected_repository_ids is only for visibility selected");
+    }
+    const existing = this.orgSecrets.get(name);
+    const repos = Array.isArray(ids) ? new Set(ids as number[]) : (existing?.repos ?? new Set<number>());
+    this.orgSecrets.set(name, { visibility, repos });
+    this.orgSecretValues.set(name, { encryptedValue: ev, keyId: kid as string });
+    return { status: existing ? 204 : 201, data: undefined };
   }
 }

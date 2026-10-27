@@ -3105,3 +3105,24 @@ Then:
 - the author's `approve` denied as `platform_admin`;
 - a `company_admin`'s and a `manager`'s `plan` denied; a seat approver's and an `owner`'s allowed;
 - a client contact's `approve_spend` allowed, and a staff member's denied.
+
+## 54. M6-P6o — the ERP writes a site's deploy secret from the vault (WSK-D88) (2026-10-27, PROTOTYPED): no new kind, no new action, no policy change
+
+WSK-D88 (owner, 2026-10-13) amends D29 and D79: the ERP writes each delivered site's per-site org Actions secret
+(`WEBDESK_DEPLOY_<SLUG>_<ENV>_<REPOID>`) from the site's vault record. BFF rows: `PUT deploy-credentials/:connectionId`,
+`POST` and `GET sites/:id/deploy-secret` (the webdev table). Code: `platform-nest/src/modules/webdev/deploy-secret{-write,.service}.ts`,
+`deploy-credential.ts`, `core/github/{sealed-box,org-secrets}.ts`. Every key below already exists.
+
+| Step | Gate |
+|---|---|
+| Seal a credential into a vault record | `integration_connection · manage` on the record (`ownerId ""`: the company tier, the same as every company or client vault write), checked before the body is read |
+| File the write | `webdev_provisioned_site · provision` (request tenant), then `github_repo · push` on the GitHub org tenant (GHT-1), the deploy grant's pair |
+| Decide (approve) | the generic `automation_approval · decide` (company_admin), then, in code before the decide UPDATE: decider ≠ requester (`403 self_approval`), `webdev_provisioned_site · provision`, `integration_connection · manage` on the record (VLT-3's decider gate), and `github_repo · secret_write` WITH the approval's id (resource_github_repo.yaml's D14 rule: company_admin or module_manager, approvalId required) |
+| Execute | as the decider, in-band: the stored `decided_by` must differ from `requested_by` (a second wall: `approver_refused: self_approval`), `github_repo · secret_write` re-checked before any egress, then the deploy grant under the decider's `provision` + `push` |
+| Read where it stands | `webdev_site · read` |
+
+Why `secret_write` now: M6-P4g's grant deliberately did NOT use it, because a grant changes only which repositories may read a
+secret. A value write IS the credential write that action names, so it is the gate, and its D14 rule (an approval id) is met by
+this very approval. The PGL-05 generic self-approval rule (§52) covers automation and agent rows and is unchanged; this kind is
+a human-filed `github` row, so the in-code rule above is what applies, in both walls. Rejecting needs no extra gate: it writes
+nothing. Live is not possible until the GitHub App holds Organization permissions > Secrets: read and write (O-3).

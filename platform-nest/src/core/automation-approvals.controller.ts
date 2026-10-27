@@ -54,6 +54,11 @@ import {
 // M6-P4c: a GH-12 repo created for a provisioned site finishes §08 (registry row, WebDesk tenant, pinned
 // contract). The module owns every step; this route only starts it, detached.
 import { completeAfterRepoApproval } from "../modules/webdev/provision-completion.service";
+// M6-P6o (WSK-D88): an approved deploy-secret write (origin 'github', workflow 'github:write_deploy_secret') executes IN-BAND, as
+// the decider, after its own preflight (decider ≠ requester, provision + integration_connection·manage + github_repo·secret_write).
+// The module owns every rule (modules/webdev/deploy-secret.service.ts); this route only calls it.
+import { isDeploySecretWriteRequest } from "../modules/webdev/deploy-secret-write";
+import { executeApprovedDeploySecretWrite, preflightDeploySecretWrite } from "../modules/webdev/deploy-secret.service";
 // PGL-05/06 (PV-D46): the generic self-approval rule, the act-for filing refusal, and the viewer's approve-refusal hint.
 import { actForFilingRefusal, selfApprovalVerdict } from "./approval-self-approval";
 import { approveRefusalHint } from "./approval-approve-hint";
@@ -373,6 +378,8 @@ export class AutomationApprovalsController {
     // WSK-66: identified the SAME way (origin + workflow_id). The generic `decide` below stays the
     // "may you decide approvals here" gate; the command's OWN rule is checked in the preflight.
     const isWebdesk = isWebdeskApprovedCommandRequest(rowOrigin, existing.rows[0].workflow_id);
+    // M6-P6o: identified the SAME way (origin + workflow_id).
+    const isDeploySecret = isDeploySecretWriteRequest(rowOrigin, existing.rows[0].workflow_id);
     const subKind = isLeave ? "leave" : undefined;
     // Owner split (2026-08-19): the two IAM request kinds authorize against DIFFERENT actions, so a
     // policy can narrow one without narrowing the other, and the audit row records which kind of
@@ -501,6 +508,13 @@ export class AutomationApprovalsController {
       );
     }
 
+    // ── M6-P6o: a deploy-secret write — never self-approved, and the decider must hold the write's OWN authority ──────────
+    // Before the decide UPDATE, so a refusal (403 self_approval, a missing gate, a malformed stored row) leaves it `pending`
+    // and GitHub untouched. Rejection needs no such check: it writes nothing.
+    if (isDeploySecret && decision === "approved") {
+      await preflightDeploySecretWrite(tenantId, id, existing.rows[0].tool_args, existing.rows[0].requested_by, req.principal);
+    }
+
     // D14-02: the executor is REGISTRY-scoped, not origin-scoped (approval-executables.ts's own
     // doctrine + migration 0078's header). execution_status is computed here and flipped in the
     // SAME UPDATE that flips `status` below — never a second statement — so a crash between the two
@@ -570,7 +584,7 @@ export class AutomationApprovalsController {
     // WSK-66: an approved webdesk row also starts at 'pending' — the state its in-band executor
     // claims (pending → executing) below. The D14 handler never claims it (origin filter).
     const executionStatus: "pending" | "not_applicable" =
-      executable || ((isReveal || isWebdesk || isConversionUpload) && decision === "approved") ? "pending" : "not_applicable";
+      executable || ((isReveal || isWebdesk || isConversionUpload || isDeploySecret) && decision === "approved") ? "pending" : "not_applicable";
     const res = await withTenants([tenantId], async (c) => {
       const upd = await c.query<{ origin: string; tool_args: unknown; workflow_id: string; tool_name: string }>(
         `UPDATE automation_approvals
@@ -685,6 +699,14 @@ export class AutomationApprovalsController {
       );
     }
 
+    // ── M6-P6o: an APPROVED deploy-secret write executes IN-BAND, exactly once ─────────────────────────────────────
+    // `res.tool_args` is this UPDATE's own RETURNING (the stored row). The executor claims pending → executing, re-checks the
+    // stored decider against the requester, re-authorizes, writes, then grants; every outcome is data (the decision stands).
+    let deploySecretResult: Awaited<ReturnType<typeof executeApprovedDeploySecretWrite>> | null = null;
+    if (res && isDeploySecret && decision === "approved") {
+      deploySecretResult = await executeApprovedDeploySecretWrite(tenantId, id, res.tool_args, req.principal);
+    }
+
     // ── M5-P2: an APPROVED upload executes IN-BAND, exactly once; a REJECTED one closes its ledger row ──────────
     // Post-claim outcomes (simulated, uploaded, failed, skipped by the second gate) come back as data and are recorded on the
     // row; the decision itself stands either way. The result carries kinds and typed tokens only, never an identifier.
@@ -697,6 +719,7 @@ export class AutomationApprovalsController {
     if (!res) throw new NotFoundException("approval not found or already decided");
     await writeActivity(tenantId, req.principal.userId, decision, "automation_approval", id);
     if (conversionResult) return { id, status: decision, conversionUpload: conversionResult };
+    if (deploySecretResult) return { id, status: decision, deploySecret: deploySecretResult };
     if (webdeskResult) return { id, status: decision, webdesk: webdeskResult };
     // `override`/`github` are present ONLY for their own approved kind, so every existing consumer
     // of this response sees a byte-identical shape otherwise. They carry what the approval actually

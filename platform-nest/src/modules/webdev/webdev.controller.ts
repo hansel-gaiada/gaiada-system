@@ -15,6 +15,11 @@
 //   GET  /api/:tenantId/modules/webdev/sites/:id/dns                    -> 200 DNS checklist + read-only check | 404 (M6-P6i)
 //   GET  /api/:tenantId/modules/webdev/sites/:id/dns/task               -> 200 the site's DNS task link (state none|open|closed) | 404 (M6-P6p)
 //   POST /api/:tenantId/modules/webdev/sites/:id/dns/recheck            -> 200 {task, check} | 404 (M6-P6p: re-run the read-only check now; closes the task when every record points)
+//   PUT  /api/:tenantId/modules/webdev/deploy-credentials/:connectionId -> 200 masked record + sealedVersion | 400 | 403 | 404 | 422 | 503
+//        (M6-P6o: seal a per-site deploy credential into its vault record; the value is accepted once and never echoed)
+//   POST /api/:tenantId/modules/webdev/sites/:id/deploy-secret          -> 201 {approvalId,...} | 400 | 403 | 404 | 409 | 422 | 503
+//        (M6-P6o: file ONE HIGH approval to write that row's org secret from its vault record; WSK-D88)
+//   GET  /api/:tenantId/modules/webdev/sites/:id/deploy-secret          -> 200 where the row's org secret stands | 404 (M6-P6o)
 //
 // This controller is DELIBERATELY THIN. It validates route/body input, resolves the principal,
 // authorizes, builds the driver, and maps a typed outcome onto a status code. Every decision that
@@ -52,7 +57,7 @@
 // always refused before this ticket) — it does not block construction of the driver itself.
 import {
   BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, HttpException, NotFoundException,
-  Param, Patch, Post, Query, Req, Res, ServiceUnavailableException, UseGuards,
+  Param, Patch, Post, Put, Query, Req, Res, ServiceUnavailableException, UseGuards,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { withGlobal } from "../../db";
@@ -81,6 +86,11 @@ import { commitScaffoldForSite, readScaffoldCommit, type ScaffoldCommitDto, type
 import { DeployGrantRefusal, type DeployGrantResult, type DeployRevokeResult } from "./deploy-grant";
 import { followProductionRow, grantDeployForSite, readDeployGrant, revokeDeployForSite, type DeployGrantDto, type DeployGrantSummary } from "./deploy-grant.service";
 import { readSiteBuildsForProvisioned, type SiteBuildsDto } from "./site-builds.service";
+import { DeploySecretRefusal } from "./deploy-secret-write";
+import {
+  fileDeploySecretWrite, readDeploySecretState, sealDeployCredential,
+  type DeploySecretFilingDto, type DeploySecretStateDto, type SealedCredentialDto,
+} from "./deploy-secret.service";
 
 const SITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -130,6 +140,16 @@ function deployGrantHttpError(err: unknown): unknown {
 function deliveryHttpError(err: unknown): unknown {
   if (err instanceof DeliveryRefusal) {
     if (err.code === "not_found") return new NotFoundException("webdev site not found");
+    return new HttpException({ message: err.code, reason: err.detail }, err.status);
+  }
+  return err;
+}
+
+/** A deploy-secret refusal (M6-P6o) as its HTTP answer, `{error: <token>, reason}`. The reason names fields and tokens,
+ *  never a value (deploy-credential.ts). */
+function deploySecretHttpError(err: unknown): unknown {
+  if (err instanceof DeploySecretRefusal) {
+    if (err.code === "not_found") return new NotFoundException(err.detail);
     return new HttpException({ message: err.code, reason: err.detail }, err.status);
   }
   return err;
@@ -597,6 +617,58 @@ export class WebdevController {
       return { ...site, deployGrant: await followProductionRow(req.principal, tenantId, id) };
     } catch (err) {
       throw deliveryHttpError(err);
+    }
+  }
+
+  // ═══ M6-P6o (WSK-D88): the ERP writes each delivered site's deploy secret from its vault record ═══════════════════
+
+  /** Seal a per-site deploy credential into its vault record (runbook step 2b; replaces the local VLT-4 script for this use).
+   *  Body EXACTLY `{credential: {...}}`, the deploy secret's documented shape. `integration_connection · manage` on the record,
+   *  checked before the body is read. The answer is the masked record and a ciphertext hash: the value is never echoed. */
+  @Put("deploy-credentials/:connectionId")
+  @HttpCode(200)
+  async sealDeployCredential(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("connectionId") connectionId: string,
+    @Body() body: unknown,
+  ): Promise<SealedCredentialDto> {
+    try {
+      return await sealDeployCredential(req.principal, tenantId, connectionId, body);
+    } catch (err) {
+      throw deploySecretHttpError(err);
+    }
+  }
+
+  /** File ONE HIGH approval to write this row's org secret from its vault record. A second person (never the requester) who
+   *  holds `provision`, `integration_connection · manage` and `github_repo · secret_write` approves it in the Approvals inbox,
+   *  and the write runs then (automation-approvals.controller.ts). Body: nothing, or `{reason}`. */
+  @Post("sites/:id/deploy-secret")
+  @HttpCode(201)
+  async fileDeploySecret(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ): Promise<DeploySecretFilingDto> {
+    try {
+      return await fileDeploySecretWrite(req.principal, tenantId, id, body);
+    } catch (err) {
+      throw deploySecretHttpError(err);
+    }
+  }
+
+  /** Where this row's org secret stands against its vault record (written, stale, pending with its typed reason, ...). */
+  @Get("sites/:id/deploy-secret")
+  async readDeploySecret(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+  ): Promise<DeploySecretStateDto> {
+    try {
+      return await readDeploySecretState(req.principal, tenantId, id);
+    } catch (err) {
+      throw deploySecretHttpError(err);
     }
   }
 }
