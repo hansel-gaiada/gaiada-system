@@ -4,6 +4,9 @@ Status: PLANNED. Closes `docs/blueprints/webdesk-design-v2.md` §13 OQ-2.6 ("vau
 client hosting credentials"). Ground-checked against source on 2026-09-04; every claim below is
 either a file:line citation or explicitly marked unverified.
 
+**Dated note 2026-10-27 (M6-P6o2):** a fifth `owner_kind`, `webdev_site`, now gives each site AND environment its own
+vault record. See "2026-10-27 · per-site records" just above section 6.
+
 ---
 
 ## 0 · The finding
@@ -437,6 +440,43 @@ as part of VLT-3's own acceptance work, not a surprise for review to catch.
   separate incident-response question, out of scope here.
 
 ---
+
+## 2026-10-27 · per-site records (M6-P6o2, migration `202610271200`)
+
+Status: PROTOTYPED (unit-tested locally; the DB and HTTP suites need the Linux gate).
+
+**The gap.** `UNIQUE (tenant_id, owner_kind, owner_id, provider)` (0033) let one owner hold one `ssh` and one `ftp` record.
+The deploy credential's owners were the company or one client, so two company sites, or a client's staging and production,
+collided. WSK-D79 and M6 §6.3 want one docroot-locked principal per site and environment. M6-P6o found it.
+
+**The ruling, recorded in the migration's header.** Option A, by `202608311000`'s precedent: a new owner kind, not a
+synthetic owner id and not a discriminator column.
+- `owner_kind = 'webdev_site'`, `owner_id` = the `webdev_sites` row id. A row is one site in one environment (staging, and
+  the production row made from it, each with its own binding and org secret). The provisioned site spans both environments,
+  so it would collide again.
+- The unique key, the `ON CONFLICT` upsert, RLS (FORCE kept) and every existing row are unchanged.
+- Option B (a nullable site column folded into the key) was rejected. The row would still claim `company` while being one
+  site's key, every reader of `owner_kind` would misread it, and the upsert target would move for every existing kind.
+
+**How the CHECK was widened.** It was rebuilt from its live definition. The file refuses if any earlier value is missing or
+there is more than one owner_kind CHECK. A self-check asserts the five kinds, the unique key, FORCE RLS and the tenant wall.
+
+**Who accepts a per-site record, and for what.**
+- The bind and P6o's write accept it for its own row only. Another site's record, or the same site's other environment's,
+  is refused `vault_ref_wrong_owner`.
+- The seal also refuses a credential whose `environment` is not the owning row's.
+- Company and client records keep working.
+
+**Who manages it.**
+- It is the company tier, like every non-user record: `integration_connection · manage`.
+- That covers PATCH, revoke, the VLT-3 reveal and its decider gate. No Cerbos change.
+- A client's own admins get no vault access, the same as for client-owned records today.
+
+**Routes.**
+- It is created only through `POST /api/:t/modules/webdev/sites/:id/deploy-credentials` (`webdev_site · update` +
+  `manage`), which proves the row is a live staging or production row of the tenant.
+- It is listed with the matching GET.
+- The generic `POST integrations/connections` still creates only `user` and `company`.
 
 ## 6 · Open items remaining after this set lands
 

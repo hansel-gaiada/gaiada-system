@@ -94,8 +94,9 @@ describe.skipIf(!live)("M6-P6o — the deploy secret written from the vault (rea
       toolArgs: { name: slug, private: true }, impact: "high", origin: "github", requestedBy: requester,
     });
     await db.query(`UPDATE automation_approvals SET status = 'approved' WHERE id = $1`, [filed.id]);
-    // Each site has its own client, so each gets its own vault record: `integration_connections` is UNIQUE per
-    // (tenant, owner_kind, owner_id, provider), so a COMPANY can hold only one `ssh` record (see the report's follow-up).
+    // Each site has its own client, so each gets its own CLIENT-owned vault record: this suite keeps the client kind covered.
+    // `integration_connections` is UNIQUE per (tenant, owner_kind, owner_id, provider), so one owner holds one `ssh` record;
+    // M6-P6o2's per-site records (owner_kind `webdev_site`, deploy-secret-per-site.db.test.ts) are the answer for company sites.
     const clientId = await createClient(T, `P6o client ${tag} ${slug}`);
     const webdevSiteId = newId();
     await db.query(

@@ -9,6 +9,10 @@
 //     re-presenting the decided approval is a 404 and writes nothing;
 //   * O-3 over HTTP: the decide answers 200 (the decision stands) with the write `failed`, and the console shows `pending`
 //     with `github_permission_missing: organization_secrets`, never success.
+//   * M6-P6o2, per-site records (owner_kind `webdev_site`): the create/list routes are `webdev_site · update|read` +
+//     `integration_connection · manage` (a member is refused with a valid body); a site's staging and production rows each get
+//     their own record; the bind refuses the other environment's record; the write runs from the row's own record; and the
+//     VLT-3 reveal of a per-site record follows its gate (decider != requester, `manage`, redeemed once by the requester).
 // Denial tests send VALID requests and are paired with an allowed control on the identical request.
 import { randomBytes } from "node:crypto";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
@@ -26,6 +30,7 @@ import { fileAutomationApproval } from "../../core/approval-filing";
 import { AutomationApprovalsController } from "../../core/automation-approvals.controller";
 import { createConnection } from "../../core/integrations.service";
 import { findSecretValueLeaks } from "../../testing/secret-value-leaks";
+import { IntegrationsController } from "../../core/integrations.controller";
 import { WebdevController } from "./webdev.controller";
 import { siteDeploySecretName } from "./deploy-grant";
 
@@ -41,7 +46,7 @@ const GRANT = "WEBDESK_DEPLOY_GRANT";
 const canary = (tag: string): string => `canary-p6oh-${tag}-${randomBytes(12).toString("hex")}`;
 
 async function buildIsolatedApp(): Promise<NestFastifyApplication> {
-  const moduleRef = await Test.createTestingModule({ controllers: [WebdevController, AutomationApprovalsController] }).compile();
+  const moduleRef = await Test.createTestingModule({ controllers: [WebdevController, AutomationApprovalsController, IntegrationsController] }).compile();
   const app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter(), { logger: false, abortOnError: false });
   app.useGlobalFilters(new HttpErrorFilter());
   await app.init();
@@ -136,6 +141,18 @@ describe.skipIf(!TEST_URL)("M6-P6o · deploy secret routes + decide (HTTP, isola
   const decide = (approvalId: string, user: string, decision = "approved") =>
     inject("POST", `/api/${tenant}/automation-approvals/${approvalId}/decide`, user, { decision });
   const row = async (id: string) => (await adminPool().query(`SELECT status, execution_status, decided_by FROM automation_approvals WHERE id = $1`, [id])).rows[0];
+  const createRecord = (siteRow: string, user: string, payload: unknown = { provider: "ssh" }) => inject("POST", `${base()}/sites/${siteRow}/deploy-credentials`, user, payload);
+  const listRecords = (siteRow: string, user: string) => inject("GET", `${base()}/sites/${siteRow}/deploy-credentials`, user);
+  /** The production row made from a staging row (P6g's shape), inserted directly: this suite is about the vault, not the promote. */
+  async function productionRowOf(stagingRow: string, slug: string): Promise<string> {
+    const id = newId();
+    await adminPool().query(
+      `INSERT INTO webdev_sites (id, tenant_id, domain, environment, kind, repo_url, adoption, origin, origin_site, promoted_from_site_id)
+       VALUES ($1, $2, $3, 'production', 'static', $4, 'mandated', 'provisioned', 'main', $5)`,
+      [id, tenant, `${slug}.example.invalid`, `https://github.com/${ORG}/${slug}`, stagingRow],
+    );
+    return id;
+  }
 
   beforeAll(async () => {
     await initTestDb();
@@ -241,6 +258,75 @@ describe.skipIf(!TEST_URL)("M6-P6o · deploy secret routes + decide (HTTP, isola
     const st = await state(s.webdevSiteId, manager);
     expect(st.statusCode).toBe(200);
     expect(st.json()).toMatchObject({ state: "pending", reason: "github_permission_missing: organization_secrets", writtenAt: null });
+  });
+
+  it("P6o2 PER-SITE RECORDS: member 403 (valid body) on create and list; a manager makes the staging and production rows their OWN records; the bind refuses the other environment's; the write runs from the row's own record", async () => {
+    const s = await site();
+    const prodRow = await productionRowOf(s.webdevSiteId, s.slug);
+    expect((await createRecord(s.webdevSiteId, member)).statusCode).toBe(403);
+    expect((await listRecords(s.webdevSiteId, member)).statusCode).toBe(403);
+    expect((await adminPool().query(`SELECT 1 FROM integration_connections WHERE owner_kind = 'webdev_site' AND owner_id = $1`, [s.webdevSiteId])).rowCount).toBe(0);
+
+    const stg = await createRecord(s.webdevSiteId, manager, { provider: "ssh", externalAccount: "stg principal" });
+    expect(stg.statusCode).toBe(201);
+    expect(stg.json()).toMatchObject({ ownerKind: "webdev_site", ownerId: s.webdevSiteId, provider: "ssh", status: "unconfigured", hasToken: false });
+    const prd = await createRecord(prodRow, manager);
+    expect(prd.statusCode).toBe(201);
+    expect(prd.json().id).not.toBe(stg.json().id);
+    expect((await createRecord(s.webdevSiteId, manager)).json().id).toBe(stg.json().id);
+    expect((await createRecord(s.webdevSiteId, manager, { provider: "wp_admin" })).statusCode).toBe(400);
+    expect((await createRecord(newId(), manager)).statusCode).toBe(404);
+    const listed = await listRecords(s.webdevSiteId, manager);
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json().map((r: { id: string }) => r.id)).toEqual([stg.json().id]);
+
+    // the production record takes a production credential only; the staging record takes the staging one
+    const wrongEnv = await seal(prd.json().id, manager, { credential: credential("p6o2-stg-on-prd") });
+    expect(wrongEnv.statusCode).toBe(422);
+    expect(wrongEnv.json()).toMatchObject({ error: "deploy_credential_wrong_record" });
+    expect((await seal(stg.json().id, manager, { credential: credential("p6o2-stg") })).statusCode).toBe(200);
+    expect((await seal(prd.json().id, manager, { credential: { ...credential("p6o2-prd"), environment: "production" } })).statusCode).toBe(200);
+
+    // the bind: each row's own record only
+    const crossed = await bind(prodRow, manager, stg.json().id);
+    expect(crossed.statusCode).toBe(422);
+    expect(crossed.json()).toMatchObject({ error: "vault_ref_wrong_owner" });
+    expect((await bind(s.webdevSiteId, manager, stg.json().id)).statusCode).toBe(200);
+
+    // P6o's write, from the per-site record, through the real decide()
+    const { approvalId } = (await file(s.webdevSiteId, admin1)).json<{ approvalId: string }>();
+    const ok = await decide(approvalId, admin2);
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toMatchObject({ deploySecret: { executionStatus: "executed", result: { secretName: s.name, written: "created" } } });
+    expect(JSON.parse(await gh.openOrgSecretValue(s.name)).password).toBe(planted["p6o2-stg"]);
+  });
+
+  it("P6o2 VLT-3: the reveal of a per-site record follows its gate: a member cannot ask, the requester cannot approve, a manager cannot decide, a second company_admin can, and only the requester redeems, once", async () => {
+    const s = await site();
+    const rec = (await createRecord(s.webdevSiteId, manager)).json<{ id: string }>();
+    expect((await seal(rec.id, manager, { credential: credential("p6o2-reveal") })).statusCode).toBe(200);
+    const conn = `/api/${tenant}/integrations/connections/${rec.id}`;
+
+    expect((await inject("POST", `${conn}/reveal-requests`, member, { reason: "rollback drill" })).statusCode).toBe(403);
+    const asked = await inject("POST", `${conn}/reveal-requests`, admin1, { reason: "rollback drill" });
+    expect(asked.statusCode).toBe(201);
+    const approvalId = asked.json<{ id: string }>().id;
+    expect((await decide(approvalId, admin1)).statusCode).toBe(403);
+    expect((await decide(approvalId, manager)).statusCode).toBe(403);
+    expect(await row(approvalId)).toMatchObject({ status: "pending" });
+    expect((await decide(approvalId, admin2)).statusCode).toBe(200);
+
+    // The redeem answers carry the plaintext BY DESIGN, so they are NOT added to `bodies` (the leak scan's input).
+    const redeem = (user: string) =>
+      app.inject({ method: "POST", url: `${conn}/reveal`, headers: asUser(user), payload: { approvalId } });
+    expect((await redeem(member)).statusCode).toBe(403);
+    expect((await redeem(admin2)).statusCode).toBe(403);
+    const got = await redeem(admin1);
+    expect(got.statusCode).toBe(200);
+    expect(JSON.parse(got.json<{ value: string }>().value).password).toBe(planted["p6o2-reveal"]);
+    const again = await redeem(admin1);
+    expect(again.statusCode).toBe(400);
+    expect(again.body).not.toContain(planted["p6o2-reveal"]);
   });
 
   it("no HTTP answer in this file carried a planted value (positive control: the scan sees one when it is there)", async () => {

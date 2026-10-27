@@ -53,6 +53,7 @@ interface PatchBody {
  *  Exported so claude-seats.controller.ts (WSUX-17) reuses the exact same own-vs-company mapping
  *  instead of re-deriving it — both controllers gate the SAME resource kind (integration_connection). */
 export function cerbosOwnerId(ownerKind: string, ownerId: string): string {
+  // Every non-user kind (company, client, github_app, and M6-P6o2's webdev_site) is the company tier: "" never matches `owns`.
   return ownerKind === "user" ? ownerId : "";
 }
 

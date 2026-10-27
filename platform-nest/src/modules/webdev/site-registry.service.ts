@@ -386,7 +386,7 @@ export async function bindSiteDelivery(
       const refusal = vaultRecordRefusal(
         { provider: found.provider, status: found.status, ownerKind: found.owner_kind, ownerId: found.owner_id },
         input.access,
-        site.client_id,
+        { id: site.id, clientId: site.client_id },
       );
       if (refusal) throw new DeliveryRefusal(refusal.code, refusal.detail);
 

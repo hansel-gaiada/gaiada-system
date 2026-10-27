@@ -3118,3 +3118,21 @@ secret. A value write IS the credential write that action names, so it is the ga
 this very approval. The PGL-05 generic self-approval rule (§52) covers automation and agent rows and is unchanged; this kind is
 a human-filed `github` row, so the in-code rule above is what applies, in both walls. Rejecting needs no extra gate: it writes
 nothing. Live is not possible until the GitHub App holds Organization permissions > Secrets: read and write (O-3).
+
+### 54.1 M6-P6o2 — per-site vault records (2026-10-27, PROTOTYPED): no new kind, no new action, no policy change
+
+`integration_connections.owner_kind` admits `webdev_site` (migration `202610271200`): `owner_id` is the `webdev_sites` row, one
+site in one environment, so each row holds its own `ssh` and `ftp` deploy record (WSK-D79). BFF rows: `POST` and
+`GET sites/:id/deploy-credentials` (the webdev table). Every key below already exists. No Cerbos change, so no restart.
+
+| Step | Gate |
+|---|---|
+| Create the row's own record | `webdev_site · update` on the row (the bind's gate), then `integration_connection · manage` (`ownerId ""`), both before the body is read |
+| List the row's records | `webdev_site · read` on the row, then `integration_connection · manage` |
+| Seal, PATCH, revoke, reveal request, redeem, the reveal's decide | unchanged: `cerbosOwnerId()` gives `""` for every non-user kind, so a per-site record is the company tier (`manage`), exactly like a company or client record. The reveal's decider gate (`manage`, decider ≠ requester) applies as written |
+| Bind and write | unchanged gates; the OWNER rule (code, `delivery-binding.ts#vaultRecordRefusal`) accepts a per-site record for its own row only |
+
+Who may manage or reveal a per-site record: the site's company tier (company_admin, manager, a holder of
+`core.integration_connection.manage`, platform_admin). A client's own admins get nothing, even when the site serves their
+client. That is the same as for client-owned records today: the vault is staff-side (WSK-D30), and the client side is a separate
+interface. Widening it would be a new rule, and none was asked for.

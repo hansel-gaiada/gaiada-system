@@ -91,28 +91,50 @@ describe("parseBindingBody", () => {
 
 describe("vaultRecordRefusal", () => {
   const ok = { provider: "ftp", status: "linked", ownerKind: "company", ownerId: "co" };
+  /** The registry row a binding is for (one site in one environment). */
+  const ROW = "11111111-1111-4111-8111-111111111111";
+  const row = (clientId: string | null, id: string = ROW) => ({ id, clientId });
   it("passes a linked record of the right provider owned by the company", () => {
-    expect(vaultRecordRefusal(ok, "ftp", null)).toBeNull();
-    expect(vaultRecordRefusal({ ...ok, provider: "ssh" }, "ssh", "cl-1")).toBeNull();
+    expect(vaultRecordRefusal(ok, "ftp", row(null))).toBeNull();
+    expect(vaultRecordRefusal({ ...ok, provider: "ssh" }, "ssh", row("cl-1"))).toBeNull();
   });
   it("passes a client-owned record only for that site's own client", () => {
     const rec = { ...ok, ownerKind: "client", ownerId: "cl-1" };
-    expect(vaultRecordRefusal(rec, "ftp", "cl-1")).toBeNull();
-    expect(vaultRecordRefusal(rec, "ftp", "cl-2")?.code).toBe("vault_ref_wrong_owner");
-    expect(vaultRecordRefusal(rec, "ftp", null)?.code).toBe("vault_ref_wrong_owner");
+    expect(vaultRecordRefusal(rec, "ftp", row("cl-1"))).toBeNull();
+    expect(vaultRecordRefusal(rec, "ftp", row("cl-2"))?.code).toBe("vault_ref_wrong_owner");
+    expect(vaultRecordRefusal(rec, "ftp", row(null))?.code).toBe("vault_ref_wrong_owner");
   });
   it("refuses a user-owned or app-owned record", () => {
-    expect(vaultRecordRefusal({ ...ok, ownerKind: "user" }, "ftp", null)?.code).toBe("vault_ref_wrong_owner");
-    expect(vaultRecordRefusal({ ...ok, ownerKind: "github_app" }, "ftp", null)?.code).toBe("vault_ref_wrong_owner");
+    expect(vaultRecordRefusal({ ...ok, ownerKind: "user" }, "ftp", row(null))?.code).toBe("vault_ref_wrong_owner");
+    expect(vaultRecordRefusal({ ...ok, ownerKind: "github_app" }, "ftp", row(null))?.code).toBe("vault_ref_wrong_owner");
+  });
+  it("M6-P6o2: passes a per-site record ONLY for its own row; another site's, or the other environment's, is refused", () => {
+    const own = { ...ok, provider: "ssh", ownerKind: "webdev_site", ownerId: ROW };
+    expect(vaultRecordRefusal(own, "ssh", row(null))).toBeNull();
+    expect(vaultRecordRefusal(own, "ssh", row("cl-1"))).toBeNull();
+    // the id compares case-insensitively (the registry's text pointer and the vault's uuid)
+    expect(vaultRecordRefusal({ ...own, ownerId: ROW.toUpperCase() }, "ssh", row(null))).toBeNull();
+    // another row: another site, or this site's production row when the record is the staging row's
+    const other = "22222222-2222-4222-8222-222222222222";
+    const refused = vaultRecordRefusal(own, "ssh", row(null, other));
+    expect(refused?.code).toBe("vault_ref_wrong_owner");
+    expect(refused?.detail).toContain("another site's or another environment's");
+    // an empty row id never matches (fail closed)
+    expect(vaultRecordRefusal({ ...own, ownerId: "" }, "ssh", row(null, ""))?.code).toBe("vault_ref_wrong_owner");
+    // the kinds do not mix: a per-site record whose owner_id is the site's CLIENT id is not that client's record
+    expect(vaultRecordRefusal({ ...own, ownerId: "cl-1" }, "ssh", row("cl-1"))?.code).toBe("vault_ref_wrong_owner");
+    // the provider and status rules still come first
+    expect(vaultRecordRefusal(own, "ftp", row(null))?.code).toBe("vault_ref_wrong_provider");
+    expect(vaultRecordRefusal({ ...own, status: "unconfigured" }, "ssh", row(null))?.code).toBe("vault_ref_not_linked");
   });
   it("refuses the wrong provider for the access, whatever else is right", () => {
-    expect(vaultRecordRefusal({ ...ok, provider: "ssh" }, "ftp", null)?.code).toBe("vault_ref_wrong_provider");
-    expect(vaultRecordRefusal({ ...ok, provider: "github" }, "ssh", null)?.code).toBe("vault_ref_wrong_provider");
-    expect(vaultRecordRefusal({ ...ok, provider: "cpanel" }, "ftp", null)?.code).toBe("vault_ref_wrong_provider");
+    expect(vaultRecordRefusal({ ...ok, provider: "ssh" }, "ftp", row(null))?.code).toBe("vault_ref_wrong_provider");
+    expect(vaultRecordRefusal({ ...ok, provider: "github" }, "ssh", row(null))?.code).toBe("vault_ref_wrong_provider");
+    expect(vaultRecordRefusal({ ...ok, provider: "cpanel" }, "ftp", row(null))?.code).toBe("vault_ref_wrong_provider");
   });
   it("refuses a record that holds no usable credential", () => {
     for (const status of ["unconfigured", "pending", "error", "revoked"]) {
-      expect(vaultRecordRefusal({ ...ok, status }, "ftp", null)?.code, status).toBe("vault_ref_not_linked");
+      expect(vaultRecordRefusal({ ...ok, status }, "ftp", row(null))?.code, status).toBe("vault_ref_not_linked");
     }
   });
 });

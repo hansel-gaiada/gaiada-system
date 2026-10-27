@@ -14,7 +14,8 @@
 //   1. the facts, re-read: the registry row is a live provisioned staging or production row; its provisioned site exists and
 //      its deploy grant is NOT `revoked` (an archived site keeps no deploy access, WSK-D82); its `vault_ref` is still the
 //      record the approval named; the record is of this tenant, of the provider the row's access needs, `linked`, owned by
-//      the company or the site's own client; and its sealed value is the VERSION the approval named (a reseal after filing
+//      THIS row (a per-site record, M6-P6o2), the company or the site's own client (another site's or the other environment's
+//      per-site record is refused); and its sealed value is the VERSION the approval named (a reseal after filing
 //      refuses `deploy_secret_vault_changed`: the decider approved a specific sealed value, not "whatever is there now").
 //      Nothing has been asked of GitHub, nothing decrypted.
 //   2. the repo: the one GH-12 created for the site (resolveProvisionedRepo), and its numeric id from GitHub. The secret's
@@ -203,7 +204,8 @@ export function checkWriteFacts(facts: WriteFacts, expect?: DeploySecretArgs): V
   if (!env.vaultRef || !facts.vault) return refuse("deploy_secret_no_vault_record", "the row is not bound to a vault record (POST sites/:id/delivery-binding)");
   const v = facts.vault;
   if (expect && v.id !== expect.connectionId) return refuse("deploy_secret_vault_changed", "the row now points at another vault record than the request named; file a new request");
-  const r = vaultRecordRefusal({ provider: v.provider, status: v.status, ownerKind: v.ownerKind, ownerId: v.ownerId }, env.access, env.clientId);
+  // The owner rule is the bind's (delivery-binding.ts): this row's own per-site record (M6-P6o2), the company, or the row's client.
+  const r = vaultRecordRefusal({ provider: v.provider, status: v.status, ownerKind: v.ownerKind, ownerId: v.ownerId }, env.access, { id: env.id, clientId: env.clientId });
   if (r) return refuse("deploy_secret_vault_unusable", r.detail, r.code);
   if (!v.sealedVersion) return refuse("deploy_secret_vault_unusable", "the vault record holds no sealed credential", "vault_ref_not_linked");
   if (expect && v.sealedVersion !== expect.sealedVersion) {

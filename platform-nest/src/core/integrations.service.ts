@@ -28,10 +28,11 @@ import { encryptSecret, TOKEN_KEY_VERSION } from "./secret-box";
 // `PUT /api/:t/integrations/figma` (core/figma/figma.controller.ts), which uses this file's createConnection and
 // setConnectionTokens, the same vault path the Bing connector uses.
 export const CONNECTION_PROVIDERS = new Set(["github", "google_drive", "claude", "cpanel", "ftp", "ssh", "wp_admin", "figma"]);
-/** Every owner_kind the DB CHECK admits (migration 202608311000 added 'github_app' — GH-01 §2.3(b)
- *  corrected). NOT the set a client may create through the generic HTTP API — see
+/** Every owner_kind the DB CHECK admits: 'user' + 'company' (0033), 'client' (0035; restored by 202608311400),
+ *  'github_app' (202608311000, GH-01 §2.3(b) corrected), 'webdev_site' (202610271200, M6-P6o2: one registry row's own
+ *  deploy principal, owner_id = webdev_sites.id). NOT the set a client may create through the generic HTTP API — see
  *  CLIENT_CREATABLE_OWNER_KINDS below for that. */
-export const CONNECTION_OWNER_KINDS = new Set(["user", "company", "github_app"]);
+export const CONNECTION_OWNER_KINDS = new Set(["user", "company", "client", "github_app", "webdev_site"]);
 /** The subset of CONNECTION_OWNER_KINDS a caller may pass to POST /connections. Deliberately
  *  EXCLUDES 'github_app': those rows are ops-provisioned via github/credential-store.ts only (App
  *  private keys, sealed outside any request a client can shape), never created by a user or company
@@ -42,7 +43,13 @@ export const CONNECTION_OWNER_KINDS = new Set(["user", "company", "github_app"])
  *  `owner=` selector only recognizes `me | company | user:<id>` (no `github_app` branch), so a
  *  github_app row is currently unreachable through the generic connections HTTP API in EITHER
  *  direction — not merely write-excluded. It is read exclusively through credential-store.ts's own
- *  direct service-layer calls (loadAppCredential/loadAppCredentialOrThrow). */
+ *  direct service-layer calls (loadAppCredential/loadAppCredentialOrThrow).
+ *
+ *  'webdev_site' is excluded for the same reason as 'github_app': its owner_id must be proven to be a live staging or
+ *  production registry row of this tenant, which only the webdev module can do, so it is created ONLY through
+ *  `POST modules/webdev/sites/:id/deploy-credentials` (deploy-secret.service.ts#createSiteDeployRecord). Once created,
+ *  the generic PATCH / DELETE / reveal routes reach it by id like any non-user record (cerbosOwnerId gives "", so the
+ *  company tier `manage`). */
 export const CLIENT_CREATABLE_OWNER_KINDS = new Set(["user", "company"]);
 export const CONNECTION_STATUSES = new Set(["unconfigured", "pending", "linked", "error", "revoked"]);
 /** Statuses a client may set directly via PATCH. 'linked' is reserved for the token path (setting it

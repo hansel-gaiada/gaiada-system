@@ -139,17 +139,28 @@ export interface VaultRecordFacts {
   ownerId: string;
 }
 
+/** The registry row a binding is for: its id (one site in one environment) and its client, when it serves one. */
+export interface BindingSiteFacts {
+  id: string;
+  clientId: string | null;
+}
+
 /** The refusal for a vault record that cannot back this binding, or null when it can. The record has ALREADY been read under
  *  the request tenant's RLS with `tenant_id = $tenant`, so a record of another tenant never reaches this function: it
  *  surfaces upstream as `vault_ref_unknown`, the same answer as an id that does not exist.
  *
- *  Owner: a record owned by the COMPANY itself, or by THIS site's own client. A record owned by a different client of the
- *  same tenant is another client's key and is refused (so is any client record for an internal site with no client). A
- *  user-owned record is a person's login, never a site's deploy credential. */
+ *  Owner, one of three:
+ *    `webdev_site`  the record of THIS row (owner_id = the row's id; M6-P6o2, migration 202610271200). The per-site record:
+ *                   one site in one environment, so another site's record, and this site's OTHER environment's record,
+ *                   are both refused. This is the shape WSK-D79 wants (one docroot-locked principal per site and environment).
+ *    `company`      the company itself (kept: records made before per-site records existed).
+ *    `client`       THIS site's own client (kept). A different client's record is another client's key and is refused (so
+ *                   is any client record for an internal site with no client).
+ *  A user-owned record is a person's login, never a site's deploy credential; a `github_app` record is an App's key. */
 export function vaultRecordRefusal(
   rec: VaultRecordFacts,
   access: string,
-  siteClientId: string | null,
+  site: BindingSiteFacts,
 ): { code: DeliveryRefusalCode; detail: string } | null {
   const want = VAULT_PROVIDER_FOR_ACCESS[access];
   if (rec.provider !== want) {
@@ -158,10 +169,16 @@ export function vaultRecordRefusal(
   if (rec.status !== "linked") {
     return { code: "vault_ref_not_linked", detail: `the vault record holds no usable credential (status ${rec.status}); store the credential first` };
   }
+  const ownedByThisRow = rec.ownerKind === "webdev_site" && site.id !== "" && rec.ownerId.toLowerCase() === site.id.toLowerCase();
   const ownedByCompany = rec.ownerKind === "company";
-  const ownedBySiteClient = rec.ownerKind === "client" && siteClientId !== null && rec.ownerId === siteClientId;
-  if (!ownedByCompany && !ownedBySiteClient) {
-    return { code: "vault_ref_wrong_owner", detail: "the vault record belongs to another owner than this site's company or client" };
+  const ownedBySiteClient = rec.ownerKind === "client" && site.clientId !== null && rec.ownerId === site.clientId;
+  if (!ownedByThisRow && !ownedByCompany && !ownedBySiteClient) {
+    return {
+      code: "vault_ref_wrong_owner",
+      detail: rec.ownerKind === "webdev_site"
+        ? "the vault record is another site's or another environment's own record (a per-site record binds to its own row only)"
+        : "the vault record belongs to another owner than this site row, its company or its client",
+    };
   }
   return null;
 }
