@@ -19,7 +19,7 @@ Description=AIP-00a: mesh entry (10.88.0.1:3012, from the sumopod relay only) to
 After=wg-quick@wg0.service docker.service
 Requires=wg-quick@wg0.service
 [Service]
-ExecStart=/usr/bin/socat TCP-LISTEN:3012,bind=10.88.0.1,fork,reuseaddr,range=10.88.0.2/32 TCP:127.0.0.1:3012
+ExecStart=/usr/bin/socat TCP4-LISTEN:3012,bind=10.88.0.1,fork,reuseaddr,range=10.88.0.2:255.255.255.255 TCP4:127.0.0.1:3012
 Restart=always
 RestartSec=5
 DynamicUser=yes

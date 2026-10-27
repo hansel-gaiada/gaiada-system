@@ -11,7 +11,7 @@ Description=AIP-00a: relay helios (10.88.0.3) to the gateway's mesh entry on gda
 After=wg-quick@wg0.service
 Requires=wg-quick@wg0.service
 [Service]
-ExecStart=/usr/bin/socat TCP-LISTEN:3012,bind=10.88.0.2,fork,reuseaddr,range=10.88.0.3/32 TCP:10.88.0.1:3012
+ExecStart=/usr/bin/socat TCP4-LISTEN:3012,bind=10.88.0.2,fork,reuseaddr,range=10.88.0.3:255.255.255.255 TCP4:10.88.0.1:3012
 Restart=always
 RestartSec=5
 DynamicUser=yes
