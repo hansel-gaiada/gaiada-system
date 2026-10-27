@@ -17,6 +17,7 @@ import { withTenants } from "../../../db";
 import { authorize, notify, writeActivity, explainDenial } from "../../../core/http";
 import { buildPipelinePost, readCerbosActions } from "./pipeline-read";
 import { syncContentMonthProgress } from "./content-month-progress";
+import { ensureDesignThumbs } from "./design-thumbs";
 import { notifyApprovalFiled } from "../../../core/approval-filing";
 import { notifyBestEffort, resolveClientRecipients } from "../../../core/client-notify";
 import { memoiseSessionCurrent } from "../../../core/request-context";
@@ -434,6 +435,9 @@ export async function afterCommit(
   principal: Principal, tenantId: string, postId: string, r: StageApplied, out: EffectOutput,
   engagement: EngagementRow, cycle: CycleRow | null, before: PipelinePostState, authz: SocialPostAuthz | null,
 ): Promise<void> {
+  // SCP-2b: the designs were just materialized as files; make their thumbnails. Not awaited (a resize must not hold the
+  // response) and never throws, so it can neither fail nor undo the action; a design left without one reads as its full file.
+  if (r.effects.includes("sync_variants_from_master")) void ensureDesignThumbs(tenantId, postId).catch(() => undefined);
   const actorId = principal.userId ?? null;
   const holderBefore = before.pipelineStatus ? holderOf(before) : null;
   await writeActivity(tenantId, actorId, r.action, "social_post", postId, {

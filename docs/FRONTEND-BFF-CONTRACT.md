@@ -12308,6 +12308,8 @@ CHECKs: `status NOT IN ('approved','running','stopped','completed') OR (approved
 
 The `weekly` kind is SCP-5b's (63.20).
 
+**10. `202610271700_social_design_thumbs.sql` (SCP-2b, built).** On `social_post_designs` (third wall, unchanged): `thumb_file_id uuid NULL REFERENCES files(id)`. The WebP thumbnail of `file_id`, itself a `files` row on the same post (63.8 "Thumbnails"). NULL means none yet or none possible, and every read then falls back to `file_id`. No DML, no RLS change; it ends with a catalogue assertion block. Registered in `socialModule.migrations`.
+
 ### 63.2 Who acts
 
 Cerbos decides who may attempt an action; the stage machine decides whether the post is in a state that allows it. PERMISSION-CONTRACT §53 holds the rules.
@@ -12629,6 +12631,8 @@ Items: `{id: 'social:<tenant>:<post or report or boost id>:<kind>', kind, role, 
 - **Staff.** `files.controller.ts` learns `social_post` as a target kind (reference images and the materialized designs, all with `role` NULL, plan SCP-D8). The parent check is `social_post` · `read`, or `design`, with the resource of 63.3.3: today's `targetReadResource` would send no `module` and no attributes, and the module roles would never match.
 - **The portal.** `GET /api/:t/portal/files/:fileId` gains the downloadable kind `social_post`. Only a file that a live design row (`social_post_designs.file_id`, `removed_at` NULL) of the post names is served, and only for a post of one of the caller's clients that has reached the client (plan SCP-D8). Anything else is the same 404 as a file that does not exist.
 - **Thumbnails.** The portal answers carry `fileId` and `thumbFileId`, which are equal until SCP-2b adds a thumbnail.
+  - **As built (SCP-2b).** After the commit of every action whose effects run `sync_variants_from_master` (today `final_approve`), `ensureDesignThumbs` (`pipeline/design-thumbs.ts`) makes the missing thumbnails of the post's live designs. It is not awaited and never throws: the response does not wait for a resize, and a failure is logged (`[scp]`) and leaves the design without one. For each live design with a `file_id` and no `thumb_file_id`, whose file is a raster image (a video keeps no thumbnail; an SVG is not rasterized), it reads the bytes through the storage backend, turns them upright by their EXIF orientation, fits them inside 640 x 640 without enlarging (`sharp`, WebP quality 80), stores them, files a second `files` row on the same post (`role` NULL, `content_type` `image/webp`, `<original name>-thumb.webp`, the design file's uploader, `scrubbed` false, `sha256` of the thumbnail) and sets `social_post_designs.thumb_file_id`. Each design is its own short transaction; no post lock is held while resizing. `sharp` is loaded lazily and a failed load is caught, so a missing native binary never stops the app from booting. `materializeDesignMedia` clears `thumb_file_id` whenever it moves `file_id` to a newer version, so the next run makes a fresh one.
+  - **Reads.** `thumbFileId` is `COALESCE(thumb_file_id, file_id)` on the staff feed's cards and the designer's queue, so a design with no thumbnail answers its full file. The portal reads and `GET /api/:t/portal/files/:fileId` are wired to `thumb_file_id` at the SCP-2 merge (the file route's "a file a live design row names" then means either column); this branch does not touch the portal controllers.
 
 ### 63.9 The portal (SCP-2)
 
