@@ -3,6 +3,8 @@
 import "dotenv/config";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { AgentDeps, ApprovalResolution, Envelope, RegistryToolImpact } from "./agent";
+import { usageReporter } from "./usage-reporter";
+import { usageEvent } from "./usage-event";
 
 // Per-goal tenant context: the runner wraps each goal's execution in `tenantContext.run(tenantId, …)`
 // so completions are attributed to the triggering tenant for the Gateway's existing per-tenant daily
@@ -36,6 +38,32 @@ export const tenantContext = new AsyncLocalStorage<string>();
 // duplicate-approval generator the way mapping a real fault to `none` would. Wiring MORE call sites is a
 // matter of adding `envelopeContext.run(...)` at that site — never of relaxing this check.
 export const envelopeContext = new AsyncLocalStorage<Envelope>();
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// AIP-03b — who a gateway call is for, as the usage record needs it. Same mechanism and reason as `tenantContext` above: `complete(prompt)`
+// has no room for it, and a module-level variable would cross goals when AGENT_MAX_CONCURRENT_GOALS > 1.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// The runner opens ONE of these per goal (`runner/service.ts`, next to `tenantContext.run`):
+//   task   the goal's agent name (e.g. `statusReporter`, or the supervisor's). A supervisor's specialists roll up under the supervisor's
+//          name: the goal, not the delegation, is what a person asked for.
+//   userId the person the goal was filed for (the platform user id), or null. Never an identity guessed from chat.
+//   runId  the goal's top-level run id (the supervisor's, a write agent's, or a specialist's own). Set by the branch that mints it, so it
+//          is MUTABLE on purpose; delegated child runs share their parent's id here.
+// Outside a goal (the CLI, tests) there is no store: the event carries no task, no person and no run, and (like the tenant) the missing
+// company means no row at all.
+export interface UsageAttribution { task: string | null; userId: string | null; runId: string | null }
+export const usageContext = new AsyncLocalStorage<UsageAttribution>();
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The person a goal is for: `requestedBy` when it is a uuid (the ERP files `requestedBy = userId`), else the envelope's external id when
+ *  its provider is `platform` (the ERP's self-link, `externalId = userId`), else null. A chat identity (whatsapp, telegram) is not a user id. */
+export function goalUserId(g: { requestedBy?: string | null; envelopeProvider: string; envelopeExternalId: string }): string | null {
+  if (g.requestedBy && UUID_RE.test(g.requestedBy)) return g.requestedBy;
+  if (g.envelopeProvider === "platform" && UUID_RE.test(g.envelopeExternalId)) return g.envelopeExternalId;
+  return null;
+}
 
 const config = {
   gatewayUrl: process.env.GATEWAY_URL ?? "http://localhost:3002",
@@ -73,20 +101,32 @@ let lastServedProvider: string | undefined;
 
 async function complete(prompt: string): Promise<string> {
   const tenantId = tenantContext.getStore();
-  const res = await fetch(`${config.gatewayUrl}/complete`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.gatewayToken}`,
-      ...(tenantId ? { "x-tenant-id": tenantId } : {}),
-    },
-    body: JSON.stringify(config.servingProvider ? { prompt, provider: config.servingProvider } : { prompt }),
-  });
-  if (!res.ok) throw new Error(`gateway ${res.status}`);
-  const body = (await res.json()) as { text: string; provider?: string };
-  // What ACTUALLY served, after any hint miss or failover — the value D13 enforces against.
-  lastServedProvider = body.provider;
-  return body.text;
+  const attribution = usageContext.getStore();
+  let status: number | null = null; // null until the gateway answers: a network failure is an `error` row
+  let body: { text: string; provider?: string; usage?: unknown } | null = null;
+  try {
+    const res = await fetch(`${config.gatewayUrl}/complete`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.gatewayToken}`,
+        ...(tenantId ? { "x-tenant-id": tenantId } : {}),
+      },
+      body: JSON.stringify(config.servingProvider ? { prompt, provider: config.servingProvider } : { prompt }),
+    });
+    status = res.status;
+    if (!res.ok) throw new Error(`gateway ${res.status}`);
+    body = (await res.json()) as { text: string; provider?: string; usage?: unknown };
+    // What ACTUALLY served, after any hint miss or failover — the value D13 enforces against.
+    lastServedProvider = body.provider;
+    return body.text;
+  } finally {
+    // AIP-03b: one usage event per call, fire and forget (the reporter never throws and is never awaited). The tenant is the run's; with none
+    // (the CLI) the reporter records nothing and says so once.
+    usageReporter.report(
+      usageEvent({ tenantId, userId: attribution?.userId, surface: "agent", capability: "llm", task: attribution?.task, runId: attribution?.runId }, status, body),
+    );
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════

@@ -6,12 +6,15 @@ import "../telemetry"; // WS9: start OTel first (before Fastify/pg) so it patche
 import { fastifyLoggerOption } from "../telemetry";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { timingSafeEqual } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 import { KnowledgeStore, type IngestDoc } from "./store";
 import { KnowledgeGraph } from "./graph";
 import { ingestEvent, type PlatformEvent } from "./graph-ingest";
 import { PgEpisodicStore } from "../memory/episodic-pg";
+import { usageReporter } from "../usage-reporter";
+import { usageEvent } from "../usage-event";
 
 export const knowledgeConfig = {
   port: Number(process.env.KNOWLEDGE_PORT ?? 3005),
@@ -70,14 +73,43 @@ export async function resolveViaPlatform(provider: string, externalId: string): 
   return { tenantSet: principal.companies ?? [], crossCompany };
 }
 
+// AIP-03b — who an embedding is for. The store's `Embedder` is `(text) => vector`, with no room for a company, so the two routes that embed
+// (/ingest and /search) open this around the store call (AsyncLocalStorage, so concurrent requests never cross). Outside it (tests, a stray caller)
+// there is no company and no usage row.
+export interface EmbedUsageContext { tenantId: string | null; userId: string | null; task: string }
+export const embedUsageContext = new AsyncLocalStorage<EmbedUsageContext>();
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A search's company: the caller's authorized set when it is exactly one company. An empty set (public tier) or several companies has no single
+ *  company to bill, so no usage row is written for it (a documented gap, logged once by the reporter). The person is the envelope's own platform
+ *  user id when the provider is `platform`; a chat identity is not a user id. */
+export function searchUsageContext(tenantSet: string[], provider: string, externalId: string): EmbedUsageContext {
+  return {
+    tenantId: tenantSet.length === 1 ? tenantSet[0] : null,
+    userId: provider === "platform" && UUID_RE.test(externalId) ? externalId : null,
+    task: "knowledge.search",
+  };
+}
+
 export async function embedViaGateway(text: string): Promise<number[]> {
-  const res = await fetch(`${knowledgeConfig.gatewayUrl}/embed`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${knowledgeConfig.gatewayToken}` },
-    body: JSON.stringify({ text }),
-  });
-  if (!res.ok) throw new Error(`gateway /embed ${res.status}`);
-  return ((await res.json()) as { embedding: number[] }).embedding;
+  const who = embedUsageContext.getStore();
+  let status: number | null = null; // null until the gateway answers: a network failure is an `error` row
+  try {
+    const res = await fetch(`${knowledgeConfig.gatewayUrl}/embed`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${knowledgeConfig.gatewayToken}` },
+      body: JSON.stringify({ text }),
+    });
+    status = res.status;
+    if (!res.ok) throw new Error(`gateway /embed ${res.status}`);
+    return ((await res.json()) as { embedding: number[] }).embedding;
+  } finally {
+    // Fire and forget; the reporter never throws. /embed reports no token counts, so tokens are 'none'.
+    usageReporter.report(
+      usageEvent({ tenantId: who?.tenantId, userId: who?.userId, surface: "knowledge", capability: "embed", task: who?.task }, status),
+    );
+  }
 }
 
 export function buildKnowledgeApp(
@@ -100,7 +132,9 @@ export function buildKnowledgeApp(
     // "public" — absent, misspelled, or hostile — resolves to 'internal', so a malformed ingest
     // can only ever under-share.
     const audience = doc.audience === "public" ? ("public" as const) : ("internal" as const);
-    const written = await store.ingest({ ...doc, acl: doc.acl ?? [], kind: doc.kind ?? "doc", audience });
+    const written = await embedUsageContext.run({ tenantId: doc.tenantId, userId: null, task: "knowledge.ingest" }, () =>
+      store.ingest({ ...doc, acl: doc.acl ?? [], kind: doc.kind ?? "doc", audience }),
+    );
     return { written };
   });
 
@@ -124,12 +158,14 @@ export function buildKnowledgeApp(
         req.log.warn({ err }, "principal resolve failed — degrading to public-tier knowledge only");
       }
     }
-    const hits = await store.search(query, {
-      tenantSet,
-      scope: scope ?? "",
-      topK: req.body?.topK,
-      publicOnly: req.body?.publicOnly === true,
-    });
+    const hits = await embedUsageContext.run(searchUsageContext(tenantSet, provider, externalId), () =>
+      store.search(query, {
+        tenantSet,
+        scope: scope ?? "",
+        topK: req.body?.topK,
+        publicOnly: req.body?.publicOnly === true,
+      }),
+    );
     return { hits };
   });
 

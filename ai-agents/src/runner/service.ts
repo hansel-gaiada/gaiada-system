@@ -38,7 +38,7 @@ import { traceRun, type AgentTrace, type TraceStatus } from "../evals/trace";
 import { specialists, writeSpecialists, supervisor } from "../specialists";
 import { ObservabilityCollector } from "../obs/collector";
 import { episodeFromTrace, type Episode } from "../memory/episodic";
-import { liveDeps, tenantContext, envelopeContext, startRegistryImpactBootstrap } from "../deps";
+import { liveDeps, tenantContext, envelopeContext, usageContext, goalUserId, startRegistryImpactBootstrap, type UsageAttribution } from "../deps";
 import { PgGoalStore, type GoalStore, type FinishGoalPatch, type BudgetCaps, type RunInput } from "./store";
 import { GoalQueue } from "./queue";
 import { publishRunEvent, subscribeTenant } from "./events-bus";
@@ -457,13 +457,16 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
     const persistRun = (r: RunInput): Promise<void> => store.insertRun(scope.active ? scope.scrubDeep(r) : r);
     const goalText = (): string => scope.scrub(g.goal);
 
+    // AIP-03b: who this goal's gateway calls are for (deps.ts `usageContext`). `runId` is filled in by the branch that mints the goal's run id.
+    const usage: UsageAttribution = { task: g.agent, userId: goalUserId(g), runId: null };
+
     let patch: FinishGoalPatch;
     try {
       // D14-14: `envelopeContext` nests INSIDE `tenantContext` — same goal, same lifetime, same
       // per-goal-not-module-level reasoning (see deps.ts's header on `envelopeContext`). This is what
       // lets `liveDeps.resolveApproval` recover the ORIGINAL requester's OBO envelope without agent.ts
       // having to pass it explicitly (D14-10's contract deliberately omits it — see agent.ts's doc).
-      patch = await runWithSensitiveScope(scope, () => tenantContext.run(g.tenantId, () => envelopeContext.run(envelope, async (): Promise<FinishGoalPatch> => {
+      patch = await runWithSensitiveScope(scope, () => tenantContext.run(g.tenantId, () => usageContext.run(usage, () => envelopeContext.run(envelope, async (): Promise<FinishGoalPatch> => {
         if (g.agent === reg.supervisor.name || g.agent === "supervisor") {
           // S0 — minted BEFORE the run (was: after it finished, purely for the observation record) so
           // the SAME id can tag every in-flight planner/delegate event this goal's supervisor level
@@ -471,6 +474,7 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
           // purpose it always was — just visible to `runOrchestrator` from the start instead of only to
           // `recordObservation` at the end.
           const runId = randomUUID();
+          usage.runId = runId;
           const emit = makeEmitter(store, { runId, goalId: g.id, tenantId: g.tenantId });
           trackRunStart(g.id, runId);
           let run: Awaited<ReturnType<typeof runOrchestrator>>;
@@ -571,6 +575,7 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
           // `suspended` (no `agent_runs` row either way for that outcome — unchanged from before this
           // ticket; only the in-flight EVENTS are new for that path, tagged to a runId with no row).
           const runId = randomUUID();
+          usage.runId = runId;
           const emit = makeEmitter(store, { runId, goalId: g.id, tenantId: g.tenantId });
           trackRunStart(g.id, runId);
           let res: WriteAgentResult;
@@ -596,6 +601,7 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
         const readDef = reg.specialists[g.agent];
         // (agent was validated at POST time; readDef is present here)
         const runId = randomUUID();
+        usage.runId = runId;
         const emit = makeEmitter(store, { runId, goalId: g.id, tenantId: g.tenantId });
         trackRunStart(g.id, runId);
         let trace: AgentTrace;
@@ -607,7 +613,7 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
         await persistRun(runInputFromTrace(trace, g.id, g.tenantId, provider));
         await recordObservation(trace, g.tenantId, provider);
         return mapTrace(trace);
-      })));
+      }))));
     } catch (err) {
       patch = mapError(err);
     }
