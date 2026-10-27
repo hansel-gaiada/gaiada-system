@@ -420,7 +420,9 @@ describe.skipIf(!TEST_URL)("SCP-Sc · the simulated publisher on the real dispat
     expect(r.json().error).toBe("not_scheduled_by_publisher");
     expect((await read(U.gm, postId)).json().simulatedPublishNow).toBeNull();
     // The results path does not touch a hand schedule either, even if its variant says published.
-    await adminPool().query(`UPDATE social_post_variants SET status = 'failed' WHERE post_id = $1`, [postId]);
+    // A hand schedule's variant holds no publish approval, so the only way it can say `published` is as 0105's
+    // native-import bookkeeping row (svar_dispatched_has_approval, svar_native_import_is_bookkeeping).
+    await adminPool().query(`UPDATE social_post_variants SET status = 'published', native_import = true WHERE post_id = $1`, [postId]);
     const [hand] = await variantsOf(postId);
     expect(await settlePublisherResults(A, { variantIds: [hand.id] })).toEqual({ live: [], failed: [], errors: 0 });
     expect(await row(postId)).toMatchObject({ pipeline_status: "scheduled", schedule_via: "manual" });
