@@ -11,6 +11,37 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### ai-gateway-go `0.14.0` - AIP-00a-1: an OpenAI-compatible chat endpoint for registered agents, on its own listener, OFF by default (AIP-D13) (2026-10-27) - PROTOTYPED
+
+- **What it is for.** The two Hermes agents on `helios` (`hermes-seo`, `hermes-bsc`) can draw their model calls through the gateway instead of holding their own provider keys. The plan is `docs/plans/2026-10-27-ai-plan.md` §6.1, and the live steps are in `infra/runbooks/aip-00a-hermes-behind-gateway.md` (AIP-00a-2 and AIP-00a-3, run by the owner).
+- **The listener.** A second listener, `GATEWAY_AGENT_LISTEN`, which is empty by default, so it is off. It serves only `POST /v1/chat/completions` and `GET /v1/models`. The main listener serves nothing new. Compose publishes it on `127.0.0.1:3012` only.
+- **Auth.** Per-agent bearer tokens, stored only as SHA-256 hashes (`GATEWAY_AGENT_TOKENS=name:sha256hex,...`) and compared in constant time.
+  - An empty or malformed set means every agent call is 401.
+  - `GATEWAY_TOKEN` never opens the agent routes, and an agent token opens nothing on the main listener.
+- **What is forwarded.**
+  - A body allow-list. Unknown keys are dropped and logged by name only.
+  - Image and audio parts are refused (400).
+  - Body size (413) and message count are capped.
+- **Model choice.** The caller's `model` never picks a provider. The first chat-capable provider in `LLM_CHAIN` serves; today that is `openai` (OpenRouter). `echo` never serves this route.
+- **The same controls as `/complete`, applied to every part of a call.**
+  - DLP and the classifier on every message the caller sends, and on the arguments of earlier tool calls (still valid JSON after scrubbing).
+  - Output DLP on streamed and non-streamed text. The answer is cut to an allow-list of fields.
+  - One egress audit row per call: the agent's name, provider, model and token counts, and never any text.
+- **Limits per agent:**
+  - a daily call cap (`agent:<name>` budget scope, or `GATEWAY_AGENT_DAILY_CALL_CAP`);
+  - `GATEWAY_AGENT_RESERVE_PCT` (default 25), so agents never use the last quarter of the global cap;
+  - `GATEWAY_AGENT_MAX_TOKENS` (default 8192), which clamps or injects the output ceiling;
+  - `GATEWAY_AGENT_MAX_CONCURRENCY` (default 4) calls in flight.
+- **Errors that stay with the agent.** An upstream 429 caused by an agent goes back to that agent (`upstream_rate_limited`, a well-formed `Retry-After`) and never opens the shared breaker for the ERP. An upstream 400/413/422 or a client disconnect is a caller fault: no failover and no breaker charge. Errors use the OpenAI shape.
+- **Streaming.** Server-sent events relayed with tool-call deltas, `stream_options.include_usage` added, an idle timeout per chunk, and failover only before the first byte.
+- **Tests.** Locally, `go test ./...` passes 257 top-level tests, 50 of them new. `-race` on the agent tests is clean. Mutation checks caught all 15 seeded faults.
+- **Local drive.** Done against real OpenRouter `z-ai/glm-5.3-flash` with the company dev key:
+  - auth isolation;
+  - a test card number was redacted in the answer and counted in the audit row;
+  - a streamed tool call, then a second turn with the tool result;
+  - no message text in the audit file.
+- **No ERP behaviour changes.** `/complete` and `/complete/stream` are unchanged, apart from an additive `Header` field on `RateLimitError` and the chain's caller-fault return, which only the new route produces. Turning the listener on is AIP-00a-2.
+
 ### platform-nest `0.184.0` + platform-ui `0.209.0` + wa-chat-bot `0.11.0` - AI plan phase 0: AIP-00c (the brain picker lists only brains that work) and AIP-00b (the bot's old built-in AI gateway removed); AIP-00a designed (2026-10-27) - PROTOTYPED
 
 - **AIP-00c, platform-nest:** new `GET /api/:tenantId/assistant/brains` returns `{brains: [{value, available}], checkedAt}`.
