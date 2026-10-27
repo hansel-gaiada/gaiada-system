@@ -366,7 +366,7 @@ test.describe("the Social skin on a phone (390x844)", () => {
 
 // ── The Home (SCP-1d): the design's feed ─────────────────────────────────────────────────────────────────────────────────
 
-const HOME_SECTIONS = ["Client stories", "Your turn", "Waiting on others", "Your accounts this cycle", "Tasks given to you", "Reports due"];
+const HOME_SECTIONS = ["Client stories", "Your turn", "Waiting on others", "Your accounts this cycle", "Tasks given to you"];
 // Scoped to the page body: while Next streams the Home in, its markup also sits once, hidden, in the stream's own container.
 const home = (page: Page) => page.locator("#main-content").getByTestId("social-home");
 /** The Home streams in behind its own boundary: wait for it, so a scan or a count never sees the loading state. */
@@ -378,7 +378,7 @@ async function homeReady(page: Page) {
 test.describe("the Social Home on a desktop (1280x800)", () => {
   test.use({ viewport: { width: 1280, height: 800 }, contextOptions: { reducedMotion: "reduce" } });
 
-  test("lays out the six sections, and the officer's clients are circles that open the client's Profile", async ({ page, context }) => {
+  test("lays out the five sections, and the officer's clients are circles that open the client's Profile", async ({ page, context }) => {
     await signIn(page, context);
     await homeReady(page);
     const stories = home(page).getByRole("list", { name: "Clients, with their schedule health" });
@@ -408,14 +408,28 @@ test.describe("the Social Home on a desktop (1280x800)", () => {
     await expect(page).toHaveURL(/\/departments\/dept-4\/?$/);
   });
 
-  test("Your accounts this cycle and Reports due link to the Profile; Waiting on others links to Messages", async ({ page, context }) => {
+  test("Reminders: the cards sit between the stories and Your turn, with the pinned notice and the reports due (SCP-Ki)", async ({ page, context }) => {
+    await signIn(page, context);
+    await homeReady(page);
+    const rem = home(page).getByRole("region", { name: "Reminders" });
+    await expect(rem).toBeVisible();
+    // The check-in card depends on the weekday (the demo expects none at the weekend), so only the notice and the reports are asserted.
+    await expect(rem.locator('[data-reminder="notice"]').getByRole("link", { name: /Read/ })).toHaveAttribute("href", /\/departments\/dept-4\/notices#/);
+    await expect(rem.locator('[data-reminder="report"]').first().getByRole("link", { name: /Open/ })).toHaveAttribute("href", /\/profile\//);
+    const stories = (await home(page).getByRole("region", { name: "Client stories" }).boundingBox())!;
+    const turn = (await home(page).getByRole("region", { name: "Your turn" }).boundingBox())!;
+    const box = (await rem.boundingBox())!;
+    expect(box.y).toBeGreaterThan(stories.y);
+    expect(box.y).toBeLessThan(turn.y);
+    await expect(home(page).getByRole("region", { name: "Reports due" })).toHaveCount(0);
+  });
+
+  test("Your accounts this cycle links to the Profile; Waiting on others links to Messages", async ({ page, context }) => {
     await signIn(page, context);
     await homeReady(page);
     const accounts = home(page).getByRole("region", { name: "Your accounts this cycle" });
     await expect(accounts.getByRole("link").first()).toHaveAttribute("href", /\/departments\/dept-4\/profile\/[^/?]+/);
     await expect(accounts.first()).toContainText(/ of \d+ posts/);
-    const reports = home(page).getByRole("region", { name: "Reports due" });
-    await expect(reports.getByRole("link").first()).toHaveAttribute("href", /\/profile\//);
     await expect(home(page).getByRole("region", { name: "Waiting on others" }).getByRole("link", { name: /Messages/ })).toHaveAttribute("href", "/departments/dept-4/messages");
   });
 

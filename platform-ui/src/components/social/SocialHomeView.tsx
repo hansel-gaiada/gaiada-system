@@ -1,5 +1,6 @@
 // SCP-1d (plan §6.2, §6.4; BFF §63.7, §63.4, §63.5) — the Social Media Home, drawn as the team's design lays it out: the client stories across the top, the feed of
-// "Your turn" cards in the middle, "Waiting on others" under it, and a side column of the caller's accounts this cycle, tasks given to them and reports due.
+// "Your turn" cards in the middle, "Waiting on others" under it, and a side column of the caller's accounts this cycle and tasks given to them. SCP-Ki (SCP-Q24): the
+// reminder cards (today's check-in, the unit's pinned notice, the reports due) sit in the main column between the stories and "Your turn", as in the design.
 //
 // Pure over the reads' answers (a server component with no reads of its own: `SocialHome.tsx` makes them, in parallel), so every section has its own state:
 //   ok          the section;
@@ -10,12 +11,16 @@ import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { HomeTurnList } from "./HomeTurnList";
+import { HomeReminders } from "./HomeReminders";
+import type { SubmitCheckinAction } from "@/components/dashboard/CheckinCard";
+import type { CheckinCardData } from "@/lib/checkins-data";
+import type { NoticeList } from "@/lib/notices";
 import { formatDate } from "@/lib/format";
 import type { AgendaTaskRow } from "@/lib/agenda";
 import type { ReadResult } from "@/lib/readResult";
-import { REPORT_FORMAT_LABEL, cycleCountsText, type AllocationRow } from "@/lib/socialAllocation";
+import { cycleCountsText, type AllocationRow } from "@/lib/socialAllocation";
 import { HEALTH_LABEL, type CycleTable } from "@/lib/socialCycles";
-import { RING_TOKEN, dueWords, ordinal, reportsDue, storyCircles, type FeedPage } from "@/lib/socialHome";
+import { RING_TOKEN, reportsDue, storyCircles, type FeedPage } from "@/lib/socialHome";
 import { clientConversationHref, holderTitle, postHref, statusWords, agoWords, type WaitingGroup } from "@/lib/socialMessages";
 import "./cycles.css";
 import "./social-home.css";
@@ -32,6 +37,10 @@ export interface SocialHomeReads {
   tasks: ReadResult<AgendaTaskRow[]>;
   accounts: ReadResult<AllocationRow[]>;
   cycles: ReadResult<CycleTable>;
+  /** SCP-Ki: `getCheckinCardData`'s answer; null when ANY check-in read failed. */
+  checkin: CheckinCardData | null;
+  /** SCP-Ki: the unit's current notices (pinned first). */
+  notices: ReadResult<NoticeList>;
 }
 
 function Section({ id, title, children, className }: { id: string; title: string; children: ReactNode; className?: string }) {
@@ -50,10 +59,10 @@ function Refused({ read, subject }: { read: Exclude<ReadResult<unknown>, { kind:
     : <ReadRefusal inline subject={subject} kind="unavailable" reason={read.reason} />;
 }
 
-export function SocialHomeView({ reads, deptId, userId, todayIso, nowIso, noQueue = false }: { reads: SocialHomeReads; deptId: string; userId: string; todayIso: string; nowIso: string; noQueue?: boolean }) {
+export function SocialHomeView({ reads, deptId, userId, tenantId, submitCheckin, todayIso, nowIso, noQueue = false }: { reads: SocialHomeReads; deptId: string; userId: string; tenantId: string; submitCheckin: SubmitCheckinAction; todayIso: string; nowIso: string; noQueue?: boolean }) {
   const now = Date.parse(nowIso);
   const profile = (engagementId: string) => `/departments/${encodeURIComponent(deptId)}/profile/${encodeURIComponent(engagementId)}`;
-  const { turn, waiting, tasks, accounts, cycles } = reads;
+  const { turn, waiting, tasks, accounts, cycles, checkin, notices } = reads;
 
   return (
     <div className="sh" data-testid="social-home">
@@ -61,6 +70,13 @@ export function SocialHomeView({ reads, deptId, userId, todayIso, nowIso, noQueu
         <Section id="sh-stories" title="Client stories" className="sh-section--stories">
           {cycles.kind !== "ok" ? <Refused read={cycles} subject="The client stories" /> : <Stories table={cycles.data} userId={userId} profile={profile} />}
         </Section>
+
+        {/* SCP-Ki (SCP-Q24): the design's reminder cards, after the stories and before the feed. No heading of its own. */}
+        <HomeReminders
+          tenantId={tenantId} deptId={deptId} checkin={checkin} submitCheckin={submitCheckin} notices={notices} now={now} profile={profile}
+          reports={accounts.kind === "ok" ? reportsDue(accounts.data, todayIso) : null}
+          reportsFailure={accounts.kind !== "ok" ? <Refused read={accounts} subject="The reports due" /> : null}
+        />
 
         <Section id="sh-turn" title="Your turn">
           {turn.kind !== "ok" ? <Refused read={turn} subject="Your turn" /> : turn.data.items.length === 0 && noQueue ? (
@@ -126,9 +142,6 @@ export function SocialHomeView({ reads, deptId, userId, todayIso, nowIso, noQueu
           )}
         </Section>
 
-        <Section id="sh-reports" title="Reports due">
-          {accounts.kind !== "ok" ? <Refused read={accounts} subject="The reports due" /> : <ReportsDue rows={accounts.data} todayIso={todayIso} profile={profile} />}
-        </Section>
       </div>
     </div>
   );
@@ -195,30 +208,6 @@ function Waiting({ groups, deptId, now }: { groups: WaitingGroup[]; deptId: stri
           {total > WAITING_SHOWN ? `All ${total} in Messages, with Follow up` : "Open Messages, to follow up"}
         </Link>
       </p>
-    </>
-  );
-}
-
-function ReportsDue({ rows, todayIso, profile }: { rows: AllocationRow[]; todayIso: string; profile: (id: string) => string }) {
-  const due = reportsDue(rows, todayIso);
-  if (due.length === 0) {
-    return <p className="scp-note" role="status">None of your clients has a report due day set. The Social Media head sets it on the Allocation page.</p>;
-  }
-  return (
-    <>
-      <ul className="sh-list">
-        {due.slice(0, SIDE_SHOWN).map((r) => (
-          <li key={r.engagementId}>
-            <Link href={profile(r.engagementId)} className="sh-row">
-              <span className="sh-row__main">{r.clientName}</span>
-              <span className="sh-row__sub">
-                {dueWords(r.daysLeft)} · the {ordinal(r.dueDay)}{r.format ? ` · ${REPORT_FORMAT_LABEL[r.format]}` : ""}
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-      <p className="scp-note">Due days come from each client&rsquo;s allocation. Whether a report is drafted or sent is not shown here yet.</p>
     </>
   );
 }
