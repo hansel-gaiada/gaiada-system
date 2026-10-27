@@ -896,11 +896,13 @@ describe.skipIf(!TEST_URL)("SCP-1b · the pipeline routes (BFF §63.6)", () => {
     await assignDesigner(postId, U.designer);
 
     // ── Creative: the designer starts, adds a LINK and submits; the final check refuses a link-only design ──
-    await stop("design", "design", "designer", { designer: ["start_design", "submit_design"] });
+    // Submitting needs a design first (the read probes the guard), so before one exists only the start is live.
+    await stop("design", "design", "designer", { designer: ["start_design"] });
     await ok(await act(U.designer, postId, "start_design"), "start_design");
     const link = await send(U.designer, "designs", { expectedStatus: "design", linkUrl: "https://example.invalid/walk-design.png", linkSource: "own" });
     expect(link.statusCode, link.body).toBe(201);
     const linkId = link.json().designId as string;
+    expect(live(await readAs(U.designer)), "with a design the submit is live").toContain("submit_design");
     await ok(await act(U.designer, postId, "submit_design"), "submit_design");
     await stop("final", "final", "approver", finalCheck);
     const linkOnly = await act(U.gm, postId, "final_approve");

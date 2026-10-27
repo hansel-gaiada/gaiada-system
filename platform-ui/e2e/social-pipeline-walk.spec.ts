@@ -87,7 +87,8 @@ async function signIn(page: Page, context: import("@playwright/test").BrowserCon
 }
 
 const chip = (page: Page) => page.locator(".scp-post__chips .scp-chip").first();
-const meta = (page: Page) => page.locator(".scp-post__meta");
+// `.first()`: a streamed page can hold two metas for an instant (loading shell and the post), which Playwright refuses as a strict-mode violation.
+const meta = (page: Page) => page.locator(".scp-post__meta").first();
 const bar = (page: Page) => page.getByRole("region", { name: "Actions" });
 const activity = (page: Page) => page.getByRole("list", { name: "Activity" });
 
