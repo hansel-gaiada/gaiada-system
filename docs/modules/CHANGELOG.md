@@ -11,6 +11,28 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.187.0` + ai-gateway-go `0.16.0` - AI plan phase 1, first half: AIP-01 (the AI usage table) and AIP-02 (the gateway reports real tokens and OpenRouter's cost) (2026-10-27) - PROTOTYPED
+
+- **AIP-01: migration `202610271800_ai_usage_events.sql`.** The table `ai_usage_events` is the business record of every AI call. It holds ids, counts, labels and money, and never any text.
+  - It is company-scoped: `FORCE` RLS with the one `tenant_isolation` policy over `app_current_tenants()`.
+  - It is append-only. A trigger refuses DELETE and every UPDATE except clearing `user_id` or `org_unit_id` to NULL (erasure, or a foreign key's `ON DELETE SET NULL`). `platform_app` is narrowed to SELECT and INSERT.
+  - `ai_usage_erase_user(uuid)` (SECURITY DEFINER, pinned `search_path`) nulls a person's rows in every company and keeps the counts.
+  - `ai_usage_daily` is a `security_invoker` view summing per UTC day, department, person, surface, provider and model. Unknown sums stay NULL.
+  - The writer library `modules/ai-usage/` (`recordAiUsage`, `recordAiUsageCall`, `eraseAiUsageForUser`) refuses unknown keys and never breaks its caller.
+  - There are no read routes and no Cerbos change: reads come with AIP-15, and by AIP-D6 per-person figures are for the head and the owner only. No caller writes rows yet; that is AIP-03.
+- **AIP-02: the gateway's `openai` provider reports real usage from OpenRouter.**
+  - `/complete` adds an optional `usage {promptTokens, completionTokens, costUsd?, source:"provider"}`. Without usage the body is byte for byte the old one.
+  - `/complete/stream` emits the existing `usage` event with real counts, `costUsd` and `source`. The platform's `stream.ts` reads it unchanged, so live assistant tokens stop being a 4-characters-per-token estimate.
+  - `llm` audit rows carry `promptTokens`, `completionTokens` and `costUsd`.
+  - OpenRouter-only request fields are sent only to an `openrouter.ai` host (`OPENAI_USAGE_ACCOUNTING`: blank = automatic).
+  - Native streaming of the `openai` provider is built but OFF (`OPENAI_NATIVE_STREAM`). While off, the stream path is the old single-chunk fallback plus the usage event, pinned byte for byte.
+  - Verified against real OpenRouter with the company dev key (6 calls): the usage event, `costUsd` (about 0.000005 USD per short call) and the audit row in both modes.
+- **Compose:** two optional gateway env vars (`OPENAI_USAGE_ACCOUNTING`, `OPENAI_NATIVE_STREAM`); empty keeps the defaults above.
+- **Tests:**
+  - ai-gateway-go: `go test` 304 locally, 43 of them new.
+  - platform-nest: writer 23 and migration 5 (run locally); `ai-usage.db.test.ts` 37 (RLS, append-only, erasure, CHECKs, the view), which runs on the Linux gate.
+
+
 ### platform-nest `0.186.0` - SCP-Sa: the social simulator's switch and containment, for the Social Media pipeline's dev review on mock data (plan SCP-D1, SCP-D3, §5; FRONTEND-BFF-CONTRACT §63.1 file 8) (2026-10-27) - PROTOTYPED
 
 - **Why.** The owner ruled that the whole pipeline is proved on mock data with every step simulated, publishing included (SCP-D1). That reverses the social module's "no simulator" rule, whose hazard is a post our calendar shows as published that never appeared. The guardrails below answer it; the test double `mock-driver.ts` is unchanged and still never registered.
