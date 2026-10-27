@@ -139,7 +139,8 @@ describe("Follow up", () => {
     fireEvent.click(within(row("Ginger and clove tea")).getByRole("button", { name: "Follow up" }));
     const alert = await within(row("Ginger and clove tea")).findByRole("alert");
     expect(alert).toHaveTextContent("Nobody else holds this post right now, so there is nobody to follow up.");
-    expect(within(row("Ginger and clove tea")).getByRole("button", { name: "Follow up" })).toBeEnabled();
+    // The alert can show while the click's transition still runs (the button reads "Following up…" until it ends): wait for the button to come back.
+    await waitFor(() => expect(within(row("Ginger and clove tea")).getByRole("button", { name: "Follow up" })).toBeEnabled());
     vi.mocked(followUpAction).mockResolvedValueOnce({ ok: false, error: "status_changed", message: followUpRefusalText({ error: "status_changed" }) });
     fireEvent.click(within(row("Ginger and clove tea")).getByRole("button", { name: "Follow up" }));
     await waitFor(() => expect(within(row("Ginger and clove tea")).getByRole("alert")).toHaveTextContent(/moved on while you were looking/));

@@ -126,6 +126,16 @@ describe("the page draws every section of the read", () => {
     unmount();
   });
 
+  it("offers the client's link only while the post waits on the client (SCP-2f)", () => {
+    const withClient = PIPE_POSTS.find((p) => p.pipelineStatus === "client" && !p.archivedAt)!;
+    const r1 = mount(withClient.title, "u-social");
+    expect(screen.getByRole("textbox", { name: "The client's link" })).toHaveValue(`${window.location.origin}/portal/social?post=${withClient.id}`);
+    r1.unmount();
+    const drafting = PIPE_POSTS.find((p) => p.pipelineStatus === "drafting")!;
+    mount(drafting.title, "u-social");
+    expect(screen.queryByRole("textbox", { name: "The client's link" })).toBeNull();
+  });
+
   it("says a post is SIMULATED when it is", () => {
     mount("Weekend brunch is back", "u-social");
     expect(screen.getByText("SIMULATED")).toBeInTheDocument();

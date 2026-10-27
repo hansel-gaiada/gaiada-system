@@ -90,8 +90,24 @@ export interface PipelinePost {
   approvedSchedule: { scheduledAt: string | null; placement: string[] } | null;
   scheduleVia: "manual" | "publisher" | null; reviewHash: string | null;
   liveUrl: string | null; wentLiveAt: string | null; simulated: boolean; archivedAt: string | null;
+  /** The client's latest decision (SCP-2, BFF §63.6.2): given in the portal, or recorded by staff on the client's behalf. Null before one, and again once the
+   *  post goes back to the client. */
+  clientDecision: ClientDecision | null;
   copyLog: CopyLogRow[]; history: HistoryRow[];
   actions: ActionRow[]; nextAction: string | null;
+}
+
+export interface ClientDecision {
+  decisionId: string; kind: "approved" | "changes"; changeKind: string | null; note: string | null; decidedAt: string;
+  via: "portal" | "recorded"; channel: string | null; decidedBy: PersonRef | null; recordedBy: PersonRef | null;
+}
+
+function asClientDecision(v: unknown): ClientDecision | null {
+  if (!isObj(v) || typeof v.decisionId !== "string" || (v.kind !== "approved" && v.kind !== "changes")) return null;
+  return {
+    decisionId: v.decisionId, kind: v.kind, changeKind: str(v.changeKind), note: str(v.note), decidedAt: str(v.decidedAt) ?? "",
+    via: v.via === "recorded" ? "recorded" : "portal", channel: str(v.channel), decidedBy: person(v.decidedBy), recordedBy: person(v.recordedBy),
+  };
 }
 
 // ── Parsing ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -161,6 +177,7 @@ export function asPipelinePost(raw: unknown): PipelinePost {
     variants: arr(o.variants).filter(isObj).map((v) => ({ id: str(v.id) ?? "", network: str(v.network) ?? "", handle: str(v.handle), status: str(v.status) ?? "", reviewStatus: str(v.reviewStatus) ?? "" })),
     approvedSchedule: approved, scheduleVia: o.scheduleVia === "manual" || o.scheduleVia === "publisher" ? o.scheduleVia : null, reviewHash: str(o.reviewHash),
     liveUrl: str(o.liveUrl), wentLiveAt: str(o.wentLiveAt), simulated: o.simulated === true, archivedAt: str(o.archivedAt),
+    clientDecision: asClientDecision(o.clientDecision),
     copyLog: arr(o.copyLog).filter(isObj).map((c) => ({
       field: str(c.field) ?? "", before: c.before, after: c.after, via: str(c.via) ?? "", by: person(c.by), suggestedBy: person(c.suggestedBy), stage: str(c.stage) ?? "", at: str(c.at) ?? "",
     })),
