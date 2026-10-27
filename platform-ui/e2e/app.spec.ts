@@ -78,6 +78,13 @@ test("notifications surface shows items and unread badge", async ({ page }) => {
   await page.waitForURL("**/me/inbox");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/inbox/i);
   await expect(page.getByText(/approval requested/i)).toBeVisible();
+  // SCP-Kh (SCP-Q24): "Needs you" is the first row of the page, above the filter tabs; closed until opened.
+  const needsYou = page.locator(".ny-row");
+  await expect(needsYou).toBeVisible();
+  const head = needsYou.getByRole("button", { name: /Needs you/ });
+  await expect(head).toHaveAttribute("aria-expanded", "false");
+  const [rowTop, tabTop] = await Promise.all([needsYou.boundingBox(), page.getByRole("link", { name: /^All/ }).first().boundingBox()]);
+  expect(rowTop!.y).toBeLessThan(tabTop!.y);
 });
 
 test("admin audit lists activity and filters", async ({ page }) => {
