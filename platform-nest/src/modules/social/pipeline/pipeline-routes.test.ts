@@ -802,4 +802,171 @@ describe.skipIf(!TEST_URL)("SCP-1b · the pipeline routes (BFF §63.6)", () => {
     expect(soon.json().error).toBe("follow_up_too_soon");
     expect(soon.json().retryAfterSeconds).toBeGreaterThan(0);
   });
+
+  // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  // (9) SCP-1p: the whole walk on ONE post, with five real principals
+  // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  // The scenarios of (1) each start a fresh post and cover one loop; the cases above cover one denial each. What none of them proves is the walk the
+  // roles actually make: ONE post carried from the officer through loop a, loop b, the creative, the final check and loops c (design, then copy) to the
+  // client, read as each of the five people at every stop. That is what this case adds: the officer, the copywriter, the Social Media lead seat (HoD), a
+  // designer named on the month request and the GM lead seat, against real Postgres and Cerbos.
+  //
+  // At every stop it asserts the holder, and that exactly the people who hold the step have a live step in their own read (`actions[]`): everyone else's
+  // listed actions are denied with the server's reason. And it asserts the plan's promises for the loops: loop b and loop c (copy) come back to the
+  // approver WITHOUT a second proofread, and the final check refuses a design that is only a link.
+
+  /** The steps of the walk, as the read's `actions[]` lists them for a caller (accept_suggestion, block, follow_up, archive and discard are not steps). */
+  const WALK_STEPS = [
+    "start_draft", "send_to_proofread", "approve_copy", "return_copy", "approve_for_design", "hod_changes", "resend",
+    "start_design", "submit_design", "final_approve", "final_changes",
+  ];
+
+  it("walk: one post through loops a, b, c (design, copy) to the client, read as the officer, copywriter, HoD, designer and GM", async () => {
+    const eng = await freshEngagement();
+    const postId = await newPost(eng);
+    type Read = {
+      pipelineStatus: string; holder: { role: string | null }; change: { case: string; kind: string } | null;
+      creativeState: string | null; caption: string; copyLog: Array<{ field: string; via: string }>;
+      variants: Array<{ network: string; reviewStatus: string }>; placement: string[];
+      history: Array<{ action: string; from: string | null; to: string | null }>;
+      actions: Array<{ action: string; allowed: boolean; reason?: string }>;
+    };
+    const readAs = async (who: string): Promise<Read> => {
+      const r = await app.inject({ method: "GET", url: `${base()}/posts/${postId}/pipeline`, headers: headersFor(who) });
+      expect(r.statusCode, `read as ${who}: ${r.body}`).toBe(200);
+      return r.json() as Read;
+    };
+    const live = (p: Read) => p.actions.filter((a) => a.allowed && WALK_STEPS.includes(a.action)).map((a) => a.action).sort();
+    /** The stop: the status, who holds it, and each person's live steps (`mine`), with every other person reading none. */
+    async function stop(label: string, status: string, holder: string, mine: Record<string, string[]>) {
+      const people: Record<string, string> = { officer: U.officer, copywriter: U.copywriter, hod: U.hod, gm: U.gm };
+      if (mine.designer) people.designer = U.designer; // a designer reads a post only once the month request names them
+      for (const [name, who] of Object.entries(people)) {
+        const p = await readAs(who);
+        expect(p.pipelineStatus, `${label}: status as ${name}`).toBe(status);
+        expect(p.holder.role, `${label}: holder as ${name}`).toBe(holder);
+        expect(live(p), `${label}: live steps for the ${name}`).toEqual([...(mine[name] ?? [])].sort());
+      }
+    }
+    const into = (p: Read, status: string) => p.history.filter((h) => h.to === status).length;
+    const send = (who: string, url: string, payload: Record<string, unknown>, method: "POST" | "PUT" | "PATCH" = "POST") =>
+      app.inject({ method, url: `${base()}/posts/${postId}/${url}`, headers: headersFor(who), payload });
+    const approvers = { hod: ["approve_for_design", "hod_changes"], gm: ["approve_for_design", "hod_changes"] };
+    const finalCheck = { hod: ["final_approve", "final_changes"], gm: ["final_approve", "final_changes"] };
+
+    // ── Draft: the officer starts it, fills it and sends it ──
+    await stop("planned", "planned", "officer", { officer: ["start_draft"] });
+    await ok(await act(U.officer, postId, "start_draft"), "start_draft");
+    await fill(eng, postId);
+    await stop("drafting", "drafting", "officer", { officer: ["send_to_proofread"] });
+    await ok(await act(U.officer, postId, "send_to_proofread"), "send_to_proofread");
+    // Proofread is the copywriter's turn. The officer is listed the copy steps but denied: the author never passes their own copy (maker/checker).
+    await stop("proofread", "proofread", "copywriter", { copywriter: ["approve_copy", "return_copy"] });
+    const officerAtProofread = await readAs(U.officer);
+    expect(officerAtProofread.actions.find((a) => a.action === "approve_copy")).toMatchObject({ allowed: false, reason: "author_cannot_approve" });
+
+    // ── LOOP A: the copywriter suggests and returns the copy; the officer accepts, fixes and resends to proofread ──
+    const sug = await send(U.copywriter, "suggestions/caption", { expectedStatus: "proofread", value: "Fresh pastries, baked before dawn." }, "PUT");
+    expect(sug.statusCode, sug.body).toBe(200);
+    const returned = await ok(await act(U.copywriter, postId, "return_copy", { note: "Tighten the opening line." }), "return_copy");
+    expect(returned.post.change).toMatchObject({ case: "copywriter_copy", kind: "copy" });
+    await stop("loop a", "changes", "officer", { officer: ["send_to_proofread"] });
+    const accepted = await ok(await act(U.officer, postId, "accept_suggestion", { field: "caption" }), "accept_suggestion");
+    expect(accepted.post.caption).toBe("Fresh pastries, baked before dawn.");
+    expect(accepted.post.copyLog.map((e: { field: string; via: string }) => [e.field, e.via])).toEqual([["caption", "suggestion"]]);
+    await ok(await act(U.officer, postId, "send_to_proofread"), "send_to_proofread again");
+    await stop("proofread again", "proofread", "copywriter", { copywriter: ["approve_copy", "return_copy"] });
+    await ok(await act(U.copywriter, postId, "approve_copy"), "approve_copy");
+    // The HoD approval is the approvers' step: the HoD seat and the GM seat both hold it, nobody else does.
+    await stop("hod", "hod", "approver", approvers);
+
+    // ── LOOP B: the HoD asks for changes; the officer's fix goes STRAIGHT back to the HoD, with no second proofread ──
+    const asked = await ok(await act(U.hod, postId, "hod_changes", { note: "Use the new promo name." }), "hod_changes");
+    expect(asked.post.change).toMatchObject({ case: "hod_copy", kind: "copy" });
+    await stop("loop b", "changes", "officer", { officer: ["resend"] });
+    const proofreadsBefore = into(await readAs(U.officer), "proofread");
+    expect(proofreadsBefore).toBeGreaterThanOrEqual(2); // the first send, loop a's second (the suggestion's own activity row also names the status)
+    const edit = await send(U.officer, "pipeline", { expectedStatus: "changes", fields: { cta: "Visit us, new name inside" } }, "PATCH");
+    expect(edit.statusCode, edit.body).toBe(200);
+    const back = await ok(await act(U.officer, postId, "resend"), "resend");
+    expect(back.post.pipelineStatus).toBe("hod");
+    expect(into(await readAs(U.hod), "proofread"), "no second proofread after loop b").toBe(proofreadsBefore);
+    await stop("hod again", "hod", "approver", approvers);
+    await ok(await act(U.hod, postId, "approve_for_design"), "approve_for_design");
+    await assignDesigner(postId, U.designer);
+
+    // ── Creative: the designer starts, adds a LINK and submits; the final check refuses a link-only design ──
+    // Submitting needs a design first (the read probes the guard), so before one exists only the start is live.
+    await stop("design", "design", "designer", { designer: ["start_design"] });
+    await ok(await act(U.designer, postId, "start_design"), "start_design");
+    const link = await send(U.designer, "designs", { expectedStatus: "design", linkUrl: "https://example.invalid/walk-design.png", linkSource: "own" });
+    expect(link.statusCode, link.body).toBe(201);
+    const linkId = link.json().designId as string;
+    expect(live(await readAs(U.designer)), "with a design the submit is live").toContain("submit_design");
+    await ok(await act(U.designer, postId, "submit_design"), "submit_design");
+    // The read already says so: with only a link on the post the approvers' "send to the client" is listed but denied (`design_not_stored`), the change step stays live.
+    await stop("final, link only", "final", "approver", { hod: ["final_changes"], gm: ["final_changes"] });
+    expect((await readAs(U.gm)).actions.find((a) => a.action === "final_approve")).toMatchObject({ allowed: false, reason: "design_not_stored" });
+    const linkOnly = await act(U.gm, postId, "final_approve");
+    expect(linkOnly.statusCode, linkOnly.body).toBe(409);
+    expect(linkOnly.json().error).toBe("design_not_stored");
+    expect((await readAs(U.gm)).pipelineStatus, "a refused send moves nothing").toBe("final");
+
+    // ── LOOP C (design): the HoD sends the design back; the designer swaps the link for a stored asset and resubmits; back at the final check ──
+    const redo = await ok(await act(U.hod, postId, "final_changes", { changeKind: "design", note: "Use the stored asset, with a larger logo." }), "final_changes design");
+    expect(redo.post.change).toMatchObject({ case: "final_design", kind: "design" });
+    expect(redo.post.creativeState).toBe("revision");
+    await stop("loop c design", "changes", "designer", { designer: ["start_design", "submit_design"] });
+    const asset = await send(U.designer, "designs", { expectedStatus: "changes", assetGroupId: assetId });
+    expect(asset.statusCode, asset.body).toBe(201);
+    const del = await app.inject({ method: "DELETE", url: `${base()}/posts/${postId}/designs/${linkId}`, headers: headersFor(U.designer) });
+    expect(del.statusCode, del.body).toBe(200);
+    await ok(await act(U.designer, postId, "submit_design"), "submit_design again");
+    await stop("final again", "final", "approver", finalCheck);
+
+    // ── LOOP C (copy): the GM sends the copy back to the officer; the fix returns to the final check, not to proofread ──
+    const proofreadsC = into(await readAs(U.gm), "proofread");
+    const copyChange = await ok(await act(U.gm, postId, "final_changes", { changeKind: "copy", note: "Name the place in the caption." }), "final_changes copy");
+    expect(copyChange.post.change).toMatchObject({ case: "final_copy", kind: "copy" });
+    await stop("loop c copy", "changes", "officer", { officer: ["resend"] });
+    const fix = await send(U.officer, "pipeline", { expectedStatus: "changes", fields: { caption: "Fresh pastries, baked before dawn, at the harbour." } }, "PATCH");
+    expect(fix.statusCode, fix.body).toBe(200);
+    const final = await ok(await act(U.officer, postId, "resend"), "resend to the final check");
+    expect(final.post.pipelineStatus).toBe("final");
+    expect(into(await readAs(U.gm), "proofread"), "no second proofread after loop c").toBe(proofreadsC);
+    await stop("final once more", "final", "approver", finalCheck);
+
+    // ── The GM sends it to the client: one variant per placed network, every review pending ──
+    const sent = await ok(await act(U.gm, postId, "final_approve"), "final_approve");
+    expect(sent.post.pipelineStatus).toBe("client");
+    expect(sent.post.variants.length).toBe(sent.post.placement.length);
+    expect(sent.post.variants.every((v: { reviewStatus: string }) => v.reviewStatus === "pending")).toBe(true);
+    await stop("client", "client", "client", {});
+    const history = (await readAs(U.officer)).history.map((h) => [h.action, h.to]);
+    expect(history.at(-1)).toEqual(["final_approve", "client"]);
+    expect(history.filter(([a]) => a === "hod_changes" || a === "final_changes" || a === "return_copy").length).toBe(4);
+  });
+
+  it("maker/checker at proofread: a copywriter who is the post's officer cannot pass their own copy; another person can", async () => {
+    // The copywriter holds the proofread step by role, and is also this client's officer: the one person for whom both are true.
+    const eng = await freshEngagement({ officer: U.copywriter });
+    const postId = await newPost(eng, U.copywriter);
+    await driveTo(eng, postId, "proofread");
+    const read = await app.inject({ method: "GET", url: `${base()}/posts/${postId}/pipeline`, headers: headersFor(U.copywriter) });
+    expect(read.json().actions.find((a: { action: string }) => a.action === "approve_copy")).toMatchObject({ allowed: false, reason: "author_cannot_approve" });
+    expect(read.json().actions.find((a: { action: string }) => a.action === "return_copy")).toMatchObject({ allowed: false, reason: "author_cannot_approve" });
+    for (const action of ["approve_copy", "return_copy"]) {
+      const self = await act(U.copywriter, postId, action, action === "return_copy" ? { note: "My own copy." } : {});
+      expect(self.statusCode, action).toBe(403);
+      expect(self.json().error, action).toBe("author_cannot_approve");
+    }
+    const suggest = await app.inject({
+      method: "PUT", url: `${base()}/posts/${postId}/suggestions/caption`, headers: headersFor(U.copywriter), payload: { expectedStatus: "proofread", value: "Mine." },
+    });
+    expect(suggest.json().error).toBe("author_cannot_approve");
+    expect((await row(postId))?.pipeline_status).toBe("proofread");
+    // The superadmin is a different person (the house wildcard), and passes it.
+    await ok(await act(U.superadmin, postId, "approve_copy"), "superadmin approves the copy");
+    expect((await row(postId))?.pipeline_status).toBe("hod");
+  });
 });
