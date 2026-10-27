@@ -8,7 +8,8 @@ import { getActiveTenant } from "@/lib/tenant";
 import { getPrefs } from "@/lib/prefs";
 import { Shell } from "@/components/shell/Shell";
 import { ShellApprovalsFeed } from "@/components/shell/ShellApprovalsFeed";
-import { isClientOnly } from "@/lib/rbac";
+import { isClientOnly, isContributor } from "@/lib/rbac";
+import { CONTRIBUTOR_HOME, contributorFenceReason } from "@/lib/contributorRouting";
 import { myWorkspaces } from "@/lib/workspaces-data";
 import { listApprovals } from "@/lib/approvals";
 import { layoutHomeRedirect } from "@/lib/overview";
@@ -31,8 +32,11 @@ export default async function AppLayout({ children, drawer }: { children: React.
   const pendingApprovals = listApprovals(userId, { status: "pending" });
   // DW-7h (BFF §52.4): a session IT ended is let through, so Next redirects it to /auth/ended (which clears the
   // cookie and says why); any other failure still lands on /login.
-  const me = await getMe(userId).catch((e: unknown) => { rethrowIfSessionEnded(e); return null; });
+  // M5-W1f: a freelance contributor is refused `/api/me` itself until their second factor is real (W1d's fence), and only a contributor is ever
+  // refused that way: so that exact answer, like `me.kind === "contributor"` below, sends them to their own shell, never the workspace.
+  const me = await getMe(userId).catch((e: unknown) => { rethrowIfSessionEnded(e); if (contributorFenceReason(e)) redirect(CONTRIBUTOR_HOME); return null; });
   if (!me) redirect("/login");
+  if (isContributor(me)) redirect(CONTRIBUTOR_HOME);
 
   // An external client has no business anywhere in the STAFF group. This lives in the layout, not on
   // the root page, because the layout is the only place that covers the whole group: redirecting from

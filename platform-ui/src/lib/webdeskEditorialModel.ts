@@ -200,6 +200,18 @@ export function editorialActionsFor(editorial: ItemEditorial | undefined, allowe
   return set;
 }
 
+/**
+ * M5-W1f: the contributor's view of an action set. `allowed` stays the only source of "may I" (the backend's Cerbos DENYs already answer `approve: false`
+ * and `assign: false` for a contributor); this only closes the two commands whose ROUTES the W1d fence does not open to a contributor, so a screen
+ * never offers a button that would come back 403 `contributor_route_forbidden`. It reads no role. A set with nothing left says why, as before.
+ */
+export function forContributor(set: EditorialActionSet): EditorialActionSet {
+  const next: EditorialActionSet = { ...set, approve: false, assign: false, approveBlockedWhy: null };
+  if (next.why !== null) return next;
+  const any = next.submit || next.withdraw || next.requestChanges || next.seoSignoff || next.comment;
+  return any ? next : { ...next, why: "You can read this item, but there is no review action available to you on it in its current state." };
+}
+
 // ── Commands ─────────────────────────────────────────────────────────────────────────────────────
 
 export type EditorialCommand = "submit" | "withdraw" | "requestChanges" | "seoSignoff" | "approve" | "assign" | "comment" | "resolve";

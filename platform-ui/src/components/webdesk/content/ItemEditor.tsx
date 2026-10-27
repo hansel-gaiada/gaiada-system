@@ -24,6 +24,7 @@ import { PreviewCard } from "./PreviewCard";
 import { PublishBar } from "./PublishBar";
 import { EditorialPanel } from "../editorial/EditorialPanel";
 import { AssistDrawer } from "./AssistDrawer";
+import { refreshContributorEditorAction } from "@/lib/contributorActions";
 import type { EditorialInitial } from "@/lib/webdeskEditorialModel";
 import "./content.css";
 
@@ -100,8 +101,11 @@ const staffApi: EditorDriver = {
   previewItem: (...a) => previewItemAction(...a),
 };
 
+/** M5-W1f: the contributor's calls: the staff ones (every one is on a route the W1d fence opens) with a refresh that skips the two publish reads. */
+const contributorApi: EditorDriver = { ...staffApi, refreshEditor: (...a) => refreshContributorEditorAction(...a) };
+
 export function ItemEditor({
-  mode, scope, routeBase, collection, tenant, site, bundle, seed, authors, readOnlyReason, mediaPublicBase = null, clientMode, editorial,
+  mode, scope, routeBase, collection, tenant, site, bundle, seed, authors, readOnlyReason, mediaPublicBase = null, clientMode, editorial, contributorMode = false,
 }: {
   mode: "edit" | "create";
   scope: SiteScope;
@@ -127,9 +131,14 @@ export function ItemEditor({
   /** M5-W2e: the writers' room review panel (staff editor only). The item page passes what it read: the item's `editorial` + `allowed`
    *  and its review record. Absent = no panel (create mode, the client portal, tests that predate it). */
   editorial?: EditorialInitial;
+  /** M5-W1f: CONTRIBUTOR MODE (the freelance writer's shell). Absent/false = the staff editor, exactly as before. On: the editor edits and saves, shows the
+   *  review panel (its actions still come only from `allowed`, minus the two whose routes are closed to a contributor), the comments and the preview;
+   *  and it has NO publish/schedule bar, NO delete, NO writing assistant, NO version-history link and NO media library or upload (the quarantine, M5-W1q,
+   *  has not shipped). Every one of those is also refused by the backend; leaving them out only stops the screen offering what would fail. */
+  contributorMode?: boolean;
 }) {
   const router = useRouter();
-  const api: EditorDriver = clientMode?.driver ?? staffApi;
+  const api: EditorDriver = clientMode?.driver ?? (contributorMode ? contributorApi : staffApi);
   /** Client-mode wording for a sentence written for staff. Identity for the staff editor. */
   const say = (text: string): string => (clientMode ? plainForClient(text) : text);
   const defs = useMemo(() => collection.composition.fields ?? [], [collection.composition.fields]);
@@ -199,7 +208,7 @@ export function ItemEditor({
   // becomes the value's alt) and who the uploaders are. Picking only fills the field; saving the item is still this editor's.
   const ctx: FormCtx = {
     issues, readOnly, neutralLock: nonDefaultLocale, neutralLocale: tenant.defaultLocale, placeholders,
-    media: { scope, routeBase, locale, locales: tenant.locales, authors, publicBase: mediaPublicBase, driver: clientMode?.mediaDriver },
+    media: contributorMode ? null : { scope, routeBase, locale, locales: tenant.locales, authors, publicBase: mediaPublicBase, driver: clientMode?.mediaDriver },
     clientEditable: clientMode?.editable.fields,
   };
 
@@ -632,7 +641,7 @@ export function ItemEditor({
               </dl>
               <div className="wc-publish__actions">
                 <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={refresh} disabled={refreshing} data-testid="refresh-now">{refreshing ? "Refreshing…" : "Refresh"}</button>
-                <Link className="lux-btn lux-btn--ghost lux-btn--sm" href={`${routeBase}/${encodeURIComponent(collection.key)}/${encodeURIComponent(item.slug)}/history?locale=${encodeURIComponent(item.locale)}`}>Version history</Link>
+                {!contributorMode && <Link className="lux-btn lux-btn--ghost lux-btn--sm" href={`${routeBase}/${encodeURIComponent(collection.key)}/${encodeURIComponent(item.slug)}/history?locale=${encodeURIComponent(item.locale)}`}>Version history</Link>}
               </div>
             </section>
 
@@ -646,7 +655,7 @@ export function ItemEditor({
               onItemChanged: (it) => { setItem(it); },
               onUnavailable: goStale,
               onUnconfirmed: (what) => setUnconfirmed(unconfirmedCopy(what)),
-            }) : (
+            }) : contributorMode ? null : (
             <PublishBar
               scope={scope}
               item={item}
@@ -672,6 +681,7 @@ export function ItemEditor({
                 dirty={dirty}
                 blocked={item.deletedAt ? "This item has been deleted." : stale !== null ? "Disabled until WebDesk answers again." : unconfirmed !== null ? "Disabled until you reload." : null}
                 initial={editorial}
+                contributorMode={contributorMode}
                 authors={authors}
                 refreshKey={`${loadedAt}|${baseVersion}`}
               />
@@ -679,7 +689,7 @@ export function ItemEditor({
 
             {/* M5-W6: the writing assistant. Offered only when the item read's `allowed.update` is true (the drawer renders nothing otherwise); it
                 only ever puts text into the draft as an UNSAVED edit: saving stays this editor's Save. */}
-            {!clientMode && !item.deletedAt && (
+            {!clientMode && !contributorMode && !item.deletedAt && (
               <AssistDrawer
                 scope={scope}
                 itemId={item.itemId}
@@ -730,7 +740,7 @@ export function ItemEditor({
               <section className="wc-side-card"><h3>Staging</h3><a href={stagingItemUrl} target="_blank" rel="noopener noreferrer" data-testid="view-staging">View on staging</a></section>
             )}
 
-            {!clientMode && !isLive(item) && !item.deletedAt && !readOnly && (
+            {!clientMode && !contributorMode && !isLive(item) && !item.deletedAt && !readOnly && (
               <section className="wc-side-card">
                 <h3>Delete</h3>
                 {!confirmDelete ? (

@@ -19,7 +19,7 @@ vi.mock("@/components/shell/Shell", () => ({ Shell: () => null }));
 vi.mock("@/components/shell/ShellApprovalsFeed", () => ({ ShellApprovalsFeed: () => null }));
 vi.mock("@/components/shell/ShellRoutesFeed", () => ({ ShellRoutesFeed: () => null }));
 
-import { getMe } from "@/lib/platform";
+import { getMe, PlatformError } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { myWorkspaces } from "@/lib/workspaces-data";
 import { routesForShell } from "@/lib/requests-data";
@@ -69,4 +69,38 @@ describe("the layout and the routes read", () => {
     expect(fo.creates.map((c) => c.label)).toEqual(["New task"]);
   });
 
+});
+
+// M5-W1f: three shells. A freelance contributor is sent to their own, whatever roles they hold; staff and client routing is unchanged.
+describe("the layout and the contributor shell (M5-W1f)", () => {
+  const writerRoles = [{ role: "webdesk_writer", scopeType: "company", scopeId: "co-a" }];
+  const fenceError = () => new PlatformError(403, "contributor_route_forbidden", undefined, undefined, "assurance_high_required", { error: "contributor_route_forbidden", reason: "assurance_high_required" });
+
+  it("a contributor (me.kind) holding writers' room roles is redirected to /contributor, never given the workspace", async () => {
+    vi.mocked(getMe).mockResolvedValue({ ...meFixture([member()], [AGENCY]), roles: writerRoles, kind: "contributor" });
+    await expect(AppLayout({ children: null, drawer: null })).rejects.toThrow("redirect:/contributor");
+  });
+
+  it("a contributor whose /api/me is refused by the fence (no second factor yet) is redirected to /contributor, not to /login", async () => {
+    vi.mocked(getMe).mockRejectedValue(fenceError());
+    await expect(AppLayout({ children: null, drawer: null })).rejects.toThrow("redirect:/contributor");
+  });
+
+  it("any other /api/me failure still goes to /login", async () => {
+    vi.mocked(getMe).mockRejectedValue(new PlatformError(500, "boom"));
+    await expect(AppLayout({ children: null, drawer: null })).rejects.toThrow("redirect:/login");
+  });
+
+  it("an employee with the very same roles is NOT redirected: staff routing is unchanged", async () => {
+    const me = { ...meFixture([member()], [AGENCY]), roles: writerRoles, kind: "employee" };
+    vi.mocked(getMe).mockResolvedValue(me);
+    vi.mocked(getActiveTenant).mockResolvedValue("co-a");
+    vi.mocked(myWorkspaces).mockResolvedValue(resolveMyWorkspaces({ me, tenantId: "co-a", root: agencyTree({ web: ["u-1"] }) }));
+    await expect(AppLayout({ children: null, drawer: null })).resolves.toBeTruthy();
+  });
+
+  it("a client-only account still goes to /portal", async () => {
+    vi.mocked(getMe).mockResolvedValue({ ...meFixture([member()], [AGENCY]), roles: [{ role: "client", scopeType: "global", scopeId: null }] });
+    await expect(AppLayout({ children: null, drawer: null })).rejects.toThrow("redirect:/portal");
+  });
 });
