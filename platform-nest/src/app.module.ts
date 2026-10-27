@@ -259,6 +259,7 @@ import { MailThreadController } from "./mail/thread.controller";
 // ServiceGuard-only (platform-ui's server-side code is the sole caller); MAIL_MAGIC_LINKS_ENABLED
 // defaults 0 so this stays dark until the staging SLO gate (§15 R5) closes.
 import { MagicLinkController } from "./mail/magic-link/controller";
+import { AiUsageIngestController } from "./modules/ai-usage/ingest.controller";
 
 @Module({
   controllers: [
@@ -380,6 +381,8 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     MailThreadController,
     // MAIL-10 (design §9).
     MagicLinkController,
+    // AIP-03b: AI callers outside platform-nest report their usage here (service token only).
+    AiUsageIngestController,
   ],
 })
 export class AppModule {}
