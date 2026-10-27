@@ -1290,6 +1290,10 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
       const shape = k === "toneSummary" ? typeof merged[k] === "string" : Array.isArray(merged[k]);
       if (!shape) return demoField(400, "invalid_field", { field: k });
     }
+    // The server keeps a tag without its '#', and refuses one that carries it (the UI form strips it before sending).
+    if ((merged.hashtagSets as Array<{ tags?: unknown }>).some((s) => !s || !Array.isArray(s.tags) || s.tags.some((t) => typeof t === "string" && t.includes("#")))) {
+      return demoField(400, "invalid_field", { field: "hashtagSets" });
+    }
     const checked = validateBrandBook(merged as BrandBook);
     if (!checked.ok) return demoField(400, "invalid_field", { field: checked.field });
     for (const k of ["tone", "hashtagStrategy"] as const) {
