@@ -354,7 +354,9 @@ export async function readPipelinePost(principal: Principal, tenantId: string, p
   if (!pre.row || pre.row.deleted_at !== null || !pre.authz) throw new ScpRouteError(404, "post_not_found");
   const resource = socialPostResource(tenantId, pre.authz);
   const state = stateOf(pre.row)!;
-  const needed = ["read", "design", ...(state.pipelineStatus !== null ? readCerbosActions(state) : [])];
+  // SCP-Sc: a publisher-scheduled post's page may draw "Publish now (simulated)", which is `approve` (BFF §63.10).
+  const needed = ["read", "design", ...(state.pipelineStatus !== null ? readCerbosActions(state) : []),
+    ...(state.pipelineStatus === "scheduled" && state.scheduleVia === "publisher" ? ["approve"] : [])];
   const cerbos = await cerbosDecisionsFor(principal, resource, [...new Set(needed)]);
   if (!cerbos.read && !cerbos.design) await authorize(principal, resource, "read"); // audits the denial and throws 403
   await assertSessionCurrent(principal);

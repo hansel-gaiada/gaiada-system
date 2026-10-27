@@ -134,6 +134,8 @@ import { startCycleReadyByLoop } from "./modules/social/pipeline/cycle-ready-by-
 // verifier is a pure in-memory decision (no network I/O — see publish-precondition.ts's own seam
 // doc), so it runs unconditionally at boot, unlike the interval-driven loop below.
 import { startPostStatusSyncLoop } from "./modules/social/post-status-sync-job";
+import { SIMULATED_DUE_INTERVAL_MS, startSimulatedDueLoop } from "./modules/social/simulated-due-job";
+import { isSocialSimulationEnabled } from "./modules/social/publisher/simulation";
 import { installCreatorInfoVerifier } from "./modules/social/creator-info-verifier";
 // SM-54 (tracker §6ad Ruling 1 / addendum §A13.2) — the search department's cadence loop lives in the
 // platform, NOT in n8n: it executes configuration a verified human already set (each engagement's
@@ -839,6 +841,13 @@ async function bootstrap(): Promise<void> {
     startPostStatusSyncLoop(config.social.reconcileIntervalMs);
     // eslint-disable-next-line no-console
     console.log(`social post-status reconcile (smm-post-status-sync) on: every ${config.social.reconcileIntervalMs}ms`);
+  }
+  // SCP-Sc: `social-simulated-due`, the simulator's every-minute due job (plan §5). Started ONLY while SOCIAL_SIMULATION_ENABLED is on
+  // (and each tick re-reads the switch), independent of the safety poll above: a simulated post goes live at its scheduled time.
+  if (isSocialSimulationEnabled()) {
+    startSimulatedDueLoop(SIMULATED_DUE_INTERVAL_MS);
+    // eslint-disable-next-line no-console
+    console.log(`social simulated due job (social-simulated-due) on: every ${SIMULATED_DUE_INTERVAL_MS}ms`);
   }
   // SM-54: the search pull scheduler. A plain Postgres sweep (no Redis dependency), so it sits outside
   // the redisUrl gate above alongside the drift sweep and the burndown job — but unlike those two this

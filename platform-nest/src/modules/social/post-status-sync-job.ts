@@ -31,6 +31,9 @@ import type { OrgHandle, PostStatus, SocialPublisher } from "./publisher/types";
 import { invokePublisher, resolveSimulatedPublisher } from "./publisher/registry";
 import { SimulatedOrgHandle } from "./publisher/simulation";
 import { emitEvent } from "../../events/outbox.service";
+// SCP-Sc (the server half of SCP-3b): the variants' terminal answers are the publisher's result on a pipeline post scheduled
+// through the publisher (live when every variant published; engine status failed when one failed). See that file's header.
+import { settlePublisherResults } from "./pipeline/publisher-result";
 // SMM-33/24 (this pass) — Gap 2: the ONLY writer of `social_post_variants.status -> 'published'`/
 // `'failed'` that reaches this table asynchronously (neither the safety poll nor the webhook intake
 // carries a human principal) had no `work_activity` row at all, unlike `dispatch.ts`'s own
@@ -153,6 +156,8 @@ export async function applyPostStatuses(tenantId: string, statuses: PostStatus[]
   if (statuses.length === 0) return { applied: 0 };
   let applied = 0;
   const pendingActivity: PendingActivity[] = [];
+  // SCP-Sc: the variants this call moved to a terminal answer, for the pipeline posts they belong to.
+  const settled: string[] = [];
   await withTenants([tenantId], async (c) => {
     await declareSocialModuleScope(c);
     for (const s of statuses) {
@@ -178,6 +183,7 @@ export async function applyPostStatuses(tenantId: string, statuses: PostStatus[]
       const row = upd.rows[0];
       if (!row) continue; // already terminal (a repeat delivery), or no such provider id in this tenant
       applied += 1;
+      if (nextStatus === "published" || nextStatus === "failed") settled.push(row.id);
 
       // SMM-22 — true up this variant's OWN `posted` reservation (if any) IN THE SAME TRANSACTION
       // as the status flip above, so the two facts ("the post is confirmed published/failed" and
@@ -222,6 +228,8 @@ export async function applyPostStatuses(tenantId: string, statuses: PostStatus[]
   for (const a of pendingActivity) {
     await writeActivity(tenantId, null, a.verb, "social_post_variant", a.variantId, a.metadata);
   }
+  // SCP-Sc: a repeat delivery moved nothing (`settled` is empty), so it settles nothing: the idempotence is the UPDATE's.
+  await settlePublisherResults(tenantId, { variantIds: settled });
   return { applied };
 }
 
@@ -278,6 +286,9 @@ export async function reconcileTenantPostStatus(tenantId: string, now: Date = ne
       console.error(`[SOCIAL-POST-STATUS-SYNC] org ${groupKey} (tenant ${tenantId}) failed:`, (err as Error).message);
     }
   }
+  // SCP-Sc: the self-heal. A pipeline post whose variants are all published (or one failed) but which the apply above never
+  // got to settle (a crash between the two transactions) is no longer in anyone's in-flight list: look for it here.
+  await settlePublisherResults(tenantId);
   return { orgs: byOrg.size, applied, errors };
 }
 

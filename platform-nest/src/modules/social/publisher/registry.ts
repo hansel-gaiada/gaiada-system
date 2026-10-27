@@ -59,7 +59,8 @@ export function getPublisher(key: PublisherKey): SocialPublisher | undefined {
 }
 
 /** SCP-Sa — THE ONE ROAD TO THE SIMULATOR. Called only by `provisioning.ts#resolveDispatchOrgHandle` and the status
- *  sweep (`post-status-sync-job.ts`), and only for an account whose `social_accounts.simulated` is true. Refuses:
+ *  sweep (`post-status-sync-job.ts`), and only for an account whose `social_accounts.simulated` is true (SCP-Sc's
+ *  `isSimulatedPublisherAvailable` below asks it too, but returns only a yes or no and never the driver). Refuses:
  *  - `simulation_disabled` when the switch is off or no simulator is registered (an operator switched it off while
  *    simulated rows remain: they stop publishing, they do not fall through to a real engine);
  *  - `capability_unsupported` for a capability the simulator does not simulate (inbox, metrics until SCP-Sd), so a
@@ -81,6 +82,19 @@ export function resolveSimulatedPublisher(capability?: PublisherCapability): Soc
     );
   }
   return p;
+}
+
+/** SCP-Sc — "could a simulated account's variant be dispatched right now?", asked through `resolveSimulatedPublisher` so the
+ *  switch and the registration are judged by the ONE rule and never by a copy of it. Answers a boolean and never the
+ *  driver, so it is not a way to the simulator: `pipeline-data.ts`'s `publisherAvailable` (the `schedule_publisher` guard)
+ *  is its only caller. Never throws. */
+export function isSimulatedPublisherAvailable(capability: PublisherCapability = "schedule"): boolean {
+  try {
+    resolveSimulatedPublisher(capability);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Resolve the driver a `social_publisher_orgs` row names (0105's `driver` column: 'postiz' |

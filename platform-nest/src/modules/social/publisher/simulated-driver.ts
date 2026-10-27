@@ -51,11 +51,19 @@
 //
 // The driver holds no state between calls (types.ts rule 2): everything `getPostStatus` needs is in the id.
 //
+// ── WHAT SCP-Sc BUILT ON THIS (pipeline/publisher-result.ts, pipeline/simulated-publish.ts, simulated-due-job.ts) ─────
+//   * The every-minute due job (`simulated-due-job.ts`) runs `reconcileTenantPostStatus` for the tenants that hold queued
+//     simulated variants, so a post goes live at its time instead of at the 15-minute safety poll. It adds no on-ramp
+//     to this driver: the reconcile is the status sweep's, already one of the two.
+//   * "Publish now (simulated)" (`pipeline/simulated-publish.ts`) does not mint, decide or re-file anything. A decided
+//     publish approval is executed by the D14 executor into `dispatchApprovedPublish`, which leaves the variant queued with
+//     an id from this driver; "now" is that id's publish time moved up to the present (`advanceSimulatedPostId` below: the id's
+//     shape stays known only to this file, the route calls the function), then the reconcile for the post's variants. The id format is UNCHANGED (backwards compatible: an old id advances like a new).
+//   * `pipeline-data.ts`'s `publisherAvailable` answers true for a post whose placed networks all have simulated accounts
+//     while the switch is on, through `registry.ts#isSimulatedPublisherAvailable` (which asks `resolveSimulatedPublisher`,
+//     so the rule is not written twice).
+//   * The post goes live (or is marked failed) from the variants' own results: `pipeline/publisher-result.ts`.
 // ── SEAMS FOR THE NEXT TICKETS (do not build them here) ────────────────────────────────────────────────────────────
-//   SCP-Sc  the every-minute due job and "Publish now (simulated)": file and get a DECIDED approval, then call the same
-//           `dispatchApprovedPublish`; run `reconcileTenantPostStatus` to move queued -> published without waiting for
-//           the 15-minute safety poll. `pipeline-data.ts`'s `publisherAvailable` still reads the ORG's driver and will say
-//           false for a simulated account until Sc teaches it `resolveSimulatedPublisher`.
 //   SCP-Sd  metrics: add `account_metrics`/`post_metrics` to `SIMULATED_CAPABILITIES` and implement the two methods
 //           below deterministically (seeded by the post id), writing `social_metrics_daily.source = 'simulated'`.
 import { randomUUID } from "node:crypto";
@@ -83,6 +91,18 @@ export const SIMULATED_CAPABILITIES: readonly PublisherCapability[] = ["schedule
 
 /** The ids this driver mints, and only these, are ones it will answer for. */
 const SIMULATED_POST_ID = /^simulated:([a-z]+):(\d+):([0-9a-f-]{36})$/;
+
+/** SCP-Sc ("Publish now (simulated)") — the same id with its publish time moved up to `atMs`, or null when this driver did
+ *  not mint `providerPostId`. NEVER later than the id already says: an id that is already due stays as it is, so the
+ *  time only ever moves toward the present. The network and the uuid (hence the published URL) are untouched, so the
+ *  post's link is the one it would have had at its scheduled time. Pure; the id format is exactly the one
+ *  `schedulePost` mints, so ids minted before SCP-Sc advance like new ones. */
+export function advanceSimulatedPostId(providerPostId: string, atMs: number): string | null {
+  const m = SIMULATED_POST_ID.exec(providerPostId);
+  if (!m) return null;
+  const [, network, current, uuid] = m;
+  return `simulated:${network}:${Math.min(Number(current), Math.floor(atMs))}:${uuid}`;
+}
 
 export interface SimulatedDispatchCheck {
   code: typeof SOCIAL_SIMULATION_REFUSAL.accountNotSimulated | typeof SOCIAL_SIMULATION_REFUSAL.approvalNotDecided;
