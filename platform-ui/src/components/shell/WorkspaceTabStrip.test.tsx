@@ -4,7 +4,7 @@ import { WorkspaceTabStrip } from "./WorkspaceTabStrip";
 import { inShell } from "./workspaceShellTestKit";
 import { buildShellModel } from "@/lib/shellModel";
 import { resolveMyWorkspaces } from "@/lib/workspaceAccess";
-import { HOTEL, agencyTree, me, member } from "@/lib/workspaceFixtures";
+import { HOTEL, agencyTree, me, member, node, person } from "@/lib/workspaceFixtures";
 
 const nav = vi.hoisted(() => ({ pathname: "/" }));
 vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname }));
@@ -112,5 +112,36 @@ describe("WorkspaceTabStrip", () => {
     const { container } = render(inShell(<WorkspaceTabStrip />, model));
     expect(screen.queryByRole("link", { name: "Meetings" })).not.toBeInTheDocument();
     expect(container).toBeEmptyDOMElement();
+  });
+
+  // SCP-Kj (SCP-Q24): the Social Home is the feed alone, so a skinned workspace draws no strip on its `top` rows; Standard keeps it.
+  describe("in the Social skin", () => {
+    const socialTree = node("root", "Agency", "company", [node("d-soc", "Social Media", "department", [person("p-soc-0", "u-1")])]);
+    const officer = me([member()]);
+    const modelFor = (choice?: "standard") => buildShellModel({
+      me: officer, tenantId: "co-a", workspaces: resolveMyWorkspaces({ me: officer, tenantId: "co-a", root: socialTree }),
+      skins: { on: ["standard", "social"], ...(choice ? { choice } : {}) },
+    });
+
+    it("draws no strip on the Home or on Notices, whose other tabs are in More", () => {
+      for (const path of ["/departments/d-soc", "/departments/d-soc/notices", "/departments/d-soc/schedule"]) {
+        nav.pathname = path;
+        const { container, unmount } = render(inShell(<WorkspaceTabStrip />, modelFor()));
+        expect(container, path).toBeEmptyDOMElement();
+        unmount();
+      }
+    });
+
+    it("keeps the strip of another row: Publish draws Calendar, Composer, Inbox and Saved", () => {
+      nav.pathname = "/departments/d-soc/calendar";
+      render(inShell(<WorkspaceTabStrip />, modelFor()));
+      expect(screen.getByRole("navigation", { name: /sections$/ })).toBeInTheDocument();
+    });
+
+    it("draws the Overview strip for a person who chose the Standard look", () => {
+      nav.pathname = "/departments/d-soc";
+      render(inShell(<WorkspaceTabStrip />, modelFor("standard")));
+      expect(within(screen.getByRole("navigation", { name: /sections$/ })).getAllByRole("link").map((a) => a.textContent)).toEqual(["Overview", "Notices", "Department calendar"]);
+    });
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SKINS, SKINS_ON, activePinKey, effectiveSkin, phoneBarFor, phoneMenuFor, phoneTopFor, pinnedFor, skinsOn, type ConcretePinned, type PinnedItem } from "./skins";
+import { SKINS, SKINS_ON, activePinKey, effectiveSkin, phoneBarFor, phoneMenuFor, phoneTopFor, pinnedFor, skinsOn, unpinnedTopTabs, type ConcretePinned, type PinnedItem } from "./skins";
 import type { ConcreteRow } from "./workspaceAccess";
 import { WORKSPACES, GENERIC_WORKSPACE, sidebarRows, workspaceBySlug } from "./workspaces";
 import { buildShellModel, allRows, type ShellModel } from "./shellModel";
@@ -263,5 +263,34 @@ describe("skins: the phone (SCP-Ke)", () => {
     const pins = ["home", "tasks", "dashboard", "settings", "profile"].map(link);
     expect(phoneMenuFor("social", pins).map((p) => p.key)).toEqual(["dashboard", "settings"]);
     expect(phoneBarFor("social", pins).map((p) => p.key)).toEqual(["home", "tasks", "profile"]);
+  });
+});
+
+describe("skins: the top row's tabs no pin opens (SCP-Kj, SCP-Q24)", () => {
+  const soc = () => wsByKey(model(me([member()]), socialTree, { on: ["standard", "social"] }), "social-media");
+
+  it("Standard has none: its tab strip holds them", () => {
+    const ws = soc();
+    expect(unpinnedTopTabs("standard", ws.rows.top, [])).toBeNull();
+  });
+
+  it("the Social skin leaves the Overview row's Notices and Department calendar, as single-tab rows keyed row/tab", () => {
+    const ws = soc();
+    const rows = unpinnedTopTabs("social", ws.rows.top, pinnedFor("social", allRows(ws))!)!;
+    expect(rows.map((r) => [r.key, r.label])).toEqual([["overview/notices", "Notices"], ["overview/schedule", "Department calendar"]]);
+    expect(rows.map((r) => r.tabs.map((t) => t.href))).toEqual([["/departments/d-soc/notices"], ["/departments/d-soc/schedule"]]);
+    expect(rows.every((r) => r.tabs.length === 1)).toBe(true);
+  });
+
+  it("a tab a pin names, or a row a pin stands for as a whole (the AI Assistant), is not repeated", () => {
+    const ws = soc();
+    const rows = unpinnedTopTabs("social", ws.rows.top, pinnedFor("social", allRows(ws))!)!;
+    expect(rows.map((r) => r.key)).not.toContain("overview/overview");
+    expect(rows.map((r) => r.key).filter((k) => k.startsWith("assistant"))).toEqual([]);
+  });
+
+  it("with no pins at all, every tab of the top rows is left", () => {
+    const ws = soc();
+    expect(unpinnedTopTabs("social", ws.rows.top, [])!.length).toBe(ws.rows.top.reduce((n, r) => n + r.tabs.length, 0));
   });
 });

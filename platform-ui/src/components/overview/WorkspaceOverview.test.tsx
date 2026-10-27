@@ -130,34 +130,6 @@ describe("WorkspaceOverview: the page's own body stays (plan §2.6 rule 1)", () 
   });
 });
 
-// SCP-1d: a workspace skin's own home layout (the Social Media feed) is drawn between the header and the bands. Without one nothing changes.
-describe("WorkspaceOverview: a skin's lead", () => {
-  const legacy = <p>today's KPI strip</p>;
-  const lead = <section aria-label="The feed"><p>feed card</p></section>;
-
-  it("draws the lead under the header and above the bands and the legacy body", () => {
-    const host: Record<string, OverviewWidgetComponent> = { "needs-you": () => <p>five items</p> };
-    const subject: OverviewSubject = { ...webDev, widgets: [{ key: "needs-you", band: "now", label: "Needs you" }] };
-    draw({ subject, widgets: host, legacy, lead });
-    const follows = (a: HTMLElement, b: HTMLElement) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(follows(screen.getByRole("heading", { level: 1 }), screen.getByText("feed card"))).toBe(true);
-    expect(follows(screen.getByText("feed card"), screen.getByText("five items"))).toBe(true);
-    expect(follows(screen.getByText("feed card"), screen.getByText("today's KPI strip"))).toBe(true);
-  });
-
-  it("is the same page without a lead", () => {
-    draw({ legacy });
-    expect(screen.queryByLabelText("The feed")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "More from Web Dev" })).toBeInTheDocument();
-  });
-
-  it("does not say the Overview is being built when a lead is drawn", () => {
-    draw({ lead });
-    expect(screen.queryByText(/is being built/)).not.toBeInTheDocument();
-    expect(screen.getByText("feed card")).toBeInTheDocument();
-  });
-});
-
 describe("WorkspaceOverview: the bands and the host", () => {
   const subject: OverviewSubject = {
     ...webDev,

@@ -108,6 +108,19 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
     return gmFrame ? gmFrame(<Suspense fallback={<HomeBodyFallback label="cockpit" />}>{cockpit}</Suspense>) : cockpit;
   }
 
+  // SCP-Kl (SCP-Q24, plan §6.1): the Social Media workspace's Home, drawn in the Social skin, is the team's design feed ONLY: no Overview header, quick
+  // actions, blocks or "More from" band, so neither `pilotFrame` nor the legacy body (and their reads) run. Whether the workspace is drawn in the Social skin is the
+  // shell's own answer (`effectiveSkin`, the same inputs the layout gives `buildShellModel`: the workspace's skin, the skins switched on, and the person's choice).
+  // A person who chose Standard, and every other department, get the Overview below exactly as before. The prefs cookie is read only for the Social Media workspace,
+  // so no other Home pays for it. What only the Overview offered is re-homed: Notices and Department calendar in More (SCP-Kj), Ask Web Dev in Create (SCP-Kk).
+  const workspace = workspaceFor(activeCompany(me, tenant)?.vertical, dept.name);
+  const socialHome = workspace.key === "social-media"
+    && effectiveSkin(workspace.skin, skinsOn(process.env.SHELL_SKIN_PREVIEW), (await getPrefs()).skin) === "social";
+  // The feed's reads are its own (`SocialHome.tsx`: all in parallel, each with its own failure state), behind their own boundary.
+  if (socialHome) {
+    return <Suspense fallback={<HomeBodyFallback label="Social Media home" />}><SocialHome userId={userId} tenantId={tenant} deptId={deptId} noQueue={holdsNoSocialQueue(me, tenant)} /></Suspense>;
+  }
+
   // DW-3a: the Overview frames this Home body, which stays below its bands until the
   // Overview's own blocks replace it. After the GM branch, which frames its own cockpit (DW-3i). The body is built
   // once, as `DepartmentHomeBody`, and passed through `frame`.
@@ -119,22 +132,8 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
   // widgets are sent as soon as they resolve instead of after the body's reads. Unframed, it renders exactly as before.
   const homeBody = <DepartmentHomeBody me={me} userId={userId} tenant={tenant} deptId={deptId} framed={!!frame} searchParams={searchParams} />;
 
-  // SCP-1d (plan §6.1, §6.2): the Social Media workspace's Home is laid out as the team's feed WHEN it is drawn in the Social skin, which is the shell's own answer
-  // (`effectiveSkin`, the same inputs the layout gives `buildShellModel`: the workspace's skin, the skins switched on, and the person's choice). A person who chose
-  // Standard, and every other department, get exactly the page above. The prefs cookie is read only for the Social Media workspace, so no other Home pays for it.
-  const workspace = workspaceFor(activeCompany(me, tenant)?.vertical, dept.name);
-  const socialHome = workspace.key === "social-media"
-    && effectiveSkin(workspace.skin, skinsOn(process.env.SHELL_SKIN_PREVIEW), (await getPrefs()).skin) === "social";
-  // The feed's reads are its own (five, in parallel, each with its own failure state), behind their own boundary so the Overview's header does not wait for them.
-  const feed = socialHome
-    ? <Suspense fallback={<HomeBodyFallback label="Social Media home" />}><SocialHome userId={userId} tenantId={tenant} deptId={deptId} noQueue={holdsNoSocialQueue(me, tenant)} /></Suspense>
-    : null;
-
-  if (frame) {
-    const framedBody = <Suspense fallback={<HomeBodyFallback label="department" />}>{homeBody}</Suspense>;
-    return feed ? frame(framedBody, feed) : frame(framedBody);
-  }
-  return feed ? <>{feed}{homeBody}</> : homeBody;
+  if (frame) return frame(<Suspense fallback={<HomeBodyFallback label="department" />}>{homeBody}</Suspense>);
+  return homeBody;
 }
 
 /** The quiet loading state of the legacy band under the Overview: two card-shaped blocks, so the band does not jump when it arrives. */

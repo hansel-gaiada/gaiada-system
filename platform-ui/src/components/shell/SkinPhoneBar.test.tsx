@@ -178,6 +178,23 @@ describe("the phone's top controls", () => {
 });
 
 describe("More as a full-screen sheet", () => {
+  it("lists 'This workspace' after Menu: Notices and Department calendar (SCP-Kj)", () => {
+    draw(modelFor(officer));
+    fireEvent.click(topMore());
+    const group = within(sheet()).getByRole("group", { name: "This workspace" });
+    expect(Array.from(group.querySelectorAll("a")).map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+      ["Notices", "/departments/d-soc/notices"], ["Department calendar", "/departments/d-soc/schedule"],
+    ]);
+  });
+
+  it("marks the workspace tab that is the current page (SCP-Kj)", () => {
+    draw(modelFor(officer), "/departments/d-soc/schedule");
+    fireEvent.click(topMore());
+    const group = within(sheet()).getByRole("group", { name: "This workspace" });
+    expect(within(group).getByRole("link", { name: "Department calendar" })).toHaveAttribute("aria-current", "page");
+    expect(within(group).getByRole("link", { name: "Notices" })).not.toHaveAttribute("aria-current");
+  });
+
   it("opens the same panel, as a sheet, with focus on Find a page", () => {
     draw(modelFor(officer));
     fireEvent.click(topMore());
@@ -191,7 +208,7 @@ describe("More as a full-screen sheet", () => {
     draw(model);
     fireEvent.click(topMore());
     const groups = within(sheet()).getAllByRole("group");
-    expect(groups.map((g) => g.querySelector("h3")?.textContent)).toEqual(["Menu", "Work", "Performance", "You", "Company and Admin"]);
+    expect(groups.map((g) => g.querySelector("h3")?.textContent)).toEqual(["Menu", "This workspace", "Work", "Performance", "You", "Company and Admin"]);
     const menu = groups[0];
     expect(Array.from(menu.querySelectorAll(".ws-more__label")).map((l) => l.textContent)).toEqual(["Calendar", "Reports", "Saved", "AI Assistant"]);
     expect(within(menu).getByRole("link", { name: "Calendar" })).toHaveAttribute("href", "/departments/d-soc/calendar");
@@ -199,7 +216,7 @@ describe("More as a full-screen sheet", () => {
     expect(within(menu).getByRole("link", { name: "Reports" })).toHaveAttribute("href", "/reports/person");
     // Nothing the bar or the top holds is repeated there, and the rows below are the model's own, as on the desktop.
     for (const name of ["Home", "Tasks", "Notifications", "Search", "Create"]) expect(within(menu).queryByRole("link", { name })).toBeNull();
-    expect(Array.from(groups[1].querySelectorAll("a[data-result]")).map((a) => (a as HTMLElement).dataset.result)).toEqual(socialWs(model).rows.work.map((r) => r.key));
+    expect(Array.from(groups[2].querySelectorAll("a[data-result]")).map((a) => (a as HTMLElement).dataset.result)).toEqual(socialWs(model).rows.work.map((r) => r.key));
   });
 
   it("keeps the AI Assistant on a phone: its drawer href, no prefetch, and not a second #asst-fab-trigger", () => {
@@ -291,7 +308,7 @@ describe("one More at a time", () => {
   it("the desktop panel has no Menu section: the menu column already shows those pins", () => {
     draw(modelFor(officer));
     fireEvent.click(within(sidebarNav()).getByRole("button", { name: /^More/ }));
-    expect(within(sheet()).getAllByRole("group").map((g) => g.querySelector("h3")?.textContent)).toEqual(["Work", "Performance", "You"]);
+    expect(within(sheet()).getAllByRole("group").map((g) => g.querySelector("h3")?.textContent)).toEqual(["This workspace", "Work", "Performance", "You"]);
     expect(within(sheet()).queryByRole("heading", { name: "Menu" })).toBeNull();
   });
 });

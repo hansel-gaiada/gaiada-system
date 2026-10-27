@@ -35,9 +35,15 @@ describe("the registry and the address", () => {
     expect(areaFor("/departments/d-1/profile/eng-9?tab=calendar&month=2026-11")).toEqual({ kind: "workspace", deptId: "d-1" });
   });
 
-  it("offers New post and Extra post in the Create menu, and the Ask to Creatives (the registry's own link)", () => {
-    expect(social.creates).toEqual(["compose-post", "new-post", "extra-post", "ask-creatives"]);
+  it("offers New post and Extra post in the Create menu, and the Asks to Creatives and Web Dev (the registry's own links)", () => {
+    expect(social.creates).toEqual(["compose-post", "new-post", "extra-post", "ask-creatives", "ask-web-dev"]);
     for (const k of social.creates) expect(social.quickActions.map((a) => a.key)).toContain(k);
+  });
+
+  it("gates Ask Web Dev in Create exactly as the quick action was gated: an agency company that has a Web Dev department (SCP-Kk)", () => {
+    expect(social.quickActions.find((a) => a.key === "ask-web-dev")!.gate).toEqual({
+      kind: "all", gates: [{ kind: "pack", pack: "agency" }, { kind: "hasWorkspace", workspace: "web-dev" }],
+    });
   });
 });
 

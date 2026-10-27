@@ -71,6 +71,10 @@ function seed(): DemoNotice[] {
     mk({ scope: "company", unitNodeId: null, pinned: false, authorId: "demo-hansel", createdAt: ago(26 * HOUR), endsOn: addDay(today(), 14),
       title: "Office closed for Nyepi",
       body: "The office is closed for Nyepi.\nThe on-call rota for client sites stays as published." }),
+    // SCP-Ki (SCP-Q24): one pinned notice for the Social Media unit, so the Social Home's reminder card has something to show in DEMO_MODE.
+    mk({ scope: "unit", unitNodeId: "dept-4", pinned: true, authorId: "demo-hansel", createdAt: ago(5 * HOUR), endsOn: addDay(today(), 7),
+      title: "Content calendar freeze for Nyepi week",
+      body: "Posts for Nyepi week are locked on Friday. Send anything still in review to the head of department before then." }),
     // A past notice, so the Past view can be driven: it ended yesterday.
     mk({ scope: "unit", unitNodeId: "dept-1", pinned: false, authorId: "u-webhead", createdAt: ago(12 * 24 * HOUR), endsOn: addDay(today(), -1),
       title: "Quarter retro notes", body: "The notes from the quarter retrospective are in the team wiki." }),

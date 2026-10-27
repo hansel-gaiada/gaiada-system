@@ -11,6 +11,9 @@ export function WorkspaceTabStrip() {
   const shell = useWorkspaceShell();
   const row = shell?.activeRow;
   if (!shell || !row || row.tabs.length < 2) return null;
+  // SCP-Kj (SCP-Q24): a skinned workspace (Social) draws no strip on its `top` rows: the Home is the feed alone, and the Overview row's other tabs
+  // (Notices, Department calendar) are listed in More ("This workspace"). Other rows keep theirs (Publish: Calendar, Composer, Inbox, Saved).
+  if (shell.view.kind === "workspace" && shell.view.ws.skin !== "standard" && shell.view.ws.rows.top.some((r) => r.key === row.key)) return null;
   return (
     <nav className="sec-tabs ws-tabs" aria-label={`${row.label} sections`}>
       {row.tabs.map((t) => {

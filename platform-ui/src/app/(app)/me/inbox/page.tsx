@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
@@ -8,6 +9,7 @@ import { markAllReadAction, markReadAction } from "./actions";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { MailThreadPanel } from "@/components/mail/MailThreadPanel";
 import { noticePostedLine } from "@/lib/notices";
+import { InboxNeedsYou, InboxNeedsYouPending, readInboxQueue } from "@/components/inbox/InboxNeedsYou";
 
 // `/me/inbox` — the employee's personal inbox (employee-portal wave F).
 //
@@ -78,6 +80,14 @@ export default async function MeInboxPage({ searchParams }: { searchParams: SP }
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
+  // SCP-Kh (SCP-Q24): the person's work queue starts NOW and is only awaited inside the row's <Suspense>, so the
+  // notifications below render as soon as they are read and the row streams in after them. The read never rejects.
+  const queue = readInboxQueue(me);
+  const needsYou = (
+    <Suspense fallback={<InboxNeedsYouPending />}>
+      <InboxNeedsYou read={queue} />
+    </Suspense>
+  );
   const tenant = await getActiveTenant(me);
   if (!tenant) return <EmptyNote>Select a company from the top bar.</EmptyNote>;
 
@@ -88,11 +98,14 @@ export default async function MeInboxPage({ searchParams }: { searchParams: SP }
     // listNotifications already absorbs 404/403 (module not enabled) into an empty list, so a throw
     // here means the backend was unreachable: say so rather than render a misleading empty inbox.
     return (
-      <EmptyNote>
-        {e instanceof PlatformError
-          ? "Couldn't reach your inbox right now. Try again shortly."
-          : "Your inbox is temporarily unavailable."}
-      </EmptyNote>
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        {needsYou}
+        <EmptyNote>
+          {e instanceof PlatformError
+            ? "Couldn't reach your inbox right now. Try again shortly."
+            : "Your inbox is temporarily unavailable."}
+        </EmptyNote>
+      </div>
     );
   }
   const unreadCount = all.filter((n) => !n.read_at).length;
@@ -120,6 +133,7 @@ export default async function MeInboxPage({ searchParams }: { searchParams: SP }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {needsYou}
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         {tabs.map((t) => (
           <Link

@@ -64,12 +64,29 @@
 .sh-row__sub { font: 400 12px var(--font-body); color: var(--erp-ink-60); }
 .sh-more-link { margin: 8px 0 0; }
 
+/* SCP-Ki (SCP-Q24): the reminder cards, the design's "tasks you gave are open" card: a white box, a round icon, a bold title, a grey sub-line, one solid button. */
+.sh-rems { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.sh-rem { min-width: 0; }
+.sh-rem__card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--erp-hairline); border-radius: var(--radius-md); background: var(--surface-card); }
+.sh-rem__icon {
+  display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; flex: none;
+  border: 1px solid var(--erp-hairline); background: var(--surface-sunken); color: var(--text-primary); font: 700 16px var(--font-body);
+}
+.sh-rem__text { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.sh-rem__title { font: 700 14px var(--font-body); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-rem__sub { font: 400 12px var(--font-body); color: var(--erp-ink-60); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-rem__btn { flex: none; }
+.sh-rem__panel { margin-top: 8px; }
+.sh-rem__panel[hidden] { display: none; }
+.sh-rem__note { font: 400 12px var(--font-body); color: var(--erp-ink-60); padding: 0 4px; }
+
 /* Phone: one column, the side column under the feed (the bottom bar is the skin's). */
 @media (max-width: 900px) {
   .sh { grid-template-columns: minmax(0, 1fr); gap: 20px; }
   .sh-main { max-width: none; }
 }
 @media (max-width: 640px) {
+  .sh-rem__title, .sh-rem__sub { white-space: normal; }
   .sh-row--split { grid-template-columns: minmax(0, 1fr); }
 }
 

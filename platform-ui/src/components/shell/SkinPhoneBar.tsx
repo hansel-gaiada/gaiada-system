@@ -9,7 +9,7 @@ import { WorkspaceSwitcher, type SidebarCompany } from "./WorkspaceSidebar";
 import { useWorkspaceShell } from "./WorkspaceShellContext";
 import type { PaletteOpenDetail } from "./CommandPalette";
 import { allRows, type ShellWorkspace } from "@/lib/shellModel";
-import { activePinKey, phoneBarFor, phoneMenuFor, phoneTopFor, pinnedFor, type ConcretePinned } from "@/lib/skins";
+import { activePinKey, phoneBarFor, phoneMenuFor, phoneTopFor, pinnedFor, unpinnedTopTabs, type ConcretePinned } from "@/lib/skins";
 import type { MoreGroup } from "@/lib/morePanel";
 import type { ConcreteRow } from "@/lib/workspaceAccess";
 import "./workspace-sidebar-social.css";
@@ -64,6 +64,7 @@ function Bar({ ws, tenantId, newItems, company, companies, account }: {
     key: `${MENU_PREFIX}${p.key}`, label: p.label, icon: p.icon, ...(p.count ? { count: p.count } : {}),
     tabs: [{ key: p.tab, label: p.label, href: p.href, icon: p.icon }],
   }));
+  const ownRows: ConcreteRow[] = (unpinnedTopTabs(ws.skin, ws.rows.top, pins) ?? []).map((r) => ({ ...r, key: `${MENU_PREFIX}${r.key}` }));
   // The sidebar's foot links, Company and Admin (a workspace's menu offers them below its rows): a phone has no sidebar, so they are listed here, or those
   // two areas would be one tap away on every other skin and none on a phone. Each opens the area's first page, as the foot link does.
   const areaRow = (key: string, label: string, icon: ConcreteRow["icon"], rows: readonly ConcreteRow[]): ConcreteRow[] => {
@@ -73,6 +74,9 @@ function Bar({ ws, tenantId, newItems, company, companies, account }: {
   const areaRows = [...areaRow("company", "Company", "sitemap", shell.model.company), ...areaRow("admin", "Admin", "settings", shell.model.admin)];
   const groups: MoreGroup[] = [
     { key: "menu", label: "Menu", rows: menuRows },
+    // SCP-Kj: the workspace's own tabs no pin opens (Notices, Department calendar); the Home has no tab strip in this skin. After "Menu", which holds the pinned
+    // pages a phone lacks a place for and so is the more used; these are the workspace's own and sit just before its Work rows.
+    { key: "workspace", label: "This workspace", rows: ownRows },
     { key: "work", label: "Work", rows: ws.rows.work },
     { key: "performance", label: "Performance", rows: ws.rows.performance },
     { key: "you", label: "You", rows: ws.rows.you },
@@ -90,7 +94,7 @@ function Bar({ ws, tenantId, newItems, company, companies, account }: {
         <MorePanel
           sheet
           id={shell.sheetId} groups={groups} active={shell.active} pathname={shell.pathname} tenantId={tenantId}
-          currentKey={activeKey ? `${MENU_PREFIX}${activeKey}` : null}
+          currentKey={activeKey ? `${MENU_PREFIX}${activeKey}` : shell.active ? `${MENU_PREFIX}${shell.active.rowKey}/${shell.active.tabKey}` : null}
           account={account} anchor={shell.sheetAnchor} onClose={close}
           switcher={<WorkspaceSwitcher model={shell.model} title={ws.label} current={ws.id} company={company} companies={companies} inline />}
         />

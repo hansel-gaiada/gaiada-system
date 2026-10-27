@@ -1,0 +1,15 @@
+/* SCP-Kh (SCP-Q24): the "Needs you" row at the top of the Inbox. The tokens are the shell's, so it follows both skins. */
+.ny-row { border-bottom: 1px solid var(--erp-hairline); }
+.ny-row__head {
+  display: flex; align-items: center; gap: var(--space-12); width: 100%; min-height: 56px; padding: var(--space-12) 0;
+  background: none; border: 0; text-align: left; color: var(--text-primary); font: inherit; cursor: pointer;
+}
+.ny-row__head:disabled { cursor: default; }
+.ny-row__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ny-row__title { font: 700 15px var(--font-body); color: var(--text-primary); }
+.ny-row__line { font: 400 13px var(--font-body); color: var(--ink-muted); }
+.ny-row__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--status-critical-fg); flex-shrink: 0; }
+.ny-row__chev { flex-shrink: 0; color: var(--ink-muted); transition: transform 0.15s; }
+.ny-row__head[aria-expanded="true"] .ny-row__chev { transform: rotate(90deg); }
+.ny-row__panel { padding: 0 0 var(--space-16); }
+@media (prefers-reduced-motion: reduce) { .ny-row__chev { transition: none; } }

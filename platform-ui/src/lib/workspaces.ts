@@ -587,7 +587,8 @@ const SOCIAL_MEDIA: Workspace = {
   ],
   // SCP-1m (plan §6.2 Create): a post needs a client's cycle, so New post and Extra post open the client switcher in "choose a client" mode, and the chosen
   // client's page opens with its form ready. New task is the shell's own "Task" item (`/tasks/new`), already in this menu; Ask Creatives is the registry's.
-  creates: ["compose-post", "new-post", "extra-post", "ask-creatives"],
+  // SCP-Kk (SCP-Q24): Ask Web Dev joins it here, because the Social Home no longer draws the Overview's quick actions; same gate as the quick action.
+  creates: ["compose-post", "new-post", "extra-post", "ask-creatives", "ask-web-dev"],
   quickActions: [
     { key: "compose-post", label: "Compose a post", href: deptPath("composer") },
     ...ASK_ACTIONS,
