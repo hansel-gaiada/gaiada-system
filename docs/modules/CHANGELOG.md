@@ -11,6 +11,23 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.213.0` - SCP-Kh to SCP-Kl: the Social Home is the team's design feed only (SCP-Q24, owner 2026-10-27) (2026-10-28) - PROTOTYPED
+
+- **Why (SCP-Q24).** The Social Media Home drew the standard Overview around the team's feed: a greeting, a period picker, three quick actions, Customise, about 13 blocks and a "More from Social Media" band. The owner found it cluttered the design. In the Social skin the Home is now the feed alone. What only the Overview offered moved first to slots the design already has. The Standard look and every other department keep the Overview exactly as before. The ruling is in the SCP plan's decision log; the KPI strip, the Pulse and the head's Team view go to the Team dashboard (SCP-5d).
+- **SCP-Kh: Needs you at the top of Notifications** (the design's own row).
+  - `/me/inbox` opens with one "Needs you" row: the counts by kind ("2 to decide, 3 tasks, 1 reply"), and a dot while anything waits. It opens in place to the whole ranked queue, with the block's Approve, Deny and Acknowledge.
+  - It is the Overview block's own read (`readNowQueue`, `selectNeedsYou`, `NeedsYouBlock`), so the two agree. The page starts it before the notifications read and the row streams in its own `<Suspense>`, so the inbox never waits for it (a page test pins this with a read that never settles).
+  - Empty with every source read: "Nothing needs you right now". Empty with a company unread: "Some sources could not be read". A failed read says so and does not open. Every department's inbox has the row.
+- **SCP-Ki: reminder cards on the Social Home** (the design's one-line card with a blue button), between the stories and "Your turn".
+  - Today's check-in, while it is expected and not sent. "Check in" opens the existing pre-filled `CheckinCard` in place, so sending stays one click once open. A failed read says "Check-in unavailable".
+  - The unit's first pinned current notice, with "N more pinned". There are no read receipts (BFF §57 v1), so the card lasts until the notice is unpinned or ends.
+  - Reports due within a week or missed by up to three days, at most three cards, then "N more reports due this week" to Allocation. Without a "sent" state (SCP-5a) a wider window would nag all month. The side column's "Reports due" list is gone.
+  - DEMO_MODE: one pinned Social Media notice in `lib/demoNotices.ts`.
+- **SCP-Kj: More holds the Overview row's other tabs.** In a pinned skin, Notices and Department calendar (which only the Home's tab strip reached) are More's first group, "This workspace", on desktop and in the phone sheet, with the current page marked. The `top` rows draw no tab strip there (`unpinnedTopTabs` in `lib/skins.ts`). The skin reachability test still proves the Social menus reach every Standard link.
+- **SCP-Kk: Ask Web Dev in Create**, after "Ask Creatives for assets", with the quick action's gate (an agency company that has a Web Dev department).
+- **SCP-Kl: the Home without the Overview.** `departments/[deptId]/page.tsx` returns the feed alone in the Social skin, before `pilotFrame`, so none of the Overview's or the legacy band's reads run. `WorkspaceOverview`'s `lead` slot and the frame's second argument are gone.
+- **Proof.** Unit: each car's full suite green locally (about 13,440 tests), typecheck and the DEMO_MODE build gate green on the train. CI 40542289703 and docs-map 40542296659 on the train before this entry (7d4f8669). sumopod gate kh1 on 7d4f8669: social-skin 36/36, social-walk 16/16, workspace-shell + workspace-a11y 91/91, chromium inbox 2/2.
+
 ### platform-nest `0.187.0` + ai-gateway-go `0.16.0` - AI plan phase 1, first half: AIP-01 (the AI usage table) and AIP-02 (the gateway reports real tokens and OpenRouter's cost) (2026-10-27) - PROTOTYPED
 
 - **AIP-01: migration `202610271800_ai_usage_events.sql`.** The table `ai_usage_events` is the business record of every AI call. It holds ids, counts, labels and money, and never any text.
