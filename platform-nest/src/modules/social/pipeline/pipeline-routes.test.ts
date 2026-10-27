@@ -904,7 +904,9 @@ describe.skipIf(!TEST_URL)("SCP-1b · the pipeline routes (BFF §63.6)", () => {
     const linkId = link.json().designId as string;
     expect(live(await readAs(U.designer)), "with a design the submit is live").toContain("submit_design");
     await ok(await act(U.designer, postId, "submit_design"), "submit_design");
-    await stop("final", "final", "approver", finalCheck);
+    // The read already says so: with only a link on the post the approvers' "send to the client" is listed but denied (`design_not_stored`), the change step stays live.
+    await stop("final, link only", "final", "approver", { hod: ["final_changes"], gm: ["final_changes"] });
+    expect((await readAs(U.gm)).actions.find((a) => a.action === "final_approve")).toMatchObject({ allowed: false, reason: "design_not_stored" });
     const linkOnly = await act(U.gm, postId, "final_approve");
     expect(linkOnly.statusCode, linkOnly.body).toBe(409);
     expect(linkOnly.json().error).toBe("design_not_stored");
