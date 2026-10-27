@@ -91,3 +91,18 @@ export function sanitizeReturnTo(raw: string | null | undefined): string {
 export function sanitizeReturnToParam(v: string | string[] | undefined | null): string {
   return sanitizeReturnTo(Array.isArray(v) ? v[0] : v);
 }
+
+/**
+ * Where to send a visitor who is not (or no longer) signed in, so that signing in brings them back to the page they asked for, QUERY INCLUDED.
+ * `/login?return=<path+query>` when the page is known, plain `/login` when it is not (a Server Action or a client navigation carries no page), and
+ * `/login` for `/` itself (the default needs no parameter). Validated by `sanitizeReturnTo` like every other return target.
+ *
+ * Why it exists (SCP-2): the proxy already sends a request with NO session cookie to `/login?return=…` with the query kept, but a cookie that is present and
+ * no longer valid passes the proxy and meets the layout's own redirect, which said `/login` and dropped everything. A client following
+ * `/portal/social?post=<id>` from WhatsApp with a stale session must land on that post after signing in.
+ */
+export function loginHrefForReturn(pathname: string | null | undefined, search: string | null | undefined): string {
+  if (!pathname) return "/login";
+  const target = sanitizeReturnTo(`${pathname}${search ?? ""}`);
+  return target === DEFAULT_RETURN ? "/login" : `/login?return=${encodeURIComponent(target)}`;
+}

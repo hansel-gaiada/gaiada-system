@@ -21,6 +21,11 @@ function walk(dir: string): string[] {
   });
 }
 
+/** One backend link as a page path: `${…}` is a dynamic segment, and a query or a hash is not part of the page (`/portal/social?post=${id}` opens `/portal/social`). */
+export function linkPath(raw: string): string {
+  return raw.replace(/\$\{[^}]*\}/g, ":id").split(/[?#]/)[0];
+}
+
 /** Every `/portal…` string literal on a line that sets an `href`, with `${…}` as one dynamic segment. */
 function backendPortalLinks(): Map<string, string[]> {
   const links = new Map<string, string[]>();
@@ -29,7 +34,8 @@ function backendPortalLinks(): Map<string, string[]> {
     readFileSync(file, "utf8").split("\n").forEach((line, i) => {
       if (!line.includes("href")) return;
       for (const m of line.matchAll(/(["'`])(\/portal(?:\/[^"'`]*)?)\1/g)) {
-        const link = m[2].replace(/\$\{[^}]*\}/g, ":id");
+        // SCP-2: a deep link may carry a query (`/portal/social?post=${id}`); the page it opens is the path's.
+        const link = linkPath(m[2]);
         const where = `${path.relative(NEST_SRC, file)}:${i + 1}`;
         links.set(link, [...(links.get(link) ?? []), where]);
       }
@@ -110,6 +116,30 @@ describe("links the backend sends clients open a portal page in an area", () => 
 // WSK-49d — the Website area's OWN links (built by the pages and the editor from `portalWebsiteHref`) resolve to pages in the
 // portal route group, inside the Business area. The BFF sends no `/portal/website` links (§16j "what is deliberately NOT done": no
 // notification links into /portal yet), so the backend scan above cannot see them; this pins the in-app ones instead.
+describe("SCP-2: a backend link with a query is judged by its path (the guard does not rely on the scan seeing one)", () => {
+  it("strips the query and the hash, and keeps a dynamic segment", () => {
+    expect(linkPath("/portal/social?post=${id}")).toBe("/portal/social");
+    expect(linkPath("/portal/social/${id}?x=1#top")).toBe("/portal/social/:id");
+    expect(linkPath("/portal/approvals/${runId}")).toBe("/portal/approvals/:id");
+  });
+  it("the page a `?post=` link opens exists and sits in Projects", () => {
+    expect(routeExists(linkPath("/portal/social?post=${id}"))).toBe(true);
+    expect(activePortalNav(linkPath("/portal/social?post=${id}")).areaKey).toBe("projects");
+  });
+});
+
+describe("SCP-2: the approval page's links open a portal page in the Projects area", () => {
+  it.each(["/portal/social", "/portal/social/:id", "/portal/social-reviews", "/portal/social-reviews/:id"])("%s resolves to a page", (link) => {
+    expect(routeExists(link)).toBe(true);
+  });
+  it.each(["/portal/social", "/portal/social/:id", "/portal/social-reviews", "/portal/social-reviews/:id"])("%s sits in Projects, on the Social posts tab", (link) => {
+    expect(activePortalNav(link.replace(/:id/g, "x"))).toEqual({ areaKey: "projects", tabHref: "/portal/social" });
+  });
+  it("a backend link with a query counts as its path (the way in is /portal/social?post=<id>)", () => {
+    expect(activePortalNav("/portal/social?post=x").areaKey).toBe("projects");
+  });
+});
+
 describe("the Website area's links open a portal page in an area", () => {
   const links = [
     "/portal/website",

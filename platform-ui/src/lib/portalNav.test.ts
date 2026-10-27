@@ -55,8 +55,12 @@ describe("activePortalNav", () => {
     ["/portal/conversation/t1", "projects", "/portal/conversation"],
     ["/portal/meetings/m1", "projects", "/portal/projects"],
     ["/portal/pay/simulated/ck-1", "billing", "/portal/invoices"],
-    ["/portal/social-reviews", "projects", "/portal/social-reviews"],
-    ["/portal/social-reviews/s1", "projects", "/portal/social-reviews"],
+    // SCP-2: Social posts is the Projects tab; the older post reviews keep their URLs and light it.
+    ["/portal/social", "projects", "/portal/social"],
+    ["/portal/social/p1", "projects", "/portal/social"],
+    ["/portal/social?post=p1", "projects", "/portal/social"],
+    ["/portal/social-reviews", "projects", "/portal/social"],
+    ["/portal/social-reviews/s1", "projects", "/portal/social"],
     ["/portal/timeline", "projects", "/portal/timeline"],
     ["/portal/company", "business", "/portal/company"],
     ["/portal/company/mk/web", "business", "/portal/company"],
@@ -106,8 +110,11 @@ describe("activePortalNav", () => {
     // PV4-08 added exactly one: Conversation, in Projects, after Requests.
     expect(PORTAL_AREAS.find((a) => a.key === "projects")!.tabs.map((t) => t.href)).toEqual([
       "/portal/projects", "/portal/approvals", "/portal/deliverables", "/portal/requests",
-      "/portal/conversation", "/portal/social-reviews", "/portal/timeline",
+      "/portal/conversation", "/portal/social", "/portal/timeline",
     ]);
+    // SCP-2 re-pointed one: the "Post reviews" row is now "Social posts" and opens the approval page.
+    expect(PORTAL_AREAS.find((a) => a.key === "projects")!.tabs.find((t) => t.href === "/portal/social")?.label).toBe("Social posts");
+    expect(all).not.toContain("/portal/social-reviews");
     // PV5-08 added exactly one: Documents, last tab of Contracts & billing.
     expect(PORTAL_AREAS.find((a) => a.key === "billing")!.tabs.map((t) => t.href)).toEqual([
       "/portal/contracts", "/portal/invoices", "/portal/documents",

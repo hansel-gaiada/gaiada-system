@@ -613,20 +613,38 @@ function commit(a: FxAction, p: PipePost, r: Req, userId: string, now: Date, ski
   }
   if (env.flags.alreadyApplied) return { ok: true, post: p, from: p.pipelineStatus, to: p.pipelineStatus, warnings: [], alreadyApplied: true, designId: null };
   // `client_approve` on the client's side and a recorded approval both end the "back with the client" state: the date and placement are approved again.
-  if (a.action === "record_client_approve") next.rescheduled = false;
+  if (a.action === "record_client_approve" || a.action === "client_approve") next.rescheduled = false;
   if (next.changeCase !== target.changeCase) throw new Error(`demoSocialPipelineRun: ${a.action}: the change case after is '${String(next.changeCase)}', the target says '${String(target.changeCase)}'`);
   next.lastActionId = r.actionId ?? null;
   next.copyLog = [...next.copyLog, ...env.copyLog];
   const channel = typeof r.params.channel === "string" ? r.params.channel : null;
   next.history = [...next.history, {
     action: a.action, from: p.pipelineStatus, to: target.pseudo ?? target.status, by: who(userId), agent: null, at: iso,
-    recorded: a.action === "record_client_approve" || a.action === "record_client_change" ? (channel ? { channel } : null) : null, viaPortal: false,
+    recorded: a.action === "record_client_approve" || a.action === "record_client_change" ? (channel ? { channel } : null) : null,
+    viaPortal: typeof a.cerbosAction === "string" && a.cerbosAction.startsWith("portal:"), // the client's own decision, made in the portal (SCP-2)
     ...(a.action === "follow_up" ? { holder: scpHolderOf(view(p)) } : {}), // who it reached: Messages shows the last follow-up of the CURRENT holder
   }];
   const idx = PIPE_POSTS.indexOf(p);
   if (env.flags.deleted) PIPE_POSTS.splice(idx, 1);
   else Object.assign(p, next);
   return { ok: true, post: env.flags.deleted ? null : p, from, to: target.pseudo ?? target.status, warnings: env.warnings, alreadyApplied: false, designId: env.flags.designId };
+}
+
+/**
+ * SCP-2: the client's own decision (`client_approve`, `client_change`), applied by the SAME `commit` the staff actions use, so the status, the change case,
+ * `changedOnly` and `copyBefore`, the creative state, the history row and `statusSince` are the fixture's, and the staff side's post moves exactly as a
+ * recorded decision moves it. The portal's own checks (the contact, the post's client, the status, the body, the hash, a replay) come BEFORE this and are
+ * `demoSocialPortal.ts`'s; the fixture's guards `seen_hash_matches` and `every_variant_review_pending` are those checks, so `guards()` is not run here.
+ */
+export function demoCommitPortalDecision(
+  p: PipePost, action: "client_approve" | "client_change", params: Record<string, unknown>, userId: string, now: Date,
+): { from: string; to: string } {
+  const a = FX.actions.find((x) => x.action === action);
+  if (!a) throw new Error(`demoSocialPipelineRun: '${action}' is not in the fixture`);
+  if (!fromMatches(a, p)) throw new Error(`demoSocialPipelineRun: '${action}' does not start from '${p.pipelineStatus}'`);
+  const out = commit(a, p, { postId: p.id, action, params }, userId, now, null);
+  if (!out.ok) throw new Error(`demoSocialPipelineRun: ${action} was refused after the portal's own checks`);
+  return { from: out.from, to: out.to };
 }
 
 // ── The answers ─────────────────────────────────────────────────────────────────────────────────────────────────────────────

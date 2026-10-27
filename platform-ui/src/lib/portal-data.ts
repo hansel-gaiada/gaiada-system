@@ -25,6 +25,7 @@ import type {
   PortalInvoiceDetail, PortalSimulatedPayment, PortalMilestone, PortalHealth, PortalOverview, PortalProfile, PortalProject, PortalProjectDetail,
   PortalReport, PortalRun, PortalRunDetail, PortalSocialReview, PortalTimelineEvent,
 } from "./portal";
+import type { PortalSocialList, PortalSocialPost, PortalSocialTab } from "./portalSocial";
 
 /** Degrade "not found"/"not yours" to a fallback; let everything else propagate. NOT extended to 403:
  *  a 403 on a route a client legitimately reaches means their access was revoked mid-session, and
@@ -259,4 +260,46 @@ export async function getPortalSocialReview(
 ): Promise<PortalSocialReview | null> {
   const { reviews } = await listPortalSocialReviews(userId, tenant);
   return reviews.find((r) => r.id === id) ?? null;
+}
+
+// ── SCP-2: the post approval page (FRONTEND-BFF-CONTRACT §63.9) ───────────────────────────────────────────────────────────────
+
+export interface PortalSocialQuery { tab: PortalSocialTab; clientId?: string | null; month?: string | null; cursor?: string | null; limit?: number }
+
+/** `GET portal/social/posts`: one tab of the approval page. `isPortalClient: false` is the 403 a staff member gets (the page explains that it is
+ *  the client's); `unavailable` is a server that predates §63.9 (404). Any other failure throws into the route's error boundary: a backend outage must
+ *  never read as "nothing is waiting for you". */
+export async function listPortalSocialPosts(
+  userId: string, tenant: string, q: PortalSocialQuery,
+): Promise<{ list: PortalSocialList | null; isPortalClient: boolean; unavailable: boolean }> {
+  const qs = new URLSearchParams({ tab: q.tab });
+  if (q.clientId) qs.set("clientId", q.clientId);
+  if (q.month) qs.set("month", q.month);
+  if (q.cursor) qs.set("cursor", q.cursor);
+  if (q.limit) qs.set("limit", String(q.limit));
+  try {
+    const list = await platformFetch<PortalSocialList>(`/api/${tenant}/portal/social/posts?${qs.toString()}`, userId);
+    return { list: { items: list.items ?? [], nextCursor: list.nextCursor ?? null, counts: list.counts ?? { toReview: 0, approved: 0, changesAsked: 0 } }, isPortalClient: true, unavailable: false };
+  } catch (e) {
+    if (e instanceof PlatformError && e.status === 403) return { list: null, isPortalClient: false, unavailable: false };
+    if (e instanceof PlatformError && e.status === 404) return { list: null, isPortalClient: true, unavailable: true };
+    throw e;
+  }
+}
+
+/** `GET portal/social/stories` (the stories circle). DEGRADE RULE: the circle is a shortcut to posts the tabs already list, so a failure of any kind
+ *  hides it (null) rather than taking the page down. The answer is `{items}` (an array is accepted too: §63.9 pins no envelope). */
+export async function listPortalSocialStories(userId: string, tenant: string, clientId?: string | null): Promise<PortalSocialPost[] | null> {
+  const qs = clientId ? `?clientId=${encodeURIComponent(clientId)}` : "";
+  try {
+    const r = await platformFetch<{ items?: PortalSocialPost[] } | PortalSocialPost[]>(`/api/${tenant}/portal/social/stories${qs}`, userId);
+    return Array.isArray(r) ? r : r.items ?? [];
+  } catch {
+    return null;
+  }
+}
+
+/** `GET portal/social/posts/:postId`: one post with its comments. null = not found or not yours (the server's 404, never told apart). */
+export async function getPortalSocialPost(userId: string, tenant: string, postId: string): Promise<PortalSocialPost | null> {
+  return safe(platformFetch<PortalSocialPost>(`/api/${tenant}/portal/social/posts/${encodeURIComponent(postId)}`, userId), null);
 }

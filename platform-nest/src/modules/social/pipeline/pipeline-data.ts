@@ -359,6 +359,27 @@ export async function loadFacts(c: PoolClient, f: FactsInput): Promise<StageFact
   if (guards.has("seen_hash_matches")) facts.reviewHash = reviewHashOf(variants);
   if (guards.has("every_variant_review_pending")) facts.everyReviewPending = variants.length > 0 && variants.every((v) => v.review_status === "pending");
   facts.variantStatuses = variants.map((v) => v.status);
+  if (guards.has("own_decision") && postId) {
+    // client_undo (SCP-2): the decision is `params.decisionId`, read from the reviews that carry it. The window is judged on the
+    // database's `clock_timestamp()` (`undo_until` is written with it; `now()` would be the transaction's start, before the lock); "nothing happened since" is the post's `last_action_id` still being the
+    // decision's id, because the decision stamps it (the portal runner passes the decision id as the action id) and every
+    // later action overwrites it. A decision that no longer carries on every live variant has been taken apart already.
+    const decisionId = isUuidText(f.params.decisionId) ? f.params.decisionId : null;
+    const rs = decisionId
+      ? (await c.query<{ decided_by: string | null; within: boolean; change_kind: string | null }>(
+          `SELECT r.decided_by::text AS decided_by, (r.undo_until IS NOT NULL AND r.undo_until > clock_timestamp()) AS within, r.change_kind
+             FROM social_post_client_reviews r JOIN social_post_variants v ON v.id = r.variant_id AND v.tenant_id = r.tenant_id
+            WHERE r.tenant_id = $1 AND v.post_id = $2 AND v.deleted_at IS NULL AND r.decision_id = $3`,
+          [f.tenantId, postId, decisionId])).rows
+      : [];
+    facts.decidedByThisContact = rs.length > 0 && f.callerId !== null && rs.every((r) => r.decided_by === f.callerId);
+    facts.withinUndoWindow = rs.length > 0 && rs.every((r) => r.within);
+    facts.nothingHappenedSince = rs.length === variants.length && decisionId !== null && f.state?.lastActionId === decisionId;
+    // A change asked on the design put the post's `creative_state` to `revision`; every post at `client` had it `submitted`
+    // (the machine reaches `client` only through submit_design, and nothing else moves it there). A copy change or an approval
+    // leaves it alone, so nothing is passed and nothing is restored.
+    if (rs.some((r) => r.change_kind === "design")) facts.preDecisionCreativeState = "submitted";
+  }
   if (guards.has("no_variant_publishing")) facts.anyVariantPublishing = variants.some((v) => v.status === "publishing");
   if (guards.has("media_rules_pass")) {
     facts.mediaFailures = variants

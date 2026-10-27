@@ -208,7 +208,7 @@ export async function readFeedCandidates(c: PoolClient, tenantId: string, n: Fee
 // ── Q3: the page's extras ────────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface FeedPageExtras {
-  /** post id -> the file of its first stored design (materialized at the final check), or absent. */
+  /** post id -> the thumbnail of its first stored design (SCP-2b), else that design's file (materialized at the final check), or absent. */
   thumbs: Map<string, string>;
   /** month request id -> the people on its PM task (§63.3.3 `assigneeIds`). */
   assignees: Map<string, string[]>;
@@ -221,8 +221,8 @@ export async function readFeedPageExtras(c: PoolClient, tenantId: string, postId
   await declareSocialModuleScope(c);
   const { rows } = await c.query<{ k: string; a: string; b: string }>(
     tagged(`
-    SELECT 'thumb' AS k, d.post_id::text AS a, d.file_id::text AS b
-      FROM (SELECT DISTINCT ON (post_id) post_id, file_id
+    SELECT 'thumb' AS k, d.post_id::text AS a, COALESCE(d.thumb_file_id, d.file_id)::text AS b
+      FROM (SELECT DISTINCT ON (post_id) post_id, file_id, thumb_file_id
               FROM social_post_designs
              WHERE tenant_id = $1::uuid AND post_id = ANY($2::uuid[]) AND removed_at IS NULL AND file_id IS NOT NULL
              ORDER BY post_id, position) d

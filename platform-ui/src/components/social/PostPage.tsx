@@ -16,6 +16,7 @@ import { CommentThread } from "@/components/pm/CommentThread";
 import { HealthChip } from "@/components/social/HealthChip";
 import { PinOverlay, pinsFromComments } from "@/components/social/PinOverlay";
 import { PostActionBar } from "@/components/social/PostActionBar";
+import { ClientDecisionLine, ClientLink } from "@/components/social/PostClient";
 import { PostDesigns } from "@/components/social/PostDesigns";
 import { PostFields } from "@/components/social/PostFields";
 import { Activity, CopyLog } from "@/components/social/PostLog";
@@ -149,6 +150,8 @@ export function PostPage({ deptId, post: initial, comments, assets, metrics, vie
           </ul>
         </div>
       )}
+      <ClientDecisionLine decision={post.clientDecision} />
+      {post.pipelineStatus === "client" && !post.archivedAt && <ClientLink postId={post.id} title={post.title} />}
       {post.pipelineStatus === "live" && post.liveUrl && (
         <p className="scp-post__banner scp-post__banner--ok">Live{post.wentLiveAt ? ` since ${formatDateTime(post.wentLiveAt)}` : ""}: <a href={post.liveUrl} target="_blank" rel="noopener noreferrer">{post.liveUrl}</a></p>
       )}

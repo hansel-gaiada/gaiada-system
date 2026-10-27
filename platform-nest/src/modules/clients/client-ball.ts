@@ -33,6 +33,7 @@
 //   * a drafted agreement is never listed (the client cannot see it).
 // Each row carries `clientId` and `projectId` so the caller can group it; the hub overview strips both (`toHubItem`).
 import type { PoolClient } from "pg";
+import { portalPostRowVisibleSql } from "../social/pipeline/portal-post-sql";
 import { awaitingReplySql } from "../../core/conversation-core";
 import { staffThreadHref } from "../../core/conversation-notify";
 import {
@@ -43,7 +44,9 @@ import {
 
 /** One item of either list, exactly as the hub overview has always returned it. */
 export interface BallItem {
-  kind: "payment" | "review" | "request" | "contract" | "conversation" | "gate";
+  /** `social_post` (SCP-2) appears in PORTAL mode only: a pipeline post waiting on the client, one item per POST (its `id` is the
+   *  post id), where a Composer post's `review` is one item per variant review. The staff lists keep `review`. */
+  kind: "payment" | "review" | "social_post" | "request" | "contract" | "conversation" | "gate";
   id: string;
   label: string;
   context: string;
@@ -103,6 +106,9 @@ export async function loadClientBall(
   const params2: unknown[] = portal ? params3.slice(0, 2) : params3;
   const S = scopeAt(1);
   const only = (sql: string): string => (portal ? ` AND ${sql}` : "");
+  // SCP-2: in the portal a pipeline post counts only while the portal would show it (not deleted, not archived, sent to the client):
+  // an archived post whose reviews stay `changes_requested` keeps no dead `/portal/social?post=` item. A Composer post is unchanged.
+  const pipelinePostVisible = `(pst.pipeline_status IS NULL OR (${portalPostRowVisibleSql("pst")}))`;
 
   const [payments, reviews, requests, drafts, threads, gates, contracts, pending] = await Promise.all([
     // ── needsUs ────────────────────────────────────────────────────────────────────────────────────
@@ -118,12 +124,13 @@ export async function loadClientBall(
     // The social third wall applies to this join: see the file header.
     c.query(
       `SELECT r.id, r.client_id AS "clientId", r.comment, r.decided_at AS "since", pst.title AS "postTitle",
+              pst.id AS "postId", (pst.pipeline_status IS NOT NULL) AS "isPipeline",
               ${staffClientVisible("r", postReviewClientVisible("r"))} AS "clientVisible"
          FROM social_post_client_reviews r
          JOIN social_post_variants v ON v.id = r.variant_id AND v.tenant_id = r.tenant_id
          JOIN social_posts pst       ON pst.id = v.post_id  AND pst.tenant_id = v.tenant_id
         WHERE r.client_id = ANY($1::uuid[]) AND r.status = 'changes_requested'${
-          only(`${postReviewClientVisible("r")} AND ${wideClientOnly("r", S)}`)}
+          only(`${postReviewClientVisible("r")} AND ${wideClientOnly("r", S)} AND ${pipelinePostVisible}`)}
         ORDER BY r.decided_at ASC, r.id ASC`,
       params2,
     ),
@@ -185,12 +192,13 @@ export async function loadClientBall(
     ),
     c.query(
       `SELECT r.id, r.client_id AS "clientId", r.requested_at AS "since", pst.title AS "postTitle",
+              pst.id AS "postId", (pst.pipeline_status IS NOT NULL) AS "isPipeline",
               ${staffClientVisible("r", postReviewClientVisible("r"))} AS "clientVisible"
          FROM social_post_client_reviews r
          JOIN social_post_variants v ON v.id = r.variant_id AND v.tenant_id = r.tenant_id
          JOIN social_posts pst       ON pst.id = v.post_id  AND pst.tenant_id = v.tenant_id
         WHERE r.client_id = ANY($1::uuid[]) AND r.status = 'pending'${
-          only(`${postReviewClientVisible("r")} AND ${wideClientOnly("r", S)}`)}
+          only(`${postReviewClientVisible("r")} AND ${wideClientOnly("r", S)} AND ${pipelinePostVisible}`)}
         ORDER BY r.requested_at ASC, r.id ASC`,
       params2,
     ),
@@ -214,9 +222,17 @@ export async function loadClientBall(
       clientId: str(r.clientId), projectId: null,
     });
   }
+  // SCP-2: in the portal, a pipeline post is decided per POST, so its several variant reviews are one waiting item (`social_post`,
+  // the post id), which the portal opens on `/portal/social?post=<id>`. A Composer post's review stays one item per review.
+  const asPost = (r: Row) => !!portal && r.isPipeline === true;
+  const postSeenUs = new Set<string>();
   for (const r of reviews.rows as Row[]) {
+    if (asPost(r)) {
+      if (postSeenUs.has(str(r.postId))) continue;
+      postSeenUs.add(str(r.postId));
+    }
     us(str(r.clientId)).push({
-      kind: "review", id: str(r.id),
+      kind: asPost(r) ? "social_post" : "review", id: asPost(r) ? str(r.postId) : str(r.id),
       label: "Client asked for changes on a post",
       context: (r.postTitle as string) ?? "Social post",
       href: `/clients/${str(r.clientId)}/requests`, since: r.since, clientVisible: visible(r),
@@ -270,9 +286,14 @@ export async function loadClientBall(
       clientId: str(k.clientId), projectId: pid(k),
     });
   }
+  const postSeenThem = new Set<string>();
   for (const r of pending.rows as Row[]) {
+    if (asPost(r)) {
+      if (postSeenThem.has(str(r.postId))) continue;
+      postSeenThem.add(str(r.postId));
+    }
     them(str(r.clientId)).push({
-      kind: "review", id: str(r.id),
+      kind: asPost(r) ? "social_post" : "review", id: asPost(r) ? str(r.postId) : str(r.id),
       label: "Awaiting client post approval",
       context: (r.postTitle as string) ?? "Social post",
       href: `/clients/${str(r.clientId)}/requests`, since: r.since, clientVisible: visible(r),

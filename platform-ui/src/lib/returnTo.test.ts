@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeReturnTo, sanitizeReturnToParam } from "./returnTo";
+import { sanitizeReturnTo, sanitizeReturnToParam, loginHrefForReturn } from "./returnTo";
 
 describe("sanitizeReturnTo — UI-01 shared return-target validator", () => {
   it("passes through ordinary same-origin deep links unchanged", () => {
@@ -75,5 +75,24 @@ describe("sanitizeReturnTo — UI-01 shared return-target validator", () => {
     it("defaults on undefined", () => {
       expect(sanitizeReturnToParam(undefined)).toBe("/");
     });
+  });
+});
+
+describe("loginHrefForReturn — the sign-in redirect keeps the link, query included (SCP-2)", () => {
+  it("carries the path and the query of the page that was asked for", () => {
+    const href = loginHrefForReturn("/portal/social", "?post=soc-post-n-3");
+    expect(href).toBe("/login?return=%2Fportal%2Fsocial%3Fpost%3Dsoc-post-n-3");
+    // and what /login reads back is the exact link
+    expect(sanitizeReturnToParam(new URL(href, "https://erp.example").searchParams.get("return"))).toBe("/portal/social?post=soc-post-n-3");
+  });
+  it("is plain /login when the page is not known (a Server Action or a client navigation) or is the home page", () => {
+    expect(loginHrefForReturn(null, null)).toBe("/login");
+    expect(loginHrefForReturn(undefined, "?a=1")).toBe("/login");
+    expect(loginHrefForReturn("/", "")).toBe("/login");
+  });
+  it("never carries a hostile target: it falls back to plain /login", () => {
+    expect(loginHrefForReturn("//evil.test", "")).toBe("/login");
+    // a backslash anywhere is refused, as in sanitizeReturnTo
+    expect(loginHrefForReturn("/portal", "?x=%5Cevil.test".replace("%5C", String.fromCharCode(92)))).toBe("/login");
   });
 });

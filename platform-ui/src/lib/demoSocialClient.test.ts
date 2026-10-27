@@ -28,8 +28,9 @@ describe("GET calendar", () => {
     expect(r?.status).toBe(200);
     const items = asCalendarItems(r?.json);
     expect(items.map((i) => i.title)).toEqual([
-      "Autumn collection teaser", "Behind the scenes at the studio", "Weekend market date moved", "Five ways to style a scarf", "Launch day announcement", "Meet the packing team",
-    ]);
+      "Autumn collection teaser", "Last call for the market stall", "Behind the scenes at the studio", "Weekend market date moved", "Five ways to style a scarf",
+      "Studio tour in 30 seconds", "Launch day announcement", "Meet the packing team",
+    ]); // SCP-2 added a story (the 22nd) and a reel (the 26th) that wait on the client
     const by = (t: string) => items.find((i) => i.title === t)!;
     expect(by("Autumn collection teaser")).toMatchObject({ clientName: "Northwind Traders", pipelineStatus: "scheduled", phase: "client_approved", format: "feed", simulated: false });
     expect(by("Five ways to style a scarf")).toMatchObject({ pipelineStatus: "client", phase: "with_client", format: "carousel" });
@@ -47,7 +48,8 @@ describe("GET calendar", () => {
   it("counts both ends of the range, by day in the display zone", () => {
     const one = asCalendarItems(call("GET", "calendar", undefined, { from: "2026-10-20", to: "2026-10-20", engagementId: "soc-eng-1" })?.json);
     expect(one.map((i) => i.title)).toEqual(["Autumn collection teaser"]);
-    expect(asCalendarItems(call("GET", "calendar", undefined, { from: "2026-10-21", to: "2026-10-22", engagementId: "soc-eng-1" })?.json)).toEqual([]);
+    expect(asCalendarItems(call("GET", "calendar", undefined, { from: "2026-10-21", to: "2026-10-21", engagementId: "soc-eng-1" })?.json)).toEqual([]);
+    expect(asCalendarItems(call("GET", "calendar", undefined, { from: "2026-10-21", to: "2026-10-22", engagementId: "soc-eng-1" })?.json).map((i) => i.title)).toEqual(["Last call for the market stall"]);
   });
 
   it("keeps the posts the cycle's health lists: the same ids for the same client and month", () => {

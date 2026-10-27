@@ -111,10 +111,13 @@ interface PipeStore {
 
 // ── placeholder images (generated, never an asset from anyone's prototype) ───────────────────────────────────────────────
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+/** The placeholder as SVG text, at any size (SCP-2 serves the portal's images at the network's own ratios: 4:5 and 9:16). */
+export function placeholderSvg(label: string, hue: number, width = 1080, height = 1080): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="${width}" height="${height}" fill="hsl(${hue} 35% 82%)"/>` +
+    `<text x="${width / 2}" y="${height / 2}" font-family="sans-serif" font-size="52" text-anchor="middle" fill="hsl(${hue} 30% 28%)">${esc(label)}</text></svg>`;
+}
 export function placeholderImage(label: string, hue: number): string {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080"><rect width="1080" height="1080" fill="hsl(${hue} 35% 82%)"/>` +
-    `<text x="540" y="540" font-family="sans-serif" font-size="52" text-anchor="middle" fill="hsl(${hue} 30% 28%)">${esc(label)}</text></svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(placeholderSvg(label, hue))}`;
 }
 
 // ── the three clients ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -204,6 +207,8 @@ interface Seed {
   e: EK; m: -1 | 0 | 1; d: number; t: string; f: Format; st: string;
   pil?: number; ph?: string[]; extra?: boolean; cc?: string; note?: string; sch?: "manual" | "publisher"; cs?: string; sim?: boolean; co?: boolean;
   blk?: { from: string; on: string; reason: string }; sug?: "fresh" | "both"; resched?: boolean; ago?: number; hint?: "tight" | "at_risk"; ai?: boolean; metrics?: boolean;
+  /** SCP-2: the client's decision on this post was RECORDED by our team through this channel (not made in the portal). */
+  rec?: "whatsapp" | "email" | "meeting";
 }
 const AGO: Record<string, number> = { planned: 1, drafting: 2, proofread: 2, hod: 3, design: 4, final: 2, client: 3, approved: 5, scheduled: 6, live: 8, changes: 2, blocked: 4 };
 const CASES = (fixture as unknown as { changeCases: Array<{ key: string; changeBy: string; changeKind: string; returnTo: string }> }).changeCases;
@@ -219,7 +224,7 @@ const SEEDS: Seed[] = [
   { e: "n", m: 0, d: 23, t: "Behind the scenes at the studio", f: "feed", st: "approved", pil: 0 },
   { e: "n", m: 0, d: 25, t: "Five ways to style a scarf", f: "carousel", st: "client", pil: 1 },
   { e: "n", m: 0, d: 27, t: "Launch day announcement", f: "feed", st: "changes", cc: "client_design", note: "Please make the product larger and move the logo to the top corner.", pil: 1 },
-  { e: "n", m: 0, d: 28, t: "Meet the packing team", f: "reel", st: "scheduled", pil: 0, sch: "publisher" },
+  { e: "n", m: 0, d: 28, t: "Meet the packing team", f: "reel", st: "scheduled", pil: 0, sch: "publisher", rec: "whatsapp" },
   { e: "n", m: 0, d: 24, t: "Weekend market date moved", f: "feed", st: "client", pil: 0, resched: true },
   { e: "n", m: 1, d: 4, t: "November kickoff", f: "feed", st: "planned", pil: 0 },
   { e: "n", m: 1, d: 6, t: "Gift guide for the host", f: "carousel", st: "drafting", pil: 1 },
@@ -245,6 +250,10 @@ const SEEDS: Seed[] = [
   { e: "h", m: 1, d: 18, t: "Staff pick of the week", f: "feed", st: "drafting", extra: true, pil: 0 },
   { e: "h", m: 1, d: 20, t: "Banquet room open day", f: "carousel", st: "design", cs: "in_progress", pil: 0 },
   { e: "h", m: 1, d: 22, t: "December at the harbour", f: "feed", st: "planned", pil: 2 },
+  // SCP-2 (the client's approval page): Northwind has a reel and a story waiting too, so the portal's To review tab and its stories circle show every format.
+  // Appended last on purpose: a post's id is its place among its client's seeds, and every earlier id stays what it was.
+  { e: "n", m: 0, d: 26, t: "Studio tour in 30 seconds", f: "reel", st: "client", pil: 0 },
+  { e: "n", m: 0, d: 22, t: "Last call for the market stall", f: "story", st: "client", pil: 1 },
 ];
 
 const PATH: Array<[string, string, string]> = [
@@ -347,11 +356,20 @@ function seedPosts(M: string, today: string, allocations: Record<string, DemoAll
     } else if (s.blk) steps.push({ action: "block", from: s.blk.from, to: "blocked" });
     if (s.resched) steps.push({ action: "reschedule", from: "scheduled", to: "client" });
     post.history = steps.map((st, i) => {
-      const portal = s.e === "n" && (st.action === "record_client_approve" || st.action === "record_client_change");
+      const decision = st.action === "record_client_approve" || st.action === "record_client_change";
+      const portal = s.e === "n" && !s.rec && decision;
       const action = portal ? (st.action === "record_client_approve" ? "client_approve" : "client_change") : st.action;
       const by = portal ? "demo-client" : (ACTOR[st.action]?.(officer, designer) ?? officer);
-      const recorded = !portal && (st.action === "record_client_approve" || st.action === "record_client_change") ? { channel: "email" } : null;
-      return { action, from: st.from, to: st.to, by: who(by), agent: null, at: stamp(Math.max(0, (s.ago ?? AGO[status]) + (steps.length - 1 - i)), 9 + (i % 8)), recorded, viaPortal: portal };
+      const recorded = !portal && decision ? { channel: s.rec ?? "email" } : null;
+      // SCP-2: a decision row carries what the portal reads back (its id, the note and the pin of a change). A pin sits on the post's first image.
+      const extra = decision
+        ? {
+          decisionId: `soc-dec-${id}-${i}`,
+          ...(st.action === "record_client_change" && s.note ? { note: s.note, changeKind: kase?.changeKind ?? null } : {}),
+          ...(portal && st.action === "record_client_change" && kase?.changeKind === "design" ? { anchor: { x: 0.62, y: 0.34, fileId: `${id}-f1` } } : {}),
+        }
+        : {};
+      return { action, from: st.from, to: st.to, by: who(by), agent: null, at: stamp(Math.max(0, (s.ago ?? AGO[status]) + (steps.length - 1 - i)), 9 + (i % 8)), recorded, viaPortal: portal, ...extra };
     });
     // copy log: what the copywriter's suggestion and the officer's fixes changed
     if (rank >= STATUS_ORDER.indexOf("hod") || s.cc === "client_copy" || s.cc === "copywriter_copy") {
@@ -654,6 +672,34 @@ function variantsOf(p: PipePost): Array<Record<string, unknown>> {
   }));
 }
 
+/** What the client's approval covers, as one hash: the caption, the date and time and each network placed (SCP-Q13). The staff read and the portal (SCP-2) both
+ *  answer THIS value, so "the post changed while the client looked" means the same on both sides. */
+export function demoReviewHash(p: PipePost): string {
+  const variants = variantsOf(p);
+  return createHash("sha256").update(variants.map((x) => `${String(x.id)}:${createHash("sha256").update(`${p.caption}|${p.scheduledAt}|${String(x.network)}`).digest("hex")}`).sort().join("\n")).digest("hex");
+}
+
+const CLIENT_DECISIONS = new Set(["client_approve", "client_change", "record_client_approve", "record_client_change"]);
+
+/** The staff read's `clientDecision` (SCP-2, BFF §63.6.2) from the post's history, as the server reads it from the reviews: the last decision, gone again
+ *  once it is undone or the post goes back to the client. A recorded decision names the member of staff; a portal one names the contact. */
+export function demoClientDecision(p: PipePost): Record<string, unknown> | null {
+  let d: Record<string, unknown> | null = null;
+  for (const h of p.history as Array<Record<string, unknown>>) {
+    if (CLIENT_DECISIONS.has(String(h.action))) d = h;
+    else if (h.action === "client_undo" || h.to === "client") d = null;
+  }
+  if (!d) return null;
+  const recorded = d.recorded && typeof (d.recorded as { channel?: unknown }).channel === "string" ? (d.recorded as { channel: string }).channel : null;
+  const approved = d.action === "client_approve" || d.action === "record_client_approve";
+  return {
+    decisionId: String(d.decisionId ?? `${p.id}-decision`), kind: approved ? "approved" : "changes",
+    ...(d.changeKind ? { changeKind: d.changeKind } : {}), ...(d.note ? { note: d.note } : {}),
+    decidedAt: d.at, via: recorded ? "recorded" : "portal", ...(recorded ? { channel: recorded } : {}),
+    decidedBy: recorded ? null : (d.by ?? null), recordedBy: recorded ? (d.by ?? null) : null,
+  };
+}
+
 export function demoPipelinePost(p: PipePost, userId: string): Record<string, unknown> {
   const eng = store.engagements.find((e) => e.id === p.engagementId)!;
   const alloc = store.allocations[p.engagementId];
@@ -662,9 +708,7 @@ export function demoPipelinePost(p: PipePost, userId: string): Record<string, un
   const approved = DONE.includes(p.pipelineStatus) && !p.rescheduled;
   const approvedSchedule = approved ? { scheduledAt: p.scheduledAt, placement: p.placement } : null;
   const sent = p.pipelineStatus === "client" || DONE.includes(p.pipelineStatus) || p.changeBy === "client" || p.changedOnly;
-  const reviewHash = sent
-    ? createHash("sha256").update(variants.map((x) => `${String(x.id)}:${createHash("sha256").update(`${p.caption}|${p.scheduledAt}|${String(x.network)}`).digest("hex")}`).sort().join("\n")).digest("hex")
-    : null;
+  const reviewHash = sent ? demoReviewHash(p) : null;
   const actions = demoPostActions(p, userId);
   const primary = scpPrimaryActionOf(v);
   const nextAction = primary && actions.some((a) => a.action === primary && a.allowed) ? primary : null;
@@ -691,6 +735,7 @@ export function demoPipelinePost(p: PipePost, userId: string): Record<string, un
     officer: alloc.officerId ? who(alloc.officerId) : null, author: p.authorId ? who(p.authorId) : null,
     holder: holderOf(p), health: demoPostHealth(p), variants, approvedSchedule, scheduleVia: p.scheduleVia, reviewHash,
     liveUrl: p.liveUrl, wentLiveAt: p.wentLiveAt, simulated: p.simulated, archivedAt: p.archivedAt,
+    clientDecision: demoClientDecision(p),
     boost: null, tasks: [], copyLog: p.copyLog, history: p.history, actions, nextAction,
   };
 }

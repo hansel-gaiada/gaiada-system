@@ -27,7 +27,7 @@ describe("GET allocation", () => {
       clientName: "Northwind Traders", officer: { id: "u-social", name: "Komang Lestari" }, postsPerCycle: 12, creativeSource: "creatives", deliveryBatch: "B",
       reportFormat: "email", reportDueDay: 5, defaultPostTime: "09:30",
     });
-    expect(rows[0].thisCycle).toMatchObject({ month: "2026-10", target: 12, counted: 6, extra: 0, stories: 0 });
+    expect(rows[0].thisCycle).toMatchObject({ month: "2026-10", target: 12, counted: 7, extra: 0, stories: 1 }); // SCP-2 added a reel and a story waiting on Northwind
     expect(rows[1]).toMatchObject({ clientName: "Saltmarsh Day Spa", officer: { id: "u-social-2" }, creativeSource: "in_team", postsPerCycle: 8 });
     expect(rows[1].thisCycle).toMatchObject({ target: 8, counted: 2 });
     expect(rows.map((x) => x.creativeSource)).toEqual(["creatives", "in_team", "creatives"]); // one on the in-team designer, two on Creatives

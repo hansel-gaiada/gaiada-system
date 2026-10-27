@@ -73,6 +73,22 @@ export async function buildPipelinePost(i: ReadInput): Promise<Record<string, un
       ORDER BY occurred_at, id`,
     [tenantId, row.id, actionNames],
   );
+  // The client's latest decision on the post (SCP-2, BFF §63.6.2 `clientDecision`): the newest decided review that carries a
+  // decision id, as the portal gave it (`decided_by` the contact) or as staff recorded it on the client's behalf (`recorded_by`
+  // and `channel`, `decided_by` NULL). Null before any decision, and again once the post goes back to the client (the reviews
+  // are reset).
+  const decisionRow = (await c.query<{
+    decision_id: string; status: string; change_kind: string | null; comment: string | null; anchor: unknown;
+    decided_at: Date; decided_by: string | null; recorded_by: string | null; channel: string | null;
+  }>(
+    `SELECT r.decision_id::text AS decision_id, r.status, r.change_kind, r.comment, r.anchor, r.decided_at,
+            r.decided_by::text AS decided_by, r.recorded_by::text AS recorded_by, r.channel
+       FROM social_post_client_reviews r
+       JOIN social_post_variants v ON v.id = r.variant_id AND v.tenant_id = r.tenant_id AND v.deleted_at IS NULL
+      WHERE r.tenant_id = $1 AND v.post_id = $2 AND r.decision_id IS NOT NULL AND r.status IN ('approved', 'changes_requested')
+      ORDER BY r.decided_at DESC, r.id LIMIT 1`,
+    [tenantId, row.id],
+  )).rows[0] ?? null;
   const request = row.creative_request_id
     ? (await c.query<{ id: string; title: string; status: string }>(`SELECT id::text AS id, title, status FROM work_requests WHERE id = $1`, [row.creative_request_id])).rows[0] ?? null
     : null;
@@ -83,6 +99,7 @@ export async function buildPipelinePost(i: ReadInput): Promise<Record<string, un
     ...history.rows.map((r) => r.actor_id),
     ...Object.values(state.suggestions).map((s) => s.by),
     ...(row.skipped_checks ?? []).map((s) => s.by),
+    decisionRow?.decided_by, decisionRow?.recorded_by,
   ]);
   const person = (id: string | null | undefined) => (id ? { id, name: names.get(id) ?? "Someone" } : null);
 
@@ -186,5 +203,19 @@ export async function buildPipelinePost(i: ReadInput): Promise<Record<string, un
     })),
     actions,
     nextAction,
+    clientDecision: decisionRow
+      ? {
+          decisionId: decisionRow.decision_id,
+          kind: decisionRow.status === "approved" ? "approved" : "changes",
+          ...(decisionRow.change_kind ? { changeKind: decisionRow.change_kind } : {}),
+          ...(decisionRow.comment ? { note: decisionRow.comment } : {}),
+          ...(decisionRow.anchor ? { anchor: decisionRow.anchor } : {}),
+          decidedAt: iso(decisionRow.decided_at),
+          via: decisionRow.recorded_by ? "recorded" : "portal",
+          ...(decisionRow.channel ? { channel: decisionRow.channel } : {}),
+          decidedBy: person(decisionRow.decided_by),
+          recordedBy: person(decisionRow.recorded_by),
+        }
+      : null,
   };
 }

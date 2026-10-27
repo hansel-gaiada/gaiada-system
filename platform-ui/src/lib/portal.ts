@@ -1049,7 +1049,10 @@ export type PortalBallSide = "you" | "us";
 /** The plain words for one waiting item. The server sends a `kind`, never a staff-phrased label (§54.5), so the UI words
  *  it, and says what the CLIENT should expect (for "us") or do (for "you"). An unknown kind (a newer server) still reads
  *  as a waiting item rather than disappearing. */
-export function ballItemLabel(kind: string, side: PortalBallSide): string {
+export function ballItemLabel(kind: string, side: PortalBallSide, hint?: string | null): string {
+  // SCP-2: a `social_post` item (one per post of the approval page, portal mode only) is a post to review, or, when the item says the client asked for
+  // changes (its `context`), one our team is changing for them. The server sends no staff status, so the words are the UI's.
+  if (kind === "social_post") return side === "us" || /changes?[ _]asked/i.test(hint ?? "") ? "A post we are changing for you" : "A post to review";
   if (side === "you") {
     switch (kind) {
       case "gate": return "An approval for you";
@@ -1076,6 +1079,8 @@ export function ballItemHref(kind: string, id: string): string | null {
     case "gate": return "/portal/approvals";
     case "contract": return `/portal/contracts/${seg}`;
     case "review": return `/portal/social-reviews/${seg}`;
+    // SCP-2: the approval page, opened at that post (the id is the post's id)
+    case "social_post": return `/portal/social?post=${seg}`;
     case "request": return "/portal/requests";
     case "conversation": return `/portal/conversation/${seg}`;
     case "payment": return "/portal/invoices";

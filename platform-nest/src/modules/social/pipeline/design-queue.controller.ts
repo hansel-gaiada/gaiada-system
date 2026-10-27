@@ -136,7 +136,7 @@ async function loadNarrowedCandidates(tenantId: string, callerId: string, design
               p.change_by, p.change_kind, p.return_to, p.changed_only, p.blocked_from, p.block_waiting_on, p.change_note,
               p.creative_source, p.creative_state, p.creative_request_id::text AS creative_request_id, p.status_since,
               to_char(cy.ready_by, 'YYYY-MM-DD') AS ready_by, e.owner_id::text AS owner_id, p.author_id::text AS author_id,
-              (SELECT d.file_id::text FROM social_post_designs d
+              (SELECT COALESCE(d.thumb_file_id, d.file_id)::text FROM social_post_designs d
                 WHERE d.tenant_id = p.tenant_id AND d.post_id = p.id AND d.removed_at IS NULL AND d.file_id IS NOT NULL
                 ORDER BY d.position, d.added_at LIMIT 1) AS thumb_file_id
          FROM social_posts p
