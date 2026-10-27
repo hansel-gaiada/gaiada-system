@@ -14,7 +14,7 @@ import { DEDUPE_BLOCKING_STATUSES } from "./store";
 import { EpisodicStore } from "../memory/episodic";
 import { ObservabilityCollector } from "../obs/collector";
 import { supervisor as realSupervisor, taskTriager } from "../specialists";
-import { tenantContext, envelopeContext } from "../deps";
+import { tenantContext, envelopeContext, usageContext, type UsageAttribution } from "../deps";
 import type { AgentDef, AgentDeps } from "../agent";
 import type { OrchestratorDef } from "../orchestrator";
 
@@ -79,6 +79,7 @@ class MemGoalStore implements GoalStore {
     return {
       id: g.id, tenantId: g.tenantId, goal: g.goal, agent: g.agent,
       envelopeProvider: g.envelopeProvider, envelopeExternalId: g.envelopeExternalId, budget: g.budget,
+      requestedBy: g.requestedBy ?? null,
     };
   }
   async finishGoal(id: string, patch: FinishGoalPatch): Promise<void> {
@@ -882,5 +883,65 @@ describe("agent-runner service", () => {
       clientReq?.destroy(); // release the socket before the suite's afterEach closes the app
       expect(sawStep).toBe(true);
     });
+  });
+});
+
+// AIP-03b — what the runner tells the gateway call about the goal it serves (deps.ts `usageContext`). The real `liveDeps.complete` reads it; here the
+// scripted `complete` records it at call time, so this proves the WIRING (per goal, per branch) with no network.
+describe("AIP-03b · the runner's usage attribution per goal", () => {
+  const U = "22222222-2222-4222-8222-222222222222";
+  const OTHER_U = "44444444-4444-4444-8444-444444444444";
+
+  function recording(responses: string[]) {
+    const d = scripted(responses);
+    const seen: Array<UsageAttribution | undefined> = [];
+    const inner = d.complete;
+    d.complete = async (p) => { const a = usageContext.getStore(); seen.push(a ? { ...a } : undefined); return inner(p); };
+    return { d, seen };
+  }
+
+  it("a read specialist: task is the agent, the person is requestedBy, the run id is the run row's", async () => {
+    const { d, seen } = recording(['{"final":"all good"}']);
+    const { app } = build({ deps: d });
+    const { id } = (await trigger(app, { goal: "report", agent: "reader", requestedBy: U })).json() as { id: string };
+    await idle(app);
+    const g = (await goalStatus(app, id)).json() as GoalDetail;
+    expect(g.status).toBe("ok");
+    expect(seen).toEqual([{ task: "reader", userId: U, runId: g.runs[0].runId }]);
+  });
+
+  it("a write specialist gets the same: task is its name, the run id is the one it persists", async () => {
+    const { d, seen } = recording(['{"final":"nothing to write"}']);
+    const { app } = build({ deps: d, servingProvider: "echo" });
+    const { id } = (await trigger(app, { goal: "write", agent: "test-writer", requestedBy: U })).json() as { id: string };
+    await idle(app);
+    const g = (await goalStatus(app, id)).json() as GoalDetail;
+    expect(g.runs).toHaveLength(1);
+    expect(seen).toEqual([{ task: "test-writer", userId: U, runId: g.runs[0].runId }]);
+  });
+
+  it("with no requestedBy the person is a platform envelope's user id; a chat identity or a non-uuid requestedBy is no person", async () => {
+    const cases: Array<[Record<string, unknown>, string | null]> = [
+      [{ envelope: { provider: "platform", externalId: OTHER_U } }, OTHER_U],
+      [{ envelope: { provider: "whatsapp", externalId: "628123456789" } }, null],
+      [{ envelope: { provider: "platform", externalId: "u1" }, requestedBy: "Jane Doe" }, null],
+    ];
+    for (const [extra, expected] of cases) {
+      const { d, seen } = recording(['{"final":"ok"}']);
+      const { app } = build({ deps: d });
+      await trigger(app, { goal: "report", agent: "reader", ...extra });
+      await idle(app);
+      expect(seen[0]?.userId, JSON.stringify(extra)).toBe(expected);
+    }
+  });
+
+  it("each goal has its own attribution: two goals never share a person or a run id", async () => {
+    const { d, seen } = recording(['{"final":"ok"}']);
+    const { app } = build({ deps: d, maxConcurrent: 1 });
+    await trigger(app, { goal: "one", agent: "reader", requestedBy: U });
+    await trigger(app, { goal: "two", agent: "reader", requestedBy: OTHER_U });
+    await idle(app);
+    expect(seen.map((s) => s?.userId)).toEqual([U, OTHER_U]);
+    expect(new Set(seen.map((s) => s?.runId)).size).toBe(2);
   });
 });

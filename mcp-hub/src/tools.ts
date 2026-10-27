@@ -31,7 +31,10 @@ export function registerCoreTools(): void {
     minAssurance: "low",
     inputSchema: {
       type: "object",
-      properties: { text: { type: "string", description: "The text to summarize" } },
+      properties: {
+        text: { type: "string", description: "The text to summarize" },
+        tenantId: { type: "string", description: "Optional: the company (uuid) this call is for, so the AI usage is recorded against it. Agents get it stamped in; leave out only when no company applies." },
+      },
       required: ["text"],
     },
     handler: async (args) => {

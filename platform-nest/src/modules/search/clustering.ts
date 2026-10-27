@@ -17,6 +17,7 @@ import type { PoolClient } from "pg";
 import { newId } from "../../db";
 import { config } from "../../config";
 import { completeViaGateway, type GatewayCallOptions, embedViaGateway } from "./providers/gateway-client";
+import type { AiCallAttribution } from "../ai-usage/gateway-usage";
 
 // ── SM-32 gate defect fix: bound keyword-set cardinality ────────────────────────────────────────────
 // Thrown by embedKeywordSet/clusterKeywordSet instead of running their sequential per-keyword (or
@@ -209,9 +210,11 @@ export async function embedKeywordSet(
     onlyMissing?: boolean;
     embed?: typeof embedViaGateway;
     gatewayOpts?: GatewayCallOptions;
+    /** AIP-03a: who is paying for these calls. Required: every embedding is a usage row. */
+    attribution: AiCallAttribution;
     /** Test-only override of config.search.maxKeywordsPerSet. */
     maxKeywords?: number;
-  } = {},
+  },
 ): Promise<EmbedResult> {
   const mode = await detectEmbeddingMode(c);
   const clause = opts.onlyMissing === false ? "" : "AND embedding IS NULL";
@@ -235,7 +238,7 @@ export async function embedKeywordSet(
   const embed = opts.embed ?? embedViaGateway;
   let embedded = 0;
   for (const row of rows.rows) {
-    const vec = await embed(row.keyword, opts.gatewayOpts);
+    const vec = await embed(row.keyword, { ...opts.gatewayOpts, attribution: opts.attribution });
     const { value, cast } = embeddingBindValue(mode, vec);
     await c.query(`UPDATE search_keywords SET embedding = $2${cast}, updated_at = now() WHERE id = $1`, [row.id, value]);
     embedded++;
@@ -268,9 +271,11 @@ export async function clusterKeywordSet(
     threshold?: number;
     complete?: typeof completeViaGateway;
     gatewayOpts?: GatewayCallOptions;
+    /** AIP-03a: who is paying for these calls. Required: every cluster label is a usage row. */
+    attribution: AiCallAttribution;
     /** Test-only override of config.search.maxKeywordsPerSet. */
     maxKeywords?: number;
-  } = {},
+  },
 ): Promise<ClusterKeywordSetResult> {
   const mode = await detectEmbeddingMode(c);
   const maxKeywords = opts.maxKeywords ?? config.search.maxKeywordsPerSet;
@@ -315,7 +320,7 @@ export async function clusterKeywordSet(
     let label = fallbackLabel;
     let intent: Intent = "informational";
     try {
-      const res = await complete(buildClusterPrompt(sortedKeywords.slice(0, 20)), opts.gatewayOpts);
+      const res = await complete(buildClusterPrompt(sortedKeywords.slice(0, 20)), { ...opts.gatewayOpts, attribution: opts.attribution });
       const parsed = parseClusterLabel(res.text, fallbackLabel);
       label = parsed.label;
       intent = parsed.intent;

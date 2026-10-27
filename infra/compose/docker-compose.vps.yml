@@ -1552,6 +1552,10 @@ services:
       MIGRATE_DATABASE_URL: postgres://knowledge_owner:${KNOWLEDGE_OWNER_PASSWORD:?}@${PG_HOST:-postgres}:5432/gaiada_knowledge
       GATEWAY_URL: http://ai-gateway:3002
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:?}
+      # AIP-03b: the runner has no platform database, so each /complete call it makes is reported to platform-nest
+      # (POST /api/internal/ai-usage, service token) as an ai_usage_events row. Same values as mcp-hub's. Unset => the reporter is off.
+      PLATFORM_URL: http://platform:3004
+      PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
       HUB_URL: http://mcp-hub:3003
       HUB_SERVICE_TOKEN: ${HUB_SERVICE_TOKEN:?}
       # Assurance elevation (mcp-hub design §2): the agent runner is the OTHER entitled caller — it
@@ -1720,6 +1724,11 @@ services:
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       GATEWAY_URL: http://ai-gateway:3002
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:?}
+      # AIP-03b: the bot's gateway calls are reported to platform-nest as ai_usage_events rows (surface `bot`, no person). The company they
+      # are recorded against is DEFAULT_TENANT_ID (a company uuid); blank => no row is written (the reporter logs that once).
+      PLATFORM_URL: http://platform:3004
+      PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
+      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-}
       WAHA_URL: http://waha:3000
       WAHA_API_KEY: ${WAHA_API_KEY:?}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
@@ -1779,6 +1788,10 @@ services:
     environment:
       GATEWAY_URL: http://ai-gateway:3002
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:?}
+      # AIP-03b: same as the bot above; this worker is the one that calls the gateway's /media.
+      PLATFORM_URL: http://platform:3004
+      PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
+      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-}
       WAHA_URL: http://waha:3000
       WAHA_API_KEY: ${WAHA_API_KEY:?}
       DATABASE_URL: postgres://bot_app:${BOT_APP_PASSWORD:?}@pg-bot:5432/gaiada_bot

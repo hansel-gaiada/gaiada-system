@@ -16,6 +16,7 @@ import type { PoolClient } from "pg";
 import { newId, withTenants } from "../../../db";
 import { config } from "../../../config";
 import { completeViaGateway, type CompletionResult } from "../../search/providers/gateway-client";
+import type { AiCallAttribution } from "../../ai-usage/gateway-usage";
 import { parseNarrative } from "../../reports/narrative";
 import {
   buildSummaryNarrativePrompt, deterministicSummaryNarrative, summaryGroundingFacts,
@@ -32,13 +33,15 @@ export interface NarrativeDeps {
   complete?: (prompt: string) => Promise<CompletionResult>;
 }
 
-export async function draftSummaryNarrative(snapshot: AccountSummarySnapshot, deps: NarrativeDeps = {}): Promise<NarrativeDraft> {
+/** AIP-03a: whose draft this is. Required: the one AI call is a usage row. */
+
+export async function draftSummaryNarrative(snapshot: AccountSummarySnapshot, attribution: AiCallAttribution, deps: NarrativeDeps = {}): Promise<NarrativeDraft> {
   const facts = summaryGroundingFacts(snapshot);
   const fallbackText = deterministicSummaryNarrative(snapshot);
   let raw: string | null = null;
   let model: string | null = null;
   try {
-    const completion = await (deps.complete ?? ((p: string) => completeViaGateway(p)))(buildSummaryNarrativePrompt(facts));
+    const completion = await (deps.complete ?? ((p: string) => completeViaGateway(p, { attribution })))(buildSummaryNarrativePrompt(facts));
     raw = completion.text;
     model = completion.provider ?? null;
   } catch {

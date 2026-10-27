@@ -338,7 +338,9 @@ describe.skipIf(!TEST_URL)("social brand-voice RAG + AI drafting (SMM-19)", () =
 
     completeMock.mockClear();
     await app.inject({ method: "POST", url: `/api/${A}/modules/social/posts/${postId}/variants/${variantId}/draft-caption`, headers: asUser(uA) });
-    expect(completeMock.mock.calls.at(-1)?.[1]).toBeUndefined(); // cloudPolish off by default -> no hint
+    // cloudPolish off by default -> no provider hint (AIP-03a: the options always carry the usage attribution now)
+    expect(completeMock.mock.calls.at(-1)?.[1]?.provider).toBeUndefined();
+    expect((completeMock.mock.calls.at(-1)?.[1] as { attribution?: unknown } | undefined)?.attribution).toMatchObject({ surface: "other" });
 
     await app.inject({
       method: "PATCH", url: `/api/${A}/modules/social/engagements/${engA}/scope`, headers: asUser(uA),
@@ -346,7 +348,7 @@ describe.skipIf(!TEST_URL)("social brand-voice RAG + AI drafting (SMM-19)", () =
     });
     completeMock.mockClear();
     await app.inject({ method: "POST", url: `/api/${A}/modules/social/posts/${postId}/variants/${variantId}/draft-caption`, headers: asUser(uA) });
-    expect(completeMock.mock.calls.at(-1)?.[1]).toEqual({ provider: "claude" });
+    expect(completeMock.mock.calls.at(-1)?.[1]).toMatchObject({ provider: "claude" });
 
     await app.inject({
       method: "PATCH", url: `/api/${A}/modules/social/engagements/${engA}/scope`, headers: asUser(uA),

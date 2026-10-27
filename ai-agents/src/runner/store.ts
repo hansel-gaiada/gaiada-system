@@ -63,6 +63,8 @@ export interface GoalRunContext {
   envelopeProvider: string;
   envelopeExternalId: string;
   budget: BudgetCaps;
+  /** AIP-03b: who the goal was filed for (a platform user id when the ERP filed it). Free text in the table; the usage record keeps it only when it is a uuid. */
+  requestedBy?: string | null;
 }
 
 /** The patch a finished goal writes back (the typed-outcome → status mapping result). */
@@ -454,13 +456,13 @@ export class PgGoalStore implements GoalStore {
     const { rows } = await this.pool.query<GoalDbRow>(
       `UPDATE agent_goals SET status='running', started_at=now()
        WHERE id=$1 AND status='queued'
-       RETURNING id, tenant_id, goal, agent, envelope_provider, envelope_external_id, budget`,
+       RETURNING id, tenant_id, goal, agent, envelope_provider, envelope_external_id, budget, requested_by`,
       [id],
     );
     if (rows.length === 0) return null;
     const r = rows[0] as unknown as {
       id: string; tenant_id: string; goal: string; agent: string;
-      envelope_provider: string; envelope_external_id: string; budget: BudgetCaps | null;
+      envelope_provider: string; envelope_external_id: string; budget: BudgetCaps | null; requested_by: string | null;
     };
     return {
       id: r.id,
@@ -470,6 +472,7 @@ export class PgGoalStore implements GoalStore {
       envelopeProvider: r.envelope_provider,
       envelopeExternalId: r.envelope_external_id,
       budget: r.budget ?? { modelCalls: 0, toolCalls: 0 },
+      requestedBy: r.requested_by ?? null,
     };
   }
 

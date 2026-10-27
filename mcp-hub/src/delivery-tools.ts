@@ -67,7 +67,11 @@ export function registerDeliveryTools(): void {
     minAssurance: "low",
     inputSchema: {
       type: "object",
-      properties: { prd: { type: "string", description: "the signed PRD text" }, notes: { type: "string" } },
+      properties: {
+        prd: { type: "string", description: "the signed PRD text" },
+        notes: { type: "string" },
+        tenantId: { type: "string", description: "Optional: the company (uuid) this call is for, so the AI usage is recorded against it. Agents get it stamped in; leave out only when no company applies." },
+      },
       required: ["prd"],
     },
     handler: async (args) => {

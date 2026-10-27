@@ -52,6 +52,8 @@
 // ever presents the ~4-chars/token estimate as if it were a measurement.
 import { config } from "../../config";
 import { withTenants } from "../../db";
+import { recordGatewayCall, statusFromError, type AiCallAttribution } from "../ai-usage/gateway-usage";
+import { refreshThreadCost } from "./thread-cost";
 
 // ─────────────────────────────────────── low-level SSE parsing ───────────────────────────────────
 
@@ -129,7 +131,7 @@ export type GatewayStreamEvent =
    *  zero-filled, never estimated). Arrives immediately before `done`, only when the serving
    *  provider reports them (today: `ollama` only) — absent on every other provider and on every
    *  error path, which is the common case, not an exception. */
-  | { type: "usage"; promptTokens: number; completionTokens: number }
+  | { type: "usage"; promptTokens: number; completionTokens: number; costUsd?: number }
   /** ASST-15's additive terminal `event: session` — the late-known Hermes session id, split out
    *  of `meta` for exactly the reason documented at this file's header. Emitted at most once,
    *  after `usage` (if any) and before `done`, and only when the serving provider actually has a
@@ -195,9 +197,11 @@ export async function* parseGatewayStream(body: ReadableStream<Uint8Array>): Asy
       }
       case "usage": {
         try {
-          const parsed = JSON.parse(raw.data) as { promptTokens?: unknown; completionTokens?: unknown };
+          const parsed = JSON.parse(raw.data) as { promptTokens?: unknown; completionTokens?: unknown; costUsd?: unknown };
           if (typeof parsed.promptTokens === "number" && typeof parsed.completionTokens === "number") {
-            yield { type: "usage", promptTokens: parsed.promptTokens, completionTokens: parsed.completionTokens };
+            // AIP-02/03a: the upstream's own USD figure, when it sent one (a reported 0 is kept). Absent otherwise: never invented.
+            const cost = typeof parsed.costUsd === "number" && Number.isFinite(parsed.costUsd) && parsed.costUsd >= 0 ? { costUsd: parsed.costUsd } : {};
+            yield { type: "usage", promptTokens: parsed.promptTokens, completionTokens: parsed.completionTokens, ...cost };
           }
         } catch {
           // Same reasoning — drop, never throw. The estimate remains the labelled fallback.
@@ -420,10 +424,14 @@ export interface RelayResult {
   usageSource: "provider" | "estimate";
   promptTokens?: number;
   completionTokens?: number;
+  /** AIP-02/03a: the provider's own USD cost for this reply, when the gateway's `usage` event carried one. */
+  costUsd?: number;
 }
 
 export interface RelayGenerationInput {
   tenantId: string;
+  /** AIP-03a: who is paying for this reply (person, thread, surface). REQUIRED: every reply is one `ai_usage_events` row. */
+  attribution: AiCallAttribution;
   prompt: string;
   emit: RelayEmit;
   idleTimeoutMs?: number;
@@ -454,6 +462,40 @@ export interface RelayGenerationInput {
  *  with a typed `errorKind`, and `emit.error(...)` is called exactly once before returning — the
  *  controller's persistence code has one shape to handle, not a try/catch around this call too. */
 export async function relayGeneration(entry: GenerationEntry, input: RelayGenerationInput): Promise<RelayResult> {
+  const result = await relayGenerationCall(entry, input);
+  // AIP-03a: ONE usage row per reply, after the answer is in hand, fire-and-forget (the promise never rejects, nothing awaits it).
+  void recordRelayUsage(input, result);
+  return result;
+}
+
+/** The usage row of one finished relay. Pure of side effects except the (never-throwing) record. `not_configured` made no call: no row. */
+export async function recordRelayUsage(input: Pick<RelayGenerationInput, "attribution" | "prompt" | "provider">, result: RelayResult): Promise<void> {
+  if (result.errorKind === "not_configured") return;
+  const hasReal = result.usageSource === "provider" && result.promptTokens !== undefined && result.completionTokens !== undefined;
+  let outcome: "ok" | "blocked_budget" | "blocked_dlp" | "error" | "incurred" = "ok";
+  if (result.outcome === "error") {
+    const status = result.errorKind === "transport_error" ? statusFromError({ message: result.errorMessage }) : null;
+    if (status === 429) outcome = "blocked_budget";
+    else if (status === 503) outcome = "blocked_dlp";
+    // A reply the user stopped, that went idle, or that dropped mid-stream was charged and did not complete: 'incurred'.
+    else if (["stopped", "idle_timeout", "client_disconnected", "aborted", "abnormal_drop"].includes(result.errorKind ?? "")) outcome = "incurred";
+    else outcome = "error";
+  }
+  const recorded = await recordGatewayCall(input.attribution, {
+    capability: "llm",
+    outcome,
+    provider: result.provider ?? null,
+    model: result.model ?? null,
+    providerHint: input.provider ?? null,
+    usage: hasReal ? { promptTokens: result.promptTokens!, completionTokens: result.completionTokens!, costUsd: result.costUsd ?? null } : null,
+    // The labelled 4-characters-per-token estimate, the SAME one that fills `assistant_messages.tokens`: the prompt we sent, the text we got.
+    estimate: !hasReal && outcome === "ok" ? { promptTokens: estimateTokens(input.prompt), completionTokens: estimateTokens(result.text) } : null,
+  });
+  // AIP-04: the thread's total cost follows its usage rows (see thread-cost.ts).
+  if (recorded?.ok && input.attribution.threadId) await refreshThreadCost(input.attribution.tenantId, input.attribution.threadId);
+}
+
+async function relayGenerationCall(entry: GenerationEntry, input: RelayGenerationInput): Promise<RelayResult> {
   const started = Date.now();
   const controller = entry.controller;
 
@@ -484,6 +526,7 @@ export async function relayGeneration(entry: GenerationEntry, input: RelayGenera
   let metaRequestedSession: string | undefined;
   let realPromptTokens: number | undefined;
   let realCompletionTokens: number | undefined;
+  let realCostUsd: number | undefined;
 
   try {
     const url = (input.gatewayUrl ?? config.services.gateway.url).replace(/\/$/, "");
@@ -532,6 +575,7 @@ export async function relayGeneration(entry: GenerationEntry, input: RelayGenera
         // Terminal-adjacent (arrives just before `done`), but non-terminal itself — keep reading.
         realPromptTokens = evt.promptTokens;
         realCompletionTokens = evt.completionTokens;
+        realCostUsd = evt.costUsd;
         continue;
       }
       if (evt.type === "session") {
@@ -564,6 +608,7 @@ export async function relayGeneration(entry: GenerationEntry, input: RelayGenera
           provider: metaProvider, model: metaModel, providerSession: metaProviderSession,
           sessionResumed: metaSessionResumed, requestedSession: metaRequestedSession,
           usageSource, promptTokens: realPromptTokens, completionTokens: realCompletionTokens,
+          ...(hasRealUsage && realCostUsd !== undefined ? { costUsd: realCostUsd } : {}),
         };
       }
       if (evt.type === "error") {

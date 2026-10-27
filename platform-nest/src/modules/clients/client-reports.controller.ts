@@ -145,7 +145,7 @@ export class ClientReportsController {
     if (live) return this.summaryAnswer(tenantId, live, false);
 
     const snapshot = await buildAccountSummarySnapshot({ tenantId, clientId, clientName: cl.name, period }, { now });
-    const narrative = await draftSummaryNarrative(snapshot);
+    const narrative = await draftSummaryNarrative(snapshot, { tenantId, userId: actor, surface: "other", task: "clients.account_summary" });
     const made = await insertSummaryDraft(tenantId, { clientId, actor, period, snapshot, narrative });
     if (made.created) {
       await writeActivity(tenantId, actor, "drafted", CLIENT_REPORT_ENTITY, made.id, {

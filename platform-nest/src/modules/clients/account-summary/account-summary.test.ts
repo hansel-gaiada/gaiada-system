@@ -19,6 +19,9 @@ import type { BusinessResults, ServiceCard } from "../centre/results/types";
 import type { BallRow } from "../client-ball";
 import type { ProjectHealth, TurnaroundPair } from "../client-health";
 
+/** AIP-03a: a tenantId that is not a uuid records nothing. */
+const ATTR = { tenantId: "no-company", userId: null, surface: "other" } as const;
+
 const CLIENT = "11111111-1111-4111-8111-111111111111";
 const TENANT = "99999999-9999-4999-8999-999999999999";
 const NOW = new Date("2026-10-03T09:00:00.000Z");
@@ -287,19 +290,19 @@ describe("PV7-07 · the document and the narrative", () => {
     it("keeps a model text that states no number the facts do not hold", async () => {
       const s = await build(baseCanned());
       let prompt = "";
-      const r = await draftSummaryNarrative(s, { complete: async (p) => { prompt = p; return { text: "The month went steadily for your team.", provider: "test-model" }; } });
+      const r = await draftSummaryNarrative(s, ATTR, { complete: async (p) => { prompt = p; return { text: "The month went steadily for your team.", provider: "test-model" }; } });
       expect(r).toEqual({ text: "The month went steadily for your team.", source: "ai", model: "test-model" });
       expect(prompt).toContain("Milestones completed");
       for (const banned of Object.values(PLANTED)) expect(prompt).not.toContain(banned);
     });
     it("keeps a model text whose numbers are all in the facts", async () => {
       const s = await build(baseCanned());
-      const r = await draftSummaryNarrative(s, { complete: async () => ({ text: "2 milestones were completed and 1 deliverable was delivered." }) });
+      const r = await draftSummaryNarrative(s, ATTR, { complete: async () => ({ text: "2 milestones were completed and 1 deliverable was delivered." }) });
       expect(r.source).toBe("ai");
     });
     it("a number that is not in the facts rejects the whole text: the deterministic narrative stands", async () => {
       const s = await build(baseCanned());
-      const r = await draftSummaryNarrative(s, { complete: async () => ({ text: "A record 4711 milestones were completed." }) });
+      const r = await draftSummaryNarrative(s, ATTR, { complete: async () => ({ text: "A record 4711 milestones were completed." }) });
       expect(r.source).toBe("deterministic");
       expect(r.text).toBe(deterministicSummaryNarrative(s));
       expect(r.model).toBeNull();
@@ -311,14 +314,14 @@ describe("PV7-07 · the document and the narrative", () => {
         async () => ({ text: "   " }),
         async () => ({ text: "word ".repeat(400) }),
       ]) {
-        const r = await draftSummaryNarrative(s, { complete });
+        const r = await draftSummaryNarrative(s, ATTR, { complete });
         expect(r.source).toBe("deterministic");
         expect(r.text).toBe(deterministicSummaryNarrative(s));
       }
     });
     it("an unconfigured gateway (the default call) is a gateway failure, not a thrown draft", async () => {
       const s = await build(baseCanned());
-      const r = await draftSummaryNarrative(s);
+      const r = await draftSummaryNarrative(s, ATTR);
       expect(["ai", "deterministic"]).toContain(r.source);
       expect(r.text.length).toBeGreaterThan(0);
     });

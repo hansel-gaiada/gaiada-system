@@ -77,6 +77,7 @@ let content: WebdeskContentService;
 let assist: WebdeskAssistService;
 let budget: InMemoryAssistBudget;
 let prompts: string[];
+let attributions: Array<{ tenantId: string; userId: string | null; surface: string; task?: string | null }>;
 let reply: () => Promise<{ text: string; provider?: string }>;
 
 const mkItem = (over: Partial<FakeItem> & { slug: string }): FakeItem => {
@@ -105,8 +106,9 @@ beforeEach(() => {
   assist = new WebdeskAssistService(content);
   budget = new InMemoryAssistBudget();
   prompts = [];
+  attributions = [];
   reply = async () => ({ text: JSON.stringify({ description: goodDesc }), provider: "ollama" });
-  assist.setDepsForTests({ gateway: async (p) => { prompts.push(p); return reply(); }, budget });
+  assist.setDepsForTests({ gateway: async (p, attribution) => { prompts.push(p); attributions.push(attribution); return reply(); }, budget });
   for (const k of ["WEBDESK_ASSIST_DAILY_CALLS", "WEBDESK_ASSIST_DAILY_TOKENS", "WEBDESK_ASSIST_DAILY_CALLS_AUTOMATED", "WEBDESK_ASSIST_DAILY_TOKENS_AUTOMATED"]) delete process.env[k];
 });
 
@@ -124,6 +126,8 @@ describe("golden: a staff editor asks for a meta description", () => {
       usage: { callsUsed: 1, callsLimit: 40, tokensLimit: 120_000, tokensAreEstimates: true, scope: "principal", automated: false },
     });
     expect(prompts).toHaveLength(1);
+    // AIP-03a: the gateway seam is handed who is paying: the company, the person, the surface and the call-site label (the client writes the usage row).
+    expect(attributions).toEqual([{ tenantId: T, userId: "u-staff", surface: "other", task: "webdev.assist" }]);
     expect(prompts[0]).toContain("Clinic web design"); // the title is in the prompt
     expect(zb.writes).toHaveLength(0);
     expect(onlyReads(), `WebDesk saw: ${zb.calls.map((c) => c.command).join(",")}`).toBe(true);
