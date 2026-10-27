@@ -11,7 +11,8 @@ afterAll(() => vi.useRealTimers());
 
 import fixture from "./scpStageMachine.json";
 import { scpEngineStatusOf, scpHolderOf, scpPhaseOf, scpPrimaryActionOf, SCP_STATUSES } from "./scpStageMachine";
-import { PIPE_POSTS, cyclesStore, demoPipelineMetrics, demoPipelineRead, allocStore, type PipePost } from "./demoSocialPipeline";
+import { PIPE_POSTS, cyclesStore, demoPipelineMetrics, demoPipelineRead, allocStore } from "./demoSocialPipeline";
+import { violations } from "./demoSocialPipelineViolations";
 import { socialDemo } from "./demoSocial";
 import { getDemoResponse } from "./demoFixtures";
 import { canLeadSocial } from "./rbac";
@@ -31,44 +32,6 @@ const read = (id: string, user = "u-social"): Body => {
 const byStatus = (s: string) => PIPE_POSTS.filter((p) => p.pipelineStatus === s);
 const action = (b: Body, name: string) => b.actions.find((a: { action: string }) => a.action === name);
 const names = (b: Body): string[] => b.actions.map((a: { action: string }) => a.action);
-
-// §63.1's CHECKs on `social_posts`, as a list of the rules a post breaks (empty: the server would accept the row).
-function violations(p: PipePost): string[] {
-  const out: string[] = [];
-  const bad = (rule: string, cond: boolean) => { if (!cond) out.push(rule); };
-  const s = p.pipelineStatus;
-  bad("status is one of the twelve", F.statuses.includes(s));
-  bad("cycle exists", cyclesStore.cycles.some((c) => c.id === p.cycleId));
-  bad("status_since set", !!p.statusSince);
-  bad("change_by/kind all or none", (p.changeBy === null) === (p.changeKind === null));
-  bad("change_by/return_to all or none", (p.changeBy === null) === (p.returnTo === null));
-  bad("change_by/note all or none", (p.changeBy === null) === (p.changeNote === null));
-  bad("one of the six change cases", p.changeBy === null || F.changeCases.some((c) => c.changeBy === p.changeBy && c.changeKind === p.changeKind && c.returnTo === p.returnTo));
-  bad("changes carries a change", s !== "changes" || p.changeBy !== null);
-  bad("a change only in changes or blocked-from-changes", p.changeBy === null || s === "changes" || (s === "blocked" && p.blockedFrom === "changes"));
-  bad("changed_only = copy_before present", p.changedOnly === (p.copyBefore !== null));
-  bad("changed_only needs no change or a client one", !p.changedOnly || p.changeBy === null || p.changeBy === "client");
-  const blocked = s === "blocked";
-  bad("blocked_from iff blocked", blocked === (p.blockedFrom !== null));
-  bad("block_reason iff blocked", blocked === (p.blockReason !== null));
-  bad("block_waiting_on iff blocked", blocked === (p.blockWaitingOn !== null));
-  bad("blocked_at iff blocked", blocked === (p.blockedAt !== null));
-  bad("blocked_from is blockable", p.blockedFrom === null || F.blockableStatuses.includes(p.blockedFrom));
-  bad("block_waiting_on is a known party", p.blockWaitingOn === null || ["client", "designer", "copywriter", "approver", "officer", "external"].includes(p.blockWaitingOn));
-  bad("design has a creative state and source", s !== "design" || (p.creativeState !== null && p.creativeSource !== null));
-  bad("creative request only for creatives", p.creativeRequestId === null || p.creativeSource === "creatives");
-  bad("schedule_via exactly when scheduled or live", (s === "scheduled" || s === "live") === (p.scheduleVia !== null));
-  bad("live has a url and a time", s !== "live" || (p.liveUrl !== null && /^https?:\/\//.test(p.liveUrl) && p.liveUrl.length <= 500 && p.wentLiveAt !== null));
-  bad("not live: no url or time", s === "live" || (p.liveUrl === null && p.wentLiveAt === null));
-  bad("caption length", p.caption.length <= 5000);
-  bad("hashtags without #", p.hashtags.length <= 60 && p.hashtags.every((h) => !h.includes("#")));
-  bad("raw assets", p.rawAssets.length <= 10 && p.rawAssets.every((a) => ["own", "client", "stock", "ai", "unknown"].includes(a.source)));
-  bad("ai assets carry a note", p.rawAssets.every((a) => a.source !== "ai" || !!a.aiNote));
-  bad("placement within the ten networks", p.placement.every((n) => ["instagram", "facebook", "tiktok", "linkedin", "x", "youtube", "threads", "pinterest", "bluesky", "mastodon"].includes(n)));
-  bad("format", ["feed", "carousel", "reel", "story"].includes(p.format));
-  bad("text lengths", p.pillar.length <= 60 && p.angle.length <= 500 && p.objective.length <= 200 && p.keyMessage.length <= 500 && p.cta.length <= 120 && p.onAssetText.length <= 500);
-  return out;
-}
 
 describe("the demo posts satisfy the server's CHECKs (§63.1), so the demo never shows a state the server refuses", () => {
   it("every post breaks no rule", () => {
@@ -290,11 +253,12 @@ describe("GET posts/:postId/pipeline", () => {
     expect(names(read(designChange.id))).not.toContain("send_to_proofread");
   });
 
-  it("the hand-off checks are a read, and the POST action route is the SCP-1e hook", () => {
+  it("the hand-off checks are a read, and the POST action route is the SCP-1e runner (its own test walks the scenarios)", () => {
     const planned = byStatus("planned")[0];
     expect(read(planned.id).checks.find((c: { code: string }) => c.code === "caption_missing")).toMatchObject({ ok: false, skippable: false });
+    // The body must name the step the caller saw: without `expectedStatus` the server's own answer is 400 missing_field, after Cerbos let the officer through.
     const r = socialDemo("POST", `/api/co-agency/modules/social/posts/${planned.id}/actions`, new URLSearchParams(), JSON.stringify({ action: "start_draft" }), "u-social");
-    expect(r).toMatchObject({ status: 501, json: { error: "demo_action_runner_not_built" } });
+    expect(r).toMatchObject({ status: 400, json: { error: "missing_field", field: "expectedStatus" } });
   });
 });
 

@@ -1,0 +1,110 @@
+/* SCP-1e — the Social Media post page and its drawer: header, stepper, action bar, field rows, suggestions, designs, logs and the small dialogs. Tokens only:
+   no colour, radius or shadow literal and no uppercase transform (the tokens guard), so the Social skin (SCP-K) restyles it by changing tokens and nothing
+   here. Ruled paper like the Settings page: hairlines, no boxes. The prefix is scp-post, beside the scp- classes of cycles.css (this file reuses scp-note,
+   scp-msg, scp-input, scp-field and scp-link from there). */
+
+.scp-post { display: grid; gap: 18px; min-width: 0; }
+.scp-post__head { display: grid; gap: 6px; }
+.scp-post__title { font: 700 20px/1.25 var(--font-body); color: var(--text-primary); margin: 0; overflow-wrap: anywhere; }
+.scp-post__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.scp-post__meta a { color: var(--accent-fg); }
+.scp-post__chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.scp-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; font: 700 11px var(--font-body); color: var(--text-primary);
+  border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md);
+}
+.scp-chip--phase { color: var(--erp-ink-60); font-weight: 600; }
+.scp-chip--sim { color: var(--status-warning-fg); border-style: dashed; }
+.scp-chip--changes { color: var(--status-warning-fg); }
+.scp-chip--blocked { color: var(--status-critical-fg); }
+
+/* The eight steps. A step is a word and a dot; the current one is bold and carries aria-current, a finished one says "Done" to a screen reader. */
+.scp-stepper { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 4px; }
+.scp-stepper__step {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; font: 400 12px var(--font-body); color: var(--erp-ink-60);
+  border-bottom: 2px solid var(--erp-hairline);
+}
+.scp-stepper__dot { width: 7px; height: 7px; border-radius: 50%; border: 1px solid currentColor; flex: none; }
+.scp-stepper__step--done { color: var(--status-ok-fg); border-bottom-color: var(--status-ok); }
+.scp-stepper__step--done .scp-stepper__dot { background: currentColor; }
+.scp-stepper__step--current { color: var(--text-primary); font-weight: 700; border-bottom-color: var(--accent-fg); }
+.scp-stepper__step--current .scp-stepper__dot { background: var(--accent-fg); border-color: var(--accent-fg); }
+.scp-stepper__side { font: 700 10px var(--font-body); color: var(--status-warning-fg); }
+.scp-stepper__step--blocked .scp-stepper__side { color: var(--status-critical-fg); }
+
+.scp-post__banner { border-left: 3px solid var(--status-idle); padding: 6px 10px; font: 400 13px/1.5 var(--font-body); color: var(--text-primary); margin: 0; }
+.scp-post__banner--changes { border-left-color: var(--status-warning); }
+.scp-post__banner--blocked { border-left-color: var(--status-critical); }
+.scp-post__banner--error { border-left-color: var(--status-critical); }
+.scp-post__banner--ok { border-left-color: var(--status-ok); }
+.scp-post__banner strong { font-weight: 700; }
+.scp-post__banner ul { margin: 4px 0 0; padding-left: 18px; }
+
+/* The action bar. */
+.scp-actions { display: grid; gap: 8px; }
+.scp-actions__row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.scp-actions__off { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.scp-actions__off li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.scp-actions__why { max-width: 70ch; }
+.scp-actions__title { font: 700 11px var(--font-body); letter-spacing: 0.04em; color: var(--erp-ink-60); margin: 0; }
+
+.scp-post__grid { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 22px; align-items: start; }
+.scp-post--drawer .scp-post__grid { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 900px) { .scp-post__grid { grid-template-columns: minmax(0, 1fr); } }
+.scp-post__media { display: grid; gap: 14px; min-width: 0; }
+.scp-post__empty-image { display: grid; place-items: center; min-height: 160px; border: 0.5px dashed var(--erp-hairline); border-radius: var(--radius-md); font: 400 12px var(--font-body); color: var(--erp-ink-60); padding: 12px; text-align: center; }
+
+.scp-post__section-title { font: 700 11px var(--font-body); letter-spacing: 0.08em; color: var(--erp-ink-60); margin: 0 0 8px; }
+
+/* Tabs and field rows. */
+.scp-tabs { display: flex; gap: 4px; border-bottom: 0.5px solid var(--erp-hairline); margin: 0 0 6px; }
+.scp-tabs__tab { border: 0; background: transparent; color: var(--erp-ink-60); font: 600 13px var(--font-body); padding: 6px 12px; cursor: pointer; border-bottom: 2px solid transparent; }
+.scp-tabs__tab[aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--accent-fg); }
+.scp-tabs__tab:focus-visible { outline: 2px solid var(--accent-fg); outline-offset: -2px; }
+
+.scp-rows { margin: 0; padding: 0; }
+.scp-row { display: grid; grid-template-columns: minmax(96px, 150px) minmax(0, 1fr) auto; gap: 4px 14px; padding: 9px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); align-items: start; }
+@media (max-width: 600px) { .scp-row { grid-template-columns: minmax(0, 1fr); } }
+.scp-row__label { font: 600 12px var(--font-body); color: var(--erp-ink-60); margin: 0; }
+.scp-row__value { font: 400 13px/1.5 var(--font-body); color: var(--text-primary); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; min-width: 0; }
+.scp-row__value--empty { color: var(--erp-ink-60); font-style: italic; }
+.scp-row__tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; justify-content: flex-end; }
+.scp-row__lock { font: 400 11px var(--font-body); color: var(--erp-ink-60); max-width: 26ch; text-align: right; }
+.scp-row__editor { grid-column: 1 / -1; display: grid; gap: 8px; padding: 4px 0 2px; }
+.scp-row__editor textarea.scp-input { width: 100%; min-height: 96px; resize: vertical; box-sizing: border-box; }
+.scp-row__editor input.scp-input[type="text"], .scp-row__editor input.scp-input[type="url"], .scp-row__editor input.scp-input:not([type]) { width: 100%; box-sizing: border-box; }
+.scp-row__buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.scp-checks { display: flex; flex-wrap: wrap; gap: 4px 16px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.scp-checks label { display: inline-flex; align-items: center; gap: 6px; font: 400 13px var(--font-body); color: var(--text-primary); }
+.scp-rawasset { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 6px; align-items: start; }
+@media (max-width: 600px) { .scp-rawasset { grid-template-columns: minmax(0, 1fr); } }
+
+/* Suggestions (the Copywriter's edits, shown to the Officer). */
+.scp-suggest { grid-column: 2 / -1; border-left: 3px solid var(--status-info); padding: 4px 10px; display: grid; gap: 4px; font: 400 13px/1.5 var(--font-body); }
+@media (max-width: 600px) { .scp-suggest { grid-column: 1 / -1; } }
+.scp-suggest__by { font: 600 11px var(--font-body); color: var(--erp-ink-60); }
+.scp-suggest__value { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-primary); }
+.scp-suggest__stale { font: 700 11px var(--font-body); color: var(--status-warning-fg); }
+
+/* Designs. */
+.scp-designs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.scp-design { display: grid; gap: 2px; padding: 6px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); font: 400 13px var(--font-body); color: var(--text-primary); }
+.scp-design__name { font-weight: 600; overflow-wrap: anywhere; }
+.scp-design__sub { font: 400 11px var(--font-body); color: var(--erp-ink-60); }
+
+/* Logs. */
+.scp-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
+.scp-log li { border-bottom: 0.5px solid var(--erp-hairline-soft); padding: 4px 0; overflow-wrap: anywhere; }
+.scp-log__when { font: 400 11px var(--font-body); color: var(--erp-ink-60); }
+.scp-log__diff { display: block; font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.scp-log__old { text-decoration: line-through; }
+
+/* The dialogs' fields. */
+.scp-dialog { display: grid; gap: 12px; }
+.scp-dialog textarea.scp-input { width: 100%; min-height: 84px; resize: vertical; box-sizing: border-box; }
+.scp-dialog input.scp-input, .scp-dialog select.scp-input { width: 100%; box-sizing: border-box; }
+.scp-dialog__checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font: 400 13px var(--font-body); }
+.scp-dialog__check--bad { color: var(--status-critical-fg); }
+.scp-dialog__check--ok { color: var(--status-ok-fg); }
+.scp-dialog__pins { max-width: 100%; }
+.scp-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

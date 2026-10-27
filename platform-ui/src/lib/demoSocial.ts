@@ -5,9 +5,10 @@ import { evaluateClientReviewState, type ClientReviewState, type ClientReviewSta
 import { validateBrandBook, type BrandBook } from "./socialBrandBook";
 import {
   DEMO_MEMBER_NAMES, PIPE_ENGAGEMENTS, allocStore, cyclesStore, demoAllocationRow, demoBrandAnswer, demoCycleHealth, demoCycleTable, demoDeadlineRange,
-  demoPipelineRead, demoRealDate, demoSettingsAnswer, demoWalkBack, isDemoSocialApprover, isPipelinePostId, pipelineEngagement, runDemoPipelineAction,
+  demoPipelineRead, demoRealDate, demoSettingsAnswer, demoWalkBack, isDemoSocialApprover, isPipelinePostId, pipelineEngagement,
   type DemoBrandProfile, type DemoAllocation,
 } from "./demoSocialPipeline";
+import { runDemoPipelineAction, runDemoPipelineWrite } from "./demoSocialPipelineRun";
 // SMM-14 — DEMO_MODE fixtures for the Social Media department (calendar + composer, SMM-12).
 // Mirrors demoPipeline.ts's STATEFUL in-memory-store convention exactly (module-level arrays
 // mutate across requests within one running dev-server process; resets on restart). Before this
@@ -1057,9 +1058,12 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
     if (POSTS.some((x) => x.id === pipeM[1]) && !isPipelinePostId(pipeM[1])) return err(409, "not_a_pipeline_post");
     return demoPipelineRead(pipeM[1], userId);
   }
-  // TODO(SCP-1e): the demo action runner (`runDemoPipelineAction`, demoSocialPipeline.ts) answers 501 until the post page's ticket builds it.
+  // SCP-1e (BFF §63.6.3 to §63.6.7): the writes, in the server's order of checks (`demoSocialPipelineRun.ts`): the one action route, then edit, suggestions, designs and bulk.
+  const isComposerPost = (id: string) => POSTS.some((x) => x.id === id) && !isPipelinePostId(id);
   const pipeActM = tail.match(/^posts\/([^/]+)\/actions$/);
-  if (pipeActM && m === "POST" && isPipelinePostId(pipeActM[1])) return runDemoPipelineAction(pipeActM[1], b(), userId);
+  if (pipeActM && m === "POST") return runDemoPipelineAction(pipeActM[1], b(), userId, { composer: isComposerPost(pipeActM[1]) });
+  const piped = runDemoPipelineWrite(m, tail, b(), userId, isComposerPost);
+  if (piped) return piped;
 
   // ── SCP-1a: allocation and brand book (BFF §63.4) ────────────────────────────────────────────────
   if (tail === "allocation" && m === "GET") {

@@ -118,7 +118,7 @@ const num = (v: unknown): number | null => (typeof v === "number" && Number.isFi
 const STATES: readonly string[] = ["on_track", "tight", "at_risk", "late", "done"];
 const HOLDERS: readonly string[] = ["officer", "copywriter", "approver", "designer", "client", "publisher", "external"];
 
-function asHealth(raw: unknown): Health | null {
+export function asHealth(raw: unknown): Health | null {
   if (!isObj(raw) || typeof raw.state !== "string" || !STATES.includes(raw.state)) return null;
   return {
     state: raw.state as HealthState,
