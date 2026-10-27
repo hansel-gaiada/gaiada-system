@@ -1,4 +1,5 @@
-// WSK-40 — done-when (3): the ERP signer's fixed (key, input) vectors (WSK-49b added v4: the client-editor `ce` claim).
+// WSK-40 — done-when (3): the ERP signer's fixed (key, input) vectors (WSK-49b added v4: the client-editor `ce` claim;
+// M5-W1e added v5: the contributor `xc` claim, between `ce` and `iat`).
 //
 // The SAME literal is pinned in platform-nest/src/modules/webdev/webdesk-editorial-signer.test.ts.
 // Each side proves both directions against it:
@@ -21,7 +22,8 @@ import type { CommandName } from "../src/control/command-types";
 
 // ── pinned (identical in platform-nest/src/modules/webdev/webdesk-editorial-signer.test.ts) ──────
 // v4 (WSK-49b) is pinned HERE FIRST: the ERP signer gains `ce` in ticket 49c, which must add this same literal
-// to its own test and emit `ce` between `apr` and `iat`, exactly where WebDesk's minter puts it.
+// to its own test and emit `ce` between `apr` and `iat`, exactly where WebDesk's minter puts it. v5 (M5-W1e) likewise: the ERP
+// signer derives `xc: true` from the principal's kind (its test passes `{ kind: "contributor" }` for the `xc` in `request`).
 const VECTORS = [
   {
     "name": "v1-human-create",
@@ -148,6 +150,34 @@ const VECTORS = [
     "ttl": 60,
     "jti": "8c9d0e1f-2a3b-4c4d-8e5f-60718293a4b5",
     "jws": "eyJhbGciOiJFZERTQSIsInR5cCI6IndkLWVkaXRvcmlhbCtqd3QiLCJraWQiOiJ3ZGUtdmVjLWEifQ.eyJpc3MiOiJ1cm46Z2FpYWRhOmVycDp3ZWJkZXYiLCJhdWQiOiJ1cm46Z2FpYWRhOndlYmRlc2s6Y29udHJvbCIsInN1YiI6InVzZXItMDAwNCIsInBrIjoiaHVtYW4iLCJ0ZW4iOiJnYWlhZGEiLCJzaXRlIjoiMGI2ZjFjMmUtM2Q0YS00YjVjLThkNmUtN2Y4MDkxYTJiM2M0IiwiY21kIjoiY29udGVudC51cGRhdGUiLCJjbWgiOiJmZmJmOTI4MGJkMTM4NDgyMGQwNWM0ZDNhNTU2N2U3OTI0NWE5OTQ0YzY3NzJjZGIxMDE0N2Y3OTIyZGIyNjdiIiwiY2UiOnRydWUsImlhdCI6MTc2MDAwMDc4OSwiZXhwIjoxNzYwMDAwODQ5LCJqdGkiOiI4YzlkMGUxZi0yYTNiLTRjNGQtOGU1Zi02MDcxODI5M2E0YjUifQ.cKb63ELZA-WcUOAndBbxXi6L1ubBCNSX8mEhzqmoXEfvPkF0avtW-g3w9qizv_kXt7Har-pIx53AOkbpRos0Cw"
+  },
+  {
+    "name": "v5-contributor-update",
+    "keyLabel": "wsk40-vector-key-a",
+    "kid": "wde-vec-a",
+    "x": "V6BcL1SNXUkuAZnXg_wB5CypXAe3bGCWyH6LprGhix4",
+    "args": {
+      "tenantSlug": "gaiada",
+      "siteId": "0b6f1c2e-3d4a-4b5c-8d6e-7f8091a2b3c4",
+      "itemId": "6a7b8c9d-0e1f-4a2b-8c3d-4e5f60718293",
+      "baseVersion": 4,
+      "fields": {
+        "h1": "Client-edited headline"
+      }
+    },
+    "request": {
+      "sub": "user-0005",
+      "pk": "human",
+      "ten": "gaiada",
+      "site": "0b6f1c2e-3d4a-4b5c-8d6e-7f8091a2b3c4",
+      "cmd": "content.update",
+      "cmh": "ffbf9280bd1384820d05c4d3a5567e79245a9944c6772cdb10147f7922db267b",
+      "xc": true
+    },
+    "iat": 1760001122,
+    "ttl": 60,
+    "jti": "9d0e1f2a-3b4c-4d5e-9f60-718293a4b5c6",
+    "jws": "eyJhbGciOiJFZERTQSIsInR5cCI6IndkLWVkaXRvcmlhbCtqd3QiLCJraWQiOiJ3ZGUtdmVjLWEifQ.eyJpc3MiOiJ1cm46Z2FpYWRhOmVycDp3ZWJkZXYiLCJhdWQiOiJ1cm46Z2FpYWRhOndlYmRlc2s6Y29udHJvbCIsInN1YiI6InVzZXItMDAwNSIsInBrIjoiaHVtYW4iLCJ0ZW4iOiJnYWlhZGEiLCJzaXRlIjoiMGI2ZjFjMmUtM2Q0YS00YjVjLThkNmUtN2Y4MDkxYTJiM2M0IiwiY21kIjoiY29udGVudC51cGRhdGUiLCJjbWgiOiJmZmJmOTI4MGJkMTM4NDgyMGQwNWM0ZDNhNTU2N2U3OTI0NWE5OTQ0YzY3NzJjZGIxMDE0N2Y3OTIyZGIyNjdiIiwieGMiOnRydWUsImlhdCI6MTc2MDAwMTEyMiwiZXhwIjoxNzYwMDAxMTgyLCJqdGkiOiI5ZDBlMWYyYS0zYjRjLTRkNWUtOWY2MC03MTgyOTNhNGI1YzYifQ.2tfk6aMXcL3jXhzorsuyhI3m1tFVcbVuz0GnopbTjkOjJ3KdQn8Et-Z_H9wh7ZA2h-m9wl5Q3hiVTqZKYMOQCA"
   }
 ] as const;
 // ─────────────────────────────────────────────────────────────────────────────────────────────────

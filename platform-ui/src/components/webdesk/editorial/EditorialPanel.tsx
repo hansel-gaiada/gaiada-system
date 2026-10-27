@@ -6,7 +6,7 @@ import {
 } from "@/lib/webdeskEditorialActions";
 import { authorLabel, type ItemEditorial, type WdResult } from "@/lib/webdeskContentModel";
 import {
-  doneWords, editorialActionsFor, editorialRefusalCopy, eventWords, lastEvent, reviewStateInfo,
+  doneWords, editorialActionsFor, forContributor, editorialRefusalCopy, eventWords, lastEvent, reviewStateInfo,
   type EditorialCommand, type EditorialInitial, type EditorialState,
 } from "@/lib/webdeskEditorialModel";
 import { formatDateTime } from "@/lib/format";
@@ -32,7 +32,7 @@ const dayOf = (iso: string | null | undefined): string => (iso ? iso.slice(0, 10
 const isoOfDay = (day: string): string | null => (day === "" ? null : `${day}T00:00:00.000Z`);
 
 export function EditorialPanel({
-  scope, itemId, version, dirty, blocked, initial, authors, refreshKey,
+  scope, itemId, version, dirty, blocked, initial, authors, refreshKey, contributorMode = false,
 }: {
   scope: EditorialScope;
   itemId: string;
@@ -46,6 +46,8 @@ export function EditorialPanel({
   authors: Record<string, string>;
   /** Changes whenever the editor re-read the item (a refresh, or a save): the panel re-reads with it. */
   refreshKey: string;
+  /** M5-W1f: the freelance writer's shell. Approve and assign are never offered (their routes are closed to a contributor); the rest still comes from `allowed`. */
+  contributorMode?: boolean;
 }) {
   const [st, setSt] = useState<EditorialInitial>(initial);
   const [busy, setBusy] = useState<EditorialCommand | "refresh" | null>(null);
@@ -78,7 +80,7 @@ export function EditorialPanel({
   }, [refreshKey, reload]);
 
   const editorial = st.editorial;
-  const set = editorialActionsFor(editorial, st.allowed);
+  const set = contributorMode ? forContributor(editorialActionsFor(editorial, st.allowed)) : editorialActionsFor(editorial, st.allowed);
   const frozen = blocked !== null || stale !== null;
   const frozenWhy = blocked ?? (stale !== null ? "Disabled until the review state can be read again." : null);
   const working = busy !== null;

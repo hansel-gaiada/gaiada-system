@@ -93,8 +93,15 @@ describe("proxy — the pre-existing session gate still holds", () => {
   });
 
   it("public routes stay reachable without a session", () => {
-    for (const p of ["/login", "/auth/login", "/step-up", "/print/x", "/invite/abc"]) {
+    for (const p of ["/login", "/auth/login", "/step-up", "/print/x", "/invite/abc", "/contributor-invite/ctr1.abc"]) {
       expect(location(proxy(req(p))), p).toBe("");
+    }
+  });
+
+  it("M5-W1f: only the contributor INVITE page is public; the contributor shell stays behind the session check", () => {
+    // The segment is matched whole, so a path that merely starts with the same letters, or the shell itself, never becomes public.
+    for (const p of ["/contributor", "/contributor/items/t/s/c/x", "/contributor-invitefoo/x", "/contributors"]) {
+      expect(location(proxy(req(p))), p).toContain("/login");
     }
   });
 });

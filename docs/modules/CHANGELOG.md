@@ -11,7 +11,7 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
-### platform-nest `0.176.0` + platform-ui `0.202.0` - SCP-1 wave 1: the Social Media content pipeline's data, permissions and stage machine, cycles and schedule health, allocation and brand book, and two self-promotion guards (FRONTEND-BFF-CONTRACT §63, PERMISSION-CONTRACT §53) (2026-10-27) - PROTOTYPED
+### platform-nest `0.177.0` + platform-ui `0.203.0` - SCP-1 wave 1: the Social Media content pipeline's data, permissions and stage machine, cycles and schedule health, allocation and brand book, and two self-promotion guards (FRONTEND-BFF-CONTRACT §63, PERMISSION-CONTRACT §53) (2026-10-27) - PROTOTYPED
 
 - **The data (SCP-1b).** Migration `202610271000_social_pipeline.sql`:
   - the allocation on `social_engagements` and the brand book on `social_brand_profiles`;
@@ -37,6 +37,28 @@ local stack). None of these mean "production-done".
 - **Guards (SCP-1q, SCP-1r; owner SCP-Q23, plan SCP-D7).** Nobody edits a position they hold, or renames, re-types, moves or deletes a unit they lead, superadmin included. The positions list gains `heldByMe`.
 - **Decisions recorded:** SCP-D6, SCP-D7, SCP-D8 (plan §2).
 - **Proof.** Every car green on its own branch's CI run, and the train on its combined run: the schema suite, the Cerbos matrix, the pure machine over every fixture scenario, the route suites against real Postgres and Cerbos, the health golden table and the UI suites.
+
+### platform-nest `0.176.0` + webdesk `0.30.0` + platform-ui `0.202.0` - M5-W1e and M5-W1f: WebDesk holds a contributor to its own command list, and the freelance writer gets their own screens (WSK-D84) (2026-10-27) - PROTOTYPED
+
+- **W1e (platform-nest signer, WebDesk verifier).**
+  - The ERP signer sets the editorial assertion's `xc: true` ONLY from the assembled principal's `users.kind = 'contributor'`. `sign(input, principal)` takes no `xc` from input, and a contributor with `ce` throws.
+  - WebDesk refuses a non-boolean `xc` and `xc` together with `ce` (401 `editorial-assertion-claims`).
+  - A contributor may run only the 11 `CONTRIBUTOR_COMMANDS` (draft, edit, restore a version, preview links, submit, withdraw, comment, request changes, SEO sign-off). Everything else is 403 `contributor-command-not-allowed` (problem+json), enforced in the guard and again in each service.
+  - Media stays refused until M5-W1q.
+  - Tests: 20 real-Postgres enforcement tests and 41 principal tests in webdesk-api; editorial vector v5 byte-matched on both sides. CI 40436692898 green on the branch.
+  - Deploy order: an older WebDesk would ignore `xc`, but no real contributor can sign in before M5-W1g, so there is no exposure.
+- **W1f (platform-ui).**
+  - `Me.kind`, `isContributor(me)`; `isStaff` is false for a contributor.
+  - A contributor, or a session `/api/me` refuses with the fence's `contributor_route_forbidden`, is sent to the new `(contributor)` shell. Staff and client routing is unchanged (tests).
+  - The shell has My assignments and the editor in contributor mode: no publish, schedule, delete, writing assistant, version history or media picker. The review buttons come from `allowed`, with approve and assign closed.
+  - It shows "Your two-step sign-in isn't set up yet" for an `assurance_high_required` refusal, never an empty list.
+  - New public accept page `/contributor-invite/<token>`, matched as a whole path segment (`/contributor` stays behind the session); the token travels in the request body only.
+  - Staff get a Freelance contributors block on the writers' people page: invite with a one-time link shown once, a list, End.
+  - Tests: platform-ui 745 files, CI 40437702841 green on the branch.
+  - Known gaps: other people's names show as ids for a contributor (`/members` is not open to them); there is no "my items" filter.
+- **W1g:** new runbook `infra/runbooks/contributor-logins.md`.
+  - It records a read-only audit of the live realm's 10 clients: no group restriction anywhere; `admin-cli` direct grants are on but its tokens fail the platform's `aud=gaiada-platform` check; no groups exist.
+  - It plans the `contributors` group and points to `enable-mfa.md` for the `amr` claim, which is the after-staging real-MFA step. Nothing applied.
 
 ### platform-nest `0.175.0` + platform-ui `0.201.0` - agentic-native close-out T2 and T4: one module list for the audits, and a reader-degrade ratchet over every page (2026-10-27) - PROTOTYPED
 

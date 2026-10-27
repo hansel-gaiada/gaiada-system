@@ -22,6 +22,7 @@ import { DbService } from "../../db/db.service";
 import { computeCommandHash } from "../auth/ws4-assertion";
 import type { EditorialPrincipal } from "../auth/editorial-principal";
 import { assertClientMayRun } from "../auth/client-editor";
+import { assertContributorMayRun } from "../auth/contributor-editor";
 import { CommandEnvelope } from "../command-envelope";
 import type { CommandName } from "../command-types";
 import { hashPreviewToken, mintPreviewToken } from "../../delivery/preview-token";
@@ -102,6 +103,7 @@ export class PreviewTokenCommandsService {
     const command: CommandName = "content.previewToken";
     // WSK-49b: a client editor may not run every command (CLIENT_EDITOR_COMMANDS); the guard checks too.
     assertClientMayRun(ctx.principal, command);
+    assertContributorMayRun(ctx.principal, command);
     // Generated BEFORE the envelope: the audit row (its first statement) names the tokenId. The token
     // itself is never given to the audit row, the idempotency record or any log.
     const tokenId = randomUUID();
@@ -168,6 +170,7 @@ export class PreviewTokenCommandsService {
     const command: CommandName = "content.previewTokenRevoke";
     // WSK-49b: a client editor may not run every command (CLIENT_EDITOR_COMMANDS); the guard checks too.
     assertClientMayRun(ctx.principal, command);
+    assertContributorMayRun(ctx.principal, command);
     return this.envelope.run<RevokedPreviewToken>({
       command,
       scope: { kind: "tenant", tenantId: ctx.tenant.id },

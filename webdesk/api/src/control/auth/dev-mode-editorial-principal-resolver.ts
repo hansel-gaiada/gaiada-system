@@ -6,7 +6,8 @@
 // Header `x-webdesk-editorial-principal`, one of:
 //   - a bare subject:   "user-123"                     -> { sub: "user-123", pk: "human" }
 //   - a JSON object:    {"sub":"bot-1","pk":"agent","agt":"webdev-writer","req":"user-9","apr":"…"}
-//     (WSK-49b: plus an optional boolean "ce", the client-editor marker the signed assertion carries)
+//     (WSK-49b: plus an optional boolean "ce", the client-editor marker the signed assertion carries;
+//      M5-W1e: and an optional boolean "xc", the contributor marker, never together with "ce")
 // Missing or unusable -> 401 editorial-assertion-missing / -malformed, the same slugs the real
 // verifier uses, so a test written against this stub asserts the real contract's refusal shapes.
 import { Injectable } from "@nestjs/common";
@@ -69,6 +70,14 @@ export class DevModeEditorialPrincipalResolver implements EditorialPrincipalReso
     if (parsed.ce !== undefined) {
       if (typeof parsed.ce !== "boolean") throw malformed("ce must be a boolean when present");
       if (parsed.ce) principal.clientEditor = true;
+    }
+    // M5-W1e: and the optional boolean `xc` (contributor). Present together with `ce` is refused, as the real verifier does.
+    if (parsed.xc !== undefined) {
+      if (typeof parsed.xc !== "boolean") throw malformed("xc must be a boolean when present");
+      if (parsed.ce !== undefined) {
+        throw new ControlProblem(401, "editorial-assertion-claims", "Editorial assertion claims invalid", "xc and ce are mutually exclusive: a contributor is never a client editor");
+      }
+      if (parsed.xc) principal.contributor = true;
     }
     return principal;
   }
