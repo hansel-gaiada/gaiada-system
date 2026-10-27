@@ -313,7 +313,24 @@ describe.skipIf(!live)("M5-W1a live — the existing tiers (design §2.4) and th
     for (const p of [writer(), translator(), seo(), editor()]) {
       expect(await allow(p, asset, "read"), p.roles[0].role).toBe(true);
       expect(await allow(p, { ...asset, siteId: S2 }, "read"), `${p.roles[0].role} site 2`).toBe(false);
-      for (const a of ["upload", "update", "delete"]) expect(await allow(p, asset, a), `${p.roles[0].role} ${a}`).toBe(false);
+      for (const a of ["upload", "update", "delete", "review"]) expect(await allow(p, asset, a), `${p.roles[0].role} ${a}`).toBe(false);
     }
+  });
+
+  it("media review (M5-W1q): the scoped editor reviews another's upload on ITS site only; never its own, an unknown uploader's, or another site's; no other editorial role reviews", async () => {
+    const queued = (over: Partial<Resource> = {}): Resource => ({ kind: "webdesk_media_asset", tenantId: T1, module: "webdev", id: "a1", siteId: S1, creatorId: "u-contrib", ...over });
+    expect(await allow(editor(), queued(), "review"), "editor, another's upload").toBe(true);
+    expect(await allow(editor(), queued({ siteId: S2 }), "review"), "editor, another site").toBe(false);
+    expect(await allow(editor(), queued({ creatorId: EDITOR }), "review"), "editor, own upload").toBe(false);
+    expect(await allow(editor(), queued({ creatorId: "" }), "review"), "editor, unknown uploader").toBe(false);
+    expect(await allow(editor(), queued({ siteId: "" }), "review"), "editor, no site").toBe(false);
+    expect(await allow(editor(), queued({ tenantId: T2 }), "review"), "editor, another company").toBe(false);
+    for (const p of [writer(), translator(), seo()]) expect(await allow(p, queued(), "review"), `${p.roles[0].role} review`).toBe(false);
+    expect(await allow(editor(OTHER, { kind: "contributor" }), queued(), "review"), "a contributor editor").toBe(false);
+    expect(await allow(editor(OTHER, { kind: "automation" }), queued(), "review"), "an automation editor").toBe(false);
+    expect(await allow(editor(OTHER, { kind: "bot" }), queued(), "review"), "a bot editor").toBe(false);
+    // the platform_admin wildcard is held to the same four-eyes rule
+    expect(await allow(platformAdmin, queued(), "review"), "platform_admin, another's upload").toBe(true);
+    expect(await allow(platformAdmin, queued({ creatorId: platformAdmin.userId! }), "review"), "platform_admin, own upload").toBe(false);
   });
 });

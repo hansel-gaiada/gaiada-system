@@ -706,13 +706,14 @@ export class ContentReadsService {
   // ==============================================================================================
   // WSK-43a: the media LIBRARY read. Filters: `mime` (exact, or an `image/*` type prefix), `q` (a substring of
   // the title, the original filename or any tag, case-insensitive), `tag` (exactly one normalised tag),
-  // `includeDeleted` (default false: soft-deleted and purged assets are hidden, as the library hides them).
+  // `includeDeleted` (default false: soft-deleted and purged assets are hidden, as the library hides them),
+  // `reviewState` (M5-W1q: accepted by default; quarantined = the review queue; rejected; all).
   // The cursor is unchanged: (created_at, id) DESC, immutable columns, so an edit, a delete or a purge
   // between two pages can never move a row across a page edge.
   async listMedia(
     tenantSlug: string,
     siteId: string,
-    query: { mime?: string; q?: string; tag?: string; includeDeleted?: boolean; cursor?: string; limit: number },
+    query: { assetId?: string; reviewState?: "accepted" | "quarantined" | "rejected" | "all"; mime?: string; q?: string; tag?: string; includeDeleted?: boolean; cursor?: string; limit: number },
   ) {
     const { tenant } = await this.commands.resolveTenantSite(tenantSlug, siteId);
     const after = query.cursor ? decodeCursor(query.cursor, ["ts", "uuid"]) : null;
@@ -724,6 +725,10 @@ export class ContentReadsService {
       };
       const where = [`ma.site_id = $1`];
       if (!query.includeDeleted) where.push(`ma.deleted_at IS NULL`);
+      // M5-W1q (WSK-D84): the library is the ACCEPTED assets unless the caller asks for the review queue. A quarantined or
+      // rejected asset never appears in the picker an editor embeds from. (`rejected` rows are soft-deleted, so they also need includeDeleted.)
+      if ((query.reviewState ?? "accepted") !== "all") where.push(`ma.review_state = ${p(query.reviewState ?? "accepted")}`);
+      if (query.assetId) where.push(`ma.id = ${p(query.assetId)}::uuid`); // M5-W1q: the ERP's review route reads ONE asset's real uploader
       if (query.mime) {
         // `image/png` is exact; `image/*` is a type prefix (validated by the controller).
         where.push(

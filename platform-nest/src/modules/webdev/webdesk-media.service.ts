@@ -12,6 +12,16 @@
 //   media.uploadToken  POST   …/media/upload-token          MEDIUM, editorial assertion, Idempotency-Key
 //   media.update       PATCH  …/media/:assetId              MEDIUM, editorial assertion, Idempotency-Key
 //   media.delete       DELETE …/media/:assetId              MEDIUM, editorial assertion, Idempotency-Key
+//   media.list (queue) GET    …/media/quarantine           read (M5-W1q: the review queue, with a per-asset `allowed.review`)
+//   media.review       POST   …/media/:assetId/review      MEDIUM, editorial assertion, Idempotency-Key (M5-W1q)
+//
+// ── THE CONTRIBUTOR UPLOAD QUARANTINE (M5-W1q, owner ruling WSK-D84) ─────────────────────────────
+// A freelance writer (`users.kind = contributor`) may mint an upload token (Cerbos `webdesk_media_asset:upload`, an ALLOW only for
+// that kind), and the token WebDesk mints for a contributor's signed assertion (`xc`) QUARANTINES what it uploads: the asset is
+// not served by any route until a staff editor accepts it. The review desk is the two routes above. `review` is a Cerbos action
+// with a structural DENY on the uploader (nobody reviews their own upload), so its resource MUST carry the asset's REAL uploader
+// (`creatorId`), read from WebDesk's own row, never from the request: `review()` loads the asset (media.list, filtered by id) before
+// it asks Cerbos, and an unknown uploader is a denial. The queue answers `allowed.review` per asset from the same question.
 //
 // Every method takes a `ContentGate`, which only `authorizeContent()` (Cerbos, as the CALLER, kind
 // `webdesk_media_asset`, module `webdev`) can produce; the controller's first statement is that call, so
@@ -44,7 +54,7 @@
 import { BadGatewayException, Logger } from "@nestjs/common";
 import { config } from "../../config";
 import { authorize } from "../../core/http";
-import { checkActions } from "../../rbac/cerbos";
+import { checkActions, checkMany } from "../../rbac/cerbos";
 import {
   UUID_RE,
   WebdeskProblem,
@@ -64,6 +74,14 @@ const MEDIA_PATH = "/control/v1/tenants/:tenantSlug/sites/:siteId/media";
 const LIST_QUERY = ["mime", "q", "tag", "includeDeleted", "cursor", "limit"] as const;
 const MINT_KEYS = ["bucket", "maxBytes", "mime"] as const;
 const UPDATE_KEYS = ["title", "alt", "tags"] as const;
+const QUEUE_QUERY = ["cursor", "limit"] as const;
+const REVIEW_KEYS = ["decision"] as const;
+/**
+ * The uploader the queue's gate probes `review` with: "somebody other than the caller". The queue lists other people's uploads,
+ * so the question is "may this caller review an upload that is not their own", and the policy's self-review and unknown-uploader
+ * DENYs need a real, different id to answer it. Not a user id (users are uuids); it is never sent anywhere or stored.
+ */
+const OTHER_UPLOADER = "queue-probe:another-uploader";
 /** Exactly what Zone B's `mintUploadToken()` produces: 32 random bytes as unpadded base64url. */
 const UPLOAD_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 
@@ -239,6 +257,87 @@ export class WebdeskMediaService {
       status: res.status,
       body: { uploadUrl: `${publicBase}${uploadPath}`, expiresAt: r.expiresAt, maxBytes: r.maxBytes, allowedMimes: r.allowedMimes },
     };
+  }
+
+  // ── the review desk (M5-W1q) ─────────────────────────────────────────────────────────────────
+
+  /** The Cerbos resource of a `review` question: the site from the wall, and the uploader from WebDesk's own row. */
+  private reviewResource(gate: ContentGate, siteId: string, uploader: string | null) {
+    return { kind: "webdesk_media_asset" as const, tenantId: gate.tenantId, module: "webdev", siteId, creatorId: uploader ?? "" };
+  }
+
+  /**
+   * `GET …/media/quarantine[?cursor&limit]` → `{assets: [... + allowed: {review}], page}`: the contributor uploads waiting for a staff
+   * decision on this site, newest first. The gate is `webdesk_media_asset:read` (phase 1); this method then asks the question the
+   * list stands for, `review` on an upload that is not the caller's, and a caller who may not (a contributor, a writer, a client, a
+   * bot) is a 403 BEFORE anything is read, so nobody learns that an upload exists or who made it. `reviewState` is forced here,
+   * never taken from the query. Each asset carries `allowed.review` (one `checkMany`, in chunks of 50): the UI shows Accept and
+   * Reject from it. `null` means Cerbos could not answer (unknown, never "denied"); the 403 on the action is then the fallback.
+   */
+  async quarantine(gate: ContentGate, site: SiteRef, rawQuery: unknown): Promise<ZoneBResult> {
+    gate.require("webdesk_media_asset", "read");
+    const editable = await gate.resolveSite(this.zoneB, site);
+    await authorize(gate.principal, this.reviewResource(gate, editable.site.siteId, OTHER_UPLOADER), "review"); // PHASE 2
+    const query = strictQuery(rawQuery, QUEUE_QUERY);
+    const res = await this.zoneB.read({
+      command: "media.list",
+      path: MEDIA_PATH,
+      params: { tenantSlug: site.tenantSlug, siteId: site.siteId },
+      query: { ...query, reviewState: "quarantined" },
+    });
+    if (!isPlainObject(res.body) || !Array.isArray(res.body.assets)) return res;
+    const assets = res.body.assets.filter(isPlainObject);
+    let flags: boolean[] | null = null;
+    try {
+      flags = await checkMany(
+        gate.principal,
+        assets.map((a) => this.reviewResource(gate, editable.site.siteId, typeof a.createdBy === "string" ? a.createdBy : null)),
+        "review",
+      );
+    } catch (err) {
+      logger.warn(`media review capabilities unavailable: ${(err as Error).message}`);
+    }
+    return { status: res.status, body: { ...res.body, assets: assets.map((a, i) => ({ ...a, allowed: { review: flags ? flags[i] === true : null } })) } };
+  }
+
+  /**
+   * `POST …/media/:assetId/review` body `{decision: "accept" | "reject"}` → 200 `{asset, decision, alreadyDecided}`. Zone B's problems pass
+   * through untouched (409 `media-not-quarantined`, 409 `media-asset-deleted`, 403 `media-self-review`, 404 `media-asset-not-found`).
+   * Order: (1) the caller may review SOMEONE's upload at all (403 before anything is validated or read); (2) the body and the id are
+   * validated; (3) the asset's real uploader is read from WebDesk and Cerbos decides on it (the uploader is refused here, and again by
+   * WebDesk); (4) the signed command is sent. No asset in the quarantine is one 404.
+   */
+  async review(gate: ContentGate, site: SiteRef, assetId: string, rawBody: unknown, idempotencyKey: string): Promise<ZoneBResult> {
+    gate.require("webdesk_media_asset", "read");
+    const editable = await gate.resolveSite(this.zoneB, site);
+    const siteId = editable.site.siteId;
+    await authorize(gate.principal, this.reviewResource(gate, siteId, OTHER_UPLOADER), "review"); // (1) PHASE 2, before the body is validated
+    const b = strictBody(rawBody, REVIEW_KEYS);
+    if (b.decision !== "accept" && b.decision !== "reject") throw invalidRequest('decision must be "accept" or "reject"');
+    if (!UUID_RE.test(assetId)) throw mediaAssetNotFound();
+    // (3) the REAL uploader, from WebDesk's own row (never the request), then the decision with it.
+    const found = await this.zoneB.read({
+      command: "media.list",
+      path: MEDIA_PATH,
+      params: { tenantSlug: site.tenantSlug, siteId: site.siteId },
+      query: { assetId, reviewState: "all", includeDeleted: "true", limit: "1" },
+    });
+    const row = isPlainObject(found.body) && Array.isArray(found.body.assets) ? found.body.assets.find(isPlainObject) : undefined;
+    if (!row || row.assetId !== assetId.toLowerCase()) throw mediaAssetNotFound();
+    await authorize(gate.principal, this.reviewResource(gate, siteId, typeof row.createdBy === "string" ? row.createdBy : null), "review");
+    return this.zoneB.write(gate.principal, gate.tenantId, {
+      command: "media.review",
+      verb: "webdesk.media.review",
+      method: "POST",
+      path: `${MEDIA_PATH}/:assetId/review`,
+      params: { tenantSlug: site.tenantSlug, siteId: site.siteId, assetId },
+      body: b,
+      idempotencyKey,
+      editorial: { tenantSlug: site.tenantSlug, siteId: site.siteId },
+      ...gate.egressClient(),
+      entity: { type: "webdesk_media_asset", id: assetId },
+      ledger: { tenantSlug: site.tenantSlug, siteId: site.siteId, assetId, decision: b.decision },
+    });
   }
 
   /** `PATCH …/media/:assetId` body `{title?, alt?, tags?}` (at least one) → 200 `{asset}`. Zone B validates the values. */

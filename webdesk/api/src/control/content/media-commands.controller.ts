@@ -3,8 +3,9 @@
 //   POST   /control/v1/tenants/:tenantSlug/sites/:siteId/media/upload-token    media.uploadToken
 //   PATCH  /control/v1/tenants/:tenantSlug/sites/:siteId/media/:assetId        media.update
 //   DELETE /control/v1/tenants/:tenantSlug/sites/:siteId/media/:assetId        media.delete
+//   POST   /control/v1/tenants/:tenantSlug/sites/:siteId/media/:assetId/review media.review (M5-W1q, WSK-D84: staff only)
 //
-// All three are MEDIUM / webdesk:operate editorial commands, gated exactly like the content writes (WSK-41):
+// All four are MEDIUM / webdesk:operate editorial commands, gated exactly like the content writes (WSK-41):
 // ControlAuthGuard (L1 mTLS + L2 token) -> CommandAuthorizationGuard (L3 scope) -> EditorialAssertionGuard
 // (L2e) -> the handler, which validates (shape here, state in the service). Guards run before the handler,
 // so a refused caller is refused whatever its body; validation can never pre-empt authorisation.
@@ -27,6 +28,7 @@ import {
   MediaCommandsService,
   normaliseTags,
   type MediaCommandContext,
+  type MediaReviewDecision,
   type UpdateMediaInput,
 } from "./media-commands.service";
 
@@ -34,6 +36,7 @@ import {
 const RESERVED_BODY_KEYS = ["tenantSlug", "siteId", "assetId"] as const;
 const MINT_KEYS = ["bucket", "maxBytes", "mime"] as const;
 const UPDATE_KEYS = ["title", "alt", "tags"] as const;
+const REVIEW_KEYS = ["decision"] as const;
 
 function body(raw: unknown, allowed: readonly string[], optional: boolean): Record<string, unknown> {
   const b: unknown = optional && (raw === undefined || raw === null) ? {} : raw;
@@ -76,6 +79,12 @@ function updateInput(raw: unknown): UpdateMediaInput {
   }
   if (Object.keys(out).length === 0) throw problems.invalidRequest(`the body must carry at least one of: ${UPDATE_KEYS.join(", ")}`);
   return out;
+}
+
+function reviewDecision(raw: unknown): MediaReviewDecision {
+  const b = body(raw, REVIEW_KEYS, false);
+  if (b.decision !== "accept" && b.decision !== "reject") throw problems.invalidRequest('decision must be "accept" or "reject"');
+  return b.decision;
 }
 
 function idempotencyKey(raw: string | undefined): string {
@@ -127,6 +136,23 @@ export class MediaCommandsController {
     const input = updateInput(raw);
     const ctx = await this.context(req, tenantSlug, siteId, idem);
     return this.media.update(ctx, assetId, input);
+  }
+
+  /** M5-W1q (WSK-D84): a staff editor accepts or rejects a contributor's quarantined upload. */
+  @Post(":assetId/review")
+  @HttpCode(200)
+  @Command("media.review")
+  async review(
+    @Req() req: EditorialRequest,
+    @Param("tenantSlug") tenantSlug: string,
+    @Param("siteId") siteId: string,
+    @Param("assetId") assetId: string,
+    @Headers("idempotency-key") idem: string | undefined,
+    @Body() raw: unknown,
+  ) {
+    const decision = reviewDecision(raw);
+    const ctx = await this.context(req, tenantSlug, siteId, idem);
+    return this.media.review(ctx, assetId, decision);
   }
 
   @Delete(":assetId")

@@ -70,6 +70,8 @@ const EXPECTED: Record<CommandName, Omit<CommandMeta, "command">> = {
   "media.update": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "media.delete": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "media.usage": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // M5-W1q (WSK-D84): accepting or rejecting a contributor's quarantined upload: a staff write, MEDIUM / operate.
+  "media.review": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   // M5-L1/L2 — the ERP reads one submission back after a form.received fact: read / webdesk:read.
   "forms.submission.get": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   // M5-L1d — a site's form definitions: forms.define is MEDIUM/operate (schema.apply's family, no WS4), the reads are read.
@@ -124,7 +126,7 @@ describe("control command registry — the impact-class map (design §07)", () =
     );
   });
 
-  it("EDITORIAL_COMMANDS is exactly the seven content.* writes (design §3.1), the two WSK-46 preview-token commands, the three WSK-43a media writes and the nine M5-W2b editorial.* writes", () => {
+  it("EDITORIAL_COMMANDS is exactly the seven content.* writes (design §3.1), the two WSK-46 preview-token commands, the three WSK-43a media writes, the M5-W1q media.review and the nine M5-W2b editorial.* writes", () => {
     expect([...EDITORIAL_COMMANDS].sort()).toEqual(
       [
         "content.create",
@@ -139,6 +141,7 @@ describe("control command registry — the impact-class map (design §07)", () =
         "media.uploadToken",
         "media.update",
         "media.delete",
+        "media.review",
         "editorial.submit",
         "editorial.withdraw",
         "editorial.requestChanges",

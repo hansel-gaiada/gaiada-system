@@ -107,13 +107,14 @@ describe("WSK-49b the principal exposes clientEditor", () => {
 describe("WSK-49b the commands a client principal may run", () => {
   const refused = [...EDITORIAL_COMMANDS].filter((c) => !CLIENT_EDITOR_COMMANDS.has(c)).sort();
 
-  it("the refused editorial commands are exactly schedule, unpublish, delete (content), delete (media) and the nine M5-W2b editorial.* review writes", () => {
+  it("the refused editorial commands are exactly schedule, unpublish, delete (content), delete (media), the M5-W1q media.review and the nine M5-W2b editorial.* review writes", () => {
     expect(refused).toEqual(
       [
         "content.delete",
         "content.schedule",
         "content.unpublish",
         "media.delete",
+        "media.review",
         "editorial.submit",
         "editorial.withdraw",
         "editorial.requestChanges",

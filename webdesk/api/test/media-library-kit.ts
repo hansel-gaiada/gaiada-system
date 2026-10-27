@@ -163,6 +163,10 @@ export interface SeedAssetOpts {
   /** Already soft-deleted: deleted_at / purge_after as SQL interval expressions relative to now(), e.g. { deletedAgo: "3 days", purgeIn: "-1 day" }. */
   deleted?: { deletedAgo: string; purgeAfterAgo: string };
   purged?: boolean;
+  /** M5-W1q: the asset's review state (default accepted). A rejected row gets a reviewer and instant, as the review command writes. */
+  reviewState?: "accepted" | "quarantined" | "rejected";
+  /** Who uploaded it (created_by), e.g. the contributor's principal sub. */
+  createdBy?: string | null;
   /** The object key; defaults to a fresh library-shaped one. */
   objectKey?: string;
 }
@@ -175,12 +179,13 @@ export async function seedAsset(fx: ContentFixture, o: SeedAssetOpts = {}): Prom
   await asTenant(fx.tenantId, async (db) => {
     await db.query(
       `INSERT INTO media_assets (id, tenant_id, site_id, bucket_key, mime, size_bytes, scan_status, title, alt, tags, original_filename, created_at,
-                                 deleted_at, purge_after, purged_at)
+                                 deleted_at, purge_after, purged_at, review_state, created_by, reviewed_by, reviewed_at)
        VALUES ($1, $2, $3, $4, $5, $6, 'clean', $7, $8::jsonb, $9::text[], $10, COALESCE($11::timestamptz, now()),
                ${o.deleted ? `now() - interval '${o.deleted.deletedAgo}'` : "NULL"},
                ${o.deleted ? `now() - interval '${o.deleted.purgeAfterAgo}'` : "NULL"},
-               ${o.purged ? "now()" : "NULL"})`,
-      [id, fx.tenantId, fx.siteId, bucketKey, o.mime ?? "image/png", o.sizeBytes ?? 100, o.title ?? null, JSON.stringify(o.alt ?? {}), o.tags ?? [], o.originalFilename ?? null, o.createdAt ?? null],
+               ${o.purged ? "now()" : "NULL"}, $12, $13,
+               ${o.reviewState === "rejected" ? "'seed-staff'" : "NULL"}, ${o.reviewState === "rejected" ? "now()" : "NULL"})`,
+      [id, fx.tenantId, fx.siteId, bucketKey, o.mime ?? "image/png", o.sizeBytes ?? 100, o.title ?? null, JSON.stringify(o.alt ?? {}), o.tags ?? [], o.originalFilename ?? null, o.createdAt ?? null, o.reviewState ?? "accepted", o.createdBy ?? null],
     );
   });
   return { id, objectKey, bucketKey };

@@ -46,6 +46,11 @@
 //      WEBDESK_UPLOAD_CORS_ORIGINS): the upload comes from the ERP's origin, not the tenant site's. It depends on
 //      the request's Origin alone, never on the token, so it is no oracle.
 //
+// QUARANTINE (M5-W1q, WSK-D84). A token minted for a contributor principal carries `quarantine = true` (set by media.uploadToken
+// from the signed `xc` claim, never from this request). The asset it uploads is created `review_state = 'quarantined'`: it has
+// passed the same scan as every upload, but no route serves it until a staff editor accepts it (media.review). The scan is NOT
+// skipped or reordered for it: the screen runs before the store exactly as above, and an infected file is refused outright.
+//
 // The asset's attribution is the token's `created_by`: the editorial principal that minted it, stored on
 // media_assets.created_by (migration 0014) and as the actor of the `webdesk.media.upload` audit row.
 import { BadRequestException, Injectable, Logger, NotFoundException, type OnModuleInit, PayloadTooLargeException, RequestTimeoutException, UnsupportedMediaTypeException } from "@nestjs/common";
@@ -115,6 +120,8 @@ interface ClaimedToken {
   max_bytes: string; // bigint
   allowed_mimes: string[];
   created_by: string;
+  /** M5-W1q: minted for a contributor (xc); the asset this token uploads is created quarantined. */
+  quarantine: boolean;
 }
 
 /** The base type of a Content-Type header, lower-cased: `image/png; charset=x` -> `image/png`. */
@@ -226,7 +233,7 @@ export class MediaUploadService implements OnModuleInit {
     // a. Look the token up (no lock, no transaction held) and refuse what the headers alone can refuse.
     const found = await this.db.withTenant(p.tenantId, async (db) => {
       const { rows } = await db.query<ClaimedToken>(
-        `SELECT id, site_id, bucket, max_bytes, allowed_mimes, created_by FROM media_upload_tokens
+        `SELECT id, site_id, bucket, max_bytes, allowed_mimes, created_by, quarantine FROM media_upload_tokens
           WHERE token_hash = $1 AND tenant_id = $2 AND used_at IS NULL AND expires_at > now()`,
         [hash, p.tenantId],
       );
@@ -249,7 +256,7 @@ export class MediaUploadService implements OnModuleInit {
         const { rows } = await client.query<ClaimedToken>(
           `UPDATE media_upload_tokens SET used_at = now()
             WHERE token_hash = $1 AND tenant_id = $2 AND used_at IS NULL AND expires_at > now()
-        RETURNING id, site_id, bucket, max_bytes, allowed_mimes, created_by`,
+        RETURNING id, site_id, bucket, max_bytes, allowed_mimes, created_by, quarantine`,
           [hash, p.tenantId],
         );
         return rows[0] ?? null;
@@ -288,6 +295,9 @@ export class MediaUploadService implements OnModuleInit {
             actor: token.created_by,
             facts: { originalFilename: p.filename, width: dims?.width ?? null, height: dims?.height ?? null },
             auditExtra: { via: "upload-token", tokenId: token.id },
+            // M5-W1q (WSK-D84): a contributor's token makes a QUARANTINED asset, decided at mint, not by the request. The
+            // scan above has already run and a failed scan never reaches here: quarantine is on top of the scan.
+            reviewState: token.quarantine ? "quarantined" : "accepted",
           }),
         ),
       );

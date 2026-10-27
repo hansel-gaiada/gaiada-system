@@ -180,6 +180,8 @@ describe("M5-W1e the commands a contributor may run (CONTRIBUTOR_COMMANDS)", () 
     "editorial.seoSignoff",
     "editorial.submit",
     "editorial.withdraw",
+    // M5-W1q (WSK-D84): a contributor may upload, INTO THE QUARANTINE (the minted token quarantines what it uploads).
+    "media.uploadToken",
   ];
   const PINNED_REFUSED = [
     "content.delete",
@@ -190,8 +192,9 @@ describe("M5-W1e the commands a contributor may run (CONTRIBUTOR_COMMANDS)", () 
     "editorial.assign",
     "editorial.policySet",
     "media.delete",
+    // M5-W1q: reviewing the quarantine is a staff function; a contributor never edits or deletes media either.
+    "media.review",
     "media.update",
-    "media.uploadToken",
   ];
 
   it("the allowed set is exactly the pinned list", () => {
@@ -208,8 +211,8 @@ describe("M5-W1e the commands a contributor may run (CONTRIBUTOR_COMMANDS)", () 
     for (const c of CONTRIBUTOR_COMMANDS) expect(EDITORIAL_COMMANDS.has(c), c).toBe(true);
   });
 
-  it("a contributor may never publish, approve, schedule, unpublish, delete, manage editorial settings, route work or write media", () => {
-    for (const never of ["content.publish", "editorial.approve", "content.schedule", "content.unpublish", "content.delete", "editorial.policySet", "editorial.assign", "media.uploadToken", "media.update", "media.delete"] as CommandName[]) {
+  it("a contributor may never publish, approve, schedule, unpublish, delete, manage editorial settings, route work, edit or delete media or review the quarantine", () => {
+    for (const never of ["content.publish", "editorial.approve", "content.schedule", "content.unpublish", "content.delete", "editorial.policySet", "editorial.assign", "media.review", "media.update", "media.delete"] as CommandName[]) {
       expect(CONTRIBUTOR_COMMANDS.has(never), never).toBe(false);
     }
   });

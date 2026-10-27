@@ -104,6 +104,7 @@ import {
   type ItemColumnsRow,
   type VersionRow,
 } from "./content-transitions";
+import { assertNoUnacceptedMedia } from "./media-review-gate";
 import { computeContentLint, lintPlaceholders, type ContentLintReport, type LintReport } from "./content-lint";
 import { ControlProblem, problems, type ProblemIssue } from "./content-problem";
 
@@ -607,6 +608,28 @@ export class ContentCommandsService {
    * that is not live, is deleted or names a missing version is left to the ordinary loop. A no-op when the live
    * version carries no experiment.
    */
+  /**
+   * M5-W1q (WSK-D84) -- a pre-pass over the WHOLE batch: no version that goes public may name a media asset that no staff
+   * editor has accepted (a contributor's quarantined upload, or a rejected one): 409 media-not-accepted, nothing written.
+   * A deleted item or a missing version is left to the ordinary loop (409 item-deleted / version-not-found).
+   */
+  private async assertMediaAccepted(
+    client: PoolClient,
+    siteId: string,
+    rows: Map<string, ItemRow>,
+    items: { itemId: string; version: number }[],
+  ): Promise<void> {
+    const versions: { itemIndex: number; blocks: unknown; seo: unknown }[] = [];
+    for (const [index, req] of items.entries()) {
+      const item = rows.get(req.itemId) as ItemRow;
+      if (item.deleted_at) continue;
+      const source = await this.loadVersion(client, item.id, req.version);
+      if (!source) continue;
+      versions.push({ itemIndex: index, blocks: source.blocks, seo: source.seo });
+    }
+    await assertNoUnacceptedMedia(client, siteId, versions);
+  }
+
   private async assertExperimentNotLocked(
     client: PoolClient,
     rows: Map<string, ItemRow>,
@@ -885,6 +908,7 @@ export class ContentCommandsService {
         const rows = await this.lockAll(client, ctx.siteId, input.items.map((i) => i.itemId));
         await this.assertClientPublish(client, ctx, rows, input.items);
         await this.assertReviewGate(client, ctx, rows, input.items);
+        await this.assertMediaAccepted(client, ctx.siteId, rows, input.items);
         await this.assertExperimentNotLocked(client, rows, input.items);
         const published: PublishResult["published"] = [];
         const refs: TenantWebhookContentItemRef[] = [];
@@ -956,6 +980,8 @@ export class ContentCommandsService {
         const rows = await this.lockAll(client, ctx.siteId, input.items.map((i) => i.itemId));
         // A schedule that publishes puts a version live at publishAt: gated now (a takedown-only schedule is not).
         if (input.publishAt !== null) await this.assertReviewGate(client, ctx, rows, input.items);
+        // M5-W1q: and a version that names an unaccepted media asset is not scheduled to go public either.
+        if (input.publishAt !== null) await this.assertMediaAccepted(client, ctx.siteId, rows, input.items);
         // M5-V5-a: the same for the experiment lock (a swap scheduled onto a live item with a running test).
         if (input.publishAt !== null) await this.assertExperimentNotLocked(client, rows, input.items);
         const scheduled: ScheduleResult["scheduled"] = [];

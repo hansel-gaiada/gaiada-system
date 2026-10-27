@@ -19,6 +19,8 @@
 #   update — edit title / alt text / tags (media.update).
 #   delete — soft-delete an asset (media.delete). WebDesk refuses it with 409 `media-in-use` while any
 #            content uses the asset (WSK-D54), so a delete can never break a page.
+#   review — M5-W1q (WSK-D84): accept or reject a contributor's QUARANTINED upload (media.review). Until a staff
+#            editor accepts it, WebDesk serves the asset nowhere. See the W1q block at the end of this file.
 #
 # ── TIERS: A MECHANICAL COPY OF resource_webdesk_content_item.yaml ───────────────────────────────
 #   editor tier    read · upload · update  <-  where content `read`/`create`/`update` are allowed:
@@ -106,6 +108,49 @@ resourcePolicy:
       derivedRoles: ["webdesk_editorial_site"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
+    # ══════════ M5-W1q · contributors upload INTO THE QUARANTINE; staff editors review it (WSK-D84) ══════════
+    # A contributor (users.kind = contributor) holding a writers' room grant on the site may START an upload (mint a token).
+    # WebDesk marks that token as quarantining (the signed assertion's `xc` claim, read at mint, never from the upload request),
+    # so the asset is not served until a staff editor accepts it. Only contributors get this rule: an employee writer's
+    # upload stays what it was (the staff tiers above). `update` and `delete` stay denied to a contributor (DENY at the end).
+    - actions: ["upload"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["webdesk_editorial_site"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.principal.attr.kind) && request.principal.attr.kind == "contributor"
+
+    # `review`: the staff editor and publisher tiers (the same four role arms as read/upload/update, plus the platform_admin
+    # wildcard at the top) and the scoped writers' room `webdesk_editor` on the site. The scoped rule reads the grant directly
+    # (`roles: ["user"]`, no derived role: the editor derived role also needs collection and locale, which a media asset has not).
+    # NEVER a contributor, a client editor, an automation or a bot principal, and NEVER the uploader (DENYs at the end).
+    - actions: ["review"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["review"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "module_staff"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.module == "webdev"
+    - actions: ["review"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.siteId) && request.resource.attr.siteId != "" &&
+            request.principal.attr.grants.exists(g, g.role == "webdesk_editor" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId &&
+              has(g.editorialScopes) &&
+              g.editorialScopes.exists(s, s.siteId == request.resource.attr.siteId))
+
     # ══════════ publisher tier — delete (MEDIUM, immediate; refused while content uses the asset) ══
     - actions: ["delete"]
       effect: EFFECT_ALLOW
@@ -120,16 +165,12 @@ resourcePolicy:
             variables.inTenant && variables.notLow &&
             request.resource.attr.module == "webdev"
 
-    # ══════════ M5-W1d · a freelance contributor never writes to the media library (design §3.1 item 6) ══════════
-    # EVERY media write: upload (minting an upload token), update and delete. `read` (picking an image) is untouched.
-    # `contributor-principal.db.test.ts` parses this file and fails if a new action appears without joining this list.
-    #
-    # !! W1q NARROWS THIS DENY, AND ONLY W1q MAY. Owner ruling WSK-D84 allows contributors to UPLOAD, but only INTO A
-    # !! QUARANTINE: an asset a contributor uploads is not served until a staff editor accepts it (on top of WSK-D80's scan).
-    # !! That quarantine is ticket M5-W1q and does not exist yet. Until it does, `upload` stays in this list: opening it
-    # !! now would let an outsider's file be served from our domain. W1q removes `upload` from this rule (or adds a
-    # !! quarantine-only condition to it) in the SAME change that ships the quarantine; `update` and `delete` stay denied.
-    - actions: ["upload", "update", "delete"]
+    # ══════════ M5-W1d / M5-W1q · what a freelance contributor never does to the media library (design §3.1 item 6, WSK-D84) ══════════
+    # A contributor may LIST the library (`read`, picking an image) and, since W1q, UPLOAD INTO THE QUARANTINE (the ALLOW above:
+    # the asset is not served until staff accept it). It never EDITS or DELETES an asset, and it never REVIEWS one (next rule).
+    # `contributor-principal.db.test.ts` parses this file and fails if a new action appears that is neither open to a contributor
+    # (read, upload) nor in a contributor DENY.
+    - actions: ["update", "delete"]
       effect: EFFECT_DENY
       roles: ["user"]
       condition:
@@ -137,3 +178,36 @@ resourcePolicy:
           expr: >-
             has(request.principal.attr.kind) &&
             request.principal.attr.kind == "contributor"
+
+    # ══════════ M5-W1q · `review` is a recorded human, staff judgement — DENYs for every principal ══════════
+    # Under deny-overrides each beats the platform_admin wildcard and every ALLOW (the `roles: ["user"]` shape of the writers' room
+    # DENYs in resource_webdesk_content_item.yaml). `creatorId` is the UPLOADER of the asset (WebDesk's created_by, from WebDesk's own
+    # read of the row, never a body): nobody reviews their own upload, a structural four-eyes rule like W1a's approve DENY. An
+    # unknown uploader is denied too (four eyes cannot be shown): resourcePayload() always sends creatorId ("" when unset), and the
+    # has()/type() arms cover a raw caller. A contributor, an automation and a bot principal never review: this is the outsider's
+    # file going public, a human staff decision. A client editor is not in any `review` ALLOW, so it is denied by default.
+    - actions: ["review"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.creatorId) && request.resource.attr.creatorId != "" &&
+            request.resource.attr.creatorId == request.principal.id
+    - actions: ["review"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            !has(request.resource.attr.creatorId) ||
+            type(request.resource.attr.creatorId) != string ||
+            request.resource.attr.creatorId == ""
+    - actions: ["review"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot", "contributor"]

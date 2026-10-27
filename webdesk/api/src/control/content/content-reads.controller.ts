@@ -29,6 +29,7 @@ import { ContentReadsService, ITEM_STATES, type ItemListQuery, type ItemListStat
 export const DEFAULT_PAGE_LIMIT = 50;
 export const MAX_PAGE_LIMIT = 100;
 const MAX_CURSOR_CHARS = 1024;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MIME_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/(\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,126})$/i;
 
 type RawQuery = Record<string, unknown>;
@@ -166,7 +167,7 @@ export class ContentReadsController {
   @Get("media")
   @Command("media.list")
   async listMedia(@Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string, @Query() raw: RawQuery) {
-    const q = query(raw, ["mime", "q", "tag", "includeDeleted", "cursor", "limit"]);
+    const q = query(raw, ["mime", "q", "tag", "includeDeleted", "reviewState", "assetId", "cursor", "limit"]);
     if (q.mime !== undefined && !MIME_RE.test(q.mime)) {
       throw problems.invalidRequest("mime must be a media type (image/png) or a type wildcard (image/*)");
     }
@@ -179,7 +180,15 @@ export class ContentReadsController {
     if (q.includeDeleted !== undefined && q.includeDeleted !== "true" && q.includeDeleted !== "false") {
       throw problems.invalidRequest("includeDeleted must be true or false");
     }
+    if (q.assetId !== undefined && !UUID_RE.test(q.assetId)) {
+      throw problems.invalidRequest("assetId must be a media asset id (a uuid)");
+    }
+    if (q.reviewState !== undefined && !["accepted", "quarantined", "rejected", "all"].includes(q.reviewState)) {
+      throw problems.invalidRequest("reviewState must be accepted (the default), quarantined, rejected or all");
+    }
     return this.reads.listMedia(tenantSlug, siteId, {
+      assetId: q.assetId?.toLowerCase(),
+      reviewState: (q.reviewState ?? "accepted") as "accepted" | "quarantined" | "rejected" | "all",
       mime: q.mime,
       q: q.q,
       // Tags are stored normalised (trimmed, lower-cased): the filter is spelled the way the library stores them.

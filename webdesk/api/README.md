@@ -2372,6 +2372,28 @@ L2e editorial assertion, then validation. All three writes are MEDIUM and need n
 `webdesk:operate`: unlike `content.delete` a media delete takes no takedown scope, because it is refused while content
 uses the asset, so it cannot break a page.
 
+### The contributor upload quarantine (M5-W1q, PROTOTYPED; owner ruling WSK-D84) — migration `0020_media_review_state.sql`
+
+A contributor's upload is created **quarantined**: it has passed the same scan (WSK-D80) and is stored, but nothing serves it until a staff editor accepts it.
+
+- **State.** `media_assets.review_state` is `accepted` (the default: every existing row, staff upload and API-key upload), `quarantined` or `rejected`, with
+  `reviewed_by` / `reviewed_at`. It is fixed at MINT: `media.uploadToken` sets `media_upload_tokens.quarantine` from the signed principal (`xc`), the public upload
+  route copies it onto the asset, and nothing in the upload request can change it. The asset's JSON carries `reviewState`, `reviewedBy`, `reviewedAt`.
+- **Refused everywhere.** `MediaService.getPublicAsset` has `review_state = 'accepted'` in its WHERE, so the public media route and the transform route answer a
+  quarantined or rejected asset as an unknown id (404), by id, upper-cased id or any guess of its path. `media.list` shows accepted assets by default; the
+  ERP's review desk asks `reviewState=quarantined` (also `rejected`, `all`; `assetId=<uuid>` reads one asset's row). Promotion exports accepted assets only.
+  `content.publish` / `content.schedule` (publishing) are **409 `media-not-accepted`** when a version names `/media/<assetId>` of an unaccepted asset
+  (`control/content/media-review-gate.ts`); drafts may name it.
+- **`media.review`** `POST /control/v1/tenants/:t/sites/:s/media/:assetId/review` body `{decision: "accept" | "reject"}`: MEDIUM / `webdesk:operate`, an editorial
+  command, on neither `CLIENT_EDITOR_COMMANDS` nor `CONTRIBUTOR_COMMANDS` (a client editor and a contributor are refused 403). Only a quarantined asset is judged
+  (409 `media-not-quarantined`, 409 `media-asset-deleted`); the uploader is refused again here (403 `media-self-review`; the ERP's Cerbos refuses first); the same
+  decision again is a no-op (`alreadyDecided`); a decision is final. **Accept** serves it. **Reject** soft-deletes it exactly as `media.delete` does
+  (`deleted_at`, `purge_after = now + the bucket's GOVERNANCE retention`): the object cannot be deleted before its lock lapses, it is served by nothing, and the
+  existing `media-purge` job deletes every stored version once `purge_after` passes. There is no second purge path.
+- **Tests.** `test/media-quarantine.spec.ts` (real Postgres, RustFS and ClamAV: state, every serving path, publishing, the scan, review, self-review, reject),
+  `migrations/tests/0020_media_review_state.test.mjs`, and the updated pins `control-command-registry`, `contributor-editor-principal`, `contributor-editor-enforcement`,
+  `client-editor-principal`.
+
 ### The upload token and the public upload route (an untrusted-input surface)
 
 - **Mint.** 32 random bytes, base64url; only the sha256 is stored (`media_upload_tokens.token_hash`); valid ten minutes;
@@ -2648,10 +2670,10 @@ refused to a contributor until it is listed on purpose.
 | `editorial.submit`, `editorial.withdraw` | hand a draft in for review, or take it back |
 | `editorial.comment`, `editorial.commentResolve` | the review conversation |
 | `editorial.requestChanges`, `editorial.seoSignoff` | the SEO reviewer's own decisions (Cerbos in the ERP still decides who) |
+| `media.uploadToken` | M5-W1q (WSK-D84): a contributor may upload, INTO THE QUARANTINE: the token it mints quarantines what it uploads (see "The contributor upload quarantine") |
 
 Refused with **`403 contributor-command-not-allowed`**: `content.publish`, `content.schedule`, `content.unpublish`, `content.delete`, `editorial.approve`,
-`editorial.assign`, `editorial.policySet`, and every media write (`media.uploadToken`, `media.update`, `media.delete`; WSK-D84 lets contributors upload into
-a quarantine, and that is one line here once the quarantine exists, W1q). The body is the house's problem body, `application/problem+json`:
+`editorial.assign`, `editorial.policySet`, and the other media commands (`media.update`, `media.delete`, `media.review`). The body is the house's problem body, `application/problem+json`:
 `{"type":"https://webdesk.gaiada.online/errors/contributor-command-not-allowed","title":"Command not allowed for a contributor","status":403,"detail":"A contributor may not run <command>. ... Nothing was changed."}`.
 `schema.apply`, `key.*`, lifecycle, releases and promotion carry no editorial assertion, so a contributor cannot be expressed there (the ERP must never
 route one); the two review reads carry none either. A contributor's idempotency record is its own (`__contributor` in the request hash) and its audit
