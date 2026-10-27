@@ -201,9 +201,16 @@ describe.skipIf(!TEST_URL)("SCP-1n · the content month in PM (BFF §63.13)", ()
          VALUES ($1, $2, $3, 'Mock B engagement', 'active', 'in_team', $4, 'central')`,
         [bEngagement, B, bClient, ["instagram"]],
       );
+      // A pipeline post needs its cycle (social_posts_pipeline_needs_cycle_ck).
+      const bCycle = newId();
       await c.query(
-        `INSERT INTO social_posts (id, tenant_id, engagement_id, title, pipeline_status, status_since) VALUES ($1, $2, $3, 'Mock B post', 'planned', now())`,
-        [foreignPostId, B, bEngagement],
+        `INSERT INTO social_cycles (id, tenant_id, engagement_id, month, deadline, ready_by, origin_site)
+         VALUES ($1, $2, $3, '2026-11-01', '2026-10-30', '2026-10-29', 'central')`,
+        [bCycle, B, bEngagement],
+      );
+      await c.query(
+        `INSERT INTO social_posts (id, tenant_id, engagement_id, cycle_id, title, pipeline_status, status_since) VALUES ($1, $2, $3, $4, 'Mock B post', 'planned', now())`,
+        [foreignPostId, B, bEngagement, bCycle],
       );
     }, SOCIAL);
 
