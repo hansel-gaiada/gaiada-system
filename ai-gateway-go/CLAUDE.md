@@ -69,6 +69,15 @@ Rules that must not drift:
 - **Audit.** One row per call, capability `chat`, with `agent`, `provider`, `model`, token counts
   when reported. Never text. New `blocked` values: `invalid_request`, `no_provider`, `client_closed`,
   `upstream_rate_limit`, `concurrency`.
+- **Metrics (AIP-00a-4).** Same OTel meter as the egress series (`gateway_egress_requests_total`
+  keeps its name and labels; a chat call still counts there under `capability="chat"`). New:
+  `gateway_agent_requests_total{agent,outcome}` (outcome `ok` or the audit's `blocked` value; an
+  unauthenticated call is `agent="unknown"`, `outcome="auth"`; a presented token is never a label),
+  `gateway_agent_tokens_total{agent,kind}` (`kind` prompt|completion, provider-reported only), and the
+  gauge `gateway_agent_budget_used_ratio{agent}` (calls today / the agent's effective daily cap, read
+  at every scrape from `budget.AgentUsage`, so it is 0 after 00:00 UTC). The gauge covers every
+  registered agent; label cardinality is the registered names plus `unknown`. Alert
+  `GatewayAgentNearCap` (ratio >= 0.8 for 5m, ticket) in `infra/observability/prometheus/rules/alerts.yml`.
 
 ## This is the only place provider keys live
 

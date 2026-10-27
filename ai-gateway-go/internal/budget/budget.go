@@ -152,6 +152,22 @@ func (b *Budget) TakeAgent(scope string, scopeCap, reservePct int, now time.Time
 	return true, ""
 }
 
+// AgentUsage (AIP-00a-4) reports an agent scope's calls today and the daily cap TakeAgent enforces
+// for it (scopeCap, or the per-tenant cap when scopeCap <= 0). Once the UTC day has rolled the
+// stored counters are stale and read as zero, without waiting for the next call to reset them.
+func (b *Budget) AgentUsage(scope string, scopeCap int, now time.Time) (used, cap int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	cap = scopeCap
+	if cap <= 0 {
+		cap = b.perTenantCap
+	}
+	if today(now) == b.day {
+		used = b.tenantCounts[scope]
+	}
+	return used, cap
+}
+
 func (b *Budget) State(now time.Time) map[string]any {
 	used, cap, tenants, perTenantCap := b.Snapshot(now)
 	return map[string]any{"used": used, "cap": cap, "tenants": tenants, "perTenantCap": perTenantCap}

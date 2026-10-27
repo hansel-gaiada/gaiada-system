@@ -124,3 +124,25 @@ tests:
             exp_annotations:
               summary: "sumopod:/ projected to fill within 24h"
               description: "Trend over the last 6h projects sumopod (node-exporter:9100:/) full within 24h. Usual cause: a service logging at volume into Loki, or trace sampling turned up."
+
+  # --- GatewayAgentNearCap (AIP-00a-4): an agent at 80% of its daily cap for 5m fires, naming the
+  # agent; one below 80% stays quiet.
+  - interval: 1m
+    input_series:
+      - series: 'gateway_agent_budget_used_ratio{agent="hermes-seo"}'
+        values: "0.5x2 0.85x20"
+      - series: 'gateway_agent_budget_used_ratio{agent="hermes-bsc"}'
+        values: "0.4x22"
+    alert_rule_test:
+      - eval_time: 6m # over 0.8 only since minute 3: not yet 5m
+        alertname: GatewayAgentNearCap
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: GatewayAgentNearCap
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              agent: hermes-seo
+            exp_annotations:
+              summary: "AI agent hermes-seo near its daily call cap"
+              description: "Agent hermes-seo has spent 85% of its daily call cap. At 100% its calls are refused (429) until 00:00 UTC. Runbook: infra/runbooks/aip-00a-hermes-behind-gateway.md."

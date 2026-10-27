@@ -388,6 +388,9 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 			provider = *e.Provider
 		}
 		inst.RecordEgress(ctx, e.Capability, provider, e.OK, e.Blocked, e.LatencyMs)
+		if e.Capability == "chat" { // AIP-00a-4: the agent listener's per-agent series
+			inst.RecordAgentCall(ctx, e.Agent, e.Blocked, e.PromptTokens, e.CompletionTokens)
+		}
 	}
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -1139,6 +1142,9 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 		log.Printf("agent listener: a GATEWAY_AGENT_TOKENS entry hashes to GATEWAY_TOKEN and was dropped; the shared token never opens the agent routes")
 		agents = kept
 	}
+	inst.RegisterAgentBudget(agents.Names(), func(agent string) (int, int) {
+		return b.AgentUsage("agent:"+agent, cfg.AgentDailyCallCap, time.Now())
+	})
 	inflight := newAgentInflight()
 	agentMux := newAgentMux(agentDeps{
 		cfg: cfg, chains: chains, b: b, rt: rt, activeClassifier: activeClassifier, emit: emit, tokens: agents,

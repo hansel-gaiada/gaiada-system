@@ -220,6 +220,17 @@ groups:
           summary: "AI gateway near daily call cap"
           description: "{{ $value | humanizePercentage }} of the daily AI call cap spent."
 
+      # --- AIP-00a-4: one registered agent has spent 80% of its own daily call cap (it is refused at
+      # 100%). The ratio resets to 0 at 00:00 UTC. Runbook: infra/runbooks/aip-00a-hermes-behind-gateway.md
+      - alert: GatewayAgentNearCap
+        expr: gateway_agent_budget_used_ratio >= 0.8
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "AI agent {{ $labels.agent }} near its daily call cap"
+          description: "Agent {{ $labels.agent }} has spent {{ $value | humanizePercentage }} of its daily call cap. At 100% its calls are refused (429) until 00:00 UTC. Runbook: infra/runbooks/aip-00a-hermes-behind-gateway.md."
+
       # --- DR-burst budget is currently unlocked (informational-but-important: a declared failover).
       - alert: GatewayDRModeActive
         expr: gateway_dr_mode == 1
