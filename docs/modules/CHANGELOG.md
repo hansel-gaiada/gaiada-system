@@ -11,6 +11,18 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.182.0` + platform-ui `0.207.0` - SCP-1 wave 2, phase 1: the Social pipeline's feed and Messages, the post page with its steps, and the client page (FRONTEND-BFF-CONTRACT §63.7, §63.10, §63.17) (2026-10-27) - PROTOTYPED
+
+- **Reads (SCP-1d, 1j).** `GET feed?view=your_turn|waiting|all` (the holder from the fixture, health first, never the maker's turn to check), `GET waiting` (Messages, grouped by holder) and `GET needs-you` (the pipeline's leg per role). A page costs three SQL queries and two Cerbos calls (a new `checkEach` in `rbac/cerbos.ts`, one batch for a page's mixed actions, fails closed); measured at 600 posts, about 100 to 220 ms.
+- **Messages and Needs you.** The Social Media `messages` row (`{D}/messages`: who holds each of your posts, Follow up with the 24-hour limit); the pipeline joins "Needs you" as one more named source.
+- **The post page (SCP-1e, 1f, 1g, 1j).** `{D}/posts/[postId]` and the same view as a drawer over any list: the stepper from the fixture, health, the Post and Creative brief tabs with editable rows per the fixture's edit rules, designs, the copy log, comments with pins, activity and the Composer link.
+  - The action bar is drawn from the server's `actions[]`: the next step as the main button, disabled actions with the reason in words, and a dialog per action's params (notes, change kind, block, recorded client decisions, send anyway, schedule, reschedule, mark live, archive, follow up).
+  - The Copywriter's suggestions, with the stale flag and accept per field; the designer's controls.
+- **The client page (SCP-1k, 1m).** `{D}/profile` (your clients; every client for a Social approver) and `{D}/profile/[engagementId]` with Plan (slots for the target; stories and extra posts apart), Stories, Calendar (a new `GET calendar`, Monday first), List (bulk Send to proofread and Approve all, each result in words), Client profile (the brand book), and create: new post, extra post, new task, ask Creatives.
+- **The Social skin's pins.** Messages and Profile lose their tickets; only Dashboard (SCP-5d) stays hidden.
+- **DEMO_MODE.** One action runner (`lib/demoSocialPipelineRun.ts`) answers every write in the server's order of checks with the fixture's effects, and the demo store is checked against the §63.1 rules after every step. The feed, Messages, Needs you, the calendar, create and bulk are answered too.
+- **Proof.** Each car was green on its own branch CI run (A: 40462859235; B: 40467710707 with A and C merged; C: 40462001644), and the train passed on its combined run.
+
 ### platform-nest `0.181.0` + webdesk `0.32.0` + platform-ui `0.206.0` - M5-W1q2: the reviewer sees a quarantined picture before accepting it (WSK-D84, approved in WSK-D90) (2026-10-27) - PROTOTYPED
 
 - **WebDesk.** New control-plane read `GET control/v1/tenants/:tenantSlug/sites/:siteId/media/:assetId/review-preview` (`media.reviewPreview`, read / `webdesk:read`, not audited). It is the only control read that answers with bytes.

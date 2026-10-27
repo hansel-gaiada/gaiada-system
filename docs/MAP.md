@@ -299,7 +299,9 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/visitors.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/linkedin-oauth.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/allocation.controller.ts` |
+| `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/calendar.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/cycles.controller.ts` |
+| `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/feed.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/pipeline.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social-reports.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social.controller.ts` |
@@ -437,13 +439,18 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/inbox`
 - `/departments/[deptId]/keywords`
 - `/departments/[deptId]/ledger`
+- `/departments/[deptId]/messages`
 - `/departments/[deptId]/money`
 - `/departments/[deptId]/notices`
 - `/departments/[deptId]/pacing`
 - `/departments/[deptId]/people`
 - `/departments/[deptId]/planner`
 - `/departments/[deptId]/planner/[campaignId]`
+- `/departments/[deptId]/posts/[postId]`
+- `/departments/[deptId]/posts/[postId]`
 - `/departments/[deptId]/prd`
+- `/departments/[deptId]/profile`
+- `/departments/[deptId]/profile/[engagementId]`
 - `/departments/[deptId]/projects`
 - `/departments/[deptId]/projects/[projectId]`
 - `/departments/[deptId]/projects/[projectId]/tasks/[taskId]`
