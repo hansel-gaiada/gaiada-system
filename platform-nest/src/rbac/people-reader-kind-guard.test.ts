@@ -23,6 +23,14 @@ import { join, relative, sep } from "node:path";
 
 /** file (relative to src/, posix) -> number of membership-kind predicates that are allowed to stand alone. */
 export const MEMBERSHIP_KIND_ALLOWLIST: Record<string, { count: number; reason: string }> = {
+  "core/dept-notices.service.ts": {
+    count: 1,
+    reason:
+      "loadActiveMemberIds is a NOTIFICATION audience, not a people list: dept-notices.test.ts (DW-10a, section 57.7) pins " +
+      "that a bot or automation member of the company IS notified of a company-wide notice, and a contributor cannot hold a " +
+      "membership at all (company_memberships_contributor_guard). Whether agents should receive notices is a product ruling, " +
+      "not this ticket's; revisit when it is made.",
+  },
   "admin/service-reconciler.ts": {
     count: 1,
     reason:
