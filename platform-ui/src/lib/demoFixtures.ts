@@ -13,6 +13,7 @@ import { conversationDemo, demoConversationNeedsUs } from "./demoConversation";
 import { pipelineDemo, portalDemo } from "./demoPipeline";
 import { clientCentreDemo, demoCentreRegisterClient, demoCentreSetBusinessType, demoIsBusinessType } from "./demoClientCentre";
 import { socialDemo, socialClientReviewPortalDemo } from "./demoSocial";
+import { demoAssetLibraryRead } from "./demoSocialPipelineRun";
 import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
 import { requestsDemo } from "./demoRequests";
 import { agencyLeadsDemo } from "./demoAgencyLeads";
@@ -2580,6 +2581,11 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // CentreProfile shape are both exercised rather than swallowed by a catch-all.
   const clientCentre = clientCentreDemo(method, p, userId, body);
   if (clientCentre) return clientCentre;
+
+  // SCP-1u: the Asset Library read the post page's designer picker uses, answered from the pipeline demo's invented assets (before this the generic `ok([])` made
+  // the picker empty, so a design driven through the demo could only be a link, and the final check refuses a link-only design).
+  const assetLibrary = demoAssetLibraryRead(method, p, url.searchParams);
+  if (assetLibrary) return assetLibrary;
 
   // Social Media department — calendar + composer (SMM-12), stateful store (lib/demoSocial.ts).
   // Before this, `/departments/dept-4/{calendar,composer}` had no fixture at all, so SMM-12 could

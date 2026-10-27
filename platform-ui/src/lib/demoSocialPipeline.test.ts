@@ -170,8 +170,12 @@ describe("GET posts/:postId/pipeline", () => {
 
   it("each persona gets the actions its role allows, with the refusal code of the fixture", () => {
     const proof = byStatus("proofread").find((p) => Object.keys(p.suggestions).length === 2)!;
-    expect(action(read(proof.id, "u-copy"), "approve_copy")).toEqual({ action: "approve_copy", allowed: true });
-    expect(read(proof.id, "u-copy").nextAction).toBe("approve_copy");
+    // this post's second suggestion was made against an older call to action, so the server's read disables Approve copy with `suggestion_stale` and has no primary step
+    expect(action(read(proof.id, "u-copy"), "approve_copy")).toEqual({ action: "approve_copy", allowed: false, reason: "suggestion_stale" });
+    expect(read(proof.id, "u-copy").nextAction).toBeNull();
+    const clean = byStatus("proofread").find((p) => Object.keys(p.suggestions).length === 0)!;
+    expect(action(read(clean.id, "u-copy"), "approve_copy")).toEqual({ action: "approve_copy", allowed: true });
+    expect(read(clean.id, "u-copy").nextAction).toBe("approve_copy");
     expect(action(read(proof.id, "u-social"), "approve_copy")).toMatchObject({ allowed: false, reason: "author_cannot_approve" });
     expect(action(read(proof.id, "u-pm"), "approve_copy")).toMatchObject({ allowed: false, reason: "not_a_copywriter" });
     expect(action(read(proof.id, "u-social"), "suggest")).toBeUndefined(); // the suggestion routes are not `actions` values
@@ -208,6 +212,7 @@ describe("GET posts/:postId/pipeline", () => {
       const c = cerbos.find((x) => x.action === name)!.cerbosAction;
       return typeof c === "string" ? c : c?.[via ?? "manual"];
     };
+    const GUARD_CODES = ["incomplete_post", "suggestion_stale", "design_missing", "design_not_stored", "no_account_for_network", "approved_time_passed", "follow_up_too_soon", "nobody_to_follow_up"];
     let wild = 0;
     let ownerAllowed = 0;
     for (const p of PIPE_POSTS) {
@@ -215,7 +220,9 @@ describe("GET posts/:postId/pipeline", () => {
       expect(officer).not.toBe("demo-hansel"); // he is nobody's officer or author, so the DENY never applies to him in the seed
       for (const a of read(p.id, "demo-hansel").actions) {
         wild += 1;
-        expect(a, `${p.id} ${a.action}`).toEqual({ action: a.action, allowed: true });
+        // the wildcard allows it; only a body-free guard of the action itself (SCP-1u: the server's probe) may still disable it, with that guard's code
+        if (a.allowed) expect(a, `${p.id} ${a.action}`).toEqual({ action: a.action, allowed: true });
+        else expect(GUARD_CODES, `${p.id} ${a.action}`).toContain(a.reason);
       }
       for (const a of read(p.id, "demo-owner").actions) {
         const key = keyOf(a.action, p.scheduleVia);

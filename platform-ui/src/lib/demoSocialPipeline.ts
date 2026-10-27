@@ -528,7 +528,7 @@ export function demoChecks(p: PipePost): Array<{ code: string; ok: boolean; mess
 interface CerbosEntry { actors: unknown; refusal: string; makerChecker?: boolean }
 const F = fixture as unknown as {
   cerbosActions: Record<string, CerbosEntry>;
-  actions: Array<{ action: string; kind?: string; cerbosAction?: string | Record<string, string> }>;
+  actions: Array<{ action: string; kind?: string; cerbosAction?: string | Record<string, string>; guards?: Array<{ guard: string; refusal: string }> }>;
 };
 /** Actions that are not `POST posts/:postId/actions` values: the create route, the edit and suggestion routes, the design routes and the portal's. */
 const NOT_IN_ACTIONS = new Set(["create", "edit", "suggest", "add_design", "remove_design", "client_approve", "client_change", "client_undo"]);
@@ -548,9 +548,69 @@ export function cerbosAllows(key: string, userId: string, p: PipePost): boolean 
   }
 }
 
-export function demoPostActions(p: PipePost, userId: string): Array<{ action: string; allowed: boolean; reason?: string }> {
+const FOLLOW_UP_WINDOW_MS = 24 * 60 * 60 * 1000;
+const APPROVED_TIME_GRACE_MS = 5 * 60 * 1000;
+
+/**
+ * The body-free action guards, as the server's `probe` runs them for `actions[]` (machine.ts `action_guards` in probe mode): the action's own guards in the
+ * fixture's order, the ones that read the body skipped (`fields_allowed_in_status`, `suggestion_exists`, `handoff_checks_pass_or_send_anyway`, `asset_exists`,
+ * `design_exists`, `seen_hash_matches`, `something_changes`), the first failing one answering its code. The demo has no row for `creatives_unit_exists_when_source_creatives`
+ * (the company has a Creatives department), `account_not_ambiguous` (one account per network), `media_rules_pass`, `publisher_available` or `no_variant_publishing`
+ * (no dispatch), so those pass here as they do in the runner.
+ */
+function probeGuardRefusal(guards: ReadonlyArray<{ guard: string; refusal: string }>, p: PipePost, userId: string, now: Date): string | null {
+  for (const g of guards) {
+    switch (g.guard) {
+      case "required_to_send":
+        if (demoChecks(p).some((c) => !c.skippable && !c.ok)) return g.refusal;
+        break;
+      case "suggestions_not_stale":
+        if (Object.entries(p.suggestions).some(([f, s]) => JSON.stringify(s.base) !== JSON.stringify((p as unknown as Record<string, unknown>)[f]))) return g.refusal;
+        break;
+      case "design_present":
+        if (p.designs.length === 0) return g.refusal;
+        break;
+      case "designs_stored":
+        // a link-only design has nothing stored to show the client (BFF §63.3.5); the server reads it as `asset_group_id` or `asset_version_id` NULL
+        if (p.designs.some((d) => !d.asset)) return g.refusal;
+        break;
+      case "one_account_per_placement_network": {
+        const have = store.allocations[p.engagementId]?.platforms ?? [];
+        if (p.placement.some((n) => !have.includes(n))) return g.refusal;
+        break;
+      }
+      case "approved_time_not_passed": {
+        const at = p.scheduledAt ? Date.parse(p.scheduledAt) : Number.NaN;
+        if (Number.isNaN(at) || at < now.getTime() - APPROVED_TIME_GRACE_MS) return g.refusal;
+        break;
+      }
+      case "holder_is_someone_else": {
+        const h = holderOf(p);
+        if (h.role === null || h.userIds.includes(userId)) return g.refusal;
+        break;
+      }
+      case "once_per_holder_per_24h": {
+        const role = holderRole(p);
+        const last = role ? demoLastFollowUp(p, role) : null;
+        if (last !== null && now.getTime() - Date.parse(last) < FOLLOW_UP_WINDOW_MS) return g.refusal;
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return null;
+}
+
+/**
+ * `actions[]` of the post read: each listed action decided for `userId` without a body, in the server's order (§63.3.2): maker/checker, the persona's refusal, then the
+ * action's body-free guards (`probeGuardRefusal`), so a button is never live where the server's would be disabled with `design_missing`, `design_not_stored` and the rest.
+ * `guards: false` is the feed card's `nextAction`, which the server decides with no facts and a neutral post (feed.ts `nextActionOf`): the status checks and the persona only.
+ */
+export function demoPostActions(p: PipePost, userId: string, opts: { guards?: boolean } = {}): Array<{ action: string; allowed: boolean; reason?: string }> {
   const officer = store.allocations[p.engagementId]?.officerId ?? null;
   const listed = new Set(scpActionsFromStatus(view(p)));
+  const now = new Date();
   return F.actions.filter((a) => listed.has(a.action) && !NOT_IN_ACTIONS.has(a.action))
     .map((a) => {
       const raw = a.cerbosAction;
@@ -559,6 +619,10 @@ export function demoPostActions(p: PipePost, userId: string): Array<{ action: st
       // step 6: maker/checker runs before Cerbos, so the refusal names itself
       if (typeof raw === "string" && entry?.makerChecker && (userId === p.authorId || userId === officer)) return { action: a.action, allowed: false, reason: "author_cannot_approve" };
       if (!cerbosAllows(key, userId, p)) return { action: a.action, allowed: false, reason: entry?.refusal ?? "not_authorized" };
+      if (opts.guards !== false) {
+        const reason = probeGuardRefusal(a.guards ?? [], p, userId, now);
+        if (reason) return { action: a.action, allowed: false, reason };
+      }
       return { action: a.action, allowed: true };
     });
 }
@@ -676,7 +740,7 @@ function demoCard(p: PipePost, userId: string): Record<string, unknown> {
   const eng = store.engagements.find((e) => e.id === p.engagementId)!;
   const holder = holderRole(p);
   const primary = scpPrimaryActionOf(view(p));
-  const entry = primary ? demoPostActions(p, userId).find((a) => a.action === primary) : undefined;
+  const entry = primary ? demoPostActions(p, userId, { guards: false }).find((a) => a.action === primary) : undefined;
   return {
     id: p.id, engagementId: p.engagementId, clientName: eng.clientName, title: p.title, format: p.format, isExtra: p.isExtra, isStory: p.format === "story",
     thumbFileId: null, pipelineStatus: p.pipelineStatus, phase: scpPhaseOf(view(p)),
