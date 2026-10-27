@@ -18,7 +18,7 @@
 // Both write an activity row on the engagement.
 //
 // THE MODULE WALL. Every query runs inside `withTenants` with `{ modules: ["social"] }` and `declareSocialModuleScope`.
-import { Body, Controller, Delete, NotFoundException, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, HttpCode, NotFoundException, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import type { PoolClient } from "pg";
 import { withTenants } from "../../db";
@@ -56,6 +56,8 @@ async function lockEngagementClient(
 export class SocialSimulatedAccountsController {
   // ==================================================================== POST engagements/:engagementId/simulated-accounts
   @Post("engagements/:engagementId/simulated-accounts")
+  // 200, not Nest's default 201: the seed is idempotent and each account says whether it was `created`.
+  @HttpCode(200)
   async seed(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("engagementId") engagementId: string, @Body() body: unknown,
   ): Promise<{ accounts: SeededAccount[] }> {
