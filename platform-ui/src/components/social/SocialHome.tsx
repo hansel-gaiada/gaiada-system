@@ -14,7 +14,7 @@ import { getWaiting } from "@/lib/socialMessages-data";
 import { todayIsoInDisplayZone } from "@/lib/format";
 import { SocialHomeView } from "./SocialHomeView";
 
-export async function SocialHome({ userId, tenantId, deptId }: { userId: string; tenantId: string; deptId: string }) {
+export async function SocialHome({ userId, tenantId, deptId, noQueue = false }: { userId: string; tenantId: string; deptId: string; noQueue?: boolean }) {
   const todayIso = todayIsoInDisplayZone();
   const [turn, waiting, tasks, accounts, cycles] = await Promise.all([
     getYourTurn(userId, tenantId),
@@ -23,5 +23,5 @@ export async function SocialHome({ userId, tenantId, deptId }: { userId: string;
     getAllocation(userId, tenantId, { mine: true }),
     getCycleTable(userId, tenantId, todayIso.slice(0, 7)),
   ]);
-  return <SocialHomeView reads={{ turn, waiting, tasks, accounts, cycles }} deptId={deptId} userId={userId} todayIso={todayIso} nowIso={new Date().toISOString()} />;
+  return <SocialHomeView reads={{ turn, waiting, tasks, accounts, cycles }} deptId={deptId} userId={userId} noQueue={noQueue} todayIso={todayIso} nowIso={new Date().toISOString()} />;
 }

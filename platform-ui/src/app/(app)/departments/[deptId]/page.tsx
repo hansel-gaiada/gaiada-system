@@ -12,6 +12,7 @@ import { listClaudeSeats, mySeat, launcherSeatProps } from "@/lib/claudeSeats";
 import { toolkitFor } from "@/lib/deptToolkits";
 import { activeCompany } from "@/lib/companyContext";
 import { getPrefs } from "@/lib/prefs";
+import { holdsNoSocialQueue } from "@/lib/socialHome";
 import { effectiveSkin, skinsOn } from "@/lib/skins";
 import { workspaceFor } from "@/lib/workspaces";
 import { functionalConsoleFor } from "@/lib/workspaceAccess";
@@ -126,7 +127,7 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
     && effectiveSkin(workspace.skin, skinsOn(process.env.SHELL_SKIN_PREVIEW), (await getPrefs()).skin) === "social";
   // The feed's reads are its own (five, in parallel, each with its own failure state), behind their own boundary so the Overview's header does not wait for them.
   const feed = socialHome
-    ? <Suspense fallback={<HomeBodyFallback label="Social Media home" />}><SocialHome userId={userId} tenantId={tenant} deptId={deptId} /></Suspense>
+    ? <Suspense fallback={<HomeBodyFallback label="Social Media home" />}><SocialHome userId={userId} tenantId={tenant} deptId={deptId} noQueue={holdsNoSocialQueue(me, tenant)} /></Suspense>
     : null;
 
   if (frame) {

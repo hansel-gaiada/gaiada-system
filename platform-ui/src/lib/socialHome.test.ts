@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { ACTION_DIALOG, REFUSAL_WORDS } from "./socialPipeline";
 import type { AllocationRow } from "./socialAllocation";
 import type { CycleRow, Health } from "./socialCycles";
-import { RING_TOKEN, asFeedPage, dueWords, mainButtonOf, ordinal, reportsDue, ringWords, storyCircles } from "./socialHome";
+import { RING_TOKEN, asFeedPage, dueWords, holdsNoSocialQueue, mainButtonOf, ordinal, reportsDue, ringWords, storyCircles } from "./socialHome";
 
 // SCP-1d: the Social Media Home's pure rules. The server decides who may do what (`nextAction.allowed`, the table's `canPlan`); these tests pin what the Home makes of
 // the answers: which button a card draws, which clients get a circle and in what order, and the due days of the reports.
@@ -137,5 +137,17 @@ describe("reports due", () => {
 
   it("writes the ordinal of a day", () => {
     expect([1, 2, 3, 4, 5, 11, 12, 13, 21, 22, 23, 31].map(ordinal)).toEqual(["1st", "2nd", "3rd", "4th", "5th", "11th", "12th", "13th", "21st", "22nd", "23rd", "31st"]);
+  });
+});
+
+describe("holdsNoSocialQueue", () => {
+  const roles = (...r: Array<[string, string, string?]>) => ({ roles: r.map(([role, scopeType, scopeId]) => ({ role, scopeType, scopeId })) }) as never;
+  it("is true for the superadmin and for the owner (global or on this company), false for a seat holder or a plain member", () => {
+    expect(holdsNoSocialQueue(roles(["platform_admin", "global"]), "co-a")).toBe(true);
+    expect(holdsNoSocialQueue(roles(["owner", "global"]), "co-a")).toBe(true);
+    expect(holdsNoSocialQueue(roles(["owner", "company", "co-a"]), "co-a")).toBe(true);
+    expect(holdsNoSocialQueue(roles(["owner", "company", "co-b"]), "co-a")).toBe(false);
+    expect(holdsNoSocialQueue(roles(["org_unit_lead", "unit", "u-1"]), "co-a")).toBe(false);
+    expect(holdsNoSocialQueue(roles(["member", "company", "co-a"]), "co-a")).toBe(false);
   });
 });

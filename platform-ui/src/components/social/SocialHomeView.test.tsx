@@ -50,7 +50,7 @@ const reads = (over: Partial<SocialHomeReads> = {}): SocialHomeReads => ({
   }),
   ...over,
 });
-const mount = (r: SocialHomeReads = reads(), userId = "u-1") => render(<SocialHomeView reads={r} deptId="d-soc" userId={userId} todayIso={TODAY} nowIso={NOW} />);
+const mount = (r: SocialHomeReads = reads(), userId = "u-1", noQueue = false) => render(<SocialHomeView reads={r} deptId="d-soc" userId={userId} noQueue={noQueue} todayIso={TODAY} nowIso={NOW} />);
 const section = (name: string) => screen.getByRole("region", { name });
 
 afterEach(cleanup);
@@ -122,6 +122,24 @@ describe("your turn", () => {
   it("says nothing is waiting on you only when the read succeeded and was empty", () => {
     mount(reads({ turn: ok({ items: [], hasMore: false }) }));
     expect(within(section("Your turn")).getByRole("status")).toHaveTextContent("Nothing is waiting on you right now");
+  });
+
+  it("tells the owner and the superadmin their empty turn is by design (the queues go to the HoD and GM seats), not 'nothing to do'", () => {
+    mount(reads({ turn: ok({ items: [], hasMore: false }) }), "u-owner", true);
+    const s = section("Your turn");
+    expect(s).toHaveTextContent("You hold no queue here");
+    expect(s).toHaveTextContent("Social Media head and the GM seats");
+    expect(s).not.toHaveTextContent("Nothing is waiting on you");
+    expect(within(s).getByRole("link", { name: "Profile" })).toHaveAttribute("href", "/departments/d-soc/profile");
+  });
+
+  it("does not say it to a person who holds a seat, nor when the read failed", () => {
+    mount(reads({ turn: ok({ items: [], hasMore: false }) }));
+    expect(section("Your turn")).not.toHaveTextContent("You hold no queue");
+    cleanup();
+    mount(reads({ turn: { kind: "unavailable", reason: "x" } }), "u-owner", true);
+    expect(section("Your turn")).toHaveTextContent("cannot be read right now");
+    expect(section("Your turn")).not.toHaveTextContent("You hold no queue");
   });
 
   it("shows an error state, never 'nothing', when the feed read failed", () => {

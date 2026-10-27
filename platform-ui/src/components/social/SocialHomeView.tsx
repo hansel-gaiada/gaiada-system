@@ -50,7 +50,7 @@ function Refused({ read, subject }: { read: Exclude<ReadResult<unknown>, { kind:
     : <ReadRefusal inline subject={subject} kind="unavailable" reason={read.reason} />;
 }
 
-export function SocialHomeView({ reads, deptId, userId, todayIso, nowIso }: { reads: SocialHomeReads; deptId: string; userId: string; todayIso: string; nowIso: string }) {
+export function SocialHomeView({ reads, deptId, userId, todayIso, nowIso, noQueue = false }: { reads: SocialHomeReads; deptId: string; userId: string; todayIso: string; nowIso: string; noQueue?: boolean }) {
   const now = Date.parse(nowIso);
   const profile = (engagementId: string) => `/departments/${encodeURIComponent(deptId)}/profile/${encodeURIComponent(engagementId)}`;
   const { turn, waiting, tasks, accounts, cycles } = reads;
@@ -63,7 +63,13 @@ export function SocialHomeView({ reads, deptId, userId, todayIso, nowIso }: { re
         </Section>
 
         <Section id="sh-turn" title="Your turn">
-          {turn.kind !== "ok" ? <Refused read={turn} subject="Your turn" /> : turn.data.items.length === 0 ? (
+          {turn.kind !== "ok" ? <Refused read={turn} subject="Your turn" /> : turn.data.items.length === 0 && noQueue ? (
+            // The owner and the superadmin hold no seat: an empty turn is not "nothing to do" (BFF §63.2).
+            <p className="scp-note" role="status">
+              You hold no queue here. The owner and the superadmin act on any post, but the approval queues go to the Social Media head and the GM seats, so this list stays empty for
+              you by design. To see the team&rsquo;s posts, open a client&rsquo;s <Link href={`/departments/${encodeURIComponent(deptId)}/profile`} className="scp-link">Profile</Link>.
+            </p>
+          ) : turn.data.items.length === 0 ? (
             <p className="scp-note" role="status">Nothing is waiting on you right now. When a post reaches your step, it shows up here.</p>
           ) : (
             <HomeTurnList cards={turn.data.items} deptId={deptId} hasMore={turn.data.hasMore} nowIso={nowIso} />

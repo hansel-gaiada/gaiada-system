@@ -157,7 +157,7 @@ describe("Department Home: the Social skin's feed", () => {
     expect(lead.props.fallback).toBeTruthy();
     const feed = lead.props.children as El;
     expect(feed.type).toBe(SocialHome);
-    expect(feed.props).toEqual({ userId: "u-1", tenantId: "co-a", deptId: "d-web" });
+    expect(feed.props).toEqual({ userId: "u-1", tenantId: "co-a", deptId: "d-web", noQueue: false });
     // The body stays (the KPI strip and the rest): the feed is added, nothing is taken out.
     expect((frame.mock.calls[0][0] as El).type).toBe(Suspense);
   });

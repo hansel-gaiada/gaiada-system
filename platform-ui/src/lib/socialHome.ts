@@ -4,6 +4,8 @@
 //
 // The server decides who may do what: `nextAction.allowed` and its `reason` come from the feed's one `checkMany`. This file only turns them into words and
 // into the rule for which button a card draws; it adds no rule of its own about who may act.
+import type { Me } from "./platform";
+import { isElevated } from "./rbac";
 import { ACTION_DIALOG, ACTION_LABEL, reasonWords } from "./socialPipeline";
 import { asHealth, healthText, type CycleRow, type CycleTable, type Health, type HealthState } from "./socialCycles";
 import type { AllocationRow } from "./socialAllocation";
@@ -150,4 +152,10 @@ export function ordinal(n: number): string {
   const mod100 = n % 100;
   if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
   return `${n}${({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th"}`;
+}
+
+/** The owner and the superadmin act through the wildcard but hold no seat, so `feed?view=your_turn` is empty for them BY DESIGN (BFF §63.2, the same rule as Needs
+ *  you's "no queue"): only the Social Media head and GM seats are approver holders. The Home says so instead of reading as "nothing to do". A mirror of the server. */
+export function holdsNoSocialQueue(me: Pick<Me, "roles">, tenantId: string): boolean {
+  return isElevated(me as Me) || me.roles.some((r) => r.role === "owner" && (r.scopeType === "global" || (r.scopeType === "company" && r.scopeId === tenantId)));
 }
