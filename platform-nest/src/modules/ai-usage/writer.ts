@@ -11,6 +11,9 @@
 //     module wall), so no `modules` option is needed from any caller.
 //   * Reads are not here. They arrive with AIP-15 behind a Cerbos kind `ai_usage`; by AIP-D6 a person never reads their own line.
 //
+// AIP-04: an event with both token counts, a provider and a model but NO cost is costed from the price table (prices.ts) and labelled
+// cost_source 'table'. A cost the caller supplied is never overwritten. No price in force leaves the cost NULL.
+//
 // Callers (AIP-03) should not await it on a hot path: `void recordAiUsage(event)` is safe because it cannot reject.
 import type { PoolClient } from "pg";
 import { newId, withGlobal, withTenants } from "../../db";
@@ -26,6 +29,7 @@ import {
   type AiUsageSurface,
   type AiUsageTokensSource,
 } from "./vocab";
+import { resolveEventCost, type PriceLookup } from "./prices";
 
 /** One AI call. Every field is an id, a count, a label or money. There is no text field, by design. */
 export interface AiUsageEvent {
@@ -66,8 +70,8 @@ const KEY_SET: ReadonlySet<string> = new Set(AI_USAGE_EVENT_KEYS);
 
 /** A label is one token of `[A-Za-z0-9._:/@+-]`, 1 to 120 characters: a model id such as `ollama/kimi-k2.7-code:cloud` fits, a sentence does not. */
 export const LABEL_PATTERN = /^[A-Za-z0-9._:/@+-]{1,120}$/;
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const INT4_MAX = 2147483647;
+export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const INT4_MAX = 2147483647;
 /** numeric(14,8): six digits before the point. */
 const COST_MAX = 999999.99999999;
 
@@ -179,6 +183,8 @@ export interface AiUsageDeps {
   warn?: (message: string) => void;
   /** Defaults to the platform's time-ordered uuid. */
   newId?: () => string;
+  /** AIP-04: the price-table lookup that fills a missing cost. Defaults to the live ai_model_prices read; a failure leaves the cost NULL. */
+  lookupPrice?: PriceLookup;
 }
 
 export type RecordResult = { ok: true; id: string } | { ok: false; reason: string };
@@ -219,7 +225,9 @@ export async function recordAiUsage(event: AiUsageEvent, deps: AiUsageDeps = {})
       reason = `invalid event: ${checked.error}`;
     } else {
       const id = (deps.newId ?? newId)();
-      const insert = buildAiUsageInsert(checked.event, id);
+      // AIP-04 / AIP-D11: a provider's cost is kept as it is; an event with both token counts and no cost gets the price table's, labelled 'table'.
+      // resolveEventCost never throws and returns the event unchanged when no price is in force (the cost stays NULL).
+      const insert = buildAiUsageInsert(await resolveEventCost(checked.event, deps.lookupPrice), id);
       try {
         await (deps.withTenants ?? withTenants)([checked.event.tenantId], async (client) => {
           await client.query(insert.text, insert.values);
