@@ -45,6 +45,21 @@ describe("Website -> Writers' room -> Uploads awaiting review -> site", () => {
     expect(screen.getAllByTestId("quarantine-accept")).toHaveLength(1); // the second upload's `allowed.review` is false
   });
 
+  it("M5-W1q2: a raster upload draws a thumbnail from the pass-through route; an SVG is a name only ('No preview for image/svg+xml'); nothing links to the file", async () => {
+    const svg = upload("a2", true);
+    svg.asset.mime = "image/svg+xml";
+    svg.asset.originalFilename = "logo.svg";
+    queueMock.mockResolvedValue({ kind: "ok", data: { assets: [upload("a1", true), svg], page: { cursor: null, hasMore: false, limit: 50 } } } as never);
+    await mount();
+    const thumbs = screen.getAllByTestId("quarantine-thumb");
+    expect(thumbs).toHaveLength(1);
+    expect(thumbs[0].getAttribute("src")).toBe("/api/webdesk-media-preview/gaiada/site-1/a1");
+    expect(thumbs[0].getAttribute("alt")).toBe("a1.png");
+    expect(thumbs[0].getAttribute("loading")).toBe("lazy");
+    expect(screen.getByTestId("quarantine-nopreview").textContent).toBe("No preview for image/svg+xml");
+    expect(screen.getByTestId("quarantine-table").querySelectorAll("a, iframe, object, embed")).toHaveLength(0);
+  });
+
   it("an empty queue is a real answer, said as such", async () => {
     queueMock.mockResolvedValue({ kind: "ok", data: { assets: [], page: { cursor: null, hasMore: false, limit: 50 } } } as never);
     await mount();

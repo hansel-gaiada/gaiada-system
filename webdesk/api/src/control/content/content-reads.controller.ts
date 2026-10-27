@@ -8,6 +8,7 @@
 //   GET /control/v1/tenants/:tenantSlug/sites/:siteId/content/items/:itemId/versions/:n        item.versionGet
 //   GET /control/v1/tenants/:tenantSlug/sites/:siteId/media                                    media.list
 //   GET /control/v1/tenants/:tenantSlug/sites/:siteId/media/:assetId/usage                     media.usage (WSK-43a)
+//   GET /control/v1/tenants/:tenantSlug/sites/:siteId/media/:assetId/review-preview            media.reviewPreview (M5-W1q2, WSK-D84: BYTES)
 //
 // Guards: ControlAuthGuard (L1 mTLS + L2 token) -> CommandAuthorizationGuard (L3 `webdesk:read`). There
 // is deliberately NO EditorialAssertionGuard: a read needs no editorial principal (design §4), so the
@@ -18,7 +19,8 @@
 // out-of-range limit or a malformed cursor is refused rather than ignored, because a silently
 // ignored `?includeDelete=true` would read as "there are no deleted items", and the editor treats an
 // empty list as a claim.
-import { Controller, Get, Param, Query, UseFilters, UseGuards } from "@nestjs/common";
+import { Controller, Get, Param, Query, Res, UseFilters, UseGuards } from "@nestjs/common";
+import type { FastifyReply } from "fastify";
 import { ControlAuthGuard } from "../auth/control-auth.guard";
 import { CommandAuthorizationGuard } from "../policy/command-authorization.guard";
 import { Command } from "../command.decorator";
@@ -209,5 +211,28 @@ export class ContentReadsController {
   ) {
     query(raw, []);
     return this.reads.mediaUsage(tenantSlug, siteId, assetId);
+  }
+
+  /**
+   * M5-W1q2 (WSK-D84): the reviewer's byte preview of ONE quarantined upload. The only control read that answers with bytes
+   * (a raster image, never anything else: see media-review-preview.ts); every refusal is a problem+json. The bytes are served
+   * `nosniff` and never cached, but this route is not a public one: it is on the internal mTLS vhost like every control route.
+   */
+  @Get("media/:assetId/review-preview")
+  @Command("media.reviewPreview")
+  async mediaReviewPreview(
+    @Param("tenantSlug") tenantSlug: string,
+    @Param("siteId") siteId: string,
+    @Param("assetId") assetId: string,
+    @Query() raw: RawQuery,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<Buffer> {
+    query(raw, []);
+    const { mime, body } = await this.reads.reviewPreview(tenantSlug, siteId, assetId);
+    reply.header("content-type", mime);
+    reply.header("content-length", String(body.length));
+    reply.header("cache-control", "private, no-store");
+    reply.header("x-content-type-options", "nosniff");
+    return body;
   }
 }

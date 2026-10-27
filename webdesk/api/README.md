@@ -2363,6 +2363,7 @@ A library asset is a `media_assets` row (migration `0014`): `title`, `alt` (a ma
 | `PATCH /control/v1/tenants/:t/sites/:s/media/:assetId` | same | `media.update` (MEDIUM). Body `{ title?, alt?, tags? }` (at least one). 200 `{ asset }` |
 | `DELETE /control/v1/tenants/:t/sites/:s/media/:assetId` | same | `media.delete` (MEDIUM, soft). 200 `{ assetId, deletedAt, purgeAfter, alreadyDeleted }`; **409 `media-in-use`** while content uses it |
 | `GET /control/v1/tenants/:t/sites/:s/media/:assetId/usage` | control channel, `webdesk:read` | `media.usage`. 200 `{ assetId, url, total, items: [{ itemId, collectionKey, locale, slug, in }] }` (at most 50 items) |
+| `GET /control/v1/tenants/:t/sites/:s/media/:assetId/review-preview` | control channel, `webdesk:read` | `media.reviewPreview` (M5-W1q2): the bytes of ONE quarantined raster image, see "The contributor upload quarantine" below; 415 / 413 / the one 404 |
 | `GET /control/v1/tenants/:t/sites/:s/media` | same | `media.list` (exists): gains `q`, `tag`, `includeDeleted` beside `mime`, and the library fields in each asset |
 | `POST /v1/t/:tenantSlug/media/upload/:token?filename=` | **none** (the token is the credential) | the public upload; the body is the file, `Content-Type` its type. 201 with the asset |
 | `OPTIONS /v1/t/:tenantSlug/media/upload/:token` | none | CORS preflight |
@@ -2390,6 +2391,14 @@ A contributor's upload is created **quarantined**: it has passed the same scan (
   decision again is a no-op (`alreadyDecided`); a decision is final. **Accept** serves it. **Reject** soft-deletes it exactly as `media.delete` does
   (`deleted_at`, `purge_after = now + the bucket's GOVERNANCE retention`): the object cannot be deleted before its lock lapses, it is served by nothing, and the
   existing `media-purge` job deletes every stored version once `purge_after` passes. There is no second purge path.
+- **`media.reviewPreview`** (M5-W1q2, PROTOTYPED) `GET /control/v1/tenants/:t/sites/:s/media/:assetId/review-preview`: read / `webdesk:read`, un-audited, no editorial assertion (the
+  contributor fence is the ERP's route fence and Cerbos). The reviewer's byte preview: answers the asset's BYTES (`Content-Type` the stored mime, `nosniff`, `private, no-store`) ONLY for
+  an asset that is on the site, not deleted, `review_state = 'quarantined'`, `scan_status = 'clean'`, whose stored mime is `image/png`, `image/jpeg`, `image/gif`, `image/webp` or
+  `image/avif`, whose size is at most 10 MiB and whose bytes bear that type's signature. A quarantined clean asset of another type is **415 `media-preview-unsupported`** (member `mime` only);
+  over the cap **413 `media-preview-too-large`**; every other case (unknown or malformed id, another site, another tenant, accepted, rejected, deleted, not clean, no stored object)
+  is the one **404 `media-asset-not-found`**. Any query key is 400. Raw bytes, not JSON: the ERP's control client reads them with its existing `binaryResponse` mode.
+  The public routes are untouched: `getPublicAsset` still refuses a quarantined asset. Code: `control/content/media-review-preview.ts`, `ContentReadsService.reviewPreview`.
+  Tests: `test/media-review-preview.spec.ts` (real Postgres, RustFS, ClamAV), `test/media-review-preview-unit.spec.ts` (pure).
 - **Tests.** `test/media-quarantine.spec.ts` (real Postgres, RustFS and ClamAV: state, every serving path, publishing, the scan, review, self-review, reject),
   `migrations/tests/0020_media_review_state.test.mjs`, and the updated pins `control-command-registry`, `contributor-editor-principal`, `contributor-editor-enforcement`,
   `client-editor-principal`.

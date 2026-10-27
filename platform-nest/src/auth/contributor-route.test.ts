@@ -46,7 +46,7 @@ const MARKED = [
 /** Never open to a contributor, whatever MARKED becomes: the staff functions the design names (§3.1 item 6) and the
  *  contributor admin itself. A second, independent list, so editing MARKED alone cannot open one of these. */
 const NEVER = [
-  /\/media\/quarantine$/, /\/media\/:assetId\/review$/, /\/media\/:assetId$/, /\/editorial\/approve$/, /\/editorial\/assign$/, /\/publish-requests/,
+  /\/media\/quarantine$/, /\/media\/:assetId\/review$/, /\/media\/:assetId\/review-preview$/, /\/media\/:assetId$/, /\/editorial\/approve$/, /\/editorial\/assign$/, /\/publish-requests/,
   /\/unpublish$/, /\/items\/:itemId\/delete$/, /\/editorial-policy$/, /\/editorial\/grants/, /\/editorial\/contributors/,
   /\/assistant\//, /\/assist$/, /\/forms/, /\/briefs$/, /\/briefs\/:briefId\/(assign|create-draft)$/,
 ];

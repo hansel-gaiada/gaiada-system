@@ -4,11 +4,11 @@ import { todayIsoInDisplayZone } from "./format";
 import { evaluateClientReviewState, type ClientReviewState, type ClientReviewStatus } from "./socialShared";
 import { validateBrandBook, type BrandBook } from "./socialBrandBook";
 import {
-  DEMO_MEMBER_NAMES, PIPE_ENGAGEMENTS, allocStore, cyclesStore, demoAllocationRow, demoBrandAnswer, demoCycleHealth, demoCycleTable, demoDeadlineRange,
-  demoPipelineRead, demoRealDate, demoSettingsAnswer, demoWalkBack, isDemoSocialApprover, isPipelinePostId, pipelineEngagement,
+  DEMO_MEMBER_NAMES, PIPE_ENGAGEMENTS, allocStore, cyclesStore, demoAllocationRow, demoBrandAnswer, demoCalendar, demoCreatePost, demoCycleHealth, demoCycleTable, demoDeadlineRange,
+  demoFeed, demoNeedsYou, demoPipelineRead, demoRealDate, demoWaiting, demoSettingsAnswer, demoWalkBack, isDemoSocialApprover, isPipelinePostId, pipelineEngagement,
   type DemoBrandProfile, type DemoAllocation,
 } from "./demoSocialPipeline";
-import { runDemoPipelineAction, runDemoPipelineWrite } from "./demoSocialPipelineRun";
+import { demoBulkActions, runDemoPipelineAction, runDemoPipelineWrite } from "./demoSocialPipelineRun";
 // SMM-14 — DEMO_MODE fixtures for the Social Media department (calendar + composer, SMM-12).
 // Mirrors demoPipeline.ts's STATEFUL in-memory-store convention exactly (module-level arrays
 // mutate across requests within one running dev-server process; resets on restart). Before this
@@ -1050,6 +1050,17 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
   }
   const cycleHealthM = tail.match(/^cycles\/([^/]+)\/health$/);
   if (cycleHealthM && m === "GET") return demoCycleHealth(cycleHealthM[1]);
+  // ── SCP-1k: the client calendar (BFF §63.10) ─────────────────────────────────────────────────────
+  if (tail === "calendar" && m === "GET") return demoCalendar(params);
+  // ── SCP-1m: create a post in a cycle (BFF §63.6.1), and SCP-1k's bulk actions (§63.6.7) ───────────
+  const createPostM = tail.match(/^cycles\/([^/]+)\/posts$/);
+  if (createPostM && m === "POST") return demoCreatePost(createPostM[1], b(), userId);
+  if (tail === "posts/actions" && m === "POST") return demoBulkActions(b(), userId);
+
+  // ── SCP-1d / SCP-1j: the feed, Messages and the pipeline's leg of Needs you (BFF §63.7) ─────────────────────────────────────────
+  if (tail === "feed" && m === "GET") return demoFeed(params, userId);
+  if (tail === "waiting" && m === "GET") return demoWaiting(userId);
+  if (tail === "needs-you" && m === "GET") return demoNeedsYou(p.match(/^\/api\/([^/]+)\//)![1], userId);
 
   // ── SCP-1o: the pipeline read (BFF §63.6.2) and the write hook ────────────────────────────────────────────────
   const pipeM = tail.match(/^posts\/([^/]+)\/pipeline$/);

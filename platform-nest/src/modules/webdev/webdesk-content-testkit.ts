@@ -96,6 +96,9 @@ export interface FakeMediaAsset {
   /** M5-W1q: the review state (default accepted) and who uploaded it (the contributor's sub for a quarantined one). */
   reviewState?: "accepted" | "quarantined" | "rejected";
   createdBy?: string | null;
+  /** M5-W1q2: the stored bytes `media.reviewPreview` returns (default: a PNG signature), and the content type it declares (default: `mime`). */
+  bytes?: Buffer;
+  previewContentType?: string;
   /** The items that use the asset (`media.usage` and the 409 `media-in-use` body list them). */
   usedBy: Array<{ itemId: string; collectionKey: string; locale: string; slug: string; in: string }>;
 }
@@ -434,6 +437,16 @@ export class FakeZoneB {
       case "forms.def.get": {
         const f = this.forms.get(`${p.siteId}:${p.formKey}`);
         return f ? ok({ form: f }) : problem(404, "form-not-found");
+      }
+      case "media.reviewPreview": {
+        // WebDesk content-reads.service#reviewPreview, restated: ONLY a quarantined, undeleted raster asset of this site; every other state is the
+        // one 404; a type that is never previewed is 415 carrying the mime; over 10 MiB is 413. The bytes (and the declared type) are the test's.
+        const a = this.media.get(p.assetId);
+        if (!a || a.siteId !== p.siteId || a.deletedAt || (a.reviewState ?? "accepted") !== "quarantined") return problem(404, "media-asset-not-found");
+        if (!["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"].includes(a.mime)) return problem(415, "media-preview-unsupported", { mime: a.mime });
+        if (a.sizeBytes > 10 * 1024 * 1024) return problem(413, "media-preview-too-large");
+        const bytes = a.bytes ?? Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32, 0x61)]);
+        return { status: 200, contentType: a.previewContentType ?? a.mime, json: null, bodyText: "", bodyBytes: bytes };
       }
       case "media.usage": {
         const a = this.media.get(p.assetId);

@@ -124,6 +124,9 @@ const ADMIN: AreaRule[] = [
 const WORKSPACE: AreaRule[] = [
   rule("/departments/[deptId]", "workspace", true),
   rule("/departments/[deptId]/settings", "workspace", false, "SCP-1c: the Social Media Settings page (the HoD's buffer and deadline table); its own entry so the page sits in one area, the department's own"),
+  rule("/departments/[deptId]/messages", "workspace", false, "SCP-1j: the Social Media Messages page (who holds each of the officer's posts, and Follow up); its own entry so the page sits in one area, the department's own"),
+  rule("/departments/[deptId]/profile", "workspace", false, "SCP-1k: the Social Media Profile switcher (the caller's clients, or every client for a Social approver); its own entry so the page sits in one area, the department's own"),
+  rule("/departments/[deptId]/profile/[engagementId]", "workspace", false, "SCP-1k, SCP-1m: one client's page (Plan, Stories, Calendar, List, Client profile) and its create bar; the department's own area, like the Allocation page it is reached from"),
   rule("/departments/[deptId]/allocation", "workspace", false, "SCP-1a: the Social Media Allocation page (each client's officer, target and creative source); its own entry so the page sits in one area, the department's own"),
   rule("/departments/[deptId]/posts/[postId]", "workspace", false, "SCP-1e: the Social Media post page (a drawer over any list); it is opened from lists and is never a menu row, so it is its own entry in the department's area"),
   ...WORKSPACES.flatMap((ws) =>

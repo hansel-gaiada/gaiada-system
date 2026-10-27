@@ -62,6 +62,8 @@ test("manager-tier (positive control): sees the triage queue and can decline + c
   // Convert round-trip #1 — route=mini_run (§2.3's default for `feature`).
   await page.getByRole("button", { name: "Add a wishlist to the product page" }).click();
   await expect(page.getByText("Route (suggested: Mini pipeline run)")).toBeVisible();
+  // PV4-04b: "Does this change the price?" must be answered before Convert is enabled.
+  await page.getByRole("radio", { name: "No", exact: true }).check();
   await page.getByRole("button", { name: "Convert" }).click();
   await expect(page.getByText(/Converted/)).toBeVisible();
 
@@ -71,6 +73,8 @@ test("manager-tier (positive control): sees the triage queue and can decline + c
   // internally-logged CR has, unlike the portal-raised client-wide rows above).
   await page.getByRole("button", { name: "Refresh the About page copy" }).click();
   await expect(page.getByText("Route (suggested: PM task)")).toBeVisible();
+  // PV4-04b: "Does this change the price?" must be answered before Convert is enabled.
+  await page.getByRole("radio", { name: "No", exact: true }).check();
   await page.getByRole("button", { name: "Convert" }).click();
   await expect(page.getByText(/Converted/)).toBeVisible();
 });

@@ -95,14 +95,14 @@ describe("the phone's bottom bar", () => {
     expect(screen.getAllByRole("navigation")).toHaveLength(2);
   });
 
-  it("holds Home, Search, Create and Tasks in that order, icon only and named by aria-label (Profile is ticketed, so absent)", () => {
+  it("holds Home, Search, Create, Tasks and Profile in that order, icon only and named by aria-label", () => {
     draw(modelFor(officer));
     const slots = Array.from(bar().querySelectorAll("a, button"));
-    expect(slots.map((s) => s.getAttribute("aria-label"))).toEqual(["Home", "Search", "Create", "Tasks"]);
+    expect(slots.map((s) => s.getAttribute("aria-label"))).toEqual(["Home", "Search", "Create", "Tasks", "Profile"]);
     for (const s of slots) expect(s.textContent).toBe("");
     expect(within(bar()).getByRole("link", { name: "Home" })).toHaveAttribute("href", "/departments/d-soc");
     expect(within(bar()).getByRole("link", { name: "Tasks" })).toHaveAttribute("href", "/me/tasks");
-    expect(within(bar()).queryByRole("link", { name: "Profile" })).toBeNull();
+    expect(within(bar()).getByRole("link", { name: "Profile" })).toHaveAttribute("href", "/departments/d-soc/profile");
   });
 
   it("Search opens the command palette with the event the top bar's field uses", () => {
@@ -146,9 +146,10 @@ describe("the phone's bottom bar", () => {
 describe("the phone's top controls", () => {
   const top = () => document.querySelector<HTMLElement>(".erp-top__phone")!;
 
-  it("are Notifications and More, in that order (Messages is ticketed, so absent), with no count while it is unknown", () => {
+  it("are Notifications, Messages and More, in that order, with no count while it is unknown", () => {
     draw(modelFor(officer));
-    expect(Array.from(top().querySelectorAll("a, button")).map((e) => e.getAttribute("aria-label") ?? e.textContent)).toEqual(["Notifications", "More"]);
+    expect(Array.from(top().querySelectorAll("a, button")).map((e) => e.getAttribute("aria-label") ?? e.textContent)).toEqual(["Notifications", "Messages", "More"]);
+    expect(within(top()).getByRole("link", { name: "Messages" })).toHaveAttribute("href", "/departments/d-soc/messages");
     const bell = within(top()).getByRole("link", { name: "Notifications" });
     expect(bell).toHaveAttribute("href", "/me/inbox");
     expect(within(bell).queryByRole("img")).toBeNull();

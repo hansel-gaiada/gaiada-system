@@ -16,7 +16,7 @@
 // (a design `soc-post-n-1-d1`, an asset `demo-asset-g1`, a file `soc-post-n-1-f1`), so `designId`, `assetGroupId` and a pin's `fileId` are any non-empty
 // string here; the `actionId` is a uuid, as on the server.
 import fixture from "./scpStageMachine.json";
-import { scpActionsFromStatus, scpPhaseOf, type ScpPostView } from "./scpStageMachine";
+import { scpActionsFromStatus, scpHolderOf, scpPhaseOf, type ScpPostView } from "./scpStageMachine";
 import { ALLOCATION_NETWORKS } from "./socialAllocation";
 import { MUST_HAVES, SUGGESTIBLE_FIELDS, editableFieldsOf } from "./socialPipeline";
 import {
@@ -599,6 +599,7 @@ function commit(a: FxAction, p: PipePost, r: Req, userId: string, now: Date, ski
   next.history = [...next.history, {
     action: a.action, from: p.pipelineStatus, to: target.pseudo ?? target.status, by: who(userId), agent: null, at: iso,
     recorded: a.action === "record_client_approve" || a.action === "record_client_change" ? (channel ? { channel } : null) : null, viaPortal: false,
+    ...(a.action === "follow_up" ? { holder: scpHolderOf(view(p)) } : {}), // who it reached: Messages shows the last follow-up of the CURRENT holder
   }];
   const idx = PIPE_POSTS.indexOf(p);
   if (env.flags.deleted) PIPE_POSTS.splice(idx, 1);
@@ -709,3 +710,6 @@ function patchDesign(postId: string, designId: string, b: Record<string, unknown
   if (link && source) { link.source = source; link.aiNote = note; }
   return { status: 200, json: { post: demoPipelinePost(p, userId) } };
 }
+
+/** `POST posts/:postId/actions` in bulk (BFF §63.6.7): each item runs the one runner on its own. Kept here, beside the runner, so the store module never imports it. */
+export const demoBulkActions = (body: Record<string, unknown>, userId: string): DemoResult => runDemoPipelineWrite("POST", "posts/actions", body, userId)!;

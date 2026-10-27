@@ -134,3 +134,49 @@ describe("accept and reject", () => {
     expect(screen.getByTestId("quarantine-bad").textContent).toMatch(/can't be reached/);
   });
 });
+
+// M5-W1q2 (WSK-D84): what the reviewer sees of an upload before deciding.
+describe("the preview of a held upload", () => {
+  it("a raster row shows a lazy thumbnail from the pass-through route, with the original filename as its alt text, a fixed max size, and NO link around it", () => {
+    mount([upload("a1", { originalFilename: "hero-shot.png", title: "Hero" })]);
+    const img = screen.getByTestId("quarantine-thumb") as HTMLImageElement;
+    expect(img.getAttribute("src")).toBe("/api/webdesk-media-preview/gaiada/site-1/a1");
+    expect(img.getAttribute("alt")).toBe("hero-shot.png");
+    expect(img.getAttribute("loading")).toBe("lazy");
+    expect(img.style.maxWidth).toBe("160px");
+    expect(img.style.maxHeight).toBe("120px");
+    // no download link and no open-in-new-tab: the picture is not wrapped in, and the row holds no link to, the file
+    expect(img.closest("a")).toBeNull();
+    expect(screen.getByTestId("quarantine-row").querySelectorAll("a")).toHaveLength(0);
+    expect(screen.getByTestId("quarantine-row").querySelectorAll("[download], [target=_blank]")).toHaveLength(0);
+  });
+
+  it("each of the five raster types gets a thumbnail", () => {
+    mount(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"].map((mime, i) => upload(`r${i}`, { mime })));
+    expect(screen.getAllByTestId("quarantine-thumb")).toHaveLength(5);
+    expect(screen.queryByTestId("quarantine-nopreview")).toBeNull();
+  });
+
+  it("SVG, HTML, PDF and video are shown by type only: 'No preview for <mime>', no <img>, no object, no iframe", () => {
+    mount(["image/svg+xml", "text/html", "application/pdf", "video/mp4"].map((mime, i) => upload(`n${i}`, { mime })));
+    const words = screen.getAllByTestId("quarantine-nopreview").map((e) => e.textContent);
+    expect(words).toEqual(["No preview for image/svg+xml", "No preview for text/html", "No preview for application/pdf", "No preview for video/mp4"]);
+    expect(screen.queryByTestId("quarantine-thumb")).toBeNull();
+    const table = screen.getByTestId("quarantine-table");
+    expect(table.querySelectorAll("img, object, embed, iframe, video, audio")).toHaveLength(0);
+  });
+
+  it("an image that fails to load says 'Preview unavailable' in its place; the other rows keep their thumbnails", () => {
+    mount([upload("a1"), upload("a2")]);
+    const [first] = screen.getAllByTestId("quarantine-thumb");
+    act(() => { fireEvent.error(first); });
+    expect(screen.getAllByTestId("quarantine-thumb")).toHaveLength(1);
+    expect(screen.getByTestId("quarantine-preview-failed").textContent).toBe("Preview unavailable");
+  });
+
+  it("a mime this list never draws (even one that LOOKS like an image) is a name only: image/svg+xml and an unknown image type", () => {
+    mount([upload("s1", { mime: "image/svg+xml" }), upload("s2", { mime: "image/x-icon" }), upload("s3", { mime: "IMAGE/PNG" })]);
+    expect(screen.queryByTestId("quarantine-thumb")).toBeNull();
+    expect(screen.getAllByTestId("quarantine-nopreview")).toHaveLength(3);
+  });
+});

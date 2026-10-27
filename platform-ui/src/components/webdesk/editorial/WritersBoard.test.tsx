@@ -179,3 +179,29 @@ describe("WritersBoard: the workflow view (M5-W5)", () => {
     expect(screen.getByTestId("board-truncated").textContent).toMatch(/Some items may be missing/);
   });
 });
+
+describe("WritersBoard: the link to the uploads desk (M5-W1q2)", () => {
+  const showWith = (uploadsHref?: { href: string; waiting?: { count: number; more: boolean } }) =>
+    render(<WritersBoard board={board([card("a", "draft")])} editorBase="/d/website/content/gaiada/site-1" authors={{}} filters={{}} filterAction="/d/website/writers/gaiada/site-1" peopleHref="/p" uploadsHref={uploadsHref} />);
+
+  it("is drawn when the page was given one, with how many uploads are held", () => {
+    showWith({ href: "/d/website/writers/uploads/gaiada/site-1", waiting: { count: 3, more: false } });
+    const link = screen.getByTestId("uploads-link");
+    expect(link.getAttribute("href")).toBe("/d/website/writers/uploads/gaiada/site-1");
+    expect(link.textContent?.replace(/\s+/g, " ").trim()).toBe("Uploads awaiting review (3)");
+  });
+
+  it("says '+' when there are more than one page, and has no count when none is given", () => {
+    showWith({ href: "/u", waiting: { count: 50, more: true } });
+    expect(screen.getByTestId("uploads-link").textContent?.replace(/\s+/g, " ").trim()).toBe("Uploads awaiting review (50+)");
+    cleanup();
+    showWith({ href: "/u" });
+    expect(screen.getByTestId("uploads-link").textContent?.replace(/\s+/g, " ").trim()).toBe("Uploads awaiting review");
+  });
+
+  it("is absent when the page was not given one (the caller may not review): no link, no placeholder", () => {
+    showWith(undefined);
+    expect(screen.queryByTestId("uploads-link")).toBeNull();
+    expect(screen.queryByText(/Uploads awaiting review/)).toBeNull();
+  });
+});

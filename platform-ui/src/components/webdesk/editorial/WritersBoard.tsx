@@ -17,7 +17,7 @@ import "./editorial.css";
  * column heads then show only how many cards are on screen: a withheld count is never drawn as 0.
  */
 export function WritersBoard({
-  board, editorBase, authors, filters, filterAction, peopleHref, workflow, dashboardHref,
+  board, editorBase, authors, filters, filterAction, peopleHref, workflow, dashboardHref, uploadsHref,
 }: {
   /** M5-W5: a `WorkflowBoard` (the calendar read) carries each card's brief, pending publish requests and placement; a plain board draws without them. */
   board: EditorialBoard & { truncated?: boolean };
@@ -30,6 +30,12 @@ export function WritersBoard({
   peopleHref: string;
   /** M5-W8: the writer dashboard for this site (how the published articles are doing). Optional: absent draws no link. */
   dashboardHref?: string;
+  /**
+   * M5-W1q2: the contributor-upload review desk for this site. Passed ONLY when the BFF let this caller read the review queue (its own Cerbos answer,
+   * `webdesk_media_asset:review`): absent draws no link, so nobody is sent to a page that would tell them they may not review. `uploadsWaiting` is
+   * the number held (`+` when there are more than one page); absent draws the link without a count.
+   */
+  uploadsHref?: { href: string; waiting?: { count: number; more: boolean } };
   /** M5-W5: the workflow view's extras. Absent = the plain board (no tabs, no locale or "mine" filter, no brief links). */
   workflow?: { calendarHref: string; briefBase: string; locales: readonly string[] };
 }) {
@@ -49,6 +55,11 @@ export function WritersBoard({
         Everything on this site that is in the review flow, by where it stands. Open an item to read it, comment, send it for review or review it.
         {" "}<Link href={peopleHref} data-testid="people-link">Manage writers</Link>
         {dashboardHref ? <>{" "}<Link href={dashboardHref} data-testid="dashboard-link">Writer dashboard</Link></> : null}
+        {uploadsHref ? (
+          <>{" "}<Link href={uploadsHref.href} data-testid="uploads-link">
+            Uploads awaiting review{uploadsHref.waiting ? ` (${uploadsHref.waiting.count}${uploadsHref.waiting.more ? "+" : ""})` : ""}
+          </Link></>
+        ) : null}
       </p>
 
       {board.countsWithheld ? (

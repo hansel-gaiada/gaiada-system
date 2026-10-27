@@ -6060,9 +6060,68 @@ unchanged (`{uploadUrl, expiresAt, maxBytes, allowedMimes}`) and the browser's P
 **The staff page** `/departments/:deptId/website/writers/uploads/:tenant/:site` (a site picker at `…/uploads`): one row per held upload (title or filename, type, size,
 dimensions, who sent it, when) with **Accept** and **Reject** (Reject asks first: it is final). The buttons follow `allowed.review` per row: `false` shows the
 reason and no buttons, `null` leaves them on with the server's refusal as the fallback; a 403 on the queue is the plain "you can't review uploads here" state,
-never an empty list. **Known gap:** the file itself is not previewable while it is quarantined (no staff-authenticated byte route exists yet; the reviewer
-judges by title, type, size, dimensions and sender), so a preview needs its own decision (a short-lived staff-only URL, or a proxied read with `nosniff` and a
-sandbox CSP). No navigation entry links to the page yet.
+never an empty list. The file is now previewable (M5-W1q2, the next sub-section): each raster row draws a thumbnail and the board of `writers/[tenant]/[site]`
+links to this page for a caller the BFF lets read the queue.
+
+#### The reviewer's byte preview of a quarantined upload (M5-W1q2, 2026-10-27 — STATUS: PROTOTYPED: typechecked locally (webdesk-api, platform-nest, platform-ui); the pure suites `media-review-preview-unit.spec.ts`, `webdesk-media-preview.test.ts` and the platform-ui suites run locally; the DB/Cerbos/RustFS suites `media-review-preview.spec.ts` and `webdesk-media-review-preview.test.ts` are written and run on the GitHub Actions gate)
+
+Owner ruling WSK-D84 (approved 2026-10-27). Until now a staff editor accepted or rejected a freelance writer's upload without seeing it. A reviewer now sees a PICTURE
+before deciding, and nothing else is ever served: the quarantined bytes are an outsider's, so they leave WebDesk only as a checked raster image, to a reviewer who passed the
+same Cerbos `review` questions as the decision, with headers that stop the browser running them. Code: WebDesk `content-reads.controller.ts` / `content-reads.service.ts`
+(`reviewPreview`), `media-review-preview.ts` (the allow-list, the cap, the signatures), command `media.reviewPreview` (read / `webdesk:read`); ERP
+`webdesk-media.service.ts` (`reviewPreview`), `webdesk-media-preview.ts` (the ERP's own check and the six headers), `WebdeskZoneB.readBytes`, `webdesk-content.controller.ts`;
+UI `app/api/webdesk-media-preview/[tenantSlug]/[siteId]/[assetId]/route.ts`, `lib/webdeskMediaPreview.ts`, `QuarantinePanel.tsx`, `WritersBoard.tsx`.
+
+**What is previewed.** Only a **raster image**: `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/avif`, of at most **10 MiB**, whose asset is on the named site, not
+deleted, `review_state = quarantined` and `scan_status = clean`. SVG, HTML, PDF, video and anything else is **never served**: the reviewer sees `No preview for <mime>`. The public
+serving routes are unchanged (a quarantined asset is still 404 there); the preview is a control-plane read, not a way to publish.
+
+**Transport: raw bytes with a content type, not JSON.** WebDesk answers the bytes themselves (`Content-Type` = the stored mime). The control client already had a typed
+`binaryResponse` mode for raw-bytes reads (the contract artifact read uses it; an any-type `Accept`, a 25 MiB response cap, the bytes returned as received), so
+`WebdeskZoneB.readBytes()` adds NO new capability to the egress: it is `read()` with that flag, through the same client, mTLS, token, breaker, deadline, transport
+mapping and `settle()` for every non-2xx answer. JSON `{mime, sizeBytes, width, height, dataBase64}` was the fallback; it was not needed, and it would have inflated a
+10 MiB image by a third, held it twice in memory and parsed a large string for nothing.
+
+| Layer | Method | Path | Notes |
+|---|---|---|---|
+| WebDesk (Zone B) | GET | `/control/v1/tenants/:tenantSlug/sites/:siteId/media/:assetId/review-preview` | `media.reviewPreview`, read / `webdesk:read`, un-audited, tenant RLS (`withTenant`), same L1 mTLS + L2 token + L3 scope as `media.list`. 200 the bytes (`Content-Type` the stored mime, `nosniff`, `private, no-store`); the bytes must bear the stored mime's signature. Any query key is 400. |
+| ERP BFF | GET | `/api/:t/modules/webdev/content/sites/:tenantSlug/:siteId/media/:assetId/review-preview` | PROTOTYPED. Staff only; NOT `@ContributorRoute()`; no MCP tool; no ledger row, no activity (a read). Order: `webdesk_media_asset:read` on the site; **`review` with a placeholder uploader, before anything is validated or read**; the id must be a uuid; the asset's REAL uploader is read from WebDesk's own row (`media.list`, `assetId`, `reviewState=quarantined`); **`review` again with that uploader**; only then the bytes are fetched, and the ERP checks them itself (below). |
+| Next | GET | `/api/webdesk-media-preview/:tenantSlug/:siteId/:assetId` | PROTOTYPED. Streams the BFF route with the caller's session (`app/api/creative-assets` shape); the company is the caller's ACTIVE one, never the URL's. 401 with no session, 400 for a bad segment or no active company, 404 in demo mode. |
+
+**Authorization is `review()`'s, and no byte is fetched before it passes.** The uploader previewing their own upload, an upload whose uploader is unknown, a writers' room
+`webdesk_writer`, a client editor, a contributor (the route fence: `contributor_route_forbidden`) and a bot or automation principal (Cerbos) are all **403**, and WebDesk is
+asked for the asset's row at most, never its bytes. No Cerbos policy or action was added: the preview reuses `webdesk_media_asset:review` (PERMISSION-CONTRACT §27.6).
+
+**What the ERP checks after the bytes arrive** (nothing WebDesk says about the type is believed): the content type must be one of the five raster types and equal the row's
+mime; the file signature must match it (PNG `89 50 4E 47 0D 0A 1A 0A`; JPEG `FF D8 FF`; GIF `GIF87a`/`GIF89a`; WEBP `RIFF....WEBP`; AVIF an `ftyp` box with brand `avif`/`avis`);
+the size must be within 10 MiB. A mismatch (a PNG declared over HTML, an MP4 as AVIF, a WAV as WEBP) is **415** and the bytes are dropped.
+
+**Refusals a consumer must render** (WebDesk's problems pass through byte for byte, `application/problem+json`):
+
+| Status | Problem `type` slug | When |
+|---|---|---|
+| 403 | (Cerbos, or the route fence `contributor_route_forbidden`) | the caller may not review this upload (see above); WebDesk's bytes were never asked for |
+| 404 | `media-asset-not-found` | ONE shape for: a malformed or unknown id, another site's asset, another company's asset, an accepted, rejected or deleted one, one whose scan is not clean, one with no stored object. No existence oracle. |
+| 415 | `media-preview-unsupported`, member `mime` only | a quarantined clean asset of any other type (svg, pdf, html, video, ...), or bytes that do not bear the declared raster type's signature |
+| 413 | `media-preview-too-large` | over 10 MiB |
+| 400 | `invalid-request` | an unknown query key (a reviewer; a caller who may not review is 403 first) |
+| 502 / 503 | (BFF) | WebDesk refused our credentials or failed (502); the channel is down or its breaker is open (503) |
+
+**The response, exactly six headers** (the Next route re-sets them from an allow-list and copies NOTHING from upstream; the BFF sets the same six from `previewHeaders()`):
+
+| Header | Value |
+|---|---|
+| `Content-Type` | the allow-listed mime (one of the five) |
+| `X-Content-Type-Options` | `nosniff` |
+| `Content-Security-Policy` | `sandbox; default-src 'none'` |
+| `Content-Disposition` | `inline; filename="preview.<ext>"` (`png`, `jpg`, `gif`, `webp`, `avif`; the uploader's own file name is never put in a header) |
+| `Cache-Control` | `private, no-store` |
+| `Cross-Origin-Resource-Policy` | `same-origin` |
+
+**The page.** On `writers/uploads/:tenant/:site` each row whose mime is raster shows a thumbnail `<img>` from the Next route, `loading="lazy"`, the original file name as its
+alt text, at most 160 x 120; a non-raster row says `No preview for <mime>`; an image that fails to load says `Preview unavailable`. There is no download link and no
+open-in-new-tab. The board of `writers/[tenant]/[site]` links to the desk (`Uploads awaiting review (n)`) **only when the BFF lets the caller read the queue** (its own Cerbos
+`review` answer; any refusal draws no link), never from a role name.
 
 ### Writers' room calendar and workflow board (M5-W5, 2026-10-12 — STATUS: PROTOTYPED (backend): typechecked + unit-tested locally; the DB/Cerbos/HTTP suite `webdesk-calendar.test.ts` is written and needs the Linux gate; UI: `writers/calendar` and the board of `writers/[tenant]/[site]`)
 

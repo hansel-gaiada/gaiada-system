@@ -123,6 +123,9 @@ DEV-VERIFIED (or each is waived with a reason recorded here):
 6. **Persona integration stays deferred** (late staging, optional), as decided on 2026-08-03; confirm
    that step 2 of attribution is not a close-out condition.
 
+**Owner, 2026-10-27: deferred.** The owner deferred the waivers and the decisions above. None is recorded yet, so the plan stays
+**OPEN** and the exit-bar tickets are not scheduled by this document. Ask again when the owner picks the plan back up.
+
 ## How to use this
 
 This is a **late-dev checklist**, not a build ticket set for today. The ERP build continues on its

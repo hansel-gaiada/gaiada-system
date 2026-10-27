@@ -94,11 +94,12 @@ describe("the Ask actions", () => {
   });
 
   it("show only where the company has the receiving department", () => {
+    // SCP-1m: New post and Extra post (the Create menu's) come after the Asks, so the Overview header's first three are unchanged where both Asks are offered.
     expect(q(social, ["social-media", "creatives", "web-dev"])).toEqual(["compose-post", "ask-creatives", "ask-web-dev"]);
-    expect(q(social, ["social-media", "web-dev"])).toEqual(["compose-post", "ask-web-dev"]);
-    expect(q(social, ["social-media", "creatives"])).toEqual(["compose-post", "ask-creatives"]);
-    expect(q(social, ["social-media"])).toEqual(["compose-post"]);
-    expect(q(social)).toEqual(["compose-post"]);
+    expect(q(social, ["social-media", "web-dev"])).toEqual(["compose-post", "ask-web-dev", "new-post"]);
+    expect(q(social, ["social-media", "creatives"])).toEqual(["compose-post", "ask-creatives", "new-post"]);
+    expect(q(social, ["social-media"])).toEqual(["compose-post", "new-post", "extra-post"]);
+    expect(q(social)).toEqual(["compose-post", "new-post", "extra-post"]);
   });
 
   it("link to the form for the right target", () => {

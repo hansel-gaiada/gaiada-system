@@ -11,6 +11,43 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.181.0` + webdesk `0.32.0` + platform-ui `0.206.0` - M5-W1q2: the reviewer sees a quarantined picture before accepting it (WSK-D84, approved in WSK-D90) (2026-10-27) - PROTOTYPED
+
+- **WebDesk.** New control-plane read `GET control/v1/tenants/:tenantSlug/sites/:siteId/media/:assetId/review-preview` (`media.reviewPreview`, read / `webdesk:read`, not audited). It is the only control read that answers with bytes.
+  - Bytes are returned only for an asset that is on that site, not deleted, `quarantined`, `clean`, one of five raster types (png, jpeg, gif, webp, avif), at most 10 MiB, and whose stored bytes carry that type's signature.
+  - Another type is 415 `media-preview-unsupported` (carrying `{mime}` only). Over the cap is 413 `media-preview-too-large`.
+  - Every other case (unknown, another site or tenant, accepted, rejected, deleted, not clean, no object) is the one 404.
+  - Public serving is unchanged and still refuses every unaccepted asset.
+- **ERP.** New route `GET …/content/sites/:tenantSlug/:siteId/media/:assetId/review-preview`. It asks Cerbos `webdesk_media_asset:review` the same way and in the same order as the decision, all before any byte is fetched:
+  - first for somebody else's upload;
+  - then with the asset's real uploader, read from WebDesk's own row.
+
+  So the uploader, an unknown uploader, a contributor, a writer, a client editor and a bot each get 403.
+  - The ERP checks the type, the magic bytes and the size itself. A mismatch is 415 and the bytes are dropped.
+  - It sends exactly six headers: the type, `nosniff`, `Content-Security-Policy: sandbox; default-src 'none'`, `inline` with a fixed file name, `private, no-store`, and `Cross-Origin-Resource-Policy: same-origin`.
+  - Transport: the new `WebdeskZoneB.readBytes()`, which is `read()` with the client's existing `binaryResponse` mode.
+- **UI.**
+  - The Next route `GET /api/webdesk-media-preview/:tenantSlug/:siteId/:assetId` streams the bytes with the caller's session and the active company. It re-sets the six headers from an allow-list and copies none from upstream.
+  - The uploads desk draws a lazy thumbnail for a raster row, with no link, no download and no new tab. Any other type shows "No preview for <mime>", and an image that fails to load shows "Preview unavailable".
+  - The writers' board has an "Uploads awaiting review (n)" link. It appears only when the BFF lets the caller read the review queue.
+- **No Cerbos policy, migration or compose change.** webdesk, platform-nest and platform-ui rebuild.
+- **Tests.** Ran locally:
+  - platform-nest preview rules: 10;
+  - WebDesk unit tests: 4;
+  - the command registry: 69;
+  - the Next route: 12;
+  - the UI: QuarantinePanel 16, the uploads page 7, the writers' board page 16.
+
+  The DB suites (`media-review-preview.spec.ts`, 13 cases; `webdesk-media-review-preview.test.ts`, 15 cases) run on the Linux gate. The capability inventory was regenerated: the webdev driver count goes from 40 to 41.
+
+### platform-ui e2e - two stale specs fixed (diagnosed by gaiada-system-3a) (2026-10-27)
+
+- `playwright.config.ts`'s `WEBDESK_STUB_SPECS` now also excludes `webdesk-assist` and `webdesk-dashboard`.
+  - The default config's chromium project had been running these two stub-only specs with no stub, so 11 tests failed with ECONNREFUSED on 3991.
+  - `playwright.webdesk.config.ts` still runs them.
+  - Checked with `--list`: the default config went from 11 matches to 0, and the webdesk config stays at 11.
+- `webdev-change-requests.spec.ts` now answers "Does this change the price?" (No) before each Convert. PV4-04b keeps Convert disabled until the question is answered.
+
 ### platform-nest `0.180.0` + platform-ui `0.205.0` - SCP-1l and SCP-1o's DEMO_MODE half: comments a client may see, pins on the image, and the Social pipeline's demo seed (FRONTEND-BFF-CONTRACT §63.8, §63.16; plan §11) (2026-10-27) - PROTOTYPED
 
 - **Comments (SCP-1l).** Migration `202610271300_comments_visibility_anchor.sql` adds `visibility` (`team` or `client`) and `anchor` (a pin `{x, y, fileId}`) to the shared `comments`, both allowed on `social_post` threads only, plus the `ix_comments_target` index. Existing comments read `team`.

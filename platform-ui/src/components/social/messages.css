@@ -1,0 +1,21 @@
+/* SCP-1j — the Social Messages page (who holds each of the officer's posts, and the Follow up button). Tokens only, no colour, radius or shadow literal
+   and no uppercase transform (the tokens guard), so the Social skin (SCP-K) restyles it by changing tokens and nothing here. It builds on the `.scp-*`
+   classes of cycles.css (sections, notes, messages, links), which the page also imports. */
+
+.scp-msg__count { font-weight: 400; }
+.scp-msglist { list-style: none; margin: 0; padding: 0; display: grid; }
+.scp-msglist__item {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: start;
+  padding: 10px 0; border-bottom: 0.5px solid var(--erp-hairline-soft);
+}
+.scp-msglist__main { display: grid; gap: 2px; min-width: 0; }
+.scp-msglist__title { font: 600 13px var(--font-body); color: var(--text-primary); text-decoration: none; overflow-wrap: anywhere; }
+.scp-msglist__title:hover { text-decoration: underline; }
+.scp-msglist__actions { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: flex-end; }
+.scp-msglist__status { grid-column: 1 / -1; margin: 0; }
+.scp-msglist__status:empty { display: none; }
+
+@media (max-width: 640px) {
+  .scp-msglist__item { grid-template-columns: minmax(0, 1fr); }
+  .scp-msglist__actions { justify-content: flex-start; }
+}
