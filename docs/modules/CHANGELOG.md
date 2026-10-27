@@ -11,6 +11,34 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.178.0` - M6-P6o and P6o2: the ERP writes each site's deploy secret from its own vault record (WSK-D88); agentic-native T18 people readers (2026-10-27) - PROTOTYPED
+
+- **M6-P6o.**
+  - Routes:
+    - `PUT /api/:t/modules/webdev/deploy-credentials/:connectionId` seals a credential into the vault (`integration_connection · manage`; the value is accepted once and never echoed; the answer gives a `sealedVersion`, the hash of the ciphertext);
+    - `POST …/sites/:id/deploy-secret` files ONE HIGH approval (`github:write_deploy_secret`);
+    - `GET …/sites/:id/deploy-secret` reports the state (`no_credential` … `written`, `stale`, `revoked`).
+  - Decide: decider ≠ requester, plus `provision`, `integration_connection · manage` and `github_repo · secret_write`. Both are re-checked at execution, and the claim runs once.
+  - Execution:
+    1. re-reads the facts (archived sites get nothing, WSK-D82; a changed vault version is refused);
+    2. reads the org's Actions public key FIRST, so without O-3 nothing is decrypted or written;
+    3. decrypts in memory and seals with a libsodium sealed box (`libsodium-wrappers` 0.7.15, pinned, no install scripts);
+    4. PUTs `WEBDESK_DEPLOY_<SLUG>_<ENV>_<REPOID>` visible to this repo only, so the write never widens access;
+    5. then grants as before.
+  - Errors are scrubbed before the ledger.
+  - Tests: a leak scan over every table, log line, response and recorded GitHub call finds no value, with a positive control; the sealed bytes open with the test private key. Shares the decide path with SCP-1's `replacesDecide` (they apply to different origins; reviewed together).
+  - The live leg waits on O-3.
+- **M6-P6o2.**
+  - Migration `202610271200_integration_connections_webdev_site_owner_kind.sql` widens the `owner_kind` CHECK with `webdev_site` (owner id = the `webdev_sites` row, one site in one environment), following `202608311000`'s precedent.
+  - It is rebuilt from the live definition, refuses six broken states, and has a closing self-check. The unique key, the upsert, RLS and every existing row are unchanged.
+  - New `POST|GET …/sites/:id/deploy-credentials`.
+  - The bind and P6o's write accept a row's OWN record only (`vault_ref_wrong_owner` otherwise).
+  - No Cerbos change. Client admins get no vault access, as before.
+- **T18:** the IT accounts worklist and `assertMember`, the IAM phase-2 backfill and a seed also require `users.kind = 'employee'` (additive).
+  - A static ratchet (`people-reader-kind-guard.test.ts`) fails on a new people reader keyed only on `company_memberships.kind`.
+  - Two allowlisted, with reasons: the dept-notices audience (bots are notified by design, DW-10a) and the service reconciler.
+- **CI on the branches:** 40439881019 (P6o), 40443963517 (P6o2), 40443676116 (T18), all green. The capability inventory was regenerated for the new HTTP suite.
+
 ### platform-nest `0.177.0` + platform-ui `0.203.0` - SCP-1 wave 1: the Social Media content pipeline's data, permissions and stage machine, cycles and schedule health, allocation and brand book, and two self-promotion guards (FRONTEND-BFF-CONTRACT §63, PERMISSION-CONTRACT §53) (2026-10-27) - PROTOTYPED
 
 - **The data (SCP-1b).** Migration `202610271000_social_pipeline.sql`:
