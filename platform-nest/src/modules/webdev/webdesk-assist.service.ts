@@ -31,6 +31,7 @@
 import { ForbiddenException, Logger } from "@nestjs/common";
 import type { Principal } from "../../rbac/principal";
 import { completeViaGateway, GatewayNotConfiguredError, type CompletionResult } from "../search/providers/gateway-client";
+import type { AiCallAttribution } from "../ai-usage/gateway-usage";
 import {
   ASSIST_KINDS, AssistNotApplicable, AssistOutputInvalid, buildPrompt, estimateTokens, isAssistKind, parseAnswer, readSource,
   type AssistKind, type BuiltPrompt, type Suggestion,
@@ -53,8 +54,8 @@ function problem(status: number, slug: string, title: string, detail: string, ex
 }
 
 /** The gateway seam. Production: the shared ai-gateway-go client (the ONLY way this module reaches a model, and it holds no provider key). */
-export type AssistGateway = (prompt: string) => Promise<CompletionResult>;
-const realGateway: AssistGateway = (prompt) => completeViaGateway(prompt, { timeoutMs: GATEWAY_TIMEOUT_MS });
+export type AssistGateway = (prompt: string, attribution: AiCallAttribution) => Promise<CompletionResult>;
+const realGateway: AssistGateway = (prompt, attribution) => completeViaGateway(prompt, { timeoutMs: GATEWAY_TIMEOUT_MS, attribution });
 
 export interface AssistDeps {
   gateway: AssistGateway;
@@ -163,7 +164,7 @@ export class WebdeskAssistService {
     const started = Date.now();
     let completion: CompletionResult;
     try {
-      completion = await this.deps.gateway(built.prompt);
+      completion = await this.deps.gateway(built.prompt, { tenantId: gate.tenantId, userId, surface: "other", task: "webdev.assist" });
     } catch (err) {
       const c = classifyGatewayError(err);
       const ms = Date.now() - started;

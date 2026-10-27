@@ -12,6 +12,9 @@ import {
   type RelayEmit, type RelayResult,
 } from "./stream";
 
+/** AIP-03a: a tenantId that is not a uuid records nothing, so these tests stay pure. */
+const ATTR = { tenantId: "t1", userId: null, surface: "assistant" } as const;
+
 function sseBody(...blocks: string[]): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
   const joined = blocks.join("");
@@ -183,7 +186,7 @@ describe("relayGeneration — real usage overrides the estimate, absent meta is 
       `event: done\ndata: {}\n\n`,
     );
     const result: RelayResult = await relayGeneration(entry, {
-      tenantId: "t1", prompt: "hi", emit, gatewayUrl: "http://fake-gateway.test", fetchImpl: fakeFetch(body),
+      tenantId: "t1", attribution: ATTR, prompt: "hi", emit, gatewayUrl: "http://fake-gateway.test", fetchImpl: fakeFetch(body),
     });
 
     expect(result.outcome).toBe("done");
@@ -209,7 +212,7 @@ describe("relayGeneration — real usage overrides the estimate, absent meta is 
       `event: done\ndata: {}\n\n`,
     );
     const result = await relayGeneration(entry, {
-      tenantId: "t1", prompt: "hi", emit, gatewayUrl: "http://fake-gateway.test", fetchImpl: fakeFetch(body),
+      tenantId: "t1", attribution: ATTR, prompt: "hi", emit, gatewayUrl: "http://fake-gateway.test", fetchImpl: fakeFetch(body),
     });
     expect(result.outcome).toBe("done");
     expect(result.provider).toBe("hermes");
@@ -230,7 +233,7 @@ describe("relayGeneration — real usage overrides the estimate, absent meta is 
       `event: done\ndata: {}\n\n`,
     );
     const result = await relayGeneration(entry, {
-      tenantId: "t1", prompt: "hi", emit, gatewayUrl: "http://fake-gateway.test", fetchImpl: fakeFetch(body),
+      tenantId: "t1", attribution: ATTR, prompt: "hi", emit, gatewayUrl: "http://fake-gateway.test", fetchImpl: fakeFetch(body),
     });
     expect(result.outcome).toBe("done");
     // ASST-16 preserved: even a FORKED session is the live one now, so it's still the id persisted.
@@ -244,7 +247,7 @@ describe("relayGeneration — real usage overrides the estimate, absent meta is 
     const entry = fakeEntry("thread-b");
     const emit = collectingEmit();
     const body = sseBody(`data: ${JSON.stringify("plain reply")}\n\n`, `event: done\ndata: {}\n\n`);
-    const result = await relayGeneration(entry, { tenantId: "t1", prompt: "hi", emit, gatewayUrl: "http://fake-gateway.test", fetchImpl: fakeFetch(body) });
+    const result = await relayGeneration(entry, { tenantId: "t1", attribution: ATTR, prompt: "hi", emit, gatewayUrl: "http://fake-gateway.test", fetchImpl: fakeFetch(body) });
 
     expect(result.outcome).toBe("done");
     expect(result.provider).toBeUndefined(); // -> persisted NULL, "unknown provider", never an error
@@ -265,7 +268,7 @@ describe("relayGeneration — real usage overrides the estimate, absent meta is 
       `data: ${JSON.stringify("partial")}\n\n`,
       `event: error\ndata: ${JSON.stringify({ error: "boom" })}\n\n`,
     );
-    const result = await relayGeneration(entry, { tenantId: "t1", prompt: "hi", emit, gatewayUrl: "http://fake-gateway.test", fetchImpl: fakeFetch(body) });
+    const result = await relayGeneration(entry, { tenantId: "t1", attribution: ATTR, prompt: "hi", emit, gatewayUrl: "http://fake-gateway.test", fetchImpl: fakeFetch(body) });
 
     expect(result.outcome).toBe("error");
     expect(result.errorKind).toBe("upstream_error");
@@ -283,7 +286,7 @@ describe("relayGeneration — real usage overrides the estimate, absent meta is 
       `data: ${JSON.stringify("still works")}\n\n`,
       `event: done\ndata: {}\n\n`,
     );
-    const result = await relayGeneration(entry, { tenantId: "t1", prompt: "hi", emit, gatewayUrl: "http://fake-gateway.test", fetchImpl: fakeFetch(body) });
+    const result = await relayGeneration(entry, { tenantId: "t1", attribution: ATTR, prompt: "hi", emit, gatewayUrl: "http://fake-gateway.test", fetchImpl: fakeFetch(body) });
     expect(result.outcome).toBe("done");
     expect(result.text).toBe("still works");
     expect(emit.calls.error).toEqual([]);

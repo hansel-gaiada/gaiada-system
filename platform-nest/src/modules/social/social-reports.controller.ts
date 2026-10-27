@@ -53,6 +53,7 @@ import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { completeViaGateway } from "./gateway-client";
+import { aiAttribution } from "../ai-usage/gateway-usage";
 import { queryBrandKnowledge } from "./knowledge-client";
 import { buildReportNarrativePrompt, parseReportNarrativeDraft, type ReportNarrativeGroundingFacts } from "./ai-drafts";
 import {
@@ -267,7 +268,7 @@ export class SocialReportsController {
     const prompt = buildReportNarrativePrompt(narrativeFacts);
     let raw: string | null = null;
     try {
-      raw = (await completeViaGateway(prompt)).text;
+      raw = (await completeViaGateway(prompt, { attribution: aiAttribution(req.principal, tenantId, "other", { task: "social.report_narrative" }) })).text;
     } catch {
       raw = null; // fail-soft: a gateway hiccup drafts the deterministic fallback, never blocks report creation
     }

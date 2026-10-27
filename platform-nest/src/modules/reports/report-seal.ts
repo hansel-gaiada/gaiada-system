@@ -54,6 +54,7 @@ import { recomputeFactWindow } from "./fact-job";
 import { buildReportDocument, computeReportRangeRows, rowGrainShape } from "./document-builder";
 import { buildGroundingFacts, buildNarrativePrompt, parseNarrative } from "./narrative";
 import { completeViaGateway, type GatewayCallOptions } from "../search/providers/gateway-client";
+import type { AiCallAttribution } from "../ai-usage/gateway-usage";
 import { upsertRows as upsertRollupRows } from "../../rollups/engine";
 import { formatPeriodRange } from "./metrics";
 import { getPeriodById, PERIOD_COLUMNS, type PeriodRow } from "./report-periods";
@@ -198,6 +199,8 @@ export type SealResult = { ok: true; period: PeriodRow; documentCount: number } 
 export async function sealPeriod(tenantId: string, periodId: string, actorUserId: string | null, gatewayOpts?: GatewayCallOptions): Promise<SealResult> {
   const period = await getPeriodById(tenantId, periodId);
   if (!period) return { ok: false, reason: "not_found" };
+  // AIP-03a: the seal's AI narrative calls are the sealer's (null for the n8n schedule/system seal).
+  const attribution: AiCallAttribution = { tenantId, userId: actorUserId, surface: "other", task: "reports.narrative" };
   // §0057 rule 2: a required acceptance criterion, never a silent skip. Checked BEFORE any work
   // happens — a custom period must never even trigger a facts recompute under the seal path.
   if (period.periodKind === "custom") return { ok: false, reason: "custom_kind" };
@@ -240,7 +243,7 @@ export async function sealPeriod(tenantId: string, periodId: string, actorUserId
     // hash on the deterministic text, exactly as it does for any grain that fell back.
     if (narrativeModeForGrain(grain) === "ai") {
       try {
-        const completion = await completeViaGateway(buildNarrativePrompt(facts), gatewayOpts);
+        const completion = await completeViaGateway(buildNarrativePrompt(facts), { ...gatewayOpts, attribution });
         completionText = completion.text;
         model = completion.provider ?? null;
       } catch {

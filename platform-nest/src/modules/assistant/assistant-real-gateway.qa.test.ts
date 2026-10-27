@@ -47,6 +47,7 @@ describe("ASST-08 adversarial: real ai-gateway-go through the ASST-06 relay (not
 
       const result = await relayGeneration(generation!, {
         tenantId: "qa-tenant",
+        attribution: { tenantId: "qa-tenant", userId: null, surface: "assistant" },
         prompt,
         gatewayUrl: GATEWAY_URL,
         gatewayToken: GATEWAY_TOKEN,
@@ -83,6 +84,7 @@ describe("ASST-08 adversarial: real ai-gateway-go through the ASST-06 relay (not
     const generation = reserveGeneration("qa-real-gw-thread-2", "qa-real-gw-msg-2");
     const result = await relayGeneration(generation!, {
       tenantId: "qa-tenant",
+      attribution: { tenantId: "qa-tenant", userId: null, surface: "assistant" },
       prompt,
       gatewayUrl: GATEWAY_URL,
       gatewayToken: GATEWAY_TOKEN,

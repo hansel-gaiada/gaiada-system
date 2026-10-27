@@ -74,6 +74,7 @@ import { validateVariant, estimateCostUsd, isNetwork, type Network, type QuotaSn
 // `publish-precondition.ts`/`dispatch.ts` too — never a second copy of the arithmetic.
 import { resolveXPricing, readUsageSnapshot } from "./usage-ledger";
 import { completeViaGateway } from "./gateway-client";
+import { aiAttribution } from "../ai-usage/gateway-usage";
 import { ingestBrandKnowledge, queryBrandKnowledge, brandCorpusScope, brandCorpusProvenance } from "./knowledge-client";
 // SMM-26 — the smm-agent-content-brief flow's own DB/AI orchestration; this controller validates
 // the request shape and calls authorize(), content-brief.ts owns everything past that (see its
@@ -2385,7 +2386,7 @@ export class SocialController {
     const prompt = buildCaptionPrompt(facts);
     let raw: string | null = null;
     try {
-      raw = (await completeViaGateway(prompt, cloudPolish ? { provider: "claude" } : undefined)).text;
+      raw = (await completeViaGateway(prompt, { attribution: aiAttribution(req.principal, tenantId, "other", { task: "social.draft_caption" }), ...(cloudPolish ? { provider: "claude" } : {}) })).text;
     } catch {
       raw = null; // fail-soft: a gateway hiccup drafts the deterministic fallback, never blocks the composer
     }
@@ -2491,7 +2492,7 @@ export class SocialController {
     const prompt = buildIdeaPrompt(facts);
     let raw: string | null = null;
     try {
-      raw = (await completeViaGateway(prompt, cloudPolish ? { provider: "claude" } : undefined)).text;
+      raw = (await completeViaGateway(prompt, { attribution: aiAttribution(req.principal, tenantId, "other", { task: "social.draft_ideas" }), ...(cloudPolish ? { provider: "claude" } : {}) })).text;
     } catch {
       raw = null; // fail-soft, same contract as draft-caption above
     }

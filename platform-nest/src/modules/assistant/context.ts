@@ -34,6 +34,8 @@
 // assistant would start treating unverified guesses as user facts).
 import type { PoolClient } from "pg";
 import { config } from "../../config";
+import { recordGatewayCall, outcomeForGatewayStatus, readGatewayUsage, type AiCallAttribution } from "../ai-usage/gateway-usage";
+import { refreshThreadCost } from "./thread-cost";
 import { searchKnowledgeStrict, type KnowledgeHit, type KnowledgeStoreHit } from "../search/knowledge-client";
 import { collapseHits, filterReadableHits, searchTopK } from "../knowledge/search-filter";
 import { assemblePrincipal, type Principal } from "../../rbac/principal";
@@ -145,7 +147,7 @@ export class CompactionGatewayError extends Error {}
  *  LOUDLY (throws) rather than silently skipping compaction — a swallowed failure here would let
  *  context assembly silently keep exceeding its budget on every subsequent send to a long thread,
  *  which is a worse failure mode than the send itself failing once and being retried. */
-async function summarizeExcerpt(excerpt: string, existingSummary: string | null, opts?: SummarizeOptions): Promise<string> {
+async function summarizeExcerpt(excerpt: string, existingSummary: string | null, attribution: AiCallAttribution, opts?: SummarizeOptions): Promise<string> {
   const url = (opts?.gatewayUrl ?? config.services.gateway.url).replace(/\/$/, "");
   if (!url) {
     throw new CompactionGatewayError("ai-gateway-go is not configured (GATEWAY_URL unset) — cannot compact this thread's context");
@@ -156,17 +158,34 @@ async function summarizeExcerpt(excerpt: string, existingSummary: string | null,
     `the summary.${existingSummary ? ` Fold it into this EXISTING summary rather than replacing it ` +
     `(merge, don't just append):\n\nEXISTING SUMMARY:\n${existingSummary}` : ""}\n\nEXCERPT:\n${excerpt}`;
   const fetchImpl = opts?.fetchImpl ?? fetch;
-  const res = await fetchImpl(`${url}/complete`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${opts?.gatewayToken ?? config.services.gateway.token}`,
-      ...(opts?.tenantId ? { "x-tenant-id": opts.tenantId } : {}),
-    },
-    body: JSON.stringify({ prompt }),
+  // AIP-03a: ONE usage row per compaction call, after the answer is in hand, fire-and-forget (never throws, never awaited here).
+  const record = (facts: Parameters<typeof recordGatewayCall>[1]): void => {
+    void recordGatewayCall(attribution, facts).then((r) => (r?.ok && attribution.threadId ? refreshThreadCost(attribution.tenantId, attribution.threadId) : undefined));
+  };
+  let res: Response;
+  try {
+    res = await fetchImpl(`${url}/complete`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${opts?.gatewayToken ?? config.services.gateway.token}`,
+        ...(opts?.tenantId ? { "x-tenant-id": opts.tenantId } : {}),
+      },
+      body: JSON.stringify({ prompt }),
+    });
+  } catch (err) {
+    record({ capability: "llm", outcome: "error" });
+    throw err;
+  }
+  if (!res.ok) {
+    record({ capability: "llm", outcome: outcomeForGatewayStatus(res.status) });
+    throw new CompactionGatewayError(`ai-gateway /complete (compaction) returned HTTP ${res.status}`);
+  }
+  const body = (await res.json()) as { text?: string; provider?: string; model?: string; usage?: unknown };
+  record({
+    capability: "llm", outcome: "ok", provider: typeof body.provider === "string" ? body.provider : null,
+    model: typeof body.model === "string" ? body.model : null, usage: readGatewayUsage(body.usage),
   });
-  if (!res.ok) throw new CompactionGatewayError(`ai-gateway /complete (compaction) returned HTTP ${res.status}`);
-  const body = (await res.json()) as { text?: string };
   const summary = (body.text ?? "").trim();
   if (!summary) throw new CompactionGatewayError("ai-gateway /complete (compaction) returned an empty summary");
   return summary;
@@ -299,7 +318,12 @@ export async function assembleContext(
     const toFold = rows.slice(0, cut + 1);
     kept = rows.slice(cut + 1);
     const excerpt = renderTranscript(toFold);
-    const newSummary = await summarizeExcerpt(excerpt, summary, opts);
+    // AIP-03a: the compaction call is the thread owner's, on this thread. With no company in scope there is nothing to attribute: no row.
+    const newSummary = await summarizeExcerpt(
+      excerpt, summary,
+      { tenantId: opts?.tenantId ?? "", userId: thread.ownerUserId, surface: "compaction", threadId, task: "assistant.compaction" },
+      opts,
+    );
     summary = newSummary;
     const uptoSeq = toFold[toFold.length - 1].seq;
     compactionUpdate = { summary: newSummary, uptoSeq };

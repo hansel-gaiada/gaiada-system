@@ -56,6 +56,7 @@ import {
   type PrevFindingRow,
 } from "./search-audit";
 import { completeViaGateway } from "./providers/gateway-client";
+import { aiAttribution } from "../ai-usage/gateway-usage";
 import {
   MAX_BRIEF_FINDINGS, MAX_BRIEF_KEYWORDS, MAX_KNOWLEDGE_HITS, MAX_KNOWLEDGE_INGEST_CHUNKS, MAX_TRIAGE_FINDINGS,
   buildBriefPrompt, buildBriefPolishPrompt, buildReportNarrativePrompt, buildTriagePrompt,
@@ -2169,7 +2170,7 @@ export class SearchController {
         if (!(await keywordSetRow(c, id))) throw new NotFoundException("keyword set not found");
         let r;
         try {
-          r = await embedKeywordSet(c, id, { onlyMissing: body?.onlyMissing });
+          r = await embedKeywordSet(c, id, { onlyMissing: body?.onlyMissing, attribution: aiAttribution(req.principal, tenantId, "search", { task: "search.embed_keyword" }) });
         } catch (err) {
           // SM-32: refuse an over-cap set rather than looping unbounded.
           if (err instanceof KeywordSetTooLargeError) throw new BadRequestException(err.message);
@@ -2200,7 +2201,7 @@ export class SearchController {
         if (!(await keywordSetRow(c, id))) throw new NotFoundException("keyword set not found");
         let r;
         try {
-          r = await clusterKeywordSet(c, id, { threshold: body?.threshold });
+          r = await clusterKeywordSet(c, id, { threshold: body?.threshold, attribution: aiAttribution(req.principal, tenantId, "search", { task: "search.cluster_label" }) });
         } catch (err) {
           // SM-32: refuse an over-cap set rather than looping unbounded.
           if (err instanceof KeywordSetTooLargeError) throw new BadRequestException(err.message);
@@ -2471,7 +2472,7 @@ export class SearchController {
       draftedVia = "fallback";
     } else {
       try {
-        const completion = await completeViaGateway(buildTriagePrompt(facts));
+        const completion = await completeViaGateway(buildTriagePrompt(facts), { attribution: aiAttribution(req.principal, tenantId, "search", { task: "search.audit_triage" }) });
         model = completion.provider ?? null;
         ({ draft, draftedVia } = parseTriageDraft(completion.text, facts));
       } catch {
@@ -2601,7 +2602,7 @@ export class SearchController {
     let draftedVia: "ai" | "fallback";
     let model: string | null = null;
     try {
-      const completion = await completeViaGateway(buildBriefPrompt(topic, facts));
+      const completion = await completeViaGateway(buildBriefPrompt(topic, facts), { attribution: aiAttribution(req.principal, tenantId, "search", { task: "search.brief_draft" }) });
       model = completion.provider ?? null;
       ({ draft, draftedVia } = parseBriefDraft(completion.text, topic, facts));
     } catch {
@@ -2690,7 +2691,7 @@ export class SearchController {
     let draftedVia: "ai" | "fallback";
     let model: string | null = null;
     try {
-      const completion = await completeViaGateway(buildBriefPolishPrompt(draftIn));
+      const completion = await completeViaGateway(buildBriefPolishPrompt(draftIn), { attribution: aiAttribution(req.principal, tenantId, "search", { task: "search.brief_polish" }) });
       model = completion.provider ?? null;
       const parsed = parseBriefDraft(completion.text, "", { propertyDomain: "", findings: [], keywords: [], knowledgeHits: [] });
       if (parsed.draftedVia === "ai") {
@@ -2886,7 +2887,7 @@ export class SearchController {
     let draftedVia: "ai" | "fallback";
     let model: string | null = null;
     try {
-      const completion = await completeViaGateway(buildReportNarrativePrompt(pre.engagementName, facts));
+      const completion = await completeViaGateway(buildReportNarrativePrompt(pre.engagementName, facts), { attribution: aiAttribution(req.principal, tenantId, "search", { task: "search.report_narrative" }) });
       model = completion.provider ?? null;
       ({ narrative, draftedVia } = parseReportNarrative(completion.text, facts));
     } catch {
@@ -3456,7 +3457,7 @@ export class SearchController {
     let draftedVia: "ai" | "fallback";
     let model: string | null = null;
     try {
-      const completion = await completeViaGateway(buildRsaDraftPrompt(pre.adGroupName, null, pre.keywords));
+      const completion = await completeViaGateway(buildRsaDraftPrompt(pre.adGroupName, null, pre.keywords), { attribution: aiAttribution(req.principal, tenantId, "search", { task: "search.rsa_draft" }) });
       model = completion.provider ?? null;
       ({ draft, draftedVia } = parseRsaDraft(completion.text, pre.adGroupName, pre.keywords));
     } catch {
@@ -3637,7 +3638,7 @@ export class SearchController {
     let draftedVia: "ai" | "fallback";
     let model: string | null = null;
     try {
-      const completion = await completeViaGateway(buildNegativesProposalPrompt(campaignName, terms));
+      const completion = await completeViaGateway(buildNegativesProposalPrompt(campaignName, terms), { attribution: aiAttribution(req.principal, tenantId, "search", { task: "search.negatives_proposal" }) });
       model = completion.provider ?? null;
       ({ candidates, draftedVia } = parseNegativesProposal(completion.text, terms));
     } catch {

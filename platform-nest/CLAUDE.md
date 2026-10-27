@@ -268,6 +268,14 @@ mode branch (they were nested once, and the guard read as enforced while enforci
 - `lib/reports.ts` in `platform-ui` is the canonical `ReportDocument` shape —
   `src/modules/reports/report-document.ts` mirrors *it*, not the reverse.
 
+## AI gateway callers write a usage row (AIP-03a)
+
+Every call that reaches `ai-gateway-go` writes one `ai_usage_events` row, and the recording lives in the client, not at the call site:
+`search/providers/gateway-client.ts`, `social/gateway-client.ts`, the assistant's `relayGeneration` and compaction call. Each takes an
+`AiCallAttribution` (`ai-usage/gateway-usage.ts`) as a REQUIRED parameter. **Do not add a `fetch` to the gateway anywhere else, and do not
+hand-write an insert into `ai_usage_events`**: use a client, or if there is a new family, record through `recordGatewayCall`. A missing price
+leaves a cost NULL, never 0 (`ai_model_prices`, AIP-04). See `../docs/FRONTEND-BFF-CONTRACT.md` §64.
+
 ## Local + live verification
 
 Bring the backend up with **both** compose files, or `platform:3004` is unpublished and the

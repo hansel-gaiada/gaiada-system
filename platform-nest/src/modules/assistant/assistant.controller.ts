@@ -837,6 +837,8 @@ export class AssistantController {
 
     const result = await relayGeneration(generation, {
       tenantId,
+      // AIP-03a: the thread owner's reply, on this thread. The department is resolved from the owner's primary placement.
+      attribution: { tenantId, userId: thread.ownerUserId, surface: "assistant", threadId: id, task: "assistant.reply" },
       prompt,
       // ASST-16 — route this generation with the thread's chosen brain, and resume its Hermes
       // session if one is already open. `provider` is a HINT only (OQ-6: "fail over and label") —
@@ -1429,6 +1431,7 @@ export class AssistantController {
       // text into `result.text` regardless, which is exactly what request/response wants.
       result = await relayGeneration(generation, {
         tenantId,
+        attribution: { tenantId, userId: thread.ownerUserId, surface: "assistant", threadId, task: "assistant.reply" },
         prompt: assembled.prompt,
         provider: thread.brainProvider ?? undefined,
         providerSession: thread.hermesSessionId ?? undefined,

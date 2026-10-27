@@ -13126,3 +13126,42 @@ The weekly report (5b: the `weekly` kind on `social_reports`), ideas for next mo
 | SCP-Q20 | A client's monthly report is approved (the HoD check) and sent only by the four; the officer writes and submits it | 63.18; PERMISSION §53.7 |
 
 **No question is open.** Ruled on 2026-10-26, after this contract's review: SCP-Q21, the four approvers decide a pipeline post's publish approval directly (63.10); SCP-Q22, the writer of a monthly report may also approve it, so reports have no maker/checker rule (63.18); SCP-Q23, ticket SCP-1q closes self-promotion into a lead seat before SCP's approvals go live (PERMISSION §53.4).
+
+## 64. The AI usage record, its callers and the price table (AIP-03a and AIP-04, 2026-10-28; plan `docs/plans/2026-10-27-ai-plan.md` §1.4, §4.1, §4.2, AIP-D6, AIP-D11) — `platform-nest/src/modules/ai-usage/` (`gateway-usage.ts`, `prices.ts` new; `writer.ts`), `modules/assistant/{stream,context,thread-cost}.ts`, `modules/search/providers/gateway-client.ts`, `modules/social/gateway-client.ts`; migration `202610271810_ai_model_prices.sql` — **STATUS: PROTOTYPED. No route, no Cerbos kind, no UI: the reads arrive with AIP-15 and the price editor later. Run anywhere: `ai-usage/{gateway-usage,prices,gateway-callers,ai-model-prices-migration}.test.ts`. Written for the Linux CI gate against real Postgres: `ai-usage/ai-model-prices.db.test.ts`. A skip is not a pass.**
+
+### 64.1 Who writes a row, and how a caller cannot forget
+
+Every platform-nest call that reaches the AI gateway writes ONE `ai_usage_events` row (AIP-01's table), after the answer is in hand, fire and forget. No call site writes an insert. The recording lives in the clients each family already goes through, and each client takes an `AiCallAttribution` as a REQUIRED parameter in its type (`tenantId`, `userId` as a string or an explicit `null`, `surface`, and optionally `orgUnitId`, `threadId`, `runId`, `task`). A new caller of a client cannot compile without it.
+
+| Family | Where the row is written | `surface` | `capability` | `task` (a call-site label until AIP-06) |
+|---|---|---|---|---|
+| The assistant's reply | `relayGeneration` (`assistant/stream.ts`), for `POST /complete/stream` | `assistant` | `llm` | `assistant.reply` |
+| The assistant's compaction | `summarizeExcerpt` (`assistant/context.ts`), for `POST /complete` | `compaction` | `llm` | `assistant.compaction` |
+| Search (`/complete` and `/embed`) | `search/providers/gateway-client.ts` (`completeViaGateway`, `embedViaGateway`) | `search` for the search routes; `other` for reports, client account summaries and WebDesk assist, which use the same client | `llm`, `embed` | `search.*`, `reports.narrative`, `clients.account_summary`, `webdev.assist` |
+| Social (`/complete`) | `social/gateway-client.ts` (`completeViaGateway`) | `other` | `llm` | `social.*` |
+
+Not recorded here, with the reason: the thread title (a pure function, no call); the knowledge-client files (`search/knowledge-client.ts`, `social/knowledge-client.ts` call the WS8 knowledge service over HTTP, which embeds inside `ai-agents`: that is AIP-03b's side); a tool or agent turn (`orchestrator`, `broker`) reaches the gateway from the `ai-agents` runner, also AIP-03b. `surface` values `title`, `agent`, `knowledge`, `bot` are therefore not written from platform-nest yet.
+
+### 64.2 What a row holds
+
+- **Person and department.** `user_id` is the caller's person; a bot is a `users` row and is recorded with its own id; a scheduled job with no person passes `null`. `org_unit_id` is the call site's own department when it passes one; otherwise the person's PRIMARY placement today (`org_unit_memberships.is_primary`, valid today, joined to the `active` `org_units` row on `(tenant_id, node_id)`), cached per process for 10 minutes (a null answer is cached too, a failure is not). Null when there is no person, no placement, or the placement is not an `org_units` row. It never fails the call.
+- **Tokens.** The gateway's `usage` (AIP-02, `{promptTokens, completionTokens, costUsd?, source:"provider"}`) gives `tokens_source = provider`. A reply with no usage frame gives `estimate`: the same 4-characters-per-token figure the assistant stores on `assistant_messages.tokens`, for the prompt sent and the text received. Embeddings and any other call with no figures give `none`.
+- **Cost.** `costUsd` from the gateway gives `cost_source = provider` (a reported 0 is kept). Otherwise the price table, 64.4. Never both.
+- **Outcome.** `ok`; `blocked_budget` for HTTP 429; `blocked_dlp` for HTTP 503; `error` for any other failure that reached the gateway; `incurred` for a streamed reply that was stopped, went idle, or dropped mid-stream (charged, not completed). A refused or failed call carries no tokens and no cost. A call made when the gateway is not configured made no call and writes no row. `failed_over` is not written: the platform cannot see a failover.
+- **Never text.** Provider and model names that are not a plain label (a space in them) become NULL rather than costing the row.
+- **Never slows or breaks a call.** The recording promise never rejects and nothing awaits it. A failing writer logs one warning (ids and a reason) and the call's result is unchanged.
+- **The gap.** `POST /complete` does not return the serving model today, so a non-streamed row has `provider` but a NULL `model`, and the price table cannot cost it (the provider's own figure still does). The client reads `model` from the answer if the gateway ever adds it (additive). Follow-up for the gateway.
+
+### 64.3 `assistant_threads.total_cost_usd`
+
+Derived, not incremented: after each assistant or compaction row of a thread is written, `refreshThreadCost` (`assistant/thread-cost.ts`) sets the thread's `total_cost_usd` to the sum of that thread's `ai_usage_events.cost_usd` (the cost can come from the price table after the reply is persisted, so an increment inside `persistGenerationOutcome` could not know it). Rows with no cost add nothing; a thread with no costed row keeps its default 0; the column is numeric(12,6), so the sum is rounded to six places; `updated_at` is not touched. A tool or agent turn adds nothing yet (64.1).
+
+### 64.4 The price table
+
+`ai_model_prices` (migration `202610271810_ai_model_prices.sql`): `provider`, `model`, `prompt_usd_per_mtok`, `completion_usd_per_mtok` (US dollars per million tokens, numeric(14,6)), `effective_from` (a UTC day), `note`; primary key `(provider, model, effective_from)`. It is global reference data, like `permissions`: no `tenant_id`, no RLS. The runtime role has SELECT only; the owner or an admin enters rows with SQL until the editor ticket adds a route behind its own Cerbos kind. To change a price insert a new row with a later `effective_from`; never edit an old one. **No row is seeded**: no price for `openai` / `z-ai/glm-5.3-flash` exists in the repository or in the gateway's OpenRouter answers (they carry a per-call cost, not a rate card), and a price is never invented.
+
+The rule (AIP-D11), in `ai-usage/prices.ts` and applied by the writer: an event with a cost keeps it, labelled as given. An event with BOTH token counts, a provider, a model and no cost gets `prompt * rate + completion * rate` from the newest row whose `effective_from` is on or before the UTC day of the call, labelled `cost_source = table` (an estimate's tokens are priced the same way, and `tokens_source` still says `estimate`). Any other case leaves the cost NULL: unknown is not zero.
+
+### 64.5 Capability inventory
+
+No route and no HTTP suite is added, so `docs/modules/CAPABILITY-INVENTORY.md` does not change.
