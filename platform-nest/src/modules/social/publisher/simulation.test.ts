@@ -126,7 +126,7 @@ describe("SCP-Sa · the registry: the simulator is reachable ONLY through resolv
 
   it("resolveSimulatedPublisher returns it for what it simulates, and refuses what it does not", async () => {
     for (const cap of SIMULATED_CAPABILITIES) expect(resolveSimulatedPublisher(cap).key).toBe(SIMULATED_PUBLISHER_KEY);
-    for (const cap of ["inbox_read", "inbox_reply", "connect_url", "integrations", "account_metrics", "post_metrics"] as const) {
+    for (const cap of ["inbox_read", "inbox_reply", "connect_url", "integrations"] as const) {
       expect(await codeOf(() => resolveSimulatedPublisher(cap))).toBe("capability_unsupported");
     }
   });
@@ -382,14 +382,20 @@ describe("SCP-Sa · the simulated driver: refusal order and honest answers", () 
       .toBe(SOCIAL_SIMULATION_REFUSAL.disabled);
   });
 
-  it("does not connect, sync, verify or report metrics (SCP-Sb seeds accounts; SCP-Sd adds metrics), and costs nothing", async () => {
+  it("does not connect, sync or verify (SCP-Sb seeds accounts), reports metrics only for a simulated handle (SCP-Sd), and costs nothing", async () => {
     const d = createSimulatedPublisher({ guard: passGuard });
-    expect([...d.capabilities].sort()).toEqual(["cancel", "media_upload", "post_status", "schedule"]);
+    expect([...d.capabilities].sort()).toEqual(["account_metrics", "cancel", "media_upload", "post_metrics", "post_status", "schedule"]);
     expect(await codeOf(d.connectUrl(simHandle(), "instagram", "https://x.invalid"))).toBe("capability_unsupported");
     expect(await codeOf(d.listIntegrations(simHandle()))).toBe("capability_unsupported");
     expect(await codeOf(d.verifyOrg(simHandle()))).toBe("capability_unsupported");
-    expect(await codeOf(d.getAccountMetrics(simHandle(), "i", { from: "2026-11-01", to: "2026-11-02" }))).toBe("capability_unsupported");
-    expect(await codeOf(d.getPostMetrics(simHandle(), ["x"]))).toBe("capability_unsupported");
+    // SCP-Sd: the metrics pair answers (simulated-metrics.test.ts), but behind the same switch and handle as every other method.
+    setFlag(false);
+    expect(await codeOf(d.getAccountMetrics(simHandle(), "i", { from: "2026-11-01", to: "2026-11-02" }))).toBe(SOCIAL_SIMULATION_REFUSAL.disabled);
+    expect(await codeOf(d.getPostMetrics(simHandle(), ["x"]))).toBe(SOCIAL_SIMULATION_REFUSAL.disabled);
+    setFlag(true);
+    expect(await codeOf(d.getAccountMetrics(new OrgHandle("r", "o", "k"), "i", { from: "2026-11-01", to: "2026-11-02" })))
+      .toBe(SOCIAL_SIMULATION_REFUSAL.accountNotSimulated);
+    expect(await codeOf(d.getPostMetrics(new OrgHandle("r", "o", "k"), ["x"]))).toBe(SOCIAL_SIMULATION_REFUSAL.accountNotSimulated);
     expect(d.listComments).toBeUndefined();
     expect(d.sendReply).toBeUndefined();
     expect(d.estimateCostUsd({ network: "x", hasLink: true })).toBe(0);
@@ -520,14 +526,40 @@ describe("SCP-Sa · static inventory of the writers (src/, tests excluded)", () 
     expect(dispatch).toMatch(/simulated: servedBySimulator && isSocialSimulationEnabled\(\)/);
   });
 
-  it("the one road in has exactly two on-ramps: the dispatch resolver and the status sweep", () => {
+  it("the one road in has exactly three on-ramps: the dispatch resolver, the status sweep and (SCP-Sd) the metrics sweep", () => {
     const callers = files
       .filter((f) => !f.endsWith(`${sep}registry.ts`))
       .filter((f) => /\bresolveSimulatedPublisher\(/.test(readFileSync(f, "utf8")));
+    // SCP-Sd added metrics-job.ts DELIBERATELY: the simulated numbers must travel the same seam a real engine's do (the sweep
+    // resolves the simulator for a simulated account and writes the answer), not a side door beside it. Its call sits behind
+    // `isSocialSimulationEnabled()` and is made only for an account whose `social_accounts.simulated` is true (metrics-job.ts).
     expect(callers.map(rel).sort()).toEqual([
+      "modules/social/metrics-job.ts",
       "modules/social/post-status-sync-job.ts",
       "modules/social/publisher/provisioning.ts",
     ]);
+  });
+
+  it("SCP-Sd: the ONLY statements that write a simulated metric row are metrics-job.ts's two simulated writers, each behind the switch", () => {
+    // A SQL literal that INSERTs into a metrics table and names the 'simulated' source. A second writer fails here until fenced.
+    const writers: string[] = [];
+    for (const f of files) {
+      for (const lit of sqlLiterals(readFileSync(f, "utf8"))) {
+        if (/\bINSERT\s+INTO\s+social_(post_metrics|metrics_daily)\b/.test(lit) && /'simulated'/.test(lit)) writers.push(rel(f));
+      }
+    }
+    expect(writers).toEqual(["modules/social/metrics-job.ts", "modules/social/metrics-job.ts"]);
+    const job = readFileSync(join(SRC, "modules", "social", "metrics-job.ts"), "utf8");
+    for (const fn of ["applySimulatedDailyMetrics", "appendSimulatedPostMetrics"]) {
+      const body = job.slice(job.indexOf(`export async function ${fn}`));
+      expect(body.slice(0, 400), fn).toMatch(/assertSimulatedWriteAllowed\(/);
+    }
+    // And the two REAL writers never name the simulated source.
+    for (const fn of ["applyAccountDailyMetrics", "appendPostMetrics"]) {
+      const start = job.indexOf(`export async function ${fn}`);
+      const body = job.slice(start, job.indexOf("\n}\n", start));
+      expect(body, fn).not.toMatch(/simulated/i);
+    }
   });
 
   it("the simulator is constructed only by boot.ts (outside tests)", () => {
