@@ -145,8 +145,10 @@ export async function buildPipelinePost(i: ReadInput): Promise<Record<string, un
     creativeRequest: request,
     designs: designs.map((d) => ({
       id: d.id, position: d.position,
-      // An asset's own source and AI note are on `creative_assets` from SCP-1h (file 4); null until then.
-      asset: d.asset_group_id ? { groupId: d.asset_group_id, versionId: d.asset_version_id, versionNo: d.asset_version_no, name: d.asset_name, source: null, aiNote: null } : null,
+      // An asset's own source and AI note are on `creative_assets` (SCP-1h, file 4), set where the asset is saved: the latest live version's.
+      asset: d.asset_group_id
+        ? { groupId: d.asset_group_id, versionId: d.asset_version_id, versionNo: d.asset_version_no, name: d.asset_name, source: d.asset_source, aiNote: d.asset_ai_note }
+        : null,
       link: d.link_url ? { url: d.link_url, source: d.link_source, aiNote: d.link_ai_note } : null,
       fileId: d.file_id,
     })),
