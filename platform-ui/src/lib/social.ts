@@ -80,7 +80,7 @@
 //    here.
 import { platformFetch, PlatformError } from "./platform";
 import {
-  EMPTY_TOOL_SCOPE, NOT_REQUESTED_REVIEW, EMPTY_ASSET_LIBRARY, UNCONFIGURED_PUBLISHER_STATUS,
+  EMPTY_TOOL_SCOPE, asSocialAccount, NOT_REQUESTED_REVIEW, EMPTY_ASSET_LIBRARY, UNCONFIGURED_PUBLISHER_STATUS,
   EMPTY_USAGE_SNAPSHOT, NOT_YET_COMPUTED_BEST_TIME,
 } from "./socialShared";
 import type {
@@ -215,7 +215,8 @@ export const listAccounts = async (
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   const r = await readGuarded(platformFetch<unknown>(`${base(t)}/accounts${suffix}`, u), { accounts: [] });
   const obj = asObject<{ accounts: unknown }>(r.data);
-  return { ...r, data: asArray<SocialAccount>(obj?.accounts) };
+  // SCP-Sb: `simulated` is read as `true` only when the server said so (`asSocialAccount`); a row without it is a real account.
+  return { ...r, data: asArray<unknown>(obj?.accounts).map(asSocialAccount) };
 };
 
 // ── the publish gate's dry run (SMM-09), read from the Composer (SMM-12) ───────────────────────────

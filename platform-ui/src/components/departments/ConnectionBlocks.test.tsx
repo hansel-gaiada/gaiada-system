@@ -86,6 +86,22 @@ describe("SocialAccountsBlock", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
+  it("marks a SIMULATED account with the chip and says in words that it is not a real account (SCP-Sb)", () => {
+    const sim = { id: "a2", clientId: "c1", network: "instagram", handle: "@mock-brand-alpha", status: "connected", simulated: true } as unknown as SocialAccount;
+    render(<SocialAccountsBlock accounts={[acct, sim]} />);
+    const rows = document.querySelectorAll("li.dept-conn-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).not.toMatch(/SIMULATED/); // a real account carries no mark
+    expect(rows[1].textContent).toMatch(/SIMULATED/);
+    expect(rows[1].textContent).toMatch(/Not a real account/);
+    expect(screen.getAllByText("SIMULATED")).toHaveLength(1);
+  });
+
+  it("an account whose row has no `simulated` flag is not marked", () => {
+    render(<SocialAccountsBlock accounts={[acct]} />);
+    expect(screen.queryByText("SIMULATED")).toBeNull();
+  });
+
   it("says 'none' only for a confirmed empty read", () => {
     render(<SocialAccountsBlock accounts={[]} />);
     expect(screen.getByText("No social accounts are connected yet.")).toBeInTheDocument();

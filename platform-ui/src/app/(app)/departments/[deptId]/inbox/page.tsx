@@ -102,7 +102,7 @@ export default async function DepartmentSocialInboxPage({ params, searchParams }
   const accountsResult = await listAccounts(userId, tenant);
   const accountsById: Record<string, InboxAccountInfo> = {};
   for (const a of accountsResult.data) {
-    accountsById[a.id] = { handle: a.handle, displayName: a.displayName, network: a.network };
+    accountsById[a.id] = { handle: a.handle, displayName: a.displayName, network: a.network, simulated: a.simulated };
   }
 
   return (

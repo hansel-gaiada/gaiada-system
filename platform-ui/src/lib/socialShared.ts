@@ -298,6 +298,18 @@ export interface SocialAccount {
   connectedAt: string | null;
   publisherOrgRef: string;
   driver: string;
+  /** SCP-Sb (`social_accounts.simulated`): a seeded mock account of the social simulator, NOT a real one. Nothing posted to it reaches a network. A server
+   *  that predates the column omits it, and an omitted flag is read as `false` (`asSocialAccount`), never as simulated. */
+  simulated: boolean;
+}
+
+/** The words every screen that lists a simulated account puts beside the SIMULATED chip. */
+export const SIMULATED_ACCOUNT_NOTE = "Not a real account: a mock account for the dev review. Nothing posted to it reaches a network.";
+
+/** Normalises one account row of `GET accounts`: `simulated` is true only when the server said `true`. */
+export function asSocialAccount(raw: unknown): SocialAccount {
+  const o = (raw !== null && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return { ...(o as unknown as SocialAccount), simulated: o.simulated === true };
 }
 
 // ── the publish gate's dry-run verdict (SMM-09/SMM-12) ─────────────────────────────────────────────

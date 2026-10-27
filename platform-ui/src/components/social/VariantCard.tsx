@@ -23,6 +23,7 @@ import {
   type AssetLibrary, type MediaDescriptor, type BestTimeSuggestion,
 } from "@/lib/socialShared";
 import { ValidationList } from "./ValidationList";
+import { SimulatedAccountChip } from "./SimulatedAccountChip";
 
 export function VariantCard({
   tenantId, variant, canDelete, account, accountsForbidden, clientReview, requiresClientOk,
@@ -355,6 +356,8 @@ function QuotaStrip({
     );
   }
   const info = describeQuota(network, account.quota);
+  // SCP-Sb: a seeded mock account says so beside its quota line.
+  const simulatedChip = account.simulated ? <SimulatedAccountChip /> : null;
   const pct = info.status === "known" && info.cap && info.cap > 0 ? Math.min(100, (info.used! / info.cap) * 100) : 0;
   const color = info.status === "known"
     ? (pct >= 100 ? "var(--status-critical-fg, #b3261e)" : pct >= (100 - (2 / (info.cap || 1)) * 100) ? "var(--status-caution-fg, #9a6700)" : "var(--erp-ink-60)")
@@ -367,6 +370,7 @@ function QuotaStrip({
         </div>
       )}
       <span style={{ font: "400 11px var(--font-body)", color }}>{info.label}</span>
+      {simulatedChip}
     </div>
   );
 }
