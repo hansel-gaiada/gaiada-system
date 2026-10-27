@@ -218,9 +218,22 @@ describe("M5-W1e contributors: enforcement in the write plane (real resolver, si
       expect(w.json().editorial.state).toBe("draft");
     });
 
+    it("media.uploadToken: the contributor's token QUARANTINES what it uploads (M5-W1q); the identical request as staff mints a token that does not", async () => {
+      const mint = (xc: boolean) => call({ method: "POST", url: `${mediaBase(fx)}/upload-token`, command: "media.uploadToken", params: params(), body: { bucket: "media" }, xc });
+      const contributor = await mint(true);
+      expect(contributor.statusCode, contributor.body).toBe(201);
+      expect(contributor.json().quarantined).toBe(true);
+      expect((await rows(`SELECT quarantine, created_by FROM media_upload_tokens WHERE id = $1`, [contributor.json().tokenId]))[0]).toEqual({ quarantine: true, created_by: CONTRIBUTOR });
+      const staff = await mint(false);
+      expect(staff.statusCode, staff.body).toBe(201);
+      expect(staff.json().quarantined).toBe(false);
+      expect((await rows(`SELECT quarantine FROM media_upload_tokens WHERE id = $1`, [staff.json().tokenId]))[0].quarantine).toBe(false);
+    });
+
     it("every command in CONTRIBUTOR_COMMANDS is covered by this block (no allowed command goes untested over HTTP)", () => {
       expect([...CONTRIBUTOR_COMMANDS].sort()).toEqual(
         [
+          "media.uploadToken",
           "content.create",
           "content.update",
           "content.restoreVersion",

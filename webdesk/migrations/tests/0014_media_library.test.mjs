@@ -110,7 +110,8 @@ async function partA(roles) {
       [ASSETS],
     )
     const a = Object.fromEntries(acols.rows.map((r) => [r.column_name, r]))
-    check('media_assets keeps its 8 original columns and gains the 11 library columns', acols.rows.length === 19 && NEW_ASSET_COLUMNS.every((n) => a[n]), acols.rows.map((r) => r.column_name))
+    // `>= 19`: a LATER migration may add columns after these (0020 adds review_state, reviewed_by, reviewed_at); this test pins what 0014 added.
+    check('media_assets keeps its 8 original columns and gains the 11 library columns', acols.rows.length >= 19 && NEW_ASSET_COLUMNS.every((n) => a[n]), acols.rows.map((r) => r.column_name))
     check(
       'types: title/original_filename/created_by text, alt jsonb, tags text[], width/height integer, instants timestamptz',
       a.title.data_type === 'text' &&
@@ -152,7 +153,8 @@ async function partA(roles) {
     // ---- media_upload_tokens
     const cols = await c.query(`SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position`, [TOKENS])
     const col = Object.fromEntries(cols.rows.map((r) => [r.column_name, r]))
-    check('media_upload_tokens: the 11 columns, in order', cols.rows.map((r) => r.column_name).join() === TOKEN_COLUMNS, cols.rows.map((r) => r.column_name))
+    // the 11 columns 0014 created, in order, as a prefix: a later migration appends (0020 adds `quarantine`)
+    check('media_upload_tokens: the 11 columns, in order', cols.rows.map((r) => r.column_name).join().startsWith(TOKEN_COLUMNS), cols.rows.map((r) => r.column_name))
     check('NOT NULL on every column but used_at', cols.rows.every((r) => (r.column_name === 'used_at' ? r.is_nullable === 'YES' : r.is_nullable === 'NO')), cols.rows.map((r) => [r.column_name, r.is_nullable]))
     check(
       'types: uuid ids, bigint max_bytes, text[] allowed_mimes, timestamptz instants, text the rest',
