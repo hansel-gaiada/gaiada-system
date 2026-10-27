@@ -19,10 +19,12 @@ import { PostActionBar } from "@/components/social/PostActionBar";
 import { PostDesigns } from "@/components/social/PostDesigns";
 import { PostFields } from "@/components/social/PostFields";
 import { Activity, CopyLog } from "@/components/social/PostLog";
+import { PostMetricsSection } from "@/components/social/PostMetrics";
 import { PostStepper } from "@/components/social/PostStepper";
 import { postEntityComment } from "@/lib/collabActions";
 import { formatDate, formatDateTime } from "@/lib/format";
 import type { Comment, CommentAnchor } from "@/lib/pm";
+import type { PostMetrics } from "@/lib/socialMetrics";
 import { WAITING_ON_LABEL, blockerLines, canWriteClientComment, networkLabel, phaseText, postImage, statusChipText, statusLabel, type AssetChoice, type PipelinePost } from "@/lib/socialPipeline";
 import type { WriteResult } from "@/lib/socialPipelineActions";
 import "@/components/social/cycles.css";
@@ -35,6 +37,10 @@ export interface PostPageProps {
   comments: Comment[] | null;
   /** The Asset Library's latest versions for the designer's picker; null when it could not be read. */
   assets: AssetChoice[] | null;
+  /** SCP-3c: a live post's metrics (BFF §63.10). `undefined` when the post is not live; `null` when they could not be read (the block says so). */
+  metrics?: PostMetrics | null;
+  /** The signed-in person: the client's officer is offered the Enter metrics form. */
+  viewerId?: string | null;
   /** DEMO_MODE: no bytes are stored, so the image is the reference image the demo store holds. */
   demo?: boolean;
   chrome?: "page" | "drawer";
@@ -45,7 +51,7 @@ const monthLabel = (m: string): string => { const x = /^(\d{4})-(\d{2})$/.exec(m
 
 interface Notice { kind: "ok" | "error"; text: string; lines: string[] }
 
-export function PostPage({ deptId, post: initial, comments, assets, demo = false, chrome = "page" }: PostPageProps) {
+export function PostPage({ deptId, post: initial, comments, assets, metrics, viewerId, demo = false, chrome = "page" }: PostPageProps) {
   const router = useRouter();
   const [post, setPost] = useState(initial);
   const [gone, setGone] = useState(false);
@@ -174,6 +180,8 @@ export function PostPage({ deptId, post: initial, comments, assets, demo = false
           <PostFields post={post} onResult={onResult} />
         </div>
       </div>
+
+      <PostMetricsSection post={post} metrics={metrics} viewerId={viewerId} onSaved={() => router.refresh()} />
 
       <section aria-labelledby="scp-post-copylog">
         <h3 className="scp-post__section-title" id="scp-post-copylog">Copy edit log</h3>

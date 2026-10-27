@@ -161,6 +161,8 @@ import { SocialAllocationController } from "./modules/social/pipeline/allocation
 import { SocialFeedController } from "./modules/social/pipeline/feed.controller";
 // SCP-1h: the designer's queue (`GET design-queue`), on its own controller under the same route prefix.
 import { SocialDesignQueueController } from "./modules/social/pipeline/design-queue.controller";
+// SCP-3c: a post's metrics (BFF §63.10 `POST variants/:variantId/metrics`, `GET posts/:postId/metrics`), on its own controller, same prefix.
+import { SocialMetricsController } from "./modules/social/pipeline/metrics.controller";
 // SMM-38 phase 38c — LinkedIn's OAuth grant flow. `LinkedInOAuthController` shares SocialController's
 // route prefix (same reasoning as SocialReportsController above); `LinkedInOAuthCallbackController`
 // is tenant-agnostic at a FIXED path, mirroring SearchGoogleOauthCallbackController below for the
@@ -281,6 +283,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     // SCP-1k: the client calendar read (BFF §63.10 `GET calendar`).
     SocialCalendarController,
     SocialDesignQueueController,
+    SocialMetricsController,
     // SMM-38 phase 38c: LinkedIn's OAuth grant flow — `LinkedInOAuthController` shares
     // SocialController's route prefix (same reasoning as SocialReportsController above);
     // `LinkedInOAuthCallbackController` is tenant-agnostic at a fixed path, same reason as

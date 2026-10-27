@@ -8,6 +8,7 @@ import { platformFetch } from "./platform";
 import { readResult, type ReadResult } from "./readResult";
 import { readCreativeAssets } from "./creativeReviews-data";
 import { asPipelinePost, type AssetChoice, type PipelinePost } from "./socialPipeline";
+import { asPostMetrics, type PostMetrics } from "./socialMetrics";
 import type { Comment } from "./entities";
 
 const base = (t: string) => `/api/${encodeURIComponent(t)}/modules/social`;
@@ -15,6 +16,11 @@ const base = (t: string) => `/api/${encodeURIComponent(t)}/modules/social`;
 /** `GET posts/:postId/pipeline` (`social_post` · `read`, or `design` on the same post). */
 export function readPipelinePost(userId: string, tenantId: string, postId: string): Promise<ReadResult<PipelinePost>> {
   return readResult(platformFetch<unknown>(`${base(tenantId)}/posts/${encodeURIComponent(postId)}/pipeline`, userId).then(asPipelinePost));
+}
+
+/** `GET posts/:postId/metrics` (`social_post` · `read`, SCP-3c, BFF §63.10): the numbers, the rate, the client's average and the boost mark of a post. */
+export function readPostMetrics(userId: string, tenantId: string, postId: string): Promise<ReadResult<PostMetrics>> {
+  return readResult(platformFetch<unknown>(`${base(tenantId)}/posts/${encodeURIComponent(postId)}/metrics`, userId).then(asPostMetrics));
 }
 
 /** The post's thread (`GET comments`, entity `social_post`): team and client comments, with their pins. The server gives the thread the post's audience. */

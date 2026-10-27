@@ -141,6 +141,8 @@ export const socialModule: ModuleContract = {
     "202610271300_comments_visibility_anchor.sql",
     // SCP-1h (BFF §63.1 file 4, §63.6.6) — where an Asset Library picture came from (source) and the note an AI-made one carries.
     "202610271400_creative_assets_source.sql",
+    // SCP-3c (BFF §63.1 file 6, §63.10) — post metrics typed in by hand or simulated: source, reach and who entered them.
+    "202610271500_social_post_metrics_manual.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is

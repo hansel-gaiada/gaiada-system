@@ -136,7 +136,9 @@ export async function applyAccountDailyMetrics(
 }
 
 /** (B) Append post-metric snapshots. NEVER upserted — see the file header. Declares its own
- *  module scope. */
+ *  module scope. The rows are the pull's (`source` takes its default, 'pull'; `entered_by` stays NULL), and
+ *  `reach` stays NULL too: the engine's `PostMetrics` (publisher/types.ts) has no reach to map, so the
+ *  engagement rate of a pulled-only post is null until a person types a reach in (SCP-3c, BFF §63.10). */
 export async function appendPostMetrics(
   tenantId: string, rows: Array<{ variantId: string; metrics: PostMetrics }>,
 ): Promise<{ written: number }> {

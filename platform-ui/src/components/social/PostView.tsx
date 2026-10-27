@@ -8,7 +8,7 @@ import { activeCompany } from "@/lib/companyContext";
 import { workspaceFor } from "@/lib/workspaces";
 import { isDemoMode } from "@/lib/demoMode";
 import { canDesignPost } from "@/lib/socialPipeline";
-import { readAssetChoices, readPipelinePost, readPostComments } from "@/lib/socialPipeline-data";
+import { readAssetChoices, readPipelinePost, readPostComments, readPostMetrics } from "@/lib/socialPipeline-data";
 import { Card } from "@/components/ui";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { PostPage } from "@/components/social/PostPage";
@@ -23,7 +23,7 @@ import "@/components/social/cycles.css";
 //   404            `post_not_found`: the page is a 404;
 //   409            `not_a_pipeline_post`: a Composer post, so the page says so and links to the Composer (a redirect would stream a meta refresh under the shell);
 //   anything else  "cannot be read right now", with the server's own words.
-// The comments and the Asset Library are secondary reads: when one fails the page says so beside its section and keeps the post.
+// The comments, the Asset Library and a live post's metrics are secondary reads: when one fails the page says so beside its section and keeps the post.
 type Chrome = "page" | "drawer";
 
 export async function PostView({ deptId, postId, chrome }: { deptId: string; postId: string; chrome: Chrome }) {
@@ -54,10 +54,13 @@ export async function PostView({ deptId, postId, chrome }: { deptId: string; pos
 
   // The designer's picker needs the library; nobody else reads it for this page.
   const assets = canDesignPost(post.data) ? await readAssetChoices(userId, tenant) : null;
+  // SCP-3c: a live post's metrics are a secondary read too: when it fails the block says so and the page keeps the post.
+  const metrics = post.data.pipelineStatus === "live" ? await readPostMetrics(userId, tenant, postId) : null;
   const body = (
     <PostPage
       deptId={deptId} post={post.data} comments={comments.kind === "ok" ? comments.data : null}
-      assets={assets && assets.kind === "ok" ? assets.data : null} demo={isDemoMode()} chrome={chrome}
+      assets={assets && assets.kind === "ok" ? assets.data : null} metrics={post.data.pipelineStatus !== "live" ? undefined : metrics?.kind === "ok" ? metrics.data : null}
+      viewerId={userId} demo={isDemoMode()} chrome={chrome}
     />
   );
   return chrome === "page" ? <Card>{body}</Card> : body;
