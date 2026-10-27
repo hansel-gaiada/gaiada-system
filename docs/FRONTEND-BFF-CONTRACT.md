@@ -2335,6 +2335,17 @@ with other resources' admin-bypass rules. Do not add one; see the policy file's 
   `assistant_tool_calls`, and SETs NULL (row survives) on `assistant_memory.source_thread_id` —
   proven by `modules/assistant/assistant.test.ts`'s cascade probe (admin-pool reads, not just
   invisible-under-RLS).
+- **PROTOTYPED** (AIP-00c, 2026-10-27) `GET /api/:t/assistant/brains` (`modules/assistant/brains.ts`, route in
+  `assistant.controller.ts`) — which gateway LLM brains can serve right now, for the brain picker. Authorized
+  exactly like `capabilities` (an authenticated user; no resource, no new Cerbos kind or action). Reads the
+  gateway's `GET /health` (`providers.llm`; state `ok` = available, `open` and `unconfigured` = not) and answers
+  `{ brains: [{ value: "<gateway provider name>", available: boolean }] | null, checkedAt: <ISO> }`. `echo` is never
+  listed; a provider outside the live `LLM_CHAIN` is absent. **`brains: null` means UNKNOWN** (gateway unreachable,
+  3 s timeout, non-2xx or an unexpected shape; one warning logged): not an empty list and not an error page, so the
+  UI offers Auto only with "Other brains can't be checked right now." Nothing else from `/health` (models,
+  endpoints, budget, key state) is returned. Cached in memory for 60 s. Consumer: `lib/assistantActions.ts#refreshBrainsAction`
+  -> `components/assistant/BrainPicker.tsx`, which offers Auto plus the available brains and keeps a thread's stored
+  value visible as "<label> (unavailable)". The `openai` label is now "Cloud (default)" (the live endpoint is OpenRouter).
 - Deliberately **NO** `writeActivity()`/`notify()` call on any of the above: the tenant activity
   feed (`GET :t/activity`) is readable by every plain member, and writing thread metadata into it
   would leak a private thread's existence/title to people with no Cerbos grant to read it — the

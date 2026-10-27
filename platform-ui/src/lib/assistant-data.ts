@@ -6,7 +6,7 @@ import "server-only";
 // `lib/assistantActions.ts` because it is triggered by client interaction, not a navigation.
 import { platformFetch, PlatformError, type Me } from "./platform";
 import type {
-  ThreadDetailResult, ThreadListResult, MemoryListResult, CapabilitiesResult, ResolvedCitation, PinnedPageContext,
+  ThreadDetailResult, ThreadListResult, MemoryListResult, CapabilitiesResult, BrainsResult, ResolvedCitation, PinnedPageContext,
   RosterResult, AssistantHandoff, AssistantThread,
 } from "./assistant";
 import { myWorkspaces } from "./workspaces-data";
@@ -63,6 +63,11 @@ export function listMemory(userId: string, tenantId: string): Promise<MemoryList
 // can actually do — see `CapabilityCards`'s own header for why that matters.
 export function getCapabilities(userId: string, tenantId: string): Promise<CapabilitiesResult> {
   return platformFetch<CapabilitiesResult>(`/api/${tenantId}/assistant/capabilities`, userId);
+}
+
+// AIP-00c — which brains the gateway can serve right now (`brains: null` = could not check).
+export function getBrains(userId: string, tenantId: string): Promise<BrainsResult> {
+  return platformFetch<BrainsResult>(`/api/${tenantId}/assistant/brains`, userId);
 }
 
 // ASST-18 — resolves ONE citation chip. Returns `null` on a 404 (an unresolvable ref — see
