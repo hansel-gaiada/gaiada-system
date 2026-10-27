@@ -1,0 +1,56 @@
+/* SCP-3e — the Social Media calendar page (`{D}/calendar`): the all-clients month, the client filter, the holiday and leave marks, the Composer posts and the day's
+   "+" and move buttons. Tokens only: no colour, radius or shadow literal and no uppercase transform (the tokens guard), so the Social skin (SCP-K) restyles it by
+   changing tokens and nothing here. It builds on `.scp-cal`, `.scp-legend`, `.scp-monthnav` and `.scp-tablewrap` (client.css, cycles.css), which this page imports
+   too. A phase is the status token it always was (`--scp-phase`, set inline from `phaseStyle`); the holiday, leave and Composer marks use neutral tokens and a
+   different EDGE STYLE (double, dotted, dashed), never a phase colour, so they cannot be read as a phase, and each is also said in words. */
+
+.scp-calpage { display: grid; gap: 12px; }
+.scp-calbar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; justify-content: space-between; }
+.scp-calbar .scp-monthnav { margin: 0; }
+.scp-calfilter { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: end; margin: 0; }
+.scp-calfilter .scp-input { min-width: 180px; }
+.scp-calnotes { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.scp-calnotes li { font: 400 12px var(--font-body); color: var(--text-primary); border-left: 3px solid var(--status-idle); padding-left: 10px; }
+.scp-cal__status { min-height: 0; }
+.scp-cal__status .scp-msg { margin: 0; }
+
+/* The grid: a cell is a drop target, a chip is a link beside its move button */
+.scp-cal--social td { height: 112px; }
+.scp-cal--social .scp-cal__over { outline: 1.5px dashed var(--erp-ink-60); outline-offset: -2px; background: var(--tint-hover); }
+.scp-cal__head { display: flex; align-items: center; gap: 6px; }
+.scp-cal__head .scp-cal__day { margin-right: auto; }
+.scp-cal__todaymark { font: 700 10px var(--font-body); color: var(--accent-fg); }
+.scp-cal__add {
+  width: 20px; height: 20px; line-height: 1; padding: 0; display: inline-grid; place-items: center; cursor: pointer;
+  font: 600 14px var(--font-body); color: var(--text-primary); background: transparent; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm);
+}
+.scp-cal__add:hover, .scp-cal__add:focus-visible { background: var(--tint-hover); border-color: var(--erp-ink-60); }
+.scp-cal__row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px; align-items: start; }
+.scp-cal__post--movable { cursor: grab; }
+.scp-cal__post--movable:active { cursor: grabbing; }
+.scp-cal__time { font-variant-numeric: tabular-nums; color: var(--erp-ink-60); }
+.scp-cal__who { font-weight: 600; }
+.scp-cal__move {
+  width: 20px; height: 20px; padding: 0; display: inline-grid; place-items: center; cursor: pointer; font: 400 12px var(--font-body); color: var(--erp-ink-60);
+  background: transparent; border: 0.5px solid var(--erp-hairline-soft); border-radius: var(--radius-sm);
+}
+.scp-cal__move:hover, .scp-cal__move:focus-visible { color: var(--text-primary); background: var(--tint-hover); border-color: var(--erp-ink-60); }
+.scp-cal__move:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Composer posts: no phase, so a dashed edge in a neutral token and the word "Composer post" for a screen reader and in the legend */
+.scp-cal__post--composer { border-left: 3px dashed var(--erp-ink-60); }
+.scp-legend__dot--composer { background: transparent; border: 1.5px dashed var(--erp-ink-60); box-sizing: border-box; }
+
+/* Holidays and approved leave: information, never a link. Double edge for a holiday, dotted for leave. */
+.scp-cal__note { display: block; padding: 2px 5px; font: 400 11px/1.3 var(--font-body); color: var(--text-primary); background: var(--tint-hover); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scp-cal__note--holiday { border-left: 3px double var(--erp-ink-60); }
+.scp-cal__note--away { border-left: 3px dotted var(--erp-ink-60); }
+.scp-cal__notekind { color: var(--erp-ink-60); }
+.scp-legend__dot--holiday { background: var(--tint-hover); border: 1.5px double var(--erp-ink-60); box-sizing: border-box; }
+.scp-legend__dot--away { background: var(--tint-hover); border: 1.5px dotted var(--erp-ink-60); box-sizing: border-box; }
+
+/* Seven columns are tight on a phone: the table scrolls sideways inside `.scp-tablewrap` rather than squeezing the chips unreadable. */
+@media (max-width: 640px) {
+  .scp-cal--social { min-width: 720px; }
+  .scp-cal--social td { height: auto; min-height: 64px; }
+}

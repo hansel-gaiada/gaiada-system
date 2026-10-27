@@ -55,6 +55,8 @@ function leave(): LeaveRow[] {
   return [
     { userId: "u-andre", name: "Andre Wijaya", startsOn: demoMonthDay(13), endsOn: demoMonthDay(15), leaveType: "vacation", status: "approved", note: "Family trip to Lombok", minutes: 1440 },
     { userId: "u-sari", name: "Sari Dewi", startsOn: demoMonthDay(20), endsOn: demoMonthDay(20), leaveType: "sick", status: "approved", note: "Dentist", minutes: 480 },
+    // SCP-3e: a Social Media colleague (`u-social`, dept-4), so the Social Media calendar shows an away mark in the demo too.
+    { userId: "u-social", name: "Komang Lestari", startsOn: demoMonthDay(26), endsOn: demoMonthDay(27), leaveType: "vacation", status: "approved", note: "Family ceremony", minutes: 960 },
     // Never shown: not approved, or a person placed in another unit.
     { userId: "u-pm", name: "Dewi Santoso", startsOn: demoMonthDay(16), endsOn: demoMonthDay(17), leaveType: "vacation", status: "pending", note: "Wedding", minutes: 960 },
     { userId: "u-seo", name: "Luh Ayu", startsOn: demoMonthDay(13), endsOn: demoMonthDay(14), leaveType: "vacation", status: "approved", note: "Retreat", minutes: 960 },
