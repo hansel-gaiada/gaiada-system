@@ -567,6 +567,19 @@ export function pmDemo(method: string, p: string, search: URLSearchParams, body?
     if (m === "POST") {
       const b = parse(body);
       const c: Comment = { id: nextId("c"), author_id: String(b.authorId ?? "demo-hansel"), author_name: MEMBERS[String(b.authorId ?? "demo-hansel")] ?? "You", body: String(b.body ?? ""), parent_comment_id: null, created_at: stamp() };
+      // SCP-1l (BFF §63.8): `visibility` and `anchor` belong to a social_post thread only (400 {field} on any other); the demo
+      // store carries both so the post page's toggle, badges and pins are drivable. A bad pin is 400 {field: "anchor"}.
+      if (et !== "social_post") {
+        if (b.visibility !== undefined) return { status: 400, json: { error: "visibility_not_allowed", field: "visibility" } };
+        if (b.anchor !== undefined) return { status: 400, json: { error: "anchor_not_allowed", field: "anchor" } };
+      } else {
+        if (b.visibility !== undefined && b.visibility !== "team" && b.visibility !== "client") return { status: 400, json: { error: "invalid_visibility", field: "visibility" } };
+        const a = b.anchor as { x?: unknown; y?: unknown; fileId?: unknown } | null | undefined;
+        const inUnit = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1;
+        if (a !== undefined && a !== null && !(typeof a === "object" && inUnit(a.x) && inUnit(a.y) && typeof a.fileId === "string")) return { status: 400, json: { error: "invalid_anchor", field: "anchor" } };
+        c.visibility = b.visibility === "client" ? "client" : "team";
+        c.anchor = a ? { x: a.x as number, y: a.y as number, fileId: a.fileId as string } : null;
+      }
       (comments[key] ??= []).push(c);
       return { status: 201, json: { id: c.id } };
     }

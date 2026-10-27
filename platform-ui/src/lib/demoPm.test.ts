@@ -734,3 +734,37 @@ describe("demoPm assignment history", () => {
     expect(hist[0].statusId).toBe("in_progress");
   });
 });
+
+describe("demoPm social_post comments (SCP-1l)", () => {
+  const POST = "sp-mock-1";
+  const FILE = "11111111-1111-4111-8111-111111111111";
+  const url = `/api/${T}/comments?entityType=social_post&entityId=${POST}`;
+
+  it("carries visibility (team by default) and the pin through write and read", () => {
+    call("POST", url, { body: "Plain team note" });
+    call("POST", url, { body: "For the client", visibility: "client", anchor: { x: 0.25, y: 0.5, fileId: FILE } });
+    const list = json<Comment[]>(call("GET", url));
+    expect(list).toHaveLength(2);
+    expect(list[0]).toMatchObject({ body: "Plain team note", visibility: "team", anchor: null });
+    expect(list[1]).toMatchObject({ body: "For the client", visibility: "client", anchor: { x: 0.25, y: 0.5, fileId: FILE } });
+  });
+
+  it("refuses a bad visibility or a pin outside 0 to 1 with 400 and the field", () => {
+    const badVis = call("POST", url, { body: "x", visibility: "everyone" });
+    expect(badVis?.status).toBe(400);
+    expect((badVis?.json as { field: string }).field).toBe("visibility");
+    const badPin = call("POST", url, { body: "x", anchor: { x: 1.5, y: 0.5, fileId: FILE } });
+    expect(badPin?.status).toBe(400);
+    expect((badPin?.json as { field: string }).field).toBe("anchor");
+  });
+
+  it("any other thread refuses visibility and anchor with 400, and its comments carry neither", () => {
+    expect(call("POST", `/api/${T}/comments?entityType=task&entityId=t-4`, { body: "x", visibility: "team" })?.status).toBe(400);
+    expect(call("POST", `/api/${T}/comments?entityType=task&entityId=t-4`, { body: "x", anchor: { x: 0, y: 0, fileId: FILE } })?.status).toBe(400);
+    call("POST", `/api/${T}/comments?entityType=task&entityId=t-4`, { body: "No extras" });
+    const list = json<Comment[]>(call("GET", `/api/${T}/comments?entityType=task&entityId=t-4`));
+    const last = list[list.length - 1];
+    expect(last.visibility).toBeUndefined();
+    expect(last.anchor).toBeUndefined();
+  });
+});

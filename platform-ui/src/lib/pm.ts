@@ -413,7 +413,16 @@ export interface Comment {
   created_at: string;
   ai?: boolean; // rendered with an "AI Tracker" badge
   reactions?: ReactionSummary[]; // P3-09 — absent/omitted on a stale backend, never an error
+  // SCP-1l (BFF §63.8) — ADDITIVE. The server returns both on every thread ('team' and null for all but a social_post's); only
+  // a social_post thread (CommentThread's `social` prop) draws them. Absent on an older backend, never an error.
+  visibility?: CommentVisibility;
+  anchor?: CommentAnchor | null;
 }
+
+/** Who a comment is for: the team only, or the client too. Only a `social_post` thread may carry `client`. */
+export type CommentVisibility = "team" | "client";
+/** A pin on the post's image: x and y are fractions of the image (0 to 1), fileId is the file the pin sits on. */
+export interface CommentAnchor { x: number; y: number; fileId: string }
 
 // ---- task followers (P3-09) ----
 export interface Follower { id: string; name: string }

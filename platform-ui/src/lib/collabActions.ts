@@ -4,6 +4,7 @@ import { getSessionUserId } from "./session-server";
 import { getMe, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
 import { attachFile, deleteFile, postComment, uploadFile } from "./entities";
+import type { CommentAnchor, CommentVisibility } from "./pm";
 import { FILE_TOO_BIG, MAX_UPLOAD_BYTES, addRefusalText } from "./fileUpload";
 
 export type CollabResult = { ok: boolean; error?: string; id?: string; /** An upload only: personal data was removed from the stored copy. */ scrubbed?: boolean };
@@ -26,12 +27,24 @@ function fail(e: unknown): CollabResult {
 }
 
 // Comments — bound to (entityType, entityId) at the call site.
-export async function postEntityComment(entityType: string, entityId: string, body: string): Promise<CollabResult> {
+// SCP-1l: `extra` (a social_post comment's visibility and pin) is passed only by a social_post thread; the server refuses either on
+// any other thread, and a client-visible comment needs `record_client` (403 `not_officer_or_approver`, worded below).
+export async function postEntityComment(entityType: string, entityId: string, body: string, extra?: { visibility?: CommentVisibility; anchor?: CommentAnchor }): Promise<CollabResult> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };
   if (!body.trim()) return { ok: false, error: "Write something first." };
-  try { const r = await postComment(c.userId, c.tenant, entityType, entityId, body.trim()); revalidatePath(`/${entityType}s/${entityId}`); return { ok: true, id: r.id }; }
-  catch (e) { return fail(e); }
+  try { const r = await postComment(c.userId, c.tenant, entityType, entityId, body.trim(), extra); revalidatePath(`/${entityType}s/${entityId}`); return { ok: true, id: r.id }; }
+  catch (e) { return failComment(e); }
+}
+
+/** A comment's refusal in a sentence; anything else as `fail` words it. */
+function failComment(e: unknown): CollabResult {
+  if (e instanceof PlatformError) {
+    if (e.status === 403 && e.message === "not_officer_or_approver") return { ok: false, error: "Only the client's officer or an approver can write a comment the client sees." };
+    if (e.status === 400 && e.field === "anchor") return { ok: false, error: "That pin is not on one of this post's images." };
+    if (e.status === 404 && e.message === "post_not_found") return { ok: false, error: "This post no longer exists." };
+  }
+  return fail(e);
 }
 
 // Attachments (metadata / reference). `revalidate` (DW-8h, §45.2) is the page path to refresh; without it the action keeps its
