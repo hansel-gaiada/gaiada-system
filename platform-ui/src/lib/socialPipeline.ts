@@ -637,7 +637,7 @@ const ACTIVITY_WORDS: Readonly<Record<string, string>> = {
   record_client_approve: "recorded the client's approval", record_client_change: "recorded the client's change request", schedule: "scheduled it in Meta",
   schedule_publisher: "scheduled it through the publisher", unschedule: "unscheduled it", reschedule: "rescheduled it, so the client is asked again",
   mark_live: "marked it live", block: "blocked it", resolve: "resolved the block", follow_up: "followed up", discard: "discarded it", archive: "archived it",
-  edit: "edited the post", suggest: "suggested copy", changed_after_client: "changed it after the client approved, so it went back to the client",
+  edit: "edited the post", suggest: "suggested copy", add_design: "added a design", remove_design: "removed a design", changed_after_client: "changed it after the client approved, so it went back to the client",
 };
 export const activityWords = (action: string): string => ACTIVITY_WORDS[action] ?? action.replace(/_/g, " ");
 

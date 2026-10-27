@@ -80,7 +80,6 @@ export function PostActionBar({ post, image, onResult }: { post: PipelinePost; i
           </ul>
         </>
       )}
-      {!dialog && error && <RefusalNote refusal={error.refusal} message={error.message} />}
       {dialog && <ActionDialog action={dialog} post={post} image={image} pending={pending} error={error} onClose={() => { setDialog(null); setError(null); }} onSubmit={(p) => send(dialog, p)} />}
     </section>
   );

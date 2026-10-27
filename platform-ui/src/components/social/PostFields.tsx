@@ -14,7 +14,7 @@ import { RefusalNote } from "@/components/social/PostRefusal";
 import { formatDateTime } from "@/lib/format";
 import {
   FIELD_SPECS, MUST_HAVES, NETWORKS, SOURCE_LABEL, SOURCES, SUGGESTIBLE_FIELDS, canAuthorPost, canSuggest, editableFieldsOf, isoToZoneInput, lockedWords, networkLabel, newActionId,
-  zoneInputToIso, type FieldSpec, type PipelinePost, type RawAsset,
+  statusLabel, zoneInputToIso, type FieldSpec, type PipelinePost, type RawAsset,
 } from "@/lib/socialPipeline";
 import { dropSuggestion, runPostAction, savePostFields, saveSuggestion, type WriteResult } from "@/lib/socialPipelineActions";
 
@@ -292,7 +292,7 @@ export function PostFields({ post, onResult }: { post: PipelinePost; onResult: R
       <div role="tabpanel" id="scp-panel" aria-labelledby={`scp-tab-${tab}`} className="scp-rows">
         {noneEditable && post.pipelineStatus !== "proofread" && (
           <p className="scp-note" style={{ margin: "0 0 4px" }}>
-            {author ? `The fields are read-only at ${post.pipelineStatus === "changes" ? "this change" : post.pipelineStatus}.` : "Only the client's officer edits these fields."}
+            {author ? `The fields are read-only at ${post.pipelineStatus === "changes" ? "this change" : statusLabel(post.pipelineStatus)}.` : "Only the client's officer edits these fields."}
           </p>
         )}
         {rows.map((s) => (

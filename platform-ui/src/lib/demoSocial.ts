@@ -1062,8 +1062,10 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
   const isComposerPost = (id: string) => POSTS.some((x) => x.id === id) && !isPipelinePostId(id);
   const pipeActM = tail.match(/^posts\/([^/]+)\/actions$/);
   if (pipeActM && m === "POST") return runDemoPipelineAction(pipeActM[1], b(), userId, { composer: isComposerPost(pipeActM[1]) });
-  const piped = runDemoPipelineWrite(m, tail, b(), userId, isComposerPost);
-  if (piped) return piped;
+  if (m !== "GET" && /^posts\/(actions$|[^/]+\/(pipeline$|suggestions\/|designs))/.test(tail)) {
+    const piped = runDemoPipelineWrite(m, tail, b(), userId, isComposerPost);
+    if (piped) return piped;
+  }
 
   // ── SCP-1a: allocation and brand book (BFF §63.4) ────────────────────────────────────────────────
   if (tail === "allocation" && m === "GET") {
