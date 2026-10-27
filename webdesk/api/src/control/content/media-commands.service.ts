@@ -24,6 +24,7 @@ import { randomUUID } from "node:crypto";
 import { computeCommandHash } from "../auth/ws4-assertion";
 import type { EditorialPrincipal } from "../auth/editorial-principal";
 import { assertClientMayRun } from "../auth/client-editor";
+import { assertContributorMayRun } from "../auth/contributor-editor";
 import { CommandEnvelope } from "../command-envelope";
 import type { CommandName } from "../command-types";
 import { hashUploadToken, mintUploadToken, uploadPathFor, UPLOAD_TOKEN_TTL_SECONDS } from "../../media/media-upload-token";
@@ -189,6 +190,7 @@ export class MediaCommandsService {
     const command: CommandName = "media.uploadToken";
     // WSK-49b: a client editor may not run every command (CLIENT_EDITOR_COMMANDS); the guard checks too.
     assertClientMayRun(ctx.principal, command);
+    assertContributorMayRun(ctx.principal, command);
     // Generated BEFORE the envelope: the audit row (its first statement) names the tokenId. The token
     // itself is never given to the audit row, the idempotency record or any log.
     const tokenId = randomUUID();
@@ -237,6 +239,7 @@ export class MediaCommandsService {
     const command: CommandName = "media.update";
     // WSK-49b: a client editor may not run every command (CLIENT_EDITOR_COMMANDS); the guard checks too.
     assertClientMayRun(ctx.principal, command);
+    assertContributorMayRun(ctx.principal, command);
     // Shape against the tenant's own locales: before the envelope, so a refusal claims no idempotency key.
     if (input.alt !== undefined) {
       const unknown = Object.keys(input.alt).filter((l) => !ctx.tenant.locales.includes(l));
@@ -286,6 +289,7 @@ export class MediaCommandsService {
     const command: CommandName = "media.delete";
     // WSK-49b: a client editor may not run every command (CLIENT_EDITOR_COMMANDS); the guard checks too.
     assertClientMayRun(ctx.principal, command);
+    assertContributorMayRun(ctx.principal, command);
     // Read before the envelope's transaction so a misconfigured retention is a loud 500 that claims nothing.
     const retentionDays = storageConfig.objectLockRetentionDays;
     return this.envelope.run<DeletedMedia>({

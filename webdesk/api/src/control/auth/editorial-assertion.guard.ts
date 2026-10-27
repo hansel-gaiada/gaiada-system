@@ -16,6 +16,7 @@ import { COMMAND_META_KEY } from "../command.decorator";
 import { EDITORIAL_COMMANDS, type CommandName } from "../command-types";
 import { EDITORIAL_PRINCIPAL_RESOLVER, type EditorialPrincipalResolver, type EditorialRequest } from "./editorial-principal";
 import { assertClientMayRun } from "./client-editor";
+import { assertContributorMayRun } from "./contributor-editor";
 
 @Injectable()
 export class EditorialAssertionGuard implements CanActivate {
@@ -41,6 +42,8 @@ export class EditorialAssertionGuard implements CanActivate {
     // WSK-49b: a client principal (`ce: true`) may run only the allow-listed commands; refused here, before
     // any body validation or state is looked at. A no-op for every other principal.
     assertClientMayRun(request.editorial, command);
+    // M5-W1e: a contributor principal (`xc: true`) may run only CONTRIBUTOR_COMMANDS, refused here for the same reason.
+    assertContributorMayRun(request.editorial, command);
     return true;
   }
 }

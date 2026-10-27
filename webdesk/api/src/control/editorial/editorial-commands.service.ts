@@ -27,6 +27,7 @@ import { CommandEnvelope, type EffectOutcome } from "../command-envelope";
 import type { CommandName } from "../command-types";
 import type { EditorialPrincipal } from "../auth/editorial-principal";
 import { assertClientMayRun } from "../auth/client-editor";
+import { assertContributorMayRun } from "../auth/contributor-editor";
 import { computeCommandHash } from "../auth/ws4-assertion";
 import { ContentCommandsService } from "../content/content-commands.service";
 import { problems } from "../content/content-problem";
@@ -112,6 +113,7 @@ export class EditorialCommandsService {
     // A client editor is refused by EditorialAssertionGuard (these commands are not on the client allow-list);
     // checked again here so a service call that skipped the guard cannot slip through.
     assertClientMayRun(ctx.principal, command);
+    assertContributorMayRun(ctx.principal, command);
     return this.envelope.run<R>({
       command,
       scope: { kind: "tenant", tenantId: ctx.tenant.id },

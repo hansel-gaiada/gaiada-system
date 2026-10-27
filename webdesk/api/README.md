@@ -2611,6 +2611,62 @@ resolvers, the command allow-list over the whole registry), `test/editorial-asse
 `ce`, `ce: false`, `ce: true` exposed, an unknown claim still ignored, `ce` bound by the signature),
 `test/editorial-assertion-vectors.spec.ts` v4.
 
+## Contributors (M5-W1e, PROTOTYPED)
+
+Ruling WSK-D84 (`docs/blueprints/webdesk-design-v2.md` §14); `docs/plans/2026-10-11-m5-writers-room-design.md` D10 and §3.1 item 7. A freelance
+writer, translator or SEO reviewer has an ERP login (`users.kind = 'contributor'`). The ERP fences it (route fence, Cerbos DENYs, a role allow-list);
+this is WebDesk's own wall, so the ERP's is not the only one. It is built exactly like the client editor of WSK-49 above and never combined with it.
+
+### The marker: `xc` on the editorial assertion
+
+The signed editorial assertion gains a second **optional** boolean claim, `xc` ("contributor"), written between `ce` and `iat`:
+`...,"apr"?,"ce"?,"xc"?,"iat","exp","jti"`. The ERP signer (`platform-nest/src/modules/webdev/webdesk-editorial-signer.ts`) writes `xc: true` only
+when the ASSEMBLED principal's `kind` is `contributor`, and never from a request body, header or argument (its `sign(input, principal)` takes the
+principal, `EditorialAssertionRequest` has no `xc` field); an assertion for any other principal has no `xc` at all, never `false`.
+
+| Rule | Where | Refusal |
+|---|---|---|
+| a present `xc` that is not a boolean (a string, a number, `null`, an array, an object) | `verifyEditorialAssertion`, step 6 | `401 editorial-assertion-claims` (never coerced, never ignored) |
+| `xc` together with `ce`, whatever their values (a contributor is never a client editor) | the same step | `401 editorial-assertion-claims` |
+| expiry, lifetime, replay, scope, `cmh`, `apr` | unchanged | unchanged |
+| `xc` is covered by the signature, so it can be neither added nor stripped in transit; it is not part of `cmh` | | `401 editorial-assertion-invalid-signature` |
+
+The principal exposes `contributor: true` only for `xc: true`; for an absent or `false` claim it is exactly what it was before W1e (the dev-mode header
+stub takes the same optional boolean `xc`, and refuses it together with `ce`). Like `ce`, the marker only ever **restricts**: an assertion without it is
+a full-power staff assertion, so the ERP's whole duty here is to set it on every contributor assertion.
+
+### Commands a contributor may and may not run
+
+`CONTRIBUTOR_COMMANDS` (`src/control/command-types.ts`) is an **allow-list**, checked by `EditorialAssertionGuard` on every editorial route and again at
+the top of every service method (`assertContributorMayRun`, `src/control/auth/contributor-editor.ts`). A command added to `EDITORIAL_COMMANDS` later is
+refused to a contributor until it is listed on purpose.
+
+| Allowed | Why |
+|---|---|
+| `content.create`, `content.update`, `content.restoreVersion` | a writer drafts and edits; a translator restores a version |
+| `content.previewToken`, `content.previewTokenRevoke` | a reviewer needs a draft link; revoke only withdraws one |
+| `editorial.submit`, `editorial.withdraw` | hand a draft in for review, or take it back |
+| `editorial.comment`, `editorial.commentResolve` | the review conversation |
+| `editorial.requestChanges`, `editorial.seoSignoff` | the SEO reviewer's own decisions (Cerbos in the ERP still decides who) |
+
+Refused with **`403 contributor-command-not-allowed`**: `content.publish`, `content.schedule`, `content.unpublish`, `content.delete`, `editorial.approve`,
+`editorial.assign`, `editorial.policySet`, and every media write (`media.uploadToken`, `media.update`, `media.delete`; WSK-D84 lets contributors upload into
+a quarantine, and that is one line here once the quarantine exists, W1q). The body is the house's problem body, `application/problem+json`:
+`{"type":"https://webdesk.gaiada.online/errors/contributor-command-not-allowed","title":"Command not allowed for a contributor","status":403,"detail":"A contributor may not run <command>. ... Nothing was changed."}`.
+`schema.apply`, `key.*`, lifecycle, releases and promotion carry no editorial assertion, so a contributor cannot be expressed there (the ERP must never
+route one); the two review reads carry none either. A contributor's idempotency record is its own (`__contributor` in the request hash) and its audit
+row carries `contributor: true`.
+
+**No contract, vocabulary or `contract.lock` version changed**: the editorial assertion is a control-channel header, not part of the delivery
+contract or the composition vocabulary (unchanged; no vocabulary or `CONTRACT.lock` bump), and an optional claim is additive. **Deploy order: WebDesk first.** An older WebDesk ignores an unknown claim (the JWT convention), so it would treat a contributor's `xc` assertion as a staff one; the ERP's own walls still hold, but the third wall only exists once this verifier is live.
+
+### Tests
+
+`test/contributor-editor-principal.spec.ts` (no database: the claim, both resolvers, replay and expiry, the allow-list PIN over the whole registry, the
+guard driven for every editorial command with signed assertions), `test/contributor-editor-enforcement.spec.ts` (real Postgres: each allowed command
+succeeds with `xc`, each refused command is a valid 403 with nothing written and the same call as staff succeeds, a non-boolean `xc`, `xc` with `ce`,
+replay, expiry), `test/editorial-assertion-vectors.spec.ts` v5 (shared byte for byte with the ERP signer's test).
+
 ## Content checks per site (M5-W3c, PROTOTYPED) — composition `lint.content`, vocabulary 1.3.0
 
 The advisory editorial checks (`src/control/content/lint-rules/**`: one H1, meta lengths, alt text, sources, internal links, the ID twin,

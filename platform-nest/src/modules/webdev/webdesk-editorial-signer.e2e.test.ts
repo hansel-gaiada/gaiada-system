@@ -117,6 +117,9 @@ async function webdeskRows<T>(tenantId: string, sql: string, args: unknown[]): P
 }
 
 /** content.create through the REAL client, signed by `sign`. */
+/** M5-W1e: the assembled principal the signer reads `kind` from (an employee: no `xc`). */
+const EMPLOYEE = { kind: "employee" } as const;
+
 async function createDraft(
   client: WebdeskControlClient,
   site: { slug: string; siteId: string },
@@ -219,7 +222,7 @@ describe.skipIf(!pairing)("WSK-40 END-TO-END: real ERP signer + WSK-66 executor 
 
   it("content.create: real signer → real client (mTLS, token, editorial header) → real WebDesk L1–L2e → 201, attributed to the ERP sub", async () => {
     const s = signer();
-    const { res, body } = await createDraft(client, site, (r) => Promise.resolve(s.sign(r)), editor);
+    const { res, body } = await createDraft(client, site, (r) => Promise.resolve(s.sign(r, EMPLOYEE)), editor);
     expect(res.status, res.bodyText).toBe(201);
     draftId = (res.json as { item: { itemId: string } }).item.itemId;
     const rows = await webdeskRows<{ created_by: string; attribution: unknown }>(
@@ -251,7 +254,7 @@ describe.skipIf(!pairing)("WSK-40 END-TO-END: real ERP signer + WSK-66 executor 
 
   it("tool_args edited after filing → the REAL WebDesk refuses 403 editorial-assertion-command-mismatch → row failed, nothing published", async () => {
     const s = signer();
-    const { res } = await createDraft(client, site, (r) => Promise.resolve(s.sign(r)), editor);
+    const { res } = await createDraft(client, site, (r) => Promise.resolve(s.sign(r, EMPLOYEE)), editor);
     expect(res.status, res.bodyText).toBe(201);
     const itemId = (res.json as { item: { itemId: string } }).item.itemId;
     const id = await fileAs(editor, [{ itemId, version: 1 }]);
@@ -265,7 +268,7 @@ describe.skipIf(!pairing)("WSK-40 END-TO-END: real ERP signer + WSK-66 executor 
 
   it("a captured assertion replayed (new Idempotency-Key) → 401 editorial-assertion-replayed from the real Redis jti store", async () => {
     const s = signer();
-    const { res, resend, body } = await createDraft(client, site, (r) => Promise.resolve(s.sign(r)), editor);
+    const { res, resend, body } = await createDraft(client, site, (r) => Promise.resolve(s.sign(r, EMPLOYEE)), editor);
     expect(res.status, res.bodyText).toBe(201);
     const again = await resend();
     expect(again.status).toBe(401);
@@ -309,16 +312,16 @@ describe.skipIf(!rotation)(`WSK-40 rotation runbook on the dev stack — phase $
   if (E.phase === "rotation-overlap") {
     it(`overlap (JWKS holds ${E.oldKid} + ${E.kid}): BOTH kids are accepted`, async () => {
       for (const s of [load(E.oldKeyFile, E.oldKid), load(E.keyFile, E.kid)]) {
-        const { res } = await createDraft(client, site, (r) => Promise.resolve(s.sign(r)), "erp-user-rotation");
+        const { res } = await createDraft(client, site, (r) => Promise.resolve(s.sign(r, EMPLOYEE)), "erp-user-rotation");
         expect(res.status, `${s.kid}: ${res.bodyText}`).toBe(201);
       }
     });
   } else {
     it(`after removal (JWKS holds ${E.kid} only): the OLD kid is refused 401 unknown-key, the new one is accepted`, async () => {
-      const old = await createDraft(client, site, (r) => Promise.resolve(load(E.oldKeyFile, E.oldKid).sign(r)), "erp-user-rotation");
+      const old = await createDraft(client, site, (r) => Promise.resolve(load(E.oldKeyFile, E.oldKid).sign(r, EMPLOYEE)), "erp-user-rotation");
       expect(old.res.status).toBe(401);
       expect(slugOf(old.res.json)).toBe("editorial-assertion-unknown-key");
-      const cur = await createDraft(client, site, (r) => Promise.resolve(load(E.keyFile, E.kid).sign(r)), "erp-user-rotation");
+      const cur = await createDraft(client, site, (r) => Promise.resolve(load(E.keyFile, E.kid).sign(r, EMPLOYEE)), "erp-user-rotation");
       expect(cur.res.status, cur.res.bodyText).toBe(201);
     });
   }

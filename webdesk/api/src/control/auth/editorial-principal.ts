@@ -38,6 +38,12 @@ export interface EditorialPrincipal {
    * client-editable paths of a composition and to the client command allow-list (./client-editor.ts).
    */
   clientEditor?: boolean;
+  /**
+   * M5-W1e: true iff the signed assertion carried `xc: true` ("contributor", a freelance writer with an ERP login). Absent means
+   * false, and the principal is then exactly what it was before W1e. A contributor is held to CONTRIBUTOR_COMMANDS
+   * (./contributor-editor.ts). Never set together with `clientEditor`: the verifier refuses an assertion that carries both.
+   */
+  contributor?: boolean;
 }
 
 export const EDITORIAL_PRINCIPAL_RESOLVER: unique symbol = Symbol("EDITORIAL_PRINCIPAL_RESOLVER");
