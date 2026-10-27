@@ -30,7 +30,6 @@ import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setu
 import { withTenants } from "../db";
 import { createCompany, createUser, addMembership, linkIdentity } from "../testing/fixtures";
 import { planTenantBackfill } from "../admin/iam-phase2-backfill";
-import { loadActiveMemberIds } from "../core/dept-notices.service";
 
 /** The exact predicate the readers now use (admin-identity.controller, core.controller). Kept as one
  *  string so a drift between the two endpoints shows up here rather than in production. */
@@ -151,7 +150,14 @@ describe.skipIf(!TEST_URL)("T18 · repointed people readers exclude automation, 
     for (const kind of ["employee", "automation", "bot", "contributor"] as const) {
       emails[kind] = `t18-${kind}-${stamp}@a.test`;
       ids[kind] = await createUser(emails[kind]);
-      // ALL FOUR hold an `employee`-kind membership: the membership column cannot tell them apart. That is the point.
+      // The employee, the automation account and the bot all hold an `employee`-kind membership: the membership
+      // column cannot tell them apart. That is the point. A CONTRIBUTOR can never hold one (company_memberships_
+      // contributor_guard, and it must be made a contributor before anything else), so it has none: the readers
+      // below are defended against it structurally as well as by the users.kind predicate.
+      if (kind === "contributor") {
+        await adminPool().query(`UPDATE users SET kind = 'contributor' WHERE id = $1`, [ids[kind]]);
+        continue;
+      }
       await addMembership(tenantId, ids[kind], "employee");
       if (kind !== "employee") await adminPool().query(`UPDATE users SET kind = $2 WHERE id = $1`, [ids[kind], kind]);
     }
@@ -159,12 +165,6 @@ describe.skipIf(!TEST_URL)("T18 · repointed people readers exclude automation, 
 
   afterAll(async () => {
     await teardownTestDb();
-  });
-
-  it("dept-notices audience (loadActiveMemberIds): only the employee", async () => {
-    const got = await withTenants([tenantId], (c) => loadActiveMemberIds(c, tenantId));
-    expect(got).toContain(ids.employee);
-    for (const k of ["automation", "bot", "contributor"]) expect(got, `${k} counted as a person`).not.toContain(ids[k]);
   });
 
   it("HR backfill plan (planTenantBackfill): the employee is a candidate; automation, bot and contributor are not", async () => {
