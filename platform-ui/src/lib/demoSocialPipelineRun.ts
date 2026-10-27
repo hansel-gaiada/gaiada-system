@@ -732,3 +732,6 @@ function patchDesign(postId: string, designId: string, b: Record<string, unknown
 
 /** `POST posts/:postId/actions` in bulk (BFF §63.6.7): each item runs the one runner on its own. Kept here, beside the runner, so the store module never imports it. */
 export const demoBulkActions = (body: Record<string, unknown>, userId: string): DemoResult => runDemoPipelineWrite("POST", "posts/actions", body, userId)!;
+
+/** One stage action on one post, with the store written: the feed preview's swap (`demoSocialFeedPreview.ts`) runs two of these and puts the first back if the second is refused. */
+export const runDemoStage = (r: Req, userId: string, composer: boolean): Out => stage(r, userId, composer);

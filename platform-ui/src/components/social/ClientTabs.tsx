@@ -1,4 +1,4 @@
-// SCP-1k — the client page's tabs, by `?tab=` (the Feed preview tab is SCP-3d's and is not offered). Plain links: the current one is `aria-current`.
+// SCP-1k, SCP-3d — the client page's tabs, by `?tab=` (Plan, Stories, Calendar, Feed preview, List, Client profile). Plain links: the current one is `aria-current`.
 import Link from "next/link";
 import { CLIENT_TABS, clientHref, type ClientTab } from "@/lib/socialClient";
 

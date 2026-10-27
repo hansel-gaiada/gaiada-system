@@ -7,6 +7,7 @@ import { platformFetch } from "./platform";
 import { readResult, type ReadResult } from "./readResult";
 import { asBrandBook, type BrandBook } from "./socialBrandBook";
 import { asCalendarItems, asCycleView, type CalendarItem, type CycleView } from "./socialClient";
+import { asFeedPreview, type FeedPreviewView } from "./socialFeedPreview";
 
 const base = (t: string) => `/api/${encodeURIComponent(t)}/modules/social`;
 
@@ -19,6 +20,11 @@ export function getCycleView(userId: string, tenantId: string, cycleId: string):
 export function getClientCalendar(userId: string, tenantId: string, q: { from: string; to: string; engagementId: string }): Promise<ReadResult<CalendarItem[]>> {
   const qs = new URLSearchParams({ from: q.from, to: q.to, engagementId: q.engagementId });
   return readResult(platformFetch<unknown>(`${base(tenantId)}/calendar?${qs.toString()}`, userId).then(asCalendarItems));
+}
+
+/** `GET engagements/:engagementId/feed-preview` (social_post · read, SCP-3d): the client's grid, newest date first, live posts locked. */
+export function getFeedPreview(userId: string, tenantId: string, engagementId: string): Promise<ReadResult<FeedPreviewView>> {
+  return readResult(platformFetch<unknown>(`${base(tenantId)}/engagements/${encodeURIComponent(engagementId)}/feed-preview`, userId).then(asFeedPreview));
 }
 
 /** `GET brand-profiles/:clientId` (social_engagement · read). A client with no profile yet is a real answer: `ok` with a null book. */

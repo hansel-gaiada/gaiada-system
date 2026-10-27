@@ -10,7 +10,7 @@ import { readOrgRoot } from "@/lib/campaigns-data";
 import { can } from "@/lib/rbac";
 import { DISPLAY_TZ, todayIsoInDisplayZone } from "@/lib/format";
 import { getAllocation } from "@/lib/socialAllocation-data";
-import { getClientBrandBook, getClientCalendar, getCycleView, getEngagementProjectId } from "@/lib/socialClient-data";
+import { getClientBrandBook, getClientCalendar, getCycleView, getEngagementProjectId, getFeedPreview } from "@/lib/socialClient-data";
 import { gridRange, parseClientTab, parseMonth, type ClientPost } from "@/lib/socialClient";
 import { Card } from "@/components/ui";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
@@ -20,6 +20,7 @@ import { ClientTabs } from "@/components/social/ClientTabs";
 import { ClientPlan } from "@/components/social/ClientPlan";
 import { ClientStories } from "@/components/social/ClientStories";
 import { ClientCalendar } from "@/components/social/ClientCalendar";
+import { FeedPreview } from "@/components/social/FeedPreview";
 import { ClientPostList } from "@/components/social/ClientPostList";
 import { ClientCreate } from "@/components/social/ClientCreate";
 import "@/components/social/cycles.css";
@@ -36,8 +37,9 @@ const dayOf = (iso: string): string => todayIsoInDisplayZone(new Date(iso));
 const timeOf = (iso: string): string =>
   new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: DISPLAY_TZ }).format(new Date(iso));
 
-// SCP-1k, SCP-1m (BFF §63.4, §63.5, §63.10, §63.17; plan §8 rows 1k and 1m): one client's page, on tabs by `?tab=`: Plan, Stories, Calendar, List and the Client
-// profile (the brand book). The Feed preview tab is SCP-3d's. The header is the profile: the count against the target (stories and extra posts beside it), the cycle
+// SCP-1k, SCP-1m, SCP-3d (BFF §63.4, §63.5, §63.10, §63.17; plan §8 rows 1k, 1m and 3d): one client's page, on tabs by `?tab=`: Plan, Stories, Calendar, Feed preview, List
+// and the Client profile (the brand book). The Feed preview is the client's grid with drag-to-swap of publish dates (`GET engagements/:id/feed-preview`); it needs no
+// cycle, because it shows every dated post of the client. The header is the profile: the count against the target (stories and extra posts beside it), the cycle
 // line, the tone and the highlights. Every read is a `ReadResult`: a refusal or a failure is said in words, never drawn as an empty grid.
 //
 // Reads: the client's row from `GET allocation` (readable by the whole team); `GET cycles/:cycleId/health` for the cycle's posts (Plan, Stories, List and the
@@ -84,6 +86,7 @@ export default async function SocialClientPage({ params, searchParams }: { param
     readOrgRoot(me, tenant),
   ]);
   const calendar = tab === "calendar" ? await getClientCalendar(userId, tenant, { ...gridRange(month), engagementId }) : null;
+  const feed = tab === "preview" ? await getFeedPreview(userId, tenant, engagementId) : null;
 
   const cycleView = cycle?.kind === "ok" ? cycle.data : null;
   const posts: ClientPost[] = cycleView?.posts ?? [];
@@ -112,6 +115,14 @@ export default async function SocialClientPage({ params, searchParams }: { param
           <ReadRefusal subject="this client's calendar" kind="forbidden" inline />
         ) : (
           <ReadRefusal subject="This client's calendar" kind="unavailable" reason={calendar?.kind === "unavailable" ? calendar.reason : undefined} inline />
+        )
+      ) : tab === "preview" ? (
+        feed?.kind === "ok" ? (
+          <FeedPreview deptId={deptId} engagementId={engagementId} items={feed.data.items} liveHidden={feed.data.liveHidden} />
+        ) : feed?.kind === "forbidden" ? (
+          <ReadRefusal subject="this client's feed preview" kind="forbidden" inline />
+        ) : (
+          <ReadRefusal subject="This client's feed preview" kind="unavailable" reason={feed?.kind === "unavailable" ? feed.reason : undefined} inline />
         )
       ) : !cycleId ? (
         <p className="scp-note">This client has no cycle this month, so there are no posts to show. A Social Media head opens the cycle by setting its deadline in Settings.</p>
