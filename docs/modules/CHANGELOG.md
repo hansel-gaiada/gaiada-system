@@ -11,7 +11,7 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
-### platform-ui `0.210.0` - SCP-1d: the Social Media Home, laid out as the team's feed (plan §6.2; FRONTEND-BFF-CONTRACT §63.7) (2026-10-27) - PROTOTYPED
+### platform-ui `0.210.0` - SCP-1d: the Social Media Home, laid out as the team's feed; SCP-1p: the pipeline walked by its five roles (plan §6.2, §1; FRONTEND-BFF-CONTRACT §63.7) (2026-10-27) - PROTOTYPED
 
 - **Where.** `{D}` for the Social Media workspace, when it is drawn in the Social skin (`effectiveSkin`, the shell's own answer). A person who chose Standard, and every other department, get the page as before. The Overview's header, banner and bands stay; the feed sits between the header and the bands (`WorkspaceOverview`'s new `lead` slot).
 - **Six sections from five reads, started together on the server** (`feed?view=your_turn`, `waiting`, the caller's open tasks, `allocation?mine=1`, `cycles?month=`):
@@ -23,7 +23,13 @@ local stack). None of these mean "production-done".
   - **Your accounts this cycle.**
 - **States.** Each section has its own failure state, so a failed read says "cannot be read" and never "nothing". No read is made per card or per client.
 - **The owner and the superadmin hold no queue** (only the two lead seats are approver holders, §63.2), so their empty "Your turn" says so.
-- **Proof.** The car was green on its own branch: CI 40476789010; sumopod e2e social-skin 33/33 and standard 91/91. The train passed on its combined run.
+- **The role walk (SCP-1p).** A new Playwright project, `social-walk`, runs on the DEMO_MODE build with the Social skin, serial, no retries, on a fresh server. Each persona signs in through the real login page, with no route mocks.
+  - The walk: the Officer drafts; the Copywriter returns the copy with a suggestion (loop a); the HoD asks for changes and the fix comes straight back without a second proofread (loop b); the Creative designs; at the final check a design change (loop c1) and a copy change (loop c2) each come back; the GM sends to the client.
+  - Each step asserts the status, the holder, and that nobody else has a live button.
+  - The maker/checker refusal is shown in words.
+  - Server side, `pipeline-routes.test.ts` gains one post carried through loops a, b and c to the client, read as all five principals, and the copywriter-who-is-the-officer DENY.
+  - **Findings (SCP-1u):** DEMO_MODE serves no Asset Library, so a design driven through the demo UI can only be a link, and the final check refuses a link-only design. The walk's own send is therefore a `test.fixme`, and the send is walked on a seeded post with a stored design. The demo also shows `submit_design` and the send as live where the server's read disables them.
+- **Proof.** Each car was green on its own branch: D, CI 40476789010 and sumopod social-skin 33/33, standard 91/91; G, CI 40477950343 and sumopod social-walk 16 passed with 1 fixme. The train passed on its combined run.
 
 ### ai-gateway-go `0.14.0` - AIP-00a-1: an OpenAI-compatible chat endpoint for registered agents, on its own listener, OFF by default (AIP-D13) (2026-10-27) - PROTOTYPED
 
