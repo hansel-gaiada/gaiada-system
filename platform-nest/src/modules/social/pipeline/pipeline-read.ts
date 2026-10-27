@@ -25,7 +25,7 @@ export const ACTION_ROUTE_ACTIONS: readonly string[] = SCP.actions
   .filter((a) => !OWN_ROUTE_ACTIONS.has(a.action) && !(typeof a.cerbosAction === "string" && a.cerbosAction.startsWith("portal:")))
   .map((a) => a.action);
 
-const HOLDER_LABELS: Record<string, string> = {
+export const HOLDER_LABELS: Record<string, string> = {
   officer: "The officer", copywriter: "A copywriter", approver: "The HoD or the GM", designer: "The designer",
   client: "The client", publisher: "The publisher", external: "Someone outside the team",
 };
