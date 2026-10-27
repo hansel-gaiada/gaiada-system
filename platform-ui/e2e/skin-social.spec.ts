@@ -329,6 +329,87 @@ test.describe("the Social skin on a phone (390x844)", () => {
   });
 });
 
+// ── The Home (SCP-1d): the design's feed ─────────────────────────────────────────────────────────────────────────────────
+
+const HOME_SECTIONS = ["Client stories", "Your turn", "Waiting on others", "Your accounts this cycle", "Tasks given to you", "Reports due"];
+const home = (page: Page) => page.getByTestId("social-home");
+/** The Home streams in behind its own boundary: wait for it, so a scan or a count never sees the loading state. */
+async function homeReady(page: Page) {
+  await expect(home(page)).toBeVisible();
+  for (const name of HOME_SECTIONS) await expect(home(page).getByRole("heading", { level: 2, name })).toBeVisible();
+}
+
+test.describe("the Social Home on a desktop (1280x800)", () => {
+  test.use({ viewport: { width: 1280, height: 800 }, contextOptions: { reducedMotion: "reduce" } });
+
+  test("lays out the six sections, and the officer's clients are circles that open the client's Profile", async ({ page, context }) => {
+    await signIn(page, context);
+    await homeReady(page);
+    const stories = home(page).getByRole("list", { name: "Clients, with their schedule health" });
+    const first = stories.getByRole("link").first();
+    // The ring's meaning is written, not only coloured: the link's name carries the client and the state.
+    await expect(first).toHaveAccessibleName(/\S+.*(On track|Tight|At risk|Late|Done|No cycle)/);
+    await press(first);
+    await expect(page).toHaveURL(/\/departments\/dept-4\/profile\/[^/?]+/);
+  });
+
+  test("Your turn: each card's main button is the server's next action, and the card opens the post drawer", async ({ page, context }) => {
+    await signIn(page, context);
+    await homeReady(page);
+    const cards = home(page).getByRole("region", { name: "Your turn" }).getByRole("article");
+    await expect(cards.first()).toBeVisible();
+    // The seeded officer holds posts, and at least one next action is allowed: a solid button (or the link that opens its dialog).
+    expect(await home(page).locator(".sh-card__act .lux-btn--solid").count()).toBeGreaterThan(0);
+    // A refused one is a disabled button with its reason beside it, never colour alone.
+    for (const off of await home(page).locator(".sh-card__act button[disabled]").all()) {
+      await expect(off).toHaveAccessibleDescription(/\S/);
+    }
+    await press(cards.first().getByRole("heading", { level: 3 }).getByRole("link"));
+    await expect(page.getByRole("dialog", { name: "Post" })).toBeVisible();
+    await expect(page).toHaveURL(/\/departments\/dept-4\/posts\/[^/?]+/);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Post" })).toBeHidden();
+    await expect(page).toHaveURL(/\/departments\/dept-4\/?$/);
+  });
+
+  test("Your accounts this cycle and Reports due link to the Profile; Waiting on others links to Messages", async ({ page, context }) => {
+    await signIn(page, context);
+    await homeReady(page);
+    const accounts = home(page).getByRole("region", { name: "Your accounts this cycle" });
+    await expect(accounts.getByRole("link").first()).toHaveAttribute("href", /\/departments\/dept-4\/profile\/[^/?]+/);
+    await expect(accounts.first()).toContainText(/ of \d+ posts/);
+    const reports = home(page).getByRole("region", { name: "Reports due" });
+    await expect(reports.getByRole("link").first()).toHaveAttribute("href", /\/profile\//);
+    await expect(home(page).getByRole("region", { name: "Waiting on others" }).getByRole("link", { name: /Messages/ })).toHaveAttribute("href", "/departments/dept-4/messages");
+  });
+
+  test("a person who chose the Standard skin sees the Overview they always saw, with no feed", async ({ page, context }) => {
+    await loginAsPlacedSocial(page);
+    await context.addCookies([tenantCookie(page.url(), TENANT), { name: "gaiada_prefs", value: encodeURIComponent(JSON.stringify({ theme: "light", skin: "standard" })), url: new URL("/", page.url()).toString() }]);
+    await page.goto(SOCIAL_HOME);
+    await expect(frame(page)).not.toHaveAttribute("data-skin", /.+/);
+    await expect(page.getByRole("main")).toBeVisible();
+    await expect(home(page)).toHaveCount(0);
+  });
+});
+
+test.describe("the Social Home on a phone (390x844)", () => {
+  test.use({ viewport: { width: 390, height: 844 }, contextOptions: { reducedMotion: "reduce" } });
+
+  test("is one column: every section is there, nothing scrolls sideways, and the stories row is the only thing that does", async ({ page, context }) => {
+    await signIn(page, context);
+    await homeReady(page);
+    await expect(bar(page)).toBeVisible();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(1);
+    // The side column sits under the feed, not beside it.
+    const turn = (await home(page).getByRole("region", { name: "Your turn" }).boundingBox())!;
+    const accounts = (await home(page).getByRole("region", { name: "Your accounts this cycle" }).boundingBox())!;
+    expect(accounts.y).toBeGreaterThan(turn.y);
+    expect(accounts.x).toBeLessThanOrEqual(turn.x + 1);
+  });
+});
+
 // ── axe ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 function describeViolations(violations: Awaited<ReturnType<AxeBuilder["analyze"]>>["violations"]): string {
@@ -391,6 +472,8 @@ const SURFACES: Surface[] = [
         await expect(menu(page)).toBeVisible();
       }
       await expect(page.getByRole("main")).toBeVisible();
+      // SCP-1d: the Home's feed streams in; scan it, not its loading state.
+      await homeReady(page);
     },
   },
   {

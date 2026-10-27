@@ -11,6 +11,9 @@ import { listWorkActivity, objectLabel, activityHref, humanizeVerb, actorLabel }
 import { listClaudeSeats, mySeat, launcherSeatProps } from "@/lib/claudeSeats";
 import { toolkitFor } from "@/lib/deptToolkits";
 import { activeCompany } from "@/lib/companyContext";
+import { getPrefs } from "@/lib/prefs";
+import { effectiveSkin, skinsOn } from "@/lib/skins";
+import { workspaceFor } from "@/lib/workspaces";
 import { functionalConsoleFor } from "@/lib/workspaceAccess";
 import { gmAccessFor, canReadGmMoney, isGmDept, parseGmPeriodKind } from "@/lib/gm";
 import { companyAccess } from "@/lib/overviewCompany";
@@ -28,6 +31,7 @@ import { ActivityFeed, type ActivityItem } from "@/components/departments/Activi
 import { LauncherRow } from "@/components/departments/LauncherRow";
 import { TeamRoster } from "@/components/departments/TeamRoster";
 import { TeachState } from "@/components/departments/TeachState";
+import { SocialHome } from "@/components/social/SocialHome";
 import "@/components/departments/departments.css";
 
 type Params = Promise<{ deptId: string }>;
@@ -113,7 +117,23 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
   // DW-9d perf: framed, the Home body (the legacy band) is its own async component under <Suspense>, so `pilotFrame`'s Overview header and
   // widgets are sent as soon as they resolve instead of after the body's reads. Unframed, it renders exactly as before.
   const homeBody = <DepartmentHomeBody me={me} userId={userId} tenant={tenant} deptId={deptId} framed={!!frame} searchParams={searchParams} />;
-  return frame ? frame(<Suspense fallback={<HomeBodyFallback label="department" />}>{homeBody}</Suspense>) : homeBody;
+
+  // SCP-1d (plan §6.1, §6.2): the Social Media workspace's Home is laid out as the team's feed WHEN it is drawn in the Social skin, which is the shell's own answer
+  // (`effectiveSkin`, the same inputs the layout gives `buildShellModel`: the workspace's skin, the skins switched on, and the person's choice). A person who chose
+  // Standard, and every other department, get exactly the page above. The prefs cookie is read only for the Social Media workspace, so no other Home pays for it.
+  const workspace = workspaceFor(activeCompany(me, tenant)?.vertical, dept.name);
+  const socialHome = workspace.key === "social-media"
+    && effectiveSkin(workspace.skin, skinsOn(process.env.SHELL_SKIN_PREVIEW), (await getPrefs()).skin) === "social";
+  // The feed's reads are its own (five, in parallel, each with its own failure state), behind their own boundary so the Overview's header does not wait for them.
+  const feed = socialHome
+    ? <Suspense fallback={<HomeBodyFallback label="Social Media home" />}><SocialHome userId={userId} tenantId={tenant} deptId={deptId} /></Suspense>
+    : null;
+
+  if (frame) {
+    const framedBody = <Suspense fallback={<HomeBodyFallback label="department" />}>{homeBody}</Suspense>;
+    return feed ? frame(framedBody, feed) : frame(framedBody);
+  }
+  return feed ? <>{feed}{homeBody}</> : homeBody;
 }
 
 /** The quiet loading state of the legacy band under the Overview: two card-shaped blocks, so the band does not jump when it arrives. */

@@ -51,7 +51,7 @@ function WidgetSkeleton({ title }: { title: string }) {
   );
 }
 
-export function WorkspaceOverview({ me, tenantId, subject, period, view = "me", canSwitchView = false, legacy, now = new Date(), widgets = OVERVIEW_WIDGETS, moduleOn = () => true, customise }: {
+export function WorkspaceOverview({ me, tenantId, subject, period, view = "me", canSwitchView = false, legacy, lead, now = new Date(), widgets = OVERVIEW_WIDGETS, moduleOn = () => true, customise }: {
   me: Me;
   tenantId: string;
   subject: OverviewSubject;
@@ -65,6 +65,8 @@ export function WorkspaceOverview({ me, tenantId, subject, period, view = "me", 
    *  until the Overview's blocks replace it (plan §2.6 rule 1: nothing is removed), and while it is there the
    *  "being built" line is not needed. */
   legacy?: ReactNode;
+  /** A workspace skin's own home layout (SCP-1d: the Social Media feed), drawn between the header and the bands. Left out, nothing changes. */
+  lead?: ReactNode;
   /** The render clock; a prop so a test can pin the greeting and the date. */
   now?: Date;
   /** The widget host. The default is the real one; a test passes its own. */
@@ -125,7 +127,9 @@ export function WorkspaceOverview({ me, tenantId, subject, period, view = "me", 
         </div>
       </header>
 
-      {bands.length === 0 && legacy == null ? (
+      {lead}
+
+      {bands.length === 0 && legacy == null && lead == null ? (
         // Honest, never invented: no block is built for this workspace yet.
         <p className="ov-empty">
           {customisable.length > 0
