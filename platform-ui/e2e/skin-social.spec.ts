@@ -229,7 +229,7 @@ test.describe("the Social skin on a phone (390x844)", () => {
     const top = page.locator(".erp-top__phone");
     await expect(top).toBeVisible();
     await expect(top.getByRole("link", { name: /^Notifications/ })).toBeVisible();
-    await expect(top.getByRole("link", { name: "Messages" })).toHaveAttribute("href", //messages$/);
+    await expect(top.getByRole("link", { name: "Messages" })).toHaveAttribute("href", /\/messages$/);
     await expect(top.getByRole("button", { name: "More" })).toBeVisible();
     const topBox = (await top.boundingBox())!;
     expect(topBox.y).toBeLessThan(80);
