@@ -310,10 +310,16 @@ services:
       # GATEWAY_AGENT_RESERVE_PCT (empty = 25): agents are refused once the global cap's remaining
       # share is at or below it, so the ERP's own users keep the last share.
       # GATEWAY_AGENT_DAILY_CALL_CAP (empty = the per-tenant cap): each agent's own daily cap.
+      # GATEWAY_AGENT_MAX_TOKENS (empty = 8192): every agent call's output ceiling; a larger
+      # max_tokens/max_completion_tokens is clamped, and max_tokens is set to it when absent.
+      # GATEWAY_AGENT_MAX_CONCURRENCY (empty = 4): calls one agent may have in flight (streams until
+      # their last byte); the next is 429 agent_concurrency_exceeded.
       GATEWAY_AGENT_LISTEN: ${GATEWAY_AGENT_LISTEN:-}
       GATEWAY_AGENT_TOKENS: ${GATEWAY_AGENT_TOKENS:-}
       GATEWAY_AGENT_RESERVE_PCT: ${GATEWAY_AGENT_RESERVE_PCT:-}
       GATEWAY_AGENT_DAILY_CALL_CAP: ${GATEWAY_AGENT_DAILY_CALL_CAP:-}
+      GATEWAY_AGENT_MAX_TOKENS: ${GATEWAY_AGENT_MAX_TOKENS:-}
+      GATEWAY_AGENT_MAX_CONCURRENCY: ${GATEWAY_AGENT_MAX_CONCURRENCY:-}
     # LOOPBACK ONLY, never 0.0.0.0 and never the mesh address (plan §6.1 item 4). The mesh reaches it
     # through a host proxy on 10.88.0.1:3012 whose systemd unit starts after wg-quick@wg0 (AIP-00a-2):
     # binding a container port to the mesh address directly would stop the gateway starting after a

@@ -39,6 +39,8 @@ mux; the agent mux serves nothing of the main contract. Code: `internal/server/a
 | `GATEWAY_AGENT_TOKENS` | `name:sha256hex[,...]`, hashes only (`printf %s "$T" \| sha256sum`). Empty or ANY malformed entry = every agent call 401. |
 | `GATEWAY_AGENT_RESERVE_PCT` | Default 25. Agents get 429 once the global cap's remaining share is at or below it; `/complete` is never refused by it. |
 | `GATEWAY_AGENT_DAILY_CALL_CAP` | Each agent's own daily cap. 0/unset = the per-tenant cap (and its console override). |
+| `GATEWAY_AGENT_MAX_TOKENS` | Default 8192. Output ceiling per call: `max_tokens`/`max_completion_tokens` clamped to it, `max_tokens` set to it when the agent sends neither. |
+| `GATEWAY_AGENT_MAX_CONCURRENCY` | Default 4. In-flight calls per agent (a stream until its last byte); the next is 429 `agent_concurrency_exceeded`. Released by a defer, so a disconnect or a panic frees the slot. |
 
 Rules that must not drift:
 - **Auth isolation.** The main mux's `authorized()` reads only `GATEWAY_TOKEN`; the agent mux reads
@@ -50,8 +52,11 @@ Rules that must not drift:
   values). A non-text part (image, audio, file) is 400. 2 MiB body (413), 400 messages.
 - **The caller's `model` never routes.** `chain.RunFiltered` walks only `providers.ChatProvider`s
   (today only `openai`); `echo` can never serve (only-echo = 503). Skipped providers record nothing
-  on their breakers. An upstream 400/413/422 or a client disconnect is a `providers.CallerError`:
-  no failover, no breaker charge, so one agent cannot open the breaker the ERP depends on.
+  on their breakers. An upstream 400/413/422, an upstream 429, or a client disconnect is a
+  `providers.CallerError`: no failover, no breaker charge, so one agent cannot open the breaker the
+  ERP depends on. The 429 goes to the agent as 429 `upstream_rate_limited` with the upstream's
+  `Retry-After` (well-formed values only), audit `blocked: upstream_rate_limit`. `/complete` and
+  `/complete/stream` keep opening the breaker on their OWN 429s.
 - **DLP.** `dlp.DLP` on every message text and every earlier tool call's `arguments` (JSON kept
   valid, see `scrubArguments`), then the classifier on the joined clean text. `tools` are not
   scrubbed. Output: `content`/`refusal` go through `dlp.StreamScrubber` on a stream and `dlp.DLP`
@@ -62,7 +67,8 @@ Rules that must not drift:
   untouched, then `data: [DONE]`. Failover only before the first byte; a later failure ends with a
   `data: {"error":...}` line and no `[DONE]`. The per-attempt timeout bounds the gap between chunks.
 - **Audit.** One row per call, capability `chat`, with `agent`, `provider`, `model`, token counts
-  when reported. Never text. New `blocked` values: `invalid_request`, `no_provider`, `client_closed`.
+  when reported. Never text. New `blocked` values: `invalid_request`, `no_provider`, `client_closed`,
+  `upstream_rate_limit`, `concurrency`.
 
 ## This is the only place provider keys live
 
