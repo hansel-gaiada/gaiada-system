@@ -7,7 +7,8 @@ import { PortalCompanySwitch } from "@/components/portal/PortalCompanySwitch";
 import { getPortalOverview } from "@/lib/portal-data";
 import { PortalShell } from "@/components/portal/PortalShell";
 import { portalBadges } from "@/lib/portalNav";
-import { isStaff } from "@/lib/rbac";
+import { isContributor, isStaff } from "@/lib/rbac";
+import { CONTRIBUTOR_HOME, contributorFenceReason } from "@/lib/contributorRouting";
 import { websiteEditorClients } from "@/lib/portalWebsiteAccess";
 
 // CP-7 — the client portal's own route group.
@@ -36,8 +37,10 @@ export default async function PortalLayout({ children }: { children: React.React
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   // DW-7h (BFF §52.4): a session IT ended is let through, so Next redirects it to /auth/ended; see (app)/layout.tsx.
-  const me = await getMe(userId).catch((e: unknown) => { rethrowIfSessionEnded(e); return null; });
+  // M5-W1f: a freelance contributor is not a client and not staff: their own shell is `/contributor` (see `(app)/layout.tsx` for the fence's answer).
+  const me = await getMe(userId).catch((e: unknown) => { rethrowIfSessionEnded(e); if (contributorFenceReason(e)) redirect(CONTRIBUTOR_HOME); return null; });
   if (!me) redirect("/login");
+  if (isContributor(me)) redirect(CONTRIBUTOR_HOME);
   const company = await getActivePortalCompany(me);
   const tenant = company?.id ?? null;
   const companies = getPortalCompanies(me);

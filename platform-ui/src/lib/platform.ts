@@ -205,6 +205,9 @@ export interface ServiceScope {
 
 export interface Me {
   userId: string; name: string; email: string; title: string | null; assurance: string;
+  /** M5-W1d/W1f: the principal's kind (`employee`, `contributor`, `bot`, ...). Additive for every principal; missing (an older backend) = not a contributor.
+   *  `isStaff(me)` is false for `contributor`, and the `(contributor)` shell is decided by `isContributor(me)`. */
+  kind?: string;
   /** PV5-14 / PV-D40 (dev stage): present only while a SIMULATED second factor holds this sign-in at high
    *  assurance, with when it ends (ISO). The header badge reads them; never shown as real MFA. */
   assuranceSource?: "simulated";

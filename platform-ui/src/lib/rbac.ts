@@ -1127,7 +1127,16 @@ export const SCOPED_DATA_ROLES: ReadonlySet<string> = new Set([
  *  Deliberately "has any non-client-side role" rather than a list of staff roles: a role added later is
  *  staff by default, which fails toward keeping someone's workspace rather than silently taking it. */
 export function isStaff(me: Me): boolean {
+  // M5-W1f: a freelance contributor holds staff-side ROLE ROWS (the three writers' room roles) but is an EXTERNAL principal with its own shell.
+  // Without this line the any-non-client-role rule above would make them staff and `(app)/layout.tsx` would hand them the workspace.
+  if (isContributor(me)) return false;
   return me.roles.some((r) => !CLIENT_SIDE_ROLES.has(r.role));
+}
+
+/** A freelance writer, translator or SEO reviewer (`users.kind = 'contributor'`, WSK-D84): lands in the `(contributor)` shell, never the workspace
+ *  and never the portal. Decided by the server's `kind` on `/me`, never by a role name. */
+export function isContributor(me: Me): boolean {
+  return me.kind === "contributor";
 }
 
 /** External client with no staff standing — the one case that gets the portal instead of the app. */

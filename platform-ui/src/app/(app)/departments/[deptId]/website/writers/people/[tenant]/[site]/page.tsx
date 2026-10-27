@@ -4,6 +4,9 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { Card } from "@/components/ui";
 import { GrantsManager } from "@/components/webdesk/editorial/GrantsManager";
+import { ContributorsManager } from "@/components/webdesk/editorial/ContributorsManager";
+import { listContributorsAction } from "@/lib/contributorsAdminActions";
+import { contributorRefusalCopy } from "@/lib/contributorsAdminModel";
 import { WdRefusal } from "@/components/webdesk/content/WdRefusal";
 import { requireWebsiteCtx } from "@/components/webdesk/content/serverCtx";
 
@@ -40,9 +43,10 @@ export default async function WebsiteWritersPeoplePage({ params }: { params: Par
   }
   if (grants.kind !== "ok") return <WdRefusal result={grants} subject="the writers" retryHref={here} />;
 
-  const [collections, people] = await Promise.all([
+  const [collections, people, contributors] = await Promise.all([
     listCollections(c.userId, c.company, t.slug, s.siteId),
     resolveAuthorNames(c.userId, c.company),
+    listContributorsAction(),
   ]);
   if (collections.kind !== "ok") return <WdRefusal result={collections} subject="the site's collections" retryHref={here} />;
 
@@ -57,6 +61,10 @@ export default async function WebsiteWritersPeoplePage({ params }: { params: Par
         collections={collections.data.map((x) => x.key)}
         locales={t.locales}
       />
+      {/* M5-W1f: freelance contributors (company-wide, same publisher tier). A failed read is a sentence, never an empty list. */}
+      {contributors.kind === "ok"
+        ? <ContributorsManager initial={contributors.data} />
+        : <p className="wc-muted" role="alert" data-testid="contributors-unavailable">Freelance contributors couldn&apos;t be loaded: {contributorRefusalCopy(contributors)}</p>}
     </div>
   );
 }

@@ -25,6 +25,11 @@ function refuseForeignOrigin(req: NextRequest): NextResponse | null {
   return NextResponse.json({ error: "origin_not_allowed" }, { status: 403 });
 }
 
+/** `/contributor-invite` and `/contributor-invite/<token>` only. The shell (`/contributor`, `/contributor/…`) stays behind the session check. */
+function isContributorInvitePath(pathname: string): boolean {
+  return pathname === "/contributor-invite" || pathname.startsWith("/contributor-invite/");
+}
+
 /** DW-3a2: a browser loading a whole page: a GET that is neither a Server Action nor one of the client router's
  *  RSC fetches (navigation, prefetch, refresh all send `rsc`). Only these may be answered by the layout's redirect. */
 function isDocumentRequest(req: NextRequest): boolean {
@@ -46,6 +51,9 @@ export function proxy(req: NextRequest) {
   // seeing a browser session. Gating it behind `hasSession` would 302 every render to /login and the
   // route's own token check (`reports-print-data.ts::getPrintPayload`) is what actually authorizes
   // the request, not this proxy.
+  // /contributor-invite/<token> (M5-W1f) is the freelance writer's sibling of /invite, public for the same reason: the person has no account yet
+  // and its own credential is a single-use, HMAC-signed, expiring token (prefix `ctr1`, its own key) verified by the backend, not this proxy.
+  // It is matched as a SEGMENT, never as a prefix, so no other `/contributor…` path (the shell, `/contributor`) can become public by accident.
   // /invite is the W0-5 client-portal magic link. It MUST be public: the person arriving has no
   // account yet — creating one is the entire purpose of the page — so gating it on `hasSession` would
   // 302 every invited client to /login and the flow could never complete. As with /print, the route's
@@ -53,7 +61,7 @@ export function proxy(req: NextRequest) {
   // token verified server-side (platform-nest client-invites.ts), not this proxy.
   const isPublic =
     pathname.startsWith("/login") || pathname.startsWith("/step-up") || pathname.startsWith("/auth") ||
-    pathname.startsWith("/print") || pathname.startsWith("/invite");
+    pathname.startsWith("/print") || pathname.startsWith("/invite") || isContributorInvitePath(pathname);
   // `__Host-gaiada_session` in production, `gaiada_session` under `next dev` (lib/cookieNames.ts).
   const hasSession = Boolean(readHostCookie(req.cookies, HOST_COOKIES.session));
   if (!isPublic && !hasSession) {

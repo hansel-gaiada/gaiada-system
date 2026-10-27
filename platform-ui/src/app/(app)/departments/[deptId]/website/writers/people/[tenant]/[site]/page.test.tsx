@@ -8,10 +8,12 @@ vi.mock("next/link", () => ({ default: ({ href, children, ...r }: { href: string
 vi.mock("@/lib/webdeskContent", () => ({ listSites: vi.fn(), listCollections: vi.fn(), resolveAuthorNames: vi.fn() }));
 vi.mock("@/lib/webdeskEditorial", () => ({ listEditorialGrants: vi.fn() }));
 vi.mock("@/lib/webdeskEditorialActions", () => ({ grantRoleAction: vi.fn(), listGrantsAction: vi.fn(), revokeRoleAction: vi.fn() }));
+vi.mock("@/lib/contributorsAdminActions", () => ({ listContributorsAction: vi.fn(), inviteContributorAction: vi.fn(), endContributorAction: vi.fn() }));
 vi.mock("@/components/webdesk/content/serverCtx", () => ({ requireWebsiteCtx: vi.fn() }));
 
 import { listCollections, listSites, resolveAuthorNames } from "@/lib/webdeskContent";
 import { listEditorialGrants } from "@/lib/webdeskEditorial";
+import { listContributorsAction } from "@/lib/contributorsAdminActions";
 import { requireWebsiteCtx } from "@/components/webdesk/content/serverCtx";
 import Page from "./page";
 
@@ -20,6 +22,7 @@ const collMock = vi.mocked(listCollections);
 const namesMock = vi.mocked(resolveAuthorNames);
 const grantsMock = vi.mocked(listEditorialGrants);
 const ctxMock = vi.mocked(requireWebsiteCtx);
+const contribMock = vi.mocked(listContributorsAction);
 
 const sites = () => ({ kind: "ok" as const, data: { tenants: [{ slug: "gaiada", status: "active", defaultLocale: "en", locales: ["en", "id"], sites: [{ siteId: "site-1", name: "gaiada.com", kind: "static", environments: [] }] }] } });
 const grant = { grantId: "g1", userId: "u5", name: "Dewi", email: null, role: "webdesk_writer", tenantSlug: "gaiada", siteId: "site-1", allCollections: false, collections: ["service"], allLocales: true, locales: [], expiresAt: null, grantedBy: null, updatedAt: null };
@@ -31,6 +34,8 @@ beforeEach(() => {
   sitesMock.mockResolvedValue(sites() as never);
   collMock.mockResolvedValue({ kind: "ok", data: [{ key: "service" }, { key: "page" }] } as never);
   namesMock.mockResolvedValue({ u5: "Dewi" });
+  contribMock.mockReset();
+  contribMock.mockResolvedValue({ kind: "ok", data: [] });
 });
 
 describe("Website -> Writers' room -> People -> site", () => {
@@ -86,5 +91,24 @@ describe("Website -> Writers' room -> People -> site", () => {
     collMock.mockResolvedValue({ kind: "unavailable", code: "editorial_unavailable", reason: "circuit_open" } as never);
     await mount();
     expect(screen.queryByTestId("grant-form")).toBeNull();
+  });
+
+  // M5-W1f: the freelance contributors block of the same page.
+  it("shows the freelance contributors form beneath the roles, with the list the BFF returned", async () => {
+    grantsMock.mockResolvedValue({ kind: "ok", data: { tenantSlug: "gaiada", siteId: "site-1", grants: [] } } as never);
+    contribMock.mockResolvedValue({ kind: "ok", data: [{ contributorId: "c1", userId: "u9", name: "Ayu", email: "ayu@example.test", status: "active", live: true, validUntil: "2027-01-01T00:00:00Z", sponsorUserId: null, invitedAt: "t", activatedAt: null, endedAt: null, hasAccount: true }] });
+    await mount();
+    expect(screen.getByTestId("contributor-invite-form")).toBeTruthy();
+    expect(screen.getAllByTestId("contributor-row")).toHaveLength(1);
+  });
+
+  it("a failed contributors read is a sentence, never an empty list or a form", async () => {
+    grantsMock.mockResolvedValue({ kind: "ok", data: { tenantSlug: "gaiada", siteId: "site-1", grants: [] } } as never);
+    contribMock.mockResolvedValue({ kind: "unavailable", code: "network", reason: "down" });
+    await mount();
+    expect(screen.getByTestId("contributors-unavailable")).toBeTruthy();
+    expect(screen.queryByTestId("contributors-empty")).toBeNull();
+    expect(screen.queryByTestId("contributor-invite-form")).toBeNull();
+    expect(screen.getByTestId("grant-form")).toBeTruthy();
   });
 });

@@ -595,7 +595,9 @@ export function resultFromError(e: unknown): WdResult<never> {
   }
   if (editorialFault) return { kind: "unavailable", code: "upstream_error", reason: p.slug ?? p.message };
   if (s === 401) return { kind: "unavailable", code: "upstream_error", reason: "session_expired" };
-  if (s === 403) return { kind: "forbidden", reason: p.message };
+  // M5-W1f: the contributor fence's 403 (`contributor_route_forbidden`) carries a machine `reason` (`assurance_high_required`); it rides in `slug`
+  // so the contributor shell can say "your two-step sign-in isn't set up" instead of "no access". Only that exact error sets it: every other 403 is unchanged.
+  if (s === 403) return { kind: "forbidden", reason: p.message, ...(p.message === "contributor_route_forbidden" && p.slug ? { slug: p.slug } : {}) };
   if (s === 404) {
     if (p.slug && NOT_FOUND_SLUGS.has(p.slug)) return { kind: "not_found", slug: p.slug };
     if (/module\s+\S+\s+not enabled/i.test(p.message)) return { kind: "not_enabled", reason: "module_disabled" };
@@ -815,8 +817,14 @@ export interface EditorBundle {
 }
 
 
+/** A read that was deliberately not made (see `loadEditorBundle`'s `skipPublishReads`): never an "ok" with an empty answer. */
+const NOT_READ: WdResult<never> = { kind: "not_enabled", reason: "not_served" };
+
 export async function loadEditorBundle(
   userId: string, company: string, tenantSlug: string, siteId: string, collectionKey: string, slug: string, requestedLocale: string | null,
+  /** M5-W1f: `skipPublishReads` leaves out the two reads the publish bar needs (pending publish requests, build status). A contributor's
+   *  shell has no publish bar and the fence answers both 403, so asking would only produce two refusals per page. */
+  opts: { skipPublishReads?: boolean } = {},
 ): Promise<WdResult<EditorBundle>> {
   const [sites, collections] = await Promise.all([
     listSites(userId, company),
@@ -847,8 +855,8 @@ export async function loadEditorBundle(
       if (r.kind !== "ok") return { value: null, problem: `The ${tenant.defaultLocale} version could not be read (${describeFailure(r)}), so locale-neutral fields show this item's own copy.` };
       return { value: { locale: tenant.defaultLocale, fields: splitVersionContent(collectionKey, r.data.version.blocks, r.data.version.seo).fields }, problem: null };
     })(),
-    findPendingPublishRequests(userId, company, tenantSlug, siteId, detail.data.item.itemId),
-    getBuildStatus(userId, company, tenantSlug, siteId),
+    opts.skipPublishReads ? Promise.resolve(NOT_READ) : findPendingPublishRequests(userId, company, tenantSlug, siteId, detail.data.item.itemId),
+    opts.skipPublishReads ? Promise.resolve(NOT_READ) : getBuildStatus(userId, company, tenantSlug, siteId),
   ]);
 
   return {
