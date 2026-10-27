@@ -88,7 +88,6 @@ export const config = {
   driveAuditFile: process.env.DRIVE_AUDIT_FILE ?? "data/drive-audit.jsonl",
   postToGroups: (process.env.POST_TO_GROUPS ?? "false").toLowerCase() === "true",
   // Gateway (separate AI-egress service). The bot calls this; only the Gateway holds the model key.
-  gatewayPort: Number(process.env.GATEWAY_PORT ?? 3002),
   gatewayUrl: process.env.GATEWAY_URL ?? "http://localhost:3002",
   gatewayToken: process.env.GATEWAY_TOKEN ?? "",
   // MCP hub (company-data tools). Blank hubServiceToken disables the /projects skill.
