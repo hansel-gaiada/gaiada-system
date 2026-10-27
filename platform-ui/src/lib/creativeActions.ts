@@ -26,6 +26,9 @@ export interface SaveAssetInput {
   versionOf?: string;
   /** Defaults to image/webp (the Studio's export); a plain upload from the asset detail sends its own. */
   contentType?: string;
+  /** SCP-1h (§63.6.6): `own|client|stock|ai|unknown` (the server's default is `unknown`), and the note an `ai` asset must carry. */
+  source?: string;
+  aiNote?: string;
 }
 
 export interface SaveAssetResult { ok: boolean; id?: string; versionNo?: number; error?: string }
@@ -72,6 +75,8 @@ export async function saveCreativeAsset(input: SaveAssetInput): Promise<SaveAsse
         original: input.original,
         originalContentType: input.originalContentType,
         versionOf: input.versionOf,
+        source: input.source,
+        aiNote: input.aiNote,
       }),
     });
     if (input.versionOf) revalidatePath("/departments/[deptId]/assets", "layout");

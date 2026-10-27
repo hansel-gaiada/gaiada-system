@@ -101,3 +101,47 @@ describe("Cancel on a request another company asked for", () => {
     expect(cancel()).toBeInTheDocument();
   });
 });
+
+// SCP-1h (BFF §63.6.6): the request detail lists the Social Media posts that joined it (additive `socialPosts`); a request no post joined shows no card.
+describe("the social posts on a request", () => {
+  const post = (over: Record<string, unknown> = {}) => ({
+    postId: "p-1", title: "Morning pastries", clientName: "Brand Alpha", pipelineStatus: "design", creativeState: "in_progress",
+    href: "/departments/d-soc/posts/p-1", ...over,
+  });
+
+  it("lists each post as a link to its post page, with the client and where the post stands", async () => {
+    read({ ...sameCompany(), socialPosts: [post(), post({ postId: "p-2", title: "Autumn bouquets", clientName: "Brand Beta", pipelineStatus: "changes", creativeState: "revision", href: "/departments/d-soc/posts/p-2" })] });
+    await mount();
+    const list = screen.getByRole("list", { name: "Social posts on this request" });
+    expect(list).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Morning pastries" })).toHaveAttribute("href", "/departments/d-soc/posts/p-1");
+    expect(screen.getByRole("link", { name: "Autumn bouquets" })).toHaveAttribute("href", "/departments/d-soc/posts/p-2");
+    expect(screen.getByText("Brand Alpha")).toBeInTheDocument();
+    expect(screen.getByText(/To design · in progress/)).toBeInTheDocument();
+    expect(screen.getByText(/Changes asked for · revision/)).toBeInTheDocument();
+  });
+
+  it("shows a post whose page link is not known as plain text, not a dead link", async () => {
+    read({ ...sameCompany(), socialPosts: [post({ href: null })] });
+    await mount();
+    expect(screen.queryByRole("link", { name: "Morning pastries" })).toBeNull();
+    expect(screen.getByText("Morning pastries")).toBeInTheDocument();
+  });
+
+  it("shows no card for a request no post joined, or from an older backend that sends no list", async () => {
+    for (const w of [{ ...sameCompany(), socialPosts: [] }, sameCompany()]) {
+      read(w);
+      const { unmount } = await mount();
+      expect(screen.queryByRole("list", { name: "Social posts on this request" })).toBeNull();
+      expect(screen.queryByText("Social posts")).toBeNull();
+      unmount();
+    }
+  });
+
+  it("keeps the rest of the page as it was", async () => {
+    read({ ...sameCompany(), socialPosts: [post()] });
+    await mount();
+    expect(screen.getByText("SEO to Creatives")).toBeInTheDocument();
+    expect(screen.getByText("Three banners.")).toBeInTheDocument();
+  });
+});

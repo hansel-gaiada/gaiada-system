@@ -7,6 +7,8 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { IDENTITY_GRADE } from "@/lib/imaging";
 import { saveCreativeAsset } from "@/lib/creativeActions";
+import { AssetSourceFields } from "./AssetSourceFields";
+import { EMPTY_ASSET_SOURCE, assetSourceBody, assetSourceProblem, assetSourceText, type AssetSourceValue } from "@/lib/creativeSource";
 import { requestReview, decideReview, withdrawReview } from "@/lib/creativeReviewActions";
 import {
   assetContentHref, openRoundOf, reviewChip, roundStatusLabel, visibleActions,
@@ -45,6 +47,8 @@ export function VersionHistory({ result, currentId, meId }: { result: ReadResult
               {v.id === currentId ? " (shown)" : ""}
             </span>
             <span>{v.uploader_id && v.uploader_id === meId ? "Uploaded by you" : "Uploaded"} {when(v.created_at)}</span>
+            {assetSourceText(v.source) && <span>{assetSourceText(v.source)}</span>}
+            {v.source === "ai" && v.aiNote ? <span>AI note: {v.aiNote}</span> : null}
           </span>
         </li>
       ))}
@@ -103,6 +107,7 @@ export function AssetActions({
   const [msg, setMsg] = useState<string | null>(null);
   const [form, setForm] = useState<"request" | "changes" | null>(null);
   const [text, setText] = useState("");
+  const [source, setSource] = useState<AssetSourceValue>(EMPTY_ASSET_SOURCE);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const open = rounds.kind === "ok" ? openRoundOf(rounds.data) : null;
@@ -121,6 +126,13 @@ export function AssetActions({
   const upload = (file: File | undefined) => {
     if (!file) return;
     setMsg(null);
+    // SCP-1h: an AI-made picture says how it was made before it is saved (the server refuses one without).
+    const problem = assetSourceProblem(source);
+    if (problem) {
+      setMsg(problem);
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
     start(async () => {
       try {
         const graded = await blobToBase64(file);
@@ -131,6 +143,7 @@ export function AssetActions({
           graded,
           contentType: file.type || "image/webp",
           versionOf: latest.id,
+          ...assetSourceBody(source),
         });
         done(r, `Saved as version ${r.versionNo ?? ""}`.trim() + ".");
         if (r.ok && r.id) router.push(`/departments/${encodeURIComponent(deptId)}/assets/${encodeURIComponent(r.id)}`);
@@ -157,6 +170,7 @@ export function AssetActions({
       <div className="cs-detail__actions">
         {vis.uploadVersion && (
           <>
+            <AssetSourceFields value={source} onChange={setSource} disabled={pending} />
             <input
               ref={fileRef}
               type="file"

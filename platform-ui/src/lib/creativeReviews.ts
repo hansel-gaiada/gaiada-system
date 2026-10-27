@@ -12,6 +12,9 @@ export interface AssetVersionFields {
   versionCount: number;
   isLatest: boolean;
   review: { round: number; status: ReviewStatus } | null;
+  /** SCP-1h: where this version came from and, for an AI-made one, how. Optional so an older backend still types. */
+  source?: string;
+  aiNote?: string | null;
 }
 
 export type ReviewStatus = "open" | "approved" | "changes_requested" | "withdrawn" | "superseded";
@@ -93,6 +96,10 @@ const TOKEN_SENTENCES: Record<string, string> = {
   version_of_invalid: "The asset to add a version to isn't valid.",
   versions_invalid: "That version filter isn't valid.",
   body_invalid: "That request wasn't valid.",
+  // SCP-1h: the save's source and AI note (400 `source_invalid`, `ai_note_invalid`, `ai_note_required`).
+  source_invalid: "That source isn't one of the choices.",
+  ai_note_invalid: "That AI note isn't valid. Keep it to 1,000 characters or fewer.",
+  ai_note_required: "Add a note on how the AI picture was made.",
 };
 
 export const FORBIDDEN_SENTENCE = "You can't do this on this asset.";
