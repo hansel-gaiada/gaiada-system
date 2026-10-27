@@ -103,7 +103,7 @@ export function PortalSocialView({ tab, items, stories, tenant, tabs, focusPostI
 
         {shown.length === 0 ? (
           <p className="ps-empty">
-            {tab === "to_review" ? "Nothing is waiting for your approval. We will let you know when the next posts are ready."
+            {tab === "to_review" ? "No posts wait for you here. We will let you know when the next posts are ready."
               : tab === "approved" ? "No approved posts to show yet."
                 : "No posts to show here yet."}
           </p>

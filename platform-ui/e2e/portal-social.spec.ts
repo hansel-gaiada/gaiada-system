@@ -152,9 +152,8 @@ test.describe("the approval page", () => {
     await expect(card(page, "Studio tour in 30 seconds").locator(".ps-media--reel")).toBeVisible();
     await expect(card(page, "Last call for the market stall").locator(".ps-media--story")).toBeVisible();
     await expect(card(page, "Weekend market date moved").locator(".ps-media--feed")).toBeVisible();
-    // a team comment written for the client, with its pin on the picture (a pin is a button on the image)
+    // a team comment written for the client (its pin is checked below, on the slide it was placed on)
     await expect(scarf).toContainText("Slide 2 shows the new moss colour");
-    await expect(scarf.getByRole("button", { name: /^Pin 1:/ })).toBeAttached();
     // never a staff status, a check or the internal note
     await expect(page.getByText(/Internal:/)).toHaveCount(0);
 
@@ -163,6 +162,11 @@ test.describe("the approval page", () => {
     await expect(first).toHaveAttribute("loading", "lazy");
     await expect(first).toHaveAttribute("src", /\/api\/[^/]+\/portal\/files\/[^/]+-f1$/);
     await expect.poll(() => first.evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth > 0)).toBe(true);
+
+    // the comment's pin sits on the picture it was placed on, the carousel's second slide: a pin is a button on the image, shown with its slide
+    await scarf.getByRole("button", { name: "Next picture" }).click();
+    await expect(scarf.getByRole("status", { name: /^Picture 2 of / })).toBeVisible();
+    await expect(scarf.getByRole("button", { name: /^Pin 1:/ })).toBeVisible();
   });
 
   test("the month filter narrows the list; another client lists nothing", async ({ page }) => {
@@ -170,7 +174,7 @@ test.describe("the approval page", () => {
     await signInAsClient(page);
     await page.goto("/portal/social?month=2026-01");
     await expect(page.getByRole("heading", { name: /^Waiting for you \(0\)/ })).toBeVisible();
-    await expect(page.getByText(/Nothing is waiting for your approval/)).toBeVisible();
+    await expect(page.locator(".ps-empty").filter({ hasText: /^No posts wait for you here\./ })).toBeVisible();
     await page.goto("/portal/social?clientId=cl-harbour");
     await expect(page.getByRole("heading", { name: /^Waiting for you \(0\)/ })).toBeVisible();
   });
@@ -290,7 +294,7 @@ test.describe("asking for changes", () => {
     await dialog.getByLabel(/What should we change\?/).fill("Make the product larger and move the logo to the top corner.");
     await dialog.getByRole("button", { name: "Place a pin" }).click();
     await dialog.locator(".scp-pinbox__place").click({ position: { x: 60, y: 90 } });
-    await expect(dialog.getByRole("button", { name: "Move the pin" })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Move the pin", exact: true })).toBeVisible(); // exact: "Remove the pin" contains it
     await dialog.getByRole("button", { name: "Send changes" }).click();
 
     await expect(dialog).toBeHidden();
@@ -317,7 +321,7 @@ test.describe("approve all", () => {
     await expect(toast(page, `Approved ${waiting} posts.`)).toBeVisible();
     await expect(toast(page, `Approved ${waiting} posts.`).getByRole("button", { name: "Undo" })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^Waiting for you \(0\)/ })).toBeVisible();
-    await expect(page.getByText(/Nothing is waiting for your approval/)).toBeVisible();
+    await expect(page.locator(".ps-empty").filter({ hasText: /^No posts wait for you here\./ })).toBeVisible();
     await expect(toApprove(page)).toContainText("0");
   });
 });
