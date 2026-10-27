@@ -44,7 +44,7 @@ describe("To review", () => {
 
   it("says plainly that nothing is waiting, when the list is empty and was read", () => {
     mount({ items: [] });
-    expect(screen.getByText(/Nothing is waiting for your approval/)).toBeInTheDocument();
+    expect(screen.getByText(/No posts wait for you here/)).toBeInTheDocument();
   });
 
   it("links to the next page when there is one", () => {
