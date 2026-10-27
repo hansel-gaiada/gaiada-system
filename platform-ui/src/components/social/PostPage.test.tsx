@@ -75,7 +75,7 @@ describe("the page draws every section of the read", () => {
     const { p, post } = mount("Wool care in three steps", "u-social");
     expect(screen.getByRole("heading", { level: 1, name: "Wool care in three steps" })).toBeInTheDocument();
     expect(chip("Proofread")).toBeInTheDocument();
-    expect(chip("In production")).toBeInTheDocument();
+    expect(screen.getByText("In production", { selector: ".scp-chip--phase" })).toBeInTheDocument();
     expect(screen.getByText("On track · 3 spare days")).toBeInTheDocument();
     expect(screen.getByText(/Northwind Traders/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open in the Composer" })).toHaveAttribute("href", `/departments/dept-4/composer/${p.id}`);
