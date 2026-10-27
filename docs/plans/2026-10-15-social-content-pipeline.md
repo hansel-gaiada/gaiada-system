@@ -630,7 +630,7 @@ once deployed, checked on the live ERP's mock seed.
 | 2d Changes | Copy or design, with a note and an optional pin. Copy goes Officer → Copywriter (changed text only) → client; design goes Creative → final check → client. The HoD is told. |
 | 2e Recorded decisions | Staff record a WhatsApp or email decision with channel and note, shown as recorded on the client's behalf to staff and the client. |
 | 2f The way in | As SCP-Q8 rules: by default the link we send, shareable to WhatsApp, opens the portal page. |
-| 2g Proof | Portal e2e on DEMO_MODE, and a live drive as a placeholder portal login (invite, accept, decide, revoke). |
+| 2g Proof | Portal e2e on DEMO_MODE, and the portal routes' tests on real Postgres and Cerbos. The live drive as a placeholder portal login moved to SCP-Sh (owner, 2026-10-27), because it needs Sb's accounts. |
 
 ### SCP-S · Simulation (runs beside SCP-3 and SCP-4; Opus for the containment)
 
@@ -643,6 +643,7 @@ once deployed, checked on the live ERP's mock seed.
 | Se Simulated boost run | A started boost completes with results. |
 | Sf Marking | Every simulated row and screen is marked; reports are watermarked; a test fails if a simulated row renders unmarked. The purge script and the flag-off step are listed under "Before real clients use the portal". |
 | Sg Simulated read-back | Feed preview, "Last synced" and the profile counts work from simulated feed, follower and reach data, all marked. |
+| Sh Live portal drive | Moved from 2g (owner, 2026-10-27). After Sb, on a live mock-seed post with the client: a placeholder portal login is invited, accepts, approves, asks for a change, undoes a decision, and is revoked. |
 
 ### SCP-3 · Schedule, live and the calendar
 
