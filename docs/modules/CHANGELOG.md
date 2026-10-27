@@ -11,6 +11,17 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### ai-gateway-go `0.15.0` - AIP-00a-4: per-agent usage in the gateway's metrics and an alert at 80 percent of an agent's cap; the AIP-00a runbook's five scripts (2026-10-27) - PROTOTYPED
+
+- **New series,** on the existing OTel meter:
+  - `gateway_agent_requests_total{agent,outcome}`: `outcome` is `ok` or the audit's `blocked` value. Unauthenticated calls are `agent="unknown"`.
+  - `gateway_agent_tokens_total{agent,kind}`, with `kind` as `prompt` or `completion`, using the provider-reported counts.
+  - `gateway_agent_budget_used_ratio{agent}`, read at scrape time from the new `budget.AgentUsage`. It returns to 0 after 00:00 UTC.
+  - Labels never carry a token or any part of one; only registered names and `unknown` appear. The existing egress and budget series are unchanged.
+- **Alert:** `GatewayAgentNearCap` fires when `gateway_agent_budget_used_ratio >= 0.8` for 5 minutes (severity `ticket`), with a case in `alerts_test.yml`.
+- **Runbook:** `infra/runbooks/aip-00a-hermes-behind-gateway.md` now runs the live move with five scripts in `infra/runbooks/aip-00a/` (tokens, the gateway listener and mesh proxy, the sumopod relay, repointing an agent, deleting its own keys). Each script backs up what it changes. The steps use the paths measured on helios on 2026-10-27: each agent's `HERMES_HOME` is its profile directory; seo has a direct DeepSeek fallback that step 4 removes; bsc's key is in `auth.json`'s credential pool.
+- **Tests:** locally `go test ./...` passes 261, 4 of them new (labels by agent and outcome, the ratio after N calls and after midnight, no token in any label). The rules test runs in CI's `observability-lint`.
+
 ### platform-ui `0.211.0` - SCP-1u: DEMO_MODE decides the post's actions as the server does, and serves an Asset Library (FRONTEND-BFF-CONTRACT §63.16) (2026-10-27) - PROTOTYPED
 
 - **Found by the role walk (SCP-1p).** The demo's designer picker was always empty, so a demo design could only be a link, which the final check refuses. The demo also showed `submit_design` and the send to the client as live where the server's read disables them.

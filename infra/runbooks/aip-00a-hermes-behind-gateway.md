@@ -1,6 +1,6 @@
 # Runbook: the helios Hermes agents behind the gateway (AIP-00a-2 and AIP-00a-3)
 
-Status: PLANNED. Owner ruling AIP-D13 (2026-10-27). The design is in `docs/plans/2026-10-27-ai-plan.md` §6.1.
+Status: PLANNED; the scripts are in `infra/runbooks/aip-00a/` (2026-10-27). Owner ruling AIP-D13 (2026-10-27). The design is in `docs/plans/2026-10-27-ai-plan.md` §6.1.
 
 **Who runs it.**
 - The orchestrator session writes and checks every command. The owner runs every step that changes a live host:
@@ -36,125 +36,78 @@ So keep the tokens 256-bit random, keep them only in each agent's own `.env` (mo
 
 **What the endpoint caps.** Per agent: calls per day, in-flight calls, and output tokens per call. Agents also may never use the last 25 percent of the global daily cap. An upstream 429 caused by an agent is relayed to that agent and does not open the shared breaker for the ERP.
 
-## Step 1: tokens (on helios; the plain tokens never leave it)
+## The scripts
 
-Run as root on `helios`. It writes one token per agent into that agent's `.env` and prints only `name:sha256` lines:
+Each step is one script in `infra/runbooks/aip-00a/`. Every script backs up what it changes and prints only what is safe to read. Copy a script to its host and run it there, for example:
 
 ```bash
-set -e
-for a in seo bsc; do
-  case $a in seo) envf=/opt/hermes-seo/.env ;; bsc) envf=/opt/hermes-bsc/profiles/bsc-main/.env ;; esac
-  cp -a "$envf" "$envf.bak-aip00a" 2>/dev/null || install -o azlan -g azlan -m 600 /dev/null "$envf"
-  t=$(openssl rand -hex 32)
-  grep -q '^GAIADA_GATEWAY_TOKEN=' "$envf" && sed -i '/^GAIADA_GATEWAY_TOKEN=/d' "$envf"
-  printf 'GAIADA_GATEWAY_TOKEN=%s\n' "$t" >> "$envf"; chown azlan:azlan "$envf"; chmod 600 "$envf"
-  printf 'hermes-%s:%s\n' "$a" "$(printf %s "$t" | sha256sum | cut -d' ' -f1)"
-done
+scp infra/runbooks/aip-00a/step1-tokens.sh helios:/root/ && ssh helios "bash /root/step1-tokens.sh"
 ```
 
-- **Verify:** two lines, `hermes-seo:<64 hex>` and `hermes-bsc:<64 hex>`. A hash of a 256-bit random token is safe to copy.
-- **Before running:** check where `hermes-bsc` reads its `.env`. If it uses the profile directory, keep the path above; otherwise use `/opt/hermes-bsc/.env`.
+**Facts the scripts are built on, measured on 2026-10-27:**
+- **Agent homes.** Both agents are Hermes Agent v0.20.5, run as `systemd --user` services of `azlan` (`hermes-seo-gateway`, `hermes-bsc-gateway`; seo also runs `hermes-seo-dashboard`). Each agent's home (`HERMES_HOME`) is its profile directory: `/opt/hermes-seo/profiles/seo-main` and `/opt/hermes-bsc/profiles/bsc-main`. Its live `config.yaml`, `.env` and `auth.json` are there, not in `/opt/hermes-*` itself.
+- **Model keys.**
+  - seo keeps `DEEPSEEK_API_KEY` and `GEMINI_API_KEY` in its profile `.env`; the same keys sit in an unused copy at `/opt/hermes-seo/.env`.
+  - bsc keeps its OpenRouter key as the one entry of `credential_pool.openrouter` in its profile `auth.json`.
+- **seo's direct fallback.** seo has `fallback_providers: [{provider: deepseek, model: deepseek-v4-flash}]`. While a direct key exists, that would send calls around the gateway whenever the gateway refuses one, so step 4 removes it.
+- **How the config is edited.** Hermes's own CLI (`hermes config set`) supports a named OpenAI-compatible provider with `key_env`. Every auxiliary task (vision, web extraction, compression, titles and the rest) can be pinned to the agent's main provider with `provider: main`. `auto` would try OpenRouter first while an OpenRouter credential exists.
+- **Gateway compose.** The gateway's compose project on `gda-aicenter` is `gaiada`, in `/home/Hansel/gaiada/infra/compose`, with `docker-compose.vps.yml`, `docker-compose.hostdata.yml` and `docker-compose.observability.yml`. The `.env` there carries the current `GAIADA_TAG`, so recreating only `ai-gateway` does not roll it back.
+
+## Step 1: tokens, on helios (`step1-tokens.sh`)
+
+The script writes one fresh 256-bit `GAIADA_GATEWAY_TOKEN` into each agent's profile `.env` (mode 600, owner `azlan`, backup `.bak-aip00a`) and prints only `hermes-seo:<sha256>` and `hermes-bsc:<sha256>`. The plain tokens never leave helios.
+
+- **Effect:** nothing reads the variable until step 4.
 - **Rollback:** restore each `.env.bak-aip00a`.
 
-## Step 2: gda-aicenter, the gateway listener and the mesh proxy
+## Step 2: gda-aicenter, the listener and the mesh proxy (`step2-gda.sh 'hermes-seo:<hash>,hermes-bsc:<hash>'`)
 
-1. In `infra/compose/.env` on the box, set:
-   - `GATEWAY_AGENT_LISTEN=0.0.0.0:3012`. This is inside the container; compose publishes it on `127.0.0.1:3012` only.
-   - `GATEWAY_AGENT_TOKENS=hermes-seo:<hash>,hermes-bsc:<hash>`, from step 1.
-   - `GATEWAY_AGENT_RESERVE_PCT=25`.
-
-   Recreate only `ai-gateway` with the full compose file set the server uses (`infra/CLAUDE.md`; `docker-compose.vps.yml` alone is not valid). Export `GAIADA_TAG` and `APP_VERSION` first, so a stale env does not roll it back.
-2. Install the proxy unit:
-
-```ini
-# /etc/systemd/system/gaiada-agent-proxy.service
-[Unit]
-Description=AIP-00a: mesh entry (10.88.0.1:3012, from the sumopod relay only) to the gateway's agent listener
-After=wg-quick@wg0.service docker.service
-Requires=wg-quick@wg0.service
-[Service]
-ExecStart=/usr/bin/socat TCP-LISTEN:3012,bind=10.88.0.1,fork,reuseaddr,range=10.88.0.2/32 TCP:127.0.0.1:3012
-Restart=always
-RestartSec=5
-DynamicUser=yes
-NoNewPrivileges=yes
-[Install]
-WantedBy=multi-user.target
-```
-
-Then run `systemctl daemon-reload && systemctl enable --now gaiada-agent-proxy`.
+The script:
+- backs up the compose `.env`;
+- sets `GATEWAY_AGENT_LISTEN=0.0.0.0:3012` (inside the container; compose publishes it on `127.0.0.1:3012` only), `GATEWAY_AGENT_TOKENS` and `GATEWAY_AGENT_RESERVE_PCT=25`;
+- recreates only `ai-gateway`;
+- installs and starts `gaiada-agent-proxy.service` (`socat` on `10.88.0.1:3012`, admitting `10.88.0.2` only, ordered after `wg-quick@wg0`).
 
 - **Verify:**
-  - `ss -ltnp | grep 3012` shows `127.0.0.1:3012` (docker) and `10.88.0.1:3012` (socat), and no `0.0.0.0:3012`.
-  - From `sumopod`: `curl -s -o /dev/null -w '%{http_code}\n' http://10.88.0.1:3012/v1/models` gives `401`.
+  - `ss` shows `127.0.0.1:3012` and `10.88.0.1:3012`, and no `0.0.0.0:3012`.
+  - The loopback `/v1/models` without a token is `401`.
+  - The boot log names both agents.
   - The ERP's own `/complete` still answers.
-- **Rollback:** `systemctl disable --now gaiada-agent-proxy`, then clear the three variables and recreate `ai-gateway`.
+- **Rollback:** restore `.env.bak-aip00a`, recreate `ai-gateway`, then `sudo systemctl disable --now gaiada-agent-proxy`.
 
-## Step 3: sumopod, the relay
+## Step 3: sumopod, the relay (`step3-sumopod.sh`)
 
-1. Run `apt-get install -y socat`, then add the relay unit:
+The script installs `socat`, starts `gaiada-agent-relay.service` (`10.88.0.2:3012`, admitting `10.88.0.3` only, forwarding to `10.88.0.1:3012`) and adds one `ufw` rule for `wg0` from `10.88.0.3` to port 3012.
 
-```ini
-# /etc/systemd/system/gaiada-agent-relay.service
-[Unit]
-Description=AIP-00a: relay helios (10.88.0.3) to the gateway's mesh entry on gda-aicenter
-After=wg-quick@wg0.service
-Requires=wg-quick@wg0.service
-[Service]
-ExecStart=/usr/bin/socat TCP-LISTEN:3012,bind=10.88.0.2,fork,reuseaddr,range=10.88.0.3/32 TCP:10.88.0.1:3012
-Restart=always
-RestartSec=5
-DynamicUser=yes
-NoNewPrivileges=yes
-[Install]
-WantedBy=multi-user.target
-```
+- **Verify:**
+  - From `sumopod`, `/v1/models` on `10.88.0.1:3012` without a token is `401`.
+  - From `helios`, it is `401` without a token and `200` with an agent's token. Step 4 checks this itself.
+- **Rollback:** `sudo systemctl disable --now gaiada-agent-relay`, then `sudo ufw delete allow in on wg0 from 10.88.0.3 to 10.88.0.2 port 3012 proto tcp`.
 
-2. Run `systemctl daemon-reload && systemctl enable --now gaiada-agent-relay` and
-   `ufw allow in on wg0 from 10.88.0.3 to 10.88.0.2 port 3012 proto tcp comment 'AIP-00a relay'`.
+## Step 4: helios, repoint one agent (`step4-helios.sh seo`, then `bsc`)
 
-- **Verify, from `helios`:**
-  - `curl -s -o /dev/null -w '%{http_code}\n' http://10.88.0.2:3012/v1/models` gives `401`.
-  - With `-H "Authorization: Bearer $GAIADA_GATEWAY_TOKEN"` (sourced from the seo `.env`) it gives `200`.
-- **Verify, from anywhere else** (the laptop, or `sumopod`'s public address): port 3012 is not reachable.
-- **Rollback:** `systemctl disable --now gaiada-agent-relay`, then `ufw delete allow in on wg0 from 10.88.0.3 to 10.88.0.2 port 3012 proto tcp`.
+The script first proves the agent's token reaches the gateway (`401` without it, `200` with it); it stops without changing anything otherwise. Then it:
+1. backs up `config.yaml` and `auth.json`;
+2. adds the provider `gaiada-gateway` (`base_url http://10.88.0.2:3012/v1`, `api_mode chat_completions`, `key_env GAIADA_GATEWAY_TOKEN`);
+3. points `model` at it (`default z-ai/glm-5.3-flash`, the model the gateway actually serves, and `context_length 131072`);
+4. removes `fallback_providers`;
+5. sets every auxiliary task to `provider: main`;
+6. sends one CLI prompt through the same config, then restarts the agent's service.
 
-## Step 4: helios, repoint one agent at a time (seo first)
+- **Verify, before step 5:** the prompt answers, and the gateway's audit file (`/app/data/egress-audit.jsonl` in `gaiada-ai-gateway-1`) has a `"capability":"chat"` row with that agent's name.
+- **Known effect:** vision is refused by the gateway (it takes no image parts), so the agent's image analysis stops working.
+- **Rollback:** restore `config.yaml.bak-aip00a` (and `auth.json.bak-aip00a`) and restart the unit.
 
-1. Back up `config.yaml` (both `/opt/hermes-seo/config.yaml` and `profiles/seo-main/config.yaml`), `.env` and `auth.json`, with the suffix `.bak-aip00a`.
-2. In the agent's live `config.yaml`, add a provider and point the model and the auxiliary tasks at it:
+## Step 5: helios, delete the agent's own model keys (`step5-helios.sh seo`, then `bsc`)
 
-```yaml
-providers:
-  gaiada-gateway:
-    base_url: "http://10.88.0.2:3012/v1"
-    api_mode: chat_completions
-    key_env: "GAIADA_GATEWAY_TOKEN"
-model:
-  provider: gaiada-gateway
-  default: gaiada-auto        # the gateway ignores it for routing (AIP-D1) and answers with the model that served
-  context_length: 131072      # do not rely on /v1/models for detection
-```
+Run this only after step 4's verify passed for that agent.
 
-   - Every `auxiliary.*.provider` must be `gaiada-gateway` (or `main`, if this version supports it).
-   - Any vision or image task the gateway refuses (images are refused, because DLP cannot read them) is turned off.
-   - The gateway drops request fields outside its allow-list and logs only their names: `response_format`, `parallel_tool_calls` and OpenRouter routing fields. An agent setting that depends on one of them will not take effect.
-   - Every call's output is capped by `GATEWAY_AGENT_MAX_TOKENS`.
-3. Run `sudo -u azlan XDG_RUNTIME_DIR=/run/user/1001 systemctl --user restart hermes-seo-gateway`.
+- **seo:** removes the model-provider key lines from both `.env` files.
+- **bsc:** empties `credential_pool.openrouter` in `auth.json`.
+- **Both:** the script repeats the prompt and restarts. Tool credentials (`SEMRUSH_API_KEY`, `FIGMA_API_KEY`, `GSC_OAUTH_CLIENT_SECRET`) stay.
+- **Rollback:** restore `<file>.bak-aip00a-step5` and restart.
 
-- **Verify, both halves, before going on:**
-  - The agent answers a short prompt in its own channel.
-  - On `gda-aicenter`, the gateway's egress audit shows a `chat` row naming `hermes-seo`.
-  - Its journal (`journalctl --user -u hermes-seo-gateway`, run as `azlan`) shows no provider-key errors.
-- **Rollback:** restore the three `.bak-aip00a` files and restart the unit.
-
-**Only after the verify passes:**
-- delete `DEEPSEEK_API_KEY` and `GEMINI_API_KEY` from the seo `.env`, restart once more, and verify again;
-- leave `SEMRUSH_API_KEY`, `FIGMA_API_KEY` and `GSC_OAUTH_CLIENT_SECRET` alone: they are tool credentials, not model keys.
-
-**Then `hermes-bsc`:** repeat the same steps. Its OpenRouter credential lives in `profiles/bsc-main/auth.json`; remove only that provider's entry, keeping any channel credentials.
-
-## Step 5: close
+## Step 6: close
 
 - Tick AIP-00a-2 and AIP-00a-3 on the board with the dates and the audit evidence.
 - Record the outcome in `legal/client-portal-addendum.md` open item 7 (Hermes outside the gateway): closed for both agents.
