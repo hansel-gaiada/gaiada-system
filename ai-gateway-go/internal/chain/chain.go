@@ -344,6 +344,39 @@ func RunWithHint[T any](c *Chain, ctx context.Context, hint string, fn func(prov
 	return runOrdered(c, ctx, reordered, fn)
 }
 
+// RunFiltered (AIP-00a-1) behaves exactly like Run over only the providers for which keep returns
+// true, in chain order. A provider that keep rejects is never attempted, so it records no breaker
+// success or failure: the agent chat route uses this to try only chat-capable providers without
+// poisoning the breakers of the providers it skips for the ERP's own traffic.
+func RunFiltered[T any](c *Chain, ctx context.Context, keep func(providers.Provider) bool, fn func(providers.Provider) (T, error)) (T, string, string, error) {
+	all := c.snapshot()
+	order := make([]providers.Provider, 0, len(all))
+	for _, p := range all {
+		if keep(p) {
+			order = append(order, p)
+		}
+	}
+	return runOrdered(c, ctx, order, fn)
+}
+
+// Filtered reports the providers keep accepts, in chain order, from the live list. Read-only.
+func (c *Chain) Filtered(keep func(providers.Provider) bool) []providers.Provider {
+	out := []providers.Provider{}
+	for _, p := range c.snapshot() {
+		if keep(p) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// callerFault is implemented by *providers.CallerError: an attempt that failed because of the
+// CALLER (the upstream rejected the request itself, or the client went away). See runOrdered.
+type callerFault interface {
+	error
+	CallerFault() string
+}
+
 // runOrdered is Run's actual loop, factored out so RunWithHint can reuse it verbatim against a
 // caller-reordered snapshot — the breaker/availability/failure-recording logic is therefore
 // IDENTICAL for both call paths; only which snapshot is walked ever differs.
@@ -368,6 +401,14 @@ func runOrdered[T any](c *Chain, ctx context.Context, order []providers.Provider
 		if err == nil {
 			c.recordSuccess(p)
 			return result, p.Name(), "", nil
+		}
+		// A caller fault is returned at once: no failover (another provider would reject the same
+		// request, or there is no one left to answer) and no breaker record (the provider is fine).
+		// No provider in the chain returned this type before AIP-00a-1, so every existing route
+		// behaves exactly as before.
+		var cf callerFault
+		if errors.As(err, &cf) {
+			return zero, "", cf.CallerFault(), err
 		}
 		tax := classify(err)
 		taxonomies = append(taxonomies, tax)

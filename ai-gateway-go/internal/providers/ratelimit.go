@@ -17,6 +17,9 @@ import (
 // callers (chain.Run) use it directly as the breaker's open-window duration.
 type RateLimitError struct {
 	RetryAfter time.Duration
+	// Header is the upstream's raw Retry-After value ("" when it sent none). Additive (AIP-00a-1):
+	// the agent route relays it to the agent; chain.Run still uses only RetryAfter.
+	Header string
 }
 
 func (e *RateLimitError) Error() string {
@@ -53,5 +56,5 @@ func parseRetryAfter(h http.Header) time.Duration {
 // newRateLimitError builds a *RateLimitError from a 429 response's headers. Shared by every
 // provider's HTTP call site.
 func newRateLimitError(res *http.Response) *RateLimitError {
-	return &RateLimitError{RetryAfter: parseRetryAfter(res.Header)}
+	return &RateLimitError{RetryAfter: parseRetryAfter(res.Header), Header: res.Header.Get("Retry-After")}
 }

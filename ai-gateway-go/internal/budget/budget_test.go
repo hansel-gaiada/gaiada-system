@@ -89,3 +89,56 @@ func TestBudgetRollsOverAtDayBoundary(t *testing.T) {
 		t.Fatal("expected both calls to succeed across the day boundary")
 	}
 }
+
+// AIP-00a-1: TakeAgent's three limits.
+func TestTakeAgentReserveKeepsTheLastShareForTake(t *testing.T) {
+	b := NewBudget(4, 100)
+	now := time.Now()
+	for i := 0; i < 3; i++ {
+		ok, scope := b.TakeAgent("agent:seo", 0, 25, now)
+		if !ok {
+			t.Fatalf("agent call %d inside the 75%% share should pass, got %q", i+1, scope)
+		}
+	}
+	// 1 of 4 remains = 25%: at the reserve, agents stop.
+	if ok, scope := b.TakeAgent("agent:seo", 0, 25, now); ok || scope != "reserve" {
+		t.Fatalf("at the reserve: want refused with reserve, got ok=%v scope=%q", ok, scope)
+	}
+	// The ERP's own call is never refused by the reserve.
+	if ok, _ := b.Take("tenant-a", now); !ok {
+		t.Fatal("Take must not be refused by the agent reserve")
+	}
+	if ok, scope := b.TakeAgent("agent:seo", 0, 0, now); ok || scope != "global" {
+		t.Fatalf("a spent global cap refuses agents as global, got ok=%v scope=%q", ok, scope)
+	}
+}
+
+func TestTakeAgentScopeCapDefaultsToPerTenantCap(t *testing.T) {
+	b := NewBudget(100, 2)
+	now := time.Now()
+	b.TakeAgent("agent:seo", 0, 0, now)
+	b.TakeAgent("agent:seo", 0, 0, now)
+	if ok, scope := b.TakeAgent("agent:seo", 0, 0, now); ok || scope != "tenant" {
+		t.Fatalf("scopeCap 0 falls back to the per-tenant cap, got ok=%v scope=%q", ok, scope)
+	}
+	if ok, _ := b.TakeAgent("agent:bsc", 0, 0, now); !ok {
+		t.Fatal("another agent has its own count")
+	}
+	if ok, _ := b.TakeAgent("agent:seo", 5, 0, now); !ok {
+		t.Fatal("an explicit agent cap overrides the per-tenant cap")
+	}
+	if got := b.Breakdown(now).Tenants["agent:seo"]; got != 3 {
+		t.Fatalf("agent spend shows next to tenants, got %d", got)
+	}
+}
+
+func TestTakeAgentClampsReservePct(t *testing.T) {
+	b := NewBudget(10, 100)
+	now := time.Now()
+	if ok, scope := b.TakeAgent("agent:seo", 0, 500, now); ok || scope != "reserve" {
+		t.Fatalf("a reserve above 100 clamps to 100 (agents always refused), got ok=%v scope=%q", ok, scope)
+	}
+	if ok, _ := b.TakeAgent("agent:seo", 0, -5, now); !ok {
+		t.Fatal("a negative reserve clamps to 0")
+	}
+}
