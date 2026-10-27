@@ -204,6 +204,7 @@ async function planEmployees(c: PoolClient, tenantId: string): Promise<BackfillR
        FROM company_memberships cm
        JOIN users u ON u.id = cm.user_id
       WHERE cm.tenant_id = $1
+        AND u.kind = 'employee'
         AND cm.kind = 'employee'
         AND cm.status = 'active'
         AND cm.deleted_at IS NULL

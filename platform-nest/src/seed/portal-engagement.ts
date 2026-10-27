@@ -363,8 +363,8 @@ async function anyStaffUser(tenantId: string): Promise<string | null> {
   const r = await withTenants([tenantId], (c) =>
     c.query<{ user_id: string }>(
       `SELECT m.user_id
-         FROM company_memberships m
-        WHERE m.kind = 'employee' AND m.status = 'active' AND m.deleted_at IS NULL
+         FROM company_memberships m JOIN users u ON u.id = m.user_id
+        WHERE u.kind = 'employee' AND m.kind = 'employee' AND m.status = 'active' AND m.deleted_at IS NULL
         ORDER BY m.created_at ASC
         LIMIT 1`,
     ),

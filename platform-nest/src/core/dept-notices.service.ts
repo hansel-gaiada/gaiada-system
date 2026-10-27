@@ -415,9 +415,10 @@ export async function loadAncestorsOf(c: PoolClient, tenantId: string, unitNodeI
 /** Every active member of the company who is a PERSON (not a service account): the audience of a company-wide notice. */
 export async function loadActiveMemberIds(c: PoolClient, tenantId: string): Promise<string[]> {
   const { rows } = await c.query<{ user_id: string }>(
-    `SELECT user_id FROM company_memberships
-      WHERE tenant_id = $1 AND deleted_at IS NULL AND status = 'active' AND kind = 'employee'
-      ORDER BY user_id`,
+    `SELECT cm.user_id FROM company_memberships cm JOIN users u ON u.id = cm.user_id
+      WHERE cm.tenant_id = $1 AND cm.deleted_at IS NULL AND cm.status = 'active' AND cm.kind = 'employee'
+        AND u.kind = 'employee'
+      ORDER BY cm.user_id`,
     [tenantId],
   );
   return rows.map((r) => r.user_id);
