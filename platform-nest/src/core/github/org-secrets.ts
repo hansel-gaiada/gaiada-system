@@ -1,17 +1,23 @@
 // M6-P4g (docs/plans/2026-10-13-webdesk-m6-p4g-deploy-grant.md) — the GitHub calls the deploy gate needs: which repo
 // this is (its numeric id), what its default branch carries at its head (`CONTRACT.lock`, through the contents API),
-// and which repositories may READ an organization Actions secret.
+// and which repositories may READ an organization Actions secret. M6-P6o (WSK-D88) adds the two calls that WRITE a
+// secret's value: the org's Actions public key, and the create-or-update of a secret with a sealed value.
 //
 //   GET    /repos/{o}/{r}                                               -> id, default_branch
 //   GET    /repos/{o}/{r}/contents/{path}?ref={sha}                     -> one file at one commit (404: absent)
+//   GET    /orgs/{org}/actions/secrets/public-key                       -> key_id, key (M6-P6o)
 //   GET    /orgs/{org}/actions/secrets/{name}                           -> exists? visibility
+//   PUT    /orgs/{org}/actions/secrets/{name}                           -> 201 created | 204 updated (M6-P6o)
 //   PUT    /orgs/{org}/actions/secrets/{name}/repositories/{repo_id}    -> 204, idempotent
 //   DELETE /orgs/{org}/actions/secrets/{name}/repositories/{repo_id}    -> 204, idempotent
 //
-// ── NO SECRET VALUE, EVER (WSK-D29) ───────────────────────────────────────────────────────────────
-// There is deliberately no function here that reads or writes a secret's VALUE (no public-key fetch, no
-// `PUT /orgs/{org}/actions/secrets/{name}` with an encrypted value). The ERP only changes which repositories may read
-// a secret the org owner created. GitHub's GET of an org secret returns its name, dates and visibility, never its value.
+// ── THE VALUE, SINCE WSK-D88 (amends WSK-D29) ─────────────────────────────────────────────────────
+// Until M6-P6o this file had no way to write a value. WSK-D88 (owner, 2026-10-13) moved the deploy secret's one copy that
+// counts into the ERP vault, and the org secret is derived from it. `putOrgSecretValue` takes ONLY an already-sealed
+// value (`encrypted_value`, the libsodium sealed box of core/github/sealed-box.ts) and its `key_id`: no plaintext ever
+// enters this file, and nothing here logs, returns or records a value. GitHub's GET of an org secret still returns its
+// name, dates and visibility, never its value, and nothing here reads one back. The one caller is
+// modules/webdev/deploy-secret-write.ts, behind a HIGH approval.
 //
 // ── NO EGRESS HERE, NO CREDENTIAL HERE ────────────────────────────────────────────────────────────
 // Every request goes through a `GitCaller` (git-data.ts): production binds it to `githubRequest(orgTenant, "erp", …)`,
@@ -122,4 +128,47 @@ export async function removeRepoFromOrgSecret(call: GitCaller, org: string, secr
     if (s === 409) return "not_selected";
     throw err;
   }
+}
+
+// ── M6-P6o: the value (WSK-D88) ─────────────────────────────────────────────────────────────────────
+
+/** The org's Actions public key: what a value is sealed to, and the id GitHub needs back with the sealed value. */
+export interface OrgPublicKey {
+  keyId: string;
+  /** base64 of the 32-byte X25519 key. Public: safe to hold, never a secret. */
+  key: string;
+}
+
+export async function getOrgPublicKey(call: GitCaller, org: string): Promise<OrgPublicKey> {
+  const r = await call<{ key_id?: unknown; key?: unknown }>({ path: `/orgs/${encodeURIComponent(org)}/actions/secrets/public-key` });
+  const keyId = r.data?.key_id;
+  const key = r.data?.key;
+  if (typeof keyId !== "string" || !keyId || typeof key !== "string" || !key) throw new Error("GitHub returned no Actions public key");
+  return { keyId, key };
+}
+
+export interface SealedSecretWrite {
+  /** base64 of a sealed box to the key named by `keyId` (sealed-box.ts). Never a plaintext. */
+  encryptedValue: string;
+  keyId: string;
+  /** The repositories that may read the secret, set in the same call (visibility is always `selected`). */
+  selectedRepositoryIds: number[];
+}
+
+/**
+ * Create or update an org secret with a sealed value, visibility `selected`, and exactly these repositories. GitHub answers
+ * 201 for a new secret and 204 for an update. Every failure (403 without `organization_secrets`, a 422 for a stale key id,
+ * 5xx) is thrown as GitHub's own error for the caller to classify; none is an answer, because a write that did not land
+ * must never be mistaken for one that did.
+ */
+export async function putOrgSecretValue(call: GitCaller, org: string, secretName: string, w: SealedSecretWrite): Promise<"created" | "updated"> {
+  if (typeof w.encryptedValue !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(w.encryptedValue)) throw new Error("encrypted_value must be base64 of a sealed box");
+  if (typeof w.keyId !== "string" || !w.keyId) throw new Error("key_id is required");
+  const ids = w.selectedRepositoryIds.map((id) => Number(requireRepositoryId(id)));
+  const r = await call<unknown>({
+    method: "PUT",
+    path: secretPath(org, secretName),
+    body: { encrypted_value: w.encryptedValue, key_id: w.keyId, visibility: "selected", selected_repository_ids: ids },
+  });
+  return r.status === 201 ? "created" : "updated";
 }

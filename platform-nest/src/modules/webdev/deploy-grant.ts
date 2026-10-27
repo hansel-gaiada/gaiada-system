@@ -433,8 +433,9 @@ export function parseRevokeReason(body: unknown): string {
 export interface GrantRequest {
   siteId: string;
   /** scaffold: the automatic follow-on of the scaffold commit · production: the automatic follow-on of creating a production
-   *  row (M6-P6h2) · operator: the explicit POST (re-checks and re-grants). Both automatic triggers never undo a revoke. */
-  trigger: "scaffold" | "production" | "operator";
+   *  row (M6-P6h2) · secret_write: the automatic follow-on of the ERP writing a per-site secret's value from the vault
+   *  (M6-P6o, WSK-D88) · operator: the explicit POST (re-checks and re-grants). Every automatic trigger never undoes a revoke. */
+  trigger: "scaffold" | "production" | "secret_write" | "operator";
 }
 
 /**

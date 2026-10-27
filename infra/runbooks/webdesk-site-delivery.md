@@ -102,20 +102,45 @@ Run steps 1 to 5 once per site, and again for the production environment. Steps 
 - `ownerKind` is `company` (the owner id is forced to the tenant) or `user`. A `company` record, or one owned by the site's own client, is accepted by the bind. A `user` record is refused.
 - **No token is accepted over HTTP.** The record starts `unconfigured`, and a repeat create returns the same `id`. Keep that `id` as `<vault-id>`.
 
-**2b. Seal the credential into it (the operator): BLOCKED, no tracked path.**
-- The only vault write path is `setConnectionTokens` in `platform-nest/src/core/integrations.service.ts`. It is internal and not exposed over HTTP.
-- The one-time import script that wraps it, `scripts/vault-import-hosting-credentials.local.mjs` (VLT-4), is a **local, untracked file** named in `docs/runbooks/credential-vault-rotation.md`. It is not in the repo at `dc636175`.
-- Write nothing else to seal the credential. If the operator has the local script, use it with `--batch` in dry-run first, then `--apply`, and delete the entry from any local credentials file in the same sitting. The full steps are in `docs/runbooks/credential-vault-rotation.md` section 1, step 0. That runbook is itself unrun.
-- If there is no script, stop here and report the gap. The bind in step 4 will refuse `vault_ref_not_linked` until a credential is sealed.
+**2b. Seal the credential into it (staff, a manager or above; M6-P6o, WSK-D88).**
 
-**Success looks like:** `GET /api/<t>/integrations/connections?owner=company&provider=ssh` shows the record with `status: "linked"` and `hasToken: true`. The plaintext is never in any response.
+    PUT /api/<t>/modules/webdev/deploy-credentials/<vault-id>
+    {"credential": {"version":1,"environment":"staging","transport":"sftp","host":"<host>","port":<port>,"user":"<principal>","password":"<secret>","knownHosts":"<pinned line>","remoteBase":"<base>","docroot":"<docroot>","siteUrl":"https://<staging-domain>"}}
+
+- `credential` is the per-site deploy secret's JSON, exactly the shape in step 3b's table (the ERP checks it with the same rules as the deploy job's `deploy-from-secret.sh`). Type it into the request once, from the host's own panel. Do not save it in a file.
+- The ERP stores it as one canonical line, sealed in the vault, and never shows it again. The answer is the masked record (`hasToken: true`, `status: "linked"`) and a `sealedVersion` (a hash of the ciphertext, not of the value).
+- `ssh` records take `transport: sftp`; `ftp` records take `transport: ftps`. The record must be the company's or the site's own client's.
+- This replaces the local VLT-4 script (`scripts/vault-import-hosting-credentials.local.mjs`) for deploy principals. Delete the credential from any local credentials file in the same sitting.
+- **One record per owner and provider.** The vault holds one `ssh` and one `ftp` record per owner (the company, or one client). Two sites, or a site's staging and production, that need separate `ssh` principals cannot both be company records today. Use the site's own client as the owner, and report a collision as a gap.
+
+**2c. Write the org secret from the vault (two staff; M6-P6o, WSK-D88).** Do this after the bind (step 4), because the write reads the row's `vaultRef`.
+
+    POST sites/<staging-row>/deploy-secret        {"reason":"<optional, why now>"}
+
+- `201 {approvalId}`. This files ONE HIGH approval. A **second** person approves it in the Approvals inbox (`POST /api/<t>/automation-approvals/<approvalId>/decide {"decision":"approved"}`). The requester can never approve their own request (`403 self_approval`).
+- The approver needs `company_admin` (the generic decide) and `github_repo · secret_write` (company_admin or the webdev module manager). On approval the ERP decrypts the record in memory, seals it to the organisation's public key and writes `WEBDESK_DEPLOY_<SLUG>_<ENV>_<REPOID>` with "Selected repositories". A new secret starts visible to no repository; the grant (step 3c, run automatically after the write) adds this site's repo once every deploy-gate condition holds.
+- **This replaces step 3b's hand-made secret** wherever O-3 is in effect. Until then the write fails `github_permission_missing: organization_secrets` and nothing is written.
+- Check where it stands: `GET sites/<staging-row>/deploy-secret`. `written` means GitHub holds what the vault holds. `pending` with a `reason` is NOT success. `stale` means the vault was resealed and the rewrite is not approved yet (step 9).
+
+**Success looks like:** `GET /api/<t>/integrations/connections?owner=company&provider=ssh` shows the record with `status: "linked"` and `hasToken: true`, and `GET sites/<row>/deploy-secret` shows `state: "written"`. The plaintext is never in any response.
 
 **Refusals you may see:**
 | Token / status | Meaning |
 |---|---|
 | 400 `provider must be one of ...` | The provider is not one of `github,google_drive,claude,cpanel,ftp,ssh,wp_admin`. |
-| 403 | You are not a manager or above for a company record. |
-| 503 on a seal | `INTEGRATION_TOKEN_KEY` is not set on the platform. Nothing is stored unencrypted. |
+| 403 | You are not a manager or above for a company or client record (seal), or you lack `provision` + `github_repo · push` (file). |
+| 400 `deploy_secret_body_invalid` | The seal body is not exactly `{credential}`, or the filing body is not empty or `{reason}`. |
+| 422 `deploy_credential_invalid` | The credential does not have the documented shape. The reason names the fields, never a value. |
+| 422 `deploy_credential_wrong_record` | sftp into an `ftp` record (or ftps into `ssh`), a user's record, or a revoked one. |
+| 503 `deploy_secret_not_configured` | `INTEGRATION_TOKEN_KEY` is not set on the platform. Nothing is stored unencrypted. |
+| 409 `deploy_secret_no_vault_record` | The row is not bound to a vault record (step 4). |
+| 422 `deploy_secret_vault_unusable` | The bound record is not linked, has the wrong provider or the wrong owner. |
+| 409 `deploy_secret_site_revoked` | The site's deploy grant is revoked (an archived site keeps no deploy access, WSK-D82). Nothing is written. |
+| 409 `deploy_secret_request_open` | A write for this row already waits for approval. |
+| 403 `self_approval` | The requester tried to approve their own write. Ask someone else. |
+| `github_permission_missing: organization_secrets` (the write fails; the decision stands) | **O-3.** The App lacks the org-secrets permission. BLOCKED until the owner grants it and accepts it on the installation. |
+| `deploy_secret_vault_changed` (the write fails) | The record was resealed or re-bound after the request was filed. File a new request. |
+| `deploy_secret_credential_mismatch: environment`, `transport` or `docroot` (the write fails) | A staging credential on a production row (or the reverse), a transport that does not match the record, or a static site's credential without `docroot`. |
 
 ## 3. The org secret and the grant
 

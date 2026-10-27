@@ -111,6 +111,12 @@ function toRow(r: DeployGrantDbRow): DeployGrantRow {
   };
 }
 
+/** M6-P6o: one provisioned site's grant row, read on the caller's transaction (which must carry the `webdev` module scope). */
+export async function readDeployGrantRowIn(c: PoolClient, siteId: string): Promise<DeployGrantRow | null> {
+  const r = await c.query<DeployGrantDbRow>(`SELECT ${COLUMNS} FROM webdev_provisioned_sites WHERE id = $1`, [siteId]);
+  return r.rows[0] ? toRow(r.rows[0]) : null;
+}
+
 /** What `GET provisioned-sites/:id` returns beside the site (`deployGrant`). An explicit field list; names, never values. */
 export interface DeployGrantDto {
   state: DeployGrantState | null;
@@ -443,7 +449,7 @@ export async function grantDeployForSite(
   principal: Principal,
   tenantId: string,
   siteId: string,
-  trigger: "scaffold" | "production" | "operator",
+  trigger: "scaffold" | "production" | "secret_write" | "operator",
 ): Promise<DeployGrantResult> {
   const orgTenantId = await authorizeDeployGrant(principal, tenantId, siteId);
   const actorId = actorIdOf(principal);
@@ -497,7 +503,7 @@ async function followGrant(
   principal: Principal,
   tenantId: string,
   siteId: string,
-  trigger: "scaffold" | "production",
+  trigger: "scaffold" | "production" | "secret_write",
 ): Promise<DeployGrantSummary> {
   try {
     const r = await grantDeployForSite(principal, tenantId, siteId, trigger);
@@ -522,6 +528,14 @@ async function followGrant(
  * M6-P4g's trigger: called by the scaffold commit AFTER its `committed` is recorded. Never throws, so the commit's answer
  * is never turned into an error by the grant; a refusal is recorded on the row and returned as data.
  */
+/**
+ * M6-P6o's trigger: called after the ERP wrote a per-site secret's value from the vault (deploy-secret.service.ts), as the
+ * write's decider. Never throws, never re-grants a `revoked` site; a refusal is recorded on the row and returned as data.
+ */
+export async function followSecretWrite(principal: Principal, tenantId: string, siteId: string): Promise<DeployGrantSummary> {
+  return followGrant(principal, tenantId, siteId, "secret_write");
+}
+
 export async function followScaffoldCommit(principal: Principal, tenantId: string, siteId: string): Promise<DeployGrantSummary> {
   return followGrant(principal, tenantId, siteId, "scaffold");
 }
