@@ -96,6 +96,8 @@ The script first proves the agent's token reaches the gateway (`401` without it,
 
 - **Verify, before step 5:** the prompt answers, and the gateway's audit file (`/app/data/egress-audit.jsonl` in `gaiada-ai-gateway-1`) has a `"capability":"chat"` row with that agent's name.
 - **Known effect:** vision is refused by the gateway (it takes no image parts), so the agent's image analysis stops working.
+- **Scheduled jobs pin a provider.** Hermes stores a provider and model snapshot on each cron job, and a job whose snapshot differs from the new global provider refuses to run (Hermes prints a warning when `model.provider` changes). After step 4, run `hermes cron list` as the agent (`cd $HERMES_HOME`, then `sudo -u azlan HERMES_HOME=… python -m hermes_cli.main cron list`) and pin each job with `cron edit <id> --provider gaiada-gateway --model z-ai/glm-5.3-flash`. On 2026-10-27 `hermes-bsc` had one, `orderatlas-review` (daily 05:00 UTC), which had already failed 11 days in a row on its dead OpenRouter key.
+- **Run the CLI from the agent's home.** `sudo -u azlan` cannot use `/root` as a working directory; the scripts `cd` into `HERMES_HOME` first, as the units do.
 - **Rollback:** restore `config.yaml.bak-aip00a` (and `auth.json.bak-aip00a`) and restart the unit.
 
 ## Step 5: helios, delete the agent's own model keys (`step5-helios.sh seo`, then `bsc`)
@@ -106,6 +108,17 @@ Run this only after step 4's verify passed for that agent.
 - **bsc:** empties `credential_pool.openrouter` in `auth.json`.
 - **Both:** the script repeats the prompt and restarts. Tool credentials (`SEMRUSH_API_KEY`, `FIGMA_API_KEY`, `GSC_OAUTH_CLIENT_SECRET`) stay.
 - **Rollback:** restore `<file>.bak-aip00a-step5` and restart.
+
+## What happened on 2026-10-27
+
+- **Steps 1 to 5 ran for both agents on 2026-10-27, on the owner's authority.**
+- **Step 3 first failed:** `sumopod`'s socat 1.8.0.0 refused `range=a.b.c.d/nn` without an address family, so the relay restarted in a loop. The scripts now use `TCP4-LISTEN` and `range=<addr>:<mask>`.
+- **The checks:**
+  - From `helios`, `/v1/models` answers 401 without a token or with a wrong one, and 200 with either agent's token.
+  - A test prompt answered through each agent, before and after its keys were deleted.
+  - The gateway's audit shows `chat` rows naming `hermes-seo` and `hermes-bsc` on `z-ai/glm-5.3-flash`. One seo turn is about 23,000 prompt tokens, because Hermes sends its tools and system prompt on every turn.
+- **What the agents hold now:** neither `.env` names a model key, and `hermes-bsc`'s OpenRouter pool is empty. `hermes-seo` keeps a Gemini pool entry that points at the deleted `GEMINI_API_KEY` and stores only a fingerprint.
+- **Backups:** every `.bak-aip00a*` file still holds the old keys. Delete them after the soak; the providers should revoke the old keys.
 
 ## Step 6: close
 

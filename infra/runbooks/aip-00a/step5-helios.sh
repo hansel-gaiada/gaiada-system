@@ -11,6 +11,7 @@ case "$a" in
   *) echo "seo or bsc"; exit 2 ;;
 esac
 UCTL="sudo -u azlan XDG_RUNTIME_DIR=/run/user/1001 systemctl --user"
+cd "$H"   # run from the agent's home, as its unit does: azlan cannot use /root as a working directory
 if [ "$a" = seo ]; then
   for f in "$H/.env" /opt/hermes-seo/.env; do
     [ -f "$f" ] || continue

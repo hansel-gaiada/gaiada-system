@@ -14,6 +14,7 @@ case "$a" in
 esac
 GW=http://10.88.0.2:3012/v1
 UCTL="sudo -u azlan XDG_RUNTIME_DIR=/run/user/1001 systemctl --user"
+cd "$H"   # run from the agent's home, as its unit does: azlan cannot use /root as a working directory
 cp -a "$H/config.yaml" "$H/config.yaml.bak-aip00a"
 [ -f "$H/auth.json" ] && cp -a "$H/auth.json" "$H/auth.json.bak-aip00a"
 
