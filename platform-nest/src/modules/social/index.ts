@@ -137,6 +137,8 @@ export const socialModule: ModuleContract = {
     // SCP-1b (PERMISSION-CONTRACT §53.13) — the content pipeline's IAM seed: the two roles, the eleven keys, the report
     // narrowing. Lands after 202610271000_social_pipeline.sql (SCP-1b's schema file).
     "202610271001_iam_social_pipeline.sql",
+    // SCP-1l (BFF §63.1 file 3, §63.8) — the shared comment thread's visibility (team or client) and its pin on the image.
+    "202610271300_comments_visibility_anchor.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is

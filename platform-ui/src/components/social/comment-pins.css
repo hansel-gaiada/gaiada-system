@@ -1,0 +1,55 @@
+/* SCP-1l — the pins on a post's image (PinOverlay) and the visibility toggle and badges of a social_post comment thread
+   (CommentThread's `social` prop). Tokens only: no colour, radius or shadow literal and no uppercase transform (the tokens guard),
+   so the Social skin (SCP-K) restyles it by changing tokens and nothing here. */
+
+/* The image and its pin layer: the box is exactly the image, so a pin's left and top in percent are fractions of the image. */
+.scp-pinbox { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
+.scp-pinbox__img { display: block; max-width: 100%; height: auto; }
+
+.scp-pin {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--pm-text-on-accent);
+  border-radius: 50%;
+  background: var(--pm-accent-fill);
+  color: var(--pm-text-on-accent);
+  font: 700 11px var(--font-body);
+  line-height: 20px;
+  text-align: center;
+  cursor: pointer;
+}
+.scp-pin:hover { background: var(--pm-accent); }
+.scp-pin:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 2px; }
+.scp-pin--selected { outline: 2px solid var(--pm-accent); outline-offset: 2px; }
+.scp-pin--marker { pointer-events: none; cursor: default; border-style: dashed; background: transparent; }
+
+/* Place mode: a layer over the whole image that takes the click. */
+.scp-pinbox__place { position: absolute; inset: 0; cursor: crosshair; background: transparent; }
+.scp-pinbox__place:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: -2px; }
+
+/* The composer's team / client toggle, and a comment's visibility badge and pin label. */
+.scp-vis { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; border: 0; margin: 0; padding: 0; min-width: 0; }
+.scp-vis__opt {
+  border: 0.5px solid var(--pm-line);
+  border-radius: var(--pm-radius);
+  background: transparent;
+  color: var(--pm-text-dim);
+  font: 700 10px var(--font-body);
+  letter-spacing: 0.01em;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.scp-vis__opt:hover { color: var(--pm-text); }
+.scp-vis__opt[aria-checked="true"] { color: var(--pm-text); border-color: var(--pm-accent); }
+.scp-vis__hint { font: 400 11px var(--font-body); color: var(--pm-text-dim); }
+
+.scp-vis-badge { font: 700 8px var(--font-body); letter-spacing: 0.01em; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius-pill); padding: 1px 5px; color: var(--pm-text-dim); }
+.scp-vis-badge--client { color: var(--pm-accent); border-color: var(--pm-accent); }
+.scp-comment-pin { font: 700 10px var(--font-body); color: var(--pm-accent); background: transparent; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+.scp-comment-pin:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 2px; }
+
+.scp-pending-pin { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font: 400 12px var(--font-body); color: var(--pm-text-dim); }
+.scp-thread-error { font: 400 12px var(--font-body); color: var(--status-danger-fg); }

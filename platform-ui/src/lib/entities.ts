@@ -5,6 +5,7 @@ import "server-only";
 // (never throw to the page) so pages can ship ahead of the backend.
 import { platformFetch, PlatformError } from "./platform";
 import { readResult, type ReadResult } from "./readResult";
+import type { CommentAnchor, CommentVisibility } from "./pm";
 
 export interface Project {
   id: string;
@@ -326,7 +327,8 @@ export const readMyTimeEntries = (u: string, t: string): Promise<ReadResult<Time
   readResult(platformFetch<TimeEntry[]>(`/api/${t}/time-entries?${new URLSearchParams({ mine: "me" })}`, u));
 
 // ---- Collaboration: comments + notifications (5c.3 — endpoints exist) ----
-export interface Comment { id: string; author_id: string | null; author_name: string | null; body: string; parent_comment_id: string | null; created_at: string }
+/** `visibility` and `anchor` (SCP-1l, BFF §63.8) are ADDITIVE: the server sends them on every thread ('team' and null for all but a social_post's). */
+export interface Comment { id: string; author_id: string | null; author_name: string | null; body: string; parent_comment_id: string | null; created_at: string; visibility?: CommentVisibility; anchor?: CommentAnchor | null }
 // WSUX-4 typed contract (platform-nest src/core/http.ts NotificationPayload,
 // FRONTEND-BFF-CONTRACT §9(c)): every row's payload now guarantees {title, href}
 // plus optional body/entityType/entityId/severity. Additive — legacy keys (e.g.
@@ -381,5 +383,7 @@ export const deleteFile = (u: string, t: string, id: string) =>
 
 // Generic threaded comments on any entity (task comments already flow through
 // lib/pm). Reused for projects, etc.
-export const postComment = (u: string, t: string, entityType: string, entityId: string, body: string) =>
-  platformFetch<{ id: string }>(`/api/${t}/comments?entityType=${entityType}&entityId=${entityId}`, u, { method: "POST", body: JSON.stringify({ body }) });
+// SCP-1l: `extra` is a social_post comment's `visibility` (team by default) and its pin; the server refuses either on any other thread.
+// The route reads entityType and entityId from the BODY (collab.controller.ts), so they ride the body as well as the query.
+export const postComment = (u: string, t: string, entityType: string, entityId: string, body: string, extra?: { visibility?: CommentVisibility; anchor?: CommentAnchor }) =>
+  platformFetch<{ id: string }>(`/api/${t}/comments?entityType=${entityType}&entityId=${entityId}`, u, { method: "POST", body: JSON.stringify({ body, entityType, entityId, ...(extra ?? {}) }) });

@@ -9,6 +9,9 @@ import { config } from "../config";
 import { authorize, writeActivity, notify } from "./http";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
+import {
+  SOCIAL_POST_ENTITY, assertAnchorOnPostFile, authorizeSocialPostThread, parseAnchor, parseVisibility, requireRecordClient,
+} from "../modules/social/pipeline/post-comments";
 
 // P3-08: closed reaction emoji set — matches the P3-09 frontend's fixed reaction bar and the
 // migration 0043 CHECK constraint (kept in sync deliberately; the DB constraint is the fail-closed
@@ -22,12 +25,17 @@ export class CollabController {
   async listComments(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("entityType") entityType?: string, @Query("entityId") entityId?: string) {
     if (!entityType || !entityId) throw new BadRequestException("entityType and entityId required");
     await authorize(req.principal, { kind: "comment", tenantId }, "read");
+    // SCP-1l (BFF §63.8): a social_post thread has the post's audience: `social_post` · `read`, or `design`.
+    // Every other entity type is untouched.
+    if (entityType === SOCIAL_POST_ENTITY) await authorizeSocialPostThread(req.principal, tenantId, entityId);
     // P3-08: `reactions` is an ADDITIVE field (aggregated per comment, viewer-scoped `mine`) —
     // every other field/shape here is unchanged, so existing consumers (project "Discussion",
     // lib/entities.postComment) are unaffected by fields they don't read.
+    // SCP-1l: `visibility` and `anchor` are ADDITIVE the same way ('team' and null for every thread but a social_post's).
     const rows = await withTenants([tenantId], (c) =>
       c.query(
         `SELECT co.id, co.author_id, u.name AS author_name, co.body, co.parent_comment_id, co.created_at,
+                co.visibility, co.anchor,
                 COALESCE(react.reactions, '[]'::json) AS reactions
          FROM comments co
          LEFT JOIN users u ON u.id = co.author_id
@@ -98,24 +106,42 @@ export class CollabController {
 
   @Post(":tenantId/comments")
   @HttpCode(201)
-  async createComment(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Body() body: { entityType?: string; entityId?: string; body?: string; parentCommentId?: string; mentions?: string[] }) {
+  async createComment(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: { entityType?: string; entityId?: string; body?: string; parentCommentId?: string; mentions?: string[]; visibility?: unknown; anchor?: unknown },
+  ) {
     const { entityType, entityId, body: text, parentCommentId, mentions = [] } = body ?? {};
     if (!entityType || !entityId || !text) throw new BadRequestException("entityType, entityId and body required");
     await authorize(req.principal, { kind: "comment", tenantId }, "create");
+    // SCP-1l (BFF §63.8). Authorization first, validation second: a refused caller never reads a 400.
+    const isSocialPost = entityType === SOCIAL_POST_ENTITY;
+    const access = isSocialPost ? await authorizeSocialPostThread(req.principal, tenantId, entityId) : null;
+    // A client-visible comment speaks to the client: `record_client` as well (403 not_officer_or_approver). Only a value that
+    // IS 'client' asks for it; any other value is judged below, after authorization.
+    if (access && body?.visibility === "client") await requireRecordClient(req.principal, tenantId, access);
+    // `visibility` and `anchor` belong to a social_post thread only; on any other thread either field is 400 {field}.
+    if (!isSocialPost) {
+      if (body?.visibility !== undefined) throw new BadRequestException({ message: "visibility_not_allowed", field: "visibility" });
+      if (body?.anchor !== undefined) throw new BadRequestException({ message: "anchor_not_allowed", field: "anchor" });
+    }
+    const visibility = isSocialPost ? parseVisibility(body?.visibility) : "team";
+    const anchor = isSocialPost ? parseAnchor(body?.anchor) : null;
+    if (anchor) await assertAnchorOnPostFile(tenantId, entityId, anchor);
     const id = newId();
     const actorId = req.principal.userId;
     try {
       await withTenants([tenantId], (c) =>
         c.query(
-          `INSERT INTO comments (id, tenant_id, author_id, target_entity_type, target_entity_id, body, parent_comment_id, origin_site)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [id, tenantId, actorId, entityType, entityId, text, parentCommentId ?? null, config.originSite],
+          `INSERT INTO comments (id, tenant_id, author_id, target_entity_type, target_entity_id, body, parent_comment_id, origin_site, visibility, anchor)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)`,
+          [id, tenantId, actorId, entityType, entityId, text, parentCommentId ?? null, config.originSite, visibility, anchor ? JSON.stringify(anchor) : null],
         ),
       );
     } catch (err) {
       throw new BadRequestException((err as Error).message);
     }
-    await writeActivity(tenantId, actorId, "commented", entityType, entityId, { commentId: id });
+    await writeActivity(tenantId, actorId, "commented", entityType, entityId, isSocialPost ? { commentId: id, visibility } : { commentId: id });
     // TR-05: pm->work_activity evidence feed. entityType "task" is shared across subsystems (see
     // the pm_task_followers vs. `tasks` lookup below) — only emit onto the pm_task stream when
     // entityId genuinely resolves to a live pm_tasks row, so a comment on a non-PM "task" never

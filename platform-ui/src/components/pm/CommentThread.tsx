@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import type { Comment } from "@/lib/pm";
+import type { Comment, CommentAnchor, CommentVisibility } from "@/lib/pm";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { pinsFromComments } from "@/components/social/PinOverlay";
 import "./pm.css";
 // Colocated here rather than a new file, same rationale as `FollowToggle` below: this ticket's
 // file ownership is CommentThread.tsx + TaskDetailView.tsx + task-detail.css, and this is the
@@ -11,6 +12,8 @@ import "./pm.css";
 // `ProjectWorkspaceView`'s Discussion thread mounts this component without ever importing
 // `task-detail.css` itself.
 import "./task-detail.css";
+// SCP-1l: the visibility toggle, badges and pin labels of a social_post thread (only drawn when the `social` prop is passed).
+import "@/components/social/comment-pins.css";
 
 function when(iso: string): string {
   const d = new Date(iso);
@@ -83,9 +86,29 @@ export function renderMiniMarkdown(body: string): ReactNode {
   return blocks.length > 0 ? blocks : <p className="pm-md-p pm-desc--empty">Nothing to preview.</p>;
 }
 
+/** SCP-1l (BFF §63.8): what a `social_post` thread adds. Pass it for that thread ONLY; with no `social` prop the thread renders and
+ *  posts exactly as before (the creative_asset and project threads). The server decides who may write a client-visible comment:
+ *  the page passes its answer as `canWriteClient`, the thread only draws the toggle. */
+export interface SocialThreadOptions {
+  /** The viewer may write client-visible comments (`social_post` · `record_client`): the team / client toggle is drawn. */
+  canWriteClient: boolean;
+  /** A pin the viewer just placed on the image (PinOverlay): it rides the next comment. */
+  pendingAnchor?: CommentAnchor | null;
+  onClearPendingAnchor?: () => void;
+  /** Draws a "Pin on image" button that starts PinOverlay's place mode. */
+  onStartPin?: () => void;
+  /** A click on a comment's "Pin N" label: the page highlights that pin. */
+  onSelectPin?: (commentId: string) => void;
+}
+
+/** The extras a social_post comment carries: `visibility` (default team) and the pin. */
+export interface PostExtras { visibility?: CommentVisibility; anchor?: CommentAnchor }
+
 interface Props {
   comments: Comment[];
-  post: (body: string) => Promise<Res>;
+  /** `extra` is passed only when the `social` prop is, so every other thread's `post` is still called with the body alone. */
+  post: (body: string, extra?: PostExtras) => Promise<Res>;
+  social?: SocialThreadOptions;
   // Optional: ProjectWorkspaceView's generic Discussion thread (lib/entities.ts
   // comments, a plain Comment[] with no `reactions` field) doesn't wire these —
   // its cards simply render with no reaction row rather than a dead-end "+".
@@ -98,7 +121,7 @@ interface Props {
   mentionCandidates?: MentionCandidate[];
 }
 
-export function CommentThread({ comments, post, addReaction, removeReaction, mentionCandidates }: Props) {
+export function CommentThread({ comments, post, social, addReaction, removeReaction, mentionCandidates }: Props) {
   const router = useRouter();
   const [body, setBody] = useState("");
   const [mode, setMode] = useState<"write" | "preview">("write");
@@ -106,6 +129,8 @@ export function CommentThread({ comments, post, addReaction, removeReaction, men
   const [mentionAnchor, setMentionAnchor] = useState<number | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [visibility, setVisibility] = useState<CommentVisibility>("team");
+  const [postError, setPostError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const emojiPopRef = useRef<HTMLDivElement>(null);
   const emojiBtnRef = useRef<HTMLButtonElement>(null);
@@ -132,7 +157,27 @@ export function CommentThread({ comments, post, addReaction, removeReaction, men
     setBody("");
     setMode("write");
     setMentionQuery(null);
-    startTransition(async () => { await post(v); router.refresh(); });
+    if (!social) {
+      startTransition(async () => { await post(v); router.refresh(); });
+      return;
+    }
+    // A social_post thread: the visibility (never `client` unless the viewer may write one) and the pending pin ride the comment.
+    const extra: PostExtras = {
+      visibility: social.canWriteClient ? visibility : "team",
+      ...(social.pendingAnchor ? { anchor: social.pendingAnchor } : {}),
+    };
+    startTransition(async () => {
+      const r = await post(v, extra);
+      if (r.ok) {
+        setPostError(null);
+        setVisibility("team");
+        social.onClearPendingAnchor?.();
+      } else {
+        setBody(v); // keep what was typed: a refusal must not eat the comment
+        setPostError(r.error ?? "Couldn't post the comment.");
+      }
+      router.refresh();
+    });
   };
 
   // Reads the caret straight off the DOM node rather than tracking it in state — the caret moves
@@ -174,6 +219,8 @@ export function CommentThread({ comments, post, addReaction, removeReaction, men
     ? mentionCandidates.filter((c) => c.name.toLowerCase().includes(mentionQuery.toLowerCase())).slice(0, 6)
     : [];
 
+  const pinNumber = social ? new Map(pinsFromComments(comments).map((p) => [p.id, p.n])) : null;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {comments.length === 0 ? (
@@ -185,6 +232,16 @@ export function CommentThread({ comments, post, addReaction, removeReaction, men
               <div className="pm-comment__head">
                 <span className="pm-comment__author">{c.author_name ?? "Someone"}</span>
                 {c.ai && <span className="pm-ai-badge">AI Tracker</span>}
+                {social && (
+                  <span className={`scp-vis-badge${c.visibility === "client" ? " scp-vis-badge--client" : ""}`}>
+                    {c.visibility === "client" ? "Client can see" : "Team only"}
+                  </span>
+                )}
+                {social && c.anchor && pinNumber?.has(c.id) && (
+                  social.onSelectPin
+                    ? <button type="button" className="scp-comment-pin" onClick={() => social.onSelectPin?.(c.id)}>{`Pin ${pinNumber.get(c.id)}`}</button>
+                    : <span className="scp-comment-pin">{`Pin ${pinNumber.get(c.id)}`}</span>
+                )}
                 <span className="pm-comment__time">{when(c.created_at)}</span>
               </div>
               <div className="pm-comment__body">{c.body}</div>
@@ -248,6 +305,34 @@ export function CommentThread({ comments, post, addReaction, removeReaction, men
           </>
         ) : (
           <div className="pm-composer__preview">{renderMiniMarkdown(body)}</div>
+        )}
+
+        {social && (
+          <>
+            {social.canWriteClient && (
+              <div className="scp-vis" role="radiogroup" aria-label="Who can see this comment">
+                <button type="button" role="radio" aria-checked={visibility === "team"} className="scp-vis__opt" onClick={() => setVisibility("team")}>Team only</button>
+                <button type="button" role="radio" aria-checked={visibility === "client"} className="scp-vis__opt" onClick={() => setVisibility("client")}>Client can see</button>
+                {visibility === "client" && <span className="scp-vis__hint">The client sees this once the post has reached them.</span>}
+              </div>
+            )}
+            {(social.onStartPin || social.pendingAnchor) && (
+              <div className="scp-pending-pin">
+                {social.pendingAnchor
+                  ? <span>{`Pinned at ${Math.round(social.pendingAnchor.x * 100)}%, ${Math.round(social.pendingAnchor.y * 100)}% on the image.`}</span>
+                  : null}
+                {social.onStartPin && (
+                  <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={social.onStartPin}>
+                    {social.pendingAnchor ? "Move pin" : "Pin on image"}
+                  </button>
+                )}
+                {social.pendingAnchor && social.onClearPendingAnchor && (
+                  <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={social.onClearPendingAnchor}>Remove pin</button>
+                )}
+              </div>
+            )}
+            {postError && <p role="alert" className="scp-thread-error">{postError}</p>}
+          </>
         )}
 
         <div>

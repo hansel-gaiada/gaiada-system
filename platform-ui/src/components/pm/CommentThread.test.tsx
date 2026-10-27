@@ -123,3 +123,98 @@ describe("TodayScheduleButton (P4-F3)", () => {
     await waitFor(() => expect(act).toHaveBeenCalledTimes(1));
   });
 });
+
+// ---- SCP-1l (BFF §63.8): a social_post thread's toggle, badges and pins ----
+const FILE = "11111111-1111-4111-8111-111111111111";
+// The composer is a <form action>: React 19 runs the action on submit (the way InstalmentPicker.test drives its form).
+const submitComment = () => fireEvent.submit(screen.getByRole("button", { name: "Comment" }).closest("form")!);
+const mockComments = [
+  { id: "c-1", author_id: "u-1", author_name: "Mock Officer", body: "Team note", parent_comment_id: null, created_at: "2027-03-01T10:00:00Z", visibility: "team" as const, anchor: null },
+  { id: "c-2", author_id: "u-1", author_name: "Mock Officer", body: "For the client", parent_comment_id: null, created_at: "2027-03-01T11:00:00Z", visibility: "client" as const, anchor: { x: 0.25, y: 0.5, fileId: FILE } },
+  { id: "c-3", author_id: "u-2", author_name: "Mock Copywriter", body: "Move the logo", parent_comment_id: null, created_at: "2027-03-01T12:00:00Z", visibility: "team" as const, anchor: { x: 0.8, y: 0.1, fileId: FILE } },
+];
+
+describe("CommentThread on a social_post thread (SCP-1l)", () => {
+  it("draws the team / client toggle only when the page says the viewer may write client comments", () => {
+    const { rerender } = render(<CommentThread comments={[]} post={vi.fn()} social={{ canWriteClient: true }} />);
+    expect(screen.getByRole("radiogroup", { name: "Who can see this comment" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Team only" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "Client can see" })).toHaveAttribute("aria-checked", "false");
+
+    rerender(<CommentThread comments={[]} post={vi.fn()} social={{ canWriteClient: false }} />);
+    expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
+  });
+
+  it("posts a client-visible comment with its visibility and the pending pin, then clears the pin", async () => {
+    const post = vi.fn().mockResolvedValue({ ok: true });
+    const clear = vi.fn();
+    const anchor = { x: 0.4, y: 0.6, fileId: FILE };
+    render(<CommentThread comments={[]} post={post} social={{ canWriteClient: true, pendingAnchor: anchor, onClearPendingAnchor: clear }} />);
+    fireEvent.click(screen.getByRole("radio", { name: "Client can see" }));
+    fireEvent.change(screen.getByPlaceholderText(/Write a comment/), { target: { value: "Please check the date" } });
+    submitComment();
+    await waitFor(() => expect(post).toHaveBeenCalledWith("Please check the date", { visibility: "client", anchor }));
+    await waitFor(() => expect(clear).toHaveBeenCalled());
+  });
+
+  it("a viewer who may not write client comments always posts team", async () => {
+    const post = vi.fn().mockResolvedValue({ ok: true });
+    render(<CommentThread comments={[]} post={post} social={{ canWriteClient: false }} />);
+    fireEvent.change(screen.getByPlaceholderText(/Write a comment/), { target: { value: "Team only please" } });
+    submitComment();
+    await waitFor(() => expect(post).toHaveBeenCalledWith("Team only please", { visibility: "team" }));
+  });
+
+  it("renders a visibility badge on each comment and a numbered pin label on the anchored ones", () => {
+    render(<CommentThread comments={mockComments} post={vi.fn()} social={{ canWriteClient: false }} />);
+    expect(screen.getAllByText("Team only").filter((el) => el.className.includes("scp-vis-badge"))).toHaveLength(2);
+    expect(screen.getAllByText("Client can see").filter((el) => el.className.includes("scp-vis-badge"))).toHaveLength(1);
+    // The numbers are the pins' places among the anchored comments, in thread order.
+    expect(screen.getByText("Pin 1")).toBeInTheDocument();
+    expect(screen.getByText("Pin 2")).toBeInTheDocument();
+  });
+
+  it("a click on a comment's pin label tells the page which comment it is", () => {
+    const onSelectPin = vi.fn();
+    render(<CommentThread comments={mockComments} post={vi.fn()} social={{ canWriteClient: false, onSelectPin }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Pin 2" }));
+    expect(onSelectPin).toHaveBeenCalledWith("c-3");
+  });
+
+  it("a refusal keeps what was typed and says why", async () => {
+    const post = vi.fn().mockResolvedValue({ ok: false, error: "Only the client's officer or an approver can write a comment the client sees." });
+    render(<CommentThread comments={[]} post={post} social={{ canWriteClient: true }} />);
+    fireEvent.click(screen.getByRole("radio", { name: "Client can see" }));
+    fireEvent.change(screen.getByPlaceholderText(/Write a comment/), { target: { value: "Hello client" } });
+    submitComment();
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Only the client's officer or an approver"));
+    expect(screen.getByPlaceholderText(/Write a comment/)).toHaveValue("Hello client");
+  });
+
+  it("offers Pin on image only when the page can start place mode, and Remove pin once one is pending", () => {
+    const onStartPin = vi.fn();
+    const { rerender } = render(<CommentThread comments={[]} post={vi.fn()} social={{ canWriteClient: false, onStartPin }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Pin on image" }));
+    expect(onStartPin).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Remove pin" })).not.toBeInTheDocument();
+    rerender(<CommentThread comments={[]} post={vi.fn()} social={{ canWriteClient: false, onStartPin, pendingAnchor: { x: 0.5, y: 0.5, fileId: FILE }, onClearPendingAnchor: vi.fn() }} />);
+    expect(screen.getByRole("button", { name: "Move pin" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove pin" })).toBeInTheDocument();
+  });
+});
+
+describe("CommentThread on any other thread is unchanged by SCP-1l", () => {
+  it("with no `social` prop it draws no toggle, badge or pin label even when the server sent visibility and anchor, and posts the body alone", async () => {
+    const post = vi.fn().mockResolvedValue({ ok: true });
+    render(<CommentThread comments={mockComments} post={post} />);
+    expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
+    expect(screen.queryByText("Team only")).not.toBeInTheDocument();
+    expect(screen.queryByText("Client can see")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Pin \d/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pin on image" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText(/Write a comment/), { target: { value: "Plain comment" } });
+    submitComment();
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0]).toEqual(["Plain comment"]);
+  });
+});
