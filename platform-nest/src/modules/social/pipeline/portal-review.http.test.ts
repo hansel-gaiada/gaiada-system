@@ -359,7 +359,7 @@ describe.skipIf(!TEST_URL)("SCP-2 · the portal's approval page for pipeline pos
     expect(approved.items[0].decision).toMatchObject({ kind: "approved", recorded: false, decidedBy: { name: "Mock Contact pP" } });
     // The post the client asked changes on is still theirs to follow: the grid shows it as `changes_asked`.
     const grid = await get("?tab=grid&month=2027-03");
-    expect(grid.items.map((i: Json) => [i.id, i.state])).toEqual([[p1, "approved"], [p2, "changes_asked"], [p3, "to_review"], [story, "to_review"]]);
+    expect(grid.items.map((i: Json) => [i.id, i.state])).toEqual([[story, "to_review"], [p3, "to_review"], [p2, "changes_asked"], [p1, "approved"]]); // newest first, as the feed
     const changed = grid.items.find((i: Json) => i.id === p2);
     expect(changed.decision).toMatchObject({ kind: "changes", changeKind: "copy", note: "Shorter, please." });
     // The default month is the current one in the report zone: these posts are March 2027's.
@@ -367,6 +367,13 @@ describe.skipIf(!TEST_URL)("SCP-2 · the portal's approval page for pipeline pos
     // A client the caller is not a contact of reads as if it had no posts.
     expect(await get(`?tab=to_review&clientId=${c1.clientId}`)).toEqual({ items: [], nextCursor: null, counts: { toReview: 0, approved: 0, changesAsked: 0 } });
     expect((await get(`?tab=to_review&clientId=${c3.clientId}`)).items).toHaveLength(2);
+    // A chosen month narrows every tab and the counts (the month's approval page); these posts are all March 2027's.
+    const march = await get("?tab=to_review&month=2027-03");
+    expect(march.items.map((i: Json) => i.id)).toEqual([p3, story]);
+    expect(march.counts).toEqual({ toReview: 2, approved: 1, changesAsked: 1 });
+    expect(await get("?tab=to_review&month=2027-04")).toEqual({ items: [], nextCursor: null, counts: { toReview: 0, approved: 0, changesAsked: 0 } });
+    expect((await get("?tab=approved&month=2027-04")).items).toEqual([]);
+    expect((await get("?tab=approved&month=2027-03")).items.map((i: Json) => i.id)).toEqual([p1]);
     // The query is validated after authorization.
     for (const [qs, field] of [["?tab=bogus", "tab"], ["?limit=0", "limit"], ["?limit=101", "limit"], ["?limit=x", "limit"], ["?month=2027-13", "month"], ["?cursor=%25%25", "cursor"], ["?clientId=nope", "clientId"]] as const) {
       const r = await app.inject({ method: "GET", url: `${portal()}/posts${qs}`, headers: as(P.pP) });

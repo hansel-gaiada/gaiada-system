@@ -188,18 +188,20 @@ function list(params: URLSearchParams, userId: string, now: number): DemoResult 
   if (month !== null && month !== "" && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return err(400, "invalid_field", "month");
   const limitRaw = params.get("limit");
   const limit = limitRaw === null ? DEFAULT_LIMIT : Number(limitRaw);
-  if (!Number.isInteger(limit) || limit < 1 || limit > 50) return err(400, "invalid_field", "limit");
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) return err(400, "invalid_field", "limit");
   const cursor = params.get("cursor");
   const offset = cursor === null || cursor === "" ? 0 : /^o\d{1,6}$/.test(cursor) ? Number(cursor.slice(1)) : -1;
   if (offset < 0) return err(400, "invalid_field", "cursor");
   const clientId = params.get("clientId");
   if (clientId !== null && clientId !== "" && !/^[\w-]{1,64}$/.test(clientId)) return err(400, "invalid_field", "clientId"); // a malformed one; an out-of-scope one lists nothing
 
-  // the filter that frames the counts too: the page's header says how many wait in THIS client and month
+  // As the server (BFF §63.9 as built): a chosen month narrows every tab and the counts; with none, To review and Approved show every month and
+  // the grid shows the current month (the counts then cover every month).
   const scoped = PIPE_POSTS
     .filter(isPortalVisible)
     .filter((p) => !clientId || engagementOf(p)?.clientId === clientId)
     .filter((p) => !month || p.cycleMonth === month);
+  const gridMonth = month || new Date(now).toISOString().slice(0, 7);
   const state = (p: PipePost) => portalState(p) as PortalSocialState;
   const counts = {
     toReview: scoped.filter((p) => state(p) === "to_review").length,
@@ -207,7 +209,9 @@ function list(params: URLSearchParams, userId: string, now: number): DemoResult 
     changesAsked: scoped.filter((p) => state(p) === "changes_asked").length,
   };
   // to review: what is due soonest first; approved and the grid: newest first, the order of an account's feed
-  const rows = scoped.filter((p) => inTab(tab as (typeof TABS)[number], state(p))).sort(tab === "to_review" ? byDate : (a, b) => byDate(b, a));
+  const rows = scoped
+    .filter((p) => inTab(tab as (typeof TABS)[number], state(p)) && (tab !== "grid" || p.cycleMonth === gridMonth))
+    .sort(tab === "to_review" ? byDate : (a, b) => byDate(b, a));
   const page = rows.slice(offset, offset + limit);
   return ok({
     items: page.map((p) => portalPost(p, userId, now)),

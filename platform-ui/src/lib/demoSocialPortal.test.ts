@@ -27,8 +27,11 @@ const call = (method: string, path: string, body?: unknown, q: Record<string, st
 const json = <T>(r: { json: unknown } | null | undefined): T => r?.json as T;
 interface Listed { items: PortalSocialPost[]; nextCursor: string | null; counts: { toReview: number; approved: number; changesAsked: number } }
 const list = (q: Record<string, string> = {}) => json<Listed>(call("GET", "posts", undefined, q));
+// Every visible post of the store: the grid shows one month at a time (the current one by default, as the server), and the store spans the month before,
+// this month and the next (the clock is pinned to mid-October 2026).
+const allGrid = (q: Record<string, string> = {}) => ["2026-09", "2026-10", "2026-11"].flatMap((month) => list({ tab: "grid", month, limit: "100", ...q }).items);
 const titled = (title: string): PortalSocialPost => {
-  const hit = [...list({ tab: "grid", limit: "50" }).items, ...list({ tab: "to_review", limit: "50" }).items].find((p) => p.title === title);
+  const hit = [...allGrid(), ...list({ tab: "to_review", limit: "50" }).items].find((p) => p.title === title);
   if (!hit) throw new Error(`no portal post titled ${title}`);
   return hit;
 };
@@ -60,7 +63,7 @@ describe("1 · identity (the first check): only a portal client contact", () => 
 
 describe("the data the demo must have for the client (cl-1)", () => {
   it("has posts waiting on the client in all four formats, and approved, scheduled, live and changes-asked ones", () => {
-    const all = list({ tab: "grid", limit: "50" }).items;
+    const all = allGrid();
     const waiting = all.filter((p) => p.state === "to_review");
     expect(new Set(waiting.map((p) => p.format))).toEqual(new Set(["feed", "carousel", "reel", "story"]));
     for (const s of ["approved", "scheduled", "live", "changes_asked"] as const) expect(all.some((p) => p.state === s), s).toBe(true);
@@ -83,11 +86,14 @@ describe("GET posts: the tabs, the counts, the filters and the cursor", () => {
     expect(r.items.map((p) => p.plannedAt)).toEqual([...r.items.map((p) => p.plannedAt)].sort());
     expect(r.counts).toEqual({ toReview: 4, approved: 7, changesAsked: 1 });
   });
-  it("approved lists approved, scheduled and live posts, newest first; the grid lists every visible one", () => {
+  it("approved lists approved, scheduled and live posts, newest first; the grid lists one month's, the current one by default", () => {
     const a = list({ tab: "approved" });
     expect(new Set(a.items.map((p) => p.state))).toEqual(new Set(["approved", "scheduled", "live"]));
     expect(a.items.map((p) => p.plannedAt)).toEqual([...a.items.map((p) => p.plannedAt)].sort().reverse());
-    expect(list({ tab: "grid", limit: "50" }).items).toHaveLength(12);
+    expect(allGrid()).toHaveLength(12);
+    const current = list({ tab: "grid", limit: "100" }).items;
+    expect(current.length).toBeGreaterThan(0);
+    expect(current.every((p) => p.month === "2026-10")).toBe(true);
   });
   it("a month narrows the list and the counts; a client that is not theirs lists nothing", () => {
     const month = list({ tab: "grid", month: "2026-09", limit: "50" });
@@ -99,13 +105,14 @@ describe("GET posts: the tabs, the counts, the filters and the cursor", () => {
     expect(other.counts).toEqual({ toReview: 0, approved: 0, changesAsked: 0 });
   });
   it("pages with a cursor and says when there is no more", () => {
-    const first = list({ tab: "grid", limit: "5" });
-    expect(first.items).toHaveLength(5);
-    expect(first.nextCursor).toBe("o5");
-    const second = list({ tab: "grid", limit: "5", cursor: first.nextCursor as string });
+    // Approved holds seven posts (the counts above).
+    const first = list({ tab: "approved", limit: "3" });
+    expect(first.items).toHaveLength(3);
+    expect(first.nextCursor).toBe("o3");
+    const second = list({ tab: "approved", limit: "3", cursor: first.nextCursor as string });
     expect(second.items.map((p) => p.id)).not.toContain(first.items[0].id);
-    const last = list({ tab: "grid", limit: "5", cursor: "o10" });
-    expect(last.items).toHaveLength(2);
+    const last = list({ tab: "approved", limit: "3", cursor: "o6" });
+    expect(last.items).toHaveLength(1);
     expect(last.nextCursor).toBeNull();
   });
   it("a bad parameter is a 400 naming its field", () => {
@@ -133,7 +140,7 @@ describe("what the client sees, and what they never see", () => {
     expect(carousel.hashtags.length).toBeGreaterThan(0);
   });
   it("no staff status, holder, check, suggestion, copy log or team comment, and no staff name except a comment's author", () => {
-    const all = JSON.stringify([list({ tab: "grid", limit: "50" }), ...list({ tab: "grid", limit: "50" }).items.map((p) => call("GET", `posts/${p.id}`)?.json)]);
+    const all = JSON.stringify([allGrid(), ...allGrid().map((p) => call("GET", `posts/${p.id}`)?.json)]);
     for (const leak of ["pipelineStatus", "engineStatus", "holder", "checks", "suggestions", "copyLog", "history", "Internal:", "Dewi Santoso", "u-pm", "Citra Maheswari"]) {
       expect(all, leak).not.toContain(leak);
     }

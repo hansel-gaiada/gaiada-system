@@ -17,11 +17,11 @@ export function clientDecisionText(d: ClientDecision): string {
   const what = d.kind === "approved" ? "approved" : `asked for a ${d.changeKind === "design" ? "design" : "copy"} change`;
   const when = d.decidedAt ? `, ${formatDateTime(d.decidedAt)}` : "";
   if (d.via === "recorded") {
-    const channel = d.channel ? ` (${CHANNEL[d.channel] ?? d.channel})` : "";
-    const by = d.recordedBy ? `${d.recordedBy.name} recorded it` : "Recorded";
-    return `The client ${what} outside the portal${channel}. ${by} on the client's behalf${when}.`;
+    const channel = d.channel ? ` by ${CHANNEL[d.channel] ?? d.channel}` : "";
+    const by = d.recordedBy ? `${d.recordedBy.name} recorded it` : "recorded";
+    return `How the client decided: ${what} outside the portal${channel}; ${by} on the client's behalf${when}.`;
   }
-  return `The client ${what} in the portal${d.decidedBy ? `: ${d.decidedBy.name}` : ""}${when}.`;
+  return `How the client decided: ${what} in the portal${d.decidedBy ? ` (${d.decidedBy.name})` : ""}${when}.`;
 }
 
 export function ClientDecisionLine({ decision }: { decision: ClientDecision | null }) {

@@ -84,7 +84,8 @@ export function postVisibleTo(
 }
 
 /** Whether `fileId` is a file the caller may download as a pipeline post's image: named by a live design row of the post
- *  (`social_post_designs.file_id`, `removed_at` NULL), and the post visible to the caller. `postId` is the file's own
+ *  (`social_post_designs.file_id`, or its stored thumbnail `thumb_file_id`, SCP-2b; `removed_at` NULL), and the post visible
+ *  to the caller. `postId` is the file's own
  *  `target_entity_id`. The caller's client holds the module scope on `c` (declared here). */
 export async function portalImageVisible(c: PoolClient, tenantId: string, clientIds: string[], postId: string, fileId: string): Promise<boolean> {
   await declareSocialModuleScope(c);
@@ -93,7 +94,7 @@ export async function portalImageVisible(c: PoolClient, tenantId: string, client
        FROM social_post_designs d
        JOIN social_posts p ON p.tenant_id = d.tenant_id AND p.id = d.post_id
        JOIN social_engagements e ON e.tenant_id = p.tenant_id AND e.id = p.engagement_id
-      WHERE d.tenant_id = $1 AND d.post_id = $2 AND d.file_id = $3::uuid AND d.removed_at IS NULL AND ${portalPostVisibleSql("p", "e", 4)}
+      WHERE d.tenant_id = $1 AND d.post_id = $2 AND (d.file_id = $3::uuid OR d.thumb_file_id = $3::uuid) AND d.removed_at IS NULL AND ${portalPostVisibleSql("p", "e", 4)}
       LIMIT 1`,
     [tenantId, postId, fileId, clientIds],
   );
@@ -173,6 +174,9 @@ const POST_SELECT = `
          COALESCE(to_char(cy.month, 'YYYY-MM'), to_char(p.scheduled_at AT TIME ZONE $3::text, 'YYYY-MM'), to_char(p.created_at AT TIME ZONE $3::text, 'YYYY-MM')) AS month,
          p.title, p.format, p.scheduled_at, p.placement, p.pipeline_status, p.caption, p.on_asset_text, p.cta, p.hashtags,
          p.live_url, p.simulated`;
+/** A post's month as the portal files it: its cycle's month, else its date's (or its creation's) in the report zone (`$3`). */
+const MONTH_OF_POST = `COALESCE(to_char(cy.month, 'YYYY-MM'), to_char(p.scheduled_at AT TIME ZONE $3::text, 'YYYY-MM'), to_char(p.created_at AT TIME ZONE $3::text, 'YYYY-MM'))`;
+
 const POST_FROM = `
     FROM social_posts p
     JOIN social_engagements e ON e.tenant_id = p.tenant_id AND e.id = p.engagement_id
@@ -201,8 +205,8 @@ async function shape(c: PoolClient, tenantId: string, rows: PostRowP[], withComm
       ORDER BY a.network, v.id`,
     [tenantId, ids],
   );
-  const designs = await c.query<{ post_id: string; file_id: string; position: number }>(
-    `SELECT d.post_id::text AS post_id, d.file_id::text AS file_id, d.position
+  const designs = await c.query<{ post_id: string; file_id: string; thumb_file_id: string; position: number }>(
+    `SELECT d.post_id::text AS post_id, d.file_id::text AS file_id, COALESCE(d.thumb_file_id, d.file_id)::text AS thumb_file_id, d.position
        FROM social_post_designs d
       WHERE d.tenant_id = $1 AND d.post_id = ANY($2::uuid[]) AND d.removed_at IS NULL AND d.file_id IS NOT NULL
       ORDER BY d.position, d.added_at`,
@@ -242,9 +246,9 @@ async function shape(c: PoolClient, tenantId: string, rows: PostRowP[], withComm
       id: r.id, clientId: r.client_id, clientName: r.client_name, month: r.month, title: r.title, format: r.format,
       plannedAt: iso(r.scheduled_at), placement: r.placement ?? [], state: portalStateOf(r.pipeline_status),
       caption: r.caption ?? "", onAssetText: r.on_asset_text, cta: r.cta, hashtags: r.hashtags ?? [],
-      // The thumbnail is the image itself until SCP-2b stores one.
+      // The stored thumbnail (SCP-2b), or the image itself until one is made (or for a design that keeps none, a video).
       images: (dBy.get(r.id) ?? []).map((d, i, all) => ({
-        fileId: d.file_id, thumbFileId: d.file_id, position: d.position, alt: all.length > 1 ? `${r.title}, image ${i + 1} of ${all.length}` : r.title,
+        fileId: d.file_id, thumbFileId: d.thumb_file_id, position: d.position, alt: all.length > 1 ? `${r.title}, image ${i + 1} of ${all.length}` : r.title,
       })),
       variants: vs.map((v) => ({
         id: v.id, network: v.network, handle: v.handle, surface: surfaceOf(r.format, v.settings), body: v.body,
@@ -300,12 +304,17 @@ export async function listPortalPosts(
   const clients = narrow(clientIds, q.clientId);
   const zone = tz();
 
+  // The month (SCP-2a, "the month's approval page"; ruled at SCP-2's train): a chosen month narrows every tab and the counts. With
+  // none, To review and Approved show every month (a post waiting on the client is often next month's) and the grid shows the
+  // current month in the report zone.
+  const month = q.tab === "grid" ? (q.month ?? todayIsoInTz(zone).slice(0, 7)) : q.month;
   const countRows = await c.query<{ pipeline_status: string; n: string }>(
     `SELECT p.pipeline_status, count(*)::text AS n
        FROM social_posts p JOIN social_engagements e ON e.tenant_id = p.tenant_id AND e.id = p.engagement_id
-      WHERE p.tenant_id = $1 AND ${portalPostVisibleSql("p", "e", 2)}
+       LEFT JOIN social_cycles cy ON cy.tenant_id = p.tenant_id AND cy.id = p.cycle_id AND cy.deleted_at IS NULL
+      WHERE p.tenant_id = $1 AND ${portalPostVisibleSql("p", "e", 2)} ${q.month ? `AND ${MONTH_OF_POST} = $4` : ""}
       GROUP BY p.pipeline_status`,
-    [tenantId, clients],
+    q.month ? [tenantId, clients, zone, q.month] : [tenantId, clients],
   );
   const counts = { toReview: 0, approved: 0, changesAsked: 0 };
   for (const r of countRows.rows) {
@@ -328,11 +337,13 @@ export async function listPortalPosts(
     sk = `COALESCE(p.status_since, p.updated_at)`;
     desc = true;
   } else {
-    // The grid preview: every visible post of the month by date. The month defaults to the current one in the report zone.
-    const month = q.month ?? todayIsoInTz(zone).slice(0, 7);
+    // The grid preview: every visible post of the month, newest first, as the account's own feed shows them.
+    sk = `COALESCE(p.went_live_at, p.scheduled_at, '-infinity'::timestamptz)`;
+    desc = true;
+  }
+  if (month) {
     extra.push(month);
-    where = `AND COALESCE(to_char(cy.month, 'YYYY-MM'), to_char(p.scheduled_at AT TIME ZONE $3::text, 'YYYY-MM'), to_char(p.created_at AT TIME ZONE $3::text, 'YYYY-MM')) = $4`;
-    sk = `COALESCE(p.went_live_at, p.scheduled_at, 'infinity'::timestamptz)`;
+    where += ` AND ${MONTH_OF_POST} = $4`;
   }
   const params: unknown[] = [tenantId, clients, zone, ...extra];
   let keyset = "";

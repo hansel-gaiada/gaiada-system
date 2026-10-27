@@ -136,6 +136,11 @@ describe("the page draws every section of the read", () => {
     expect(screen.queryByRole("textbox", { name: "The client's link" })).toBeNull();
   });
 
+  it("says how the client's decision reached us: recorded on the client's behalf, by whom and through which channel (SCP-2e)", () => {
+    mount("Meet the packing team", "u-social");
+    expect(screen.getByTestId("scp-client-decision")).toHaveTextContent(/^How the client decided: approved outside the portal by WhatsApp; .+ recorded it on the client's behalf, /);
+  });
+
   it("says a post is SIMULATED when it is", () => {
     mount("Weekend brunch is back", "u-social");
     expect(screen.getByText("SIMULATED")).toBeInTheDocument();

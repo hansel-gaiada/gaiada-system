@@ -678,6 +678,27 @@ export function demoReviewHash(p: PipePost): string {
   return createHash("sha256").update(variants.map((x) => `${String(x.id)}:${createHash("sha256").update(`${p.caption}|${p.scheduledAt}|${String(x.network)}`).digest("hex")}`).sort().join("\n")).digest("hex");
 }
 
+const CLIENT_DECISIONS = new Set(["client_approve", "client_change", "record_client_approve", "record_client_change"]);
+
+/** The staff read's `clientDecision` (SCP-2, BFF §63.6.2) from the post's history, as the server reads it from the reviews: the last decision, gone again
+ *  once it is undone or the post goes back to the client. A recorded decision names the member of staff; a portal one names the contact. */
+export function demoClientDecision(p: PipePost): Record<string, unknown> | null {
+  let d: Record<string, unknown> | null = null;
+  for (const h of p.history as Array<Record<string, unknown>>) {
+    if (CLIENT_DECISIONS.has(String(h.action))) d = h;
+    else if (h.action === "client_undo" || h.to === "client") d = null;
+  }
+  if (!d) return null;
+  const recorded = d.recorded && typeof (d.recorded as { channel?: unknown }).channel === "string" ? (d.recorded as { channel: string }).channel : null;
+  const approved = d.action === "client_approve" || d.action === "record_client_approve";
+  return {
+    decisionId: String(d.decisionId ?? `${p.id}-decision`), kind: approved ? "approved" : "changes",
+    ...(d.changeKind ? { changeKind: d.changeKind } : {}), ...(d.note ? { note: d.note } : {}),
+    decidedAt: d.at, via: recorded ? "recorded" : "portal", ...(recorded ? { channel: recorded } : {}),
+    decidedBy: recorded ? null : (d.by ?? null), recordedBy: recorded ? (d.by ?? null) : null,
+  };
+}
+
 export function demoPipelinePost(p: PipePost, userId: string): Record<string, unknown> {
   const eng = store.engagements.find((e) => e.id === p.engagementId)!;
   const alloc = store.allocations[p.engagementId];
@@ -713,6 +734,7 @@ export function demoPipelinePost(p: PipePost, userId: string): Record<string, un
     officer: alloc.officerId ? who(alloc.officerId) : null, author: p.authorId ? who(p.authorId) : null,
     holder: holderOf(p), health: demoPostHealth(p), variants, approvedSchedule, scheduleVia: p.scheduleVia, reviewHash,
     liveUrl: p.liveUrl, wentLiveAt: p.wentLiveAt, simulated: p.simulated, archivedAt: p.archivedAt,
+    clientDecision: demoClientDecision(p),
     boost: null, tasks: [], copyLog: p.copyLog, history: p.history, actions, nextAction,
   };
 }

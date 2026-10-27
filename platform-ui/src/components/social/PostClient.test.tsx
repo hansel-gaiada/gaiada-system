@@ -13,17 +13,17 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("the client's decision", () => {
   it("names the contact for a decision given in the portal", () => {
-    expect(clientDecisionText(base)).toMatch(/^The client approved in the portal: Rina Contact, /);
+    expect(clientDecisionText(base)).toMatch(/^How the client decided: approved in the portal \(Rina Contact\), /);
   });
   it("names the member of staff and the channel for a recorded decision, and the change kind", () => {
     const text = clientDecisionText({
       ...base, kind: "changes", changeKind: "design", via: "recorded", channel: "whatsapp", decidedBy: null, recordedBy: { id: "u-1", name: "Officer One" },
     });
-    expect(text).toMatch(/^The client asked for a design change outside the portal \(WhatsApp\)\. Officer One recorded it on the client's behalf, /);
+    expect(text).toMatch(/^How the client decided: asked for a design change outside the portal by WhatsApp; Officer One recorded it on the client's behalf, /);
   });
   it("says a copy change, and a meeting, in words", () => {
     expect(clientDecisionText({ ...base, kind: "changes", changeKind: "copy", via: "recorded", channel: "meeting", decidedBy: null, recordedBy: null }))
-      .toMatch(/^The client asked for a copy change outside the portal \(a meeting\)\. Recorded on the client's behalf/);
+      .toMatch(/^How the client decided: asked for a copy change outside the portal by a meeting; recorded on the client's behalf/);
   });
   it("draws nothing before a decision", () => {
     const { container } = render(<ClientDecisionLine decision={null} />);

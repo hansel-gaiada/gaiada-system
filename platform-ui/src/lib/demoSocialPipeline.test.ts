@@ -123,7 +123,7 @@ describe("GET posts/:postId/pipeline", () => {
     "onAssetText", "cta", "hashtags", "visualDirection", "rawAssets", "placement", "scheduledAt", "isExtra", "isStory", "mustHaves", "pipelineStatus", "phase",
     "statusSince", "engineStatus", "change", "changedOnly", "copyBefore", "block", "creativeSource", "creativeState", "creativeRequest", "designs", "suggestions",
     "checks", "skippedChecks", "officer", "author", "holder", "health", "variants", "approvedSchedule", "scheduleVia", "reviewHash", "liveUrl", "wentLiveAt",
-    "simulated", "archivedAt", "boost", "tasks", "copyLog", "history", "actions", "nextAction",
+    "simulated", "archivedAt", "clientDecision", "boost", "tasks", "copyLog", "history", "actions", "nextAction",
   ];
   it("answers the §63.6.2 shape for every demo post, with phase, holder, engine status and next action from the twin", () => {
     for (const p of PIPE_POSTS) {
