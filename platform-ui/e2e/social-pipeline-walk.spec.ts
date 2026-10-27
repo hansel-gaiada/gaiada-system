@@ -50,6 +50,7 @@ const TITLE = `Walk post ${RUN}`;
 const TITLE_MC = `Walk maker-checker ${RUN}`;
 const CAPTION_FIRST = "Walk caption: the first draft of the note.";
 const CAPTION_SUGGESTED = "Walk caption: the copywriter's clearer version of the note.";
+const MAKER_CHECKER = "You wrote or look after this post, so you cannot pass it at this step. Another person has to.";
 const LINK_ONE = "https://example.com/walk/design-one";
 const LINK_TWO = "https://example.com/walk/design-two";
 
@@ -192,7 +193,8 @@ test.describe("SCP-1p: the content pipeline walked by its five roles", () => {
     // It is the copywriter's turn: the officer sees the copy actions, disabled, with the reason in words.
     await expect(live(page, "Approve copy")).toHaveCount(0);
     await expect(live(page, "Return with edits")).toHaveCount(0);
-    await expect(offRow(page, "Approve copy")).toContainText("Only a copywriter can do this.");
+    // The officer wrote the post, so the server's first answer is the maker/checker one, before the role one ("Only a copywriter can do this.").
+    await expect(offRow(page, "Approve copy")).toContainText(MAKER_CHECKER);
     await expect(activity(page)).toContainText("Draft to Proofread");
   });
 
@@ -276,7 +278,7 @@ test.describe("SCP-1p: the content pipeline walked by its five roles", () => {
     await expect(activity(page).locator("li").last()).toContainText("Changes asked to HoD approval");
     // And it is the HoD's turn, not the officer's.
     await expect(live(page, "Approve for design")).toHaveCount(0);
-    await expect(offRow(page, "Approve for design")).toContainText("Only the Social Media head, the GM, the owner or the superadmin can do this.");
+    await expect(offRow(page, "Approve for design")).toContainText(MAKER_CHECKER); // the author may not pass their own post at the HoD step either
   });
 
   test("7 HoD: approves for design, and the post goes to the Creative", async ({ page, context }) => {
@@ -406,7 +408,7 @@ test.describe("SCP-1p: the content pipeline walked by its five roles", () => {
     // The superadmin's wildcard would allow it, the maker/checker DENY beats the wildcard.
     await expect(live(page, "Approve copy")).toHaveCount(0);
     await expect(live(page, "Return with edits")).toHaveCount(0);
-    await expect(offRow(page, "Approve copy")).toContainText("You wrote or look after this post, so you cannot pass it at this step. Another person has to.");
+    await expect(offRow(page, "Approve copy")).toContainText(MAKER_CHECKER);
     await expect(offRow(page, "Return with edits")).toContainText("You wrote or look after this post, so you cannot pass it at this step.");
     await expect(chip(page)).toHaveText("Proofread");
   });
