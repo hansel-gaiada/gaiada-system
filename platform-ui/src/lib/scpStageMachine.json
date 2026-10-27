@@ -732,6 +732,7 @@
     "checks_failed": { "http": 409, "with": "blockers [{code, message}]" },
     "suggestion_stale": { "http": 409, "with": "detail {fields}" },
     "creatives_unit_missing": { "http": 409 },
+    "request_kind_unavailable": { "http": 409 },
     "design_missing": { "http": 409 },
     "design_not_stored": { "http": 409, "with": "detail {designIds}" },
     "no_account_for_network": { "http": 409, "with": "detail {networks}" },

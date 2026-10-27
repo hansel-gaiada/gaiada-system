@@ -212,6 +212,7 @@ export const REFUSAL_WORDS: Readonly<Record<string, string>> = {
   checks_failed: "Some hand-off checks failed. Fix them, or send anyway with a reason.",
   suggestion_stale: "A suggestion was made against text that has changed since. Ask the copywriter to suggest again, or drop it.",
   creatives_unit_missing: "The company has no Creatives department, so the design request cannot be opened.",
+  request_kind_unavailable: "Project Management is off for this company, so the design request to Creatives cannot be opened. Ask an admin to turn it on.",
   design_missing: "Add at least one design first.",
   design_not_stored: "A design that is only a link has nothing to show the client. Add it from the Asset Library.",
   no_account_for_network: "The client has no account on a network the post is placed on.",
