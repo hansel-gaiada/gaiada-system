@@ -478,8 +478,11 @@ function sourceFiles(dir = SRC): string[] {
   return out;
 }
 const rel = (p: string) => relative(SRC, p).split(sep).join("/");
-/** The only file allowed to write a `simulated = true` account (SCP-Sb). */
+/** The file that writes `simulated = true` accounts behind fence 4 (SCP-Sb's seed). */
 const SIMULATED_ACCOUNT_WRITER = "modules/social/simulated-accounts.ts";
+/** SCP-Sb's prepare script: the one other writer of the mark. It runs BEFORE the switch is on (boot refuses the switch beside any
+ *  non-simulated row), so it cannot sit behind fence 4; the test below pins what it may do instead. */
+const SIMULATED_PREPARE_SCRIPT = "seed/social-simulation-prepare.ts";
 const sqlLiterals = (src: string) => [...src.matchAll(/`[^`]*`/g)].map((m) => m[0]);
 
 describe("SCP-Sa · static inventory of the writers (src/, tests excluded)", () => {
@@ -498,15 +501,16 @@ describe("SCP-Sa · static inventory of the writers (src/, tests excluded)", () 
       "modules/social/publisher/youtube-oauth.ts",
       "modules/social/simulated-accounts.ts",
       "seed/portal-engagement.ts",
+      "seed/social-simulation-prepare.ts",
     ]);
     for (const f of writers) {
       // SCP-Sb's seed is the one writer of SIMULATED accounts: it owes the opposite fence (switch OFF refuses) instead.
-      if (rel(f) === SIMULATED_ACCOUNT_WRITER) continue;
+      if (rel(f) === SIMULATED_ACCOUNT_WRITER || rel(f) === SIMULATED_PREPARE_SCRIPT) continue;
       expect(readFileSync(f, "utf8"), rel(f)).toMatch(/\b(assertRealAccountWriteAllowed|realAccountWriteRefusal)\(/);
     }
   });
 
-  it("the ONLY statement that writes a variant's `simulated` mark is dispatch.ts's stamp; the ONLY account-mark writer is SCP-Sb's seed", () => {
+  it("the ONLY statement that writes a variant's `simulated` mark is dispatch.ts's stamp; the ONLY account-mark writers are SCP-Sb's seed and its prepare script", () => {
     const variantMarkWriters: string[] = [];
     const accountMarkWriters: string[] = [];
     for (const f of files) {
@@ -519,7 +523,11 @@ describe("SCP-Sa · static inventory of the writers (src/, tests excluded)", () 
     expect(variantMarkWriters).toEqual(["modules/social/dispatch.ts"]);
     // SCP-Sb's seed is the ONE writer of an account's mark: it calls `assertSimulatedWriteAllowed` before it writes, and its
     // controller calls it again before the body is read. A second writer fails here until it is fenced the same way.
-    expect([...new Set(accountMarkWriters)]).toEqual([SIMULATED_ACCOUNT_WRITER]);
+    expect([...new Set(accountMarkWriters)].sort()).toEqual([SIMULATED_ACCOUNT_WRITER, SIMULATED_PREPARE_SCRIPT]);
+    // The prepare script only ever turns the mark ON, on rows that are off, inserts nothing and deletes nothing.
+    const prepare = sqlLiterals(readFileSync(join(SRC, SIMULATED_PREPARE_SCRIPT), "utf8")).join(" "); // the SQL literals only: the header quotes the statement
+    expect(prepare.match(/\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+social_\w+/g)).toEqual(["UPDATE social_accounts"]);
+    expect(prepare).toMatch(/UPDATE social_accounts SET simulated = true, updated_at = now\(\) WHERE tenant_id = \$1 AND simulated = false AND id = ANY/);
     const seed = readFileSync(join(SRC, SIMULATED_ACCOUNT_WRITER), "utf8");
     const fence = seed.indexOf('assertSimulatedWriteAllowed("simulated-account seed")');
     expect(fence).toBeGreaterThan(-1);
