@@ -11,6 +11,20 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.210.0` - SCP-1d: the Social Media Home, laid out as the team's feed (plan §6.2; FRONTEND-BFF-CONTRACT §63.7) (2026-10-27) - PROTOTYPED
+
+- **Where.** `{D}` for the Social Media workspace, when it is drawn in the Social skin (`effectiveSkin`, the shell's own answer). A person who chose Standard, and every other department, get the page as before. The Overview's header, banner and bands stay; the feed sits between the header and the bands (`WorkspaceOverview`'s new `lead` slot).
+- **Six sections from five reads, started together on the server** (`feed?view=your_turn`, `waiting`, the caller's open tasks, `allocation?mine=1`, `cycles?month=`):
+  - **Your turn.** The next allowed action is the main button. An action with no dialog runs from the card with `expectedStatus` and an action id; one that needs an answer opens the post; a refused one is disabled, with the reason in words.
+  - **Waiting on others.** Grouped by who holds each post.
+  - **Tasks given to you.**
+  - **Reports due.** The allocation's due day; whether a report is drafted or sent waits for SCP-5a.
+  - **Client stories.** Rings coloured by cycle health with the status tokens, and the state in words.
+  - **Your accounts this cycle.**
+- **States.** Each section has its own failure state, so a failed read says "cannot be read" and never "nothing". No read is made per card or per client.
+- **The owner and the superadmin hold no queue** (only the two lead seats are approver holders, §63.2), so their empty "Your turn" says so.
+- **Proof.** The car was green on its own branch: CI 40476789010; sumopod e2e social-skin 33/33 and standard 91/91. The train passed on its combined run.
+
 ### platform-nest `0.184.0` + platform-ui `0.209.0` + wa-chat-bot `0.11.0` - AI plan phase 0: AIP-00c (the brain picker lists only brains that work) and AIP-00b (the bot's old built-in AI gateway removed); AIP-00a designed (2026-10-27) - PROTOTYPED
 
 - **AIP-00c, platform-nest:** new `GET /api/:tenantId/assistant/brains` returns `{brains: [{value, available}], checkedAt}`.
