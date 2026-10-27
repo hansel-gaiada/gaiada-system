@@ -66,7 +66,7 @@ const group = (name: string) => within(screen.getByRole("group", { name }));
 const open = (name: string) => fireEvent.click(bar().getByRole("button", { name }));
 const lastBody = (): Body => vi.mocked(runPostAction).mock.calls.at(-1)![1] as Body;
 const closed = () => waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-const chip = (text: string) => screen.getByText(text, { selector: ".scp-chip" });
+const chip = (text: string) => screen.getByText(text, { selector: ".scp-chip:not(.scp-chip--phase)" });
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -133,7 +133,7 @@ describe("the page draws every section of the read", () => {
 
   it("shows what the client approved for an approved post, and why its date is locked", () => {
     mount("Behind the scenes at the studio", "u-social");
-    expect(screen.getByText(/The client approved/)).toBeInTheDocument();
+    expect(screen.getByText(/The client approved/, { selector: ".scp-post__banner" })).toBeInTheDocument();
     expect(group("Date and time").getByText("Use Reschedule: the client will be asked again.")).toBeInTheDocument();
     expect(group("Networks").getByText("Use Reschedule: the client will be asked again.")).toBeInTheDocument();
   });
@@ -565,8 +565,8 @@ describe("comments and pins (SCP-1l)", () => {
     { id: "c-2", author_id: "u-2", author_name: "Citra Maheswari", body: "Move the logo", parent_comment_id: null, created_at: "2026-10-15T12:00:00Z", visibility: "team" as const, anchor: { x: 0.8, y: 0.1, fileId: FILE(title) } },
   ];
 
-  it("draws a pin on the stored design for each anchored comment, and offers the client toggle only to someone who holds record_client", () => {
-    const t = "Autumn collection teaser";
+  it("draws a pin on the stored design for each anchored comment, and offers the client toggle to someone whose actions include a record_client sibling", () => {
+    const t = "Weekend market date moved";
     mount(t, "u-social", { comments: comments(t) });
     expect(screen.getByRole("button", { name: "Pin 1: Move the logo" })).toBeInTheDocument(); // on the image
     expect(screen.getByRole("button", { name: "Pin 1" })).toBeInTheDocument(); // in the thread
@@ -582,7 +582,7 @@ describe("comments and pins (SCP-1l)", () => {
   });
 
   it("places a pin on the image and posts the comment with its visibility and the pin", async () => {
-    const t = "Autumn collection teaser";
+    const t = "Weekend market date moved";
     mount(t, "u-social", { comments: comments(t) });
     fireEvent.click(screen.getByRole("button", { name: "Pin on image" }));
     fireEvent.click(screen.getByRole("button", { name: /^Place a pin on the image/ }));

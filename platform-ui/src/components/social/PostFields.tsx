@@ -133,7 +133,7 @@ function Editor({ spec, draft, setDraft }: { spec: FieldSpec; draft: Draft; setD
       );
     case "networks":
       return (
-        <fieldset className="scp-checks" aria-label={spec.label}>
+        <fieldset className="scp-checks" aria-label={`Choose ${spec.label.toLowerCase()}`}>
           {NETWORKS.map((n) => (
             <label key={n}>
               <input
@@ -147,7 +147,7 @@ function Editor({ spec, draft, setDraft }: { spec: FieldSpec; draft: Draft; setD
       );
     case "musthaves":
       return (
-        <fieldset className="scp-checks" aria-label={spec.label}>
+        <fieldset className="scp-checks" aria-label={`Choose ${spec.label.toLowerCase()}`}>
           {MUST_HAVES.map((m) => (
             <label key={m.key}>
               <input
