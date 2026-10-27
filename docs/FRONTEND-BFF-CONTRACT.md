@@ -2483,15 +2483,22 @@ this relay), changing this framing again is a breaking change.
   **Additive contract: a consumer MUST treat an absent `meta` event as "unknown provider" — never
   an error.** This covers both an older gateway build (pre-ASST-11) and, until the ASST-06
   follow-up lands, THIS gateway's only real consumer, which simply never looks for it yet.
-- **`event: usage`** — `data: {"promptTokens":int,"completionTokens":int}`. **Terminal** — written
+- **`event: usage`** — `data: {"promptTokens":int,"completionTokens":int,"costUsd"?:number,"source":"provider"}`
+  (**AIP-02, 2026-10-27:** `costUsd` and `source` are additive; `costUsd` is the upstream's own USD figure and
+  is omitted when it sent none; `source` is always `"provider"`; a consumer that reads only the two counts, as
+  platform-nest's `stream.ts` does, is unaffected). **Terminal** — written
   immediately before `event: done`, and **only** when a provider reports REAL end-of-stream token
   counts (never zero-filled, never estimated — the whole point of this event is that it is never
   ASST-06's own ~4-chars/token estimate wearing a "real" label). Absent on every error path, and
   absent whenever the serving provider doesn't report counts.
-  **Which providers can report it today: `ollama` only** (`internal/providers/ollama.go` —
+  **Which providers can report it today: `ollama` and, since AIP-02, `openai`** (the live OpenRouter brain: it
+  streams natively with `stream_options.include_usage` and reports OpenRouter's counts and `usage.cost`; see
+  `ai-gateway-go/CLAUDE.md`, "Usage and cost on the text routes". `POST /complete` gains the same figures as an
+  optional `usage` object `{promptTokens,completionTokens,costUsd?,source}` beside the unchanged `{text,provider}`).
+  The paragraph below is the ASST-11 record for `ollama` (`internal/providers/ollama.go` —
   Ollama's NDJSON final line carries `prompt_eval_count`/`eval_count`, wired via the new
-  `providers.UsageStreamingProvider` extension of `StreamingProvider`). `echo`, `openai` (incl.
-  Ollama Cloud), `gemini`, and `claude` report no real counts today — `usage` is simply absent for
+  `providers.UsageStreamingProvider` extension of `StreamingProvider`). `echo`, `gemini`, and `claude`
+  (and `openai` when its upstream reports no usage, e.g. Ollama Cloud) report no real counts today — `usage` is simply absent for
   them, by design, not a gap. Live production usage from the real Ollama upstream is
   **UNVERIFIED** — proven only against fixture NDJSON in `internal/providers/ollama_test.go`; no
   live Ollama instance was driven for this ticket.
