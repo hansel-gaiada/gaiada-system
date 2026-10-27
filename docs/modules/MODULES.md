@@ -34,8 +34,8 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.178.0` | IN PROGRESS | WS1 | 2026-10-27 |
-| platform-ui | `0.203.0` | IN PROGRESS | WS5 | 2026-10-27 |
+| platform-nest | `0.179.0` | IN PROGRESS | WS1 | 2026-10-27 |
+| platform-ui | `0.204.0` | IN PROGRESS | WS5 | 2026-10-27 |
 | ai-gateway-go | `0.13.3` | PROTOTYPED | WS3 | 2026-10-13 |
 | mcp-hub | `0.16.0` | PROTOTYPED | WS2 | 2026-10-15 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -48,7 +48,7 @@ versions below; the running build reports it at `GET /health`.
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
-| webdesk | `0.30.0` | DEV-VERIFIED | Web Dev | 2026-10-27 |
+| webdesk | `0.31.0` | DEV-VERIFIED | Web Dev | 2026-10-27 |
 | search-marketing | `0.5.2` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.5.31` | IN PROGRESS | Social Media | 2026-08-23 |
 | hr | `0.5.0` | IN PROGRESS | HR | 2026-08-26 |

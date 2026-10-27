@@ -11,6 +11,25 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.179.0` + webdesk `0.31.0` + platform-ui `0.204.0` - M5-W1q: a contributor's upload is quarantined until a staff editor accepts it (WSK-D84) (2026-10-27) - PROTOTYPED
+
+- **WebDesk.** Migration `0020_media_review_state.sql`: `media_assets.review_state` is `accepted` (the default), `quarantined` or `rejected`.
+  - Quarantine is decided at token mint from the signed `xc` claim, and the upload request cannot change it.
+  - The scan still runs first.
+  - Only an accepted asset is served by `GET /v1/t/:slug/media/:id`, its transform, or the private presign, and only accepted assets are exported on promotion.
+  - Publishing or scheduling content that names an unaccepted `/media/<id>` is 409 `media-not-accepted`, and nothing is written.
+  - New `media.review {decision}` is final, only for a quarantined asset, and never by the uploader (`media-self-review`), a contributor or a client editor. Reject soft-deletes the asset for the existing purge.
+  - `media.uploadToken` joins `CONTRIBUTOR_COMMANDS`.
+- **ERP.** In `resource_webdesk_media_asset.yaml`:
+  - `upload` leaves the contributor DENY (`update` and `delete` stay denied) with a contributor-only ALLOW on its editorial site;
+  - the new action `review` goes to the editor and publisher tiers (`webdev_staff`, `webdev_manager`, the scoped `webdesk_editor`, company admin and up);
+  - structural DENYs stop the uploader, an unknown uploader, contributors, bots and automation.
+
+  Also: the catalog key `webdev.webdesk_media_asset.review`, the regenerated bundles, and migration `202610271100_iam_webdesk_media_review.sql` (an IAM seed). The BFF has `GET media/quarantine` (with a per-row `allowed.review`) and `POST media/:assetId/review`; the upload-token route opens to contributors. **Cerbos must be restarted and probed after deploy.**
+- **UI:** the writers' room has a new `uploads` page (a site picker, then the queue) with Accept and Reject driven by `allowed`. It is reachable by URL; a nav link is a follow-up.
+- **Tests:** `webdesk-media-quarantine` (17), migration 0020 (46 checks), the writers'-room Cerbos suite (33). On sumopod `cerbos compile --tests`: writers' room 5377/5377 and the new media-review matrix 144/144. CI 40444799794 green on the branch.
+- **Not built yet:** a byte preview for the reviewer (it needs a staff-only presign or a sandboxed proxy, a decision).
+
 ### platform-nest `0.178.0` - M6-P6o and P6o2: the ERP writes each site's deploy secret from its own vault record (WSK-D88); agentic-native T18 people readers (2026-10-27) - PROTOTYPED
 
 - **M6-P6o.**
