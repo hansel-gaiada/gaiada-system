@@ -11,6 +11,37 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.189.0` + ai-agents `0.17.0` + mcp-hub `0.17.0` + wa-chat-bot `0.12.0` - AI plan phase 1, second half: AIP-03a (every platform-nest AI call writes a usage row), AIP-03b (the services outside platform-nest report theirs) and AIP-04 (the price table; assistant threads' total cost filled) (2026-10-28) - PROTOTYPED
+
+- **AIP-03a.** Every platform-nest caller of the AI gateway writes one `ai_usage_events` row per call, recorded in the clients rather than at the call sites. Each client requires an `AiCallAttribution` (company, person or an explicit null, surface, and optionally department, thread, run and task), so a new caller cannot compile without it. The callers covered:
+  - assistant replies (`relayGeneration`) and compaction;
+  - the search client (its seven routes, keyword embedding and clustering, report narratives, account summaries, WebDesk assist);
+  - the social client (briefs, inbox triage, reports, drafts).
+- **What each row carries:**
+  - **Tokens:** labelled `provider` (from the gateway's real usage, AIP-02), `estimate` (the assistant's 4-characters estimate) or `none`.
+  - **Cost:** the provider's own cost first.
+  - **Outcome:** `ok`, `blocked_budget` (429), `blocked_dlp` (503), `error`, or `incurred` (a reply stopped or dropped mid-stream).
+  - **Department:** the call site's, or the person's primary active unit (cached 10 minutes, never failing the call).
+  - Recording is fire-and-forget and never changes a call's result.
+- **Not covered yet:** the callers outside platform-nest (the agent runner, knowledge embeddings, bots) are AIP-03b.
+- **AIP-03b: the AI callers outside platform-nest report usage.** They have no platform DB access, so they post to the new `POST /api/internal/ai-usage`.
+  - **The route.** `ServiceGuard` with `PLATFORM_SERVICE_TOKEN`, as `/principal/resolve` uses it. It takes 1 to 100 events and answers `{accepted, rejected:[{index, reason}], counted}`; reason codes never echo a value.
+  - **Its checks.** Only surfaces `agent`, `knowledge`, `bot` and `other` are accepted. The company must exist and not be deleted. A user who is not an active member is stored NULL and counted. The department is always the platform's own resolution, never the caller's. It writes through the same writer, so validation, the price table and `cost_source` are identical.
+  - **The reporters.** A batching, fire-and-forget reporter (byte-identical in `ai-agents`, `mcp-hub` and `wa-chat-bot`): it flushes every 5 s or at 50 events, caps its queue at 1000, never throws, and is off without `PLATFORM_URL` and `PLATFORM_SERVICE_TOKEN`.
+  - **The call sites:**
+    - the agent runner's `/complete` (surface `agent`, the agent's name as `task`, the run id, the requesting person);
+    - knowledge embeddings (`knowledge`/`embed`; a search across several companies writes nothing);
+    - the MCP hub's `/complete` and `/media` (`agent` when an agent called it, else `other`; the tenant from the tool call's `tenantId`, now optional on `llm.summarize`, `llm.extract` and `design.prototype`);
+    - the WhatsApp bot (`bot`; its company from a new `DEFAULT_TENANT_ID`; blank means no rows).
+  - **Compose:** `PLATFORM_URL` and `PLATFORM_SERVICE_TOKEN` for `agent-runner`, `bot` and `bot-media-worker`, plus `DEFAULT_TENANT_ID` for both bot services (empty by default).
+  - **Gaps:** n8n workflows that call the hub's AI tools pass no `tenantId` yet, so they write no rows. Rows from `/complete` have a NULL model, because the gateway does not name it.
+  - **Tests:** the route's unit 12 plus controller 6 (run locally), and its HTTP suite 6 (on the Linux gate); per service, the reporter 10 and the event 6, plus the call sites (`ai-agents` 11 + 4, `mcp-hub` 7 through the real hub, the bot 8). The full suites pass locally: `ai-agents` 443, `mcp-hub` 451, `wa-chat-bot` 559.
+- **AIP-04: migration `202610271810_ai_model_prices.sql`.** `ai_model_prices (provider, model, effective_from)` holds USD per million prompt and completion tokens. It is global reference data, read-only to `platform_app`.
+  - **No price is seeded:** none exists in the repo, and prices are never invented. The owner or an admin enters them.
+  - When a row has tokens but no provider cost, the writer prices it from the newest effective row, labelled `table`. No price row leaves the cost NULL; unknown is not zero.
+  - `assistant_threads.total_cost_usd`, read but never written until now, is kept equal to the sum of the thread's usage-row costs.
+- **Tests:** locally, prices 17, the recorder 27, the callers through to the INSERT 25, the migration 7, and the updated webdesk-assist 22. `ai-model-prices.db.test.ts` (14) runs on the Linux gate.
+
 ### platform-nest `0.188.0` - SCP-2: the client reviews a month of social posts in the portal (FRONTEND-BFF-CONTRACT §63.8, §63.9, §63.14; plan §8 SCP-2) (2026-10-28) - PROTOTYPED
 
 - **The routes.** `api/:tenantId/portal/social`: `GET posts?tab=to_review|approved|grid&clientId&month&cursor&limit` (`{items, nextCursor, counts}`), `GET stories`, `GET posts/:postId`, `POST posts/:postId/decide`, `POST posts/approve-all`, `POST decisions/:decisionId/undo` (new `core/social-pipeline-portal.controller.ts`). Order of checks: Cerbos `portal`, the portal scope, the post's visibility (a pipeline post of one of the caller's clients that reached the client; anything else is 404), then the body. A chosen month narrows every tab and the counts; with none, To review and Approved show every month and the grid the current one, newest first.
