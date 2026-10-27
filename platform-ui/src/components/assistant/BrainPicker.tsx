@@ -49,9 +49,11 @@ export function BrainPicker({ thread, disabled, onChanged }: {
 
   if (!thread) return null;
 
-  const offered = BRAIN_OPTIONS.filter((o) => o.value === null || (available instanceof Set && available.has(o.value)));
+  // While the list is loading, the stored choice keeps its plain label: it is not yet known to be unavailable.
+  const loading = available === undefined;
   const stored = thread.brainProvider;
-  const storedHidden = stored !== null && !offered.some((o) => o.value === stored);
+  const offered = BRAIN_OPTIONS.filter((o) => o.value === null || (available instanceof Set && available.has(o.value)) || (loading && o.value === stored));
+  const storedHidden = !loading && stored !== null && !offered.some((o) => o.value === stored);
 
   async function handleChange(raw: string) {
     const value = raw === "" ? null : raw;
