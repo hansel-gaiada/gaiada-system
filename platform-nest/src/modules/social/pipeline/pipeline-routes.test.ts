@@ -17,7 +17,10 @@
 //   (6) SCP-Q13: schedule keeps the approved date; reschedule sends the post back with every review pending; a publisher
 //       schedule is unscheduled by one of the four (its dispatch cancelled at the publisher first); a Composer caption
 //       edit on an approved post sends it back; approved_time_passed;
-//   (7) the designs routes (another company's asset is 404), the suggestions routes, the bulk route, the read.
+//   (7) the designs routes (another company's asset is 404), the suggestions routes, the bulk route, the read (which
+//       carries `scheduleVia`);
+//   (8) the month request: opening it tells the Creatives head as a hand-filed request does (`request.received`), joining
+//       it tells nobody.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../../config";
@@ -199,7 +202,7 @@ describe.skipIf(!TEST_URL)("SCP-1b · the pipeline routes (BFF §63.6)", () => {
 
     const people = [
       "officer", "otherOfficer", "copywriter", "hod", "gm", "owner", "superadmin", "companyAdmin", "socialManager",
-      "webHead", "designer", "otherDesigner", "inTeamDesigner", "bot", "foreignHead",
+      "webHead", "designer", "otherDesigner", "inTeamDesigner", "bot", "foreignHead", "creativesHead",
     ];
     for (const p of people) {
       U[p] = await createUser(`scp1b-${p.toLowerCase()}@mock.test`, `Mock ${p}`);
@@ -224,6 +227,7 @@ describe.skipIf(!TEST_URL)("SCP-1b · the pipeline routes (BFF §63.6)", () => {
     await grantSocialSeat(A, units.socialMedia, U.hod);
     await grantSocialSeat(A, units.gm, U.gm);
     await grantSocialSeat(A, units.webDev, U.webHead);
+    await grantSocialSeat(A, units.creatives, U.creativesHead);
     await grantSocialSeat(B, units.socialMedia, U.foreignHead);
     for (const p of ["officer", "hod", "superadmin"]) await linkIdentity(U[p], "whatsapp", `wa-${p}`, true);
 
@@ -493,6 +497,35 @@ describe.skipIf(!TEST_URL)("SCP-1b · the pipeline routes (BFF §63.6)", () => {
     await ok(await act(U.inTeamDesigner, teamPost, "start_design"), "the in-team designer");
   });
 
+  it("opening the month request tells the Creatives head as a hand-filed request does; joining it tells nobody", async () => {
+    const eng = await freshEngagement();
+    const received = async (requestId: string) =>
+      (await adminPool().query(
+        `SELECT user_id::text AS user_id, payload->>'title' AS title, payload->>'href' AS href FROM notifications WHERE type = 'request.received' AND payload->>'entityId' = $1`,
+        [requestId])).rows as Array<{ user_id: string; title: string; href: string }>;
+
+    // The first approval for design opens the cycle's request: the Creatives unit's head is told, the approver is not.
+    const first = await newPost(eng);
+    await driveTo(eng, first, "design");
+    const requestId = (await row(first))?.creative_request_id;
+    expect(requestId).toBeTruthy();
+    const told = await received(requestId!);
+    expect(told.map((r) => r.user_id)).toEqual([U.creativesHead]);
+    expect(told[0].title).toContain("New request for Creatives");
+    expect(told[0].href).toMatch(/^\/departments\/.+\/requests$/);
+
+    // The second post of the same cycle joins that request (still open): the same request, and no second notification.
+    const second = await newPost(eng);
+    await driveTo(eng, second, "design");
+    expect((await row(second))?.creative_request_id).toBe(requestId);
+    expect((await received(requestId!)).map((r) => r.user_id)).toEqual([U.creativesHead]);
+    const requests = await adminPool().query(`SELECT count(*)::int AS n FROM work_requests WHERE tenant_id = $1 AND id = ANY($2::uuid[])`, [A, [requestId]]);
+    expect(requests.rows[0].n).toBe(1);
+    const cycleRequests = await adminPool().query(
+      `SELECT count(DISTINCT creative_request_id)::int AS n FROM social_posts WHERE tenant_id = $1 AND cycle_id = $2`, [A, eng.cycleId]);
+    expect(cycleRequests.rows[0].n).toBe(1);
+  });
+
   it("an unattended automation is refused; an agent acting for the officer acts as the officer, recorded as via.agent", async () => {
     const eng = await freshEngagement();
     const postId = await newPost(eng);
@@ -577,11 +610,14 @@ describe.skipIf(!TEST_URL)("SCP-1b · the pipeline routes (BFF §63.6)", () => {
     await driveTo(eng, postId, "scheduled");
     const v = await adminPool().query(`SELECT scheduled_at FROM social_post_variants WHERE post_id = $1 AND deleted_at IS NULL`, [postId]);
     for (const r of v.rows) expect(new Date(r.scheduled_at).toISOString()).toBe(FUTURE);
+    const scheduled = await app.inject({ method: "GET", url: `${base()}/posts/${postId}/pipeline`, headers: headersFor(eng.officer) });
+    expect(scheduled.json().scheduleVia).toBe("manual");
     const back = await ok(await act(eng.officer, postId, "reschedule", { at: LATER }), "reschedule");
     expect(back.post.pipelineStatus).toBe("client");
     expect(back.post.scheduledAt).toBe(LATER);
     expect(back.post.variants.every((x: { reviewStatus: string }) => x.reviewStatus === "pending")).toBe(true);
     expect((await row(postId))?.schedule_via).toBeNull();
+    expect(back.post.scheduleVia).toBeNull();
   });
 
   it("a publisher schedule: the officer cannot reschedule it (cancel); one of the four unschedules it, cancelling the queued dispatch first", async () => {
@@ -590,7 +626,8 @@ describe.skipIf(!TEST_URL)("SCP-1b · the pipeline routes (BFF §63.6)", () => {
       const eng = await freshEngagement();
       const postId = await newPost(eng);
       await driveTo(eng, postId, "approved");
-      await ok(await act(U.hod, postId, "schedule_publisher"), "schedule_publisher");
+      const viaPublisher = await ok(await act(U.hod, postId, "schedule_publisher"), "schedule_publisher");
+      expect(viaPublisher.post.scheduleVia).toBe("publisher");
       // The decided approval was dispatched: the variant is queued at the publisher.
       const variant = await adminPool().query(`SELECT id::text AS id FROM social_post_variants WHERE post_id = $1 AND deleted_at IS NULL`, [postId]);
       const approval = await adminPool().query(`SELECT id FROM automation_approvals WHERE tool_args->>'variantId' = $1`, [variant.rows[0].id]);
@@ -709,7 +746,7 @@ describe.skipIf(!TEST_URL)("SCP-1b · the pipeline routes (BFF §63.6)", () => {
     expect(designerRead.statusCode).toBe(403);
     const ownRead = await app.inject({ method: "GET", url: `${base()}/posts/${postId}/pipeline`, headers: headersFor(U.officer) });
     expect(ownRead.statusCode).toBe(200);
-    expect(ownRead.json()).toMatchObject({ pipelineStatus: "planned", phase: "brief", health: null, boost: null, tasks: [], nextAction: "start_draft" });
+    expect(ownRead.json()).toMatchObject({ pipelineStatus: "planned", phase: "brief", scheduleVia: null, health: null, boost: null, tasks: [], nextAction: "start_draft" });
     expect(composer.statusCode).toBe(409);
   });
 

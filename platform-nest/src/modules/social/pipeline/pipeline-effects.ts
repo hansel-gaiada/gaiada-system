@@ -14,7 +14,6 @@ import { newId, withTenants } from "../../../db";
 import { config } from "../../../config";
 import { emitEvent } from "../../../events/outbox.service";
 import { insertAutomationApprovalRow, type FileApprovalInput } from "../../../core/approval-filing";
-import { createRequestWorkItemInTx } from "../../../core/work-requests.controller";
 import * as wr from "../../../core/work-requests.service";
 import { variantArgsSha256, variantPublishArgs } from "../canonical-args";
 import { estimateCostUsd, isNetwork, supportsFirstCommentFor, validateVariant, type Network } from "../media-rules";
@@ -340,11 +339,9 @@ const MONTHS = ["January", "February", "March", "April", "May", "June", "July", 
 
 /** The post joins the cycle's month request, opening one when the cycle has none or its request is no longer open.
  *
- *  ⚠ CONTRACT GAP: §63.6.6 says "an ordinary §32 asset request". There is no service function that creates one: the
- *  creation lives inline in `WorkRequestsController.create` (core/work-requests.controller.ts:91-157). This composes the
- *  same exported pieces in the same order (`parseAssetsForm`, `loadOrgIndex`, `requireToDepartment`, `resolveFromUnit`,
- *  `ensureIntakeProject`, `createRequestWorkItemInTx`, then the `work_requests` row and its `work_request.created` event);
- *  only the INSERT statement is repeated. Extracting `createWorkRequestInTx` from the controller would end that. */
+ *  The request is an ordinary §32 asset request (§63.6.6): it is created by `createWorkRequestInTx`, the very function
+ *  `POST requests` runs in its transaction, so the two cannot drift. The receiving unit's "request received" notification
+ *  is sent after the commit by the service (`afterCommit`, from `out.openedRequest`), as it is for a hand-filed request. */
 async function joinOrOpenMonthRequest(run: EffectRun): Promise<void> {
   if (!run.cycle) throw new ScpRouteError(404, "cycle_not_found");
   const cycle = await run.c.query<{ creative_request_id: string | null; status: string | null }>(
@@ -366,30 +363,13 @@ async function joinOrOpenMonthRequest(run: EffectRun): Promise<void> {
       channel: "social",
       notes: `Designs for ${run.engagement.client_name}'s ${MONTHS[m - 1]} ${y} posts; each post lists its own brief.`,
     });
-    const index = await wr.loadOrgIndex(run.c, run.tenantId);
-    const toUnit = wr.requireToDepartment(index, unit.id);
-    const fromUnitId = await wr.resolveFromUnit(run.c, run.tenantId, run.actorId, index);
-    const who = await run.c.query<{ name: string }>(`SELECT name FROM users WHERE id = $1`, [run.actorId]);
-    const intake = await wr.ensureIntakeProject(run.c, run.tenantId, unit.id, toUnit.name ?? unit.name, config.originSite);
-    const work = await createRequestWorkItemInTx(run.c, {
-      tenantId: run.tenantId, userId: run.actorId, kind: "assets", toUnitId: unit.id, toName: toUnit.name ?? unit.name,
-      projectId: intake.projectId, clientId: null, title, brief: "", neededBy: run.cycle.ready_by, form,
-      requesterName: who.rows[0]?.name ?? "Someone", fromUnitName: fromUnitId ? index.get(fromUnitId)?.name ?? null : null,
+    const created = await wr.createWorkRequestInTx(run.c, run.tenantId, run.actorId, {
+      kind: "assets", toUnitId: unit.id, title, brief: "", neededBy: run.cycle.ready_by, campaignPartId: null, form,
     });
-    requestId = newId();
-    await run.c.query(
-      `INSERT INTO work_requests
-         (id, tenant_id, kind, to_unit_id, from_unit_id, requested_by, title, brief, needed_by, campaign_part_id, form,
-          pm_task_id, change_request_id, origin_site)
-       VALUES ($1, $2, 'assets', $3, $4, $5, $6, '', $7::date, NULL, $8::jsonb, $9, NULL, $10)`,
-      [requestId, run.tenantId, unit.id, fromUnitId, run.actorId, title, run.cycle.ready_by, JSON.stringify(form), work.pmTaskId, config.originSite],
-    );
-    await emitEvent(run.c, run.tenantId, "work_request", requestId, "work_request.created", {
-      requestId, kind: "assets", toUnitId: unit.id, fromUnitId, campaignPartId: null, workId: work.work.id,
-    });
+    requestId = created.id;
     await run.c.query(`UPDATE social_cycles SET creative_request_id = $3, updated_at = now() WHERE tenant_id = $1 AND id = $2`,
       [run.tenantId, run.cycle.id, requestId]);
-    run.out.openedRequest = { id: requestId, title, toUnitId: unit.id, toName: toUnit.name ?? unit.name };
+    run.out.openedRequest = { id: requestId, title, toUnitId: unit.id, toName: created.toName };
   }
   await run.c.query(`UPDATE social_posts SET creative_request_id = $3 WHERE tenant_id = $1 AND id = $2`, [run.tenantId, run.postId, requestId]);
   run.out.joinedRequestId = requestId;

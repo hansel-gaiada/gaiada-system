@@ -133,6 +133,8 @@ export async function buildPipelinePost(i: ReadInput): Promise<Record<string, un
     visualDirection: state.visualDirection,
     rawAssets: state.rawAssets.map((a) => ({ url: a.url ?? null, label: a.label ?? null, source: a.source ?? null, aiNote: a.aiNote ?? null })),
     placement: state.placement, scheduledAt: state.scheduledAt,
+    // Who scheduled it (`social_posts.schedule_via`, BFF §63.1): the UI draws the unschedule button for the route that holds it.
+    scheduleVia: state.scheduleVia === "manual" || state.scheduleVia === "publisher" ? state.scheduleVia : null,
     isExtra: row.is_extra, isStory: state.format === "story", mustHaves: state.mustHaves,
     pipelineStatus: state.pipelineStatus, phase: phaseOf(state), statusSince: iso(row.status_since),
     engineStatus: row.status ?? engineStatusOf(state, variants.map((v) => v.status), state.archived),

@@ -19,7 +19,7 @@ import { buildPipelinePost, readCerbosActions } from "./pipeline-read";
 import { notifyApprovalFiled } from "../../../core/approval-filing";
 import { notifyBestEffort, resolveClientRecipients } from "../../../core/client-notify";
 import { memoiseSessionCurrent } from "../../../core/request-context";
-import { loadAuthFacts } from "../../../core/work-requests.service";
+import { loadAuthFacts, notifyRequestReceived } from "../../../core/work-requests.service";
 import { deniedOnlyForAssurance } from "../../../auth/step-up";
 import { checkActions, type Resource } from "../../../rbac/cerbos";
 import { assemblePrincipal, auditDecision, sessionVersionCurrent, type Principal } from "../../../rbac/principal";
@@ -407,6 +407,9 @@ async function afterCommit(
   for (const a of out.filedApprovals) await notifyApprovalFiled(a.id, a.input);
   if (out.openedRequest) {
     await writeActivity(tenantId, actorId, "created", "work_request", out.openedRequest.id, { kind: "assets", toUnitId: out.openedRequest.toUnitId, socialPostId: postId });
+    // The receiving unit's heads hear of the request as they do of a hand-filed one (§32.7 `request.received`). A request opened
+    // just now has no assignees, so the "designers" notification below reaches nobody for it. Best-effort, like every notification.
+    if (actorId) await notifyRequestReceived(tenantId, actorId, out.openedRequest.id, out.openedRequest.toUnitId, out.openedRequest.toName, out.openedRequest.title);
   }
   try {
     await sendNotifications(tenantId, actorId, postId, r, out, engagement, before, authz);
