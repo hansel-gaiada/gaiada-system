@@ -50,11 +50,14 @@ type CallerError struct {
 	// Status is the HTTP status the gateway should answer with (0 when there is no one to answer,
 	// e.g. the client disconnected).
 	Status int
-	// Taxonomy is the audit `blocked` tag: "invalid_request" or "client_closed".
+	// Taxonomy is the audit `blocked` tag: "invalid_request", "client_closed",
+	// "upstream_rate_limit" or "dlp".
 	Taxonomy string
 	// Message is safe to show the caller: an upstream error message (already truncated) or a fixed
 	// phrase. It never holds request text the gateway itself added.
 	Message string
+	// RetryAfter is a Retry-After value to relay to the caller ("" = none).
+	RetryAfter string
 }
 
 func (e *CallerError) Error() string {

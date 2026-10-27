@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gaiada/ai-gateway-go/internal/audit"
@@ -49,6 +50,82 @@ type agentDeps struct {
 	activeClassifier func() *dlp.Classifier
 	emit             func(context.Context, audit.EgressAudit)
 	tokens           AgentTokens
+	inflight         *agentInflight
+}
+
+const (
+	defaultAgentMaxTokens      = 8192
+	defaultAgentMaxConcurrency = 4
+)
+
+func (d agentDeps) maxTokens() int64 {
+	if d.cfg.AgentMaxTokens > 0 {
+		return int64(d.cfg.AgentMaxTokens)
+	}
+	return defaultAgentMaxTokens
+}
+
+func (d agentDeps) maxConcurrency() int {
+	if d.cfg.AgentMaxConcurrency > 0 {
+		return d.cfg.AgentMaxConcurrency
+	}
+	return defaultAgentMaxConcurrency
+}
+
+// agentInflight counts each agent's in-flight calls (GATEWAY_AGENT_MAX_CONCURRENCY).
+type agentInflight struct {
+	mu sync.Mutex
+	n  map[string]int
+}
+
+func newAgentInflight() *agentInflight { return &agentInflight{n: map[string]int{}} }
+
+// acquire takes a slot for agent, or reports false when it already holds max.
+func (a *agentInflight) acquire(agent string, max int) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.n[agent] >= max {
+		return false
+	}
+	a.n[agent]++
+	return true
+}
+
+func (a *agentInflight) release(agent string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.n[agent] <= 1 {
+		delete(a.n, agent)
+		return
+	}
+	a.n[agent]--
+}
+
+func (a *agentInflight) count(agent string) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.n[agent]
+}
+
+// applyTokenCeiling bounds every agent call's output (GATEWAY_AGENT_MAX_TOKENS): a caller's
+// max_tokens/max_completion_tokens above the ceiling is clamped to it, a lower one is kept, and
+// when the caller sent neither, max_tokens is set to the ceiling.
+func applyTokenCeiling(fields map[string]json.RawMessage, ceiling int64) {
+	seen := false
+	for _, k := range []string{"max_tokens", "max_completion_tokens"} {
+		raw, ok := fields[k]
+		if !ok {
+			continue
+		}
+		seen = true
+		var n int64
+		if json.Unmarshal(raw, &n) != nil || n > ceiling {
+			fields[k] = json.RawMessage(strconv.FormatInt(ceiling, 10))
+		}
+	}
+	if !seen {
+		fields["max_tokens"] = json.RawMessage(strconv.FormatInt(ceiling, 10))
+	}
 }
 
 // writeOpenAIErr writes the OpenAI error shape {"error":{"message","type","code"}}.
@@ -148,6 +225,17 @@ func newAgentMux(d agentDeps) *http.ServeMux {
 		}
 		row.Agent = agent
 
+		// The concurrency slot is held until this handler returns: a stream holds it until its
+		// last byte, and the deferred release runs on every exit, a client disconnect or a panic
+		// included.
+		if !d.inflight.acquire(agent, d.maxConcurrency()) {
+			row.Blocked = "concurrency"
+			writeOpenAIErr(w, 429, "rate_limit_error", "agent_concurrency_exceeded",
+				fmt.Sprintf("this agent already has %d calls in flight", d.maxConcurrency()))
+			return
+		}
+		defer d.inflight.release(agent)
+
 		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, agentMaxBodyBytes))
 		if err != nil {
 			row.Blocked = "invalid_request"
@@ -207,6 +295,7 @@ func newAgentMux(d agentDeps) *http.ServeMux {
 			}
 		}
 
+		applyTokenCeiling(cleaned.fields, d.maxTokens())
 		req := providers.ChatRequest{Fields: cleaned.fields}
 		if cb.stream {
 			serveChatStream(d, w, r, req, &row)
@@ -224,6 +313,11 @@ func chainFailure(w http.ResponseWriter, err error, attempts int) {
 	var ce *providers.CallerError
 	if errors.As(err, &ce) {
 		switch {
+		case ce.Taxonomy == "upstream_rate_limit":
+			if ce.RetryAfter != "" {
+				w.Header().Set("Retry-After", ce.RetryAfter)
+			}
+			writeOpenAIErr(w, 429, "rate_limit_error", "upstream_rate_limited", ce.Message)
 		case ce.Taxonomy == "dlp":
 			writeOpenAIErr(w, 503, "server_error", "dlp_unavailable", "DLP unavailable, answer withheld (fail-closed)")
 		case ce.Status >= 400:
@@ -238,13 +332,42 @@ func chainFailure(w http.ResponseWriter, err error, attempts int) {
 	writeOpenAIErr(w, 502, "api_error", "upstream_error", err.Error())
 }
 
-// clientGone wraps an attempt error when the caller disconnected: a caller fault, so the provider's
-// breaker is not charged for it.
-func clientGone(r *http.Request, err error) error {
-	if err != nil && r.Context().Err() != nil {
+// agentAttemptErr turns two attempt failures into caller faults, so neither fails over nor
+// charges the provider's breaker:
+//   - the caller disconnected;
+//   - the upstream answered 429 to an AGENT call. The shared breaker is what the ERP's own
+//     /complete depends on, so an agent's burst must never open it; the agent gets the 429 (with
+//     the upstream's Retry-After) and backs off. /complete and /complete/stream are unchanged: their
+//     own 429s still open the breaker for Retry-After (chain.openForRateLimit).
+func agentAttemptErr(r *http.Request, err error) error {
+	if err == nil {
+		return nil
+	}
+	if r.Context().Err() != nil {
 		return &providers.CallerError{Taxonomy: "client_closed", Message: "the client closed the connection"}
 	}
+	var rl *providers.RateLimitError
+	if errors.As(err, &rl) {
+		return &providers.CallerError{Status: 429, Taxonomy: "upstream_rate_limit",
+			Message: "the upstream provider is rate limiting; retry later", RetryAfter: retryAfterValue(rl.Header)}
+	}
 	return err
+}
+
+// retryAfterValue relays an upstream Retry-After only when it is well formed (delta seconds or an
+// HTTP date), so an upstream cannot put an arbitrary value into the agent's response header.
+func retryAfterValue(h string) string {
+	h = strings.TrimSpace(h)
+	if h == "" || len(h) > 64 {
+		return ""
+	}
+	if n, err := strconv.Atoi(h); err == nil && n >= 0 {
+		return h
+	}
+	if _, err := http.ParseTime(h); err == nil {
+		return h
+	}
+	return ""
 }
 
 func serveChat(d agentDeps, w http.ResponseWriter, r *http.Request, req providers.ChatRequest, row *audit.EgressAudit) {
@@ -256,7 +379,7 @@ func serveChat(d agentDeps, w http.ResponseWriter, r *http.Request, req provider
 		ctx, cancel := context.WithTimeout(r.Context(), d.rt.timeout())
 		defer cancel()
 		resp, err := p.(providers.ChatProvider).Chat(ctx, req)
-		return resp, clientGone(r, err)
+		return resp, agentAttemptErr(r, err)
 	})
 	if err != nil {
 		row.Blocked = taxonomy
@@ -594,7 +717,7 @@ func serveChatStream(d agentDeps, w http.ResponseWriter, r *http.Request, req pr
 		if errors.Is(context.Cause(actx), errIdle) && r.Context().Err() == nil {
 			serr = fmt.Errorf("%s: no chunk for %s: %w", p.Name(), timeout, context.DeadlineExceeded)
 		}
-		serr = clientGone(r, serr)
+		serr = agentAttemptErr(r, serr)
 		if committed {
 			// Bytes from THIS attempt reached the client: end the stream with an error and stop
 			// the chain (no second provider's answer may be appended to a partial one).

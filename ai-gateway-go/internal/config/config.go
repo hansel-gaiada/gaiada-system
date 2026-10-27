@@ -86,10 +86,16 @@ type Config struct {
 	// cap's remaining share is at or below this percentage; the ERP's own traffic never is.
 	// AgentDailyCallCap (GATEWAY_AGENT_DAILY_CALL_CAP): each agent's own daily cap; 0 or unset =
 	// the per-tenant cap (GATEWAY_PER_TENANT_DAILY_CALL_CAP or its console override).
-	AgentListen       string
-	AgentTokens       string
-	AgentReservePct   int
-	AgentDailyCallCap int
+	// AgentMaxTokens (GATEWAY_AGENT_MAX_TOKENS, default 8192) is the per-call output ceiling:
+	// max_tokens/max_completion_tokens are clamped to it, and max_tokens is set to it when the caller
+	// sent neither. AgentMaxConcurrency (GATEWAY_AGENT_MAX_CONCURRENCY, default 4) is how many calls
+	// one agent may have in flight, streams included until their last byte. <= 0 means the default.
+	AgentListen         string
+	AgentTokens         string
+	AgentReservePct     int
+	AgentDailyCallCap   int
+	AgentMaxTokens      int
+	AgentMaxConcurrency int
 }
 
 func envBool(key string, fallback bool) bool {
@@ -182,5 +188,7 @@ func Load() Config {
 		AgentTokens:            envOr("GATEWAY_AGENT_TOKENS", ""),
 		AgentReservePct:        envInt("GATEWAY_AGENT_RESERVE_PCT", 25),
 		AgentDailyCallCap:      envInt("GATEWAY_AGENT_DAILY_CALL_CAP", 0),
+		AgentMaxTokens:         envInt("GATEWAY_AGENT_MAX_TOKENS", 8192),
+		AgentMaxConcurrency:    envInt("GATEWAY_AGENT_MAX_CONCURRENCY", 4),
 	}
 }

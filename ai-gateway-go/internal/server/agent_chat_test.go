@@ -163,7 +163,10 @@ type agentRig struct {
 	up          *fakeUpstream
 	llm         *chain.Chain
 	auditFile   string
+	inflight    *agentInflight
 }
+
+func (rig *agentRig) inflightOf(agent string) int { return rig.inflight.count(agent) }
 
 type rigOpts struct {
 	cfg        func(*config.Config)
@@ -194,9 +197,9 @@ func newAgentRig(t *testing.T, o rigOpts) *agentRig {
 		raw = testAgentTokens()
 	}
 	tokens, _ := ParseAgentTokens(raw)
-	mainMux, agentMux := NewServers(cfg, Chains{LLM: llm, Media: llm, Embed: llm},
+	mainMux, agentMux, inflight := newServers(cfg, Chains{LLM: llm, Media: llm, Embed: llm},
 		budget.NewBudget(cfg.DailyCallCap, cfg.PerTenantDailyCallCap), o.classifier, metrics.New(), nil, tokens)
-	rig := &agentRig{main: httptest.NewServer(mainMux), agent: httptest.NewServer(agentMux), up: up, llm: llm, auditFile: cfg.AuditFile}
+	rig := &agentRig{main: httptest.NewServer(mainMux), agent: httptest.NewServer(agentMux), up: up, llm: llm, auditFile: cfg.AuditFile, inflight: inflight}
 	t.Cleanup(rig.main.Close)
 	t.Cleanup(rig.agent.Close)
 	return rig
