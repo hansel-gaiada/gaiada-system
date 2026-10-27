@@ -51,10 +51,10 @@ unfalsifiable after.
 | knowledge | `knowledge` | 3 |
 | lms | `lms` | 1 |
 | monitoring | `monitoring` | 3 |
-| pm | `pm` | 16 |
+| pm | `pm` | 17 |
 | reports | `checkins` · `reports` | 24 |
 | search | `search` | 30 |
-| social | `social` | 18 |
+| social | `social` | 19 |
 | webdev | `webdev` | 41 |
 
 ## Capabilities

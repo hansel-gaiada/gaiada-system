@@ -16,6 +16,7 @@ import type { PoolClient } from "pg";
 import { withTenants } from "../../../db";
 import { authorize, notify, writeActivity, explainDenial } from "../../../core/http";
 import { buildPipelinePost, readCerbosActions } from "./pipeline-read";
+import { syncContentMonthProgress } from "./content-month-progress";
 import { notifyApprovalFiled } from "../../../core/approval-filing";
 import { notifyBestEffort, resolveClientRecipients } from "../../../core/client-notify";
 import { memoiseSessionCurrent } from "../../../core/request-context";
@@ -288,6 +289,8 @@ export async function createPipelinePost(principal: Principal, tenantId: string,
     const r = decide({ ...base, post: null, facts, mode: "apply" });
     if (!r.ok) return { refusal: r };
     const ins = await insertPostRow(c, tenantId, engagement!.id, callerId, r.set);
+    // A new counted post that is not approved yet reopens a done content-month task (SCP-1n, BFF §63.13).
+    if (ins.created) await syncContentMonthProgress(c, tenantId, cycle!.id, callerId);
     return { applied: r, ...ins, engagement: engagement!, cycle: cycle! };
   }, SOCIAL);
   if ("refusal" in out && out.refusal) return authorizeStage(principal, resource, "create", out.refusal);
@@ -527,6 +530,8 @@ export async function changeAfterClientInTx(c: PoolClient, tenantId: string, pos
       WHERE tenant_id = $1 AND id = $2`,
     [tenantId, postId],
   );
+  // The post went back to the client: the cycle's content-month task reopens (SCP-1n, BFF §63.13), now that the row says so.
+  await EFFECT_RUNNERS.content_month_progress(run);
   return postId;
 }
 
