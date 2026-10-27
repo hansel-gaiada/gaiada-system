@@ -101,6 +101,7 @@ client's photos". Resolving it returns the post to the step it left.
 | SCP-Q21 | Who decides a pipeline post's publish approval? (raised by SCP-0b, from SCP-Q19) | **The four approvers, directly.** For a social pipeline post, being one of the four is the right to decide its publish approval: the HoD, the GM and the owner need no company-admin role, and a company admin who is not one of the four cannot decide it. The person who filed it never decides (PV-D46), and the post's author or officer cannot either. Every other kind of approval keeps today's rule. |
 | SCP-Q22 | May the writer of a client's monthly report approve it? (raised by SCP-0b) | **Yes.** Reports have no maker/checker rule: one of the four may approve a report they wrote. (Posts keep theirs.) |
 | SCP-Q23 | Close the self-promotion gap into a lead seat? (raised by SCP-0b) | **Yes, with a ticket (SCP-1q).** Nobody may edit a position they hold, the same way assigning yourself is already refused, so nobody can make themselves a head. It protects every lead-seat authority, not only SCP, and lands before SCP's approvals go live. |
+| SCP-Q24 | What does the Social Home show? (raised 2026-10-27 by the owner: the Overview's header and blocks clutter the design) | **The design's feed only.** In the Social skin the Home has no Overview header (greeting, period, quick actions, Customise, Me/Team), no Overview blocks and no "More from Social Media" band. What only the Overview offered moves first to slots the design already has: Needs you to the top row of Notifications (Kh); today's check-in and pinned notices to the design's reminder cards (Ki); Notices and the Department calendar to More (Kj); Ask Web Dev to Create (Kk). The KPI strip, Pulse and the head's Team view go to the Team dashboard (SCP-5d). The Standard look and every other department keep the Overview. Reverses §6.4's "the KPI strip and banner stay" for the Social skin. |
 
 **Open:** none.
 
@@ -448,7 +449,7 @@ move, without any real network account.
 
 | Row (pinned) | Opens | Notes |
 |---|---|---|
-| Home | The Social Media Overview `{D}`, laid out as the design's feed | "Your turn", "Waiting on others", tasks, reports due, client stories, accounts this cycle |
+| Home | The Social Media Overview `{D}`, laid out as the design's feed, and nothing else (SCP-Q24) | "Your turn", "Waiting on others", tasks, reports due, client stories, accounts this cycle |
 | Search | ⌘K | Posts, clients, people and pages |
 | Messages | "Waiting on": who holds each of your posts, with Follow up | Client threads open the portal conversation (PV-4). Team chat stays outside the ERP |
 | Notifications | The notification feed (`/me/inbox`) | |
@@ -485,6 +486,8 @@ findable from ⌘K. SCP-0b names the other new pages and their registry keys (FR
 reports get `{D}/social-reports`, because `{D}/reports` is SEO's reports page in every department.
 
 ### 6.4 The Overview
+
+**SCP-Q24 (2026-10-27): in the Social skin the Home is the feed alone (Kl).** What follows describes the Overview the Standard look draws for Social Media. In the Social skin, Needs you is the top row of Notifications (Kh), the check-in and pinned notices are reminder cards (Ki), and the Pulse tiles and KPI strip are the Team dashboard's (SCP-5d).
 
 - **Needs you,** per role: Officer (drafts to send, fixes asked, ready to schedule, metrics missing two days after going
   live); Copywriter (the proofread queue); HoD and GM (HoD approvals, final checks, reports to check and to send,
@@ -597,6 +600,11 @@ once deployed, checked on the live ERP's mock seed.
 | Ke Phone | The bottom bar (Home, Search, Create, Tasks, Profile); Notifications and Messages at the top; More as a full-screen sheet. |
 | Kf Tests | The palette, page-home, one-area and sidebar tests pass in both skins; axe passes in light and dark, desktop and phone. |
 | Kg Switch on | The skin is on for Social Media once 1d, 1e and 1k are live, so no menu row points at a page that does not exist. Pinned rows whose page comes from a later ticket stay hidden until that page is live: Messages until 1j, Settings until 1c, Dashboard until 5d (the skin's pin list carries each row's ticket, and Kg's test checks it). |
+| Kh Needs you in Notifications | `/me/inbox` opens with one "Needs you" row, as the design draws it: the counts by kind and a dot while anything waits. It opens the whole ranked queue in place, with the Overview block's Approve, Deny and Acknowledge. Same read as the block (`readNowQueue`, `selectNeedsYou`), streamed so the inbox does not wait. Every department's inbox has it. |
+| Ki Reminder cards | On the Social Home, the design's one-line card with a blue button: today's check-in while it is expected and not sent (the button opens the existing pre-filled form; submitting stays one click); pinned current notices of the unit (newest first, "N more pinned" to the board; with no read receipts a card lasts until unpinned or past its end date); Reports due as cards. Each card's read fails on its own, never as "nothing due". |
+| Kj More holds the Overview row's tabs | In a pinned skin the Overview row's other tabs (Notices, Department calendar), which only the tab strip reached, are listed in More on desktop and in the phone sheet. The Social Home draws no tab strip. The skin reachability test still proves the Social menus reach every Standard link. |
+| Kk Ask Web Dev in Create | Create lists "Ask Web Dev" after "Ask Creatives for assets", with the quick action's gate (an agency company that has a Web Dev department). |
+| Kl The Home without the Overview | In the Social skin `{D}` renders the feed alone. The Standard look and every other department render exactly as before (a test proves both). Lands in one train with Kh to Kk. |
 
 ### SCP-1 · The pipeline for staff: draft to final check
 
