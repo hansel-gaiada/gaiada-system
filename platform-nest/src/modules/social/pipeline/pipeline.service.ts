@@ -133,7 +133,7 @@ export interface StageOutcome {
   out: EffectOutput;
 }
 
-interface Prepared {
+export interface Prepared {
   pre: { row: Awaited<ReturnType<typeof loadPostRow>>; authz: SocialPostAuthz | null };
   state: PipelinePostState | null;
   resource: Resource;
@@ -146,7 +146,7 @@ interface Prepared {
 }
 
 /** Steps 1 to 3 of the orchestration (the header): the rows, Cerbos once, and the gate. Throws the refusal. */
-async function prepareStage(principal: Principal, req: StageRequest): Promise<Prepared> {
+export async function prepareStage(principal: Principal, req: StageRequest): Promise<Prepared> {
   const { tenantId, postId, action } = req;
   const callerId = principal.userId ?? null;
 
@@ -190,10 +190,61 @@ async function cycleHasOpenMonthRequest(tenantId: string, cycleId: string | null
   return (r.rowCount ?? 0) > 0;
 }
 
+/** What one action's transaction answers: a refusal (nothing written), or the applied action with what the commit's
+ *  after-work needs. */
+export type StageTxResult =
+  | { refusal: StageRefusal }
+  | { applied: StageApplied; out: EffectOutput; engagement: EngagementRow; cycle: CycleRow | null; before: PipelinePostState };
+
+/**
+ * Step 4 of the orchestration (the header), on the caller's client: the post locked `FOR UPDATE`, the facts read under the
+ * lock, `decide()` again in full (steps 8 and 9 re-checked, then the action's own guards), the row written with the
+ * machine's `set`, the copy log and every I/O effect. A refusal is RETURNED with nothing written by this call; the caller
+ * owns the transaction, so a caller that holds other writes (the feed-preview swap runs two of these in one transaction)
+ * throws to roll them back. `cancelled` is the set of queued dispatches cancelled at the publisher before the transaction.
+ */
+export async function applyStageInTx(c: PoolClient, prepared: Prepared, req: StageRequest, cancelled: Set<string>): Promise<StageTxResult> {
+  const { tenantId, postId, action } = req;
+  const { pre, cerbos, principalFacts, base, callerId } = prepared;
+  const row = await loadPostRow(c, tenantId, postId, true);
+  const locked = stateOf(row);
+  if (!row || !locked) return { refusal: notFoundRefusal() };
+  // The Cerbos actions this decision needs under the lock must be the ones asked (a publisher schedule that appeared
+  // since names another action): otherwise the post changed under the caller.
+  if (locked.pipelineStatus !== null && cerbosActionsToAsk(action, locked).some((a) => !(a in cerbos))) {
+    return { refusal: statusChanged(locked) };
+  }
+  const engagement = await loadEngagement(c, tenantId, row.engagement_id);
+  if (!engagement) return { refusal: notFoundRefusal() };
+  const cycle = row.cycle_id ? await loadCycle(c, tenantId, row.cycle_id) : null;
+  const who = {
+    ownerId: engagement.owner_id ?? "",
+    approverIds: pre.authz?.approverIds ?? (await loadSocialApproverIds(c, tenantId)),
+    assigneeIds: pre.authz?.assigneeIds ?? [],
+  };
+  const facts = await loadFacts(c, { tenantId, action, state: locked, params: req.params, engagement, cycle, callerId, who });
+  const lockedAuthz = pre.authz ? { ...pre.authz, ownerId: who.ownerId, creatorId: locked.authorId ?? "" } : null;
+  const r = decide({ ...base, post: locked, principal: principalFacts(lockedAuthz), facts, mode: "apply" });
+  if (!r.ok) return { refusal: r };
+  if (r.alreadyApplied) return { applied: r, out: emptyOutput(), engagement, cycle, before: locked };
+
+  await updatePostRow(c, tenantId, postId, r.set, r.appendSkippedChecks);
+  await insertCopyLog({ c, tenantId, postId, actorId: callerId }, r.copyLog);
+  const out = emptyOutput(cancelled);
+  out.warnings.push(...r.warnings);
+  const run = { c, tenantId, actorId: callerId, action, postId, before: locked, next: r.next ?? locked, row, engagement, cycle, params: req.params, result: r, out };
+  for (const name of r.effects) {
+    if (isNotification(name)) continue;
+    await EFFECT_RUNNERS[name](run);
+  }
+  return { applied: r, out, engagement, cycle, before: locked };
+}
+
 /** Run one action on one existing post, start to finish. Throws the HTTP error of a refusal. */
 export async function runStageAction(principal: Principal, req: StageRequest): Promise<StageOutcome> {
   const { tenantId, postId, action } = req;
-  const { pre, state, resource, cerbos, principalFacts, base, replay, callerId } = await prepareStage(principal, req);
+  const prepared = await prepareStage(principal, req);
+  const { pre, state, resource, replay } = prepared;
   if (replay) return { postId, applied: replay, out: emptyOutput() };
 
   // BFF §63.3.5: approving a `creatives` client's post for design may open the cycle's month request, which also needs
@@ -219,40 +270,7 @@ export async function runStageAction(principal: Principal, req: StageRequest): P
     : new Set<string>();
 
   // 4. The transaction.
-  const result = await withTenants([tenantId], async (c) => {
-    const row = await loadPostRow(c, tenantId, postId, true);
-    const locked = stateOf(row);
-    if (!row || !locked) return { refusal: notFoundRefusal() };
-    // The Cerbos actions this decision needs under the lock must be the ones asked (a publisher schedule that appeared
-    // since names another action): otherwise the post changed under the caller.
-    if (locked.pipelineStatus !== null && cerbosActionsToAsk(action, locked).some((a) => !(a in cerbos))) {
-      return { refusal: statusChanged(locked) };
-    }
-    const engagement = await loadEngagement(c, tenantId, row.engagement_id);
-    if (!engagement) return { refusal: notFoundRefusal() };
-    const cycle = row.cycle_id ? await loadCycle(c, tenantId, row.cycle_id) : null;
-    const who = {
-      ownerId: engagement.owner_id ?? "",
-      approverIds: pre.authz?.approverIds ?? (await loadSocialApproverIds(c, tenantId)),
-      assigneeIds: pre.authz?.assigneeIds ?? [],
-    };
-    const facts = await loadFacts(c, { tenantId, action, state: locked, params: req.params, engagement, cycle, callerId, who });
-    const lockedAuthz = pre.authz ? { ...pre.authz, ownerId: who.ownerId, creatorId: locked.authorId ?? "" } : null;
-    const r = decide({ ...base, post: locked, principal: principalFacts(lockedAuthz), facts, mode: "apply" });
-    if (!r.ok) return { refusal: r };
-    if (r.alreadyApplied) return { applied: r, out: emptyOutput(), engagement, cycle, before: locked };
-
-    await updatePostRow(c, tenantId, postId, r.set, r.appendSkippedChecks);
-    await insertCopyLog({ c, tenantId, postId, actorId: callerId }, r.copyLog);
-    const out = emptyOutput(cancelled);
-    out.warnings.push(...r.warnings);
-    const run = { c, tenantId, actorId: callerId, action, postId, before: locked, next: r.next ?? locked, row, engagement, cycle, params: req.params, result: r, out };
-    for (const name of r.effects) {
-      if (isNotification(name)) continue;
-      await EFFECT_RUNNERS[name](run);
-    }
-    return { applied: r, out, engagement, cycle, before: locked };
-  }, SOCIAL);
+  const result = await withTenants([tenantId], (c) => applyStageInTx(c, prepared, req, cancelled), SOCIAL);
 
   if ("refusal" in result && result.refusal) return authorizeStage(principal, resource, action, result.refusal);
   const ok = result as { applied: StageApplied; out: EffectOutput; engagement: EngagementRow; cycle: CycleRow | null; before: PipelinePostState };
@@ -412,7 +430,7 @@ export async function patchDesign(principal: Principal, tenantId: string, postId
 // After the commit: activity and notifications (BFF §63.14)
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-async function afterCommit(
+export async function afterCommit(
   principal: Principal, tenantId: string, postId: string, r: StageApplied, out: EffectOutput,
   engagement: EngagementRow, cycle: CycleRow | null, before: PipelinePostState, authz: SocialPostAuthz | null,
 ): Promise<void> {
