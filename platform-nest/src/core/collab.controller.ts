@@ -10,7 +10,8 @@ import { authorize, writeActivity, notify } from "./http";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import {
-  SOCIAL_POST_ENTITY, assertAnchorOnPostFile, authorizeSocialPostThread, parseAnchor, parseVisibility, requireRecordClient,
+  SOCIAL_POST_ENTITY, assertAnchorOnPostFile, authorizeReactionTarget, authorizeSocialPostThread, loadReplyParent, mentionsWhoCanRead,
+  parseAnchor, requireRecordClient, resolveReplyVisibility,
 } from "../modules/social/pipeline/post-comments";
 
 // P3-08: closed reaction emoji set — matches the P3-09 frontend's fixed reaction bar and the
@@ -68,6 +69,8 @@ export class CollabController {
     if (!emoji || !REACTION_EMOJIS.has(emoji)) throw new BadRequestException("invalid emoji");
     // Same gate as posting a comment — reacting is a comment-thread write, not a separate resource.
     await authorize(req.principal, { kind: "comment", tenantId }, "create");
+    // SCP-1t (BFF §63.8): on a social_post thread a reaction also needs the post's audience (`read`, or `design`), as the thread itself does.
+    await authorizeReactionTarget(req.principal, tenantId, commentId);
     const actorId = req.principal.userId;
     await withTenants([tenantId], async (c) => {
       const exists = await c.query(`SELECT 1 FROM comments WHERE id = $1 AND deleted_at IS NULL`, [commentId]);
@@ -93,6 +96,8 @@ export class CollabController {
     @Param("emoji") emoji: string,
   ) {
     await authorize(req.principal, { kind: "comment", tenantId }, "create");
+    // SCP-1t: the same audience gate as adding one, so a person the post's audience excludes learns nothing from the answer.
+    await authorizeReactionTarget(req.principal, tenantId, commentId);
     // SELF-ROW delete only: user_id is always the calling principal, never client-supplied —
     // there is no way to reach another user's reaction row through this endpoint.
     await withTenants([tenantId], (c) =>
@@ -120,12 +125,17 @@ export class CollabController {
     // A client-visible comment speaks to the client: `record_client` as well (403 not_officer_or_approver). Only a value that
     // IS 'client' asks for it; any other value is judged below, after authorization.
     if (access && body?.visibility === "client") await requireRecordClient(req.principal, tenantId, access);
+    // SCP-1t: a reply answers a comment of THIS post's thread (400 {field: "parentCommentId"} otherwise) and takes its visibility.
+    const parent = isSocialPost ? await loadReplyParent(tenantId, entityId, parentCommentId) : null;
     // `visibility` and `anchor` belong to a social_post thread only; on any other thread either field is 400 {field}.
     if (!isSocialPost) {
       if (body?.visibility !== undefined) throw new BadRequestException({ message: "visibility_not_allowed", field: "visibility" });
       if (body?.anchor !== undefined) throw new BadRequestException({ message: "anchor_not_allowed", field: "anchor" });
     }
-    const visibility = isSocialPost ? parseVisibility(body?.visibility) : "team";
+    // SCP-1t: no visibility given takes the parent's; a `client` reply to a `team` comment is 400 {field: "visibility"}.
+    const visibility = isSocialPost ? resolveReplyVisibility(body?.visibility, parent) : "team";
+    // A client-visible reply that INHERITED its visibility speaks to the client too: it needs `record_client` as an explicit `client` does.
+    if (access && visibility === "client" && body?.visibility !== "client") await requireRecordClient(req.principal, tenantId, access);
     const anchor = isSocialPost ? parseAnchor(body?.anchor) : null;
     if (anchor) await assertAnchorOnPostFile(tenantId, entityId, anchor);
     const id = newId();
@@ -172,7 +182,16 @@ export class CollabController {
     // is the most specific fact, so it wins the single notify() call for that recipient.
     // notify() itself auto-skips the actor (recipientId === actorId, verified in core/http.ts).
     const alreadyNotified = new Set<string>();
-    for (const m of Array.from(new Set(mentions)).slice(0, 50)) {
+    // SCP-1t (BFF §63.8): on a social_post thread an @mention only reaches a person who can read the post. The others are dropped, and the
+    // answer says which (`mentionsNotNotified`, additive), so the author knows who was not told.
+    let toNotify = Array.from(new Set(mentions)).slice(0, 50);
+    let notNotified: string[] = [];
+    if (access) {
+      const audience = await mentionsWhoCanRead(access.resource, toNotify);
+      toNotify = audience.readers;
+      notNotified = audience.dropped;
+    }
+    for (const m of toNotify) {
       alreadyNotified.add(m);
       await notify(tenantId, m, actorId, "mention", {
         title: "You were mentioned in a comment", severity: "info", entityType, entityId, commentId: id, href,
@@ -201,7 +220,7 @@ export class CollabController {
         });
       }
     }
-    return { id };
+    return notNotified.length > 0 ? { id, mentionsNotNotified: notNotified } : { id };
   }
 
   // Raise an in-app notification for another member (5c.3 + WS4 §3): used by elevated actors

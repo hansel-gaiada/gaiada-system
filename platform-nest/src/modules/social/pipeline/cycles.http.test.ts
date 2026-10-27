@@ -16,7 +16,7 @@
 // THE DAY. The server counts "today" in `REPORTS_TZ`; these tests ask the same function for it and pick months relative to it, so they hold
 // on any date. Expected working-day values come from `walkBack` below, a plain Monday-to-Friday walk written here, never from the code under test.
 // (The golden table, `schedule-health-golden.json`, pins the maths itself; this file proves the plumbing around it.)
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../../config";
 import { withTenants, newId } from "../../../db";
@@ -27,7 +27,6 @@ import { grantSocialRole, grantSocialSeat, seedSocialOrgTree, setEngagementOffic
 import { registerModule, resetModules } from "../../registry";
 import { todayIsoInTz } from "../../reports/person-scope";
 import { socialModule } from "../index";
-import { syncContentMonthTask } from "./cycles-data";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -631,16 +630,5 @@ describe.skipIf(!TEST_URL)("social settings and cycles (SCP-1c)", () => {
     const bad = await get(U.staff, "cycles?month=2026-13");
     expect(bad.statusCode).toBe(400);
     expect(bad.json()).toMatchObject({ error: "invalid_field", field: "month" });
-  });
-});
-
-// ── the content-month PM task is SCP-1n's: the hook is a documented no-op and touches nothing ────────────────────────────────────
-describe("syncContentMonthTask (SCP-1c leaves the hook, SCP-1n fills it)", () => {
-  it("is a no-op: it resolves and sends no query, so no pm_tasks row is touched", async () => {
-    const query = vi.fn();
-    await expect(
-      syncContentMonthTask({ query } as never, { tenantId: newId(), cycleId: newId(), engagementId: newId(), month: "2026-03", deadline: "2026-02-27", readyBy: "2026-02-26", actorId: null }),
-    ).resolves.toBeUndefined();
-    expect(query).not.toHaveBeenCalled();
   });
 });

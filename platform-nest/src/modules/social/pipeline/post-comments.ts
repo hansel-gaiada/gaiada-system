@@ -8,6 +8,10 @@
 //     `loadSocialPostAuthz` + `socialPostResource` (a client-supplied scope is never trusted).
 //   - WHO may write a client-visible comment: it speaks to the client, so it also needs `social_post` · `record_client`
 //     (the officer and the two seats; 403 `not_officer_or_approver`).
+//   - WHO a reaction, a reply and an @mention reach (SCP-1t): a reaction is a write to the thread, so it needs the thread's gate on the comment's
+//     post (`authorizeReactionTarget`); a reply takes its parent's visibility (`loadReplyParent`, `resolveReplyVisibility`), so a team note never
+//     shows to the client out of context; an @mention notifies only a person who can read the post (`mentionsWhoCanRead`), the rest are dropped
+//     and the author is told which.
 //   - WHICH file a pin may sit on: a file of THAT post (a live design row's `file_id`, or a `files` row targeting the post).
 //   - WHICH comments the client may see (`clientVisibleComments`): the `client` ones, and only once the post has reached
 //     the client (`social_posts.client_first_sent_at`). The portal reads through this, so the rule lives here and nowhere else.
@@ -19,8 +23,8 @@ import type { PoolClient } from "pg";
 import { withTenants } from "../../../db";
 import { authorize, explainDenial } from "../../../core/http";
 import { deniedOnlyForAssurance } from "../../../auth/step-up";
-import { auditDecision, type Principal } from "../../../rbac/principal";
-import type { Resource } from "../../../rbac/cerbos";
+import { assemblePrincipal, auditDecision, type Principal } from "../../../rbac/principal";
+import { checkActions, type Resource } from "../../../rbac/cerbos";
 import { loadSocialPostAuthz, socialPostResource } from "../pipeline-authz";
 import { declareSocialModuleScope } from "../module-scope";
 import { cerbosDecisionsFor } from "./pipeline.service";
@@ -71,6 +75,81 @@ export function parseVisibility(raw: unknown): CommentVisibility {
   if (raw === undefined) return "team";
   if (raw === "team" || raw === "client") return raw;
   throw new BadRequestException({ message: "invalid_visibility", field: "visibility" });
+}
+
+/**
+ * PURE. The visibility of a REPLY (SCP-1t, BFF §63.8). `given` is the body's `visibility` and `parent` the comment it answers (null for a top
+ * comment). A reply with no visibility given takes its parent's; one that is not `team` or `client` is 400 `{field: "visibility"}` as ever; and a
+ * `client` reply to a `team` comment is 400 `{field: "visibility"}`: the client would read an answer to a note it never saw. A `team` reply to a
+ * `client` comment is allowed (the team's own aside under a comment the client can see). A top comment's default is `team`.
+ */
+export function resolveReplyVisibility(given: unknown, parent: { visibility: CommentVisibility } | null): CommentVisibility {
+  if (given !== undefined) {
+    const v = parseVisibility(given);
+    if (v === "client" && parent !== null && parent.visibility === "team") {
+      throw new BadRequestException({ message: "reply_visibility_exceeds_parent", field: "visibility" });
+    }
+    return v;
+  }
+  return parent ? parent.visibility : "team";
+}
+
+/**
+ * The comment a reply answers, on the SAME post's thread (SCP-1t): a live comment whose target is this post, else 400 `{field: "parentCommentId"}`
+ * (a comment of another thread would hand the reply that thread's visibility). `null` for a top comment (no `parentCommentId`).
+ */
+export async function loadReplyParent(
+  tenantId: string, postId: string, parentCommentId: unknown,
+): Promise<{ visibility: CommentVisibility } | null> {
+  if (parentCommentId === undefined || parentCommentId === null) return null;
+  const bad = () => new BadRequestException({ message: "invalid_parent_comment", field: "parentCommentId" });
+  if (typeof parentCommentId !== "string" || !UUID_RE.test(parentCommentId)) throw bad();
+  const r = await withTenants([tenantId], (c) => c.query<{ visibility: string }>(
+    `SELECT visibility FROM comments
+      WHERE tenant_id = $1 AND id = $2 AND target_entity_type = 'social_post' AND target_entity_id = $3 AND deleted_at IS NULL`,
+    [tenantId, parentCommentId, postId],
+  ));
+  const row = r.rows[0];
+  if (!row) throw bad();
+  return { visibility: row.visibility === "client" ? "client" : "team" };
+}
+
+/**
+ * A reaction is a write to the comment's thread (SCP-1t). When the comment is on a `social_post` thread, the caller needs that thread's gate on the
+ * comment's post (`social_post` · `read`, or `design`): 404 `post_not_found`, or 403 audited like any denial. A comment on any other thread, or no
+ * such comment, is left to the caller's own handling (nothing changes for them).
+ */
+export async function authorizeReactionTarget(principal: Principal, tenantId: string, commentId: string): Promise<void> {
+  if (typeof commentId !== "string" || !UUID_RE.test(commentId)) return;
+  const r = await withTenants([tenantId], (c) => c.query<{ target_entity_type: string; target_entity_id: string }>(
+    `SELECT target_entity_type, target_entity_id FROM comments WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+    [tenantId, commentId],
+  ));
+  const row = r.rows[0];
+  if (row && row.target_entity_type === SOCIAL_POST_ENTITY) await authorizeSocialPostThread(principal, tenantId, row.target_entity_id);
+}
+
+/**
+ * Who of `mentions` may be told about a comment on a post (SCP-1t): the people who can read it (`social_post` · `read`, or `design`), judged on the
+ * post's resource for each person as the system would judge them on a normal sign-in. Everyone else is dropped: an @mention must not be a way to
+ * pull a post's existence or a note's words to someone the post's audience excludes. Ids that are not a user, not active, or not a uuid are dropped
+ * too. Order and duplicates are the caller's; the answer keeps the first sight of each id.
+ */
+export async function mentionsWhoCanRead(resource: Resource, mentions: readonly string[]): Promise<{ readers: string[]; dropped: string[] }> {
+  const readers: string[] = [];
+  const dropped: string[] = [];
+  for (const id of Array.from(new Set(mentions))) {
+    let allowed = false;
+    if (typeof id === "string" && UUID_RE.test(id)) {
+      const p = await assemblePrincipal(id, "high");
+      if (p) {
+        const d = await checkActions(p, resource, ["read", "design"]);
+        allowed = d.read === true || d.design === true;
+      }
+    }
+    (allowed ? readers : dropped).push(id);
+  }
+  return { readers, dropped };
 }
 
 /** PURE. `anchor` as the body gave it: undefined/null is no pin; else `{x, y, fileId}` with x and y numbers from 0 to 1 and
