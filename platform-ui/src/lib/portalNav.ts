@@ -14,6 +14,10 @@ export interface PortalSubTab { href: string; label: string }
 export const PORTAL_WEBSITE_HREF = "/portal/website";
 /** The Reports tab's path, so the nav, the badge and the deliverables link name it once. */
 export const PORTAL_REPORTS_HREF = "/portal/reports";
+/** The Social posts tab's path (SCP-2, BFF §63.9): the month's approval page. The old per-post-variant list stays at
+ *  `PORTAL_SOCIAL_REVIEWS_HREF` (URLs never move: it is in emails already sent) and is reached from this page. */
+export const PORTAL_SOCIAL_HREF = "/portal/social";
+export const PORTAL_SOCIAL_REVIEWS_HREF = "/portal/social-reviews";
 export interface PortalArea { key: string; label: string; tabs: PortalSubTab[] }
 
 export const PORTAL_AREAS: PortalArea[] = [
@@ -37,7 +41,9 @@ export const PORTAL_AREAS: PortalArea[] = [
       // PV4-08: threads with our team, one per project plus a General one. `/portal/meetings/:id` (shared meeting
       // notes) has no tab of its own: see PORTAL_PATH_ALIASES.
       { href: "/portal/conversation", label: "Conversation" },
-      { href: "/portal/social-reviews", label: "Post reviews" },
+      // SCP-2: the menu row that said "Post reviews" now opens the approval page. `/portal/social-reviews` keeps its URL and is
+      // an alias of this tab (see PORTAL_PATH_ALIASES), linked from the page while the older list still has items waiting.
+      { href: PORTAL_SOCIAL_HREF, label: "Social posts" },
       { href: "/portal/timeline", label: "Timeline" },
     ],
   },
@@ -68,6 +74,8 @@ export const PORTAL_AREAS: PortalArea[] = [
  *  the "minutes shared" notice (`/portal/meetings/<id>`); they sit in Projects and light that area's first tab. */
 const PORTAL_PATH_ALIASES: Array<{ prefix: string; areaKey: string; tabHref: string }> = [
   { prefix: "/portal/meetings", areaKey: "projects", tabHref: "/portal/projects" },
+  // SCP-2: the older per-variant post reviews stay where they were, and light the Social posts tab that replaced their menu row.
+  { prefix: PORTAL_SOCIAL_REVIEWS_HREF, areaKey: "projects", tabHref: PORTAL_SOCIAL_HREF },
   // PV-D41: the simulated hosted payment page belongs to the invoice it pays.
   { prefix: "/portal/pay", areaKey: "billing", tabHref: "/portal/invoices" },
   // PV5-11: the client's signing page at the simulated PSrE is reached from a contract and returns to it.

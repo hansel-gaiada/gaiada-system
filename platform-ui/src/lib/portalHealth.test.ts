@@ -18,8 +18,14 @@ describe("ballItemLabel", () => {
     expect(ballItemLabel("hologram", "you")).toBe("Something waiting for you");
     expect(ballItemLabel("hologram", "us")).toBe("Something waiting for us");
   });
+  it("SCP-2: a social_post item is a post to review, or one we are changing when the item says changes were asked; never a staff status", () => {
+    expect(ballItemLabel("social_post", "you")).toBe("A post to review");
+    expect(ballItemLabel("social_post", "you", "Studio tour")).toBe("A post to review");
+    expect(ballItemLabel("social_post", "you", "changes_asked")).toBe("A post we are changing for you");
+    expect(ballItemLabel("social_post", "us")).toBe("A post we are changing for you");
+  });
   it("never uses staff phrasing", () => {
-    for (const kind of ["gate", "contract", "review", "payment", "request", "conversation"]) {
+    for (const kind of ["gate", "contract", "review", "social_post", "payment", "request", "conversation"]) {
       for (const side of ["you", "us"] as const) expect(ballItemLabel(kind, side)).not.toMatch(/triage|client-recorded|drafted|staff/i);
     }
   });
@@ -32,6 +38,9 @@ describe("ballItemHref", () => {
     expect(ballItemHref("contract", "ctr-1")).toBe("/portal/contracts/ctr-1");
     expect(ballItemHref("review", "rv-1")).toBe("/portal/social-reviews/rv-1");
     expect(ballItemHref("conversation", "th-1")).toBe("/portal/conversation/th-1");
+    // SCP-2: a post opens the approval page at that post (the id is the post's id), encoded
+    expect(ballItemHref("social_post", "soc-post-n-3")).toBe("/portal/social?post=soc-post-n-3");
+    expect(ballItemHref("social_post", "a/b c")).toBe("/portal/social?post=a%2Fb%20c");
     // A request has no page of its own; a payment id is not an invoice id.
     expect(ballItemHref("request", "cr-1")).toBe("/portal/requests");
     expect(ballItemHref("payment", "pay-1")).toBe("/portal/invoices");

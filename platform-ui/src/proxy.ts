@@ -3,7 +3,7 @@ import { sanitizeReturnTo } from "@/lib/returnTo";
 import { peekSessionExpiry, needsRefresh } from "@/lib/session-expiry";
 import { readHostCookie, HOST_COOKIES } from "@/lib/cookieNames";
 import { allowedOrigins, isOriginAllowed, requestOwnOrigin, ORIGIN_CHECK_EXEMPT_PATHS } from "@/lib/originCheck";
-import { PATHNAME_HEADER } from "@/lib/pathnameHeader";
+import { PATHNAME_HEADER, SEARCH_HEADER } from "@/lib/pathnameHeader";
 import { replayCspFor } from "@/lib/replaysCsp";
 
 /** CSRF gate (B0): refuse a state-changing request whose Origin / Sec-Fetch-Site says it came from a
@@ -127,7 +127,12 @@ export function proxy(req: NextRequest) {
   // survives.
   const requestHeaders = new Headers(req.headers);
   requestHeaders.delete(PATHNAME_HEADER);
-  if (isDocumentRequest(req)) requestHeaders.set(PATHNAME_HEADER, pathname);
+  requestHeaders.delete(SEARCH_HEADER);
+  if (isDocumentRequest(req)) {
+    requestHeaders.set(PATHNAME_HEADER, pathname);
+    // SCP-2: the query too, for the portal layout's sign-in redirect (a cookie that is present but no longer valid passes this proxy and is sent to /login by the layout).
+    requestHeaders.set(SEARCH_HEADER, req.nextUrl.search);
+  }
   const res = NextResponse.next({ request: { headers: requestHeaders } });
   if (req.method === "GET") {
     const csp = replayCspFor(pathname, req.nextUrl.searchParams);

@@ -13,6 +13,7 @@ import { conversationDemo, demoConversationNeedsUs } from "./demoConversation";
 import { pipelineDemo, portalDemo } from "./demoPipeline";
 import { clientCentreDemo, demoCentreRegisterClient, demoCentreSetBusinessType, demoIsBusinessType } from "./demoClientCentre";
 import { socialDemo, socialClientReviewPortalDemo } from "./demoSocial";
+import { socialPortalPostsDemo } from "./demoSocialPortal";
 import { demoAssetLibraryRead } from "./demoSocialPipelineRun";
 import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
 import { requestsDemo } from "./demoRequests";
@@ -2777,6 +2778,11 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // SMM-31/32 — client portal's social-post review (D-16), stateful store shared with
   // `demoSocial.ts`'s staff-side routes above (same `globalThis`-pinned `CLIENT_REVIEWS`, so a
   // staff "ask" and a client "decide" agree on the one row).
+  // SCP-2 (BFF §63.9) — the same portal's post approval page (`portal/social/...`), answered from the SAME pipeline store the staff demo uses
+  // (lib/demoSocialPortal.ts), so a decision made here moves the staff side's post. A different path from `portal/social-reviews` above.
+  const socialPortalPosts = socialPortalPostsDemo(method, p, url.searchParams, userId, body);
+  if (socialPortalPosts) return socialPortalPosts;
+
   const socialReviewPortal = socialClientReviewPortalDemo(method, p, userId, body);
   if (socialReviewPortal) return socialReviewPortal;
 

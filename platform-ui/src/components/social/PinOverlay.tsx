@@ -51,9 +51,11 @@ export interface PinOverlayProps {
   /** A click on a pin: the page scrolls to or opens its comment. */
   onSelectPin?: (pin: Pin) => void;
   selectedId?: string | null;
+  /** The image's loading hint. The portal's grids and lists pass "lazy" (SCP-2); the post page keeps the browser's default. */
+  loading?: "lazy" | "eager";
 }
 
-export function PinOverlay({ src, alt, fileId, pins, placing = false, onPlace, onCancelPlace, onSelectPin, selectedId = null }: PinOverlayProps) {
+export function PinOverlay({ src, alt, fileId, pins, placing = false, onPlace, onCancelPlace, onSelectPin, selectedId = null, loading }: PinOverlayProps) {
   const [marker, setMarker] = useState<{ x: number; y: number }>({ x: 0.5, y: 0.5 });
   const shown = pins.filter((p) => p.anchor.fileId === fileId);
 
@@ -76,13 +78,14 @@ export function PinOverlay({ src, alt, fileId, pins, placing = false, onPlace, o
     else if (e.key === "ArrowUp") move(0, -step);
     else if (e.key === "ArrowDown") move(0, step);
     else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); place(marker.x, marker.y); }
-    else if (e.key === "Escape") { e.preventDefault(); onCancelPlace?.(); }
+    // stopPropagation: inside a dialog (the portal's "Ask for changes"), Escape cancels the pin and does not also close the dialog.
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onCancelPlace?.(); }
   }
 
   return (
     <div className="scp-pinbox">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img className="scp-pinbox__img" src={src} alt={alt} />
+      <img className="scp-pinbox__img" src={src} alt={alt} loading={loading} />
       {shown.map((p) => (
         <button
           key={p.id}
