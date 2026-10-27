@@ -42,19 +42,22 @@ describe("the registry and the address", () => {
 });
 
 describe("tabs", () => {
-  it("offers Plan, Stories, Calendar, List and the Client profile, and no Feed preview until SCP-3d", () => {
-    expect(CLIENT_TABS.map((t) => t.key)).toEqual(["plan", "stories", "calendar", "list", "brand"]);
+  it("offers Plan, Stories, Calendar, Feed preview (SCP-3d), List and the Client profile", () => {
+    expect(CLIENT_TABS.map((t) => t.key)).toEqual(["plan", "stories", "calendar", "preview", "list", "brand"]);
+    expect(CLIENT_TABS.find((t) => t.key === "preview")!.label).toBe("Feed preview");
   });
   it("reads ?tab= and falls back to Plan for anything the page does not have", () => {
     expect(parseClientTab("calendar")).toBe("calendar");
     expect(parseClientTab(["list", "plan"])).toBe("list");
-    expect(parseClientTab("preview")).toBe("plan");
+    expect(parseClientTab("preview")).toBe("preview");
+    expect(parseClientTab("nonsense")).toBe("plan");
     expect(parseClientTab(undefined)).toBe("plan");
     expect(parseClientTab("")).toBe("plan");
   });
   it("builds the page's links", () => {
     expect(clientHref("d 1", "e-1")).toBe("/departments/d%201/profile/e-1");
     expect(clientHref("d-1", "e-1", "plan", { new: "extra" })).toBe("/departments/d-1/profile/e-1?tab=plan&new=extra");
+    expect(clientHref("d-1", "e-1", "preview")).toBe("/departments/d-1/profile/e-1?tab=preview");
     expect(postHref("d-1", "p/1")).toBe("/departments/d-1/posts/p%2F1");
   });
 });
