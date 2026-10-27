@@ -68,6 +68,7 @@ import { validateVariant, estimateCostUsd, isNetwork, type Network, type QuotaSn
 import { resolveXPricing } from "./usage-ledger";
 import { variantArgsSha256 } from "./canonical-args";
 import { completeViaGateway } from "./gateway-client";
+import type { AiCallAttribution } from "../ai-usage/gateway-usage";
 import { queryBrandKnowledge } from "./knowledge-client";
 import {
   buildIdeaPrompt, parseIdeaDraft, buildCaptionPrompt, parseCaptionDraft,
@@ -191,6 +192,8 @@ async function draftAndInsertVariant(
     tenantId: string; postId: string; accountId: string; network: Network; quota: QuotaSnapshot;
     engagementName: string; ideaBrief: string; tone: Record<string, unknown>; hashtagStrategy: HashtagStrategy;
     knowledgeHits: Array<{ sourceRef: string; text: string }>; cloudPolish: boolean;
+    /** AIP-03a: who is paying for the caption call. */
+    attribution: AiCallAttribution;
   },
 ): Promise<{ variantId: string; draftedVia: "ai" | "fallback" } | null> {
   const facts = {
@@ -200,7 +203,7 @@ async function draftAndInsertVariant(
   const prompt = buildCaptionPrompt(facts);
   let raw: string | null = null;
   try {
-    raw = (await completeViaGateway(prompt, args.cloudPolish ? { provider: "claude" } : undefined)).text;
+    raw = (await completeViaGateway(prompt, { attribution: args.attribution, ...(args.cloudPolish ? { provider: "claude" } : {}) })).text;
   } catch {
     raw = null; // fail-soft — same contract as draftPostVariantCaption
   }
@@ -293,7 +296,7 @@ export async function runContentBrief(
   };
   let rawIdeas: string | null = null;
   try {
-    rawIdeas = (await completeViaGateway(buildIdeaPrompt(ideaFacts), cloudPolish ? { provider: "claude" } : undefined)).text;
+    rawIdeas = (await completeViaGateway(buildIdeaPrompt(ideaFacts), { attribution: { tenantId, userId: principalUserId, surface: "other", task: "social.content_brief_ideas" }, ...(cloudPolish ? { provider: "claude" } : {}) })).text;
   } catch {
     rawIdeas = null;
   }
@@ -358,6 +361,7 @@ export async function runContentBrief(
           engagementName: eng.name, ideaBrief: idea.brief, tone: eng.tone, hashtagStrategy: eng.hashtagStrategy,
           knowledgeHits: variantKnowledgeHits.map((h) => ({ sourceRef: h.sourceRef, text: h.text })),
           cloudPolish,
+          attribution: { tenantId, userId: principalUserId, surface: "other", task: "social.content_brief_caption" },
         });
       });
       if (result === null) {

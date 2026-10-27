@@ -170,7 +170,7 @@ export async function classifyOneThread(
 
   let raw: string | null = null;
   try {
-    const res = await completeViaGateway(buildTriagePrompt(facts), gatewayOpts);
+    const res = await completeViaGateway(buildTriagePrompt(facts), { ...gatewayOpts, attribution: { tenantId, userId: null, surface: "other", task: "social.inbox_triage" } });
     raw = res.text;
   } catch {
     raw = null; // fail-closed to 'unavailable' below — see file header

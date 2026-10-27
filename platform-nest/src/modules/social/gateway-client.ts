@@ -17,6 +17,10 @@
 // when the engagement's `tool_scope.ai.cloudPolish` is on. This module never asserts a vendor
 // identity or holds a vendor key — it only asks the gateway to try one name first.
 import { config } from "../../config";
+import {
+  outcomeForGatewayStatus, readGatewayUsage, recordGatewayCall, statusFromError,
+  type AiCallAttribution, type GatewayCallFacts,
+} from "../ai-usage/gateway-usage";
 
 export interface GatewayCallOptions {
   /** Override the configured gateway URL (tests only; production always reads config). */
@@ -27,6 +31,11 @@ export interface GatewayCallOptions {
   timeoutMs?: number;
   /** Optional per-request provider-order hint (cloudPolish). See file header. */
   provider?: string;
+}
+
+/** AIP-03a: every call through this client writes one `ai_usage_events` row. The attribution is REQUIRED in the type, so a new caller cannot skip it. */
+export interface AttributedCallOptions extends GatewayCallOptions {
+  attribution: AiCallAttribution;
 }
 
 export class GatewayNotConfiguredError extends Error {
@@ -48,11 +57,39 @@ function resolve(opts?: GatewayCallOptions) {
   };
 }
 
-async function callGateway<T>(path: string, body: unknown, opts?: GatewayCallOptions): Promise<T> {
+/** A non-2xx gateway answer: the status is what the usage record classifies (429 budget, 503 DLP, anything else an error). */
+class GatewayHttpError extends Error {
+  constructor(path: string, readonly status: number) {
+    super(`ai-gateway ${path} returned HTTP ${status}`);
+    this.name = "GatewayHttpError";
+  }
+}
+
+export interface CompletionResult {
+  text: string;
+  provider?: string;
+  /** AIP-02: the provider's own counts and cost, when the serving provider reported them. */
+  usage?: { promptTokens: number; completionTokens: number; costUsd?: number; source?: string };
+  /** Additive and forward-compatible: the model that served, when the gateway reports it (it does not on /complete today). */
+  model?: string;
+}
+
+/** What a /complete answer says about the call, for the usage record. */
+export function completionFacts(answer: CompletionResult): Pick<GatewayCallFacts, "provider" | "model" | "usage"> {
+  return { provider: answer?.provider ?? null, model: typeof answer?.model === "string" ? answer.model : null, usage: readGatewayUsage(answer?.usage) };
+}
+
+/**
+ * One call, and ONE usage row for it (AIP-03a): after the answer is in hand, fire-and-forget, never throwing, never delaying. A refusal (429 budget,
+ * 503 DLP) or any other failure that reached the gateway is a row too, with the matching outcome and no tokens. An unconfigured gateway made no call
+ * and records nothing.
+ */
+async function callGateway<T extends CompletionResult>(path: string, body: unknown, opts: AttributedCallOptions): Promise<T> {
   const { url, token, fetchImpl, timeoutMs } = resolve(opts);
   if (!url) throw new GatewayNotConfiguredError();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const providerHint = opts.provider ?? null;
   try {
     const res = await fetchImpl(`${url.replace(/\/$/, "")}${path}`, {
       method: "POST",
@@ -60,23 +97,32 @@ async function callGateway<T>(path: string, body: unknown, opts?: GatewayCallOpt
       body: JSON.stringify(body),
       signal: controller.signal,
     });
-    if (!res.ok) throw new Error(`ai-gateway ${path} returned HTTP ${res.status}`);
-    return (await res.json()) as T;
+    if (!res.ok) throw new GatewayHttpError(path, res.status);
+    const answer = (await res.json()) as T;
+    let facts: Pick<GatewayCallFacts, "provider" | "model" | "usage"> = {};
+    try {
+      facts = completionFacts(answer);
+    } catch {
+      facts = {}; // a malformed answer is still a call that was made: it records with no figures
+    }
+    if (opts.attribution) void recordGatewayCall(opts.attribution, { capability: "llm", outcome: "ok", providerHint, ...facts });
+    return answer;
+  } catch (err) {
+    if (opts.attribution) {
+      const status = err instanceof GatewayHttpError ? err.status : statusFromError(err);
+      void recordGatewayCall(opts.attribution, { capability: "llm", outcome: status === null ? "error" : outcomeForGatewayStatus(status), providerHint });
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
   }
 }
 
-export interface CompletionResult {
-  text: string;
-  provider?: string;
-}
-
 /** `POST /complete` — prompt -> completion text (+ the provider that actually served it, after the
  *  gateway's own failover). `opts.provider` is the cloudPolish hint (see file header); it is the
  *  ONLY provider-selection knob this module has — everything past that is the gateway's chain. */
-export async function completeViaGateway(prompt: string, opts?: GatewayCallOptions): Promise<CompletionResult> {
+export async function completeViaGateway(prompt: string, opts: AttributedCallOptions): Promise<CompletionResult> {
   const body: { prompt: string; provider?: string } = { prompt };
-  if (opts?.provider) body.provider = opts.provider;
+  if (opts.provider) body.provider = opts.provider;
   return callGateway<CompletionResult>("/complete", body, opts);
 }

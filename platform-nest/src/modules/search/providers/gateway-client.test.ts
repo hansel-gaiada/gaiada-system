@@ -10,6 +10,9 @@ import {
   GatewayNotConfiguredError,
 } from "./gateway-client";
 
+/** AIP-03a: the clients now require an attribution. A tenantId that is not a uuid records NOTHING, so these pre-existing tests stay pure (no usage row, no database). */
+const ATTR = { tenantId: "no-company", userId: null, surface: "other" } as const;
+
 function mockServer(handler: (path: string, body: unknown) => unknown | { status: number }) {
   const calls: Array<{ url: string; method: string; body: unknown; headers: Record<string, string> }> = [];
   const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -31,7 +34,7 @@ const GW = "https://gateway.test";
 describe("embedViaGateway", () => {
   it("posts to exactly {gatewayUrl}/embed with a Bearer token and returns the embedding", async () => {
     const { calls, fetchImpl } = mockServer(() => ({ embedding: [0.1, 0.2, 0.3] }));
-    const vec = await embedViaGateway("running shoes", { gatewayUrl: GW, gatewayToken: "tok-123", fetchImpl });
+    const vec = await embedViaGateway("running shoes", { attribution: ATTR, gatewayUrl: GW, gatewayToken: "tok-123", fetchImpl });
     expect(vec).toEqual([0.1, 0.2, 0.3]);
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe(`${GW}/embed`);
@@ -42,20 +45,20 @@ describe("embedViaGateway", () => {
 
   it("throws (never falls back to a direct call) when the gateway is not configured", async () => {
     const { calls, fetchImpl } = mockServer(() => ({ embedding: [1] }));
-    await expect(embedViaGateway("x", { gatewayUrl: "", gatewayToken: "", fetchImpl })).rejects.toThrow(GatewayNotConfiguredError);
+    await expect(embedViaGateway("x", { attribution: ATTR, gatewayUrl: "", gatewayToken: "", fetchImpl })).rejects.toThrow(GatewayNotConfiguredError);
     expect(calls).toHaveLength(0); // no egress attempted at all
   });
 
   it("propagates a gateway HTTP error", async () => {
     const { fetchImpl } = mockServer(() => ({ status: 503 }));
-    await expect(embedViaGateway("x", { gatewayUrl: GW, gatewayToken: "t", fetchImpl })).rejects.toThrow(/HTTP 503/);
+    await expect(embedViaGateway("x", { attribution: ATTR, gatewayUrl: GW, gatewayToken: "t", fetchImpl })).rejects.toThrow(/HTTP 503/);
   });
 });
 
 describe("completeViaGateway", () => {
   it("posts to exactly {gatewayUrl}/complete and returns text + served provider", async () => {
     const { calls, fetchImpl } = mockServer(() => ({ text: "a cluster label", provider: "ollama" }));
-    const res = await completeViaGateway("label this cluster", { gatewayUrl: GW, gatewayToken: "tok-123", fetchImpl });
+    const res = await completeViaGateway("label this cluster", { attribution: ATTR, gatewayUrl: GW, gatewayToken: "tok-123", fetchImpl });
     expect(res).toEqual({ text: "a cluster label", provider: "ollama" });
     expect(calls[0].url).toBe(`${GW}/complete`);
     expect(calls[0].body).toEqual({ prompt: "label this cluster" });
@@ -67,9 +70,9 @@ describe("ai-gateway-go is the ONLY egress path (design §01 non-negotiable)", (
     const { calls, fetchImpl } = mockServer((path) =>
       path === "/embed" ? { embedding: [1, 2] } : { text: "ok", provider: "ollama" },
     );
-    await embedViaGateway("a", { gatewayUrl: GW, gatewayToken: "t", fetchImpl });
-    await completeViaGateway("b", { gatewayUrl: GW, gatewayToken: "t", fetchImpl });
-    await embedViaGateway("c", { gatewayUrl: GW, gatewayToken: "t", fetchImpl });
+    await embedViaGateway("a", { attribution: ATTR, gatewayUrl: GW, gatewayToken: "t", fetchImpl });
+    await completeViaGateway("b", { attribution: ATTR, gatewayUrl: GW, gatewayToken: "t", fetchImpl });
+    await embedViaGateway("c", { attribution: ATTR, gatewayUrl: GW, gatewayToken: "t", fetchImpl });
     expect(calls).toHaveLength(3);
     const hosts = new Set(calls.map((c) => new URL(c.url).origin));
     expect(hosts.size).toBe(1);
