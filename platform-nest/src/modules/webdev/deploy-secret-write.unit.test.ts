@@ -195,6 +195,8 @@ describe("M6-P6o · writeDeploySecret (pure, against the fake GitHub)", () => {
     ["the row points at another record", { vault: { id: "77777777-7777-4777-8777-777777777777" } }, "deploy_secret_vault_changed"],
     ["the record is not linked", { vault: { status: "unconfigured" } }, "deploy_secret_vault_unusable"],
     ["the record is a user's", { vault: { ownerKind: "user" } }, "deploy_secret_vault_unusable"],
+    // M6-P6o2: a per-site record of ANOTHER row (another site, or this site's other environment) is never this row's key
+    ["the record is another row's per-site record", { vault: { ownerKind: "webdev_site", ownerId: "88888888-8888-4888-8888-888888888888" } }, "deploy_secret_vault_unusable"],
     ["the record is ftp for an ssh row", { vault: { provider: "ftp" } }, "deploy_secret_vault_unusable"],
     ["the row is unbound", { env: { vaultRef: null } }, "deploy_secret_no_vault_record"],
     ["the row is a tracked estate row", { env: { origin: "tracked" } }, "deploy_secret_not_deliverable"],
@@ -217,6 +219,18 @@ describe("M6-P6o · writeDeploySecret (pure, against the fake GitHub)", () => {
     expect(e.qualifier).toBe(qualifier);
     expect(valueCalls(h.gh)).toHaveLength(0);
     expect(h.counts.grants).toBe(0);
+  });
+
+  it("M6-P6o2: a per-site record of THIS row is accepted and written; the refusal of another row's names vault_ref_wrong_owner", async () => {
+    const own = await harness({ vault: { ownerKind: "webdev_site", ownerId: ROW } });
+    expect(await writeDeploySecret(own.deps, args())).toMatchObject({ outcome: "written", written: "created" });
+    expect(valueCalls(own.gh)).toHaveLength(1);
+    const other = await harness({ vault: { ownerKind: "webdev_site", ownerId: "88888888-8888-4888-8888-888888888888" } });
+    const e = await refusal(writeDeploySecret(other.deps, args()));
+    expect(e.code).toBe("deploy_secret_vault_unusable");
+    expect(e.qualifier).toBe("vault_ref_wrong_owner");
+    expect(other.gh.calls).toHaveLength(0);
+    expect(other.counts).toEqual({ opened: 0, grants: 0 });
   });
 
   it("a recorded grant for another repository id is superseded; nothing written", async () => {

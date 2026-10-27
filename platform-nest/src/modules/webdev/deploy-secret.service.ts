@@ -1,6 +1,9 @@
 // M6-P6o (WSK-D88) — the Postgres, vault, ERP-App, ledger, approval and authorization bindings of deploy-secret-write.ts
-// (read that file's header first: the seven steps and where each wall is). Four entry points:
+// (read that file's header first: the seven steps and where each wall is). Four entry points, plus M6-P6o2's per-site
+// record (one row's OWN vault record, owner_kind `webdev_site`, owner_id = the registry row; migration 202610271200):
 //
+//   createSiteDeployRecord      POST sites/:id/deploy-credentials       make (or return) the row's own ssh/ftp record (step 2a).
+//   listSiteDeployRecords       GET  sites/:id/deploy-credentials       the row's own records, masked.
 //   sealDeployCredential        PUT  deploy-credentials/:connectionId   the TRACKED way a hosting credential enters the vault
 //                               (replaces the local, untracked VLT-4 script for deploy principals; runbook step 2b).
 //   fileDeploySecretWrite       POST sites/:id/deploy-secret            files ONE HIGH approval to write that row's secret.
@@ -10,6 +13,8 @@
 //                               the typed reason (O-3 reads `github_permission_missing: organization_secrets`, never success).
 //
 // ── AUTHORIZATION (no Cerbos change; every key below already exists) ──────────────────────────────────────────────
+//   record   (P6o2) `webdev_site · update` on the row (the bind's gate) + `integration_connection · manage` (ownerId ""):
+//            a per-site record is the company tier like every non-user record; read is `webdev_site · read` + `manage`.
 //   seal     `integration_connection · manage` on the record (the company tier every other vault write asks for a company or
 //            client record: the generic connections API, Figma's PUT). Checked BEFORE the body is read, so a caller who may
 //            not seal learns nothing from a malformed body (and the value is never parsed for them).
@@ -39,7 +44,9 @@ import { fileAutomationApproval } from "../../core/approval-filing";
 import { resolveGithubOrgTenant } from "../../core/github-org-tenant";
 import { erpGitCaller } from "../../core/github/git-data";
 import { withGithubLedger } from "../../core/github/ledger";
-import { getConnectionRow, readAccessToken, setConnectionTokens, type ConnectionResponse } from "../../core/integrations.service";
+import {
+  createConnection, getConnectionRow, listConnections, readAccessToken, setConnectionTokens, type ConnectionResponse,
+} from "../../core/integrations.service";
 import { cerbosOwnerId, connectionAction } from "../../core/integrations.controller";
 import { tokenVaultConfigured } from "../../core/secret-box";
 import type { Principal } from "../../rbac/principal";
@@ -128,6 +135,91 @@ async function orgTenantOf(tenantId: string): Promise<string> {
   return org.tenantId;
 }
 
+// ── 0. the per-site record (M6-P6o2, runbook step 2a) ──────────────────────────────────────────────
+
+/** The live staging or production registry row a per-site record names, or null. Read under both RLS walls. */
+async function ownerRowOf(tenantId: string, webdevSiteId: string): Promise<{ id: string; environment: "staging" | "production" } | null> {
+  if (!UUID_RE.test(webdevSiteId)) return null;
+  const r = await withTenants(
+    [tenantId],
+    (c) =>
+      c.query<{ id: string; environment: string }>(
+        `SELECT id, environment FROM webdev_sites WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+        [webdevSiteId.toLowerCase(), tenantId],
+      ),
+    { modules: ["webdev"] },
+  );
+  const row = r.rows[0];
+  if (!row || (row.environment !== "staging" && row.environment !== "production")) return null;
+  return { id: row.id, environment: row.environment };
+}
+
+/** The providers a per-site deploy record may have: `ssh` (SFTP) or `ftp` (FTPS), the bind's `VAULT_PROVIDER_FOR_ACCESS`. */
+export const SITE_DEPLOY_RECORD_PROVIDERS: readonly string[] = ["ssh", "ftp"];
+const EXTERNAL_ACCOUNT_MAX = 200;
+
+/**
+ * Create (or return) the per-site vault record of ONE registry row: `owner_kind 'webdev_site'`, `owner_id` = the row's id
+ * (migration 202610271200). One `ssh` and one `ftp` record per row, so every site and environment holds its own principal
+ * (WSK-D79). Idempotent: the generic upsert on `(tenant, owner_kind, owner_id, provider)` returns the same record (a revoked
+ * one comes back `unconfigured`, with no token). Body EXACTLY `{provider}` or `{provider, externalAccount}` (a LABEL, never a
+ * secret). No token is accepted here: the value is sealed with PUT deploy-credentials/:connectionId.
+ *
+ * Authorization first, independent of the body: `webdev_site · update` on the row (the bind's gate) AND
+ * `integration_connection · manage` (the company tier every non-user vault record asks; ownerId "" so `owns` never matches).
+ */
+export async function createSiteDeployRecord(principal: Principal, tenantId: string, webdevSiteId: string, body: unknown): Promise<ConnectionResponse> {
+  if (!UUID_RE.test(webdevSiteId)) return refuse("not_found", "webdev site not found");
+  const id = webdevSiteId.toLowerCase();
+  await authorize(principal, { kind: "webdev_site", tenantId, id, module: "webdev" }, "update");
+  await authorize(principal, { kind: "integration_connection", tenantId, ownerId: "" }, "manage");
+  const actorId = actorOf(principal);
+
+  const b = typeof body === "object" && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+  const keys = b ? Object.keys(b) : [];
+  const ext = b?.externalAccount;
+  if (
+    !b || keys.some((k) => k !== "provider" && k !== "externalAccount") ||
+    typeof b.provider !== "string" || !SITE_DEPLOY_RECORD_PROVIDERS.includes(b.provider) ||
+    (ext !== undefined && ext !== null && (typeof ext !== "string" || ext.trim().length === 0 || ext.length > EXTERNAL_ACCOUNT_MAX))
+  ) {
+    return refuse(
+      "deploy_secret_body_invalid",
+      `the body must be exactly {provider: "ssh"|"ftp"} or {provider, externalAccount} (a label of 1 to ${EXTERNAL_ACCOUNT_MAX} characters, never a secret)`,
+    );
+  }
+  const owner = await ownerRowOf(tenantId, id);
+  if (!owner) {
+    // Distinguish a row that exists but is not deliverable from one that does not exist (or is another tenant's: RLS hides it).
+    const any = await withTenants([tenantId], (c) => c.query(`SELECT 1 FROM webdev_sites WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`, [id, tenantId]), { modules: ["webdev"] });
+    if (!any.rows[0]) return refuse("not_found", "webdev site not found");
+    return refuse("deploy_secret_not_deliverable", "only a staging or production row has a deploy record (a preview or development row is never delivered)");
+  }
+  const record = await createConnection(tenantId, {
+    ownerKind: "webdev_site",
+    ownerId: owner.id,
+    provider: b.provider,
+    externalAccount: typeof ext === "string" ? ext.trim() : null,
+    createdBy: actorId,
+  });
+  await writeActivity(tenantId, actorId, "created", "integration_connection", record.id, {
+    ownerKind: "webdev_site", webdevSiteId: owner.id, environment: owner.environment, provider: record.provider,
+  });
+  return record;
+}
+
+/** The per-site records of ONE registry row (masked: `hasToken`, never a value). `webdev_site · read` on the row and
+ *  `integration_connection · manage` (reading a vault record that is not your own is the company tier). */
+export async function listSiteDeployRecords(principal: Principal, tenantId: string, webdevSiteId: string): Promise<ConnectionResponse[]> {
+  if (!UUID_RE.test(webdevSiteId)) return refuse("not_found", "webdev site not found");
+  const id = webdevSiteId.toLowerCase();
+  await authorize(principal, { kind: "webdev_site", tenantId, id, module: "webdev" }, "read");
+  await authorize(principal, { kind: "integration_connection", tenantId, ownerId: "" }, "manage");
+  const exists = await withTenants([tenantId], (c) => c.query(`SELECT 1 FROM webdev_sites WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`, [id, tenantId]), { modules: ["webdev"] });
+  if (!exists.rows[0]) return refuse("not_found", "webdev site not found");
+  return listConnections(tenantId, { ownerKind: "webdev_site", ownerId: id, includeRevoked: true });
+}
+
 // ── 1. the seal (runbook step 2b) ──────────────────────────────────────────────────────────────────
 
 export interface SealedCredentialDto {
@@ -167,10 +259,23 @@ export async function sealDeployCredential(principal: Principal, tenantId: strin
   if (row.provider !== want) {
     return refuse("deploy_credential_wrong_record", `transport ${parsed.credential.transport} needs a vault record of provider ${want}, this one is ${row.provider}`, "provider");
   }
-  if (row.owner_kind !== "company" && row.owner_kind !== "client") {
-    return refuse("deploy_credential_wrong_record", "a deploy credential belongs to a company or client record, never a user's", "owner");
+  if (row.owner_kind !== "company" && row.owner_kind !== "client" && row.owner_kind !== "webdev_site") {
+    return refuse("deploy_credential_wrong_record", "a deploy credential belongs to a site row's own record, a company or a client record, never a user's", "owner");
   }
-  if (row.status === "revoked") return refuse("deploy_credential_wrong_record", "the record is revoked; create it again first (POST integrations/connections)", "revoked");
+  if (row.status === "revoked") return refuse("deploy_credential_wrong_record", "the record is revoked; create it again first (POST sites/:id/deploy-credentials)", "revoked");
+  if (row.owner_kind === "webdev_site") {
+    // A per-site record (M6-P6o2) is ONE row's: its owning row must still be a live staging or production row of this tenant,
+    // and the credential must be for that row's environment (the write re-checks it; refusing here keeps a wrong value out).
+    const owner = await ownerRowOf(tenantId, row.owner_id);
+    if (!owner) return refuse("deploy_credential_wrong_record", "the record's site row no longer exists, or is not a staging or production row", "owner");
+    if (parsed.credential.environment !== owner.environment) {
+      return refuse(
+        "deploy_credential_wrong_record",
+        `this record is the ${owner.environment} row's own; the credential is for ${parsed.credential.environment}`,
+        "environment",
+      );
+    }
+  }
   if (!tokenVaultConfigured()) return refuse("deploy_secret_not_configured", "the vault is not configured (INTEGRATION_TOKEN_KEY); nothing was stored");
 
   const connection = await setConnectionTokens(tenantId, row.id, { accessToken: parsed.canonical });

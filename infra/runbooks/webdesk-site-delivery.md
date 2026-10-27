@@ -93,14 +93,16 @@ Run steps 1 to 5 once per site, and again for the production environment. Steps 
 
 **Why a record:** the vault is the custody copy (WSK-D33 option (c)). It is also what step 4 points at, and what lets you reveal the credential later for a rollback or a rotation. The org secret in step 3 is a second copy; a rotation changes both.
 
-**2a. Create the record (staff, a manager or above):**
+**2a. Create the record (staff, a manager or above; M6-P6o2).** Make the row's OWN record, once per row (the staging row, and the production row, each get their own):
 
-    POST /api/<t>/integrations/connections
-    {"provider":"ssh","ownerKind":"company","externalAccount":"<label, no secret>"}
+    POST /api/<t>/modules/webdev/sites/<row>/deploy-credentials
+    {"provider":"ssh","externalAccount":"<label, no secret>"}
 
 - `provider` is `ssh` for SFTP, `ftp` for FTPS. It must match the `access` you bind in step 4.
-- `ownerKind` is `company` (the owner id is forced to the tenant) or `user`. A `company` record, or one owned by the site's own client, is accepted by the bind. A `user` record is refused.
+- The record belongs to that row (`ownerKind: "webdev_site"`, `ownerId: <row>`). The bind and the write accept it for that row only. Another site's record, or the same site's other environment's record, is refused `vault_ref_wrong_owner`.
 - **No token is accepted over HTTP.** The record starts `unconfigured`, and a repeat create returns the same `id`. Keep that `id` as `<vault-id>`.
+- See the row's records: `GET /api/<t>/modules/webdev/sites/<row>/deploy-credentials`.
+- Records made earlier still work. A `company` record (`POST /api/<t>/integrations/connections {"provider":"ssh","ownerKind":"company"}`) or one owned by the site's own client is still accepted by the bind. A `user` record is refused. Prefer the row's own record for new sites.
 
 **2b. Seal the credential into it (staff, a manager or above; M6-P6o, WSK-D88).**
 
@@ -109,9 +111,10 @@ Run steps 1 to 5 once per site, and again for the production environment. Steps 
 
 - `credential` is the per-site deploy secret's JSON, exactly the shape in step 3b's table (the ERP checks it with the same rules as the deploy job's `deploy-from-secret.sh`). Type it into the request once, from the host's own panel. Do not save it in a file.
 - The ERP stores it as one canonical line, sealed in the vault, and never shows it again. The answer is the masked record (`hasToken: true`, `status: "linked"`) and a `sealedVersion` (a hash of the ciphertext, not of the value).
-- `ssh` records take `transport: sftp`; `ftp` records take `transport: ftps`. The record must be the company's or the site's own client's.
+- `ssh` records take `transport: sftp`; `ftp` records take `transport: ftps`. The record must be the row's own, the company's, or the site's own client's.
+- A row's own record takes that row's `environment` only: a staging credential into the production row's record is refused `deploy_credential_wrong_record: environment`.
 - This replaces the local VLT-4 script (`scripts/vault-import-hosting-credentials.local.mjs`) for deploy principals. Delete the credential from any local credentials file in the same sitting.
-- **One record per owner and provider.** The vault holds one `ssh` and one `ftp` record per owner (the company, or one client). Two sites, or a site's staging and production, that need separate `ssh` principals cannot both be company records today. Use the site's own client as the owner, and report a collision as a gap.
+- **One record per owner and provider.** The vault holds one `ssh` and one `ftp` record per owner. Since M6-P6o2 each row is an owner, so every site and every environment has its own `ssh` and `ftp` record and nothing collides. A `company` record is still one per company: two company sites cannot share it as separate principals, so give each row its own record (2a).
 
 **2c. Write the org secret from the vault (two staff; M6-P6o, WSK-D88).** Do this after the bind (step 4), because the write reads the row's `vaultRef`.
 
@@ -122,16 +125,18 @@ Run steps 1 to 5 once per site, and again for the production environment. Steps 
 - **This replaces step 3b's hand-made secret** wherever O-3 is in effect. Until then the write fails `github_permission_missing: organization_secrets` and nothing is written.
 - Check where it stands: `GET sites/<staging-row>/deploy-secret`. `written` means GitHub holds what the vault holds. `pending` with a `reason` is NOT success. `stale` means the vault was resealed and the rewrite is not approved yet (step 9).
 
-**Success looks like:** `GET /api/<t>/integrations/connections?owner=company&provider=ssh` shows the record with `status: "linked"` and `hasToken: true`, and `GET sites/<row>/deploy-secret` shows `state: "written"`. The plaintext is never in any response.
+**Success looks like:** `GET /api/<t>/modules/webdev/sites/<row>/deploy-credentials` shows the record with `status: "linked"` and `hasToken: true` (for an older company record: `GET /api/<t>/integrations/connections?owner=company&provider=ssh`), and `GET sites/<row>/deploy-secret` shows `state: "written"`. The plaintext is never in any response.
 
 **Refusals you may see:**
 | Token / status | Meaning |
 |---|---|
 | 400 `provider must be one of ...` | The provider is not one of `github,google_drive,claude,cpanel,ftp,ssh,wp_admin`. |
-| 403 | You are not a manager or above for a company or client record (seal), or you lack `provision` + `github_repo · push` (file). |
+| 403 | You are not a manager or above for a vault record (create, seal; a row's own record also needs `webdev_site · update`), or you lack `provision` + `github_repo · push` (file). |
 | 400 `deploy_secret_body_invalid` | The seal body is not exactly `{credential}`, or the filing body is not empty or `{reason}`. |
 | 422 `deploy_credential_invalid` | The credential does not have the documented shape. The reason names the fields, never a value. |
-| 422 `deploy_credential_wrong_record` | sftp into an `ftp` record (or ftps into `ssh`), a user's record, or a revoked one. |
+| 422 `deploy_credential_wrong_record` | sftp into an `ftp` record (or ftps into `ssh`), a user's record, or a revoked one. For a row's own record: `environment` (the credential is for the other environment) or `owner` (its row was deleted or is not staging or production). |
+| 400 `deploy_secret_body_invalid` (2a) | The create body is not exactly `{provider: "ssh"\|"ftp"}` or `{provider, externalAccount}`. |
+| 409 `deploy_secret_not_deliverable` (2a) | The row is a preview or development row; only staging and production rows get a deploy record. |
 | 503 `deploy_secret_not_configured` | `INTEGRATION_TOKEN_KEY` is not set on the platform. Nothing is stored unencrypted. |
 | 409 `deploy_secret_no_vault_record` | The row is not bound to a vault record (step 4). |
 | 422 `deploy_secret_vault_unusable` | The bound record is not linked, has the wrong provider or the wrong owner. |
@@ -252,7 +257,7 @@ The grant also runs by itself, after the scaffold's first fill. That automatic p
 | `vault_ref_unknown` | 422 | No such record in this tenant. Another tenant's record gives the same answer. |
 | `vault_ref_wrong_provider` | 422 | `ssh` needs a provider `ssh` record, and `ftp` needs `ftp`. |
 | `vault_ref_not_linked` | 422 | No credential is sealed in the record (step 2b). |
-| `vault_ref_wrong_owner` | 422 | The record belongs to a user, or to another client. |
+| `vault_ref_wrong_owner` | 422 | The record belongs to a user, to another client, or is another row's own record (another site, or this site's other environment; M6-P6o2). |
 | `site_environment_not_deliverable` | 409 | Only a `staging` or `production` row can be bound. |
 | 404 | | Unknown or foreign site. |
 

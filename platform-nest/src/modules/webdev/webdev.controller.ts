@@ -15,6 +15,9 @@
 //   GET  /api/:tenantId/modules/webdev/sites/:id/dns                    -> 200 DNS checklist + read-only check | 404 (M6-P6i)
 //   GET  /api/:tenantId/modules/webdev/sites/:id/dns/task               -> 200 the site's DNS task link (state none|open|closed) | 404 (M6-P6p)
 //   POST /api/:tenantId/modules/webdev/sites/:id/dns/recheck            -> 200 {task, check} | 404 (M6-P6p: re-run the read-only check now; closes the task when every record points)
+//   POST /api/:tenantId/modules/webdev/sites/:id/deploy-credentials    -> 201 the row's own masked vault record | 400 | 403 | 404 | 409
+//   GET  /api/:tenantId/modules/webdev/sites/:id/deploy-credentials    -> 200 the row's own masked vault records | 403 | 404
+//        (M6-P6o2: per-site records, owner_kind webdev_site, one ssh and one ftp per site AND environment; migration 202610271200)
 //   PUT  /api/:tenantId/modules/webdev/deploy-credentials/:connectionId -> 200 masked record + sealedVersion | 400 | 403 | 404 | 422 | 503
 //        (M6-P6o: seal a per-site deploy credential into its vault record; the value is accepted once and never echoed)
 //   POST /api/:tenantId/modules/webdev/sites/:id/deploy-secret          -> 201 {approvalId,...} | 400 | 403 | 404 | 409 | 422 | 503
@@ -88,9 +91,10 @@ import { followProductionRow, grantDeployForSite, readDeployGrant, revokeDeployF
 import { readSiteBuildsForProvisioned, type SiteBuildsDto } from "./site-builds.service";
 import { DeploySecretRefusal } from "./deploy-secret-write";
 import {
-  fileDeploySecretWrite, readDeploySecretState, sealDeployCredential,
+  createSiteDeployRecord, fileDeploySecretWrite, listSiteDeployRecords, readDeploySecretState, sealDeployCredential,
   type DeploySecretFilingDto, type DeploySecretStateDto, type SealedCredentialDto,
 } from "./deploy-secret.service";
+import type { ConnectionResponse } from "../../core/integrations.service";
 
 const SITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -562,7 +566,8 @@ export class WebdevController {
   /** M6-P6g — bind a registry row to its delivery target. Body EXACTLY `{hostKind, hostRef, access, vaultRef}` (any other key
    *  is a 400: a host, user, path or secret has no column and is refused, not ignored). `hostKind` is `shared-hosting` or
    *  `our-box`; `hostRef` an opaque label; `access` `ssh` (SFTP) or `ftp` (FTPS); `vaultRef` a VLT-1 record of THIS tenant,
-   *  linked, of the provider that access needs, owned by the company or this site's own client. Another tenant's record and
+   *  linked, of the provider that access needs, owned by THIS row (its per-site record, M6-P6o2), the company or this site's own
+   *  client; another site's or the other environment's per-site record is `422 vault_ref_wrong_owner`. Another tenant's record and
    *  an id that does not exist are both `422 vault_ref_unknown`. Authorization comes first and is independent of the body
    *  (`webdev_site · update`, no new action). Refusals are `{error: <token>, reason}` with the token's status. */
   @Post("sites/:id/delivery-binding")
@@ -621,6 +626,39 @@ export class WebdevController {
   }
 
   // ═══ M6-P6o (WSK-D88): the ERP writes each delivered site's deploy secret from its vault record ═══════════════════
+
+  /** M6-P6o2 — create (or return) THIS row's own vault record for a deploy principal: owner_kind `webdev_site`, owner_id = the
+   *  row (one site in one environment). Body EXACTLY `{provider: "ssh"|"ftp"}` or `{provider, externalAccount}` (a label).
+   *  No token: seal it with PUT deploy-credentials/:connectionId. `webdev_site · update` + `integration_connection · manage`,
+   *  both before the body is read. Idempotent (the vault's own upsert): a repeat returns the same record. */
+  @Post("sites/:id/deploy-credentials")
+  @HttpCode(201)
+  async createSiteDeployRecord(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ): Promise<ConnectionResponse> {
+    try {
+      return await createSiteDeployRecord(req.principal, tenantId, id, body);
+    } catch (err) {
+      throw deploySecretHttpError(err);
+    }
+  }
+
+  /** M6-P6o2 — THIS row's own vault records, masked (`hasToken`, never a value), revoked ones included. */
+  @Get("sites/:id/deploy-credentials")
+  async listSiteDeployRecords(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+  ): Promise<ConnectionResponse[]> {
+    try {
+      return await listSiteDeployRecords(req.principal, tenantId, id);
+    } catch (err) {
+      throw deploySecretHttpError(err);
+    }
+  }
 
   /** Seal a per-site deploy credential into its vault record (runbook step 2b; replaces the local VLT-4 script for this use).
    *  Body EXACTLY `{credential: {...}}`, the deploy secret's documented shape. `integration_connection · manage` on the record,
