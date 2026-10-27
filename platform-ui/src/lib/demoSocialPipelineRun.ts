@@ -19,8 +19,9 @@ import fixture from "./scpStageMachine.json";
 import { scpActionsFromStatus, scpHolderOf, scpPhaseOf, type ScpPostView } from "./scpStageMachine";
 import { ALLOCATION_NETWORKS } from "./socialAllocation";
 import { MUST_HAVES, SUGGESTIBLE_FIELDS, editableFieldsOf } from "./socialPipeline";
+import { demoNetworksWithoutAccount } from "./demoSocialAccounts";
 import {
-  PIPE_POSTS, allocStore, cerbosAllows, demoChecks, demoPipelinePost, isDemoSocialApprover, who, type DemoResult, type PipePost,
+  PIPE_ENGAGEMENTS, PIPE_POSTS, allocStore, cerbosAllows, demoChecks, demoPipelinePost, isDemoSocialApprover, who, type DemoResult, type PipePost,
 } from "./demoSocialPipeline";
 
 // ── The fixture, as this file reads it ───────────────────────────────────────────────────────────────────────────────────────
@@ -104,6 +105,8 @@ const MUST_HAVE_KEYS = MUST_HAVES.map((m) => m.key);
 const view = (p: PipePost): ScpPostView => ({
   pipelineStatus: p.pipelineStatus, changeCase: p.changeCase, scheduleVia: p.scheduleVia, blockWaitingOn: p.blockWaitingOn, creativeState: p.creativeState,
 });
+/** The client an engagement is for (the account guards read the CLIENT's accounts). */
+const clientOfEngagement = (engagementId: string): string => PIPE_ENGAGEMENTS.find((e) => e.id === engagementId)?.clientId ?? "";
 const officerOf = (p: PipePost): string | null => allocStore.byEngagement[p.engagementId]?.officerId ?? null;
 const isAutomation = (userId: string): boolean => /^(demo-)?(automation|bot)\b/.test(userId);
 
@@ -556,9 +559,9 @@ function guards(a: FxAction, p: PipePost, r: Req, userId: string, now: Date): { 
         break;
       }
       case "one_account_per_placement_network": {
-        const have = allocStore.byEngagement[p.engagementId]?.platforms ?? [];
+        // SCP-Sb: the client's ACCOUNTS decide, as the server's `loadClientAccounts` count does, not the allocation's platform list.
         const placement = Array.isArray(r.params.placement) ? (r.params.placement as string[]) : p.placement;
-        const networks = placement.filter((n) => !have.includes(n));
+        const networks = demoNetworksWithoutAccount(clientOfEngagement(p.engagementId), placement);
         if (networks.length) return { fail: refuse("no_account_for_network", { detail: { networks } }), skipped };
         break;
       }

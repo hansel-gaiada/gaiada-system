@@ -12,10 +12,12 @@ import { DISPLAY_TZ, todayIsoInDisplayZone } from "@/lib/format";
 import { getAllocation } from "@/lib/socialAllocation-data";
 import { getClientBrandBook, getClientCalendar, getCycleView, getEngagementProjectId, getFeedPreview } from "@/lib/socialClient-data";
 import { gridRange, parseClientTab, parseMonth, type ClientPost } from "@/lib/socialClient";
+import { getClientAccounts } from "@/lib/socialSimulatedAccounts-data";
 import { Card } from "@/components/ui";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { BrandBookForm } from "@/components/social/BrandBookForm";
 import { ClientHeader } from "@/components/social/ClientHeader";
+import { ClientAccounts, type ClientAccountsRead } from "@/components/social/ClientAccounts";
 import { ClientTabs } from "@/components/social/ClientTabs";
 import { ClientPlan } from "@/components/social/ClientPlan";
 import { ClientStories } from "@/components/social/ClientStories";
@@ -79,11 +81,12 @@ export default async function SocialClientPage({ params, searchParams }: { param
   const today = todayIsoInDisplayZone();
   const month = parseMonth(sp.month, today.slice(0, 7));
   const cycleId = row.thisCycle?.cycleId ?? null;
-  const [cycle, brand, project, root] = await Promise.all([
+  const [cycle, brand, project, root, accountsRead] = await Promise.all([
     cycleId ? getCycleView(userId, tenant, cycleId) : Promise.resolve(null),
     getClientBrandBook(userId, tenant, row.clientId),
     getEngagementProjectId(userId, tenant, engagementId),
     readOrgRoot(me, tenant),
+    getClientAccounts(userId, tenant, row.clientId),
   ]);
   const calendar = tab === "calendar" ? await getClientCalendar(userId, tenant, { ...gridRange(month), engagementId }) : null;
   const feed = tab === "preview" ? await getFeedPreview(userId, tenant, engagementId) : null;
@@ -91,11 +94,14 @@ export default async function SocialClientPage({ params, searchParams }: { param
   const cycleView = cycle?.kind === "ok" ? cycle.data : null;
   const posts: ClientPost[] = cycleView?.posts ?? [];
   const tone = brand.kind === "ok" ? (brand.data?.toneSummary || null) : undefined;
+  // SCP-Sb: the client's accounts, each simulated one marked; the seed button for the four approvers.
+  const accounts: ClientAccountsRead = accountsRead.kind === "ok" ? { kind: "ok", accounts: accountsRead.data } : accountsRead.kind === "forbidden" ? { kind: "forbidden" } : { kind: "unavailable" };
   const askCreatives = departmentForWorkspace(root, company?.vertical, "creatives") !== null;
 
   return (
     <div className="scp-client">
       <ClientHeader row={row} cycle={cycleView} cycleUnavailable={cycle !== null && cycle.kind !== "ok"} tone={tone} />
+      <ClientAccounts engagementId={engagementId} read={accounts} canPlan={row.canPlan} />
       <ClientCreate
         key={newMode ?? "closed"}
         deptId={deptId} cycleId={cycleId} platforms={row.platforms} pillars={brand.kind === "ok" ? brand.data?.contentPillars ?? [] : []}

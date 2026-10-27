@@ -12,6 +12,7 @@
 // tests pin the clock to mid-month before importing it.
 import { createHash } from "node:crypto";
 import { todayIsoInDisplayZone } from "./format";
+import { demoNetworksWithoutAccount } from "./demoSocialAccounts";
 import type { BrandBook } from "./socialBrandBook";
 import fixture from "./scpStageMachine.json";
 import {
@@ -575,8 +576,8 @@ function probeGuardRefusal(guards: ReadonlyArray<{ guard: string; refusal: strin
         if (p.designs.some((d) => !d.asset)) return g.refusal;
         break;
       case "one_account_per_placement_network": {
-        const have = store.allocations[p.engagementId]?.platforms ?? [];
-        if (p.placement.some((n) => !have.includes(n))) return g.refusal;
+        // SCP-Sb: the client's ACCOUNTS decide (the simulated accounts of `demoSocialAccounts.ts`), as the server's `loadClientAccounts` count does.
+        if (demoNetworksWithoutAccount(store.engagements.find((e) => e.id === p.engagementId)?.clientId ?? "", p.placement).length > 0) return g.refusal;
         break;
       }
       case "approved_time_not_passed": {

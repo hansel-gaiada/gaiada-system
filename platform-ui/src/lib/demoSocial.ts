@@ -12,6 +12,10 @@ import {
 } from "./demoSocialPipeline";
 import { demoBulkActions, runDemoPipelineAction, runDemoPipelineWrite } from "./demoSocialPipelineRun";
 import { demoFeedPreviewRoute } from "./demoSocialFeedPreview";
+import {
+  DEMO_SIMULATED_NETWORKS, demoAccounts, demoRemoveSimulatedAccounts, demoSeedSimulatedAccounts,
+  type DemoAccount, type DemoSimulatedNetwork, type DemoSocialNetwork as AccountsNetwork,
+} from "./demoSocialAccounts";
 // SMM-14 — DEMO_MODE fixtures for the Social Media department (calendar + composer, SMM-12).
 // Mirrors demoPipeline.ts's STATEFUL in-memory-store convention exactly (module-level arrays
 // mutate across requests within one running dev-server process; resets on restart). Before this
@@ -43,9 +47,7 @@ import { demoFeedPreviewRoute } from "./demoSocialFeedPreview";
 // partial (see their own seed comments below) so "an absent counter renders as unknown, never
 // zero" is drivable in a real browser, not just asserted in a unit test.
 
-export type DemoSocialNetwork =
-  | "instagram" | "facebook" | "tiktok" | "linkedin" | "x"
-  | "youtube" | "threads" | "pinterest" | "bluesky" | "mastodon";
+export type DemoSocialNetwork = AccountsNetwork;
 
 interface DemoResult { status: number; json: unknown }
 const ok = (json: unknown): DemoResult => ({ status: 200, json });
@@ -54,24 +56,6 @@ const err = (status: number, error: string): DemoResult => ({ status, json: { er
 interface DemoValidationIssue { rule: string; message: string }
 interface DemoValidation { ok: boolean; errors: DemoValidationIssue[]; warnings: DemoValidationIssue[] }
 const PASS: DemoValidation = { ok: true, errors: [], warnings: [] };
-
-interface DemoAccountCapabilities {
-  schedule: boolean; nativeSchedule: boolean; directPost: boolean; stories: boolean;
-  comments: boolean; dm: boolean; analytics: boolean;
-  unsupported: Partial<Record<"schedule" | "nativeSchedule" | "directPost" | "stories" | "comments" | "dm" | "analytics", "network" | "driver" | "unverified">>;
-}
-const FULL_CAPS: DemoAccountCapabilities = {
-  schedule: true, nativeSchedule: true, directPost: true, stories: true, comments: true, dm: true, analytics: true, unsupported: {},
-};
-
-interface DemoAccount {
-  id: string; clientId: string; network: DemoSocialNetwork; handle: string; displayName: string | null;
-  status: "connected" | "expiring" | "expired" | "error";
-  quota: Record<string, unknown>;
-  capabilities: DemoAccountCapabilities;
-  lastError: string | null; healthCheckedAt: string | null; connectedAt: string | null;
-  publisherOrgRef: string; driver: string;
-}
 
 interface DemoMediaDescriptor {
   fileId?: string; kind?: "image" | "video"; alt?: string; format?: string;
@@ -268,64 +252,6 @@ type SocialStore = {
 };
 
 const ENGAGEMENTS_SEED: DemoEngagement[] = [ENGAGEMENT, CLIENT_REVIEWED_ENGAGEMENT];
-
-// ── accounts (SMM-05 registry) — a deliberate mix per the ticket's own requirement: at least one
-// connected instagram account with a LIVE known quota, at least one connected account with NO live
-// counter (renders "unknown", never "0 used" — QUOTA_UNKNOWN_RULE/describeQuota's own contract),
-// one account whose quota is simply not modeled for its network (facebook), and one disconnected
-// (expired) account so the registry's non-happy path is drivable too. ───────────────────────────
-const ACCOUNTS_SEED: DemoAccount[] = [
-  {
-    id: "soc-acc-ig-1", clientId: "cl-1", network: "instagram", handle: "northwindtraders",
-    displayName: "Northwind Traders", status: "connected",
-    quota: { igPosts24h: { used: 8, cap: 25 } },
-    capabilities: FULL_CAPS, lastError: null,
-    healthCheckedAt: "2026-08-19T06:00:00Z", connectedAt: "2026-07-01T09:10:00Z",
-    publisherOrgRef: "pub-org-northwind", driver: "meta-graph",
-  },
-  {
-    // Deliberately NO `igPosts24h` bucket — the registry has simply never synced this account's
-    // quota. `describeQuota` must render "Unknown — registry not synced (never zero)", the exact
-    // gap this ticket exists to make drivable.
-    id: "soc-acc-ig-2", clientId: "cl-1", network: "instagram", handle: "northwind.behindthescenes",
-    displayName: "Northwind BTS", status: "connected",
-    quota: {},
-    capabilities: FULL_CAPS, lastError: null,
-    healthCheckedAt: null, connectedAt: "2026-07-15T11:00:00Z",
-    publisherOrgRef: "pub-org-northwind", driver: "meta-graph",
-  },
-  {
-    // Quota AT cap — drives the `quota_exhausted` publish-precondition refusal (soc-var-4 below
-    // targets this account) and the QuotaStrip's "critical" (100%) styling.
-    id: "soc-acc-ig-3", clientId: "cl-1", network: "instagram", handle: "northwind.promo",
-    displayName: "Northwind Promo", status: "connected",
-    quota: { igPosts24h: { used: 25, cap: 25 } },
-    capabilities: FULL_CAPS, lastError: null,
-    healthCheckedAt: "2026-08-19T05:30:00Z", connectedAt: "2026-07-01T09:15:00Z",
-    publisherOrgRef: "pub-org-northwind", driver: "meta-graph",
-  },
-  {
-    // facebook has no live-counter model at all in `describeQuota` — always "not_modeled",
-    // regardless of what `quota` carries. A different fact from "unsynced" (soc-acc-ig-2 above).
-    id: "soc-acc-fb-1", clientId: "cl-1", network: "facebook", handle: "NorthwindTraders",
-    displayName: "Northwind Traders (Facebook)", status: "connected",
-    quota: {},
-    capabilities: FULL_CAPS, lastError: null,
-    healthCheckedAt: "2026-08-19T06:00:00Z", connectedAt: "2026-07-02T09:00:00Z",
-    publisherOrgRef: "pub-org-northwind", driver: "meta-graph",
-  },
-  {
-    // Disconnected — exercises the registry's non-happy status and a capability actually blocked
-    // for a real reason ("network": TikTok's API never exposed DM to third-party publishers).
-    id: "soc-acc-tiktok-1", clientId: "cl-1", network: "tiktok", handle: "northwindtraders",
-    displayName: "Northwind Traders (TikTok)", status: "expired",
-    quota: {},
-    capabilities: { ...FULL_CAPS, dm: false, unsupported: { dm: "network" } },
-    lastError: "OAuth token expired — reconnect required.",
-    healthCheckedAt: "2026-08-10T08:00:00Z", connectedAt: "2026-06-20T09:00:00Z",
-    publisherOrgRef: "pub-org-northwind", driver: "tiktok-api",
-  },
-];
 
 // ── posts + variants — spans draft (unscheduled), in_review, approved (one healthy account, one
 // at-quota so the same post demonstrates both a passing AND a failing publish-precondition dry
@@ -821,7 +747,7 @@ const BEST_TIME_SEED: DemoBestTime[] = [
 // One store, shared by every module copy. Seeded once, on first touch.
 const store: SocialStore = ((globalThis as Record<symbol, unknown>)[STORE] ??= {
   engagements: ENGAGEMENTS_SEED,
-  accounts: ACCOUNTS_SEED,
+  accounts: demoAccounts,
   posts: POSTS_SEED,
   seq: 900,
   clientReviews: CLIENT_REVIEWS_SEED,
@@ -1136,6 +1062,43 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
     if (typeof next.officerId === "string" && !(next.officerId in DEMO_MEMBER_NAMES)) return err(409, "officer_not_member");
     Object.assign(allocStore.byEngagement[eng.id], next);
     return ok(demoAllocationRow(eng, userId));
+  }
+  // ── SCP-Sb: seed and tear down a client's simulated accounts (BFF §63.1 file 8). The server's order of checks: the four approvers (403), the switch (the demo is
+  // always "on"), the body (400), the engagement (404), then the data (409 `simulated_account_in_use`).
+  const simM = tail.match(/^engagements\/([^/]+)\/simulated-accounts$/);
+  if (simM && (m === "POST" || m === "DELETE")) {
+    if (!isDemoSocialApprover(userId)) return notApprover();
+    let networks: DemoSimulatedNetwork[] = [...DEMO_SIMULATED_NETWORKS];
+    const pick = (raw: unknown): DemoSimulatedNetwork[] | null => {
+      if (!Array.isArray(raw) || raw.length === 0 || raw.length > DEMO_SIMULATED_NETWORKS.length) return null;
+      if (!raw.every((x) => typeof x === "string" && (DEMO_SIMULATED_NETWORKS as readonly string[]).includes(x))) return null;
+      return DEMO_SIMULATED_NETWORKS.filter((n) => raw.includes(n));
+    };
+    if (m === "POST") {
+      const raw = b();
+      if (raw !== undefined && raw !== null) {
+        if (typeof raw !== "object" || Array.isArray(raw)) return demoField(400, "invalid_field", { field: "body" });
+        for (const k of Object.keys(raw as Record<string, unknown>)) if (k !== "networks") return demoField(400, "unknown_field", { field: k });
+        if ((raw as Record<string, unknown>).networks !== undefined) {
+          const got = pick((raw as Record<string, unknown>).networks);
+          if (!got) return demoField(400, "invalid_field", { field: "networks" });
+          networks = got;
+        }
+      }
+    } else {
+      const q = params.get("networks");
+      if (q !== null && q !== "") {
+        const got = pick(q.split(",").map((x) => x.trim().toLowerCase()));
+        if (!got) return demoField(400, "invalid_field", { field: "networks" });
+        networks = got;
+      }
+    }
+    const eng = pipelineEngagement(simM[1]);
+    if (!eng) return err(404, "engagement_not_found");
+    if (m === "POST") return ok({ accounts: demoSeedSimulatedAccounts({ id: eng.clientId, name: eng.clientName }, networks) });
+    const used = (accountId: string) => POSTS.some((p) => p.variants.some((v) => v.accountId === accountId));
+    const out = demoRemoveSimulatedAccounts(eng.clientId, networks, used);
+    return out.ok ? ok({ removed: out.removed }) : demoField(409, "simulated_account_in_use", { detail: { accountIds: out.accountIds } });
   }
   const brandM = tail.match(/^brand-profiles\/([^/]+)$/);
   if (brandM && m === "GET") {
