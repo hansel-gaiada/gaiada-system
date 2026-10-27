@@ -15,7 +15,6 @@
 // Every read declares the social module scope (the posts, variants, designs and engagements are third-walled).
 import type { PoolClient } from "pg";
 import { config } from "../../../config";
-import { todayIsoInTz } from "../../reports/person-scope";
 import { declareSocialModuleScope } from "../module-scope";
 import { clientVisibleComments } from "./post-comments";
 import { reviewHashOf } from "./pipeline-data";
@@ -304,10 +303,9 @@ export async function listPortalPosts(
   const clients = narrow(clientIds, q.clientId);
   const zone = tz();
 
-  // The month (SCP-2a, "the month's approval page"; ruled at SCP-2's train): a chosen month narrows every tab and the counts. With
-  // none, To review and Approved show every month (a post waiting on the client is often next month's) and the grid shows the
-  // current month in the report zone.
-  const month = q.tab === "grid" ? (q.month ?? todayIsoInTz(zone).slice(0, 7)) : q.month;
+  // The month (SCP-2a, "the month's approval page"; ruled at SCP-2's train): a filter, never a default. A chosen month narrows every
+  // tab and the counts; with none, every month is listed, because a post waiting on the client is often next month's.
+  const month = q.month;
   const countRows = await c.query<{ pipeline_status: string; n: string }>(
     `SELECT p.pipeline_status, count(*)::text AS n
        FROM social_posts p JOIN social_engagements e ON e.tenant_id = p.tenant_id AND e.id = p.engagement_id

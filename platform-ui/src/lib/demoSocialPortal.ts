@@ -195,13 +195,11 @@ function list(params: URLSearchParams, userId: string, now: number): DemoResult 
   const clientId = params.get("clientId");
   if (clientId !== null && clientId !== "" && !/^[\w-]{1,64}$/.test(clientId)) return err(400, "invalid_field", "clientId"); // a malformed one; an out-of-scope one lists nothing
 
-  // As the server (BFF §63.9 as built): a chosen month narrows every tab and the counts; with none, To review and Approved show every month and
-  // the grid shows the current month (the counts then cover every month).
+  // As the server (BFF §63.9 as built): the month is a filter, never a default; a chosen month narrows every tab and the counts.
   const scoped = PIPE_POSTS
     .filter(isPortalVisible)
     .filter((p) => !clientId || engagementOf(p)?.clientId === clientId)
     .filter((p) => !month || p.cycleMonth === month);
-  const gridMonth = month || new Date(now).toISOString().slice(0, 7);
   const state = (p: PipePost) => portalState(p) as PortalSocialState;
   const counts = {
     toReview: scoped.filter((p) => state(p) === "to_review").length,
@@ -210,7 +208,7 @@ function list(params: URLSearchParams, userId: string, now: number): DemoResult 
   };
   // to review: what is due soonest first; approved and the grid: newest first, the order of an account's feed
   const rows = scoped
-    .filter((p) => inTab(tab as (typeof TABS)[number], state(p)) && (tab !== "grid" || p.cycleMonth === gridMonth))
+    .filter((p) => inTab(tab as (typeof TABS)[number], state(p)))
     .sort(tab === "to_review" ? byDate : (a, b) => byDate(b, a));
   const page = rows.slice(offset, offset + limit);
   return ok({

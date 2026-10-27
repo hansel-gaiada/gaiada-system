@@ -27,8 +27,7 @@ const call = (method: string, path: string, body?: unknown, q: Record<string, st
 const json = <T>(r: { json: unknown } | null | undefined): T => r?.json as T;
 interface Listed { items: PortalSocialPost[]; nextCursor: string | null; counts: { toReview: number; approved: number; changesAsked: number } }
 const list = (q: Record<string, string> = {}) => json<Listed>(call("GET", "posts", undefined, q));
-// Every visible post of the store: the grid shows one month at a time (the current one by default, as the server), and the store spans the month before,
-// this month and the next (the clock is pinned to mid-October 2026).
+// Every visible post of the store, month by month: the store spans the month before, this month and the next (the clock is pinned to mid-October 2026).
 const allGrid = (q: Record<string, string> = {}) => ["2026-09", "2026-10", "2026-11"].flatMap((month) => list({ tab: "grid", month, limit: "100", ...q }).items);
 const titled = (title: string): PortalSocialPost => {
   const hit = [...allGrid(), ...list({ tab: "to_review", limit: "50" }).items].find((p) => p.title === title);
@@ -86,14 +85,12 @@ describe("GET posts: the tabs, the counts, the filters and the cursor", () => {
     expect(r.items.map((p) => p.plannedAt)).toEqual([...r.items.map((p) => p.plannedAt)].sort());
     expect(r.counts).toEqual({ toReview: 4, approved: 7, changesAsked: 1 });
   });
-  it("approved lists approved, scheduled and live posts, newest first; the grid lists one month's, the current one by default", () => {
+  it("approved lists approved, scheduled and live posts, newest first; the grid lists every visible one, a month at a time when one is chosen", () => {
     const a = list({ tab: "approved" });
     expect(new Set(a.items.map((p) => p.state))).toEqual(new Set(["approved", "scheduled", "live"]));
     expect(a.items.map((p) => p.plannedAt)).toEqual([...a.items.map((p) => p.plannedAt)].sort().reverse());
     expect(allGrid()).toHaveLength(12);
-    const current = list({ tab: "grid", limit: "100" }).items;
-    expect(current.length).toBeGreaterThan(0);
-    expect(current.every((p) => p.month === "2026-10")).toBe(true);
+    expect(list({ tab: "grid", limit: "100" }).items).toHaveLength(12); // no month: every month (a filter, never a default)
   });
   it("a month narrows the list and the counts; a client that is not theirs lists nothing", () => {
     const month = list({ tab: "grid", month: "2026-09", limit: "50" });

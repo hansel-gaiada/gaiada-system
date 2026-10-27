@@ -36,7 +36,6 @@ const SOCIAL = { modules: ["social"] };
 const SVC = { authorization: "Bearer svc-token" };
 const as = (userId: string) => ({ ...SVC, "x-user-id": userId });
 const d = (day: number) => `2027-03-${String(day).padStart(2, "0")}T10:00:00.000Z`;
-const INSIDE_MARCH_2027 = () => new Date().toISOString().slice(0, 7) === "2027-03";
 
 interface Eng { clientId: string; engagementId: string; cycleId: string }
 type Json = Record<string, any>;
@@ -362,8 +361,8 @@ describe.skipIf(!TEST_URL)("SCP-2 · the portal's approval page for pipeline pos
     expect(grid.items.map((i: Json) => [i.id, i.state])).toEqual([[story, "to_review"], [p3, "to_review"], [p2, "changes_asked"], [p1, "approved"]]); // newest first, as the feed
     const changed = grid.items.find((i: Json) => i.id === p2);
     expect(changed.decision).toMatchObject({ kind: "changes", changeKind: "copy", note: "Shorter, please." });
-    // The default month is the current one in the report zone: these posts are March 2027's.
-    expect((await get("?tab=grid")).items).toHaveLength(INSIDE_MARCH_2027() ? 4 : 0);
+    // The month is a filter, never a default: with none the grid lists every month's posts.
+    expect((await get("?tab=grid")).items).toHaveLength(4);
     // A client the caller is not a contact of reads as if it had no posts.
     expect(await get(`?tab=to_review&clientId=${c1.clientId}`)).toEqual({ items: [], nextCursor: null, counts: { toReview: 0, approved: 0, changesAsked: 0 } });
     expect((await get(`?tab=to_review&clientId=${c3.clientId}`)).items).toHaveLength(2);
