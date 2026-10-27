@@ -65,7 +65,12 @@ const AGENCY_DEPARTMENTS: { name: string; divisions: { name: string; roles?: Org
     { name: "Off-page", roles: [] },
   ] },
   // Social Media has no divisions — people sit directly under the department.
-  { name: "Social Media", divisions: [], people: [person("d4-p1", "Dewi Santoso", "u-pm"), person("d4-p2", "Komang Lestari", "u-social")] },
+  { name: "Social Media", divisions: [], people: [
+    person("d4-p1", "Dewi Santoso", "u-pm"), person("d4-p2", "Komang Lestari", "u-social"),
+    // SCP-1o (plan §11.1): Officer 2, the Copywriter and the in-team designer. Dewi Santoso (u-pm) is the HoD: her lead seat is the `org_unit_lead`
+    // grant on dept-4 in `demoFixtures.ts` (the org tree carries no seat flag).
+    person("d4-p3", "Wayan Sudira", "u-social-2"), person("d4-p4", "Citra Maheswari", "u-copy"), person("d4-p5", "Kadek Surya", "u-social-design"),
+  ] },
   // GM (GM-01). Like Social Media it has no divisions — the General Manager sits directly under the
   // department, which mirrors platform-nest's real roster (`seed/roster.ts`: `{ id: "d-gm", name:
   // "GM", divisions: [] }`, with Edward as its lead).
