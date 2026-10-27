@@ -11,7 +11,7 @@ import path from "node:path";
 import { NextRequest } from "next/server";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { proxy, config } from "./proxy";
-import { PATHNAME_HEADER } from "./lib/pathnameHeader";
+import { PATHNAME_HEADER, SEARCH_HEADER } from "./lib/pathnameHeader";
 import { sealSession, encodeSession } from "./lib/session";
 import { cookieName, HOST_COOKIES } from "./lib/cookieNames";
 
@@ -276,5 +276,27 @@ describe("proxy — the pathname request header (DW-3a2)", () => {
     const res = proxy(req("/", { method: "POST", cookie: devCookie(), headers: { origin: "https://erp.example", "next-action": "abc123" } }));
     expect(res.status).not.toBe(403);
     expect(forwarded(res)).toBeNull();
+  });
+});
+
+describe("proxy — the deep link survives sign-in (SCP-2: /portal/social?post=<id>)", () => {
+  const forwardedSearch = (res: Response) => res.headers.get(`x-middleware-request-${SEARCH_HEADER}`);
+
+  it("a visitor with NO session cookie is sent to /login with the whole link, query included", () => {
+    const res = proxy(req("/portal/social?post=soc-post-n-3"));
+    expect(res.status).toBe(307);
+    const to = new URL(location(res), "https://erp.example");
+    expect(to.pathname).toBe("/login");
+    expect(to.searchParams.get("return")).toBe("/portal/social?post=soc-post-n-3");
+  });
+
+  it("hands the query to the server on a document request, so a layout can send a stale cookie to /login with the link", () => {
+    expect(forwardedSearch(proxy(req("/portal/social?post=p1&tab=grid", { cookie: devCookie() })))).toBe("?post=p1&tab=grid");
+    expect(forwardedSearch(proxy(req("/portal/social", { cookie: devCookie() })))).toBe("");
+  });
+
+  it("overwrites a client-sent value, and withholds it from RSC fetches", () => {
+    expect(forwardedSearch(proxy(req("/portal/social?post=p1", { cookie: devCookie(), headers: { [SEARCH_HEADER]: "?evil=1" } })))).toBe("?post=p1");
+    expect(forwardedSearch(proxy(req("/portal/social?post=p1", { cookie: devCookie(), headers: { rsc: "1", [SEARCH_HEADER]: "?evil=1" } })))).toBeNull();
   });
 });

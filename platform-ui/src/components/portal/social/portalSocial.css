@@ -1,0 +1,201 @@
+/* SCP-2 — the client's post approval page (`/portal/social`): the header counts and filters, the stories circle, the tabs, the post cards that look like the
+   network they will appear on, the grid preview, the Ask-for-changes dialog, the toasts with Undo and the story viewer.
+
+   TOKENS ONLY (styles/tokens.test.ts): no colour, radius or shadow literal and no uppercase transform; the portal never dims text with `opacity`
+   (portalNoOpacityText.test.ts), so "planned" and "seen" are drawn with a dashed border and a quieter ink token, never a fade. So light and dark come
+   from the portal's own tokens and nothing is repeated per theme.
+
+   PHONE FIRST: everything is one column at 360 px with no horizontal scroll; a control is at least 44 px tall (`.ps-btn`), the tab strip and the stories
+   circle scroll sideways on their own, and an image never exceeds its box. */
+
+/* ── Buttons: the portal's `.btn`, at a size a thumb can hit ─────────────────────────────────────────────────────────────── */
+.ps-btn { min-height: 44px; padding-left: 16px; padding-right: 16px; white-space: normal; text-align: center; }
+
+/* ── The header: counts and filters ──────────────────────────────────────────────────────────────────────────────────────── */
+.ps-counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0 0 16px; padding: 0; list-style: none; }
+.ps-counts__link {
+  display: grid; gap: 2px; min-height: 64px; padding: 10px 12px; text-decoration: none; color: var(--ink-muted);
+  background: var(--surface-card-solid); border: 1px solid var(--line); border-radius: var(--radius-md);
+}
+.ps-counts__link:hover { border-color: var(--accent-fg); background: var(--tint-hover); }
+.ps-counts__link:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 2px; }
+.ps-counts__n { font: 600 22px/1.1 var(--font-display, var(--font-body)); color: var(--ink-strong); font-variant-numeric: tabular-nums; }
+.ps-counts__n--wait { color: var(--status-warning-fg); }
+.ps-counts__label { font: 500 12px/1.3 var(--font-body); }
+
+.ps-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 0 0 16px; }
+.ps-filters__field { display: grid; gap: 4px; min-width: 0; }
+.ps-filters .cp-select { width: auto; min-width: 150px; max-width: 100%; min-height: 44px; }
+
+.ps-older { margin: 0 0 16px; font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); }
+.ps-link { color: var(--accent-fg); text-decoration: underline; text-underline-offset: 2px; }
+.ps-link:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 2px; }
+
+/* ── The tabs: links, `?tab=`. The portal's sub-tab look, in the page's own column ─────────────────────────────────────────── */
+.ps-tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; margin: 0 0 16px; border-bottom: 1px solid var(--line); }
+.ps-tabs::-webkit-scrollbar { display: none; }
+.ps-tabs .cp-subtab { height: 44px; padding: 0 14px; font-size: 13px; }
+.ps-tabs .cp-subtab:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: -2px; }
+
+/* ── The list ────────────────────────────────────────────────────────────────────────────────────────────────────────────── */
+.ps-list { display: grid; gap: 14px; min-width: 0; }
+.ps-list__head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.ps-list__title { margin: 0; font: 600 16px/1.3 var(--font-body); color: var(--ink-strong); }
+.ps-list__title:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 2px; }
+.ps-list__n { font-weight: 400; color: var(--ink-muted); }
+.ps-feed { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 18px; align-items: start; }
+.ps-feed--one { grid-template-columns: minmax(0, 480px); }
+.ps-empty { margin: 0; font: 400 14px/1.5 var(--font-body); color: var(--ink-muted); }
+.ps-more { margin: 0; }
+.ps-confirm { display: grid; gap: 10px; padding: 12px 14px; background: var(--surface-card-solid); border: 1px solid var(--line-control); border-radius: var(--radius-md); }
+.ps-confirm p { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--ink-body); }
+.ps-notice {
+  font: 500 13px/1.45 var(--font-body); color: var(--ink-body); padding: 9px 11px; margin: 0 0 12px;
+  background: color-mix(in srgb, var(--status-info) 9%, transparent); border: 1px solid color-mix(in srgb, var(--status-info) 30%, transparent); border-radius: var(--radius-8);
+}
+
+/* ── A post card: the network's own look ─────────────────────────────────────────────────────────────────────────────────── */
+.ps-card {
+  display: grid; grid-template-rows: auto auto auto 1fr; min-width: 0; overflow: hidden;
+  background: var(--surface-card-solid); border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--ink-body);
+}
+.ps-card:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 2px; }
+.ps-card__head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
+.ps-avatar {
+  flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--accent-fill); color: var(--ink-on-accent-fill); font: 600 14px/1 var(--font-body);
+}
+.ps-card__who { flex: 1 1 auto; min-width: 0; }
+.ps-handle { font: 600 13px/1.3 var(--font-body); color: var(--ink-strong); overflow-wrap: anywhere; }
+.ps-meta { font: 400 12px/1.4 var(--font-body); color: var(--ink-muted); overflow-wrap: anywhere; }
+.ps-state { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; font: 500 12px/1.2 var(--font-body); text-align: right; }
+.ps-state__dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
+
+/* the picture: 4:5 for a feed post or a carousel, 9:16 for a reel or a story; a pin's percentages are fractions of this box */
+.ps-media { position: relative; width: 100%; background: var(--surface-page); overflow: hidden; touch-action: manipulation; user-select: none; }
+.ps-media--feed, .ps-media--carousel { aspect-ratio: 4 / 5; }
+.ps-media--reel, .ps-media--story { aspect-ratio: 9 / 16; }
+.ps-slide { width: 100%; height: 100%; }
+.ps-slide[hidden] { display: none; }
+.ps-media .scp-pinbox { display: block; width: 100%; height: 100%; }
+.ps-media .scp-pinbox__img { width: 100%; height: 100%; object-fit: contain; }
+.ps-media__none { position: absolute; inset: 0; display: grid; place-items: center; font: 400 13px/1.4 var(--font-body); color: var(--ink-muted); }
+.ps-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line-control);
+  background: var(--surface-card-solid); color: var(--ink-strong); font: 600 22px/1 var(--font-body); cursor: pointer; display: grid; place-items: center; padding: 0 0 3px;
+}
+.ps-nav--prev { left: 8px; }
+.ps-nav--next { right: 8px; }
+.ps-nav:hover:not(:disabled) { border-color: var(--accent-fg); }
+.ps-nav:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 2px; }
+.ps-nav:disabled { cursor: default; }
+.ps-count {
+  position: absolute; right: 10px; top: 10px; padding: 2px 8px; border-radius: var(--radius-pill); font: 600 11px/1.5 var(--font-body);
+  background: var(--surface-card-solid); color: var(--ink-strong); border: 1px solid var(--line);
+}
+.ps-tip { margin: 0; padding: 6px 12px 0; font: 400 12px/1.4 var(--font-body); color: var(--ink-muted); }
+
+.ps-card__body { display: grid; gap: 8px; padding: 10px 12px 14px; min-width: 0; align-content: start; }
+.ps-title { margin: 0; font: 600 14px/1.35 var(--font-body); color: var(--ink-strong); overflow-wrap: anywhere; }
+.ps-sim { margin: 0; font: 500 12px/1.4 var(--font-body); color: var(--status-warning-fg); }
+.ps-caption { margin: 0; font: 400 14px/1.5 var(--font-body); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ps-tags { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.ps-tag { font: 500 13px/1.4 var(--font-body); color: var(--accent-fg); overflow-wrap: anywhere; }
+.ps-facts { margin: 0; display: grid; gap: 6px; }
+.ps-facts > div { display: grid; gap: 1px; }
+.ps-facts dt { font: 500 11px/1.4 var(--font-body); color: var(--ink-muted); }
+.ps-facts dd { margin: 0; font: 400 13px/1.45 var(--font-body); overflow-wrap: anywhere; }
+.ps-variant { margin: 0; font: 400 13px/1.5 var(--font-body); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.ps-comments { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.ps-comments__h { margin: 0; font: 600 12px/1.4 var(--font-body); color: var(--ink-muted); }
+.ps-comments ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.ps-comment p { margin: 2px 0 0; font: 400 13px/1.5 var(--font-body); overflow-wrap: anywhere; }
+.ps-comment__by { font: 600 12px/1.4 var(--font-body); color: var(--ink-strong); }
+.ps-comment__when { font: 400 11px/1.4 var(--font-body); color: var(--ink-subtle); }
+
+.ps-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ps-actions .ps-btn { flex: 1 1 140px; }
+.ps-decision { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); justify-items: start; }
+.ps-decision p { margin: 0; }
+.ps-decision__line { font: 500 13px/1.5 var(--font-body); color: var(--ink-strong); }
+.ps-decision__note { font: 400 13px/1.5 var(--font-body); color: var(--ink-body); overflow-wrap: anywhere; }
+
+/* ── The grid preview: three columns by date; a planned post has a dashed edge and a word, not a fade ──────────────────────── */
+.ps-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; margin: 0; padding: 0; list-style: none; }
+.ps-cell { position: relative; min-width: 0; border: 1px solid var(--line); background: var(--surface-card-solid); }
+.ps-cell--planned { border: 2px dashed var(--line-control); }
+.ps-cell__link { display: block; position: relative; aspect-ratio: 4 / 5; overflow: hidden; color: var(--ink-strong); text-decoration: none; }
+.ps-cell__link:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: -2px; }
+.ps-cell__img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.ps-cell__none { display: grid; place-items: center; width: 100%; height: 100%; padding: 6px; font: 500 12px/1.3 var(--font-body); text-align: center; }
+.ps-cell__day, .ps-cell__mark, .ps-cell__kind {
+  position: absolute; padding: 1px 6px; border-radius: var(--radius-pill); font: 600 10px/1.6 var(--font-body);
+  background: var(--surface-card-solid); color: var(--ink-strong); border: 1px solid var(--line);
+}
+.ps-cell__day { left: 4px; bottom: 4px; }
+.ps-cell__mark { left: 4px; top: 4px; color: var(--status-warning-fg); }
+.ps-cell__kind { right: 4px; top: 4px; }
+
+/* ── The stories circle ──────────────────────────────────────────────────────────────────────────────────────────────────── */
+.ps-stories-wrap { margin: 0 0 16px; }
+.ps-stories { display: flex; gap: 14px; margin: 0; padding: 4px 2px 8px; list-style: none; overflow-x: auto; scrollbar-width: none; }
+.ps-stories::-webkit-scrollbar { display: none; }
+.ps-ring { display: grid; gap: 4px; justify-items: center; width: 76px; padding: 0; background: transparent; border: 0; color: var(--ink-body); cursor: pointer; font: inherit; }
+.ps-ring:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 3px; border-radius: var(--radius-md); }
+.ps-ring__pic { display: block; width: 68px; height: 68px; padding: 3px; border-radius: 50%; border: 3px dashed var(--line-control); overflow: hidden; }
+.ps-ring--new .ps-ring__pic { border: 3px solid var(--accent-fill); }
+.ps-ring__pic img, .ps-ring__blank { display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; background: var(--surface-page); }
+.ps-ring__label { max-width: 76px; font: 500 11px/1.3 var(--font-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-muted); }
+.ps-ring--new .ps-ring__label { color: var(--ink-strong); }
+
+/* the viewer: full screen, a 9:16 frame in the middle, the decision under it */
+.ps-viewer {
+  position: fixed; inset: 0; z-index: 250; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 8px; padding: 10px 12px;
+  background: var(--surface-page); color: var(--ink-body); overflow-y: auto;
+}
+.ps-viewer:focus-visible { outline: none; }
+.ps-viewer__top { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
+.ps-viewer__who { font: 400 13px/1.4 var(--font-body); min-width: 0; overflow-wrap: anywhere; }
+.ps-viewer__pos { font: 400 12px/1.4 var(--font-body); color: var(--ink-muted); }
+.ps-viewer__stage { position: relative; display: grid; place-items: center; min-height: 0; }
+.ps-viewer__frame { height: min(100%, 62vh); width: auto; max-width: 100%; aspect-ratio: 9 / 16; border: 1px solid var(--line); border-radius: var(--radius-md); }
+.ps-viewer__img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.ps-viewer__foot { display: grid; gap: 8px; max-width: 520px; width: 100%; margin: 0 auto; }
+.ps-viewer__foot p { margin: 0; }
+
+/* ── Ask for changes ─────────────────────────────────────────────────────────────────────────────────────────────────────── */
+.ps-change { display: grid; gap: 14px; }
+.ps-change__lead { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--ink-body); }
+.ps-change__kind { display: grid; gap: 8px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.ps-change .cp-check { min-height: 44px; align-items: center; }
+.ps-change .cp-check input { margin: 0; width: 20px; height: 20px; flex: 0 0 auto; }
+.ps-change__pin { max-width: 320px; border: 1px solid var(--line); border-radius: var(--radius-8); overflow: hidden; }
+.ps-change__pin .scp-pinbox { display: block; width: 100%; }
+.ps-change__pin .scp-pinbox__img { width: 100%; height: auto; }
+.ps-change__pinbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.ps-change__which { display: grid; gap: 4px; }
+.ps-change__which .cp-select { width: auto; min-height: 44px; }
+.ps-change__foot { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+
+/* ── Toasts: what happened, and Undo while it can be undone ──────────────────────────────────────────────────────────────── */
+.ps-toasts { position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 400; display: grid; gap: 8px; justify-items: center; pointer-events: none; }
+.ps-toast {
+  pointer-events: auto; position: relative; overflow: hidden; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; width: 100%; max-width: 480px;
+  padding: 10px 12px 12px; background: var(--surface-card-solid); border: 1px solid var(--line-control); border-radius: var(--radius-md); box-shadow: var(--elev-4);
+  color: var(--ink-body); font: 500 13px/1.45 var(--font-body);
+}
+.ps-toast--error { border-color: var(--status-danger); color: var(--status-danger-fg); }
+.ps-toast__msg { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
+.ps-toast__x { flex: 0 0 auto; width: 44px; height: 44px; border: 0; background: transparent; color: var(--ink-muted); font: 400 20px/1 var(--font-body); cursor: pointer; border-radius: var(--radius-8); }
+.ps-toast__x:hover { color: var(--ink-strong); background: var(--tint-hover); }
+.ps-toast__x:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: -2px; }
+.ps-toast__bar { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--erp-accent); transform-origin: left; animation: ps-countdown linear forwards; }
+@keyframes ps-countdown { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@media (prefers-reduced-motion: reduce) { .ps-toast__bar { animation: none; } }
+
+@media (max-width: 420px) {
+  .ps-counts { gap: 6px; }
+  .ps-counts__link { padding: 8px; }
+  .ps-state { max-width: 40%; }
+}

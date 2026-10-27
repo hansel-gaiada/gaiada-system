@@ -29,7 +29,7 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ".auth/user.json" },
       dependencies: ["setup"],
-      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, /workspace-shell\.spec\.ts/, /me-performance\.spec\.ts/, /workspace-departments\.spec\.ts/, /workspace-functional\.spec\.ts/, /workspace-personas\.spec\.ts/, /a11y-axe-workspaces\.spec\.ts/, /skin-social\.spec\.ts/, /social-pipeline-walk\.spec\.ts/, /overview-personalise\.spec\.ts/, /dept-notices\.spec\.ts/, /dept-kpi-months\.spec\.ts/, /dept-calendar\.spec\.ts/, /requests-across\.spec\.ts/, /freelancer-bills\.spec\.ts/, /contract-billing\.spec\.ts/, WEBDESK_STUB_SPECS],
+      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, /workspace-shell\.spec\.ts/, /me-performance\.spec\.ts/, /workspace-departments\.spec\.ts/, /workspace-functional\.spec\.ts/, /workspace-personas\.spec\.ts/, /a11y-axe-workspaces\.spec\.ts/, /skin-social\.spec\.ts/, /social-pipeline-walk\.spec\.ts/, /overview-personalise\.spec\.ts/, /dept-notices\.spec\.ts/, /dept-kpi-months\.spec\.ts/, /dept-calendar\.spec\.ts/, /requests-across\.spec\.ts/, /freelancer-bills\.spec\.ts/, /contract-billing\.spec\.ts/, /portal-social\.spec\.ts/, WEBDESK_STUB_SPECS],
     },
     {
       // CP-17 client portal. Its OWN project with NO stored session, because every test here signs in as
@@ -39,6 +39,19 @@ export default defineConfig({
       name: "portal",
       use: { ...devices["Desktop Chrome"] },
       testMatch: /portal\.spec\.ts/,
+    },
+    {
+      // SCP-2 (plan SCP-2g): the client's post approval page (`/portal/social`) end to end as the demo client contact: axe in both themes at desktop and 390 px,
+      // the way in through the sign-in, the stories circle, Approve / Undo / double-tap, Ask for changes with a pin, Approve all, the Grid preview and Approved
+      // tabs. Its OWN project with NO stored session, for the same reason as `portal` above: every test signs in as the client itself. Order-dependent: the
+      // demo store is module state in the Next server and one test's decision is the next one's start, so it runs on ONE worker, in file order, with no retries
+      // (a retry would run against a store the first attempt already changed), and against a fresh server. Runs on the test server, like the workspace projects.
+      name: "portal-social",
+      fullyParallel: false,
+      workers: 1,
+      retries: 0,
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /portal-social\.spec\.ts/,
     },
     {
       // PV1-07 — the staff menu follows the company (verticals, Group, Platform). Signs in per test as a

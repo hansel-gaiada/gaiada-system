@@ -20,10 +20,9 @@ import { PORTAL_AREAS, PORTAL_REPORTS_HREF, PORTAL_WEBSITE_HREF, activePortalNav
 // BADGES: Projects carries the count of gates waiting on the client plus the threads with unread messages from our
 // team (`conversationUnread`, PV4-08; see `portalBadges`); Contracts & billing carries unsigned
 // contracts plus overdue invoices (both computed in the layout from the overview it already fetches).
-// The "Post reviews" sub-tab deliberately carries NO badge: SMM-31/32's backend never extended
-// `portal/overview`'s `needsYou`, so a badge would cost every portal page load a second always-on fetch
-// just to produce one, or claim an unverified number. The list page surfaces its own pending count once
-// opened.
+// The "Social posts" sub-tab (SCP-2; it was "Post reviews", and `/portal/social-reviews` keeps its URL and lights it) deliberately
+// carries NO badge: the backend never extended `portal/overview`'s `needsYou` for posts, so a badge would cost every portal page
+// load a second always-on fetch just to produce one, or claim an unverified number. The page shows its own counts once opened.
 //
 // REPORTS (PV7-04b): the Overview area's second tab. Overview carries the count of published reports this user has not
 // opened (`newReports`, via `portalBadges`), on the area and on the Reports sub-tab, so it is visible from every page.

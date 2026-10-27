@@ -40,7 +40,7 @@ function BallBlock({ side, ball }: { side: PortalBallSide; ball: PortalBall | nu
         <ul className="cp-ball__items">
           {ball.items.map((it) => {
             const href = ballItemHref(it.kind, it.id);
-            const label = ballItemLabel(it.kind, side);
+            const label = ballItemLabel(it.kind, side, it.context);
             return (
               <li key={`${it.kind}-${it.id}`}>
                 {href ? <Link href={href}>{label}</Link> : <span>{label}</span>}

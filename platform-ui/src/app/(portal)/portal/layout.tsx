@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { rethrowIfSessionEnded } from "@/lib/sessionEnded";
@@ -10,6 +11,8 @@ import { portalBadges } from "@/lib/portalNav";
 import { isContributor, isStaff } from "@/lib/rbac";
 import { CONTRIBUTOR_HOME, contributorFenceReason } from "@/lib/contributorRouting";
 import { websiteEditorClients } from "@/lib/portalWebsiteAccess";
+import { PATHNAME_HEADER, SEARCH_HEADER } from "@/lib/pathnameHeader";
+import { loginHrefForReturn } from "@/lib/returnTo";
 
 // CP-7 — the client portal's own route group.
 //
@@ -35,11 +38,17 @@ import { websiteEditorClients } from "@/lib/portalWebsiteAccess";
 // layout only decides what chrome to draw.
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   const userId = await getSessionUserId();
-  if (!userId) redirect("/login");
+  // SCP-2: a visitor whose cookie is present but no longer valid reaches this redirect (the proxy only turns away a MISSING cookie, and it keeps the query), so
+  // it carries the page they asked for, query included: `/portal/social?post=<id>` must survive the sign-in. The proxy hands both over on a document request.
+  const toLogin = async (): Promise<never> => {
+    const h = await headers();
+    redirect(loginHrefForReturn(h.get(PATHNAME_HEADER), h.get(SEARCH_HEADER)));
+  };
+  if (!userId) return toLogin();
   // DW-7h (BFF §52.4): a session IT ended is let through, so Next redirects it to /auth/ended; see (app)/layout.tsx.
   // M5-W1f: a freelance contributor is not a client and not staff: their own shell is `/contributor` (see `(app)/layout.tsx` for the fence's answer).
   const me = await getMe(userId).catch((e: unknown) => { rethrowIfSessionEnded(e); if (contributorFenceReason(e)) redirect(CONTRIBUTOR_HOME); return null; });
-  if (!me) redirect("/login");
+  if (!me) return toLogin();
   if (isContributor(me)) redirect(CONTRIBUTOR_HOME);
   const company = await getActivePortalCompany(me);
   const tenant = company?.id ?? null;
