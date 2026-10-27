@@ -24,7 +24,7 @@ sign-in by group.
 | `gaiada-ui` (public), `gaiada-platform` (confidential) | yes (standard flow) | The ERP. Tokens carry `aud=gaiada-platform` via the `gaiada-platform-audience` mapper; the platform accepts only that audience (`OIDC_AUDIENCE`). The ERP's fence then applies. |
 | `account`, `account-console` | yes | Keycloak's self-service account page. A contributor may manage their own password and OTP there, which is intended. |
 | `security-admin-console`, `realm-management` | yes (login page) | The admin console. A contributor holds no `realm-management` role, so they can do nothing there. |
-| `admin-cli` | direct password grant **enabled** (Keycloak's default) | A password-only token is issued to `admin-cli` without `aud=gaiada-platform`, so the platform refuses it. **Hardening option for the owner:** turn off direct access grants on this realm's `admin-cli` (`kcadm update clients/<id> -r gaiada -s directAccessGrantsEnabled=false`). The master realm's `admin-cli`, which kcadm uses, is a different client and is unaffected. |
+| `admin-cli` | direct password grant **enabled** (Keycloak's default) | A password-only token is issued to `admin-cli` without `aud=gaiada-platform`, so the platform refuses it. **Hardening option for the owner:** turn off direct access grants on this realm's `admin-cli` (`kcadm update clients/<id> -r gaiada -s directAccessGrantsEnabled=false`). The master realm's `admin-cli`, which kcadm uses, is a different client and is unaffected. **Owner, 2026-10-27 (WSK-D90): keep it as it is for now.** |
 | `broker` | yes (identity brokering) | No identity provider is configured, so it is unused. |
 | `gaiada-provisioner`, `webdesk-control` | no (service accounts only) | Not sign-in clients. |
 
