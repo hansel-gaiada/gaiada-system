@@ -1,4 +1,4 @@
-// SCP-1b — the content pipeline's data (202610261500_social_pipeline.sql, BFF §63.1 file 1) against LIVE Postgres.
+// SCP-1b — the content pipeline's data (202610271000_social_pipeline.sql, BFF §63.1 file 1) against LIVE Postgres.
 // Needs DATABASE_URL_TEST (platform-nest/CLAUDE.md). Skipped without it: NOT run on the dev laptop, runs on the Linux
 // CI gate. initTestDb() hands us a fully migrated database and repoints the app at a NOSUPERUSER NOBYPASSRLS role, so
 // every withTenants() call below is subject to FORCE RLS; adminPool() (superuser) only re-applies the file and reads
@@ -20,7 +20,7 @@ import { config } from "../../config";
 import { socialModule } from "./index";
 import fixture from "./scp-stage-machine.json";
 
-const MIGRATION = "202610261500_social_pipeline.sql";
+const MIGRATION = "202610271000_social_pipeline.sql";
 const MIGRATION_PATH = join(__dirname, "..", "..", "..", "migrations", MIGRATION);
 const S = { modules: ["social"] };
 const NEW_TABLES = ["social_settings", "social_cycles", "social_post_designs", "social_post_copy_edits"] as const;

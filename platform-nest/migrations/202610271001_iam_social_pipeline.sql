@@ -1,5 +1,5 @@
 -- IAM — SCP-1b: the Social Media content pipeline (docs/PERMISSION-CONTRACT.md §53, docs/FRONTEND-BFF-CONTRACT.md §63.1
--- file 2; owner rulings SCP-Q2, SCP-Q9, SCP-Q11, SCP-Q13 to SCP-Q21). Pure IAM seed: no DDL (202610261500_social_pipeline.sql
+-- file 2; owner rulings SCP-Q2, SCP-Q9, SCP-Q11, SCP-Q13 to SCP-Q21). Pure IAM seed: no DDL (202610271000_social_pipeline.sql
 -- owns the schema). Every statement here touches GLOBAL reference tables (`roles`, `permissions`, `role_permissions`), which
 -- carry no RLS, so nothing below can read zero rows behind an unset tenant GUC.
 --
@@ -142,7 +142,7 @@ BEGIN
   -- The two role rows this file and the bundle rows above depend on.
   SELECT count(*) INTO got FROM roles WHERE company_id IS NULL AND name IN ('social_copywriter', 'social_designer');
   IF got <> 2 THEN
-    RAISE EXCEPTION '202610261501: expected the two global roles social_copywriter and social_designer, found %', got;
+    RAISE EXCEPTION '202610271001: expected the two global roles social_copywriter and social_designer, found %', got;
   END IF;
 
   -- ── The six deletes: company_admin, manager, social_manager lose report approve and deliver. DELTA (0112): each pair
@@ -155,7 +155,7 @@ BEGIN
     ) AS x(role_name, perm_key)
   LOOP
     IF NOT EXISTS (SELECT 1 FROM roles WHERE company_id IS NULL AND name = k.role_name) THEN
-      RAISE EXCEPTION '202610261501: global role "%" not found — refusing to guess', k.role_name;
+      RAISE EXCEPTION '202610271001: global role "%" not found — refusing to guess', k.role_name;
     END IF;
     DELETE FROM role_permissions rp
      USING roles r, permissions p
@@ -163,10 +163,10 @@ BEGIN
        AND r.company_id IS NULL AND r.name = k.role_name AND p.key = k.perm_key;
     GET DIAGNOSTICS n = ROW_COUNT;
     IF n > 1 THEN
-      RAISE EXCEPTION '202610261501: expected at most 1 (%, %) bundle row, deleted % — duplicates in role_permissions',
+      RAISE EXCEPTION '202610271001: expected at most 1 (%, %) bundle row, deleted % — duplicates in role_permissions',
         k.role_name, k.perm_key, n;
     END IF;
-    RAISE NOTICE '202610261501: (%, %) deleted % row(s)', k.role_name, k.perm_key, n;
+    RAISE NOTICE '202610271001: (%, %) deleted % row(s)', k.role_name, k.perm_key, n;
   END LOOP;
 
   -- ── No route into the four (§53.4): a CUSTOM role holding any approver-only key loses it. DELTA-logged. ──
@@ -175,14 +175,14 @@ BEGIN
    WHERE rp.role_id = r.id AND rp.permission_id = p.id
      AND r.company_id IS NOT NULL AND p.key = ANY (approver_keys);
   GET DIAGNOSTICS n = ROW_COUNT;
-  RAISE NOTICE '202610261501: removed % custom-role pair(s) on the five approver-only keys', n;
+  RAISE NOTICE '202610271001: removed % custom-role pair(s) on the five approver-only keys', n;
 
   -- A GLOBAL role other than owner and platform_admin still holding one would be a bundle this file did not expect: stop.
   SELECT count(*) INTO got
     FROM role_permissions rp JOIN roles r ON r.id = rp.role_id JOIN permissions p ON p.id = rp.permission_id
    WHERE p.key = ANY (approver_keys) AND NOT (r.company_id IS NULL AND r.name IN ('owner', 'platform_admin'));
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610261501: % role row(s) other than owner/platform_admin still hold an approver-only key', got;
+    RAISE EXCEPTION '202610271001: % role row(s) other than owner/platform_admin still hold an approver-only key', got;
   END IF;
 
   -- ── ui_grantable = false on the five approver-only keys (three were inserted false above; this flips the two report
@@ -190,7 +190,7 @@ BEGIN
   UPDATE permissions SET ui_grantable = false WHERE key = ANY (approver_keys) AND ui_grantable;
   GET DIAGNOSTICS n = ROW_COUNT;
   IF n > 2 THEN
-    RAISE EXCEPTION '202610261501: expected to flip at most the 2 social.report keys to ui_grantable=false, flipped %', n;
+    RAISE EXCEPTION '202610271001: expected to flip at most the 2 social.report keys to ui_grantable=false, flipped %', n;
   END IF;
 
   -- ══ Assert, don't assume ══════════════════════════════════════════════════════════════════════════════════════
@@ -208,11 +208,11 @@ BEGIN
     ) AS x(key, kind, sensitive, ui) ON x.key = p.key
    WHERE p.cerbos_kind = x.kind AND p.class = 'grantable' AND p.sensitive = x.sensitive AND p.ui_grantable = x.ui;
   IF got <> 11 THEN
-    RAISE EXCEPTION '202610261501: expected 11 pipeline keys with their exact kind/class/sensitive/ui_grantable, found %', got;
+    RAISE EXCEPTION '202610271001: expected 11 pipeline keys with their exact kind/class/sensitive/ui_grantable, found %', got;
   END IF;
   SELECT count(*) INTO got FROM permissions WHERE key = ANY (approver_keys) AND NOT ui_grantable AND sensitive = (key <> 'social.engagement.plan');
   IF got <> 5 THEN
-    RAISE EXCEPTION '202610261501: expected the five approver-only keys ui_grantable=false (all sensitive but plan), found %', got;
+    RAISE EXCEPTION '202610271001: expected the five approver-only keys ui_grantable=false (all sensitive but plan), found %', got;
   END IF;
 
   -- The exact holders of each new key, in BOTH directions, over every role row (custom roles included).
@@ -237,13 +237,13 @@ BEGIN
       FROM role_permissions rp JOIN roles r ON r.id = rp.role_id JOIN permissions p ON p.id = rp.permission_id
      WHERE r.company_id IS NULL AND p.key = k.perm_key AND r.name = ANY (k.role_names);
     IF got <> array_length(k.role_names, 1) THEN
-      RAISE EXCEPTION '202610261501: %: expected % named role(s) to hold it, found %', k.perm_key, array_length(k.role_names, 1), got;
+      RAISE EXCEPTION '202610271001: %: expected % named role(s) to hold it, found %', k.perm_key, array_length(k.role_names, 1), got;
     END IF;
     SELECT count(*) INTO got
       FROM role_permissions rp JOIN roles r ON r.id = rp.role_id JOIN permissions p ON p.id = rp.permission_id
      WHERE p.key = k.perm_key AND NOT (r.company_id IS NULL AND r.name = ANY (k.role_names));
     IF got <> 0 THEN
-      RAISE EXCEPTION '202610261501: % leaked to % role row(s) outside %', k.perm_key, got, k.role_names;
+      RAISE EXCEPTION '202610271001: % leaked to % role row(s) outside %', k.perm_key, got, k.role_names;
     END IF;
   END LOOP;
 
@@ -254,13 +254,13 @@ BEGIN
      AND p.key IN ('social.post.author', 'social.post.design', 'social.post.schedule', 'social.post.manage',
                    'social.post.record_client', 'social.post.boost');
   IF got <> 6 THEN
-    RAISE EXCEPTION '202610261501: expected the six self-scoped member markers, found %', got;
+    RAISE EXCEPTION '202610271001: expected the six self-scoped member markers, found %', got;
   END IF;
   SELECT count(*) INTO got
     FROM role_permissions rp JOIN roles r ON r.id = rp.role_id JOIN permissions p ON p.id = rp.permission_id
    WHERE p.key = ANY (new_keys) AND rp.self_scoped AND r.name <> 'member';
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610261501: % self_scoped row(s) on a new key outside member', got;
+    RAISE EXCEPTION '202610271001: % self_scoped row(s) on a new key outside member', got;
   END IF;
 
   -- The two new roles' EXACT bundles.
@@ -280,7 +280,7 @@ BEGIN
         WHERE r.company_id IS NULL AND r.name = k.role_name)
     ) diff;
     IF got <> 0 THEN
-      RAISE EXCEPTION '202610261501: %''s bundle diverges from % by % key(s)', k.role_name, k.keys, got;
+      RAISE EXCEPTION '202610271001: %''s bundle diverges from % by % key(s)', k.role_name, k.keys, got;
     END IF;
   END LOOP;
 
@@ -289,7 +289,7 @@ BEGIN
     FROM role_permissions rp JOIN roles r ON r.id = rp.role_id JOIN permissions p ON p.id = rp.permission_id
    WHERE r.company_id IS NULL AND r.name = 'client' AND p.module_key <> 'portal';
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610261501: client holds % key(s) outside portal.*', got;
+    RAISE EXCEPTION '202610271001: client holds % key(s) outside portal.*', got;
   END IF;
 
   -- owner == company_admin + the five approver-only keys, over EVERY social_* kind, in both directions
@@ -310,14 +310,14 @@ BEGIN
       WHERE r.company_id IS NULL AND r.name = 'owner' AND p.cerbos_kind LIKE 'social\_%')
   ) diff;
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610261501: owner''s social bundle diverges from company_admin + the five approver keys by % key(s)', got;
+    RAISE EXCEPTION '202610271001: owner''s social bundle diverges from company_admin + the five approver keys by % key(s)', got;
   END IF;
   SELECT count(*) INTO got
     FROM role_permissions rp JOIN roles r ON r.id = rp.role_id JOIN permissions p ON p.id = rp.permission_id
    WHERE r.company_id IS NULL AND r.name = 'company_admin' AND p.key = ANY (approver_keys);
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610261501: company_admin still holds % approver-only key(s)', got;
+    RAISE EXCEPTION '202610271001: company_admin still holds % approver-only key(s)', got;
   END IF;
 
-  RAISE NOTICE '202610261501: social pipeline IAM seeded (2 roles, 11 keys; report approve/deliver narrowed to owner + platform_admin)';
+  RAISE NOTICE '202610271001: social pipeline IAM seeded (2 roles, 11 keys; report approve/deliver narrowed to owner + platform_admin)';
 END $$;

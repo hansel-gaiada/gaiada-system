@@ -100,7 +100,7 @@ const REAL_ROLES = [
   // NULL and materializes nothing, which is the silent half of the unreachable-tier defect.
   "lms_staff", "lms_manager",
   // SCP-1b (2026-10-26, PERMISSION-CONTRACT §53.9): the Social Media content pipeline's two scope-only roles, global
-  // `roles` rows granted at company scope (202610261501_iam_social_pipeline.sql). NOT module tiers: their names are
+  // `roles` rows granted at company scope (202610271001_iam_social_pipeline.sql). NOT module tiers: their names are
   // literal in derived_roles.yaml, so DIRECT maps each to itself.
   "social_copywriter", "social_designer",
 ];

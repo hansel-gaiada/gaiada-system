@@ -1,4 +1,4 @@
--- 202610261500_social_pipeline.sql — SCP-1b: the Social Media content pipeline's data.
+-- 202610271000_social_pipeline.sql — SCP-1b: the Social Media content pipeline's data.
 -- Contract: docs/FRONTEND-BFF-CONTRACT.md §63.1, file 1 ("<prefix>_social_pipeline.sql"). Plan:
 -- docs/plans/2026-10-15-social-content-pipeline.md §4.2 (the contract wins on any difference). Fixture:
 -- src/modules/social/scp-stage-machine.json (`statuses`, `blockableStatuses`, `changeCases`, `handoffChecks`).
@@ -592,7 +592,7 @@ BEGIN
    WHERE NOT EXISTS (SELECT 1 FROM information_schema.columns ic
                       WHERE ic.table_schema = current_schema() AND ic.table_name = want.t AND ic.column_name = want.c);
   IF missing IS NOT NULL THEN
-    RAISE EXCEPTION '202610261500: missing columns: %', missing;
+    RAISE EXCEPTION '202610271000: missing columns: %', missing;
   END IF;
 
   -- The defaults that make every existing row a Composer post with empty pipeline fields.
@@ -600,7 +600,7 @@ BEGIN
    WHERE table_schema = current_schema() AND table_name = 'social_posts' AND is_nullable = 'YES'
      AND column_name IN ('pipeline_status','cycle_id','status_since') AND column_default IS NULL;
   IF n <> 3 THEN
-    RAISE EXCEPTION '202610261500: social_posts.pipeline_status, cycle_id and status_since must be nullable with no default, found % of 3', n;
+    RAISE EXCEPTION '202610271000: social_posts.pipeline_status, cycle_id and status_since must be nullable with no default, found % of 3', n;
   END IF;
 
   -- Constraints, by name.
@@ -645,7 +645,7 @@ BEGIN
    WHERE NOT EXISTS (SELECT 1 FROM pg_constraint pc
                       WHERE pc.conrelid = to_regclass(want.t) AND pc.conname = want.c);
   IF missing IS NOT NULL THEN
-    RAISE EXCEPTION '202610261500: missing constraints: %', missing;
+    RAISE EXCEPTION '202610271000: missing constraints: %', missing;
   END IF;
 
   -- Indexes, by name, with their partial predicates where they carry one.
@@ -667,7 +667,7 @@ BEGIN
                       WHERE pi.schemaname = current_schema() AND pi.tablename = want.t AND pi.indexname = want.i
                         AND pi.indexdef LIKE '%' || want.pred || '%');
   IF missing IS NOT NULL THEN
-    RAISE EXCEPTION '202610261500: missing or misshapen indexes: %', missing;
+    RAISE EXCEPTION '202610271000: missing or misshapen indexes: %', missing;
   END IF;
 
   SELECT count(*) INTO n FROM pg_indexes
@@ -675,7 +675,7 @@ BEGIN
      AND indexname IN ('ux_social_cycles_month','ux_social_cycles_request','ux_social_post_designs_position')
      AND indexdef LIKE 'CREATE UNIQUE INDEX%';
   IF n <> 3 THEN
-    RAISE EXCEPTION '202610261500: the three partial unique indexes must be UNIQUE, found % of 3', n;
+    RAISE EXCEPTION '202610271000: the three partial unique indexes must be UNIQUE, found % of 3', n;
   END IF;
 
   -- The third wall on the four new tables.
@@ -683,7 +683,7 @@ BEGIN
    WHERE relname IN ('social_settings','social_cycles','social_post_designs','social_post_copy_edits')
      AND relkind = 'r' AND relrowsecurity AND relforcerowsecurity;
   IF n <> 4 THEN
-    RAISE EXCEPTION '202610261500: the four new tables must have RLS ENABLED and FORCED, found % of 4', n;
+    RAISE EXCEPTION '202610271000: the four new tables must have RLS ENABLED and FORCED, found % of 4', n;
   END IF;
   SELECT count(*) INTO n FROM pg_policies
    WHERE tablename IN ('social_settings','social_cycles','social_post_designs','social_post_copy_edits')
@@ -691,12 +691,12 @@ BEGIN
      AND qual LIKE '%app_current_tenants()%' AND qual LIKE '%app_module_allowed(''social''::text)%'
      AND with_check LIKE '%app_current_tenants()%' AND with_check LIKE '%app_module_allowed(''social''::text)%';
   IF n <> 4 THEN
-    RAISE EXCEPTION '202610261500: the four new tables need the composed tenant + module policy on USING and WITH CHECK, found % of 4', n;
+    RAISE EXCEPTION '202610271000: the four new tables need the composed tenant + module policy on USING and WITH CHECK, found % of 4', n;
   END IF;
   SELECT count(*) INTO n FROM pg_policies
    WHERE tablename IN ('social_settings','social_cycles','social_post_designs','social_post_copy_edits');
   IF n <> 4 THEN
-    RAISE EXCEPTION '202610261500: the four new tables must carry exactly one policy each, found %', n;
+    RAISE EXCEPTION '202610271000: the four new tables must carry exactly one policy each, found %', n;
   END IF;
 
   -- The review table keeps its PLAIN wall (0105 D-16): one policy, no module clause.
@@ -704,7 +704,7 @@ BEGIN
    WHERE tablename = 'social_post_client_reviews'
      AND (policyname <> 'tenant_isolation' OR qual LIKE '%app_module_allowed%' OR with_check LIKE '%app_module_allowed%');
   IF n <> 0 THEN
-    RAISE EXCEPTION '202610261500: social_post_client_reviews must keep its plain tenant wall (0105 D-16)';
+    RAISE EXCEPTION '202610271000: social_post_client_reviews must keep its plain tenant wall (0105 D-16)';
   END IF;
 
   -- The append-only trigger, on UPDATE and DELETE, BEFORE, per row.
@@ -716,6 +716,6 @@ BEGIN
      AND (tg.tgtype & 8) = 8      -- DELETE
      AND (tg.tgtype & 16) = 16;   -- UPDATE
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610261500: social_post_copy_edits needs its BEFORE UPDATE OR DELETE row trigger';
+    RAISE EXCEPTION '202610271000: social_post_copy_edits needs its BEFORE UPDATE OR DELETE row trigger';
   END IF;
 END $$;
