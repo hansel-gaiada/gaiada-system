@@ -95,8 +95,12 @@ describe("DW-10c static pin — resource_org_structure.yaml · read_calendar", (
     }
   });
 
-  it("no EFFECT_DENY on the kind (bots and automation may read the calendar), and the client role and org_unit_lead are named by no rule", () => {
-    expect(rules.filter((r) => r.effect === "EFFECT_DENY").length).toBe(0);
+  it("no EFFECT_DENY reaches read_calendar (bots and automation may read the calendar), and the client role and org_unit_lead are named by no rule", () => {
+    // SCP-1r (SCP-D7) added ONE DENY to the kind, the unit self-edit DENY, on `update` alone (pinned in
+    // cerbos-org-structure-self-edit.test.ts). It is the only DENY there may be: nothing narrows `read` or `read_calendar`.
+    const denies = rules.filter((r) => r.effect === "EFFECT_DENY");
+    expect(denies.map((r) => r.actions)).toEqual([["update"]]);
+    expect(denies.filter((r) => r.actions.includes("read_calendar") || r.actions.includes("*")).length).toBe(0);
     for (const r of rules) {
       expect(r.derivedRoles).not.toContain("client");
       expect(r.derivedRoles).not.toContain("org_unit_lead");
