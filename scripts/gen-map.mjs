@@ -132,7 +132,14 @@ function composeServices(file) {
 
 // ── platform-nest ─────────────────────────────────────────────────────────────────────────────
 function nestModules() {
-  const registered = [...read("platform-nest/src/main.ts").matchAll(/registerModule\((\w+)\)/g)].map((m) => m[1]);
+  // A module is registered by a `registerModule(x)` call in main.ts, or (since the agentic-native T2) by main.ts looping over
+  // COMPILED_IN_MODULES, the one list the impact and inventory tests also read. Read both, so this column stays true either way.
+  const main = read("platform-nest/src/main.ts");
+  const registered = [...main.matchAll(/registerModule\((\w+)\)/g)].map((m) => m[1]);
+  if (/for \(const (\w+) of COMPILED_IN_MODULES\) registerModule\(\1\)/.test(main)) {
+    const list = read("platform-nest/src/modules/compiled-in-modules.ts").match(/COMPILED_IN_MODULES[^=]*=\s*\[([^\]]*)\]/);
+    if (list) registered.push(...[...list[1].matchAll(/\b(\w+Module)\b/g)].map((m) => m[1]));
+  }
   const dirs = existsSync(join(ROOT, "platform-nest/src/modules"))
     ? readdirSync(join(ROOT, "platform-nest/src/modules"), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort()
     : [];

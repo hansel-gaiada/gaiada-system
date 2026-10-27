@@ -149,22 +149,22 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 | Dir | Contract key | Registered in `main.ts` |
 |---|---|---|
-| `agency` | `agency` | — |
-| `assistant` | `assistant` | — |
-| `automation-console` | `automation-console` | — |
-| `clients` | `clients` | — |
-| `finance` | `finance` | — |
-| `hr` | `hr` | — |
-| `invoice` | `invoice` | — |
-| `it` | `it` | — |
-| `knowledge` | `knowledge` | — |
-| `lms` | `lms` | — |
-| `monitoring` | `monitoring` | — |
-| `pm` | `pm` | — |
-| `reports` | `reports` | — |
-| `search` | `search` | — |
-| `social` | `social` | — |
-| `webdev` | `webdev` | — |
+| `agency` | `agency` | yes |
+| `assistant` | `assistant` | yes |
+| `automation-console` | `automation-console` | yes |
+| `clients` | `clients` | yes |
+| `finance` | `finance` | yes |
+| `hr` | `hr` | yes |
+| `invoice` | `invoice` | yes |
+| `it` | `it` | yes |
+| `knowledge` | `knowledge` | yes |
+| `lms` | `lms` | yes |
+| `monitoring` | `monitoring` | yes |
+| `pm` | `pm` | yes |
+| `reports` | `reports` | yes |
+| `search` | `search` | yes |
+| `social` | `social` | yes |
+| `webdev` | `webdev` | yes |
 | `webdev-contracts` | — | — |
 
 ## platform-nest — migrations
