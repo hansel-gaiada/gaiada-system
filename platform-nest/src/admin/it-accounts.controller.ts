@@ -130,7 +130,8 @@ export class ItAccountsController {
       );
     }
 
-    // Staff of this company. `kind='employee'` excludes the service accounts, which hold real
+    // Staff of this company. `u.kind='employee'` (WHAT the account is; T18) keeps a contributor, bot or
+    // automation account off a human worklist; `cm.kind='employee'` keeps the placement ordinary. `kind='employee'` excludes the service accounts, which hold real
     // memberships on purpose and must never appear on a human worklist (the same distinction P2-15's
     // backfill turns on).
     const staff = await withTenants([tenantId], (c) =>
@@ -138,7 +139,7 @@ export class ItAccountsController {
         `SELECT cm.user_id, u.email, u.name
            FROM company_memberships cm
            JOIN users u ON u.id = cm.user_id
-          WHERE cm.tenant_id = $1 AND cm.kind = 'employee' AND cm.status = 'active'
+          WHERE cm.tenant_id = $1 AND u.kind = 'employee' AND cm.kind = 'employee' AND cm.status = 'active'
             AND cm.deleted_at IS NULL AND u.deleted_at IS NULL
           ORDER BY u.email`,
         [tenantId],
@@ -393,7 +394,7 @@ export class ItAccountsController {
         `SELECT u.email, u.name
            FROM company_memberships cm
            JOIN users u ON u.id = cm.user_id
-          WHERE cm.tenant_id = $1 AND cm.user_id = $2 AND cm.kind = 'employee'
+          WHERE cm.tenant_id = $1 AND cm.user_id = $2 AND u.kind = 'employee' AND cm.kind = 'employee'
             AND cm.status = 'active' AND cm.deleted_at IS NULL AND u.deleted_at IS NULL`,
         [tenantId, userId],
       ),
