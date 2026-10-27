@@ -75,7 +75,7 @@ test.describe("the Social skin on a desktop (1280x800)", () => {
     // <html> gets it from a client effect once the shell has hydrated.
     await expect(page.locator("html")).toHaveAttribute("data-skin", "social");
     await expect(menu(page)).toBeVisible();
-    await expect.poll(() => pinNames(page)).toEqual(["Home", "Search", "Messages", "Notifications", "Tasks", "Create", "Calendar", "Reports", "Saved", "AI Assistant", "More"]);
+    await expect.poll(() => pinNames(page)).toEqual(["Home", "Search", "Messages", "Notifications", "Tasks", "Create", "Calendar", "Reports", "Saved", "Profile", "AI Assistant", "More"]);
     await expect(menu(page).getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
     // The phone's parts are not drawn on a desktop.
     await expect(bar(page)).toBeHidden();
@@ -244,11 +244,12 @@ test.describe("the Social skin on a desktop (1280x800)", () => {
 test.describe("the Social skin on a phone (390x844)", () => {
   test.use({ viewport: { width: 390, height: 844 }, contextOptions: { reducedMotion: "reduce" } });
 
-  test("the bottom bar holds Home, Search, Create and Tasks, and the drawer is never offered", async ({ page, context }) => {
+  test("the bottom bar holds Home, Search, Create, Tasks and Profile, and the drawer is never offered", async ({ page, context }) => {
     await signIn(page, context);
     await expect(bar(page)).toBeVisible();
     const names = await bar(page).locator("a, button").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")));
-    expect(names).toEqual(["Home", "Search", "Create", "Tasks"]);
+    // Profile (SCP-1k) fills the fifth slot now that its page is built.
+    expect(names).toEqual(["Home", "Search", "Create", "Tasks", "Profile"]);
     await expect(bar(page).getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
     // The bar sits on the bottom edge.
     const box = (await bar(page).boundingBox())!;
