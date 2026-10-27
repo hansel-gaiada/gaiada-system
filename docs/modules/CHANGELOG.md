@@ -11,6 +11,21 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.180.0` + platform-ui `0.205.0` - SCP-1l and SCP-1o's DEMO_MODE half: comments a client may see, pins on the image, and the Social pipeline's demo seed (FRONTEND-BFF-CONTRACT §63.8, §63.16; plan §11) (2026-10-27) - PROTOTYPED
+
+- **Comments (SCP-1l).** Migration `202610271300_comments_visibility_anchor.sql` adds `visibility` (`team` or `client`) and `anchor` (a pin `{x, y, fileId}`) to the shared `comments`, both allowed on `social_post` threads only, plus the `ix_comments_target` index. Existing comments read `team`.
+- **The thread's audience.** `GET`/`POST /api/:t/comments` on a `social_post` now check `social_post` · `read` (or `design`) on the post. A client-visible comment also needs `record_client` (403 `not_officer_or_approver`). A pin must name a file of that post.
+- **One rule for the portal.** `clientVisibleComments()` (`modules/social/pipeline/post-comments.ts`) shows a client comment only once the post has reached the client; the portal (SCP-2) will use it.
+- **UI.** `CommentThread` gains an optional team/client toggle, a badge and pin labels for `social_post` threads, and the new `PinOverlay` places and lists pins by mouse or keyboard. Every other thread is unchanged.
+  - **A fix found on the way:** `lib/entities.postComment` sent `entityType` and `entityId` only in the query string, while `POST /comments` reads them from the body (a 400 for every caller of that helper). It now sends both.
+- **DEMO_MODE (SCP-1o).**
+  - The personas of plan §11.1: Officer 2, the Copywriter, the in-team designer, and the HoD and GM logins on their lead seats. `canLeadSocial` holds for exactly the four approvers.
+  - Three invented clients with allocations, brand books and three cycles each, and 31 posts covering all twelve statuses and the six change cases. Each post is checked against the §63.1 rules by a test.
+  - `GET posts/:postId/pipeline` is answered in the §63.6.2 shape, with `actions[]` decided per persona as Cerbos would: the superadmin's wildcard, the owner's approver mirrors, and the maker/checker DENY first.
+  - The demo action runner is SCP-1e's (a 501 hook until then).
+- **Test personas (§11.2):** `placeOfficerOnAllocation()` beside `setEngagementOfficer()`.
+- **Proof.** Each car was green on its own branch CI run (1l: 40449081143; 1o: 40450538646), and the train passed on its combined run.
+
 ### platform-nest `0.179.0` + webdesk `0.31.0` + platform-ui `0.204.0` - M5-W1q: a contributor's upload is quarantined until a staff editor accepts it (WSK-D84) (2026-10-27) - PROTOTYPED
 
 - **WebDesk.** Migration `0020_media_review_state.sql`: `media_assets.review_state` is `accepted` (the default), `quarantined` or `rejected`.
