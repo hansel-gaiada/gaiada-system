@@ -1,4 +1,4 @@
-// AIP-01 — the closed vocabularies of `ai_usage_events` (migration 202610271600_ai_usage_events.sql). Each list mirrors a CHECK in that
+// AIP-01 — the closed vocabularies of `ai_usage_events` (migration 202610271800_ai_usage_events.sql). Each list mirrors a CHECK in that
 // file one for one; ai-usage-migration.test.ts reads the migration text and fails if the two drift.
 //
 // The table holds ids, counts, labels and money ONLY. There is deliberately no field anywhere in this module that could carry prompt,

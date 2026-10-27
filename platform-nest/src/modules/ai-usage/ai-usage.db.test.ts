@@ -1,4 +1,4 @@
-// AIP-01 — migration 202610271600_ai_usage_events.sql and the writer, against LIVE Postgres. Needs DATABASE_URL_TEST; skipped without it.
+// AIP-01 — migration 202610271800_ai_usage_events.sql and the writer, against LIVE Postgres. Needs DATABASE_URL_TEST; skipped without it.
 // initTestDb() hands us a fully migrated database and repoints the app at a NOSUPERUSER NOBYPASSRLS role (platform_app_test), so RLS is
 // really exercised through withTenants. Seeding and "what is really stored" go through the superuser pool, which bypasses RLS but never a
 // CHECK or a trigger.
@@ -20,7 +20,7 @@ import { createCompany, createUser } from "../../testing/fixtures";
 import { APP_ROLE } from "../../testing/db-names";
 import { eraseAiUsageForUser, recordAiUsage } from "./writer";
 
-const MIGRATION = "202610271600_ai_usage_events.sql";
+const MIGRATION = "202610271800_ai_usage_events.sql";
 
 /** Columns a test may set; everything else takes the column default. Values are always parameters. */
 type Row = Partial<{

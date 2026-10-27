@@ -68,13 +68,13 @@
 DO $$
 BEGIN
   IF to_regprocedure('app_current_tenants()') IS NULL THEN
-    RAISE EXCEPTION '202610271600: app_current_tenants() is missing (0025)';
+    RAISE EXCEPTION '202610271800: app_current_tenants() is missing (0025)';
   END IF;
   IF to_regclass('org_units') IS NULL OR to_regclass('users') IS NULL OR to_regclass('companies') IS NULL THEN
-    RAISE EXCEPTION '202610271600: companies, users and org_units must exist';
+    RAISE EXCEPTION '202610271800: companies, users and org_units must exist';
   END IF;
   IF current_setting('server_version_num')::int < 150000 THEN
-    RAISE EXCEPTION '202610271600: needs PostgreSQL 15+ (security_invoker views); server_version_num = %', current_setting('server_version_num');
+    RAISE EXCEPTION '202610271800: needs PostgreSQL 15+ (security_invoker views); server_version_num = %', current_setting('server_version_num');
   END IF;
 END $$;
 
@@ -271,14 +271,14 @@ BEGIN
   SELECT string_agg(column_name::text, ',' ORDER BY column_name::text COLLATE "C") INTO cols FROM information_schema.columns
    WHERE table_schema = current_schema() AND table_name = 'ai_usage_events';
   IF cols IS DISTINCT FROM 'capability,completion_tokens,cost_source,cost_usd,gateway_provider_hint,id,model,occurred_at,org_unit_id,outcome,prompt_tokens,provider,run_id,surface,task,tenant_id,thread_id,tier,tokens_source,user_id' THEN
-    RAISE EXCEPTION '202610271600: ai_usage_events has the wrong column set: %', cols;
+    RAISE EXCEPTION '202610271800: ai_usage_events has the wrong column set: %', cols;
   END IF;
 
   SELECT count(*) INTO n FROM information_schema.columns
    WHERE table_schema = current_schema() AND table_name = 'ai_usage_events' AND is_nullable = 'NO'
      AND column_name IN ('id', 'tenant_id', 'occurred_at', 'surface', 'capability', 'tokens_source', 'outcome');
   IF n <> 7 THEN
-    RAISE EXCEPTION '202610271600: id, tenant_id, occurred_at, surface, capability, tokens_source and outcome must be NOT NULL, found % of 7', n;
+    RAISE EXCEPTION '202610271800: id, tenant_id, occurred_at, surface, capability, tokens_source and outcome must be NOT NULL, found % of 7', n;
   END IF;
 
   SELECT string_agg(want.c, ', ') INTO missing
@@ -289,14 +289,14 @@ BEGIN
    WHERE NOT EXISTS (SELECT 1 FROM pg_constraint pc
                       WHERE pc.conrelid = to_regclass('ai_usage_events') AND pc.conname = want.c AND pc.contype = 'c' AND pc.convalidated);
   IF missing IS NOT NULL THEN
-    RAISE EXCEPTION '202610271600: missing or unvalidated CHECKs on ai_usage_events: %', missing;
+    RAISE EXCEPTION '202610271800: missing or unvalidated CHECKs on ai_usage_events: %', missing;
   END IF;
 
   SELECT count(*) INTO n FROM pg_constraint
    WHERE conrelid = to_regclass('ai_usage_events') AND contype = 'f' AND confdeltype = 'n'
      AND conname IN ('ai_usage_events_user_id_fkey', 'ai_usage_events_org_unit_id_fkey');
   IF n <> 2 THEN
-    RAISE EXCEPTION '202610271600: user_id and org_unit_id must be foreign keys ON DELETE SET NULL, found % of 2', n;
+    RAISE EXCEPTION '202610271800: user_id and org_unit_id must be foreign keys ON DELETE SET NULL, found % of 2', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_indexes
@@ -304,44 +304,44 @@ BEGIN
      AND ((indexname = 'ix_ai_usage_events_unit_day' AND indexdef LIKE '%(tenant_id, org_unit_id, occurred_at)%')
        OR (indexname = 'ix_ai_usage_events_user_day' AND indexdef LIKE '%(tenant_id, user_id, occurred_at)%'));
   IF n <> 2 THEN
-    RAISE EXCEPTION '202610271600: the two (tenant, department|user, time) indexes must exist, found % of 2', n;
+    RAISE EXCEPTION '202610271800: the two (tenant, department|user, time) indexes must exist, found % of 2', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_class WHERE oid = to_regclass('ai_usage_events') AND relrowsecurity AND relforcerowsecurity;
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610271600: ai_usage_events must have RLS ENABLED and FORCED';
+    RAISE EXCEPTION '202610271800: ai_usage_events must have RLS ENABLED and FORCED';
   END IF;
 
   SELECT count(*) INTO n FROM pg_policies
    WHERE schemaname = current_schema() AND tablename = 'ai_usage_events' AND policyname = 'tenant_isolation' AND cmd = 'ALL'
      AND qual LIKE '%app_current_tenants()%' AND with_check LIKE '%app_current_tenants()%';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610271600: ai_usage_events needs exactly the tenant_isolation policy over app_current_tenants()';
+    RAISE EXCEPTION '202610271800: ai_usage_events needs exactly the tenant_isolation policy over app_current_tenants()';
   END IF;
   SELECT count(*) INTO n FROM pg_policies WHERE schemaname = current_schema() AND tablename = 'ai_usage_events';
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610271600: ai_usage_events must carry no policy other than tenant_isolation, found %', n;
+    RAISE EXCEPTION '202610271800: ai_usage_events must carry no policy other than tenant_isolation, found %', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_trigger
    WHERE tgrelid = to_regclass('ai_usage_events') AND tgname = 'trg_ai_usage_events_append_only' AND NOT tgisinternal
      AND tgenabled = 'O' AND (tgtype & 1) = 1 AND (tgtype & 2) = 2 AND (tgtype & 8) = 8 AND (tgtype & 16) = 16 AND (tgtype & 32) = 0;
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610271600: trg_ai_usage_events_append_only must be an enabled BEFORE UPDATE OR DELETE row trigger';
+    RAISE EXCEPTION '202610271800: trg_ai_usage_events_append_only must be an enabled BEFORE UPDATE OR DELETE row trigger';
   END IF;
 
   SELECT count(*) INTO n FROM pg_proc
    WHERE oid = to_regprocedure('ai_usage_erase_user(uuid)') AND prosecdef
      AND proconfig IS NOT NULL AND EXISTS (SELECT 1 FROM unnest(proconfig) AS cfg WHERE cfg LIKE 'search_path=%');
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610271600: ai_usage_erase_user(uuid) must be SECURITY DEFINER with a pinned search_path';
+    RAISE EXCEPTION '202610271800: ai_usage_erase_user(uuid) must be SECURITY DEFINER with a pinned search_path';
   END IF;
 
   SELECT count(*) INTO n FROM pg_class
    WHERE oid = to_regclass('ai_usage_daily') AND relkind = 'v' AND reloptions IS NOT NULL
      AND 'security_invoker=true' = ANY (reloptions);
   IF n <> 1 THEN
-    RAISE EXCEPTION '202610271600: ai_usage_daily must be a view with security_invoker = true';
+    RAISE EXCEPTION '202610271800: ai_usage_daily must be a view with security_invoker = true';
   END IF;
 
   -- The runtime role may INSERT and SELECT, and nothing else, when it exists (it does not in a fresh CI database).
@@ -351,7 +351,7 @@ BEGIN
        OR has_table_privilege('platform_app', 'ai_usage_events', 'TRUNCATE')
        OR NOT has_table_privilege('platform_app', 'ai_usage_events', 'SELECT')
        OR NOT has_table_privilege('platform_app', 'ai_usage_events', 'INSERT') THEN
-      RAISE EXCEPTION '202610271600: platform_app must hold exactly SELECT and INSERT on ai_usage_events';
+      RAISE EXCEPTION '202610271800: platform_app must hold exactly SELECT and INSERT on ai_usage_events';
     END IF;
   END IF;
 END $$;

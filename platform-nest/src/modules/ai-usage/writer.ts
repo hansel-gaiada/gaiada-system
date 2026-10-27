@@ -1,4 +1,4 @@
-// AIP-01 — the append-only writer for `ai_usage_events` (migration 202610271600_ai_usage_events.sql).
+// AIP-01 — the append-only writer for `ai_usage_events` (migration 202610271800_ai_usage_events.sql).
 //
 // THE RULES THIS FILE KEEPS
 //   * Ids, counts, labels and money only. Nothing here accepts prompt, answer, tool or message text. The event type has no such field,

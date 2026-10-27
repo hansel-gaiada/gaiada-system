@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { AI_USAGE_CAPABILITIES, AI_USAGE_COST_SOURCES, AI_USAGE_OUTCOMES, AI_USAGE_SURFACES, AI_USAGE_TOKENS_SOURCES } from "./vocab";
 
-const MIGRATION = "202610271600_ai_usage_events.sql";
+const MIGRATION = "202610271800_ai_usage_events.sql";
 const sql = readFileSync(join(__dirname, "..", "..", "..", "migrations", MIGRATION), "utf8");
 const code = sql.split("\n").map((l) => (l.includes("--") ? l.slice(0, l.indexOf("--")) : l)).join("\n");
 const list = (v: readonly string[]) => `IN (${v.map((x) => `'${x}'`).join(", ")})`;
