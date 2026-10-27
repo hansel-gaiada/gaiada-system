@@ -66,6 +66,12 @@ const DEMO_USER_WEBHEAD_ID = "u-webhead";  // DW-3h: the HEAD of Web Dev (`org_u
 const DEMO_USER_SEO_ID = "u-seo";  // placed in SEO > On-page > SEO Specialist (lib/org.ts)
 const DEMO_USER_SOCIAL_ID = "u-social";  // placed in Social Media (lib/org.ts); NOT u-pm, whose directory row says `manager`
 const DEMO_USER_CREATIVE_ID = "u-creative";  // placed in Creatives > Design (lib/org.ts)
+// SCP-1o (plan §11.1): the Social Media pipeline's personas. The HoD and the GM are the existing people `u-pm` and `u-gm`, now with a login.
+const DEMO_USER_SOCIAL2_ID = "u-social-2";  // Officer 2, placed in Social Media
+const DEMO_USER_COPY_ID = "u-copy";  // the Copywriter, placed in Social Media, holds `social_copywriter`
+const DEMO_USER_SOCIAL_DESIGN_ID = "u-social-design";  // the in-team designer, placed in Social Media, holds `social_designer`
+const DEMO_USER_HOD_ID = "u-pm";  // the HoD: the Social Media lead seat (`org_unit_lead` on dept-4)
+const DEMO_USER_GM_ID = "u-gm";  // the GM: the GM unit's lead seat (`org_unit_lead` on dept-5)
 const DEMO_USER_HR_ID = "u-hr";  // `hr_staff` on the agency, unplaced
 const DEMO_USER_FINANCE_STAFF_ID = "u-finance-staff";  // `finance_staff` on the agency, unplaced (u-finance is the holding's manager row)
 const DEMO_USER_IT_ID = "u-it";  // `it_admin` on the agency, unplaced
@@ -225,6 +231,39 @@ const ME_SOCIAL = {
   companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
   roles: [{ role: "member", scopeType: "company", scopeId: "co-agency" }],
 };
+// SCP-1o (plan §11.1). Each pipeline persona holds `member` plus the one thing that makes them that persona (a role, or a lead seat, as `GET /api/me`
+// sends it: `tenantIds` names the company whose own seat backs the grant, DW-10g-2). The superadmin and the owner identities complete the four approvers.
+const ME_SOCIAL2 = {
+  userId: DEMO_USER_SOCIAL2_ID, name: "Wayan Sudira", email: "social-two@gaiada.com", title: "Social Media Executive", assurance: "high",
+  companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
+  roles: [{ role: "member", scopeType: "company", scopeId: "co-agency" }],
+};
+const ME_COPY = {
+  userId: DEMO_USER_COPY_ID, name: "Citra Maheswari", email: "copywriter@gaiada.com", title: "Copywriter", assurance: "high",
+  companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
+  roles: [{ role: "member", scopeType: "company", scopeId: "co-agency" }, { role: "social_copywriter", scopeType: "company", scopeId: "co-agency" }],
+};
+const ME_SOCIAL_DESIGN = {
+  userId: DEMO_USER_SOCIAL_DESIGN_ID, name: "Kadek Surya", email: "social-design@gaiada.com", title: "In-team Designer", assurance: "high",
+  companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
+  roles: [{ role: "member", scopeType: "company", scopeId: "co-agency" }, { role: "social_designer", scopeType: "company", scopeId: "co-agency" }],
+};
+const ME_HOD = {
+  userId: DEMO_USER_HOD_ID, name: "Dewi Santoso", email: "social-head@gaiada.com", title: "Head of Social Media", assurance: "high",
+  companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
+  roles: [
+    { role: "member", scopeType: "company", scopeId: "co-agency" },
+    { role: "org_unit_lead", scopeType: "org_unit", scopeId: "dept-4", tenantIds: ["co-agency"] },
+  ],
+};
+const ME_GM = {
+  userId: DEMO_USER_GM_ID, name: "Edward", email: "gm@gaiada.com", title: "General Manager", assurance: "high",
+  companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
+  roles: [
+    { role: "member", scopeType: "company", scopeId: "co-agency" },
+    { role: "org_unit_lead", scopeType: "org_unit", scopeId: "dept-5", tenantIds: ["co-agency"] },
+  ],
+};
 const ME_CREATIVE = {
   userId: DEMO_USER_CREATIVE_ID, name: "Putu Rani", email: "creative@gaiada.com", title: "Senior Designer", assurance: "high",
   companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
@@ -377,6 +416,11 @@ const MEMBERS: Record<string, { user_id: string; name: string; email: string; ti
     { user_id: DEMO_USER_SEO_ID, name: "Luh Ayu", email: "seo-specialist@gaiada.com", title: "SEO Specialist" },
     { user_id: DEMO_USER_SOCIAL_ID, name: "Komang Lestari", email: "social@gaiada.com", title: "Social Media Executive" },
     { user_id: DEMO_USER_CREATIVE_ID, name: "Putu Rani", email: "creative@gaiada.com", title: "Senior Designer" },
+    // SCP-1o: the Social Media pipeline's personas (the HoD is `u-pm` above).
+    { user_id: DEMO_USER_SOCIAL2_ID, name: "Wayan Sudira", email: "social-two@gaiada.com", title: "Social Media Executive" },
+    { user_id: DEMO_USER_COPY_ID, name: "Citra Maheswari", email: "copywriter@gaiada.com", title: "Copywriter" },
+    { user_id: DEMO_USER_SOCIAL_DESIGN_ID, name: "Kadek Surya", email: "social-design@gaiada.com", title: "In-team Designer" },
+    { user_id: DEMO_USER_GM_ID, name: "Edward", email: "gm@gaiada.com", title: "General Manager" },
     { user_id: DEMO_USER_HR_ID, name: "Ayu Wardani", email: "hr-staff@gaiada.com", title: "HR Officer" },
     { user_id: DEMO_USER_FINANCE_STAFF_ID, name: "Bayu Prasetyo", email: "finance-staff@gaiada.com", title: "Finance Officer" },
     { user_id: DEMO_USER_IT_ID, name: "Dika Pratama", email: "it-admin@gaiada.com", title: "IT Administrator" },
@@ -2342,6 +2386,11 @@ function getCurrentDemoIdentity(userId: string) {
   if (userId === DEMO_USER_SEO_ID) return ME_SEO;
   if (userId === DEMO_USER_SOCIAL_ID) return ME_SOCIAL;
   if (userId === DEMO_USER_CREATIVE_ID) return ME_CREATIVE;
+  if (userId === DEMO_USER_SOCIAL2_ID) return ME_SOCIAL2;
+  if (userId === DEMO_USER_COPY_ID) return ME_COPY;
+  if (userId === DEMO_USER_SOCIAL_DESIGN_ID) return ME_SOCIAL_DESIGN;
+  if (userId === DEMO_USER_HOD_ID) return ME_HOD;
+  if (userId === DEMO_USER_GM_ID) return ME_GM;
   if (userId === DEMO_USER_HR_ID) return ME_HR;
   if (userId === DEMO_USER_FINANCE_STAFF_ID) return ME_FINANCE_STAFF;
   if (userId === DEMO_USER_IT_ID) return ME_IT;
@@ -2535,7 +2584,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // Social Media department — calendar + composer (SMM-12), stateful store (lib/demoSocial.ts).
   // Before this, `/departments/dept-4/{calendar,composer}` had no fixture at all, so SMM-12 could
   // not be driven in a browser under DEMO_MODE — see that file's header for the full story (SMM-14).
-  const social = socialDemo(method, p, url.searchParams, body);
+  const social = socialDemo(method, p, url.searchParams, body, userId);
   if (social) return social;
 
   // DW-5 / DW-10e — requests between departments and across group companies (BFF §32, §60) — stateful store (lib/demoRequests.ts).

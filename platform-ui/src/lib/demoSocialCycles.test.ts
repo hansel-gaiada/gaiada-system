@@ -23,19 +23,21 @@ describe("GET settings", () => {
 });
 
 describe("GET cycles", () => {
-  it("lists the two demo engagements of the current month with a cycle each, and fixed health: one on track, one late", () => {
+  it("lists the three demo clients of the current month with a cycle each, and the health of their posts: the worst post state, or done", () => {
     const r = call("GET", "cycles", undefined, { month: "2026-10" });
     expect(r?.status).toBe(200);
     const t = asCycleTable(r?.json);
     expect(t.month).toBe("2026-10");
-    expect(t.rows.map((x) => x.engagementId)).toEqual(["soc-eng-1", "soc-eng-2"]);
+    expect(t.rows.map((x) => x.engagementId)).toEqual(["soc-eng-1", "soc-eng-3", "soc-eng-4"]);
     expect(t.rows.every((x) => x.cycleId !== null)).toBe(true);
-    expect(t.rows.map((x) => x.health?.state)).toEqual(["on_track", "late"]);
+    // Northwind and the hotel each have a post still with the client past the cycle's ready-by (late); the spa's posts are all scheduled or live (done).
+    expect(t.rows.map((x) => x.health?.state)).toEqual(["late", "done", "late"]);
     // batch B: the last working day of September 2026 (a Wednesday); batch A: Tuesday the 15th. Ready-by is one working day before the deadline.
     expect(t.rows[0].deadline).toBe("2026-09-30");
     expect(t.rows[0].readyBy).toBe("2026-09-29");
     expect(t.rows[1].deadline).toBe("2026-09-15");
     expect(t.rows[1].readyBy).toBe("2026-09-14");
+    expect(t.rows[2].deadline).toBe("2026-09-30");
     for (const x of t.rows) {
       const c = x.counts;
       expect(c.planned + c.inProduction + c.withClient + c.clientChanges + c.approved + c.scheduled + c.live).toBe(c.counted);
@@ -45,16 +47,16 @@ describe("GET cycles", () => {
   it("a month with no cycle has the pre-fill and no health; the month is validated", () => {
     const t = asCycleTable(call("GET", "cycles", undefined, { month: "2026-12" })?.json);
     expect(t.rows.every((x) => x.cycleId === null && x.health === null)).toBe(true);
-    expect(t.rows.map((x) => x.prefill.deadline)).toEqual(["2026-11-30", "2026-11-13"]); // B: 30 Nov (Mon); A: 15 Nov is a Sunday
+    expect(t.rows.map((x) => x.prefill.deadline)).toEqual(["2026-11-30", "2026-11-13", "2026-11-30"]); // B: 30 Nov (Mon); A: 15 Nov is a Sunday
     expect(call("GET", "cycles", undefined, { month: "2026-13" })).toMatchObject({ status: 400, json: { error: "invalid_field", field: "month" } });
   });
 
   it("answers one cycle's health, and 404 cycle_not_found for another id", () => {
     const t = asCycleTable(call("GET", "cycles", undefined, { month: "2026-10" })?.json);
-    const r = call("GET", `cycles/${t.rows[1].cycleId}/health`);
+    const r = call("GET", `cycles/${t.rows[0].cycleId}/health`);
     expect(r?.status).toBe(200);
     const body = r?.json as { client: { state: string; lateWith: string }; posts: Array<{ health: { state: string } }> };
-    expect(body.client).toMatchObject({ state: "late", lateWith: "designer" });
+    expect(body.client).toMatchObject({ state: "late", lateWith: "client" });
     expect(body.posts.map((p) => p.health.state)).toContain("done");
     expect(call("GET", "cycles/nope/health")).toMatchObject({ status: 404, json: { error: "cycle_not_found" } });
   });
@@ -64,7 +66,7 @@ describe("PUT cycles", () => {
   it("validates before it looks anything up, and one bad row refuses all", () => {
     expect(call("PUT", "cycles", { month: "x", rows: [] })).toMatchObject({ status: 400, json: { field: "month" } });
     expect(call("PUT", "cycles", { month: "2026-12", rows: "no" })).toMatchObject({ status: 400, json: { field: "rows" } });
-    const bad = call("PUT", "cycles", { month: "2026-12", rows: [{ engagementId: "soc-eng-1", deadline: "2026-11-30" }, { engagementId: "soc-eng-2", deadline: "2020-01-01" }] });
+    const bad = call("PUT", "cycles", { month: "2026-12", rows: [{ engagementId: "soc-eng-1", deadline: "2026-11-30" }, { engagementId: "soc-eng-3", deadline: "2020-01-01" }] });
     expect(bad).toMatchObject({ status: 400, json: { error: "invalid_field", field: "rows[1].deadline" } });
     expect(asCycleTable(call("GET", "cycles", undefined, { month: "2026-12" })?.json).rows.every((x) => x.cycleId === null)).toBe(true);
     expect(call("PUT", "cycles", { month: "2026-12", rows: [{ engagementId: "ghost", deadline: "2026-11-30" }] })).toMatchObject({ status: 404, json: { error: "engagement_not_found", failedId: "ghost" } });

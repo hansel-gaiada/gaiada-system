@@ -127,3 +127,41 @@ describe("DW-9a: the department persona logins", () => {
     expect(demoIdentityFor("creative@northwind.example")).toBe("demo-client");
   });
 });
+
+describe("SCP-1o: the Social Media pipeline persona logins (plan §11.1)", () => {
+  const ADDRESSES: Array<[string, string]> = [
+    ["social@gaiada.com", "u-social"],
+    ["social-two@gaiada.com", "u-social-2"],
+    ["copywriter@gaiada.com", "u-copy"],
+    ["social-design@gaiada.com", "u-social-design"],
+    ["social-head@gaiada.com", "u-pm"],
+    ["creative@gaiada.com", "u-creative"],
+    ["gm@gaiada.com", "u-gm"],
+    ["group-owner@gaiada.com", "demo-owner"],
+    ["hansel@gaiada.com", "demo-hansel"],
+  ];
+  it("pins each address to its identity", () => {
+    for (const [email, id] of ADDRESSES) expect(demoIdentityFor(email), email).toBe(id);
+    for (const [email, id] of ADDRESSES) expect(demoIdentityFor(email.toUpperCase()), email).toBe(id);
+  });
+
+  it("no new token contains 'ic' or 'client' (so none reaches its tier by luck)", () => {
+    for (const email of ["social-two@gaiada.com", "copywriter@gaiada.com", "social-design@gaiada.com", "social-head@gaiada.com", "gm@gaiada.com"]) {
+      expect(email.includes("ic"), email).toBe(false);
+      expect(email.includes("client"), email).toBe(false);
+    }
+  });
+
+  it("matches exactly: a longer address does not take the identity, another tier keeps it", () => {
+    expect(demoIdentityFor("copywriter-manager@gaiada.com")).toBe("dept-manager");
+    expect(demoIdentityFor("social-two-manager@gaiada.com")).toBe("dept-manager");
+    expect(demoIdentityFor("gm-ic@gaiada.com")).toBe("gede-ic");
+    expect(demoIdentityFor("xgm@gaiada.com")).toBe("demo-hansel");
+  });
+
+  it("a client address that contains a new token is still a client", () => {
+    expect(demoIdentityFor("social-head@northwind.example")).toBe("demo-client");
+    expect(demoIdentityFor("gm@northwind.example")).toBe("demo-client");
+    expect(demoIdentityFor("copywriter-client@gaiada.com")).toBe("demo-client");
+  });
+});

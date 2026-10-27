@@ -4,9 +4,9 @@
 // role row at `own_unit`, an open assignment), `createRole` / `grantRole`, and the org-tree shape the GM surfaces read
 // (`company_org_structure`, departments found by name through `workspaceSlugFor`). Nothing here hard-codes a node id into
 // the code under test: the ids below are the fixture's own, and pipeline-authz.ts finds the units by their NAMES.
-import { withGlobal, withTenants } from "../db";
+import { newId, withGlobal, withTenants } from "../db";
 import { config } from "../config";
-import { createRole, grantLeadSeat, grantRole } from "./fixtures";
+import { addMembership, createRole, createUser, grantLeadSeat, grantRole } from "./fixtures";
 
 /** The fixture's node ids. Free-form on purpose: the code resolves units by name ("Social Media", "GM"), never by id. */
 export const SOCIAL_UNITS = {
@@ -84,4 +84,17 @@ export async function setEngagementOfficer(tenantId: string, engagementId: strin
     { modules: ["social"] },
   );
   if (r.rowCount !== 1) throw new Error(`setEngagementOfficer: no engagement ${engagementId} in ${tenantId}`);
+}
+
+/**
+ * Place an Officer on a client's allocation (plan §11.2, SCP-1o): the person is an active employee member of the company (the allocation's own rule,
+ * 409 `officer_not_member`) holding `member`, and becomes the engagement's officer. Pass `userId` for an existing user, or omit it to create a fresh one
+ * (so a suite can place TWO officers, one per client, and test that each is refused on the other's posts). Returns the officer's user id.
+ */
+export async function placeOfficerOnAllocation(tenantId: string, engagementId: string, userId?: string): Promise<string> {
+  const id = userId ?? (await createUser(`${newId()}@scp-officer.test`, "SCP officer"));
+  await addMembership(tenantId, id);
+  await grantRole(id, await createRole("member"), "company", tenantId);
+  await setEngagementOfficer(tenantId, engagementId, id);
+  return id;
 }

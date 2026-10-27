@@ -11,7 +11,9 @@
 export type DemoIdentityId =
   | "seo-staff" | "demo-client" | "dept-manager" | "gede-ic" | "demo-hansel" | "demo-viceroy-marketing"
   | "demo-two-company-client" | "demo-owner" | "demo-client-admin" | "demo-client-viewer" | "u-dev" | "u-webhead"
-  | "u-seo" | "u-social" | "u-creative" | "u-hr" | "u-finance-staff" | "u-it" | "u-resort";
+  | "u-seo" | "u-social" | "u-creative" | "u-hr" | "u-finance-staff" | "u-it" | "u-resort"
+  // SCP-1o (plan §11.1): the Social Media pipeline's other personas. `u-pm` is the HoD and `u-gm` the GM (both existing people, now with a login).
+  | "u-social-2" | "u-copy" | "u-social-design" | "u-pm" | "u-gm";
 
 export function demoIdentityFor(email: string): DemoIdentityId {
   const lower = email.toLowerCase();
@@ -52,6 +54,14 @@ export function demoIdentityFor(email: string): DemoIdentityId {
   // future "social-manager@" from the manager test below.
   if (lower === "social@gaiada.com") return "u-social";
   if (lower === "creative@gaiada.com") return "u-creative";
+  // SCP-1o (plan §11.1): five logins for the Social Media pipeline's personas. EXACT addresses only (the words are ordinary: as substrings they would
+  // take a future "copywriter-manager@" from the manager test below), after the "client" test and before the "manager" and "ic" tests. None of the
+  // tokens contains "ic" or "client" (`demoIdentity.test.ts` pins each address).
+  if (lower === "social-two@gaiada.com") return "u-social-2";
+  if (lower === "copywriter@gaiada.com") return "u-copy";
+  if (lower === "social-design@gaiada.com") return "u-social-design";
+  if (lower === "social-head@gaiada.com") return "u-pm";
+  if (lower === "gm@gaiada.com") return "u-gm";
   if (lower === "hr-staff@gaiada.com" || lower.includes("hr-staff")) return "u-hr";
   if (lower === "finance-staff@gaiada.com" || lower.includes("finance-staff")) return "u-finance-staff";
   if (lower === "it-admin@gaiada.com" || lower.includes("it-admin")) return "u-it";

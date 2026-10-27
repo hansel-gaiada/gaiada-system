@@ -3,6 +3,11 @@ import { isDemoPortalClient } from "./demoPortalClients";
 import { todayIsoInDisplayZone } from "./format";
 import { evaluateClientReviewState, type ClientReviewState, type ClientReviewStatus } from "./socialShared";
 import { validateBrandBook, type BrandBook } from "./socialBrandBook";
+import {
+  DEMO_MEMBER_NAMES, PIPE_ENGAGEMENTS, allocStore, cyclesStore, demoAllocationRow, demoBrandAnswer, demoCycleHealth, demoCycleTable, demoDeadlineRange,
+  demoPipelineRead, demoRealDate, demoSettingsAnswer, demoWalkBack, isDemoSocialApprover, isPipelinePostId, pipelineEngagement, runDemoPipelineAction,
+  type DemoBrandProfile, type DemoAllocation,
+} from "./demoSocialPipeline";
 // SMM-14 — DEMO_MODE fixtures for the Social Media department (calendar + composer, SMM-12).
 // Mirrors demoPipeline.ts's STATEFUL in-memory-store convention exactly (module-level arrays
 // mutate across requests within one running dev-server process; resets on restart). Before this
@@ -968,145 +973,6 @@ function computePrecondition(v: DemoVariant, account: DemoAccount | undefined, e
   return { ...base, ok: true };
 }
 
-// ── SCP-1c — the settings and the cycles (BFF §63.4, §63.5) ──────────────────────────────────────────────────────────────────
-// What the Settings page needs and no more (the full pipeline seed is SCP-1o): `GET`/`PUT settings`, `GET`/`PUT cycles` and
-// `GET cycles/:cycleId/health`, for the two demo engagements (both Northwind Traders', the one demo client).
-//
-// IT IS A MOCK, NOT THE MATHS. The server owns the pre-fill, ready-by and health (platform-nest `schedule-health.ts`, pinned by its golden
-// table); this store walks Monday to Friday for the two dates it must show and answers FIXED health and counts per engagement (one on track,
-// one late), so the page's chips and the disabled/enabled states are drivable without a backend. It answers in the server's order of checks:
-// validation, then 404, and it enforces the same ranges (`rows[i].deadline`, the buffer 0 to 10, the factor 1 to 10 with two decimals).
-// `canPlan` is true: the demo user is the superadmin, one of the four approvers.
-//
-// Its own globalThis-pinned store, beside the main one, for the same bundling reason (see WHY THESE STORES ARE PINNED above). Seeded once, from
-// the day it is first touched; tests that depend on the date pin the clock to mid-month before importing this file.
-const CYCLES_STORE = Symbol.for("gaiada.demoSocial.cycles");
-interface DemoCycle { id: string; engagementId: string; month: string; deadline: string; readyBy: string }
-interface DemoCycleStore { bufferWorkingDays: number; boostCandidateFactor: number; cycles: DemoCycle[] }
-
-const DEMO_CLIENT_NAME = "Northwind Traders";
-const DEMO_OFFICER = { id: "u-pm", name: "Dewi Santoso" };
-/** Fixed per engagement: the demo's own picture of a month in progress (counts that sum to `counted`; health the server would compute). */
-const DEMO_CYCLE_FACTS: Record<string, { batch: "A" | "B"; target: number; counts: Record<string, number>; health: Record<string, unknown> | null }> = {
-  "soc-eng-1": {
-    batch: "B", target: 12,
-    counts: { counted: 8, planned: 1, inProduction: 3, withClient: 2, clientChanges: 0, approved: 1, scheduled: 1, live: 0, extra: 1, stories: 2 },
-    health: { state: "on_track", spareDays: 3, lateDays: null, lateWith: null },
-  },
-  "soc-eng-2": {
-    batch: "A", target: 6,
-    counts: { counted: 5, planned: 2, inProduction: 1, withClient: 1, clientChanges: 1, approved: 0, scheduled: 0, live: 0, extra: 0, stories: 0 },
-    health: { state: "late", spareDays: -4, lateDays: 2, lateWith: "designer" },
-  },
-};
-
-const demoDow = (iso: string): number => new Date(`${iso}T00:00:00Z`).getUTCDay();
-const demoShift = (iso: string, n: number): string => { const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
-/** Monday to Friday only (the demo has no holiday data of its own: its calendar is "known" only so the page shows a name). */
-const demoWeekdayOnOrBefore = (iso: string): string => { let d = iso; while (demoDow(d) === 0 || demoDow(d) === 6) d = demoShift(d, -1); return d; };
-const demoWalkBack = (iso: string, n: number): string => {
-  let d = iso;
-  for (let left = n; left > 0; ) { d = demoShift(d, -1); if (demoDow(d) !== 0 && demoDow(d) !== 6) left -= 1; }
-  return d;
-};
-const demoMonthShift = (month: string, delta: number): string => {
-  const t = Number(month.slice(0, 4)) * 12 + (Number(month.slice(5, 7)) - 1) + delta;
-  return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, "0")}`;
-};
-const demoPrefill = (month: string, batch: "A" | "B"): string => {
-  const prev = demoMonthShift(month, -1);
-  return demoWeekdayOnOrBefore(batch === "A" ? `${prev}-15` : demoShift(`${month}-01`, -1));
-};
-/** `[min, max]` of a cycle's deadline for `month` (the `social_cycles` check). */
-const demoDeadlineRange = (month: string): { min: string; max: string } =>
-  ({ min: `${demoMonthShift(month, -3)}-01`, max: demoShift(`${demoMonthShift(month, 1)}-01`, -1) });
-const demoRealDate = (s: unknown): s is string =>
-  typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
-
-const cyclesStore: DemoCycleStore = ((globalThis as Record<symbol, unknown>)[CYCLES_STORE] ??= (() => {
-  const month = todayIsoInDisplayZone().slice(0, 7);
-  const buffer = 1;
-  const cycles: DemoCycle[] = ENGAGEMENTS_SEED.filter((e) => DEMO_CYCLE_FACTS[e.id]).map((e) => {
-    const deadline = demoPrefill(month, DEMO_CYCLE_FACTS[e.id].batch);
-    return { id: `soc-cyc-${e.id}-${month}`, engagementId: e.id, month, deadline, readyBy: demoWalkBack(deadline, buffer) };
-  });
-  return { bufferWorkingDays: buffer, boostCandidateFactor: 1.25, cycles };
-})()) as DemoCycleStore;
-
-const demoField = (status: number, error: string, extra: Record<string, unknown>): DemoResult => ({ status, json: { error, ...extra } });
-const demoHealthOf = (e: DemoEngagement, readyBy: string): Record<string, unknown> | null => {
-  const f = DEMO_CYCLE_FACTS[e.id];
-  if (!f?.health) return null;
-  return { ...f.health, latestSafeHandoff: f.health.state === "late" ? demoWalkBack(readyBy, 4) : readyBy, readyBy };
-};
-const demoSettingsAnswer = () => ({
-  bufferWorkingDays: cyclesStore.bufferWorkingDays, boostCandidateFactor: cyclesStore.boostCandidateFactor,
-  holidayCalendar: { known: true, name: "Demo public holidays" }, canPlan: true,
-});
-function demoCycleTable(month: string): Record<string, unknown> {
-  const rows = ENGAGEMENTS.filter((e) => e.status !== "closed").map((e) => {
-    const f = DEMO_CYCLE_FACTS[e.id];
-    const cycle = cyclesStore.cycles.find((c) => c.engagementId === e.id && c.month === month) ?? null;
-    return {
-      engagementId: e.id, clientName: DEMO_CLIENT_NAME, officer: DEMO_OFFICER, deliveryBatch: f?.batch ?? null,
-      cycleId: cycle?.id ?? null, deadline: cycle?.deadline ?? null, readyBy: cycle?.readyBy ?? null,
-      prefill: { deadline: f ? demoPrefill(month, f.batch) : null, batch: f?.batch ?? null },
-      target: f?.target ?? null,
-      counts: cycle && f ? f.counts : { counted: 0, planned: 0, inProduction: 0, withClient: 0, clientChanges: 0, approved: 0, scheduled: 0, live: 0, extra: 0, stories: 0 },
-      health: cycle ? demoHealthOf(e, cycle.readyBy) : null,
-    };
-  });
-  return { month, bufferWorkingDays: cyclesStore.bufferWorkingDays, holidaysKnown: true, canPlan: true, rows };
-}
-
-// ── SCP-1a — the allocation and the brand book (BFF §63.4) ─────────────────────────────────────────────────────────────────────
-// `GET allocation`, `PATCH engagements/:engagementId/allocation`, and `GET`/`PATCH brand-profiles/:clientId` for the two demo engagements (both Northwind
-// Traders', the one demo client), in the server's order of checks: validation (400 `{field}`, `unknown_field` for a key it does not know), then 404, then
-// 409 `officer_not_member`. `canPlan` is true: the demo user is the superadmin, one of the four approvers. The officer must be one of the demo company's
-// members (the names of `demoFixtures.ts` MEMBERS, mock names only). `thisCycle` is the cycle of the settings store above with its FIXED counts (the demo
-// has no posts), against this store's target.
-//
-// Its own globalThis-pinned store (see WHY THESE STORES ARE PINNED above). The brand book's absent-field rule is the server's: a PATCH names only what it
-// changes, and the sibling keys of `tone` and `hashtagStrategy` survive.
-const ALLOC_STORE = Symbol.for("gaiada.demoSocial.allocation");
-interface DemoAllocation {
-  officerId: string | null; postsPerCycle: number | null; creativeSource: "creatives" | "in_team"; deliveryBatch: "A" | "B" | null;
-  reportFormat: "email" | "meeting" | null; reportDueDay: number | null; platforms: string[]; formats: string[]; defaultPostTime: string | null;
-  stepEstimates: Record<string, number>;
-}
-interface DemoBrandProfile {
-  id: string; clientId: string; tone: Record<string, unknown>; hashtagStrategy: Record<string, unknown>; knowledgeSourceIds: string[];
-  book: Omit<BrandBook, "toneSummary" | "hashtagSets">; updatedAt: string;
-}
-const DEMO_MEMBER_NAMES: Record<string, string> = {
-  "demo-hansel": "Clement Hansel", "u-pm": "Dewi Santoso", "u-dev": "Made Putra", "u-social": "Komang Lestari", "u-creative": "Putu Rani",
-};
-const allocStore: { byEngagement: Record<string, DemoAllocation>; brands: Record<string, DemoBrandProfile> } = ((globalThis as Record<symbol, unknown>)[ALLOC_STORE] ??= {
-  byEngagement: {
-    "soc-eng-1": {
-      officerId: "u-pm", postsPerCycle: 12, creativeSource: "creatives", deliveryBatch: "B", reportFormat: "email", reportDueDay: 5,
-      platforms: ["instagram", "facebook", "tiktok"], formats: ["feed", "reel", "story"], defaultPostTime: "09:30",
-      stepEstimates: { proofread: 1, hod: 1, design: 3, final: 1, client: 2, schedule: 1 },
-    },
-    "soc-eng-2": {
-      officerId: "u-pm", postsPerCycle: 6, creativeSource: "in_team", deliveryBatch: "A", reportFormat: "meeting", reportDueDay: 10,
-      platforms: ["instagram"], formats: ["feed"], defaultPostTime: "18:00", stepEstimates: {},
-    },
-  } as Record<string, DemoAllocation>,
-  brands: {
-    "cl-1": {
-      id: "soc-brand-cl-1", clientId: "cl-1", tone: { summary: "Warm, direct and a little playful.", traits: ["warm", "direct"] },
-      hashtagStrategy: { maxCount: 5, sets: [{ name: "Always", tags: ["northwind", "madewithcare"] }] }, knowledgeSourceIds: [],
-      book: {
-        contentPillars: ["Behind the scenes", "Product stories"], mustHaveNotes: ["Always tag the store"], brandRules: ["No discount wording"],
-        channels: [{ network: "instagram", handle: "northwindtraders", url: "https://example.com/northwind" }],
-        keyDates: [{ date: "12-24", label: "Holiday campaign ends" }], links: [{ label: "Brand guide", url: "https://example.com/northwind/brand" }],
-      },
-      updatedAt: "2026-09-01T09:00:00Z",
-    },
-  } as Record<string, DemoBrandProfile>,
-}) as { byEngagement: Record<string, DemoAllocation>; brands: Record<string, DemoBrandProfile> };
-
 const ALLOC_KEYS = ["officerId", "postsPerCycle", "creativeSource", "deliveryBatch", "reportFormat", "reportDueDay", "platforms", "formats", "defaultPostTime", "stepEstimates"];
 const STEP_KEYS_DEMO = ["proofread", "hod", "design", "final", "client", "schedule"];
 const demoInt = (v: unknown, lo: number, hi: number): v is number => typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi;
@@ -1114,34 +980,15 @@ const demoPick = (v: unknown, allowed: readonly string[]): string[] | null => {
   if (!Array.isArray(v) || v.length > allowed.length || v.some((x) => typeof x !== "string" || !allowed.includes(x))) return null;
   return [...new Set(v as string[])];
 };
+const demoField = (status: number, error: string, extra: Record<string, unknown>): DemoResult => ({ status, json: { error, ...extra } });
 
-function demoAllocationRow(e: DemoEngagement): Record<string, unknown> {
-  const a = allocStore.byEngagement[e.id];
-  const month = todayIsoInDisplayZone().slice(0, 7);
-  const cycle = cyclesStore.cycles.find((c) => c.engagementId === e.id && c.month === month);
-  const f = DEMO_CYCLE_FACTS[e.id];
-  return {
-    engagementId: e.id, clientId: e.clientId, clientName: DEMO_CLIENT_NAME, status: e.status,
-    officer: a.officerId ? { id: a.officerId, name: DEMO_MEMBER_NAMES[a.officerId] ?? "" } : null,
-    postsPerCycle: a.postsPerCycle, creativeSource: a.creativeSource, deliveryBatch: a.deliveryBatch, reportFormat: a.reportFormat,
-    reportDueDay: a.reportDueDay, platforms: a.platforms, formats: a.formats, defaultPostTime: a.defaultPostTime, stepEstimates: a.stepEstimates,
-    thisCycle: cycle && f ? { cycleId: cycle.id, month, target: a.postsPerCycle, counted: f.counts.counted, extra: f.counts.extra, stories: f.counts.stories } : null,
-    canPlan: true,
-  };
-}
-
-function demoBrandAnswer(p: DemoBrandProfile): Record<string, unknown> {
-  return {
-    id: p.id, clientId: p.clientId, tone: p.tone, hashtagStrategy: p.hashtagStrategy, knowledgeSourceIds: p.knowledgeSourceIds, updatedAt: p.updatedAt,
-    toneSummary: typeof p.tone.summary === "string" ? p.tone.summary : "",
-    contentPillars: p.book.contentPillars, mustHaveNotes: p.book.mustHaveNotes, brandRules: p.book.brandRules,
-    hashtagSets: Array.isArray(p.hashtagStrategy.sets) ? p.hashtagStrategy.sets : [],
-    channels: p.book.channels, keyDates: p.book.keyDates, links: p.book.links,
-  };
-}
+// ── SCP-1c, SCP-1a, SCP-1o — settings, cycles, allocation, brand book and the pipeline read ───────────────────────────────────
+// The store (three invented clients, their cycles and a month of posts) and every answer built from it live in `demoSocialPipeline.ts`; this file
+// keeps the routes and their validation, in the server's order of checks. THE DEMO CALLER is `userId` (default: the superadmin `demo-hansel`, one
+// of the four approvers): `canPlan` and the 403 `not_a_social_approver` follow the persona.
 
 /** Returns a DemoResult for any `/api/:t/modules/social/*` route, or null if it doesn't match. */
-export function socialDemo(method: string, p: string, params: URLSearchParams, body?: string): DemoResult | null {
+export function socialDemo(method: string, p: string, params: URLSearchParams, body?: string, userId: string = "demo-hansel"): DemoResult | null {
   const match = p.match(/^\/api\/[^/]+\/modules\/social\/(.*)$/);
   if (!match) return null;
   const tail = match[1];
@@ -1149,8 +996,10 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
   const b = () => (body ? (JSON.parse(body) as Record<string, unknown>) : {});
 
   // ── SCP-1c: settings and cycles (BFF §63.4, §63.5) ───────────────────────────────────────────────
-  if (tail === "settings" && m === "GET") return ok(demoSettingsAnswer());
+  const notApprover = () => err(403, "not_a_social_approver");
+  if (tail === "settings" && m === "GET") return ok(demoSettingsAnswer(userId));
   if (tail === "settings" && m === "PUT") {
+    if (!isDemoSocialApprover(userId)) return notApprover();
     const body_ = b() as Record<string, unknown>;
     for (const k of Object.keys(body_)) if (k !== "bufferWorkingDays" && k !== "boostCandidateFactor") return demoField(400, "unknown_field", { field: k });
     const bw = body_.bufferWorkingDays;
@@ -1165,14 +1014,15 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
       const next = demoWalkBack(c.deadline, cyclesStore.bufferWorkingDays);
       if (next !== c.readyBy) { c.readyBy = next; recomputed += 1; }
     }
-    return ok({ ...demoSettingsAnswer(), cyclesRecomputed: recomputed });
+    return ok({ ...demoSettingsAnswer(userId), cyclesRecomputed: recomputed });
   }
   if (tail === "cycles" && m === "GET") {
     const month = params.get("month") || todayIsoInDisplayZone().slice(0, 7);
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return demoField(400, "invalid_field", { field: "month" });
-    return ok(demoCycleTable(month));
+    return ok(demoCycleTable(month, userId));
   }
   if (tail === "cycles" && m === "PUT") {
+    if (!isDemoSocialApprover(userId)) return notApprover();
     const body_ = b() as { month?: unknown; rows?: unknown };
     const month = body_.month;
     if (typeof month !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return demoField(400, "invalid_field", { field: "month" });
@@ -1187,7 +1037,7 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
       rows.push({ engagementId: r.engagementId, deadline: r.deadline });
     }
     for (const r of rows) {
-      if (!ENGAGEMENTS.some((e) => e.id === r.engagementId && e.status !== "closed")) return demoField(404, "engagement_not_found", { failedId: r.engagementId });
+      if (!pipelineEngagement(r.engagementId)) return demoField(404, "engagement_not_found", { failedId: r.engagementId });
     }
     for (const r of rows) {
       const readyBy = demoWalkBack(r.deadline, cyclesStore.bufferWorkingDays);
@@ -1195,41 +1045,35 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
       if (existing) { existing.deadline = r.deadline; existing.readyBy = readyBy; }
       else cyclesStore.cycles.push({ id: `soc-cyc-${r.engagementId}-${month}`, engagementId: r.engagementId, month, deadline: r.deadline, readyBy });
     }
-    return ok(demoCycleTable(month));
+    return ok(demoCycleTable(month, userId));
   }
   const cycleHealthM = tail.match(/^cycles\/([^/]+)\/health$/);
-  if (cycleHealthM && m === "GET") {
-    const cycle = cyclesStore.cycles.find((c) => c.id === cycleHealthM[1]);
-    const eng = cycle ? ENGAGEMENTS.find((e) => e.id === cycle.engagementId) : undefined;
-    if (!cycle || !eng) return err(404, "cycle_not_found");
-    const client = demoHealthOf(eng, cycle.readyBy);
-    const f = DEMO_CYCLE_FACTS[eng.id];
-    const post = (id: string, title: string, status: string, phase: string, holder: string | null, health: Record<string, unknown>) =>
-      ({ postId: `soc-post-demo-${eng.id}-${id}`, title, status, phase, holder, isExtra: false, format: "feed", health });
-    return ok({
-      cycleId: cycle.id, engagementId: eng.id, clientName: DEMO_CLIENT_NAME, month: cycle.month, deadline: cycle.deadline, readyBy: cycle.readyBy,
-      today: todayIsoInDisplayZone(), bufferWorkingDays: cyclesStore.bufferWorkingDays, holidaysKnown: true, estimates: {},
-      averageApprovalDays: null, clientSlower: false, client,
-      posts: f ? [
-        post("a", "Autumn collection teaser", "design", "in_production", "designer", client ?? { state: "on_track", spareDays: 3, lateDays: null, lateWith: null, latestSafeHandoff: cycle.readyBy, readyBy: cycle.readyBy }),
-        post("b", "Behind the scenes", "client", "with_client", "client", { state: "on_track", spareDays: 3, lateDays: null, lateWith: null, latestSafeHandoff: cycle.readyBy, readyBy: cycle.readyBy }),
-        post("c", "Launch day announcement", "approved", "client_approved", "officer", { state: "done", spareDays: null, lateDays: null, lateWith: null, latestSafeHandoff: null, readyBy: cycle.readyBy }),
-      ] : [],
-    });
+  if (cycleHealthM && m === "GET") return demoCycleHealth(cycleHealthM[1]);
+
+  // ── SCP-1o: the pipeline read (BFF §63.6.2) and the write hook ────────────────────────────────────────────────
+  const pipeM = tail.match(/^posts\/([^/]+)\/pipeline$/);
+  if (pipeM && m === "GET") {
+    // a Composer post of the legacy store is not a pipeline post (409), the server's answer for `pipeline_status IS NULL`
+    if (POSTS.some((x) => x.id === pipeM[1]) && !isPipelinePostId(pipeM[1])) return err(409, "not_a_pipeline_post");
+    return demoPipelineRead(pipeM[1], userId);
   }
+  // TODO(SCP-1e): the demo action runner (`runDemoPipelineAction`, demoSocialPipeline.ts) answers 501 until the post page's ticket builds it.
+  const pipeActM = tail.match(/^posts\/([^/]+)\/actions$/);
+  if (pipeActM && m === "POST" && isPipelinePostId(pipeActM[1])) return runDemoPipelineAction(pipeActM[1], b(), userId);
 
   // ── SCP-1a: allocation and brand book (BFF §63.4) ────────────────────────────────────────────────
   if (tail === "allocation" && m === "GET") {
     const mine = params.get("mine");
     if (mine !== null && mine !== "" && !["1", "true", "0", "false"].includes(mine)) return demoField(400, "invalid_field", { field: "mine" });
-    // The demo caller is `demo-hansel` (the superadmin), who is no officer: `mine=1` keeps only the clients whose officer they are.
-    const items = ENGAGEMENTS.filter((e) => e.status !== "closed" && allocStore.byEngagement[e.id])
-      .filter((e) => !(mine === "1" || mine === "true") || allocStore.byEngagement[e.id].officerId === "demo-hansel")
-      .map(demoAllocationRow);
+    // `mine=1` keeps only the clients whose officer the caller is (the default caller, the superadmin, is nobody's officer).
+    const items = PIPE_ENGAGEMENTS.filter((e) => e.status !== "closed" && allocStore.byEngagement[e.id])
+      .filter((e) => !(mine === "1" || mine === "true") || allocStore.byEngagement[e.id].officerId === userId)
+      .map((e) => demoAllocationRow(e, userId));
     return ok({ items });
   }
   const allocM = tail.match(/^engagements\/([^/]+)\/allocation$/);
   if (allocM && m === "PATCH") {
+    if (!isDemoSocialApprover(userId)) return notApprover();
     const bd = b() as Record<string, unknown>;
     for (const k of Object.keys(bd)) if (!ALLOC_KEYS.includes(k)) return demoField(400, "unknown_field", { field: k });
     if (Object.keys(bd).length === 0) return err(400, "no_fields");
@@ -1260,11 +1104,11 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
       }
       next.stepEstimates = est;
     }
-    const eng = ENGAGEMENTS.find((e) => e.id === allocM[1]);
+    const eng = pipelineEngagement(allocM[1]);
     if (!eng || !allocStore.byEngagement[eng.id]) return err(404, "engagement_not_found");
     if (typeof next.officerId === "string" && !(next.officerId in DEMO_MEMBER_NAMES)) return err(409, "officer_not_member");
     Object.assign(allocStore.byEngagement[eng.id], next);
-    return ok(demoAllocationRow(eng));
+    return ok(demoAllocationRow(eng, userId));
   }
   const brandM = tail.match(/^brand-profiles\/([^/]+)$/);
   if (brandM && m === "GET") {

@@ -17,23 +17,27 @@ const call = (method: string, path: string, body?: unknown, q: Record<string, st
   socialDemo(method, `/api/co-agency/modules/social/${path}`, new URLSearchParams(q), body === undefined ? undefined : JSON.stringify(body));
 
 describe("GET allocation", () => {
-  it("lists the two demo engagements with their allocation, this cycle's counts and canPlan (the demo user is the superadmin)", () => {
+  it("lists the three demo clients with their allocation, this cycle's counts and canPlan (the demo user is the superadmin)", () => {
     const r = call("GET", "allocation");
     expect(r?.status).toBe(200);
     const rows = asAllocationRows(r?.json);
-    expect(rows.map((x) => x.engagementId)).toEqual(["soc-eng-1", "soc-eng-2"]);
+    expect(rows.map((x) => x.engagementId)).toEqual(["soc-eng-1", "soc-eng-3", "soc-eng-4"]);
     expect(rows.every((x) => x.canPlan)).toBe(true);
     expect(rows[0]).toMatchObject({
-      clientName: "Northwind Traders", officer: { id: "u-pm", name: "Dewi Santoso" }, postsPerCycle: 12, creativeSource: "creatives", deliveryBatch: "B",
+      clientName: "Northwind Traders", officer: { id: "u-social", name: "Komang Lestari" }, postsPerCycle: 12, creativeSource: "creatives", deliveryBatch: "B",
       reportFormat: "email", reportDueDay: 5, defaultPostTime: "09:30",
     });
-    expect(rows[0].thisCycle).toMatchObject({ month: "2026-10", target: 12, counted: 8, extra: 1, stories: 2 });
-    expect(rows[1]).toMatchObject({ creativeSource: "in_team", postsPerCycle: 6 });
-    expect(rows[1].thisCycle).toMatchObject({ target: 6, counted: 5 });
+    expect(rows[0].thisCycle).toMatchObject({ month: "2026-10", target: 12, counted: 6, extra: 0, stories: 0 });
+    expect(rows[1]).toMatchObject({ clientName: "Saltmarsh Day Spa", officer: { id: "u-social-2" }, creativeSource: "in_team", postsPerCycle: 8 });
+    expect(rows[1].thisCycle).toMatchObject({ target: 8, counted: 2 });
+    expect(rows.map((x) => x.creativeSource)).toEqual(["creatives", "in_team", "creatives"]); // one on the in-team designer, two on Creatives
   });
 
-  it("mine=1 keeps the caller's clients (the demo caller is nobody's officer), and mine is validated", () => {
+  it("mine=1 keeps the caller's clients (the default caller is nobody's officer), and mine is validated", () => {
     expect(asAllocationRows(call("GET", "allocation", undefined, { mine: "1" })?.json)).toEqual([]);
+    const asOfficer = socialDemo("GET", "/api/co-agency/modules/social/allocation", new URLSearchParams({ mine: "1" }), undefined, "u-social");
+    expect(asAllocationRows(asOfficer?.json).map((x) => x.engagementId)).toEqual(["soc-eng-1", "soc-eng-4"]);
+    expect(asAllocationRows(asOfficer?.json).every((x) => !x.canPlan)).toBe(true); // an officer is not an approver
     expect(call("GET", "allocation", undefined, { mine: "maybe" })).toMatchObject({ status: 400, json: { field: "mine" } });
   });
 });
@@ -63,11 +67,11 @@ describe("PATCH engagements/:id/allocation", () => {
 
   it("409 officer_not_member for someone who is not one of the company's members", () => {
     expect(call("PATCH", "engagements/soc-eng-1/allocation", { officerId: "u-stranger" })).toMatchObject({ status: 409, json: { error: "officer_not_member" } });
-    expect(asAllocationRows(call("GET", "allocation")?.json)[0].officer?.id).toBe("u-pm"); // nothing was written
+    expect(asAllocationRows(call("GET", "allocation")?.json)[0].officer?.id).toBe("u-social"); // nothing was written
   });
 
   it("saves any subset and answers the row, leaving the rest as it was; a step-estimates object replaces the old one", () => {
-    const r = call("PATCH", "engagements/soc-eng-2/allocation", { officerId: "u-social", postsPerCycle: 9, platforms: ["instagram", "tiktok", "instagram"], stepEstimates: { design: 4 } });
+    const r = call("PATCH", "engagements/soc-eng-3/allocation", { officerId: "u-social", postsPerCycle: 9, platforms: ["instagram", "tiktok", "instagram"], stepEstimates: { design: 4 } });
     expect(r?.status).toBe(200);
     const row = asAllocationRow(r?.json);
     expect(row).toMatchObject({ officer: { id: "u-social", name: "Komang Lestari" }, postsPerCycle: 9, platforms: ["instagram", "tiktok"], stepEstimates: { design: 4 } });
@@ -75,7 +79,7 @@ describe("PATCH engagements/:id/allocation", () => {
     expect(row.reportFormat).toBe("meeting"); // untouched
     expect(row.thisCycle).toMatchObject({ target: 9 }); // this cycle's target follows
     // nulls clear the optional fields
-    const cleared = asAllocationRow(call("PATCH", "engagements/soc-eng-2/allocation", { reportFormat: null, reportDueDay: null, defaultPostTime: null, deliveryBatch: null, officerId: null, stepEstimates: {} })?.json);
+    const cleared = asAllocationRow(call("PATCH", "engagements/soc-eng-3/allocation", { reportFormat: null, reportDueDay: null, defaultPostTime: null, deliveryBatch: null, officerId: null, stepEstimates: {} })?.json);
     expect(cleared).toMatchObject({ reportFormat: null, reportDueDay: null, defaultPostTime: null, deliveryBatch: null, officer: null, stepEstimates: {} });
   });
 });
