@@ -428,6 +428,44 @@ export async function checkMany(p: Principal, resources: readonly Resource[], ac
   return out;
 }
 
+/**
+ * ONE request for MANY resources with their OWN actions (SCP-1d, the Social feed: each post's next step is a different Cerbos action).
+ * The same principal and resource payloads `check` sends, in chunks of at most `CERBOS_BATCH_LIMIT` resources, so a page of 50 is ONE call.
+ * Answers, per input and in input order, a map action -> allowed. ADVISORY like `checkMany` (audits nothing, no session or act-for check),
+ * and it FAILS CLOSED the same way: a result matched by position and confirmed by its echoed `kind` and `id`; one it cannot vouch for
+ * answers every action `false`. An HTTP error throws.
+ */
+export async function checkEach(
+  p: Principal, items: ReadonlyArray<{ resource: Resource; actions: readonly string[] }>,
+): Promise<Array<Record<string, boolean>>> {
+  const out: Array<Record<string, boolean>> = [];
+  for (let i = 0; i < items.length; i += CERBOS_BATCH_LIMIT) {
+    const chunk = items.slice(i, i + CERBOS_BATCH_LIMIT);
+    const payloads = chunk.map((it) => resourcePayload(it.resource));
+    const res = await fetch(`${config.cerbosUrl}/api/check/resources`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requestId: "platform",
+        principal: principalPayload(p),
+        resources: chunk.map((it, j) => ({ actions: [...it.actions], resource: payloads[j] })),
+      }),
+    });
+    if (!res.ok) throw new Error(`cerbos ${res.status}`);
+    const data = (await res.json()) as {
+      results?: Array<{ resource?: { kind?: string; id?: string }; actions?: Record<string, string> }>;
+    };
+    const results = Array.isArray(data.results) && data.results.length === chunk.length ? data.results : [];
+    chunk.forEach((it, j) => {
+      const got = results[j];
+      const echoed = got?.resource;
+      const matches = echoed !== undefined && echoed.kind === payloads[j].kind && echoed.id === payloads[j].id;
+      out.push(Object.fromEntries(it.actions.map((a) => [a, Boolean(got) && matches && got.actions?.[a] === "EFFECT_ALLOW"])));
+    });
+  }
+  return out;
+}
+
 export interface QueryPlan {
   kind: "always-allowed" | "always-denied" | "conditional";
   /** For conditional plans: the raw Cerbos AST (the RLS layer maps the parts it supports). */

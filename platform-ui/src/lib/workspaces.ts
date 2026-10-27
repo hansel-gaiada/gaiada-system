@@ -532,6 +532,15 @@ const SOCIAL_MEDIA: Workspace = {
         blurb: "Each client's officer, monthly target, creative source, report day, platforms and this cycle's counts.",
       }],
     },
+    // SCP-1j (BFF §63.7, §63.17): Messages, who holds each of the officer's posts and the Follow up button. No gate: anyone with a social read tier opens it, and a
+    // person who is nobody's officer reads an empty state. Its FIRST tab is `{D}/messages`: the Social skin's Messages pin opens the row's first tab.
+    {
+      key: "messages", label: "Messages", icon: "messages",
+      tabs: [{
+        key: "messages", label: "Messages", href: deptPath("messages"), icon: "messages",
+        blurb: "Who holds each of your posts, and a reminder to send them.",
+      }],
+    },
     // SCP-1c (BFF §63.17): the HoD's Settings page (the ready-by buffer, the deadline table). Shown to the four Social approvers only; the page itself is
     // readable by the team and editable with `plan`. The row key `settings` is the Social skin's pin (`lib/skins.ts`); Admin's `settings` row is another list.
     {

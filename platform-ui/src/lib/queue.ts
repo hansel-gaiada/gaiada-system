@@ -27,6 +27,8 @@ import { threadTitle } from "./conversation";
 import type { StaffThread } from "./conversation";
 import { listNotifications, type NotificationItem } from "./entities";
 import { getMyKpiAlerts, alertTitle, alertReading, type KpiAlert } from "./deptKpiAlerts";
+import { getSocialNeedsYou } from "./socialMessages-data";
+import { needsKindWords, type NeedsYouSocialItem } from "./socialMessages";
 import { mergeLegs, type Envelope } from "./envelope";
 import { rankByUrgency, type QueueItem, type QueueItemType } from "./queueUrgency";
 import { PM_STATUS_LADDER } from "./pmVocabulary";
@@ -264,6 +266,26 @@ export function fromKpiAlert(a: KpiAlert, company: { id: string; name: string })
   };
 }
 
+// SCP-1j (BFF §63.7): a post of the Social Media content pipeline that waits for ME: a draft to send, a fix asked, a post to proofread, a head approval,
+// a design. The server decides whose turn it is, per role, so every row is mine to act on. The id is the server's own (`social:<tenant>:<post>:<kind>`, which
+// carries the company, as every id here must), `createdAt` is how long it has sat in its step and `dueDate` the cycle's ready-by when it has one, so a post past
+// its ready-by ranks as an overdue task does. It is work, not an approval: `type` is "task".
+export function fromSocialPipeline(i: NeedsYouSocialItem, company: { id: string; name: string }): QueueItem {
+  return {
+    id: i.id,
+    type: "task",
+    title: i.title,
+    meta: [i.clientName, needsKindWords(i.kind)].filter(Boolean).join(" · "),
+    companyId: company.id,
+    company: company.name,
+    href: i.href,
+    dueDate: i.due ?? null,
+    createdAt: i.since,
+    decidable: true,
+    urgencyScore: 0,
+  };
+}
+
 export interface MyWorkQueueOptions {
   /** Cap on automation-approval + pipeline-gate reads (both tenant-wide
    *  lists); default matches the rail's own convention of pending-only. */
@@ -288,7 +310,7 @@ export async function getMyWorkQueue(
         // AGN-3: every source names itself, so a leg that survives a dead source reports WHICH one it
         // lost instead of quietly returning a shorter queue.
         const lost: string[] = [];
-        const [approvals, automation, gates, tasks, pmTasks, notifications, conversations, kpiAlerts] = await Promise.all([
+        const [approvals, automation, gates, tasks, pmTasks, notifications, conversations, kpiAlerts, socialPosts] = await Promise.all([
           settle("approvals", getPendingApprovals(userId, [c]), lost),
           settle("automation approvals", listAutomationApprovals(userId, c.id, { status: "pending" }), lost),
           // A refused gate read is a REFUSAL, not an empty gate list, so it is reported as a lost
@@ -317,6 +339,16 @@ export async function getMyWorkQueue(
             }),
             lost,
           ),
+          // The Social Media pipeline's leg (SCP-1j). A failed read is a LOST source, named, and so is a source the server itself could not read
+          // (`partial`); a 403 (no social read tier) and a 404 (no Social Media module) are no leg at all, not a failure.
+          settle(
+            "Social pipeline",
+            getSocialNeedsYou(userId, c.id).then((r) => {
+              for (const s of r.partial) lost.push(`Social ${s}`);
+              return r.items;
+            }),
+            lost,
+          ),
         ]);
         const rows: QueueItem[] = [
           ...approvals.map((a) => fromApproval(a, decidable)),
@@ -327,6 +359,7 @@ export async function getMyWorkQueue(
           ...notifications.filter(isMentionEligible).map((n) => fromMention(n, c)),
           ...conversations.map((t) => fromConversation(t, c)),
           ...kpiAlerts.map((a) => fromKpiAlert(a, c)),
+          ...socialPosts.map((i) => fromSocialPipeline(i, c)),
         ];
         return { company: c, ok: true, rows, partialSources: lost };
       } catch {

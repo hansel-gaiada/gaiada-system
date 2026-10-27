@@ -34,9 +34,9 @@ describe("skins: switched on", () => {
   });
 
   it("Social is on, yet no pinned entry points at a page that does not exist: the unbuilt ones stay ticketed", () => {
-    // Settings is built (SCP-1c, `{dept}/settings`), so its pin lost its ticket; the rest wait for SCP-1j, SCP-1k and SCP-5d.
+    // Settings (SCP-1c, `{dept}/settings`) and Messages (SCP-1j, `{dept}/messages`) are built, so their pins lost their tickets; the rest wait for SCP-1k and SCP-5d.
     const ticketed = SKINS.social.pinned!.filter((p) => p.ticket).map((p) => p.key).sort();
-    expect(ticketed).toEqual(["dashboard", "messages", "profile"]);
+    expect(ticketed).toEqual(["dashboard", "profile"]);
   });
 });
 
@@ -92,7 +92,7 @@ describe("skins: the pinned menu", () => {
   it("resolves only to pages the person's model offers, in order, and never a planned one", () => {
     const soc = wsByKey(model(me([member()]), socialTree, { on: ["standard", "social"] }), "social-media");
     const pinned = pinnedFor(soc.skin, allRows(soc))!;
-    expect(pinned.map((p) => p.key)).toEqual(["home", "search", "notifications", "tasks", "create", "calendar", "reports", "saved", "assistant"]);
+    expect(pinned.map((p) => p.key)).toEqual(["home", "search", "messages", "notifications", "tasks", "create", "calendar", "reports", "saved", "assistant"]);
     const offered = new Set(allRows(soc).flatMap((r) => r.tabs.map((t) => t.href)));
     for (const p of pinned) if (p.kind === "link") expect(offered.has(p.href), p.key).toBe(true);
     expect(pinned.find((p) => p.key === "home")).toMatchObject({ kind: "link", label: "Home", href: "/departments/d-soc" });
@@ -103,13 +103,18 @@ describe("skins: the pinned menu", () => {
     return pinnedFor(soc.skin, allRows(soc))!.map((p) => p.key);
   };
 
-  it("keeps the Dashboard hidden while its page (SCP-5d) is not built; Settings (SCP-1c) is built and shows to the Social head only, never to an officer or an ancestor's head", () => {
+  it("keeps the Dashboard hidden while its page (SCP-5d) is not built; Messages (SCP-1j) opens the registry's `messages` row and its first tab is `{dept}/messages`; Settings (SCP-1c) is built and shows to the Social head only, never to an officer or an ancestor's head", () => {
     expect(SKINS.social.pinned!.find((p) => p.key === "dashboard")).toMatchObject({ kind: "row", row: "dashboard", ticket: "SCP-5d" });
     // Settings is built: its pin names no ticket and opens the registry's `settings` row (the four approvers' page, `canLeadSocial`).
     expect(SKINS.social.pinned!.find((p) => p.key === "settings")).toEqual({ kind: "row", key: "settings", row: "settings", label: "Settings", icon: "settings" });
     const officer = pinsOf(me([member()]));
     expect(officer).not.toContain("dashboard");
     expect(officer).not.toContain("settings");
+    // Messages is built: its pin names no ticket, every person offered the Social workspace gets it, and it opens the row's first tab, `{dept}/messages`.
+    expect(SKINS.social.pinned!.find((p) => p.key === "messages")).toEqual({ kind: "row", key: "messages", row: "messages", label: "Messages", icon: "messages" });
+    expect(officer).toContain("messages");
+    const soc = wsByKey(model(me([member()]), socialTree, { on: ["standard", "social"] }), "social-media");
+    expect(pinnedFor("social", allRows(soc))!.find((p) => p.key === "messages")).toMatchObject({ kind: "link", label: "Messages", href: "/departments/d-soc/messages", row: "messages" });
     expect(pinsOf(me([member(), lead("d-soc")]))).toEqual([...officer, "settings"]);
     expect(pinsOf(me([member(), lead("root")]))).toEqual(officer);
     expect(pinsOf(me([member(), lead("d-web")]))).toEqual(officer);
@@ -245,8 +250,8 @@ describe("skins: the phone (SCP-Ke)", () => {
     expect(phoneBarFor("social", socialPins()).map((p) => p.key)).toEqual(["home", "search", "create", "tasks"]);
   });
 
-  it("the top holds Notifications; Messages is absent while ticketed", () => {
-    expect(phoneTopFor("social", socialPins()).map((p) => p.key)).toEqual(["notifications"]);
+  it("the top holds Notifications and Messages (SCP-1j built its page), in the skin's order", () => {
+    expect(phoneTopFor("social", socialPins()).map((p) => p.key)).toEqual(["notifications", "messages"]);
   });
 
   it("the sheet's Menu section is every pinned link the bar and the top do not hold, in the menu's order", () => {

@@ -75,7 +75,7 @@ test.describe("the Social skin on a desktop (1280x800)", () => {
     // <html> gets it from a client effect once the shell has hydrated.
     await expect(page.locator("html")).toHaveAttribute("data-skin", "social");
     await expect(menu(page)).toBeVisible();
-    await expect.poll(() => pinNames(page)).toEqual(["Home", "Search", "Notifications", "Tasks", "Create", "Calendar", "Reports", "Saved", "AI Assistant", "More"]);
+    await expect.poll(() => pinNames(page)).toEqual(["Home", "Search", "Messages", "Notifications", "Tasks", "Create", "Calendar", "Reports", "Saved", "AI Assistant", "More"]);
     await expect(menu(page).getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
     // The phone's parts are not drawn on a desktop.
     await expect(bar(page)).toBeHidden();
@@ -259,11 +259,12 @@ test.describe("the Social skin on a phone (390x844)", () => {
     await expect(page.locator("html")).not.toHaveAttribute("data-nav", "open");
   });
 
-  test("Notifications and More are at the top, and the bar's Search and Create work", async ({ page, context }) => {
+  test("Notifications, Messages and More are at the top, and the bar's Search and Create work", async ({ page, context }) => {
     await signIn(page, context);
     const top = page.locator(".erp-top__phone");
     await expect(top).toBeVisible();
     await expect(top.getByRole("link", { name: /^Notifications/ })).toBeVisible();
+    await expect(top.getByRole("link", { name: "Messages" })).toHaveAttribute("href", /\/messages$/);
     await expect(top.getByRole("button", { name: "More" })).toBeVisible();
     const topBox = (await top.boundingBox())!;
     expect(topBox.y).toBeLessThan(80);

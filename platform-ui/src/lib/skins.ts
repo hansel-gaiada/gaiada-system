@@ -50,7 +50,7 @@ export interface Skin {
 const SOCIAL_PINNED: readonly PinnedItem[] = [
   { kind: "row", key: "home", row: "overview", tab: "overview", label: "Home", icon: "home" },
   { kind: "shell", key: "search", item: "search", label: "Search", icon: "search" },
-  { kind: "row", key: "messages", row: "messages", label: "Messages", icon: "messages", ticket: "SCP-1j" },
+  { kind: "row", key: "messages", row: "messages", label: "Messages", icon: "messages" },
   { kind: "shell", key: "notifications", item: "notifications", label: "Notifications", icon: "heart" },
   // The person's tasks (`/me/tasks`); "given by me" and "whole team" stay in Project Management, under More.
   { kind: "row", key: "tasks", row: "tasks", label: "Tasks", icon: "tasks" },

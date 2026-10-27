@@ -5,7 +5,7 @@ import { evaluateClientReviewState, type ClientReviewState, type ClientReviewSta
 import { validateBrandBook, type BrandBook } from "./socialBrandBook";
 import {
   DEMO_MEMBER_NAMES, PIPE_ENGAGEMENTS, allocStore, cyclesStore, demoAllocationRow, demoBrandAnswer, demoCycleHealth, demoCycleTable, demoDeadlineRange,
-  demoPipelineRead, demoRealDate, demoSettingsAnswer, demoWalkBack, isDemoSocialApprover, isPipelinePostId, pipelineEngagement, runDemoPipelineAction,
+  demoFeed, demoNeedsYou, demoPipelineRead, demoRealDate, demoWaiting, demoSettingsAnswer, demoWalkBack, isDemoSocialApprover, isPipelinePostId, pipelineEngagement, runDemoPipelineAction,
   type DemoBrandProfile, type DemoAllocation,
 } from "./demoSocialPipeline";
 // SMM-14 — DEMO_MODE fixtures for the Social Media department (calendar + composer, SMM-12).
@@ -1049,6 +1049,11 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
   }
   const cycleHealthM = tail.match(/^cycles\/([^/]+)\/health$/);
   if (cycleHealthM && m === "GET") return demoCycleHealth(cycleHealthM[1]);
+
+  // ── SCP-1d / SCP-1j: the feed, Messages and the pipeline's leg of Needs you (BFF §63.7) ─────────────────────────────────────────
+  if (tail === "feed" && m === "GET") return demoFeed(params, userId);
+  if (tail === "waiting" && m === "GET") return demoWaiting(userId);
+  if (tail === "needs-you" && m === "GET") return demoNeedsYou(p.match(/^\/api\/([^/]+)\//)![1], userId);
 
   // ── SCP-1o: the pipeline read (BFF §63.6.2) and the write hook ────────────────────────────────────────────────
   const pipeM = tail.match(/^posts\/([^/]+)\/pipeline$/);
