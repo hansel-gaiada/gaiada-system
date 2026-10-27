@@ -99,6 +99,11 @@ import { getPublisher } from "./publisher/registry";
 // `computeAccountBestTime` backs the manual "recompute now" affordance so a freshly-connected
 // account is not stuck showing a stale/absent cache for up to a full day.
 import { getCachedBestTime, computeAccountBestTime, applyBestTimeSuggestion } from "./best-time";
+// SCP-1a — the planning gate (`plan`, the four social approvers) and the brand book's rules (BFF §63.4, §63.12).
+import { authorizePlan } from "./pipeline/plan-authz";
+import {
+  hashtagSetsOf, mergeHashtagSets, mergeToneSummary, parseBrandBook, parseHashtagSets, parseToneSummary, requireObject, toneSummaryOf,
+} from "./pipeline/brand-book";
 
 const ENGAGEMENT_STATUSES = new Set(["draft", "active", "paused", "closed"]);
 const NETWORKS = new Set([
@@ -274,6 +279,11 @@ export class SocialController {
     if (!clientId || !name) refuse("missing_field");
     if (body.id && !UUID_RE.test(body.id)) refuse("invalid_id");
     await authorize(req.principal, { kind: "social_engagement", tenantId, module: "social" }, "create");
+    // SCP-1a (BFF §63.12): naming an officer other than the caller is a planning act, the four approvers' (403 `not_a_social_approver`).
+    // Naming yourself, or nobody, is today's behaviour.
+    if (body.ownerId !== undefined && body.ownerId !== null && body.ownerId !== req.principal.userId) {
+      await authorizePlan(req, tenantId);
+    }
 
     // Criterion 3 (idempotent writes). Agents and n8n retry at-least-once; a "create" that always
     // inserts turns one retried goal into two engagements for the same client. The caller-supplied
@@ -341,6 +351,11 @@ export class SocialController {
     @Body() body: { name?: string; status?: string; projectId?: string | null; ownerId?: string | null; startsOn?: string | null; endsOn?: string | null },
   ) {
     await authorize(req.principal, { kind: "social_engagement", id: engagementId, tenantId, module: "social" }, "update");
+    // SCP-1a (BFF §63.12): the officer is set by the allocation (`PATCH engagements/:engagementId/allocation`, `plan`) and nowhere else.
+    // Any `ownerId` in the body, even null or the caller's own id, is refused.
+    if (body && typeof body === "object" && "ownerId" in body && (body as { ownerId?: unknown }).ownerId !== undefined) {
+      throw new ConflictException({ message: "officer_set_by_allocation" });
+    }
     if (body?.status && !ENGAGEMENT_STATUSES.has(body.status)) {
       refuse("invalid_status");
     }
@@ -352,7 +367,7 @@ export class SocialController {
     const params: unknown[] = [];
     for (const [col, val] of [
       ["name", body?.name], ["status", body?.status], ["project_id", body?.projectId],
-      ["owner_id", body?.ownerId], ["starts_on", body?.startsOn], ["ends_on", body?.endsOn],
+      ["starts_on", body?.startsOn], ["ends_on", body?.endsOn],
     ] as const) {
       if (val !== undefined) { params.push(val); sets.push(`${col} = $${params.length}`); }
     }
@@ -495,52 +510,103 @@ export class SocialController {
       [tenantId],
       (c) => c.query(
         `SELECT id, client_id AS "clientId", tone, hashtag_strategy AS "hashtagStrategy",
-                knowledge_source_ids AS "knowledgeSourceIds", updated_at AS "updatedAt"
+                knowledge_source_ids AS "knowledgeSourceIds", updated_at AS "updatedAt",
+                content_pillars AS "contentPillars", must_have_notes AS "mustHaveNotes", brand_rules AS "brandRules",
+                channels, key_dates AS "keyDates", links
            FROM social_brand_profiles WHERE client_id = $1 AND deleted_at IS NULL`,
         [clientId],
       ),
       { modules: ["social"] },
     );
     if (!rows[0]) throw new NotFoundException("brand profile not found");
-    return rows[0];
+    // SCP-1a (BFF §63.4): the brand book. `toneSummary` and `hashtagSets` are keys inside `tone` and `hashtagStrategy`, which keep answering whole.
+    return {
+      ...rows[0],
+      toneSummary: toneSummaryOf(rows[0].tone),
+      hashtagSets: hashtagSetsOf(rows[0].hashtagStrategy),
+    };
   }
 
   @Patch("brand-profiles/:clientId")
   async upsertBrandProfile(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("clientId") clientId: string,
-    @Body() body: { tone?: Record<string, unknown>; hashtagStrategy?: Record<string, unknown>; knowledgeSourceIds?: string[] },
+    @Body() body: {
+      tone?: Record<string, unknown>; hashtagStrategy?: Record<string, unknown>; knowledgeSourceIds?: string[];
+      toneSummary?: string; contentPillars?: string[]; mustHaveNotes?: string[]; brandRules?: string[];
+      hashtagSets?: unknown; channels?: unknown; keyDates?: unknown; links?: unknown;
+    },
   ) {
     await authorize(req.principal, { kind: "social_engagement", tenantId, module: "social" }, "update");
-    if (!body || (body.tone === undefined && body.hashtagStrategy === undefined && body.knowledgeSourceIds === undefined)) {
+    const BOOK_KEYS = ["toneSummary", "contentPillars", "mustHaveNotes", "brandRules", "hashtagSets", "channels", "keyDates", "links"] as const;
+    const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+    if (b.tone === undefined && b.hashtagStrategy === undefined && b.knowledgeSourceIds === undefined && BOOK_KEYS.every((k) => b[k] === undefined)) {
       refuse("no_fields");
     }
+    // SCP-1a: validate everything BEFORE anything is written (400 `{field}`), after the decision above.
+    const book = parseBrandBook(b);
+    const wholeTone = b.tone === undefined ? undefined : requireObject(b.tone, "tone");
+    if (wholeTone && "summary" in wholeTone) parseToneSummary(wholeTone.summary, "tone");
+    const wholeStrategy = b.hashtagStrategy === undefined ? undefined : requireObject(b.hashtagStrategy, "hashtagStrategy");
+    if (wholeStrategy && "sets" in wholeStrategy) wholeStrategy.sets = parseHashtagSets(wholeStrategy.sets, "hashtagStrategy");
+
     // Idempotent by construction: 0105's UNIQUE (tenant_id, client_id) makes this an upsert, so a
     // retried call updates in place instead of creating a second profile for the same client.
     const id = newId();
     await withTenants(
       [tenantId],
-      (c) => c.query(
+      async (c) => {
+        // The two jsonb columns carry brand-book keys (`tone.summary`, `hashtag_strategy.sets`): merge into the stored object under a row
+        // lock, so a patch that names one key never erases its siblings and two writers do not lose each other's key.
+        let toneParam: string | null = null;
+        let strategyParam: string | null = null;
+        if (wholeTone !== undefined || book.toneSummary !== undefined || wholeStrategy !== undefined || book.hashtagSets !== undefined) {
+          const cur = (await c.query<{ tone: Record<string, unknown> | null; hashtag_strategy: Record<string, unknown> | null }>(
+            `SELECT tone, hashtag_strategy FROM social_brand_profiles WHERE tenant_id = $1 AND client_id = $2 FOR UPDATE`,
+            [tenantId, clientId],
+          )).rows[0];
+          if (wholeTone !== undefined || book.toneSummary !== undefined) {
+            toneParam = JSON.stringify(mergeToneSummary(cur?.tone ?? {}, wholeTone, book.toneSummary));
+          }
+          if (wholeStrategy !== undefined || book.hashtagSets !== undefined) {
+            strategyParam = JSON.stringify(mergeHashtagSets(cur?.hashtag_strategy ?? {}, wholeStrategy, book.hashtagSets));
+          }
+        }
+        const json = (v: unknown): string | null => (v === undefined ? null : JSON.stringify(v));
+        await c.query(
         // ⚠ The UPDATE arm coalesces against the PARAMETER, not against EXCLUDED. This had the bug
         // the other way round and social.test.ts caught it: the INSERT arm turns a missing field
         // into '{}' (the column is NOT NULL), so `EXCLUDED.tone` is never NULL on conflict, so
         // `COALESCE(EXCLUDED.tone, existing)` always picked the '{}' — and a partial patch that
         // named only `hashtagStrategy` silently ERASED the client's brand voice. Coalescing on
         // $4/$5/$6 asks the question that was actually meant: "did the caller send this field?"
-        `INSERT INTO social_brand_profiles (id, tenant_id, client_id, tone, hashtag_strategy, knowledge_source_ids, origin_site)
-         VALUES ($1,$2,$3,COALESCE($4::jsonb,'{}'::jsonb),COALESCE($5::jsonb,'{}'::jsonb),COALESCE($6::jsonb,'[]'::jsonb),$7)
+        `INSERT INTO social_brand_profiles
+           (id, tenant_id, client_id, tone, hashtag_strategy, knowledge_source_ids,
+            content_pillars, must_have_notes, brand_rules, channels, key_dates, links, origin_site)
+         VALUES ($1,$2,$3,COALESCE($4::jsonb,'{}'::jsonb),COALESCE($5::jsonb,'{}'::jsonb),COALESCE($6::jsonb,'[]'::jsonb),
+                 COALESCE($7::text[],'{}'::text[]),COALESCE($8::text[],'{}'::text[]),COALESCE($9::text[],'{}'::text[]),
+                 COALESCE($10::jsonb,'[]'::jsonb),COALESCE($11::jsonb,'[]'::jsonb),COALESCE($12::jsonb,'[]'::jsonb),$13)
          ON CONFLICT (tenant_id, client_id) DO UPDATE SET
            tone = COALESCE($4::jsonb, social_brand_profiles.tone),
            hashtag_strategy = COALESCE($5::jsonb, social_brand_profiles.hashtag_strategy),
            knowledge_source_ids = COALESCE($6::jsonb, social_brand_profiles.knowledge_source_ids),
+           content_pillars = COALESCE($7::text[], social_brand_profiles.content_pillars),
+           must_have_notes = COALESCE($8::text[], social_brand_profiles.must_have_notes),
+           brand_rules = COALESCE($9::text[], social_brand_profiles.brand_rules),
+           channels = COALESCE($10::jsonb, social_brand_profiles.channels),
+           key_dates = COALESCE($11::jsonb, social_brand_profiles.key_dates),
+           links = COALESCE($12::jsonb, social_brand_profiles.links),
            updated_at = now()`,
         [
           id, tenantId, clientId,
-          body.tone === undefined ? null : JSON.stringify(body.tone),
-          body.hashtagStrategy === undefined ? null : JSON.stringify(body.hashtagStrategy),
-          body.knowledgeSourceIds === undefined ? null : JSON.stringify(body.knowledgeSourceIds),
+          toneParam,
+          strategyParam,
+          b.knowledgeSourceIds === undefined ? null : JSON.stringify(b.knowledgeSourceIds),
+          book.contentPillars ?? null, book.mustHaveNotes ?? null, book.brandRules ?? null,
+          json(book.channels), json(book.keyDates), json(book.links),
           config.originSite,
         ],
-      ),
+        );
+      },
       { modules: ["social"] },
     );
     await writeActivity(tenantId, req.principal.userId, "updated", "social_brand_profile", clientId, {});
