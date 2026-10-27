@@ -1,5 +1,6 @@
 import { listSites, resolveAuthorNames } from "@/lib/webdeskContent";
 import { getEditorialCalendar } from "@/lib/webdeskCalendar";
+import { listQuarantine } from "@/lib/webdeskMediaReview";
 import { filtersFrom, queryFor, toWorkflowBoard } from "@/lib/webdeskCalendarModel";
 import { isReviewState } from "@/lib/webdeskEditorialModel";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -29,9 +30,12 @@ export default async function WebsiteWritersBoardPage({ params, searchParams }: 
 
   const filters = filtersFrom(sp);
   const state = sp.state && isReviewState(sp.state) ? sp.state : undefined;
-  const [cal, authors] = await Promise.all([
+  const [cal, authors, queue] = await Promise.all([
     getEditorialCalendar(c.userId, c.company, t.slug, s.siteId, queryFor(filters, c.userId)),
     resolveAuthorNames(c.userId, c.company),
+    // M5-W1q2: the link to the uploads desk is shown only where the BFF lets this caller READ its queue (Cerbos `review`, asked there); any refusal, a 403
+    // included, draws no link. A convenience, never a gate: the desk's own page and the BFF decide every action.
+    listQuarantine(c.userId, c.company, t.slug, s.siteId),
   ]);
   if (cal.kind !== "ok") return <CalendarRefusal result={cal} subject="the review board" retryHref={here} />;
 
@@ -47,6 +51,7 @@ export default async function WebsiteWritersBoardPage({ params, searchParams }: 
         filterAction={here}
         peopleHref={`${c.writersBase}/people/${siteBase}`}
         dashboardHref={`${c.writersBase}/dashboard/${siteBase}`}
+        uploadsHref={queue.kind === "ok" ? { href: `${c.writersBase}/uploads/${siteBase}`, waiting: { count: queue.data.assets.length, more: queue.data.page.hasMore } } : undefined}
         workflow={{ calendarHref: `${c.writersBase}/calendar/${siteBase}`, briefBase: `${c.writersBase}/briefs/${siteBase}`, locales: t.locales }}
       />
     </div>

@@ -4,6 +4,8 @@ import { listQuarantineAction, reviewUploadAction } from "@/lib/webdeskMediaRevi
 import { authorLabel, type WdResult } from "@/lib/webdeskContentModel";
 import { reviewRefusalCopy, uploadFacts, type QuarantineBody, type QuarantinedUpload, type ReviewDecision } from "@/lib/webdeskMediaReviewModel";
 import { formatDateTime } from "@/lib/format";
+import { isPreviewableMime, noPreviewCopy, PREVIEW_UNAVAILABLE_COPY, previewHref } from "@/lib/webdeskMediaPreview";
+import type { MediaAsset } from "@/lib/webdeskMediaModel";
 import "../editorial/editorial.css";
 
 // `writers/uploads/[tenant]/[site]` -- the contributor upload quarantine's review desk (M5-W1q, WSK-D84). A freelance writer's upload is held
@@ -13,6 +15,33 @@ import "../editorial/editorial.css";
 // said in words and the list is re-read, so the screen never claims a state the server does not hold.
 
 type Msg = { tone: "ok" | "bad" | "warn"; text: string };
+
+// M5-W1q2 (WSK-D84) -- what a reviewer sees of an upload BEFORE deciding. A raster image (png, jpeg, gif, webp, avif) is drawn as a small
+// thumbnail loaded from our own pass-through route (`/api/webdesk-media-preview/...`, which streams the platform's `review-preview` with the
+// reviewer's session and re-sets six safe headers); anything else (svg, html, pdf, video) is shown by its type only: "No preview for <mime>".
+// A thumbnail that fails to load (refused, too large, the service down) says "Preview unavailable". There is deliberately NO link on the image:
+// no download, no open-in-new-tab. The file is only ever a picture inside this row.
+const THUMB_STYLE = { display: "block", maxWidth: 160, maxHeight: 120, width: "auto", height: "auto", objectFit: "contain", border: "1px solid var(--line-soft)", borderRadius: 4 } as const;
+
+function UploadThumb({ scope, asset }: { scope: { tenantSlug: string; siteId: string }; asset: MediaAsset }) {
+  const [failed, setFailed] = useState(false);
+  if (!isPreviewableMime(asset.mime)) return <span className="wc-muted" data-testid="quarantine-nopreview">{noPreviewCopy(asset.mime)}</span>;
+  if (failed) return <span className="wc-muted" data-testid="quarantine-preview-failed">{PREVIEW_UNAVAILABLE_COPY}</span>;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- a same-origin pass-through of a stranger's bytes: next/image would re-encode and cache them
+    <img
+      src={previewHref(scope, asset.assetId)}
+      alt={asset.originalFilename ?? asset.title ?? "Uploaded image"}
+      loading="lazy"
+      decoding="async"
+      draggable={false}
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+      style={THUMB_STYLE}
+      data-testid="quarantine-thumb"
+    />
+  );
+}
 
 export function QuarantinePanel({
   scope, initial, people,
@@ -62,7 +91,7 @@ export function QuarantinePanel({
       )}
       <p className="wc-muted" data-testid="quarantine-note">
         These files were uploaded by freelance writers. They have passed the malware scan, but nobody can see them on the website until you accept them.
-        The file itself isn&apos;t shown here: check the title, type and who sent it, and reject anything you don&apos;t recognise.
+        A picture is shown as a small preview; any other kind of file is shown by its type only. Check what it is and who sent it, and reject anything you don&apos;t recognise.
       </p>
 
       {uploads.length === 0 ? (
@@ -80,7 +109,10 @@ export function QuarantinePanel({
                 const sender = u.asset.createdBy ? authorLabel(u.asset.createdBy, people) : "Unknown";
                 return (
                   <tr key={id} data-testid="quarantine-row">
-                    <td>{u.asset.title ?? u.asset.originalFilename ?? "Untitled"}{u.asset.title && u.asset.originalFilename ? <><br /><span className="wc-muted">{u.asset.originalFilename}</span></> : null}</td>
+                    <td>
+                      <div data-testid="quarantine-preview"><UploadThumb scope={scope} asset={u.asset} /></div>
+                      {u.asset.title ?? u.asset.originalFilename ?? "Untitled"}{u.asset.title && u.asset.originalFilename ? <><br /><span className="wc-muted">{u.asset.originalFilename}</span></> : null}
+                    </td>
                     <td>{uploadFacts(u.asset)}</td>
                     <td>{sender}</td>
                     <td>{formatDateTime(u.asset.createdAt)}</td>

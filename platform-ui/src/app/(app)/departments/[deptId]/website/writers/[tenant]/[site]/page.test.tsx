@@ -1,22 +1,27 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 
 // The Writers' room board page: the site (company wall), then the workflow board from the calendar read. A refusal, or a part the BFF could not
 // read, is a notice and never an empty board; withheld counts are words and never zeros.
+// M5-W1q2 added the link to the uploads desk: it is drawn ONLY where the BFF lets the caller read the review queue (its own Cerbos `review` answer), never from a
+// role name; a 403 or any other refusal of that read draws no link, and the board itself is unaffected either way.
 
 vi.mock("next/link", () => ({ default: ({ href, children, ...r }: { href: string; children: React.ReactNode }) => <a href={href} {...r}>{children}</a> }));
 vi.mock("@/lib/webdeskContent", () => ({ listSites: vi.fn(), resolveAuthorNames: vi.fn() }));
 vi.mock("@/lib/webdeskCalendar", () => ({ getEditorialCalendar: vi.fn() }));
+vi.mock("@/lib/webdeskMediaReview", () => ({ listQuarantine: vi.fn() }));
 vi.mock("@/components/webdesk/content/serverCtx", () => ({ requireWebsiteCtx: vi.fn() }));
 
 import { listSites, resolveAuthorNames } from "@/lib/webdeskContent";
 import { getEditorialCalendar } from "@/lib/webdeskCalendar";
+import { listQuarantine } from "@/lib/webdeskMediaReview";
 import { requireWebsiteCtx } from "@/components/webdesk/content/serverCtx";
 import Page from "./page";
 
 const sitesMock = vi.mocked(listSites);
 const namesMock = vi.mocked(resolveAuthorNames);
 const calMock = vi.mocked(getEditorialCalendar);
+const queueMock = vi.mocked(listQuarantine);
 const ctxMock = vi.mocked(requireWebsiteCtx);
 
 const sites = () => ({ kind: "ok" as const, data: { tenants: [{ slug: "gaiada", status: "active", defaultLocale: "en", locales: ["en", "id"], sites: [{ siteId: "site-1", name: "gaiada.com", kind: "static", environments: [] }] }] } });
@@ -36,11 +41,13 @@ const cal = (over: Record<string, unknown> = {}) => ({
 const mount = async (search: Record<string, string> = {}) => render(await Page({ params: Promise.resolve({ deptId: "dept-1", tenant: "gaiada", site: "site-1" }), searchParams: Promise.resolve(search) }));
 
 beforeEach(() => {
-  ctxMock.mockReset(); sitesMock.mockReset(); namesMock.mockReset(); calMock.mockReset();
+  ctxMock.mockReset(); sitesMock.mockReset(); namesMock.mockReset(); calMock.mockReset(); queueMock.mockReset();
   ctxMock.mockResolvedValue({ userId: "u", me: {}, company: "co-1", deptId: "dept-1", contentBase: "/departments/dept-1/website/content", writersBase: "/departments/dept-1/website/writers" } as never);
   sitesMock.mockResolvedValue(sites() as never);
   namesMock.mockResolvedValue({ u1: "Ayu" });
+  queueMock.mockResolvedValue({ kind: "forbidden", reason: "forbidden" } as never); // the default caller may not review: no link unless a test says otherwise
 });
+afterEach(cleanup);
 
 describe("Website -> Writers' room -> site", () => {
   it("asks for the writers tab context and reads the calendar with no window, forwarding the filters ('me' is the caller's own id)", async () => {
@@ -120,5 +127,61 @@ describe("Website -> Writers' room -> site", () => {
     sitesMock.mockResolvedValue({ kind: "forbidden", reason: "no" } as never);
     await mount();
     expect(calMock).not.toHaveBeenCalled();
+  });
+});
+
+const queue = (n: number, hasMore = false) => ({
+  kind: "ok" as const,
+  data: { assets: Array.from({ length: n }, (_, i) => ({ asset: { assetId: `a${i}` }, reviewState: "quarantined", allowedReview: true })), page: { cursor: null, hasMore, limit: 50 } },
+});
+const linkText = () => screen.getByTestId("uploads-link").textContent?.replace(/\s+/g, " ").trim();
+
+describe("Website -> Writers' room -> site: the link to the uploads desk (M5-W1q2)", () => {
+  it("a caller whose queue read succeeds sees the link, to this site's uploads desk, with the number held; the queue read is for THIS site", async () => {
+    calMock.mockResolvedValue(cal() as never);
+    queueMock.mockResolvedValue(queue(3) as never);
+    await mount();
+    expect(queueMock).toHaveBeenCalledWith("u", "co-1", "gaiada", "site-1");
+    expect(screen.getByTestId("uploads-link").getAttribute("href")).toBe("/departments/dept-1/website/writers/uploads/gaiada/site-1");
+    expect(linkText()).toBe("Uploads awaiting review (3)");
+  });
+
+  it("more than one page of uploads says so with a '+'; an empty queue is still a link (a real answer: the desk says nothing is waiting)", async () => {
+    calMock.mockResolvedValue(cal() as never);
+    queueMock.mockResolvedValue(queue(50, true) as never);
+    await mount();
+    expect(linkText()).toBe("Uploads awaiting review (50+)");
+    cleanup();
+    queueMock.mockResolvedValue(queue(0) as never);
+    await mount();
+    expect(linkText()).toBe("Uploads awaiting review (0)");
+  });
+
+  it("a caller the BFF refuses (403: may not review) gets NO link, and the board is still drawn", async () => {
+    calMock.mockResolvedValue(cal() as never);
+    queueMock.mockResolvedValue({ kind: "forbidden", reason: "forbidden" } as never);
+    await mount();
+    expect(screen.queryByTestId("uploads-link")).toBeNull();
+    expect(screen.getByTestId("writers-board")).toBeTruthy();
+    expect(screen.getByTestId("people-link")).toBeTruthy(); // the neighbouring links are unaffected
+  });
+
+  it("any other failure of the queue read (the service is down, drift, not found) also draws no link, and never breaks the board", async () => {
+    calMock.mockResolvedValue(cal() as never);
+    for (const r of [{ kind: "unavailable", code: "editorial_unavailable", reason: "circuit_open" }, { kind: "unavailable", code: "contract_drift", reason: "x" }, { kind: "not_found", slug: "site-not-found" }]) {
+      queueMock.mockResolvedValue(r as never);
+      await mount();
+      expect(screen.queryByTestId("uploads-link")).toBeNull();
+      expect(screen.getByTestId("writers-board")).toBeTruthy();
+      cleanup();
+    }
+  });
+
+  it("a board that could not be read draws no board and so no link, whatever the queue says", async () => {
+    calMock.mockResolvedValue({ kind: "forbidden", reason: "no" } as never);
+    queueMock.mockResolvedValue(queue(2) as never);
+    await mount();
+    expect(screen.queryByTestId("writers-board")).toBeNull();
+    expect(screen.queryByTestId("uploads-link")).toBeNull();
   });
 });
