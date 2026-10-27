@@ -116,7 +116,7 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
   const workspace = workspaceFor(activeCompany(me, tenant)?.vertical, dept.name);
   const socialHome = workspace.key === "social-media"
     && effectiveSkin(workspace.skin, skinsOn(process.env.SHELL_SKIN_PREVIEW), (await getPrefs()).skin) === "social";
-  // The feed's reads are its own (five, in parallel, each with its own failure state), behind their own boundary.
+  // The feed's reads are its own (`SocialHome.tsx`: all in parallel, each with its own failure state), behind their own boundary.
   if (socialHome) {
     return <Suspense fallback={<HomeBodyFallback label="Social Media home" />}><SocialHome userId={userId} tenantId={tenant} deptId={deptId} noQueue={holdsNoSocialQueue(me, tenant)} /></Suspense>;
   }
