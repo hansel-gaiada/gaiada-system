@@ -77,6 +77,19 @@ type Config struct {
 	DRMode        bool
 	DRBurstCap    int
 	DRDurationMin int
+	// AIP-00a-1: the agent listener (plan docs/plans/2026-10-27-ai-plan.md §6.1).
+	// AgentListen (GATEWAY_AGENT_LISTEN, e.g. "0.0.0.0:3012") is the address of the SECOND listener
+	// that serves only POST /v1/chat/completions and GET /v1/models. Empty = the listener is off.
+	// AgentTokens (GATEWAY_AGENT_TOKENS) is "name:sha256hex[,name:sha256hex...]": token HASHES
+	// only. Empty or malformed = every agent call is 401 (fail closed).
+	// AgentReservePct (GATEWAY_AGENT_RESERVE_PCT, default 25): agents are refused once the global
+	// cap's remaining share is at or below this percentage; the ERP's own traffic never is.
+	// AgentDailyCallCap (GATEWAY_AGENT_DAILY_CALL_CAP): each agent's own daily cap; 0 or unset =
+	// the per-tenant cap (GATEWAY_PER_TENANT_DAILY_CALL_CAP or its console override).
+	AgentListen       string
+	AgentTokens       string
+	AgentReservePct   int
+	AgentDailyCallCap int
 }
 
 func envBool(key string, fallback bool) bool {
@@ -165,5 +178,9 @@ func Load() Config {
 		DRMode:                 envBool("DR_MODE", false),
 		DRBurstCap:             envInt("DR_BURST_CAP", 2000),
 		DRDurationMin:          envInt("DR_DURATION_MIN", 1440),
+		AgentListen:            strings.TrimSpace(envOr("GATEWAY_AGENT_LISTEN", "")),
+		AgentTokens:            envOr("GATEWAY_AGENT_TOKENS", ""),
+		AgentReservePct:        envInt("GATEWAY_AGENT_RESERVE_PCT", 25),
+		AgentDailyCallCap:      envInt("GATEWAY_AGENT_DAILY_CALL_CAP", 0),
 	}
 }

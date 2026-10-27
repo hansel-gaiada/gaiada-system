@@ -12,7 +12,7 @@ import (
 
 type EgressAudit struct {
 	TS         int64   `json:"ts"`
-	Capability string  `json:"capability"` // llm | media | embed
+	Capability string  `json:"capability"` // llm | media | embed | chat (AIP-00a-1, the agent listener)
 	Provider   *string `json:"provider"`   // nil when blocked before egress
 	OK         bool    `json:"ok"`
 	// auth | budget | dlp | timeout | rate_limit | provider_error. The last three are the B5
@@ -30,6 +30,16 @@ type EgressAudit struct {
 	// the exact cost.
 	ForcedBoundaries int   `json:"forcedBoundaries,omitempty"`
 	LatencyMs        int64 `json:"latencyMs"`
+	// Agent (AIP-00a-1) is the registered agent's name on a `chat` row (the name half of its
+	// GATEWAY_AGENT_TOKENS entry); empty, and omitted, on every other route and on a chat 401.
+	// Model is the upstream model that served a chat call. PromptTokens/CompletionTokens are the
+	// provider-reported usage, omitted when the provider reported none (never estimated). All four
+	// are omitempty, so rows from the existing routes stay byte-identical. A row NEVER holds message
+	// text, tool arguments or tool results.
+	Agent            string `json:"agent,omitempty"`
+	Model            string `json:"model,omitempty"`
+	PromptTokens     int    `json:"promptTokens,omitempty"`
+	CompletionTokens int    `json:"completionTokens,omitempty"`
 }
 
 func WriteAudit(path string, e EgressAudit) error {

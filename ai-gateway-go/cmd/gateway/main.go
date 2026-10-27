@@ -91,6 +91,28 @@ func loadOrCreateCA(certPath, keyPath string) (certPEM, keyPEM []byte, err error
 	return cert, key, nil
 }
 
+// startAgentListener serves the agent mux (POST /v1/chat/completions, GET /v1/models, nothing
+// else) on GATEWAY_AGENT_LISTEN, in its own goroutine. Plain HTTP by design: the plan (§6.1 item 4)
+// publishes it on host loopback only and carries it over WireGuard, which encrypts the hop. No
+// WriteTimeout, because a streamed answer may legitimately run long; the per-chunk idle timeout in
+// the handler bounds a silent upstream instead. A listener that cannot bind stops the process, so a
+// misconfigured address is loud, not a gateway that silently lacks its agent route.
+func startAgentListener(cfg config.Config, tokens server.AgentTokens, mux http.Handler) {
+	srv := &http.Server{
+		Addr:              cfg.AgentListen,
+		Handler:           otelhttp.NewHandler(mux, "gateway-agent"),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    64 << 10,
+	}
+	log.Printf("agent listener on %s: %d agent(s) %v, reserve %d%%, per-agent cap %d/day (0 = per-tenant cap)",
+		cfg.AgentListen, tokens.Len(), tokens.Names(), cfg.AgentReservePct, cfg.AgentDailyCallCap)
+	go func() {
+		log.Fatal(srv.ListenAndServe())
+	}()
+}
+
 func main() {
 	cfg := config.Load()
 
@@ -161,8 +183,19 @@ func main() {
 		BuildProviders: func(names []string) []providers.Provider { return buildProviderList(names, cfg, client) },
 	}
 
+	// AIP-00a-1: registered agents' token hashes. All-or-nothing: a malformed value leaves the set
+	// empty, so every agent call is 401 (fail closed). Names are logged, hashes never.
+	agentTokens, agentErr := server.ParseAgentTokens(cfg.AgentTokens)
+	if agentErr != nil {
+		log.Printf("agent listener: GATEWAY_AGENT_TOKENS rejected (%v); every agent call will be 401", agentErr)
+	}
+	mainMux, agentMux := server.NewServers(cfg, chains, b, classifier, inst, admin, agentTokens)
+	if cfg.AgentListen != "" {
+		startAgentListener(cfg, agentTokens, agentMux)
+	}
+
 	// Wrap the router so every inbound request extracts traceparent and gets a server span.
-	var handler http.Handler = otelhttp.NewHandler(server.NewServer(cfg, chains, b, classifier, inst, admin), "gateway")
+	var handler http.Handler = otelhttp.NewHandler(mainMux, "gateway")
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	log.Printf("Gaiada AI Gateway (Go) on %s — llm: %v, media: %v, auth: %v, cap: %d/day, tls: %s, topology: %s, classifier: %v",
 		addr, cfg.LLMChain, cfg.MediaChain, cfg.GatewayToken != "", cfg.DailyCallCap, cfg.TLSMode, cfg.TopologyMode, cfg.DLPClassifierEnabled)

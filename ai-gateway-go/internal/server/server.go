@@ -9,6 +9,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -344,7 +345,19 @@ func providerConfigReport(cfg config.Config) []providerCfg {
 	}
 }
 
+// NewServer builds the MAIN listener's mux only. It is NewServers without the agent mux, kept so
+// every existing caller and test is unchanged.
 func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *dlp.Classifier, inst *metrics.Instruments, admin *Admin) *http.ServeMux {
+	mux, _ := NewServers(cfg, chains, b, classifier, inst, admin, AgentTokens{})
+	return mux
+}
+
+// NewServers builds both muxes over ONE set of shared state (budget, chains, runtime tuning,
+// classifier toggle, audit): the main mux, and the agent mux for the second listener
+// (AIP-00a-1, GATEWAY_AGENT_LISTEN). The agent routes are registered ONLY on the agent mux, and
+// the main mux never consults agent tokens, so neither listener can serve the other's routes.
+// An empty token set is a closed agent mux: every agent call is 401.
+func NewServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *dlp.Classifier, inst *metrics.Instruments, admin *Admin, agents AgentTokens) (*http.ServeMux, *http.ServeMux) {
 	mux := http.NewServeMux()
 
 	// Boot values seed the runtime tuning; a persisted override has already been folded into cfg by
@@ -1114,5 +1127,14 @@ func NewServer(cfg config.Config, chains Chains, b *budget.Budget, classifier *d
 		auditOK = true
 	})
 
-	return mux
+	// The shared GATEWAY_TOKEN must never be an agent token: an entry hashing to it is dropped
+	// (agentOf also refuses the token outright on every agent call).
+	if kept, dropped := agents.without(cfg.GatewayToken); dropped {
+		log.Printf("agent listener: a GATEWAY_AGENT_TOKENS entry hashes to GATEWAY_TOKEN and was dropped; the shared token never opens the agent routes")
+		agents = kept
+	}
+	agentMux := newAgentMux(agentDeps{
+		cfg: cfg, chains: chains, b: b, rt: rt, activeClassifier: activeClassifier, emit: emit, tokens: agents,
+	})
+	return mux, agentMux
 }

@@ -413,3 +413,44 @@ func TestRunWithHintEmptyHintIsIdenticalToRun(t *testing.T) {
 		t.Fatalf("expected the first (unreordered) provider to serve, got %q", providerHint)
 	}
 }
+
+// AIP-00a-1: RunFiltered never attempts (or charges) a provider the filter rejects.
+func TestRunFilteredSkipsRejectedProvidersWithoutTouchingTheirBreakers(t *testing.T) {
+	a := &stubProvider{name: "a", avail: true, failCount: 100}
+	b := &stubProvider{name: "b", avail: true}
+	c := NewChain([]providers.Provider{a, b}, 1, 60_000, time.Now)
+	out, name, _, err := RunFiltered(c, context.Background(), func(p providers.Provider) bool { return p.Name() == "b" },
+		func(p providers.Provider) (string, error) { return p.Complete(context.Background(), "x") })
+	if err != nil || name != "b" || out != "ok from b" {
+		t.Fatalf("want b to serve, got %q %q %v", out, name, err)
+	}
+	if a.calls != 0 || c.State()["a"] != "ok" {
+		t.Fatalf("a filtered-out provider is never attempted: calls=%d state=%q", a.calls, c.State()["a"])
+	}
+	if got := c.Filtered(func(p providers.Provider) bool { return p.Name() == "a" }); len(got) != 1 || got[0].Name() != "a" {
+		t.Fatalf("Filtered returns the matching providers, got %v", got)
+	}
+}
+
+func TestCallerErrorStopsTheChainWithoutFailoverOrBreakerCharge(t *testing.T) {
+	ce := &providers.CallerError{Status: 400, Taxonomy: "invalid_request", Message: "bad"}
+	a := &stubProvider{name: "a", avail: true, failCount: 100, err: ce}
+	b := &stubProvider{name: "b", avail: true}
+	c := NewChain([]providers.Provider{a, b}, 1, 60_000, time.Now)
+	_, name, tax, err := Run(c, context.Background(), func(p providers.Provider) (string, error) {
+		return p.Complete(context.Background(), "x")
+	})
+	if err == nil || name != "" || tax != "invalid_request" {
+		t.Fatalf("want the caller error with its taxonomy, got name=%q tax=%q err=%v", name, tax, err)
+	}
+	var got *providers.CallerError
+	if !errors.As(err, &got) {
+		t.Fatalf("the caller error is returned as-is, got %T", err)
+	}
+	if b.calls != 0 {
+		t.Fatal("a caller fault must not fail over")
+	}
+	if c.State()["a"] != "ok" {
+		t.Fatalf("a caller fault must not charge the breaker (threshold 1), state=%q", c.State()["a"])
+	}
+}

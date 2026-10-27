@@ -110,6 +110,48 @@ func (b *Budget) Take(tenant string, now time.Time) (bool, string) {
 	return true, ""
 }
 
+// TakeAgent (AIP-00a-1) spends one call for a registered agent, atomically under the same lock as
+// Take, against three limits, checked in this order:
+//
+//  1. "global": the effective global cap is spent (the same rule Take applies).
+//  2. "reserve": the remaining share of the effective global cap is at or below reservePct
+//     percent. That last share is kept for the ERP's own traffic, which goes through Take and is
+//     never refused by this rule. reservePct is clamped to 0..100; 0 leaves only rule 1.
+//  3. "tenant": the scope's own count has reached scopeCap (<= 0 means the per-tenant cap, so the
+//     console's per-tenant setting also bounds agents unless a separate agent cap is set).
+//
+// scope is the caller's budget key ("agent:<name>"); it shares the per-tenant counter map, so an
+// agent's spend shows in Breakdown().Tenants next to the tenants'.
+func (b *Budget) TakeAgent(scope string, scopeCap, reservePct int, now time.Time) (bool, string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.rollDay(now)
+	eff := b.effectiveCap(now)
+	if b.globalCount >= eff {
+		return false, "global"
+	}
+	if reservePct < 0 {
+		reservePct = 0
+	}
+	if reservePct > 100 {
+		reservePct = 100
+	}
+	remaining := eff - b.globalCount
+	if remaining*100 <= reservePct*eff {
+		return false, "reserve"
+	}
+	if scopeCap <= 0 {
+		scopeCap = b.perTenantCap
+	}
+	used := b.tenantCounts[scope]
+	if used >= scopeCap {
+		return false, "tenant"
+	}
+	b.tenantCounts[scope] = used + 1
+	b.globalCount++
+	return true, ""
+}
+
 func (b *Budget) State(now time.Time) map[string]any {
 	used, cap, tenants, perTenantCap := b.Snapshot(now)
 	return map[string]any{"used": used, "cap": cap, "tenants": tenants, "perTenantCap": perTenantCap}
