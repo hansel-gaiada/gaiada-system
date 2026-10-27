@@ -312,6 +312,10 @@ export interface PmTask {
   contributors?: Contributor[];
   /** PV3-07: always false on `GET pm/tasks` and `GET pm/tasks/:id` (the portal lists no tasks). Absent on other task reads. */
   clientVisible?: boolean;
+  /** SCP-1n (BFF §63.13): the row this task points at, both set or both null. `social_post` is set through the PM routes; `social_cycle` marks a
+   *  cycle's content-month task, which the social pipeline owns. Absent on older backends. */
+  linkedType?: "social_post" | "social_cycle" | null;
+  linkedId?: string | null;
 }
 
 // Boundary guarantee for the fields above that every render site reads WITHOUT a null-check

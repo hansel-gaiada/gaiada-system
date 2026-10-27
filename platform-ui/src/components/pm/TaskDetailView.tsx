@@ -4,6 +4,8 @@ import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
+import { activeCompany } from "@/lib/companyContext";
+import { readTaskSocialLink } from "@/lib/pmTaskLink-data";
 import { getTask, getProject, listFiles, getFieldDefs } from "@/lib/entities";
 import { can } from "@/lib/rbac";
 import { readFigmaLinks } from "@/lib/figma-data";
@@ -114,6 +116,9 @@ export async function TaskDetailView({
     // DW-6i (§42.6) — a ReadResult, token already dropped. Gates "Attach from Google Drive"; a refused or failed read just hides the button.
     readDriveStatus(userId, tenant),
   ]);
+  // SCP-1n (BFF §63.13): a task that points at a social post, or is a cycle's content-month task, links to the post page or the client's page. A link
+  // that cannot be resolved (no Social Media department, no read of the cycle) is simply not offered.
+  const socialLink = await readTaskSocialLink(userId, tenant, activeCompany(me, tenant)?.vertical, task);
   // A manager is told where to connect Figma only when it is known not to be (one extra read, then, for the department).
   const figmaDept = can(me, "company.manage", tenant) && figma.kind === "ok" && !figma.data.figmaConnected
     ? await getProject(userId, tenant, task.projectId).then((p) => p.department_id, () => null)
@@ -329,6 +334,7 @@ export async function TaskDetailView({
               {canEdit && <SetToMeButton label={PM_TERMS.setToMe} act={reassignResponsible.bind(null, task.id, userId)} />}
             </Prop>
             <Prop label="Priority">{task.priority}</Prop>
+            {socialLink && <Prop label="Linked to"><Link href={socialLink.href} className="pm-detail__link">{socialLink.label}</Link></Prop>}
             <Prop label="Start" muted={!task.startDate}>{task.startDate ?? "Not set"}</Prop>
             {/* P4-F3: start–due range, the overdue/almost-late/in-time glyph (one definition,
                 `taskUrgency` — never a bespoke date comparison here), and a one-click "Today". */}
