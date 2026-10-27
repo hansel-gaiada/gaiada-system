@@ -64,7 +64,7 @@ const SOCIAL_PINNED: readonly PinnedItem[] = [
   { kind: "row", key: "assistant", row: "assistant", label: "AI Assistant" },
   // A future Social page ({D}/dashboard, for the four Social approvers).
   { kind: "row", key: "dashboard", row: "dashboard", label: "Dashboard", icon: "dashboard", ticket: "SCP-5d" },
-  { kind: "row", key: "settings", row: "settings", label: "Settings", icon: "settings", ticket: "SCP-1c" },
+  { kind: "row", key: "settings", row: "settings", label: "Settings", icon: "settings" },
 ];
 
 export const SKINS: Readonly<Record<SkinKey, Skin>> = {

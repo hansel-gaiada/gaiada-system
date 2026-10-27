@@ -54,7 +54,7 @@ unfalsifiable after.
 | pm | `pm` | 16 |
 | reports | `checkins` · `reports` | 24 |
 | search | `search` | 30 |
-| social | `social` | 15 |
+| social | `social` | 16 |
 | webdev | `webdev` | 38 |
 
 ## Capabilities

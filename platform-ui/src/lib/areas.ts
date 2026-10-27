@@ -123,6 +123,7 @@ const ADMIN: AreaRule[] = [
 // A department's own pages carry its id from the URL; owned routes are generated from the registry.
 const WORKSPACE: AreaRule[] = [
   rule("/departments/[deptId]", "workspace", true),
+  rule("/departments/[deptId]/settings", "workspace", false, "SCP-1c: the Social Media Settings page (the HoD's buffer and deadline table); its own entry so the page sits in one area, the department's own"),
   ...WORKSPACES.flatMap((ws) =>
     ws.ownedRoutes.map((path): AreaRule => ({ path, subtree: true, kind: "workspace", slug: ws.key, why: `owned by the ${ws.label} workspace` })),
   ),

@@ -102,12 +102,16 @@ describe("skins: the pinned menu", () => {
     return pinnedFor(soc.skin, allRows(soc))!.map((p) => p.key);
   };
 
-  it("keeps the Dashboard hidden while its page (SCP-5d) is not built, so an officer and a head see the same pins", () => {
+  it("keeps the Dashboard hidden while its page (SCP-5d) is not built; Settings (SCP-1c) is built and shows to the Social head only, never to an officer or an ancestor's head", () => {
     expect(SKINS.social.pinned!.find((p) => p.key === "dashboard")).toMatchObject({ kind: "row", row: "dashboard", ticket: "SCP-5d" });
+    // Settings is built: its pin names no ticket and opens the registry's `settings` row (the four approvers' page, `canLeadSocial`).
+    expect(SKINS.social.pinned!.find((p) => p.key === "settings")).toEqual({ kind: "row", key: "settings", row: "settings", label: "Settings", icon: "settings" });
     const officer = pinsOf(me([member()]));
     expect(officer).not.toContain("dashboard");
-    expect(pinsOf(me([member(), lead("d-soc")]))).toEqual(officer);
+    expect(officer).not.toContain("settings");
+    expect(pinsOf(me([member(), lead("d-soc")]))).toEqual([...officer, "settings"]);
     expect(pinsOf(me([member(), lead("root")]))).toEqual(officer);
+    expect(pinsOf(me([member(), lead("d-web")]))).toEqual(officer);
   });
 
   it("opens the shared Reports row's first tab until a Social reports tab is in the model, then that tab", () => {

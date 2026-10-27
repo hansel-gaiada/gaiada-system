@@ -74,10 +74,11 @@ describe("the Social menu: which entries a person sees", () => {
     expect(entries()).toEqual(["Home", "Search", "Notifications", "Tasks", "Create", "Calendar", "Reports", "Saved", "AI Assistant", "More"]);
   });
 
-  it("a head sees the same entries until the Dashboard, Messages, Profile and Settings pages are built (they stay hidden while ticketed)", () => {
+  it("a head also sees Settings (SCP-1c); the Dashboard, Messages and Profile pages stay hidden while ticketed", () => {
     renderAt(socialModel(head), "/departments/d-soc");
-    expect(entries()).toEqual(["Home", "Search", "Notifications", "Tasks", "Create", "Calendar", "Reports", "Saved", "AI Assistant", "More"]);
+    expect(entries()).toEqual(["Home", "Search", "Notifications", "Tasks", "Create", "Calendar", "Reports", "Saved", "AI Assistant", "Settings", "More"]);
     expect(within(menu()).queryByRole("link", { name: "Dashboard" })).toBeNull();
+    expect(link("Settings")).toHaveAttribute("href", "/departments/d-soc/settings");
   });
 
   it("the entries open the pages the person's rows already offer, and replace the groups", () => {
