@@ -53,10 +53,12 @@ interface ReviewOwnerRow {
   variant_id: string;
   engagement_id: string;
   live_args_sha256: string | null;
+  pipeline_status: string | null;
 }
 
 type DecideOutcome =
   | { kind: "not_found" }
+  | { kind: "decide_per_post" }
   | { kind: "already_decided"; status: string; variantId: string }
   | { kind: "ok"; variantId: string; engagementId: string };
 
@@ -85,6 +87,7 @@ export class SocialClientReviewPortalController {
            JOIN social_posts p         ON p.id = v.post_id    AND p.tenant_id = v.tenant_id
            JOIN social_accounts a      ON a.id = v.account_id AND a.tenant_id = v.tenant_id
           WHERE ${postReviewInPortalScope("r", { clients: 1 })} ${statusClause}
+            AND p.pipeline_status IS NULL -- SCP-1b: pipeline posts are decided per post, not listed here
           ORDER BY r.requested_at DESC LIMIT 200`,
         params,
       );
@@ -115,7 +118,7 @@ export class SocialClientReviewPortalController {
       // outside the caller's client set reads as "not found", never "not yours" (0075's rule 1, the
       // same existence-oracle avoidance every portal read in this estate applies).
       const owner = await c.query<ReviewOwnerRow>(
-        `SELECT r.variant_id, p.engagement_id, v.args_sha256 AS live_args_sha256
+        `SELECT r.variant_id, p.engagement_id, v.args_sha256 AS live_args_sha256, p.pipeline_status
            FROM social_post_client_reviews r
            JOIN social_post_variants v ON v.id = r.variant_id AND v.tenant_id = r.tenant_id
            JOIN social_posts p         ON p.id = v.post_id    AND p.tenant_id = v.tenant_id
@@ -123,6 +126,9 @@ export class SocialClientReviewPortalController {
         [id, scope.clientIds],
       );
       if (!owner.rows[0]) return { kind: "not_found" };
+      // SCP-1b: a pipeline post is decided per post (never per variant). Only reached once ownership
+      // is proven above, so a review the caller cannot see still reads 404; nothing is written yet.
+      if (owner.rows[0].pipeline_status !== null) return { kind: "decide_per_post" };
       const { variant_id: variantId, engagement_id: engagementId, live_args_sha256: liveHash } = owner.rows[0];
 
       // The guarded UPDATE re-checks BOTH the ownership predicate and `status = 'pending'` — the
@@ -152,6 +158,7 @@ export class SocialClientReviewPortalController {
     });
 
     if (decided.kind === "not_found") throw new NotFoundException("review not found");
+    if (decided.kind === "decide_per_post") throw new ConflictException({ message: "decide_per_post" });
     if (decided.kind === "already_decided") {
       // IDEMPOTENT: a retry that lands after the row already moved. Same decision on file -> report
       // the current state, no side effect re-run. A DIFFERENT decision is a genuine conflict — the

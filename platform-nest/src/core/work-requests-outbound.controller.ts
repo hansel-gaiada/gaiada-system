@@ -43,7 +43,6 @@ import { isUuidShaped } from "./dept-resolution";
 import { lockChangeRequest } from "./webdev-cr-lock";
 import { storage } from "./storage";
 import { dispositionHeader } from "./files.controller";
-import { createRequestWorkItemInTx } from "./work-requests.controller";
 import { REQUEST_ROUTE_KEYS, isRequestRouteKey, kindForRouteKey, resolveGroupClient } from "./request-routes";
 import type { Resource } from "../rbac/cerbos";
 import * as svc from "./work-requests.service";
@@ -207,7 +206,7 @@ export class WorkRequestsOutboundController {
           const cl = await c.query<{ name: string }>(`SELECT name FROM clients WHERE id = $1 AND tenant_id = $2`, [client.clientId, P]);
           const clientName = cl.rows[0]?.name ?? route.requester_name;
           const intake = await svc.ensureClientIntakeProject(c, P, nodeId, toName, client.clientId, clientName, config.originSite);
-          const w = await createRequestWorkItemInTx(c, {
+          const w = await svc.createRequestWorkItemInTx(c, {
             tenantId: P, userId, kind, toUnitId: nodeId, toName, projectId: intake.projectId, clientId: client.clientId,
             title: input.title, brief: input.brief, neededBy: input.neededBy, form, requesterName: requester.name,
             fromUnitName: requester.unitName ? `${route.requester_name} · ${requester.unitName}` : route.requester_name,

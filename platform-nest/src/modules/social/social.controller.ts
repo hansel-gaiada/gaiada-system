@@ -99,6 +99,22 @@ import { getPublisher } from "./publisher/registry";
 // `computeAccountBestTime` backs the manual "recompute now" affordance so a freshly-connected
 // account is not stuck showing a stale/absent cache for up to a full day.
 import { getCachedBestTime, computeAccountBestTime, applyBestTimeSuggestion } from "./best-time";
+// SCP-1b — the phase people see for a pipeline post; the rule lives in the machine, never restated here.
+import { phaseOf } from "./pipeline/machine";
+// SCP-1b — systemRules change_after_client: a Composer edit of an approved or scheduled pipeline post goes back to the client.
+import { changeAfterClientInTx, recordChangeAfterClient } from "./pipeline/pipeline.service";
+
+/** SCP-1b: lock the variant's post (when it has one) before the variant, the order the pipeline takes them in, so a
+ *  Composer edit and a stage action on the same post never deadlock. Answers the post id, or null. */
+async function lockPostOfVariant(c: PoolClient, tenantId: string, variantId: string): Promise<string | null> {
+  const v = await c.query<{ post_id: string }>(
+    `SELECT post_id::text AS post_id FROM social_post_variants WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+    [tenantId, variantId],
+  );
+  const postId = v.rows[0]?.post_id ?? null;
+  if (postId) await c.query(`SELECT 1 FROM social_posts WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, [tenantId, postId]);
+  return postId;
+}
 
 const ENGAGEMENT_STATUSES = new Set(["draft", "active", "paused", "closed"]);
 const NETWORKS = new Set([
@@ -147,6 +163,15 @@ function resolveEstimatedCostOrRefuse(network: Network, shape: VariantShape): nu
   const estimate = estimateCostUsd(network, shape, resolveXPricing());
   if (!estimate.ok) refuse(estimate.reason);
   return estimate.costUsd;
+}
+
+/** SCP-1b: swap the four selected change columns for the additive `phase` (null for a Composer post).
+ *  `pipelineStatus` stays on the row as selected. The rule is the machine's `phaseOf`. */
+function withPhase<T extends { pipelineStatus: string | null; changeBy: string | null; changeKind: string | null; returnTo: string | null }>(
+  row: T,
+): Omit<T, "changeBy" | "changeKind" | "returnTo"> & { phase: string | null } {
+  const { changeBy, changeKind, returnTo, ...rest } = row;
+  return { ...rest, phase: phaseOf({ pipelineStatus: rest.pipelineStatus, changeBy, changeKind, returnTo } as Parameters<typeof phaseOf>[0]) };
 }
 
 type ToolScope = Record<string, Record<string, unknown>>;
@@ -757,6 +782,8 @@ export class SocialController {
         `SELECT p.id, p.engagement_id AS "engagementId", p.campaign_id AS "campaignId", p.title,
                 p.brief, p.source, p.status, p.scheduled_at AS "scheduledAt",
                 p.created_by AS "createdBy", p.created_at AS "createdAt",
+                p.pipeline_status AS "pipelineStatus", p.change_by AS "changeBy",
+                p.change_kind AS "changeKind", p.return_to AS "returnTo",
                 COALESCE(v.variants, '[]'::json) AS variants
            FROM social_posts p
            LEFT JOIN LATERAL (
@@ -774,7 +801,7 @@ export class SocialController {
       ),
       { modules: ["social"] },
     );
-    return rows;
+    return rows.map(withPhase);
   }
 
   @Post("posts")
@@ -817,7 +844,9 @@ export class SocialController {
       (c) => c.query(
         `SELECT p.id, p.engagement_id AS "engagementId", p.campaign_id AS "campaignId", p.title, p.brief,
                 p.source, p.status, p.scheduled_at AS "scheduledAt", p.custom_fields AS "customFields",
-                p.created_by AS "createdBy", p.created_at AS "createdAt", p.updated_at AS "updatedAt"
+                p.created_by AS "createdBy", p.created_at AS "createdAt", p.updated_at AS "updatedAt",
+                p.pipeline_status AS "pipelineStatus", p.change_by AS "changeBy",
+                p.change_kind AS "changeKind", p.return_to AS "returnTo"
            FROM social_posts p WHERE p.id = $1 AND p.deleted_at IS NULL`,
         [postId],
       ),
@@ -839,7 +868,7 @@ export class SocialController {
       ),
       { modules: ["social"] },
     );
-    return { ...rows[0], variants: variants.rows };
+    return { ...withPhase(rows[0]), variants: variants.rows };
   }
 
   @Patch("posts/:postId")
@@ -848,6 +877,7 @@ export class SocialController {
     @Body() body: { title?: string; brief?: string; campaignId?: string | null; scheduledAt?: string | null; status?: string },
   ) {
     await authorize(req.principal, { kind: "social_post", id: postId, tenantId, module: "social" }, "update");
+    await this.refuseIfPipelinePost(tenantId, { postId });
     if (body?.status && !POST_STATUSES.has(body.status)) refuse("invalid_status");
     const sets: string[] = [];
     const params: unknown[] = [];
@@ -872,6 +902,7 @@ export class SocialController {
   @Delete("posts/:postId")
   async deletePost(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("postId") postId: string) {
     await authorize(req.principal, { kind: "social_post", id: postId, tenantId, module: "social" }, "delete");
+    await this.refuseIfPipelinePost(tenantId, { postId });
     // A post with anything public under it is not deletable here: taking a live post down is
     // `delete_published`, a separately-permissioned outbound action (SMM-09/10), not a soft-delete
     // of our own row. Deleting the row would orphan something the world can still see.
@@ -913,6 +944,7 @@ export class SocialController {
     if (!body?.accountId) refuse("missing_field");
     if (body.id && !UUID_RE.test(body.id)) refuse("invalid_id");
     await authorize(req.principal, { kind: "social_post", id: postId, tenantId, module: "social" }, "update");
+    await this.refuseIfPipelinePost(tenantId, { postId });
     const account = await this.loadAccount(tenantId, body.accountId);
     const id = body.id ?? newId();
     const draft = {
@@ -964,6 +996,8 @@ export class SocialController {
     const result = await withTenants(
       [tenantId],
       async (c) => {
+        // SCP-1b: the post's lock before the variant's, the order the pipeline's action route takes them in.
+        const postId = await lockPostOfVariant(c, tenantId, variantId);
         const { rows } = await c.query<{
           id: string; account_id: string; body: string; first_comment: string | null;
           media: unknown; settings: Record<string, unknown>; scheduled_at: Date | null;
@@ -1012,12 +1046,16 @@ export class SocialController {
           [next.body, next.firstComment, JSON.stringify(next.media), JSON.stringify(next.settings),
            next.scheduledAt, argsSha256, variantId],
         );
-        return { kind: "ok" as const, accountId: row.account_id, next, argsSha256, wasApproved };
+        // SCP-1b, systemRules change_after_client (BFF §63.3.5): an edit of an approved or scheduled pipeline post's
+        // variant moved what the client approved, so the post goes back to the client, in this same transaction.
+        const sentBack = postId ? await changeAfterClientInTx(c, tenantId, postId, req.principal.userId) : null;
+        return { kind: "ok" as const, accountId: row.account_id, next, argsSha256, wasApproved, sentBack };
       },
       { modules: ["social"] },
     );
     if (result.kind === "not_found") throw new NotFoundException("post variant not found");
     if (result.kind === "refuse") refuse(result.reason);
+    if (result.sentBack) await recordChangeAfterClient(tenantId, req.principal.userId, result.sentBack, variantId);
 
     // Re-validate against the account's live rules OUTSIDE the write transaction, then store the
     // verdict. Split deliberately: validation reads the connector registry, and holding the row
@@ -1055,6 +1093,7 @@ export class SocialController {
   @Delete("variants/:variantId")
   async deleteVariant(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string) {
     await authorize(req.principal, { kind: "social_post", id: variantId, tenantId, module: "social" }, "delete");
+    await this.refuseIfPipelinePost(tenantId, { variantId });
     const result = await withTenants(
       [tenantId],
       async (c) => {
@@ -1350,6 +1389,8 @@ export class SocialController {
     const result = await withTenants(
       [tenantId],
       async (c) => {
+        // SCP-1b: the post's lock before the variant's (the pipeline's lock order).
+        const postId = await lockPostOfVariant(c, tenantId, variantId);
         const { rows } = await c.query<{
           id: string; account_id: string; body: string; first_comment: string | null; media: unknown;
           settings: Record<string, unknown>; scheduled_at: Date | null; status: string; approval_id: string | null; native_import: boolean;
@@ -1390,13 +1431,16 @@ export class SocialController {
             WHERE id = $3`,
           [JSON.stringify(nextMedia), argsSha256, variantId],
         );
+        // SCP-1b, systemRules change_after_client: a media attach after the client approved sends the post back.
+        const sentBack = postId ? await changeAfterClientInTx(c, tenantId, postId, req.principal.userId) : null;
         return {
           kind: "ok" as const, accountId: row.account_id, media: nextMedia, argsSha256, wasApproved,
-          body: row.body, firstComment: row.first_comment, settings: row.settings, scheduledAt: row.scheduled_at,
+          body: row.body, firstComment: row.first_comment, settings: row.settings, scheduledAt: row.scheduled_at, sentBack,
         };
       },
       { modules: ["social"] },
     );
+    if (result.kind === "ok" && result.sentBack) await recordChangeAfterClient(tenantId, req.principal.userId, result.sentBack, variantId);
     if (result.kind === "not_found") throw new NotFoundException("post variant not found");
     if (result.kind === "refuse") refuse(result.reason);
 
@@ -1598,6 +1642,7 @@ export class SocialController {
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
   ) {
     await authorize(req.principal, { kind: "social_post", id: variantId, tenantId, module: "social" }, "publish");
+    await this.refuseIfPipelinePost(tenantId, { variantId });
     if (!req.principal.userId) throw new BadRequestException("an authenticated user is required");
     const requestedBy = req.principal.userId;
 
@@ -1732,6 +1777,7 @@ export class SocialController {
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
   ) {
     await authorize(req.principal, { kind: "social_client_review", id: variantId, tenantId, module: "social" }, "request");
+    await this.refuseIfPipelinePost(tenantId, { variantId });
     const result = await withTenants(
       [tenantId],
       async (c) => {
@@ -1763,7 +1809,10 @@ export class SocialController {
            VALUES ($1, $2, $3, $4, 'pending', now(), now(), $5)
            ON CONFLICT (variant_id) DO UPDATE SET
              status = 'pending', comment = NULL, reviewed_args_sha256 = NULL,
-             decided_by = NULL, decided_at = NULL, requested_at = now(), updated_at = now()
+             decided_by = NULL, decided_at = NULL, requested_at = now(), updated_at = now(),
+             -- SCP-1b (BFF §63.1): a re-request resets the six decision columns the pipeline added too, or a stale
+             -- change_kind on a pending row would trip their CHECK.
+             change_kind = NULL, anchor = NULL, recorded_by = NULL, channel = NULL, decision_id = NULL, undo_until = NULL
            RETURNING id`,
           [id, tenantId, variantId, clientId, config.originSite],
         );
@@ -1816,6 +1865,7 @@ export class SocialController {
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
   ) {
     await authorize(req.principal, { kind: "social_client_review", id: variantId, tenantId, module: "social" }, "withdraw");
+    await this.refuseIfPipelinePost(tenantId, { variantId });
     const result = await withTenants(
       [tenantId],
       async (c) => {
@@ -2747,6 +2797,30 @@ export class SocialController {
       quotaProbe: config.social.publisher.quotaProbeTool ? "live" : "unavailable",
       orgs: rows,
     };
+  }
+
+  /** SCP-1b: a pipeline post (`pipeline_status` NOT NULL) has its variants and client reviews written
+   *  only by the stage machine, so the Composer routes that would change them answer 409
+   *  `pipeline_post`. Call AFTER authorize(). A missing or deleted row falls through untouched, so
+   *  each route keeps its own 404 path. `{ postId }` names the post, `{ variantId }` its variant. */
+  private async refuseIfPipelinePost(
+    tenantId: string, ref: { postId: string } | { variantId: string },
+  ): Promise<void> {
+    const byPost = "postId" in ref;
+    const { rows } = await withTenants(
+      [tenantId],
+      (c) => c.query<{ pipeline_status: string | null }>(
+        byPost
+          ? `SELECT p.pipeline_status FROM social_posts p WHERE p.id = $1 AND p.deleted_at IS NULL`
+          : `SELECT p.pipeline_status
+               FROM social_post_variants v
+               JOIN social_posts p ON p.id = v.post_id AND p.tenant_id = v.tenant_id
+              WHERE v.id = $1 AND v.deleted_at IS NULL`,
+        [byPost ? ref.postId : ref.variantId],
+      ),
+      { modules: ["social"] },
+    );
+    if (rows[0]?.pipeline_status != null) throw new ConflictException({ message: "pipeline_post" });
   }
 
   /** Load an account's network + live quota, refusing anything outside this tenant. Shared by every

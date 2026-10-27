@@ -100,9 +100,12 @@ describe.skipIf(!TEST_URL)("IAM Phase 2 (P2-03) — permissions.ui_grantable + p
     // PV5-02 (2026-10-12): 25 -> 26. `finance.config.set_bank_details` is held false on purpose for the same
     // reason as countersign: it is reached only by an inline Cerbos GRANT rule (owner / finance_manager) and the
     // platform_admin wildcard, and the key must never ride a UI-built bundle. Deliberate pin update.
-    it("exactly 26 rows are ui_grantable=false (15 relationship + 9 portal.* + core.contract.countersign + finance.config.set_bank_details)", async () => {
+    // SCP-1b (2026-10-26, PERMISSION-CONTRACT §53.11): 26 -> 32. portal.approve_spend (the 10th portal.* key) and the five
+    // approver-only social keys (social.post.approve, social.engagement.plan, social.engagement.budget, and social.report.approve
+    // and .deliver, flipped true -> false), so no custom role or position can carry a social approver's authority.
+    it("exactly 32 rows are ui_grantable=false (15 relationship + 10 portal.* + core.contract.countersign + finance.config.set_bank_details + the 5 social approver keys)", async () => {
       const { rows } = await withGlobal((c) => c.query<{ n: string }>(`SELECT count(*)::text AS n FROM permissions WHERE ui_grantable = false`));
-      expect(Number(rows[0].n)).toBe(26);
+      expect(Number(rows[0].n)).toBe(32);
     });
   });
 

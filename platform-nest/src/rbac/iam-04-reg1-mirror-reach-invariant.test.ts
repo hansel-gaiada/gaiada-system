@@ -601,6 +601,11 @@ const IAM_04_REG1_PRE_EXISTING_OUT_OF_SCOPE_BASELINE: Record<string, string[]> =
   "social_post.update": ["social_manager", "social_staff"],
   "social_post.delete": ["social_manager"],
   "social_post.import_native": ["social_manager", "social_staff"],
+  // SCP-1b (2026-10-26, PERMISSION-CONTRACT §53.7, §53.10): the new `perm_social_report_read` mirror, flagged against the two
+  // module tiers exactly as social_engagement/social_post's mirrors above are. CONFIRMED FALSE by the same handler-evidence
+  // method: every `social_report` call site (social-reports.controller.ts, six of them) sends `module: "social"`
+  // (pipeline-authz.ts socialReportResource), so the module gate never excludes social_manager/social_staff in practice.
+  "social_report.read": ["social_manager", "social_staff"],
 };
 
 describe("IAM-04-REG1 · permission-arm MIRROR-REACH invariant (static, re-derived every run)", () => {

@@ -15,6 +15,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
 import bundles from "./role-permission-bundles.json";
+import { OWNER_EXTENSION } from "../../scripts/generate-role-bundles.mjs";
 
 async function keysFor(role: string): Promise<string[]> {
   const { rows } = await adminPool().query<{ key: string }>(
@@ -49,22 +50,25 @@ describe.skipIf(!TEST_URL)("IAM-14 · the owner role", () => {
     expect(Number(rows[0].n)).toBe(1);
   });
 
-  it("🔴 the DB bundle matches company_admin EXACTLY — the envelope cannot be short or long", async () => {
+  // SCP-1b (2026-10-26, PERMISSION-CONTRACT §53.11, owner ruling SCP-Q19): owner == company_admin + OWNER_EXTENSION. The five
+  // approver-only social keys are the owner's and NOT company_admin's; everywhere else the envelope is unchanged (D-8).
+  it("🔴 the DB bundle is company_admin's EXACTLY plus OWNER_EXTENSION — the envelope cannot be short or long", async () => {
     const owner = await keysFor("owner");
     const admin = await keysFor("company_admin");
     expect(owner.length, "owner has no bundle at all — migration did not run").toBeGreaterThan(0);
     expect(
       owner,
-      "owner's envelope diverged from company_admin's. It is defined AS company_admin's (D-8: " +
-        "everything business + role authoring, no platform controls) precisely so it cannot drift — " +
-        "if this fails, either the migration's INSERT..SELECT changed or someone hand-edited rows.",
-    ).toEqual(admin);
+      "owner's envelope diverged from company_admin's + OWNER_EXTENSION. It is defined AS company_admin's (D-8: " +
+        "everything business + role authoring, no platform controls) plus the five social approver keys (SCP-Q19), precisely " +
+        "so it cannot drift — if this fails, either a migration's INSERT..SELECT changed or someone hand-edited rows.",
+    ).toEqual([...new Set([...admin, ...OWNER_EXTENSION])].sort());
+    for (const k of OWNER_EXTENSION) expect(admin, `company_admin must not hold ${k}`).not.toContain(k);
   });
 
   it("the JSON artifact agrees with the database — two expressions of one rule", async () => {
-    // The generator derives owner from company_admin too. If these disagree, one of them was
+    // The generator derives owner from company_admin + OWNER_EXTENSION too. If these disagree, one of them was
     // hand-edited, and for this role a hand-edit is exactly what must not survive review.
-    expect(bundles.roles.owner).toEqual(bundles.roles.company_admin);
+    expect(bundles.roles.owner).toEqual([...new Set([...bundles.roles.company_admin, ...OWNER_EXTENSION])].sort());
     expect(await keysFor("owner")).toEqual([...bundles.roles.owner].sort());
   });
 

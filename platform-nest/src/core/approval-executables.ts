@@ -193,11 +193,7 @@ export interface ExecutableApprovalEntry {
    * walls, for every high-impact automation/agent row, whether or not the entry declares an `approverCheck`. An entry
    * never needs to restate "not the filer".
    */
-  approverCheck?(
-    client: PoolClient,
-    toolArgs: Record<string, unknown>,
-    approver: ApprovalApprover,
-  ): Promise<PreconditionVerdict>;
+  approverCheck?: ApproverCheck;
 
   /**
    * PGL-05 — the tool's impact tier, declared ONLY for a tool the PLATFORM does not define (a hub-local dispatcher tool:
@@ -208,6 +204,28 @@ export interface ExecutableApprovalEntry {
    * resolves to a server-side tier one way or the other.
    */
   impact?: "low" | "medium" | "high";
+}
+
+/**
+ * An entry's approver rule (see `ExecutableApprovalEntry.approverCheck`): a function, optionally carrying two markers.
+ *
+ * SCP-1b (PERMISSION-CONTRACT §53.12, owner ruling SCP-Q21) adds `replacesDecide`. Absent (every entry before SCP), the check
+ * ADDS to the generic decide right: the decider must first pass `automation_approval · decide` (company_admin,
+ * platform_admin), then this. With `replacesDecide: true`, for every row `replacesDecideFor(client, toolArgs)` answers true
+ * for (absent = every row), the check IS the decide right: the decide surface skips the generic decide authorize for that
+ * row and authorizes the decider by this check alone, for an approval AND for a rejection (a rejection is a decision on the
+ * same object). For a row it answers false for, nothing changes. The executor wall never re-checked the generic decide
+ * right, so there it is this check alone already.
+ *
+ * Never weakens PGL-05 (§52.1): the generic self-approval rule runs before this check on BOTH walls, so the filer of a
+ * high-impact row never approves it, whoever they are.
+ */
+export interface ApproverCheck {
+  (client: PoolClient, toolArgs: Record<string, unknown>, approver: ApprovalApprover): Promise<PreconditionVerdict>;
+  replacesDecide?: true;
+  /** Which rows the replacement applies to. A read only (no writes, no network), on the decide surface's tenant client with
+   *  the entry's `preconditionModules` in scope. A throw fails closed (decide answers 500 and decides nothing). */
+  replacesDecideFor?(client: PoolClient, toolArgs: Record<string, unknown>): Promise<boolean>;
 }
 
 /** Who approved (or is approving) a D14 row. `actForUserId` is set when the decide call itself arrived
@@ -1339,6 +1357,89 @@ async function socialPublishPrecondition(
   return { ok: false, reason: verdict.reason };
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// SCP-1b — the publish decision on a PIPELINE post (PERMISSION-CONTRACT §53.12; SCP-Q19 with PV-D46, SCP-Q21).
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// A pipeline post (`social_posts.pipeline_status IS NOT NULL`) is a client's post that the four social approvers own: the
+// HoD and GM seats, the owner, the superadmin (§53.4). Its publish approval is therefore decided by one of them, never by a
+// company admin who merely holds the generic decide right, and never by the post's author or its client's officer (the
+// maker/checker DENY on `social_post · approve`). The decider must pass `social_post · approve` on THAT post, with its real
+// attributes (`pipeline-authz.ts`), exactly as the stage routes ask it. Otherwise 403 `social_approver_required` and the
+// row stays pending.
+//
+// SCP-Q21: for these rows the check REPLACES the generic decide right (`replacesDecide`), so the HoD, the GM and the owner
+// decide without company_admin. Composer posts (`pipeline_status IS NULL`) are untouched: `replacesDecideFor` answers false,
+// the check answers ok, and §52.3's generic decide right is all there is, as before.
+//
+// Ordering (PGL-05, §52.1): the generic self-approval rule runs first on both walls, so the filer gets `self_approval`.
+// A decide call that acts for someone must pass for BOTH humans (`authorize()`'s intersection), like PGL-06's countersign.
+// Fails closed: an approver who no longer assembles is refused. A Cerbos outage throws (decide 500, executor
+// `precondition_error`).
+
+/** SCP-1b: the typed reason a pipeline post's publish approval is refused with when the decider is not one of the four. */
+export const SOCIAL_APPROVER_REQUIRED = "social_approver_required";
+
+const VARIANT_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The post a publish approval's variant belongs to, read under the caller's tenant client: null when the variant is gone. */
+async function publishVariantPost(
+  client: PoolClient,
+  toolArgs: Record<string, unknown>,
+): Promise<{ tenantId: string; postId: string; pipeline: boolean } | null> {
+  const v = toolArgs?.variantId;
+  const variantId = typeof v === "string" && VARIANT_UUID_RE.test(v) ? v : null;
+  if (!variantId) return null;
+  await declareSocialModuleScope(client);
+  const { rows } = await client.query<{ tenant_id: string; post_id: string; pipeline_status: string | null }>(
+    `SELECT v.tenant_id, v.post_id, p.pipeline_status
+       FROM social_post_variants v
+       JOIN social_posts p ON p.id = v.post_id AND p.tenant_id = v.tenant_id
+      WHERE v.id = $1`,
+    [variantId],
+  );
+  const r = rows[0];
+  if (!r) return null;
+  return { tenantId: r.tenant_id, postId: r.post_id, pipeline: r.pipeline_status !== null };
+}
+
+/** `replacesDecideFor`: only a pipeline post's publish approval. A missing variant keeps the generic decide right (the
+ *  precondition refuses such a row at execution anyway, so nothing can publish through it). */
+async function isPipelinePublish(client: PoolClient, toolArgs: Record<string, unknown>): Promise<boolean> {
+  return (await publishVariantPost(client, toolArgs))?.pipeline === true;
+}
+
+async function socialPublishApproverCheckFn(
+  client: PoolClient,
+  toolArgs: Record<string, unknown>,
+  approver: ApprovalApprover,
+): Promise<PreconditionVerdict> {
+  const target = await publishVariantPost(client, toolArgs);
+  if (!target || !target.pipeline) return { ok: true }; // a Composer post: no approver rule (§52.3 alone)
+  // Lazy: pipeline-authz.ts sits in the social module and reads the org tree and the PM task; keeping it out of this
+  // file's static import graph keeps the registry's load order what it was.
+  const { loadSocialPostAuthz, socialPostResource } = await import("../modules/social/pipeline-authz");
+  const facts = await loadSocialPostAuthz(client, target.tenantId, target.postId);
+  if (!facts) return { ok: false, reason: SOCIAL_APPROVER_REQUIRED };
+  const resource = socialPostResource(target.tenantId, facts);
+  const assurance: Assurance = approver.assurance ?? "linked";
+  const humans = [approver.userId];
+  if (approver.actForUserId && approver.actForUserId !== approver.userId) humans.push(approver.actForUserId);
+  for (const userId of humans) {
+    const principal = await assemblePrincipal(userId, assurance);
+    if (!principal) return { ok: false, reason: SOCIAL_APPROVER_REQUIRED };
+    const decision = await check(principal, resource, "approve");
+    if (!decision.allow) return { ok: false, reason: SOCIAL_APPROVER_REQUIRED };
+  }
+  return { ok: true };
+}
+
+/** The approverCheck both publish tools declare (exported for the registry tests). */
+export const socialPublishApproverCheck: ApproverCheck = Object.assign(socialPublishApproverCheckFn, {
+  replacesDecide: true as const,
+  replacesDecideFor: isPipelinePublish,
+});
+
 /**
  * Registers `social.publishPost` AND the `social.publishPostMetered` bar. Exported for the same
  * reason the other three bootstraps are: a test file that calls `resetExecutableApprovals()` and
@@ -1359,6 +1460,8 @@ export function registerSocialExecutableApprovals(): void {
     lockKey: socialPublishLockKey,
     precondition: socialPublishPrecondition,
     neverAutoRetry: true,
+    // SCP-1b (§53.12): a pipeline post's publish approval is decided by the four social approvers only.
+    approverCheck: socialPublishApproverCheck,
   });
 }
 
@@ -1646,6 +1749,9 @@ export function registerSocialMeteredExecutableApprovalIfEnabled(): void {
     lockKey: socialMeteredPublishLockKey,
     precondition: socialMeteredPublishPrecondition,
     neverAutoRetry: true,
+    // SCP-1b (§53.12): the same approver rule as the free tool. While the tool stays BARRED (the default) it has no entry,
+    // so no decision on its rows ever executes; the generic decide right still gates them.
+    approverCheck: socialPublishApproverCheck,
   });
 }
 

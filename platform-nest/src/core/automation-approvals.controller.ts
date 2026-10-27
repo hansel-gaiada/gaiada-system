@@ -14,7 +14,7 @@ import { check } from "../rbac/cerbos";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { getExecutable } from "./approval-executables";
-import { EXECUTING_STALE_MS, executeApprovedAutomationWrite, isExecutionWedged, runApproverCheck, toolArgsOf } from "./approval-execute";
+import { EXECUTING_STALE_MS, approverCheckReplacesDecide, executeApprovedAutomationWrite, isExecutionWedged, runApproverCheck, toolArgsOf } from "./approval-execute";
 import { computeArgsSha256 } from "./hub-client";
 import { fileAutomationApproval } from "./approval-filing";
 // M5-G5b: a tool whose args are personal data (agency_privacy.*) declares how its args are reduced before they are
@@ -382,20 +382,33 @@ export class AutomationApprovalsController {
       : isLeave
         ? "decide_leave"
         : "decide";
-    await authorize(
-      req.principal,
-      {
-        kind: "automation_approval",
-        id,
-        tenantId,
-        module,
-        subKind,
-        // Only ever set for an override. Everywhere else it stays undefined -> "" -> the DENY's
-        // `has() && != ""` guard cannot fire, so no existing approval's behaviour moves.
-        creatorId: isOverride ? (existing.rows[0].requested_by ?? "") : undefined,
-      },
-      decideAction,
-    );
+    // ── SCP-1b (PERMISSION-CONTRACT §53.12, SCP-Q21): an entry whose approverCheck REPLACES the generic decide right ────────
+    // For a row its `replacesDecideFor` claims (today: a PIPELINE post's `social.publishPost` approval), passing the entry's
+    // own approverCheck (`social_post · approve` on the post) IS the decide right: the HoD, the GM and the owner decide
+    // without company_admin, and a company_admin who is not one of the four is refused. So the generic decide authorize below
+    // is skipped for that row, and the approverCheck further down runs for BOTH decisions (a rejection is a decision on the
+    // client's post too). Only automation/agent rows can be registry rows, exactly as the executable lookup below. A read,
+    // before any write; every other row (Composer posts included) is byte-for-byte unchanged.
+    const registryEntry = rowOrigin === "automation" || rowOrigin === "agent" ? getExecutable(rowToolName) : undefined;
+    const replacesDecide = registryEntry
+      ? await withTenants([tenantId], (c) => approverCheckReplacesDecide(c, registryEntry, toolArgsOf(existing.rows[0].tool_args)))
+      : false;
+    if (!replacesDecide) {
+      await authorize(
+        req.principal,
+        {
+          kind: "automation_approval",
+          id,
+          tenantId,
+          module,
+          subKind,
+          // Only ever set for an override. Everywhere else it stays undefined -> "" -> the DENY's
+          // `has() && != ""` guard cannot fire, so no existing approval's behaviour moves.
+          creatorId: isOverride ? (existing.rows[0].requested_by ?? "") : undefined,
+        },
+        decideAction,
+      );
+    }
 
     // ── VLT-3: a credential reveal may NEVER be self-granted (plan §6 OQ-2.6.c) ───────────────────
     // Filing only requires `update`-tier reach on the connection (self-owner, or manager+); the
@@ -528,12 +541,15 @@ export class AutomationApprovalsController {
     // re-checks the stored `decided_by` as a second wall. Approve only: rejecting executes nothing.
     // Runs after authorize(), so a caller who may not decide at all still gets the plain 403.
     // A principal with no user id cannot be told apart from the excluded human, so it is refused.
-    if (executable?.approverCheck) {
+    // SCP-1b: a row whose check replaces the generic decide right (above) runs it for a REJECTION too, since nothing else
+    // authorized this decider. Still after the self-approval rule, which (approve only) runs first.
+    const approverEntry = executable ?? (replacesDecide ? registryEntry : undefined);
+    if (approverEntry?.approverCheck) {
       const approverId = req.principal.userId;
       const verdict = !approverId
         ? { ok: false as const, reason: "approver_unknown" }
         : await withTenants([tenantId], (c) =>
-          runApproverCheck(c, executable, toolArgsOf(existing.rows[0].tool_args), {
+          runApproverCheck(c, approverEntry, toolArgsOf(existing.rows[0].tool_args), {
             userId: approverId,
             ...(req.principal.actFor?.userId ? { actForUserId: req.principal.actFor.userId } : {}),
             assurance: req.principal.assurance,
@@ -541,7 +557,7 @@ export class AutomationApprovalsController {
         );
       if (!verdict.ok) {
         throw new ForbiddenException({
-          message: `${verdict.reason}: you may not approve this request`,
+          message: `${verdict.reason}: you may not ${decision === "approved" ? "approve" : "decide"} this request`,
           reason: verdict.reason,
         });
       }

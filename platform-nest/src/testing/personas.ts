@@ -29,7 +29,11 @@ const site = () => config.originSite;
 export type PersonaKey =
   | "superadmin" | "company_admin" | "manager" | "org_unit_lead" | "member" | "viewer"
   | "hr_staff" | "hr_manager" | "it_admin" | "search_staff" | "search_manager"
-  | "agency_approver" | "client_contact";
+  | "agency_approver" | "client_contact"
+  // SCP-1b (plan §11.2, PERMISSION-CONTRACT §53.9): the Social Media pipeline's two scope-only roles. OPT-IN: not part of
+  // ALL_PERSONA_KEYS, so every existing default seed is byte-identical; a pipeline suite names them in its `which` list. The
+  // social approver is a SEAT, not a role: see social-pipeline-fixtures.ts (grantSocialSeat).
+  | "social_copywriter" | "social_designer";
 
 interface PersonaDef {
   role: string;
@@ -59,9 +63,18 @@ const PERSONA_DEFS: Record<Exclude<PersonaKey, "client_contact">, PersonaDef> = 
   search_staff: { role: "search_staff", scope: "company" },
   search_manager: { role: "search_manager", scope: "company" },
   agency_approver: { role: "agency_approver", scope: "company", extraRole: "member" },
+  // SCP-1b: company-scope grants, each with `member` too (every pipeline actor is a member of the company).
+  social_copywriter: { role: "social_copywriter", scope: "company", extraRole: "member" },
+  social_designer: { role: "social_designer", scope: "company", extraRole: "member" },
 };
 
-export const ALL_PERSONA_KEYS: PersonaKey[] = [...(Object.keys(PERSONA_DEFS) as PersonaKey[]), "client_contact"];
+/** SCP-1b: personas a suite must ask for by name (see the PersonaKey note). */
+const OPT_IN_PERSONAS: ReadonlySet<PersonaKey> = new Set<PersonaKey>(["social_copywriter", "social_designer"]);
+
+export const ALL_PERSONA_KEYS: PersonaKey[] = [
+  ...(Object.keys(PERSONA_DEFS) as PersonaKey[]).filter((k) => !OPT_IN_PERSONAS.has(k)),
+  "client_contact",
+];
 
 /** The org-unit node id every persona tenant's `org_unit_lead` is placed AND granted at — a bare
  *  0029-convention free-form node id (no `company_org_structure` blob needed: `org_unit_memberships

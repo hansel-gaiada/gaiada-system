@@ -14,6 +14,7 @@
 // item and is never copied here.
 import type { PoolClient } from "pg";
 import { newId, withTenants } from "../db";
+import { config } from "../config";
 import { loadOrgStructure, type OrgNode } from "../admin/org-structure.service";
 import { emitEvent } from "../events/outbox.service";
 import { isUuidShaped, todayIso } from "./dept-resolution";
@@ -22,6 +23,7 @@ import { loadUnitAncestors } from "./org-unit-closure";
 import { loadSeatHoldersByNode } from "../modules/reports/person-scope";
 import { scrubText } from "./scrub";
 import { notifyBestEffort } from "./client-notify";
+import { createPmTaskInTx, normalizePmTaskInput } from "../modules/pm/pm.controller";
 
 // ───────────────────────────────────────────── vocabulary ─────────────────────────────────────────────
 
@@ -572,6 +574,129 @@ export async function loadAuthFacts(c: PoolClient, tenantId: string, requestId: 
  *  is told. Runs inside `withTenants([tenantId])`. */
 export async function loadUnitHeads(c: PoolClient, tenantId: string, unitId: string): Promise<string[]> {
   return (await loadSeatHoldersByNode(c, tenantId, [unitId])).get(unitId) ?? [];
+}
+
+/** §32.7 `request.received`, AFTER the commit: tells the receiving department's heads. Best-effort: a failure here never fails
+ *  the write, and with no head nobody is told (the board still shows the request). The one notifier for every way a request
+ *  is created: `POST requests` and the social pipeline's client-month request both call it. */
+export async function notifyRequestReceived(
+  tenantId: string, actorId: string, requestId: string, toUnitId: string, toName: string, title: string,
+): Promise<void> {
+  try {
+    const heads = await withTenants([tenantId], (c) => loadUnitHeads(c, tenantId, toUnitId));
+    if (!heads.length) return;
+    await notifyBestEffort(tenantId, actorId, heads, "request.received", {
+      title: `New request for ${toName}: ${title}`,
+      href: `/departments/${toUnitId}/requests`, entityType: "work_request", entityId: requestId, severity: "info",
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`[work-requests] request.received notification failed (request=${requestId}):`, (err as Error)?.message ?? err);
+  }
+}
+
+/** The WORK ITEM of a request, written in the caller's transaction BEFORE the request row (§32.5's order; the DW-10e route
+ *  guard reads it): an asset request is a PM task owned by the receiving DEPARTMENT in `projectId`; an engineering request is a
+ *  Web Dev change request (`source = 'internal'`) naming `projectId` and `clientId`. Shared by §32's create (`clientId` null,
+ *  the internal intake project), §60's send (H's client record and its client requests project, DW-D41) and the social
+ *  pipeline's month request, so THE DELIBERATE WIDENING of the controller's header stays in this one place.
+ *
+ *  The task is owned by the RECEIVING DEPARTMENT, with nobody responsible yet. `normalizePmTaskInput` validates an assignee only
+ *  when it names a responsible person, which a department with nobody on it yet cannot, so the department assignee is set
+ *  here, after the rest of the task was validated. Someone is made responsible later through PM, and the task then reaches
+ *  that person's Needs you (§32 preamble). `responsibleId` is JSON null, NOT "": the assignment ledger writes it into a uuid
+ *  column (pm_task_assignment_events.responsible_id), where "" is a 500, and null is the "nobody yet" shape PM's own
+ *  dual-write, drift guard and readers already treat as no responsible person (`!assignee.responsibleId`). */
+export async function createRequestWorkItemInTx(c: PoolClient, o: {
+  tenantId: string; userId: string; kind: RequestKind; toUnitId: string; toName: string; projectId: string;
+  clientId: string | null; title: string; brief: string; neededBy: string | null; form: RequestForm;
+  requesterName: string; fromUnitName: string | null;
+}): Promise<{ work: { type: "pm_task" | "change_request"; id: string }; pmTaskId: string | null; changeRequestId: string | null }> {
+  if (o.kind === "assets") {
+    const n = normalizePmTaskInput({
+      projectId: o.projectId,
+      title: o.title,
+      description: buildTaskDescription({ brief: o.brief, form: o.form as AssetsForm, requesterName: o.requesterName, fromUnitName: o.fromUnitName }),
+      dueDate: o.neededBy ?? undefined,
+      priority: "normal",
+    });
+    n.assignee = {
+      kind: "department", refId: o.toUnitId, refName: o.toName,
+      responsibleId: null as unknown as string, responsibleName: null as unknown as string,
+    };
+    const task = await createPmTaskInTx(c, o.tenantId, o.userId, n);
+    return { work: { type: "pm_task", id: task.id }, pmTaskId: task.id, changeRequestId: null };
+  }
+  const form = o.form as EngineeringForm;
+  const changeRequestId = newId();
+  await c.query(
+    `INSERT INTO webdev_change_requests
+       (id, tenant_id, client_id, project_id, source, kind, title, body, status, requested_by, origin_site, affected_url)
+     VALUES ($1, $2, $10, $9, 'internal', $3, $4, $5, 'new', $6, $7, $8)`,
+    [changeRequestId, o.tenantId, form.kind, o.title, o.brief || null, o.userId, config.originSite, form.affectedUrl ?? null, o.projectId, o.clientId],
+  );
+  // The same event the internal-create route emits, so everything watching Web Dev intake sees this request too.
+  await emitEvent(c, o.tenantId, "webdev_change_request", changeRequestId, "webdev.change_request.created", {
+    source: "internal", kind: form.kind, clientId: o.clientId, projectId: o.projectId, actorId: o.userId,
+  });
+  return { work: { type: "change_request", id: changeRequestId }, pmTaskId: null, changeRequestId };
+}
+
+/** §32.5 `POST requests`, the part inside the caller's ONE `withTenants` transaction: resolve the receiving department, check
+ *  the campaign part, derive the requester's own department, ensure the intake project, write the work item
+ *  (`createRequestWorkItemInTx`), then the `work_requests` row and its `work_request.created` outbox event. `input` is the
+ *  VALIDATED body (`parseCreate`, or the same shape built by the server). Refusals, in order: the receiving unit is not a
+ *  department (400 `to_unit_invalid`), the campaign part is not live (400 `campaign_part_invalid`), then whatever the work
+ *  item's own validation refuses.
+ *
+ *  Not here, on purpose: the Cerbos decision and the receiving module being on (`pm` for assets, `webdev` for engineering,
+ *  409 `request_kind_unavailable`). Both are made BEFORE the transaction (an authorization call and a second connection must
+ *  not sit inside it), so the caller does them. After the commit the caller writes the activity and calls
+ *  `notifyRequestReceived`. */
+export async function createWorkRequestInTx(
+  c: PoolClient, tenantId: string, actorId: string, input: CreateInput,
+): Promise<{ id: string; work: { type: "pm_task" | "change_request"; id: string }; toName: string; intake: { projectId: string; created: boolean } }> {
+  const index = await loadOrgIndex(c, tenantId);
+  const toUnit = requireToDepartment(index, input.toUnitId);
+  const toName = toUnit.name ?? input.toUnitId;
+  if (input.campaignPartId) {
+    const part = await c.query(
+      `SELECT 1 FROM agency_campaign_parts WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL AND status <> 'cancelled'`,
+      [input.campaignPartId, tenantId],
+    );
+    if (!part.rows[0]) {
+      throw new WorkRequestRuleError(400, "campaign_part_invalid", "campaignPartId is not a live, uncancelled part of this company", "campaignPartId");
+    }
+  }
+  const fromUnitId = await resolveFromUnit(c, tenantId, actorId, index);
+  const fromUnitName = fromUnitId ? index.get(fromUnitId)?.name ?? null : null;
+  const who = await c.query<{ name: string }>(`SELECT name FROM users WHERE id = $1`, [actorId]);
+  const requesterName = who.rows[0]?.name ?? "Someone";
+  const id = newId();
+
+  // The receiving department's intake project serves BOTH kinds: the asset task lives in it, and the engineering change
+  // request names it as its `project_id`, so Web Dev's `pm_task` triage lands the task in "<Department> · Requests" with no
+  // extra input (§32.1).
+  const intake = await ensureIntakeProject(c, tenantId, input.toUnitId, toName, config.originSite);
+  const w = await createRequestWorkItemInTx(c, {
+    tenantId, userId: actorId, kind: input.kind, toUnitId: input.toUnitId, toName, projectId: intake.projectId, clientId: null,
+    title: input.title, brief: input.brief, neededBy: input.neededBy, form: input.form, requesterName, fromUnitName,
+  });
+
+  await c.query(
+    `INSERT INTO work_requests
+       (id, tenant_id, kind, to_unit_id, from_unit_id, requested_by, title, brief, needed_by, campaign_part_id, form,
+        pm_task_id, change_request_id, origin_site)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10, $11::jsonb, $12, $13, $14)`,
+    [
+      id, tenantId, input.kind, input.toUnitId, fromUnitId, actorId, input.title, input.brief, input.neededBy,
+      input.campaignPartId, JSON.stringify(input.form), w.pmTaskId, w.changeRequestId, config.originSite,
+    ],
+  );
+  await emitEvent(c, tenantId, "work_request", id, "work_request.created", {
+    requestId: id, kind: input.kind, toUnitId: input.toUnitId, fromUnitId, campaignPartId: input.campaignPartId, workId: w.work.id,
+  });
+  return { id, work: w.work, toName, intake };
 }
 
 // ───────────────────────────────────────── reads ─────────────────────────────────────────

@@ -20,6 +20,15 @@
 //     - the filer WITH the right still gets self_approval (the two rules stack);
 //     - the second wall: a stored approver without the right is refused at execution, nothing is signed;
 //     - the hint says countersign_right_required to the company_admin.
+//   SCP-1b (PERMISSION-CONTRACT §53.12, SCP-Q21) — a PIPELINE post's publish approval is decided by the four social approvers
+//     - a company_admin who is not one of the four gets 403 social_approver_required (approve AND reject), the row stays pending;
+//     - the HoD seat, the GM seat and the owner, holding NO company_admin, decide it (the check replaces the generic decide right);
+//     - the post's officer and its author are refused (the maker/checker DENY), even holding company_admin;
+//     - the filer who is a seat approver still gets self_approval FIRST (§52.1 runs ahead of the replacing check);
+//     - a Composer post is unchanged: a seat holder without company_admin is refused the plain 403, a company_admin decides;
+//     - the executor walls: the stored decider's self-approval is refused before anything, and the approverCheck the executor
+//       re-runs refuses a stored company_admin decider and passes a stored seat decider;
+//     - the hint says social_approver_required to the company_admin.
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
@@ -28,8 +37,9 @@ import { buildApp } from "../main";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole, createClient, linkIdentity } from "../testing/fixtures";
 import { sha256Hex } from "./content-hash";
-import { COUNTERSIGN_RIGHT_REQUIRED } from "./approval-executables";
-import { executeApprovedAutomationWrite } from "./approval-execute";
+import { COUNTERSIGN_RIGHT_REQUIRED, SOCIAL_APPROVER_REQUIRED, getExecutable } from "./approval-executables";
+import { executeApprovedAutomationWrite, runApproverCheck } from "./approval-execute";
+import { SOCIAL_UNITS, grantSocialSeat, seedSocialOrgTree } from "../testing/social-pipeline-fixtures";
 import { ACT_FOR_FILING_UNSUPPORTED, SELF_APPROVAL } from "./approval-self-approval";
 
 const svc = { authorization: "Bearer svc-token" };
@@ -355,6 +365,199 @@ describe.skipIf(!TEST_URL)("PGL-05/06 · approval tightening (PV-D46) through th
       });
       expect(hubCalls).toBe(0);
       expect(await providerSigs(k)).toBe(0);
+    });
+  });
+
+  // ── SCP-1b: the publish decision on a pipeline post (§53.12) ──────────────────────────────────────────────────────────
+
+  describe("SCP-1b: a pipeline post's publish approval is decided by the four social approvers (SCP-Q21)", () => {
+    let S: string;
+    let hod: string, gm: string, ownerS: string, adminS: string, officer: string, author: string, filerS: string;
+    let pipelineVariant: string;
+    let composerVariant: string;
+
+    beforeAll(async () => {
+      S = await createCompany("SCP1b PGL Agency", ["social", "agency", "clients"]);
+      await seedSocialOrgTree(S);
+      hod = await createUser("hod@scp1b-pgl.test");
+      gm = await createUser("gm@scp1b-pgl.test");
+      ownerS = await createUser("owner@scp1b-pgl.test");
+      adminS = await createUser("admin@scp1b-pgl.test");
+      officer = await createUser("officer@scp1b-pgl.test");
+      author = await createUser("author@scp1b-pgl.test");
+      filerS = await createUser("filer@scp1b-pgl.test");
+      const member = await createRole("member");
+      const pool = adminPool();
+      for (const u of [hod, gm, ownerS, adminS, officer, author, filerS]) {
+        await addMembership(S, u);
+        await grantRole(u, member, "company", S);
+        await pool.query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [S, u]);
+      }
+      await grantSocialSeat(S, SOCIAL_UNITS.socialMedia, hod);
+      await grantSocialSeat(S, SOCIAL_UNITS.gm, gm);
+      await grantRole(ownerS, await createRole("owner"), "company", S);
+      await grantRole(adminS, await createRole("company_admin"), "company", S);
+      // the officer and the author hold company_admin too: the maker/checker DENY must still refuse them
+      await grantRole(officer, await createRole("company_admin"), "company", S);
+      await grantRole(author, await createRole("company_admin"), "company", S);
+
+      const clientId = await createClient(S, "SCP1b PGL Brand");
+      const engagementId = newId();
+      const cycleId = newId();
+      const orgId = newId();
+      const accountId = newId();
+      const pipelinePost = newId();
+      const composerPost = newId();
+      pipelineVariant = newId();
+      composerVariant = newId();
+      await withTenants([S], async (c) => {
+        await c.query(
+          `INSERT INTO social_engagements (id, tenant_id, client_id, name, owner_id, origin_site) VALUES ($1,$2,$3,'SCP1b PGL',$4,'main')`,
+          [engagementId, S, clientId, officer],
+        );
+        await c.query(
+          `INSERT INTO social_cycles (id, tenant_id, engagement_id, month, deadline, ready_by)
+           VALUES ($1,$2,$3,date_trunc('month', now())::date, date_trunc('month', now())::date, date_trunc('month', now())::date)`,
+          [cycleId, S, engagementId],
+        );
+        await c.query(
+          `INSERT INTO social_publisher_orgs (id, tenant_id, client_id, postiz_org_id, api_key_ref, origin_site) VALUES ($1,$2,$3,$4,'env:KEY','main')`,
+          [orgId, S, clientId, `org-${S}`],
+        );
+        await c.query(
+          `INSERT INTO social_accounts (id, tenant_id, client_id, publisher_org_id, network, handle, status, quota, origin_site)
+           VALUES ($1,$2,$3,$4,'instagram','@scp1b','connected','{}'::jsonb,'main')`,
+          [accountId, S, clientId, orgId],
+        );
+        await c.query(
+          `INSERT INTO social_posts (id, tenant_id, engagement_id, title, origin_site, cycle_id, pipeline_status, status_since, schedule_via, author_id)
+           VALUES ($1,$2,$3,'SCP1b pipeline post','main',$4,'scheduled',now(),'publisher',$5)`,
+          [pipelinePost, S, engagementId, cycleId, author],
+        );
+        await c.query(
+          `INSERT INTO social_posts (id, tenant_id, engagement_id, title, origin_site) VALUES ($1,$2,$3,'SCP1b composer post','main')`,
+          [composerPost, S, engagementId],
+        );
+        for (const [v, postId] of [[pipelineVariant, pipelinePost], [composerVariant, composerPost]]) {
+          await c.query(
+            `INSERT INTO social_post_variants (id, tenant_id, post_id, account_id, body, origin_site) VALUES ($1,$2,$3,$4,'hello','main')`,
+            [v, S, postId, accountId],
+          );
+        }
+      }, { modules: ["social"] });
+    }, 120_000);
+
+    const fileIn = async (variantId: string, requestedBy: string): Promise<string> => {
+      const id = newId();
+      await withTenants([S], (c) =>
+        c.query(
+          `INSERT INTO automation_approvals (id, tenant_id, workflow_id, tool_name, tool_args, impact, requested_by, origin, agent_name, origin_site)
+           VALUES ($1,$2,$3,'social.publishPost',$4,'high',$5,'agent',$3,'main')`,
+          [id, S, AGENT, JSON.stringify({ variantId }), requestedBy],
+        ),
+      );
+      return id;
+    };
+    const decideIn = (id: string, by: string, decision: "approved" | "rejected", facade = false) =>
+      app.inject({
+        method: "POST",
+        url: facade ? `/api/${S}/approvals/${id}/decide` : `/api/${S}/automation-approvals/${id}/decide`,
+        headers: asUser(by),
+        payload: facade ? { origin: "agent", decision } : { decision },
+      });
+
+    it("🔴 a company_admin who is not one of the four gets 403 social_approver_required, to approve and to reject; the row stays pending", async () => {
+      const id = await fileIn(pipelineVariant, filerS);
+      for (const decision of ["approved", "rejected"] as const) {
+        const r = await decideIn(id, adminS, decision);
+        expect(r.statusCode, r.body).toBe(403);
+        expect(r.json().reason).toBe(SOCIAL_APPROVER_REQUIRED);
+      }
+      const f = await decideIn(id, adminS, "approved", true);
+      expect(f.statusCode, f.body).toBe(403);
+      expect(f.json().reason).toBe(SOCIAL_APPROVER_REQUIRED);
+      expect(await rowOf(id)).toMatchObject({ status: "pending", decided_by: null });
+      expect((await app.inject({ method: "GET", url: `/api/${S}/automation-approvals/${id}`, headers: asUser(adminS) })).json().approveRefusal)
+        .toBe(SOCIAL_APPROVER_REQUIRED);
+    });
+
+    it("the HoD seat, the GM seat and the owner decide it WITHOUT company_admin (the check is the decide right)", async () => {
+      const a = await fileIn(pipelineVariant, filerS);
+      const ra = await decideIn(a, hod, "approved");
+      expect(ra.statusCode, ra.body).toBe(200);
+      expect(await rowOf(a)).toMatchObject({ status: "approved", decided_by: hod, execution_status: "pending" });
+      const b = await fileIn(pipelineVariant, filerS);
+      const rb = await decideIn(b, gm, "approved", true);
+      expect(rb.statusCode, rb.body).toBe(200);
+      expect((await rowOf(b)).decided_by).toBe(gm);
+      const c = await fileIn(pipelineVariant, filerS);
+      const rc = await decideIn(c, ownerS, "approved");
+      expect(rc.statusCode, rc.body).toBe(200);
+      expect((await rowOf(c)).decided_by).toBe(ownerS);
+      const d = await fileIn(pipelineVariant, filerS);
+      const rd = await decideIn(d, hod, "rejected");
+      expect(rd.statusCode, rd.body).toBe(200);
+      expect(await rowOf(d)).toMatchObject({ status: "rejected", decided_by: hod, execution_status: "not_applicable" });
+      // platform_admin passes too (its wildcard), though it is no member of this company
+      const e = await fileIn(pipelineVariant, filerS);
+      const re = await decideIn(e, platformAdmin, "approved");
+      expect(re.statusCode, re.body).toBe(200);
+    });
+
+    it("🔴 the post's officer and its author are refused (the maker/checker DENY), though both hold company_admin", async () => {
+      for (const who of [officer, author]) {
+        const id = await fileIn(pipelineVariant, filerS);
+        const r = await decideIn(id, who, "approved");
+        expect(r.statusCode, r.body).toBe(403);
+        expect(r.json().reason).toBe(SOCIAL_APPROVER_REQUIRED);
+        expect((await rowOf(id)).status).toBe("pending");
+      }
+    });
+
+    it("🔴 a seat approver who FILED the request gets self_approval first; another of the four then decides it", async () => {
+      const id = await fileIn(pipelineVariant, hod);
+      const r = await decideIn(id, hod, "approved");
+      expect(r.statusCode, r.body).toBe(403);
+      expect(r.json().reason).toBe(SELF_APPROVAL);
+      expect((await rowOf(id)).status).toBe("pending");
+      const ok = await decideIn(id, gm, "approved");
+      expect(ok.statusCode, ok.body).toBe(200);
+    });
+
+    it("a Composer post is unchanged: a seat holder without company_admin gets the plain 403; a company_admin decides", async () => {
+      const id = await fileIn(composerVariant, filerS);
+      const r = await decideIn(id, hod, "approved");
+      expect(r.statusCode, r.body).toBe(403);
+      expect(r.json().reason).toBeUndefined();
+      const ok = await decideIn(id, adminS, "approved");
+      expect(ok.statusCode, ok.body).toBe(200);
+      expect((await rowOf(id)).decided_by).toBe(adminS);
+    });
+
+    it("🔴 the executor walls: a stored self-approval is refused before anything; the approverCheck it re-runs refuses a stored company_admin and passes a stored seat", async () => {
+      const self = newId();
+      await withTenants([S], (c) =>
+        c.query(
+          `INSERT INTO automation_approvals
+             (id, tenant_id, workflow_id, tool_name, tool_args, impact, status, requested_by, decided_by, decided_at, origin, origin_site, execution_status)
+           VALUES ($1,$2,$3,'social.publishPost',$4,'high','approved',$5,$5,now(),'agent','main','pending')`,
+          [self, S, AGENT, JSON.stringify({ variantId: pipelineVariant }), hod],
+        ),
+      );
+      expect(await executeApprovedAutomationWrite(S, self)).toEqual({ status: "failed", error: `approver_refused: ${SELF_APPROVAL}` });
+      expect(hubCalls).toBe(0);
+      // The executor runs the entry's approverCheck against the STORED decider, as below (after the publish precondition,
+      // which this synthetic variant would not pass, so the check is driven directly through the same runApproverCheck).
+      const entry = getExecutable("social.publishPost")!;
+      expect(entry.approverCheck?.replacesDecide).toBe(true);
+      const args = { variantId: pipelineVariant };
+      expect(await withTenants([S], (c) => runApproverCheck(c, entry, args, { userId: adminS })))
+        .toEqual({ ok: false, reason: SOCIAL_APPROVER_REQUIRED });
+      expect(await withTenants([S], (c) => runApproverCheck(c, entry, args, { userId: hod }))).toEqual({ ok: true });
+      expect(await withTenants([S], (c) => runApproverCheck(c, entry, { variantId: composerVariant }, { userId: adminS }))).toEqual({ ok: true });
+      // a decide call acting for someone must pass for both humans
+      expect(await withTenants([S], (c) => runApproverCheck(c, entry, args, { userId: hod, actForUserId: adminS })))
+        .toEqual({ ok: false, reason: SOCIAL_APPROVER_REQUIRED });
     });
   });
 });

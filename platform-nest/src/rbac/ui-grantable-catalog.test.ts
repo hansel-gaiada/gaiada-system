@@ -112,8 +112,9 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // DW-10a (2026-10-15): +4 grantable / +4 total on the NEW dept_notice kind (all uiGrantable TRUE). 479 -> 483 / 464 -> 468.
     // DW-10c (2026-10-15): +1 grantable / +1 total on the existing org_structure kind (`read_calendar`, uiGrantable TRUE). 483 -> 484 / 468 -> 469.
     // DW-10e (2026-10-16): +2 grantable / +2 total on the existing work_request kind (send_across, read_across; both uiGrantable TRUE). 484 -> 486 / 469 -> 471.
-    expect(permissions.length).toBe(486);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(471);
+    // SCP-1b (2026-10-26): +11 grantable / +11 total on EXISTING kinds (7 uiGrantable TRUE; FALSE: social.post.approve, social.engagement.plan/budget, portal.approve_spend). 486 -> 497 / 471 -> 482.
+    expect(permissions.length).toBe(497);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(482);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

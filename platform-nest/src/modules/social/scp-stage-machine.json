@@ -132,7 +132,7 @@
     { "status": "planned", "fieldGroups": ["planning"] },
     { "status": "drafting", "fieldGroups": ["planning", "copy"] },
     { "status": "changes", "changeCases": ["copywriter_copy", "hod_copy", "final_copy"], "fieldGroups": ["copy"], "alsoFields": ["scheduledAt", "mustHaves", "placement"], "copyLog": true },
-    { "status": "changes", "changeCases": ["client_copy"], "fieldGroups": ["copy"], "alsoFields": ["scheduledAt", "mustHaves"], "copyLog": true, "note": "the client has seen the networks, so the placement stays" },
+    { "status": "changes", "changeCases": ["client_copy"], "fieldGroups": ["copy"], "alsoFields": ["mustHaves"], "copyLog": true, "note": "the client has seen the networks and the date: the placement and the date stay (systemRules date_moves); a new date after the client's approval is reschedule (plan SCP-D6)" },
     { "status": "any other", "fieldGroups": [], "refusal": "field_locked", "note": "the date and placement of an approved or scheduled post change only through reschedule" }
   ],
   "requiredToSend": [
