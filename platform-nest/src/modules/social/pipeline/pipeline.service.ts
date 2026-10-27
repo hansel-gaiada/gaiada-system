@@ -33,8 +33,9 @@ import {
 } from "./machine";
 import {
   findDepartmentBySlug, holderUserIds, loadCycle, loadEngagement, loadFacts, loadPostRow, roleHolders, stateOf,
-  type CycleRow, type EngagementRow,
+  type CycleRow, type EngagementRow, type PostRow,
 } from "./pipeline-data";
+import { cancelDecisionNotices, scheduleDecisionNotices } from "./decision-notices";
 import {
   EFFECT_RUNNERS, ScpRouteError, cancelQueuedDispatchesBeforeTx, emptyOutput, insertCopyLog, insertPostRow, isNotification,
   updatePostRow, type EffectOutput,
@@ -133,13 +134,19 @@ export interface StageOutcome {
   out: EffectOutput;
 }
 
+/** What `decide()` takes besides the post, the principal facts, the facts and the mode. `surface` is the portal's (SCP-2); absent is staff. */
+export interface StageBase {
+  action: string; params: Record<string, unknown>; cerbos: CerbosDecisions; expectedStatus?: string; actionId?: string;
+  requireExpectedStatus?: boolean; surface?: "staff" | "portal";
+}
+
 export interface Prepared {
   pre: { row: Awaited<ReturnType<typeof loadPostRow>>; authz: SocialPostAuthz | null };
   state: PipelinePostState | null;
   resource: Resource;
   cerbos: CerbosDecisions;
   principalFacts: (authz: SocialPostAuthz | null) => { userId?: string; isAutomation: boolean; isAuthor: boolean; isOfficer: boolean };
-  base: { action: string; params: Record<string, unknown>; cerbos: CerbosDecisions; expectedStatus?: string; actionId?: string; requireExpectedStatus?: boolean };
+  base: StageBase;
   /** The gate's answer when it was a replay (`alreadyApplied`); null when the action goes on to the transaction. */
   replay: StageApplied | null;
   callerId: string;
@@ -203,7 +210,19 @@ export type StageTxResult =
  * owns the transaction, so a caller that holds other writes (the feed-preview swap runs two of these in one transaction)
  * throws to roll them back. `cancelled` is the set of queued dispatches cancelled at the publisher before the transaction.
  */
-export async function applyStageInTx(c: PoolClient, prepared: Prepared, req: StageRequest, cancelled: Set<string>): Promise<StageTxResult> {
+/** What a caller's hook sees once the post is locked and its engagement read (SCP-2). */
+export interface StageTxContext { c: PoolClient; row: PostRow; state: PipelinePostState; engagement: EngagementRow }
+
+/**
+ * SCP-2 added ONE optional parameter, `hook`: the portal's runner uses it to judge things only the lock can judge (the
+ * visibility of the post, a replayed decision, the facts of an undo) before the machine runs. It runs after the lock, the
+ * Cerbos check and the engagement read, and before the facts and `decide()`. It answers null to go on, or a `StageTxResult` to
+ * answer for the caller (a refusal writes nothing). Every staff caller passes none, and then this function is what it was.
+ */
+export async function applyStageInTx(
+  c: PoolClient, prepared: Prepared, req: StageRequest, cancelled: Set<string>,
+  hook?: (x: StageTxContext) => Promise<StageTxResult | null>,
+): Promise<StageTxResult> {
   const { tenantId, postId, action } = req;
   const { pre, cerbos, principalFacts, base, callerId } = prepared;
   const row = await loadPostRow(c, tenantId, postId, true);
@@ -216,6 +235,10 @@ export async function applyStageInTx(c: PoolClient, prepared: Prepared, req: Sta
   }
   const engagement = await loadEngagement(c, tenantId, row.engagement_id);
   if (!engagement) return { refusal: notFoundRefusal() };
+  if (hook) {
+    const early = await hook({ c, row, state: locked, engagement });
+    if (early) return early;
+  }
   const cycle = row.cycle_id ? await loadCycle(c, tenantId, row.cycle_id) : null;
   const who = {
     ownerId: engagement.owner_id ?? "",
@@ -280,7 +303,7 @@ export async function runStageAction(principal: Principal, req: StageRequest): P
   return { postId, applied: ok.applied, out: ok.out };
 }
 
-function notFoundRefusal(): StageRefusal {
+export function notFoundRefusal(): StageRefusal {
   return { ok: false, http: 404, code: "post_not_found", guard: "post_exists" };
 }
 
@@ -422,6 +445,10 @@ export async function patchDesign(principal: Principal, tenantId: string, postId
         WHERE tenant_id = $1 AND post_id = $2 AND id = $3`,
       [tenantId, postId, designId, body.position ?? null, design.link_url ? source : null, design.link_url ? note : null],
     );
+    // A write to the post's designs outside the machine is something that happened to the post: it clears the idempotency key of
+    // the last applied action, as an action without one does (BFF §63.0), so a portal decision's undo ("nothing happened since",
+    // BFF §63.9) can see it. This also means the previous action's `actionId` no longer replays after a design PATCH.
+    await c.query(`UPDATE social_posts SET last_action_id = NULL, last_action_at = now() WHERE tenant_id = $1 AND id = $2`, [tenantId, postId]);
   }, SOCIAL);
   await writeActivity(tenantId, callerId, "update_design", "social_post", postId, { designId, fields: keys });
 }
@@ -433,14 +460,17 @@ export async function patchDesign(principal: Principal, tenantId: string, postId
 export async function afterCommit(
   principal: Principal, tenantId: string, postId: string, r: StageApplied, out: EffectOutput,
   engagement: EngagementRow, cycle: CycleRow | null, before: PipelinePostState, authz: SocialPostAuthz | null,
+  opts: { viaPortal?: boolean } = {},
 ): Promise<void> {
   const actorId = principal.userId ?? null;
   const holderBefore = before.pipelineStatus ? holderOf(before) : null;
+  // A `client_undo` took a decision back: its waiting notices go (the delayed sender re-reads the decision as well).
+  if (out.dropNotificationsFor) cancelDecisionNotices(out.dropNotificationsFor);
   await writeActivity(tenantId, actorId, r.action, "social_post", postId, {
     ...r.activity.metadata,
     cycleId: cycle?.id ?? null,
     engagementId: engagement.id,
-    viaPortal: false,
+    viaPortal: opts.viaPortal === true,
     ...(r.action === "follow_up" ? { holder: holderBefore } : {}),
   });
   for (const a of out.filedApprovals) await notifyApprovalFiled(a.id, a.input);
@@ -470,7 +500,42 @@ const TITLES: Record<string, string> = {
   "social.post.client_changed": "The client asked for a change",
   "social.post.client_decided": "The client's decision was recorded",
   "social.post.follow_up": "A follow-up on a post",
+  "social.post.client_recorded": "We recorded your decision on a post",
 };
+
+const DELAYED_PREFIX = "notify_after_undo_window:";
+const PORTAL_DECISIONS = new Set(["client_approve", "client_change"]);
+
+export type DecisionStanding = { state: "stands" } | { state: "gone" } | { state: "open"; undoUntil: string };
+
+/**
+ * Whether a portal decision still stands, as the delayed notices ask it just before they send (BFF §63.9): every live variant's
+ * review of the post carries `decisionId`, and the post is still in the status the decision took it to.
+ *  - It takes `FOR SHARE` on the post row first, so it WAITS for an undo that is in flight (the undo holds the row `FOR UPDATE`):
+ *    an undo that won the lock is seen as `gone`, never raced.
+ *  - It also answers `open` while the window has not closed on the database clock (`clock_timestamp()`, the clock the window is
+ *    written and judged with), with the instant it closes: a timer that fires early (clock skew, a flush) reschedules and sends
+ *    nothing, so a notice never goes out while an undo is still possible.
+ */
+export async function decisionStands(tenantId: string, postId: string, decisionId: string, to: string | null): Promise<DecisionStanding> {
+  return withTenants([tenantId], async (c) => {
+    await c.query(`SELECT 1 FROM social_posts WHERE tenant_id = $1 AND id = $2 FOR SHARE`, [tenantId, postId]);
+    const r = await c.query<{ pipeline_status: string | null; mine: string; total: string; open: boolean; until: Date | null }>(
+      `SELECT p.pipeline_status, count(*) FILTER (WHERE r.decision_id = $3)::text AS mine, count(*)::text AS total,
+              COALESCE(bool_or(r.decision_id = $3 AND r.undo_until > clock_timestamp()), false) AS open,
+              max(r.undo_until) FILTER (WHERE r.decision_id = $3) AS until
+         FROM social_posts p
+         JOIN social_post_variants v ON v.tenant_id = p.tenant_id AND v.post_id = p.id AND v.deleted_at IS NULL
+         LEFT JOIN social_post_client_reviews r ON r.variant_id = v.id AND r.tenant_id = v.tenant_id
+        WHERE p.tenant_id = $1 AND p.id = $2 AND p.deleted_at IS NULL
+        GROUP BY p.pipeline_status`,
+      [tenantId, postId, decisionId]);
+    const row = r.rows[0];
+    if (!row || row.pipeline_status !== to || Number(row.mine) === 0 || row.mine !== row.total) return { state: "gone" } as const;
+    if (row.open && row.until) return { state: "open", undoUntil: new Date(row.until).toISOString() } as const;
+    return { state: "stands" } as const;
+  }, SOCIAL);
+}
 
 async function sendNotifications(
   tenantId: string, actorId: string | null, postId: string, r: StageApplied, out: EffectOutput,
@@ -478,6 +543,30 @@ async function sendNotifications(
 ): Promise<void> {
   const names = r.effects.filter(isNotification);
   if (!names.length) return;
+  const whoOf = (name: string) => name.slice(name.indexOf(":") + 1);
+  const now = names.filter((n) => !n.startsWith(DELAYED_PREFIX)).map(whoOf);
+  const later = names.filter((n) => n.startsWith(DELAYED_PREFIX)).map(whoOf);
+  if (now.length) await deliverNotices(tenantId, actorId, postId, r, out, engagement, before, authz, now);
+  // The portal decision's notices wait out its undo window (BFF §63.9): a timer for `undo_until`, and only if the decision
+  // still stands when it fires. A restart inside the window drops them (decision-notices.ts).
+  if (later.length && out.decisionId) {
+    const decisionId = out.decisionId;
+    const fire = async (): Promise<void> => {
+      const standing = await decisionStands(tenantId, postId, decisionId, r.to);
+      // Fired while an undo is still possible: wait out the rest of the window and look again.
+      if (standing.state === "open") { scheduleDecisionNotices(decisionId, standing.undoUntil, fire, { reschedule: true }); return; }
+      if (standing.state !== "stands") return;
+      await deliverNotices(tenantId, actorId, postId, r, out, engagement, before, authz, later);
+    };
+    scheduleDecisionNotices(decisionId, out.undoUntil, fire);
+  }
+}
+
+/** Send the notices for the given targets (the `who` of the fixture's `notify:<who>` names), by the routing of §63.14. */
+async function deliverNotices(
+  tenantId: string, actorId: string | null, postId: string, r: StageApplied, out: EffectOutput,
+  engagement: EngagementRow, before: PipelinePostState, authz: SocialPostAuthz | null, targets: string[],
+): Promise<void> {
   const dept = await withTenants([tenantId], (c) => findDepartmentBySlug(c, tenantId, "social-media"));
   const approverIds = authz?.approverIds ?? [];
   const next = r.next ?? before;
@@ -489,7 +578,8 @@ async function sendNotifications(
   const send = async (ids: string[], type: string) => {
     for (const id of new Set(ids)) await notify(tenantId, id, actorId, type, payload(type));
   };
-  const recorded = r.action === "record_client_approve" || r.action === "record_client_change";
+  // The officer hears of a client's decision as `client_decided`, whether the client gave it in the portal or staff recorded it.
+  const decided = r.action === "record_client_approve" || r.action === "record_client_change" || PORTAL_DECISIONS.has(r.action);
   const designers = async (): Promise<string[]> => {
     if (next.creativeSource === "in_team") return roleHolders(tenantId, "social_designer");
     const requestId = out.joinedRequestId ?? (await withTenants([tenantId], (c) => c.query<{ id: string | null }>(
@@ -498,22 +588,21 @@ async function sendNotifications(
     return (await withTenants([tenantId], (c) => loadAuthFacts(c, tenantId, requestId)))?.assigneeIds ?? [];
   };
 
-  for (const name of names) {
-    const who = name.slice(name.indexOf(":") + 1);
-    if (name.startsWith("notify_after_undo_window:")) continue; // SCP-2: the portal decision's undo window
+  for (const who of targets) {
     switch (who) {
       case "copywriters": await send(await roleHolders(tenantId, "social_copywriter"), "social.post.your_turn"); break;
       case "approvers": await send(approverIds, "social.post.your_turn"); break;
       case "approvers_told": await send(approverIds, "social.post.client_changed"); break;
       case "designers": await send(await designers(), "social.post.your_turn"); break;
-      case "officer": await send(engagement.owner_id ? [engagement.owner_id] : [], recorded ? "social.post.client_decided" : "social.post.your_turn"); break;
+      case "officer": await send(engagement.owner_id ? [engagement.owner_id] : [], decided ? "social.post.client_decided" : "social.post.your_turn"); break;
       case "holder": {
         // resolve: the new holder is told it is their turn; follow_up: the current holder is reminded.
         const state = r.action === "follow_up" ? before : next;
         const type = r.action === "follow_up" ? "social.post.follow_up" : "social.post.your_turn";
         if (state.pipelineStatus && holderOf(state) === "client") {
           const recipients = await withTenants([tenantId], (c) => resolveClientRecipients(c, { clientId: engagement.client_id, projectId: engagement.project_id, kind: "general" }));
-          await notifyBestEffort(tenantId, actorId, recipients, type, payload(type));
+          // The client's contacts cannot open a staff page: their link is the post in the portal (BFF §63.9, SCP-2).
+          await notifyBestEffort(tenantId, actorId, recipients, type, { ...payload(type), href: `/portal/social?post=${postId}` });
         } else {
           const h = await holderUserIds(tenantId, state, { ownerId: engagement.owner_id ?? "", approverIds, assigneeIds: authz?.assigneeIds ?? [] });
           await send(h.userIds, type);
@@ -522,12 +611,20 @@ async function sendNotifications(
       }
       // The client is told once per post by the review request's own event, inside the transaction (requestReviews).
       case "client": case "client_once_per_post": break;
-      // ⚠ CONTRACT GAP: §63.14 has no type for telling the client that staff recorded their decision.
-      case "client_recorded": break;
+      // Staff recorded a decision on the client's behalf (BFF §63.14 `social.post.client_recorded`): the client's contacts are
+      // told, and the link opens the post in the portal.
+      case "client_recorded": {
+        const recipients = await withTenants([tenantId], (c) => resolveClientRecipients(c, { clientId: engagement.client_id, projectId: engagement.project_id, kind: "general" }));
+        const type = "social.post.client_recorded";
+        await notifyBestEffort(tenantId, actorId, recipients, type, {
+          title: TITLES[type], href: `/portal/social?post=${postId}`, entityType: "social_post", entityId: postId, severity: "info", action: r.action,
+        });
+        break;
+      }
       case "officer_when_by_publisher": break; // SCP-3b: the publisher's result path
       default:
         // eslint-disable-next-line no-console
-        console.warn(`[scp] unknown notification '${name}' on ${r.action}`);
+        console.warn(`[scp] unknown notification '${who}' on ${r.action}`);
     }
   }
 }
@@ -568,7 +665,7 @@ export async function changeAfterClientInTx(c: PoolClient, tenantId: string, pos
   if (row.pipeline_status === "scheduled") await EFFECT_RUNNERS.cancel_queued_dispatches_and_withdraw_pending_approvals(run);
   await EFFECT_RUNNERS.request_client_reviews_on_every_variant(run);
   await c.query(
-    `UPDATE social_posts SET pipeline_status = 'client', status = 'in_review', status_since = now(), schedule_via = NULL, updated_at = now()
+    `UPDATE social_posts SET pipeline_status = 'client', status = 'in_review', status_since = now(), schedule_via = NULL, last_action_id = NULL, last_action_at = now(), updated_at = now()
       WHERE tenant_id = $1 AND id = $2`,
     [tenantId, postId],
   );

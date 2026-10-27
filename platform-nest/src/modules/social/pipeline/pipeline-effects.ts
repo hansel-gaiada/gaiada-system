@@ -62,11 +62,16 @@ export interface EffectOutput {
   clientToldOnce: boolean;
   /** Variant ids whose queued dispatch the service cancelled at the publisher before the transaction. */
   cancelledAtPublisher: Set<string>;
+  /** SCP-2: the portal decision's shared id and the end of its undo window (ISO), for the answer and the delayed notices. */
+  decisionId: string | null;
+  undoUntil: string | null;
+  /** SCP-2: the decision a `client_undo` took back, whose pending notices the service drops after the commit. */
+  dropNotificationsFor: string | null;
 }
 
 export const emptyOutput = (cancelled: Set<string> = new Set()): EffectOutput => ({
   warnings: [], filedApprovals: [], openedRequest: null, joinedRequestId: null, designId: null, clientToldOnce: false,
-  cancelledAtPublisher: cancelled,
+  cancelledAtPublisher: cancelled, decisionId: null, undoUntil: null, dropNotificationsFor: null,
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -313,23 +318,62 @@ export async function withdrawReviews(run: Pick<EffectRun, "c" | "tenantId" | "p
   );
 }
 
-/** A decision the client gave outside the portal, recorded by staff on every pending review of the post in one statement:
- *  one shared `decision_id`, `recorded_by` and `channel` set, `decided_by` NULL (the client decided outside the ERP, BFF
- *  §63.1), and `reviewed_args_sha256` the variant's hash at this moment. */
+/** The length of the portal decision's undo window (fixture effect `undo_window_10s`, BFF §63.9). */
+export const UNDO_WINDOW_SECONDS = 10;
+
+/** One decision on every pending review of the post, in one statement: one shared `decision_id`, the variant's hash at this
+ *  moment as `reviewed_args_sha256`, and the note, change kind and pin as given.
+ *  - Recorded by staff (`record_client_*`): `recorded_by` and `channel` set, `decided_by` NULL (the client decided outside
+ *    the ERP, BFF §63.1). No undo window.
+ *  - Given by the client in the portal (`client_approve`, `client_change`; SCP-2): `decided_by` the contact, `recorded_by`
+ *    and `channel` NULL, and `undo_until` ten seconds on (`undo_window_10s`). The decision id is the caller's
+ *    (`params.decisionId`: the portal runner also stamps it on the post as `last_action_id`, which is how `client_undo`
+ *    knows nothing happened since). */
 async function recordDecision(run: EffectRun, status: "approved" | "changes_requested"): Promise<void> {
-  const decisionId = newId();
+  const portal = run.action === "client_approve" || run.action === "client_change";
+  const decisionId = portal && typeof run.params.decisionId === "string" ? run.params.decisionId : newId();
   const anchor = run.params.anchor && typeof run.params.anchor === "object" ? JSON.stringify(run.params.anchor) : null;
-  await run.c.query(
+  const r = await run.c.query<{ undo_until: Date | null }>(
+    // `undo_until` is written with `clock_timestamp()`, not `now()`: inside a transaction `now()` is the transaction's START, which
+    // may be well before the post lock was won, and the window would come back already shortened. The undo judges it on the same clock.
     `UPDATE social_post_client_reviews r
         SET status = $3, comment = $4, change_kind = $5, anchor = $6::jsonb, reviewed_args_sha256 = v.args_sha256,
-            decision_id = $7, recorded_by = $8, channel = $9, decided_by = NULL, decided_at = now(), updated_at = now()
+            decision_id = $7, recorded_by = $8, channel = $9, decided_by = $10, decided_at = now(), updated_at = now(),
+            undo_until = CASE WHEN $11::boolean THEN clock_timestamp() + make_interval(secs => $12::int) ELSE NULL END
        FROM social_post_variants v
       WHERE r.variant_id = v.id AND r.tenant_id = v.tenant_id AND v.tenant_id = $1 AND v.post_id = $2 AND v.deleted_at IS NULL
-        AND r.status = 'pending'`,
+        AND r.status = 'pending'
+      RETURNING r.undo_until`,
     [run.tenantId, run.postId, status, String(run.params.note ?? "").trim() || null,
      status === "changes_requested" ? run.params.changeKind : null, status === "changes_requested" ? anchor : null,
-     decisionId, run.actorId, run.params.channel],
+     decisionId, portal ? null : run.actorId, portal ? null : run.params.channel, portal ? run.actorId : null,
+     portal, UNDO_WINDOW_SECONDS],
   );
+  run.out.decisionId = decisionId;
+  const until = r.rows[0]?.undo_until;
+  run.out.undoUntil = until ? new Date(until).toISOString() : null;
+}
+
+/** `client_undo` (SCP-2): every review of the decision back to `pending`, every decision column reset exactly as
+ *  `requestReviews` resets them, but with no new `social.client_review.requested` event: the client asked for nothing new, the
+ *  decision never happened. The decision is `params.decisionId`. */
+async function reviewsBackToPending(run: EffectRun): Promise<void> {
+  const decisionId = String(run.params.decisionId);
+  await run.c.query(
+    `UPDATE social_post_client_reviews SET
+        status = 'pending', comment = NULL, reviewed_args_sha256 = NULL, decided_by = NULL, decided_at = NULL,
+        change_kind = NULL, anchor = NULL, recorded_by = NULL, channel = NULL, decision_id = NULL, undo_until = NULL,
+        updated_at = now()
+      WHERE tenant_id = $1 AND decision_id = $2 AND variant_id IN (SELECT id FROM social_post_variants WHERE tenant_id = $1 AND post_id = $3)`,
+    [run.tenantId, decisionId, run.postId],
+  );
+}
+
+/** `drop_pending_notifications` (SCP-2): the staff notices of the undone decision are still waiting out its undo window (they
+ *  are sent only once the window has passed). The service drops them after the commit; the delayed sender also re-reads the
+ *  decision, which is the real guard. */
+async function dropPendingNotifications(run: EffectRun): Promise<void> {
+  run.out.dropNotificationsFor = String(run.params.decisionId);
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -543,9 +587,9 @@ export const EFFECT_RUNNERS: Record<string, (run: EffectRun) => Promise<void>> =
   set_simulated_from_variants: noop, // SCP-Sa: `simulated` comes from the variants once file 8 adds the column
   start_metrics: noop, // SCP-3c: metrics start when the post is live
   from_published_variants: noop, // SCP-3b: the publisher's own result path (systemRules publisher_results)
-  reviews_back_to_pending: noop, // SCP-2: client_undo, a portal route
-  drop_pending_notifications: noop, // SCP-2
-  undo_window_10s: noop, // SCP-2: the portal decision's undo window
+  reviews_back_to_pending: reviewsBackToPending, // SCP-2: client_undo, a portal route
+  drop_pending_notifications: dropPendingNotifications, // SCP-2: after the commit (the service)
+  undo_window_10s: noop, // SCP-2: written by the portal decision's own effect (`undo_until`)
   activity_only: noop, // follow_up writes only its activity row (after the commit)
   enter_in_team_queue: noop, // the queue is the posts in `design` with creative_source in_team (BFF §63.6.6)
   schedule_by_hand_at_approved_date_time_and_placement: noop, // "Schedule in Meta": nothing changes but the status

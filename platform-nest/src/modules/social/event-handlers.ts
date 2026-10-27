@@ -182,6 +182,9 @@ interface ClientReviewRequestedPayload {
   clientId?: string;
   projectId?: string | null;
   postTitle?: string;
+  /** SCP-2: set by the pipeline's `requestReviews` (BFF §63.14). Its presence says this is a pipeline post, which the client
+   *  approves per post on `/portal/social`; a Composer post has none and keeps the per-variant page. */
+  postId?: string;
   [key: string]: unknown;
 }
 
@@ -205,7 +208,9 @@ export async function handleClientReviewRequested(event: OutboxEvent): Promise<v
 
   await notifyBestEffort(event.tenantId, null, recipients, "social.client_review.requested", {
     title: `A post is ready for your review${payload.postTitle ? `: ${payload.postTitle}` : ""}`,
-    href: "/portal/social-reviews",
+    // SCP-2 (BFF §63.9, SCP-Q8): a pipeline post opens on the approval page, shareable and through the portal sign-in; a Composer
+    // post keeps the per-variant review page.
+    href: typeof payload.postId === "string" && payload.postId ? `/portal/social?post=${payload.postId}` : "/portal/social-reviews",
     entityType: "social_post_client_review",
     entityId: payload.reviewId,
     severity: "info",
