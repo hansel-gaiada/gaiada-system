@@ -95,14 +95,14 @@ describe("the phone's bottom bar", () => {
     expect(screen.getAllByRole("navigation")).toHaveLength(2);
   });
 
-  it("holds Home, Search, Create and Tasks in that order, icon only and named by aria-label (Profile is ticketed, so absent)", () => {
+  it("holds Home, Search, Create, Tasks and Profile in that order, icon only and named by aria-label", () => {
     draw(modelFor(officer));
     const slots = Array.from(bar().querySelectorAll("a, button"));
-    expect(slots.map((s) => s.getAttribute("aria-label"))).toEqual(["Home", "Search", "Create", "Tasks"]);
+    expect(slots.map((s) => s.getAttribute("aria-label"))).toEqual(["Home", "Search", "Create", "Tasks", "Profile"]);
     for (const s of slots) expect(s.textContent).toBe("");
     expect(within(bar()).getByRole("link", { name: "Home" })).toHaveAttribute("href", "/departments/d-soc");
     expect(within(bar()).getByRole("link", { name: "Tasks" })).toHaveAttribute("href", "/me/tasks");
-    expect(within(bar()).queryByRole("link", { name: "Profile" })).toBeNull();
+    expect(within(bar()).getByRole("link", { name: "Profile" })).toHaveAttribute("href", "/departments/d-soc/profile");
   });
 
   it("Search opens the command palette with the event the top bar's field uses", () => {

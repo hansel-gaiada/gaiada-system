@@ -1,0 +1,85 @@
+/* SCP-1k, SCP-1m — the Social Media client page: header, tabs, Plan grid, Stories, Calendar, List and the create bar. Tokens only: no colour, radius or
+   shadow literal and no uppercase transform (the tokens guard), so the Social skin (SCP-K) restyles it by changing tokens and nothing here. It builds on the
+   `.scp-*` classes of cycles.css and allocation.css, which every importer of this file also imports. The phase colours are the status tokens; the label
+   is always written beside the colour, so colour is never the only signal. */
+
+.scp-client { display: grid; gap: 20px; }
+
+/* Header */
+.scp-chead { display: grid; gap: 10px; }
+.scp-chead__top { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; justify-content: space-between; }
+.scp-chead__name { font: 700 20px var(--font-body); color: var(--text-primary); margin: 0; }
+.scp-chead__meta { font: 400 12px var(--font-body); color: var(--erp-ink-60); margin: 0; }
+.scp-chead__line { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; font: 400 13px var(--font-body); color: var(--text-primary); margin: 0; }
+.scp-chead__count { font: 700 16px var(--font-body); font-variant-numeric: tabular-nums; }
+.scp-chead__beside { font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.scp-chead__tone { font: 400 13px/1.5 var(--font-body); color: var(--text-primary); margin: 0; max-width: 72ch; }
+.scp-highlights { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.scp-highlight { border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); padding: 4px 10px; font: 400 12px var(--font-body); color: var(--text-primary); }
+.scp-highlight b { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* Tabs */
+.scp-ctabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 0.5px solid var(--erp-hairline); }
+.scp-ctab { font: 600 13px var(--font-body); color: var(--erp-ink-60); text-decoration: none; padding: 8px 12px; border-bottom: 2px solid transparent; margin-bottom: -0.5px; }
+.scp-ctab:hover { color: var(--text-primary); background: var(--tint-hover); }
+.scp-ctab[aria-current="page"] { color: var(--text-primary); border-bottom-color: var(--accent-fg); }
+
+/* The create bar */
+.scp-create { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.scp-create__panel { border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); padding: 14px; display: grid; gap: 12px; }
+.scp-create__title { font: 700 13px var(--font-body); color: var(--text-primary); margin: 0; }
+.scp-create__flag { font: 700 11px var(--font-body); color: var(--status-warning-fg); }
+
+/* Plan and Stories: a grid of post cards and empty slots */
+.scp-plan__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; list-style: none; margin: 0; padding: 0; }
+.scp-plan__sub { font: 700 11px var(--font-body); letter-spacing: 0.06em; color: var(--erp-ink-60); margin: 0 0 8px; }
+.scp-pcard {
+  display: grid; gap: 6px; align-content: start; padding: 10px 12px; min-height: 96px;
+  border: 0.5px solid var(--erp-hairline); border-left: 4px solid var(--scp-phase, var(--status-idle)); border-radius: var(--radius-md);
+  text-decoration: none; color: var(--text-primary); background: transparent;
+}
+.scp-pcard:hover { background: var(--tint-hover); }
+.scp-pcard__title { font: 600 13px/1.3 var(--font-body); margin: 0; }
+.scp-pcard__meta { font: 400 11px var(--font-body); color: var(--erp-ink-60); display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.scp-pcard__flag { font: 700 10px var(--font-body); letter-spacing: 0.06em; color: var(--status-warning-fg); }
+.scp-slot--empty {
+  display: grid; align-content: center; justify-items: start; gap: 4px; min-height: 96px;
+  border: 0.5px dashed var(--erp-hairline); border-radius: var(--radius-md); padding: 10px 12px; color: var(--erp-ink-60); font: 400 12px var(--font-body);
+}
+.scp-slot--empty a { font: 600 12px var(--font-body); color: var(--accent-fg); }
+
+/* The phase legend */
+.scp-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; list-style: none; margin: 0 0 12px; padding: 0; font: 400 12px var(--font-body); color: var(--text-primary); }
+.scp-legend__item { display: inline-flex; align-items: center; gap: 6px; }
+.scp-legend__dot { width: 10px; height: 10px; border-radius: var(--radius-sm); background: var(--scp-phase, var(--status-idle)); flex: none; }
+
+/* The calendar: Monday first, ruled like the rest of the Social pages */
+.scp-cal { width: 100%; table-layout: fixed; border-collapse: collapse; font: 400 12px var(--font-body); color: var(--text-primary); }
+.scp-cal caption { text-align: left; font: 400 12px var(--font-body); color: var(--erp-ink-60); padding: 0 0 8px; }
+.scp-cal th { text-align: left; font: 700 10px var(--font-body); letter-spacing: 0.06em; color: var(--erp-ink-60); padding: 6px 8px; border-bottom: 0.5px solid var(--erp-hairline); }
+.scp-cal td { vertical-align: top; height: 92px; padding: 4px 6px; border: 0.5px solid var(--erp-hairline-soft); }
+.scp-cal__day { font: 600 11px var(--font-body); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.scp-cal__out { background: var(--tint-hover); }
+.scp-cal__out .scp-cal__day { color: var(--erp-ink-60); font-weight: 400; }
+.scp-cal__today .scp-cal__day { color: var(--accent-fg); }
+.scp-cal__items { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 3px; }
+.scp-cal__post {
+  display: block; padding: 2px 5px; border-left: 3px solid var(--scp-phase, var(--status-idle)); text-decoration: none; color: var(--text-primary);
+  font: 400 11px/1.3 var(--font-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.scp-cal__post:hover { background: var(--tint-hover); }
+.scp-cal__sim { font: 700 9px var(--font-body); color: var(--status-warning-fg); }
+
+/* The List */
+.scp-list__bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 10px; }
+.scp-list__results { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 4px; font: 400 12px var(--font-body); color: var(--text-primary); }
+.scp-list__result--ok { color: var(--status-ok-fg); }
+.scp-list__result--refused { color: var(--status-critical-fg); }
+.scp-phasecell { display: inline-flex; align-items: center; gap: 6px; }
+.scp-phasecell__dot { width: 8px; height: 8px; border-radius: var(--radius-sm); background: var(--scp-phase, var(--status-idle)); flex: none; }
+
+/* The switcher */
+.scp-switch { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; list-style: none; margin: 0; padding: 0; }
+.scp-switch__card { display: grid; gap: 6px; padding: 12px 14px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); text-decoration: none; color: var(--text-primary); }
+.scp-switch__card:hover { background: var(--tint-hover); }
+.scp-switch__name { font: 700 14px var(--font-body); margin: 0; }

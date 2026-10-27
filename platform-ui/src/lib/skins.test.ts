@@ -34,9 +34,9 @@ describe("skins: switched on", () => {
   });
 
   it("Social is on, yet no pinned entry points at a page that does not exist: the unbuilt ones stay ticketed", () => {
-    // Settings (SCP-1c, `{dept}/settings`) and Messages (SCP-1j, `{dept}/messages`) are built, so their pins lost their tickets; the rest wait for SCP-1k and SCP-5d.
+    // Settings (SCP-1c), Messages (SCP-1j) and Profile (SCP-1k) are built, so their pins lost their tickets; Dashboard waits for SCP-5d.
     const ticketed = SKINS.social.pinned!.filter((p) => p.ticket).map((p) => p.key).sort();
-    expect(ticketed).toEqual(["dashboard", "profile"]);
+    expect(ticketed).toEqual(["dashboard"]);
   });
 });
 
@@ -92,7 +92,7 @@ describe("skins: the pinned menu", () => {
   it("resolves only to pages the person's model offers, in order, and never a planned one", () => {
     const soc = wsByKey(model(me([member()]), socialTree, { on: ["standard", "social"] }), "social-media");
     const pinned = pinnedFor(soc.skin, allRows(soc))!;
-    expect(pinned.map((p) => p.key)).toEqual(["home", "search", "messages", "notifications", "tasks", "create", "calendar", "reports", "saved", "assistant"]);
+    expect(pinned.map((p) => p.key)).toEqual(["home", "search", "messages", "notifications", "tasks", "create", "calendar", "reports", "saved", "profile", "assistant"]);
     const offered = new Set(allRows(soc).flatMap((r) => r.tabs.map((t) => t.href)));
     for (const p of pinned) if (p.kind === "link") expect(offered.has(p.href), p.key).toBe(true);
     expect(pinned.find((p) => p.key === "home")).toMatchObject({ kind: "link", label: "Home", href: "/departments/d-soc" });
@@ -246,8 +246,8 @@ describe("skins: the phone (SCP-Ke)", () => {
     expect(SKINS.social.phoneTop).toEqual(["notifications", "messages"]);
   });
 
-  it("the bar holds the entries the person is offered, in the skin's order; Profile is absent while ticketed", () => {
-    expect(phoneBarFor("social", socialPins()).map((p) => p.key)).toEqual(["home", "search", "create", "tasks"]);
+  it("the bar holds the entries the person is offered, in the skin's order; Profile (SCP-1k) fills the fifth slot by itself", () => {
+    expect(phoneBarFor("social", socialPins()).map((p) => p.key)).toEqual(["home", "search", "create", "tasks", "profile"]);
   });
 
   it("the top holds Notifications and Messages (SCP-1j built its page), in the skin's order", () => {
