@@ -52,7 +52,7 @@
 // proofread -> client, skipping the HoD approval, Creative and the final check (`approve_copy`'s `to` is `client` when `changedOnly`).
 // So for a post with `changed_only` true that is in `proofread`, or in `changes` returning to `proofread` (the `client_copy` case, which
 // `return_copy` also sets while `changedOnly`), or blocked from either of those, the steps `hod`, `design` and `final` do not remain:
-//     changes (client_copy)   proofread, client, schedule
+//     changes (client_copy: `change_by` client, back to proofread)   proofread, client, schedule
 //     proofread               client, schedule
 // The skipped steps are DERIVED from the fixture, never retyped: the steps strictly between `proofread` and the status `approve_copy`
 // goes to when `changedOnly` is true (`changedOnlySkippedSteps`). A fixture edit that moves that target changes the answer, and the test
@@ -286,8 +286,9 @@ export function remainingSteps(post: HealthPost): StepKey[] | null {
   if (status === "changes") {
     const i = stepIndex(post.returnTo ?? "");
     const from = i >= 0 ? STEP_KEYS.slice(i) : [...STEP_KEYS];
-    // Loop e: only a copy change returning to proofread skips the middle steps.
-    return post.changedOnly === true && i === stepIndex("proofread") ? withoutChangedOnlySkips(from) : from;
+    // Loop e: only the CLIENT's copy change (`client_copy`, returning to proofread) skips the middle steps. The database allows
+    // `changed_only` only with a client or no change case, so any other case carrying it cannot arise and takes the cautious path.
+    return post.changedOnly === true && post.changeBy === "client" && i === stepIndex("proofread") ? withoutChangedOnlySkips(from) : from;
   }
   const i = stepIndex(status);
   if (i < 0) return [...STEP_KEYS];
