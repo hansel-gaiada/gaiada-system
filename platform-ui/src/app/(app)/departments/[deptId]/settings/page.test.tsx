@@ -341,6 +341,7 @@ describe("without the right to plan: readable, every control disabled WITH the r
   it("with canPlan the same controls are enabled and carry no reason", async () => {
     vi.mocked(getSocialSettings).mockResolvedValue(ok(settings({ canPlan: true })));
     vi.mocked(getCycleTable).mockResolvedValue(ok(table({ canPlan: true })));
+    vi.mocked(getAllocation).mockResolvedValue(ok([alloc({ canPlan: true })]));
     await mount();
     expect(screen.getByLabelText(/Buffer \(working days\)/)).toBeEnabled();
     expect(screen.getByLabelText("Deadline for Brand Alpha")).toBeEnabled();
