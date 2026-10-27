@@ -55,30 +55,40 @@ describe.skipIf(!TEST_URL)("social calendar (SCP-1k)", () => {
   let A: string; // the agency: social on
   let C: string; // another company: social on
   const U: Record<string, string> = {};
-  let engA: { id: string; clientId: string };
-  let engB: { id: string; clientId: string };
-  let engC: { id: string; clientId: string };
+  type Eng = { id: string; clientId: string; cycleId: string };
+  let engA: Eng;
+  let engB: Eng;
+  let engC: Eng;
   const ids: Record<string, string> = {};
 
   const get = (who: string, qs: string, tenant = A) =>
     app.inject({ method: "GET", url: `/api/${tenant}/modules/social/calendar${qs}`, headers: asUser(who) });
 
-  async function makeEngagement(tenant: string, clientName: string): Promise<{ id: string; clientId: string }> {
+  /** An engagement with one cycle (a pipeline post needs a cycle: `social_posts_pipeline_needs_cycle_ck`). The posts' own dates are what the read goes by. */
+  async function makeEngagement(tenant: string, clientName: string): Promise<Eng> {
     const clientId = await createClient(tenant, clientName);
     const id = newId();
+    const cycleId = newId();
     await withTenants(
       [tenant],
-      (c) => c.query(
-        `INSERT INTO social_engagements (id, tenant_id, client_id, name, status) VALUES ($1, $2, $3, $4, 'active')`,
-        [id, tenant, clientId, `${clientName} engagement`],
-      ),
+      async (c) => {
+        await c.query(
+          `INSERT INTO social_engagements (id, tenant_id, client_id, name, status) VALUES ($1, $2, $3, $4, 'active')`,
+          [id, tenant, clientId, `${clientName} engagement`],
+        );
+        await c.query(
+          `INSERT INTO social_cycles (id, tenant_id, engagement_id, month, deadline, ready_by, origin_site)
+           VALUES ($1, $2, $3, '2026-03-01', '2026-02-26', '2026-02-24', 'central')`,
+          [cycleId, tenant, id],
+        );
+      },
       { modules: ["social"] },
     );
-    return { id, clientId };
+    return { id, clientId, cycleId };
   }
 
   async function insertPost(
-    tenant: string, e: { id: string }, title: string, at: string | null,
+    tenant: string, e: Eng, title: string, at: string | null,
     o: {
       status?: string | null; format?: string; changeBy?: string; changeKind?: string; returnTo?: string; blockedFrom?: string; archived?: boolean;
       deleted?: boolean; simulated?: boolean; archivedBy?: string;
@@ -89,11 +99,11 @@ describe.skipIf(!TEST_URL)("social calendar (SCP-1k)", () => {
     await withTenants(
       [tenant],
       (c) => c.query(
-        `INSERT INTO social_posts (id, tenant_id, engagement_id, title, scheduled_at, pipeline_status, status_since, format,
+        `INSERT INTO social_posts (id, tenant_id, engagement_id, cycle_id, title, scheduled_at, pipeline_status, status_since, format,
                                    change_by, change_kind, return_to, change_note,
                                    blocked_from, block_waiting_on, block_reason, blocked_at,
                                    archived_at, archived_by, archive_reason, deleted_at, simulated)
-         VALUES ($1, $2, $3, $4, $5::timestamptz, $6, CASE WHEN $6::text IS NULL THEN NULL ELSE now() END, $7,
+         VALUES ($1, $2, $3, CASE WHEN $6::text IS NULL THEN NULL ELSE $16::uuid END, $4, $5::timestamptz, $6, CASE WHEN $6::text IS NULL THEN NULL ELSE now() END, $7,
                  $8, $9, $10, CASE WHEN $8::text IS NULL THEN NULL ELSE 'a note' END,
                  $11, CASE WHEN $11::text IS NULL THEN NULL ELSE 'officer' END, CASE WHEN $11::text IS NULL THEN NULL ELSE 'waiting' END,
                  CASE WHEN $11::text IS NULL THEN NULL ELSE now() END,
@@ -101,7 +111,7 @@ describe.skipIf(!TEST_URL)("social calendar (SCP-1k)", () => {
                  CASE WHEN $12::boolean THEN 'archived' ELSE NULL END,
                  CASE WHEN $14::boolean THEN now() ELSE NULL END, $15::boolean)`,
         [id, tenant, e.id, title, at, status, o.format ?? null, o.changeBy ?? null, o.changeKind ?? null, o.returnTo ?? null,
-         o.blockedFrom ?? null, o.archived ?? false, o.archivedBy ?? null, o.deleted ?? false, o.simulated ?? false],
+         o.blockedFrom ?? null, o.archived ?? false, o.archivedBy ?? null, o.deleted ?? false, o.simulated ?? false, e.cycleId],
       ),
       { modules: ["social"] },
     );
