@@ -332,7 +332,8 @@ test.describe("the Social skin on a phone (390x844)", () => {
 // ── The Home (SCP-1d): the design's feed ─────────────────────────────────────────────────────────────────────────────────
 
 const HOME_SECTIONS = ["Client stories", "Your turn", "Waiting on others", "Your accounts this cycle", "Tasks given to you", "Reports due"];
-const home = (page: Page) => page.getByTestId("social-home");
+// Scoped to the page body: while Next streams the Home in, its markup also sits once, hidden, in the stream's own container.
+const home = (page: Page) => page.locator("#main-content").getByTestId("social-home");
 /** The Home streams in behind its own boundary: wait for it, so a scan or a count never sees the loading state. */
 async function homeReady(page: Page) {
   await expect(home(page)).toBeVisible();
