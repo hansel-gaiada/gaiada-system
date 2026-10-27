@@ -8,7 +8,7 @@ import { defineConfig, devices } from "@playwright/test";
 const PORT = Number(process.env.E2E_PORT) || 3005;
 // The WebDesk specs only pass against the stubbed BFF (playwright.webdesk.config.ts); this config has no
 // stub, so no project here may ever pick them up.
-const WEBDESK_STUB_SPECS = /(webdesk-content|webdesk-editorial|portal-website|portal-conversation)\.spec\.ts/;
+const WEBDESK_STUB_SPECS = /(webdesk-content|webdesk-editorial|webdesk-assist|webdesk-dashboard|portal-website|portal-conversation)\.spec\.ts/;
 
 export default defineConfig({
   testDir: "./e2e",
