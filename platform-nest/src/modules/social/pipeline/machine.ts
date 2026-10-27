@@ -301,7 +301,7 @@ function requireCase(post: ChangeColumns, status: string): string {
   return cc;
 }
 
-type StatusPost = ChangeColumns & Pick<PipelinePostState, "pipelineStatus" | "scheduleVia" | "blockWaitingOn" | "creativeState">;
+export type StatusPost = ChangeColumns & Pick<PipelinePostState, "pipelineStatus" | "scheduleVia" | "blockWaitingOn" | "creativeState">;
 
 /** The phase people see (fixture `phaseOf`, `changes` by the change case). */
 export function phaseOf(post: Pick<StatusPost, "pipelineStatus" | "changeBy" | "changeKind" | "returnTo">): string | null {

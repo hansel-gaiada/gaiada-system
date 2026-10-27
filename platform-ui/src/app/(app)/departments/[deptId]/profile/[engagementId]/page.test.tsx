@@ -19,14 +19,14 @@ vi.mock("@/lib/companyContext", () => ({ activeCompany: vi.fn(() => ({ id: "co-a
 vi.mock("@/lib/departments", () => ({ getDepartment: vi.fn() }));
 vi.mock("@/lib/campaigns-data", () => ({ readOrgRoot: vi.fn() }));
 vi.mock("@/lib/socialAllocation-data", () => ({ getAllocation: vi.fn(), getOfficerCandidates: vi.fn() }));
-vi.mock("@/lib/socialClient-data", () => ({ getCycleView: vi.fn(), getClientCalendar: vi.fn(), getClientBrandBook: vi.fn(), getEngagementProjectId: vi.fn() }));
+vi.mock("@/lib/socialClient-data", () => ({ getCycleView: vi.fn(), getClientCalendar: vi.fn(), getClientBrandBook: vi.fn(), getEngagementProjectId: vi.fn(), getFeedPreview: vi.fn() }));
 vi.mock("@/lib/socialAllocationActions", () => ({ saveAllocation: vi.fn(), loadBrandBook: vi.fn(), saveBrandBook: vi.fn() }));
-vi.mock("@/lib/socialClientActions", () => ({ bulkPostAction: vi.fn(), createClientPost: vi.fn() }));
+vi.mock("@/lib/socialClientActions", () => ({ bulkPostAction: vi.fn(), createClientPost: vi.fn(), swapFeedPreview: vi.fn() }));
 
 import { getDepartment } from "@/lib/departments";
 import { readOrgRoot } from "@/lib/campaigns-data";
 import { getAllocation } from "@/lib/socialAllocation-data";
-import { getClientBrandBook, getClientCalendar, getCycleView, getEngagementProjectId } from "@/lib/socialClient-data";
+import { getClientBrandBook, getClientCalendar, getCycleView, getEngagementProjectId, getFeedPreview } from "@/lib/socialClient-data";
 import { loadBrandBook } from "@/lib/socialAllocationActions";
 import { EMPTY_BRAND_BOOK } from "@/lib/socialBrandBook";
 import { node } from "@/lib/workspaceFixtures";
@@ -75,6 +75,7 @@ beforeEach(() => {
   vi.mocked(getAllocation).mockReset().mockResolvedValue(ok([row()]));
   vi.mocked(getCycleView).mockReset().mockResolvedValue(ok(cycle()));
   vi.mocked(getClientCalendar).mockReset().mockResolvedValue(ok([]));
+  vi.mocked(getFeedPreview).mockReset().mockResolvedValue(ok({ items: [], liveHidden: 0 }));
   vi.mocked(getClientBrandBook).mockReset().mockResolvedValue(ok({ ...EMPTY_BRAND_BOOK, toneSummary: "Warm and direct.", contentPillars: ["Seasonal"] }));
   vi.mocked(getEngagementProjectId).mockReset().mockResolvedValue(ok(null));
   vi.mocked(loadBrandBook).mockReset().mockResolvedValue({ ok: true, book: { ...EMPTY_BRAND_BOOK }, exists: true });
@@ -142,13 +143,14 @@ describe("the header", () => {
 });
 
 describe("the tabs", () => {
-  it("lists Plan, Stories, Calendar, List and Client profile as links by ?tab=, with the current one marked, and no Feed preview", async () => {
+  it("lists Plan, Stories, Calendar, Feed preview, List and Client profile as links by ?tab=, with the current one marked", async () => {
     await mount({ tab: "list" });
     const nav = screen.getByRole("navigation", { name: "This client" });
     expect(within(nav).getAllByRole("link").map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
       ["Plan", "/departments/d-soc/profile/e-alpha?tab=plan"],
       ["Stories", "/departments/d-soc/profile/e-alpha?tab=stories"],
       ["Calendar", "/departments/d-soc/profile/e-alpha?tab=calendar"],
+      ["Feed preview", "/departments/d-soc/profile/e-alpha?tab=preview"],
       ["List", "/departments/d-soc/profile/e-alpha?tab=list"],
       ["Client profile", "/departments/d-soc/profile/e-alpha?tab=brand"],
     ]);
@@ -204,8 +206,8 @@ describe("Plan", () => {
     expect(document.querySelector("[data-slot='empty']")).toBeNull();
   });
 
-  it("falls back to Plan for ?tab=preview, which is SCP-3d's", async () => {
-    await mount({ tab: "preview" });
+  it("falls back to Plan for a ?tab= the page does not have", async () => {
+    await mount({ tab: "nonsense" });
     expect(screen.getByRole("list", { name: "Counted posts and empty slots" })).toBeInTheDocument();
   });
 });
@@ -266,6 +268,39 @@ describe("Calendar", () => {
     expect(screen.queryByRole("table")).toBeNull();
     expect(screen.getByText(/This client's calendar cannot be read right now/)).toBeInTheDocument();
     expect(screen.getByText("calendar: not a list")).toBeInTheDocument();
+  });
+});
+
+describe("Feed preview (SCP-3d)", () => {
+  const feedItem = (over: Record<string, unknown>) => ({
+    postId: "p-1", scheduledAt: "2026-10-20T09:30:00.000Z", thumbFileId: null, pipelineStatus: "planned", locked: false, title: "Harvest teaser", format: "feed",
+    phase: "brief", simulated: false, dateMove: "edit", dateMoveRefusal: null, ...over,
+  });
+
+  it("reads GET feed-preview for this client on its own tab only, and draws the grid without needing a cycle", async () => {
+    vi.mocked(getFeedPreview).mockResolvedValue(ok({ items: [feedItem({}), feedItem({ postId: "p-2", title: "Studio day" })] as never, liveHidden: 0 }));
+    vi.mocked(getAllocation).mockResolvedValue(ok([row({ thisCycle: null })]));
+    await mount({ tab: "preview" });
+    expect(getFeedPreview).toHaveBeenCalledWith("u-1", "co-a", "e-alpha");
+    expect(getCycleView).not.toHaveBeenCalled();
+    expect(screen.getByRole("list", { name: "The client's posts, newest first" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Feed preview" })).toHaveAttribute("aria-current", "page");
+    cleanup();
+    vi.mocked(getFeedPreview).mockClear();
+    await mount({ tab: "list" });
+    expect(getFeedPreview).not.toHaveBeenCalled(); // read on its own tab only
+  });
+
+  it("says a refused or failed read in words, never as an empty grid", async () => {
+    vi.mocked(getFeedPreview).mockResolvedValue({ kind: "forbidden" });
+    await mount({ tab: "preview" });
+    expect(screen.getByText("You don't have access to this client's feed preview.")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "The client's posts, newest first" })).toBeNull();
+    cleanup();
+    vi.mocked(getFeedPreview).mockResolvedValue({ kind: "unavailable", reason: "feed preview: not a list" });
+    await mount({ tab: "preview" });
+    expect(screen.getByText(/This client's feed preview cannot be read right now/)).toBeInTheDocument();
+    expect(screen.getByText("feed preview: not a list")).toBeInTheDocument();
   });
 });
 

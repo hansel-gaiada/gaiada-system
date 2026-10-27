@@ -157,6 +157,8 @@ import { SocialPipelineController } from "./modules/social/pipeline/pipeline.con
 // route prefix; no route path collides (`settings`, `cycles`, `cycles/:cycleId/health` are new).
 import { SocialCyclesController } from "./modules/social/pipeline/cycles.controller";
 import { SocialCalendarController } from "./modules/social/pipeline/calendar.controller";
+// SCP-3d: the client's feed preview, its grid and the swap of two posts' dates (BFF §63.10), on its own controller under the same prefix.
+import { SocialFeedPreviewController } from "./modules/social/pipeline/feed-preview.controller";
 import { SocialAllocationController } from "./modules/social/pipeline/allocation.controller";
 import { SocialFeedController } from "./modules/social/pipeline/feed.controller";
 // SCP-1h: the designer's queue (`GET design-queue`), on its own controller under the same route prefix.
@@ -282,6 +284,8 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     SocialFeedController,
     // SCP-1k: the client calendar read (BFF §63.10 `GET calendar`).
     SocialCalendarController,
+    // SCP-3d: `GET/POST engagements/:engagementId/feed-preview[/swap]` (BFF §63.10).
+    SocialFeedPreviewController,
     SocialDesignQueueController,
     SocialMetricsController,
     // SMM-38 phase 38c: LinkedIn's OAuth grant flow — `LinkedInOAuthController` shares

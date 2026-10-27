@@ -83,3 +83,36 @@
 .scp-switch__card { display: grid; gap: 6px; padding: 12px 14px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); text-decoration: none; color: var(--text-primary); }
 .scp-switch__card:hover { background: var(--tint-hover); }
 .scp-switch__name { font: 700 14px var(--font-body); margin: 0; }
+
+/* The Feed preview (SCP-3d): the client's grid, three to a row, square, newest first. A cell is a button (select it, then pick the other post: the keyboard path)
+   inside a draggable cell; a live post is locked and not draggable. Tokens only; the phase colour and the status words are always both there. */
+.scp-feedwrap { display: grid; gap: 12px; }
+.scp-feed__help { max-width: 72ch; margin: 0; }
+.scp-feed__status { margin: 0; min-height: 1.4em; font: 400 13px/1.4 var(--font-body); color: var(--text-primary); }
+.scp-feed__status[data-kind="error"] { color: var(--status-critical-fg); }
+.scp-feed__status[data-kind="ok"] { color: var(--status-ok-fg); }
+.scp-feed { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; list-style: none; margin: 0; padding: 0; max-width: 640px; }
+.scp-feed__cell { position: relative; aspect-ratio: 1 / 1; border: 0.5px solid var(--erp-hairline); border-bottom: 3px solid var(--scp-phase, var(--status-idle)); background: var(--tint-hover); overflow: hidden; }
+.scp-feed__cell[draggable="true"] { cursor: grab; }
+.scp-feed__cell[data-dragging="true"] { opacity: 0.5; }
+.scp-feed__cell[data-over="true"] { outline: 2px dashed var(--accent-fg); outline-offset: -3px; }
+.scp-feed__cell[data-picked="true"] { outline: 3px solid var(--accent-fg); outline-offset: -3px; }
+.scp-feed__tile { position: absolute; inset: 0; display: block; width: 100%; height: 100%; padding: 0; margin: 0; border: 0; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
+.scp-feed__tile[aria-disabled="true"] { cursor: default; }
+.scp-feed__tile:focus-visible { outline: 3px solid var(--accent-fg); outline-offset: -3px; }
+.scp-feed__media { display: grid; place-items: center; width: 100%; height: 100%; overflow: hidden; }
+.scp-feed__media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scp-feed__ph { padding: 8px; font: 600 12px/1.3 var(--font-body); color: var(--erp-ink-60); text-align: center; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; }
+.scp-feed__cap { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; padding: 4px 6px; background: var(--surface-card); border-top: 0.5px solid var(--erp-hairline); font: 400 11px/1.2 var(--font-body); color: var(--text-primary); }
+.scp-feed__dot { width: 8px; height: 8px; border-radius: var(--radius-sm); background: var(--scp-phase, var(--status-idle)); flex: none; }
+.scp-feed__st { font-weight: 700; }
+.scp-feed__when { color: var(--erp-ink-60); font-variant-numeric: tabular-nums; }
+.scp-feed__lock { position: absolute; top: 4px; left: 4px; padding: 1px 6px; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm); font: 700 10px var(--font-body); color: var(--text-primary); }
+.scp-feed__sim { position: absolute; top: 4px; right: 4px; padding: 1px 6px; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm); font: 700 9px var(--font-body); color: var(--status-warning-fg); }
+.scp-feed__open { position: absolute; right: 4px; bottom: 28px; padding: 1px 6px; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm); font: 600 11px var(--font-body); color: var(--accent-fg); text-decoration: none; }
+.scp-feed__open:focus-visible { outline: 2px solid var(--accent-fg); outline-offset: 1px; }
+.scp-feed__confirm { display: grid; gap: 8px; max-width: 640px; padding: 12px 14px; border: 0.5px solid var(--status-warning-fg); border-radius: var(--radius-md); background: var(--surface-card); }
+.scp-feed__confirm-title { margin: 0; font: 700 13px var(--font-body); color: var(--text-primary); }
+.scp-feed__confirm-body { margin: 0; font: 400 13px/1.45 var(--font-body); color: var(--text-primary); }
+.scp-feed__confirm-act { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 480px) { .scp-feed { gap: 2px; } .scp-feed__when { display: none; } }

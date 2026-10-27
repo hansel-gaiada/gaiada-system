@@ -14,17 +14,18 @@ const str = (v: unknown): string | null => (typeof v === "string" && v ? v : nul
 
 // ── The tabs ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** The client page's tabs, by `?tab=`. The Feed preview (`preview`) is SCP-3d's: it is not offered until that ticket builds it. */
+/** The client page's tabs, by `?tab=` (BFF §63.17). The Feed preview (`preview`, SCP-3d) is the client's grid, with drag-to-swap of publish dates. */
 export const CLIENT_TABS = [
   { key: "plan", label: "Plan" },
   { key: "stories", label: "Stories" },
   { key: "calendar", label: "Calendar" },
+  { key: "preview", label: "Feed preview" },
   { key: "list", label: "List" },
   { key: "brand", label: "Client profile" },
 ] as const;
 export type ClientTab = (typeof CLIENT_TABS)[number]["key"];
 
-/** A `?tab=` value (or the first of several) as a tab; Plan for anything the page does not have (so a bookmarked `preview` opens Plan). */
+/** A `?tab=` value (or the first of several) as a tab; Plan for anything the page does not have. */
 export function parseClientTab(v: string | string[] | undefined): ClientTab {
   const s = typeof v === "string" ? v : v?.[0];
   return CLIENT_TABS.find((t) => t.key === s)?.key ?? "plan";

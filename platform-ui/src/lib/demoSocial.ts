@@ -11,6 +11,7 @@ import {
   type DemoBrandProfile, type DemoAllocation,
 } from "./demoSocialPipeline";
 import { demoBulkActions, runDemoPipelineAction, runDemoPipelineWrite } from "./demoSocialPipelineRun";
+import { demoFeedPreviewRoute } from "./demoSocialFeedPreview";
 // SMM-14 — DEMO_MODE fixtures for the Social Media department (calendar + composer, SMM-12).
 // Mirrors demoPipeline.ts's STATEFUL in-memory-store convention exactly (module-level arrays
 // mutate across requests within one running dev-server process; resets on restart). Before this
@@ -1052,6 +1053,8 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
   }
   const cycleHealthM = tail.match(/^cycles\/([^/]+)\/health$/);
   if (cycleHealthM && m === "GET") return demoCycleHealth(cycleHealthM[1]);
+  // ── SCP-3d: the client's feed preview and its swap (BFF §63.10), in demoSocialFeedPreview.ts ─────────────────
+  { const feedPreview = demoFeedPreviewRoute(m, tail, body, userId); if (feedPreview) return feedPreview; }
   // ── SCP-1k: the client calendar (BFF §63.10) ─────────────────────────────────────────────────────
   if (tail === "calendar" && m === "GET") return demoCalendar(params);
   // ── SCP-1m: create a post in a cycle (BFF §63.6.1), and SCP-1k's bulk actions (§63.6.7) ───────────

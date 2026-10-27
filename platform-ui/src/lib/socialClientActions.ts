@@ -3,6 +3,7 @@
 //
 //   createClientPost   `POST cycles/:cycleId/posts`   (social_post · create, with author or approve: the cycle's officer or one of the four)
 //   bulkPostAction     `POST posts/actions`           ('send_to_proofread' | 'approve_copy', 1 to 50 items; each item decided on its own)
+//   swapFeedPreview    `POST engagements/:id/feed-preview/swap`   (SCP-3d: two posts trade publish dates, all or nothing; each by the date-move rule)
 //
 // The gates here are hints; the server's 403 is the boundary. Every refusal comes back as the contract's own code in `error` (and its `field`),
 // plus the words for it in `message`; the screens show the words.
@@ -11,6 +12,8 @@ import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
 import { asBulkResults, createRefusalText, type BulkAction, type BulkItem, type BulkResult, type NewPostInput } from "./socialClient";
+import { refusalFromBody } from "./socialPipeline";
+import { asSwapAnswer, swapRefusalText, type SwapInput, type SwappedPost } from "./socialFeedPreview";
 
 export type ClientActionResult<T> = ({ ok: true } & T) | { ok: false; error: string; field?: string; message: string };
 
@@ -19,7 +22,7 @@ const base = (t: string) => `/api/${encodeURIComponent(t)}/modules/social`;
 const BULK_MAX = 50;
 
 async function run<T>(
-  words: (code: string, field?: string) => string, fn: (c: { userId: string; tenant: string }) => Promise<T>,
+  words: (code: string, field?: string, e?: PlatformError) => string, fn: (c: { userId: string; tenant: string }) => Promise<T>,
 ): Promise<ClientActionResult<T>> {
   const userId = await getSessionUserId();
   if (!userId) return { ok: false, error: "session_expired", message: "Session expired — sign in again." };
@@ -29,7 +32,7 @@ async function run<T>(
   try {
     return { ok: true, ...(await fn({ userId, tenant })) };
   } catch (e) {
-    if (e instanceof PlatformError) return { ok: false, error: e.message, field: e.field, message: words(e.message, e.field) };
+    if (e instanceof PlatformError) return { ok: false, error: e.message, field: e.field, message: words(e.message, e.field, e) };
     throw e;
   }
 }
@@ -58,4 +61,22 @@ export async function bulkPostAction(action: BulkAction, items: readonly BulkIte
     revalidatePath("/departments", "layout");
     return { results };
   });
+}
+
+/**
+ * Swaps the publish dates of two posts of one client (BFF §63.10). `input` carries each post's status and date as the page showed them: the server answers
+ * 409 `status_changed` when either has moved. All or nothing: one refusal (a locked post, a live one, a client who must be asked about a post that cannot be)
+ * leaves both as they were. `titles` only words a refusal that names a post.
+ */
+export async function swapFeedPreview(engagementId: string, input: SwapInput, titles: Readonly<Record<string, string>> = {}): Promise<ClientActionResult<{ posts: SwappedPost[] }>> {
+  return run(
+    (code, field, e) => swapRefusalText(refusalFromBody(e?.status ?? 0, code, e?.body, field, e?.reason), (id) => titles[id] ?? null),
+    async (c) => {
+      const raw = await platformFetch<unknown>(`${base(c.tenant)}/engagements/${encodeURIComponent(engagementId)}/feed-preview/swap`, c.userId, {
+        method: "POST", body: JSON.stringify(input),
+      });
+      revalidatePath("/departments", "layout");
+      return { posts: asSwapAnswer(raw) };
+    },
+  );
 }
