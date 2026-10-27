@@ -72,6 +72,8 @@ const EXPECTED: Record<CommandName, Omit<CommandMeta, "command">> = {
   "media.usage": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   // M5-W1q (WSK-D84): accepting or rejecting a contributor's quarantined upload: a staff write, MEDIUM / operate.
   "media.review": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  // M5-W1q2 (WSK-D84): the reviewer's byte preview is a read: no editorial principal, no WS4.
+  "media.reviewPreview": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   // M5-L1/L2 — the ERP reads one submission back after a form.received fact: read / webdesk:read.
   "forms.submission.get": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   // M5-L1d — a site's form definitions: forms.define is MEDIUM/operate (schema.apply's family, no WS4), the reads are read.

@@ -70,6 +70,8 @@ export type CommandName =
   | "media.usage"
   // M5-W1q (WSK-D84) -- a staff editor accepts or rejects a contributor's quarantined upload. Carries an editorial principal.
   | "media.review"
+  // M5-W1q2 (WSK-D84) -- the reviewer's byte preview of a quarantined upload: a read, no editorial principal.
+  | "media.reviewPreview"
   // M5-L1/L2 — one form submission read back by the ERP after it sees a Zone B form.received fact.
   | "forms.submission.get"
   // M5-L1d — a site's form definitions: the write (an upsert by (site, key)) and the two reads.
@@ -210,6 +212,12 @@ export const COMMAND_REGISTRY: Readonly<Record<CommandName, CommandMeta>> = Obje
   // public only once content that references it is published (itself HIGH and gated); reject is a soft delete the media-purge
   // job finishes. No WS4 approval. The ERP's own walls (Cerbos `review`, the uploader may not review their own upload) come first.
   "media.review": { command: "media.review", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  // M5-W1q2 (WSK-D84): the reviewer's byte preview. A plain read / webdesk:read like media.list (which already lists the quarantine
+  // queue): it changes nothing and carries no editorial assertion, so the contributor fence cannot live here; the ERP's route
+  // wall (Cerbos `review`, the uploader may not preview their own upload) is what keeps a contributor out. WebDesk's own wall is
+  // the shape of what it returns: ONLY a quarantined, clean, undeleted raster image on the named site, under the tenant's RLS,
+  // and never anything else (the route serves no accepted, rejected, svg, pdf or video byte).
+  "media.reviewPreview": { command: "media.reviewPreview", impactClass: "read", scope: "webdesk:read", jobTracked: false },
   // M5-L1/L2: read / webdesk:read, the same class and scope as every other control read of tenant data
   // (item.get, media.list, ...): the form.received fact is ids-only, so the ERP fetches the authoritative
   // copy here. A submission is personal data, which is why the route is tenant-scoped, refuses a

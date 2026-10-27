@@ -1,6 +1,7 @@
 // WSK-51 — the control plane's live read commands for the content editor (write-plane design §4).
 //
 //   collection.list · collection.get · item.list · item.get · item.versions · item.versionGet · media.list · media.usage
+//   · media.reviewPreview (M5-W1q2: the one read that returns BYTES; see reviewPreview below)
 //   (media.list and media.usage are the WSK-43a media LIBRARY reads: see listMedia / mediaUsage below)
 //
 // (tenant.list is the platform-level read and lives in ../tenants/tenant-reads.service.ts.)
@@ -35,7 +36,7 @@
 // soft-deleted items by default. `?includeDeleted=true` includes them (history), and `?state=deleted`
 // lists only them. `item.get` by id still returns a deleted item (with `deletedAt` set) so the editor
 // can open its history and an operator can reverse the delete; the version reads work too.
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DbService } from "../../db/db.service";
 import { validateCollectionComposition, type CollectionComposition } from "../../delivery/vocabulary/composition";
@@ -48,6 +49,11 @@ import { ControlProblem, problems } from "./content-problem";
 import { findMediaUsage } from "./media-usage";
 import { canonicalAssetPath, toLibraryAsset } from "../../media/library-asset";
 import { MEDIA_ASSET_COLUMNS } from "../../media/media.service";
+import { decodeBucketKey } from "../../media/bucket-key-codec";
+import { STORAGE_ADAPTER } from "../../storage/storage.tokens";
+import type { StorageAdapter } from "../../storage/storage.types";
+import { storageConfig } from "../../storage/storage.config";
+import { isPreviewRasterMime, PREVIEW_MAX_BYTES, previewNotFound, previewTooLarge, previewUnsupported, rasterSignatureMatches } from "./media-review-preview";
 import type { MediaAssetRow } from "../../media/dto";
 import { EDITORIAL_COLUMNS, countOpenComments, loadPolicy, viewOf, type EditorialRow, type EditorialView } from "../editorial/editorial-store";
 import type { ReviewState } from "../editorial/editorial-model";
@@ -252,6 +258,7 @@ export class ContentReadsService {
   constructor(
     private readonly db: DbService,
     private readonly commands: ContentCommandsService,
+    @Inject(STORAGE_ADAPTER) private readonly storage: StorageAdapter,
   ) {}
 
   /** One snapshot, read only, under the tenant's RLS context. */
@@ -788,6 +795,46 @@ export class ContentReadsService {
       const usage = await findMediaUsage(c, { tenantId: tenant.id, siteId, assetId });
       return { assetId, url: canonicalAssetPath(tenant.slug, assetId), total: usage.total, items: usage.items };
     });
+  }
+
+  // ==============================================================================================
+  // media.reviewPreview  (M5-W1q2, WSK-D84)
+  // ==============================================================================================
+  // The reviewer's byte preview of ONE quarantined upload. Returns the bytes ONLY for an asset that is on this site, not deleted,
+  // `review_state = 'quarantined'`, `scan_status = 'clean'`, a raster image (media-review-preview.ts) and within the size cap.
+  // Refusals: a quarantined clean asset of another type is 415 media-preview-unsupported ({mime}); one over the cap is 413
+  // media-preview-too-large; EVERY other case (unknown, malformed id, another site, another tenant, accepted, rejected, deleted,
+  // not clean, no object) is the one 404 media-asset-not-found, so the route is no existence oracle. The row is read in one
+  // read-only transaction under the tenant's RLS; the object is fetched AFTER it closes, so no connection is held across storage I/O.
+  // Nothing is audited (a read, like media.list). The bytes are checked against the stored mime's signature before they leave: a row
+  // that declares a raster type its bytes do not bear is 415, never served.
+  async reviewPreview(tenantSlug: string, siteId: string, assetId: string): Promise<{ mime: string; body: Buffer }> {
+    const { tenant } = await this.commands.resolveTenantSite(tenantSlug, siteId);
+    if (!UUID_RE.test(assetId)) throw previewNotFound();
+    const row = await this.read(tenant.id, async (c) => {
+      const { rows } = await c.query<{ mime: string; size_bytes: string; scan_status: string; review_state: string; deleted_at: Date | null; bucket_key: string }>(
+        `SELECT mime, size_bytes, scan_status, review_state, deleted_at, bucket_key
+           FROM media_assets WHERE id = $1 AND site_id = $2 AND tenant_id = $3`,
+        [assetId, siteId, tenant.id],
+      );
+      return rows[0] ?? null;
+    });
+    if (!row || row.deleted_at !== null || row.review_state !== "quarantined" || row.scan_status !== "clean") throw previewNotFound();
+    if (!isPreviewRasterMime(row.mime)) throw previewUnsupported(row.mime);
+    if (Number(row.size_bytes) > PREVIEW_MAX_BYTES) throw previewTooLarge();
+    const decoded = decodeBucketKey(row.bucket_key);
+    if (!decoded || decoded.bucket !== "media") throw previewNotFound(); // a quarantined upload only ever lands in the media bucket
+    let body: Buffer;
+    try {
+      body = (await this.storage.getObject(storageConfig.bucketName(decoded.bucket), decoded.objectKey)).body;
+    } catch (err) {
+      const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+      if (e?.name === "NotFound" || e?.name === "NoSuchKey" || e?.$metadata?.httpStatusCode === 404) throw previewNotFound();
+      throw err;
+    }
+    if (body.length > PREVIEW_MAX_BYTES) throw previewTooLarge();
+    if (!rasterSignatureMatches(body, row.mime)) throw previewUnsupported(row.mime);
+    return { mime: row.mime, body };
   }
 }
 
