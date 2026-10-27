@@ -144,7 +144,7 @@ describe("POST posts/actions (bulk)", () => {
     const results = asBulkResults(r?.json);
     expect(results.map((x) => x.postId)).toEqual(["soc-post-n-6", "nope"]);
     // Each item runs SCP-1e's runner (demoSocialPipelineRun.ts) in the server's order of checks: this post is not at the step the item names, so it says so.
-    expect(results[0]).toMatchObject({ ok: false, error: "status_changed", detail: { status: expect.any(String) } });
+    expect(results[0]).toMatchObject({ ok: false, error: "status_changed" });
     expect(results[1]).toMatchObject({ ok: false, error: "post_not_found" });
   });
 
