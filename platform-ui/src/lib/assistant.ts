@@ -130,14 +130,17 @@ export interface BrainOption { value: string | null; label: string }
 //
 // THE TWO OLLAMAS ARE DIFFERENT PROVIDERS AND THE LABELS MUST NOT BLUR THAT:
 //   - `ollama` is the LOCAL daemon (`OLLAMA_URL`) — on-box, no egress, no cost.
-//   - `openai` is the OpenAI-COMPATIBLE cloud slot (`OPENAI_BASE_URL`), which in this deployment points
-//     at **Ollama Cloud** (`https://ollama.com/v1`) — see the compose comment on `OPENAI_BASE_URL`.
-//     Same vendor brand, different runtime, different failure modes and cost. A deployment that repoints
-//     `OPENAI_BASE_URL` at something else (real OpenAI, a gateway) should relabel this entry.
+//   - `openai` is the OpenAI-COMPATIBLE cloud slot (`OPENAI_BASE_URL`). Its label is deliberately
+//     GENERIC ("Cloud (default)"): the live endpoint is the company OpenRouter key (GLM 5.3 Flash), and
+//     a deployment may repoint it again, so the label must not name a vendor.
+//
+// AIP-00c: this list is the NAME TABLE only. The picker offers just the options the gateway reports
+// as available (`GET :t/assistant/brains`), plus a thread's stored value, so an old stored value
+// still has a name here even when it is no longer offered.
 export const BRAIN_OPTIONS: BrainOption[] = [
   { value: null, label: "Auto (failover chain)" },
   { value: "ollama", label: "Ollama (local)" },
-  { value: "openai", label: "Ollama Cloud" },
+  { value: "openai", label: "Cloud (default)" },
   { value: "hermes", label: "Hermes" },
   { value: "gemini", label: "Gemini" },
   { value: "claude", label: "Claude" },
@@ -146,6 +149,10 @@ export const BRAIN_OPTIONS: BrainOption[] = [
 export function brainOptionLabel(value: string | null): string {
   return BRAIN_OPTIONS.find((o) => o.value === value)?.label ?? (value ?? "Auto (failover chain)");
 }
+// AIP-00c — `GET :t/assistant/brains`. `brains: null` means the gateway could not be checked (unknown),
+// which is neither "none available" nor an error.
+export interface BrainAvailability { value: string; available: boolean }
+export interface BrainsResult { brains: BrainAvailability[] | null; checkedAt: string }
 export interface SendMessageResult { messageId: string; streamUrl: string }
 export interface StopResult { ok: boolean; stopped: boolean }
 

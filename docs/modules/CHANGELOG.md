@@ -11,6 +11,45 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.184.0` + platform-ui `0.209.0` + wa-chat-bot `0.11.0` - AI plan phase 0: AIP-00c (the brain picker lists only brains that work) and AIP-00b (the bot's old built-in AI gateway removed); AIP-00a designed (2026-10-27) - PROTOTYPED
+
+- **AIP-00c, platform-nest:** new `GET /api/:tenantId/assistant/brains` returns `{brains: [{value, available}], checkedAt}`.
+  - It reads the gateway's `GET /health` `providers.llm`. Only the state `ok` counts as available, and `echo` is never listed.
+  - Nothing else from `/health` is returned: no model names, endpoints, budget or key state.
+  - Answers are cached for 60 s. An unset URL, a network error, the 3 s timeout, a non-2xx answer or a bad shape each give `brains: null`, meaning unknown.
+  - It is authorized like `assistant/capabilities`, so there is no new Cerbos kind or action.
+- **AIP-00c, platform-ui:**
+  - The picker offers Auto plus only the available brains. On the live gateway today that is Auto and "Cloud (default)", the company OpenRouter key.
+  - The `openai` entry, previously labelled "Ollama Cloud", is now "Cloud (default)".
+  - When the list is unknown, the picker shows Auto with a muted line, "Other brains can't be checked right now."
+  - A thread's stored brain that is no longer offered still shows, as "<label> (unavailable)". While the list loads, it keeps its plain label.
+  - The hint sent is unchanged.
+- **AIP-00b, wa-chat-bot:** removed the old built-in AI gateway (`src/gateway/server.ts` and `provider.ts`, with their tests), the `gateway` script, `@google/generative-ai` and the Gemini settings.
+  - The live checks of 2026-10-27 found it running on none of `gda-aicenter`, `sumopod` or `helios`. A port probe of `delphi` over the mesh found nothing on 3002 or 3009.
+  - The bot's chat-surface files in `src/gateway/` stay.
+  - The bot's `/health` now reports `ai: "gateway"` when `GATEWAY_URL` and `GATEWAY_TOKEN` are both set, otherwise `"off"`. Before, it reported "echo" while it was in fact using the ERP gateway. Both variables are set on the live bot.
+- **AIP-00a, docs only:** owner rulings AIP-D13 and AIP-D14, and the design with tickets AIP-00a-1 to AIP-00a-4 in the AI plan §6.1. The two Hermes agents on `helios` move behind a new gateway chat endpoint over the mesh. The endpoint itself is a separate train.
+- **Tests:**
+  - `assistant-brains` 8;
+  - `BrainPicker` 6;
+  - `AssistantWorkspace` 16;
+  - wa-chat-bot 61 files, 535 passed (16 skipped, which need Postgres); wa-chat-bot `tsc` is clean.
+
+### platform-nest `0.183.0` + platform-ui `0.208.0` - SCP-1 wave 2, phase 2: the designer's queue and the asset's source, the content month in PM, the comment audience and the reach guard (FRONTEND-BFF-CONTRACT §63.1, §63.6.6, §63.8, §63.13, §32, §35; PERMISSION-CONTRACT §53.4) (2026-10-27) - PROTOTYPED
+
+- **Designs (SCP-1h).** `GET design-queue`: the posts the caller may design now, narrowed by the two design facts and confirmed by one Cerbos batch. A revision shows its note; each row has ready-by and health. The `{D}/design-queue` page and row.
+- **The asset's source.** Migration `202610271400_creative_assets_source.sql`: `creative_assets.source` (default `unknown`) and `ai_note`, with an AI asset needing its note. The Asset Library save, Image Studio and Upload new version take Source and AI note, and the version history shows each version's source.
+- **The month request.** The request detail lists its `socialPosts`. Opening a month request with the company's PM module off is 409 `request_kind_unavailable`, also a fixture refusal now with words in the UI. A request rule refusal reaches the caller with its code, and the intake project's `created` activity is written.
+- **The content month in PM (SCP-1n).** Migration `202610271410_pm_task_links.sql`: `pm_tasks.linked_type` and `linked_id`.
+  - `PUT cycles` makes one PM task per cycle, due on its ready-by, with the Ball on the officer.
+  - The pipeline writes its progress and sets it done when every counted post is past client approval and the target is met.
+  - A PM task can point at a post. The post lists its tasks, and the task drawer links back.
+  - No PM task is made per post; a test proves it.
+- **Comments (SCP-1t).** On a post's thread, reactions, replies and @mentions follow the post's audience. A reply keeps its parent's visibility, so a team note never shows to the client out of context. An @mention reaches only someone who can read the post, and the answer names the rest.
+- **The reach guard (SCP-1s).** An org edit that moves a unit or a person under a unit the actor leads is refused, superadmin included. It is the same DENY as SCP-1r's, fed with the units the moved node newly sits under.
+- **The Social skin.** The `SKINS_ON` note now says only Dashboard keeps its ticket.
+- **Proof.** Each car was green on its own branch CI run (E: 40468252409; F: 40470226728), and the train passed on its combined run.
+
 ### platform-nest `0.182.0` + platform-ui `0.207.0` - SCP-1 wave 2, phase 1: the Social pipeline's feed and Messages, the post page with its steps, and the client page (FRONTEND-BFF-CONTRACT §63.7, §63.10, §63.17) (2026-10-27) - PROTOTYPED
 
 - **Reads (SCP-1d, 1j).** `GET feed?view=your_turn|waiting|all` (the holder from the fixture, health first, never the maker's turn to check), `GET waiting` (Messages, grouped by holder) and `GET needs-you` (the pipeline's leg per role). A page costs three SQL queries and two Cerbos calls (a new `checkEach` in `rbac/cerbos.ts`, one batch for a page's mixed actions, fails closed); measured at 600 posts, about 100 to 220 ms.

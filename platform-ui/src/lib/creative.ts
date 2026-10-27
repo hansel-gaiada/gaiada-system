@@ -27,6 +27,9 @@ export interface CreativeAsset {
   versionCount?: number;
   isLatest?: boolean;
   review?: { round: number; status: string } | null;
+  // SCP-1h (§63.6.6): where the bytes came from and, for an AI-made asset, how. Optional so an older backend still types.
+  source?: string;
+  aiNote?: string | null;
 }
 
 export async function listCreativeAssets(

@@ -1,0 +1,25 @@
+/* SCP-1h — the designer's queue. Tokens only, no colour, radius or shadow literal and no uppercase transform (the tokens guard), so the Social skin
+   restyles it by changing tokens and nothing here. It builds on the `.scp-*` classes of cycles.css (notes, links, health chip), which every importer
+   of this file also imports. */
+
+.scp-dq { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.scp-dq__row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; padding: 12px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.scp-dq__row:first-child { border-top: 0.5px solid var(--erp-hairline-soft); }
+.scp-dq__main { display: grid; gap: 4px; min-width: 0; }
+.scp-dq__title { font: 600 14px var(--font-body); color: var(--text-primary); text-decoration: none; overflow-wrap: anywhere; }
+.scp-dq__title:hover { text-decoration: underline; }
+.scp-dq__meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.scp-dq__side { display: grid; gap: 4px; justify-items: end; align-content: start; font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.scp-dq__state { font: 600 11px var(--font-body); color: var(--text-primary); }
+.scp-dq__state[data-state="revision"] { color: var(--status-warning-fg); }
+.scp-dq__revision {
+  margin: 4px 0 0; padding: 6px 10px; border-left: 3px solid var(--status-warning); background: var(--status-warning-bg);
+  font: 400 13px/1.45 var(--font-body); color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.scp-dq__revision-label { display: block; font: 600 11px var(--font-body); color: var(--status-warning-fg); margin: 0 0 2px; }
+.scp-dq__pager { display: flex; gap: 16px; margin: 14px 0 0; }
+
+@media (max-width: 640px) {
+  .scp-dq__row { grid-template-columns: minmax(0, 1fr); }
+  .scp-dq__side { justify-items: start; }
+}

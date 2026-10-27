@@ -2335,6 +2335,17 @@ with other resources' admin-bypass rules. Do not add one; see the policy file's 
   `assistant_tool_calls`, and SETs NULL (row survives) on `assistant_memory.source_thread_id` —
   proven by `modules/assistant/assistant.test.ts`'s cascade probe (admin-pool reads, not just
   invisible-under-RLS).
+- **PROTOTYPED** (AIP-00c, 2026-10-27) `GET /api/:t/assistant/brains` (`modules/assistant/brains.ts`, route in
+  `assistant.controller.ts`) — which gateway LLM brains can serve right now, for the brain picker. Authorized
+  exactly like `capabilities` (an authenticated user; no resource, no new Cerbos kind or action). Reads the
+  gateway's `GET /health` (`providers.llm`; state `ok` = available, `open` and `unconfigured` = not) and answers
+  `{ brains: [{ value: "<gateway provider name>", available: boolean }] | null, checkedAt: <ISO> }`. `echo` is never
+  listed; a provider outside the live `LLM_CHAIN` is absent. **`brains: null` means UNKNOWN** (gateway unreachable,
+  3 s timeout, non-2xx or an unexpected shape; one warning logged): not an empty list and not an error page, so the
+  UI offers Auto only with "Other brains can't be checked right now." Nothing else from `/health` (models,
+  endpoints, budget, key state) is returned. Cached in memory for 60 s. Consumer: `lib/assistantActions.ts#refreshBrainsAction`
+  -> `components/assistant/BrainPicker.tsx`, which offers Auto plus the available brains and keeps a thread's stored
+  value visible as "<label> (unavailable)". The `openai` label is now "Cloud (default)" (the live endpoint is OpenRouter).
 - Deliberately **NO** `writeActivity()`/`notify()` call on any of the above: the tenant activity
   feed (`GET :t/activity`) is readable by every plain member, and writing thread metadata into it
   would leak a private thread's existence/title to people with no Cerbos grant to read it — the
@@ -7088,6 +7099,8 @@ Six artifacts, as in §31.2.
 - **`GET requests/:id`** returns the row above, plus `brief`, `form` and `declineReason`, plus `assets: [{id, name, contentType, href}]`.
   - `href` is the existing creative-asset content route.
   - Another tenant's request answers **404 `request_not_found`**.
+
+**SCP-1h (2026-10-27).** `GET /requests/:id` gains `socialPosts: [{postId, title, clientName, pipelineStatus, creativeState, href}]` (additive): the social posts that joined the request (the cycle's month request to Creatives), read under the social module scope; [] when none did (FRONTEND-BFF-CONTRACT §63.6.6).
 
 ### 32.6 Keeping the ask and the work in step (no stored copy of progress)
 
@@ -12052,7 +12065,7 @@ Mailed invite → no token in the response → the sender mints → the link acc
 - **Delivery is not proven here.** A Mailpit catch on sumopod (PGL-11) proves rendering and wiring; deliverability of the real sender is a manual readiness item at cut-over. With `MAIL_ENABLED=1` but no SMTP host the dev-log adapter "sends" nothing, so `CLIENT_MAIL_ENABLED` must not be turned on before a real sender exists (the readiness check, PGL-01).
 - A final failed send (after five attempts) leaves the invite sealed: the PM sees the contact still `invited` and re-invites.
 
-## 63. The Social Media content pipeline (SCP, 2026-10-26) — `platform-nest/src/modules/social/` (the stage machine, cycles, boosts, the Team dashboard and their routes: new files), `src/modules/social/social-reports.controller.ts`, `src/core/social-pipeline-portal.controller.ts` (new), `src/core/collab.controller.ts`, `src/core/files.controller.ts`, `src/core/portal-commerce.controller.ts`; migrations `<prefix>_social_pipeline.sql`, `<prefix+1>_iam_social_pipeline.sql`, `<prefix+2>_comments_visibility_anchor.sql`, `<prefix+3>_creative_assets_source.sql`, `<prefix+4>_pm_task_links.sql`, `<prefix+5>_social_post_metrics_manual.sql`, `<prefix+6>_social_boosts.sql`, `<prefix+7>_social_simulation.sql`, `<prefix+8>_social_reports_monthly.sql` (prefixes: the next free after main's newest at landing; `202610181101` is main's newest today and `202610261100` is taken); fixture `platform-nest/src/modules/social/scp-stage-machine.json`; UI under `/departments/[deptId]` (63.17) and `/portal/social` — **STATUS: IN PROGRESS (2026-10-27). Built and proved on the Linux CI gate: 63.1 files 1 and 2 (`202610271000_social_pipeline.sql`, `202610271001_iam_social_pipeline.sql`), 63.3, 63.4, 63.5, 63.6 except the design queue and the request detail's `socialPosts` (SCP-1h), 63.12 and the post types of 63.14 (SCP-1b, 1c, 1a); 63.1 file 3 (`202610271300_comments_visibility_anchor.sql`) and the comments half of 63.8 (SCP-1l); 63.16's personas, data and pipeline read (SCP-1o); and, in wave 2, 63.7's `feed`, `waiting` and `needs-you` (SCP-1d, 1j), 63.10's `GET calendar` (SCP-1k), and the pages of 63.17 `messages`, `profile` and the post page with DEMO_MODE's action runner (SCP-1e, 1f, 1g, 1j, 1k, 1m). The rest is PLANNED.**
+## 63. The Social Media content pipeline (SCP, 2026-10-26) — `platform-nest/src/modules/social/` (the stage machine, cycles, boosts, the Team dashboard and their routes: new files), `src/modules/social/social-reports.controller.ts`, `src/core/social-pipeline-portal.controller.ts` (new), `src/core/collab.controller.ts`, `src/core/files.controller.ts`, `src/core/portal-commerce.controller.ts`; migrations `<prefix>_social_pipeline.sql`, `<prefix+1>_iam_social_pipeline.sql`, `<prefix+2>_comments_visibility_anchor.sql`, `<prefix+3>_creative_assets_source.sql`, `<prefix+4>_pm_task_links.sql`, `<prefix+5>_social_post_metrics_manual.sql`, `<prefix+6>_social_boosts.sql`, `<prefix+7>_social_simulation.sql`, `<prefix+8>_social_reports_monthly.sql` (prefixes: the next free after main's newest at landing; `202610181101` is main's newest today and `202610261100` is taken); fixture `platform-nest/src/modules/social/scp-stage-machine.json`; UI under `/departments/[deptId]` (63.17) and `/portal/social` — **STATUS: IN PROGRESS (2026-10-27). Built and proved on the Linux CI gate: 63.1 files 1 and 2 (`202610271000_social_pipeline.sql`, `202610271001_iam_social_pipeline.sql`), 63.3, 63.4, 63.5, 63.6, 63.12 and the post types of 63.14 (SCP-1b, 1c, 1a); 63.1 file 3 (`202610271300_comments_visibility_anchor.sql`) and the comments half of 63.8 (SCP-1l); 63.16's personas, data and pipeline read (SCP-1o); and, in wave 2, 63.7's `feed`, `waiting` and `needs-you` (SCP-1d, 1j), 63.10's `GET calendar` (SCP-1k), and the pages of 63.17 `messages`, `profile` and the post page with DEMO_MODE's action runner (SCP-1e, 1f, 1g, 1j, 1k, 1m); 63.1 files 4 and 5 (`202610271400_creative_assets_source.sql`, `202610271410_pm_task_links.sql`), 63.6.6's design queue, the request detail's `socialPosts` and the Asset Library's source and AI note (SCP-1h), 63.13 (SCP-1n), and 63.8's reactions, replies and @mentions on a post's thread (SCP-1t). The rest is PLANNED.**
 
 **Why.** Plan `docs/plans/2026-10-15-social-content-pipeline.md` (SCP), decisions SCP-D1 to SCP-D5 and the owner's rulings of 2026-10-26 (plan §2: SCP-Q2, Q5 and Q7 to Q18). The Social Media team plans, writes, proofreads, approves, designs, gets client approval, schedules, monitors, boosts and reports on every post in the ERP, in their own design's eight steps. The first release includes the monthly report (SCP-5a) and the Team dashboard (SCP-5d) (SCP-Q5). The authorization is PERMISSION-CONTRACT §53.
 
@@ -12228,9 +12241,9 @@ Index `(tenant_id, post_id, edited_at DESC)`. The first draft is not logged; the
 
 Existing rows read `team` by default.
 
-**4. `<prefix+3>_creative_assets_source.sql` (SCP-1h).** On `creative_assets` (plain wall): `source text NOT NULL DEFAULT 'unknown'`, `CHECK (source IN ('own','client','stock','ai','unknown'))`; `ai_note text NULL`, `CHECK (ai_note IS NULL OR char_length(ai_note) BETWEEN 1 AND 1000)`; `CHECK (source <> 'ai' OR ai_note IS NOT NULL)`. Per version: a new version starts `unknown` unless the save says otherwise.
+**4. `<prefix+3>_creative_assets_source.sql` (SCP-1h).** On `creative_assets` (plain wall): `source text NOT NULL DEFAULT 'unknown'`, `CHECK (source IN ('own','client','stock','ai','unknown'))`; `ai_note text NULL`, `CHECK (ai_note IS NULL OR char_length(ai_note) BETWEEN 1 AND 1000)`; `CHECK (source <> 'ai' OR ai_note IS NOT NULL)`. Per version: a new version starts `unknown` unless the save says otherwise. **Built as `202610271400_creative_assets_source.sql`** (constraints `creative_assets_source_ck`, `creative_assets_ai_note_ck`, `creative_assets_ai_needs_note_ck`; a catalogue-only DO block asserts them).
 
-**5. `<prefix+4>_pm_task_links.sql` (SCP-1n).** On `pm_tasks`: `linked_type text NULL`, `CHECK (linked_type IN ('social_post','social_cycle'))`; `linked_id uuid NULL`; `CHECK ((linked_type IS NULL) = (linked_id IS NULL))`; unique `(tenant_id, linked_id) WHERE linked_type = 'social_cycle' AND deleted_at IS NULL` (one content-month task per cycle); index `(tenant_id, linked_type, linked_id) WHERE linked_type IS NOT NULL AND deleted_at IS NULL`. No FK: the linked row is a module row behind its own wall.
+**5. `<prefix+4>_pm_task_links.sql` (SCP-1n).** On `pm_tasks`: `linked_type text NULL`, `CHECK (linked_type IN ('social_post','social_cycle'))`; `linked_id uuid NULL`; `CHECK ((linked_type IS NULL) = (linked_id IS NULL))`; unique `(tenant_id, linked_id) WHERE linked_type = 'social_cycle' AND deleted_at IS NULL` (one content-month task per cycle); index `(tenant_id, linked_type, linked_id) WHERE linked_type IS NOT NULL AND deleted_at IS NULL`. No FK: the linked row is a module row behind its own wall. **Built as `202610271410_pm_task_links.sql`** (`pm_tasks_linked_type_ck`, `pm_tasks_linked_pair_ck`, `ux_pm_tasks_social_cycle`, `ix_pm_tasks_linked`; a catalogue-only DO block asserts them).
 
 **6. `<prefix+5>_social_post_metrics_manual.sql` (SCP-3c).** On `social_post_metrics`: `source text NOT NULL DEFAULT 'pull'`, `CHECK (source IN ('pull','manual','simulated'))`; `reach integer NULL CHECK (reach IS NULL OR reach >= 0)` (the engagement rate needs reach, and the table has none today); `entered_by uuid NULL → users`, `CHECK ((source = 'manual') = (entered_by IS NOT NULL))`.
 
@@ -12546,6 +12559,8 @@ The client's own decisions are portal routes (63.9).
   - opened lazily by the first `approve_for_design` of a `creatives` client in the cycle. Its PM task is the designers' work in Creatives' own board.
   - The pipeline never delivers, declines or cancels it: Creatives does, as today. A post approved after the request closed opens a new one, and `social_cycles.creative_request_id` points at it.
   - 409 `creatives_unit_missing` when the company's tree has no Creatives department.
+  - 409 `request_kind_unavailable` when opening the request finds the company's PM module off, as `POST requests` refuses it (§32.5). Joining a request that is already open needs no check. Any other §32 rule refusal reaches the caller with its own code, never as a 500.
+  - When the request helper makes the intake project, it writes that project's `created` activity, as the hand-filed path does.
   - The request detail (`GET /api/:t/requests/:id`, §32) gains `socialPosts: [{postId, title, clientName, pipelineStatus, creativeState, href}]` (additive), read under the social module scope.
 - **Designs** (`social_post` · `design`, status `design` or a design `changes` case):
   - **`POST posts/:postId/designs`** takes `{expectedStatus, assetGroupId? | linkUrl?, linkSource?, linkAiNote?, position?}`. An unknown asset is 404 `asset_not_found`; an AI link without a note is 400 `{field: "linkAiNote"}`. An asset added on a `creatives` post is also linked to the month request (`work_request_assets`, `ON CONFLICT DO NOTHING`).
@@ -12553,9 +12568,11 @@ The client's own decisions are portal routes (63.9).
   - **`DELETE posts/:postId/designs/:designId`** marks the design removed (404 `design_not_found`).
   - **`submit_design`** needs at least one design (409 `design_missing`). An AI-made design always carries its note, because the database refuses one without (63.1, files 1 and 4). A source left `unknown` is a warning in `warnings`, not a refusal.
   - An asset's own source and AI note are set where the asset is saved: the Asset Library save (`creative.controller.ts`, §35) gains `source` and `aiNote`, under its existing gate.
+    As built: a bad source is 400 on `source`; an `ai` source without a note is 400 `ai_note_required` `{field: "aiNote"}`, and a note that is not text or is over 1,000 characters is 400 `ai_note_invalid` `{field: "aiNote"}`; every asset read returns `source` and `aiNote`; a new version starts `unknown`. A design's read and the unknown-source warning follow the asset's own source.
 - **The design queue.** **`GET design-queue?cursor=&limit=`** lists the posts the caller may design now (`design`, or a design `changes` case): those whose month request's task names the caller, plus every `in_team` post when the caller holds `social_designer`.
   - Its outer gate is `work_request` · `read` (every member), and each row is narrowed by those two facts, the same facts Cerbos uses.
   - Items: `{postId, clientName, title, format, creativeState, revisionNote: string|null, readyBy, health, thumbFileId|null}`.
+  - As built: it answers `{items, nextCursor: string|null}`, with `limit` from 1 to 100 (default 30), read after the decision. Narrowing needs the request's assignees, so it is done in memory over the company's posts at the designers' steps, not as a SQL keyset. The order is ready-by, then when the post reached its step, then id, and the opaque cursor is the last item's key. Each row that survives the two facts is confirmed by one batched Cerbos `design` check, which can only remove a row. `revisionNote` is the `change_note` that asked for the revision, and `health` is the post's own (schedule-health).
 
 **63.6.7 Bulk** (SCP-1f "Approve all", SCP-1k "Send to proofread" on the List). **`POST posts/actions`** takes `{action: 'send_to_proofread'|'approve_copy', items: [{postId, expectedStatus, actionId?}]}`, 1 to 50 items. Each item runs 63.3.2 on its own and in its own transaction. Answers 200 `{results: [{postId, ok: true, post} | {postId, ok: false, error, field?, detail?, blockers?}]}`. One item's refusal never undoes another. "Send anyway" is not offered in bulk.
 
@@ -12598,6 +12615,13 @@ Items: `{id: 'social:<tenant>:<post or report or boost id>:<kind>', kind, role, 
   - A `client` comment additionally needs `social_post` · `record_client`, because it speaks to the client. Refused: 403 `not_officer_or_approver`.
   - A client comment is visible to the client only once the post has reached the client (`client_first_sent_at`).
 - **`GET /comments`** returns `visibility` and `anchor` (additive). For `entityType: 'social_post'` it also checks `social_post` · `read` (or `design`) on that post, so the thread has the post's audience.
+- **Reactions, replies and @mentions follow the post's audience** (SCP-1t):
+  - **Reactions.** On a `social_post` thread, `POST` and `DELETE comments/:id/reactions` check `social_post` · `read` (or `design`) on the comment's post: 404 `post_not_found`, or 403, audited. Comments on other threads are unchanged.
+  - **Replies.** A reply's `parentCommentId` must be a live comment of the same post's thread, else 400 `invalid_parent_comment` `{field: "parentCommentId"}`.
+    - A reply with no `visibility` takes its parent's.
+    - A `client` reply to a `team` comment is 400 `reply_visibility_exceeds_parent` `{field: "visibility"}`. A `team` reply to a `client` comment is allowed.
+    - A reply that inherits `client` needs `record_client`, as an explicit `client` does.
+  - **@mentions.** An @mention notifies only people who can read the post. The rest are dropped, and the answer lists them in `mentionsNotNotified` (additive).
 - **Pins** show on the post's image (staff) and in the portal (client comments only, 63.9).
 - **The client** does not write comments in the first release. Their note and pin ride their decision, and the staff thread shows each decision inline from the reviews.
 
@@ -12774,6 +12798,12 @@ BoostRow { id, postId, postTitle, clientName, cycleId, status, goal, audience, a
   - It sets `done` when every counted post is approved, and reopens it when one goes back to the client. One direction only: moving the task never moves a post.
 - **Task links.** The PM task routes accept `linkedType: 'social_post'` and `linkedId`. The task drawer links to the post. `GET posts/:postId/pipeline` lists them in `tasks`.
 - **No task per post.** A test proves it.
+- **As built (SCP-1n):**
+  - **`PUT cycles`.** Each row the call wrote gains `contentMonthTask: {taskId: string|null, reason: 'no_project'|'project_not_found'|null}` (additive); rows the call did not write carry none. The task is made through PM's own `createPmTaskInTx` and kept through `updateLinkedTaskScheduleInTx` (the seq, the assignee dual-write, the assignment ledger and `pm.task.created`), and found again by its link, never by its title.
+  - **Progress.** It uses the deadline table's counts (`tallyCounts`), so a story and an extra post are left out. It stays at 99 or below until the task is done.
+  - **Done.** The cycle has counted posts, every counted post is approved, scheduled or live, and the target is met when there is one. With a target of 12 and 3 approved posts, the month is not done. The write runs in the stage action's own transaction (the `content_month_progress` effect); a cycle with no task is a no-op.
+  - **Task links on the routes.** `linkedType` and `linkedId` are taken together, or both null to clear. A bad value is 400 `invalid_task_link` `{field}`. The post must pass the gate of the post's comment thread (`social_post` · `read`, or `design`): a post that does not exist in the company is 400 `post_not_found` `{field: "linkedId"}`, and one the caller may not read is 403. A content-month task's link cannot be changed: 409 `task_link_locked`.
+  - **`GET posts/:postId/pipeline` `tasks`.** At most 50 entries: `{id, title, status, progress, dueDate, projectId, …}`. Each task is listed only when the caller may read it as a PM task (`pm_task` · `read`). The task drawer links a `social_post` task to the post, and a content-month task to the client's page.
 
 ### 63.14 Notifications and activity
 

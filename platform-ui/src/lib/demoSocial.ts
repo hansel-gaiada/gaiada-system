@@ -3,6 +3,7 @@ import { isDemoPortalClient } from "./demoPortalClients";
 import { todayIsoInDisplayZone } from "./format";
 import { evaluateClientReviewState, type ClientReviewState, type ClientReviewStatus } from "./socialShared";
 import { validateBrandBook, type BrandBook } from "./socialBrandBook";
+import { demoDesignQueue } from "./demoSocialDesignQueue";
 import {
   DEMO_MEMBER_NAMES, PIPE_ENGAGEMENTS, allocStore, cyclesStore, demoAllocationRow, demoBrandAnswer, demoCalendar, demoCreatePost, demoCycleHealth, demoCycleTable, demoDeadlineRange,
   demoFeed, demoNeedsYou, demoPipelineRead, demoRealDate, demoWaiting, demoSettingsAnswer, demoWalkBack, isDemoSocialApprover, isPipelinePostId, pipelineEngagement,
@@ -1077,6 +1078,9 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
     const piped = runDemoPipelineWrite(m, tail, b(), userId, isComposerPost);
     if (piped) return piped;
   }
+
+  // ── SCP-1h: the designer's queue (BFF §63.6.6), derived from the demo posts (demoSocialDesignQueue.ts) ──────────────
+  if (tail === "design-queue" && m === "GET") return demoDesignQueue(userId, params);
 
   // ── SCP-1a: allocation and brand book (BFF §63.4) ────────────────────────────────────────────────
   if (tail === "allocation" && m === "GET") {

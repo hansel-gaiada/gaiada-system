@@ -9,6 +9,8 @@ export const pmModule: ModuleContract = {
   migrations: [
     "0018_pm.sql", "0036_pm_tags.sql", "0037_pm_task_custom_fields.sql", "0038_pm_project_statuses.sql",
     "0039_pm_task_recurrence.sql", "0040_pm_progress_snapshots.sql",
+    // SCP-1n (BFF §63.1 item 5, §63.13) — a task can point at a social post, and the content-month task at its cycle.
+    "202610271410_pm_task_links.sql",
   ],
   // IAM-01d migration: all 3 CLEAN — pure colon-to-dot renames onto the catalog's pm.task.* keys.
   permissions: [

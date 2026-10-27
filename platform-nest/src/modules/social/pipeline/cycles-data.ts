@@ -13,6 +13,7 @@ import { config } from "../../../config";
 import { loadWorkingCalendar, HOLIDAY_LOOKAHEAD_DAYS } from "../../reports/dept-kpi-readers/functional/working-calendar";
 import { addDays, type WorkingCalendar } from "../../hr/working-days";
 import { declareSocialModuleScope } from "../module-scope";
+import { pushReadyByToContentMonthTask } from "./content-month";
 import {
   APPROVAL_WINDOW_DAYS, averageApprovalDays, clientHealth, isClientSlower, lastDayOfMonth, looksLikeIsoDate, parseStepEstimates,
   postHealth, postHolder, postPhase, prefillDeadline, readyByFor, tallyCounts,
@@ -144,23 +145,15 @@ export async function recomputeOpenReadyBy(
       `UPDATE social_cycles SET ready_by = $3::date, updated_by = COALESCE($4, updated_by), updated_at = now() WHERE tenant_id = $1 AND id = $2`,
       [a.tenantId, r.id, next, a.actorId],
     );
+    // SCP-1n: the cycle's content-month task is due on its ready-by, so it moves with it.
+    await pushReadyByToContentMonthTask(c, a.tenantId, r.id, next, a.actorId);
     updated += 1;
   }
   return { checked: rows.length, updated, skipped };
 }
 
-/**
- * The content-month PM task of a cycle (BFF §63.13) is SCP-1n's: it creates or updates one task per cycle in the engagement's project
- * (title "<Month YYYY> content", due on `readyBy`, the Ball on the officer, `linked_type = 'social_cycle'`). This hook is where 1n plugs
- * in. It is called once for every cycle `PUT cycles` writes, inside the same transaction, after the cycle row is written. SCP-1c builds
- * it as a NO-OP and touches no `pm_tasks` row (the column `linked_type` does not exist until 1n's migration).
- */
-export async function syncContentMonthTask(
-  _c: PoolClient,
-  _cycle: { tenantId: string; cycleId: string; engagementId: string; month: string; deadline: string; readyBy: string; actorId: string | null },
-): Promise<void> {
-  // SCP-1n: intentionally empty.
-}
+// The content-month PM task of a cycle (BFF §63.13) is SCP-1n's: `content-month.ts` (the task, made by `PUT cycles`) and
+// `content-month-progress.ts` (its progress, written by the pipeline). This file only tells the task when its cycle's ready-by moved.
 
 // ── The deadline table (GET cycles, and the answer of PUT cycles) ──────────────────────────────────────────────────────
 

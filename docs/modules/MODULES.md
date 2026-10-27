@@ -34,8 +34,8 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.182.0` | IN PROGRESS | WS1 | 2026-10-27 |
-| platform-ui | `0.207.0` | IN PROGRESS | WS5 | 2026-10-27 |
+| platform-nest | `0.184.0` | IN PROGRESS | WS1 | 2026-10-27 |
+| platform-ui | `0.209.0` | IN PROGRESS | WS5 | 2026-10-27 |
 | ai-gateway-go | `0.13.3` | PROTOTYPED | WS3 | 2026-10-13 |
 | mcp-hub | `0.16.0` | PROTOTYPED | WS2 | 2026-10-15 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -43,7 +43,7 @@ versions below; the running build reports it at `GET /health`.
 | automation (n8n) | `0.8.0` | PROTOTYPED | WS4 | 2026-10-15 |
 | observability | `0.6.2` | DEV-VERIFIED | WS9 | 2026-08-06 |
 | infra | `0.13.17` | PROTOTYPED | WS10 | 2026-10-13 |
-| wa-chat-bot | `0.10.0` | PROTOTYPED | WS5 | 2026-10-12 |
+| wa-chat-bot | `0.11.0` | PROTOTYPED | WS5 | 2026-10-27 |
 | ai-agents | `0.16.0` | PROTOTYPED | WS8 | 2026-10-13 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |

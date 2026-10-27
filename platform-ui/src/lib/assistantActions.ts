@@ -15,11 +15,11 @@ import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError, type Me } from "./platform";
 import { getActiveTenant } from "./tenant";
 import {
-  listThreads, getThread, listMemory, getCapabilities, resolveCitation, getRoster, listThreadHandoffs,
+  listThreads, getThread, listMemory, getCapabilities, getBrains, resolveCitation, getRoster, listThreadHandoffs,
   THREAD_LIST_LIMIT, type ListThreadsParams, type GetThreadParams,
 } from "./assistant-data";
 import type {
-  AssistantMemoryScope, AssistantThreadStatus, CapabilitiesResult, MemoryListResult, ResolvedCitation, SendMessageResult, StopResult,
+  AssistantMemoryScope, AssistantThreadStatus, CapabilitiesResult, BrainsResult, MemoryListResult, ResolvedCitation, SendMessageResult, StopResult,
   ThreadDetailResult, ThreadListResult, RosterResult, AssistantHandoff, ToolCallApprovalJoin,
 } from "./assistant";
 // ASST-21 — the run-watch view's transcript read reuses the EXISTING Intelligence-console reader
@@ -266,6 +266,18 @@ export async function refreshCapabilitiesAction(): Promise<ActionResult<Capabili
   if ("error" in c) return { ok: false, error: c.error };
   try {
     const r = await getCapabilities(c.userId, c.tenant);
+    return { ...r, ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ---- Brain picker availability (AIP-00c) ----------------------------------------------------------
+export async function refreshBrainsAction(): Promise<ActionResult<BrainsResult>> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  try {
+    const r = await getBrains(c.userId, c.tenant);
     return { ...r, ok: true };
   } catch (e) {
     return fail(e);

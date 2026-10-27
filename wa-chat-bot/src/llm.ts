@@ -18,7 +18,7 @@ export async function complete(prompt: string): Promise<string> {
     const data = (await res.json()) as { text?: string };
     return data.text ?? "";
   } catch (err) {
-    return `[Gateway unreachable: ${(err as Error).message} — is it running? npm run gateway]`;
+    return `[Gateway unreachable: ${(err as Error).message} — is the ERP gateway (GATEWAY_URL) reachable?]`;
   }
 }
 

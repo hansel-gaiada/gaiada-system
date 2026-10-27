@@ -7,7 +7,6 @@ Scope: `wa-chat-bot/` — the **chat surface** (WhatsApp via WAHA, Telegram as f
 npm ci && npm run typecheck && npm test    # vitest
 npm run dev            # tsx watch src/server.ts
 npm run media-worker   # the dedicated media queue worker (separate process, on purpose)
-npm run gateway        # local gateway shim (src/gateway/) — dev only
 docker compose --profile db up -d          # Postgres (app role NOBYPASSRLS)
 docker compose --profile queue up -d       # Redis / BullMQ
 docker compose --profile kms up -d         # OpenBao
@@ -18,8 +17,10 @@ Profiles are opt-in per dependency; WAHA has none, so a bare `up -d` starts it.
 
 ## Two invariants this service exists to respect
 
-1. **The bot never holds a provider key.** All model calls go through the Gateway
-   (`src/llm.ts`). If a completion fails, debug the Gateway seam, not a credential here.
+1. **The bot never holds a provider key.** The bot reaches models only through the ERP gateway
+   (`GATEWAY_URL`, client in `src/llm.ts`). If a completion fails, debug the Gateway seam, not a
+   credential here. The old built-in gateway (`src/gateway/server.ts`, `npm run gateway`, Gemini
+   key) was removed by AIP-00b (2026-10-27).
 2. **The bot never asserts identity.** `src/principal.ts` presents a named service identity and
    the platform/hub resolves the principal. Roles are never claimed client-side.
 

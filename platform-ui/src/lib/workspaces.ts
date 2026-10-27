@@ -552,6 +552,16 @@ const SOCIAL_MEDIA: Workspace = {
         blurb: "Who holds each of your posts, and a reminder to send them.",
       }],
     },
+    // SCP-1h (BFF §63.6.6, §63.17): the designer's queue: the posts the caller may design now. No gate: the server narrows each row by the caller's two
+    // design facts (named on the month request's task, or a holder of the in-team designer role), so a person with neither sees an honest empty list.
+    // The row key `design-queue` is the one the Social skin's pinned rows name (plan §6.2); it is free in this workspace.
+    {
+      key: "design-queue", label: "Design queue", icon: "gateway",
+      tabs: [{
+        key: "design-queue", label: "Design queue", href: deptPath("design-queue"), icon: "gateway",
+        blurb: "The posts waiting for your design, with the note on any revision.",
+      }],
+    },
     // SCP-1c (BFF §63.17): the HoD's Settings page (the ready-by buffer, the deadline table). Shown to the four Social approvers only; the page itself is
     // readable by the team and editable with `plan`. The row key `settings` is the Social skin's pin (`lib/skins.ts`); Admin's `settings` row is another list.
     {

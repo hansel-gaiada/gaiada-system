@@ -277,4 +277,127 @@ describe.skipIf(!TEST_URL || !live)("SCP-1r -- nobody renames, re-types, moves o
       expect(res.statusCode).toBe(400);
     });
   });
+
+  // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  // SCP-1s -- nobody widens their own reach by moving a unit under a unit they lead
+  // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  // A lead has the reach of the unit and everything under it (the DW-4 subtree reach), so re-parenting a unit under the unit you lead
+  // hands you its people. The guard now also counts, for each node whose parent changed, every unit that sits above it in its NEW
+  // place (and did not before) as touched, so the same DENY fires. Its own company and tree, so the order of the cases above
+  // cannot reach it.
+  describe("SCP-1s -- moving a unit into a subtree whose lead seat you hold", () => {
+    let T3: string;
+    let admin3: string; // another company_admin: leads nothing
+    let leadsWebDev: string; // a company_admin with a lead seat on Web Dev
+    let superLeadsWebDev: string; // the superadmin, with a lead seat on Web Dev
+    let leadsFrontend: string; // a company_admin with a lead seat on a unit inside Web Dev
+
+    const storedIn = async (): Promise<N> =>
+      (await withTenants([T3], (c) => c.query<{ structure: { root: N } }>(`SELECT structure FROM company_org_structure WHERE tenant_id = $1`, [T3]))).rows[0].structure.root;
+    const putIn = async (actorId: string, edit: (root: N) => void) => {
+      const root = await storedIn();
+      edit(root);
+      return app.inject({ method: "PUT", url: `/api/${T3}/org-structure`, headers: asUser(actorId), payload: { root } });
+    };
+    const moveUnder = (root: N, id: string, under: string): void => { find(root, under)!.children!.push(detach(root, id)); };
+    const refusedAndUntouched = async (who: string, edit: (root: N) => void) => {
+      const before = await storedIn();
+      expectRefused(await putIn(who, edit));
+      expect(await storedIn()).toEqual(before);
+    };
+    const adminIn = async (email: string, role = "company_admin"): Promise<string> => {
+      const id = await createUser(email);
+      await addMembership(T3, id);
+      await grantRole(id, await createRole(role), role === "platform_admin" ? "global" : "company", role === "platform_admin" ? null : T3);
+      return id;
+    };
+
+    beforeAll(async () => {
+      T3 = await createCompany("Unit Reach Co", ["hr", "reports"]);
+      await seedSocialOrgTree(T3); // GM, Marketing [Social Media, Creatives], Web Dev
+      admin3 = await adminIn("scp1s-admin@a.test");
+      const seeded = await storedIn();
+      find(seeded, SOCIAL_UNITS.webDev)!.children = [
+        { ...NEW_NODE("dv-frontend", "Frontend", "division"), children: [NEW_NODE("dv-ui", "UI", "division")] },
+        NEW_NODE("dv-backend", "Backend", "division"),
+      ];
+      expect((await app.inject({ method: "PUT", url: `/api/${T3}/org-structure`, headers: asUser(admin3), payload: { root: seeded } })).statusCode).toBe(200);
+
+      leadsWebDev = await adminIn("scp1s-leader@a.test");
+      await grantSocialSeat(T3, SOCIAL_UNITS.webDev, leadsWebDev);
+      superLeadsWebDev = await adminIn("scp1s-super@a.test", "platform_admin");
+      await grantSocialSeat(T3, SOCIAL_UNITS.webDev, superLeadsWebDev);
+      leadsFrontend = await adminIn("scp1s-frontend@a.test");
+      await grantSocialSeat(T3, "dv-frontend", leadsFrontend);
+    });
+
+    it("a company admin who leads Web Dev and moves the Creatives unit under Web Dev is refused, and the tree is unchanged", async () => {
+      await refusedAndUntouched(leadsWebDev, (r) => moveUnder(r, SOCIAL_UNITS.creatives, SOCIAL_UNITS.webDev));
+    });
+
+    it("so is the superadmin who leads Web Dev: the wildcard does not get past the DENY", async () => {
+      await refusedAndUntouched(superLeadsWebDev, (r) => moveUnder(r, SOCIAL_UNITS.creatives, SOCIAL_UNITS.webDev));
+    });
+
+    it("moving it DEEP into Web Dev is refused too: the lead of any unit above the new place is a toucher", async () => {
+      // Under UI, two levels below Web Dev: the lead of Web Dev (the grandparent) and the lead of Frontend (the parent) are both refused.
+      await refusedAndUntouched(leadsWebDev, (r) => moveUnder(r, SOCIAL_UNITS.creatives, "dv-ui"));
+      await refusedAndUntouched(leadsFrontend, (r) => moveUnder(r, SOCIAL_UNITS.creatives, "dv-ui"));
+      await refusedAndUntouched(leadsFrontend, (r) => moveUnder(r, SOCIAL_UNITS.creatives, "dv-frontend"));
+    });
+
+    it("the lead of a unit inside Web Dev may still move a unit under Web Dev itself (they do not lead Web Dev)", async () => {
+      const res = await putIn(leadsFrontend, (r) => moveUnder(r, SOCIAL_UNITS.creatives, SOCIAL_UNITS.webDev));
+      expect(res.statusCode).toBe(200);
+      expect(parentOf(await storedIn(), SOCIAL_UNITS.creatives)!.id).toBe(SOCIAL_UNITS.webDev);
+      expect((await putIn(admin3, (r) => moveUnder(r, SOCIAL_UNITS.creatives, SOCIAL_UNITS.division))).statusCode).toBe(200); // put back
+    });
+
+    it("ANOTHER company admin, who leads nothing, makes the same move and it succeeds (the guard reads the person, not the move)", async () => {
+      const res = await putIn(admin3, (r) => moveUnder(r, SOCIAL_UNITS.creatives, SOCIAL_UNITS.webDev));
+      expect(res.statusCode).toBe(200);
+      expect(parentOf(await storedIn(), SOCIAL_UNITS.creatives)!.id).toBe(SOCIAL_UNITS.webDev);
+      expect((await putIn(admin3, (r) => moveUnder(r, SOCIAL_UNITS.creatives, SOCIAL_UNITS.division))).statusCode).toBe(200); // put back
+      expect(parentOf(await storedIn(), SOCIAL_UNITS.creatives)!.id).toBe(SOCIAL_UNITS.division);
+    });
+
+    it("moving a unit between two units the actor does not lead is allowed", async () => {
+      const res = await putIn(leadsWebDev, (r) => moveUnder(r, SOCIAL_UNITS.creatives, SOCIAL_UNITS.gm));
+      expect(res.statusCode).toBe(200);
+      expect(parentOf(await storedIn(), SOCIAL_UNITS.creatives)!.id).toBe(SOCIAL_UNITS.gm);
+      expect((await putIn(leadsWebDev, (r) => moveUnder(r, SOCIAL_UNITS.creatives, SOCIAL_UNITS.division))).statusCode).toBe(200);
+    });
+
+    it("moving a unit OUT from under your own unit follows the existing rule: a child is free to go, the led unit itself is not", async () => {
+      // Backend leaves Web Dev for GM: the actor leads Web Dev, which is not touched (a child left it) and sits above nothing new.
+      expect((await putIn(leadsWebDev, (r) => moveUnder(r, "dv-backend", SOCIAL_UNITS.gm))).statusCode).toBe(200);
+      expect(parentOf(await storedIn(), "dv-backend")!.id).toBe(SOCIAL_UNITS.gm);
+      expect((await putIn(admin3, (r) => moveUnder(r, "dv-backend", SOCIAL_UNITS.webDev))).statusCode).toBe(200); // put back
+      // Web Dev itself moves: its parent changed, the existing SCP-1r rule.
+      await refusedAndUntouched(leadsWebDev, (r) => moveUnder(r, SOCIAL_UNITS.webDev, SOCIAL_UNITS.gm));
+      await refusedAndUntouched(superLeadsWebDev, (r) => moveUnder(r, SOCIAL_UNITS.webDev, SOCIAL_UNITS.division));
+    });
+
+    it("a move inside a subtree the unit already belongs to is not a gain of reach, so it is allowed", async () => {
+      const res = await putIn(leadsWebDev, (r) => moveUnder(r, "dv-backend", "dv-frontend"));
+      expect(res.statusCode).toBe(200);
+      expect(parentOf(await storedIn(), "dv-backend")!.id).toBe("dv-frontend");
+      expect((await putIn(leadsWebDev, (r) => moveUnder(r, "dv-backend", SOCIAL_UNITS.webDev))).statusCode).toBe(200);
+    });
+
+    it("one request with a harmless move and the widening one is refused as a whole, nothing half-applied", async () => {
+      await refusedAndUntouched(leadsWebDev, (r) => {
+        moveUnder(r, SOCIAL_UNITS.socialMedia, SOCIAL_UNITS.gm); // a unit they do not lead, to a unit they do not lead: fine alone
+        moveUnder(r, SOCIAL_UNITS.creatives, SOCIAL_UNITS.webDev); // the widening one
+      });
+    });
+
+    it("a new unit under the one you lead stays free (SCP-1r: it has no seat), and moving it back into the subtree later is a move like any other", async () => {
+      expect((await putIn(leadsWebDev, (r) => { find(r, SOCIAL_UNITS.webDev)!.children!.push(NEW_NODE("dv-new", "Fresh", "division")); })).statusCode).toBe(200);
+      // Away to GM (a unit they do not lead): allowed. Back into Web Dev (which they lead): refused. Another admin puts it back.
+      expect((await putIn(leadsWebDev, (r) => moveUnder(r, "dv-new", SOCIAL_UNITS.gm))).statusCode).toBe(200);
+      await refusedAndUntouched(leadsWebDev, (r) => moveUnder(r, "dv-new", SOCIAL_UNITS.webDev));
+      expect((await putIn(admin3, (r) => moveUnder(r, "dv-new", SOCIAL_UNITS.webDev))).statusCode).toBe(200);
+    });
+  });
 });

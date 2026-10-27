@@ -139,6 +139,8 @@ export const socialModule: ModuleContract = {
     "202610271001_iam_social_pipeline.sql",
     // SCP-1l (BFF §63.1 file 3, §63.8) — the shared comment thread's visibility (team or client) and its pin on the image.
     "202610271300_comments_visibility_anchor.sql",
+    // SCP-1h (BFF §63.1 file 4, §63.6.6) — where an Asset Library picture came from (source) and the note an AI-made one carries.
+    "202610271400_creative_assets_source.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is

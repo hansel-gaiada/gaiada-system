@@ -21,6 +21,7 @@ import { resolveXPricing } from "../usage-ledger";
 import { SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_TOOL_CLASSIFICATION } from "../publish-precondition";
 import { assertDispatchChain, resolveDispatchOrgHandle } from "../publisher/provisioning";
 import { SCP } from "./fixture";
+import { syncContentMonthProgress } from "./content-month-progress";
 import { captionWithHashtags } from "./handoff-checks";
 import { COLUMN_EFFECTS, splitEffect, type PipelinePostState, type StageApplied } from "./machine";
 import {
@@ -55,7 +56,7 @@ export interface EffectRun {
 export interface EffectOutput {
   warnings: string[];
   filedApprovals: Array<{ id: string; input: FileApprovalInput }>;
-  openedRequest: { id: string; title: string; toUnitId: string; toName: string } | null;
+  openedRequest: { id: string; title: string; toUnitId: string; toName: string; intake: { projectId: string; created: boolean } } | null;
   joinedRequestId: string | null;
   designId: string | null;
   clientToldOnce: boolean;
@@ -363,13 +364,21 @@ async function joinOrOpenMonthRequest(run: EffectRun): Promise<void> {
       channel: "social",
       notes: `Designs for ${run.engagement.client_name}'s ${MONTHS[m - 1]} ${y} posts; each post lists its own brief.`,
     });
-    const created = await wr.createWorkRequestInTx(run.c, run.tenantId, run.actorId, {
-      kind: "assets", toUnitId: unit.id, title, brief: "", neededBy: run.cycle.ready_by, campaignPartId: null, form,
-    });
+    // The §32 rule refusals (`to_unit_invalid`, `intake_project_unavailable`, a form or task the work item refuses) are
+    // plain Errors, which would answer 500: map them to the refusal the caller reads, with the rule's own code.
+    let created: Awaited<ReturnType<typeof wr.createWorkRequestInTx>>;
+    try {
+      created = await wr.createWorkRequestInTx(run.c, run.tenantId, run.actorId, {
+        kind: "assets", toUnitId: unit.id, title, brief: "", neededBy: run.cycle.ready_by, campaignPartId: null, form,
+      });
+    } catch (e) {
+      if (e instanceof wr.WorkRequestRuleError) throw new ScpRouteError(e.httpStatus, e.reason, e.field ? { field: e.field } : {});
+      throw e;
+    }
     requestId = created.id;
     await run.c.query(`UPDATE social_cycles SET creative_request_id = $3, updated_at = now() WHERE tenant_id = $1 AND id = $2`,
       [run.tenantId, run.cycle.id, requestId]);
-    run.out.openedRequest = { id: requestId, title, toUnitId: unit.id, toName: created.toName };
+    run.out.openedRequest = { id: requestId, title, toUnitId: unit.id, toName: created.toName, intake: created.intake };
   }
   await run.c.query(`UPDATE social_posts SET creative_request_id = $3 WHERE tenant_id = $1 AND id = $2`, [run.tenantId, run.postId, requestId]);
   run.out.joinedRequestId = requestId;
@@ -424,11 +433,12 @@ async function markDesignRemoved(run: EffectRun): Promise<void> {
   );
 }
 
-/** A design whose source was left `unknown` is a warning, never a refusal (BFF §63.6.6). Links carry their own source; an
- *  asset's source is on `creative_assets` from SCP-1h (file 4), so only links are judged until then. */
+/** A design whose source was left `unknown` is a warning, never a refusal (BFF §63.6.6). A link carries its own source; an
+ *  asset's is the latest live version's on `creative_assets` (SCP-1h, file 4), set where the asset is saved. */
 async function warnOnUnknownSource(run: EffectRun): Promise<void> {
   const designs = await loadDesigns(run.c, run.tenantId, run.postId);
-  if (designs.some((d) => d.link_url !== null && d.link_source === "unknown")) run.out.warnings.push("design_source_unknown");
+  const unknown = designs.some((d) => (d.link_url !== null ? d.link_source === "unknown" : d.asset_version_id !== null && d.asset_source === "unknown"));
+  if (unknown) run.out.warnings.push("design_source_unknown");
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -530,7 +540,6 @@ const noop = async (): Promise<void> => {};
 /** Every I/O effect the fixture names, by name. A no-op hook names the ticket that fills it. */
 export const EFFECT_RUNNERS: Record<string, (run: EffectRun) => Promise<void>> = {
   // ── later tickets ──
-  content_month_progress: noop, // SCP-1n: the content-month task's progress (BFF §63.13)
   set_simulated_from_variants: noop, // SCP-Sa: `simulated` comes from the variants once file 8 adds the column
   start_metrics: noop, // SCP-3c: metrics start when the post is live
   from_published_variants: noop, // SCP-3b: the publisher's own result path (systemRules publisher_results)
@@ -556,6 +565,8 @@ export const EFFECT_RUNNERS: Record<string, (run: EffectRun) => Promise<void>> =
   approve_every_variant_review_with_args_hash_in_one_transaction: (run) => recordDecision(run, "approved"),
   changes_requested_on_every_variant_review_in_one_transaction: (run) => recordDecision(run, "changes_requested"),
   withdraw_pending_client_reviews: (run) => withdrawReviews(run),
+  // ── the content-month PM task (SCP-1n, BFF §63.13): its progress, done and reopen follow the cycle's posts, one direction only ──
+  content_month_progress: async (run) => { if (run.row.cycle_id) await syncContentMonthProgress(run.c, run.tenantId, run.row.cycle_id, run.actorId || null); },
   // ── the month request and designs ──
   join_or_open_month_request: joinOrOpenMonthRequest,
   insert_design: insertDesign,

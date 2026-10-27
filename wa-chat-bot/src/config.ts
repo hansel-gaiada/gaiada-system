@@ -2,8 +2,6 @@ import "dotenv/config";
 
 export const config = {
   port: Number(process.env.PORT ?? 3001),
-  geminiApiKey: process.env.GEMINI_API_KEY ?? "",
-  geminiModel: process.env.GEMINI_MODEL ?? "gemini-1.5-flash",
   wahaUrl: process.env.WAHA_URL ?? "http://localhost:3000",
   wahaSession: process.env.WAHA_SESSION ?? "default",
   // API key WAHA requires on its REST API (X-Api-Key). Set the same value in both processes.
@@ -90,7 +88,6 @@ export const config = {
   driveAuditFile: process.env.DRIVE_AUDIT_FILE ?? "data/drive-audit.jsonl",
   postToGroups: (process.env.POST_TO_GROUPS ?? "false").toLowerCase() === "true",
   // Gateway (separate AI-egress service). The bot calls this; only the Gateway holds the model key.
-  gatewayPort: Number(process.env.GATEWAY_PORT ?? 3002),
   gatewayUrl: process.env.GATEWAY_URL ?? "http://localhost:3002",
   gatewayToken: process.env.GATEWAY_TOKEN ?? "",
   // MCP hub (company-data tools). Blank hubServiceToken disables the /projects skill.
@@ -175,5 +172,3 @@ export const config = {
   // Sent-lead set (idempotency). Empty -> <dirname(groupsFile)>/web-lead-alerts.json.
   webLeadAlertStateFile: process.env.WEB_LEAD_ALERT_STATE_FILE ?? "",
 };
-
-export const aiEnabled = config.geminiApiKey.length > 0;

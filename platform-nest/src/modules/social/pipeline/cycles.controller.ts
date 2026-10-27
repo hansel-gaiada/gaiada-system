@@ -18,8 +18,9 @@
 // THE MODULE WALL. Every social query declares `{ modules: ["social"] }` on its `withTenants` (the data module also calls
 // `declareSocialModuleScope`). Holidays come through `loadWorkingCalendar`, which declares the hr scope itself.
 //
-// THE CONTENT-MONTH PM TASK (§63.13) is SCP-1n's: `syncContentMonthTask` is the documented no-op hook where it plugs in. This file
-// touches no `pm_tasks` row.
+// THE CONTENT-MONTH PM TASK (§63.13, SCP-1n): `PUT cycles` creates or updates one PM task per cycle through `syncContentMonthTask`
+// (content-month.ts), in the same transaction. Each row of the answer says which task (`contentMonthTask.taskId`), or why there is none
+// (`contentMonthTask.reason`: `no_project` when the engagement has no project, `project_not_found` when it was deleted).
 import {
   BadRequestException, Body, Controller, ForbiddenException, Get, NotFoundException, Param, Put, Query, Req, UseGuards,
 } from "@nestjs/common";
@@ -36,9 +37,10 @@ import { loadSocialApproverIds, socialEngagementResource } from "../pipeline-aut
 import {
   HEALTH_LOOKBACK_DAYS, READY_BY_LOOKBACK_DAYS, composeCycleHealth, composeCycleTable, loadCalendarInfo,
   openCycleDeadlineRange, readApprovalSamples, readCycle, readCyclePosts, readCycleTableData, readEngagements, readSettings,
-  recomputeOpenReadyBy, syncContentMonthTask, tableAnchors, todayIsoInTz,
+  recomputeOpenReadyBy, tableAnchors, todayIsoInTz,
   type CalendarInfo, type CycleTable, type SocialSettings,
 } from "./cycles-data";
+import { syncContentMonthTask, type ContentMonthTaskResult } from "./content-month";
 import { isMonthKey, lastDayOfMonth, readyByFor, looksLikeIsoDate } from "./schedule-health";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -217,6 +219,7 @@ export class SocialCyclesController {
     // The holidays the new ready-bys walk across, read before the transaction.
     const info = await loadCalendarInfo(tenantId, [...rows.map((r) => r.deadline), `${month}-01`, today], READY_BY_LOOKBACK_DAYS);
 
+    const tasks = new Map<string, ContentMonthTaskResult>();
     await withTenants(
       [tenantId],
       async (c) => {
@@ -235,13 +238,21 @@ export class SocialCyclesController {
              RETURNING id`,
             [newId(), tenantId, r.engagementId, `${month}-01`, r.deadline, readyBy, actorId, config.originSite],
           );
-          await syncContentMonthTask(c, { tenantId, cycleId: out[0].id, engagementId: r.engagementId, month, deadline: r.deadline, readyBy, actorId });
+          tasks.set(r.engagementId, await syncContentMonthTask(c, { tenantId, cycleId: out[0].id, engagementId: r.engagementId, month, deadline: r.deadline, readyBy, actorId }));
         }
       },
       { modules: ["social"] },
     );
 
-    return this.buildTable(req, tenantId, month, today, true);
+    const table = await this.buildTable(req, tenantId, month, today, true);
+    // Additive (SCP-1n): each row names the content-month task of the cycle this call wrote, or why it has none. Rows the call did not write carry none.
+    return {
+      ...table,
+      rows: table.rows.map((row) => {
+        const t = tasks.get(row.engagementId);
+        return t ? { ...row, contentMonthTask: { taskId: t.taskId, reason: t.reason } } : row;
+      }),
+    } as CycleTable;
   }
 
   // ==================================================================== GET cycles/:cycleId/health

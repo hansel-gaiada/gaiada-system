@@ -61,8 +61,8 @@ machine with internet — no Docker, no webhook, no tunnel:
    Optionally `/setprivacy` → **Disable** so the bot can read group messages.
 2. `cp .env.example .env`; set `TELEGRAM_BOT_TOKEN=<token>`, a random `GATEWAY_TOKEN`,
    and leave `TELEGRAM_WEBHOOK_SECRET` empty (empty = long-polling mode).
-3. Two terminals: `npm run gateway` (or the standalone `../ai-gateway`) and `npm start`.
-4. DM your bot "hello" → it replies (echo mode without a Gemini key; real AI with one).
+3. Point `GATEWAY_URL` at a reachable ERP `ai-gateway` (with its `GATEWAY_TOKEN`), then `npm start`.
+4. DM your bot "hello" → it replies through the gateway (`/health` shows `"ai":"gateway"` when both are set, `"off"` otherwise).
    Add it to a test group and try `/ping`, `/summarize`, `/capture buy cement`, `/actions`.
 5. Group ids show up in the logs as `tg:-100...` — add them to `config/groups.yaml` to
    monitor them, and set `MANAGEMENT_GROUP_ID=tg:-100...` to receive digests on Telegram.
@@ -72,7 +72,7 @@ machine with internet — no Docker, no webhook, no tunnel:
 - Node 20+ (tested on 22), npm.
 - Docker (to run WAHA).
 - A spare, warmed-up WhatsApp number.
-- (Optional now) a free Gemini API key — without it the bot runs in **echo mode** so you can test the plumbing first.
+- Models are reached only through the ERP gateway (`GATEWAY_URL` + `GATEWAY_TOKEN`); the bot holds no provider key.
 
 ## Setup
 
@@ -114,18 +114,15 @@ DATABASE_URL=postgres://gaiada_app:<POSTGRES_APP_PASSWORD>@localhost:5433/gaiada
 Backups: `docker exec gaiada-postgres pg_dump -U postgres gaiada > backup.sql` (nightly cron).
 Never back up `data/keys.json` into the same set — that's what keeps crypto-shred real.
 
-### 2. Get a free AI key (optional but recommended)
+### 2. Point the bot at the AI gateway
 
-Create a key at https://aistudio.google.com/app/apikey and put it in `.env` as `GEMINI_API_KEY`.
-Leave it blank to run in echo mode first.
+The **bot** holds no model key. It reaches models only through the ERP `ai-gateway`
+(`GATEWAY_URL`, with `GATEWAY_TOKEN` as the bearer token), set in `.env`. The old built-in
+gateway (`npm run gateway`, Gemini key) was removed by AIP-00b (2026-10-27).
 
-### 3. Run the Gateway + the bot (two processes)
-
-The **Gateway** holds the AI key; the **bot** holds none and calls the Gateway. Set a
-`GATEWAY_TOKEN` in `.env` (any random string), then in two terminals:
+### 3. Run the bot
 
 ```bash
-npm run gateway   # AI egress service on :3002 (holds GEMINI_API_KEY)
 npm start         # the bot on :3001 (or: npm run dev)
 ```
 
@@ -184,7 +181,6 @@ Tests: `src/admin-web-lead-alert.test.ts`.
 | Now (trial) | Harden to (see specs/plans) |
 |---|---|
 | Plaintext JSON file store | Managed Postgres + per-subject/per-entity **crypto-shred** encryption |
-| Gemini key in the bot | Route all AI through the **Gateway** (no keys in the bot, DLP, failover) |
 | Free AI tier | Paid tier with DPA + no-training, or local model, for real data |
 | Manual `/digest` route | Scheduler at 12:00 & 18:00 GMT+8 |
 | Bot resolves sender loosely | Platform-minted principal + assurance tiers (bot never asserts identity) |
@@ -199,7 +195,7 @@ src/
   scrub.ts        PAN/KTP redaction (tested)
   waha.ts         WhatsApp gateway adapter + normalize (tested)
   store.ts        file-backed message store + retention purge
-  llm.ts          Gemini client (echo mode if no key)
+  llm.ts          AI client for the ERP gateway (GATEWAY_URL; no model key here)
   summarize.ts    digest + Q&A prompts
   bot.ts          scrub -> store -> (if addressed) reply (tested)
   server.ts       Fastify webhook + manual digest route

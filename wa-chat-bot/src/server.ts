@@ -3,7 +3,7 @@ import { fastifyLoggerOption } from "./telemetry";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { config, aiEnabled } from "./config";
+import { config } from "./config";
 import { WahaGateway, type WhatsAppGateway } from "./waha";
 import { TelegramGateway, startTelegramPoller } from "./telegram";
 import { normalizeWahaEvent, normalizeTelegramEvent } from "./gateway/events";
@@ -35,6 +35,9 @@ import {
 } from "./web-lead-alert";
 import type { Slot } from "./window";
 
+/** Models are reached only through the ERP gateway (GATEWAY_URL + GATEWAY_TOKEN); the bot holds no provider key. */
+const aiMode = config.gatewayUrl && config.gatewayToken ? "gateway" : "off";
+
 /** Constant-time string comparison (avoids timing side-channels on token checks). */
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -64,7 +67,7 @@ function bearer(req: FastifyRequest): string {
 export function buildApp(gateway: WhatsAppGateway = new SurfaceRouter()): FastifyInstance {
   const app = Fastify({ logger: fastifyLoggerOption() as never });
 
-  app.get("/health", async () => ({ ok: true, ai: aiEnabled ? "on" : "echo", session: lastKnownStatus() }));
+  app.get("/health", async () => ({ ok: true, ai: aiMode, session: lastKnownStatus() }));
 
   // WAHA posts message events here. Must carry the shared secret (?token= or X-Webhook-Token).
   app.post("/webhook", async (req, reply) => {
@@ -570,7 +573,7 @@ async function start(): Promise<void> {
       startTelegramPoller((m) => handleInbound(new TelegramGateway(), m));
       app.log.info("Telegram poller started (getUpdates long-polling)");
     }
-    app.log.info(`Gaiada WA bot on ${config.host}:${config.port} (AI: ${aiEnabled ? "on" : "echo"}, webhook auth: ${config.webhookSecret ? "on" : "OFF-reject"}, digests: 12:00 & 18:00 ${config.scheduleTimezone}, media worker: every ${config.mediaPollSeconds}s)`);
+    app.log.info(`Gaiada WA bot on ${config.host}:${config.port} (AI: ${aiMode}, webhook auth: ${config.webhookSecret ? "on" : "OFF-reject"}, digests: 12:00 & 18:00 ${config.scheduleTimezone}, media worker: every ${config.mediaPollSeconds}s)`);
   } catch (e) {
     app.log.error(e);
     process.exit(1);

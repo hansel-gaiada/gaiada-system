@@ -16,6 +16,7 @@ import type { PoolClient } from "pg";
 import { withTenants } from "../../../db";
 import { authorize, notify, writeActivity, explainDenial } from "../../../core/http";
 import { buildPipelinePost, readCerbosActions } from "./pipeline-read";
+import { syncContentMonthProgress } from "./content-month-progress";
 import { notifyApprovalFiled } from "../../../core/approval-filing";
 import { notifyBestEffort, resolveClientRecipients } from "../../../core/client-notify";
 import { memoiseSessionCurrent } from "../../../core/request-context";
@@ -23,6 +24,7 @@ import { loadAuthFacts, notifyRequestReceived } from "../../../core/work-request
 import { deniedOnlyForAssurance } from "../../../auth/step-up";
 import { checkActions, type Resource } from "../../../rbac/cerbos";
 import { assemblePrincipal, auditDecision, sessionVersionCurrent, type Principal } from "../../../rbac/principal";
+import { isModuleEnabled } from "../../registry";
 import { loadSocialApproverIds, loadSocialPostAuthz, socialPostResource, type SocialPostAuthz } from "../pipeline-authz";
 import { scpAction } from "./fixture";
 import {
@@ -179,6 +181,15 @@ async function prepareStage(principal: Principal, req: StageRequest): Promise<Pr
   return { pre, state, resource, cerbos, principalFacts, base, replay: gate.alreadyApplied ? gate : null, callerId };
 }
 
+/** Whether the cycle's month request is still open (the post would join it, not open a new one: `joinOrOpenMonthRequest`). */
+async function cycleHasOpenMonthRequest(tenantId: string, cycleId: string | null): Promise<boolean> {
+  if (!cycleId) return false;
+  const r = await withTenants([tenantId], (c) => c.query(
+    `SELECT 1 FROM social_cycles sc JOIN work_requests w ON w.id = sc.creative_request_id
+      WHERE sc.tenant_id = $1 AND sc.id = $2 AND w.status = 'open' LIMIT 1`, [tenantId, cycleId]), SOCIAL);
+  return (r.rowCount ?? 0) > 0;
+}
+
 /** Run one action on one existing post, start to finish. Throws the HTTP error of a refusal. */
 export async function runStageAction(principal: Principal, req: StageRequest): Promise<StageOutcome> {
   const { tenantId, postId, action } = req;
@@ -191,7 +202,15 @@ export async function runStageAction(principal: Principal, req: StageRequest): P
   if (action === "approve_for_design" && pre.row) {
     const src = await withTenants([tenantId], (c) => c.query<{ creative_source: string }>(
       `SELECT creative_source FROM social_engagements WHERE tenant_id = $1 AND id = $2`, [tenantId, pre.row!.engagement_id]), SOCIAL);
-    if (src.rows[0]?.creative_source === "creatives") await authorize(principal, { kind: "work_request", tenantId }, "create");
+    if (src.rows[0]?.creative_source === "creatives") {
+      await authorize(principal, { kind: "work_request", tenantId }, "create");
+      // An asset request needs the company's PM module (its task is the designers' work in Creatives' own board), exactly as
+      // `POST requests` checks it (409 `request_kind_unavailable`, §32.5). Joining a request that is already open needs no new
+      // task, so only the opening of one is refused. A module check is a second connection, so it is made here, before the lock.
+      if (!(await isModuleEnabled(tenantId, "pm")) && !(await cycleHasOpenMonthRequest(tenantId, pre.row.cycle_id))) {
+        throw new ScpRouteError(409, "request_kind_unavailable");
+      }
+    }
   }
 
   // Network work before the lock: cancel a queued dispatch at the publisher (unschedule, reschedule).
@@ -288,6 +307,8 @@ export async function createPipelinePost(principal: Principal, tenantId: string,
     const r = decide({ ...base, post: null, facts, mode: "apply" });
     if (!r.ok) return { refusal: r };
     const ins = await insertPostRow(c, tenantId, engagement!.id, callerId, r.set);
+    // A new counted post that is not approved yet reopens a done content-month task (SCP-1n, BFF §63.13).
+    if (ins.created) await syncContentMonthProgress(c, tenantId, cycle!.id, callerId);
     return { applied: r, ...ins, engagement: engagement!, cycle: cycle! };
   }, SOCIAL);
   if ("refusal" in out && out.refusal) return authorizeStage(principal, resource, "create", out.refusal);
@@ -407,6 +428,12 @@ async function afterCommit(
   for (const a of out.filedApprovals) await notifyApprovalFiled(a.id, a.input);
   if (out.openedRequest) {
     await writeActivity(tenantId, actorId, "created", "work_request", out.openedRequest.id, { kind: "assets", toUnitId: out.openedRequest.toUnitId, socialPostId: postId });
+    // The helper made the receiving unit's intake project, so it writes the activity `POST requests` writes for it (§32.5).
+    if (out.openedRequest.intake.created) {
+      await writeActivity(tenantId, actorId, "created", "project", out.openedRequest.intake.projectId, {
+        name: `${out.openedRequest.toName} · Requests`, intakeFor: out.openedRequest.toUnitId,
+      });
+    }
     // The receiving unit's heads hear of the request as they do of a hand-filed one (§32.7 `request.received`). A request opened
     // just now has no assignees, so the "designers" notification below reaches nobody for it. Best-effort, like every notification.
     if (actorId) await notifyRequestReceived(tenantId, actorId, out.openedRequest.id, out.openedRequest.toUnitId, out.openedRequest.toName, out.openedRequest.title);
@@ -527,6 +554,8 @@ export async function changeAfterClientInTx(c: PoolClient, tenantId: string, pos
       WHERE tenant_id = $1 AND id = $2`,
     [tenantId, postId],
   );
+  // The post went back to the client: the cycle's content-month task reopens (SCP-1n, BFF §63.13), now that the row says so.
+  await EFFECT_RUNNERS.content_month_progress(run);
   return postId;
 }
 

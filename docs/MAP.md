@@ -36,7 +36,7 @@ Node scripts per component:
 - `platform-ui` — `build`, `dev`, `e2e`, `e2e:a11y`, `gen:office-credits`, `start`, `test`, `test:watch`, `typecheck`
 - `report-renderer` — `dev`, `start`, `test`, `typecheck`
 - `simulation` — `build`, `start`, `typecheck`
-- `wa-chat-bot` — `dev`, `gateway`, `media-worker`, `start`, `test`, `typecheck`
+- `wa-chat-bot` — `dev`, `media-worker`, `start`, `test`, `typecheck`
 - `webdesk` — `check:deploy-copies`, `check:rls`, `check:rls:selftest`, `check:workflows`, `check:wp-template`, `lint:migrations`, `migrate`, `test`, `test:deploy-scripts`
 
 ## Compose
@@ -169,11 +169,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610271300_comments_visibility_anchor.sql`
+- Head: `202610271410_pm_task_links.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 335 (121 legacy `NNNN_`, 214 timestamped)
+- Applied files on disk: 337 (121 legacy `NNNN_`, 216 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -301,6 +301,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/allocation.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/calendar.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/cycles.controller.ts` |
+| `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/design-queue.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/feed.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/pipeline.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social-reports.controller.ts` |
@@ -433,6 +434,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/decisions`
 - `/departments/[deptId]/deliverables`
 - `/departments/[deptId]/depts`
+- `/departments/[deptId]/design-queue`
 - `/departments/[deptId]/engagements`
 - `/departments/[deptId]/engagements/[engagementId]`
 - `/departments/[deptId]/gsc-ga4`

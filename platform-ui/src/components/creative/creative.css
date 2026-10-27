@@ -106,6 +106,8 @@
 .cs-detail__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cs-detail__msg { font-size: 12px; color: var(--text-primary); margin: 0; }
 .cs-detail__form { display: flex; flex-direction: column; gap: 8px; max-width: 520px; }
+/* SCP-1h: the save's Source and AI note. */
+.cs-source { display: flex; flex-direction: column; gap: 6px; max-width: 360px; }
 .cs-vlist, .cs-rlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .cs-vrow { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: var(--radius-12); border: 1px solid var(--hairline); background: var(--surface-card-solid); }
 .cs-vrow__thumb { width: 56px; height: 56px; object-fit: cover; border-radius: var(--radius-8); background: var(--hairline); flex: 0 0 auto; }

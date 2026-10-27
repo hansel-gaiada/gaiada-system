@@ -20,7 +20,7 @@ vi.mock("@/lib/assistantActions", () => ({
   refreshThreadsAction: vi.fn(), refreshThreadAction: vi.fn(), createThreadAction: vi.fn(),
   renameThreadAction: vi.fn(), setThreadPinnedAction: vi.fn(), setThreadStatusAction: vi.fn(),
   setThreadBrainAction: vi.fn(), deleteThreadAction: vi.fn(), sendMessageAction: vi.fn(), stopStreamAction: vi.fn(),
-  refreshCapabilitiesAction: vi.fn(), resolveCitationAction: vi.fn(),
+  refreshCapabilitiesAction: vi.fn(), refreshBrainsAction: vi.fn(), resolveCitationAction: vi.fn(),
   confirmWriteAction: vi.fn(), dismissWriteAction: vi.fn(),
 }));
 
