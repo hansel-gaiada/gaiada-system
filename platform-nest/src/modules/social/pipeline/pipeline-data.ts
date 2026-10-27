@@ -184,6 +184,9 @@ export interface DesignRow {
   asset_content_type: string | null;
   asset_graded_key: string | null;
   asset_graded_byte_size: string | null;
+  // the latest live version's own source and AI note (`creative_assets`, SCP-1h file 4); null for a link
+  asset_source: string | null;
+  asset_ai_note: string | null;
 }
 
 export async function loadDesigns(c: PoolClient, tenantId: string, postId: string): Promise<DesignRow[]> {
@@ -191,10 +194,11 @@ export async function loadDesigns(c: PoolClient, tenantId: string, postId: strin
     `SELECT d.id, d.position, d.asset_group_id::text AS asset_group_id, d.link_url, d.link_source, d.link_ai_note,
             d.file_id::text AS file_id, d.file_version_no,
             a.id::text AS asset_version_id, a.version_no AS asset_version_no, a.name AS asset_name,
-            a.content_type AS asset_content_type, a.graded_key AS asset_graded_key, a.graded_byte_size AS asset_graded_byte_size
+            a.content_type AS asset_content_type, a.graded_key AS asset_graded_key, a.graded_byte_size AS asset_graded_byte_size,
+            a.source AS asset_source, a.ai_note AS asset_ai_note
        FROM social_post_designs d
        LEFT JOIN LATERAL (
-         SELECT ca.id, ca.version_no, ca.name, ca.content_type, ca.graded_key, ca.graded_byte_size
+         SELECT ca.id, ca.version_no, ca.name, ca.content_type, ca.graded_key, ca.graded_byte_size, ca.source, ca.ai_note
            FROM creative_assets ca
           WHERE ca.tenant_id = d.tenant_id AND COALESCE(ca.version_group_id, ca.id) = d.asset_group_id AND ca.deleted_at IS NULL
           ORDER BY ca.version_no DESC LIMIT 1

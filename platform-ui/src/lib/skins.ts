@@ -78,8 +78,8 @@ export const SKINS: Readonly<Record<SkinKey, Skin>> = {
 };
 
 /** The skins drawn for everyone. Standard always; Social since SCP-Kg, switched on by the owner on 2026-10-27 ahead of SCP-1d, 1e and 1k (plan §8
- *  had it wait for them). No pinned entry points at a page that does not exist: Messages and Dashboard keep their `ticket` and
- *  stay hidden until their pages land. Anyone may still choose the Standard look for themselves (More › Appearance). */
+ *  had it wait for them). No pinned entry points at a page that does not exist: Dashboard keeps its `ticket` (SCP-5d) and stays
+ *  hidden until its page lands. Anyone may still choose the Standard look for themselves (More › Appearance). */
 export const SKINS_ON: readonly SkinKey[] = ["standard", "social"];
 
 /** The skins switched on: `SKINS_ON`, plus the comma-separated keys of `SHELL_SKIN_PREVIEW` (a dev or test box; unknown keys ignored). */

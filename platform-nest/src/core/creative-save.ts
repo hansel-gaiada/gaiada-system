@@ -33,6 +33,10 @@ export interface SaveAssetInput {
   originalContentType: string | null;
   /** A validated asset id (any version of the group), or null for a new asset. */
   versionOf: string | null;
+  /** SCP-1h (BFF §63.1 file 4): the source of THESE bytes and the note an AI-made one carries (`rv.parseSourceAndNote`). Left out,
+   *  the version is `unknown`: a new version never inherits the source of the one it replaces. */
+  source?: rv.AssetSource;
+  aiNote?: string | null;
   hooks?: {
     /** Runs FIRST inside the transaction and may replace `versionOf` (a Figma export reads its link's group here, under the
      *  link row's lock, so two first exports cannot start two groups). */
@@ -94,14 +98,14 @@ export async function saveCreativeAsset(input: SaveAssetInput): Promise<SavedAss
           `INSERT INTO creative_assets
              (id, tenant_id, uploader_id, department_id, name, content_type, width, height, preset_id,
               grade, original_key, original_content_type, original_byte_size, graded_key, graded_byte_size, origin_site,
-              version_group_id, version_no, supersedes_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+              version_group_id, version_no, supersedes_id, source, ai_note)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
           [
             id, tenantId, userId, departmentId, input.name,
             input.contentType, input.width, input.height, input.presetId,
             JSON.stringify(input.grade), originalKey, input.originalContentType, originalSize,
             gradedKey, input.graded.byteLength, config.originSite,
-            groupId, versionNo, supersedesId,
+            groupId, versionNo, supersedesId, input.source ?? "unknown", input.aiNote ?? null,
           ],
         );
         // §35.3: a new version supersedes the open round, in this same transaction (the group lock is held).

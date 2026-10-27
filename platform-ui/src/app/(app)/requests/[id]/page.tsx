@@ -20,7 +20,7 @@ import { Designs } from "@/components/figma/Designs";
 import { readOrgRoot } from "@/lib/campaigns-data";
 import {
   assetDownloadHref, formLinks, formSummary, neededByText, requestActions, requestKindLabel, requestStatusLabel, routeText,
-  workLink, workText,
+  socialPostStatusText, workLink, workText,
 } from "@/lib/requests";
 import "@/components/requests/requests.css";
 
@@ -141,6 +141,20 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
                 <li key={l.label}>
                   <span className="req-lines__label">{l.label}</span>
                   {l.href ? <a href={l.href} target="_blank" rel="noopener noreferrer">{l.text}</a> : l.text}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
+
+        {(req.socialPosts?.length ?? 0) > 0 && (
+          <Card title="Social posts" hint="The posts this request is the designs for. Each opens its post page.">
+            <ul className="req-lines" aria-label="Social posts on this request">
+              {req.socialPosts!.map((p) => (
+                <li key={p.postId}>
+                  <span className="req-lines__label">{p.clientName || "Client"}</span>
+                  {p.href ? <Link href={p.href}>{p.title}</Link> : p.title}
+                  <span className="req-quiet"> · {socialPostStatusText(p)}</span>
                 </li>
               ))}
             </ul>

@@ -29,6 +29,7 @@ import { staffNeverClientVisible } from "../../core/portal-visibility";
 // property that makes a two-way import between these two modules safe in practice.
 import { todayIsoInTz } from "../reports/person-scope";
 import { assertPersonAxisReadAllowed } from "../../core/person-axis-gate";
+import type { Principal } from "../../rbac/principal";
 
 type Assignee = {
   kind: "person" | "department" | "division";
@@ -49,6 +50,39 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const TAG_COLORS = new Set(["bronze", "champagne", "olive", "slate", "clay", "moss", "dust", "ink"]);
 const STATUS_ID_RE = /^[a-z0-9_]{1,40}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// ---------------- SCP-1n (BFF §63.13) — a task can point at a social post ----------------
+// `linked_type`/`linked_id` (migration 202610271410) say which row a task is about. The ROUTES accept only `social_post`: the other kind,
+// `social_cycle`, is the content-month task, which the social pipeline creates and owns (`createPmTaskInTx`'s `link`, never a body).
+export type PmLinkType = "social_post" | "social_cycle";
+export interface PmTaskLink { type: PmLinkType; id: string }
+const ROUTE_LINK_TYPES: ReadonlySet<string> = new Set(["social_post"]);
+
+/** PURE. `linkedType`/`linkedId` as a body gave them. `undefined`: neither key was sent (no change). `null`: both were sent as null
+ *  (clear the link). Else the pair, validated: the type is `social_post`, the id a uuid. Half a pair is 400 `{field}`. */
+export function parseTaskLinkInput(b: { linkedType?: unknown; linkedId?: unknown } | null | undefined): PmTaskLink | null | undefined {
+  const t = b?.linkedType;
+  const i = b?.linkedId;
+  if (t === undefined && i === undefined) return undefined;
+  if (t === null && i === null) return null;
+  if (typeof t !== "string" || !ROUTE_LINK_TYPES.has(t)) throw new BadRequestException({ message: "invalid_task_link", field: "linkedType" });
+  if (typeof i !== "string" || !UUID_RE.test(i)) throw new BadRequestException({ message: "invalid_task_link", field: "linkedId" });
+  return { type: t as PmLinkType, id: i.toLowerCase() };
+}
+
+/** The post a task is being linked to must exist in the company and be one the caller may see (`social_post` · `read`, or `design`):
+ *  the same gate as the post's comment thread. 400 `{field: "linkedId"}` for a post that does not exist here (another company's included),
+ *  403 for one the caller may not read. Loaded at call time: the social module is behind its own wall and this file never imports it at load. */
+async function assertCanLinkSocialPost(principal: Principal, tenantId: string, link: PmTaskLink): Promise<void> {
+  if (link.type !== "social_post") return;
+  const { authorizeSocialPostThread } = await import("../social/pipeline/post-comments");
+  try {
+    await authorizeSocialPostThread(principal, tenantId, link.id);
+  } catch (err) {
+    if (err instanceof NotFoundException) throw new BadRequestException({ message: "post_not_found", field: "linkedId" });
+    throw err;
+  }
+}
 
 // ---------------- P4-A1 — tenant-wide task list: query-param parsing helpers ----------------
 // Mirrors platform-ui's `lib/pmUrgency.ts` DUE_SOON_DAYS_DEFAULT (kept as a separate constant,
@@ -677,6 +711,7 @@ const TASK_SELECT = `
          t.estimate_minutes AS "estimateMinutes", t.depends_on AS "dependsOn", t.tags, t.custom_fields AS "customFields", t.updated_at AS "updatedAt",
          t.block_reason AS "blockReason",
          t.recurrence, p.short_code AS "projectShortCode", t.seq,
+         t.linked_type AS "linkedType", t.linked_id AS "linkedId",
          CASE WHEN p.short_code IS NOT NULL AND t.seq IS NOT NULL THEN p.short_code || '-' || t.seq ELSE NULL END AS "displayCode",
          COALESCE((SELECT SUM(minutes) FROM time_entries te WHERE te.pm_task_id = t.id AND te.deleted_at IS NULL), 0)::int AS "loggedMinutes",
          COALESCE((
@@ -695,6 +730,7 @@ interface TaskRow {
   blockReason: string | null; // P4-I decision 17 — non-null = HUMAN-set Blocked (a required reason); null while isBlocked = SYSTEM-set (an open dependency)
   recurrence: TaskRecurrence | null;
   projectShortCode: string | null; seq: number | null; displayCode: string | null;
+  linkedType: PmLinkType | null; linkedId: string | null; // SCP-1n (BFF §63.13): the row this task points at
   contributors: Contributor[]; // TR-02 — additive; joined off pm_task_assignees, never the blob
 }
 
@@ -1190,6 +1226,9 @@ export interface NormalizedPmTaskInput {
   recurrence: TaskRecurrence | null;
   subtasks: Array<{ id: string; title: string; done: boolean }>;
   tags: string[];
+  /** SCP-1n: the row the task points at. A body can only name a `social_post` (parseTaskLinkInput); the content-month task's
+   *  `social_cycle` link is set by the social pipeline on the object this function returns. */
+  link: PmTaskLink | null;
 }
 
 /** Pure validation/normalization of a create-task payload. Throws BadRequestException. No DB. */
@@ -1197,6 +1236,7 @@ export function normalizePmTaskInput(b: {
   projectId?: string; title?: string; status?: string; priority?: string; dueDate?: string; startDate?: string;
   milestoneId?: string; description?: string; estimateMinutes?: number; assignee?: unknown;
   customFields?: Record<string, unknown>; recurrence?: unknown; subtasks?: unknown; tags?: unknown;
+  linkedType?: unknown; linkedId?: unknown;
 }): NormalizedPmTaskInput {
   const title = b?.title?.trim();
   if (!b?.projectId || !title) throw new BadRequestException("projectId and title required");
@@ -1227,6 +1267,7 @@ export function normalizePmTaskInput(b: {
     recurrence: validRecurrence(b.recurrence),
     subtasks,
     tags: Array.from(new Set(tagIds as string[])),
+    link: parseTaskLinkInput(b) ?? null,
   };
 }
 
@@ -1274,12 +1315,12 @@ export async function createPmTaskInTx(
   const seq = await allocateTaskSeq(c, n.projectId);
   const id = newId();
   await c.query(
-    `INSERT INTO pm_tasks (id, tenant_id, project_id, title, description, status, priority, progress, assignee, milestone_id, start_date, due_date, estimate_minutes, custom_fields, recurrence, subtasks, tags, seq, origin_site)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::date, $12::date, $13, $14, $15, $16, $17, $18, $19)`,
+    `INSERT INTO pm_tasks (id, tenant_id, project_id, title, description, status, priority, progress, assignee, milestone_id, start_date, due_date, estimate_minutes, custom_fields, recurrence, subtasks, tags, seq, origin_site, linked_type, linked_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::date, $12::date, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
     [id, tenantId, n.projectId, n.title, n.description, status, n.priority, progress,
      n.assignee ? JSON.stringify(n.assignee) : null, n.milestoneId, n.startDate, n.dueDate,
      n.estimateMinutes, JSON.stringify(n.customFields), n.recurrence ? JSON.stringify(n.recurrence) : null,
-     JSON.stringify(n.subtasks), n.tags, seq, config.originSite],
+     JSON.stringify(n.subtasks), n.tags, seq, config.originSite, n.link?.type ?? null, n.link?.id ?? null],
   );
   // TR-02 dual-write: same transaction as the INSERT above, so blob+rows commit or roll back
   // together — a malformed/unknown person ref fails loudly here and the whole task creation
@@ -1337,6 +1378,86 @@ export async function closePmTaskInTx(
     });
   }
   return { outcome: "closed", status: done.id };
+}
+
+/** SCP-1n (BFF §63.13) — the pipeline's write of the CONTENT-MONTH task's progress, on an already-open tenant-scoped connection, one
+ *  direction only (a post moves the task; the task never moves a post). `done: true` closes the task through `closePmTaskInTx` (the
+ *  project's own done status, progress 100). `done: false` writes `progress` (kept below 100: 100 is what done means) and, when the task
+ *  was done, REOPENS it into the project's `in_progress` status (else its ready status), with the `pm.task.updated` event the work-activity
+ *  consumer reads as a reopen. A task that was deleted since answers `gone`. MUST run inside `withTenants([tenantId], ...)`. */
+export async function setLinkedTaskProgressInTx(
+  c: PoolClient,
+  tenantId: string,
+  actorUserId: string | null,
+  taskId: string,
+  want: { progress: number; done: boolean },
+): Promise<{ outcome: "closed" | "reopened" | "progress" | "unchanged" | "gone" | "no_done_status"; status: string | null }> {
+  const cur = await c.query<{ projectId: string; status: string; progress: number }>(
+    `SELECT project_id AS "projectId", status, progress FROM pm_tasks WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL FOR UPDATE`,
+    [taskId, tenantId],
+  );
+  const task = cur.rows[0];
+  if (!task) return { outcome: "gone", status: null };
+  const statuses = await effectiveStatuses(c, task.projectId);
+  const isDone = statuses.find((s) => s.id === task.status)?.isDone ?? false;
+  if (want.done) {
+    if (isDone) return { outcome: "unchanged", status: task.status };
+    const r = await closePmTaskInTx(c, tenantId, actorUserId, taskId);
+    return { outcome: r.outcome === "closed" ? "closed" : r.outcome === "no_done_status" ? "no_done_status" : "unchanged", status: r.status };
+  }
+  const progress = Math.max(0, Math.min(99, Math.round(want.progress)));
+  if (isDone) {
+    const open = statuses.find((s) => s.id === "in_progress" && !s.isDone && !s.isBlocked)?.id ?? readyStatus(statuses);
+    await c.query(
+      `UPDATE pm_tasks SET status = $2, progress = $3, block_reason = NULL, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`,
+      [taskId, open, progress],
+    );
+    await emitEvent(c, tenantId, "pm_task", taskId, "pm.task.updated", {
+      status: open, statusChanged: true, wasDone: true, isDoneNow: false, actorId: actorUserId,
+    });
+    return { outcome: "reopened", status: open };
+  }
+  if (task.progress === progress) return { outcome: "unchanged", status: task.status };
+  await c.query(`UPDATE pm_tasks SET progress = $2, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`, [taskId, progress]);
+  await emitEvent(c, tenantId, "pm_task", taskId, "pm.task.updated", {
+    status: task.status, statusChanged: false, wasDone: false, isDoneNow: false, actorId: actorUserId,
+  });
+  return { outcome: "progress", status: task.status };
+}
+
+/** SCP-1n (BFF §63.13) — a re-run of `PUT cycles` updates the content-month task: its due date and, when given, its title and its Ball and
+ *  Responsible (the assignee dual-write and the assignment ledger run exactly as `patchTask` runs them); what is left out stays as it is.
+ *  Never touches status or progress. MUST run inside `withTenants([tenantId], ...)`. */
+export async function updateLinkedTaskScheduleInTx(
+  c: PoolClient,
+  tenantId: string,
+  actorUserId: string | null,
+  taskId: string,
+  want: { title?: string; dueDate: string; assignee?: NonNullable<Assignee> },
+): Promise<{ changed: boolean }> {
+  const cur = await c.query<{ title: string; dueDate: string | null; status: string; assignee: Assignee }>(
+    `SELECT title, to_char(due_date, 'YYYY-MM-DD') AS "dueDate", status, assignee FROM pm_tasks WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL FOR UPDATE`,
+    [taskId, tenantId],
+  );
+  const task = cur.rows[0];
+  if (!task) return { changed: false };
+  const title = want.title ?? task.title;
+  const sameBall = !want.assignee || (task.assignee?.kind === want.assignee.kind && task.assignee?.refId === want.assignee.refId
+    && task.assignee?.responsibleId === want.assignee.responsibleId);
+  if (task.title === title && task.dueDate === want.dueDate && sameBall) return { changed: false };
+  await c.query(
+    `UPDATE pm_tasks SET title = $2, due_date = $3::date, assignee = CASE WHEN $4::boolean THEN $5::jsonb ELSE assignee END, updated_at = now()
+      WHERE id = $1 AND deleted_at IS NULL`,
+    [taskId, title, want.dueDate, !sameBall, want.assignee ? JSON.stringify(want.assignee) : null],
+  );
+  if (!sameBall) {
+    await syncTaskAssignees(c, tenantId, taskId, want.assignee ?? null, actorUserId, task.status);
+    await logAssigneeDriftIfAny(c, tenantId, taskId);
+  }
+  await emitEvent(c, tenantId, "pm_task", taskId, "pm.task.updated", {
+    status: task.status, statusChanged: false, wasDone: false, isDoneNow: false, actorId: actorUserId,
+  });
+  return { changed: true };
 }
 
 // ---------------- P4-E2 helpers ----------------
@@ -1837,6 +1958,7 @@ export class PmController {
                  t.estimate_minutes AS "estimateMinutes",
                  t.tags, t.depends_on AS "dependsOn", t.custom_fields AS "customFields",
                  t.recurrence, t.updated_at AS "updatedAt",
+                 t.linked_type AS "linkedType", t.linked_id AS "linkedId",
                  -- PV3-07: the portal lists no tasks, so this is the NEVER_CLIENT_VISIBLE constant.
                  ${staffNeverClientVisible("task")} AS "clientVisible",
                  -- description/subtasks/estimateMinutes/customFields/recurrence and the two
@@ -2131,7 +2253,7 @@ export class PmController {
   async createTask(
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
-    @Body() b: { projectId?: string; title?: string; status?: string; priority?: string; dueDate?: string; startDate?: string; milestoneId?: string; description?: string; estimateMinutes?: number; assignee?: unknown; customFields?: Record<string, unknown>; recurrence?: unknown; subtasks?: unknown; tags?: unknown },
+    @Body() b: { projectId?: string; title?: string; status?: string; priority?: string; dueDate?: string; startDate?: string; milestoneId?: string; description?: string; estimateMinutes?: number; assignee?: unknown; customFields?: Record<string, unknown>; recurrence?: unknown; subtasks?: unknown; tags?: unknown; linkedType?: unknown; linkedId?: unknown },
   ) {
     // MI-03: input validation, then authz, then the DB work — the SAME three steps in the SAME
     // order as before, now expressed through the two exported service functions above so that the
@@ -2155,6 +2277,8 @@ export class PmController {
     if (assignee && assignee.responsibleId !== req.principal.userId) {
       await authorize(req.principal, { kind: "pm_task", tenantId, projectId: n.projectId }, "manage");
     }
+    // SCP-1n: a link to a social post needs the post to exist in this company and the caller to be able to read it.
+    if (n.link) await assertCanLinkSocialPost(req.principal, tenantId, n.link);
     const { id } = await withTenants([tenantId], (c) => createPmTaskInTx(c, tenantId, req.principal.userId, n));
     if (assignee?.responsibleId) {
       await notify(tenantId, assignee.responsibleId, req.principal.userId, "assignment", {
@@ -2208,6 +2332,11 @@ export class PmController {
       }
     }
 
+    // SCP-1n: `linkedType` + `linkedId` (a social post), or both null to clear. Parsed after `update` was decided; a link to a
+    // post needs the post to exist in this company and the caller to be able to read it.
+    const linkChange = parseTaskLinkInput(b as { linkedType?: unknown; linkedId?: unknown });
+    if (linkChange) await assertCanLinkSocialPost(req.principal, tenantId, linkChange);
+
     // Both reassigned inside the transaction closure and returned at the end,
     // rather than mutating outer `let`s — read via the awaited return value
     // instead (TS's closure-narrowing can't soundly track outer mutations).
@@ -2222,6 +2351,14 @@ export class PmController {
       if (!lock.rows[0]) throw new NotFoundException("task not found");
       const task = await fetchTask(c, taskId);
       if (!task) throw new NotFoundException("task not found");
+      // SCP-1n: the content-month task belongs to its cycle (the pipeline created it and writes its progress); no route moves it.
+      if (linkChange !== undefined) {
+        if (task.linkedType === "social_cycle") throw new ConflictException({ message: "task_link_locked" });
+        await c.query(
+          `UPDATE pm_tasks SET linked_type = $2, linked_id = $3, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`,
+          [taskId, linkChange?.type ?? null, linkChange?.id ?? null],
+        );
+      }
 
       // Mutable working copy of the fields the coupling rules touch.
       let subtasks = Array.isArray(task.subtasks) ? [...(task.subtasks as { id: string; title: string; done: boolean }[])] : [];

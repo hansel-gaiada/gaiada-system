@@ -2,7 +2,7 @@
 // client may see. No database: the real-Postgres behaviour is in post-comments.http.test.ts.
 import { describe, it, expect, vi } from "vitest";
 import type { PoolClient } from "pg";
-import { clientVisibleComments, parseAnchor, parseVisibility } from "./post-comments";
+import { clientVisibleComments, parseAnchor, parseVisibility, resolveReplyVisibility } from "./post-comments";
 
 const FILE = "11111111-1111-4111-8111-111111111111";
 const TENANT = "22222222-2222-4222-8222-222222222222";
@@ -93,5 +93,53 @@ describe("clientVisibleComments (the rule the portal reads through)", () => {
       { id: "c-2", authorName: null, body: "No pin", parentCommentId: "c-1", anchor: null, createdAt: "2027-03-02T10:00:00.000Z" },
     ]);
     expect(Object.keys(out[0]!)).not.toContain("authorId");
+  });
+});
+
+describe("resolveReplyVisibility (SCP-1t) -- a reply takes its parent's visibility", () => {
+  const team = { visibility: "team" as const };
+  const client = { visibility: "client" as const };
+  const statusOf = (e: unknown) => (e as { getStatus(): number }).getStatus();
+  const fieldOf = (e: unknown) => (e as { getResponse(): { field: string } }).getResponse().field;
+
+  it("a top comment (no parent) is team unless it says client, exactly as parseVisibility", () => {
+    expect(resolveReplyVisibility(undefined, null)).toBe("team");
+    expect(resolveReplyVisibility("team", null)).toBe("team");
+    expect(resolveReplyVisibility("client", null)).toBe("client");
+  });
+
+  it("a reply with no visibility given takes its parent's", () => {
+    expect(resolveReplyVisibility(undefined, team)).toBe("team");
+    expect(resolveReplyVisibility(undefined, client)).toBe("client");
+  });
+
+  it("a client reply to a team comment is 400 {field: visibility}: the client would read an answer to a note it never saw", () => {
+    try {
+      resolveReplyVisibility("client", team);
+      throw new Error("expected a refusal");
+    } catch (e) {
+      expect(statusOf(e)).toBe(400);
+      expect(fieldOf(e)).toBe("visibility");
+    }
+  });
+
+  it("a team reply to a client comment is allowed (an aside the client does not see), and a client reply to a client comment too", () => {
+    expect(resolveReplyVisibility("team", client)).toBe("team");
+    expect(resolveReplyVisibility("client", client)).toBe("client");
+    expect(resolveReplyVisibility("team", team)).toBe("team");
+  });
+
+  it("a visibility that is neither team nor client is still 400 {field: visibility}, with or without a parent", () => {
+    for (const parent of [null, team, client]) {
+      for (const bad of ["everyone", "", "CLIENT", 1, null]) {
+        try {
+          resolveReplyVisibility(bad, parent);
+          throw new Error(`expected a refusal for ${String(bad)}`);
+        } catch (e) {
+          expect(statusOf(e)).toBe(400);
+          expect(fieldOf(e)).toBe("visibility");
+        }
+      }
+    }
   });
 });

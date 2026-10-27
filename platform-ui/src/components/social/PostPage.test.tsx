@@ -536,6 +536,9 @@ describe("the designer's part (SCP-1h)", () => {
     expect(designs.getAllByRole("listitem")).toHaveLength(3);
 
     const first = (demoPipelineRead(p.id, "u-creative").json as Body).designs[0].id as string;
+    // The new design shows before the add's transition ends, and Remove stays disabled until it does: wait for it, or a busy
+    // runner clicks a disabled button (train 4's CI 40472406446).
+    await waitFor(() => expect(designs.getByRole("button", { name: "Remove design 1" })).toBeEnabled());
     fireEvent.click(designs.getByRole("button", { name: "Remove design 1" }));
     await waitFor(() => expect(removePostDesign).toHaveBeenCalledWith(p.id, first));
     await waitFor(() => expect(designs.getAllByRole("listitem")).toHaveLength(2));

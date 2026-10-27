@@ -2,13 +2,14 @@
 // rows; `actions[]` is decided for the caller by the machine's `probe` (the steps of §63.3.2 that need no body) on one
 // Cerbos call, and `checks[]` by `readChecks`, so the page shows exactly what the routes would answer.
 //
-// Fields a later ticket owns answer their neutral value and say which ticket: `health` (SCP-1c), `boost` (SCP-4),
-// `tasks` (SCP-1n). None is a made-up number.
+// Fields a later ticket owns answer their neutral value and say which ticket: `health` (SCP-1c), `boost` (SCP-4). None is a
+// made-up number. `tasks` (SCP-1n) is the PM tasks that point at the post.
 import type { PoolClient } from "pg";
 import type { Principal } from "../../../rbac/principal";
 import type { Resource } from "../../../rbac/cerbos";
 import { SCP } from "./fixture";
 import { readChecks } from "./handoff-checks";
+import { listPostTasks } from "./post-tasks";
 import {
   actionsFromStatus, cerbosActionsToAsk, changeCaseOf, engineStatusOf, holderOf, phaseOf, postStateFromRow, primaryActionOf, probe,
   type PipelinePostState,
@@ -121,6 +122,7 @@ export async function buildPipelinePost(i: ReadInput): Promise<Record<string, un
   }
 
   const cc = changeCaseOf(state);
+  const tasks = await listPostTasks(c, i.principal, tenantId, row.id);
   return {
     id: row.id,
     engagementId: row.engagement_id,
@@ -145,8 +147,10 @@ export async function buildPipelinePost(i: ReadInput): Promise<Record<string, un
     creativeRequest: request,
     designs: designs.map((d) => ({
       id: d.id, position: d.position,
-      // An asset's own source and AI note are on `creative_assets` from SCP-1h (file 4); null until then.
-      asset: d.asset_group_id ? { groupId: d.asset_group_id, versionId: d.asset_version_id, versionNo: d.asset_version_no, name: d.asset_name, source: null, aiNote: null } : null,
+      // An asset's own source and AI note are on `creative_assets` (SCP-1h, file 4), set where the asset is saved: the latest live version's.
+      asset: d.asset_group_id
+        ? { groupId: d.asset_group_id, versionId: d.asset_version_id, versionNo: d.asset_version_no, name: d.asset_name, source: d.asset_source, aiNote: d.asset_ai_note }
+        : null,
       link: d.link_url ? { url: d.link_url, source: d.link_source, aiNote: d.link_ai_note } : null,
       fileId: d.file_id,
     })),
@@ -162,7 +166,7 @@ export async function buildPipelinePost(i: ReadInput): Promise<Record<string, un
     reviewHash: reviewHashOf(variants),
     liveUrl: row.live_url, wentLiveAt: iso(row.went_live_at), simulated: row.simulated, archivedAt: iso(row.archived_at),
     boost: null, // SCP-4: boosts (BFF §63.11)
-    tasks: [], // SCP-1n: PM task links (BFF §63.13)
+    tasks, // the PM tasks that point at this post (SCP-1n, BFF §63.13)
     copyLog: copyLog.rows.map((r) => ({
       field: r.field, before: r.before, after: r.after, via: r.via, by: person(r.edited_by), suggestedBy: person(r.suggested_by), stage: r.stage, at: iso(r.edited_at),
     })),

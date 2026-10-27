@@ -43,6 +43,7 @@ import { isUuidShaped } from "./dept-resolution";
 import { lockChangeRequest } from "./webdev-cr-lock";
 import type { Resource } from "../rbac/cerbos";
 import * as svc from "./work-requests.service";
+import { socialPostsOfRequest } from "../modules/social/pipeline/request-social-posts";
 
 const resource = (tenantId: string, extra: Partial<Resource> = {}): Resource => ({ kind: "work_request", tenantId, ...extra });
 const notFound = () => new svc.WorkRequestRuleError(404, "request_not_found", "request not found");
@@ -304,13 +305,16 @@ export class WorkRequestsController {
   @Get(":id")
   async detail(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
     await authorize(req.principal, resource(tenantId, { id }), "read");
-    return mapRules(() =>
+    const row = await mapRules(() =>
       withTenants([tenantId], async (c) => {
-        const row = await svc.getRequest(c, tenantId, id, await svc.loadOrgIndex(c, tenantId));
-        if (!row) throw notFound();
-        return row;
+        const found = await svc.getRequest(c, tenantId, id, await svc.loadOrgIndex(c, tenantId));
+        if (!found) throw notFound();
+        return found;
       }),
     );
+    // SCP-1h (§63.6.6): the social posts that joined this request (additive; [] for a request no post joined). Read under the
+    // social module scope in a transaction of its own, never inside the request read above.
+    return { ...row, socialPosts: await socialPostsOfRequest(tenantId, id) };
   }
 
   // ═══════════════════════════════════════════════ helpers ═══════════════════════════════════════════════

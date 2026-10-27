@@ -112,6 +112,37 @@ export function parseVersionOf(raw: unknown): string | null {
   return v;
 }
 
+export const ASSET_SOURCES = ["own", "client", "stock", "ai", "unknown"] as const;
+export type AssetSource = (typeof ASSET_SOURCES)[number];
+export const AI_NOTE_MAX = 1_000;
+
+/** SCP-1h (BFF §63.1 file 4, §35.2): where the saved bytes came from, and the note an AI-made picture carries. Both are optional on
+ *  the save: no source is `unknown` (a new version never inherits the one it replaces: new bytes, new origin). An `ai` source needs
+ *  a non-blank note (400 `ai_note_required`); a note of 1 to 1,000 characters may ride on any source; a blank one is no note.
+ *  `char_length` in the database counts characters, so the bound is counted in code points here. */
+export function parseSourceAndNote(rawSource: unknown, rawNote: unknown): { source: AssetSource; aiNote: string | null } {
+  let source: AssetSource = "unknown";
+  if (rawSource !== undefined && rawSource !== null) {
+    if (typeof rawSource !== "string" || !(ASSET_SOURCES as readonly string[]).includes(rawSource)) {
+      throw new CreativeRuleError(400, "source_invalid", "source must be own, client, stock, ai or unknown", "source");
+    }
+    source = rawSource as AssetSource;
+  }
+  let aiNote: string | null = null;
+  if (rawNote !== undefined && rawNote !== null) {
+    if (typeof rawNote !== "string") throw new CreativeRuleError(400, "ai_note_invalid", "aiNote must be text", "aiNote");
+    const n = stripNul(rawNote).trim();
+    if ([...n].length > AI_NOTE_MAX) {
+      throw new CreativeRuleError(400, "ai_note_invalid", `aiNote must be at most ${AI_NOTE_MAX} characters`, "aiNote");
+    }
+    aiNote = n === "" ? null : n;
+  }
+  if (source === "ai" && aiNote === null) {
+    throw new CreativeRuleError(400, "ai_note_required", "an AI-made asset needs a note saying how it was made", "aiNote");
+  }
+  return { source, aiNote };
+}
+
 /** `?versions=latest` (the default) or `?versions=all`. */
 export function parseVersionsQuery(raw: unknown): "latest" | "all" {
   if (raw === undefined || raw === null) return "latest";
@@ -258,7 +289,7 @@ export async function departmentOf(c: PoolClient, tenantId: string, assetId: str
 // Today's list columns (unchanged, snake_case), then the §35.5 version fields (camelCase, as the contract names them).
 const ASSET_COLUMNS = `a.id, a.name, a.content_type, a.width, a.height, a.preset_id, a.grade, a.department_id,
        a.original_key IS NOT NULL AS has_original, a.original_byte_size, a.graded_byte_size,
-       a.training_ready, a.uploader_id, a.created_at,
+       a.training_ready, a.uploader_id, a.created_at, a.source, a.ai_note AS "aiNote",
        a.version_no AS "versionNo", COALESCE(a.version_group_id, a.id) AS "versionGroupId",
        a.supersedes_id AS "supersedesId", g.n AS "versionCount", (a.version_no = g.latest_no) AS "isLatest",
        (SELECT json_build_object('round', r.round, 'status', r.status)

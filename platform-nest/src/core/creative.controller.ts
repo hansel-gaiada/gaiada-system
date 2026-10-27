@@ -70,6 +70,9 @@ interface SaveBody {
   originalContentType?: string;
   /** DW-6h §35.2: save this as the NEXT VERSION of that asset's group (any version of the group may be named). */
   versionOf?: unknown;
+  /** SCP-1h §63.6.6: where the bytes came from (`own|client|stock|ai|unknown`, default `unknown`) and an AI-made asset's note. */
+  source?: unknown;
+  aiNote?: unknown;
 }
 
 /** The `creative_asset` resource for one review action. The attributes come from the database, never from a body. */
@@ -135,6 +138,7 @@ export class CreativeController {
     if (!b.graded) throw new BadRequestException("graded image content required");
     const grade = validateGrade(b.grade);
     const versionOf = await rv.mapCreativeRules(async () => rv.parseVersionOf(b.versionOf));
+    const { source, aiNote } = await rv.mapCreativeRules(async () => rv.parseSourceAndNote(b.source, b.aiNote));
     const userId = req.principal.userId as string;
 
     const gradedBytes = decodeImage(b.graded, "graded");
@@ -147,7 +151,7 @@ export class CreativeController {
       contentType: b.contentType ?? "image/webp", width: b.width ?? null, height: b.height ?? null,
       presetId: b.presetId ?? "custom", departmentId: b.departmentId,
       grade, graded: gradedBytes, original: originalBytes, originalContentType: b.originalContentType ?? null,
-      versionOf,
+      versionOf, source, aiNote,
     });
   }
 
@@ -158,7 +162,7 @@ export class CreativeController {
       c.query(
         `SELECT id, name, content_type, width, height, preset_id, grade, department_id,
                 original_key IS NOT NULL AS has_original, original_byte_size, graded_byte_size,
-                training_ready, uploader_id, created_at
+                training_ready, uploader_id, created_at, source, ai_note AS "aiNote"
          FROM creative_assets WHERE id = $1 AND deleted_at IS NULL`,
         [id],
       ),

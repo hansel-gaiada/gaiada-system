@@ -131,12 +131,37 @@ export interface RequestRow {
 
 export interface RequestAsset { id: string; name: string; contentType: string; href: string }
 
+/** SCP-1h (§63.6.6): a Social Media post that joined this request (the client's month of designs). `href` opens the post page, or is null when the company has no Social Media department. */
+export interface RequestSocialPost {
+  postId: string;
+  title: string;
+  clientName: string;
+  pipelineStatus: string;
+  creativeState: string | null;
+  href: string | null;
+}
+
+const SOCIAL_STEP: Readonly<Record<string, string>> = {
+  planned: "Planned", drafting: "Being written", proofread: "Proofreading", hod: "With the head of department", design: "To design", final: "Final check",
+  changes: "Changes asked for", blocked: "Blocked", client: "With the client", approved: "Approved", scheduled: "Scheduled", live: "Live",
+};
+const SOCIAL_DESIGN_STATE: Readonly<Record<string, string>> = { not_started: "not started", in_progress: "in progress", revision: "revision", submitted: "submitted" };
+
+/** "To design · in progress": where a social post on a request stands, in plain words. */
+export function socialPostStatusText(p: Pick<RequestSocialPost, "pipelineStatus" | "creativeState">): string {
+  const step = SOCIAL_STEP[p.pipelineStatus] ?? p.pipelineStatus;
+  const state = p.creativeState ? SOCIAL_DESIGN_STATE[p.creativeState] ?? p.creativeState : null;
+  return state ? `${step} · ${state}` : step;
+}
+
 export interface RequestDetail extends RequestRow {
   brief: string;
   /** The form as sent, shown back as data. Never interpreted. */
   form: Record<string, unknown>;
   declineReason: string | null;
   assets: RequestAsset[];
+  /** Additive: the social posts that joined this request. [] for a request no post joined, and for an older backend. */
+  socialPosts?: RequestSocialPost[];
 }
 
 export interface RequestSummary {
@@ -248,7 +273,16 @@ export function normalizeRequestDetail(raw: unknown, opts: { outbound?: boolean 
     const id = o ? str(o.id) : null;
     return o && id ? [{ id, name: str(o.name) ?? id, contentType: str(o.contentType) ?? "", href: str(o.href) ?? "" }] : [];
   });
-  return { ...row, brief: str(r.brief) ?? "", form: obj(r.form) ?? {}, declineReason: str(r.declineReason), assets };
+  const socialPosts = (Array.isArray(r.socialPosts) ? r.socialPosts : []).flatMap((p): RequestSocialPost[] => {
+    const o = obj(p);
+    const postId = o ? str(o.postId) : null;
+    if (!o || !postId) return [];
+    return [{
+      postId, title: str(o.title) ?? "Untitled post", clientName: str(o.clientName) ?? "", pipelineStatus: str(o.pipelineStatus) ?? "",
+      creativeState: str(o.creativeState), href: str(o.href),
+    }];
+  });
+  return { ...row, brief: str(r.brief) ?? "", form: obj(r.form) ?? {}, declineReason: str(r.declineReason), assets, socialPosts };
 }
 
 export function normalizeSummary(raw: unknown): RequestSummary | null {

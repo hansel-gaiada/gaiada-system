@@ -129,6 +129,7 @@ const WORKSPACE: AreaRule[] = [
   rule("/departments/[deptId]/profile/[engagementId]", "workspace", false, "SCP-1k, SCP-1m: one client's page (Plan, Stories, Calendar, List, Client profile) and its create bar; the department's own area, like the Allocation page it is reached from"),
   rule("/departments/[deptId]/allocation", "workspace", false, "SCP-1a: the Social Media Allocation page (each client's officer, target and creative source); its own entry so the page sits in one area, the department's own"),
   rule("/departments/[deptId]/posts/[postId]", "workspace", false, "SCP-1e: the Social Media post page (a drawer over any list); it is opened from lists and is never a menu row, so it is its own entry in the department's area"),
+  rule("/departments/[deptId]/design-queue", "workspace", false, "SCP-1h: the Social Media design queue (the posts the caller may design now); its own entry so the page sits in one area, the department's own"),
   ...WORKSPACES.flatMap((ws) =>
     ws.ownedRoutes.map((path): AreaRule => ({ path, subtree: true, kind: "workspace", slug: ws.key, why: `owned by the ${ws.label} workspace` })),
   ),
