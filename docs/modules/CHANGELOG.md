@@ -11,6 +11,25 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.188.0` - AI plan phase 1, second half: AIP-03a (every platform-nest AI call writes a usage row) and AIP-04 (the price table; assistant threads' total cost filled) (2026-10-28) - PROTOTYPED
+
+- **AIP-03a.** Every platform-nest caller of the AI gateway writes one `ai_usage_events` row per call, recorded in the clients rather than at the call sites. Each client requires an `AiCallAttribution` (company, person or an explicit null, surface, and optionally department, thread, run and task), so a new caller cannot compile without it. The callers covered:
+  - assistant replies (`relayGeneration`) and compaction;
+  - the search client (its seven routes, keyword embedding and clustering, report narratives, account summaries, WebDesk assist);
+  - the social client (briefs, inbox triage, reports, drafts).
+- **What each row carries:**
+  - **Tokens:** labelled `provider` (from the gateway's real usage, AIP-02), `estimate` (the assistant's 4-characters estimate) or `none`.
+  - **Cost:** the provider's own cost first.
+  - **Outcome:** `ok`, `blocked_budget` (429), `blocked_dlp` (503), `error`, or `incurred` (a reply stopped or dropped mid-stream).
+  - **Department:** the call site's, or the person's primary active unit (cached 10 minutes, never failing the call).
+  - Recording is fire-and-forget and never changes a call's result.
+- **Not covered yet:** the callers outside platform-nest (the agent runner, knowledge embeddings, bots) are AIP-03b.
+- **AIP-04: migration `202610271810_ai_model_prices.sql`.** `ai_model_prices (provider, model, effective_from)` holds USD per million prompt and completion tokens. It is global reference data, read-only to `platform_app`.
+  - **No price is seeded:** none exists in the repo, and prices are never invented. The owner or an admin enters them.
+  - When a row has tokens but no provider cost, the writer prices it from the newest effective row, labelled `table`. No price row leaves the cost NULL; unknown is not zero.
+  - `assistant_threads.total_cost_usd`, read but never written until now, is kept equal to the sum of the thread's usage-row costs.
+- **Tests:** locally, prices 17, the recorder 27, the callers through to the INSERT 25, the migration 7, and the updated webdesk-assist 22. `ai-model-prices.db.test.ts` (14) runs on the Linux gate.
+
 ### platform-nest `0.187.0` + ai-gateway-go `0.16.0` - AI plan phase 1, first half: AIP-01 (the AI usage table) and AIP-02 (the gateway reports real tokens and OpenRouter's cost) (2026-10-27) - PROTOTYPED
 
 - **AIP-01: migration `202610271800_ai_usage_events.sql`.** The table `ai_usage_events` is the business record of every AI call. It holds ids, counts, labels and money, and never any text.
