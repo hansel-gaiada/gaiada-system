@@ -10,29 +10,31 @@ import { tenantCookie } from "./appCookies";
 //   Copywriter   copywriter@gaiada.com      LOOP A: suggests an edit, returns the copy with a note; later approves the copy
 //   Officer      (again)                    accepts the suggestion, fixes the copy, sends it back to proofread
 //   HoD          social-head@gaiada.com     LOOP B: asks for changes; the officer's fix goes STRAIGHT back (no second proofread); then approves for design
-//   Creative     creative@gaiada.com        starts the design, adds a design link, submits
-//   GM           gm@gaiada.com              the final check; refused in words while the design is only a link
-//   HoD          (again)                    LOOP C1: a design change goes back to the Creative, who resubmits; back at the final check
-//   GM           (again)                    LOOP C2: a copy change goes back to the Officer, who resends; back at the final check
+//   Creative     creative@gaiada.com        starts the design, adds a design LINK, submits
+//   GM           gm@gaiada.com              the final check: "Send to the client" is disabled, with the reason in words, while the design is only a link
+//   HoD          (again)                    LOOP C1: a design change goes back to the Creative, who swaps the link for an Asset Library design and resubmits
+//   GM           (again)                    LOOP C2: a copy change goes back to the Officer, who resends; back at the final check; then the GM SENDS the post to the client
 //   Superadmin   hansel@gaiada.com          MAKER/CHECKER: the author of a post cannot pass it at proofread, refused in plain words
 //
-// ── FINDINGS THIS WALK RECORDS (the product is not changed to hide them) ──────────────────────────────────────────────────────
-// F1  In DEMO_MODE the designer's Asset Library picker is always empty (the demo serves no `GET creative/assets`, so `readAssetChoices` reads `[]`), although
-//     the demo runner knows two invented assets (`DEMO_ASSETS`). A design can therefore only be a LINK, and the final check refuses a link-only design
-//     (`design_not_stored`). So the GM's "Send to the client" cannot succeed on a post the walk drove through the UI. The step the walk CAN do is walked on the
-//     seeded final-check post `soc-post-s-6` (its design is an asset); the walk's own post ends at the refusal, and its send is a `test.fixme`.
+// ── FINDINGS THIS WALK RECORDED ──────────────────────────────────────────────────────────────────────────────────────────────
+// F1  FIXED (SCP-1u). The demo served no `GET creative/assets`, so the designer's Asset Library picker was always empty and a design could only be a link, which
+//     the final check refuses (`design_not_stored`): the walk's own post could never reach the client. The demo now answers that read from `DEMO_ASSETS`
+//     (`demoAssetLibraryRead`), and an asset design counts as stored exactly as the server decides it (the design has an asset group and version, not a link),
+//     so the walk's Creative swaps the link for an Asset Library design in loop c1 and the GM sends the walk's own post to the client (test 14, no longer a fixme).
+// F3  FIXED (SCP-1u). The demo listed "Send to the client" and "Submit for the final check" as live where the server's read lists them disabled (`design_not_stored`,
+//     `design_missing`); they were refused only when clicked. `actions[]` now runs the machine's body-free guards in the fixture's order, so a link-only post shows the
+//     button disabled with the reason beside it (test 9), which is what the real ERP shows.
 // F2  A person who is both the author and an approver (the superadmin) can only be shown the maker/checker refusal as a DISABLED button with the reason
 //     beside it: the page never offers the click, so the server's 403 `author_cannot_approve` body is not reachable through this UI (platform-nest's walk
 //     test covers the 403 itself).
 //
 // ── WHY ITS OWN PROJECT ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 // Every test signs in itself, so no stored session. Serial and order-dependent inside the file; independent of every other project: the post is created by
-// the walk (a title of its own), and the one seeded post it touches (`soc-post-s-6`) is read by no other spec. Run the file against a FRESH server: the demo
-// store lives in the server's memory, and `soc-post-s-6` can be sent to the client once. Gated on sumopod with the other workspace projects, retries off.
+// the walk (a title of its own) and touches no seeded post. Run the file against a FRESH server: the demo
+// store lives in the server's memory. Gated on sumopod with the other workspace projects, retries off.
 
 const TENANT = "co-agency";
 const CLIENT_PAGE = "/departments/dept-4/profile/soc-eng-1"; // Northwind Traders: officer u-social, designs by Creatives
-const SEEDED_FINAL = "/departments/dept-4/posts/soc-post-s-6"; // Saltmarsh Day Spa, "Meet our senior therapist": at the final check with a stored asset design
 
 const OFFICER = "social@gaiada.com";
 const COPYWRITER = "copywriter@gaiada.com";
@@ -52,7 +54,8 @@ const CAPTION_FIRST = "Walk caption: the first draft of the note.";
 const CAPTION_SUGGESTED = "Walk caption: the copywriter's clearer version of the note.";
 const MAKER_CHECKER = "You wrote or look after this post, so you cannot pass it at this step. Another person has to.";
 const LINK_ONE = "https://example.com/walk/design-one";
-const LINK_TWO = "https://example.com/walk/design-two";
+const ASSET_NAME = "Autumn hero - final.png"; // the demo's invented Asset Library asset (`DEMO_ASSETS[0]`)
+const ASSET_GROUP = "demo-asset-g1";
 
 let POST_URL = "";
 let MC_URL = "";
@@ -307,12 +310,9 @@ test.describe("SCP-1p: the content pipeline walked by its five roles", () => {
     await act(page, "Start design");
     await expect(page.getByText("In progress", { exact: false }).first()).toBeVisible();
     const designs = page.getByRole("region", { name: "Designs" });
-    // F1: the Asset Library picker is empty in DEMO_MODE, so a design can only be a link. Recorded, then walked with a link.
+    // F1 (fixed): the Asset Library picker lists the demo's invented assets. This step still adds a LINK, so the final check has a link-only design to refuse.
     await press(designs.getByRole("radio", { name: "From the Asset Library" }));
-    const emptyLibrary = designs.getByText(/Asset Library (has no saved assets yet|could not be read)/);
-    if (await emptyLibrary.isVisible()) {
-      test.info().annotations.push({ type: "finding", description: "F1: DEMO_MODE Asset Library picker is empty; a design can only be a link." });
-    }
+    await expect(designs.getByRole("combobox").locator("option", { hasText: ASSET_NAME })).toHaveCount(1);
     await tick(designs.getByRole("radio", { name: "A link" }));
     await designs.getByRole("textbox", { name: "Link" }).fill(LINK_ONE);
     await press(designs.getByRole("button", { name: "Add design", exact: true }));
@@ -323,15 +323,15 @@ test.describe("SCP-1p: the content pipeline walked by its five roles", () => {
     await expect(live(page, "Submit for the final check")).toHaveCount(0);
   });
 
-  test("9 GM: at the final check a link-only design is refused in words (F1)", async ({ page, context }) => {
+  test("9 GM: at the final check a link-only design cannot be sent, and the button says why (F1, F3)", async ({ page, context }) => {
     await signIn(page, context, GM);
     await open(page, POST_URL, TITLE);
     await expectAt(page, "Final check", "Approvers");
-    await expect(live(page, "Send to the client")).toBeVisible();
+    // The server's read disables the send with `design_not_stored`; the demo's now does the same (it was live and refused only on click).
+    await expect(live(page, "Send to the client")).toHaveCount(0);
+    await expect(offRow(page, "Send to the client")).toContainText("A design that is only a link has nothing to show the client.");
     await expect(live(page, "Ask for changes")).toBeVisible();
-    await act(page, "Send to the client");
-    await expect(page.getByRole("alert").filter({ hasText: "A design that is only a link has nothing to show the client." }).first()).toBeVisible();
-    await expect(chip(page)).toHaveText("Final check"); // refused: nothing moved
+    await expect(chip(page)).toHaveText("Final check");
   });
 
   test("10 HoD, LOOP C1: a design change goes back to the Creative, who resubmits, and it returns to the final check", async ({ page, context }) => {
@@ -352,10 +352,11 @@ test.describe("SCP-1p: the content pipeline walked by its five roles", () => {
     const designs = page.getByRole("region", { name: "Designs" });
     await press(designs.getByRole("button", { name: "Remove design 1", exact: true }));
     await expect(designs.getByRole("link", { name: LINK_ONE })).toBeHidden();
-    await tick(designs.getByRole("radio", { name: "A link" }));
-    await designs.getByRole("textbox", { name: "Link" }).fill(LINK_TWO);
+    // The change asks for a stored asset: the Asset Library picker now has one to offer.
+    await tick(designs.getByRole("radio", { name: "From the Asset Library" }));
+    await designs.getByRole("combobox").selectOption({ value: ASSET_GROUP });
     await press(designs.getByRole("button", { name: "Add design", exact: true }));
-    await expect(designs.getByRole("link", { name: LINK_TWO })).toBeVisible();
+    await expect(designs).toContainText(`${ASSET_NAME} · version 2`);
     await act(page, "Submit for the final check");
     await expectAt(page, "Final check", "Approvers");
   });
@@ -383,28 +384,20 @@ test.describe("SCP-1p: the content pipeline walked by its five roles", () => {
     await expect(activity(page).locator("li").last()).toContainText("Changes asked to Final check");
   });
 
-  // F1: the walk's own post cannot reach the client in DEMO_MODE, because its design can only be a link. When the demo serves an Asset Library (or the walk can
-  // add one), remove the fixme: the GM presses "Send to the client" here and the post is With the client, held by the Client.
-  test.fixme("14 GM: sends the walk's own post to the client (F1: no stored design is possible in DEMO_MODE)", async ({ page, context }) => {
+  test("14 GM: sends the walk's own post to the client (its design is an Asset Library asset, so it is stored)", async ({ page, context }) => {
     await signIn(page, context, GM);
     await open(page, POST_URL, TITLE);
-    await act(page, "Send to the client");
-    await expectAt(page, "With the client", "Client");
-  });
-
-  test("15 GM: approves a post to the client (walked on the seeded final-check post, whose design is a stored asset)", async ({ page, context }) => {
-    await signIn(page, context, GM);
-    await open(page, SEEDED_FINAL, "Meet our senior therapist");
     await expectAt(page, "Final check", "Approvers");
-    // The officer of that client is not the GM, so no maker/checker applies; the GM holds the step.
     await expect(live(page, "Send to the client")).toBeVisible();
     await act(page, "Send to the client");
     await expectAt(page, "With the client", "Client");
     await expect(seen(page, ".scp-post__chips")).toContainText("With client");
     await expect(live(page, "Send to the client")).toHaveCount(0);
+    // the send stored the design as a file the client can see
+    await expect(page.getByRole("region", { name: "Designs" })).toContainText("Stored for the client");
   });
 
-  test("16 Maker/checker: the author of a post cannot pass it at proofread, refused in plain words", async ({ page, context }) => {
+  test("15 Maker/checker: the author of a post cannot pass it at proofread, refused in plain words", async ({ page, context }) => {
     // The superadmin may author (the house wildcard), and as the author may not approve the copy: the one person for whom both are true.
     await signIn(page, context, SUPERADMIN);
     MC_URL = await createPost(page, TITLE_MC);
@@ -421,7 +414,7 @@ test.describe("SCP-1p: the content pipeline walked by its five roles", () => {
     await expect(chip(page)).toHaveText("Proofread");
   });
 
-  test("17 Maker/checker: the copywriter, a different person, can pass the same post", async ({ page, context }) => {
+  test("16 Maker/checker: the copywriter, a different person, can pass the same post", async ({ page, context }) => {
     await signIn(page, context, COPYWRITER);
     await open(page, MC_URL, TITLE_MC);
     await expectAt(page, "Proofread", `Copywriter: ${COPYWRITER_NAME}`);

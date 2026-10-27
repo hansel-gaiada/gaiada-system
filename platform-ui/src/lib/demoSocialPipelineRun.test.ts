@@ -19,10 +19,11 @@ vi.hoisted(() => {
 });
 
 import fixture from "./scpStageMachine.json";
-import { PIPE_POSTS, allocStore, demoCycleCounts, demoPipelineRead, type PipePost } from "./demoSocialPipeline";
-import { DEMO_ACTION_ROUTE, DEMO_ASSETS, DEMO_COLUMN_EFFECTS, isNoopEffect, runDemoPipelineAction, runDemoPipelineWrite } from "./demoSocialPipelineRun";
+import { PIPE_POSTS, allocStore, demoCycleCounts, demoFeed, demoPipelineRead, demoPostActions, type PipePost } from "./demoSocialPipeline";
+import { DEMO_ACTION_ROUTE, DEMO_ASSETS, DEMO_COLUMN_EFFECTS, demoAssetLibraryRead, isNoopEffect, runDemoPipelineAction, runDemoPipelineWrite } from "./demoSocialPipelineRun";
 import { violations } from "./demoSocialPipelineViolations";
 import { socialDemo } from "./demoSocial";
+import { getDemoResponse } from "./demoFixtures";
 
 const SNAPSHOT: PipePost[] = structuredClone(PIPE_POSTS);
 const ALLOC_SNAPSHOT = structuredClone(allocStore.byEngagement);
@@ -505,6 +506,128 @@ describe("the edit, suggestions, designs and bulk routes", () => {
     expect(runDemoPipelineWrite("POST", "posts/actions", { action: "block", items: [{ postId: "x" }] }, "u-social")).toMatchObject({ status: 400, json: { error: "invalid_field", field: "action" } });
     expect(runDemoPipelineWrite("POST", "posts/actions", { action: "approve_copy", items: [] }, "u-copy")).toMatchObject({ status: 400, json: { error: "invalid_field", field: "items" } });
     expect(runDemoPipelineWrite("GET", "posts/nope/unknown", {}, "u-social")).toBeNull();
+  });
+});
+
+// SCP-1u: the demo answers the Asset Library the post page reads, an asset design is stored as the server stores it, and `actions[]` runs the server's body-free guards.
+describe("SCP-1u: the Asset Library read, a stored asset design, and the guards of actions[]", () => {
+  const LIBRARY = "/api/co-agency/creative/assets";
+  const stateOf = (title: string, status: string): PipePost => {
+    const c = structuredClone(byTitle(title));
+    Object.assign(c, { pipelineStatus: status, changeCase: null, changeBy: null, changeKind: null, returnTo: null, scheduleVia: null, blockedFrom: null, blockWaitingOn: null, rescheduled: false, history: [] });
+    return c;
+  };
+  const link = (id: string) => ({ id, position: 1, asset: null, link: { url: "https://example.com/d", source: "own", aiNote: null }, fileId: null });
+  const stored = (id: string) => ({ id, position: 1, asset: { groupId: DEMO_ASSETS[0].groupId, versionId: DEMO_ASSETS[0].versionId, versionNo: 2, name: DEMO_ASSETS[0].name, source: "own", aiNote: null }, link: null, fileId: null });
+  const one = (p: PipePost, who: string, name: string) => demoPostActions(p, persona(p, who)).find((a) => a.action === name);
+
+  it("the library read is the invented assets, in the library's row shape, for the unfiltered read only", () => {
+    const r = demoAssetLibraryRead("GET", LIBRARY, new URLSearchParams())!;
+    expect(r.status).toBe(200);
+    expect((r.json as Body[]).map((a) => ({ id: a.id, name: a.name, group: a.versionGroupId, no: a.versionNo }))).toEqual(
+      DEMO_ASSETS.map((a) => ({ id: a.versionId, name: a.name, group: a.groupId, no: a.versionNo })),
+    );
+    expect(demoAssetLibraryRead("GET", LIBRARY, new URLSearchParams("departmentId=dept-2"))).toBeNull();
+    expect(demoAssetLibraryRead("POST", LIBRARY, new URLSearchParams())).toBeNull();
+    expect(demoAssetLibraryRead("GET", `${LIBRARY}/demo-asset-v1/versions`, new URLSearchParams())).toBeNull();
+    // and it is what the whole demo answers on the path the post page reads
+    const wired = getDemoResponse("GET", LIBRARY, "u-creative");
+    expect(wired.status).toBe(200);
+    expect((wired.json as Body[]).map((a) => a.versionGroupId)).toEqual(DEMO_ASSETS.map((a) => a.groupId));
+  });
+
+  it("an asset design is stored as the server stores it: the final check and the client send accept it, and a link-only design is still refused", () => {
+    const p = byTitle("Winter warmth menu");
+    expect(p).toMatchObject({ pipelineStatus: "design", creativeSource: "in_team", creativeState: "not_started" });
+    okRes(act(p, "in_team_designer", "start_design"));
+    // a link only: the design step may submit it, the final check may not send it (the server's `asset_group_id` NULL)
+    const linkAdded = okRes(route(p, "in_team_designer", "POST", `posts/${p.id}/designs`, { expectedStatus: "design", linkUrl: "https://example.com/drive/d1", linkSource: "own" }));
+    expect(linkAdded.post.designs[0].asset).toBeNull();
+    okRes(act(p, "in_team_designer", "submit_design"));
+    refused(act(p, "approver", "final_approve"), "design_not_stored", { detail: { designIds: [`${p.id}-d1`] } });
+    // changes back to the designer, who swaps the link for an asset of the library
+    okRes(act(p, "approver", "final_changes", { changeKind: "design", note: "Please use a saved asset." }));
+    okRes(route(p, "in_team_designer", "DELETE", `posts/${p.id}/designs/${p.id}-d1`));
+    const added = okRes(route(p, "in_team_designer", "POST", `posts/${p.id}/designs`, { expectedStatus: "changes", assetGroupId: DEMO_ASSETS[1].groupId }));
+    expect(added.post.designs).toEqual([expect.objectContaining({ asset: expect.objectContaining({ groupId: DEMO_ASSETS[1].groupId }), link: null })]);
+    okRes(act(p, "in_team_designer", "submit_design"));
+    expect(one(p, "approver", "final_approve")).toEqual({ action: "final_approve", allowed: true });
+    const sent = okRes(act(p, "approver", "final_approve"));
+    expect(sent.post.pipelineStatus).toBe("client");
+    expect(sent.post.designs[0].fileId).toEqual(expect.any(String)); // the send materialized the file
+  });
+
+  it("submit_design is disabled with design_missing until the post has a design; the persona's refusal still comes first", () => {
+    const p = stateOf("Winter warmth menu", "design");
+    p.designs = [];
+    expect(one(p, "in_team_designer", "submit_design")).toEqual({ action: "submit_design", allowed: false, reason: "design_missing" });
+    expect(one(p, "request_designer", "submit_design")).toEqual({ action: "submit_design", allowed: false, reason: "not_the_designer" });
+    p.designs = [link(`${p.id}-d1`)];
+    expect(one(p, "in_team_designer", "submit_design")).toEqual({ action: "submit_design", allowed: true });
+  });
+
+  it("final_approve runs the server's guards in the fixture's order: design_missing, design_not_stored, then the client's accounts", () => {
+    const p = stateOf("Winter warmth menu", "final");
+    p.designs = [];
+    expect(one(p, "approver", "final_approve")).toEqual({ action: "final_approve", allowed: false, reason: "design_missing" });
+    p.designs = [link(`${p.id}-d1`)];
+    expect(one(p, "approver", "final_approve")).toEqual({ action: "final_approve", allowed: false, reason: "design_not_stored" });
+    p.designs = [link(`${p.id}-d1`), stored(`${p.id}-d2`)]; // one link among stored ones is still unstored
+    expect(one(p, "approver", "final_approve")).toEqual({ action: "final_approve", allowed: false, reason: "design_not_stored" });
+    p.designs = [stored(`${p.id}-d1`)];
+    expect(one(p, "approver", "final_approve")).toEqual({ action: "final_approve", allowed: true });
+    p.placement = ["x"]; // the client has no account on X
+    expect(one(p, "approver", "final_approve")).toEqual({ action: "final_approve", allowed: false, reason: "no_account_for_network" });
+    p.designs = [];
+    expect(one(p, "approver", "final_approve")).toEqual({ action: "final_approve", allowed: false, reason: "design_missing" });
+    // the maker/checker and the persona come before any guard, and an action with no guard of that kind is untouched
+    p.designs = [link(`${p.id}-d1`)];
+    expect(one(p, "officer", "final_approve")).toEqual({ action: "final_approve", allowed: false, reason: "author_cannot_approve" });
+    expect(one(p, "approver", "final_changes")).toEqual({ action: "final_changes", allowed: true });
+  });
+
+  it("the other body-free guards the demo used to skip: a stale suggestion, an incomplete post, a passed approved time and a follow-up inside 24 hours", () => {
+    const stale = stateOf("Old harbour walk", "proofread");
+    stale.suggestions = { caption: { value: "A new caption", base: "an older caption", by: "u-copy", at: "2026-10-15T09:00:00.000Z" } };
+    expect(one(stale, "copywriter", "approve_copy")).toEqual({ action: "approve_copy", allowed: false, reason: "suggestion_stale" });
+    stale.suggestions = {};
+    expect(one(stale, "copywriter", "approve_copy")).toEqual({ action: "approve_copy", allowed: true });
+
+    const draft = stateOf("Gift guide for the host", "drafting");
+    draft.caption = "";
+    expect(one(draft, "officer", "send_to_proofread")).toEqual({ action: "send_to_proofread", allowed: false, reason: "incomplete_post" });
+    draft.caption = "A caption.";
+    draft.mustHaves = []; // a soft check: send anyway is always possible, so the button stays live
+    expect(one(draft, "officer", "send_to_proofread")).toEqual({ action: "send_to_proofread", allowed: true });
+
+    const approved = stateOf("Harbour view suite", "approved");
+    approved.scheduledAt = "2026-10-01T09:00:00.000Z";
+    expect(one(approved, "officer", "schedule")).toEqual({ action: "schedule", allowed: false, reason: "approved_time_passed" });
+    approved.scheduledAt = "2026-10-23T09:00:00.000Z";
+    expect(one(approved, "officer", "schedule")).toEqual({ action: "schedule", allowed: true });
+
+    const withClient = stateOf("Five ways to style a scarf", "client");
+    expect(one(withClient, "approver", "follow_up")).toEqual({ action: "follow_up", allowed: true });
+    withClient.history = [{ action: "follow_up", from: "client", to: "client", by: { id: "u-pm", name: "x" }, agent: null, at: new Date().toISOString(), recorded: null, viaPortal: false, holder: "client" }];
+    expect(one(withClient, "approver", "follow_up")).toEqual({ action: "follow_up", allowed: false, reason: "follow_up_too_soon" });
+    withClient.history[0].holder = "approver"; // a follow-up that reached an earlier holder is not this holder's
+    expect(one(withClient, "approver", "follow_up")).toEqual({ action: "follow_up", allowed: true });
+  });
+
+  it("the read's actions[] runs the guards, and the feed card does not (the server decides a card with no facts and a neutral post)", () => {
+    const p = byTitle("Old harbour walk");
+    const saved = structuredClone(p); // an earlier test moved this post: put it at proofread for this one, and back after
+    try {
+      Object.assign(p, { pipelineStatus: "proofread", changeCase: null, changeBy: null, changeKind: null, returnTo: null, blockedFrom: null, blockWaitingOn: null, history: [] });
+      p.suggestions = { caption: { value: "A new caption", base: "an older caption", by: "u-copy", at: "2026-10-15T09:00:00.000Z" } };
+      const read = demoPipelineRead(p.id, "u-copy").json as Body;
+      expect(read.actions.find((a: Body) => a.action === "approve_copy")).toEqual({ action: "approve_copy", allowed: false, reason: "suggestion_stale" });
+      expect(read.nextAction).toBeNull();
+      const card = ((demoFeed(new URLSearchParams("view=all&limit=50"), "u-copy").json as Body).items as Body[]).find((c) => c.id === p.id)!;
+      expect(card.nextAction).toEqual({ action: "approve_copy", allowed: true });
+    } finally {
+      Object.assign(p, saved);
+    }
   });
 });
 

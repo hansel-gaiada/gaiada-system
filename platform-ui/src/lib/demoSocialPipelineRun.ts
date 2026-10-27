@@ -57,6 +57,23 @@ export const DEMO_ASSETS: ReadonlyArray<{ groupId: string; versionId: string; ve
   { groupId: "demo-asset-g2", versionId: "demo-asset-v1", versionNo: 1, name: "Studio portrait.png", source: "ai", aiNote: "Background made with an image model; the product is a photograph." },
 ];
 
+/**
+ * `GET /api/:t/creative/assets` with no filter: the Asset Library's latest versions, which is what the post page's designer picker reads (`readAssetChoices`).
+ * The demo has no creative library of its own, so the answer is `DEMO_ASSETS`, in the row shape of §35.5 (each version's own id, its group in `versionGroupId`).
+ * A read with a filter (a department's library, `trainingReady`, `versions=all`) is not this one: null, and the caller falls through.
+ */
+export function demoAssetLibraryRead(method: string, p: string, params: URLSearchParams): DemoResult | null {
+  if (method.toUpperCase() !== "GET" || !/^\/api\/[^/]+\/creative\/assets$/.test(p) || [...params.keys()].length > 0) return null;
+  return {
+    status: 200,
+    json: DEMO_ASSETS.map((a, i) => ({
+      id: a.versionId, name: a.name, content_type: "image/png", width: 1080, height: 1350, preset_id: null, grade: null, department_id: "dept-2",
+      has_original: true, original_byte_size: 240000 + i * 1000, graded_byte_size: 180000 + i * 1000, training_ready: false, created_at: "2026-09-20T09:00:00.000Z",
+      versionNo: a.versionNo, versionGroupId: a.groupId, supersedesId: null, versionCount: a.versionNo, isLatest: true, review: null, source: a.source, aiNote: a.aiNote,
+    })),
+  };
+}
+
 // ── Refusals ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 interface Fail { error: string; field?: string; detail?: Record<string, unknown>; blockers?: Array<{ code: string; message: string }>; retryAfterSeconds?: number }
@@ -565,7 +582,9 @@ function guards(a: FxAction, p: PipePost, r: Req, userId: string, now: Date): { 
         break;
       }
       case "once_per_holder_per_24h": {
-        const last = [...p.history].reverse().find((h) => h.action === "follow_up");
+        // the server's `once_per_holder_per_24h` counts the follow-ups that reached THIS holder (a follow-up of an earlier holder is not this one's)
+        const role = scpHolderOf(view(p));
+        const last = [...p.history].reverse().find((h) => h.action === "follow_up" && (h.holder === undefined || h.holder === role));
         const elapsed = last ? now.getTime() - Date.parse(String(last.at)) : Number.POSITIVE_INFINITY;
         if (elapsed < FOLLOW_UP_WINDOW_MS) return { fail: refuse("follow_up_too_soon", { retryAfterSeconds: Math.ceil((FOLLOW_UP_WINDOW_MS - elapsed) / 1000) }), skipped };
         break;
