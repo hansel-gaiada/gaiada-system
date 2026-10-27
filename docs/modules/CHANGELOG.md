@@ -11,6 +11,18 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.175.0` + platform-ui `0.201.0` - agentic-native close-out T2 and T4: one module list for the audits, and a reader-degrade ratchet over every page (2026-10-27) - PROTOTYPED
+
+- **T2.** New `platform-nest/src/modules/compiled-in-modules.ts` (`COMPILED_IN_MODULES`, the 16 modules). `main.ts` registers from it in the identical order, and both `impact-registry.test.ts` and `capability-inventory.test.ts` read it.
+  - Before, the impact test hard-coded 14 and missed finance and lms, and the inventory missed lms.
+  - The inventory now has 17 owners and 282 capabilities (lms adds 3 reads); no write changed.
+  - Teeth: removing finance's `freelancerBills.draft` impact turned the impact test red, a write it could not see before.
+- **T4.** The reader-degrade guard (`readerDegrade.test.ts`) now also scans `platform-ui/src/app` and `src/components`, as a RATCHET.
+  - `readerDegradeAppAllowlist.ts` lists the 92 existing sites in 78 files. A new site, or a higher count, fails; a lower count fails until the allowlist is lowered, so it can only shrink.
+  - `src/app/(app)/me/page.tsx` drops its bare-catch `safe()`: its 4 reads go through `readResult`, and a refused read renders `ReadRefusal` and "Not shown" instead of "Nothing new".
+  - Teeth: a scratch `.catch(() => [])` page and a raised count both went red.
+- From the agentic-native close-out (`docs/superpowers/plans/2026-08-03-agentic-native-erp-plan.md`, tickets T2 and T4). CI 40364835614 green on the branch (`acf4bde9`).
+
 ### platform-ui `0.200.0` - SCP-Kg: the Social skin is ON for Social Media (owner, 2026-10-27) (2026-10-27) - PROTOTYPED
 
 - **What changes on screen.** Every Social Media workspace now wears the team's own design: the pinned menu (Home, Search, Notifications, Tasks, Create, Calendar, Reports, Saved, AI Assistant, More), the More panel, the phone bar and sheet, and the flat white or black look. Every other workspace, Company and Admin stay Standard. Anyone may choose the Standard look for themselves: More › Appearance › Standard look (and back from the avatar menu).
