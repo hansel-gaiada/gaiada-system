@@ -25,7 +25,7 @@ import { postEntityComment } from "@/lib/collabActions";
 import { formatDate, formatDateTime } from "@/lib/format";
 import type { Comment, CommentAnchor } from "@/lib/pm";
 import type { PostMetrics } from "@/lib/socialMetrics";
-import { WAITING_ON_LABEL, blockerLines, canWriteClientComment, networkLabel, phaseText, postImage, statusChipText, statusLabel, type AssetChoice, type PipelinePost } from "@/lib/socialPipeline";
+import { WAITING_ON_LABEL, blockerLines, canWriteClientComment, failedPublishLines, networkLabel, phaseText, postImage, statusChipText, statusLabel, type AssetChoice, type PipelinePost } from "@/lib/socialPipeline";
 import type { WriteResult } from "@/lib/socialPipelineActions";
 import "@/components/social/cycles.css";
 import "@/components/social/post-page.css";
@@ -140,6 +140,14 @@ export function PostPage({ deptId, post: initial, comments, assets, metrics, vie
           The client approved {formatDateTime(approved.scheduledAt)} on {approved.placement.map(networkLabel).join(", ") || "no network"}
           {post.scheduleVia ? `, scheduled ${post.scheduleVia === "publisher" ? "through the publisher" : "by hand"}` : ""}. A different date or placement is Reschedule, and the client is asked again.
         </p>
+      )}
+      {failedPublishLines(post).length > 0 && (
+        <div className="scp-post__banner scp-post__banner--error" role="alert">
+          <strong>The publisher could not publish this post.</strong> It stays scheduled, and the Failed posts tile counts it. One of the four approvers can unschedule it, or the officer can reschedule it.
+          <ul>
+            {failedPublishLines(post).map((l, i) => <li key={i}>{networkLabel(l.network)}: {l.text}</li>)}
+          </ul>
+        </div>
       )}
       {post.pipelineStatus === "live" && post.liveUrl && (
         <p className="scp-post__banner scp-post__banner--ok">Live{post.wentLiveAt ? ` since ${formatDateTime(post.wentLiveAt)}` : ""}: <a href={post.liveUrl} target="_blank" rel="noopener noreferrer">{post.liveUrl}</a></p>
