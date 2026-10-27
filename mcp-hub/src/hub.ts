@@ -18,6 +18,7 @@ import { RESOURCE_TEMPLATES, canReadResources, readResource } from "./resources"
 import { PROMPTS, canUsePrompts, getPrompt } from "./prompts";
 import { verifyExecutionGrant, type VerifiedExecutionGrant } from "./approval-grant";
 import { validateToolArgs, invalidArgsMessage } from "./validate-args";
+import { toolCallUsage, toolCallUsageFor } from "./gateway-client";
 
 export interface HubServerOptions {
   /** Raw `x-approval-grant` header value from the tool call, if the caller sent one (D14-04).
@@ -86,7 +87,8 @@ export function buildHubServer(principal: Principal, options: HubServerOptions =
       return { content: [{ type: "text" as const, text: reason }], isError: true };
     }
     try {
-      const text = await decision.tool.handler(checked.args, principal);
+      // AIP-03b: the context a gateway call made from this handler is attributed with (gateway-client.ts `toolCallUsage`).
+      const text = await toolCallUsage.run(toolCallUsageFor(name, checked.args, principal), () => decision.tool.handler(checked.args, principal));
       auditToolCall({ ts: Date.now(), tool: name, principal: principalRef(principal), decision: "allow", ok: true, ...(grantAudit ? { grant: grantAudit } : {}) });
       return { content: [{ type: "text" as const, text }] };
     } catch (err) {

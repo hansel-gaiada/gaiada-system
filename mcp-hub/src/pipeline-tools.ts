@@ -154,6 +154,7 @@ export function registerPipelineTools(): void {
       properties: {
         kind: { type: "string", enum: ["prd", "report", "scope"] },
         text: { type: "string", description: "The meeting minutes / transcript to extract from" },
+        tenantId: { type: "string", description: "Optional: the company (uuid) this call is for, so the AI usage is recorded against it. Agents get it stamped in; leave out only when no company applies." },
       },
       required: ["kind", "text"],
     },
