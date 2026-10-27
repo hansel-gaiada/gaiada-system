@@ -12256,7 +12256,7 @@ The planning and money routes send `{kind: "social_engagement", id?, tenantId, m
 - **`final_approve` syncs the variants from the master post.** For each placed network it uses the client's account on that network: none gives 409 `no_account_for_network`, more than one 409 `ambiguous_account` (`detail: {networks}`).
   - A variant is created, updated in place (`UNIQUE (post_id, account_id)`), or soft-deleted when its network left the placement (its review withdrawn).
   - `body` is the caption, with the hashtags placed by the brand's `hashtag_strategy.placement` (body or first comment). `settings.igType` follows the format. `scheduled_at` is the post's.
-  - `media` is the designs in order, each version materialized once as a `files` row targeting the post (`target_entity_type = 'social_post'`, `role = 'social_design'`) and remembered on the design row. A design that is only a link has nothing to show the client: 409 `design_not_stored` with its ids.
+  - `media` is the designs in order, each version materialized once as a `files` row targeting the post (`target_entity_type = 'social_post'`, `role` NULL) and remembered on the design row (`social_post_designs.file_id`). The design row, not a file role, marks it as a design: `files.role` is for issued records (one live file per parent and role, never deleted), and a post has several designs (plan SCP-D8). A design that is only a link has nothing to show the client: 409 `design_not_stored` with its ids.
   - Validation and `args_sha256` are written as every variant write does. Then one client review per variant is requested (the upsert back to `pending`), and the client is told once per post.
 - **`approve_copy` with `changedOnly`** (loop e) re-syncs only the variants' copy (body, first comment), requests the reviews again, clears `changed_only` and `copy_before`, and tells the HoD and GM (`approvers_told`).
 - **Client decisions** (portal or recorded) update every pending review of the post in one transaction: status, `comment`, `change_kind`, `anchor`, `reviewed_args_sha256`, one shared `decision_id`; `decided_by` (portal) or `recorded_by` and `channel` (recorded).
@@ -12480,8 +12480,8 @@ Items: `{id: 'social:<tenant>:<post or report or boost id>:<kind>', kind, role, 
 - **The client** does not write comments in the first release. Their note and pin ride their decision, and the staff thread shows each decision inline from the reviews.
 
 **Files.**
-- **Staff.** `files.controller.ts` learns `social_post` as a target kind (reference images with `role = 'social_reference'`, and the materialized designs). The parent check is `social_post` · `read`, or `design`, with the resource of 63.3.3: today's `targetReadResource` would send no `module` and no attributes, and the module roles would never match.
-- **The portal.** `GET /api/:t/portal/files/:fileId` gains the downloadable kind `social_post`. Only `role` `social_design` files are served, and only for a post of one of the caller's clients that has reached the client. Anything else is the same 404 as a file that does not exist.
+- **Staff.** `files.controller.ts` learns `social_post` as a target kind (reference images and the materialized designs, all with `role` NULL, plan SCP-D8). The parent check is `social_post` · `read`, or `design`, with the resource of 63.3.3: today's `targetReadResource` would send no `module` and no attributes, and the module roles would never match.
+- **The portal.** `GET /api/:t/portal/files/:fileId` gains the downloadable kind `social_post`. Only a file that a live design row (`social_post_designs.file_id`, `removed_at` NULL) of the post names is served, and only for a post of one of the caller's clients that has reached the client (plan SCP-D8). Anything else is the same 404 as a file that does not exist.
 - **Thumbnails.** The portal answers carry `fileId` and `thumbFileId`, which are equal until SCP-2b adds a thumbnail.
 
 ### 63.9 The portal (SCP-2)
