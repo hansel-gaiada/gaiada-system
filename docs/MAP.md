@@ -169,11 +169,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610270910_webdev_site_dns_tasks.sql`
+- Head: `202610271001_iam_social_pipeline.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 330 (121 legacy `NNNN_`, 209 timestamped)
+- Applied files on disk: 332 (121 legacy `NNNN_`, 211 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -298,6 +298,9 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/visitors.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/linkedin-oauth.controller.ts` |
+| `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/allocation.controller.ts` |
+| `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/cycles.controller.ts` |
+| `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/pipeline.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social-reports.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/youtube-oauth.controller.ts` |
@@ -406,6 +409,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/activity`
 - `/departments/[deptId]/ads`
 - `/departments/[deptId]/ai-visibility`
+- `/departments/[deptId]/allocation`
 - `/departments/[deptId]/analytics`
 - `/departments/[deptId]/assets`
 - `/departments/[deptId]/assets/[assetId]`
@@ -450,6 +454,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/review`
 - `/departments/[deptId]/schedule`
 - `/departments/[deptId]/search-terms`
+- `/departments/[deptId]/settings`
 - `/departments/[deptId]/sites`
 - `/departments/[deptId]/sites/[slug]`
 - `/departments/[deptId]/sites/portfolio`
