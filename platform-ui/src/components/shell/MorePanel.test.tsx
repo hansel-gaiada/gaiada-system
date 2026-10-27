@@ -92,8 +92,23 @@ describe("the More panel: what it lists", () => {
         expect(a).toHaveAttribute("href", row.tabs[0].href);
       }
     }
-    // Nothing else: the Overview and the AI Assistant are pinned in the menu, not rows of the panel.
-    expect(within(dialog).getAllByRole("group").map((g) => g.getAttribute("aria-labelledby") && g.querySelector("h3")?.textContent)).toEqual(["Work", "Performance", "You"]);
+    // Nothing else but the workspace's own tabs (SCP-Kj): the Overview and the AI Assistant are pinned in the menu, not rows of the panel.
+    expect(within(dialog).getAllByRole("group").map((g) => g.getAttribute("aria-labelledby") && g.querySelector("h3")?.textContent)).toEqual(["This workspace", "Work", "Performance", "You"]);
+  });
+
+  it("lists first 'This workspace': Notices and Department calendar, the Overview row's tabs no pin opens (SCP-Kj)", () => {
+    draw(modelFor(officer));
+    const group = within(openMore()).getByRole("group", { name: "This workspace" });
+    expect(Array.from(group.querySelectorAll("a")).map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+      ["Notices", "/departments/d-soc/notices"], ["Department calendar", "/departments/d-soc/schedule"],
+    ]);
+  });
+
+  it("marks the one that is the current page, and nothing when the page is Home (SCP-Kj)", () => {
+    draw(modelFor(officer), {}, "/departments/d-soc/notices");
+    const group = within(openMore()).getByRole("group", { name: "This workspace" });
+    expect(within(group).getByRole("link", { name: "Notices" })).toHaveAttribute("aria-current", "page");
+    expect(within(group).getByRole("link", { name: "Department calendar" })).not.toHaveAttribute("aria-current");
   });
 });
 

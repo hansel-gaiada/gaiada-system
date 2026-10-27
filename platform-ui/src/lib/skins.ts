@@ -153,3 +153,17 @@ export function phoneMenuFor(skin: SkinKey, pins: readonly ConcretePinned[]): Ex
   const placed = new Set([...SKINS[skin].phoneBar, ...SKINS[skin].phoneTop]);
   return pins.filter((p): p is Extract<ConcretePinned, { kind: "link" }> => p.kind === "link" && !placed.has(p.key));
 }
+
+/** The tabs of the workspace's `top` rows that no pinned entry opens (SCP-Kj, SCP-Q24), as single-tab rows keyed `<row>/<tab>`: the Overview row's Notices and
+ *  Department calendar, which the Standard shell reaches through the tab strip on the Overview. The Social Home is the feed alone, so a skinned workspace has no
+ *  strip on a `top` row, and More lists these first, as "This workspace". A pin opens a tab when it names it, or stands for the whole row. Null for a skin with no
+ *  pinned menu (Standard); the rows arrive gated and concrete, so a tab the person is not offered is not here. */
+export function unpinnedTopTabs(skin: SkinKey, topRows: readonly ConcreteRow[], pins: readonly ConcretePinned[]): ConcreteRow[] | null {
+  if (!SKINS[skin].pinned) return null;
+  const opened = (rowKey: string, tabKey: string) => pins.some((p) => p.kind === "link" && p.row === rowKey && (p.wholeRow || p.tab === tabKey));
+  return topRows.flatMap((row) =>
+    row.tabs
+      .filter((t) => !opened(row.key, t.key))
+      .map((t): ConcreteRow => ({ key: `${row.key}/${t.key}`, label: t.label, icon: t.icon ?? row.icon, tabs: [{ key: t.key, label: t.label, href: t.href, icon: t.icon ?? row.icon }] })),
+  );
+}

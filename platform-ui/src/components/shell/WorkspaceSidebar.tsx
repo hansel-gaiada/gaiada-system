@@ -12,11 +12,11 @@ import { allRows, overviewHref, type ShellModel, type ShellWorkspace } from "@/l
 import { assistantDrawerHref } from "@/lib/assistantContext";
 import { ASSISTANT_ROW } from "@/lib/workspaces";
 import type { ConcreteRow } from "@/lib/workspaceAccess";
-import { activePinKey, pinnedFor, type ConcretePinned } from "@/lib/skins";
+import { activePinKey, pinnedFor, unpinnedTopTabs, type ConcretePinned } from "@/lib/skins";
 import type { PaletteOpenDetail } from "./CommandPalette";
 import { useWorkspaceShell } from "./WorkspaceShellContext";
 import { RowCount } from "./RowCount";
-import { MorePanel, type SidebarAccount } from "./MorePanel";
+import { MENU_PREFIX, MorePanel, type SidebarAccount } from "./MorePanel";
 import { useSidebarState } from "./sidebarState";
 import { moreCountOf, type MoreGroup } from "@/lib/morePanel";
 import "./workspace-sidebar.css";
@@ -183,8 +183,11 @@ function PinnedMenu({ ws, pins, active, pathname, tenantId, menuItems, account, 
   const activeKey = activePinKey(pins, active);
   // Notifications is a shell entry, so it is current by its own page; that page is also the Inbox row's first tab, which More still lists.
   const inboxHere = isUnder(pathname, INBOX_HREF);
-  // The rows More lists, exactly as the model gives them: Work, Performance and You.
+  // The rows More lists, exactly as the model gives them: Work, Performance and You. SCP-Kj (SCP-Q24): first, the workspace's own tabs no pin opens (the Overview
+  // row's Notices and Department calendar), since the Home has no tab strip in this skin. They are not rows of the model, so `currentKey` names the current one.
+  const own = unpinnedTopTabs(ws.skin, ws.rows.top, pins) ?? [];
   const groups: MoreGroup[] = [
+    ...(own.length > 0 ? [{ key: "workspace", label: "This workspace", rows: own.map((r) => ({ ...r, key: `${MENU_PREFIX}${r.key}` })) }] : []),
     { key: "work", label: "Work", rows: ws.rows.work },
     { key: "performance", label: "Performance", rows: ws.rows.performance },
     { key: "you", label: "You", rows: ws.rows.you },
@@ -251,6 +254,7 @@ function PinnedMenu({ ws, pins, active, pathname, tenantId, menuItems, account, 
         {moreOpen && (
           <MorePanel
             id={moreId} groups={groups} active={active} pathname={pathname} tenantId={tenantId}
+            currentKey={active ? `${MENU_PREFIX}${active.rowKey}/${active.tabKey}` : null}
             account={account} switcher={switcher} anchor={moreButton} onClose={close}
           />
         )}

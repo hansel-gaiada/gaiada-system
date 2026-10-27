@@ -236,6 +236,38 @@ test.describe("the Social skin on a desktop (1280x800)", () => {
     await expect(page.locator(".ws-pin")).toHaveCount(0);
     // Standard keeps the search field in the top bar.
     await expect(page.locator(".erp-top").getByRole("searchbox")).toBeVisible();
+    // SCP-Kj / SCP-Kl: and the Overview with its header, quick actions and the Overview row's tab strip, which only the Social skin drops.
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Quick actions" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Overview sections" }).getByRole("link")).toHaveText(["Overview", "Notices", "Department calendar"]);
+  });
+
+  // SCP-Kl / SCP-Kj (SCP-Q24): the Social Home is the feed alone; what only the Overview offered is re-homed (Notices and Department calendar in More).
+  test("the Social Home draws no Overview header, quick actions, Customise or tab strip", async ({ page, context }) => {
+    await signIn(page, context);
+    await expect(frame(page)).toHaveAttribute("data-skin", "social");
+    await expect(page.getByRole("main")).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Quick actions" })).toHaveCount(0);
+    await expect(page.getByText("Customise", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("group", { name: "Period" })).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "Overview sections" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "More from Social Media" })).toHaveCount(0);
+  });
+
+  test("More lists Notices and Department calendar first, under This workspace, and both open", async ({ page, context }) => {
+    await signIn(page, context);
+    await press(menu(page).getByRole("button", { name: /^More/ }));
+    const group = sheet(page).getByRole("group", { name: "This workspace" });
+    await expect(group.getByRole("link")).toHaveCount(2);
+    await expect(group.getByRole("link", { name: "Notices" })).toHaveAttribute("href", `${SOCIAL_HOME}/notices`);
+    await expect(group.getByRole("link", { name: "Department calendar" })).toHaveAttribute("href", `${SOCIAL_HOME}/schedule`);
+    // It is the panel's first group, and on its page the entry is the current one and the page has no strip.
+    await expect(sheet(page).getByRole("group").first()).toHaveAccessibleName("This workspace");
+    await group.getByRole("link", { name: "Notices" }).click();
+    await expect(page).toHaveURL(new RegExp(`${SOCIAL_HOME}/notices$`));
+    await expect(page.getByRole("navigation", { name: "Overview sections" })).toHaveCount(0);
+    await press(menu(page).getByRole("button", { name: /^More/ }));
+    await expect(sheet(page).getByRole("link", { name: "Notices" })).toHaveAttribute("aria-current", "page");
   });
 });
 
@@ -292,6 +324,9 @@ test.describe("the Social skin on a phone (390x844)", () => {
     const menuGroup = panel.getByRole("group", { name: "Menu" });
     await expect(menuGroup).toBeVisible();
     for (const name of ["Calendar", "Reports", "Saved", "AI Assistant"]) await expect(menuGroup.getByRole("link", { name })).toBeVisible();
+    // SCP-Kj: the workspace's own tabs, which the Home's tab strip no longer holds, follow the Menu section.
+    const workspaceGroup = panel.getByRole("group", { name: "This workspace" });
+    for (const name of ["Notices", "Department calendar"]) await expect(workspaceGroup.getByRole("link", { name })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(panel).toBeHidden();
     await expect(more).toBeFocused();

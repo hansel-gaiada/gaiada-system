@@ -119,8 +119,9 @@ describe.each(SKIN_PERSONAS)("every page the Standard menu links to is still rea
 
     it("invents nothing: what the Social desktop and phone add are deeper pages of the workspace's own rows", () => {
       for (const extra of [...minus(D, S), ...minus(P, S)]) expect(own.has(extra), extra).toBe(true);
-      // The two it adds today: the Calendar tab and the Asset Library, which Standard reaches through the row's tab strip.
-      expect(minus(D, S)).toEqual([`/departments/d-soc/assets`, `/departments/d-soc/calendar`].filter((h) => !S.has(h)).sort());
+      // What it adds today: the Calendar tab and the Asset Library, which Standard reaches through the row's tab strip, and (SCP-Kj) the Overview row's Notices and
+      // Department calendar, which the Social Home no longer has a strip for (More lists them first, "This workspace").
+      expect(minus(D, S)).toEqual([`/departments/d-soc/assets`, `/departments/d-soc/calendar`, `/departments/d-soc/notices`, `/departments/d-soc/schedule`].filter((h) => !S.has(h)).sort());
     });
   });
 });
