@@ -177,7 +177,7 @@ async function materializeDesignMedia(run: EffectRun): Promise<Array<Record<stri
            Number(d.asset_graded_byte_size ?? 0), d.asset_graded_key, config.originSite],
         );
       }
-      await run.c.query(`UPDATE social_post_designs SET file_id = $3, file_version_no = $4 WHERE tenant_id = $1 AND id = $2`,
+      await run.c.query(`UPDATE social_post_designs SET file_id = $3, file_version_no = $4, thumb_file_id = NULL WHERE tenant_id = $1 AND id = $2`,
         [run.tenantId, d.id, fileId, d.asset_version_no]);
     }
     const kf = kindFormatOf(d.asset_content_type);
