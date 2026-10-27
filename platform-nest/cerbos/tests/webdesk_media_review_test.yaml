@@ -271,63 +271,270 @@ tests:
       resources: [up_by_contributor, up_by_editor, up_by_company_admin, up_by_platform_admin, up_unknown_uploader, up_site2, up_site_unfed, up_other_tenant]
       actions: [review]
     expected:   # DENY on every resource
-      []
+      - principal: editor_no_scope_rows
+        resource: up_by_contributor
+        actions: {review: EFFECT_DENY}
+      - principal: editor_no_scope_rows
+        resource: up_by_editor
+        actions: {review: EFFECT_DENY}
+      - principal: editor_no_scope_rows
+        resource: up_by_company_admin
+        actions: {review: EFFECT_DENY}
+      - principal: editor_no_scope_rows
+        resource: up_by_platform_admin
+        actions: {review: EFFECT_DENY}
+      - principal: editor_no_scope_rows
+        resource: up_unknown_uploader
+        actions: {review: EFFECT_DENY}
+      - principal: editor_no_scope_rows
+        resource: up_site2
+        actions: {review: EFFECT_DENY}
+      - principal: editor_no_scope_rows
+        resource: up_site_unfed
+        actions: {review: EFFECT_DENY}
+      - principal: editor_no_scope_rows
+        resource: up_other_tenant
+        actions: {review: EFFECT_DENY}
   - name: editor_low_assurance review
     input:
       principals: [editor_low_assurance]
       resources: [up_by_contributor, up_by_editor, up_by_company_admin, up_by_platform_admin, up_unknown_uploader, up_site2, up_site_unfed, up_other_tenant]
       actions: [review]
     expected:   # DENY on every resource
-      []
+      - principal: editor_low_assurance
+        resource: up_by_contributor
+        actions: {review: EFFECT_DENY}
+      - principal: editor_low_assurance
+        resource: up_by_editor
+        actions: {review: EFFECT_DENY}
+      - principal: editor_low_assurance
+        resource: up_by_company_admin
+        actions: {review: EFFECT_DENY}
+      - principal: editor_low_assurance
+        resource: up_by_platform_admin
+        actions: {review: EFFECT_DENY}
+      - principal: editor_low_assurance
+        resource: up_unknown_uploader
+        actions: {review: EFFECT_DENY}
+      - principal: editor_low_assurance
+        resource: up_site2
+        actions: {review: EFFECT_DENY}
+      - principal: editor_low_assurance
+        resource: up_site_unfed
+        actions: {review: EFFECT_DENY}
+      - principal: editor_low_assurance
+        resource: up_other_tenant
+        actions: {review: EFFECT_DENY}
   - name: writer review
     input:
       principals: [writer]
       resources: [up_by_contributor, up_by_editor, up_by_company_admin, up_by_platform_admin, up_unknown_uploader, up_site2, up_site_unfed, up_other_tenant]
       actions: [review]
     expected:   # DENY on every resource
-      []
+      - principal: writer
+        resource: up_by_contributor
+        actions: {review: EFFECT_DENY}
+      - principal: writer
+        resource: up_by_editor
+        actions: {review: EFFECT_DENY}
+      - principal: writer
+        resource: up_by_company_admin
+        actions: {review: EFFECT_DENY}
+      - principal: writer
+        resource: up_by_platform_admin
+        actions: {review: EFFECT_DENY}
+      - principal: writer
+        resource: up_unknown_uploader
+        actions: {review: EFFECT_DENY}
+      - principal: writer
+        resource: up_site2
+        actions: {review: EFFECT_DENY}
+      - principal: writer
+        resource: up_site_unfed
+        actions: {review: EFFECT_DENY}
+      - principal: writer
+        resource: up_other_tenant
+        actions: {review: EFFECT_DENY}
   - name: translator review
     input:
       principals: [translator]
       resources: [up_by_contributor, up_by_editor, up_by_company_admin, up_by_platform_admin, up_unknown_uploader, up_site2, up_site_unfed, up_other_tenant]
       actions: [review]
     expected:   # DENY on every resource
-      []
+      - principal: translator
+        resource: up_by_contributor
+        actions: {review: EFFECT_DENY}
+      - principal: translator
+        resource: up_by_editor
+        actions: {review: EFFECT_DENY}
+      - principal: translator
+        resource: up_by_company_admin
+        actions: {review: EFFECT_DENY}
+      - principal: translator
+        resource: up_by_platform_admin
+        actions: {review: EFFECT_DENY}
+      - principal: translator
+        resource: up_unknown_uploader
+        actions: {review: EFFECT_DENY}
+      - principal: translator
+        resource: up_site2
+        actions: {review: EFFECT_DENY}
+      - principal: translator
+        resource: up_site_unfed
+        actions: {review: EFFECT_DENY}
+      - principal: translator
+        resource: up_other_tenant
+        actions: {review: EFFECT_DENY}
   - name: seo_reviewer review
     input:
       principals: [seo_reviewer]
       resources: [up_by_contributor, up_by_editor, up_by_company_admin, up_by_platform_admin, up_unknown_uploader, up_site2, up_site_unfed, up_other_tenant]
       actions: [review]
     expected:   # DENY on every resource
-      []
+      - principal: seo_reviewer
+        resource: up_by_contributor
+        actions: {review: EFFECT_DENY}
+      - principal: seo_reviewer
+        resource: up_by_editor
+        actions: {review: EFFECT_DENY}
+      - principal: seo_reviewer
+        resource: up_by_company_admin
+        actions: {review: EFFECT_DENY}
+      - principal: seo_reviewer
+        resource: up_by_platform_admin
+        actions: {review: EFFECT_DENY}
+      - principal: seo_reviewer
+        resource: up_unknown_uploader
+        actions: {review: EFFECT_DENY}
+      - principal: seo_reviewer
+        resource: up_site2
+        actions: {review: EFFECT_DENY}
+      - principal: seo_reviewer
+        resource: up_site_unfed
+        actions: {review: EFFECT_DENY}
+      - principal: seo_reviewer
+        resource: up_other_tenant
+        actions: {review: EFFECT_DENY}
   - name: contributor_editor review
     input:
       principals: [contributor_editor]
       resources: [up_by_contributor, up_by_editor, up_by_company_admin, up_by_platform_admin, up_unknown_uploader, up_site2, up_site_unfed, up_other_tenant]
       actions: [review]
     expected:   # DENY on every resource
-      []
+      - principal: contributor_editor
+        resource: up_by_contributor
+        actions: {review: EFFECT_DENY}
+      - principal: contributor_editor
+        resource: up_by_editor
+        actions: {review: EFFECT_DENY}
+      - principal: contributor_editor
+        resource: up_by_company_admin
+        actions: {review: EFFECT_DENY}
+      - principal: contributor_editor
+        resource: up_by_platform_admin
+        actions: {review: EFFECT_DENY}
+      - principal: contributor_editor
+        resource: up_unknown_uploader
+        actions: {review: EFFECT_DENY}
+      - principal: contributor_editor
+        resource: up_site2
+        actions: {review: EFFECT_DENY}
+      - principal: contributor_editor
+        resource: up_site_unfed
+        actions: {review: EFFECT_DENY}
+      - principal: contributor_editor
+        resource: up_other_tenant
+        actions: {review: EFFECT_DENY}
   - name: contributor_with_staff_tier review
     input:
       principals: [contributor_with_staff_tier]
       resources: [up_by_contributor, up_by_editor, up_by_company_admin, up_by_platform_admin, up_unknown_uploader, up_site2, up_site_unfed, up_other_tenant]
       actions: [review]
     expected:   # DENY on every resource
-      []
+      - principal: contributor_with_staff_tier
+        resource: up_by_contributor
+        actions: {review: EFFECT_DENY}
+      - principal: contributor_with_staff_tier
+        resource: up_by_editor
+        actions: {review: EFFECT_DENY}
+      - principal: contributor_with_staff_tier
+        resource: up_by_company_admin
+        actions: {review: EFFECT_DENY}
+      - principal: contributor_with_staff_tier
+        resource: up_by_platform_admin
+        actions: {review: EFFECT_DENY}
+      - principal: contributor_with_staff_tier
+        resource: up_unknown_uploader
+        actions: {review: EFFECT_DENY}
+      - principal: contributor_with_staff_tier
+        resource: up_site2
+        actions: {review: EFFECT_DENY}
+      - principal: contributor_with_staff_tier
+        resource: up_site_unfed
+        actions: {review: EFFECT_DENY}
+      - principal: contributor_with_staff_tier
+        resource: up_other_tenant
+        actions: {review: EFFECT_DENY}
   - name: automation_editor review
     input:
       principals: [automation_editor]
       resources: [up_by_contributor, up_by_editor, up_by_company_admin, up_by_platform_admin, up_unknown_uploader, up_site2, up_site_unfed, up_other_tenant]
       actions: [review]
     expected:   # DENY on every resource
-      []
+      - principal: automation_editor
+        resource: up_by_contributor
+        actions: {review: EFFECT_DENY}
+      - principal: automation_editor
+        resource: up_by_editor
+        actions: {review: EFFECT_DENY}
+      - principal: automation_editor
+        resource: up_by_company_admin
+        actions: {review: EFFECT_DENY}
+      - principal: automation_editor
+        resource: up_by_platform_admin
+        actions: {review: EFFECT_DENY}
+      - principal: automation_editor
+        resource: up_unknown_uploader
+        actions: {review: EFFECT_DENY}
+      - principal: automation_editor
+        resource: up_site2
+        actions: {review: EFFECT_DENY}
+      - principal: automation_editor
+        resource: up_site_unfed
+        actions: {review: EFFECT_DENY}
+      - principal: automation_editor
+        resource: up_other_tenant
+        actions: {review: EFFECT_DENY}
   - name: bot_company_admin review
     input:
       principals: [bot_company_admin]
       resources: [up_by_contributor, up_by_editor, up_by_company_admin, up_by_platform_admin, up_unknown_uploader, up_site2, up_site_unfed, up_other_tenant]
       actions: [review]
     expected:   # DENY on every resource
-      []
+      - principal: bot_company_admin
+        resource: up_by_contributor
+        actions: {review: EFFECT_DENY}
+      - principal: bot_company_admin
+        resource: up_by_editor
+        actions: {review: EFFECT_DENY}
+      - principal: bot_company_admin
+        resource: up_by_company_admin
+        actions: {review: EFFECT_DENY}
+      - principal: bot_company_admin
+        resource: up_by_platform_admin
+        actions: {review: EFFECT_DENY}
+      - principal: bot_company_admin
+        resource: up_unknown_uploader
+        actions: {review: EFFECT_DENY}
+      - principal: bot_company_admin
+        resource: up_site2
+        actions: {review: EFFECT_DENY}
+      - principal: bot_company_admin
+        resource: up_site_unfed
+        actions: {review: EFFECT_DENY}
+      - principal: bot_company_admin
+        resource: up_other_tenant
+        actions: {review: EFFECT_DENY}
   - name: webdev_staff review
     input:
       principals: [webdev_staff]
@@ -427,7 +634,30 @@ tests:
       resources: [up_by_contributor, up_by_editor, up_by_company_admin, up_by_platform_admin, up_unknown_uploader, up_site2, up_site_unfed, up_other_tenant]
       actions: [review]
     expected:   # DENY on every resource
-      []
+      - principal: member
+        resource: up_by_contributor
+        actions: {review: EFFECT_DENY}
+      - principal: member
+        resource: up_by_editor
+        actions: {review: EFFECT_DENY}
+      - principal: member
+        resource: up_by_company_admin
+        actions: {review: EFFECT_DENY}
+      - principal: member
+        resource: up_by_platform_admin
+        actions: {review: EFFECT_DENY}
+      - principal: member
+        resource: up_unknown_uploader
+        actions: {review: EFFECT_DENY}
+      - principal: member
+        resource: up_site2
+        actions: {review: EFFECT_DENY}
+      - principal: member
+        resource: up_site_unfed
+        actions: {review: EFFECT_DENY}
+      - principal: member
+        resource: up_other_tenant
+        actions: {review: EFFECT_DENY}
   - name: platform_admin review
     input:
       principals: [platform_admin]
