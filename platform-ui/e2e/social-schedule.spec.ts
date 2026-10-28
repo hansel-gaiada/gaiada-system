@@ -1,4 +1,6 @@
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
+// `test` waits out React's hidden streaming copy after each goto (settledPage.ts), so a CSS locator like `td[data-day]` never sees the page twice.
+import { test, expect } from "./settledPage";
 import { tenantCookie } from "./appCookies";
 
 // SCP-3a / SCP-3b (plan docs/plans/2026-10-15-social-content-pipeline.md §4.3, §8 rows 3a and 3b; BFF §63.10): "Schedule in Meta", Unschedule, Reschedule and
