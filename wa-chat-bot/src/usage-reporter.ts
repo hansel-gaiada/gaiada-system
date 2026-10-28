@@ -16,6 +16,8 @@ export interface UsageEvent {
   task?: string | null;
   provider?: string | null;
   model?: string | null;
+  /** The tier the gateway applied (AIP-06/07): fast, standard or strong; absent when none was applied. */
+  tier?: string | null;
   promptTokens?: number | null;
   completionTokens?: number | null;
   tokensSource: "provider" | "estimate" | "none";

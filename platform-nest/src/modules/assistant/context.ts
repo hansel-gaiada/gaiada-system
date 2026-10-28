@@ -35,6 +35,7 @@
 import type { PoolClient } from "pg";
 import { config } from "../../config";
 import { recordGatewayCall, outcomeForGatewayStatus, readGatewayUsage, type AiCallAttribution } from "../ai-usage/gateway-usage";
+import { gatewayTaskField } from "../ai-usage/routing";
 import { refreshThreadCost } from "./thread-cost";
 import { searchKnowledgeStrict, type KnowledgeHit, type KnowledgeStoreHit } from "../search/knowledge-client";
 import { collapseHits, filterReadableHits, searchTopK } from "../knowledge/search-filter";
@@ -143,6 +144,16 @@ export interface SummarizeOptions {
 
 export class CompactionGatewayError extends Error {}
 
+/** The compaction prompt, exactly as `summarizeExcerpt` sends it. Exported (AIP-09) so the tier eval tests the production text, not a copy. */
+export function buildCompactionPrompt(excerpt: string, existingSummary: string | null): string {
+  return (
+    `Summarize the following excerpt from a conversation in a few dense sentences, preserving ` +
+    `concrete facts, decisions and open questions. Do not add commentary or preamble, output only ` +
+    `the summary.${existingSummary ? ` Fold it into this EXISTING summary rather than replacing it ` +
+    `(merge, don't just append):\n\nEXISTING SUMMARY:\n${existingSummary}` : ""}\n\nEXCERPT:\n${excerpt}`
+  );
+}
+
 /** One non-streaming `POST /complete` call to fold an excerpt into the rolling summary. Fails
  *  LOUDLY (throws) rather than silently skipping compaction — a swallowed failure here would let
  *  context assembly silently keep exceeding its budget on every subsequent send to a long thread,
@@ -152,11 +163,7 @@ async function summarizeExcerpt(excerpt: string, existingSummary: string | null,
   if (!url) {
     throw new CompactionGatewayError("ai-gateway-go is not configured (GATEWAY_URL unset) — cannot compact this thread's context");
   }
-  const prompt =
-    `Summarize the following excerpt from a conversation in a few dense sentences, preserving ` +
-    `concrete facts, decisions and open questions. Do not add commentary or preamble, output only ` +
-    `the summary.${existingSummary ? ` Fold it into this EXISTING summary rather than replacing it ` +
-    `(merge, don't just append):\n\nEXISTING SUMMARY:\n${existingSummary}` : ""}\n\nEXCERPT:\n${excerpt}`;
+  const prompt = buildCompactionPrompt(excerpt, existingSummary);
   const fetchImpl = opts?.fetchImpl ?? fetch;
   // AIP-03a: ONE usage row per compaction call, after the answer is in hand, fire-and-forget (never throws, never awaited here).
   const record = (facts: Parameters<typeof recordGatewayCall>[1]): void => {
@@ -171,7 +178,7 @@ async function summarizeExcerpt(excerpt: string, existingSummary: string | null,
         Authorization: `Bearer ${opts?.gatewayToken ?? config.services.gateway.token}`,
         ...(opts?.tenantId ? { "x-tenant-id": opts.tenantId } : {}),
       },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, ...gatewayTaskField(attribution.task) }),
     });
   } catch (err) {
     record({ capability: "llm", outcome: "error" });
@@ -181,10 +188,10 @@ async function summarizeExcerpt(excerpt: string, existingSummary: string | null,
     record({ capability: "llm", outcome: outcomeForGatewayStatus(res.status) });
     throw new CompactionGatewayError(`ai-gateway /complete (compaction) returned HTTP ${res.status}`);
   }
-  const body = (await res.json()) as { text?: string; provider?: string; model?: string; usage?: unknown };
+  const body = (await res.json()) as { text?: string; provider?: string; model?: string; tier?: string; usage?: unknown };
   record({
     capability: "llm", outcome: "ok", provider: typeof body.provider === "string" ? body.provider : null,
-    model: typeof body.model === "string" ? body.model : null, usage: readGatewayUsage(body.usage),
+    model: typeof body.model === "string" ? body.model : null, tier: typeof body.tier === "string" ? body.tier : null, usage: readGatewayUsage(body.usage),
   });
   const summary = (body.text ?? "").trim();
   if (!summary) throw new CompactionGatewayError("ai-gateway /complete (compaction) returned an empty summary");

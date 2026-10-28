@@ -21,6 +21,7 @@ import {
   outcomeForGatewayStatus, readGatewayUsage, recordGatewayCall, statusFromError,
   type AiCallAttribution, type GatewayCallFacts,
 } from "../ai-usage/gateway-usage";
+import { gatewayTaskField } from "../ai-usage/routing";
 
 export interface GatewayCallOptions {
   /** Override the configured gateway URL (tests only; production always reads config). */
@@ -72,11 +73,13 @@ export interface CompletionResult {
   usage?: { promptTokens: number; completionTokens: number; costUsd?: number; source?: string };
   /** Additive and forward-compatible: the model that served, when the gateway reports it (it does not on /complete today). */
   model?: string;
+  /** AIP-06/07: the tier the gateway applied (fast|standard|strong), when it routed the call. */
+  tier?: string;
 }
 
 /** What a /complete answer says about the call, for the usage record. */
-export function completionFacts(answer: CompletionResult): Pick<GatewayCallFacts, "provider" | "model" | "usage"> {
-  return { provider: answer?.provider ?? null, model: typeof answer?.model === "string" ? answer.model : null, usage: readGatewayUsage(answer?.usage) };
+export function completionFacts(answer: CompletionResult): Pick<GatewayCallFacts, "provider" | "model" | "usage" | "tier"> {
+  return { provider: answer?.provider ?? null, model: typeof answer?.model === "string" ? answer.model : null, usage: readGatewayUsage(answer?.usage), tier: typeof answer?.tier === "string" ? answer.tier : null };
 }
 
 /**
@@ -99,7 +102,7 @@ async function callGateway<T extends CompletionResult>(path: string, body: unkno
     });
     if (!res.ok) throw new GatewayHttpError(path, res.status);
     const answer = (await res.json()) as T;
-    let facts: Pick<GatewayCallFacts, "provider" | "model" | "usage"> = {};
+    let facts: Pick<GatewayCallFacts, "provider" | "model" | "usage" | "tier"> = {};
     try {
       facts = completionFacts(answer);
     } catch {
@@ -122,7 +125,7 @@ async function callGateway<T extends CompletionResult>(path: string, body: unkno
  *  gateway's own failover). `opts.provider` is the cloudPolish hint (see file header); it is the
  *  ONLY provider-selection knob this module has — everything past that is the gateway's chain. */
 export async function completeViaGateway(prompt: string, opts: AttributedCallOptions): Promise<CompletionResult> {
-  const body: { prompt: string; provider?: string } = { prompt };
+  const body: { prompt: string; provider?: string; task?: string } = { prompt, ...gatewayTaskField(opts.attribution?.task) };
   if (opts.provider) body.provider = opts.provider;
   return callGateway<CompletionResult>("/complete", body, opts);
 }

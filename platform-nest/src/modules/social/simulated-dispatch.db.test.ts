@@ -14,8 +14,10 @@
 //        account's, an approval that is pending / rejected / names another variant -> refused, nothing minted.
 //   (S7) resolveDispatchOrgHandle reads `simulated` itself when a caller's chain omits it (the inbox paths), and refuses
 //        what the simulator does not simulate.
-//   (S8) boot's DB facts count every tenant through the third wall (equal to the superuser's count: no zero-row trap),
-//        a revoked grant is not "live", and the switch ON beside a real account or a live grant aborts wiring.
+//   (S8) SCP-Sa2 (was: the switch ON beside a real account or a live grant aborts wiring): boot's DB facts count every
+//        tenant through the third wall (equal to the superuser's count: no zero-row trap); a real account with a live
+//        grant now BOOTS beside the simulator (owner ruling SCP-D9); a row breaking the kind rule or a grant on a simulated
+//        account aborts wiring. The side-by-side dispatch itself is side-by-side.db.test.ts.
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { randomBytes } from "node:crypto";
 import { config } from "../../config";
@@ -301,34 +303,59 @@ describe.skipIf(!TEST_URL)("SCP-Sa · the social simulator on the real dispatch 
       .rejects.toMatchObject({ code: "publisher_not_configured" });
   });
 
-  it("(S8) boot's DB facts see every tenant through the wall, 'live' means active, and the switch ON beside real rows aborts wiring", async () => {
-    // A real LinkedIn account with a LIVE grant.
+  it("(S8) SCP-Sa2: boot's DB facts see every tenant through the wall; real rows and live grants boot; a mixed row or a grant on a simulated account aborts wiring", async () => {
+    // A real LinkedIn account with a LIVE grant: allowed beside the simulator since SCP-D9.
     const li = await insertAccount("linkedin", false);
     await withTenants([co], (c) => storeOAuthGrant(c, {
       tenantId: co, accountId: li, network: "linkedin", accessToken: "mock-access-token", expiresAt: new Date(Date.now() + 3600_000),
     }), MODULES);
 
-    const superuser = async () => (await adminPool().query<{ grants: number; accounts: number }>(
-      `SELECT (SELECT count(*) FROM social_oauth_tokens WHERE status = 'active')::int AS grants,
-              (SELECT count(*) FROM social_accounts WHERE simulated = false)::int AS accounts`)).rows[0];
-    const facts = await readSocialSimulationDbFacts();
-    const truth = await superuser();
-    expect(facts).toEqual({ liveOAuthGrants: truth.grants, realAccounts: truth.accounts });
-    expect(facts.liveOAuthGrants).toBeGreaterThanOrEqual(1);
-    expect(facts.realAccounts).toBeGreaterThanOrEqual(2);
-
-    // A revoked grant is not live.
-    await withTenants([co], (c) => revokeOAuthGrant(c, li, "SCP-Sa test"), MODULES);
-    expect((await readSocialSimulationDbFacts()).liveOAuthGrants).toBe(facts.liveOAuthGrants - 1);
-
-    // A soft-deleted real account still counts (it is one upsert away from live again).
-    await adminPool().query(`UPDATE social_accounts SET deleted_at = now() WHERE id = $1`, [li]);
-    expect((await readSocialSimulationDbFacts()).realAccounts).toBe(facts.realAccounts);
+    const superuser = async () => (await adminPool().query<{ violations: number; grants: number }>(
+      `SELECT (SELECT count(*) FROM social_accounts a
+                WHERE (a.simulated AND (a.postiz_integration_id IS NULL OR a.postiz_integration_id NOT LIKE 'simulated:%' OR a.connected_by IS NOT NULL))
+                   OR (NOT a.simulated AND a.postiz_integration_id LIKE 'simulated:%'))::int AS violations,
+              (SELECT count(*) FROM social_oauth_tokens t JOIN social_accounts a ON a.id = t.account_id WHERE a.simulated)::int AS grants`)).rows[0];
+    const clean = await readSocialSimulationDbFacts();
+    expect(clean).toEqual({ accountKindViolations: (await superuser()).violations, simulatedAccountGrants: (await superuser()).grants });
+    expect(clean).toEqual({ accountKindViolations: 0, simulatedAccountGrants: 0 });
 
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     resetPublishers();
-    await expect(wireSocialPublisher()).rejects.toThrowError(SocialSimulationBootError);
+    await wireSocialPublisher();
+    expect(listPublishers().some((p) => p.key === "simulated")).toBe(true);
+    await withTenants([co], (c) => revokeOAuthGrant(c, li, "SCP-Sa2 test"), MODULES);
+
+    // Plant what the migration forbids, in THIS file's own database only (initTestDb gives each file its own): a
+    // soft-deleted simulated row with no integration id (a pre-migration shape), and a grant on a simulated account.
+    await adminPool().query(`ALTER TABLE social_accounts DROP CONSTRAINT social_accounts_kind_ck`);
+    await adminPool().query(`ALTER TABLE social_oauth_tokens DISABLE TRIGGER trg_social_oauth_tokens_real_account_only`);
+    const legacy = newId();
+    await withTenants([co], (c) => c.query(
+      `INSERT INTO social_accounts (id, tenant_id, client_id, publisher_org_id, network, handle, status, quota, simulated, deleted_at, origin_site)
+       VALUES ($1,$2,$3,$4,'tiktok',$5,'connected','{}',true,now(),'central')`,
+      [legacy, co, clientId, orgId, uniq("@legacy-sim")]), MODULES);
+    let facts = await readSocialSimulationDbFacts();
+    expect(facts).toEqual({ accountKindViolations: (await superuser()).violations, simulatedAccountGrants: (await superuser()).grants });
+    expect(facts.accountKindViolations).toBe(1);
+    resetPublishers();
+    await expect(wireSocialPublisher()).rejects.toThrowError(/break the account-kind rule/);
     expect(listPublishers().some((p) => p.key === "simulated")).toBe(false);
+
+    await adminPool().query(`UPDATE social_accounts SET postiz_integration_id = 'simulated:tiktok' WHERE id = $1`, [legacy]);
+    await withTenants([co], (c) => storeOAuthGrant(c, {
+      tenantId: co, accountId: simIg, network: "instagram", accessToken: "mock-access-token", expiresAt: new Date(Date.now() + 3600_000),
+    }), MODULES);
+    facts = await readSocialSimulationDbFacts();
+    expect(facts).toEqual({ accountKindViolations: 0, simulatedAccountGrants: 1 });
+    resetPublishers();
+    await expect(wireSocialPublisher()).rejects.toThrowError(SocialSimulationBootError);
+
+    // Put this file's database back the way the migration left it.
+    await adminPool().query(`DELETE FROM social_oauth_tokens WHERE account_id = $1`, [simIg]);
+    await adminPool().query(`ALTER TABLE social_oauth_tokens ENABLE TRIGGER trg_social_oauth_tokens_real_account_only`);
+    await adminPool().query(`ALTER TABLE social_accounts ADD CONSTRAINT social_accounts_kind_ck CHECK (
+      (simulated AND postiz_integration_id IS NOT NULL AND postiz_integration_id LIKE 'simulated:%' AND connected_by IS NULL)
+      OR (NOT simulated AND (postiz_integration_id IS NULL OR postiz_integration_id NOT LIKE 'simulated:%')))`);
   });
 });

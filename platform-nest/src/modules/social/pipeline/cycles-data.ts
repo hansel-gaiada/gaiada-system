@@ -177,6 +177,8 @@ export interface CyclePostRow extends CountedPost {
   id: string;
   cycleId: string;
   title: string;
+  /** SCP-Sf: `social_posts.simulated` (the post went live through the social simulator), so every list of it can carry the mark. */
+  simulated: boolean;
 }
 
 export interface CycleTableData {
@@ -246,10 +248,10 @@ export async function readCyclePosts(c: PoolClient, tenantId: string, cycleIds: 
   const { rows } = await c.query<{
     id: string; cycle_id: string; title: string; pipeline_status: string; change_by: string | null; change_kind: string | null;
     return_to: string | null; changed_only: boolean; blocked_from: string | null; block_waiting_on: string | null; is_extra: boolean;
-    format: string | null;
+    format: string | null; simulated: boolean;
   }>(
     `SELECT p.id, p.cycle_id, p.title, p.pipeline_status, p.change_by, p.change_kind, p.return_to, p.changed_only, p.blocked_from,
-            p.block_waiting_on, p.is_extra, p.format
+            p.block_waiting_on, p.is_extra, p.format, p.simulated
        FROM social_posts p
       WHERE p.tenant_id = $1 AND p.cycle_id = ANY($2::uuid[]) AND p.pipeline_status IS NOT NULL
         AND p.deleted_at IS NULL AND p.archived_at IS NULL
@@ -259,6 +261,7 @@ export async function readCyclePosts(c: PoolClient, tenantId: string, cycleIds: 
   return rows.map((r) => ({
     id: r.id, cycleId: r.cycle_id, title: r.title, status: r.pipeline_status, changeBy: r.change_by, changeKind: r.change_kind,
     returnTo: r.return_to, changedOnly: r.changed_only === true, blockedFrom: r.blocked_from, blockWaitingOn: r.block_waiting_on, isExtra: r.is_extra, format: r.format,
+    simulated: r.simulated === true,
   }));
 }
 
@@ -382,6 +385,8 @@ export interface PostHealthRow {
   isExtra: boolean;
   format: string | null;
   health: Health;
+  /** SCP-Sf: the post went live through the social simulator (additive to BFF §63.5: the client page's cards carry the SIMULATED mark). */
+  simulated: boolean;
 }
 export interface CycleHealthAnswer {
   cycleId: string;
@@ -410,6 +415,7 @@ export function composeCycleHealth(
   const slower = isClientSlower(average, e.stepEstimates.client);
   const rows = posts.map((p): PostHealthRow => ({
     postId: p.id, title: p.title, status: p.status, phase: postPhase(p), holder: postHolder(p), isExtra: p.isExtra, format: p.format,
+    simulated: p.simulated,
     health: postHealth({ today, readyBy: cycle.readyBy, calendar: info.calendar, estimates: e.stepEstimates, clientSlower: slower, post: p }),
   }));
   return {

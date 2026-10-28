@@ -24,6 +24,7 @@ vi.mock("@/lib/companyContext", () => ({ activeCompany: vi.fn(() => ({ id: "co-a
 vi.mock("@/lib/departments", () => ({ getDepartment: vi.fn() }));
 vi.mock("@/lib/demoMode", () => ({ isDemoMode: vi.fn(() => false) }));
 vi.mock("@/lib/socialPipeline-data", () => ({ readPipelinePost: vi.fn(), readPostComments: vi.fn(), readAssetChoices: vi.fn(), readPostMetrics: vi.fn() }));
+vi.mock("@/lib/socialBoosts-data", () => ({ canRunBoosts: vi.fn(), getBoostBudget: vi.fn() }));
 vi.mock("@/lib/collabActions", () => ({ postEntityComment: vi.fn() }));
 vi.mock("@/lib/socialPipelineActions", () => ({
   runPostAction: vi.fn(), savePostFields: vi.fn(), saveSuggestion: vi.fn(), dropSuggestion: vi.fn(), addPostDesign: vi.fn(), removePostDesign: vi.fn(),
@@ -34,6 +35,9 @@ import { getDepartment } from "@/lib/departments";
 import { PIPE_POSTS, demoPipelineRead } from "@/lib/demoSocialPipeline";
 import { asPipelinePost, type PipelinePost } from "@/lib/socialPipeline";
 import { readAssetChoices, readPipelinePost, readPostComments, readPostMetrics } from "@/lib/socialPipeline-data";
+import { canRunBoosts, getBoostBudget } from "@/lib/socialBoosts-data";
+import { asBoostBudget, type BoostBudget } from "@/lib/socialBoosts";
+import "@/lib/demoSocialBoosts"; // registers the demo boost store, so the demo post read carries its `boost`
 import type { PostMetrics } from "@/lib/socialMetrics";
 import type { ReadResult } from "@/lib/readResult";
 import { PostView } from "./PostView";
@@ -154,5 +158,57 @@ describe("a live post's metrics (SCP-3c, BFF §63.10)", () => {
       expect(screen.getByRole("heading", { level: 1, name: "A day in the warehouse" })).toBeInTheDocument();
       unmount();
     }
+  });
+});
+
+describe("a live post's Boost block (SCP-4b, BFF §63.11)", () => {
+  const budget = (canRecord: boolean): BoostBudget => asBoostBudget({ agreed: null, pending: null, committedMinor: 0, remainingMinor: 0, history: [], canRecord });
+  const live = (title: string) => vi.mocked(readPipelinePost).mockResolvedValue(ok(postFor(title, "u-social")));
+  beforeEach(() => {
+    vi.mocked(canRunBoosts).mockReset().mockResolvedValue(true);
+    vi.mocked(getBoostBudget).mockReset().mockResolvedValue(ok(budget(false)));
+  });
+
+  it("is drawn for a live post only, and asks who runs a boost from the post's officer, the signed-in person and their seats (a mirror: the server decides)", async () => {
+    await mount("page", "d-soc", "p-1"); // at proofread
+    expect(canRunBoosts).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "Boost" })).toBeNull();
+    live("A day in the warehouse");
+    await mount("page", "d-soc", "p-live");
+    expect(canRunBoosts).toHaveBeenCalledWith(expect.objectContaining({ userId: "u-1" }), "co-a", "u-social", "u-1");
+    expect(screen.getByRole("heading", { name: "Boost" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Boost" })).toBeEnabled();
+    expect(getBoostBudget).not.toHaveBeenCalled(); // no boost, so no cycle to read
+  });
+
+  it("a person who cannot run a boost sees the button disabled with the reason, never missing", async () => {
+    vi.mocked(canRunBoosts).mockResolvedValue(false);
+    live("A day in the warehouse");
+    await mount();
+    expect(screen.getByRole("button", { name: "Boost" })).toBeDisabled();
+    expect(screen.getByText(/The owner agrees the money but does not run boosts/)).toBeInTheDocument();
+  });
+
+  it("with a boost waiting for the client it reads the boost's cycle budget, and canRecord there decides the two record actions", async () => {
+    live("Reader favourite reshare");
+    vi.mocked(canRunBoosts).mockResolvedValue(false);
+    vi.mocked(getBoostBudget).mockResolvedValue(ok(budget(true)));
+    await mount();
+    const cycleId = postFor("Reader favourite reshare", "u-social").boost!.cycleId!;
+    expect(getBoostBudget).toHaveBeenCalledWith("u-1", "co-a", cycleId);
+    expect(screen.getByText("Waiting for the client")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Record client's approval" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Record client's decline" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull(); // not the person's: they cannot run a boost
+    expect(screen.queryByRole("button", { name: "Boost" })).toBeNull(); // the post has an open boost
+  });
+
+  it("a budget read that failed leaves the record actions off (it never claims them) and the post stays", async () => {
+    live("Reader favourite reshare");
+    vi.mocked(getBoostBudget).mockResolvedValue({ kind: "unavailable", reason: "platform 500" });
+    await mount();
+    expect(screen.getByRole("heading", { level: 1, name: "Reader favourite reshare" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Record client/ })).toBeNull();
   });
 });

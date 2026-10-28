@@ -18,6 +18,9 @@
 //   8. A post of another engagement, of another company, or that does not exist is 404; the same post twice is 400; a Composer post is 409.
 //   9. AUTHORIZATION BEFORE VALIDATION: a caller who is not the client's officer is 403 `not_the_officer` before the body is read (so before any 400),
 //      a caller with no social tier is 403 on the read, and a scheduled post's publisher schedule needs `cancel` (403 `cancel_required`) with nothing changed.
+//  10. SCP-Sg, THE LIVE FEED READ BACK (additive): a live post carries `liveUrl`, its `reach` (its variants' newest snapshots summed, null when none reported
+//      one) and `reachSource`; a post that is not live has all three null; `lastSyncedAt` is the newest `updated_at` of the client's counted daily rows
+//      (a simulated account counts simulated rows only, a real one pulled rows only), null with none.
 //
 // Posts are seeded by SQL at the status under test (the stage machine's own routes are proved by pipeline-routes.test.ts), fixed days far in the future.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -256,13 +259,15 @@ describe.skipIf(!TEST_URL)("SCP-3d · the feed preview (BFF §63.10)", () => {
       ids.clientCopy = await seed(e, A, "Client copy", D(8), { status: "changes", change: ["client", "copy", "proofread"] });
       const r = await get(U.reader, e.engagementId);
       expect(r.statusCode, r.body).toBe(200);
-      const j = r.json() as { items: Array<Record<string, unknown>>; liveHidden: number };
+      const j = r.json() as { items: Array<Record<string, unknown>>; liveHidden: number; lastSyncedAt: string | null };
       expect(j.items.map((i) => i.title)).toEqual(["Planned", "Approved", "Proofread", "Live", "Client copy"]);
       expect(j.liveHidden).toBe(0);
       expect(j.items[0]).toEqual({
         postId: ids.planned, scheduledAt: D(20), thumbFileId: null, pipelineStatus: "planned", locked: false, title: "Planned", format: "feed",
         phase: "brief", simulated: false, dateMove: "edit", dateMoveRefusal: null,
+        liveUrl: null, reach: null, reachSource: null, // SCP-Sg: additive, null for a post that is not live
       });
+      expect(j.lastSyncedAt).toBeNull(); // no account of this client has synced
       expect(j.items.map((i) => i.locked)).toEqual([false, false, false, true, false]);
       expect(j.items.map((i) => [i.dateMove, i.dateMoveRefusal])).toEqual([
         ["edit", null], ["reschedule", null], ["locked", "field_locked"], ["locked", "post_is_live"], ["locked", "field_locked"],
@@ -312,6 +317,87 @@ describe.skipIf(!TEST_URL)("SCP-3d · the feed preview (BFF §63.10)", () => {
       );
       const j = (await get(U.reader, e.engagementId)).json() as { items: Array<{ thumbFileId: string | null }> };
       expect(j.items[0].thumbFileId).toBe(fileId);
+    });
+
+    // ── SCP-Sg: the live feed read back ──────────────────────────────────────────────────────────────────────────────────────────────────────
+    const variantsOf = async (postId: string) =>
+      (await adminPool().query(`SELECT id::text AS id FROM social_post_variants WHERE post_id = $1 AND deleted_at IS NULL ORDER BY created_at, id`, [postId])).rows.map((r) => r.id as string);
+    const snapshot = (variantId: string, reach: number | null, source: "pull" | "simulated", fetchedAt: string) =>
+      adminPool().query(
+        `INSERT INTO social_post_metrics (tenant_id, variant_id, reach, impressions, source, fetched_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [A, variantId, reach, reach === null ? null : reach * 2, source, fetchedAt],
+      );
+    const daily = (accountId: string, date: string, source: "pull" | "simulated", updatedAt: string) =>
+      adminPool().query(
+        `INSERT INTO social_metrics_daily (tenant_id, account_id, date, followers, reach, source, updated_at) VALUES ($1, $2, $3, 1000, 50, $4, $5)`,
+        [A, accountId, date, source, updatedAt],
+      );
+    type Item = { title: string; liveUrl: string | null; reach: number | null; reachSource: string | null };
+    const itemsOf = async (engagementId: string) => ((await get(U.reader, engagementId)).json() as { items: Item[]; lastSyncedAt: string | null });
+
+    it("answers a live post's address, its reach (each variant's newest snapshot, summed) and the snapshot's mark; a post that is not live answers nulls", async () => {
+      const e = await makeEngagement(A, U.officer);
+      const live = await seed(e, A, "Live with numbers", D(10), { status: "live", variant: true });
+      await seed(e, A, "Planned", D(12), { status: "planned" });
+      await seed(e, A, "Live without numbers", D(9), { status: "live", variant: true });
+      await seed(e, A, "Live without a variant", D(8), { status: "live", variant: false });
+      // A second account and variant (the same post on Facebook): the post's reach is both variants' NEWEST snapshots added.
+      const orgId = (await adminPool().query(`SELECT publisher_org_id::text AS id FROM social_accounts WHERE id = $1`, [e.accountId])).rows[0].id as string;
+      const fbAccount = newId();
+      await adminPool().query(
+        `INSERT INTO social_accounts (id, tenant_id, client_id, publisher_org_id, network, handle, status, origin_site)
+         VALUES ($1, $2, $3, $4, 'facebook', '@mock-facebook-sg', 'connected', 'central')`, [fbAccount, A, e.clientId, orgId]);
+      const fbVariant = newId();
+      await adminPool().query(
+        `INSERT INTO social_post_variants (id, tenant_id, post_id, account_id, body, scheduled_at, status, origin_site)
+         VALUES ($1, $2, $3, $4, 'A mock caption', $5, 'draft', 'central')`, [fbVariant, A, live, fbAccount, D(10)]);
+      const [igVariant] = await variantsOf(live);
+      await snapshot(igVariant, 100, "pull", "2027-04-01T08:00:00Z"); // superseded by the newer snapshot below
+      await snapshot(igVariant, 400, "pull", "2027-04-02T08:00:00Z");
+      await snapshot(fbVariant, 250, "simulated", "2027-04-02T09:00:00Z");
+      const j = await itemsOf(e.engagementId);
+      const by = (t: string) => j.items.find((i) => i.title === t) as Item;
+      expect(by("Live with numbers")).toMatchObject({ liveUrl: "https://example.invalid/p/1", reach: 650, reachSource: "simulated" });
+      expect(by("Planned")).toMatchObject({ liveUrl: null, reach: null, reachSource: null });
+      // "Not reported" is null, never 0: a live post with no snapshot, and one with no variant at all.
+      expect(by("Live without numbers")).toMatchObject({ liveUrl: "https://example.invalid/p/1", reach: null, reachSource: null });
+      expect(by("Live without a variant")).toMatchObject({ reach: null, reachSource: null });
+    });
+
+    it("a snapshot that reported no reach is null, not 0", async () => {
+      const e = await makeEngagement(A, U.officer);
+      const live = await seed(e, A, "Pulled, no reach", D(10), { status: "live", variant: true });
+      await snapshot((await variantsOf(live))[0], null, "pull", "2027-04-02T08:00:00Z");
+      expect((await itemsOf(e.engagementId)).items[0]).toMatchObject({ reach: null, reachSource: "pull" });
+    });
+
+    it("says when the client's accounts last synced: the newest `updated_at` of the counted daily rows; null with none", async () => {
+      const e = await makeEngagement(A, U.officer);
+      await seed(e, A, "Planned", D(12), { status: "planned" });
+      expect((await itemsOf(e.engagementId)).lastSyncedAt).toBeNull();
+      await daily(e.accountId, "2027-03-30", "pull", "2027-03-30T10:00:00.000Z");
+      await daily(e.accountId, "2027-03-31", "pull", "2027-03-31T10:30:00.000Z");
+      expect((await itemsOf(e.engagementId)).lastSyncedAt).toBe("2027-03-31T10:30:00.000Z");
+      // Another client's sync is never this client's.
+      const other = await makeEngagement(A, U.officer);
+      expect((await itemsOf(other.engagementId)).lastSyncedAt).toBeNull();
+    });
+
+    it("never mixes: a real account's simulated rows and a simulated account's pulled rows do not count as a sync", async () => {
+      const e = await makeEngagement(A, U.officer);
+      await daily(e.accountId, "2027-03-30", "simulated", "2027-03-30T10:00:00.000Z"); // a real account (simulated = false) holding a simulated row
+      expect((await itemsOf(e.engagementId)).lastSyncedAt).toBeNull();
+      // A simulated account of the same client (an account's kind is fixed once it holds an integration id, SCP-Sa2, so
+      // this is a second account rather than the first one flipped): its simulated row counts, its pulled row never does.
+      const orgId = (await adminPool().query(`SELECT publisher_org_id::text AS id FROM social_accounts WHERE id = $1`, [e.accountId])).rows[0].id as string;
+      const simAccount = newId();
+      await adminPool().query(
+        `INSERT INTO social_accounts (id, tenant_id, client_id, publisher_org_id, network, handle, status, simulated, postiz_integration_id, origin_site)
+         VALUES ($1, $2, $3, $4, 'facebook', '@mock-sim-facebook', 'connected', true, 'simulated:facebook', 'central')`, [simAccount, A, e.clientId, orgId]);
+      await daily(simAccount, "2027-03-30", "simulated", "2027-03-30T10:00:00.000Z");
+      expect((await itemsOf(e.engagementId)).lastSyncedAt).toBe("2027-03-30T10:00:00.000Z");
+      await daily(simAccount, "2027-03-31", "pull", "2027-04-01T00:00:00.000Z"); // a pulled row under a simulated account
+      expect((await itemsOf(e.engagementId)).lastSyncedAt).toBe("2027-03-30T10:00:00.000Z");
     });
 
     it("is refused without the social tier (403), and an engagement that is not this company's or does not exist is 404", async () => {

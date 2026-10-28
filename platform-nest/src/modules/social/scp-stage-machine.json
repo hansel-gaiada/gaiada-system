@@ -381,7 +381,8 @@
         { "guard": "design_present", "refusal": "design_missing" },
         { "guard": "designs_stored", "refusal": "design_not_stored" },
         { "guard": "one_account_per_placement_network", "refusal": "no_account_for_network" },
-        { "guard": "account_not_ambiguous", "refusal": "ambiguous_account" }
+        { "guard": "account_not_ambiguous", "refusal": "ambiguous_account" },
+        { "guard": "account_kinds_not_mixed", "refusal": "publisher_kinds_mixed" }
       ],
       "effects": ["sync_variants_from_master", "materialize_design_files", "request_client_reviews", "set_client_first_sent_at_if_null", "set_status_since", "set_engine_status", "notify:client_once_per_post"],
       "plan": "§4.3 final_approve: creates the variants and requests client review on each"
@@ -496,6 +497,7 @@
       "to": "scheduled",
       "params": {},
       "guards": [
+        { "guard": "account_kinds_not_mixed", "refusal": "publisher_kinds_mixed" },
         { "guard": "publisher_available", "refusal": "publisher_unavailable" },
         { "guard": "approved_time_not_passed", "refusal": "approved_time_passed" },
         { "guard": "media_rules_pass", "refusal": "media_rules_failed" }
@@ -737,6 +739,7 @@
     "design_not_stored": { "http": 409, "with": "detail {designIds}" },
     "no_account_for_network": { "http": 409, "with": "detail {networks}" },
     "ambiguous_account": { "http": 409, "with": "detail {networks}" },
+    "publisher_kinds_mixed": { "http": 409, "with": "detail {simulated, real} (the networks of each kind)" },
     "content_changed": { "http": 409 },
     "post_not_with_client": { "http": 409 },
     "client_review_already_decided": { "http": 409 },
@@ -878,6 +881,13 @@
       "steps": [
         { "action": "schedule", "actor": "officer", "refusal": "approved_time_passed" },
         { "action": "reschedule", "actor": "officer", "params": { "at": "a future date and time" }, "expect": { "status": "client" } }
+      ]
+    },
+    {
+      "name": "a post is wholly simulated or wholly real (SCP-D9): a placement that mixes the two kinds is refused at the final check",
+      "start": { "status": "final", "mixedAccountKinds": true },
+      "steps": [
+        { "action": "final_approve", "actor": "approver", "refusal": "publisher_kinds_mixed" }
       ]
     },
     {

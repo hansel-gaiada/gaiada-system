@@ -21,7 +21,9 @@ import { PostDesigns } from "@/components/social/PostDesigns";
 import { PostFields } from "@/components/social/PostFields";
 import { Activity, CopyLog } from "@/components/social/PostLog";
 import { PostMetricsSection } from "@/components/social/PostMetrics";
+import { PostBoostSection, type BoostAccess } from "@/components/social/PostBoost";
 import { PostStepper } from "@/components/social/PostStepper";
+import { SimulatedMark } from "@/components/social/SimulatedMark";
 import { postEntityComment } from "@/lib/collabActions";
 import { formatDate, formatDateTime } from "@/lib/format";
 import type { Comment, CommentAnchor } from "@/lib/pm";
@@ -42,6 +44,8 @@ export interface PostPageProps {
   metrics?: PostMetrics | null;
   /** The signed-in person: the client's officer is offered the Enter metrics form. */
   viewerId?: string | null;
+  /** SCP-4b: what the server page could tell about the person for the Boost block of a live post (BFF §63.11). Absent: the block is not drawn. */
+  boostAccess?: BoostAccess;
   /** DEMO_MODE: no bytes are stored, so the image is the reference image the demo store holds. */
   demo?: boolean;
   chrome?: "page" | "drawer";
@@ -52,7 +56,7 @@ const monthLabel = (m: string): string => { const x = /^(\d{4})-(\d{2})$/.exec(m
 
 interface Notice { kind: "ok" | "error"; text: string; lines: string[] }
 
-export function PostPage({ deptId, post: initial, comments, assets, metrics, viewerId, demo = false, chrome = "page" }: PostPageProps) {
+export function PostPage({ deptId, post: initial, comments, assets, metrics, viewerId, boostAccess, demo = false, chrome = "page" }: PostPageProps) {
   const router = useRouter();
   const [post, setPost] = useState(initial);
   const [gone, setGone] = useState(false);
@@ -103,7 +107,8 @@ export function PostPage({ deptId, post: initial, comments, assets, metrics, vie
           <span className={`scp-chip${post.pipelineStatus === "changes" ? " scp-chip--changes" : post.pipelineStatus === "blocked" ? " scp-chip--blocked" : ""}`}>{statusChipText(post)}</span>
           {post.phase && <span className="scp-chip scp-chip--phase">{phaseText(post.phase)}</span>}
           <HealthChip health={post.health} />
-          {post.simulated && <span className="scp-chip scp-chip--sim">SIMULATED</span>}
+          {/* SCP-Sf: the post went live through the simulator, or the simulator served one of its networks (a failed or partial simulated publish). */}
+          {(post.simulated || post.variants.some((v) => v.simulated)) && <SimulatedMark of="post" />}
           {post.isExtra && <span className="scp-chip scp-chip--phase">Extra post</span>}
         </div>
         <div className="scp-post__meta">
@@ -194,6 +199,8 @@ export function PostPage({ deptId, post: initial, comments, assets, metrics, vie
 
       <PostMetricsSection post={post} metrics={metrics} viewerId={viewerId} onSaved={() => router.refresh()} />
 
+      {boostAccess && <PostBoostSection post={post} access={boostAccess} onChanged={() => router.refresh()} />}
+
       <section aria-labelledby="scp-post-copylog">
         <h3 className="scp-post__section-title" id="scp-post-copylog">Copy edit log</h3>
         <CopyLog post={post} />
@@ -218,7 +225,16 @@ export function PostPage({ deptId, post: initial, comments, assets, metrics, vie
         )}
         {post.variants.length > 0 && (
           <p className="scp-field__hint" style={{ margin: "8px 0 0" }}>
-            {`Client review: ${post.variants.map((v) => `${networkLabel(v.network)} ${v.reviewStatus.replace(/_/g, " ") || "not asked yet"}`).join(", ")}.`}
+            {"Client review: "}
+            {post.variants.map((v, i) => (
+              <span key={v.id}>
+                {i > 0 && ", "}
+                {`${networkLabel(v.network)} ${v.reviewStatus.replace(/_/g, " ") || "not asked yet"}`}
+                {/* SCP-Sf: a network the simulator served says so where the network is named (a post may hold both kinds, SCP-D9). */}
+                {v.simulated && <> <SimulatedMark of="variant" /></>}
+              </span>
+            ))}
+            .
           </p>
         )}
       </section>

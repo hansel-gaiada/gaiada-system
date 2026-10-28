@@ -3173,3 +3173,48 @@ Who may manage or reveal a per-site record: the site's company tier (company_adm
 `core.integration_connection.manage`, platform_admin). A client's own admins get nothing, even when the site serves their
 client. That is the same as for client-owned records today: the vault is staff-side (WSK-D30), and the client side is a separate
 interface. Widening it would be a new rule, and none was asked for.
+
+## 55. AIP-08b — the `assistant_brain` kind: who may pick a named AI provider (2026-10-28, BUILT, PROTOTYPED)
+
+Owner ruling **AIP-D5**: "only people with an 'advanced' grant may pick a named provider; everyone else sees Auto, Fast and Strong."
+BFF rows: `docs/FRONTEND-BFF-CONTRACT.md` §18 (thread create and PATCH, `assistant/brains`). Status: **BUILT, PROTOTYPED.** The
+policy, the derived role, catalog, group, bundles, migration `202610281210_assistant_brain_choose_provider.sql`, the enforcement and
+the static and unit suites are in the repo. The live Cerbos matrix (`cerbos-assistant-brain.test.ts`) and the HTTP suites
+(`assistant.test.ts`, `assistant-stream.test.ts`) run on the Linux CI gate and skip without Postgres and Cerbos. **Restart Cerbos at
+the deploy** (a new policy file is not hot-reloaded) and probe it: company_admin `choose_provider` allowed, a plain member denied.
+
+**A new kind, `assistant_brain` (module `assistant`), with ONE action.** Key `assistant.brain.choose_provider`: grantable,
+`uiGrantable: true`, **not sensitive** (a cost lever, not data access). One resource per company: `id` = `tenantId` = the route's
+`:tenantId`, never a body. No new resource attribute, so no `resourcePayload()` change.
+
+| Rule | Reach |
+|---|---|
+| `*` | `platform_admin` (the house wildcard; the kind is non-exempt in `iam-215-boundary-pin.test.ts`) |
+| `choose_provider` | `company_admin`, `inTenant && notLow` |
+| `choose_provider` | `perm_assistant_brain_choose_provider`, `inTenant && notLow && inRoot` (the permission arm: how `owner`, which has no rules, and a role edit's holder reach it) |
+
+No other role rule and no DENY. **`resource_assistant_thread.yaml` is untouched:** a thread stays owner-private with no admin rule.
+This kind decides only which brain a person may ask for on their OWN thread; the thread's own checks still run first.
+
+**Bundles:** `platform_admin`, `company_admin`, `owner` (owner mirrors company_admin, `owner-role.db.test.ts`). Nobody else; any other
+person gets it only through a role edit (a tenant role holding the key). Not self-scoped. Group: `assistant_choose_provider`
+("Assistant: choose AI provider"), not advanced-only.
+
+**Where it is checked** (`assistant.controller.ts`, always the per-resource `can()`, never `can.scopeOnly`):
+- thread **create** and **PATCH**: a non-null `brainProvider` without the grant is **403** `brain_provider_forbidden` and nothing is
+  written. Clearing the provider and every tier need no grant.
+- **send time** (the stream route and `POST :t/assistant/ask`): a stored provider is sent as the `provider` hint only while the owner
+  holds the grant now; otherwise no hint and no provider session (Auto routing), no error, the stored value kept. A failed check drops
+  the hint.
+- **`GET :t/assistant/brains`**: `canChooseProvider` per caller (never cached); `brains: []` without it.
+
+The UI capability layer (`platform-ui/src/lib/rbac.ts`) is deliberately NOT extended: the brain picker reads `canChooseProvider`.
+
+**The six artifacts** (the §36 template): the policy (+ `perm_assistant_brain_choose_provider` in `derived_roles.yaml`); `cerbos.ts`
+(a comment only: `id` and `tenantId` are already carried); the catalog (+1 entry); the groups (+1 group); the migration with its
+DO-block self-assertion (exactly three holders, owner ≡ company_admin on the kind, nothing self-scoped); the bundles, regenerated
+(the generator needed no resolver change: the kind names only `platform_admin` and `company_admin`, which `DIRECT` maps). The
+assistant module declares the key in `ModuleContract.permissions`.
+
+**Counts:** 113 kinds, 499 pairs, 484 grantable, 15 relationship, 218 sensitive; 175 groups; bundles 2182 pairs
+(`platform_admin` 484, `company_admin` 434, `owner` 439).

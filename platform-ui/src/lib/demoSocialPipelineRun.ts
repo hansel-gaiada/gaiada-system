@@ -19,7 +19,7 @@ import fixture from "./scpStageMachine.json";
 import { scpActionsFromStatus, scpHolderOf, scpPhaseOf, type ScpPostView } from "./scpStageMachine";
 import { ALLOCATION_NETWORKS } from "./socialAllocation";
 import { MUST_HAVES, SUGGESTIBLE_FIELDS, editableFieldsOf } from "./socialPipeline";
-import { demoNetworksWithoutAccount } from "./demoSocialAccounts";
+import { demoAccountKinds, demoNetworksWithoutAccount } from "./demoSocialAccounts";
 import {
   PIPE_ENGAGEMENTS, PIPE_POSTS, allocStore, cerbosAllows, demoChecks, demoPipelinePost, isDemoSocialApprover, who, type DemoResult, type PipePost,
 } from "./demoSocialPipeline";
@@ -566,6 +566,13 @@ function guards(a: FxAction, p: PipePost, r: Req, userId: string, now: Date): { 
         break;
       }
       case "account_not_ambiguous": break; // one account per network in the demo
+      case "account_kinds_not_mixed": {
+        // SCP-Sa3: the demo has no variants with accounts, so both actions judge the client's accounts on the post's placement (the server's `final_approve` does the
+        // same; its `schedule_publisher` reads the live variants, which a demo post's placement stands for).
+        const kinds = demoAccountKinds(clientOfEngagement(p.engagementId), p.placement);
+        if (kinds.simulated.length > 0 && kinds.real.length > 0) return { fail: refuse("publisher_kinds_mixed", { detail: kinds }), skipped };
+        break;
+      }
       case "approved_time_not_passed": {
         const at = p.scheduledAt ? Date.parse(p.scheduledAt) : Number.NaN;
         if (Number.isNaN(at) || at < now.getTime() - APPROVED_TIME_GRACE_MS) return { fail: refuse("approved_time_passed"), skipped };

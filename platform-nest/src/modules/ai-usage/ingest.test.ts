@@ -156,3 +156,16 @@ describe("AIP-03b · the producers' real events pass the platform's validation",
     expect(h.written.map((e) => e.outcome)).toEqual(["ok", "ok", "ok", "blocked_dlp"]);
   });
 });
+
+describe("AIP-07 · tier on the ingest", () => {
+  it("accepts fast, standard, strong and an absent or null tier; anything else is refused for that index as invalid_tier", async () => {
+    const h = harness();
+    const r = await ingestAiUsage([
+      ev({ tier: "fast" }), ev({ tier: "standard" }), ev({ tier: "strong" }), ev(), ev({ tier: null }),
+      ev({ tier: "turbo" }), ev({ tier: "Fast" }), ev({ tier: 3 }),
+    ], h.deps);
+    expect(r.accepted).toBe(5);
+    expect(r.rejected).toEqual([{ index: 5, reason: "invalid_tier" }, { index: 6, reason: "invalid_tier" }, { index: 7, reason: "invalid_tier" }]);
+    expect(h.written.map((e) => e.tier ?? null)).toEqual(["fast", "standard", "strong", null, null]);
+  });
+});

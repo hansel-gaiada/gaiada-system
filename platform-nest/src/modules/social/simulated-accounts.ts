@@ -22,13 +22,15 @@
 //   * refuses (409 `account_exists_not_simulated`, nothing written) when the client already has a LIVE account on a requested
 //     network that is not simulated, or a non-simulated row (deleted or disconnected too) holding the very handle it would
 //     take (0105's UNIQUE (tenant, client, network, handle) counts soft-deleted rows). A second account beside a real one
-//     would make the pipeline `ambiguous_account`, and a real account beside the simulator is what boot refuses anyway.
+//     would make the pipeline `ambiguous_account`. (SCP-Sa2, owner ruling SCP-D9: real accounts may now exist beside the
+//     simulator, so this refusal is what keeps a client's network from holding one of each; and this seed never writes
+//     onto a real row: its UPDATE matches `simulated = true` rows only, and social_accounts_kind_ck refuses a mixed row.)
 //
 // ── SOFT-DELETED SIMULATED ROWS ARE REVIVED, NOT DUPLICATED ────────────────────────────────────────────────────────────
 // The social module never hard-deletes (the UNIQUE above has no partial WHERE). `removeSimulatedAccounts` soft-deletes, and a
-// later seed revives the same row (`created: true`: the pipeline did not have it a moment ago). This is the SIMULATED half of
-// Sa's note that soft-deleted rows count at boot: boot counts only `simulated = false` rows, so a soft-deleted SIMULATED row
-// is harmless, and a soft-deleted REAL row is not (the prepare script lists those).
+// later seed revives the same row (`created: true`: the pipeline did not have it a moment ago). A soft-deleted simulated row
+// keeps its kind (SCP-Sa2: the kind never changes once used, and boot checks soft-deleted rows against the kind rule too),
+// so reviving it can never turn it into, or out of, a real account.
 //
 // ── NETWORKS ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 // `SOCIAL_NETWORKS_ENABLED` defaults to instagram,facebook,linkedin: TikTok is OFF at the deployment level. The pipeline's

@@ -11,7 +11,7 @@ import "server-only";
 // (`app/api/assistant/threads/[id]/stream/route.ts`) calls this file directly instead of going
 // through `platformFetch`'s DEMO_MODE branch. See that route's header for the split.
 import type {
-  AssistantMemoryScope, AssistantMessageRole, AssistantThreadStatus, HandoffStatus,
+  AssistantMemoryScope, AssistantMessageRole, AssistantThreadStatus, BrainTier, HandoffStatus,
   AssistantToolAgent, ThreadToolCall, WriteIntentStatus,
 } from "./assistant";
 
@@ -21,6 +21,7 @@ interface DemoThread {
   ownerUserId: string;
   title: string | null;
   brainProvider: string | null;
+  brainTier: BrainTier | null;
   brainModel: string | null;
   hermesSessionId: string | null;
   status: AssistantThreadStatus;
@@ -259,21 +260,21 @@ function seedThreads(): DemoThread[] {
   return [
     {
       id: "asst-thread-1", tenantId: "co-agency", ownerUserId: DEMO_OWNER,
-      title: "Draft the Q3 client update", brainProvider: null, brainModel: null, hermesSessionId: null,
+      title: "Draft the Q3 client update", brainProvider: null, brainTier: null, brainModel: null, hermesSessionId: null,
       status: "active", pinned: true, lastMessageAt: "2026-08-04T09:10:00Z",
       totalTokens: 340, totalCostUsd: "0.00", compactionSummary: null, compactionSummaryUptoSeq: null,
       createdAt: "2026-08-04T09:00:00Z", updatedAt: "2026-08-04T09:10:00Z",
     },
     {
       id: "asst-thread-2", tenantId: "co-agency", ownerUserId: DEMO_OWNER,
-      title: "Explain the D14 execution gate", brainProvider: null, brainModel: null, hermesSessionId: null,
+      title: "Explain the D14 execution gate", brainProvider: null, brainTier: null, brainModel: null, hermesSessionId: null,
       status: "active", pinned: false, lastMessageAt: "2026-08-03T14:22:00Z",
       totalTokens: 180, totalCostUsd: "0.00", compactionSummary: null, compactionSummaryUptoSeq: null,
       createdAt: "2026-08-03T14:20:00Z", updatedAt: "2026-08-03T14:22:00Z",
     },
     {
       id: "asst-thread-3", tenantId: "co-agency", ownerUserId: DEMO_OWNER,
-      title: "Older scratch thread", brainProvider: null, brainModel: null, hermesSessionId: null,
+      title: "Older scratch thread", brainProvider: null, brainTier: null, brainModel: null, hermesSessionId: null,
       status: "active", pinned: false, lastMessageAt: "2026-07-10T08:00:00Z",
       totalTokens: 60, totalCostUsd: "0.00", compactionSummary: null, compactionSummaryUptoSeq: null,
       createdAt: "2026-07-10T07:55:00Z", updatedAt: "2026-07-10T08:00:00Z",
@@ -493,7 +494,7 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
     const thread = THREADS.find((t) => t.id === threadId && t.tenantId === tenantId);
     if (m === "PATCH") {
       if (!thread || thread.ownerUserId !== userId) return { status: 404, json: { error: "thread not found" } };
-      const b = JSON.parse(body || "{}") as { title?: string | null; pinned?: boolean; status?: string; brainProvider?: string | null; brainModel?: string | null };
+      const b = JSON.parse(body || "{}") as { title?: string | null; pinned?: boolean; status?: string; brainProvider?: string | null; brainTier?: BrainTier | null; brainModel?: string | null };
       if (Object.prototype.hasOwnProperty.call(b, "title")) thread.title = typeof b.title === "string" ? b.title.trim().slice(0, 500) || null : null;
       if (typeof b.pinned === "boolean") thread.pinned = b.pinned;
       if (b.status === "active" || b.status === "archived") thread.status = b.status;
@@ -504,6 +505,16 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
         // next turn), so the demo fixture must not leave a stale one behind either.
         if (next !== thread.brainProvider) thread.hermesSessionId = null;
         thread.brainProvider = next;
+        if (next !== null) thread.brainTier = null;
+      }
+      // AIP-08a — mirrors patchThread: a non-null tier clears the provider (and a left provider resets the Hermes session).
+      if (Object.prototype.hasOwnProperty.call(b, "brainTier")) {
+        const t = b.brainTier ?? null;
+        thread.brainTier = t;
+        if (t !== null && !Object.prototype.hasOwnProperty.call(b, "brainProvider")) {
+          if (thread.brainProvider !== null) thread.hermesSessionId = null;
+          thread.brainProvider = null;
+        }
       }
       if (Object.prototype.hasOwnProperty.call(b, "brainModel")) thread.brainModel = b.brainModel ?? null;
       thread.updatedAt = now();
@@ -543,11 +554,11 @@ export function assistantDemo(method: string, p: string, params: URLSearchParams
   if (listCreateM) {
     const [, tenantId] = listCreateM;
     if (m === "POST") {
-      const b = JSON.parse(body || "{}") as { title?: string; brainProvider?: string; brainModel?: string };
+      const b = JSON.parse(body || "{}") as { title?: string; brainProvider?: string; brainTier?: BrainTier | null; brainModel?: string };
       const t: DemoThread = {
         id: nid("asst-thread"), tenantId, ownerUserId: userId,
         title: (b.title ?? "").trim().slice(0, 500) || null,
-        brainProvider: b.brainProvider ?? null, brainModel: b.brainModel ?? null, hermesSessionId: null,
+        brainProvider: b.brainProvider ?? null, brainTier: b.brainProvider ? null : (b.brainTier ?? null), brainModel: b.brainModel ?? null, hermesSessionId: null,
         status: "active", pinned: false, lastMessageAt: null, totalTokens: 0, totalCostUsd: "0.00",
         compactionSummary: null, compactionSummaryUptoSeq: null, createdAt: now(), updatedAt: now(),
       };

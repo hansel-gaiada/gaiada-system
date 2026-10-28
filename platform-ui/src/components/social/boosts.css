@@ -1,0 +1,62 @@
+/* SCP-4b, SCP-4c — boosts: the Boosting page, the boost card and request dialog on the post page, and the Boost budget card on the client page (BFF §63.11). Tokens only: no colour,
+   radius or shadow literal and no uppercase transform (the tokens guard), so the Social skin restyles it by changing tokens and nothing here. It builds on the `.scp-*` classes of
+   cycles.css and post-page.css (notes, messages, fields, chips), which every importer of this file also imports. Colour is never the only signal: the status is always a word. */
+
+.scp-boosts { display: grid; gap: 24px; min-width: 0; }
+.scp-boosts__section { display: grid; gap: 10px; min-width: 0; }
+.scp-boosts__h { font: 700 11px var(--font-body); letter-spacing: 0.08em; color: var(--erp-ink-60); margin: 0; }
+
+/* Candidates and the list: ruled rows, no boxes. */
+.scp-boostrows { list-style: none; margin: 0; padding: 0; display: grid; }
+.scp-boostrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; padding: 12px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.scp-boostrow:first-child { border-top: 0.5px solid var(--erp-hairline-soft); }
+.scp-boostrow__main { display: grid; gap: 4px; min-width: 0; }
+.scp-boostrow__title { font: 600 14px var(--font-body); color: var(--text-primary); text-decoration: none; overflow-wrap: anywhere; }
+.scp-boostrow__title:hover { text-decoration: underline; }
+.scp-boostrow__meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.scp-boostrow__side { display: grid; gap: 6px; justify-items: end; align-content: start; font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+@media (max-width: 640px) { .scp-boostrow { grid-template-columns: minmax(0, 1fr); } .scp-boostrow__side { justify-items: start; } }
+
+.scp-boostchip { display: inline-flex; padding: 2px 8px; font: 700 11px var(--font-body); color: var(--text-primary); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); }
+.scp-boostchip[data-status="requested"] { color: var(--status-warning-fg); }
+.scp-boostchip[data-status="running"] { color: var(--status-ok-fg); border-color: var(--status-ok); }
+.scp-boostchip[data-status="declined"], .scp-boostchip[data-status="cancelled"] { color: var(--erp-ink-60); }
+
+.scp-boostfilters { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: end; margin: 0; }
+.scp-boostfilters .scp-field { min-width: 160px; }
+
+.scp-boosttotals { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 18px; margin: 0; padding: 0; }
+.scp-boosttotals div { display: grid; gap: 2px; padding: 6px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); }
+.scp-boosttotals dt { font: 600 12px var(--font-body); color: var(--erp-ink-60); margin: 0; }
+.scp-boosttotals dd { margin: 0; font: 700 16px var(--font-body); color: var(--text-primary); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* The boost card (post page, and the budget card's neighbours). */
+.scp-boostcard { display: grid; gap: 10px; border-left: 3px solid var(--status-info); padding: 4px 0 4px 12px; min-width: 0; }
+.scp-boostcard[data-status="requested"] { border-left-color: var(--status-warning); }
+.scp-boostcard[data-status="running"], .scp-boostcard[data-status="completed"] { border-left-color: var(--status-ok); }
+.scp-boostcard[data-status="cancelled"], .scp-boostcard[data-status="declined"] { border-left-color: var(--status-idle); }
+.scp-boostcard__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.scp-boostcard__facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px 18px; margin: 0; padding: 0; }
+.scp-boostcard__facts div { display: grid; gap: 2px; padding: 4px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); min-width: 0; }
+.scp-boostcard__facts dt { font: 600 12px var(--font-body); color: var(--erp-ink-60); margin: 0; }
+.scp-boostcard__facts dd { margin: 0; font: 400 13px/1.4 var(--font-body); color: var(--text-primary); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.scp-boostcard__facts dd.scp-row__value--empty { color: var(--erp-ink-60); font-style: italic; }
+.scp-boostcard__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* The request dialog's line and estimate. */
+.scp-boostline { margin: 0; padding: 6px 10px; border-left: 3px solid var(--status-idle); font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
+.scp-boostline[data-within="true"] { border-left-color: var(--status-ok); }
+.scp-boostline[data-within="false"] { border-left-color: var(--status-warning); }
+.scp-boostgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 14px; }
+
+/* The budget card on the client page. */
+.scp-budget { display: grid; gap: 12px; min-width: 0; }
+.scp-budget__figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px 18px; margin: 0; padding: 0; }
+.scp-budget__figures div { display: grid; gap: 2px; padding: 6px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); min-width: 0; }
+.scp-budget__figures dt { font: 600 12px var(--font-body); color: var(--erp-ink-60); margin: 0; }
+.scp-budget__figures dd { margin: 0; font: 700 16px var(--font-body); color: var(--text-primary); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.scp-budget__sub { font: 400 12px/1.4 var(--font-body); color: var(--erp-ink-60); margin: 0; }
+.scp-budget__pending { border-left: 3px solid var(--status-warning); padding: 4px 0 4px 12px; display: grid; gap: 4px; font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
+.scp-budget__history { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font: 400 12px/1.5 var(--font-body); color: var(--erp-ink-60); }
+.scp-budget__history li { border-bottom: 0.5px solid var(--erp-hairline-soft); padding: 4px 0; overflow-wrap: anywhere; }
+.scp-budget__form { display: grid; gap: 10px; border-left: 3px solid var(--status-info); padding: 4px 0 4px 12px; }

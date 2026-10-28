@@ -156,8 +156,9 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // DW-10e (2026-10-16): +2 pairs on the EXISTING work_request kind (`send_across`, `read_across`, no new kind). 484 -> 486, kinds stay 112.
     // SCP-1b (2026-10-26): +11 pairs on EXISTING kinds (social_post x8, social_engagement plan/budget, portal approve_spend; no new kind). 486 -> 497, kinds stay 112.
     // M5-W1q (2026-10-27, WSK-D84): +1 pair on the EXISTING webdesk_media_asset kind (`review`, no new kind). 497 -> 498, kinds stay 112.
-    expect(catalog.length).toBe(498);
-    expect(catalogKindSet.size).toBe(112);
+    // AIP-08b (2026-10-28, AIP-D5): +1 pair / +1 kind: `assistant_brain` (choose_provider, NEW kind, module assistant: pick a named AI provider for your own threads). 498 -> 499, kinds 112 -> 113.
+    expect(catalog.length).toBe(499);
+    expect(catalogKindSet.size).toBe(113);
   });
 
   it("(a-forward) every catalog kind is backed by a real resourcePolicy file", () => {

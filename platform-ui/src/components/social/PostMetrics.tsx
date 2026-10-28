@@ -10,6 +10,7 @@
 // names its `field`, which is put beside that input; any other refusal is said in words (`refusalText`) under the form.
 import { useId, useState, useTransition } from "react";
 import { RefusalNote } from "@/components/social/PostRefusal";
+import { SimulatedMark } from "@/components/social/SimulatedMark";
 import { formatDateTime } from "@/lib/format";
 import {
   COUNTERS, COUNTER_LABEL, SOURCE_WORDS, buildMetricsBody, canEnterMetrics, emptyMetricsForm, formatCount, formatRate,
@@ -53,7 +54,7 @@ export function PostMetricsSection({ post, metrics, viewerId, onSaved }: PostMet
         <>
           <div className="scp-post__chips">
             {data.boostCandidate && <span className="scp-chip scp-chip--boost">Boost candidate</span>}
-            {data.simulated && <span className="scp-chip scp-chip--sim">SIMULATED</span>}
+            {data.simulated && <SimulatedMark of="metrics" />}
           </div>
           {latest ? (
             <>

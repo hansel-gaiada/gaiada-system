@@ -29,13 +29,16 @@
 // via the verb/metadata bag, its title) to people who have no Cerbos grant to read the thread
 // itself — exactly the class of admin-adjacent backdoor ASST-02's policy header says not to build.
 import {
-  BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, Res, UseGuards,
+  BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, Res, UseGuards,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { PoolClient } from "pg";
 import { newId, withTenants } from "../../db";
 import { config } from "../../config";
+import { GATEWAY_TIERS, readGatewayTier, type GatewayTier } from "../ai-usage/routing";
 import { authorize } from "../../core/http";
+import { can } from "../../rbac/can";
+import type { Principal } from "../../rbac/principal";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { assembleContext, persistCompactionUpdate, type ContextCitation } from "./context";
@@ -104,11 +107,52 @@ function clampInt(raw: unknown, fallback: number, min: number, max: number): num
   return Math.max(min, Math.min(max, v));
 }
 
+const BRAIN_CONFLICT = "brain_conflict: send either brainTier or brainProvider, not both";
+
+// ── AIP-08b — WHO MAY PICK A NAMED PROVIDER (owner ruling AIP-D5) ──────────────────────────────────
+// "Only people with an 'advanced' grant may pick a named provider; everyone else sees Auto, Fast and Strong." The grant is
+// `assistant.brain.choose_provider` on the `assistant_brain` kind (resource_assistant_brain.yaml): company_admin and owner by default,
+// anyone else through a role edit. The resource is the COMPANY's brain setting, built from the validated route `:tenantId` only.
+// It is checked in three places: thread create and PATCH (a non-null brainProvider is a 403 without it; clearing and tiers need no
+// grant), send time (a stored provider the owner may no longer pick is NOT sent: the reply routes as Auto, and the stored value is
+// kept), and GET assistant/brains (`canChooseProvider`; the provider list is withheld without it).
+export const CHOOSE_PROVIDER_PERMISSION = "assistant.brain.choose_provider";
+export const BRAIN_PROVIDER_FORBIDDEN =
+  "brain_provider_forbidden: choosing a named AI provider needs the assistant.brain.choose_provider permission; pick Auto, Fast or Strong";
+
+/** The per-resource Cerbos question (never `can.scopeOnly`): may this principal pick a named provider in this company? */
+export function canChooseProvider(principal: Principal, tenantId: string): Promise<boolean> {
+  return can(principal, CHOOSE_PROVIDER_PERMISSION, { id: tenantId, tenantId });
+}
+
+/** Send time: the provider hint to forward for a thread, or `undefined` (Auto). Never throws: a failed check is a dropped hint
+ *  (the closed direction), so a reply is never refused or left holding its generation slot because of it. */
+async function allowedProviderHint(principal: Principal, tenantId: string, stored: string | null): Promise<string | undefined> {
+  if (stored === null) return undefined;
+  try {
+    if (await canChooseProvider(principal, tenantId)) return stored;
+  } catch (e) {
+    console.warn(`assistant: choose_provider check failed (${e instanceof Error ? e.message : "error"}); replying as Auto`);
+  }
+  return undefined;
+}
+
+/** AIP-08a: `undefined` = key absent; `null` = explicit clear; a tier = valid; anything else is a 400. */
+function readBrainTierInput(body: unknown, key: string): GatewayTier | null | undefined {
+  if (!body || !Object.prototype.hasOwnProperty.call(body, key)) return undefined;
+  const raw = (body as Record<string, unknown>)[key];
+  if (raw === null) return null;
+  const tier = readGatewayTier(raw);
+  if (tier === null) throw new BadRequestException(`${key} must be one of ${GATEWAY_TIERS.join(",")} or null`);
+  return tier;
+}
+
 interface ThreadRow {
   id: string;
   ownerUserId: string;
   title: string | null;
   brainProvider: string | null;
+  brainTier: GatewayTier | null;
   brainModel: string | null;
   hermesSessionId: string | null;
   status: string;
@@ -123,7 +167,7 @@ interface ThreadRow {
 }
 
 const THREAD_SELECT = `
-  SELECT id, owner_user_id AS "ownerUserId", title, brain_provider AS "brainProvider", brain_model AS "brainModel",
+  SELECT id, owner_user_id AS "ownerUserId", title, brain_provider AS "brainProvider", brain_tier AS "brainTier", brain_model AS "brainModel",
          hermes_session_id AS "hermesSessionId", status, pinned, last_message_at AS "lastMessageAt",
          total_tokens AS "totalTokens", total_cost_usd AS "totalCostUsd",
          compaction_summary AS "compactionSummary", compaction_summary_upto_seq AS "compactionSummaryUptoSeq",
@@ -357,7 +401,7 @@ export class AssistantController {
   async createThread(
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
-    @Body() body: { title?: string; brainProvider?: string; brainModel?: string },
+    @Body() body: { title?: string; brainProvider?: string; brainTier?: string | null; brainModel?: string },
   ) {
     const ownerId = req.principal.userId;
     if (!ownerId) throw new BadRequestException("an authenticated user is required");
@@ -366,13 +410,18 @@ export class AssistantController {
     const title = typeof body?.title === "string" ? body.title.trim().slice(0, 500) || null : null;
     const brainProvider = typeof body?.brainProvider === "string" ? body.brainProvider.trim().slice(0, 100) || null : null;
     const brainModel = typeof body?.brainModel === "string" ? body.brainModel.trim().slice(0, 200) || null : null;
+    // AIP-08a: one picker, one choice — a tier and a named provider never come together.
+    const brainTier = readBrainTierInput(body, "brainTier") ?? null;
+    if (brainTier !== null && brainProvider !== null) throw new BadRequestException(BRAIN_CONFLICT);
+    // AIP-08b: a named provider needs the grant; checked before anything is written.
+    if (brainProvider !== null && !(await canChooseProvider(req.principal, tenantId))) throw new ForbiddenException(BRAIN_PROVIDER_FORBIDDEN);
     const id = newId();
     await withTenants(
       [tenantId],
       (c) => c.query(
-        `INSERT INTO assistant_threads (id, tenant_id, owner_user_id, title, brain_provider, brain_model, origin_site)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [id, tenantId, ownerId, title, brainProvider, brainModel, config.originSite],
+        `INSERT INTO assistant_threads (id, tenant_id, owner_user_id, title, brain_provider, brain_tier, brain_model, origin_site)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [id, tenantId, ownerId, title, brainProvider, brainTier, brainModel, config.originSite],
       ),
       { modules: ["assistant"] },
     );
@@ -430,7 +479,7 @@ export class AssistantController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
-    @Body() body: { title?: string | null; pinned?: boolean; status?: string; brainProvider?: string | null; brainModel?: string | null },
+    @Body() body: { title?: string | null; pinned?: boolean; status?: string; brainProvider?: string | null; brainTier?: string | null; brainModel?: string | null },
   ) {
     const thread = await withTenants([tenantId], (c) => fetchThread(c, id), { modules: ["assistant"] });
     if (!thread) throw new NotFoundException("thread not found");
@@ -438,6 +487,18 @@ export class AssistantController {
 
     if (body?.status !== undefined && !THREAD_STATUSES.has(body.status)) {
       throw new BadRequestException(`status must be one of ${[...THREAD_STATUSES].join(",")}`);
+    }
+
+    // AIP-08a: validate the tier before anything is written; a tier and a named provider in one body conflict.
+    const nextBrainTier = readBrainTierInput(body, "brainTier");
+    if (nextBrainTier) {
+      const bp = typeof body.brainProvider === "string" ? body.brainProvider.trim().slice(0, 100) || null : null;
+      if (bp !== null) throw new BadRequestException(BRAIN_CONFLICT);
+    }
+    // AIP-08b: setting a named provider needs the grant (clearing it, or any tier, does not); checked before anything is written.
+    if (Object.prototype.hasOwnProperty.call(body ?? {}, "brainProvider") && typeof body.brainProvider === "string"
+        && body.brainProvider.trim() !== "" && !(await canChooseProvider(req.principal, tenantId))) {
+      throw new ForbiddenException(BRAIN_PROVIDER_FORBIDDEN);
     }
 
     const sets: string[] = ["updated_at = now()"];
@@ -459,6 +520,8 @@ export class AssistantController {
       const nextBrainProvider = typeof body.brainProvider === "string" ? body.brainProvider.trim().slice(0, 100) || null : null;
       params.push(nextBrainProvider);
       sets.push(`brain_provider = $${params.length}`);
+      // AIP-08a: a named provider replaces any tier (one picker, one choice).
+      if (nextBrainProvider !== null && nextBrainTier === undefined) sets.push(`brain_tier = NULL`);
       // ASST-16 — switching brains mid-thread starts a FRESH provider session, without touching
       // ERP thread history: `hermes_session_id` is Hermes' OWN resume token, meaningless (and
       // actively wrong) once the thread is routed at a different provider — the ERP transcript
@@ -471,6 +534,19 @@ export class AssistantController {
       // away an in-progress Hermes conversation).
       if (nextBrainProvider !== thread.brainProvider) {
         sets.push(`hermes_session_id = NULL`);
+      }
+    }
+    if (nextBrainTier !== undefined) {
+      params.push(nextBrainTier);
+      sets.push(`brain_tier = $${params.length}`);
+      if (nextBrainTier !== null) {
+        // A non-null tier clears the provider in the same UPDATE, and that is a provider change for the
+        // ASST-16 rule: a stored provider (e.g. hermes) is left, so its session must not be resumed.
+        // (When the body also carries brainProvider:null, that branch above already cleared it and reset the session.)
+        if (!has("brainProvider")) {
+          sets.push(`brain_provider = NULL`);
+          if (thread.brainProvider !== null) sets.push(`hermes_session_id = NULL`);
+        }
       }
     }
     if (has("brainModel")) {
@@ -638,6 +714,9 @@ export class AssistantController {
     await authorize(req.principal, { kind: "assistant_thread", id, tenantId, ownerId: thread.ownerUserId }, "stream");
 
     if (!messageId) throw new BadRequestException("messageId is required");
+    // AIP-08b: a stored named provider is sent only while its owner (this caller: `stream` just cleared them as the owner) still
+    // holds the grant; otherwise the reply routes as Auto. Asked BEFORE the slot is reserved, and never throws.
+    const providerHint = await allowedProviderHint(req.principal, tenantId, thread.brainProvider);
     // Reserve the "one active generation per thread" slot SYNCHRONOUSLY, before the first `await`
     // below — see stream.ts's `reserveGeneration` header for why this must not be a plain
     // check-then-later-register (a real TOCTOU window across the awaited placeholder fetch +
@@ -845,8 +924,10 @@ export class AssistantController {
       // a down/unavailable hermes silently falls through to the gateway's normal failover chain,
       // never a hard error; `result.provider`/`result.model` (persisted below) always name the
       // ACTUAL server, never the requested one, which is what makes the ASST-12 badge truthful.
-      provider: thread.brainProvider ?? undefined,
-      providerSession: thread.hermesSessionId ?? undefined,
+      provider: providerHint,
+      tier: thread.brainTier ?? undefined,
+      // AIP-08b: a provider session belongs to the provider hint; without the hint there is no session to resume.
+      providerSession: providerHint ? thread.hermesSessionId ?? undefined : undefined,
       emit: {
         token: (text) => write(sseLine("token", { text })),
         // ASST-12/15: relayed the instant `meta` arrives (before `done`) so a live-streaming
@@ -1275,12 +1356,23 @@ export class AssistantController {
   // ================================================================== BRAINS (AIP-00c) ============
   // The brain picker's list: which gateway LLM providers can serve right now (`{value, available}`
   // only, see brains.ts). Authorized like `capabilities` above: an authenticated user, no per-row
-  // resource and no parameter that widens anything — the answer is the same gateway-wide fact for
-  // every caller, so no new Cerbos kind or action. `brains: null` means "could not check".
+  // resource and no parameter that widens anything. The gateway read is the same fact for every
+  // caller; `brains: null` means "could not check".
+  //
+  // AIP-08b: `canChooseProvider` answers for THIS caller in THIS company (a fresh Cerbos check per request, never cached: the cache in
+  // brains.ts holds only the gateway read, which is the same for everyone). Without the grant `brains` is `[]`, so the browser never
+  // receives the provider list; `tiers` is unchanged.
   @Get(":tenantId/assistant/brains")
-  async brains(@Req() req: FastifyRequest) {
+  async brains(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
     if (!req.principal.userId) throw new BadRequestException("an authenticated user is required");
-    return getBrains();
+    // A failed grant check is "no grant" (the closed direction): the route never threw before AIP-08b, and a Cerbos hiccup must
+    // not take Auto/Fast/Strong out of the picker along with the named providers.
+    const allowedCheck = canChooseProvider(req.principal, tenantId).catch((e: unknown) => {
+      console.warn(`assistant brains: choose_provider check failed (${e instanceof Error ? e.message : "error"}); answering without the grant`);
+      return false;
+    });
+    const [result, allowed] = await Promise.all([getBrains(), allowedCheck]);
+    return { ...result, brains: allowed ? result.brains : [], canChooseProvider: allowed };
   }
 
   // ================================================================== CITATIONS (ASST-18) ========
@@ -1408,6 +1500,8 @@ export class AssistantController {
       { modules: ["assistant"] },
     );
 
+    // AIP-08b: as the stream route, the stored provider is sent only while the caller (the thread's owner) holds the grant.
+    const providerHint = await allowedProviderHint(req.principal, tenantId, thread.brainProvider);
     const generation = reserveGeneration(threadId, turn.messageId);
     if (!generation) throw new ConflictException("a generation is already active for this thread");
 
@@ -1433,8 +1527,9 @@ export class AssistantController {
         tenantId,
         attribution: { tenantId, userId: thread.ownerUserId, surface: "assistant", threadId, task: "assistant.reply" },
         prompt: assembled.prompt,
-        provider: thread.brainProvider ?? undefined,
-        providerSession: thread.hermesSessionId ?? undefined,
+        provider: providerHint,
+        tier: thread.brainTier ?? undefined,
+        providerSession: providerHint ? thread.hermesSessionId ?? undefined : undefined,
         emit: { token: () => {}, meta: () => {}, session: () => {}, usage: () => {}, done: () => {}, error: () => {} },
       });
     } finally {

@@ -8,8 +8,13 @@ import "server-only";
 // (the officer's gate before the body, then the body, then the posts, then each post's stale picture, then the lock rule), and each move is the demo runner's own
 // (`runDemoStage`: `edit` with `fields.scheduledAt`, or `reschedule` with `at`, so a rescheduled post goes back to the client exactly as the post page's Reschedule
 // does). A move the runner refuses puts the other one back: the posts are snapshotted first, so the store is never left half-swapped.
+//
+// SCP-Sg: a live post also answers `liveUrl`, `reach` and `reachSource` (the metrics store's newest snapshots, `demoLiveReach`), and the answer `lastSyncedAt` (the
+// client's accounts' newest sync, `demoClientLastSyncedAt`). A SIMULATED post's address is `https://simulated.invalid/...`, as the server's simulator writes it.
 import { PIPE_POSTS, PIPE_ENGAGEMENTS, allocStore, isClientContact, type DemoResult, type PipePost } from "./demoSocialPipeline";
 import { runDemoStage } from "./demoSocialPipelineRun";
+import { demoLiveReach } from "./demoSocialMetrics";
+import { demoClientLastSyncedAt } from "./demoSocialAccountsSummary";
 import { scpPhaseOf, SCP_STATUSES } from "./scpStageMachine";
 import { FEED_PREVIEW_LIVE_CAP, byNewest, dateMoveForPost, type DateMove, type FeedItem } from "./socialFeedPreview";
 
@@ -42,7 +47,8 @@ export function demoFeedPreviewRoute(method: string, tail: string, body: string 
 /** `GET engagements/:engagementId/feed-preview`. */
 export function demoFeedPreview(engagementId: string, userId: string): DemoResult {
   if (isClientContact(userId)) return err(403, NOT_AUTHORIZED);
-  if (!PIPE_ENGAGEMENTS.some((e) => e.id === engagementId)) return err(404, "engagement_not_found");
+  const engagement = PIPE_ENGAGEMENTS.find((e) => e.id === engagementId);
+  if (!engagement) return err(404, "engagement_not_found");
   const posts = PIPE_POSTS
     .filter((p) => p.engagementId === engagementId && p.scheduledAt !== null && !p.archivedAt && p.format !== "story")
     .sort((a, b) => byNewest({ scheduledAt: a.scheduledAt as string, postId: a.id }, { scheduledAt: b.scheduledAt as string, postId: b.id }));
@@ -50,13 +56,16 @@ export function demoFeedPreview(engagementId: string, userId: string): DemoResul
   const keptLive = new Set(live.slice(0, FEED_PREVIEW_LIVE_CAP).map((p) => p.id));
   const items = posts.filter((p) => p.pipelineStatus !== "live" || keptLive.has(p.id)).map((p): FeedItem => {
     const move = moveOf(p);
+    const isLive = p.pipelineStatus === "live";
+    const seen = isLive ? demoLiveReach(p) : { reach: null, source: null };
     return {
       postId: p.id, scheduledAt: new Date(p.scheduledAt as string).toISOString(), thumbFileId: null, pipelineStatus: p.pipelineStatus,
-      locked: p.pipelineStatus === "live", title: p.title, format: p.format, phase: scpPhaseOf(view(p)), simulated: p.simulated,
+      locked: isLive, title: p.title, format: p.format, phase: scpPhaseOf(view(p)), simulated: p.simulated,
       dateMove: move.move, dateMoveRefusal: move.refusal,
+      liveUrl: isLive ? (p.simulated ? `https://simulated.invalid/${p.id}` : p.liveUrl) : null, reach: seen.reach, reachSource: seen.source,
     };
   });
-  return { status: 200, json: { items, liveHidden: Math.max(0, live.length - keptLive.size) } };
+  return { status: 200, json: { items, liveHidden: Math.max(0, live.length - keptLive.size), lastSyncedAt: demoClientLastSyncedAt(engagement.clientId) } };
 }
 
 /** `POST engagements/:engagementId/feed-preview/swap`. */

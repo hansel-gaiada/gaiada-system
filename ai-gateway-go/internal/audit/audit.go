@@ -45,6 +45,12 @@ type EgressAudit struct {
 	// are likewise set on `llm` rows when the provider reported usage. All omitempty: a row
 	// without usage stays byte-identical, and a row NEVER holds text.
 	CostUSD float64 `json:"costUsd,omitempty"`
+	// Task and Tier (AIP-06). Task is the validated `task` the caller sent (even when routing did not
+	// use it); Tier is the tier that was actually APPLIED (the serving provider was the tier's
+	// provider), never the one merely requested. Both omitempty, so a row for a request with neither
+	// stays byte-identical. A routed success also sets Model to the served model. Never text.
+	Task string `json:"task,omitempty"`
+	Tier string `json:"tier,omitempty"`
 }
 
 func WriteAudit(path string, e EgressAudit) error {

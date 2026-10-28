@@ -11,8 +11,11 @@ import { can } from "@/lib/rbac";
 import { DISPLAY_TZ, todayIsoInDisplayZone } from "@/lib/format";
 import { getAllocation } from "@/lib/socialAllocation-data";
 import { getClientBrandBook, getClientCalendar, getCycleView, getEngagementProjectId, getFeedPreview } from "@/lib/socialClient-data";
-import { gridRange, parseClientTab, parseMonth, type ClientPost } from "@/lib/socialClient";
+import { gridRange, monthTitle, parseClientTab, parseMonth, type ClientPost } from "@/lib/socialClient";
+import { getBoostBudget } from "@/lib/socialBoosts-data";
 import { getClientAccounts } from "@/lib/socialSimulatedAccounts-data";
+import { getAccountsSummary } from "@/lib/socialAccountsSummary-data";
+import type { AccountsSummaryRead } from "@/lib/socialAccountsSummary";
 import { Card } from "@/components/ui";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { BrandBookForm } from "@/components/social/BrandBookForm";
@@ -20,6 +23,7 @@ import { ClientHeader } from "@/components/social/ClientHeader";
 import { ClientAccounts, type ClientAccountsRead } from "@/components/social/ClientAccounts";
 import { ClientTabs } from "@/components/social/ClientTabs";
 import { ClientPlan } from "@/components/social/ClientPlan";
+import { BoostBudgetCard } from "@/components/social/BoostBudgetCard";
 import { ClientStories } from "@/components/social/ClientStories";
 import { ClientCalendar } from "@/components/social/ClientCalendar";
 import { FeedPreview } from "@/components/social/FeedPreview";
@@ -39,6 +43,7 @@ const dayOf = (iso: string): string => todayIsoInDisplayZone(new Date(iso));
 const timeOf = (iso: string): string =>
   new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: DISPLAY_TZ }).format(new Date(iso));
 
+// SCP-Sg: the header and the accounts strip also read `GET engagements/:id/accounts-summary` (followers, 30-day reach, last sync; SIMULATED when the simulator wrote them).
 // SCP-1k, SCP-1m, SCP-3d (BFF §63.4, §63.5, §63.10, §63.17; plan §8 rows 1k, 1m and 3d): one client's page, on tabs by `?tab=`: Plan, Stories, Calendar, Feed preview, List
 // and the Client profile (the brand book). The Feed preview is the client's grid with drag-to-swap of publish dates (`GET engagements/:id/feed-preview`); it needs no
 // cycle, because it shows every dated post of the client. The header is the profile: the count against the target (stories and extra posts beside it), the cycle
@@ -81,27 +86,32 @@ export default async function SocialClientPage({ params, searchParams }: { param
   const today = todayIsoInDisplayZone();
   const month = parseMonth(sp.month, today.slice(0, 7));
   const cycleId = row.thisCycle?.cycleId ?? null;
-  const [cycle, brand, project, root, accountsRead] = await Promise.all([
+  const [cycle, brand, project, root, accountsRead, summaryRead] = await Promise.all([
     cycleId ? getCycleView(userId, tenant, cycleId) : Promise.resolve(null),
     getClientBrandBook(userId, tenant, row.clientId),
     getEngagementProjectId(userId, tenant, engagementId),
     readOrgRoot(me, tenant),
     getClientAccounts(userId, tenant, row.clientId),
+    getAccountsSummary(userId, tenant, engagementId),
   ]);
   const calendar = tab === "calendar" ? await getClientCalendar(userId, tenant, { ...gridRange(month), engagementId }) : null;
   const feed = tab === "preview" ? await getFeedPreview(userId, tenant, engagementId) : null;
+  // SCP-4c (BFF §63.11): the Plan tab carries the current cycle's Boost budget card.
+  const boostBudget = tab === "plan" && cycleId ? await getBoostBudget(userId, tenant, cycleId) : null;
 
   const cycleView = cycle?.kind === "ok" ? cycle.data : null;
   const posts: ClientPost[] = cycleView?.posts ?? [];
   const tone = brand.kind === "ok" ? (brand.data?.toneSummary || null) : undefined;
   // SCP-Sb: the client's accounts, each simulated one marked; the seed button for the four approvers.
   const accounts: ClientAccountsRead = accountsRead.kind === "ok" ? { kind: "ok", accounts: accountsRead.data } : accountsRead.kind === "forbidden" ? { kind: "forbidden" } : { kind: "unavailable" };
+  // SCP-Sg: the accounts read back (followers, reach, last sync) for the header, the accounts strip and the Feed preview's "Last synced".
+  const summary: AccountsSummaryRead = summaryRead.kind === "ok" ? { kind: "ok", data: summaryRead.data } : summaryRead.kind === "forbidden" ? { kind: "forbidden" } : { kind: "unavailable" };
   const askCreatives = departmentForWorkspace(root, company?.vertical, "creatives") !== null;
 
   return (
     <div className="scp-client">
-      <ClientHeader row={row} cycle={cycleView} cycleUnavailable={cycle !== null && cycle.kind !== "ok"} tone={tone} />
-      <ClientAccounts engagementId={engagementId} read={accounts} canPlan={row.canPlan} />
+      <ClientHeader row={row} cycle={cycleView} cycleUnavailable={cycle !== null && cycle.kind !== "ok"} tone={tone} summary={summary} />
+      <ClientAccounts engagementId={engagementId} read={accounts} canPlan={row.canPlan} summary={summary} />
       <ClientCreate
         key={newMode ?? "closed"}
         deptId={deptId} cycleId={cycleId} platforms={row.platforms} pillars={brand.kind === "ok" ? brand.data?.contentPillars ?? [] : []}
@@ -124,7 +134,7 @@ export default async function SocialClientPage({ params, searchParams }: { param
         )
       ) : tab === "preview" ? (
         feed?.kind === "ok" ? (
-          <FeedPreview deptId={deptId} engagementId={engagementId} items={feed.data.items} liveHidden={feed.data.liveHidden} />
+          <FeedPreview deptId={deptId} engagementId={engagementId} items={feed.data.items} liveHidden={feed.data.liveHidden} lastSyncedAt={feed.data.lastSyncedAt} />
         ) : feed?.kind === "forbidden" ? (
           <ReadRefusal subject="this client's feed preview" kind="forbidden" inline />
         ) : (
@@ -137,7 +147,16 @@ export default async function SocialClientPage({ params, searchParams }: { param
       ) : cycle?.kind === "unavailable" ? (
         <ReadRefusal subject="This cycle's posts" kind="unavailable" reason={cycle.reason} inline />
       ) : tab === "plan" ? (
-        <ClientPlan deptId={deptId} engagementId={engagementId} posts={posts} target={row.postsPerCycle} canAdd />
+        <>
+          <ClientPlan deptId={deptId} engagementId={engagementId} posts={posts} target={row.postsPerCycle} canAdd />
+          {boostBudget?.kind === "ok" ? (
+            <BoostBudgetCard cycleId={cycleId} monthTitle={monthTitle(row.thisCycle?.month ?? month)} budget={boostBudget.data} />
+          ) : boostBudget?.kind === "forbidden" ? (
+            <ReadRefusal subject="this cycle's boost budget" kind="forbidden" inline />
+          ) : boostBudget?.kind === "unavailable" ? (
+            <ReadRefusal subject="This cycle's boost budget" kind="unavailable" reason={boostBudget.reason} inline />
+          ) : null}
+        </>
       ) : tab === "stories" ? (
         <ClientStories deptId={deptId} posts={posts} />
       ) : (

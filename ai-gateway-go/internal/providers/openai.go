@@ -156,6 +156,18 @@ func (p *OpenAIProvider) Name() string { return "openai" }
 // Complete() uses, never VisionModel (media is a different capability with its own model choice).
 func (p *OpenAIProvider) ModelName() string { return p.Model }
 
+// WithModel implements ModelOverrider (AIP-06): a shallow copy whose text model is `model`. Only
+// Model changes: VisionModel (media) and every other field are carried over, and the receiver, which
+// the chain shares between requests, is never mutated. Name() is unchanged, so the breaker stays one
+// per provider. Every request path reads p.Model per call (chatUsage, chat, the native stream).
+func (p *OpenAIProvider) WithModel(model string) Provider {
+	c := *p
+	c.Model = model
+	return &c
+}
+
+var _ ModelOverrider = (*OpenAIProvider)(nil)
+
 // Available needs both a base URL and a key — an OpenAI-compatible endpoint always authenticates,
 // so a missing key is a misconfiguration, not an anonymous mode.
 func (p *OpenAIProvider) Available() bool { return p.BaseURL != "" && p.APIKey != "" }

@@ -75,7 +75,7 @@ describe("the block draws the read", () => {
 
   it("a simulated post carries the SIMULATED chip and its source says Simulated; it is no candidate and has no average", () => {
     mount("Weekend brunch is back");
-    expect(screen.getByText("SIMULATED")).toHaveClass("scp-chip--sim");
+    expect(screen.getByRole("img", { name: "Simulated" })).toHaveClass("scp-sim-mark"); // SCP-Sf: the one mark
     expect(screen.queryByText("Boost candidate")).toBeNull();
     expect(screen.getByText(/Source:/).textContent).toMatch(/Source: Simulated, captured/);
     expect(within(cell("This client's average, last 90 days")).getByText("Not known")).toBeInTheDocument();

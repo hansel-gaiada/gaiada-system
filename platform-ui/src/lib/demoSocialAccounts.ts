@@ -151,6 +151,16 @@ export const demoNetworksWithoutAccount = (clientId: string, networks: readonly 
   return networks.filter((n) => (have[n] ?? 0) === 0);
 };
 
+/** SCP-Sa3 (SCP-D9, "a post is wholly simulated or wholly real"): the networks among `networks` that this client holds a SIMULATED account on, and those it holds
+ *  a REAL one on, as the server's `account_kinds_not_mixed` reads them (`loadClientAccounts`: not deleted, not disconnected). A network with accounts of both kinds
+ *  is listed under both, so it reads as mixed. Every seeded demo account is simulated, so this answers `real: []` until a test (or a later demo feature) adds a real one. */
+export function demoAccountKinds(clientId: string, networks: readonly string[]): { simulated: string[]; real: string[] } {
+  const simulated = new Set<string>();
+  const real = new Set<string>();
+  for (const a of store.accounts) if (a.clientId === clientId && networks.includes(a.network)) (a.simulated ? simulated : real).add(a.network);
+  return { simulated: [...simulated].sort(), real: [...real].sort() };
+}
+
 export interface DemoSeededAccount {
   id: string; network: DemoSimulatedNetwork; handle: string; simulated: true; created: boolean; networkEnabled: boolean;
 }

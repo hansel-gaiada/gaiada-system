@@ -6,7 +6,7 @@ reach it unchanged at `http://ai-gateway:3002`. The former Node `ai-gateway/` wa
 directory deleted — references to it are history only.
 
 Root `../CLAUDE.md` has program rules. Layout: `cmd/gateway` + `internal/{server,chain,providers,
-config,adminconfig,budget,dlp,egress,audit,metrics,telemetry,tls}`.
+config,adminconfig,routing,budget,dlp,egress,audit,metrics,telemetry,tls}`.
 
 ## Commands
 
@@ -118,6 +118,60 @@ reports nothing usable, nothing new is emitted and the platform keeps its labell
 - **Audit.** `llm` rows gain `promptTokens`, `completionTokens` and `costUsd` (all omitempty) when the
   serving provider reported usage; rows without usage are byte-identical to before. Never text.
 - The agent route (`/v1/chat/completions`) is untouched by all of this.
+
+## Routing by task and tier (AIP-06, plan `docs/plans/2026-10-27-ai-plan.md` §2.2, rulings AIP-D1 and AIP-D5)
+
+`POST /complete` and `POST /complete/stream` accept two optional fields. Code: `internal/routing` (the pure
+`Resolve`, the live table `Holder`, the validation and env parsing), `routedProvider`/`appliedTier` in
+`internal/server/server.go`, `providers.ModelOverrider`.
+
+- **`task`**: `chat` | `summarise` | `classify` | `agent_step` | `draft`. **`tier`**: `fast` | `standard` | `strong`.
+  Any other value (wrong case, unknown, empty, wrong JSON type) is treated as ABSENT, never an error.
+- **Precedence: `provider` > `tier` > the task's tier > plain chain order.** With `provider` sent the tier is not
+  consulted at all (the validated `task` is still carried to the audit).
+- **A tier is a (provider, model) pair** from the routing table. The route hands the provider name to
+  `chain.RunWithHint` as the hint; inside the attempt only that provider, and only if it implements
+  `providers.ModelOverrider`, runs on a `WithModel` copy (a shallow copy with the text model replaced; the shared
+  provider is never mutated and `Name()` never changes, so the breaker stays one per provider). Implemented by
+  `openai`, `ollama`, `gemini`, `claude` (each reads its model per call). `hermes`, `echo`, `central-forward`,
+  `whisper` do not implement it, so a tier entry with a model for them is refused.
+- **The agent listener never routes.** `/v1/chat/completions` is untouched; the caller's `model` still never picks anything.
+
+| Env | Meaning |
+|---|---|
+| `GATEWAY_TIERS` | `tier=provider[:model]`, comma-separated, e.g. `fast=openai,standard=openai,strong=openai:z-ai/glm-5.3-flash`. The provider is split from the model at the FIRST `:` (model ids contain `:` and `/`). `echo` is refused. Empty = no tiers. |
+| `GATEWAY_TASK_TIERS` | `task=tier`, comma-separated, e.g. `chat=standard,summarise=standard`. Empty = no task mapping. |
+
+A malformed entry (unknown tier/task/provider, bad model characters, `echo`, a model on a non-overridable provider,
+a duplicate) is logged at boot by its KEY and the reason, dropped, and never fails the boot.
+
+**Admin keys** (`PUT /admin/config`, same validation as the env, `DELETE` reverts to the env table, live):
+`tiers` = `{"fast":{"provider":"openai","model":""},...}` (keys only `fast|standard|strong`; `provider` a known
+provider, not `echo`; `model` empty or `^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$` and only for a provider that can
+override) and `taskTiers` = `{"summarise":"fast",...}` (keys only the five tasks, values only the three tiers). An
+empty object is valid and means "none" (it shadows the env). `GET /admin/config` reports the effective table under
+`routing` and the two keys in `overriddenKeys`. The live table is an `atomic.Pointer` to an immutable copy, rebuilt
+from env + the store under a lock after every write or clear.
+
+**Applied tier.** After the run, `tier` is reported only if the provider that actually served is the tier's provider
+(and its model, if the tier names one, was really used). For the stream the check is made against the provider
+current at the first emitted token, the one `meta` names. Otherwise (tier provider skipped, breaker-open, failed
+over) nothing about the tier is reported anywhere.
+
+- **`/complete`** answer: `provider, text, model, tier, usage` (`model` also set whenever a tier was applied).
+  **`/complete/stream`** `meta`: `provider, model, tier` (`model` names the override). **Audit**: `task` (the
+  validated requested task, even if unused), `tier` (applied), and a routed success sets `model`; never text.
+- **`GET /health`** gains `tiers`: sorted tier NAMES only (never a provider or model), omitted when none are
+  configured. `providers.llm` (what platform-nest's `brains.ts` parses) is unchanged.
+
+Rules that must not drift:
+- **Absent means byte-identical.** With `task`/`tier` absent, invalid, or `provider` sent, the answer, the stream
+  frames and the audit row are exactly what they were before AIP-06, with an empty table and with a full one.
+- **`provider` > `tier` > the task's tier.** Never reorder this.
+- **A tier is a hint, never a requirement.** It is a pure reordering through `RunWithHint`: the breaker and the
+  availability gate apply to it like to any provider, and a failover provider uses its own default model (the
+  override never leaks past the tier provider's attempt).
+- **The tier's model is for one attempt only**, through a copy; never write to a shared provider.
 
 ## This is the only place provider keys live
 

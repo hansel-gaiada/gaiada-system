@@ -46,7 +46,7 @@ describe("a card", () => {
   it("marks an extra post and a simulated one in words", () => {
     mount([card({ isExtra: true, simulated: true })]);
     expect(screen.getByText(/extra post/)).toBeInTheDocument();
-    expect(screen.getByText(/simulated/)).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Simulated" })).toHaveTextContent("SIMULATED"); // SCP-Sf: the one mark
   });
 });
 

@@ -504,7 +504,8 @@ export async function dispatchApprovedPublish(
     const chain = await assertDispatchChain(c, variantId).catch(() => null);
     return { network: chain?.network ?? null, chain };
   });
-  if (preview?.network && CONSENT_AT_UPLOAD_NETWORKS.has(preview.network) && preview.chain) {
+  // SCP-Sa2 — a real engine's probe, so never for a simulated account (the reverse fence; the probe refuses it too).
+  if (preview?.network && CONSENT_AT_UPLOAD_NETWORKS.has(preview.network) && preview.chain && !preview.chain.simulated) {
     await refreshCreatorInfoSnapshot(tenantId, variantId, preview.chain.org, preview.chain.integrationId);
   }
 

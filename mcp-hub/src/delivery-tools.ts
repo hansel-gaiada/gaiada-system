@@ -81,6 +81,7 @@ export function registerDeliveryTools(): void {
         `You are a senior product designer. From the PRD below, produce a PROTOTYPE/DESIGN BRIEF as ` +
         `markdown: screen inventory, key components, primary user flows, and states. Be concrete and ` +
         `buildable.${args.notes ? ` Reviewer notes to address: ${String(args.notes)}.` : ""}\n\nPRD:\n${prd}`,
+        "draft",
       );
       return JSON.stringify({ content });
     },

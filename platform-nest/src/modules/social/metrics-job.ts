@@ -24,7 +24,9 @@
 // social simulator (`resolveSimulatedPublisher`, the one road; publisher/simulated-driver.ts answers from the pure generator in
 // publisher/simulated-metrics.ts) and store the answer with `source = 'simulated'` through their OWN two writers
 // (`applySimulatedDailyMetrics`, `appendSimulatedPostMetrics`), leaving the real writers' SQL untouched. A real account's path
-// is exactly what it was. While the switch is off a simulated account is skipped without an error and nothing simulated is
+// is exactly what it was, plus SCP-Sa2's reverse fence (the simulator now runs beside a real Postiz, owner ruling SCP-D9):
+// before a real engine is asked, a simulated account, a `simulated:` integration id or a `simulated:` provider post id is
+// refused (`simulated_account_on_real_publisher`) and counted as an error, never sent. While the switch is off a simulated account is skipped without an error and nothing simulated is
 // written (the writers refuse too). The simulated post half writes one snapshot per variant per due day (1, 3 and 7 days after
 // go-live), stamped `fetched_at = go-live + day`, and writes only the ones not already stored: it is idempotent, and a post
 // that went live three days ago gets its day-1 and day-3 rows on the next run (the catch-up is inherent, not a second job).
@@ -58,7 +60,9 @@ import { declareSocialModuleScope } from "./publish-precondition";
 import { openOrg, type PublisherOrgRow } from "./publisher/provisioning";
 import type { DailyMetrics, PostMetrics, DateRange } from "./publisher/types";
 import { invokePublisher, resolveSimulatedPublisher } from "./publisher/registry";
-import { SimulatedOrgHandle, assertSimulatedWriteAllowed, isSocialSimulationEnabled } from "./publisher/simulation";
+import {
+  SimulatedOrgHandle, assertRealPublisherTarget, assertSimulatedWriteAllowed, isSocialSimulationEnabled, realPublisherRefusal,
+} from "./publisher/simulation";
 import type { OrgHandle, SocialPublisher } from "./publisher/types";
 
 // ── reads (own transaction, own declared scope, no network I/O) ───────────────────────────────────
@@ -106,11 +110,14 @@ interface PublishedVariantRow {
   org_id: string;
   /** SCP-Sd — the variant's ACCOUNT is simulated: its snapshots come from the simulator and are stored `source = 'simulated'`. */
   simulated: boolean;
+  /** SCP-Sa2 — the account's integration id, for the reverse fence on the real half. */
+  integration_id: string | null;
 }
 
 async function loadRecentlyPublished(c: PoolClient, sinceDays: number): Promise<PublishedVariantRow[]> {
   const { rows } = await c.query<PublishedVariantRow>(
-    `SELECT v.id AS variant_id, v.provider_post_id, a.publisher_org_id AS org_id, a.simulated
+    `SELECT v.id AS variant_id, v.provider_post_id, a.publisher_org_id AS org_id, a.simulated,
+            a.postiz_integration_id AS integration_id
        FROM social_post_variants v
        JOIN social_accounts a ON a.id = v.account_id AND a.tenant_id = v.tenant_id
       WHERE v.status = 'published' AND v.provider_post_id IS NOT NULL AND v.deleted_at IS NULL
@@ -348,6 +355,11 @@ export async function pullTenantMetrics(
         dailyRows += (await applySimulatedDailyMetrics(tenantId, acct.id, series)).written;
         continue;
       }
+      // SCP-Sa2 — the reverse fence (simulation.ts fence 4): a real engine is never asked for a simulated account's numbers.
+      // `acct.simulated` is false on this branch by construction; the integration id is the second, independent signal.
+      assertRealPublisherTarget(`real account metrics of account ${acct.id}`, {
+        simulated: acct.simulated, integrationId: acct.postiz_integration_id,
+      });
       const { driver, handle } = openOrg(org);
       if (!driver.capabilities.has("account_metrics")) continue;
       const series = await invokePublisher(
@@ -402,16 +414,29 @@ export async function pullTenantMetrics(
         postMetricRows += (await appendSimulatedPostMetrics(tenantId, simToWrite)).written;
         continue;
       }
+      // SCP-Sa2 — the reverse fence on the real half, row by row (the post-status sweep's shape): a row whose account is
+      // simulated, whose integration id or provider post id is `simulated:` is refused and logged, never sent to a real engine.
+      const realRows: PublishedVariantRow[] = [];
+      for (const r of rows) {
+        const refusal = realPublisherRefusal(`real post metrics of variant ${r.variant_id}`, {
+          simulated: r.simulated, integrationId: r.integration_id, providerPostId: r.provider_post_id,
+        });
+        if (!refusal) { realRows.push(r); continue; }
+        errors += 1;
+        // eslint-disable-next-line no-console
+        console.error(`[SOCIAL-METRICS-PULL] tenant ${tenantId}: ${refusal.code}: ${refusal.message}`);
+      }
+      if (realRows.length === 0) continue;
       const { driver, handle } = openOrg(org);
       if (!driver.capabilities.has("post_metrics")) continue;
-      const ids = rows.map((r) => r.provider_post_id);
+      const ids = realRows.map((r) => r.provider_post_id);
       const metrics = await invokePublisher(
         { op: "getPostMetrics", org: handle },
         () => driver.getPostMetrics(handle, ids),
       );
       const byPostId = new Map(metrics.map((m) => [m.providerPostId, m]));
       const toWrite: Array<{ variantId: string; metrics: PostMetrics }> = [];
-      for (const r of rows) {
+      for (const r of realRows) {
         const m = byPostId.get(r.provider_post_id);
         if (m) toWrite.push({ variantId: r.variant_id, metrics: m });
       }

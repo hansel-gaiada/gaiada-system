@@ -1,4 +1,4 @@
-// SCP-4a — 202610280500_social_boosts.sql (BFF §63.1 file 7) against LIVE Postgres. Needs DATABASE_URL_TEST; skipped without it (the file-text
+// SCP-4a — 202610281300_social_boosts.sql (BFF §63.1 file 7) against LIVE Postgres. Needs DATABASE_URL_TEST; skipped without it (the file-text
 // checks at the top always run). initTestDb() hands us a fully migrated database; the CHECKs are proved through the superuser pool, which bypasses
 // RLS but never a CHECK, a unique index or a foreign key; the WALL is proved through `withTenants` (the runtime role, which RLS binds).
 //
@@ -13,7 +13,7 @@ import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setu
 import { createClient, createCompany, createUser } from "../testing/fixtures";
 import { socialModule } from "../modules/social/index";
 
-const MIGRATION = "202610280500_social_boosts.sql";
+const MIGRATION = "202610281300_social_boosts.sql";
 const PATH = join(__dirname, "..", "..", "migrations", MIGRATION);
 
 describe("SCP-4a · the migration file (no database needed)", () => {

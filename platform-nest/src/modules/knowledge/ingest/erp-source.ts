@@ -21,7 +21,7 @@
 // Finer-grained gating needs server-resolved scopes first — see the module README.
 import type { PoolClient } from "pg";
 import { withTenants } from "../../../db";
-import { chunkText, renderFields } from "./chunk";
+import { boundHeader, chunkText, renderFields } from "./chunk";
 import type { IngestDocument } from "./types";
 
 /** Modules this job operates inside. Required for the module-owned tables' RLS predicate. */
@@ -54,7 +54,8 @@ function doc(
   header: string,
   body: string,
 ): IngestDocument | null {
-  const chunks = chunkText(body.slice(0, MAX_TEXT_CHARS)).map((c) => `${header}\n\n${c}`);
+  const h = boundHeader(header, body);
+  const chunks = chunkText(h.body.slice(0, MAX_TEXT_CHARS)).map((c) => `${h.header}\n\n${c}`);
   if (chunks.length === 0) return null;
   return { tenantId, sourceRef, audience: "internal", acl: [], kind: "doc", provenance: "human", chunks, label };
 }

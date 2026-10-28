@@ -66,7 +66,7 @@
 .asst-workspace--drawer.asst-workspace--with-details { grid-template-columns: 1fr; }
 .asst-workspace--drawer .asst-details { position: absolute; inset: 0; z-index: 2; border-left: none; }
 /* ASST-16 — the per-thread brain picker, same toolbar row as the memory toggle. */
-.asst-brain-picker { display: flex; align-items: center; gap: 6px; }
+.asst-brain-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .asst-brain-picker__label {
   font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--ink-subtle);
 }
@@ -80,6 +80,7 @@
 .asst-brain-picker__select:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; border-color: var(--erp-accent); }
 .asst-brain-picker__select:disabled { cursor: not-allowed; opacity: 0.6; }
 .asst-brain-picker__note { font: 400 11px var(--font-body); color: var(--ink-subtle); }
+.asst-brain-picker__help { flex-basis: 100%; }
 .asst-brain-picker__error { font: 400 11px var(--font-body); color: var(--status-danger-fg); }
 .asst-details-toggle {
   border: 0.5px solid var(--erp-hairline); background: transparent; cursor: pointer;

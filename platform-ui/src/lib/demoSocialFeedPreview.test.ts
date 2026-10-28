@@ -175,3 +175,33 @@ describe("POST engagements/:engagementId/feed-preview/swap", () => {
     expect((r?.json as { error: string }).error).toBe("field_locked");
   });
 });
+
+// SCP-Sg: the live feed read back, from the demo's metrics store and accounts.
+describe("the live feed read back (SCP-Sg)", () => {
+  it("answers a live post's address, reach and the snapshots' mark; a post that is not live answers nulls", () => {
+    const list = items("soc-eng-1");
+    const live = list.filter((i) => i.locked);
+    expect(live.length).toBeGreaterThan(0);
+    for (const i of live) {
+      expect(i.liveUrl, i.postId).toMatch(/^https:\/\/example\.com\//);
+      expect(typeof i.reach, i.postId).toBe("number");
+      expect(i.reachSource, i.postId).not.toBeNull();
+    }
+    for (const i of list.filter((x) => !x.locked)) expect(i).toMatchObject({ liveUrl: null, reach: null, reachSource: null });
+  });
+
+  it("gives a simulated post a simulated.invalid address and the simulated mark (the hotel's live post)", () => {
+    const sim = items("soc-eng-4").filter((i) => i.locked && i.simulated);
+    expect(sim.length).toBeGreaterThan(0);
+    for (const i of sim) {
+      expect(i.liveUrl).toMatch(/^https:\/\/simulated\.invalid\//);
+      expect(i.reachSource).toBe("simulated");
+    }
+  });
+
+  it("answers the client's last sync (the hour before the pinned clock), the same value as the accounts read", () => {
+    for (const eng of ["soc-eng-1", "soc-eng-3", "soc-eng-4"]) {
+      expect(asFeedPreview(feed(eng)?.json).lastSyncedAt, eng).toBe("2026-10-16T03:00:00.000Z");
+    }
+  });
+});

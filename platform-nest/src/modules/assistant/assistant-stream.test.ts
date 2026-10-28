@@ -18,6 +18,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { Server } from "node:http";
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../config";
 import { withTenants } from "../../db";
@@ -30,6 +31,19 @@ import { assistantModule } from "./index";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
+
+// AIP-08b (AIP-D5): picking a NAMED provider needs `assistant.brain.choose_provider`. The thread owner in this file picks named
+// providers, so they get it the way a non-admin really would: a tenant role holding the key (a role edit), granted at company scope.
+async function grantChooseProvider(userId: string, tenantId: string): Promise<void> {
+  const roleId = randomUUID();
+  const pool = adminPool();
+  await pool.query(`INSERT INTO roles (id, company_id, name) VALUES ($1, $2, $3)`, [roleId, tenantId, `aip08b_brain_chooser_${roleId.slice(0, 8)}`]);
+  const ins = await pool.query(
+    `INSERT INTO role_permissions (role_id, permission_id) SELECT $1, id FROM permissions WHERE key = 'assistant.brain.choose_provider'`, [roleId],
+  );
+  expect(ins.rowCount, "the 202610281210 seed must have created the key").toBe(1);
+  await grantRole(userId, roleId, "company", tenantId);
+}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -241,6 +255,7 @@ describe.skipIf(!TEST_URL)("Assistant send->stream engine (ASST-06)", () => {
     await grantRole(admin, companyAdminRole, "company", A);
     await grantRole(other, memberRole, "company", A);
     await grantRole(owner, memberRole, "company", A);
+    await grantChooseProvider(owner, A);
 
     // Fake gateway FIRST, then point config.services.gateway at it, then build+listen the app —
     // no test in this file may rely on the real ai-gateway-go binary (none is running in this
@@ -428,6 +443,27 @@ describe.skipIf(!TEST_URL)("Assistant send->stream engine (ASST-06)", () => {
   });
 
   // ── ASST-16 — per-thread brain picker + Hermes session mapping (blueprint Phase-2 gate) ──────────
+  // AIP-08b (AIP-D5): a stored named provider is forwarded only while the thread's owner holds the grant NOW. `other` is a plain
+  // member; their thread carries a provider written straight into the row (as one picked under a grant since revoked).
+  it("AIP-08b: a stored provider the owner can no longer pick is not sent (the reply routes as Auto), nothing errors, and the stored value is kept", async () => {
+    const r = await app.inject({ method: "POST", url: `/api/${A}/assistant/threads`, headers: asUser(other), payload: { title: "revoked pick" } });
+    expect(r.statusCode).toBe(201);
+    const threadId = r.json().id as string;
+    await adminPool().query(`UPDATE assistant_threads SET brain_provider = 'hermes', hermes_session_id = 'stale-session' WHERE id = $1`, [threadId]);
+
+    const sent = await sendMessage(threadId, "hello without a grant", asUser(other));
+    expect(sent.statusCode).toBe(201);
+    const { streamUrl } = sent.json() as { streamUrl: string };
+    const body = await readAll(await openStream(streamUrl, asUser(other)));
+    expect(body).not.toContain("event: error");
+    const req = gateway.receivedRequests.at(-1)!;
+    expect(req.provider).toBeUndefined();
+    expect(req.providerSession).toBeUndefined();
+
+    const after = await adminPool().query(`SELECT brain_provider FROM assistant_threads WHERE id = $1`, [threadId]);
+    expect(after.rows[0].brain_provider).toBe("hermes");
+  });
+
   describe("ASST-16: brain routing + Hermes session continuity", () => {
     async function patchBrain(threadId: string, brainProvider: string | null) {
       const r = await app.inject({

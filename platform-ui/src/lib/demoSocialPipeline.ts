@@ -12,7 +12,7 @@
 // tests pin the clock to mid-month before importing it.
 import { createHash } from "node:crypto";
 import { todayIsoInDisplayZone } from "./format";
-import { demoNetworksWithoutAccount } from "./demoSocialAccounts";
+import { demoAccountKinds, demoNetworksWithoutAccount } from "./demoSocialAccounts";
 import type { BrandBook } from "./socialBrandBook";
 import fixture from "./scpStageMachine.json";
 import {
@@ -466,7 +466,7 @@ export function demoCycleHealth(cycleId: string): DemoResult {
     today: todayIsoInDisplayZone(), bufferWorkingDays: cyclesStore.bufferWorkingDays, holidaysKnown: true,
     estimates: store.allocations[eng.id].stepEstimates, averageApprovalDays: null, clientSlower: false, client: demoClientHealth(cycle),
     posts: store.posts.filter((p) => p.cycleId === cycle.id && !p.archivedAt).map((p) => ({
-      postId: p.id, title: p.title, status: p.pipelineStatus, phase: scpPhaseOf(view(p)), holder: holderRole(p), isExtra: p.isExtra, format: p.format, health: demoPostHealth(p),
+      postId: p.id, title: p.title, status: p.pipelineStatus, phase: scpPhaseOf(view(p)), holder: holderRole(p), isExtra: p.isExtra, format: p.format, health: demoPostHealth(p), simulated: p.simulated,
     })),
   });
 }
@@ -515,8 +515,11 @@ const FAILED_ENGINE = ["failed", "partially_published"];
 /**
  * `GET overview` (§63.7, SCP-3f): the Pulse tiles, computed from the demo posts the way the server computes them (the same phase map, the demo's fixed health,
  * the display zone's week). `composerFailed` is the legacy Composer store's failed posts, which the one Failed posts number includes. The demo's simulator is always
- * on (as `POST simulated-accounts` already says), so simulated rows are counted and the answer says so. Boosts have no store yet: null.
+ * on (as `POST simulated-accounts` already says), so simulated rows are counted and the answer says so. Boosts have no demo store: the tile shows a fixed number of waiting boosts.
  */
+/** SCP-4d: the demo has no boost store, so the Boosts waiting tile shows a fixed, plausible number (a requested boost and an approved one). */
+const DEMO_BOOSTS_WAITING = 2;
+
 export function demoOverview(userId: string, composerFailed: number): DemoResult {
   if (isClientContact(userId)) return err(403, "not authorized: social_post read");
   const week = demoWeekOf(todayIsoInDisplayZone());
@@ -531,7 +534,7 @@ export function demoOverview(userId: string, composerFailed: number): DemoResult
       return day >= week.from && day < week.to;
     }).length,
     failedPosts: live.filter((p) => FAILED_ENGINE.includes(String(scpEngineStatusOf(view(p))))).length + composerFailed,
-    boostsWaiting: null,
+    boostsWaiting: DEMO_BOOSTS_WAITING,
   };
   return ok({ tiles, simulatedIncluded: true });
 }
@@ -635,6 +638,12 @@ function probeGuardRefusal(guards: ReadonlyArray<{ guard: string; refusal: strin
       case "one_account_per_placement_network": {
         // SCP-Sb: the client's ACCOUNTS decide (the simulated accounts of `demoSocialAccounts.ts`), as the server's `loadClientAccounts` count does.
         if (demoNetworksWithoutAccount(store.engagements.find((e) => e.id === p.engagementId)?.clientId ?? "", p.placement).length > 0) return g.refusal;
+        break;
+      }
+      case "account_kinds_not_mixed": {
+        // SCP-Sa3 (SCP-D9): a post is wholly simulated or wholly real, judged over the client's accounts on the placement (as the runner's guard does).
+        const kinds = demoAccountKinds(store.engagements.find((e) => e.id === p.engagementId)?.clientId ?? "", p.placement);
+        if (kinds.simulated.length > 0 && kinds.real.length > 0) return g.refusal;
         break;
       }
       case "approved_time_not_passed": {
@@ -775,9 +784,13 @@ export function demoPipelinePost(p: PipePost, userId: string): Record<string, un
     holder: holderOf(p), health: demoPostHealth(p), variants, approvedSchedule, scheduleVia: p.scheduleVia, reviewHash,
     liveUrl: p.liveUrl, wentLiveAt: p.wentLiveAt, simulated: p.simulated, archivedAt: p.archivedAt,
     clientDecision: demoClientDecision(p),
-    boost: null, tasks: [], copyLog: p.copyLog, history: p.history, actions, nextAction,
+    boost: boostReader(p.id), tasks: [], copyLog: p.copyLog, history: p.history, actions, nextAction,
   };
 }
+
+/** SCP-4b (BFF §63.6.2): the post read's `boost`. The boost store lives in `demoSocialBoosts.ts`, which imports this file, so it registers its reader here; null until it has. */
+let boostReader: (postId: string) => unknown = () => null;
+export function setDemoBoostReader(fn: (postId: string) => unknown): void { boostReader = fn; }
 
 /** `GET posts/:postId/pipeline`. 403 for a client contact (the portal has its own routes); 404 `post_not_found`. */
 export function demoPipelineRead(postId: string, userId: string): DemoResult {

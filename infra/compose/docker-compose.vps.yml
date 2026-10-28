@@ -211,6 +211,13 @@ services:
       # AIP-02: let /complete/stream use the openai provider's real upstream stream. Empty = off (the
       # single-chunk fallback, as before); 1/true/on enables it.
       OPENAI_NATIVE_STREAM: ${OPENAI_NATIVE_STREAM:-}
+      # AIP-06: route by task. GATEWAY_TIERS=tier=provider[:model],... GATEWAY_TASK_TIERS=task=tier,...
+      # Forwarded here or the container never sees them (a var in .env reaches it only through `environment:`).
+      # The defaults ARE ruling AIP-D1 (owner, 2026-10-27): every tier is the one live model (the openai slot, no
+      # model override) and every task maps to `standard` until AIP-09's eval clears `fast`. `-` (not `:-`) on
+      # purpose: unset takes the default, while an explicit empty value in .env turns routing off.
+      GATEWAY_TIERS: ${GATEWAY_TIERS-fast=openai,standard=openai,strong=openai}
+      GATEWAY_TASK_TIERS: ${GATEWAY_TASK_TIERS-chat=standard,summarise=standard,classify=standard,agent_step=standard,draft=standard}
       # Text chain: OpenAI-compatible brain first, then local Ollama, then cloud fallbacks. A
       # provider whose key/URL is unset reports Available()=false and is skipped, so this order is
       # safe even when OPENAI_* is blank (it falls straight through to the old ollama,gemini,claude).

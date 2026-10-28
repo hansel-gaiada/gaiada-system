@@ -90,6 +90,8 @@ describe.skipIf(!TEST_URL)("SCP-Sa · the simulation marks on social_accounts, s
     const cols = ["id", "tenant_id", "client_id", "publisher_org_id", "network", "handle", "status", "origin_site"];
     const vals: unknown[] = [id, A, client, org, "instagram", `@mock-kopi-senja-${++seq}`, "connected", "central"];
     if (simulated !== undefined) { cols.push("simulated"); vals.push(simulated); }
+    // SCP-Sa2 (202610280100, social_accounts_kind_ck): a simulated account carries its `simulated:<network>` id, as the seed writes it.
+    if (simulated === true) { cols.push("postiz_integration_id"); vals.push("simulated:instagram"); }
     await pool().query(`INSERT INTO social_accounts (${cols.join(", ")}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(", ")})`, vals);
     return id;
   }

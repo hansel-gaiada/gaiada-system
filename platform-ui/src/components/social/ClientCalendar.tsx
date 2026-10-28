@@ -5,6 +5,7 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { CalendarLegend } from "@/components/social/CalendarLegend";
+import { SimulatedMark } from "@/components/social/SimulatedMark";
 import { CALENDAR_WEEKDAYS } from "@/lib/socialCalendar";
 import {
   clientHref, formatWords, itemsByDay, monthGrid, monthTitle, phaseLabel, phaseStyle, postHref, shiftMonth, statusLabel, type CalendarItem,
@@ -53,7 +54,7 @@ export function ClientCalendar({
                                 title={`${it.title} · ${formatWords(it.format)} · ${statusLabel(it.pipelineStatus)} · ${phaseLabel(it.phase)}`}
                               >
                                 {timeOf(it.scheduledAt)} {it.title}
-                                {it.simulated && <span className="scp-cal__sim"> SIMULATED</span>}
+                                {it.simulated && <> <SimulatedMark /></>}
                               </Link>
                             </li>
                           ))}

@@ -15,10 +15,10 @@
     "note": "class='relationship' permissions are NEVER present in any bundle (Ruling 3); enforced here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against the live `role_permissions_reject_relationship` DB trigger (0093).",
     "counts": {
       "roles": 30,
-      "totalPairs": 2179,
+      "totalPairs": 2182,
       "perRole": {
-        "platform_admin": 483,
-        "company_admin": 433,
+        "platform_admin": 484,
+        "company_admin": 434,
         "manager": 222,
         "member": 126,
         "viewer": 41,
@@ -46,7 +46,7 @@
         "lms_manager": 11,
         "social_copywriter": 3,
         "social_designer": 3,
-        "owner": 438
+        "owner": 439
       },
       "selfScopedPairs": 58
     }
@@ -81,6 +81,7 @@
       "agency.lead.read",
       "agency.lead.triage",
       "agency.lead.update",
+      "assistant.brain.choose_provider",
       "core.activity.read",
       "core.automation_approval.create",
       "core.automation_approval.decide",
@@ -566,6 +567,7 @@
       "agency.lead.read",
       "agency.lead.triage",
       "agency.lead.update",
+      "assistant.brain.choose_provider",
       "core.activity.read",
       "core.automation_approval.create",
       "core.automation_approval.decide",
@@ -1880,6 +1882,7 @@
       "agency.lead.read",
       "agency.lead.triage",
       "agency.lead.update",
+      "assistant.brain.choose_provider",
       "core.activity.read",
       "core.automation_approval.create",
       "core.automation_approval.decide",

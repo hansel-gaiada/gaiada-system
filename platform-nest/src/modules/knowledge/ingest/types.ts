@@ -23,6 +23,10 @@ export interface IngestDocument {
   label: string;
 }
 
+/** Why a sweep stopped early: the gateway refused an embed for the day's budget (429), or
+ *  MAX_CONSECUTIVE_FAILURES documents failed in a row. */
+export type AbortReason = "embedding_budget" | "consecutive_failures";
+
 /** Per-run outcome. `retired` counts sources deleted because they no longer exist upstream. */
 export interface IngestRunResult {
   tier: Audience;
@@ -31,9 +35,11 @@ export interface IngestRunResult {
   chunks: number;
   retired: number;
   errors: string[];
-  /** True when the sweep stopped on the gateway's budget refusal (429). An aborted result never
-   *  retired anything, and the tiers after it did not run. */
+  /** True when the sweep stopped early: on the gateway's budget refusal (429), or after
+   *  MAX_CONSECUTIVE_FAILURES documents failed in a row. An aborted result never retired anything, and
+   *  the tiers after it did not run. */
   aborted?: boolean;
+  abortReason?: AbortReason;
   startedAt: string;
   finishedAt: string;
 }

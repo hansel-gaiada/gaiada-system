@@ -31,6 +31,16 @@ func (p *ClaudeProvider) Available() bool { return p.APIKey != "" }
 // ModelName implements providers.ModelReporter (ASST-11).
 func (p *ClaudeProvider) ModelName() string { return p.Model }
 
+// WithModel implements ModelOverrider (AIP-06): a shallow copy with the model replaced. call reads
+// p.Model per request; the receiver is untouched.
+func (p *ClaudeProvider) WithModel(model string) Provider {
+	c := *p
+	c.Model = model
+	return &c
+}
+
+var _ ModelOverrider = (*ClaudeProvider)(nil)
+
 func (p *ClaudeProvider) endpoint() string {
 	if p.baseURL != "" {
 		return p.baseURL

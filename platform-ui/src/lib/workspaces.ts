@@ -141,7 +141,7 @@ export interface PulseTile {
 /** The readers a Pulse tile can draw from: one per tile, each with its own failure semantics. */
 export type PulseSource =
   | "change-requests-new" | "pipeline-gates-pending" | "monitoring-problem-sites"
-  | "social-overview-in-production" | "social-overview-with-client" | "social-overview-late" | "social-overview-scheduled-week" | "social-overview-failed"
+  | "social-overview-in-production" | "social-overview-with-client" | "social-overview-late" | "social-overview-scheduled-week" | "social-overview-failed" | "social-overview-boosts-waiting"
   | "it-account-requests"
   | "hr-leave-pending" | "hr-onboarding-open" | "hr-cases-open" | "hr-payroll-waiting" | "it-devices-offline"
   | "finance-payments-to-confirm" | "finance-overdue-receivables" | "finance-close-progress" | "finance-integrity-findings"
@@ -563,6 +563,16 @@ const SOCIAL_MEDIA: Workspace = {
         blurb: "The posts waiting for your design, with the note on any revision.",
       }],
     },
+    // SCP-4b (BFF §63.11, §63.17): Boosting: the candidates, the boosts running and waiting, and the totals. No gate: the whole team reads it, and the server refuses a write to
+    // anyone who may not run a boost (the client's officer, the HoD or the GM seat); the page says so in words. The Social skin does NOT pin it: the row is reachable from
+    // the More panel (`lib/skins.ts`), and in the Standard menu it sits with the other rows. The row key `boosts` is free in this workspace.
+    {
+      key: "boosts", label: "Boosting", icon: "chart",
+      tabs: [{
+        key: "boosts", label: "Boosting", href: deptPath("boosts"), icon: "chart",
+        blurb: "Posts worth boosting, the boosts running and waiting for the client, and what each month's boost budget has committed.",
+      }],
+    },
     // SCP-1c (BFF §63.17): the HoD's Settings page (the ready-by buffer, the deadline table). Shown to the four Social approvers only; the page itself is
     // readable by the team and editable with `plan`. The row key `settings` is the Social skin's pin (`lib/skins.ts`); Admin's `settings` row is another list.
     {
@@ -586,8 +596,8 @@ const SOCIAL_MEDIA: Workspace = {
     { key: "late", label: "Late", source: "social-overview-late", href: deptPath("profile") },
     { key: "scheduled-this-week", label: "Scheduled this week", source: "social-overview-scheduled-week", href: deptPath("calendar") },
     { key: "failed-posts", label: "Failed posts", source: "social-overview-failed", href: deptPath("calendar") },
-    // The boosts table is SCP-4a's: a placeholder until `GET overview` answers a number.
-    { key: "boosts-waiting", label: "Boosts waiting", ticket: "SCP-4a" },
+    // SCP-4d: boosts requested, plus approved and not yet started, from the same shared `GET overview`.
+    { key: "boosts-waiting", label: "Boosts waiting", source: "social-overview-boosts-waiting", href: deptPath("boosts") },
     // Needs the inbox sync backend first (SMM-15).
     { key: "unanswered-inbox", label: "Unanswered inbox", ticket: "DW-3e after SMM-15" },
   ],

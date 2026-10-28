@@ -148,9 +148,14 @@ export const socialModule: ModuleContract = {
     "202610271600_social_simulation.sql",
     // SCP-2b (BFF §63.1 file 10, §63.8) — the stored thumbnail of a post's design (`social_post_designs.thumb_file_id`).
     "202610271700_social_design_thumbs.sql",
+    // SCP-Sa2 (owner ruling SCP-D9; BFF §63.1 file 8) — the simulator runs beside a real Postiz, so every account is exactly
+    // one kind: social_accounts_kind_ck (the `simulated:` integration id belongs to simulated rows alone), the kind never
+    // changes once used (trg_social_accounts_kind_guard), and no OAuth grant names a simulated account
+    // (trg_social_oauth_tokens_real_account_only). Backfills `simulated:<network>` onto simulated rows with no id.
+    "202610280100_social_account_kind.sql",
     // SCP-4a (BFF §63.1 file 7, §63.11) — boosts and the monthly boost budget: social_boost_budgets and social_boosts, both on
     // the PLAIN tenant wall (the portal writes them, as social_post_client_reviews).
-    "202610280500_social_boosts.sql",
+    "202610281300_social_boosts.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is
@@ -690,6 +695,71 @@ export const socialModule: ModuleContract = {
           variantId: { type: "string", description: "The post variant to send for client sign-off." },
         },
         required: ["tenantId", "variantId"],
+      },
+    },
+    // ── SCP-4d: the boost pair (BFF §63.15). Money paths: impact "high", so an agent call is confirmed by the person first. ──
+    {
+      name: "social.requestBoost",
+      description:
+        "Request a paid boost of one live post. The ERP buys NO ads: a boost is a RECORD of a run the team makes in Meta's own tools "
+        + "(or that the simulator runs). Within the client's agreed monthly boost budget the request is approved at once; otherwise it "
+        + "waits for the client to approve. The agent acts with the asking person's rights, and impact is high (money), so the person "
+        + "confirms in the thread before this runs. Amounts are minor units of the currency; one open boost per post.",
+      minAssurance: "low",
+      write: true,
+      impact: "high",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/posts/:postId/boosts",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          postId: { type: "string", description: "The live post to boost." },
+          goal: { type: "string", enum: ["profile_visits", "website", "messages"], description: "What the boost is for." },
+          audience: { type: "string", enum: ["automatic", "local", "custom"], description: "Who it should reach; 'custom' needs audienceNote." },
+          audienceNote: { type: "string", description: "Describes a custom audience (required for 'custom')." },
+          dailyBudgetMinor: { type: "integer", minimum: 1, description: "Daily budget in minor units of the currency." },
+          days: { type: "integer", minimum: 1, maximum: 90, description: "How many days it runs (1-90)." },
+          startsOn: { type: "string", description: "First day, YYYY-MM-DD." },
+          currency: { type: "string", description: "Three-letter currency code; the server's default when omitted." },
+          id: { type: "string", description: "Optional client-chosen boost id (idempotency)." },
+        },
+        required: ["tenantId", "postId", "goal", "audience", "dailyBudgetMinor", "days", "startsOn"],
+      },
+    },
+    {
+      name: "social.boostAction",
+      description:
+        "Act on one boost: cancel_boost, start_boost, stop_boost, complete_boost (the team records the run in Meta's own tools or the "
+        + "simulator; the ERP buys no ads), or record_boost_approval / record_boost_decline (the client's answer given outside the portal). "
+        + "`expectedStatus` is the status the caller saw; a changed boost answers a conflict. A boost within the client's agreed monthly "
+        + "budget is already approved; otherwise it waits for the client. The agent acts with the asking person's rights, and impact is "
+        + "high (money), so the person confirms in the thread before this runs.",
+      minAssurance: "low",
+      write: true,
+      impact: "high",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/boosts/:boostId/actions",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          boostId: { type: "string", description: "The boost to act on." },
+          action: {
+            type: "string",
+            enum: ["cancel_boost", "start_boost", "stop_boost", "complete_boost", "record_boost_approval", "record_boost_decline"],
+            description: "What to do.",
+          },
+          expectedStatus: { type: "string", description: "The boost's status as the caller last saw it." },
+          actionId: { type: "string", description: "Optional client-chosen id (idempotency)." },
+          spendMinor: { type: "integer", minimum: 0, description: "Spend in minor units (stop_boost, complete_boost)." },
+          paidReach: { type: "integer", minimum: 0, description: "Paid reach (complete_boost)." },
+          clicks: { type: "integer", minimum: 0, description: "Clicks (optional results)." },
+          channel: { type: "string", enum: ["whatsapp", "email", "meeting"], description: "How the client's answer came (record_* actions)." },
+          note: { type: "string", description: "Note of the recorded answer (record_* actions)." },
+          reason: { type: "string", description: "Why (cancel_boost)." },
+        },
+        required: ["tenantId", "boostId", "action", "expectedStatus"],
       },
     },
     {

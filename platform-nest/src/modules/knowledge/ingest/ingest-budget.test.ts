@@ -10,7 +10,8 @@ vi.mock("./web-source", async (orig) => ({ ...(await orig<typeof import("./web-s
 
 import { config } from "../../../config";
 import { buildErpDocuments } from "./erp-source";
-import { runFullIngest, runInternalIngest } from "./ingest.service";
+import { ingestDocument } from "./ingest-client";
+import { MAX_CONSECUTIVE_FAILURES, runFullIngest, runInternalIngest } from "./ingest.service";
 import { runIngestSweep } from "./scheduler";
 import { crawlSite } from "./web-source";
 import type { IngestDocument } from "./types";
@@ -153,5 +154,70 @@ describe("knowledge ingest: embedding budget", () => {
     expect(r.errors).toHaveLength(1);
     expect(r.retired).toBe(0);
     expect(svc.calls.erase).toEqual([]);
+  });
+
+  // 2026-10-28: with ollama's breaker open every /ingest failed in ~50 ms, and the sweep went on through ~8,700
+  // documents. A run of failures means the store or its embedder is down, so the sweep stops.
+  it(`${MAX_CONSECUTIVE_FAILURES} documents failing in a row stop the sweep: nothing retired, later companies not run`, async () => {
+    const svc = fakeService(1000);
+    svc.stored.set("erp:project:stale-1", T1);
+    const down = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/ingest")) {
+        svc.calls.ingest.push(JSON.parse(String(init?.body)).sourceRef);
+        return new Response("gateway /embed 502", { status: 500 });
+      }
+      return svc.fetchImpl(input, init);
+    });
+    vi.stubGlobal("fetch", down);
+    vi.mocked(buildErpDocuments).mockImplementation(async (t: string) => docs(t, 100));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const results = await runIngestSweep();
+
+    expect(svc.calls.ingest).toHaveLength(MAX_CONSECUTIVE_FAILURES);
+    const stopped = results.find((r) => r.aborted);
+    expect(stopped?.abortReason).toBe("consecutive_failures");
+    expect(stopped?.tenantId).toBe(T1);
+    expect(buildErpDocuments).toHaveBeenCalledTimes(1);
+    expect(svc.calls.erase).toEqual([]);
+    expect(svc.stored.has("erp:project:stale-1")).toBe(true);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toMatch(/STOPPED on failures/);
+  });
+
+  it("isolated failures do not stop the sweep: every document is still sent", async () => {
+    const svc = fakeService(1000);
+    let n = 0;
+    const flaky = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/ingest") && ++n % 2 === 0) return new Response("bad document", { status: 500 });
+      return svc.fetchImpl(input, init);
+    });
+    vi.stubGlobal("fetch", flaky);
+    vi.mocked(buildErpDocuments).mockResolvedValue(docs(T1, 3 * MAX_CONSECUTIVE_FAILURES));
+    const r = await runInternalIngest(T1);
+    expect(r.aborted).toBeFalsy();
+    expect(n).toBe(3 * MAX_CONSECUTIVE_FAILURES);
+    expect(r.errors).toHaveLength((3 * MAX_CONSECUTIVE_FAILURES) / 2 | 0);
+  });
+
+  // The sweep used to give up on /ingest after 30 s while the knowledge service kept embedding the abandoned source,
+  // so the embedder's queue grew with every slow document.
+  it("/ingest waits up to 5 minutes before giving up", async () => {
+    vi.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      vi.stubGlobal("fetch", vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        signal = init?.signal ?? undefined;
+        return new Promise<Response>((_resolve, reject) => signal?.addEventListener("abort", () => reject(new Error("aborted"))));
+      }));
+      const pending = ingestDocument(docs(T1, 1)[0]).catch((e: Error) => e);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(240_000);
+      expect(signal?.aborted).toBe(true);
+      expect(String(await pending)).toMatch(/aborted/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

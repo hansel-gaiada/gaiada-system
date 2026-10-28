@@ -19,7 +19,7 @@ import {
   THREAD_LIST_LIMIT, type ListThreadsParams, type GetThreadParams,
 } from "./assistant-data";
 import type {
-  AssistantMemoryScope, AssistantThreadStatus, CapabilitiesResult, BrainsResult, MemoryListResult, ResolvedCitation, SendMessageResult, StopResult,
+  AssistantMemoryScope, AssistantThreadStatus, BrainTier, CapabilitiesResult, BrainsResult, MemoryListResult, ResolvedCitation, SendMessageResult, StopResult,
   ThreadDetailResult, ThreadListResult, RosterResult, AssistantHandoff, ToolCallApprovalJoin,
 } from "./assistant";
 // ASST-21 — the run-watch view's transcript read reuses the EXISTING Intelligence-console reader
@@ -108,8 +108,12 @@ export async function setThreadStatusAction(threadId: string, status: AssistantT
 // normal failover chain decides). The backend clears `hermes_session_id` server-side whenever this
 // PATCH actually changes the stored value (assistant.controller.ts's patchThread) — switching
 // brains mid-thread always starts a fresh provider session, without touching the ERP transcript.
-export async function setThreadBrainAction(threadId: string, brainProvider: string | null): Promise<ActionResult> {
-  return patchThread(threadId, { brainProvider });
+//
+// AIP-08a: one picker, one choice. The body is exactly one of: `{brainProvider}` (a named provider; the platform clears any tier),
+// `{brainTier}` (a tier; the platform clears any provider) or both null (Auto).
+export type BrainChoiceBody = { brainProvider: string | null } | { brainTier: BrainTier | null } | { brainProvider: null; brainTier: null };
+export async function setThreadBrainAction(threadId: string, choice: BrainChoiceBody): Promise<ActionResult> {
+  return patchThread(threadId, { ...choice });
 }
 
 async function patchThread(threadId: string, body: Record<string, unknown>): Promise<ActionResult> {

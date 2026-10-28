@@ -1,13 +1,19 @@
 // SCP-1k — the client page's header (plan §8 row 1k): the client, its officer, the count against the monthly target (stories and extra posts beside it, never
 // in it), the cycle line (month, deadline, ready-by and the client's health), the tone in one line and the cycle's highlights. It draws what the server
 // answered: the counts are `GET allocation`'s `thisCycle`, the health and the posts are `GET cycles/:cycleId/health`'s.
+// SCP-Sg adds the followers line from `GET engagements/:engagementId/accounts-summary`: followers with the 30-day change, the 30-day reach, the SIMULATED mark when
+// the numbers are the simulator's, and "Last synced <time>" (or "Not synced yet"). A refused or failed read says so in words, never "0".
 import { HealthChip } from "./HealthChip";
+import { SimulatedMark } from "./SimulatedMark";
 import { CREATIVE_SOURCE_LABEL, NETWORK_LABEL, cycleCountsText, type AllocationRow } from "@/lib/socialAllocation";
 import { cycleHighlights, monthTitle, type CycleView } from "@/lib/socialClient";
 import { formatDate } from "@/lib/format";
+import {
+  SUMMARY_FORBIDDEN_TEXT, SUMMARY_SIMULATED_NOTE, SUMMARY_UNAVAILABLE_TEXT, countText, deltaText, lastSyncedText, type AccountsSummaryRead,
+} from "@/lib/socialAccountsSummary";
 
 export function ClientHeader({
-  row, cycle, cycleUnavailable, tone,
+  row, cycle, cycleUnavailable, tone, summary,
 }: {
   row: AllocationRow;
   /** The cycle's posts and health; null with no cycle this month, or when they could not be read (`cycleUnavailable`). */
@@ -15,6 +21,8 @@ export function ClientHeader({
   cycleUnavailable?: boolean;
   /** The tone in one line: a string, null for a client with none, undefined when the brand book could not be read. */
   tone: string | null | undefined;
+  /** SCP-Sg: the client's accounts read back. Omitted by a caller that does not read it (nothing is drawn then, and nothing claimed). */
+  summary?: AccountsSummaryRead;
 }) {
   const counts = cycleCountsText(row);
   const high = cycle ? cycleHighlights(cycle.posts) : null;
@@ -38,6 +46,7 @@ export function ClientHeader({
           <span>No cycle this month, so no posts are counted yet.</span>
         )}
       </p>
+      {summary && <FollowersLine summary={summary} />}
       <p className="scp-chead__line">
         {row.thisCycle ? (
           cycle ? (
@@ -67,5 +76,39 @@ export function ClientHeader({
         </ul>
       )}
     </header>
+  );
+}
+
+/** SCP-Sg: followers (with the 30-day change), the 30-day reach, the SIMULATED mark and the last sync, from the accounts read back. */
+function FollowersLine({ summary }: { summary: AccountsSummaryRead }) {
+  if (summary.kind === "forbidden") return <p className="scp-chead__line scp-chead__beside">{SUMMARY_FORBIDDEN_TEXT}</p>;
+  if (summary.kind === "unavailable") return <p className="scp-chead__line scp-chead__beside" role="status">{SUMMARY_UNAVAILABLE_TEXT}</p>;
+  const { accounts, totals, simulated, lastSyncedAt } = summary.data;
+  if (accounts.length === 0) return <p className="scp-chead__line scp-chead__beside">No social accounts yet, so there are no followers to show.</p>;
+  // The 30-day change of the whole client: the accounts' changes added, only when every account that reported followers also has a change (a partial sum would lie).
+  const reporting = accounts.filter((a) => a.followers !== null);
+  const delta = reporting.length > 0 && reporting.every((a) => a.followersDelta30d !== null)
+    ? reporting.reduce((n, a) => n + (a.followersDelta30d as number), 0) : null;
+  return (
+    <p className="scp-chead__line" aria-label="Followers, reach and last sync">
+      {totals.followers === null ? (
+        <span>Followers not reported yet</span>
+      ) : (
+        <>
+          <span className="scp-chead__count" aria-label="Followers">{countText(totals.followers)}</span>
+          <span>followers{delta !== null ? ` (${deltaText(delta)})` : ""}</span>
+        </>
+      )}
+      {totals.reach30d === null ? (
+        <span>Reach not reported yet</span>
+      ) : (
+        <>
+          <span className="scp-chead__count" aria-label="Reach in the last 30 days">{countText(totals.reach30d)}</span>
+          <span>reach in 30 days</span>
+        </>
+      )}
+      {simulated && <><SimulatedMark of="metrics" /><span className="scp-chead__beside">{SUMMARY_SIMULATED_NOTE}</span></>}
+      <span className="scp-chead__beside">{lastSyncedText(lastSyncedAt)}</span>
+    </p>
   );
 }
