@@ -44,8 +44,8 @@ function asProposal(raw: unknown, fallback: { currency: string; minorUnit: numbe
   const currency = str(raw.currency) ?? fallback.currency;
   return {
     id: raw.id, status: str(raw.status) ?? "pending", amountMinor: num(raw.amountMinor) ?? 0, currency, minorUnit: num(raw.minorUnit) ?? (str(raw.currency) ? minorUnitOf(currency) : fallback.minorUnit),
-    note: str(raw.note), at: str(raw.proposedAt) ?? str(raw.requestedAt) ?? str(raw.createdAt) ?? str(raw.at), by: nameOf(raw.proposedBy) ?? nameOf(raw.by) ?? nameOf(raw.requestedBy),
-    decidedAt: str(raw.decidedAt), decidedBy: nameOf(raw.decidedBy), via: str(raw.via) ?? str(raw.agreedVia), channel: str(raw.channel),
+    note: str(raw.note) ?? str(raw.requestNote), at: str(raw.proposedAt) ?? str(raw.requestedAt) ?? str(raw.createdAt) ?? str(raw.at), by: nameOf(raw.proposedBy) ?? nameOf(raw.by) ?? nameOf(raw.requestedBy),
+    decidedAt: str(raw.decidedAt), decidedBy: nameOf(raw.decidedBy), via: str(raw.via) ?? str(raw.agreedVia) ?? str(raw.decidedVia), channel: str(raw.channel),
   };
 }
 
