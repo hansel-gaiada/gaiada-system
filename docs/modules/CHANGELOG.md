@@ -11,6 +11,27 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.192.0` + ai-agents `0.19.0` - the knowledge re-index stops wasting embeddings: unchanged chunks are kept, and a sweep stops at the first refusal and retires nothing (2026-10-28) - PROTOTYPED
+
+- **Why.** The platform-side half of release 450's outage fix. A sweep (every 6 h) re-embedded every chunk of every company, about 9,300 calls for roughly 1,250 indexed pieces, and it kept firing thousands of calls after the gateway refused it.
+- **ai-agents (knowledge service): unchanged chunks are kept.** `KnowledgeStore.ingestDetailed`, under a per-source advisory lock in one transaction, matches incoming chunks to stored rows by exact text (as a multiset, so repeated paragraphs work).
+  - A match keeps its row and vector, and only its metadata is rewritten.
+  - Only new or changed text is embedded, and that happens BEFORE any delete, so an embed failure rolls back and leaves the source as it was.
+  - Rows the source no longer has are removed.
+  - `/ingest` answers `{written, embedded, reused}`.
+  - No migration: the table already stores each chunk's text.
+- **The refusal travels.** A 429 from the gateway's `/embed` is a `GatewayBudgetError`, which `/ingest` answers as HTTP 429 `embedding_budget_exhausted`.
+- **platform-nest: the sweep stops.** The ingest client maps that 429 to `EmbeddingBudgetExhaustedError`.
+  - The sweep stops at once: no further source, no further company.
+  - It writes ONE warning line with counts only.
+  - The retire step runs only for a source list that was fully processed, so a stopped sweep never removes anything it did not reach.
+  - Other per-document errors behave as before.
+- **What to expect after the deploy.** The first sweeps converge over runs: the index held about 1,250 pieces while many sources had never been embedded. An unchanged corpus then costs no embeds at all.
+- **Tests:**
+  - platform-nest: `ingest-budget.test.ts` 5 plus `ingest.test.ts` 24, run locally;
+  - ai-agents: store 6 and service 1, new DB tests, on the Linux gate.
+
+
 ### platform-nest `0.191.0` + platform-ui `0.216.0` - SCP-3 train 2: the Social Media calendar (SCP-3e), the pipeline's Overview tiles and posts-on-schedule reader (SCP-3f), the four approvers' publish approvals in `/approvals` (SCP-3g), and the proof of schedule and live (SCP-3a, 3b) (plan §8 SCP-3; FRONTEND-BFF-CONTRACT §8, §63.7, §63.10; PERMISSION-CONTRACT §53.12) (2026-10-28) - PROTOTYPED
 
 - **The calendar (SCP-3e).** `{D}/calendar`, the Social menu's Calendar row and the Publish › Calendar tab, becomes the Social Media calendar: every client's pipeline posts on a Monday-first month, coloured by phase with a legend and the status in words, holidays and approved leave from the department calendar, and the Composer's own posts as read-only links. Drag a post, or use "Move to date…": an early post's date is edited, an approved or scheduled one is rescheduled after the page says the client will be asked again, and a locked one says why. A day's "+" plans a post for the client's officer or one of the four. `GET calendar` items now carry the server's `dateMove` and `dateMoveRefusal` (the feed preview's rule), so the page never guesses. The Composer's old drag on this page (SMM-12) and its review chips left it; the Composer keeps its own date change.
