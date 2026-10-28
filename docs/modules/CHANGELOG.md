@@ -11,6 +11,14 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.195.0` + platform-ui `0.219.0` - SCP-S train 4: a post is wholly simulated or wholly real (SCP-Sa3); one SIMULATED mark on every screen, its render pin, and the purge before real data (SCP-Sf) (plan §5, SCP-D9; FRONTEND-BFF-CONTRACT §63.1 file 8, §63.5, §63.14) (2026-10-28) - PROTOTYPED
+
+- **Never a half-simulated post (SCP-Sa3).** `final_approve` and `schedule_publisher` refuse 409 `publisher_kinds_mixed` (with the networks of each kind) when a post's networks mix simulated and real accounts; nothing is written. The demo applies the same rule.
+- **One mark (SCP-Sf).** `SimulatedMark` (accessible name "Simulated") replaces every ad-hoc chip: accounts strip, Connections, inbox, quota strip, post header and networks, metrics, "Publish now (simulated)", Feed preview, Home cards, client post cards and list, Analytics, the portal post card, the calendars and the Overview Pulse tiles. A render pin fails when a component reads the flag without drawing it, or when another file writes the word. The cycle health's posts and the SMM metrics rows gain `simulated` / `source` so the mark can show.
+- **The purge (SCP-Sf).** `node dist/seed/social-simulation-purge.js [--apply]` (dry run by default; runbook step 7) removes exactly the simulator's footprint per company and nothing real, refuses while the switch is on, refuses any shape it cannot classify, and puts posts the simulator carried back to the final check (never deleting a post). Activity `simulation_purged`, `simulated_variants_removed`.
+- **Integration (this train).** The SCP-3 calendar and Pulse chips and SCP-Sg's header numbers moved onto the one mark; the pin covers 15 components with none pending.
+- **Proof.** Each car's CI on its own branch (their only failures were two Sa2 tests already fixed on train 3); the train's combined CI and e2e.
+
 ### ai-gateway-go `0.18.0` + platform-nest `0.194.0` + platform-ui `0.218.0` + ai-agents `0.20.0` + mcp-hub `0.19.0` + wa-chat-bot `0.14.0` - AI plan phase 2, train 1: route by task and tier (AIP-06, AIP-07), the Auto/Fast/Strong picker (AIP-08a), named providers behind an advanced grant (AIP-08b) and the fast-tier eval (AIP-09) (2026-10-28) - PROTOTYPED
 
 - **Why.** Plan `docs/plans/2026-10-27-ai-plan.md` §2.2, phase 2. The gateway can now be told what kind of task a call is and which tier it wants, so a cheaper or stronger model can be used per task without any caller naming a model. Ruling AIP-D1 holds: all three tiers are the one live model for now, so nothing a user sees changes in answer quality or cost; the routing, the records and the eval are in place for the day a second model is approved.

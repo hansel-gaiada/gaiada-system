@@ -209,7 +209,9 @@ describe("what a decided post says", () => {
   it("a published post links to it, and a simulated one says so", () => {
     mount(post({ state: "live", liveUrl: "https://example.com/p/1", simulated: true, decision: null }));
     expect(screen.getByRole("link", { name: /View the published post/ })).toHaveAttribute("href", "https://example.com/p/1");
-    expect(card()).toHaveTextContent(/Simulated/);
+    // SCP-Sf: the one SIMULATED mark, and the sentence that says what it means.
+    expect(within(card()).getByRole("img", { name: "Simulated" })).toHaveTextContent("SIMULATED");
+    expect(card()).toHaveTextContent(/This is a rehearsal, not a post on a real account\./);
   });
 });
 

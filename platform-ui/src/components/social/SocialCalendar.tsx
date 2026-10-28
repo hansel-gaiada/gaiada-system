@@ -19,6 +19,7 @@ import { useId, useState, useTransition } from "react";
 import { Modal } from "@/components/overlay/Modal";
 import { CalendarPlan, type Planned } from "@/components/social/CalendarPlan";
 import { RefusalNote } from "@/components/social/PostRefusal";
+import { SimulatedMark } from "@/components/social/SimulatedMark";
 import { dayLabel } from "@/lib/deptCalendar";
 import { runPostAction, savePostFields, type WriteResult } from "@/lib/socialPipelineActions";
 import { newActionId } from "@/lib/socialPipeline";
@@ -173,7 +174,7 @@ export function SocialCalendar({
                                   title={`${it.clientName} · ${it.title} · ${formatWords(it.format)} · ${statusLabel(it.pipelineStatus)} · ${phaseLabel(it.phase)}${rule.kind === "locked" ? ` · Date locked: ${rule.why}` : ""}`}
                                 >
                                   <span className="scp-cal__time">{it.time}</span> <span className="scp-cal__who">{it.clientName}</span> {it.title}
-                                  {it.simulated && <span className="scp-cal__sim"> SIMULATED</span>}
+                                  {it.simulated && <> <SimulatedMark /></>}
                                   <span className="scp-sr-only">. {phaseLabel(it.phase)}, {statusLabel(it.pipelineStatus)}{rule.kind === "locked" ? ", date locked" : ""}</span>
                                 </Link>
                                 <button

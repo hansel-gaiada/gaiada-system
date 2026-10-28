@@ -16,6 +16,7 @@ import { formatWords, phaseLabel, postHref, statusLabel } from "@/lib/socialClie
 import { mainButtonOf, type PipelineCard } from "@/lib/socialHome";
 import { agoWords } from "@/lib/socialMessages";
 import { HealthChip } from "./HealthChip";
+import { SimulatedMark } from "./SimulatedMark";
 
 /** How many cards the Home draws before "Show more". The feed page itself is bounded (the server clamps it to 50), and no card makes its own read. */
 export const TURN_SHOWN = 8;
@@ -80,7 +81,7 @@ function TurnCard({ card, deptId, now }: { card: PipelineCard; deptId: string; n
         </h3>
         <p className="sh-card__meta">
           {formatWords(card.format)} · {statusLabel(card.pipelineStatus)} · {phaseLabel(card.phase)}
-          {card.simulated && " · simulated"}
+          {card.simulated && <> · <SimulatedMark /></>}
         </p>
         {button.kind !== "none" && (
           <div className="sh-card__act">

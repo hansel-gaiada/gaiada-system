@@ -534,6 +534,8 @@ describe.skipIf(!TEST_URL)("social settings and cycles (SCP-1c)", () => {
     expect(byTitle("blocked post")).toMatchObject({ status: "blocked", phase: "brief", holder: "client" });
     expect(byTitle("extra post")).toMatchObject({ isExtra: true });
     expect(byTitle("a story")).toMatchObject({ format: "story" });
+    // SCP-Sf: every post carries its `simulated` mark (none of these went live through the simulator).
+    expect(body.posts.every((p: { simulated: unknown }) => p.simulated === false)).toBe(true);
     // with no estimates the latest safe handoff is ready-by itself
     expect(byTitle("planned post").health.latestSafeHandoff).toBe(body.readyBy);
   });

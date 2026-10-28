@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { useId, useMemo, useState, useTransition, type CSSProperties } from "react";
 import { bulkPostAction } from "@/lib/socialClientActions";
 import { HealthChip } from "./HealthChip";
+import { SimulatedMark } from "./SimulatedMark";
 import {
   BULK_WORDS, bulkRefusalText, bulkSummary, formatWords, holderLabel, newUuid, phaseLabel, phaseStyle, postHref, statusLabel,
   type BulkAction, type BulkResult, type ClientPost,
@@ -99,6 +100,7 @@ export function ClientPostList({ deptId, posts }: { deptId: string; posts: reado
                 </td>
                 <td>
                   <Link href={postHref(deptId, p.postId)} className="scp-table__client">{p.title}</Link>
+                  {p.simulated && <> <SimulatedMark /></>}
                   {p.isExtra && <span className="scp-table__sub">Extra post · outside the target</span>}
                   {!p.isExtra && p.format === "story" && <span className="scp-table__sub">Story · not counted</span>}
                 </td>

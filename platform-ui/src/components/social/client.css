@@ -68,7 +68,6 @@
   font: 400 11px/1.3 var(--font-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .scp-cal__post:hover { background: var(--tint-hover); }
-.scp-cal__sim { font: 700 9px var(--font-body); color: var(--status-warning-fg); }
 
 /* The List */
 .scp-list__bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 10px; }
@@ -108,7 +107,8 @@
 .scp-feed__st { font-weight: 700; }
 .scp-feed__when { color: var(--erp-ink-60); font-variant-numeric: tabular-nums; }
 .scp-feed__lock { position: absolute; top: 4px; left: 4px; padding: 1px 6px; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm); font: 700 10px var(--font-body); color: var(--text-primary); }
-.scp-feed__sim { position: absolute; top: 4px; right: 4px; padding: 1px 6px; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm); font: 700 9px var(--font-body); color: var(--status-warning-fg); }
+/* SCP-Sf: the corner of a tile that carries the SIMULATED mark (SimulatedMark.tsx draws the mark; this only places it, on a card-coloured ground over the picture). */
+.scp-feed__sim { position: absolute; top: 4px; right: 4px; background: var(--surface-card); }
 .scp-feed__open { position: absolute; right: 4px; bottom: 28px; padding: 1px 6px; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm); font: 600 11px var(--font-body); color: var(--accent-fg); text-decoration: none; }
 .scp-feed__open:focus-visible { outline: 2px solid var(--accent-fg); outline-offset: 1px; }
 /* SCP-Sg: the live tile's reach, and its link to the post on the network (or the "Simulated post" label, which is not a link). */
