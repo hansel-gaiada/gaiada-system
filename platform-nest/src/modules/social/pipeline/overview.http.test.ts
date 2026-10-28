@@ -126,22 +126,36 @@ describe.skipIf(!TEST_URL)("SCP-3f · GET overview (BFF §63.7)", () => {
     const scheduleVia = o.scheduleVia ?? (status === "scheduled" || live ? "manual" : null);
     await withTenants([tenant], (c) => c.query(
       `INSERT INTO social_posts (id, tenant_id, engagement_id, title, cycle_id, pipeline_status, status_since, status, scheduled_at, simulated, schedule_via,
-                                 live_url, went_live_at, deleted_at, archived_at, archived_by, archive_reason)
+                                 live_url, went_live_at, deleted_at, archived_at, archived_by, archive_reason, creative_state, creative_source)
        VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6::text IS NULL THEN NULL ELSE now() END, $7,
                CASE WHEN $8::text IS NULL THEN NULL ELSE (($8::date)::timestamp + ($9::int * interval '1 minute')) AT TIME ZONE $10 END, $11, $12,
                CASE WHEN $13::boolean THEN 'https://example.invalid/live' ELSE NULL END, CASE WHEN $13::boolean THEN now() ELSE NULL END,
                CASE WHEN $14::boolean THEN now() ELSE NULL END, CASE WHEN $15::boolean THEN now() ELSE NULL END,
-               CASE WHEN $15::boolean THEN $16::uuid ELSE NULL END, CASE WHEN $15::boolean THEN 'archived' ELSE NULL END)`,
+               CASE WHEN $15::boolean THEN $16::uuid ELSE NULL END, CASE WHEN $15::boolean THEN 'archived' ELSE NULL END,
+               -- a post in Creative holds its creative state and source (social_posts_design_ck)
+               CASE WHEN $6::text = 'design' THEN 'in_progress' ELSE NULL END, CASE WHEN $6::text = 'design' THEN 'in_team' ELSE NULL END)`,
       [id, tenant, e.id, title, o.composer ? null : e.cycleId, o.composer ? null : status, o.engine ?? "draft", o.at?.day ?? null, o.at?.minutes ?? 0, config.reportsTz,
        o.simulated ?? false, scheduleVia, live, o.deleted === true, o.archived === true, officer],
     ), SOCIAL);
     if (o.variant) {
       const account = await accountOf(tenant, e.clientId);
-      await withTenants([tenant], (c) => c.query(
-        `INSERT INTO social_post_variants (id, tenant_id, post_id, account_id, status, simulated, body, media, settings, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, 'body', '[]', '{}', 'central')`,
-        [newId(), tenant, id, account, o.variant!.status, o.variant!.simulated],
-      ), SOCIAL);
+      // A variant past `approved` was dispatched, so it holds a decided publish approval (svar_dispatched_has_approval).
+      const dispatched = !["draft", "in_review", "approved", "cancelled"].includes(o.variant.status);
+      const variantId = newId();
+      await withTenants([tenant], async (c) => {
+        let approvalId: string | null = null;
+        if (dispatched) {
+          approvalId = newId();
+          await c.query(
+            `INSERT INTO automation_approvals (id, tenant_id, workflow_id, tool_name, tool_args, impact, status, requested_by, decided_by, decided_at, origin, origin_site)
+             VALUES ($1, $2, 'wf:scp3f', 'social.publishPost', $3, 'high', 'approved', $4, $4, now(), 'automation', 'main')`,
+            [approvalId, tenant, JSON.stringify({ variantId }), officer]);
+        }
+        await c.query(
+          `INSERT INTO social_post_variants (id, tenant_id, post_id, account_id, status, simulated, body, media, settings, origin_site, approval_id, args_sha256)
+           VALUES ($1, $2, $3, $4, $5, $6, 'body', '[]', '{}', 'central', $7, CASE WHEN $7::uuid IS NULL THEN NULL ELSE repeat('a', 64) END)`,
+          [variantId, tenant, id, account, o.variant!.status, o.variant!.simulated, approvalId]);
+      }, SOCIAL);
     }
     return id;
   }
