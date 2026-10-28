@@ -1365,7 +1365,13 @@ export class AssistantController {
   @Get(":tenantId/assistant/brains")
   async brains(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
     if (!req.principal.userId) throw new BadRequestException("an authenticated user is required");
-    const [result, allowed] = await Promise.all([getBrains(), canChooseProvider(req.principal, tenantId)]);
+    // A failed grant check is "no grant" (the closed direction): the route never threw before AIP-08b, and a Cerbos hiccup must
+    // not take Auto/Fast/Strong out of the picker along with the named providers.
+    const allowedCheck = canChooseProvider(req.principal, tenantId).catch((e: unknown) => {
+      console.warn(`assistant brains: choose_provider check failed (${e instanceof Error ? e.message : "error"}); answering without the grant`);
+      return false;
+    });
+    const [result, allowed] = await Promise.all([getBrains(), allowedCheck]);
     return { ...result, brains: allowed ? result.brains : [], canChooseProvider: allowed };
   }
 

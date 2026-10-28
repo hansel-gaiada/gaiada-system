@@ -205,6 +205,15 @@ describe("AIP-08b · GET /assistant/brains", () => {
     await ctl.brains(reqFor(ADMIN), "t9");
     expect(canCalls[0].resource).toEqual({ id: "t9", tenantId: "t9" });
   });
+  it("a failed check answers as no grant (never a 500): brains [] and the tiers still offered", async () => {
+    canThrows = true;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const r = await ctl.brains(reqFor(ADMIN), "t1");
+    warn.mockRestore();
+    expect(r.canChooseProvider).toBe(false);
+    expect(r.brains).toEqual([]);
+    expect(r.tiers).toEqual(["fast", "standard", "strong"]);
+  });
 });
 
 describe("AIP-08b · both relayGeneration call sites use the checked hint", () => {
