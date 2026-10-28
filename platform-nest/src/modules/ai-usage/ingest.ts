@@ -10,12 +10,15 @@
 //     the money still happened.
 //   * The department is never taken from the caller. A supplied `orgUnitId` is ignored; the department is the member's primary placement
 //     today (resolvePrimaryUnitId, the same read every platform-nest caller gets), or null.
+//   * `tier` (AIP-07), when present, must be exactly fast, standard or strong (the gateway's tiers): anything else is rejected for that event
+//     as `invalid_tier`, like any other bad field. The writer itself accepts any label; this route is the strict one.
 //   * Reasons are short codes. Nothing the caller sent (a key name, a label, a value) is echoed back.
 //
 // One event failing never fails the batch: the answer is `{accepted, rejected: [{index, reason}], counted}`.
 import { withGlobal, withTenants } from "../../db";
 import { AI_USAGE_EVENT_KEYS, UUID_PATTERN, recordAiUsage, validateAiUsageEvent, type AiUsageEvent, type RecordResult } from "./writer";
 import { resolvePrimaryUnitId } from "./gateway-usage";
+import { readGatewayTier } from "./routing";
 import type { AiUsageSurface } from "./vocab";
 
 /** The only surfaces a service may report. */
@@ -80,6 +83,7 @@ export async function ingestAiUsage(events: unknown[], deps: IngestDeps = {}): P
   events.forEach((raw, index) => {
     const v = validateAiUsageEvent(raw);
     if (!v.ok) return void rejected.push({ index, reason: reasonCode(v.error) });
+    if (v.event.tier != null && readGatewayTier(v.event.tier) === null) return void rejected.push({ index, reason: "invalid_tier" });
     if (!INGEST_SURFACES.includes(v.event.surface)) return void rejected.push({ index, reason: "surface_not_allowed" });
     ok.push({ index, event: v.event });
   });
