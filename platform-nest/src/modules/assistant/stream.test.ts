@@ -47,6 +47,20 @@ describe("parseGatewayStream — ASST-11's additive meta/usage frames + ASST-15'
     ]);
   });
 
+  it("AIP-07: meta carries the gateway's tier when it sent a string; absent otherwise", async () => {
+    const body = sseBody(
+      `event: meta
+data: ${JSON.stringify({ provider: "ollama", model: "m", tier: "fast" })}
+
+`,
+      `event: done
+data: {}
+
+`,
+    );
+    expect(await collect(parseGatewayStream(body))).toEqual([{ type: "meta", provider: "ollama", model: "m", tier: "fast" }, { type: "done" }]);
+  });
+
   it("model may legitimately be \"\" (a provider with no fixed-model concept) — passed through, not coerced", async () => {
     const body = sseBody(`event: meta\ndata: ${JSON.stringify({ provider: "echo", model: "" })}\n\n`, `event: done\ndata: {}\n\n`);
     const events = await collect(parseGatewayStream(body));

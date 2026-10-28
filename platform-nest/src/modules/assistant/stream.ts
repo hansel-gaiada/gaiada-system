@@ -53,6 +53,7 @@
 import { config } from "../../config";
 import { withTenants } from "../../db";
 import { recordGatewayCall, statusFromError, type AiCallAttribution } from "../ai-usage/gateway-usage";
+import { gatewayTaskField } from "../ai-usage/routing";
 import { refreshThreadCost } from "./thread-cost";
 
 // ─────────────────────────────────────── low-level SSE parsing ───────────────────────────────────
@@ -126,7 +127,7 @@ export type GatewayStreamEvent =
    *  legitimately be `""` (a provider with no fixed-model concept, e.g. `echo`) — that is a
    *  truthful absence, not malformed data, so it is passed through as-is, never coerced to null
    *  or dropped. ASST-15: no longer carries `providerSession` — see `session` below. */
-  | { type: "meta"; provider: string; model: string }
+  | { type: "meta"; provider: string; model: string; tier?: string }
   /** ASST-11's terminal `event: usage` — REAL end-of-stream provider-reported counts (never
    *  zero-filled, never estimated). Arrives immediately before `done`, only when the serving
    *  provider reports them (today: `ollama` only) — absent on every other provider and on every
@@ -183,9 +184,9 @@ export async function* parseGatewayStream(body: ReadableStream<Uint8Array>): Asy
       }
       case "meta": {
         try {
-          const parsed = JSON.parse(raw.data) as { provider?: unknown; model?: unknown };
+          const parsed = JSON.parse(raw.data) as { provider?: unknown; model?: unknown; tier?: unknown };
           if (typeof parsed.provider === "string" && typeof parsed.model === "string") {
-            yield { type: "meta", provider: parsed.provider, model: parsed.model };
+            yield { type: "meta", provider: parsed.provider, model: parsed.model, ...(typeof parsed.tier === "string" ? { tier: parsed.tier } : {}) };
           }
           // A malformed-but-present meta frame (missing/wrong-typed fields) is dropped, not
           // thrown — absent-tolerant per the additive-event contract; the badge simply stays
@@ -399,6 +400,8 @@ export interface RelayResult {
    *  never the requested one (ASST-16's "the badge shows the truth" requirement). */
   provider?: string;
   model?: string;
+  /** AIP-07: the tier the gateway applied, from `meta` (absent = none applied). Recorded in ai_usage_events.tier. */
+  tier?: string;
   /** ASST-15's terminal `event: session` — undefined unless the SERVING provider actually
    *  reported one (today: hermes only). ASST-16 persists this to
    *  `assistant_threads.hermes_session_id` and threads it back as `providerSession` on the NEXT
@@ -486,6 +489,7 @@ export async function recordRelayUsage(input: Pick<RelayGenerationInput, "attrib
     outcome,
     provider: result.provider ?? null,
     model: result.model ?? null,
+    tier: result.tier ?? null,
     providerHint: input.provider ?? null,
     usage: hasReal ? { promptTokens: result.promptTokens!, completionTokens: result.completionTokens!, costUsd: result.costUsd ?? null } : null,
     // The labelled 4-characters-per-token estimate, the SAME one that fills `assistant_messages.tokens`: the prompt we sent, the text we got.
@@ -519,6 +523,7 @@ async function relayGenerationCall(entry: GenerationEntry, input: RelayGeneratio
   // `"estimate"` and leave `provider`/`model` undefined rather than guessing.
   let metaProvider: string | undefined;
   let metaModel: string | undefined;
+  let metaTier: string | undefined;
   let metaProviderSession: string | undefined;
   // ASST-24 — captured alongside metaProviderSession, from the SAME `session` event firing; never
   // set independently of it (both stay undefined together whenever no session event arrives).
@@ -549,6 +554,7 @@ async function relayGenerationCall(entry: GenerationEntry, input: RelayGeneratio
       // before this ticket" contract for every OTHER caller of this route.
       body: JSON.stringify({
         prompt: input.prompt,
+        ...gatewayTaskField(input.attribution?.task),
         ...(input.provider ? { provider: input.provider } : {}),
         ...(input.providerSession ? { providerSession: input.providerSession } : {}),
       }),
@@ -568,6 +574,7 @@ async function relayGenerationCall(entry: GenerationEntry, input: RelayGeneratio
         // never carries providerSession anymore (see the `session` case below).
         metaProvider = evt.provider;
         metaModel = evt.model;
+        metaTier = evt.tier;
         input.emit.meta(evt.provider, evt.model);
         continue;
       }
@@ -605,7 +612,7 @@ async function relayGenerationCall(entry: GenerationEntry, input: RelayGeneratio
         input.emit.done();
         return {
           text, tokensEstimate: tokensTotal, latencyMs: lm, outcome: "done",
-          provider: metaProvider, model: metaModel, providerSession: metaProviderSession,
+          provider: metaProvider, model: metaModel, ...(metaTier ? { tier: metaTier } : {}), providerSession: metaProviderSession,
           sessionResumed: metaSessionResumed, requestedSession: metaRequestedSession,
           usageSource, promptTokens: realPromptTokens, completionTokens: realCompletionTokens,
           ...(hasRealUsage && realCostUsd !== undefined ? { costUsd: realCostUsd } : {}),
@@ -616,7 +623,7 @@ async function relayGenerationCall(entry: GenerationEntry, input: RelayGeneratio
         input.emit.error(evt.error, "upstream_error");
         return {
           text, tokensEstimate: estimateTokens(text), latencyMs: lm, outcome: "error", errorKind: "upstream_error", errorMessage: evt.error,
-          provider: metaProvider, model: metaModel, providerSession: metaProviderSession,
+          provider: metaProvider, model: metaModel, ...(metaTier ? { tier: metaTier } : {}), providerSession: metaProviderSession,
           sessionResumed: metaSessionResumed, requestedSession: metaRequestedSession, usageSource: "estimate",
         };
       }
@@ -627,7 +634,7 @@ async function relayGenerationCall(entry: GenerationEntry, input: RelayGeneratio
       input.emit.error(msg, "abnormal_drop");
       return {
         text, tokensEstimate: estimateTokens(text), latencyMs: lm, outcome: "error", errorKind: "abnormal_drop", errorMessage: msg,
-        provider: metaProvider, model: metaModel, providerSession: metaProviderSession,
+        provider: metaProvider, model: metaModel, ...(metaTier ? { tier: metaTier } : {}), providerSession: metaProviderSession,
         sessionResumed: metaSessionResumed, requestedSession: metaRequestedSession, usageSource: "estimate",
       };
     }
@@ -639,7 +646,7 @@ async function relayGenerationCall(entry: GenerationEntry, input: RelayGeneratio
     input.emit.error(msg, "abnormal_drop");
     return {
       text, tokensEstimate: estimateTokens(text), latencyMs: lm, outcome: "error", errorKind: "abnormal_drop", errorMessage: msg,
-      provider: metaProvider, model: metaModel, providerSession: metaProviderSession,
+      provider: metaProvider, model: metaModel, ...(metaTier ? { tier: metaTier } : {}), providerSession: metaProviderSession,
       sessionResumed: metaSessionResumed, requestedSession: metaRequestedSession, usageSource: "estimate",
     };
   } catch (err) {
@@ -667,7 +674,7 @@ async function relayGenerationCall(entry: GenerationEntry, input: RelayGeneratio
     input.emit.error(errorMessage, errorKind);
     return {
       text, tokensEstimate: estimateTokens(text), latencyMs: lm, outcome: "error", errorKind, errorMessage,
-      provider: metaProvider, model: metaModel, providerSession: metaProviderSession,
+      provider: metaProvider, model: metaModel, ...(metaTier ? { tier: metaTier } : {}), providerSession: metaProviderSession,
       sessionResumed: metaSessionResumed, requestedSession: metaRequestedSession, usageSource: "estimate",
     };
   } finally {
