@@ -222,6 +222,26 @@ export async function approverCheckReplacesDecide(
   return chk.replacesDecideFor ? (await chk.replacesDecideFor(c, args)) === true : true;
 }
 
+/**
+ * SCP-3g (PERMISSION-CONTRACT §53.12): for each of `argsList` (rows of this entry's tool, in order), may `approver` decide it
+ * UNDER THE REPLACEMENT, i.e. does `replacesDecideFor` claim it and does the approverCheck pass? The read routes' question
+ * (`ApproverCheck.replacedDecideAllowedMany`), read on `c` with the entry's module scope in force, exactly as
+ * `approverCheckReplacesDecide` and `runApproverCheck` read. All false for an entry without the marker or without the batched
+ * form: the read routes widen nothing for it. A throw propagates (the read fails closed).
+ */
+export async function replacedDecideAllowedMany(
+  c: PoolClient,
+  entry: ExecutableApprovalEntry,
+  argsList: ReadonlyArray<Record<string, unknown>>,
+  approver: ApprovalApprover,
+): Promise<boolean[]> {
+  const chk = entry.approverCheck;
+  if (!chk || chk.replacesDecide !== true || !chk.replacedDecideAllowedMany || argsList.length === 0) return argsList.map(() => false);
+  await applyPreconditionScopes(c, entry);
+  const answers = await chk.replacedDecideAllowedMany(c, argsList, approver);
+  return argsList.map((_, i) => answers[i] === true);
+}
+
 /** `execution_status='executing'` + untouched for longer than the staleness threshold = wedged by a
  *  dead process. THE crash-wedge predicate; D14-07's retry endpoint imports this instead of
  *  re-deriving the rule (two copies of a staleness threshold is how they drift). */

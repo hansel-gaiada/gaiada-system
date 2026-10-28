@@ -11,6 +11,8 @@
 // authorize()/Cerbos call each origin's native controller already makes, just probed per
 // (tenant, origin[, module]) leg instead of per-request. A caller never sees a row here they
 // couldn't already see by calling the native endpoint directly (D-UX-2: never widen visibility).
+// SCP-3g keeps that: the automation leg also lists the rows a caller may decide by id because an entry's approverCheck
+// replaces the generic decide right (approval-replaced-decide.ts), and the native detail route opens exactly those rows too.
 //
 // D-UX-2 fan-out rule: cross-company reads are N parallel single-tenant `withTenants([t])` legs —
 // NEVER a widened GUC set. Every withTenants() call below passes a single-element array literal,
@@ -18,12 +20,13 @@
 import { BadRequestException, Controller, Get, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { withGlobal, withTenants } from "../db";
-import { authorize } from "./http";
+import { assertSessionCurrent, authorize } from "./http";
 import { AuthGuard } from "../auth/guards";
 import type { Principal } from "../rbac/principal";
 import type { Envelope, EnvelopeCompany } from "./envelope";
 import { ageBonus, ORIGIN_BASE_WEIGHT, IMPACT_BONUS, type ApprovalOrigin } from "./approvals-urgency";
 import { APPROVER_CHECK_HINT_BUDGET, approveRefusalHint } from "./approval-approve-hint";
+import { replacedDecidableIds, replacedDecideCandidates } from "./approval-replaced-decide";
 
 export interface UnifiedApprovalItem {
   id: string;
@@ -92,6 +95,17 @@ async function namesFor(ids: string[]): Promise<Map<string, string>> {
 async function canDo(principal: Principal, tenantId: string, kind: string, action: string, module?: string): Promise<boolean> {
   try {
     await authorize(principal, { kind, tenantId, module }, action);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** D11 for the SCP-3g path, which lets a caller through by an entry's batched approverCheck rather than `authorize()`: a
+ *  revoked session widens nothing (every soft probe above already answers no for it). */
+async function sessionCurrent(principal: Principal): Promise<boolean> {
+  try {
+    await assertSessionCurrent(principal);
     return true;
   } catch {
     return false;
@@ -197,7 +211,6 @@ async function automationLeg(
 
   const readableHr = wantsHr && (await canDo(principal, tenantId, "automation_approval", "read", "hr"));
   const readableOther = wantsOther && (await canDo(principal, tenantId, "automation_approval", "read"));
-  if (!readableHr && !readableOther) return { items: [], readable: false };
 
   const decidableHr = readableHr && (await canDo(principal, tenantId, "automation_approval", "decide", "hr"));
   const decidableOther = readableOther && (await canDo(principal, tenantId, "automation_approval", "decide"));
@@ -206,22 +219,49 @@ async function automationLeg(
   // (`automation_approval:read` scoped to the hr module) and probe-consent rows have no equivalent
   // — they are read under the same generic action every automation row is.
   const readableOrigins = subOrigins.filter((o) => (o === "hr" ? readableHr : readableOther));
-  if (!readableOrigins.length) return { items: [], readable: false };
+
+  // SCP-3g (PERMISSION-CONTRACT §53.12): a caller WITHOUT the generic decide right may still decide some rows by id, because
+  // an entry's approverCheck REPLACES that right (a pipeline post's publish approval: the four social approvers). Those rows
+  // are listed for them and marked decidable, exactly the ones the decide route would let through (approval-replaced-decide.ts).
+  // A caller with the generic decide right is unchanged: they already list and may decide every row (and the hint below tells a
+  // company_admin who is not one of the four that the check refuses them).
+  // A revoked session widens nothing (D11: this path does not go through `authorize()`).
+  const replacedOrigins = decidableOther || !(await sessionCurrent(principal))
+    ? []
+    : subOrigins.filter((o) => o === "automation" || o === "agent");
+  if (!readableOrigins.length && !replacedOrigins.length) return { items: [], readable: false };
 
   const now = Date.now();
-  const { rows } = await withTenants([tenantId], (c) =>
-    c.query<{
-      id: string; workflow_id: string; tool_name: string; impact: string; reason: string | null;
-      tool_args: { href?: string } | null; origin: string; created_at: string; status: string; requested_by: string | null;
-    }>(
-      `SELECT id, workflow_id, tool_name, impact, reason, tool_args, origin, created_at, status, requested_by
-       FROM automation_approvals
-       WHERE deleted_at IS NULL AND origin = ANY($1::text[])
-         AND ${status === "pending" ? "status = 'pending'" : "status IN ('approved','rejected')"}
-       ORDER BY created_at DESC LIMIT 200`,
-      [readableOrigins],
-    ),
-  );
+  type LegRow = {
+    id: string; workflow_id: string; tool_name: string; impact: string; reason: string | null;
+    tool_args: { href?: string } | null; origin: string; created_at: string; status: string; requested_by: string | null;
+  };
+  const { rows, replacedIds } = await withTenants([tenantId], async (c) => {
+    const listed: LegRow[] = readableOrigins.length
+      ? (await c.query<LegRow>(
+        `SELECT id, workflow_id, tool_name, impact, reason, tool_args, origin, created_at, status, requested_by
+         FROM automation_approvals
+         WHERE deleted_at IS NULL AND origin = ANY($1::text[])
+           AND ${status === "pending" ? "status = 'pending'" : "status IN ('approved','rejected')"}
+         ORDER BY created_at DESC LIMIT 200`,
+        [readableOrigins],
+      )).rows
+      : [];
+    if (!replacedOrigins.length) return { rows: listed, replacedIds: new Set<string>() };
+    // The rows this caller already lists are asked about as they are; a caller without the generic read gets the candidates
+    // (one query, same status filter and bound) and keeps only the ones they could decide.
+    const listedIds = new Set(listed.map((r) => r.id));
+    const candidates = readableOther
+      ? listed
+      : await replacedDecideCandidates(c, {
+        origins: replacedOrigins,
+        statuses: status === "pending" ? ["pending"] : ["approved", "rejected"],
+      });
+    const ids = await replacedDecidableIds(c, principal, candidates);
+    const added = candidates.filter((r) => ids.has(r.id) && !listedIds.has(r.id)) as unknown as LegRow[];
+    return { rows: [...listed, ...added], replacedIds: ids };
+  });
+  if (!readableOrigins.length && !rows.length) return { items: [], readable: false };
   const items: UnifiedApprovalItem[] = rows.map((r) => {
     const ageMs = now - new Date(r.created_at).getTime();
     const origin = r.origin as ApprovalOrigin;
@@ -241,23 +281,28 @@ async function automationLeg(
       // here without a per-row Cerbos call. Someone who lacks it sees the row and is refused on
       // decide — the safe direction. The reverse (hiding rows they could decide) would strand
       // requests, which is the failure this whole fix is about.
-      decidable: origin === "hr" ? decidableHr : decidableOther,
+      // SCP-3g: a row the caller may decide under its entry's replacing approverCheck is decidable for them.
+      decidable: origin === "hr" ? decidableHr : decidableOther || replacedIds.has(r.id),
       status: r.status,
     };
   });
   // PGL-05/06: why the viewer's Approve would be refused, for the pending D14 rows they could otherwise decide. One
   // budget per leg bounds the entry-rule probes (each a query, maybe a Cerbos call); past it only the pure rule runs.
-  if (status === "pending" && decidableOther) {
+  // SCP-3g: a row decidable only under the replacement gets the same helper with no entry-rule budget: its approverCheck has
+  // just passed for this caller (that is why it is listed), so only the pure self-approval rule can still refuse them.
+  if (status === "pending" && (decidableOther || replacedIds.size > 0)) {
     const budget = { remaining: APPROVER_CHECK_HINT_BUDGET };
+    const checked = { remaining: 0 };
     const byId = new Map(rows.map((r) => [r.id, r]));
     for (const item of items) {
       if (item.origin !== "automation" && item.origin !== "agent") continue;
+      if (!decidableOther && !replacedIds.has(item.id)) continue;
       const r = byId.get(item.id)!;
       item.approveRefusal = await approveRefusalHint(
         principal,
         tenantId,
         { origin: r.origin, toolName: r.tool_name, impact: r.impact, requestedBy: r.requested_by, toolArgs: r.tool_args },
-        budget,
+        decidableOther ? budget : checked,
       );
     }
   }

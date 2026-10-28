@@ -37,6 +37,10 @@ export interface AutomationApproval {
   execution_error?: string | null;
   execution_result?: unknown;
   execution_attempts?: number | null;
+  /** SCP-3g (PERMISSION §53.12): true when this caller may decide the row because its entry's approverCheck replaces the generic
+   *  decide right (a pipeline post's publish approval: the four social approvers). Absent otherwise, and on older backends. A
+   *  hint; the decide route asks again. */
+  approver_decides?: boolean;
 }
 
 async function skipUnavailable<T>(p: Promise<T>, fallback: T): Promise<T> {

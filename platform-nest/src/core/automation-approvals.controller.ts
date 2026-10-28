@@ -9,7 +9,7 @@
 import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { withGlobal, withTenants } from "../db";
-import { authorize, writeActivity } from "./http";
+import { assertSessionCurrent, authorize, writeActivity } from "./http";
 import { check } from "../rbac/cerbos";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
@@ -62,6 +62,15 @@ import { executeApprovedDeploySecretWrite, preflightDeploySecretWrite } from "..
 // PGL-05/06 (PV-D46): the generic self-approval rule, the act-for filing refusal, and the viewer's approve-refusal hint.
 import { actForFilingRefusal, selfApprovalVerdict } from "./approval-self-approval";
 import { approveRefusalHint } from "./approval-approve-hint";
+// SCP-3g: the rows a caller may decide by id because an entry's approverCheck replaces the generic decide right are listed
+// and opened for them too (PERMISSION-CONTRACT §53.12).
+import {
+  REPLACED_DECIDE_ORIGINS,
+  replacedDecidableIds,
+  replacedDecideCandidates,
+  replacedDecideTools,
+  type ReplacedDecideCandidate,
+} from "./approval-replaced-decide";
 
 const IMPACTS = new Set(["medium", "high", "unclassified"]);
 const ORIGINS = new Set(["automation", "agent"]);
@@ -249,21 +258,35 @@ export class AutomationApprovalsController {
     } | undefined;
     if (!row) throw new NotFoundException("approval not found");
     const module = row.origin === "hr" ? "hr" : undefined;
+    const readResource = { kind: "automation_approval", id, tenantId, module, creatorId: row.requestedBy ?? undefined };
+    // SCP-3g (PERMISSION-CONTRACT §53.12): may this viewer decide the row by id because its entry's approverCheck REPLACES the
+    // generic decide right (a pipeline post's publish approval: the four social approvers)? Asked only of a row whose tool
+    // declares the replacement (every other row answers false with no query), on the row's own tenant client.
+    const approverDecides = replacedDecideTools().includes(row.toolName)
+      ? (await withTenants([tenantId], (c) =>
+        replacedDecidableIds(c, req.principal, [{ id: row.id, origin: row.origin, tool_name: row.toolName, tool_args: row.toolArgs }]),
+      )).has(row.id)
+      : false;
     // T7 (WebDesk M3): the REQUESTER may read their own row. `creatorId` is `requested_by` — the
     // users.id that filed it, the same id as `principal.id` (approval-filing.ts stores
     // `requestedBy: principal.userId`; principalPayload() sends `id: p.userId`). It is the fetched
     // row's value, never anything the client sent. Cerbos's own-row ALLOW is `read` only: it grants
     // no decide/retry, and managers/company admins pass through their existing rules unchanged.
-    await authorize(
-      req.principal,
-      { kind: "automation_approval", id, tenantId, module, creatorId: row.requestedBy ?? undefined },
-      "read",
-    );
+    // SCP-3g: a viewer who may decide this row under the replacement opens it when the generic read and the own-row rule both
+    // fail (probed WITHOUT auditing, so their ordinary open files no authz.deny row); the session check `authorize()` would make
+    // still runs. Everyone else goes through `authorize()` exactly as before: same order, same 403.
+    if (approverDecides && !(await check(req.principal, readResource, "read")).allow) {
+      await assertSessionCurrent(req.principal);
+    } else {
+      await authorize(req.principal, readResource, "read");
+    }
     // PGL-05/06 (PERMISSION-CONTRACT §52, BFF §8): why THIS viewer's Approve would be refused, so the UI can say so
     // instead of offering a button that 403s. A HINT only: null means "not known to be refused", and the decide gate
     // stays the authority. Pending rows only; a decided row has nothing to approve.
     const approveRefusal = row.status === "pending" ? await approveRefusalHint(req.principal, tenantId, row) : null;
-    return { ...row, approveRefusal };
+    // SCP-3g: `approverDecides` tells the UI this viewer's decide right on the row is its entry's approverCheck (they may
+    // decide it without the generic right). A hint like `approveRefusal`; the decide route asks again.
+    return { ...row, approveRefusal, approverDecides };
   }
 
   @Get(":tenantId/automation-approvals")
@@ -304,8 +327,8 @@ export class AutomationApprovalsController {
     if (filterPending) clauses.push("status = 'pending'");
     else if (status) { params.push(status); clauses.push(`status = $${params.length}`); }
     if (origin) { params.push(origin); clauses.push(`origin = $${params.length}`); }
-    const rows = await withTenants([tenantId], (c) =>
-      c.query(
+    return withTenants([tenantId], async (c) => {
+      const listed = (await c.query<ReplacedDecideCandidate>(
         // D14-02: execution_status/executed_at/executed_by/execution_error/execution_result/
         // execution_attempts (0078) — an approved-but-unexecuted row must be visibly distinguishable
         // from a done one (the resume-path program's whole point; see 0078's header).
@@ -315,9 +338,29 @@ export class AutomationApprovalsController {
          WHERE ${clauses.join(" AND ")}
          ORDER BY created_at DESC LIMIT 200`,
         params,
-      ),
-    );
-    return rows.rows;
+      )).rows;
+      // SCP-3g (PERMISSION-CONTRACT §53.12): the rows this caller may decide by id because an entry's approverCheck REPLACES
+      // the generic decide right (a pipeline post's publish approval: the four social approvers). An own-row caller ALSO gets
+      // them (the candidates of the same status and origin filter, one query, kept only when the check passes); an elevated
+      // caller already lists them, and is asked only when they lack the generic decide right (with it they may decide every
+      // row anyway). Such a row carries `approver_decides: true`. No candidate row, no extra work.
+      const tools = new Set(replacedDecideTools());
+      const candidates = ownOnly
+        ? await replacedDecideCandidates(c, {
+          origins: origin ? [origin] : REPLACED_DECIDE_ORIGINS,
+          statuses: filterPending ? ["pending"] : status ? [status] : null,
+        })
+        : listed.filter((r) => tools.has(r.tool_name) && REPLACED_DECIDE_ORIGINS.includes(r.origin));
+      if (candidates.length === 0) return listed;
+      if (!ownOnly && (await check(req.principal, { kind: "automation_approval", tenantId }, "decide")).allow) return listed;
+      const decidable = await replacedDecidableIds(c, req.principal, candidates);
+      if (decidable.size === 0) return listed;
+      const listedIds = new Set(listed.map((r) => r.id));
+      const merged = [...listed, ...candidates.filter((r) => decidable.has(r.id) && !listedIds.has(r.id))]
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 200);
+      return merged.map((r) => (decidable.has(r.id) ? { ...r, approver_decides: true } : r));
+    });
   }
 
   @Post(":tenantId/automation-approvals/:id/decide")
@@ -415,6 +458,11 @@ export class AutomationApprovalsController {
         },
         decideAction,
       );
+    } else {
+      // SCP-3g: the generic authorize() above is skipped for this row, and with it the D11 session check every authorize()
+      // ends with; the approverCheck below assembles fresh principals and never looks at the session. So a revoked session
+      // is refused here, 401 as anywhere else, before anything is decided.
+      await assertSessionCurrent(req.principal);
     }
 
     // ── VLT-3: a credential reveal may NEVER be self-granted (plan §6 OQ-2.6.c) ───────────────────

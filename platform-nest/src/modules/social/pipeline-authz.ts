@@ -83,6 +83,23 @@ export async function loadSocialApproverIds(client: PoolClient, tenantId: string
  */
 export async function loadSocialPostAuthz(client: PoolClient, tenantId: string, postId: string): Promise<SocialPostAuthz | null> {
   if (typeof postId !== "string" || !UUID_RE.test(postId)) return null;
+  return (await loadSocialPostAuthzMany(client, tenantId, [postId])).get(postId.toLowerCase()) ?? null;
+}
+
+/**
+ * SCP-3g: the facts of several posts of `tenantId` at once, keyed by the post id (lower case). The ONE builder
+ * `loadSocialPostAuthz` reads through, so a page of posts gets exactly the facts one post gets: one posts query, the seat
+ * holders once, and one PM read per distinct month request. A post that is absent, deleted or another tenant's, or an id that
+ * is not a uuid, has no entry.
+ */
+export async function loadSocialPostAuthzMany(
+  client: PoolClient,
+  tenantId: string,
+  postIds: readonly string[],
+): Promise<Map<string, SocialPostAuthz>> {
+  const out = new Map<string, SocialPostAuthz>();
+  const wanted = [...new Set(postIds.filter((id) => typeof id === "string" && UUID_RE.test(id)).map((id) => id.toLowerCase()))];
+  if (wanted.length === 0) return out;
   await declareSocialModuleScope(client);
   const { rows } = await client.query<{
     id: string; engagement_id: string; pipeline_status: string | null; author_id: string | null;
@@ -92,24 +109,28 @@ export async function loadSocialPostAuthz(client: PoolClient, tenantId: string, 
             p.creative_request_id::text AS creative_request_id, p.creative_source, e.owner_id::text AS owner_id
        FROM social_posts p
        JOIN social_engagements e ON e.id = p.engagement_id AND e.tenant_id = p.tenant_id
-      WHERE p.tenant_id = $1 AND p.id = $2 AND p.deleted_at IS NULL`,
-    [tenantId, postId],
+      WHERE p.tenant_id = $1 AND p.id = ANY($2::uuid[]) AND p.deleted_at IS NULL`,
+    [tenantId, wanted],
   );
-  const r = rows[0];
-  if (!r) return null;
-  const assigneeIds = r.creative_request_id
-    ? ((await loadAuthFacts(client, tenantId, r.creative_request_id))?.assigneeIds ?? [])
-    : [];
-  return {
-    postId: r.id,
-    engagementId: r.engagement_id,
-    pipelineStatus: r.pipeline_status,
-    ownerId: r.owner_id ?? "",
-    creatorId: r.author_id ?? "",
-    approverIds: await loadSocialApproverIds(client, tenantId),
-    assigneeIds,
-    creativeSource: r.creative_source ?? "",
-  };
+  if (rows.length === 0) return out;
+  const assigneesByRequest = new Map<string, string[]>();
+  for (const requestId of new Set(rows.map((r) => r.creative_request_id).filter((v): v is string => !!v))) {
+    assigneesByRequest.set(requestId, (await loadAuthFacts(client, tenantId, requestId))?.assigneeIds ?? []);
+  }
+  const approverIds = await loadSocialApproverIds(client, tenantId);
+  for (const r of rows) {
+    out.set(r.id.toLowerCase(), {
+      postId: r.id,
+      engagementId: r.engagement_id,
+      pipelineStatus: r.pipeline_status,
+      ownerId: r.owner_id ?? "",
+      creatorId: r.author_id ?? "",
+      approverIds: [...approverIds],
+      assigneeIds: r.creative_request_id ? [...(assigneesByRequest.get(r.creative_request_id) ?? [])] : [],
+      creativeSource: r.creative_source ?? "",
+    });
+  }
+  return out;
 }
 
 /** The `social_post` resource of BFF §63.3.3. */

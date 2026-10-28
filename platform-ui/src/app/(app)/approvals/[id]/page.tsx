@@ -106,7 +106,10 @@ export default async function ApprovalDetailPage({ params }: { params: Promise<{
   const crossTenant = resolvedTenant !== tenant;
   const resolvedCompanyName = crossTenant ? me.companies.find((c) => c.id === resolvedTenant)?.name ?? null : null;
 
-  const mayDecide = can(me, "approvals.decide", resolvedTenant) && detail.data.status === "pending";
+  // SCP-3g: a pipeline post's publish approval is decided by the four social approvers, who need not hold `approvals.decide`;
+  // the server says so per row (`approverDecides`). It only ever adds the form for that row; the decide route asks again.
+  const approverDecides = detail.kind === "automation_approval" && detail.data.approverDecides === true;
+  const mayDecide = (can(me, "approvals.decide", resolvedTenant) || approverDecides) && detail.data.status === "pending";
   // PGL-05/06: the server says when THIS viewer's Approve would be refused (self-approval, the countersign right, …).
   const approveRefusal = detail.kind === "automation_approval" ? detail.data.approveRefusal ?? null : null;
 
