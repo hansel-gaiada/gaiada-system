@@ -504,6 +504,38 @@ export function demoCalendar(params: URLSearchParams): DemoResult {
   return ok({ items });
 }
 
+/** Monday to Sunday of the week `iso` falls in, as local dates (`to` the next Monday, exclusive): the server's `weekOf`. */
+const demoWeekOf = (iso: string): { from: string; to: string } => {
+  const from = demoShift(iso, -((demoDow(iso) + 6) % 7));
+  return { from, to: demoShift(from, 7) };
+};
+/** The pipeline's engine statuses the Failed posts tile counts (§63.7 `failedPosts`). */
+const FAILED_ENGINE = ["failed", "partially_published"];
+
+/**
+ * `GET overview` (§63.7, SCP-3f): the Pulse tiles, computed from the demo posts the way the server computes them (the same phase map, the demo's fixed health,
+ * the display zone's week). `composerFailed` is the legacy Composer store's failed posts, which the one Failed posts number includes. The demo's simulator is always
+ * on (as `POST simulated-accounts` already says), so simulated rows are counted and the answer says so. Boosts have no store yet: null.
+ */
+export function demoOverview(userId: string, composerFailed: number): DemoResult {
+  if (isClientContact(userId)) return err(403, "not authorized: social_post read");
+  const week = demoWeekOf(todayIsoInDisplayZone());
+  const live = store.posts.filter((p) => !p.archivedAt);
+  const tiles = {
+    inProduction: live.filter((p) => scpPhaseOf(view(p)) === "in_production").length,
+    withClient: live.filter((p) => scpPhaseOf(view(p)) === "with_client").length,
+    late: live.filter((p) => demoPostHealth(p).state === "late").length,
+    scheduledThisWeek: live.filter((p) => {
+      if (p.pipelineStatus !== "scheduled" || p.scheduledAt === null) return false;
+      const day = todayIsoInDisplayZone(new Date(p.scheduledAt));
+      return day >= week.from && day < week.to;
+    }).length,
+    failedPosts: live.filter((p) => FAILED_ENGINE.includes(String(scpEngineStatusOf(view(p))))).length + composerFailed,
+    boostsWaiting: null,
+  };
+  return ok({ tiles, simulatedIncluded: true });
+}
+
 export function demoAllocationRow(e: PipeEngagement, userId: string): Record<string, unknown> {
   const a = store.allocations[e.id];
   const month = todayIsoInDisplayZone().slice(0, 7);

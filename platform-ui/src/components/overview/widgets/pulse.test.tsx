@@ -16,7 +16,7 @@ import { agencyTree, me as meFixture, member } from "@/lib/workspaceFixtures";
 import * as cr from "@/lib/webdevChangeRequests-data";
 import * as pipeline from "@/lib/pipeline";
 import * as monitoring from "@/lib/monitoring";
-import * as social from "@/lib/social";
+import * as socialOverview from "@/lib/socialOverview-data";
 import * as itAccounts from "@/lib/it-accounts";
 import * as hrData from "@/lib/hr-data";
 import * as hrFullData from "@/lib/hr-full-data";
@@ -26,13 +26,13 @@ import * as automation from "@/lib/automationFailures";
 import * as finData from "@/lib/finance-data";
 import * as billingData from "@/lib/contractBilling-data";
 import type { MonitoringSummary } from "@/lib/monitoringShared";
-import type { SocialPost } from "@/lib/socialShared";
+import type { SocialOverview } from "@/lib/socialOverview";
 import type { PipelineGate } from "@/lib/pipeline";
 
 vi.mock("@/lib/webdevChangeRequests-data", () => ({ listChangeRequests: vi.fn() }));
 vi.mock("@/lib/pipeline", () => ({ listInternalPendingGates: vi.fn() }));
 vi.mock("@/lib/monitoring", () => ({ getSummary: vi.fn() }));
-vi.mock("@/lib/social", () => ({ listPosts: vi.fn() }));
+vi.mock("@/lib/socialOverview-data", () => ({ getOverview: vi.fn() }));
 vi.mock("@/lib/it-accounts", async (orig) => ({ ...(await orig<typeof import("@/lib/it-accounts")>()), listAccounts: vi.fn() }));
 
 vi.mock("@/lib/hr-data", () => ({ listLeaveResult: vi.fn(), listCasesResult: vi.fn() }));
@@ -53,7 +53,7 @@ const person = meFixture([member()]);
 const listRequests = vi.mocked(cr.listChangeRequests);
 const listGates = vi.mocked(pipeline.listInternalPendingGates);
 const summary = vi.mocked(monitoring.getSummary);
-const posts = vi.mocked(social.listPosts);
+const overview = vi.mocked(socialOverview.getOverview);
 const accounts = vi.mocked(itAccounts.listAccounts);
 const leave = vi.mocked(hrData.listLeaveResult);
 const hrCases = vi.mocked(hrData.listCasesResult);
@@ -76,7 +76,9 @@ const gate = (id: string, run: string) => ({ id, run_id: run }) as unknown as Pi
 const sum = (over: Partial<MonitoringSummary> = {}): MonitoringSummary => ({
   total: 10, up: 8, down: 1, degraded: 1, maintenance: 0, unknown: 0, openIncidents: 2, lastSweepAt: "2026-10-13T08:00:00Z", ...over,
 });
-const post = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `p${i}` }) as unknown as SocialPost);
+const overviewOf = (over: Partial<SocialOverview["tiles"]> = {}, simulatedIncluded = false): SocialOverview => ({
+  tiles: { inProduction: 7, withClient: 3, late: 2, scheduledThisWeek: 5, failedPosts: 1, boostsWaiting: null, ...over }, simulatedIncluded,
+});
 const account = (state: string) => ({
   userId: state, email: "", name: state, employmentStatus: null, keycloakId: null, enabled: null, emailVerified: null,
   linked: false, linkVerified: false, state, actionable: true,
@@ -92,12 +94,12 @@ const props = (pulse: readonly PulseTile[] | undefined, extra: Partial<OverviewW
 const tile = (name: string) => within(screen.getByRole("region", { name: "Pulse" })).getByText(name).closest("li")!;
 
 beforeEach(() => {
-  for (const m of [listRequests, listGates, summary, posts, accounts, leave, hrCases, payroll, devices, alerts, failures, pendingPayments, instalmentsDue, arAging, periodsRead, closeRead, ...Object.values(integrityReads)]) m.mockReset();
+  for (const m of [listRequests, listGates, summary, overview, accounts, leave, hrCases, payroll, devices, alerts, failures, pendingPayments, instalmentsDue, arAging, periodsRead, closeRead, ...Object.values(integrityReads)]) m.mockReset();
 });
 afterEach(() => vi.restoreAllMocks());
 
 describe("the registry's built tiles (DW-3e)", () => {
-  it("builds exactly Web Dev's three, Social Media's two, HR's four, Finance's five and IT's four, and no other", () => {
+  it("builds exactly Web Dev's three, Social Media's five, HR's four, Finance's five and IT's four, and no other", () => {
     const built: string[] = [];
     for (const w of [...WORKSPACES, GENERIC_WORKSPACE]) for (const t of w.pulse) if (!isPlanned(t)) built.push(`${w.key}/${t.key}`);
     expect(built.sort()).toEqual([
@@ -115,7 +117,10 @@ describe("the registry's built tiles (DW-3e)", () => {
       "it/failing-workflows",
       "it/threat-alerts",
       "social-media/failed-posts",
-      "social-media/posts-scheduled",
+      "social-media/in-production",
+      "social-media/late",
+      "social-media/scheduled-this-week",
+      "social-media/with-client",
       "web-dev/requests-waiting",
       "web-dev/runs-waiting-approval",
       "web-dev/sites-with-a-problem",
@@ -127,7 +132,7 @@ describe("the registry's built tiles (DW-3e)", () => {
       for (const t of w.pulse) {
         if (isPlanned(t)) {
           expect(t.source, `${w.key}/${t.key}`).toBeUndefined();
-          expect(t.ticket, `${w.key}/${t.key}`).toMatch(/^DW-\d+[a-z]?\b/);
+          expect(t.ticket, `${w.key}/${t.key}`).toMatch(/^(DW|SCP)-\d+[a-z]?\b/);
         } else {
           expect(t.source, `${w.key}/${t.key}`).toBeDefined();
           expect(t.href?.startsWith("/"), `${w.key}/${t.key}`).toBe(true);
@@ -161,7 +166,7 @@ describe("the registry's built tiles (DW-3e)", () => {
 
   it("finds the built tiles of the workspace the subject belongs to, and none for Company, SEO, Creatives or a generic department", () => {
     expect(builtPulseTiles(webDev).map((t) => t.key)).toEqual(["requests-waiting", "sites-with-a-problem", "runs-waiting-approval"]);
-    expect(tilesOf("social-media").map((t) => t.key)).toEqual(["posts-scheduled", "failed-posts"]);
+    expect(tilesOf("social-media").map((t) => t.key)).toEqual(["in-production", "with-client", "late", "scheduled-this-week", "failed-posts"]);
     expect(tilesOf("it").map((t) => t.key)).toEqual(["devices-offline", "threat-alerts", "account-requests", "failing-workflows"]);
     expect(tilesOf("hr").map((t) => t.key)).toEqual(["leave-pending", "onboarding", "open-cases", "payroll-status"]);
     // The company Overview the GM sees has no Pulse widget, so the GM reaches failing workflows through IT's tile and the page.
@@ -269,31 +274,52 @@ describe("Pulse, Web Dev (the widget)", () => {
   it("draws nothing, and reads nothing, for a workspace with no built tile", async () => {
     expect(await Pulse(props([]))).toBeNull();
     expect(await Pulse(props(undefined))).toBeNull();
-    expect([listRequests, listGates, summary, posts, accounts, leave, hrCases, payroll, devices].every((m) => m.mock.calls.length === 0)).toBe(true);
+    expect([listRequests, listGates, summary, overview, accounts, leave, hrCases, payroll, devices].every((m) => m.mock.calls.length === 0)).toBe(true);
   });
 });
 
 describe("Pulse, Social Media and IT (the widget)", () => {
   const social2 = () => tilesOf("social-media");
 
-  it("counts scheduled and failed posts by the reader's own status filter", async () => {
-    posts.mockImplementation(async (_u, _t, p) => ({ data: post(p?.status === "scheduled" ? 4 : 1), forbidden: false }));
+  it("reads GET overview ONCE for all five pipeline tiles and draws each figure with its link", async () => {
+    overview.mockResolvedValue({ kind: "ok", data: overviewOf() });
     render(await Pulse(props(social2())));
-    expect(posts).toHaveBeenCalledWith("u-1", "co-a", { status: "scheduled" });
-    expect(posts).toHaveBeenCalledWith("u-1", "co-a", { status: "failed" });
-    expect(within(tile("Posts scheduled")).getByText("4")).toBeInTheDocument();
-    expect(within(tile("Failed posts")).getByText("1")).toBeInTheDocument();
-    expect(within(tile("Failed posts")).getByRole("link")).toHaveAttribute("href", "/departments/d-web/calendar");
+    expect(overview).toHaveBeenCalledTimes(1);
+    expect(overview).toHaveBeenCalledWith("u-1", "co-a");
+    for (const [label, n, href] of [
+      ["In production", "7", "/departments/d-web/profile"], ["With client", "3", "/departments/d-web/profile"], ["Late", "2", "/departments/d-web/profile"],
+      ["Scheduled this week", "5", "/departments/d-web/calendar"], ["Failed posts", "1", "/departments/d-web/calendar"],
+    ] as const) {
+      expect(within(tile(label)).getByText(n), label).toBeInTheDocument();
+      expect(within(tile(label)).getByRole("link"), label).toHaveAttribute("href", href);
+    }
+    // Boosts waiting (SCP-4a) and Unanswered inbox are placeholders: never drawn, never a 0.
+    expect(screen.queryByText("Boosts waiting")).toBeNull();
+    expect(screen.queryByText("Unanswered inbox")).toBeNull();
+    expect(screen.queryByText("SIMULATED")).toBeNull();
   });
 
-  it("maps a 403 (forbidden) to No access and a throw (5xx) to Unavailable, per tile", async () => {
-    posts.mockImplementation(async (_u, _t, p) => {
-      if (p?.status === "failed") throw new Error("500");
-      return { data: [], forbidden: true };
-    });
+  it("marks every tile SIMULATED while the server says the tiles count simulated rows", async () => {
+    overview.mockResolvedValue({ kind: "ok", data: overviewOf({}, true) });
     render(await Pulse(props(social2())));
-    expect(within(tile("Posts scheduled")).getByText("No access")).toBeInTheDocument();
-    expect(within(tile("Failed posts")).getByText("Unavailable")).toBeInTheDocument();
+    expect(screen.getAllByText("SIMULATED")).toHaveLength(5);
+    expect(within(tile("Late")).getByText("SIMULATED")).toBeInTheDocument();
+  });
+
+  it("a refused read says No access on every pipeline tile, with no link and no figure", async () => {
+    overview.mockResolvedValue({ kind: "forbidden" });
+    render(await Pulse(props(social2())));
+    expect(screen.getAllByText("No access")).toHaveLength(5);
+    expect(within(tile("Late")).queryByRole("link")).toBeNull();
+    expect(screen.queryByText("0")).toBeNull();
+  });
+
+  it("a failed read, a throw and a rejected read are Unavailable, never a zero (and every tile failing throws for the frame)", async () => {
+    overview.mockResolvedValue({ kind: "unavailable", reason: "500" });
+    await expect(Pulse(props(social2()))).rejects.toThrow("every tile failed");
+    overview.mockReset();
+    overview.mockRejectedValue(new Error("boom"));
+    await expect(Pulse(props(social2()))).rejects.toThrow("every tile failed");
   });
 
   it("counts the accounts that still need a login for IT, and maps the typed refusals", async () => {

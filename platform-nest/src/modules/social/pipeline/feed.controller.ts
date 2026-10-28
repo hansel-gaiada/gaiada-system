@@ -3,6 +3,7 @@
 //   GET feed?view=your_turn|waiting|all&engagementId=&cycleId=&phase=&officerId=&cursor=&limit=   social_post · read   PipelineCard items
 //   GET waiting                                                                                    social_post · read   Messages: who holds my posts
 //   GET needs-you                                                                                  social_post · read   the pipeline's leg of lib/queue.ts
+//   GET overview                                                                                   social_post · read   the Overview's Pulse tiles (SCP-3f)
 //
 // AUTHORIZATION BEFORE VALIDATION (BFF §63.0): the read decision is asked first, so a refused caller always gets 403, never a 400.
 // What each caller SEES is narrowed by relationship facts read from the rows (the officer is the engagement's owner, a Creatives designer an
@@ -24,12 +25,15 @@ import { ModuleEnabledGuard } from "../../module-enabled.guard";
 import { addDays } from "../../hr/working-days";
 import { grantCoversTenant, todayIsoInTz } from "../../reports/person-scope";
 import { loadSocialApproverIds } from "../pipeline-authz";
+import { isSocialSimulationEnabled } from "../publisher/simulation";
 import { findDepartmentBySlug, roleHolders } from "./pipeline-data";
 import { HOLDER_LABELS } from "./pipeline-read";
 import {
   FEED_WINDOW_AHEAD_DAYS, FEED_WINDOW_BEHIND_DAYS, readFeedCandidates, readFeedContext, readFeedPageExtras, readLastFollowUps, readMetricsMissing,
   type FeedCandidate, type FeedPageExtras,
 } from "./feed-data";
+import { readOverviewFacts } from "./overview-data";
+import { composeOverview, weekOf, type OverviewAnswer } from "./overview";
 import {
   FEED_PAGE_DEFAULT, FEED_PAGE_MAX, FEED_PHASES, cardOf, cerbosActionsFor, composeEntries, decodeCursor, holderRoleOf, isWaitingOn, isYourTurn, needsYouKind,
   nextActionOf, pageOf, primaryRouteAction, resourceOfCandidate, type FeedCaller, type PipelineCard,
@@ -161,6 +165,27 @@ export class SocialFeedController {
     const items = data.page.map((e, index) =>
       cardOf(e, data.extras.thumbs.get(e.c.id) ?? null, nextActionOf(e.c, actions[index], decisionOf.get(index) ?? {}, { userId: principal.userId ? principal.userId.toLowerCase() : null, isAutomation })));
     return { items, nextCursor: data.nextCursor };
+  }
+
+  // ==================================================================== GET overview
+  /**
+   * The Overview's Pulse tiles (§63.7). Authorization first; there is nothing to validate. The caller's view is the feed's `all` (the whole company's
+   * pipeline: the tiles are the team's, narrowed by nothing a query could name). Three statements (`overview-data.ts`), the same module wall as the feed.
+   */
+  @Get("overview")
+  async overview(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string): Promise<OverviewAnswer> {
+    await authorizeRead(req, tenantId);
+    // Read once, at call time: the switch decides both what is counted and what the answer says.
+    const includeSimulated = isSocialSimulationEnabled();
+    const today = todayIsoInTz(config.reportsTz);
+    return withTenants([tenantId], async (c) => {
+      const ctx = await readFeedContext(c, tenantId, { today, from: addDays(today, -FEED_WINDOW_BEHIND_DAYS), to: addDays(today, FEED_WINDOW_AHEAD_DAYS), tz: config.reportsTz });
+      const candidates = await readFeedCandidates(c, tenantId, {
+        view: "all", callerId: null, isCopywriter: false, isSeatApprover: false, isInTeamDesigner: false,
+      });
+      const facts = await readOverviewFacts(c, tenantId, { tz: config.reportsTz, week: weekOf(today), includeSimulated });
+      return composeOverview(candidates, facts, { today, calendar: ctx.calendar, samples: ctx.samples, includeSimulated });
+    }, SOCIAL_HR);
   }
 
   // ==================================================================== GET waiting
