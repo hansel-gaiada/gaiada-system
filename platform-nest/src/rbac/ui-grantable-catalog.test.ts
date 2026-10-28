@@ -114,8 +114,9 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // DW-10e (2026-10-16): +2 grantable / +2 total on the existing work_request kind (send_across, read_across; both uiGrantable TRUE). 484 -> 486 / 469 -> 471.
     // SCP-1b (2026-10-26): +11 grantable / +11 total on EXISTING kinds (7 uiGrantable TRUE; FALSE: social.post.approve, social.engagement.plan/budget, portal.approve_spend). 486 -> 497 / 471 -> 482.
     // M5-W1q (2026-10-27): +1 grantable / +1 total on the existing webdesk_media_asset kind (`review`; uiGrantable TRUE). 497 -> 498 / 482 -> 483.
-    expect(permissions.length).toBe(498);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(483);
+    // AIP-08b (2026-10-28, AIP-D5): +1 grantable / +1 total on the NEW assistant_brain kind (`choose_provider`; uiGrantable TRUE: a role edit grants it). 498 -> 499 / 483 -> 484.
+    expect(permissions.length).toBe(499);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(484);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 
