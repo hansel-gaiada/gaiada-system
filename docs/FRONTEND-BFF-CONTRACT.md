@@ -2582,6 +2582,31 @@ falls through to the chain's untouched `Run` behavior. Absent hint ⇒ byte-iden
 before this ticket for every existing caller (`/complete`, `/media`, `/embed` don't accept a hint
 at all; `/complete/stream` with no `provider` field delegates straight to `Run`).
 
+### AIP-06 — route by task and tier (`POST /complete` and `POST /complete/stream`, 2026-10-28)
+
+Plan `docs/plans/2026-10-27-ai-plan.md` §2.2; rulings AIP-D1 (one model for every tier for now) and AIP-D5.
+Additive and optional; with the fields absent the wire is byte for byte what it was.
+
+- **Request.** Both routes accept `task` (`chat` | `summarise` | `classify` | `agent_step` | `draft`) and `tier`
+  (`fast` | `standard` | `strong`). Any other value (wrong case, unknown, empty, wrong JSON type) is treated as absent,
+  never an error. Precedence: `provider` (the ASST-15 hint) > `tier` > the task's tier > plain chain order. When
+  `provider` is sent the tier is not consulted at all.
+- **A tier names a provider and, optionally, a model** (gateway config `GATEWAY_TIERS`, `GATEWAY_TASK_TIERS`, or the
+  console keys `tiers` and `taskTiers`). The tier's provider is tried first, on the tier's model for that one attempt.
+  It is a HINT exactly like `provider`: a provider that is unavailable, has an open breaker, or fails is skipped or
+  failed over from as today, and every other provider runs on its own default model.
+- **Response, only when a tier was APPLIED** (the provider that served is the tier's provider):
+  `POST /complete` answers `{provider, text, model, tier, usage?}` (`model` is the served model, and is also set whenever
+  `usage` is); `POST /complete/stream`'s `event: meta` is `{provider, model, tier}`, where `model` names the overridden model
+  and `tier` is present only when the provider that released the first byte is the tier's provider. When no tier was
+  applied (none requested, `provider` sent, the tier's provider did not serve), `tier` is absent and the body, the meta
+  frame and the audit row are exactly the previous ones. A consumer must treat an absent `tier` as "no tier applied".
+- **Audit** (`GET /egress-audit`, `llm` rows): `task` (the validated requested task, even when routing did not use it)
+  and `tier` (the applied tier) are added, omitted when empty; a routed success also records `model`. Never text.
+- **`GET /health`** gains `tiers`: the sorted names of the configured tiers (never a provider or model), and the key is
+  absent when none are configured. `providers.llm` is unchanged.
+- The agent listener (`/v1/chat/completions`) is not affected: the caller's model never routes there.
+
 ### Memory panel backend — propose vs confirm, quarantine discipline (ASST-19, 2026-08-05)
 
 Note on the "PENDING (ASST-06+)" bullet above (in §18's own list): it still names
