@@ -135,6 +135,7 @@ import { startCycleReadyByLoop } from "./modules/social/pipeline/cycle-ready-by-
 // doc), so it runs unconditionally at boot, unlike the interval-driven loop below.
 import { startPostStatusSyncLoop } from "./modules/social/post-status-sync-job";
 import { SIMULATED_DUE_INTERVAL_MS, startSimulatedDueLoop } from "./modules/social/simulated-due-job";
+import { SIMULATED_BOOST_INTERVAL_MS, startSimulatedBoostLoop } from "./modules/social/simulated-boost-job";
 import { isSocialSimulationEnabled } from "./modules/social/publisher/simulation";
 import { installCreatorInfoVerifier } from "./modules/social/creator-info-verifier";
 // SM-54 (tracker §6ad Ruling 1 / addendum §A13.2) — the search department's cadence loop lives in the
@@ -848,6 +849,11 @@ async function bootstrap(): Promise<void> {
     startSimulatedDueLoop(SIMULATED_DUE_INTERVAL_MS);
     // eslint-disable-next-line no-console
     console.log(`social simulated due job (social-simulated-due) on: every ${SIMULATED_DUE_INTERVAL_MS}ms`);
+    // SCP-Se: `social-simulated-boost`, the same switch: a simulated boost that staff started completes after
+    // SOCIAL_SIMULATED_BOOST_MINUTES (default 10) with spend at or below its budget, paid reach and clicks. Never starts one.
+    startSimulatedBoostLoop(SIMULATED_BOOST_INTERVAL_MS);
+    // eslint-disable-next-line no-console
+    console.log(`social simulated boost job (social-simulated-boost) on: every ${SIMULATED_BOOST_INTERVAL_MS}ms, boosts complete after ${config.social.simulatedBoostMinutes} min`);
   }
   // SM-54: the search pull scheduler. A plain Postgres sweep (no Redis dependency), so it sits outside
   // the redisUrl gate above alongside the drift sweep and the burndown job — but unlike those two this
