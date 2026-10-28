@@ -20,6 +20,8 @@ vi.mock("@/lib/departments", () => ({ getDepartment: vi.fn() }));
 vi.mock("@/lib/campaigns-data", () => ({ readOrgRoot: vi.fn() }));
 vi.mock("@/lib/socialAllocation-data", () => ({ getAllocation: vi.fn(), getOfficerCandidates: vi.fn() }));
 vi.mock("@/lib/socialClient-data", () => ({ getCycleView: vi.fn(), getClientCalendar: vi.fn(), getClientBrandBook: vi.fn(), getEngagementProjectId: vi.fn(), getFeedPreview: vi.fn() }));
+vi.mock("@/lib/socialAccountsSummary-data", () => ({ getAccountsSummary: vi.fn() }));
+vi.mock("@/lib/socialSimulatedAccounts-data", () => ({ getClientAccounts: vi.fn() }));
 vi.mock("@/lib/socialAllocationActions", () => ({ saveAllocation: vi.fn(), loadBrandBook: vi.fn(), saveBrandBook: vi.fn() }));
 vi.mock("@/lib/socialClientActions", () => ({ bulkPostAction: vi.fn(), createClientPost: vi.fn(), swapFeedPreview: vi.fn() }));
 
@@ -28,6 +30,10 @@ import { readOrgRoot } from "@/lib/campaigns-data";
 import { getAllocation } from "@/lib/socialAllocation-data";
 import { getClientBrandBook, getClientCalendar, getCycleView, getEngagementProjectId, getFeedPreview } from "@/lib/socialClient-data";
 import { loadBrandBook } from "@/lib/socialAllocationActions";
+import { getAccountsSummary } from "@/lib/socialAccountsSummary-data";
+import { getClientAccounts } from "@/lib/socialSimulatedAccounts-data";
+import type { SocialAccount } from "@/lib/socialShared";
+import type { AccountsSummaryView } from "@/lib/socialAccountsSummary";
 import { EMPTY_BRAND_BOOK } from "@/lib/socialBrandBook";
 import { node } from "@/lib/workspaceFixtures";
 import type { AllocationRow } from "@/lib/socialAllocation";
@@ -59,6 +65,15 @@ const item = (over: Partial<CalendarItem>): CalendarItem => ({
   postId: "p-1", clientName: "Brand Alpha", title: "Harvest teaser", format: "feed", scheduledAt: "2026-10-20T09:30:00.000Z", pipelineStatus: "client", phase: "with_client", simulated: false, ...over,
 });
 
+/** SCP-Sg: the client's accounts read back; the default is a synced simulated client (an invented one). */
+const summary = (over: Partial<AccountsSummaryView> = {}): AccountsSummaryView => ({
+  accounts: [
+    { accountId: "a-ig", network: "instagram", handle: "@mock-brand-alpha", simulated: true, followers: 12400, followersDelta30d: 250, reach30d: 18200, impressions30d: 25000, lastSyncedAt: "2026-10-16T03:00:00.000Z", source: "simulated" },
+    { accountId: "a-fb", network: "facebook", handle: "@mock-brand-alpha", simulated: true, followers: 5100, followersDelta30d: 50, reach30d: 4300, impressions30d: 6000, lastSyncedAt: "2026-10-16T03:00:00.000Z", source: "simulated" },
+  ],
+  totals: { followers: 17500, reach30d: 22500 }, simulated: true, lastSyncedAt: "2026-10-16T03:00:00.000Z", ...over,
+});
+
 const orgWithCreatives = node("root", "Agency", "company", [node("d-soc", "Social Media", "department"), node("d-cre", "Creatives", "department")]);
 const mount = async (search: Record<string, string> = {}, params: { deptId?: string; engagementId?: string } = {}) =>
   render(await SocialClientPage({
@@ -75,7 +90,12 @@ beforeEach(() => {
   vi.mocked(getAllocation).mockReset().mockResolvedValue(ok([row()]));
   vi.mocked(getCycleView).mockReset().mockResolvedValue(ok(cycle()));
   vi.mocked(getClientCalendar).mockReset().mockResolvedValue(ok([]));
-  vi.mocked(getFeedPreview).mockReset().mockResolvedValue(ok({ items: [], liveHidden: 0 }));
+  vi.mocked(getFeedPreview).mockReset().mockResolvedValue(ok({ items: [], liveHidden: 0, lastSyncedAt: null }));
+  vi.mocked(getAccountsSummary).mockReset().mockResolvedValue(ok(summary()));
+  vi.mocked(getClientAccounts).mockReset().mockResolvedValue(ok([
+    { id: "a-ig", clientId: "c-alpha", network: "instagram", handle: "@mock-brand-alpha", simulated: true },
+    { id: "a-fb", clientId: "c-alpha", network: "facebook", handle: "@mock-brand-alpha", simulated: true },
+  ] as unknown as SocialAccount[]));
   vi.mocked(getClientBrandBook).mockReset().mockResolvedValue(ok({ ...EMPTY_BRAND_BOOK, toneSummary: "Warm and direct.", contentPillars: ["Seasonal"] }));
   vi.mocked(getEngagementProjectId).mockReset().mockResolvedValue(ok(null));
   vi.mocked(loadBrandBook).mockReset().mockResolvedValue({ ok: true, book: { ...EMPTY_BRAND_BOOK }, exists: true });
@@ -274,17 +294,18 @@ describe("Calendar", () => {
 describe("Feed preview (SCP-3d)", () => {
   const feedItem = (over: Record<string, unknown>) => ({
     postId: "p-1", scheduledAt: "2026-10-20T09:30:00.000Z", thumbFileId: null, pipelineStatus: "planned", locked: false, title: "Harvest teaser", format: "feed",
-    phase: "brief", simulated: false, dateMove: "edit", dateMoveRefusal: null, ...over,
+    phase: "brief", simulated: false, dateMove: "edit", dateMoveRefusal: null, liveUrl: null, reach: null, reachSource: null, ...over,
   });
 
   it("reads GET feed-preview for this client on its own tab only, and draws the grid without needing a cycle", async () => {
-    vi.mocked(getFeedPreview).mockResolvedValue(ok({ items: [feedItem({}), feedItem({ postId: "p-2", title: "Studio day" })] as never, liveHidden: 0 }));
+    vi.mocked(getFeedPreview).mockResolvedValue(ok({ items: [feedItem({}), feedItem({ postId: "p-2", title: "Studio day" })] as never, liveHidden: 0, lastSyncedAt: "2026-10-16T03:00:00.000Z" }));
     vi.mocked(getAllocation).mockResolvedValue(ok([row({ thisCycle: null })]));
     await mount({ tab: "preview" });
     expect(getFeedPreview).toHaveBeenCalledWith("u-1", "co-a", "e-alpha");
     expect(getCycleView).not.toHaveBeenCalled();
     expect(screen.getByRole("list", { name: "The client's posts, newest first" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Feed preview" })).toHaveAttribute("aria-current", "page");
+    expect(document.querySelector(".scp-feed__sync")).toHaveTextContent("Last synced 16 Oct, 11:00"); // the summary's newest sync, in the display zone
     cleanup();
     vi.mocked(getFeedPreview).mockClear();
     await mount({ tab: "list" });
@@ -377,5 +398,69 @@ describe("the create bar on the page", () => {
     vi.mocked(readOrgRoot).mockResolvedValue(null as never);
     await mount();
     expect(screen.queryByRole("link", { name: "Ask Creatives for assets" })).toBeNull();
+  });
+});
+
+// SCP-Sg (BFF §63.10): the header's followers line and the accounts strip, from `GET engagements/:id/accounts-summary`.
+describe("followers, reach and last sync (SCP-Sg)", () => {
+  const line = () => within(document.querySelector<HTMLElement>(".scp-chead")!).getByLabelText("Followers, reach and last sync");
+
+  it("reads the summary for this client's engagement, and shows the followers with the 30-day change, the 30-day reach and the last sync, with the SIMULATED chip", async () => {
+    await mount();
+    expect(getAccountsSummary).toHaveBeenCalledWith("u-1", "co-a", "e-alpha");
+    expect(within(line()).getByLabelText("Followers")).toHaveTextContent("17,500");
+    expect(line()).toHaveTextContent("followers (+300 in 30 days)");
+    expect(within(line()).getByLabelText("Reach in the last 30 days")).toHaveTextContent("22,500");
+    expect(within(line()).getByText("SIMULATED")).toBeInTheDocument();
+    expect(within(line()).getByText("Last synced 16 Oct, 11:00")).toBeInTheDocument();
+  });
+
+  it("shows each account's followers and last sync on the accounts strip", async () => {
+    await mount();
+    const strip = screen.getByRole("region", { name: "Social accounts" });
+    expect(strip).toHaveTextContent("12,400 followers · Last synced 16 Oct, 11:00");
+    expect(strip).toHaveTextContent("5,100 followers · Last synced 16 Oct, 11:00");
+  });
+
+  it("has no SIMULATED chip for a real client's numbers", async () => {
+    vi.mocked(getAccountsSummary).mockResolvedValue(ok(summary({
+      simulated: false,
+      accounts: summary().accounts.map((a) => ({ ...a, simulated: false, source: "pull" as const })),
+    })));
+    await mount();
+    expect(within(line()).queryByText("SIMULATED")).toBeNull();
+    expect(within(line()).getByLabelText("Followers")).toHaveTextContent("17,500");
+  });
+
+  it("says 'Not synced yet' and 'not reported yet', never 0, for a client no sweep has reached", async () => {
+    vi.mocked(getAccountsSummary).mockResolvedValue(ok(summary({
+      simulated: false, totals: { followers: null, reach30d: null }, lastSyncedAt: null,
+      accounts: summary().accounts.map((a) => ({ ...a, followers: null, followersDelta30d: null, reach30d: null, impressions30d: null, lastSyncedAt: null, source: null })),
+    })));
+    await mount();
+    expect(within(line()).getByText("Followers not reported yet")).toBeInTheDocument();
+    expect(within(line()).getByText("Reach not reported yet")).toBeInTheDocument();
+    expect(within(line()).getByText("Not synced yet")).toBeInTheDocument();
+    expect(within(line()).queryByText(/^0$/)).toBeNull();
+    expect(within(screen.getByRole("region", { name: "Social accounts" })).queryByText(/followers ·/)).toBeNull();
+  });
+
+  it("says a failed read and a refused read in words, never as 0 followers", async () => {
+    vi.mocked(getAccountsSummary).mockResolvedValue({ kind: "unavailable", reason: "boom" });
+    await mount();
+    expect(screen.getAllByText("Followers and reach could not be read just now.").length).toBeGreaterThan(0);
+    expect(document.querySelector(".scp-chead")!.textContent).not.toMatch(/\b0 followers/);
+    cleanup();
+    vi.mocked(getAccountsSummary).mockResolvedValue({ kind: "forbidden" });
+    await mount();
+    expect(screen.getAllByText("Followers and reach need a Social Media read tier.").length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText("Followers")).toBeNull();
+  });
+
+  it("does not leave the page blank when the summary fails: the rest of the header is drawn", async () => {
+    vi.mocked(getAccountsSummary).mockResolvedValue({ kind: "unavailable", reason: "boom" });
+    await mount();
+    expect(screen.getByRole("heading", { name: "Brand Alpha" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Posts counted against the monthly target")).toHaveTextContent("2 of 5");
   });
 });
