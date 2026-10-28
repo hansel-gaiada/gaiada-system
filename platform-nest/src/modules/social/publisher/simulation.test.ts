@@ -1,18 +1,26 @@
-// SCP-Sa — the social simulator's flag and containment, proved WITHOUT a database, Cerbos or a network (runs anywhere).
-// The DB-backed half (the real dispatch path through the simulator, the boot DB counts, the account writers' refusals
-// against real rows) is `simulated-dispatch.db.test.ts`; the migration's own suite is
-// `src/db/social-simulation-migration.db.test.ts`.
+// SCP-Sa / SCP-Sa2 — the social simulator's flag and containment, proved WITHOUT a database, Cerbos or a network (runs
+// anywhere). The DB-backed half (the real dispatch path through the simulator, the boot DB counts, the account writers'
+// refusals against real rows) is `simulated-dispatch.db.test.ts` and, for SCP-Sa2's side-by-side mode,
+// `side-by-side.db.test.ts`; the migrations' own suites are `src/db/social-simulation-migration.db.test.ts` and
+// `src/db/social-account-kind-migration.db.test.ts`.
+//
+// SCP-Sa2 (owner ruling SCP-D9, 2026-10-28): the simulator now runs BESIDE a real Postiz. The pins that encoded "never
+// both" (boot refusing Postiz / a real-driver override / a live grant / a real account; the connect paths refusing a real
+// account; the registry refusing a real engine beside the simulator) were REPLACED by pins for "never mixed": each one's
+// test name below says what changed. Every pin that still holds is unchanged.
 //
 // What this file pins, fence by fence (simulation.ts's header numbers them):
 //   1. the switch: default off, read at call time;
 //   2. the one road in: `resolveSimulatedPublisher` is the only way to the simulator; `getPublisher`, `resolvePublisher`
 //      and every capability override refuse it by name;
-//   3/4. the boot errors (each one), the registry's per-registration provenance check, and the runtime refusals of every
-//      account create/connect path, plus a static inventory so a NEW writer of `social_accounts` (or of a `simulated`
-//      mark) fails here until it is fenced;
+//   3. one kind per account: the boot errors (each one), the registry's per-registration provenance check, the real
+//      account writers' fences, plus a static inventory so a NEW writer of `social_accounts` (or of a `simulated` mark)
+//      fails here until it is fenced;
+//   4. each driver refuses the other kind: the reverse fence (`realPublisherRefusal`) and a static inventory of the real
+//      paths that must ask it;
 //   5. the driver's own refusal order and its honest answers (approval first, then the switch, then the handle, then our
 //      rows, then the failure keyword), and the port's contract suite with the switch on and off;
-//   6. the labels: URLs under https://simulated.invalid/, the marker, the filter's statuses.
+//   7. the labels: URLs under https://simulated.invalid/, the marker, the filter's statuses.
 // And the standing rule this ticket must NOT weaken: the test double (`mock-driver.ts`) is never registered by boot,
 // under any value of the switch.
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
@@ -21,22 +29,22 @@ import { join, relative, sep } from "node:path";
 import { config } from "../../../config";
 import { OrgHandle, SocialPublisherError, type SocialPublisher, type VariantDispatch } from "./types";
 import {
-  SIMULATED_PUBLISHER_KEY, SIMULATE_FAIL_KEYWORD, SOCIAL_SIMULATION_REFUSAL, SimulatedOrgHandle,
-  assertRealAccountWriteAllowed, assertSimulatedWriteAllowed, isSimulatedPublisher, isSocialSimulationEnabled,
-  publisherProvenanceViolation, realAccountWriteRefusal,
+  SIMULATED_ID_PREFIX, SIMULATED_PUBLISHER_KEY, SIMULATE_FAIL_KEYWORD, SOCIAL_SIMULATION_REFUSAL, SimulatedOrgHandle,
+  assertRealIntegrationId, assertRealPublisherTarget, assertSimulatedWriteAllowed, isSimulatedId, isSimulatedPublisher,
+  isSocialSimulationEnabled, publisherProvenanceViolation, realPublisherRefusal, realWriteOnSimulatedRow,
 } from "./simulation";
 import { createSimulatedPublisher, SIMULATED_CAPABILITIES, type SimulatedDispatchGuard } from "./simulated-driver";
 import { createMockPublisher, newMockPublisherState } from "./mock-driver";
 import { createDirectDriver } from "./direct";
 import {
-  getPublisher, listPublishers, registerPublisher, resetPublishers, resolvePublisher, resolvePublisherForCapability,
-  resolveSimulatedPublisher,
+  getPublisher, listPublishers, realPublisherKey, registerPublisher, resetPublishers, resolvePublisher,
+  resolvePublisherForCapability, resolveSimulatedPublisher,
 } from "./registry";
 import { assertSocialSimulationBootSafe, SocialSimulationBootError, wireSocialPublisher, type SocialSimulationBootFacts } from "./boot";
 import { runPublisherContractSuite } from "./publisher-contract";
-import { checkConnectReadiness, initiateAccountConnect, syncConnectorRegistry } from "./provisioning";
-import { checkLinkedInConnectReadiness, completeLinkedInConnect, startLinkedInConnect } from "./linkedin-oauth";
-import { checkYouTubeConnectReadiness, completeYouTubeConnect, startYouTubeConnect } from "./youtube-oauth";
+import { checkConnectReadiness } from "./provisioning";
+import { checkLinkedInConnectReadiness } from "./linkedin-oauth";
+import { checkYouTubeConnectReadiness } from "./youtube-oauth";
 import { SocialPublisherErrorFilter } from "../publisher-error.filter";
 
 const T = "00000000-0000-4000-8000-0000000000a1";
@@ -157,13 +165,14 @@ describe("SCP-Sa · provenance: the marker must match the key and the switch (SM
     expect(isSimulatedPublisher(null)).toBe(false);
   });
 
-  it("publisherProvenanceViolation: every forbidden mix is named, every allowed one is null", () => {
+  it("publisherProvenanceViolation: every forbidden registry is named, every allowed one is null (SCP-Sa2: a real engine beside the simulator is ALLOWED)", () => {
     const mock = createMockPublisher(newMockPublisherState());
     expect(publisherProvenanceViolation([mock, createDirectDriver()], false)).toBeNull();
     expect(publisherProvenanceViolation([createDirectDriver(), sim()], true)).toBeNull();
     expect(publisherProvenanceViolation([sim()], false)).toMatch(/is off/);
-    expect(publisherProvenanceViolation([sim(), mock], true)).toMatch(/real publishing engine/);
-    expect(publisherProvenanceViolation([{ ...mock, key: "mixpost" }], true)).toMatch(/real publishing engine/);
+    // SCP-Sa2 (SCP-D9): was "real publishing engine" refused; side by side is now the ruled mode.
+    expect(publisherProvenanceViolation([sim(), mock, createDirectDriver()], true)).toBeNull();
+    expect(publisherProvenanceViolation([{ ...mock, key: "mixpost" }, sim()], true)).toBeNull();
     expect(publisherProvenanceViolation([realUnderSimKey()], true)).toMatch(/only the simulator may take that key/);
     expect(publisherProvenanceViolation([simUnderPostizKey()], true)).toMatch(/registers only under the key/);
   });
@@ -174,14 +183,28 @@ describe("SCP-Sa · provenance: the marker must match the key and the switch (SM
     expect(listPublishers()).toHaveLength(0);
   });
 
-  it("registerPublisher refuses a real engine beside the simulator, in either order", () => {
+  it("SCP-Sa2 (was: refuses a real engine beside the simulator): registerPublisher ADMITS a real engine beside it, in either order, and keeps them apart by key", () => {
     setFlag(true);
     registerPublisher(sim());
-    expect(() => registerPublisher(createMockPublisher(newMockPublisherState()))).toThrowError(/real publishing engine/);
+    registerPublisher(createMockPublisher(newMockPublisherState())); // the test double, under 'postiz'
+    expect(listPublishers().map((p) => p.key).sort()).toEqual(["postiz", "simulated"]);
+    expect(realPublisherKey()).toBe("postiz");
     resetPublishers();
-    // The other order cannot happen with the switch on either: the engine is refused as it enters a registry the switch
-    // says must hold only the simulator.
-    expect(() => registerPublisher(createMockPublisher(newMockPublisherState()))).toThrowError(/real publishing engine/);
+    registerPublisher(createMockPublisher(newMockPublisherState()));
+    registerPublisher(sim());
+    // The real engine never resolves to the simulator, and the simulator never resolves by the real engine's names.
+    expect(resolvePublisher("postiz").key).toBe("postiz");
+    expect(isSimulatedPublisher(resolvePublisher("postiz"))).toBe(false);
+    expect(getPublisher("simulated")).toBeUndefined();
+    expect(resolveSimulatedPublisher("schedule").key).toBe("simulated");
+  });
+
+  it("SCP-Sa2: a simulator filed under 'postiz' beside a real engine is still refused (the marker/key rule did not move)", () => {
+    setFlag(true);
+    registerPublisher(createMockPublisher(newMockPublisherState()));
+    expect(() => registerPublisher(simUnderPostizKey())).toThrowError(/registers only under the key/);
+    expect(resolvePublisher("postiz").key).toBe("postiz");
+    expect(isSimulatedPublisher(resolvePublisher("postiz"))).toBe(false);
   });
 
   it("registerPublisher refuses a marker/key mismatch whatever the switch", () => {
@@ -196,44 +219,41 @@ describe("SCP-Sa · provenance: the marker must match the key and the switch (SM
 
 // ── Boot errors ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-describe("SCP-Sa · boot errors (each one ABORTS startup: a thrown error, never a warning)", () => {
+describe("SCP-Sa / SCP-Sa2 · boot errors (each one ABORTS startup: a thrown error, never a warning)", () => {
   const safe: SocialSimulationBootFacts = {
-    enabled: true, postizBaseUrl: "", capabilityOverrides: {}, liveOAuthGrants: 0, realAccounts: 0,
+    enabled: true, capabilityOverrides: {}, accountKindViolations: 0, simulatedAccountGrants: 0,
   };
 
-  it("a clean simulated database boots", () => {
+  it("a clean database boots with the switch on", () => {
     expect(() => assertSocialSimulationBootSafe(safe)).not.toThrow();
   });
 
-  it("refuses the switch beside Postiz", () => {
-    expect(() => assertSocialSimulationBootSafe({ ...safe, postizBaseUrl: "http://10.88.0.2:4007" }))
-      .toThrowError(SocialSimulationBootError);
-    expect(() => assertSocialSimulationBootSafe({ ...safe, postizBaseUrl: "http://10.88.0.2:4007" }))
-      .toThrowError(/SOCIAL_POSTIZ_BASE_URL is set/);
+  it("SCP-Sa2 (was: refuses beside Postiz / a real-driver override / a live grant / a real account): the facts boot no longer reads cannot refuse; an override naming a REAL driver boots", () => {
+    // Postiz configured, live grants and real accounts are not boot facts any more (SCP-D9: side by side). An override
+    // naming `direct` routes REAL accounts to a real driver, which is allowed beside the simulator.
+    expect(() => assertSocialSimulationBootSafe({ ...safe, capabilityOverrides: { "linkedin:*": "direct" } })).not.toThrow();
+    expect(Object.keys(safe).sort()).toEqual(["accountKindViolations", "capabilityOverrides", "enabled", "simulatedAccountGrants"]);
   });
 
-  it("refuses the switch beside ANY capability override (the config road to a real `direct`)", () => {
-    expect(() => assertSocialSimulationBootSafe({ ...safe, capabilityOverrides: { "linkedin:*": "direct" } }))
-      .toThrowError(/SOCIAL_PUBLISHER_CAPABILITY_DRIVERS routes linkedin:\*/);
+  it("SCP-Sa2: refuses the switch beside ANY account that breaks the account-kind rule", () => {
+    expect(() => assertSocialSimulationBootSafe({ ...safe, accountKindViolations: 1 })).toThrowError(SocialSimulationBootError);
+    expect(() => assertSocialSimulationBootSafe({ ...safe, accountKindViolations: 2 })).toThrowError(/2 social_accounts row\(s\) break the account-kind rule/);
   });
 
-  it("refuses the switch beside a live OAuth grant (the token road to a real `direct`)", () => {
-    expect(() => assertSocialSimulationBootSafe({ ...safe, liveOAuthGrants: 1 })).toThrowError(/1 live OAuth grant/);
+  it("SCP-Sa2: refuses the switch beside ANY OAuth grant on a simulated account", () => {
+    expect(() => assertSocialSimulationBootSafe({ ...safe, simulatedAccountGrants: 1 })).toThrowError(/1 social_oauth_tokens row\(s\) name a simulated account/);
   });
 
-  it("refuses the switch beside ANY non-simulated account", () => {
-    expect(() => assertSocialSimulationBootSafe({ ...safe, realAccounts: 1 })).toThrowError(/1 non-simulated social_accounts/);
-  });
-
-  it("refuses an override naming the simulator EVEN WITH THE SWITCH OFF", () => {
-    expect(() => assertSocialSimulationBootSafe({ ...safe, enabled: false, capabilityOverrides: { "*:schedule": "simulated" } }))
-      .toThrowError(/'\*:schedule' to 'simulated'/);
+  it("refuses an override naming the simulator, switch ON or OFF (unchanged)", () => {
+    for (const enabled of [true, false]) {
+      expect(() => assertSocialSimulationBootSafe({ ...safe, enabled, capabilityOverrides: { "*:schedule": "simulated" } }))
+        .toThrowError(/'\*:schedule' to 'simulated'/);
+    }
   });
 
   it("with the switch off, nothing else is checked: a real deployment boots exactly as before", () => {
     expect(() => assertSocialSimulationBootSafe({
-      enabled: false, postizBaseUrl: "http://10.88.0.2:4007", capabilityOverrides: { "linkedin:*": "direct" },
-      liveOAuthGrants: 9, realAccounts: 9,
+      enabled: false, capabilityOverrides: { "linkedin:*": "direct" }, accountKindViolations: 9, simulatedAccountGrants: 9,
     })).not.toThrow();
   });
 });
@@ -249,7 +269,7 @@ describe("SCP-Sa · wireSocialPublisher (the exact function bootstrap() awaits)"
 
   it("switch OFF: the simulator is NOT registered, the DB is NOT read, one plain log line says so", async () => {
     setFlag(false);
-    const readDbFacts = vi.fn(async () => ({ liveOAuthGrants: 0, realAccounts: 0 }));
+    const readDbFacts = vi.fn(async () => ({ accountKindViolations: 0, simulatedAccountGrants: 0 }));
     await wireSocialPublisher({ readDbFacts });
     expect(readDbFacts).not.toHaveBeenCalled();
     expect(listPublishers().map((p) => p.key)).toEqual(["direct"]);
@@ -261,7 +281,7 @@ describe("SCP-Sa · wireSocialPublisher (the exact function bootstrap() awaits)"
 
   it("switch ON, clean database: registers the simulator beside an inert `direct`, and warns on the boot log", async () => {
     setFlag(true);
-    const readDbFacts = vi.fn(async () => ({ liveOAuthGrants: 0, realAccounts: 0 }));
+    const readDbFacts = vi.fn(async () => ({ accountKindViolations: 0, simulatedAccountGrants: 0 }));
     await wireSocialPublisher({ readDbFacts });
     expect(readDbFacts).toHaveBeenCalledTimes(1);
     expect(listPublishers().map((p) => p.key).sort()).toEqual(["direct", "simulated"]);
@@ -270,25 +290,38 @@ describe("SCP-Sa · wireSocialPublisher (the exact function bootstrap() awaits)"
       .toMatch(/^\[social:simulation-enabled\] SOCIAL_SIMULATION_ENABLED is ON/m);
   });
 
-  it("switch ON beside a real account: refuses BEFORE registering anything", async () => {
+  it("SCP-Sa2: switch ON beside a row that breaks the kind rule or a grant on a simulated account: refuses BEFORE registering anything", async () => {
     setFlag(true);
-    await expect(wireSocialPublisher({ readDbFacts: async () => ({ liveOAuthGrants: 0, realAccounts: 3 }) }))
+    await expect(wireSocialPublisher({ readDbFacts: async () => ({ accountKindViolations: 3, simulatedAccountGrants: 0 }) }))
       .rejects.toThrowError(SocialSimulationBootError);
+    expect(listPublishers()).toHaveLength(0);
+    await expect(wireSocialPublisher({ readDbFacts: async () => ({ accountKindViolations: 0, simulatedAccountGrants: 1 }) }))
+      .rejects.toThrowError(/name a simulated account/);
     expect(listPublishers()).toHaveLength(0);
   });
 
-  it("switch ON beside a live grant, Postiz, or an override: refuses", async () => {
+  it("SCP-Sa2 (was: refuses beside Postiz): switch ON with Postiz configured BOOTS, registering postiz, direct and the simulator side by side, and the warning names both", async () => {
     setFlag(true);
-    await expect(wireSocialPublisher({ readDbFacts: async () => ({ liveOAuthGrants: 2, realAccounts: 0 }) }))
-      .rejects.toThrowError(/live OAuth grant/);
     config.social.publisher.baseUrl = "http://10.88.0.2:4007";
-    await expect(wireSocialPublisher({ readDbFacts: async () => ({ liveOAuthGrants: 0, realAccounts: 0 }) }))
-      .rejects.toThrowError(/SOCIAL_POSTIZ_BASE_URL/);
-    config.social.publisher.baseUrl = "";
+    await wireSocialPublisher({ readDbFacts: async () => ({ accountKindViolations: 0, simulatedAccountGrants: 0 }) });
+    expect(listPublishers().map((p) => p.key).sort()).toEqual(["direct", "postiz", "simulated"]);
+    expect(isSimulatedPublisher(resolvePublisher("postiz"))).toBe(false);
+    expect(resolveSimulatedPublisher("schedule").key).toBe("simulated");
+    expect(realPublisherKey()).toBe("postiz");
+    expect((console.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls.flat().join("\n"))
+      .toMatch(/Real accounts publish through 'postiz' beside it/);
+  });
+
+  it("SCP-Sa2 (was: refuses any override): switch ON with an override naming a REAL driver boots; one naming the simulator still refuses", async () => {
+    setFlag(true);
     config.social.publisher.capabilityDrivers = { "linkedin:schedule": "direct" };
-    await expect(wireSocialPublisher({ readDbFacts: async () => ({ liveOAuthGrants: 0, realAccounts: 0 }) }))
-      .rejects.toThrowError(/CAPABILITY_DRIVERS/);
-    expect(listPublishers().some(isSimulatedPublisher)).toBe(false);
+    await wireSocialPublisher({ readDbFacts: async () => ({ accountKindViolations: 0, simulatedAccountGrants: 0 }) });
+    expect(listPublishers().map((p) => p.key).sort()).toEqual(["direct", "simulated"]);
+    resetPublishers();
+    config.social.publisher.capabilityDrivers = { "linkedin:schedule": "simulated" };
+    await expect(wireSocialPublisher({ readDbFacts: async () => ({ accountKindViolations: 0, simulatedAccountGrants: 0 }) }))
+      .rejects.toThrowError(/to 'simulated'/);
+    expect(listPublishers()).toHaveLength(0);
   });
 });
 
@@ -422,53 +455,79 @@ describe("SCP-Sa · port contract (switch off)", () => {
 
 // ── 3. Runtime refusals: every account create/connect path ───────────────────────────────────────────────────────
 
-describe("SCP-Sa · runtime: with the switch ON, no path creates or connects a REAL account", () => {
+describe("SCP-Sa2 · runtime: with the switch ON, a REAL account may be connected (was: refused simulation_real_account_refused)", () => {
   beforeEach(() => setFlag(true));
-  const REFUSED = SOCIAL_SIMULATION_REFUSAL.realAccountRefused;
+  const GONE = "simulation_real_account_refused";
 
-  it("the guards themselves", async () => {
-    expect(await codeOf(() => assertRealAccountWriteAllowed("x"))).toBe(REFUSED);
-    expect(realAccountWriteRefusal("x")).toMatchObject({ ok: false, reason: REFUSED });
+  it("the old refusal code is gone from the vocabulary", () => {
+    expect(Object.values(SOCIAL_SIMULATION_REFUSAL)).not.toContain(GONE);
     expect(() => assertSimulatedWriteAllowed("x")).not.toThrow();
   });
 
-  // Each of these refuses as its FIRST step, before any database read or network call, so this file can prove it
-  // without Postgres: a call that got further would throw a connection error instead of the typed code.
-  it("account connect (readiness answers it; initiate throws it)", async () => {
-    expect(await checkConnectReadiness(T, ACCOUNT, "instagram")).toMatchObject({ ok: false, reason: REFUSED });
-    expect(await codeOf(initiateAccountConnect(T, { clientId: ACCOUNT, network: "instagram", handle: "@x", actorId: null }))).toBe(REFUSED);
+  // Each readiness check now goes PAST the simulator to its own next (config-only) check, with no database read: the
+  // answer is that check's code, never the simulator's. (The DB half, a real connect beside a simulated account, is
+  // side-by-side.db.test.ts.)
+  it("account connect readiness answers its own next check, not the simulator", async () => {
+    const r = await checkConnectReadiness(T, ACCOUNT, "instagram");
+    expect(r.reason).not.toBe(GONE);
+    expect(r).toMatchObject({ ok: false, reason: "client_connect_requires_signoff" });
   });
 
-  it("connector-registry sync (Postiz-mirrored accounts are always real)", async () => {
-    expect(await codeOf(syncConnectorRegistry(T, ACCOUNT, null))).toBe(REFUSED);
-  });
-
-  it("LinkedIn connect: readiness, start AND the OAuth callback (before the single-use code is spent)", async () => {
-    const fetchImpl = vi.fn();
-    expect(await checkLinkedInConnectReadiness(T, ACCOUNT)).toMatchObject({ ok: false, reason: REFUSED });
-    expect(await codeOf(startLinkedInConnect(T, { clientId: ACCOUNT, handle: "@x", actorId: null }))).toBe(REFUSED);
-    expect(await codeOf(completeLinkedInConnect(T, ACCOUNT, { code: "c", actorId: null, fetchImpl: fetchImpl as never }))).toBe(REFUSED);
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
-  it("YouTube connect: readiness, start AND the OAuth callback", async () => {
-    const fetchImpl = vi.fn();
-    expect(await checkYouTubeConnectReadiness(T, ACCOUNT)).toMatchObject({ ok: false, reason: REFUSED });
-    expect(await codeOf(startYouTubeConnect(T, { clientId: ACCOUNT, handle: "@x", actorId: null }))).toBe(REFUSED);
-    expect(await codeOf(completeYouTubeConnect(T, ACCOUNT, { code: "c", actorId: null, fetchImpl: fetchImpl as never }))).toBe(REFUSED);
-    expect(fetchImpl).not.toHaveBeenCalled();
+  it("LinkedIn and YouTube connect readiness answer their own next check, not the simulator", async () => {
+    expect((await checkLinkedInConnectReadiness(T, ACCOUNT)).reason).not.toBe(GONE);
+    expect((await checkYouTubeConnectReadiness(T, ACCOUNT)).reason).not.toBe(GONE);
   });
 });
 
 describe("SCP-Sa · runtime: with the switch OFF, nothing writes a simulated mark", () => {
   beforeEach(() => setFlag(false));
 
-  it("assertSimulatedWriteAllowed refuses simulation_disabled; real writes are allowed", async () => {
+  it("assertSimulatedWriteAllowed refuses simulation_disabled", async () => {
     expect(await codeOf(() => assertSimulatedWriteAllowed("x"))).toBe(SOCIAL_SIMULATION_REFUSAL.disabled);
-    expect(() => assertRealAccountWriteAllowed("x")).not.toThrow();
-    expect(realAccountWriteRefusal("x")).toBeNull();
   });
 });
+
+// ── 3/4. SCP-Sa2: one kind per account, and the reverse fence ──────────────────────────────────────────────────────
+
+describe("SCP-Sa2 · the reverse fence: a real path refuses a simulated account, switch on or off", () => {
+  const REFUSED = SOCIAL_SIMULATION_REFUSAL.simulatedOnRealPublisher;
+  for (const on of [true, false]) {
+    it(`refuses on each independent signal (switch ${on ? "on" : "off"})`, async () => {
+      setFlag(on);
+      expect(realPublisherRefusal("x", { simulated: true })?.code).toBe(REFUSED);
+      expect(realPublisherRefusal("x", { simulated: false, integrationId: "simulated:instagram" })?.code).toBe(REFUSED);
+      expect(realPublisherRefusal("x", { providerPostId: "simulated:facebook:1:0b6a7a52-77c3-4c1f-9d0e-5f2d3f8e1a11" })?.code).toBe(REFUSED);
+      expect(await codeOf(() => assertRealPublisherTarget("x", { simulated: true }))).toBe(REFUSED);
+    });
+  }
+
+  it("passes a plainly real target, and never mistakes a near miss for the prefix", () => {
+    expect(realPublisherRefusal("x", {})).toBeNull();
+    expect(realPublisherRefusal("x", { simulated: false, integrationId: "ig_1234", providerPostId: "postiz-1" })).toBeNull();
+    expect(realPublisherRefusal("x", { simulated: null, integrationId: null, providerPostId: null })).toBeNull();
+    // `direct`'s sentinel and a case variant are real: the CHECK's LIKE is case-sensitive, and so is this.
+    expect(realPublisherRefusal("x", { integrationId: "direct:linkedin" })).toBeNull();
+    expect(realPublisherRefusal("x", { integrationId: "Simulated:instagram" })).toBeNull();
+    expect(isSimulatedId("simulated")).toBe(false);
+    expect(isSimulatedId(`${SIMULATED_ID_PREFIX}x`)).toBe(true);
+  });
+
+  it("the message names the path and the ruling, and the code renders 409", async () => {
+    const e = realPublisherRefusal("real 'schedule' for account a1", { simulated: true })!;
+    expect(e.message).toMatch(/^real 'schedule' for account a1: refused because its account is simulated/);
+    expect(e.message).toMatch(/SCP-D9/);
+  });
+
+  it("a real account writer refuses a simulated integration id, and names a handle a simulated account holds", async () => {
+    expect(await codeOf(() => assertRealIntegrationId("sync", "simulated:instagram"))).toBe(REFUSED_WRITE);
+    expect(() => assertRealIntegrationId("sync", "ig_1234")).not.toThrow();
+    expect(() => assertRealIntegrationId("sync", null)).not.toThrow();
+    const e = realWriteOnSimulatedRow("account connect", "instagram", "@mock-kopi");
+    expect(e.code).toBe(REFUSED_WRITE);
+    expect(e.message).toMatch(/'@mock-kopi' belongs to a simulated account/);
+  });
+});
+const REFUSED_WRITE = SOCIAL_SIMULATION_REFUSAL.simulatedOnRealPublisher;
 
 // ── Static inventory: a NEW writer fails here until it is fenced ─────────────────────────────────────────────────
 
@@ -490,6 +549,16 @@ const SIMULATED_ACCOUNT_WRITER = "modules/social/simulated-accounts.ts";
  *  non-simulated row), so it cannot sit behind fence 4; the test below pins what it may do instead. */
 const SIMULATED_PREPARE_SCRIPT = "seed/social-simulation-prepare.ts";
 const sqlLiterals = (src: string) => [...src.matchAll(/`[^`]*`/g)].map((m) => m[0]);
+/** SCP-Sa2 — every SQL statement in `src` that starts with `re`, read from the match to the closing backtick of its template
+ *  literal. Independent of backtick pairing in comments (which `sqlLiterals` depends on). */
+const statementsAt = (src: string, re: RegExp): string[] =>
+  [...src.matchAll(new RegExp(re.source, "g"))].map((m) => src.slice(m.index ?? 0, src.indexOf("`", m.index ?? 0)));
+/** SCP-Sa2 — does this statement WRITE an account's mark (a SET of `simulated` to anything but false, or an INSERT naming
+ *  the column)? A real writer may READ the mark in its WHERE (`simulated = false`, the fence); that is not a write. */
+const writesAccountMark = (stmt: string): boolean =>
+  /\bsimulated\s*=(?!\s*false\b)/.test(stmt) || /INSERT\s+INTO\s+social_accounts\s*\([^)]*\bsimulated\b/.test(stmt);
+/** Source without its comments, for "who CALLS this" inventories (a comment that names a function is not a call). */
+const codeOnly = (src: string): string => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
 
 describe("SCP-Sa · static inventory of the writers (src/, tests excluded)", () => {
   const files = sourceFiles();
@@ -499,7 +568,7 @@ describe("SCP-Sa · static inventory of the writers (src/, tests excluded)", () 
     expect(files.map(rel)).toContain("modules/social/dispatch.ts");
   });
 
-  it("every file that INSERTs or UPDATEs social_accounts is fenced against a real account under the switch", () => {
+  it("SCP-Sa2 (was: every real writer refuses under the switch): every REAL writer of social_accounts can never land on a simulated row", () => {
     const writers = files.filter((f) => /\b(INSERT\s+INTO|UPDATE)\s+social_accounts\b/.test(readFileSync(f, "utf8")));
     expect(writers.map(rel).sort()).toEqual([
       "modules/social/publisher/linkedin-oauth.ts",
@@ -510,30 +579,52 @@ describe("SCP-Sa · static inventory of the writers (src/, tests excluded)", () 
       "seed/social-simulation-prepare.ts",
     ]);
     for (const f of writers) {
-      // SCP-Sb's seed is the one writer of SIMULATED accounts: it owes the opposite fence (switch OFF refuses) instead.
+      // SCP-Sb's seed and the prepare script are the writers of SIMULATED accounts: pinned by the next test instead.
       if (rel(f) === SIMULATED_ACCOUNT_WRITER || rel(f) === SIMULATED_PREPARE_SCRIPT) continue;
-      expect(readFileSync(f, "utf8"), rel(f)).toMatch(/\b(assertRealAccountWriteAllowed|realAccountWriteRefusal)\(/);
+      const src = readFileSync(f, "utf8");
+      const stmts = statementsAt(src, /\b(?:INSERT\s+INTO|UPDATE)\s+social_accounts\b/);
+      expect(stmts.length, rel(f)).toBeGreaterThan(0);
+      for (const stmt of stmts) {
+        // A real writer never writes the mark (it may READ it in a WHERE: that is the fence).
+        expect(writesAccountMark(stmt), `${rel(f)}: ${stmt.slice(0, 60)}`).toBe(false);
+        // Every conflict update that could land on an existing row is fenced off simulated rows.
+        if (/ON\s+CONFLICT[\s\S]*DO\s+UPDATE/.test(stmt)) expect(stmt, rel(f)).toMatch(/WHERE social_accounts\.simulated = false/);
+        // Every UPDATE of social_accounts in a real writer names `simulated = false` in its WHERE.
+        if (/^UPDATE\s+social_accounts\b/.test(stmt)) expect(stmt, rel(f)).toMatch(/\bsimulated = false\b/);
+      }
     }
+    // The portal seed inserts with no integration id and no mark: it can only ever write the real kind.
+    const portal = statementsAt(readFileSync(join(SRC, "seed", "portal-engagement.ts"), "utf8"), /\bINSERT\s+INTO\s+social_accounts\b/);
+    expect(portal).toHaveLength(1);
+    expect(portal[0]).not.toMatch(/simulated|postiz_integration_id|ON\s+CONFLICT/);
   });
 
   it("the ONLY statement that writes a variant's `simulated` mark is dispatch.ts's stamp; the ONLY account-mark writers are SCP-Sb's seed and its prepare script", () => {
     const variantMarkWriters: string[] = [];
     const accountMarkWriters: string[] = [];
     for (const f of files) {
-      for (const lit of sqlLiterals(readFileSync(f, "utf8"))) {
+      const src = readFileSync(f, "utf8");
+      for (const lit of sqlLiterals(src)) {
         if (!/\bsimulated\b/.test(lit)) continue;
         if (/\b(INSERT\s+INTO|UPDATE)\s+social_post_variants\b/.test(lit)) variantMarkWriters.push(rel(f));
-        if (/\b(INSERT\s+INTO|UPDATE)\s+social_accounts\b/.test(lit)) accountMarkWriters.push(rel(f));
+      }
+      // SCP-Sa2: real writers now READ the mark in their WHERE (the fence), so an account-mark WRITER is a statement that
+      // sets it or inserts it, not one that merely names it.
+      for (const stmt of statementsAt(src, /\b(?:INSERT\s+INTO|UPDATE)\s+social_accounts\b/)) {
+        if (writesAccountMark(stmt)) accountMarkWriters.push(rel(f));
       }
     }
     expect(variantMarkWriters).toEqual(["modules/social/dispatch.ts"]);
     // SCP-Sb's seed is the ONE writer of an account's mark: it calls `assertSimulatedWriteAllowed` before it writes, and its
     // controller calls it again before the body is read. A second writer fails here until it is fenced the same way.
     expect([...new Set(accountMarkWriters)].sort()).toEqual([SIMULATED_ACCOUNT_WRITER, SIMULATED_PREPARE_SCRIPT]);
-    // The prepare script only ever turns the mark ON, on rows that are off, inserts nothing and deletes nothing.
+    // The prepare script only ever turns the mark ON, on rows that are off and never reached an engine, inserts nothing
+    // and deletes nothing. SCP-Sa2: it writes the simulated integration id in the same statement (social_accounts_kind_ck).
     const prepare = sqlLiterals(readFileSync(join(SRC, SIMULATED_PREPARE_SCRIPT), "utf8")).join(" "); // the SQL literals only: the header quotes the statement
     expect(prepare.match(/\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+social_\w+/g)).toEqual(["UPDATE social_accounts"]);
-    expect(prepare).toMatch(/UPDATE social_accounts SET simulated = true, updated_at = now\(\) WHERE tenant_id = \$1 AND simulated = false AND id = ANY/);
+    expect(prepare).toMatch(
+      /UPDATE social_accounts SET simulated = true, postiz_integration_id = '\$\{SIMULATED_ID_PREFIX\}' \|\| network, updated_at = now\(\) WHERE tenant_id = \$1 AND simulated = false AND postiz_integration_id IS NULL AND connected_by IS NULL AND id = ANY/,
+    );
     const seed = readFileSync(join(SRC, SIMULATED_ACCOUNT_WRITER), "utf8");
     const fence = seed.indexOf('assertSimulatedWriteAllowed("simulated-account seed")');
     expect(fence).toBeGreaterThan(-1);
@@ -587,6 +678,51 @@ describe("SCP-Sa · static inventory of the writers (src/, tests excluded)", () 
     }
   });
 
+  it("SCP-Sa2 · the reverse fence: every real path that hands a variant or account to a real engine asks it", () => {
+    // `openOrg(` hands back a REAL engine. Its callers are pinned so a new one fails here until it is reviewed: each
+    // that serves a variant or an account must ask the reverse fence. best-time.ts only reads the driver's capability set
+    // (no engine call), and provisioning.ts's own callers are org-level (verify, sync, connect), fenced as writers above.
+    const openOrgCallers = files.filter((f) => /\bopenOrg\(/.test(codeOnly(readFileSync(f, "utf8")))).map(rel).sort();
+    expect(openOrgCallers).toEqual([
+      "modules/social/best-time.ts",
+      "modules/social/creator-info-verifier.ts",
+      "modules/social/metrics-job.ts",
+      "modules/social/post-status-sync-job.ts",
+      "modules/social/publisher/provisioning.ts",
+    ]);
+    for (const f of ["modules/social/creator-info-verifier.ts", "modules/social/metrics-job.ts", "modules/social/post-status-sync-job.ts", "modules/social/pipeline/pipeline-effects.ts"]) {
+      expect(readFileSync(join(SRC, f), "utf8"), f).toMatch(/\b(realPublisherRefusal|assertRealPublisherTarget)\(/);
+    }
+    // The dispatch resolver: the reverse fence sits on the REAL branch, after the fork to the simulator and before any
+    // real driver is resolved.
+    const prov = readFileSync(join(SRC, "modules", "social", "publisher", "provisioning.ts"), "utf8");
+    const body = prov.slice(prov.indexOf("export async function resolveDispatchOrgHandle"));
+    const fork = body.indexOf("resolveSimulatedPublisher(capability)");
+    const fence = body.indexOf("assertRealPublisherTarget(");
+    const real = body.indexOf("resolvePublisherForCapability(");
+    expect(fork).toBeGreaterThan(-1);
+    expect(fence).toBeGreaterThan(fork);
+    expect(real).toBeGreaterThan(fence);
+    // The status sweep fences its real groups BEFORE it opens the real driver for them, and the webhook intake too.
+    const sweep = readFileSync(join(SRC, "modules", "social", "post-status-sync-job.ts"), "utf8");
+    const tenantSweep = sweep.slice(sweep.indexOf("export async function reconcileTenantPostStatus"));
+    expect(tenantSweep.indexOf("refuseSimulatedOnRealGroup(")).toBeGreaterThan(-1);
+    expect(tenantSweep.indexOf("refuseSimulatedOnRealGroup(")).toBeLessThan(tenantSweep.indexOf("openStatusDriver("));
+    const intake = sweep.slice(sweep.indexOf("export async function reconcileOneProviderPost"));
+    expect(intake.indexOf("realPublisherRefusal(")).toBeGreaterThan(-1);
+    expect(intake.indexOf("realPublisherRefusal(")).toBeLessThan(intake.indexOf("openStatusDriver("));
+    // The metrics sweep fences both real halves before `openOrg`.
+    const job = readFileSync(join(SRC, "modules", "social", "metrics-job.ts"), "utf8");
+    const halves = job.slice(job.indexOf("export async function pullTenantMetrics"));
+    const firstOpen = halves.indexOf("openOrg(");
+    const secondOpen = halves.indexOf("openOrg(", firstOpen + 1);
+    expect(halves.indexOf("assertRealPublisherTarget(")).toBeLessThan(firstOpen);
+    expect(halves.indexOf("realPublisherRefusal(")).toBeGreaterThan(firstOpen);
+    expect(halves.indexOf("realPublisherRefusal(")).toBeLessThan(secondOpen);
+    // And dispatch.ts never sends a simulated chain to the real creator-info probe.
+    expect(readFileSync(join(SRC, "modules", "social", "dispatch.ts"), "utf8")).toMatch(/preview\.chain && !preview\.chain\.simulated\)/);
+  });
+
   it("the simulator is constructed only by boot.ts (outside tests)", () => {
     const constructors = files.filter((f) => /\bcreateSimulatedPublisher\(/.test(readFileSync(f, "utf8")));
     expect(constructors.map(rel).sort()).toEqual([
@@ -618,7 +754,7 @@ describe("SCP-Sa · the test double (mock-driver.ts) is never registered by boot
       config.social.publisher.capabilityDrivers = {};
       setFlag(on);
       resetPublishers();
-      await wireSocialPublisher({ readDbFacts: async () => ({ liveOAuthGrants: 0, realAccounts: 0 }) });
+      await wireSocialPublisher({ readDbFacts: async () => ({ accountKindViolations: 0, simulatedAccountGrants: 0 }) });
       const keys = listPublishers().map((p) => p.key).sort();
       expect(keys).toEqual(on ? ["direct", "simulated"] : ["direct"]);
       // Neither registered driver is the double: the double's connectUrl answers mock.invalid, never these.
@@ -643,7 +779,7 @@ describe("SCP-Sa · the HTTP filter renders every new code with its intended sta
   }
 
   it.each([
-    ["simulation_real_account_refused", 409],
+    ["simulated_account_on_real_publisher", 409],
     ["simulation_disabled", 409],
     ["simulated_account_required", 409],
     ["simulated_approval_not_decided", 409],

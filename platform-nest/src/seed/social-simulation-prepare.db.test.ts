@@ -1,14 +1,19 @@
-// SCP-Sb — the prepare script against REAL Postgres (needs DATABASE_URL_TEST: NOT run on the dev laptop, runs on the Linux CI gate; a
-// skip is not a pass). The rule itself is `social-simulation-prepare.test.ts`.
+// SCP-Sb / SCP-Sa2 — the prepare script against REAL Postgres (needs DATABASE_URL_TEST: NOT run on the dev laptop, runs on the
+// Linux CI gate; a skip is not a pass). The rules themselves are `social-simulation-prepare.test.ts`.
+//
+// SCP-Sa2 (owner ruling SCP-D9): the simulator runs beside real accounts, so real accounts and real grants no longer block.
+// What blocks is a row breaking the account-kind rule or a grant on a simulated account. Migration 202610280100 makes both
+// impossible to write, so this file plays a database the migration has not reached: it drops social_accounts_kind_ck and
+// the grant trigger IN ITS OWN per-file database (initTestDb gives every file its own) to plant those rows.
 //
 // Proves, on rows the CP-21 seed's shape and on rows it is not:
-//   (P1) the DRY RUN lists every non-simulated account (soft-deleted included) and every active grant, with ids and client names,
-//        classifies them, and WRITES NOTHING (every row is byte-for-byte what it was);
-//   (P2) `--apply` marks exactly the MOCK SEED rows (live and soft-deleted) and nothing else: the unclassified rows and the grants
-//        stay as they were, nothing is deleted, no status/handle/org changes; it records an activity row;
-//   (P3) it is idempotent (a second apply marks nothing), and a company holding only seed rows comes out clean: the boot's own
-//        per-company count (`simulated = false`) reads 0 after;
-//   (P4) the company's read goes through the third wall: a company's rows are never read as zero (the RLS zero-row trap).
+//   (P1) the DRY RUN finds the markable CP-21 rows (soft-deleted included), counts the real accounts without listing them as
+//        blocking, lists the rows breaking the kind rule and the grants on simulated accounts, and WRITES NOTHING;
+//   (P2) `--apply` marks exactly the MOCK SEED rows (live and soft-deleted), writing `simulated:<network>` with the mark in
+//        the same statement, and nothing else: real rows and grants stay as they were, nothing is deleted; an activity row;
+//   (P3) it is idempotent (a second apply marks nothing); a company holding only seed rows and real rows is clean (nothing
+//        blocks), and the planted rows are exactly what still blocks;
+//   (P4) the company's reads go through the third wall: the counts equal what the superuser sees (the RLS zero-row trap).
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomBytes } from "node:crypto";
 import { config } from "../config";
@@ -20,14 +25,15 @@ import { CP21_API_KEY_REF, cp21PostizOrgId, prepare, renderReport } from "./soci
 
 const MODULES = { modules: ["social"] };
 
-describe.skipIf(!TEST_URL)("SCP-Sb · social-simulation-prepare on real rows", () => {
-  let dirty: string; // seed rows AND rows it must refuse
-  let clean: string; // only seed rows
+describe.skipIf(!TEST_URL)("SCP-Sb / SCP-Sa2 · social-simulation-prepare on real rows", () => {
+  let dirty: string; // seed rows, real rows AND the rows that break the kind rule
+  let clean: string; // only seed rows and real rows
   const ids: Record<string, string> = {};
   const before = { key: config.integrationTokenKey };
 
   async function addAccount(tenant: string, label: string, o: {
-    clientName: string; orgKeyRef?: string; orgIdOf?: (clientId: string) => string; integration?: string | null; deleted?: boolean; network?: string; simulated?: boolean;
+    clientName: string; orgKeyRef?: string; orgIdOf?: (clientId: string) => string; integration?: string | null; deleted?: boolean;
+    network?: string; simulated?: boolean;
   }): Promise<{ accountId: string; clientId: string }> {
     const clientId = await createClient(tenant, o.clientName);
     const orgId = newId();
@@ -51,8 +57,6 @@ describe.skipIf(!TEST_URL)("SCP-Sb · social-simulation-prepare on real rows", (
       `SELECT id, simulated, status, handle, publisher_org_id, postiz_integration_id, deleted_at, updated_at FROM social_accounts WHERE tenant_id = ANY($1::uuid[]) ORDER BY id`,
       [[dirty, clean]],
     )).rows;
-  const bootCount = async (tenant: string): Promise<number> =>
-    Number((await withTenants([tenant], (c) => c.query<{ n: string }>(`SELECT count(*)::text AS n FROM social_accounts WHERE simulated = false`), MODULES)).rows[0].n);
 
   beforeAll(async () => {
     await initTestDb();
@@ -63,7 +67,8 @@ describe.skipIf(!TEST_URL)("SCP-Sb · social-simulation-prepare on real rows", (
     // CP-21 shaped: markable.
     await addAccount(dirty, "seed-live", { clientName: "Seed Live Co" });
     await addAccount(dirty, "seed-deleted", { clientName: "Seed Deleted Co", deleted: true, network: "facebook" });
-    // Refused: a real-looking org, an engine integration id, a trace of a grant, publishing history.
+    // REAL (stay real; allowed beside the simulator since SCP-D9): a real-looking org, an engine integration id, a trace of a
+    // grant, publishing history, a live grant.
     await addAccount(dirty, "real-org", { clientName: "Real Org Co", orgKeyRef: "default", orgIdOf: (c) => `org-${c}` });
     await addAccount(dirty, "integrated", { clientName: "Integrated Co", integration: "ig_1234" });
     const revoked = await addAccount(dirty, "was-granted", { clientName: "Granted Co", network: "linkedin" });
@@ -72,7 +77,6 @@ describe.skipIf(!TEST_URL)("SCP-Sb · social-simulation-prepare on real rows", (
       await revokeOAuthGrant(c, revoked.accountId, "SCP-Sb test");
     }, MODULES);
     const published = await addAccount(dirty, "published", { clientName: "Published Co" });
-    // Publishing history: a native import (a post recorded as published by hand) names this account.
     await withTenants([dirty], async (c) => {
       const engagementId = newId();
       const postId = newId();
@@ -83,57 +87,73 @@ describe.skipIf(!TEST_URL)("SCP-Sb · social-simulation-prepare on real rows", (
         [newId(), dirty, postId, published.accountId],
       );
     }, MODULES);
-    // A live grant on a real LinkedIn account: it blocks, and is only ever listed.
     const live = await addAccount(dirty, "live-grant", { clientName: "Live Grant Co", network: "linkedin", orgKeyRef: "default", orgIdOf: (c) => `org-${c}` });
     await withTenants([dirty], (c) => storeOAuthGrant(c, { tenantId: dirty, accountId: live.accountId, network: "linkedin", accessToken: "mock-access", expiresAt: new Date(Date.now() + 3600_000) }), MODULES);
-    // Already simulated: not listed at all.
+    // Already simulated (valid): not markable, not real, not blocking.
     await addAccount(dirty, "already-sim", { clientName: "Already Sim Co", simulated: true, integration: "simulated:instagram" });
 
-    // The clean company: only seed rows.
+    // A database the migration has not reached: plant a simulated row with no integration id, a real row with a simulated
+    // id, and a grant on a simulated account. Only this file's database is touched.
+    await adminPool().query(`ALTER TABLE social_accounts DROP CONSTRAINT social_accounts_kind_ck`);
+    await adminPool().query(`ALTER TABLE social_oauth_tokens DISABLE TRIGGER trg_social_oauth_tokens_real_account_only`);
+    await addAccount(dirty, "sim-no-id", { clientName: "Legacy Sim Co", simulated: true, integration: null, deleted: true });
+    await addAccount(dirty, "real-sim-id", { clientName: "Mixed Real Co", integration: "simulated:facebook", network: "facebook" });
+    const granted = await addAccount(dirty, "sim-granted", { clientName: "Sim Granted Co", simulated: true, integration: "simulated:linkedin", network: "linkedin" });
+    await withTenants([dirty], (c) => storeOAuthGrant(c, { tenantId: dirty, accountId: granted.accountId, network: "linkedin", accessToken: "mock-access", expiresAt: new Date(Date.now() + 3600_000) }), MODULES);
+
+    // The clean company: seed rows and a real row.
     await addAccount(clean, "clean-live", { clientName: "Clean Live Co" });
     await addAccount(clean, "clean-deleted", { clientName: "Clean Deleted Co", deleted: true });
+    await addAccount(clean, "clean-real", { clientName: "Clean Real Co", integration: "ig_9", orgKeyRef: "default", orgIdOf: (c) => `org-${c}` });
   });
   afterAll(async () => {
     config.integrationTokenKey = before.key;
     await teardownTestDb();
   });
 
-  it("(P1) the dry run classifies every non-simulated row, lists grants with ids and client names, and writes nothing", async () => {
+  it("(P1) the dry run finds the markable rows, COUNTS the real ones, lists only kind-rule breaks and grants on simulated accounts, and writes nothing", async () => {
     const before = await snapshot();
     const r = await prepare({ apply: false, onlyTenantIds: [dirty, clean] });
     expect(await snapshot()).toEqual(before);
     const d = r.tenants.find((t) => t.tenantId === dirty)!;
     expect(d.markable.map((a) => a.id).sort()).toEqual([ids["seed-live"], ids["seed-deleted"]].sort());
-    const unclassified = d.unclassified.map((u) => u.account.id).sort();
-    expect(unclassified).toEqual([ids["real-org"], ids.integrated, ids["was-granted"], ids.published, ids["live-grant"]].sort());
-    expect(d.unclassified.find((u) => u.account.id === ids["was-granted"])!.reasons.join(" ")).toMatch(/OAuth grant/);
-    expect(d.unclassified.find((u) => u.account.id === ids["real-org"])!.account.clientName).toBe("Real Org Co");
-    expect(d.unclassified.some((u) => u.account.id === ids["already-sim"])).toBe(false);
-    expect(d.markable.find((a) => a.id === ids["seed-deleted"])!.deleted).toBe(true); // soft-deleted rows are listed, and flagged
-    // grants: only the ACTIVE one, with the client's name
-    expect(d.grants).toHaveLength(1);
-    expect(d.grants[0]).toMatchObject({ accountId: ids["live-grant"], clientName: "Live Grant Co", network: "linkedin" });
+    expect(d.markable.find((a) => a.id === ids["seed-deleted"])!.deleted).toBe(true); // soft-deleted rows are found, and flagged
+    // real-org, integrated, was-granted, published, live-grant and the planted real-sim-id: real accounts, counted.
+    expect(d.realAccounts).toBe(6);
+    expect(d.kindViolations.map((v) => v.id).sort()).toEqual([ids["sim-no-id"], ids["real-sim-id"]].sort());
+    expect(d.simulatedGrants).toHaveLength(1);
+    expect(d.simulatedGrants[0]).toMatchObject({ accountId: ids["sim-granted"], clientName: "Sim Granted Co", network: "linkedin", status: "active" });
+    // SCP-Sa2: the live grant on the REAL LinkedIn account is not listed at all.
+    expect(d.simulatedGrants.some((g) => g.accountId === ids["live-grant"])).toBe(false);
+    expect(r.blockingAccounts).toBe(2);
+    expect(r.blockingGrants).toBe(1);
     const text = renderReport(r).join("\n");
     expect(text).toContain(ids["seed-live"]);
-    expect(text).toContain("Real Org Co");
+    expect(text).toMatch(/KIND RULE BROKEN/);
+    expect(text).not.toContain("Real Org Co");
     expect(text).toMatch(/BOOT WOULD STILL REFUSE/);
     expect(r.totalMarked).toBe(0);
   });
 
-  it("(P2) --apply marks exactly the mock seed rows; everything it cannot classify, and every grant, is untouched; nothing is deleted", async () => {
-    const beforeRows = await snapshot() as Array<{ id: string; simulated: boolean }>;
+  it("(P2) --apply marks exactly the mock seed rows with their simulated:<network> id; real rows, planted rows and grants are untouched", async () => {
+    const beforeRows = await snapshot() as Array<{ id: string; simulated: boolean; postiz_integration_id: string | null }>;
     const grantsBefore = (await adminPool().query(`SELECT id, status FROM social_oauth_tokens WHERE tenant_id = $1 ORDER BY id`, [dirty])).rows;
     const r = await prepare({ apply: true, onlyTenantIds: [dirty, clean] });
     expect(r.totalMarked).toBe(4); // two in each company
-    const after = await snapshot() as Array<{ id: string; simulated: boolean; status: string; handle: string; deleted_at: unknown }>;
+    const after = await snapshot() as Array<{ id: string; simulated: boolean; status: string; handle: string; deleted_at: unknown; postiz_integration_id: string | null }>;
     expect(after).toHaveLength(beforeRows.length); // nothing deleted, nothing added
     const marked = new Set([ids["seed-live"], ids["seed-deleted"], ids["clean-live"], ids["clean-deleted"]]);
     for (const row of after) {
       const was = beforeRows.find((b) => b.id === row.id)!;
-      if (marked.has(row.id)) expect(row.simulated, row.id).toBe(true);
-      else expect(row.simulated, row.id).toBe(was.simulated); // unclassified rows keep their mark, whichever it was
+      if (marked.has(row.id)) {
+        expect(row.simulated, row.id).toBe(true);
+        expect(row.postiz_integration_id, row.id).toMatch(/^simulated:(instagram|facebook)$/);
+      } else {
+        expect(row.simulated, row.id).toBe(was.simulated);
+        expect(row.postiz_integration_id, row.id).toBe(was.postiz_integration_id);
+      }
     }
-    // soft-deleted stays soft-deleted; statuses and handles are as seeded
+    expect(after.find((x) => x.id === ids["seed-deleted"])!).toMatchObject({ postiz_integration_id: "simulated:facebook" });
     expect(after.find((x) => x.id === ids["seed-deleted"])!.deleted_at).not.toBeNull();
     expect(after.find((x) => x.id === ids["seed-live"])!).toMatchObject({ status: "connected", handle: "@seed-live" });
     expect((await adminPool().query(`SELECT id, status FROM social_oauth_tokens WHERE tenant_id = $1 ORDER BY id`, [dirty])).rows).toEqual(grantsBefore);
@@ -142,21 +162,29 @@ describe.skipIf(!TEST_URL)("SCP-Sb · social-simulation-prepare on real rows", (
     expect(act.rows[0].metadata).toMatchObject({ script: "social-simulation-prepare", rule: "cp21_seed_fingerprint" });
   });
 
-  it("(P3) it is idempotent, and a company with only seed rows is clean by the boot's own count", async () => {
+  it("(P3) it is idempotent; the clean company blocks nothing though it holds a real account; the planted rows are what still blocks", async () => {
     const again = await prepare({ apply: true, onlyTenantIds: [dirty, clean] });
     expect(again.totalMarkable).toBe(0);
     expect(again.totalMarked).toBe(0);
-    expect(await bootCount(clean)).toBe(0);
-    expect(again.tenants.find((t) => t.tenantId === clean)).toMatchObject({ markable: [], unclassified: [], grants: [] });
-    // the dirty company still blocks: five unclassified accounts and one live grant, named
-    expect(await bootCount(dirty)).toBe(5);
-    expect(again.blockingAccounts).toBe(5);
+    const c = again.tenants.find((t) => t.tenantId === clean)!;
+    expect(c).toMatchObject({ markable: [], realAccounts: 1, kindViolations: [], simulatedGrants: [] });
+    expect(again.blockingAccounts).toBe(2);
     expect(again.blockingGrants).toBe(1);
   });
 
-  it("(P4) a company is read through its own wall: the read finds the rows the superuser sees", async () => {
-    const seen = (await adminPool().query<{ n: string }>(`SELECT count(*)::text AS n FROM social_accounts WHERE tenant_id = $1 AND simulated = false`, [dirty])).rows[0].n;
-    expect(await bootCount(dirty)).toBe(Number(seen));
-    expect(Number(seen)).toBeGreaterThan(0);
+  it("(P4) a company is read through its own wall: the script's counts equal the superuser's", async () => {
+    const su = (await adminPool().query<{ v: number; g: number; sim: number }>(
+      `SELECT (SELECT count(*)::int FROM social_accounts a WHERE a.tenant_id = $1
+                 AND ((a.simulated AND (a.postiz_integration_id IS NULL OR a.postiz_integration_id NOT LIKE 'simulated:%' OR a.connected_by IS NOT NULL))
+                   OR (NOT a.simulated AND a.postiz_integration_id LIKE 'simulated:%'))) AS v,
+              (SELECT count(*)::int FROM social_oauth_tokens t JOIN social_accounts a ON a.id = t.account_id WHERE t.tenant_id = $1 AND a.simulated) AS g,
+              (SELECT count(*)::int FROM social_accounts WHERE tenant_id = $1 AND simulated = false) AS sim`,
+      [dirty],
+    )).rows[0];
+    const r = await prepare({ apply: false, onlyTenantIds: [dirty] });
+    expect(r.tenants[0].kindViolations).toHaveLength(su.v);
+    expect(r.tenants[0].simulatedGrants).toHaveLength(su.g);
+    expect(r.tenants[0].realAccounts + r.tenants[0].markable.length).toBe(su.sim);
+    expect(su.v).toBeGreaterThan(0);
   });
 });

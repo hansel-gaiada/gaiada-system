@@ -447,9 +447,11 @@ const configBase = {
   // (src/modules/social/publisher/simulated-driver.ts). This REVERSES the social module's own "no simulator" rule, so it is
   // fenced harder than its siblings. Default OFF; "1"/"true" registers the simulator at boot, and a variant whose
   // `social_accounts.simulated` is true then publishes through it to `https://simulated.invalid/...`. Nothing else ever
-  // reaches it. On, boot REFUSES (an error, not a warning) beside a usable real publisher (Postiz configured, any
-  // SOCIAL_PUBLISHER_CAPABILITY_DRIVERS override, any live OAuth grant) or beside ANY non-simulated `social_accounts`
-  // row, and every account create/connect path refuses a real account (`simulation_real_account_refused`). Off: the
+  // reaches it. SCP-Sa2 (owner ruling SCP-D9): it runs BESIDE a real Postiz and real accounts, never mixed with them:
+  // every account is exactly one kind (migration 202610280100's CHECK), each driver refuses the other kind
+  // (`simulated_account_on_real_publisher` / `simulated_account_required`), and boot REFUSES (an error, not a warning)
+  // an override naming 'simulated' (switch on or off), or, with it on, any account row that breaks the kind rule or any
+  // OAuth grant on a simulated account. Off: the
   // simulator is never registered and nothing may write a `simulated = true` account or variant (`simulation_disabled`).
   // Must be OFF, and the simulated rows purged, before the ERP holds real client data ("Before real clients use the
   // portal"). Read at CALL time (publisher/simulation.ts), so a test switches it on this object. Needs the compose

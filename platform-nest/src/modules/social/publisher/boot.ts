@@ -51,24 +51,30 @@
 // guard and it is deliberate — read `assertPublisherBaseUrlIsPrivate` below for why the estate's
 // standing "boot errors, not warnings" doctrine applies here too.
 //
-// ── SCP-Sa — THE SIMULATOR'S BOOT ERRORS (the "no simulator" rule, reversed for the dev review only) ──────────────
+// ── SCP-Sa / SCP-Sa2 — THE SIMULATOR'S BOOT ERRORS (the "no simulator" rule, reversed for the dev review only) ───────
 // This file used to say "there is deliberately no fallback driver and no simulator". Plan SCP-D3 (owner ruling SCP-D1)
 // reverses that for the dev-review stage: with SOCIAL_SIMULATION_ENABLED on, `wireSocialPublisher` registers
-// simulated-driver.ts. simulation.ts's header lists the six fences; the ones that live HERE are boot errors that abort
-// startup (SM-33's `assertProvenance` doctrine, main.ts: "this must abort startup, not degrade to a warning"):
+// simulated-driver.ts. SCP-Sa then refused the switch beside anything real ("never both"). The owner ruled (SCP-D9,
+// 2026-10-28) that the simulator runs BESIDE a real Postiz, so the rule here is now "never mixed" (simulation.ts's header
+// lists the seven fences). The ones that live HERE are boot errors that abort startup (SM-33's `assertProvenance` doctrine,
+// main.ts: "this must abort startup, not degrade to a warning"):
 //   1. an override in SOCIAL_PUBLISHER_CAPABILITY_DRIVERS that names 'simulated', switch on OR off: it would route real
 //      accounts to a driver that reports publishes that never happened;
 //   and with the switch ON:
-//   2. Postiz configured (SOCIAL_POSTIZ_BASE_URL set): a real engine beside the simulator;
-//   3. any SOCIAL_PUBLISHER_CAPABILITY_DRIVERS override: the only thing that makes `direct` reachable by config;
-//   4. any live (`status = 'active'`) OAuth grant in `social_oauth_tokens`, in any tenant: the other thing that makes
-//      `direct` able to publish for real;
-//   5. ANY non-simulated `social_accounts` row, in any tenant, soft-deleted included (a soft-deleted account is one upsert
-//      away from live again): the simulator and real client accounts never share a database;
-//   6. after registration, the object-level re-check (`simulation.ts#publisherProvenanceViolation`): each registered
+//   2. ANY `social_accounts` row that breaks the account-kind rule, in any tenant, soft-deleted included (a simulated row
+//      without a `simulated:` integration id or with a `connected_by`, a real row with a `simulated:` id). Migration
+//      202610280100's CHECK makes such a row impossible to write; this is the belt over it, for a database the migration
+//      has not reached or a constraint someone dropped. A mixed row is the one shape the two drivers cannot keep apart;
+//   3. ANY `social_oauth_tokens` row, of any status, that names a simulated account (the database refuses it too:
+//      `trg_social_oauth_tokens_real_account_only`): a grant is a real credential, and `direct` would publish with it;
+//   4. after registration, the object-level re-check (`simulation.ts#publisherProvenanceViolation`): each registered
 //      driver's structural `simulated` marker matches its key and the switch.
-// With the switch OFF none of 2-5 runs and the DB is not read: a real deployment boots exactly as before, and the
-// simulator is never registered (`registry.ts#registerPublisher` would refuse it). Checks 4 and 5 are the ONLY database
+// What SCP-Sa2 REMOVED (each encoded "never both", none "never mixed"): Postiz configured, any override naming a REAL
+// driver, any live OAuth grant, and any non-simulated account no longer refuse the switch. Postiz is registered beside
+// the simulator; a real account's variant goes to Postiz (or `direct`) and a simulated one's to the simulator, each driver
+// refusing the other kind at runtime (the reverse fence, simulation.ts fence 4).
+// With the switch OFF none of 2-3 runs and the DB is not read: a real deployment boots exactly as before, and the
+// simulator is never registered (`registry.ts#registerPublisher` would refuse it). Checks 2 and 3 are the ONLY database
 // reads in this file; they still open no socket to Postiz or any network, so the property above holds. They read each
 // tenant through its own `withTenants` with the social scope declared (the RLS zero-row trap: an unscoped read of a
 // FORCE-RLS table counts zero and would wave the boot through).
@@ -80,11 +86,11 @@ import { createDirectDriver } from "./direct";
 import { createDbYouTubeQuotaStore } from "./youtube-quota";
 import { registerLinkedInTokenRefresher } from "./linkedin-oauth";
 import { registerYouTubeTokenRefresher } from "./youtube-oauth";
-import { listPublishers, registerPublisher } from "./registry";
+import { listPublishers, realPublisherKey, registerPublisher } from "./registry";
 import { createSimulatedPublisher } from "./simulated-driver";
 import {
-  SIMULATED_PUBLISHER_KEY, SIMULATED_URL_ORIGIN, SOCIAL_SIMULATION_ENV, isSocialSimulationEnabled,
-  publisherProvenanceViolation,
+  ACCOUNT_KIND_VIOLATION_SQL, SIMULATED_PUBLISHER_KEY, SIMULATED_URL_ORIGIN, SOCIAL_SIMULATION_ENV,
+  isSocialSimulationEnabled, publisherProvenanceViolation,
 } from "./simulation";
 
 /** Escape hatch for the one legitimate case: an operator deliberately running the engine behind a
@@ -135,14 +141,15 @@ export function assertPublisherBaseUrlIsPrivate(baseUrl: string, allowOverride: 
   if (!isPrivate) throw new PublicPublisherBaseUrlError(baseUrl);
 }
 
-// ── SCP-Sa — the simulator's boot errors ───────────────────────────────────────────────────────────────────────────
+// ── SCP-Sa / SCP-Sa2 — the simulator's boot errors ─────────────────────────────────────────────────────────────────
 
 export class SocialSimulationBootError extends Error {
   constructor(reason: string) {
     super(
-      `[social] BOOT ERROR: ${reason}. The social simulator (plan SCP-D3, dev review only) never runs beside anything `
-      + `real; this must abort startup, not degrade to a warning. Either switch it off (unset ${SOCIAL_SIMULATION_ENV}) `
-      + "or remove the real publisher or accounts named above.",
+      `[social] BOOT ERROR: ${reason}. The social simulator (plan SCP-D3, dev review only) runs beside real accounts and a `
+      + "real Postiz (owner ruling SCP-D9), but never MIXED with them: every account is exactly one kind. This must abort "
+      + `startup, not degrade to a warning. Either switch it off (unset ${SOCIAL_SIMULATION_ENV}) or fix the rows named `
+      + "above (infra/runbooks/social-simulation.md, 'Side by side').",
     );
     this.name = "SocialSimulationBootError";
   }
@@ -152,15 +159,17 @@ export class SocialSimulationBootError extends Error {
  *  boot error has a test without a database. */
 export interface SocialSimulationBootFacts {
   enabled: boolean;
-  postizBaseUrl: string;
   capabilityOverrides: Record<string, string>;
-  /** `social_oauth_tokens` rows with `status = 'active'`, every tenant. Read only when `enabled`. */
-  liveOAuthGrants: number;
-  /** `social_accounts` rows with `simulated = false`, every tenant, soft-deleted included. Read only when `enabled`. */
-  realAccounts: number;
+  /** `social_accounts` rows that break the account-kind rule (`simulation.ts#ACCOUNT_KIND_VIOLATION_SQL`), every tenant,
+   *  soft-deleted included. Read only when `enabled`. */
+  accountKindViolations: number;
+  /** `social_oauth_tokens` rows of ANY status naming a simulated account, every tenant. Read only when `enabled`. */
+  simulatedAccountGrants: number;
 }
 
-/** Boot errors 1-5 of this file's header. Throws `SocialSimulationBootError`; returns nothing when the boot may go on. */
+/** Boot errors 1-3 of this file's header. Throws `SocialSimulationBootError`; returns nothing when the boot may go on.
+ *  SCP-Sa2: a configured Postiz, an override naming a REAL driver, live grants on real accounts and real accounts are no
+ *  longer here; they are allowed beside the simulator (SCP-D9). */
 export function assertSocialSimulationBootSafe(f: SocialSimulationBootFacts): void {
   const routedToSimulator = Object.entries(f.capabilityOverrides).filter(([, d]) => d === SIMULATED_PUBLISHER_KEY);
   if (routedToSimulator.length > 0) {
@@ -170,59 +179,50 @@ export function assertSocialSimulationBootSafe(f: SocialSimulationBootFacts): vo
     );
   }
   if (!f.enabled) return;
-  if (f.postizBaseUrl) {
+  if (f.accountKindViolations > 0) {
     throw new SocialSimulationBootError(
-      `${SOCIAL_SIMULATION_ENV} is on while SOCIAL_POSTIZ_BASE_URL is set: Postiz is a real publishing engine`,
+      `${SOCIAL_SIMULATION_ENV} is on while ${f.accountKindViolations} social_accounts row(s) break the account-kind rule `
+      + "(any tenant, soft-deleted included): a simulated account without a 'simulated:' integration id or with a "
+      + "connected_by, or a real account with a 'simulated:' integration id. Such a row is neither kind, and the two "
+      + "drivers cannot keep it apart (run migration 202610280100_social_account_kind, or social-simulation-prepare to list them)",
     );
   }
-  const overrides = Object.keys(f.capabilityOverrides);
-  if (overrides.length > 0) {
+  if (f.simulatedAccountGrants > 0) {
     throw new SocialSimulationBootError(
-      `${SOCIAL_SIMULATION_ENV} is on while SOCIAL_PUBLISHER_CAPABILITY_DRIVERS routes ${overrides.join(", ")} to a `
-      + "real driver ('direct' publishes for real)",
-    );
-  }
-  if (f.liveOAuthGrants > 0) {
-    throw new SocialSimulationBootError(
-      `${SOCIAL_SIMULATION_ENV} is on while ${f.liveOAuthGrants} live OAuth grant(s) exist in social_oauth_tokens: a `
-      + "connected LinkedIn/YouTube account can publish for real through 'direct'",
-    );
-  }
-  if (f.realAccounts > 0) {
-    throw new SocialSimulationBootError(
-      `${SOCIAL_SIMULATION_ENV} is on while ${f.realAccounts} non-simulated social_accounts row(s) exist (any tenant, `
-      + "soft-deleted included): the simulator may run only on a database whose every social account is simulated "
-      + "(mark the seeded mock accounts simulated, SCP-Sb, or remove them)",
+      `${SOCIAL_SIMULATION_ENV} is on while ${f.simulatedAccountGrants} social_oauth_tokens row(s) name a simulated account: `
+      + "an OAuth grant is a real credential ('direct' publishes with it) and never belongs to a simulated account",
     );
   }
 }
 
 /** The two DB facts, read tenant by tenant through the third wall (see this file's header). Every company, deleted ones
- *  included: a real account under a deleted company is still a real account. */
-export async function readSocialSimulationDbFacts(): Promise<{ liveOAuthGrants: number; realAccounts: number }> {
+ *  included: a mixed row under a deleted company is still a mixed row. */
+export async function readSocialSimulationDbFacts(): Promise<{ accountKindViolations: number; simulatedAccountGrants: number }> {
   const { rows: tenants } = await withGlobal((c) => c.query<{ id: string }>(`SELECT id FROM companies`));
-  let liveOAuthGrants = 0;
-  let realAccounts = 0;
+  let accountKindViolations = 0;
+  let simulatedAccountGrants = 0;
   for (const { id } of tenants) {
     const r = await withTenants(
       [id],
-      (c) => c.query<{ grants: string; accounts: string }>(
-        `SELECT (SELECT count(*) FROM social_oauth_tokens WHERE status = 'active')::text AS grants,
-                (SELECT count(*) FROM social_accounts WHERE simulated = false)::text AS accounts`,
+      (c) => c.query<{ violations: string; grants: string }>(
+        `SELECT (SELECT count(*) FROM social_accounts a WHERE ${ACCOUNT_KIND_VIOLATION_SQL})::text AS violations,
+                (SELECT count(*) FROM social_oauth_tokens t
+                   JOIN social_accounts a ON a.id = t.account_id AND a.tenant_id = t.tenant_id
+                  WHERE a.simulated)::text AS grants`,
       ),
       { modules: ["social"] },
     );
-    liveOAuthGrants += Number(r.rows[0]?.grants ?? 0);
-    realAccounts += Number(r.rows[0]?.accounts ?? 0);
+    accountKindViolations += Number(r.rows[0]?.violations ?? 0);
+    simulatedAccountGrants += Number(r.rows[0]?.grants ?? 0);
   }
-  return { liveOAuthGrants, realAccounts };
+  return { accountKindViolations, simulatedAccountGrants };
 }
 
 /** Test seams for `wireSocialPublisher`. The switch itself is read from config (`isSocialSimulationEnabled`), exactly as
  *  `registerPublisher` reads it, so a test cannot wire one value and register under another. */
 export interface SocialPublisherWiringDeps {
   /** Defaults to `readSocialSimulationDbFacts`. Called ONLY when the switch is on. */
-  readDbFacts?: () => Promise<{ liveOAuthGrants: number; realAccounts: number }>;
+  readDbFacts?: () => Promise<{ accountKindViolations: number; simulatedAccountGrants: number }>;
 }
 
 /** Register the publisher driver, or deliberately register nothing.
@@ -236,17 +236,17 @@ export interface SocialPublisherWiringDeps {
  *
  *  SCP-Sa: that paragraph stays TRUE for every deployment with SOCIAL_SIMULATION_ENABLED off, which is every deployment
  *  that holds real data. With it on (dev review only), the simulator is registered here, behind the boot errors of this
- *  file's header, and announces itself on a `[social:simulation-enabled]` warning line on every start. Async since
- *  SCP-Sa, for the two DB counts those errors need; with the switch off it awaits nothing. */
+ *  file's header, and announces itself on a `[social:simulation-enabled]` warning line on every start. SCP-Sa2 (SCP-D9):
+ *  Postiz, when configured, is registered too, beside it; the warning line says so. Async since SCP-Sa, for the two DB
+ *  counts those errors need; with the switch off it awaits nothing. */
 export async function wireSocialPublisher(deps: SocialPublisherWiringDeps = {}): Promise<void> {
   // SCP-Sa — decided FIRST, before anything is registered: a refused boot leaves no half-wired registry behind.
   const simulation = isSocialSimulationEnabled();
   const dbFacts = simulation
     ? await (deps.readDbFacts ?? readSocialSimulationDbFacts)()
-    : { liveOAuthGrants: 0, realAccounts: 0 };
+    : { accountKindViolations: 0, simulatedAccountGrants: 0 };
   assertSocialSimulationBootSafe({
     enabled: simulation,
-    postizBaseUrl: config.social.publisher.baseUrl,
     capabilityOverrides: config.social.publisher.capabilityDrivers,
     ...dbFacts,
   });
@@ -307,8 +307,11 @@ export async function wireSocialPublisher(deps: SocialPublisherWiringDeps = {}):
     // eslint-disable-next-line no-console
     console.warn(
       `[social:simulation-enabled] ${SOCIAL_SIMULATION_ENV} is ON: the social simulator publishes simulated accounts' `
-      + `posts to ${SIMULATED_URL_ORIGIN}/ and nothing reaches a real network (plan SCP-D3, dev review only). Turn it `
-      + "OFF and purge the simulated rows before the ERP holds real client data.",
+      + `posts to ${SIMULATED_URL_ORIGIN}/ and nothing of theirs reaches a real network (plan SCP-D3, dev review only). `
+      // SCP-Sa2 (SCP-D9) — side by side: say which real engine serves the real accounts beside it, so the boot log alone
+      // tells an operator both are live.
+      + `Real accounts publish through '${realPublisherKey()}' beside it; every account is exactly one kind (SCP-D9). `
+      + "Turn it OFF and purge the simulated rows before the ERP holds real client data.",
     );
   } else {
     // eslint-disable-next-line no-console

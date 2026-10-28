@@ -27,6 +27,7 @@ import {
 import { getPublisher, invokePublisher } from "./publisher/registry";
 import { openOrg, type PublisherOrgRow } from "./publisher/provisioning";
 import type { CreatorInfoSnapshot } from "./publisher/types";
+import { realPublisherRefusal } from "./publisher/simulation";
 
 /** How stale a snapshot may be before the verifier treats it as though it never existed. TikTok's
  *  own requirement is consent "immediately before" upload — this cannot literally mean zero seconds
@@ -119,6 +120,11 @@ export async function refreshCreatorInfoSnapshot(
   org: PublisherOrgRow,
   integrationId: string,
 ): Promise<void> {
+  // SCP-Sa2 — the reverse fence (simulation.ts fence 4). Since the simulator runs beside a real Postiz (owner ruling
+  // SCP-D9), a simulated TikTok account's variant would otherwise send its `simulated:tiktok` id to Postiz's creator-info
+  // probe. Never: a simulated integration id is not probed (this function never throws, so the refusal is a quiet return;
+  // dispatch.ts does not call it for a simulated chain either). The precondition then judges the variant as it always has.
+  if (realPublisherRefusal("creator-info probe", { integrationId })) return;
   const driver = getPublisher(org.driver as "postiz" | "mixpost") ?? undefined;
   if (!driver?.getCreatorInfo || !driver.capabilities.has("creator_info_probe")) return;
   let snapshot: CreatorInfoSnapshot | undefined;

@@ -23,8 +23,12 @@
 //
 // Nothing else reaches it: `resolvePublisher` and `getPublisher` refuse it by name, a capability override naming it is
 // refused (registry.ts) and refused at boot (boot.ts), and `resolveSimulatedPublisher` itself refuses while the switch
-// is off. A real account never carries `simulated = true`: while the switch is on no real account can exist (boot and
-// the account writers refuse), and while it is off nothing may write the mark (`assertSimulatedWriteAllowed`).
+// is off. SCP-Sa2 (owner ruling SCP-D9): this driver now runs BESIDE a real Postiz and real accounts, so what keeps a
+// real account away from it is no longer "no real account exists" but "every account is exactly one kind": the database
+// ties `simulated = true` to a `simulated:` integration id and fixes the kind once used (migration 202610280100), every
+// real writer is fenced off simulated rows, and each driver refuses the other kind (this one: refusals 3 and 4 below,
+// read from OUR rows; the real engines: `simulation.ts#realPublisherRefusal`, the reverse fence). While the switch is
+// off nothing may write the mark (`assertSimulatedWriteAllowed`).
 //
 // ── WHAT A SIMULATED PUBLISH IS ────────────────────────────────────────────────────────────────────────────────────
 // It takes the REAL dispatch path (`dispatch.ts#dispatchApprovedPublish`): the D14 approval is filed and DECIDED by a

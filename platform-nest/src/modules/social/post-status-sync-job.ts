@@ -29,7 +29,7 @@ import { declareSocialModuleScope } from "./publish-precondition";
 import { openOrg, type PublisherOrgRow } from "./publisher/provisioning";
 import type { OrgHandle, PostStatus, SocialPublisher } from "./publisher/types";
 import { invokePublisher, resolveSimulatedPublisher } from "./publisher/registry";
-import { SimulatedOrgHandle } from "./publisher/simulation";
+import { SimulatedOrgHandle, realPublisherRefusal } from "./publisher/simulation";
 import { emitEvent } from "../../events/outbox.service";
 // SCP-Sc (the server half of SCP-3b): the variants' terminal answers are the publisher's result on a pipeline post scheduled
 // through the publisher (live when every variant published; engine status failed when one failed). See that file's header.
@@ -56,6 +56,8 @@ interface InFlightRow {
   network: string;
   /** SCP-Sa — `social_accounts.simulated`: a simulated account's posts are asked of the simulator, never of a real engine. */
   simulated: boolean;
+  /** SCP-Sa2 — `social_accounts.postiz_integration_id`, read for the reverse fence (`simulation.ts#realPublisherRefusal`). */
+  integration_id: string | null;
 }
 
 async function loadInFlight(c: PoolClient, providerPostIds?: string[]): Promise<InFlightRow[]> {
@@ -66,7 +68,8 @@ async function loadInFlight(c: PoolClient, providerPostIds?: string[]): Promise<
     filter = "AND v.provider_post_id = ANY($1::text[])";
   }
   const { rows } = await c.query<InFlightRow>(
-    `SELECT v.id AS variant_id, v.provider_post_id, a.publisher_org_id AS org_id, a.network, a.simulated
+    `SELECT v.id AS variant_id, v.provider_post_id, a.publisher_org_id AS org_id, a.network, a.simulated,
+            a.postiz_integration_id AS integration_id
        FROM social_post_variants v
        JOIN social_accounts a ON a.id = v.account_id AND a.tenant_id = v.tenant_id
       WHERE v.status IN ('queued', 'publishing')
@@ -91,12 +94,33 @@ async function loadOrg(c: PoolClient, orgId: string): Promise<PublisherOrgRow | 
 /** SCP-Sa — which driver answers for one org's in-flight posts. A SIMULATED account's posts go to the simulator (the one
  *  road, `registry.ts#resolveSimulatedPublisher`; it refuses `simulation_disabled` while the switch is off, which the
  *  sweep logs and skips, leaving those rows queued), every other account's to the org's own engine exactly as before.
- *  The two never mix in one call: the sweep groups by (org, simulated). */
+ *  The two never mix in one call: the sweep groups by (org, simulated). SCP-Sa2: since the simulator runs beside a real
+ *  Postiz (SCP-D9), the real groups also pass through `refuseSimulatedOnRealGroup` below before any real call. */
 function openStatusDriver(tenantId: string, org: PublisherOrgRow, simulated: boolean): { driver: SocialPublisher; handle: OrgHandle } {
   if (simulated) {
     return { driver: resolveSimulatedPublisher("post_status"), handle: new SimulatedOrgHandle(tenantId, null, org.id) };
   }
   return openOrg(org);
+}
+
+/** SCP-Sa2 — THE REVERSE FENCE for the status read (simulation.ts fence 4). A real group is about to be asked of a real
+ *  engine; every row in it is checked independently of the grouping key: its account's mark, its account's integration
+ *  id and its own provider post id (a `simulated:` id was minted by the simulator and means nothing to Postiz). A row
+ *  that fails is REFUSED (`simulated_account_on_real_publisher`, logged, counted as an error) and left exactly where it
+ *  is; the rest of the group carries on, so one impossible row never stalls a client's real posts. */
+function refuseSimulatedOnRealGroup(tenantId: string, rows: InFlightRow[]): { ok: InFlightRow[]; refused: number } {
+  const ok: InFlightRow[] = [];
+  let refused = 0;
+  for (const r of rows) {
+    const refusal = realPublisherRefusal(`real status read of variant ${r.variant_id}`, {
+      simulated: r.simulated, integrationId: r.integration_id, providerPostId: r.provider_post_id,
+    });
+    if (!refusal) { ok.push(r); continue; }
+    refused += 1;
+    // eslint-disable-next-line no-console
+    console.error(`[SOCIAL-POST-STATUS-SYNC] tenant ${tenantId}: ${refusal.code}: ${refusal.message}`);
+  }
+  return { ok, refused };
 }
 
 /** Postgres `state` -> the CHECK-constrained `social_post_variants.status` vocabulary. `unknown`
@@ -243,7 +267,8 @@ export async function reconcileTenantPostStatus(tenantId: string, now: Date = ne
     return loadInFlight(c);
   });
   // SCP-Sa — grouped by (org, simulated), so a simulated account's posts and a real account's are never sent to the same
-  // driver in one call (in practice the boot and runtime fences keep the two from coexisting at all).
+  // driver in one call. SCP-Sa2 (SCP-D9): the two DO coexist now (the simulator runs beside Postiz), so this grouping is
+  // load-bearing, and the real groups are re-checked row by row before any real call (`refuseSimulatedOnRealGroup`).
   const byOrg = new Map<string, InFlightRow[]>();
   for (const r of rows) {
     const key = `${r.org_id}|${r.simulated === true ? "sim" : "real"}`;
@@ -271,9 +296,16 @@ export async function reconcileTenantPostStatus(tenantId: string, now: Date = ne
         return loadOrg(c, orgId);
       });
       if (!org) continue;
+      let rowsToAsk = orgRows;
+      if (!simulated) {
+        const fenced = refuseSimulatedOnRealGroup(tenantId, orgRows);
+        errors += fenced.refused;
+        rowsToAsk = fenced.ok;
+        if (rowsToAsk.length === 0) continue;
+      }
       const { driver, handle } = openStatusDriver(tenantId, org, simulated);
       if (!driver.capabilities.has("post_status")) continue;
-      const ids = orgRows.map((r) => r.provider_post_id);
+      const ids = rowsToAsk.map((r) => r.provider_post_id);
       const statuses = await invokePublisher(
         { op: "getPostStatus", org: handle },
         () => driver.getPostStatus(handle, ids, { from, to }),
@@ -331,6 +363,14 @@ export async function reconcileOneProviderPost(tenantId: string, providerPostId:
     return loadOrg(c, row.org_id);
   });
   if (!org) return false;
+  // SCP-Sa2 — the reverse fence on the webhook intake: a real engine is never asked about a simulated row. Thrown (a typed
+  // 409 through the filter), since this path serves exactly one id.
+  if (row.simulated !== true) {
+    const refusal = realPublisherRefusal(`real status read of variant ${row.variant_id}`, {
+      integrationId: row.integration_id, providerPostId: row.provider_post_id,
+    });
+    if (refusal) throw refusal;
+  }
   const { driver, handle } = openStatusDriver(tenantId, org, row.simulated === true);
   if (!driver.capabilities.has("post_status")) return false;
   const statuses = await invokePublisher(

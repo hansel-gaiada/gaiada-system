@@ -148,6 +148,11 @@ export const socialModule: ModuleContract = {
     "202610271600_social_simulation.sql",
     // SCP-2b (BFF §63.1 file 10, §63.8) — the stored thumbnail of a post's design (`social_post_designs.thumb_file_id`).
     "202610271700_social_design_thumbs.sql",
+    // SCP-Sa2 (owner ruling SCP-D9; BFF §63.1 file 8) — the simulator runs beside a real Postiz, so every account is exactly
+    // one kind: social_accounts_kind_ck (the `simulated:` integration id belongs to simulated rows alone), the kind never
+    // changes once used (trg_social_accounts_kind_guard), and no OAuth grant names a simulated account
+    // (trg_social_oauth_tokens_real_account_only). Backfills `simulated:<network>` onto simulated rows with no id.
+    "202610280100_social_account_kind.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is

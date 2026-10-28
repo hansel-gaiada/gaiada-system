@@ -496,16 +496,19 @@ export type PublisherRefusalCode =
    *  not a URL and must never be sent. A deployment configuration gap, same class as
    *  `publisher_not_configured` — nothing the caller can fix by retrying. */
   | "connect_redirect_not_configured"
-  // ── SCP-Sa — the simulator's containment (simulation.ts holds the constants and their full reasoning). All five
-  // are deliberate refusals; four are 409 (the state of the data or the switch forbids it), one is the simulated
-  // engine "answering badly" (502), so it lands on the same failed-post path a real engine error does.
-  /** SOCIAL_SIMULATION_ENABLED is on and this path would create or connect a REAL (non-simulated) account. */
-  | "simulation_real_account_refused"
+  // ── SCP-Sa / SCP-Sa2 — the simulator's containment (simulation.ts holds the constants and their full reasoning). All
+  // five are deliberate refusals; four are 409 (the state of the data or the switch forbids it), one is the simulated
+  // engine "answering badly" (502), so it lands on the same failed-post path a real engine error does. SCP-Sa2 removed
+  // `simulation_real_account_refused` (the simulator runs beside real accounts now, owner ruling SCP-D9) and added
+  // `simulated_account_on_real_publisher`.
   /** SOCIAL_SIMULATION_ENABLED is off and this path would write a simulated account or variant, or call the simulator. */
   | "simulation_disabled"
   /** The simulator was handed a variant whose account is not `simulated = true` (or an org handle that is not a
    *  `SimulatedOrgHandle`). Belt and braces behind the routing, which should make this unreachable. */
   | "simulated_account_required"
+  /** SCP-Sa2 — THE REVERSE FENCE: a real path (a real engine's dispatch, status read, metrics read or probe, or a real
+   *  account's write) met a simulated account, a `simulated:` integration id or a `simulated:` provider post id. */
+  | "simulated_account_on_real_publisher"
   /** The simulator found no DECIDED publish approval for this variant. It never mints or decides one itself. */
   | "simulated_approval_not_decided"
   /** The caption carries `[simulate-fail]`: the simulated engine refuses, exercising the failed-post path. */

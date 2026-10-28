@@ -292,8 +292,9 @@ describe.skipIf(!TEST_URL)("SCP-Sd · the metrics sweep pulls simulated accounts
   it("(D5) a simulated account gets a 30-day series with source 'simulated'; a rerun changes no row; a real `pull` day is never overwritten", async () => {
     simulate();
     const t = await makeTenant("D5");
-    // The seed's account may carry no integration id at all: it is still pulled.
-    const account = await makeAccount(t, "instagram", { simulated: true, integration: null });
+    // SCP-Sa2: a simulated account always carries `simulated:<network>` now (social_accounts_kind_ck; it was allowed to carry
+    // none before), so this is the seed's own shape.
+    const account = await makeAccount(t, "instagram", { simulated: true });
     const today = new Date(clock).toISOString().slice(0, 10);
     const held = new Date(clock - 5 * DAY).toISOString().slice(0, 10);
     // A day already held as a real pull row, with a value the generator would never write.
