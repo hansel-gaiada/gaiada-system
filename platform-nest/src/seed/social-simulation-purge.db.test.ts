@@ -18,7 +18,12 @@
 //   (P3) a second run finds nothing and changes nothing (idempotent);
 //   (P4) a company holding a shape it cannot classify (a PULLED metric row on a simulated account's variant) is REFUSED and
 //        changes not at all;
-//   (P5) the switch ON refuses the whole run before any company is read; an unknown table pointing at social_accounts does too.
+//   (P5) the switch ON refuses the whole run before any company is read; an unknown table pointing at social_accounts does too;
+//   (P6) SCP-Se, simulated BOOSTS (SCP-4's `social_boosts`, which hang off a post, not an account): the dry run lists exactly the
+//        simulated boosts; `--apply` deletes them (before the posts move back) and leaves every real boost and every boost budget
+//        BYTE-IDENTICAL; a simulated boost on a real post, and a real boost on a post the purge would change, each REFUSE their
+//        company and change nothing in it (the removable simulated rows beside them stay too). P1-P3 carry the boosts through the
+//        mixed company: dry run, apply, idempotent re-run.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { config } from "../config";
 import { newId } from "../db";
@@ -94,12 +99,56 @@ describe.skipIf(!TEST_URL)("SCP-Sf · social-simulation-purge on real rows", () 
     q(`INSERT INTO social_post_client_reviews (id, tenant_id, variant_id, client_id, status, decided_at) VALUES ($1,$2,$3,$4,'approved',now())`,
       [newId(), t, variantId, clientId]);
 
+  /** SCP-Se: a client's agreed monthly boost budget for a cycle (not a simulated row: the purge never touches it). */
+  async function budget(t: string, clientId: string, cycleId: string): Promise<string> {
+    const bid = newId();
+    await q(`INSERT INTO social_boost_budgets (id, tenant_id, client_id, cycle_id, amount_minor, currency, status, requested_by, decided_via, decided_by, decided_at, origin_site)
+             VALUES ($1,$2,$3,$4,5000000,'IDR','agreed',$5,'portal',$5,now(),'central')`, [bid, t, clientId, cycleId, user]);
+    return bid;
+  }
+  /** SCP-Se: one boost row. `simulated` is the boost's own mark (the app copies it from the post; a test may break that on purpose). */
+  async function boost(t: string, postId: string, clientId: string, cycleId: string, o: {
+    status: "requested" | "running" | "completed"; simulated: boolean; budgetId?: string | null;
+  }): Promise<string> {
+    const bid = newId();
+    const approved = o.status !== "requested";
+    const ended = o.status === "completed";
+    await q(`INSERT INTO social_boosts (id, tenant_id, post_id, client_id, cycle_id, status, goal, audience, daily_budget_minor, days, currency, starts_on,
+                                        requested_by, approved_via, approved_by, approved_at, budget_id, started_at, started_by, ended_at, spend_minor,
+                                        paid_reach, simulated, origin_site)
+             VALUES ($1,$2,$3,$4,$5,$6,'website','automatic',100000,5,'IDR','2026-11-05',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'central')`,
+    [bid, t, postId, clientId, cycleId, o.status, user,
+      approved ? (o.budgetId ? "budget" : "portal") : null, approved ? user : null, approved ? new Date("2026-10-21T08:00:00Z") : null, approved ? (o.budgetId ?? null) : null,
+      approved ? new Date("2026-10-22T08:00:00Z") : null, approved ? user : null,
+      ended ? new Date("2026-10-27T08:00:00Z") : null, ended ? 450000 : null, ended ? 20000 : null, o.simulated]);
+    return bid;
+  }
+  /** SCP-Se: a company holding one simulated live post (with its simulated variant and a simulated boost) plus ONE unclassifiable boost. */
+  async function refusedBoostCompany(name: string, shape: "simulated_on_real_post" | "real_on_purged_post"): Promise<string> {
+    const t = await createCompany(name, ["social"]);
+    const c = await createClient(t, "Refuse Mock");
+    const o = await org(t, c, "simulated:no-key", `simulated-${c}`);
+    const ig = await account(t, c, o, "instagram", "@mock-refuse", true);
+    const e = await engagementAndCycle(t, c, "Refuse social");
+    const wentLive = new Date("2026-10-20T10:00:00Z");
+    const live = await pipelinePost(t, e, "Refuse simulated live", { status: "live", via: "publisher", liveUrl: `${SIM}/instagram/9`, wentLive, simulated: true, status0105: "published" });
+    await variant(t, live, ig, { status: "published", simulated: true, approvalId: await decidedApproval(t), providerPostId: `simulated:instagram:9:${newId()}`, url: `${SIM}/instagram/9`, at: wentLive });
+    await boost(t, live, c, e.cycleId, { status: "completed", simulated: true }); // a removable one: it must stay too, the company is refused whole
+    if (shape === "simulated_on_real_post") {
+      const real = await pipelinePost(t, e, "Refuse real live", { status: "live", via: "manual", liveUrl: "https://www.instagram.com/p/MOCKREFUSE", wentLive, status0105: "published" });
+      id.refuseSimBoost = await boost(t, real, c, e.cycleId, { status: "completed", simulated: true });
+    } else {
+      id.refuseRealBoost = await boost(t, live, c, e.cycleId, { status: "completed", simulated: false });
+    }
+    return t;
+  }
+
   /** Every row of every social table of a company, as JSON, by table: the "byte-identical" yardstick. */
   async function everything(t: string): Promise<Record<string, Record<string, unknown>>> {
     const out: Record<string, Record<string, unknown>> = {};
     for (const table of [
       "social_publisher_orgs", "social_accounts", "social_posts", "social_post_variants", "social_post_metrics", "social_metrics_daily",
-      "social_post_client_reviews", "social_best_time_suggestions", "automation_approvals",
+      "social_post_client_reviews", "social_best_time_suggestions", "automation_approvals", "social_boosts", "social_boost_budgets",
     ]) {
       const r = await q(`SELECT id, row_to_json(x)::text AS j FROM ${table} x WHERE tenant_id = $1`, [t]);
       out[table] = Object.fromEntries(r.rows.map((row: { id: string; j: string }) => [row.id, row.j]));
@@ -108,6 +157,8 @@ describe.skipIf(!TEST_URL)("SCP-Sf · social-simulation-purge on real rows", () 
   }
 
   let user: string;
+  let badSimBoostCo: string; // SCP-Se: a simulated boost on a real post
+  let badRealBoostCo: string; // SCP-Se: a real boost on a post the purge would move
   beforeAll(async () => {
     await initTestDb();
     config.socialSimulationEnabled = false;
@@ -132,6 +183,11 @@ describe.skipIf(!TEST_URL)("SCP-Sf · social-simulation-purge on real rows", () 
     await daily(co, id.betaIg, "2026-10-22", "simulated");
     await q(`INSERT INTO social_best_time_suggestions (tenant_id, account_id, status, min_measured_posts_threshold, min_bucket_posts_threshold, lookback_days, raw)
              VALUES ($1,$2,'insufficient_evidence',5,2,90,'{}')`, [co, id.betaIg]);
+    // SCP-Se: Brand Beta's agreed budget, and two simulated boosts of the live simulated post: one running (covered by the budget), one
+    // completed. The budget is the client's agreement, not a simulated row: it stays.
+    id.betaBudget = await budget(co, beta, be.cycleId);
+    id.bSimRun = await boost(co, id.pLive, beta, be.cycleId, { status: "running", simulated: true, budgetId: id.betaBudget });
+    id.bSimDone = await boost(co, id.pLive, beta, be.cycleId, { status: "completed", simulated: true });
     id.pSched = await pipelinePost(co, be, "Beta scheduled", { status: "scheduled", via: "publisher", status0105: "scheduled" });
     id.vSched = await variant(co, id.pSched, id.betaFb, { status: "approved" });
     id.pending = newId();
@@ -154,9 +210,13 @@ describe.skipIf(!TEST_URL)("SCP-Sf · social-simulation-purge on real rows", () 
     id.vBothSim = await variant(co, id.pBoth, id.kopiIg, { status: "published", simulated: true, approvalId: await decidedApproval(co), providerPostId: `simulated:instagram:2:${newId()}`, url: `${SIM}/instagram/2`, at: wentLive });
     id.vBothReal = await variant(co, id.pBoth, id.kopiLi, { status: "published", approvalId: await decidedApproval(co), providerPostId: "li-urn-1", url: "https://www.linkedin.com/feed/update/mock-1", at: new Date("2026-10-20T09:00:00Z") });
     await metric(co, id.vBothReal, "pull");
+    // SCP-Se: a simulated boost of the both-kinds post (the post is repaired, the boost goes).
+    id.bSimReq = await boost(co, id.pBoth, kopi, ke.cycleId, { status: "requested", simulated: true });
     id.pHand = await pipelinePost(co, ke, "Kopi posted by hand", { status: "live", via: "manual", liveUrl: "https://www.instagram.com/p/MOCKHAND", wentLive, status0105: "published" });
     id.vHand = await variant(co, id.pHand, id.kopiIg, { status: "published", nativeImport: true, url: "https://www.instagram.com/p/MOCKHAND", at: wentLive });
     await metric(co, id.vHand, "manual", user);
+    // SCP-Se: a REAL boost, running, of the post a person marked live by hand (kept as it is).
+    id.bRealRun = await boost(co, id.pHand, kopi, ke.cycleId, { status: "running", simulated: false });
 
     // Real Co: real rows only.
     const real = await createClient(co, "Real Co");
@@ -167,6 +227,9 @@ describe.skipIf(!TEST_URL)("SCP-Sf · social-simulation-purge on real rows", () 
     id.vReal = await variant(co, id.pReal, id.realIg, { status: "published", approvalId: await decidedApproval(co), providerPostId: "ig-real-1", url: "https://www.instagram.com/p/REAL1", at: wentLive });
     await metric(co, id.vReal, "pull");
     await daily(co, id.realIg, "2026-10-21", "pull");
+    // SCP-Se: a real, completed boost of a real post, covered by the client's agreed budget; and the budgets the purge must never touch.
+    id.realBudget = await budget(co, real, re.cycleId);
+    id.bRealDone = await boost(co, id.pReal, real, re.cycleId, { status: "completed", simulated: false, budgetId: id.realBudget });
 
     // The unclassifiable company: a PULLED metric row on a simulated account's variant (only a real engine writes `pull`).
     const odd = await createClient(bad, "Odd Mock");
@@ -176,7 +239,11 @@ describe.skipIf(!TEST_URL)("SCP-Sf · social-simulation-purge on real rows", () 
     const oddPost = await pipelinePost(bad, oe, "Odd post", { status: "final", status0105: "draft" });
     id.oddVariant = await variant(bad, oddPost, oddIg, { status: "draft" });
     await metric(bad, id.oddVariant, "pull");
-  }, 120_000);
+
+    // SCP-Se: the two boost shapes the purge cannot classify, each in a company of its own.
+    badSimBoostCo = await refusedBoostCompany("SCP-Se Simulated Boost On Real Post Mock", "simulated_on_real_post");
+    badRealBoostCo = await refusedBoostCompany("SCP-Se Real Boost On Purged Post Mock", "real_on_purged_post");
+  }, 180_000);
   afterAll(async () => {
     config.socialSimulationEnabled = false;
     await teardownTestDb();
@@ -194,6 +261,9 @@ describe.skipIf(!TEST_URL)("SCP-Sf · social-simulation-purge on real rows", () 
       posts: keep("social_posts", [id.pReal]),
       metrics: await metricsOf([id.vBothReal, id.vReal]),
       daily: (await q(`SELECT row_to_json(m)::text AS j FROM social_metrics_daily m WHERE account_id = $1 ORDER BY id`, [id.realIg])).rows.map((r: { j: string }) => r.j),
+      // SCP-Se: the real boosts, and EVERY boost budget (the purge never touches a budget, whichever side of it the boost was).
+      boosts: keep("social_boosts", [id.bRealRun, id.bRealDone]),
+      budgets: keep("social_boost_budgets", [id.betaBudget, id.realBudget]),
     };
   };
 
@@ -218,16 +288,23 @@ describe.skipIf(!TEST_URL)("SCP-Sf · social-simulation-purge on real rows", () 
     expect(o.plan.restore.map((x) => x.postId).sort()).toEqual([id.pLive, id.pSched].sort());
     expect(o.plan.repair.map((x) => x.postId)).toEqual([id.pBoth]);
     expect(o.plan.kept.map((x) => x.postId).sort()).toEqual([id.pFinal, id.pComposer, id.pHand].sort());
+    // SCP-Se: exactly the three simulated boosts (two on the simulated live post, one on the both-kinds post), never the two real ones.
+    expect(o.plan.deleteBoosts.map((b) => b.id).sort()).toEqual([id.bSimRun, id.bSimDone, id.bSimReq].sort());
+    expect(o.plan.deleteBoosts.every((b) => b.simulated)).toBe(true);
     // The third wall: the counts read through RLS equal the superuser's.
     const su = (await q(
       `SELECT (SELECT count(*) FROM social_accounts WHERE tenant_id = $1 AND simulated)::int AS sa,
               (SELECT count(*) FROM social_post_variants WHERE tenant_id = $1 AND simulated)::int AS sv,
-              (SELECT count(*) FROM social_metrics_daily WHERE tenant_id = $1 AND source = 'simulated')::int AS sdm`, [co])).rows[0];
-    expect(o.before).toMatchObject({ simulatedAccounts: su.sa, simulatedVariants: su.sv, simulatedDailyMetrics: su.sdm });
+              (SELECT count(*) FROM social_metrics_daily WHERE tenant_id = $1 AND source = 'simulated')::int AS sdm,
+              (SELECT count(*) FROM social_boosts WHERE tenant_id = $1 AND simulated)::int AS sb`, [co])).rows[0];
+    expect(o.before).toMatchObject({ simulatedAccounts: su.sa, simulatedVariants: su.sv, simulatedDailyMetrics: su.sdm, simulatedBoosts: su.sb });
     expect(o.before.simulatedAccounts).toBe(3);
+    expect(o.before.simulatedBoosts).toBe(3);
     const text = renderPurgeReport(r).join("\n");
     expect(text).toMatch(/^DRY RUN/);
     expect(text).not.toContain("A mock caption.");
+    for (const b of [id.bSimRun, id.bSimDone, id.bSimReq]) expect(text).toContain(`WOULD REMOVE BOOST  ${b}`);
+    for (const b of [id.bRealRun, id.bRealDone]) expect(text).not.toContain(b);
   });
 
   it("(P2) --apply removes exactly the footprint; real rows are byte-identical; posts are put back, never deleted", async () => {
@@ -239,9 +316,14 @@ describe.skipIf(!TEST_URL)("SCP-Sf · social-simulation-purge on real rows", () 
     expect(r.refusedCompanies).toBe(0);
     expect(o.after).toEqual({
       simulatedAccounts: 0, variantsOnSimulatedAccounts: 0, simulatedVariants: 0, simulatedPosts: 0, simulatedPostMetrics: 0,
-      simulatedDailyMetrics: 0, simulatorOrgs: 0,
+      simulatedDailyMetrics: 0, simulatorOrgs: 0, simulatedBoosts: 0,
     });
-    expect(await realRows()).toEqual(realBefore);
+    expect(await realRows()).toEqual(realBefore); // incl. the real boosts and both boost budgets, byte for byte
+    // SCP-Se: the simulated boosts are gone, the real ones and the budgets are all that is left; the posts they sat on were not deleted.
+    expect((await q(`SELECT id FROM social_boosts WHERE tenant_id = $1 ORDER BY id`, [co])).rows.map((x: { id: string }) => x.id).sort()).toEqual([id.bRealRun, id.bRealDone].sort());
+    expect((await q(`SELECT id FROM social_boost_budgets WHERE tenant_id = $1 ORDER BY id`, [co])).rows.map((x: { id: string }) => x.id).sort()).toEqual([id.betaBudget, id.realBudget].sort());
+    expect(Number((await q(`SELECT count(*) FROM social_boosts WHERE tenant_id = $1 AND simulated`, [co])).rows[0].count)).toBe(0);
+    expect(r.companies[0].plan.deleteBoosts).toHaveLength(3);
     // No post was deleted, and no post's content or date moved.
     expect((await q(`SELECT id, title, brief, caption, hashtags, placement, scheduled_at, cycle_id FROM social_posts WHERE tenant_id = $1 ORDER BY id`, [co])).rows).toEqual(postsBefore);
 
@@ -265,6 +347,9 @@ describe.skipIf(!TEST_URL)("SCP-Sf · social-simulation-purge on real rows", () 
     // History: one company row and one row per post moved back or repaired, actor NULL, no caption anywhere.
     const acts = (await q(`SELECT verb, target_entity_id, metadata::text AS m FROM activities WHERE tenant_id = $1 AND verb IN ('simulation_purged','simulated_variants_removed')`, [co])).rows;
     expect(acts.filter((a: { verb: string }) => a.verb === "simulation_purged")).toHaveLength(1);
+    const purged = JSON.parse(acts.find((a: { verb: string }) => a.verb === "simulation_purged").m) as { boosts: number; boostIds: string[] };
+    expect(purged.boosts).toBe(3);
+    expect(purged.boostIds.sort()).toEqual([id.bSimRun, id.bSimDone, id.bSimReq].sort());
     expect(acts.filter((a: { verb: string }) => a.verb === "simulated_variants_removed").map((a: { target_entity_id: string }) => a.target_entity_id).sort())
       .toEqual([id.pLive, id.pSched, id.pBoth].sort());
     expect(acts.some((a: { m: string }) => a.m.includes("A mock caption."))).toBe(false);
@@ -277,7 +362,9 @@ describe.skipIf(!TEST_URL)("SCP-Sf · social-simulation-purge on real rows", () 
     expect(r.companies[0].applied).toBe(false);
     expect(r.companies[0].plan.refusals).toEqual([]);
     expect(r.companies[0].plan.deleteVariants).toEqual([]);
+    expect(r.companies[0].plan.deleteBoosts).toEqual([]);
     expect(r.companies[0].plan.restore).toEqual([]);
+    expect(r.companies[0].before.simulatedBoosts).toBe(0);
   });
 
   it("(P4) a company with a pulled metric row on a simulated account's variant is refused and changes not at all", async () => {
@@ -308,5 +395,24 @@ describe.skipIf(!TEST_URL)("SCP-Sf · social-simulation-purge on real rows", () 
       await q(`DROP TABLE scp_sf_probe`);
     }
     expect(await everything(bad)).toEqual(before);
+  });
+
+  it.each([
+    ["a simulated boost on a real post", "simulated_on_real_post", "simulated_boost_on_real_post", "refuseSimBoost"],
+    ["a real boost on a post the purge would change", "real_on_purged_post", "real_boost_on_purged_post", "refuseRealBoost"],
+  ] as const)("(P6) %s refuses its company (exit 2) and changes not at all, the removable simulated rows beside it included", async (_name, shape, code, key) => {
+    const t = shape === "simulated_on_real_post" ? badSimBoostCo : badRealBoostCo;
+    const before = await everything(t);
+    const dry = await purge({ apply: false, onlyTenantIds: [t] });
+    expect(dry.refusedCompanies).toBe(1);
+    expect(dry.companies[0].plan.refusals).toEqual([{ code, ids: [id[key]] }]);
+    const r = await purge({ apply: true, onlyTenantIds: [t] });
+    expect(r.refusedCompanies).toBe(1);
+    expect(r.companies[0].applied).toBe(false);
+    expect(r.companies[0].plan.refusals).toEqual([{ code, ids: [id[key]] }]);
+    expect(await everything(t)).toEqual(before);
+    // The simulated boost that WOULD have been removed is still there: a refused company is not half-purged.
+    expect(Number((await q(`SELECT count(*) FROM social_boosts WHERE tenant_id = $1 AND simulated`, [t])).rows[0].count)).toBeGreaterThanOrEqual(1);
+    expect(renderPurgeReport(r).join("\n")).toMatch(new RegExp(`REFUSED ${code}: 1 `));
   });
 });
