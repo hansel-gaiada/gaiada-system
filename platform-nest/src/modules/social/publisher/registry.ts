@@ -27,10 +27,11 @@ const publishers = new Map<PublisherKey, SocialPublisher>();
 const tracer = trace.getTracer("social.publisher");
 
 /** SCP-Sa — every registration is provenance-checked against what is ALREADY registered (simulation.ts's
- *  `publisherProvenanceViolation`): a simulator under a real key, a real engine under 'simulated', the simulator with the
- *  switch off, or a real engine beside the simulator THROWS here, at the call that would have created the mix — the
- *  SM-33 "boot error, never a warning" doctrine applied at the one place a driver can enter the registry, so a test or a
- *  later refactor cannot assemble the forbidden pair by calling this function in a different order than boot does. */
+ *  `publisherProvenanceViolation`): a simulator under a real key, a real engine under 'simulated', or the simulator with
+ *  the switch off THROWS here, at the call that would have created it — the SM-33 "boot error, never a warning" doctrine
+ *  applied at the one place a driver can enter the registry, so a test or a later refactor cannot assemble a forbidden
+ *  registry by calling this function in a different order than boot does. SCP-Sa2 (owner ruling SCP-D9): a real engine
+ *  beside the simulator is no longer forbidden here; the account's kind keeps their traffic apart (simulation.ts). */
 export function registerPublisher(p: SocialPublisher): void {
   const candidate = [...[...publishers.values()].filter((x) => x.key !== p.key), p];
   const violation = publisherProvenanceViolation(candidate, isSocialSimulationEnabled());
@@ -38,6 +39,17 @@ export function registerPublisher(p: SocialPublisher): void {
     throw new Error(`[social] BOOT ERROR: refusing to register publisher '${p.key}': ${violation} (SCP-Sa)`);
   }
   publishers.set(p.key, p);
+}
+
+/** SCP-Sa2 — which REAL publishing engine this process runs, for `GET /health`'s `socialPublisher` (no URL, no key):
+ *  'postiz' or 'mixpost' when one is registered, else 'none'. `direct` and the simulator are not engines in this sense
+ *  (`direct` is always registered and inert without a grant; the simulator has its own `socialSimulation` field). */
+export function realPublisherKey(): "postiz" | "mixpost" | "none" {
+  for (const key of ["postiz", "mixpost"] as const) {
+    const p = publishers.get(key);
+    if (p && !isSimulatedPublisher(p)) return key;
+  }
+  return "none";
 }
 
 /** Test seam — drop all registrations (each suite registers exactly the driver it exercises). */
@@ -58,8 +70,10 @@ export function getPublisher(key: PublisherKey): SocialPublisher | undefined {
   return p && isSimulatedPublisher(p) ? undefined : p;
 }
 
-/** SCP-Sa — THE ONE ROAD TO THE SIMULATOR. Called only by `provisioning.ts#resolveDispatchOrgHandle` and the status
- *  sweep (`post-status-sync-job.ts`), and only for an account whose `social_accounts.simulated` is true (SCP-Sc's
+/** SCP-Sa — THE ONE ROAD TO THE SIMULATOR. Called only by `provisioning.ts#resolveDispatchOrgHandle`, the status
+ *  sweep (`post-status-sync-job.ts`) and the metrics sweep (`metrics-job.ts`), and only for an account whose
+ *  `social_accounts.simulated` is true. The opposite direction is fenced too (SCP-Sa2): a real path refuses a simulated
+ *  account (`simulation.ts#realPublisherRefusal`), so neither driver ever serves the other kind (SCP-Sc's
  *  `isSimulatedPublisherAvailable` below asks it too, but returns only a yes or no and never the driver). Refuses:
  *  - `simulation_disabled` when the switch is off or no simulator is registered (an operator switched it off while
  *    simulated rows remain: they stop publishing, they do not fall through to a real engine);

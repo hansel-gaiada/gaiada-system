@@ -71,12 +71,13 @@ const STATUS_BY_CODE: Record<string, number> = {
   platform_app_not_registered: 409,
   client_connect_requires_signoff: 409,
   connect_redirect_not_configured: 503,
-  // SCP-Sa — the social simulator's containment (publisher/simulation.ts). The four fences are 409s: a well-formed request
-  // the state of the switch or the data forbids. The `[simulate-fail]` keyword is the simulated engine answering badly,
-  // so it joins `publisher_http_error`'s 502.
-  simulation_real_account_refused: 409,
+  // SCP-Sa / SCP-Sa2 — the social simulator's containment (publisher/simulation.ts). The four fences are 409s: a well-formed
+  // request the state of the switch or the data forbids. The `[simulate-fail]` keyword is the simulated engine answering
+  // badly, so it joins `publisher_http_error`'s 502. SCP-Sa2 (SCP-D9): `simulation_real_account_refused` is gone (real
+  // accounts are allowed beside the simulator); `simulated_account_on_real_publisher` is the reverse fence.
   simulation_disabled: 409,
   simulated_account_required: 409,
+  simulated_account_on_real_publisher: 409,
   simulated_approval_not_decided: 409,
   simulated_publish_failed: 502,
 };

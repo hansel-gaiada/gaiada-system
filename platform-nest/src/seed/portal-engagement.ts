@@ -47,7 +47,6 @@
 //   DATABASE_URL=... node dist/seed/portal-engagement.js
 import { newId, withGlobal, withTenants, closePool } from "../db";
 import { config } from "../config";
-import { assertRealAccountWriteAllowed } from "../modules/social/publisher/simulation";
 
 const site = () => config.originSite;
 
@@ -438,10 +437,11 @@ async function ensureAccount(
       [clientId, network],
     );
     if (existing.rows[0]) return existing.rows[0].id;
-    // SCP-Sa — these are REAL-shaped accounts (simulated = false). While the social simulator is on, boot refuses beside
-    // any such row, so writing one would break the next start: refused here instead, with the reason. SCP-Sb seeds the
-    // simulated accounts the simulator needs.
-    assertRealAccountWriteAllowed("portal demo seed (CP-21) social account");
+    // SCP-Sa2 (owner ruling SCP-D9) — these are REAL-shaped accounts (simulated = false, no integration id). The simulator
+    // now runs beside real accounts, so they are written with the switch on too (SCP-Sa refused them). This INSERT never
+    // names the mark or an integration id, so it can only ever write the real kind (social_accounts_kind_ck); an account
+    // the existing-row read above found is reused as it is, whichever kind it is. social-simulation-prepare.ts can mark
+    // these rows simulated later (they carry the CP-21 fingerprint), which is how the demo publishes through the simulator.
     const id = newId();
     await c.query(
       `INSERT INTO social_accounts

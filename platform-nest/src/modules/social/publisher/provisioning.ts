@@ -30,7 +30,9 @@ import { resolveAccountCapabilities, deriveAccountStatus, KNOWN_NETWORKS, type A
 import { describeKeyRef, resolveOrgApiKey, DEFAULT_KEY_REF } from "./keys";
 import { invokePublisher, resolvePublisher, resolvePublisherForCapability, resolveSimulatedPublisher } from "./registry";
 import { resolveActiveAccessToken } from "./oauth-tokens";
-import { SimulatedOrgHandle, assertRealAccountWriteAllowed, realAccountWriteRefusal } from "./simulation";
+import {
+  SimulatedOrgHandle, assertRealIntegrationId, assertRealPublisherTarget, isSimulatedId, realWriteOnSimulatedRow,
+} from "./simulation";
 import {
   OrgHandle, SocialPublisherError, type IntegrationState, type PublisherCapability,
   type PublisherRefusalCode, type SocialPublisher,
@@ -261,7 +263,7 @@ function directOrgRef(network: Network): string {
  *  proving the no-config-default-stays-inert property by construction, not by a separate branch. */
 export async function resolveDispatchOrgHandle(
   tenantId: string,
-  chain: Pick<DispatchChain, "org" | "network" | "accountId"> & { simulated?: boolean },
+  chain: Pick<DispatchChain, "org" | "network" | "accountId"> & { simulated?: boolean; integrationId?: string | null },
   capability: PublisherCapability,
 ): Promise<{ driver: SocialPublisher; handle: OrgHandle }> {
   // ── SCP-Sa — THE FORK TO THE SIMULATOR, and the only one ─────────────────────────────────────────────────────────
@@ -271,13 +273,25 @@ export async function resolveDispatchOrgHandle(
   // paths build a partial chain) gets it read here, so no caller can route a simulated account to a real engine by
   // forgetting to say. `resolveSimulatedPublisher` refuses while the switch is off (`simulation_disabled`) and for a
   // capability it does not simulate, and never falls back to a real driver.
-  const simulated = chain.simulated ?? await accountIsSimulated(tenantId, chain.accountId);
+  const read = chain.simulated === undefined ? await readAccountKind(tenantId, chain.accountId) : null;
+  const simulated = chain.simulated ?? read?.simulated === true;
   if (simulated) {
     return {
       driver: resolveSimulatedPublisher(capability),
       handle: new SimulatedOrgHandle(tenantId, chain.accountId, chain.org.id),
     };
   }
+  // ── SCP-Sa2 — THE REVERSE FENCE, on the real branch (simulation.ts fence 4) ──────────────────────────────────────
+  // Since SCP-D9 a real engine (Postiz, `direct`) is registered beside the simulator, so this branch is the one place a
+  // simulated account could reach a real engine if the fork above were ever handed a stale or wrong `simulated`. It does
+  // not trust the fork: it reads the account's kind afresh from OUR row (unless that read just happened above) and checks
+  // the caller's integration id as well, and refuses `simulated_account_on_real_publisher` for a simulated account or a
+  // `simulated:` id (the two signals `social_accounts_kind_ck` ties together). One indexed primary-key read per
+  // resolution, outside any lock; a missing row is left to the real path's own refusal, as before.
+  const kind = read ?? await readAccountKind(tenantId, chain.accountId);
+  const where = `real '${capability}' for account ${chain.accountId}`;
+  assertRealPublisherTarget(where, { simulated: kind?.simulated, integrationId: kind?.integrationId });
+  assertRealPublisherTarget(where, { integrationId: chain.integrationId });
   const network = chain.network as Network;
   const driver = resolvePublisherForCapability(chain.org.driver, network, capability);
   if (driver.key !== "direct") {
@@ -292,15 +306,20 @@ export async function resolveDispatchOrgHandle(
   return { driver, handle };
 }
 
-/** SCP-Sa — is this account one of the seeded simulated accounts? A missing row reads `false` (the real path then
- *  refuses it on its own terms; this function never invents a simulated account). */
-export async function accountIsSimulated(tenantId: string, accountId: string): Promise<boolean> {
+/** SCP-Sa / SCP-Sa2 — the account's kind as OUR row says it: `simulated` and its integration id. Null for a missing row
+ *  (the real path then refuses it on its own terms; this function never invents a simulated account). */
+export async function readAccountKind(
+  tenantId: string, accountId: string,
+): Promise<{ simulated: boolean; integrationId: string | null } | null> {
   const { rows } = await withTenants(
     [tenantId],
-    (c) => c.query<{ simulated: boolean }>(`SELECT simulated FROM social_accounts WHERE id = $1`, [accountId]),
+    (c) => c.query<{ simulated: boolean; integration_id: string | null }>(
+      `SELECT simulated, postiz_integration_id AS integration_id FROM social_accounts WHERE id = $1`, [accountId],
+    ),
     MODULES,
   );
-  return rows[0]?.simulated === true;
+  const r = rows[0];
+  return r ? { simulated: r.simulated === true, integrationId: r.integration_id } : null;
 }
 
 export async function loadOrgByClient(tenantId: string, clientId: string): Promise<PublisherOrgRow | null> {
@@ -370,10 +389,11 @@ export async function syncConnectorRegistry(
   clientId: string,
   actorId: string | null,
 ): Promise<SyncResult> {
-  // SCP-Sa — this mirrors the ENGINE's integrations, which are always real accounts. Refused first, before any read or
-  // network call, while the social simulator is on (simulation.ts fence 3). With the switch on Postiz cannot be
-  // configured anyway (boot refuses), so this is the belt behind those braces, and it names the real reason.
-  assertRealAccountWriteAllowed("connector-registry sync");
+  // SCP-Sa2 (owner ruling SCP-D9) — this mirrors the ENGINE's integrations, which are always REAL accounts, and since
+  // SCP-D9 it runs while the simulator is on too (SCP-Sa refused it then). What keeps it from ever touching a simulated
+  // account (simulation.ts fence 3): an engine id with the `simulated:` prefix is skipped (`simulated_integration_id`),
+  // `upsertAccount` never writes onto a simulated row, and the "no longer reported" sweep below never marks one
+  // disconnected (a simulated account is never reported by an engine, by construction).
   const org = await loadOrgByClient(tenantId, clientId);
   if (!org) {
     throw new SocialPublisherError(
@@ -400,6 +420,12 @@ export async function syncConnectorRegistry(
       // 0105's CHECK constraint would reject it anyway; refusing here means a NAMED skip instead of
       // a constraint error, and — the real point — a coerced network would mis-route a publish.
       skipped.push({ network: it.network, reason: "unmodelled_network" });
+      continue;
+    }
+    if (isSimulatedId(it.id)) {
+      // SCP-Sa2 — an engine never mints this prefix; if one ever did, mirroring it would make a REAL account carry a
+      // simulated account's id (social_accounts_kind_ck refuses the row; this names the skip instead).
+      skipped.push({ network: it.network, reason: "simulated_integration_id" });
       continue;
     }
     usable.push(it);
@@ -430,6 +456,11 @@ export async function syncConnectorRegistry(
         const upserted = await upsertAccount(c, {
           tenantId, clientId, publisherOrgId: org.id, integration: it, status, capabilities, quota: quota.snapshot,
         });
+        if (!upserted) {
+          // SCP-Sa2 — the engine's (network, handle) is held by a SIMULATED account of this client: never converted.
+          skipped.push({ network: it.network, reason: "handle_held_by_simulated_account" });
+          continue;
+        }
         accounts.push({
           accountId: upserted.id, network: it.network, handle: it.handle, status,
           capabilities, quotaSource: quota.source, created: upserted.created,
@@ -449,6 +480,8 @@ export async function syncConnectorRegistry(
             AND postiz_integration_id IS NOT NULL
             AND NOT (postiz_integration_id = ANY($2::text[]))
             AND status <> 'disconnected'
+            -- SCP-Sa2: the engine never reports a simulated account, so "not reported" says nothing about one.
+            AND simulated = false
           RETURNING id`,
         [clientId, seen],
       );
@@ -470,22 +503,28 @@ export async function syncConnectorRegistry(
 /** Match on the opaque integration id FIRST, then on 0105's `UNIQUE (tenant_id, client_id, network,
  *  handle)`. The order matters: a client who renames their account upstream keeps ONE registry row
  *  (with its history, its notes and its FK from every variant that targets it) instead of growing a
- *  second one that silently competes with the first for future publishes. */
+ *  second one that silently competes with the first for future publishes.
+ *
+ *  SCP-Sa2 (SCP-D9): this writes REAL accounts only. Both statements are fenced so they can never land on a SIMULATED
+ *  row (`simulated = false` on the UPDATE, `WHERE social_accounts.simulated = false` on the conflict update); when the
+ *  key is held by a simulated account nothing is written and this answers null (the caller names the skip). It never
+ *  writes the mark, and `assertRealIntegrationId` refuses a `simulated:` id first. */
 async function upsertAccount(
   c: PoolClient,
   args: {
     tenantId: string; clientId: string; publisherOrgId: string; integration: IntegrationState;
     status: string; capabilities: AccountCapabilities; quota: Record<string, unknown>;
   },
-): Promise<{ id: string; created: boolean }> {
+): Promise<{ id: string; created: boolean } | null> {
   const { integration: it } = args;
+  assertRealIntegrationId("connector-registry sync", it.id);
   const byIntegration = await c.query<{ id: string }>(
     `UPDATE social_accounts
         SET handle = $1, display_name = $2, status = $3, quota = $4::jsonb, capabilities = $5::jsonb,
             last_error = $6, health_checked_at = now(),
             connected_at = COALESCE(connected_at, CASE WHEN $3 = 'connected' THEN now() END),
             updated_at = now()
-      WHERE client_id = $7 AND postiz_integration_id = $8 AND deleted_at IS NULL
+      WHERE client_id = $7 AND postiz_integration_id = $8 AND deleted_at IS NULL AND simulated = false
       RETURNING id`,
     [it.handle, it.displayName ?? null, args.status, JSON.stringify(args.quota),
       JSON.stringify(args.capabilities), it.error ?? null, args.clientId, it.id],
@@ -520,12 +559,15 @@ async function upsertAccount(
             -- an invisible one is not.
             deleted_at = NULL,
             updated_at = now()
+      -- SCP-Sa2: never onto a simulated row (no row back = the key is a simulated account's; see the doc above).
+      WHERE social_accounts.simulated = false
      RETURNING id, (xmax = 0) AS inserted`,
     [id, args.tenantId, args.clientId, args.publisherOrgId, it.network, it.handle, it.displayName ?? null,
       it.id, args.status, JSON.stringify(args.quota), JSON.stringify(args.capabilities),
       it.error ?? null, config.originSite],
   );
-  const row = inserted.rows[0] as { id: string; inserted?: boolean };
+  const row = inserted.rows[0] as { id: string; inserted?: boolean } | undefined;
+  if (!row) return null;
   return { id: row.id, created: row.inserted === true };
 }
 
@@ -606,10 +648,8 @@ export async function checkConnectReadiness(
   clientId: string,
   network: string,
 ): Promise<ConnectReadiness> {
-  // SCP-Sa — first of all: while the social simulator is on, no REAL account may be connected (simulation.ts fence 3).
-  // Answered as an ordinary `{ok:false}` so the console's readiness read shows why; `initiateAccountConnect` throws it.
-  const simulationRefusal = realAccountWriteRefusal("account connect");
-  if (simulationRefusal) return simulationRefusal;
+  // SCP-Sa2 (owner ruling SCP-D9): a real account may be connected while the simulator is on (SCP-Sa refused it). The
+  // write can still never land on a simulated account (`initiateAccountConnect`'s conflict fence).
   if (!isNetwork(network)) {
     return { ok: false, reason: "network_disabled", detail: `'${network}' is not a network this platform models` };
   }
@@ -723,9 +763,13 @@ export async function initiateAccountConnect(
                 status = CASE WHEN social_accounts.postiz_integration_id IS NULL THEN 'pending'
                               ELSE social_accounts.status END,
                 updated_at = now()
+          -- SCP-Sa2 (SCP-D9): a real connect never resurrects, re-homes or re-states a SIMULATED account that holds
+          -- this handle. No row back = refused below, before any event or engine call.
+          WHERE social_accounts.simulated = false
            RETURNING id, (xmax = 0) AS inserted`,
         [id, tenantId, input.clientId, org.id, network, handle, config.originSite],
       );
+      if (!rows[0]) throw realWriteOnSimulatedRow("account connect", network, handle);
       const row = rows[0] as { id: string; inserted?: boolean };
       const wasInserted = row.inserted === true;
       await emitEvent(

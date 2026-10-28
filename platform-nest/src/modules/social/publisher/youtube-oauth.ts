@@ -29,7 +29,7 @@ import { hasRegisteredPlatformApp, loadOrgByClient } from "./provisioning";
 import { storeOAuthGrant, registerTokenRefresher } from "./oauth-tokens";
 import { mintSocialOAuthState } from "./oauth-state";
 import { SocialPublisherError } from "./types";
-import { assertRealAccountWriteAllowed, realAccountWriteRefusal } from "./simulation";
+import { realWriteOnSimulatedRow } from "./simulation";
 import {
   exchangeAuthorizationCode, hasYouTubeAppCredentials, refreshWithRefreshToken,
 } from "./youtube-client";
@@ -41,18 +41,16 @@ const MODULES: { modules: string[] } = { modules: ["social"] };
 export interface YouTubeConnectReadiness {
   ok: boolean;
   reason?: "network_disabled" | "client_connect_requires_signoff" | "connect_redirect_not_configured"
-    | "platform_app_not_registered" | "org_not_provisioned"
-    // SCP-Sa — the social simulator is on: no real account may be connected (simulation.ts fence 3).
-    | "simulation_real_account_refused";
+    | "platform_app_not_registered" | "org_not_provisioned";
   detail?: string;
 }
 
 /** THE precondition, checked before minting any state or touching Google. Mirrors
  *  `linkedin-oauth.ts#checkLinkedInConnectReadiness`'s ORDER and EXACT refusal vocabulary. */
 export async function checkYouTubeConnectReadiness(tenantId: string, clientId: string): Promise<YouTubeConnectReadiness> {
-  // SCP-Sa — first: while the social simulator is on, a real YouTube account is never connected (simulation.ts fence 3).
-  const simulationRefusal = realAccountWriteRefusal("YouTube connect");
-  if (simulationRefusal) return simulationRefusal;
+  // SCP-Sa2 (owner ruling SCP-D9): a real YouTube account may be connected while the social simulator is on (SCP-Sa
+  // refused it). The writes below can still never land on a simulated account (the conflict fence in the start, the
+  // kind check in the callback, and the database's social_accounts_kind_ck / trg_social_oauth_tokens_real_account_only).
   if (!config.social.publisher.enabledNetworks.includes("youtube")) {
     return { ok: false, reason: "network_disabled", detail: "'youtube' is disabled in this deployment (SOCIAL_NETWORKS_ENABLED)" };
   }
@@ -128,9 +126,12 @@ export async function startYouTubeConnect(
                                 AND social_accounts.status <> 'connected'
                               THEN 'pending' ELSE social_accounts.status END,
                 updated_at = now()
+          -- SCP-Sa2 (SCP-D9): a real connect never resurrects or re-homes a SIMULATED account holding this handle.
+          WHERE social_accounts.simulated = false
            RETURNING id, (xmax = 0) AS inserted`,
         [id, tenantId, input.clientId, org.id, handle, config.originSite],
       );
+      if (!rows[0]) throw realWriteOnSimulatedRow("YouTube connect", "youtube", handle);
       const row = rows[0] as { id: string; inserted?: boolean };
       const wasInserted = row.inserted === true;
       await emitEvent(
@@ -181,21 +182,23 @@ export async function completeYouTubeConnect(
   accountId: string,
   args: { code: string; actorId: string | null; fetchImpl?: typeof fetch },
 ): Promise<CompleteYouTubeConnectResult> {
-  // SCP-Sa — before anything else, the OAuth CALLBACK is refused too while the social simulator is on: a connect started
-  // before an operator switched the simulator on must not complete into a real account beside it (simulation.ts fence 3).
-  // Refused before the single-use code is spent, so the human can finish later with the simulator off.
-  assertRealAccountWriteAllowed("YouTube connect callback");
+  // SCP-Sa2 (owner ruling SCP-D9): the callback completes while the social simulator is on too (SCP-Sa refused it). What
+  // it must never do is complete into a SIMULATED account: the row is checked below, before the single-use code is spent.
   // Cheapest / most structural check FIRST, before ever spending Google's single-use authorization
   // `code` on an exchange — same doctrine as `linkedin-oauth.ts`'s own ordering.
   const owns = await withTenants(
     [tenantId],
-    (c: PoolClient) => c.query<{ id: string; network: string }>(
-      `SELECT id, network FROM social_accounts WHERE id = $1 AND deleted_at IS NULL`,
+    (c: PoolClient) => c.query<{ id: string; network: string; handle: string; simulated: boolean }>(
+      `SELECT id, network, handle, simulated FROM social_accounts WHERE id = $1 AND deleted_at IS NULL`,
       [accountId],
     ),
     MODULES,
   );
   const ownedRow = owns.rows[0];
+  // SCP-Sa2 — never a grant for a simulated account (the database refuses it too: trg_social_oauth_tokens_real_account_only
+  // and social_accounts_kind_ck's `connected_by IS NULL`). Refused here first, with the typed code, before the network's
+  // single-use authorization code is spent.
+  if (ownedRow?.simulated === true) throw realWriteOnSimulatedRow("YouTube connect callback", ownedRow.network, ownedRow.handle);
   if (!ownedRow || ownedRow.network !== "youtube") {
     throw new SocialPublisherError("org_not_provisioned", `no pending YouTube account ${accountId} found for this tenant`);
   }
@@ -229,7 +232,7 @@ export async function completeYouTubeConnect(
             SET status = 'connected', platform_app_id = $2, connected_by = $3, connected_at = now(),
                 last_error = NULL, postiz_integration_id = COALESCE(postiz_integration_id, 'direct:youtube'),
                 updated_at = now()
-          WHERE id = $1`,
+          WHERE id = $1 AND simulated = false`,
         [accountId, platformApp.rows[0]?.id ?? null, args.actorId],
       );
       await emitEvent(c, tenantId, "social_account", accountId, "social.account.connected", { network: "youtube", driver: "direct" });

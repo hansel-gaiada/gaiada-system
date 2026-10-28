@@ -20,6 +20,7 @@ import { estimateCostUsd, isNetwork, supportsFirstCommentFor, validateVariant, t
 import { resolveXPricing } from "../usage-ledger";
 import { SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_TOOL_CLASSIFICATION } from "../publish-precondition";
 import { assertDispatchChain, resolveDispatchOrgHandle } from "../publisher/provisioning";
+import { assertRealPublisherTarget, isSimulatedPublisher } from "../publisher/simulation";
 import { SCP } from "./fixture";
 import { syncContentMonthProgress } from "./content-month-progress";
 import { captionWithHashtags } from "./handoff-checks";
@@ -592,6 +593,9 @@ export async function cancelQueuedDispatchesBeforeTx(tenantId: string, postId: s
     try {
       const chain = await withTenants([tenantId], (c) => assertDispatchChain(c, v.id), { modules: ["social"] });
       const { driver, handle } = await resolveDispatchOrgHandle(tenantId, chain, "cancel");
+      // SCP-Sa2 — the reverse fence (simulation.ts fence 4): a real engine is never asked to cancel a post the simulator
+      // minted. The resolver already refused a simulated account; this checks the variant's own id as well.
+      if (!isSimulatedPublisher(driver)) assertRealPublisherTarget(`cancel of variant ${v.id}`, { providerPostId: v.provider_post_id });
       await driver.cancelPost(handle, v.provider_post_id);
       done.add(v.id);
     } catch (err) {

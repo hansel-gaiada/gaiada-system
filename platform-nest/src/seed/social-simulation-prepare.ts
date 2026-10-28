@@ -1,17 +1,22 @@
-// SCP-Sb — prepare a database for the social simulator: find every row that would make boot REFUSE `SOCIAL_SIMULATION_ENABLED`,
-// and mark the ones that are plainly mock seed as simulated.
+// SCP-Sb / SCP-Sa2 — prepare a database for the social simulator: list every row that would make boot REFUSE
+// `SOCIAL_SIMULATION_ENABLED`, and mark the CP-21 demo-seed accounts simulated so the demo publishes through the simulator.
 //   node dist/seed/social-simulation-prepare.js            DRY RUN: reads only, lists, writes nothing
 //   node dist/seed/social-simulation-prepare.js --apply    marks the rows classified MOCK SEED as simulated, in one transaction per company
 // (dev checkout: npx tsx scripts/social-simulation-prepare.ts <same arguments>; operator steps: infra/runbooks/social-simulation.md)
 //
-// WHAT BOOT REFUSES (publisher/boot.ts, SCP-Sa errors 4 and 5), and so what this lists, in EVERY company (deleted ones too):
-//   * every `social_accounts` row with `simulated = false`, SOFT-DELETED INCLUDED (a soft-deleted account is one upsert away from
-//     live again, so boot counts it);
-//   * every `social_oauth_tokens` row with `status = 'active'` (a connected LinkedIn/YouTube account can publish for real through
-//     the `direct` driver).
-// The exit code predicts the boot: 0 when nothing blocking would remain (after the marks, in a dry run too), 2 when something would.
+// ── WHAT BOOT REFUSES SINCE SCP-Sa2 (owner ruling SCP-D9: the simulator runs BESIDE a real Postiz) ──────────────────────
+// Real accounts, real OAuth grants and a configured Postiz no longer stop the switch: they publish through Postiz (or
+// `direct`) beside the simulator. What boot refuses (publisher/boot.ts errors 2 and 3), and so the ONLY thing this lists as
+// blocking, in EVERY company (deleted ones too), soft-deleted rows included:
+//   * every `social_accounts` row that breaks the ACCOUNT-KIND RULE (`simulation.ts#ACCOUNT_KIND_VIOLATION_SQL`, the same
+//     predicate boot counts): a simulated row without a `simulated:` integration id or with a `connected_by`, or a real
+//     row with a `simulated:` id. Migration 202610280100's CHECK makes such a row impossible to write, so on a migrated
+//     database this list is empty; it exists for a database the migration has not reached;
+//   * every `social_oauth_tokens` row, of any status, naming a SIMULATED account (a grant is a real credential).
+// Neither is ever touched: a person decides each (the runbook's "Side by side" section says how to look).
+// The exit code predicts the boot: 0 when nothing blocking remains, 2 when something does (or an error).
 //
-// ── THE RULE: WHAT IS "PLAINLY MOCK SEED" ──────────────────────────────────────────────────────────────────────────────
+// ── WHAT IT MARKS: "PLAINLY MOCK SEED" ─────────────────────────────────────────────────────────────────────────────────
 // Only one thing writes a non-simulated account without ever talking to an engine: the CP-21 portal demo seed
 // (`seed/portal-engagement.ts`). Its rows have a fingerprint no real connection can have, and this script marks an account
 // ONLY when ALL of these hold:
@@ -21,22 +26,24 @@
 //   4. no `social_oauth_tokens` row of ANY status names it (a revoked grant is the trace of a real connection that existed);
 //   5. no variant on it carries a provider post id, a `published_at`, or is a native import (real publishing happened, or
 //      was recorded as having happened).
-// Soft-deleted rows are classified by the same rule (a soft-deleted CP-21 seed row is as mock as a live one, and boot counts it).
-// EVERYTHING ELSE IS UNCLASSIFIED: the script prints it with the reasons and the ids and touches nothing. That includes every
-// account of a real-looking org, every account with an integration id, and every account with any grant or publishing history.
-// A human decides those (connect nothing; either remove the row through the module's own tools, or do not turn the switch on).
-// Live OAuth grants are NEVER touched: revoking one is a human act through the existing disconnect flow.
+// Soft-deleted rows are classified by the same rule. Everything else is a REAL account and stays real: since SCP-D9 that is
+// allowed beside the simulator, so it is only counted, not listed as blocking. Such a demo row can never publish through
+// Postiz anyway (it has no integration id: `assertDispatchChain` refuses it), so marking it is what lets the demo publish.
+// Marking writes the kind's second half too (SCP-Sa2): `postiz_integration_id = 'simulated:' || network`, because
+// `social_accounts_kind_ck` refuses a simulated row without it, and `trg_social_accounts_kind_guard` admits the change
+// exactly because rule 3 and 4 hold (the row never reached an engine).
 //
 // ── WHAT IT NEVER DOES ─────────────────────────────────────────────────────────────────────────────────────────────────
-// It never deletes a row, never changes a status, handle, org or integration id, never revokes or reads a token's ciphertext
-// (the grant query selects ids and statuses only), never clears a soft-delete, and never writes anything without `--apply`.
-// The only statement it can run is an UPDATE of social_accounts that sets simulated = true WHERE simulated = false AND id = ANY(<the
-// classified ids>), and it checks the row count against the plan inside the transaction (a mismatch rolls the company back).
+// It never deletes a row, never changes a status, handle or org, never revokes or reads a token's ciphertext (the grant
+// query selects ids and statuses only), never clears a soft-delete, never turns a simulated row real, and never writes
+// anything without `--apply`. The only statement it can run is an UPDATE of social_accounts that sets simulated = true and
+// the simulated integration id WHERE simulated = false AND the id is still NULL AND id = ANY(<the classified ids>), and it
+// checks the row count against the plan inside the transaction (a mismatch rolls the company back).
 //
-// ── FENCE 4, AND WHY THIS IS NOT BEHIND IT ─────────────────────────────────────────────────────────────────────────────
-// `assertSimulatedWriteAllowed` refuses a simulated write while the switch is off. This script runs BEFORE the switch is turned
-// on (boot would refuse the switch otherwise), so it cannot call it, and does not: a row marked simulated while the switch is
-// off is inert (a simulated account's variant refuses `simulation_disabled` at dispatch; nothing registers the simulator).
+// ── FENCE 5, AND WHY THIS IS NOT BEHIND IT ─────────────────────────────────────────────────────────────────────────────
+// `assertSimulatedWriteAllowed` refuses a simulated write while the switch is off. This script may run BEFORE the switch is
+// turned on (it predicts the boot), so it does not call it: a row marked simulated while the switch is off is inert (a
+// simulated account's variant refuses `simulation_disabled` at dispatch; nothing registers the simulator).
 // The static inventory in publisher/simulation.test.ts names this file as the ONE other writer of the mark and pins that it
 // only ever sets it TRUE on a `simulated = false` row, inserts nothing and deletes nothing.
 //
@@ -45,6 +52,7 @@
 import type { PoolClient } from "pg";
 import { withGlobal, withTenants, closePool } from "../db";
 import { writeActivity } from "../core/http";
+import { ACCOUNT_KIND_VIOLATION_SQL, SIMULATED_ID_PREFIX, isSimulatedId } from "../modules/social/publisher/simulation";
 
 /** The CP-21 demo seed's org fingerprint (`seed/portal-engagement.ts#ensurePublisherOrg`). */
 export const CP21_API_KEY_REF = "seed:portal-demo-no-key";
@@ -52,7 +60,7 @@ export const cp21PostizOrgId = (clientId: string): string => `seed-${clientId}`;
 
 const MODULES = { modules: ["social"] };
 
-/** One `simulated = false` account with everything the rule reads. */
+/** One `simulated = false` account with everything the marking rule reads. */
 export interface PrepareAccount {
   id: string;
   clientId: string;
@@ -71,9 +79,9 @@ export interface PrepareAccount {
   hasPublishingHistory: boolean;
 }
 
-export type Verdict = { kind: "mock_seed" } | { kind: "unclassified"; reasons: string[] };
+export type Verdict = { kind: "mock_seed" } | { kind: "real"; reasons: string[] };
 
-/** PURE. The rule of the header. Every failed condition adds its reason: an unclassified row says WHY. */
+/** PURE. The marking rule of the header. Every failed condition adds its reason: a row that stays real says WHY. */
 export function classifyAccount(a: PrepareAccount): Verdict {
   const reasons: string[] = [];
   if (a.orgApiKeyRef !== CP21_API_KEY_REF) reasons.push(`its publisher org's api_key_ref is '${a.orgApiKeyRef}', not the CP-21 seed alias`);
@@ -82,17 +90,46 @@ export function classifyAccount(a: PrepareAccount): Verdict {
   if (a.connectedBy !== null) reasons.push("a person connected it (connected_by is set)");
   if (a.hasAnyGrant) reasons.push("an OAuth grant names it (live, revoked or expired): a real connection existed");
   if (a.hasPublishingHistory) reasons.push("a variant on it carries a provider post id, a published time or is a native import");
-  return reasons.length === 0 ? { kind: "mock_seed" } : { kind: "unclassified", reasons };
+  return reasons.length === 0 ? { kind: "mock_seed" } : { kind: "real", reasons };
 }
 
-export interface PrepareGrant { id: string; accountId: string; clientName: string; network: string }
+/** One row that breaks the account-kind rule. */
+export interface KindViolation {
+  id: string;
+  clientName: string;
+  network: string;
+  handle: string;
+  simulated: boolean;
+  integrationId: string | null;
+  connectedBy: boolean;
+  deleted: boolean;
+}
+
+/** PURE. Why a row breaks the account-kind rule (empty when it does not): the negation of `social_accounts_kind_ck`, in
+ *  words. Kept beside `ACCOUNT_KIND_VIOLATION_SQL` by the test that runs both on the same shapes. */
+export function kindViolationReasons(v: Pick<KindViolation, "simulated" | "integrationId" | "connectedBy">): string[] {
+  const reasons: string[] = [];
+  if (v.simulated) {
+    if (v.integrationId === null) reasons.push(`it is simulated but has no integration id (expected '${SIMULATED_ID_PREFIX}<network>')`);
+    else if (!isSimulatedId(v.integrationId)) reasons.push(`it is simulated but carries the engine integration id '${v.integrationId}'`);
+    if (v.connectedBy) reasons.push("it is simulated but a person connected it (connected_by is set)");
+  } else if (isSimulatedId(v.integrationId)) {
+    reasons.push(`it is real but carries the simulated integration id '${v.integrationId}'`);
+  }
+  return reasons;
+}
+
+/** An OAuth grant (any status) on a SIMULATED account. Ids and status only, never ciphertext. */
+export interface PrepareGrant { id: string; accountId: string; clientName: string; network: string; status: string }
 
 export interface TenantReport {
   tenantId: string;
   company: string;
   markable: PrepareAccount[];
-  unclassified: Array<{ account: PrepareAccount; reasons: string[] }>;
-  grants: PrepareGrant[];
+  /** Real accounts that stay real (allowed beside the simulator since SCP-D9). Counted, never listed as blocking. */
+  realAccounts: number;
+  kindViolations: KindViolation[];
+  simulatedGrants: PrepareGrant[];
   /** Rows actually marked (always 0 in a dry run). */
   marked: number;
 }
@@ -100,14 +137,15 @@ export interface TenantReport {
 export interface PrepareResult {
   apply: boolean;
   tenants: TenantReport[];
-  /** What would still make boot refuse the switch once every markable row is marked. */
+  /** What would still make boot refuse the switch: rows breaking the kind rule, and grants on simulated accounts. */
   blockingAccounts: number;
   blockingGrants: number;
   totalMarkable: number;
   totalMarked: number;
+  totalRealAccounts: number;
 }
 
-/** Reads one company's blockers, in the caller's transaction. */
+/** Reads one company's report, in the caller's transaction. */
 export async function readTenant(c: PoolClient, tenantId: string, company: string): Promise<TenantReport> {
   const accounts = await c.query<{
     id: string; client_id: string; client_name: string | null; network: string; handle: string; status: string; deleted: boolean;
@@ -126,19 +164,37 @@ export async function readTenant(c: PoolClient, tenantId: string, company: strin
       ORDER BY cl.name, a.network, a.handle, a.id`,
     [tenantId],
   );
+  const violations = await c.query<{
+    id: string; client_name: string | null; network: string; handle: string; simulated: boolean; integration_id: string | null;
+    connected_by: boolean; deleted: boolean;
+  }>(
+    `SELECT a.id, cl.name AS client_name, a.network, a.handle, a.simulated, a.postiz_integration_id AS integration_id,
+            a.connected_by IS NOT NULL AS connected_by, a.deleted_at IS NOT NULL AS deleted
+       FROM social_accounts a
+       LEFT JOIN clients cl ON cl.id = a.client_id AND cl.tenant_id = a.tenant_id
+      WHERE a.tenant_id = $1 AND ${ACCOUNT_KIND_VIOLATION_SQL}
+      ORDER BY cl.name, a.network, a.handle, a.id`,
+    [tenantId],
+  );
   // Ids and statuses only: the ciphertext columns are never selected.
-  const grants = await c.query<{ id: string; account_id: string; client_name: string | null; network: string }>(
-    `SELECT t.id, t.account_id, cl.name AS client_name, t.network
+  const grants = await c.query<{ id: string; account_id: string; client_name: string | null; network: string; status: string }>(
+    `SELECT t.id, t.account_id, cl.name AS client_name, t.network, t.status
        FROM social_oauth_tokens t
-       LEFT JOIN social_accounts a ON a.id = t.account_id AND a.tenant_id = t.tenant_id
+       JOIN social_accounts a ON a.id = t.account_id AND a.tenant_id = t.tenant_id
        LEFT JOIN clients cl ON cl.id = a.client_id AND cl.tenant_id = t.tenant_id
-      WHERE t.tenant_id = $1 AND t.status = 'active'
+      WHERE t.tenant_id = $1 AND a.simulated
       ORDER BY cl.name, t.network, t.id`,
     [tenantId],
   );
   const report: TenantReport = {
-    tenantId, company, markable: [], unclassified: [],
-    grants: grants.rows.map((g) => ({ id: g.id, accountId: g.account_id, clientName: g.client_name ?? "(unknown client)", network: g.network })),
+    tenantId, company, markable: [], realAccounts: 0,
+    kindViolations: violations.rows.map((v) => ({
+      id: v.id, clientName: v.client_name ?? "(unknown client)", network: v.network, handle: v.handle, simulated: v.simulated,
+      integrationId: v.integration_id, connectedBy: v.connected_by, deleted: v.deleted,
+    })),
+    simulatedGrants: grants.rows.map((g) => ({
+      id: g.id, accountId: g.account_id, clientName: g.client_name ?? "(unknown client)", network: g.network, status: g.status,
+    })),
     marked: 0,
   };
   for (const r of accounts.rows) {
@@ -147,17 +203,18 @@ export async function readTenant(c: PoolClient, tenantId: string, company: strin
       deleted: r.deleted, integrationId: r.integration_id, connectedBy: r.connected_by, orgApiKeyRef: r.api_key_ref, orgPostizOrgId: r.postiz_org_id,
       hasAnyGrant: r.has_grant, hasPublishingHistory: r.has_history,
     };
-    const v = classifyAccount(a);
-    if (v.kind === "mock_seed") report.markable.push(a);
-    else report.unclassified.push({ account: a, reasons: v.reasons });
+    if (classifyAccount(a).kind === "mock_seed") report.markable.push(a);
+    else report.realAccounts += 1;
   }
   return report;
 }
 
-/** Marks the classified ids, inside the caller's transaction; throws (rolling the company back) if the row count differs from the plan. */
+/** Marks the classified ids, inside the caller's transaction; throws (rolling the company back) if the row count differs from
+ *  the plan. Writes the simulated integration id in the SAME statement (social_accounts_kind_ck), and only on a row whose id
+ *  is still NULL and which nobody connected (the classification's rule 3, re-checked by the statement itself). */
 async function markSimulated(c: PoolClient, tenantId: string, ids: string[]): Promise<number> {
   const r = await c.query(
-    `UPDATE social_accounts SET simulated = true, updated_at = now() WHERE tenant_id = $1 AND simulated = false AND id = ANY($2::uuid[])`,
+    `UPDATE social_accounts SET simulated = true, postiz_integration_id = '${SIMULATED_ID_PREFIX}' || network, updated_at = now() WHERE tenant_id = $1 AND simulated = false AND postiz_integration_id IS NULL AND connected_by IS NULL AND id = ANY($2::uuid[])`,
     [tenantId, ids],
   );
   if ((r.rowCount ?? 0) !== ids.length) {
@@ -194,10 +251,11 @@ export async function prepare(opts: { apply: boolean; onlyTenantIds?: readonly s
   return {
     apply: opts.apply,
     tenants,
-    blockingAccounts: tenants.reduce((n, t) => n + t.unclassified.length, 0),
-    blockingGrants: tenants.reduce((n, t) => n + t.grants.length, 0),
+    blockingAccounts: tenants.reduce((n, t) => n + t.kindViolations.length, 0),
+    blockingGrants: tenants.reduce((n, t) => n + t.simulatedGrants.length, 0),
     totalMarkable: tenants.reduce((n, t) => n + t.markable.length, 0),
     totalMarked: tenants.reduce((n, t) => n + t.marked, 0),
+    totalRealAccounts: tenants.reduce((n, t) => n + t.realAccounts, 0),
   };
 }
 
@@ -208,27 +266,30 @@ export function renderReport(r: PrepareResult): string[] {
   const acct = (a: PrepareAccount) =>
     `${a.id}  ${a.clientName}  ${a.network} ${a.handle}  status=${a.status}${a.deleted ? "  SOFT-DELETED" : ""}`;
   for (const t of r.tenants) {
-    if (t.markable.length + t.unclassified.length + t.grants.length === 0) continue;
+    if (t.markable.length + t.kindViolations.length + t.simulatedGrants.length === 0) continue;
     out.push("", `COMPANY ${t.company} (${t.tenantId})`);
     for (const a of t.markable) out.push(`  ${r.apply ? "MARKED   " : "WOULD MARK"}  ${acct(a)}`);
-    for (const u of t.unclassified) {
-      out.push(`  UNCLASSIFIED  ${acct(u.account)}`);
-      for (const why of u.reasons) out.push(`      - ${why}`);
+    for (const v of t.kindViolations) {
+      out.push(`  KIND RULE BROKEN  ${v.id}  ${v.clientName}  ${v.network} ${v.handle}  ${v.simulated ? "simulated" : "real"}${v.deleted ? "  SOFT-DELETED" : ""}`);
+      for (const why of kindViolationReasons(v)) out.push(`      - ${why}`);
     }
-    for (const g of t.grants) out.push(`  LIVE OAUTH GRANT  ${g.id}  ${g.clientName}  ${g.network}  (account ${g.accountId})`);
+    for (const g of t.simulatedGrants) {
+      out.push(`  OAUTH GRANT ON A SIMULATED ACCOUNT  ${g.id}  ${g.clientName}  ${g.network}  status=${g.status}  (account ${g.accountId})`);
+    }
   }
   out.push(
     "",
     `markable (CP-21 seed fingerprint): ${r.totalMarkable}${r.apply ? `, marked: ${r.totalMarked}` : ""}`,
-    `still blocking boot after the marks: ${r.blockingAccounts} unclassified account(s), ${r.blockingGrants} live OAuth grant(s)`,
+    `real accounts (stay real; allowed beside the simulator, SCP-D9): ${r.totalRealAccounts}`,
+    `still blocking boot: ${r.blockingAccounts} account(s) breaking the kind rule, ${r.blockingGrants} OAuth grant(s) on simulated accounts`,
   );
   if (r.blockingAccounts + r.blockingGrants > 0) {
     out.push(
       "BOOT WOULD STILL REFUSE SOCIAL_SIMULATION_ENABLED. This script touches neither kind: a person decides each row above",
-      "(an unclassified account is not plainly mock seed; a live grant is revoked through the module's own disconnect flow).",
+      "(infra/runbooks/social-simulation.md, 'Side by side'). On a database that ran migration 202610280100 there are none.",
     );
   } else if (!r.apply && r.totalMarkable > 0) {
-    out.push("Re-run with --apply to mark them; then boot will accept SOCIAL_SIMULATION_ENABLED.");
+    out.push("Nothing blocks the switch. Re-run with --apply to mark the demo-seed rows simulated, so the demo publishes through the simulator.");
   } else {
     out.push("Nothing blocks the switch.");
   }
