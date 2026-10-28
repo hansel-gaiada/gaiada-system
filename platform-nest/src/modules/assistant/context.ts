@@ -35,6 +35,7 @@
 import type { PoolClient } from "pg";
 import { config } from "../../config";
 import { recordGatewayCall, outcomeForGatewayStatus, readGatewayUsage, type AiCallAttribution } from "../ai-usage/gateway-usage";
+import { gatewayTaskField } from "../ai-usage/routing";
 import { refreshThreadCost } from "./thread-cost";
 import { searchKnowledgeStrict, type KnowledgeHit, type KnowledgeStoreHit } from "../search/knowledge-client";
 import { collapseHits, filterReadableHits, searchTopK } from "../knowledge/search-filter";
@@ -171,7 +172,7 @@ async function summarizeExcerpt(excerpt: string, existingSummary: string | null,
         Authorization: `Bearer ${opts?.gatewayToken ?? config.services.gateway.token}`,
         ...(opts?.tenantId ? { "x-tenant-id": opts.tenantId } : {}),
       },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, ...gatewayTaskField(attribution.task) }),
     });
   } catch (err) {
     record({ capability: "llm", outcome: "error" });
@@ -181,10 +182,10 @@ async function summarizeExcerpt(excerpt: string, existingSummary: string | null,
     record({ capability: "llm", outcome: outcomeForGatewayStatus(res.status) });
     throw new CompactionGatewayError(`ai-gateway /complete (compaction) returned HTTP ${res.status}`);
   }
-  const body = (await res.json()) as { text?: string; provider?: string; model?: string; usage?: unknown };
+  const body = (await res.json()) as { text?: string; provider?: string; model?: string; tier?: string; usage?: unknown };
   record({
     capability: "llm", outcome: "ok", provider: typeof body.provider === "string" ? body.provider : null,
-    model: typeof body.model === "string" ? body.model : null, usage: readGatewayUsage(body.usage),
+    model: typeof body.model === "string" ? body.model : null, tier: typeof body.tier === "string" ? body.tier : null, usage: readGatewayUsage(body.usage),
   });
   const summary = (body.text ?? "").trim();
   if (!summary) throw new CompactionGatewayError("ai-gateway /complete (compaction) returned an empty summary");

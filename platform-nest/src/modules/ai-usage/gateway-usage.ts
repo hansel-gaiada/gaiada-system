@@ -22,6 +22,7 @@
 //   answer is in hand. The writer it ends in (writer.ts) has the same never-throw contract.
 import { withTenants } from "../../db";
 import { INT4_MAX, LABEL_PATTERN, UUID_PATTERN, recordAiUsageCall, type AiUsageDeps, type AiUsageCall, type AiUsageContext, type RecordResult } from "./writer";
+import { readGatewayTier } from "./routing";
 import type { AiUsageCapability, AiUsageOutcome, AiUsageSurface } from "./vocab";
 
 /**
@@ -38,7 +39,10 @@ export interface AiCallAttribution {
   surface: AiUsageSurface;
   threadId?: string | null;
   runId?: string | null;
-  /** A call-site label such as `social.caption` (no spaces, at most 120 characters). Free until AIP-06 defines routing classes. */
+  /**
+   * A call-site label such as `social.draft_caption` (no spaces, at most 120 characters). Recorded as-is in `ai_usage_events.task`.
+   * AIP-07: the gateway routes on a coarser CLASS derived from it (`gatewayTaskFor`, routing.ts); the label is kept because it is finer.
+   */
   task?: string | null;
 }
 
@@ -99,6 +103,8 @@ export interface GatewayCallFacts {
   outcome: AiUsageOutcome;
   provider?: string | null;
   model?: string | null;
+  /** The tier the gateway reports it applied (AIP-06); anything but fast|standard|strong is dropped. A refused call records none. */
+  tier?: string | null;
   /** The provider-reported counts and cost, when the answer carried them. Wins over `estimate`. */
   usage?: GatewayUsage | null;
   /** A labelled 4-characters-per-token estimate, used only when `usage` is absent. */
@@ -117,6 +123,7 @@ export function toAiUsageCall(facts: GatewayCallFacts, attr: Pick<AiCallAttribut
     outcome: facts.outcome,
     provider: label(facts.provider),
     model: label(facts.model),
+    tier: refused ? null : label(readGatewayTier(facts.tier)),
     task: label(attr.task ?? null),
     gatewayProviderHint: label(facts.providerHint ?? null),
     tokensSource: usage ? "provider" : estimate ? "estimate" : "none",

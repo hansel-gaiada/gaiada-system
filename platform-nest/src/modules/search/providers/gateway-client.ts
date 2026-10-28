@@ -18,6 +18,7 @@ import {
   outcomeForGatewayStatus, readGatewayUsage, recordGatewayCall, statusFromError,
   type AiCallAttribution, type GatewayCallFacts, type GatewayUsage,
 } from "../../ai-usage/gateway-usage";
+import { gatewayTaskField } from "../../ai-usage/routing";
 
 export interface GatewayCallOptions {
   /** Override the configured gateway URL (tests only; production always reads config). */
@@ -71,7 +72,7 @@ async function callGateway<T>(
   body: unknown,
   opts: AttributedCallOptions,
   capability: GatewayCallFacts["capability"],
-  read: (answer: T) => Pick<GatewayCallFacts, "provider" | "model" | "usage">,
+  read: (answer: T) => Pick<GatewayCallFacts, "provider" | "model" | "usage" | "tier">,
   providerHint?: string,
 ): Promise<T> {
   const { url, token, fetchImpl, timeoutMs } = resolve(opts);
@@ -87,7 +88,7 @@ async function callGateway<T>(
     });
     if (!res.ok) throw new GatewayHttpError(path, res.status);
     const answer = (await res.json()) as T;
-    let facts: Pick<GatewayCallFacts, "provider" | "model" | "usage"> = {};
+    let facts: Pick<GatewayCallFacts, "provider" | "model" | "usage" | "tier"> = {};
     try {
       facts = read(answer);
     } catch {
@@ -122,17 +123,19 @@ export interface CompletionResult {
   usage?: { promptTokens: number; completionTokens: number; costUsd?: number; source?: string };
   /** Additive and forward-compatible: the model that served, when the gateway reports it (it does not on /complete today). */
   model?: string;
+  /** AIP-06/07: the tier the gateway applied (fast|standard|strong), when it routed the call. */
+  tier?: string;
 }
 
 /** What a /complete answer says about the call, for the usage record. */
-export function completionFacts(answer: CompletionResult): Pick<GatewayCallFacts, "provider" | "model" | "usage"> {
+export function completionFacts(answer: CompletionResult): Pick<GatewayCallFacts, "provider" | "model" | "usage" | "tier"> {
   const usage: GatewayUsage | null = readGatewayUsage(answer?.usage);
-  return { provider: answer?.provider ?? null, model: typeof answer?.model === "string" ? answer.model : null, usage };
+  return { provider: answer?.provider ?? null, model: typeof answer?.model === "string" ? answer.model : null, usage, tier: typeof answer?.tier === "string" ? answer.tier : null };
 }
 
 /** `POST /complete` — prompt -> completion text (+ the provider the gateway actually served, after
  *  its own chain/failover). Hermes is the gateway's default chain member for bulk work like
  *  intent-tagging (design §01); this file never picks a provider itself, the gateway does. */
 export async function completeViaGateway(prompt: string, opts: AttributedCallOptions): Promise<CompletionResult> {
-  return callGateway<CompletionResult>("/complete", { prompt }, opts, "llm", completionFacts);
+  return callGateway<CompletionResult>("/complete", { prompt, ...gatewayTaskField(opts.attribution?.task) }, opts, "llm", completionFacts);
 }
