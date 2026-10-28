@@ -179,10 +179,19 @@ export function assertSimulatedWriteAllowed(where: string): void {
 /** SCP-Sa2 — the account-kind rule as SQL, ONE copy for boot (`boot.ts#readSocialSimulationDbFacts`) and the operator
  *  script (`seed/social-simulation-prepare.ts`), so the two can never count different things. A row breaks the rule when
  *  it is simulated without a `simulated:` integration id or with a `connected_by`, or real with a `simulated:` id: the
- *  exact negation of `social_accounts_kind_ck`. Expects the table aliased `a`. */
+ *  exact negation of `social_accounts_kind_ck`. Expects the table aliased `a`.
+ *
+ *  TWO-VALUED ON PURPOSE: `NULL LIKE '...'` is NULL, so a bare `NOT a.simulated AND a.postiz_integration_id LIKE ...` is
+ *  NULL (not false) for a real account with no integration id, and the whole predicate would answer NULL for the most
+ *  common real shape. In a WHERE that happens to read as "no violation", but a predicate that answers "unknown" for a
+ *  valid row is not the negation of the CHECK, and any caller that SELECTs it (or NOTs it) would be misled. Every LIKE
+ *  is wrapped in COALESCE(..., false), so this answers true or false for every row (pinned on a shape matrix, NULLs
+ *  included, by social-account-kind-migration.db.test.ts M7). `a.simulated` is NOT NULL (202610271600). */
 export const ACCOUNT_KIND_VIOLATION_SQL = `(
-  (a.simulated AND (a.postiz_integration_id IS NULL OR a.postiz_integration_id NOT LIKE '${SIMULATED_ID_PREFIX}%' OR a.connected_by IS NOT NULL))
-  OR (NOT a.simulated AND a.postiz_integration_id LIKE '${SIMULATED_ID_PREFIX}%')
+  (a.simulated AND (a.postiz_integration_id IS NULL
+                    OR NOT COALESCE(a.postiz_integration_id LIKE '${SIMULATED_ID_PREFIX}%', false)
+                    OR a.connected_by IS NOT NULL))
+  OR (NOT a.simulated AND COALESCE(a.postiz_integration_id LIKE '${SIMULATED_ID_PREFIX}%', false))
 )`;
 
 /** The org handle the simulator is called with. It carries OUR tenant and account ids instead of an upstream key,

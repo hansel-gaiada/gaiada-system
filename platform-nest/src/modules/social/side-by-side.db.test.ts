@@ -46,7 +46,8 @@ describe.skipIf(!TEST_URL)("SCP-Sa2 · the simulator side by side with a real en
   let postizOrgId: string;
   let simIg: string;
   let simIgHandle: string;
-  let realFb: string;
+  let simFb: string;
+  let realLi: string;
   let state: MockPublisherState;
   let engine: SocialPublisher;
   const before = {
@@ -72,7 +73,7 @@ describe.skipIf(!TEST_URL)("SCP-Sa2 · the simulator side by side with a real en
 
   beforeAll(async () => {
     await initTestDb();
-    config.social.publisher.enabledNetworks = [...new Set([...before.networks, "instagram", "facebook"])];
+    config.social.publisher.enabledNetworks = [...new Set([...before.networks, "instagram", "facebook", "linkedin"])];
     config.social.publisher.defaultOrgApiKey = "test-org-key";
     config.integrationTokenKey = randomBytes(32).toString("base64");
 
@@ -93,7 +94,11 @@ describe.skipIf(!TEST_URL)("SCP-Sa2 · the simulator side by side with a real en
     const sim = await insertAccount("instagram", true);
     simIg = sim.id;
     simIgHandle = sim.handle;
-    realFb = (await insertAccount("facebook", false)).id;
+    // B1 publishes text only, so its simulated post is on FACEBOOK: Instagram requires media (media-rules.ts `mediaRequired`),
+    // and a text-only Instagram variant is refused by the precondition before any driver is chosen. The real account is a
+    // LinkedIn account served by the engine (one kind per network per client, as the seed keeps it).
+    simFb = (await insertAccount("facebook", true)).id;
+    realLi = (await insertAccount("linkedin", false)).id;
   });
 
   afterAll(async () => {
@@ -158,13 +163,14 @@ describe.skipIf(!TEST_URL)("SCP-Sa2 · the simulator side by side with a real en
 
   it("(B1) one simulated and one real post in the same tenant and client: each reaches ONLY its own driver, at dispatch and at the sweep", async () => {
     const schedule = vi.spyOn(engine, "schedulePost");
-    const sim = await approvedVariantWithDecidedApproval(simIg, "instagram");
-    const real = await approvedVariantWithDecidedApproval(realFb, "facebook");
+    const sim = await approvedVariantWithDecidedApproval(simFb, "facebook");
+    const real = await approvedVariantWithDecidedApproval(realLi, "linkedin");
 
     const simVerdict = await dispatchApprovedPublish(co, sim.variantId, wfUser);
     const realVerdict = await dispatchApprovedPublish(co, real.variantId, wfUser);
-    expect(simVerdict.ok).toBe(true);
-    expect(realVerdict.ok).toBe(true);
+    // The whole verdict in the message, so a refusal names its stage and reason.
+    expect(simVerdict, JSON.stringify(simVerdict)).toMatchObject({ ok: true });
+    expect(realVerdict, JSON.stringify(realVerdict)).toMatchObject({ ok: true });
 
     // The engine was asked to publish exactly once: the real variant.
     expect(schedule).toHaveBeenCalledTimes(1);
@@ -172,7 +178,7 @@ describe.skipIf(!TEST_URL)("SCP-Sa2 · the simulator side by side with a real en
     const simRow = await variantRow(sim.variantId);
     const realRow = await variantRow(real.variantId);
     expect(simRow).toMatchObject({ status: "queued", simulated: true });
-    expect(simRow.providerPostId).toMatch(/^simulated:instagram:\d+:[0-9a-f-]{36}$/);
+    expect(simRow.providerPostId).toMatch(/^simulated:facebook:\d+:[0-9a-f-]{36}$/);
     expect(realRow).toMatchObject({ status: "queued", simulated: false });
     expect(realRow.providerPostId).toMatch(/^mock-post-/);
 
@@ -182,7 +188,7 @@ describe.skipIf(!TEST_URL)("SCP-Sa2 · the simulator side by side with a real en
     expect(sweep.errors).toBe(0);
     expect(askedIds(status)).toEqual([realRow.providerPostId]);
     expect((await variantRow(sim.variantId))).toMatchObject({ status: "published", simulated: true });
-    expect((await variantRow(sim.variantId)).publishedUrl).toMatch(/^https:\/\/simulated\.invalid\/instagram\//);
+    expect((await variantRow(sim.variantId)).publishedUrl).toMatch(/^https:\/\/simulated\.invalid\/facebook\//);
     expect((await variantRow(real.variantId))).toMatchObject({ status: "publishing", simulated: false });
   });
 
@@ -190,17 +196,17 @@ describe.skipIf(!TEST_URL)("SCP-Sa2 · the simulator side by side with a real en
     const org = { id: orgId, clientId, driver: "postiz", postizOrgId, apiKeyRef: "default", status: "active" };
     await expect(resolveDispatchOrgHandle(co, { org, network: "instagram", accountId: simIg, simulated: false }, "schedule"))
       .rejects.toMatchObject({ code: REFUSED });
-    await expect(resolveDispatchOrgHandle(co, { org, network: "facebook", accountId: realFb, simulated: false, integrationId: "simulated:facebook" }, "schedule"))
+    await expect(resolveDispatchOrgHandle(co, { org, network: "linkedin", accountId: realLi, simulated: false, integrationId: "simulated:linkedin" }, "schedule"))
       .rejects.toMatchObject({ code: REFUSED });
     // the plain real chain resolves to the engine, the simulated one to the simulator
-    expect((await resolveDispatchOrgHandle(co, { org, network: "facebook", accountId: realFb }, "schedule")).driver.key).toBe("postiz");
+    expect((await resolveDispatchOrgHandle(co, { org, network: "linkedin", accountId: realLi }, "schedule")).driver.key).toBe("postiz");
     expect((await resolveDispatchOrgHandle(co, { org, network: "instagram", accountId: simIg }, "schedule")).driver.key).toBe("simulated");
     expect(state.calls).toEqual([]);
   });
 
   it("(B3) the status sweep's and the webhook intake's reverse fence: a simulator-minted id on a real account is refused, left queued, never sent", async () => {
-    const v = await approvedVariantWithDecidedApproval(realFb, "facebook");
-    const minted = `simulated:facebook:${Date.now() - 1000}:${newId()}`;
+    const v = await approvedVariantWithDecidedApproval(realLi, "linkedin");
+    const minted = `simulated:linkedin:${Date.now() - 1000}:${newId()}`;
     await adminPool().query(
       `UPDATE social_post_variants SET status = 'queued', provider_post_id = $2, approval_id = $3 WHERE id = $1`,
       [v.variantId, minted, v.approvalId]);
@@ -216,8 +222,8 @@ describe.skipIf(!TEST_URL)("SCP-Sa2 · the simulator side by side with a real en
   });
 
   it("(B4) the metrics sweep's reverse fence: a simulator-minted id on a real account's published variant is refused and never sent", async () => {
-    const v = await approvedVariantWithDecidedApproval(realFb, "facebook");
-    const minted = `simulated:facebook:${Date.now() - 86_400_000}:${newId()}`;
+    const v = await approvedVariantWithDecidedApproval(realLi, "linkedin");
+    const minted = `simulated:linkedin:${Date.now() - 86_400_000}:${newId()}`;
     await adminPool().query(
       `UPDATE social_post_variants SET status = 'published', provider_post_id = $2, approval_id = $3, published_at = now() - interval '1 day'
         WHERE id = $1`,
