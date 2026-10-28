@@ -29,7 +29,7 @@ local stack). None of these mean "production-done".
 - **What to expect after the deploy.** The first sweeps converge over runs: the index held about 1,250 pieces while many sources had never been embedded. An unchanged corpus then costs no embeds at all.
 - **Tests:**
   - platform-nest: `ingest-budget.test.ts` 5 plus `ingest.test.ts` 24, run locally;
-  - ai-agents: store 6 and service 1, new DB tests, on the Linux gate.
+  - ai-agents: 7 new DB tests (store 6, service 1). CI's ai-agents job has no Postgres and SKIPS the DB-backed suites, so they ran on sumopod against a throwaway Postgres 17 on the exact code: `store.test.ts` 19/19, `service.test.ts` 11/11, `usage-callsites.test.ts` 11/11.
 
 
 ### platform-nest `0.191.0` + platform-ui `0.216.0` - SCP-3 train 2: the Social Media calendar (SCP-3e), the pipeline's Overview tiles and posts-on-schedule reader (SCP-3f), the four approvers' publish approvals in `/approvals` (SCP-3g), and the proof of schedule and live (SCP-3a, 3b) (plan §8 SCP-3; FRONTEND-BFF-CONTRACT §8, §63.7, §63.10; PERMISSION-CONTRACT §53.12) (2026-10-28) - PROTOTYPED
