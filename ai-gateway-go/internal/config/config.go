@@ -63,9 +63,14 @@ type Config struct {
 	EmbedChain            []string
 	DailyCallCap          int
 	PerTenantDailyCallCap int
-	EgressAllowlist       []string
-	BreakerThreshold      int
-	BreakerCooldownMs     int
+	// EmbedDailyCallCap (GATEWAY_EMBED_DAILY_CALL_CAP, default 50000) is /embed's OWN daily call budget,
+	// separate from DailyCallCap. Measured 2026-10-28: the knowledge re-index's free local embeddings
+	// (EMBED_CHAIN=ollama) used up the shared 2,000-call cap every day from 10-23 to 10-28, so chat, agents
+	// and drafts were refused. Embeddings never take from the chat cap now; this cap is a runaway guard.
+	EmbedDailyCallCap int
+	EgressAllowlist   []string
+	BreakerThreshold  int
+	BreakerCooldownMs int
 	// ProviderTimeoutMs bounds a single provider attempt (B5: gateway reliability). Each
 	// capability handler derives a fresh context.WithTimeout(r.Context(), ProviderTimeoutMs)
 	// per provider tried, so a hung provider fails over cleanly within budget instead of
@@ -177,6 +182,7 @@ func Load() Config {
 		EmbedChain:            splitCsv(envOr("EMBED_CHAIN", "ollama,gemini")),
 		DailyCallCap:          envInt("GATEWAY_DAILY_CALL_CAP", 2000),
 		PerTenantDailyCallCap: envInt("GATEWAY_PER_TENANT_DAILY_CALL_CAP", 1000),
+		EmbedDailyCallCap:     envInt("GATEWAY_EMBED_DAILY_CALL_CAP", 50000),
 		EgressAllowlist:       splitCsv(envOr("EGRESS_ALLOWLIST", "")),
 		BreakerThreshold:      envInt("BREAKER_THRESHOLD", 3),
 		BreakerCooldownMs:     envInt("BREAKER_COOLDOWN_MS", 60_000),

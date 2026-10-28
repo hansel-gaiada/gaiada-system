@@ -420,6 +420,14 @@ func NewServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 // newServers is NewServers plus the agent in-flight counter, which the tests read.
 func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *dlp.Classifier, inst *metrics.Instruments, admin *Admin, agents AgentTokens) (*http.ServeMux, *http.ServeMux, *agentInflight) {
 	mux := http.NewServeMux()
+	// /embed's OWN budget (cfg.EmbedDailyCallCap): embeddings never take from b, the chat/agent cap. Called with an
+	// empty tenant, so no per-tenant cap applies (Take refuses any tenant when perTenantCap is 0). DR mode does not
+	// widen it; it is a runaway guard, not a spending cap (the embed chain is the local model).
+	embedCap := cfg.EmbedDailyCallCap
+	if embedCap <= 0 {
+		embedCap = 50000 // unset or invalid: the guard's default, never "refuse every embed"
+	}
+	eb := budget.NewBudget(embedCap, 0)
 
 	// Boot values seed the runtime tuning; a persisted override has already been folded into cfg by
 	// main before this point, so the two never disagree at startup.
@@ -450,9 +458,10 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		body := map[string]any{
-			"ok":        true,
-			"providers": map[string]any{"llm": chains.LLM.State(), "media": chains.Media.State()},
-			"budget":    b.State(time.Now()),
+			"ok":          true,
+			"providers":   map[string]any{"llm": chains.LLM.State(), "media": chains.Media.State()},
+			"budget":      b.State(time.Now()),
+			"embedBudget": eb.State(time.Now()),
 		}
 		if c := activeClassifier(); c != nil {
 			body["classifierReachable"] = classifierReachable(c)
@@ -879,10 +888,10 @@ func newServers(cfg config.Config, chains Chains, b *budget.Budget, classifier *
 			writeErr(w, 400, "text required")
 			return
 		}
-		ok, scope := b.Take(tenantOf(r), started)
+		ok, _ := eb.Take("", started)
 		if !ok {
 			emit(r.Context(), audit.EgressAudit{TS: started.UnixMilli(), Capability: "embed", OK: false, Blocked: "budget"})
-			writeErr(w, 429, scope+" daily budget exceeded — degraded until tomorrow")
+			writeErr(w, 429, "embed daily budget exceeded — degraded until tomorrow")
 			return
 		}
 		result, err := dlp.DLP(body.Text)
