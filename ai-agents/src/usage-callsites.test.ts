@@ -117,6 +117,8 @@ describe("AIP-03b · the knowledge service's /embed", () => {
     const seen: Array<ReturnType<typeof embedUsageContext.getStore>> = [];
     const store = {
       ingest: async () => { seen.push(embedUsageContext.getStore()); return 1; },
+      // The /ingest route calls ingestDetailed since the re-index fix (unchanged chunks are kept, not re-embedded).
+      ingestDetailed: async () => { seen.push(embedUsageContext.getStore()); return { written: 1, embedded: 1, reused: 0 }; },
       search: async () => { seen.push(embedUsageContext.getStore()); return []; },
     } as unknown as KnowledgeStore;
     const saved = knowledgeConfig.serviceToken;
