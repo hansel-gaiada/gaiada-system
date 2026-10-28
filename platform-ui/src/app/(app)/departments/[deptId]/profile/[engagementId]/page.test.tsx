@@ -42,7 +42,7 @@ const row = (over: Partial<AllocationRow> = {}): AllocationRow => ({
   defaultPostTime: "09:30", stepEstimates: {}, thisCycle: { cycleId: "cy-1", month: "2026-10", target: 5, counted: 2, extra: 1, stories: 1 }, canPlan: false, ...over,
 });
 const post = (over: Partial<ClientPost>): ClientPost => ({
-  postId: "p-1", title: "A post", status: "drafting", phase: "brief", holder: "officer", isExtra: false, format: "feed", health: null, ...over,
+  postId: "p-1", title: "A post", status: "drafting", phase: "brief", holder: "officer", isExtra: false, format: "feed", health: null, simulated: false, ...over,
 });
 const posts: ClientPost[] = [
   post({ postId: "p-1", title: "Harvest teaser", status: "client", phase: "with_client", holder: "client" }),

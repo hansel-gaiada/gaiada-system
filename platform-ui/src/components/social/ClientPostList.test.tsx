@@ -13,7 +13,7 @@ import type { ClientPost } from "@/lib/socialClient";
 import { ClientPostList } from "./ClientPostList";
 
 const post = (over: Partial<ClientPost>): ClientPost => ({
-  postId: "p-1", title: "A post", status: "drafting", phase: "brief", holder: "officer", isExtra: false, format: "feed", health: null, ...over,
+  postId: "p-1", title: "A post", status: "drafting", phase: "brief", holder: "officer", isExtra: false, format: "feed", health: null, simulated: false, ...over,
 });
 const posts: ClientPost[] = [
   post({ postId: "p-1", title: "Harvest teaser", status: "drafting" }),

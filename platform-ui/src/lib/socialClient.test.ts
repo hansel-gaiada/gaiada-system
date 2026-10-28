@@ -11,7 +11,7 @@ import { areaFor } from "./areas";
 // SCP-1k, SCP-1m: the client page's pure helpers. The server counts and decides; these only lay out and word what it answered.
 
 const post = (over: Partial<ClientPost> = {}): ClientPost => ({
-  postId: "p-1", title: "A post", status: "drafting", phase: "brief", holder: "officer", isExtra: false, format: "feed", health: null, ...over,
+  postId: "p-1", title: "A post", status: "drafting", phase: "brief", holder: "officer", isExtra: false, format: "feed", health: null, simulated: false, ...over,
 });
 
 describe("the registry and the address", () => {
@@ -133,6 +133,10 @@ describe("parsing the server's answers", () => {
     });
     expect(v).toMatchObject({ cycleId: "c-1", month: "2026-10", client: { state: "on_track" } });
     expect(v.posts[0]).toMatchObject({ postId: "p-1", phase: "with_client", holder: "client", format: "reel", isExtra: false, health: { spareDays: 3 } });
+    // SCP-Sf: `simulated` is true only when the server says so; an older server's answer (no field) reads as not simulated.
+    expect(v.posts[0].simulated).toBe(false);
+    const sim = asCycleView({ cycleId: "c-1", posts: [{ postId: "p-2", status: "live", simulated: true }, { postId: "p-3", status: "live", simulated: "yes" }] });
+    expect(sim.posts.map((p) => p.simulated)).toEqual([true, false]);
   });
   it("refuses a body that is not an answer, instead of drawing an empty grid", () => {
     expect(() => asCycleView({ cycleId: "c-1" })).toThrow();
