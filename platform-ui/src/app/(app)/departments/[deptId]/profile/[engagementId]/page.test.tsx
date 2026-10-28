@@ -20,6 +20,7 @@ vi.mock("@/lib/departments", () => ({ getDepartment: vi.fn() }));
 vi.mock("@/lib/campaigns-data", () => ({ readOrgRoot: vi.fn() }));
 vi.mock("@/lib/socialAllocation-data", () => ({ getAllocation: vi.fn(), getOfficerCandidates: vi.fn() }));
 vi.mock("@/lib/socialClient-data", () => ({ getCycleView: vi.fn(), getClientCalendar: vi.fn(), getClientBrandBook: vi.fn(), getEngagementProjectId: vi.fn(), getFeedPreview: vi.fn() }));
+vi.mock("@/lib/socialBoosts-data", () => ({ getBoostBudget: vi.fn() }));
 vi.mock("@/lib/socialAllocationActions", () => ({ saveAllocation: vi.fn(), loadBrandBook: vi.fn(), saveBrandBook: vi.fn() }));
 vi.mock("@/lib/socialClientActions", () => ({ bulkPostAction: vi.fn(), createClientPost: vi.fn(), swapFeedPreview: vi.fn() }));
 
@@ -28,6 +29,8 @@ import { readOrgRoot } from "@/lib/campaigns-data";
 import { getAllocation } from "@/lib/socialAllocation-data";
 import { getClientBrandBook, getClientCalendar, getCycleView, getEngagementProjectId, getFeedPreview } from "@/lib/socialClient-data";
 import { loadBrandBook } from "@/lib/socialAllocationActions";
+import { getBoostBudget } from "@/lib/socialBoosts-data";
+import { asBoostBudget } from "@/lib/socialBoosts";
 import { EMPTY_BRAND_BOOK } from "@/lib/socialBrandBook";
 import { node } from "@/lib/workspaceFixtures";
 import type { AllocationRow } from "@/lib/socialAllocation";
@@ -78,6 +81,10 @@ beforeEach(() => {
   vi.mocked(getFeedPreview).mockReset().mockResolvedValue(ok({ items: [], liveHidden: 0 }));
   vi.mocked(getClientBrandBook).mockReset().mockResolvedValue(ok({ ...EMPTY_BRAND_BOOK, toneSummary: "Warm and direct.", contentPillars: ["Seasonal"] }));
   vi.mocked(getEngagementProjectId).mockReset().mockResolvedValue(ok(null));
+  vi.mocked(getBoostBudget).mockReset().mockResolvedValue(ok(asBoostBudget({
+    agreed: { amountMinor: 1_000_000, currency: "IDR", minorUnit: 0, via: "portal", agreedAt: "2026-10-01T02:00:00Z", agreedBy: { name: "Dana Whitfield" } }, pending: null,
+    committedMinor: 500_000, remainingMinor: 500_000, history: [], canRecord: false,
+  })));
   vi.mocked(loadBrandBook).mockReset().mockResolvedValue({ ok: true, book: { ...EMPTY_BRAND_BOOK }, exists: true });
 });
 afterEach(() => vi.useRealTimers());
@@ -377,5 +384,48 @@ describe("the create bar on the page", () => {
     vi.mocked(readOrgRoot).mockResolvedValue(null as never);
     await mount();
     expect(screen.queryByRole("link", { name: "Ask Creatives for assets" })).toBeNull();
+  });
+});
+
+describe("the Boost budget card (SCP-4c, BFF §63.11)", () => {
+  it("is on the Plan tab for the current cycle: read for the signed-in person, drawn with the agreed, committed and remaining figures", async () => {
+    await mount();
+    expect(getBoostBudget).toHaveBeenCalledWith("u-1", "co-a", "cy-1");
+    expect(screen.getByRole("heading", { name: "Boost budget, October 2026" })).toBeInTheDocument();
+    const figures = screen.getByLabelText("The month's boost budget");
+    expect(within(figures).getByText("IDR 1,000,000")).toBeInTheDocument();
+    expect(within(figures).getAllByText("IDR 500,000")).toHaveLength(2);
+    // a person who may not record sees it read-only
+    expect(screen.queryByRole("button", { name: "Propose to client" })).toBeNull();
+  });
+
+  it("gives the four approvers (the read's canRecord) the Propose and Record controls", async () => {
+    vi.mocked(getBoostBudget).mockResolvedValue(ok(asBoostBudget({ agreed: null, pending: null, committedMinor: 0, remainingMinor: 0, history: [], canRecord: true })));
+    await mount();
+    expect(screen.getByRole("button", { name: "Propose to client" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Record client's agreement" })).toBeEnabled();
+    expect(screen.getByText("Nothing agreed")).toBeInTheDocument();
+  });
+
+  it("is read on the Plan tab only, and not at all for a client with no cycle this month", async () => {
+    const a = await mount({ tab: "list" });
+    expect(getBoostBudget).not.toHaveBeenCalled();
+    a.unmount();
+    vi.mocked(getAllocation).mockResolvedValue(ok([row({ thisCycle: null })]));
+    await mount();
+    expect(getBoostBudget).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: /Boost budget/ })).toBeNull();
+  });
+
+  it("a refused or failed read is said in words beside the card, and the plan stays", async () => {
+    vi.mocked(getBoostBudget).mockResolvedValue({ kind: "forbidden" });
+    const a = await mount();
+    expect(screen.getByText(/cycle's boost budget/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Empty slot \d+ of 5/).length).toBeGreaterThan(0);
+    a.unmount();
+    vi.mocked(getBoostBudget).mockResolvedValue({ kind: "unavailable", reason: "boost budget: not a budget read" });
+    await mount();
+    expect(screen.getByText(/This cycle's boost budget/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Boost budget, / })).toBeNull();
   });
 });
