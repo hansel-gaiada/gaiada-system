@@ -170,7 +170,7 @@ export function registerPipelineTools(): void {
         `{"content": "<the artifact as markdown>", "confidence": <number 0..1>}\n` +
         `Set confidence to how completely the minutes specified this artifact (1 = fully specified, ` +
         `low = major gaps you had to guess).\n\nMEETING MINUTES:\n${text}`;
-      const raw = await gatewayComplete(prompt);
+      const raw = await gatewayComplete(prompt, "draft");
       // Robust to non-compliant local models: parse JSON if present, else wrap the raw text.
       let content = raw;
       let confidence: number | null = null;

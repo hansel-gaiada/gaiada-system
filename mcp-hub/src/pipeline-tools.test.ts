@@ -175,6 +175,13 @@ describe("WS11 pipeline hub tools", () => {
     expect(JSON.parse(out)).toEqual({ kind: "prd", content: "# PRD\n...", confidence: 1 }); // clamped to 1
   });
 
+  it("AIP-07: llm.extract sends task draft", async () => {
+    const f = mockFetch(200, { text: '{"content":"x","confidence":0.5}' }) as unknown as ReturnType<typeof vi.fn>;
+    vi.stubGlobal("fetch", f);
+    await getTool("llm.extract")!.handler({ kind: "prd", text: "we discussed a login page" }, principal);
+    expect(JSON.parse(String((f.mock.calls[0] as unknown as [string, RequestInit])[1].body)).task).toBe("draft");
+  });
+
   it("llm.extract is robust to a non-JSON model reply (wraps raw, null confidence)", async () => {
     vi.stubGlobal("fetch", mockFetch(200, { text: "sorry, here is a plain summary" }));
     const out = await getTool("llm.extract")!.handler({ kind: "report", text: "notes" }, principal);
