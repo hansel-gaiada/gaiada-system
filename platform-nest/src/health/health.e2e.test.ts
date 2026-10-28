@@ -4,6 +4,9 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { buildApp } from "../main";
 import { config } from "../config";
+import { registerPublisher, resetPublishers } from "../modules/social/publisher/registry";
+import { createMockPublisher, newMockPublisherState } from "../modules/social/publisher/mock-driver";
+import { createSimulatedPublisher } from "../modules/social/publisher/simulated-driver";
 
 describe("health (nest port stage 1)", () => {
   let app: NestFastifyApplication;
@@ -55,5 +58,21 @@ describe("health: the social simulator's switch (SCP-Sa)", () => {
     config.socialSimulationEnabled = false;
     const offAgain = (await app.inject({ method: "GET", url: "/health" })).json() as { socialSimulation: unknown };
     expect(offAgain.socialSimulation).toBe(false);
+  });
+
+  // SCP-Sa2 (owner ruling SCP-D9): the simulator runs beside a real engine, so /health names which real engine is
+  // registered ('postiz' | 'mixpost' | 'none'), never its URL. Read from the registry at call time.
+  it("GET /health reports socialPublisher: 'none' with no engine, 'postiz' beside the simulator", async () => {
+    resetPublishers();
+    const none = (await app.inject({ method: "GET", url: "/health" })).json() as { socialPublisher: unknown };
+    expect(none.socialPublisher).toBe("none");
+    config.socialSimulationEnabled = true;
+    registerPublisher(createMockPublisher(newMockPublisherState())); // key 'postiz', the test double
+    registerPublisher(createSimulatedPublisher({ guard: async () => null }));
+    const both = (await app.inject({ method: "GET", url: "/health" })).json() as Record<string, unknown>;
+    expect(both).toMatchObject({ socialSimulation: true, socialPublisher: "postiz" });
+    expect(JSON.stringify(both)).not.toMatch(/https?:\/\/10\.|SOCIAL_POSTIZ_BASE_URL/);
+    resetPublishers();
+    config.socialSimulationEnabled = false;
   });
 });
