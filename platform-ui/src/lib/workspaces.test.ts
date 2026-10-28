@@ -112,7 +112,7 @@ describe("URLs never move (plan §2.6)", () => {
     expect(missing).toEqual([]);
   });
 
-  it("names a DW ticket on everything not built yet", () => {
+  it("names a DW or SCP ticket on everything not built yet", () => {
     const tickets: string[] = [];
     for (const row of everyRow()) {
       if (row.ticket) tickets.push(row.ticket);
@@ -122,7 +122,7 @@ describe("URLs never move (plan §2.6)", () => {
       for (const x of [...ws.overview, ...ws.pulse, ...ws.quickActions, ...ws.connections]) if (x.ticket) tickets.push(x.ticket);
     }
     expect(tickets.length).toBeGreaterThan(0);
-    for (const t of tickets) expect(t).toMatch(/^DW-\d+[a-z]?\b/);
+    for (const t of tickets) expect(t).toMatch(/^(DW|SCP)-\d+[a-z]?\b/);
   });
 });
 
