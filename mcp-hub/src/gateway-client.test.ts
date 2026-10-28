@@ -34,3 +34,17 @@ describe("gatewayComplete refuses a non-generation (M6-P4n)", () => {
     await expect(gatewayComplete("p")).resolves.toContain("The server");
   });
 });
+
+describe("AIP-07 · the routing class and the tier", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const sent = (f: ReturnType<typeof vi.fn>) => JSON.parse(String((f.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+  it("sends the caller's task, and no task key when it names none", async () => {
+    const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ text: "real", provider: "x" }) }));
+    vi.stubGlobal("fetch", f);
+    await gatewayComplete("p", "summarise");
+    expect(sent(f)).toEqual({ prompt: "p", task: "summarise" });
+    f.mockClear();
+    await gatewayComplete("p");
+    expect(sent(f)).toEqual({ prompt: "p" });
+  });
+});

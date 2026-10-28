@@ -56,10 +56,21 @@ describe("AIP-03b · the hub's /complete", () => {
     expect(r.isError).toBeFalsy();
     expect(r.content[0].text).toBe("a summary");
     expect(reported).toEqual([{
-      tenantId: T1, userId: U, surface: "agent", capability: "llm", task: "llm.summarize", runId: null, provider: "openai", model: "z-ai/glm-5.3-flash",
+      tenantId: T1, userId: U, surface: "agent", capability: "llm", task: "llm.summarize", runId: null, provider: "openai", model: "z-ai/glm-5.3-flash", tier: null,
       promptTokens: 200, completionTokens: 40, tokensSource: "provider", costUsd: 0.003, costSource: "provider", outcome: "ok",
     }]);
     expect(JSON.stringify(reported)).not.toContain("long text");
+  });
+
+  it("AIP-07: llm.summarize sends task summarise and the answer's tier rides on the event (an invalid tier is dropped)", async () => {
+    const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ text: "a summary", provider: "openai", tier: "fast" }) }));
+    vi.stubGlobal("fetch", f);
+    await call(await connect(agentPrincipal), "llm.summarize", { text: "long text", tenantId: T1 });
+    expect(JSON.parse(String((f.mock.calls[0] as unknown as [string, RequestInit])[1].body)).task).toBe("summarise");
+    expect(reported[0].tier).toBe("fast");
+    gateway(200, { text: "a summary", provider: "openai", tier: "turbo" });
+    await call(await connect(agentPrincipal), "llm.summarize", { text: "long text", tenantId: T1 });
+    expect(reported[1].tier).toBeNull();
   });
 
   it("a call from n8n or a chat identity is surface other and has no person", async () => {
