@@ -374,6 +374,47 @@ func TestEmbedReturnsVectorOnSuccess(t *testing.T) {
 	}
 }
 
+// 2026-10-28: the knowledge re-index's free local embeddings used up the shared daily call cap every day, so chat
+// was refused. /embed now has its OWN budget: embeddings never take from the chat cap, and a spent embed budget
+// refuses only embeds.
+func TestEmbedHasItsOwnBudget(t *testing.T) {
+	cfg := config.Config{GatewayToken: "secret", AuditFile: t.TempDir() + "/audit.jsonl", DailyCallCap: 2, PerTenantDailyCallCap: 2, EmbedDailyCallCap: 3}
+	echo := providers.NewEchoProvider()
+	chains := Chains{
+		LLM:   chain.NewChain([]providers.Provider{echo}, 3, 60_000, time.Now),
+		Media: chain.NewChain([]providers.Provider{echo}, 3, 60_000, time.Now),
+		Embed: chain.NewChain([]providers.Provider{echo}, 3, 60_000, time.Now),
+	}
+	srv := httptest.NewServer(NewServer(cfg, chains, budget.NewBudget(cfg.DailyCallCap, cfg.PerTenantDailyCallCap), nil, metrics.New(), nil))
+	defer srv.Close()
+	for i := 1; i <= 3; i++ {
+		if res := postJSON(t, srv, "/embed", "secret", map[string]any{"text": "chunk"}); res.StatusCode != 200 {
+			t.Fatalf("embed %d: expected 200 (within the embed budget), got %d", i, res.StatusCode)
+		}
+	}
+	if res := postJSON(t, srv, "/embed", "secret", map[string]any{"text": "chunk"}); res.StatusCode != 429 {
+		t.Fatalf("embed 4: expected 429 (embed budget spent), got %d", res.StatusCode)
+	}
+	// Three embeds used none of the chat cap (2): both completions still answer.
+	for i := 1; i <= 2; i++ {
+		if res := postJSON(t, srv, "/complete", "secret", map[string]any{"prompt": "hi"}); res.StatusCode != 200 {
+			t.Fatalf("complete %d: expected 200 (embeds must not spend the chat cap), got %d", i, res.StatusCode)
+		}
+	}
+	res, err := http.Get(srv.URL + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var health struct {
+		Budget      map[string]any `json:"budget"`
+		EmbedBudget map[string]any `json:"embedBudget"`
+	}
+	json.NewDecoder(res.Body).Decode(&health)
+	if health.Budget["used"] != float64(2) || health.EmbedBudget["used"] != float64(3) {
+		t.Fatalf("expected chat used 2 and embed used 3, got %v / %v", health.Budget["used"], health.EmbedBudget["used"])
+	}
+}
+
 func TestCompleteStreamEmitsSSE(t *testing.T) {
 	srv := testServer(t, "secret")
 	defer srv.Close()

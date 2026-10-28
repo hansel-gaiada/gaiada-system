@@ -11,13 +11,37 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
-### platform-nest `NEST_NEXT` + platform-ui `UI_NEXT` - SCP-S train 3: the social simulator beside the real Postiz, never mixed (SCP-Sa2, owner ruling SCP-D9); the accounts read-back with followers, reach and "Last synced" (SCP-Sg) (plan §2 SCP-D9, §5; FRONTEND-BFF-CONTRACT §63.1 file 8, §63.10) (2026-10-28) - PROTOTYPED
+### platform-nest `0.191.0` + platform-ui `0.216.0` - SCP-S train 3: the social simulator beside the real Postiz, never mixed (SCP-Sa2, owner ruling SCP-D9); the accounts read-back with followers, reach and "Last synced" (SCP-Sg) (plan §2 SCP-D9, §5; FRONTEND-BFF-CONTRACT §63.1 file 8, §63.10) (2026-10-28) - PROTOTYPED
 
 - **Why (SCP-D9).** The live switch-on found a real Postiz running on the ERP box, which SCP-Sa's "never both" containment refuses at boot. The owner ruled the two run side by side, so both paths can be tested at once. The rule moves from *never both* to *never mixed*.
 - **Migration `202610280100_social_account_kind.sql`:** `social_accounts_kind_ck` (a simulated account carries `simulated:<network>` and no `connected_by`; a real one never carries that prefix), `trg_social_accounts_kind_guard` (the kind is fixed once an account is used), `trg_social_oauth_tokens_real_account_only`, and a backfill of `simulated:<network>` onto simulated rows that had none (on live, the seven soft-deleted seed rows marked earlier; the pre-check returned no other shape).
 - **Boot and runtime.** With the switch on, boot allows Postiz, real accounts and grants, and refuses only rows that break the kind rule. `simulation_real_account_refused` is removed; the reverse fence 409 `simulated_account_on_real_publisher` sits on every real path (dispatch, status sweep and webhook, metrics sweep, cancel, creator-info probe); real connects and the Postiz sync never touch a simulated row. `GET /health` adds `socialPublisher`. The prepare script now reports kind-rule breaks only.
 - **The read-back (SCP-Sg).** `GET engagements/:engagementId/accounts-summary` answers each account's followers, 30-day change, reach and impressions and last sync, simulated and pulled rows never mixed; the feed preview gains live posts' link and reach and `lastSyncedAt`. The client page header and accounts strip show followers, reach and "Last synced" with a SIMULATED chip; Feed preview shows each live tile's reach and labels a simulated post's address instead of linking it.
 - **Proof.** Each car's CI on its own branch (Sa2's caught a NULL-unsafe predicate and a test that published text-only to Instagram, both fixed); the train's combined CI; a read-only pre-check of the migration's shapes on the live database. Capability inventory regenerated.
+
+### ai-gateway-go `0.17.0` + mcp-hub `0.18.0` + ai-agents `0.18.0` + wa-chat-bot `0.13.0` + automation (n8n) `0.9.0` - AI plan phase 1 finished; the daily AI outage fixed: embeddings get their own budget (2026-10-28) - PROTOTYPED
+
+- **The outage.** Measured on the live ERP on 2026-10-28, from the gateway's audit and the new `ai_usage_events` table.
+  - Every day since at least 10-23, the platform's knowledge re-index used up the gateway's shared 2,000-call daily cap within minutes. The re-index runs every 6 h and makes about 9,300 `/embed` calls a sweep, even though its embeddings are free and local (`EMBED_CHAIN=ollama`, `nomic-embed-text`).
+  - Every assistant reply, agent run and draft was then refused (429) for the rest of the day: about 15 LLM calls succeeded a day, while 140 to 350 were refused and about 34,000 embeds were refused.
+  - On 10-28 the sweep at 00:31 UTC (6 h after release 448's boot) did it again. The owner approved DR mode for the rest of the day, and it was turned on at about 01:50 UTC.
+- **The fix, ai-gateway-go.** `/embed` takes from its OWN daily budget, `GATEWAY_EMBED_DAILY_CALL_CAP` (default 50000).
+  - It has no per-tenant cap and no DR widening: it is a runaway guard for the local model, never a spending cap. Embeddings never spend the chat cap again.
+  - `/health` reports it as `embedBudget`.
+  - `TestEmbedHasItsOwnBudget` pins both halves.
+  - The platform-side half (skip unchanged chunks, stop a sweep at the first refusal) is a separate change.
+- **AIP-03 follow-up: the model is named.**
+  - The gateway's `/complete` names the serving model as `model`, only next to `usage`, so an answer without usage stays byte for byte the old one. The `llm` audit row carries it too.
+  - The platform's search and social clients already read it. The shared usage-event helper, identical in `ai-agents`, `mcp-hub` and `wa-chat-bot`, now passes it on, so rows can be priced from `ai_model_prices`.
+- **AIP-03b: the n8n workflows name their company.** Every hub `llm.summarize`, `llm.extract` and `design.prototype` call now passes `tenantId`, so its usage is recorded:
+  - `mtg-dispatcher` uses the bridge envelope's tenant;
+  - `pipeline-delivery` uses the pipeline run's tenant;
+  - `wd-digests` uses `AGENCY_TENANT_ID`;
+  - `summarize-via-mcp`, the only company-agnostic flow, uses the new `N8N_USAGE_TENANT_ID` (empty means no row).
+
+  `compliance-gate-nag` calls no AI tool and is unchanged. A test in `mcp-hub` (`workflow-tool-args.test.ts`) refuses any AI call without a `tenantId` expression and any literal id. The live n8n picks this up only when the owner re-imports and REACTIVATES the four workflows (`infra/runbooks/n8n-reimport-ai-usage-tenant.md`).
+- **AIP-D15:** the WhatsApp bot's usage belongs to Gaia Digital Agency, set live as `DEFAULT_TENANT_ID`.
+- **Live proof of AIP-03b.** A handoff to `status-reporter` wrote its row through `POST /api/internal/ai-usage`: surface `agent`, task `status-reporter`, the user and the run id. It read `blocked_budget`, which is exactly how the outage was found.
 
 ### platform-nest `0.190.0` + platform-ui `0.215.0` - SCP-S train 2: simulated accounts (SCP-Sb), the simulated publisher end to end with the publisher's result on a pipeline post (SCP-Sc, SCP-3b's server half), simulated metrics (SCP-Sd) (plan §5; FRONTEND-BFF-CONTRACT §63.10, §63.14; PERMISSION-CONTRACT §53.12) (2026-10-28) - PROTOTYPED
 

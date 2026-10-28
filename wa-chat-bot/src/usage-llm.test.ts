@@ -27,7 +27,7 @@ describe("AIP-03b · the bot's /complete", () => {
     gateway(200, { text: "the digest", provider: "openai", usage: { promptTokens: 900, completionTokens: 120, costUsd: 0.004, source: "provider" } });
     expect(await complete("summarise the chat SECRET-CHAT-TEXT")).toBe("the digest");
     expect(reported).toEqual([{
-      tenantId: T, userId: null, surface: "bot", capability: "llm", task: "bot.complete", runId: null, provider: "openai",
+      tenantId: T, userId: null, surface: "bot", capability: "llm", task: "bot.complete", runId: null, provider: "openai", model: null,
       promptTokens: 900, completionTokens: 120, tokensSource: "provider", costUsd: 0.004, costSource: "provider", outcome: "ok",
     }]);
     expect(JSON.stringify(reported)).not.toMatch(/SECRET|digest/);

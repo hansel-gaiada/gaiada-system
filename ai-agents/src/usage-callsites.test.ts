@@ -33,7 +33,7 @@ describe("AIP-03b · the runner's /complete", () => {
     const text = await runAs({ task: "statusReporter", userId: U, runId: R }, T, () => liveDeps.complete("p"));
     expect(text).toBe("done");
     expect(reported).toEqual([{
-      tenantId: T, userId: U, surface: "agent", capability: "llm", task: "statusReporter", runId: R, provider: "openai",
+      tenantId: T, userId: U, surface: "agent", capability: "llm", task: "statusReporter", runId: R, provider: "openai", model: null,
       promptTokens: 120, completionTokens: 30, tokensSource: "provider", costUsd: 0.0021, costSource: "provider", outcome: "ok",
     }]);
   });
@@ -85,7 +85,7 @@ describe("AIP-03b · the knowledge service's /embed", () => {
     const v = await embedUsageContext.run({ tenantId: T, userId: null, task: "knowledge.ingest" }, () => embedViaGateway("some chunk text"));
     expect(v).toEqual([0.1, 0.2]);
     expect(reported).toEqual([{
-      tenantId: T, userId: null, surface: "knowledge", capability: "embed", task: "knowledge.ingest", runId: null, provider: null,
+      tenantId: T, userId: null, surface: "knowledge", capability: "embed", task: "knowledge.ingest", runId: null, provider: null, model: null,
       promptTokens: null, completionTokens: null, tokensSource: "none", costUsd: null, costSource: null, outcome: "ok",
     }]);
     expect(JSON.stringify(reported)).not.toContain("chunk text");

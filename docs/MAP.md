@@ -170,11 +170,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610271810_ai_model_prices.sql`
+- Head: `202610280100_social_account_kind.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 342 (121 legacy `NNNN_`, 221 timestamped)
+- Applied files on disk: 343 (121 legacy `NNNN_`, 222 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -299,6 +299,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/visitors.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/linkedin-oauth.controller.ts` |
+| `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/accounts-summary.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/allocation.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/calendar.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/pipeline/cycles.controller.ts` |
@@ -751,7 +752,7 @@ Declared `id` is load-bearing (sub-workflow references). Import with the CLI, ne
 
 Contracts + top-level docs (`docs/`): `BLUEPRINTS.md`, `FRONTEND-BFF-CONTRACT.md`, `PERMISSION-CONTRACT.md`, `PLACEHOLDER-PRINCIPALS.md`, `a11y-manual-checklist.md`, `sidebar-nav-map.md`, `ui-work-split.md`
 
-Runbooks (`infra/runbooks/`): `ai-crawler-log.md`, `aip-00a-hermes-behind-gateway.md`, `alerting-wire-a-real-receiver.md`, `certified-signing-simulated.md`, `company-seal-keys.md`, `contributor-logins.md`, `db-topology-cutover.md`, `deploy-vps.md`, `drive-and-figma-connections.md`, `enable-estate-blackbox-and-alert-routing.md`, `enable-mfa.md`, `erp-edge-sumopod.md`, `erp-name-cutover.md`, `erp-offsite-backup.md`, `internal-ca.md`, `keycloak-production-mode.md`, `keycloak-security-events.md`, `local-model-serving.md`, `m5-phase3-go-live.md`, `midtrans-payments.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `portal-go-live.md`, `restore-drill.md`, `social-simulation.md`, `umami-sumopod.md`, `webdesk-control-channel.md`, `webdesk-domain-dns.md`, `webdesk-editorial-keys.md`, `webdesk-live-swap.md`, `webdesk-site-delivery.md`, `webdesk-staging-rebuild.md`, `webdesk-ws4-keys.md`, `webdesk-zoneb-backups.md`, `webdesk-zoneb-box-hardening.md`, `webdesk-zoneb-otel.md`, `webdesk-zoneb-status-page.md`
+Runbooks (`infra/runbooks/`): `ai-crawler-log.md`, `aip-00a-hermes-behind-gateway.md`, `alerting-wire-a-real-receiver.md`, `certified-signing-simulated.md`, `company-seal-keys.md`, `contributor-logins.md`, `db-topology-cutover.md`, `deploy-vps.md`, `drive-and-figma-connections.md`, `enable-estate-blackbox-and-alert-routing.md`, `enable-mfa.md`, `erp-edge-sumopod.md`, `erp-name-cutover.md`, `erp-offsite-backup.md`, `internal-ca.md`, `keycloak-production-mode.md`, `keycloak-security-events.md`, `local-model-serving.md`, `m5-phase3-go-live.md`, `midtrans-payments.md`, `n8n-reimport-ai-usage-tenant.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `portal-go-live.md`, `restore-drill.md`, `social-simulation.md`, `umami-sumopod.md`, `webdesk-control-channel.md`, `webdesk-domain-dns.md`, `webdesk-editorial-keys.md`, `webdesk-live-swap.md`, `webdesk-site-delivery.md`, `webdesk-staging-rebuild.md`, `webdesk-ws4-keys.md`, `webdesk-zoneb-backups.md`, `webdesk-zoneb-box-hardening.md`, `webdesk-zoneb-otel.md`, `webdesk-zoneb-status-page.md`
 
 Ops scripts (`infra/scripts/`): `backup-cron.sh`, `backup.sh`, `client-targets-forced-command.sh`, `erp-backup-read.sh`, `erp-offsite-pull.sh`, `healthcheck.sh`, `lint-observability.sh`, `pull-client-property-targets.sh`, `restore-drill.sh`, `rollback-to.sh`, `sync-client-property-targets.sh`, `test-all.sh`, `wire-env.sh`
 

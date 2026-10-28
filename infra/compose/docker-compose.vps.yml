@@ -323,6 +323,9 @@ services:
       GATEWAY_AGENT_LISTEN: ${GATEWAY_AGENT_LISTEN:-}
       GATEWAY_AGENT_TOKENS: ${GATEWAY_AGENT_TOKENS:-}
       GATEWAY_AGENT_RESERVE_PCT: ${GATEWAY_AGENT_RESERVE_PCT:-}
+      # /embed's own daily call budget (empty = 50000), separate from GATEWAY_DAILY_CALL_CAP: embeddings never spend the
+      # chat cap (2026-10-28: the knowledge re-index's free local embeddings used it up every day). A runaway guard only.
+      GATEWAY_EMBED_DAILY_CALL_CAP: ${GATEWAY_EMBED_DAILY_CALL_CAP:-}
       GATEWAY_AGENT_DAILY_CALL_CAP: ${GATEWAY_AGENT_DAILY_CALL_CAP:-}
       GATEWAY_AGENT_MAX_TOKENS: ${GATEWAY_AGENT_MAX_TOKENS:-}
       GATEWAY_AGENT_MAX_CONCURRENCY: ${GATEWAY_AGENT_MAX_CONCURRENCY:-}
