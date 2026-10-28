@@ -285,12 +285,13 @@ describe.skipIf(!TEST_URL)("SCP-3a/3b · schedule by hand and mark live (BFF §6
   it("unschedule by hand goes back to approved with the reviews still approved, and scheduling again works", async () => {
     const postId = await approvedPost({ placement: ["instagram", "facebook"] });
     const before = await approvedSnapshot(postId);
+    const asked = await asks(postId); // final_approve asked the client once already
     await ok(await act(U.officer, postId, "schedule"), "schedule");
     const un = await act(U.officer, postId, "unschedule");
     expect(un.statusCode, un.body).toBe(200);
     expect(await row(postId)).toMatchObject({ pipeline_status: "approved", status: "approved", schedule_via: null });
     expect(await approvedSnapshot(postId)).toEqual(before);
-    expect(await asks(postId)).toBe(0);
+    expect(await asks(postId)).toBe(asked);
     const again = await act(U.officer, postId, "schedule");
     expect(again.statusCode, again.body).toBe(200);
     expect(await row(postId)).toMatchObject({ pipeline_status: "scheduled", schedule_via: "manual" });
@@ -332,7 +333,9 @@ describe.skipIf(!TEST_URL)("SCP-3a/3b · schedule by hand and mark live (BFF §6
     const after = await variants(postId);
     const dropped = after.find((v) => v.id === fb.id)!;
     expect(dropped.deleted_at).not.toBeNull();
-    expect(dropped.review_status).not.toBe("approved");
+    // The client is not asked about a network that left: the dropped variant's review is never set pending. A pending review on it would
+    // be withdrawn; this one was approved, and stays as the record of that decision (a deleted variant is skipped by every post read).
+    expect(dropped.review_status).not.toBe("pending");
     const kept = after.filter((v) => v.deleted_at === null);
     expect(kept.map((v) => v.network)).toEqual(["instagram"]);
     expect(kept[0]).toMatchObject({ review_status: "pending", reviewed_args_sha256: null });
