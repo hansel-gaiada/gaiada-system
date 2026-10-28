@@ -136,3 +136,86 @@ describe("workflow MCP calls pass every argument their tool requires (M6-P4k)", 
     expect(missing).toEqual([]);
   });
 });
+
+// AIP-03b — every workflow call to a gateway-backed AI tool must name the company it is acting for.
+//
+// Release 448 records each gateway call as an `ai_usage_events` row, and the company comes ONLY from the tool call's own
+// `tenantId` argument (gateway-client.ts). A call without one writes no row, which is correct (never bill the wrong
+// company) but silently loses the usage. So each of these calls carries `tenantId` as an n8n EXPRESSION read from the
+// workflow's own data (never a literal id: the repo is public and the ERP is multi-company), or, for a workflow that has
+// no company in its data, the owner-chosen `$env.N8N_USAGE_TENANT_ID` (empty by default = record nothing).
+const AI_TOOLS = ["llm.summarize", "llm.extract", "design.prototype"];
+/** Workflows with no company anywhere in their data; they may only use the env fallback. */
+const COMPANY_AGNOSTIC: Record<string, string> = { "summarize-via-mcp.json": "$env.N8N_USAGE_TENANT_ID" };
+
+/** The source text of the `tenantId:` value inside a call's literal arguments object, or null when absent. */
+function tenantIdExpr(body: string): string | null {
+  const args = /arguments:\s*\{/.exec(body);
+  if (!args) return null;
+  const obj = objectAt(body, args.index + args[0].length - 1);
+  const at = /(^|[{,]\s*)tenantId:\s*/.exec(obj);
+  if (!at) return null;
+  // The value runs to the next top-level comma (strings and brackets are skipped by depth).
+  let depth = 0;
+  let i = at.index + at[0].length;
+  const start = i;
+  for (; i < obj.length - 1; i++) {
+    const c = obj[i];
+    if (c === '"' || c === "'" || c === "`") {
+      i++;
+      while (i < obj.length && obj[i] !== c) i += obj[i] === "\\" ? 2 : 1;
+      continue;
+    }
+    if ("{[(".includes(c)) depth++;
+    else if ("}])".includes(c)) depth--;
+    else if (depth === 0 && c === ",") break;
+  }
+  return obj.slice(start, i).trim();
+}
+
+describe("workflow AI calls name their company, as an expression (AIP-03b)", () => {
+  const aiCalls = () =>
+    readdirSync(WORKFLOWS)
+      .filter((f) => f.endsWith(".json"))
+      .sort()
+      .flatMap((file) => {
+        const doc = JSON.parse(readFileSync(join(WORKFLOWS, file), "utf8")) as { nodes?: Array<{ name: string; parameters?: { jsonBody?: unknown } }> };
+        return (doc.nodes ?? []).flatMap((n) => {
+          const body = typeof n.parameters?.jsonBody === "string" ? n.parameters.jsonBody : "";
+          const tool = /name:\s*"([A-Za-z]+\.[A-Za-z.]+)"/.exec(body)?.[1];
+          return body.includes("tools/call") && tool && AI_TOOLS.includes(tool) ? [{ file, node: n.name, tool, tenant: tenantIdExpr(body) }] : [];
+        });
+      });
+
+  it("reads the tenantId argument the way the workflows write it", () => {
+    expect(tenantIdExpr(`x tools/call arguments: { tenantId: $('A b').first().json.tenantId, text: y }`)).toBe("$('A b').first().json.tenantId");
+    expect(tenantIdExpr(`arguments: { kind: "prd", tenantId: $env.X || undefined }`)).toBe("$env.X || undefined");
+    expect(tenantIdExpr(`arguments: { text: y }`)).toBeNull();
+  });
+
+  it("finds every AI call (the floor keeps an empty scan from passing)", () => {
+    const calls = aiCalls();
+    expect(calls.length).toBeGreaterThanOrEqual(8);
+    for (const tool of AI_TOOLS) expect(calls.some((c) => c.tool === tool), `no workflow calls ${tool}`).toBe(true);
+  });
+
+  it("every call passes a tenantId expression, never a literal id", () => {
+    const bad = aiCalls().flatMap((c) => {
+      if (c.tenant === null) return [`${c.file} › ${c.node} › ${c.tool}: no tenantId argument`];
+      const fromData = /\$json|\$\(|\$env\./.test(c.tenant);
+      const literal = /^["'`]|[0-9a-f]{8}-[0-9a-f]{4}-/i.test(c.tenant);
+      return fromData && !literal ? [] : [`${c.file} › ${c.node} › ${c.tool}: tenantId is not an expression over the workflow's data (${c.tenant})`];
+    });
+    expect(bad).toEqual([]);
+  });
+
+  it("a company-agnostic workflow uses only the owner-chosen env fallback; no other workflow does", () => {
+    const wrong = aiCalls().flatMap((c) => {
+      const agnostic = COMPANY_AGNOSTIC[c.file];
+      const usesEnv = (c.tenant ?? "").includes("$env.N8N_USAGE_TENANT_ID");
+      if (agnostic) return c.tenant?.includes(agnostic) ? [] : [`${c.file} › ${c.node}: company-agnostic, must use ${agnostic}`];
+      return usesEnv ? [`${c.file} › ${c.node}: has a company in its data; do not use the env fallback`] : [];
+    });
+    expect(wrong).toEqual([]);
+  });
+});

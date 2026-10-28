@@ -159,7 +159,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 3, method: \"tools/call\", params: { name: \"llm.summarize\", arguments: { text: $json.text } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 3, method: \"tools/call\", params: { name: \"llm.summarize\", arguments: { tenantId: $env.AGENCY_TENANT_ID, text: $json.text } } }) }}",
         "options": { "response": { "response": { "responseFormat": "text" } } }
       },
       "name": "MCP llm.summarize",

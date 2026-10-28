@@ -51,12 +51,12 @@ const call = (c: Client, name: string, args: Record<string, unknown>) => c.callT
 
 describe("AIP-03b · the hub's /complete", () => {
   it("an agent-driven call: surface agent, the call's tenant, the platform person, the tool as task, the gateway's usage and cost", async () => {
-    gateway(200, { text: "a summary", provider: "openai", usage: { promptTokens: 200, completionTokens: 40, costUsd: 0.003, source: "provider" } });
+    gateway(200, { text: "a summary", provider: "openai", model: "z-ai/glm-5.3-flash", usage: { promptTokens: 200, completionTokens: 40, costUsd: 0.003, source: "provider" } });
     const r = await call(await connect(agentPrincipal), "llm.summarize", { text: "long text", tenantId: T1 });
     expect(r.isError).toBeFalsy();
     expect(r.content[0].text).toBe("a summary");
     expect(reported).toEqual([{
-      tenantId: T1, userId: U, surface: "agent", capability: "llm", task: "llm.summarize", runId: null, provider: "openai",
+      tenantId: T1, userId: U, surface: "agent", capability: "llm", task: "llm.summarize", runId: null, provider: "openai", model: "z-ai/glm-5.3-flash",
       promptTokens: 200, completionTokens: 40, tokensSource: "provider", costUsd: 0.003, costSource: "provider", outcome: "ok",
     }]);
     expect(JSON.stringify(reported)).not.toContain("long text");

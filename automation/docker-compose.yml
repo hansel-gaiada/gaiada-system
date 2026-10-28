@@ -64,6 +64,10 @@ services:
       # Hub access (backbone: workflows call mcp-hub with a service token + OBO identity).
       HUB_SERVICE_TOKEN: ${HUB_SERVICE_TOKEN:-}
       AGENCY_TENANT_ID: ${AGENCY_TENANT_ID:-}
+      # AIP-03b: the company whose AI usage a COMPANY-AGNOSTIC workflow records (today only summarize-via-mcp, a template
+      # webhook with no tenant in its payload). Empty by default = those calls pass no tenantId and the hub writes no usage
+      # row (never a guess). Every other AI call takes its company from its own data; see automation/README.md.
+      N8N_USAGE_TENANT_ID: ${N8N_USAGE_TENANT_ID:-}
       # Event-bridge shared secret — MUST match platform's N8N_BRIDGE_SECRET.
       N8N_BRIDGE_SECRET: ${N8N_BRIDGE_SECRET:-}
       # Notifications (workflows skip the notify step if URL is empty).

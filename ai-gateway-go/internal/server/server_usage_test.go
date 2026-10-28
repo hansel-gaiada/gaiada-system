@@ -196,7 +196,8 @@ func TestCompleteOpenAIAddsUsageObject(t *testing.T) {
 	if status != 200 {
 		t.Fatalf("status %d %s", status, got)
 	}
-	want := `{"provider":"openai","text":"the answer","usage":{"promptTokens":11,"completionTokens":7,"costUsd":0.000123,"source":"provider"}}` + "\n"
+	// AIP-03 follow-up: `model` rides with `usage` (only), so a downstream price-table cost knows the model.
+	want := `{"provider":"openai","text":"the answer","model":"z-ai/glm-5.3-flash","usage":{"promptTokens":11,"completionTokens":7,"costUsd":0.000123,"source":"provider"}}` + "\n"
 	if got != want {
 		t.Fatalf("answer\n got  %q\n want %q", got, want)
 	}
