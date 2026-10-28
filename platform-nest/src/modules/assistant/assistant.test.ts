@@ -136,6 +136,34 @@ describe.skipIf(!TEST_URL)("Assistant module (ASST-05)", () => {
     expect(afterPatchBody.thread.brainModel).toBe("opus");
   });
 
+  it("AIP-08a: brain_tier round-trips over HTTP, tier and provider clear each other, and the two CHECKs hold in the table", async () => {
+    const created = await app.inject({
+      method: "POST", url: `/api/${A}/assistant/threads`, headers: asUser(owner), payload: { title: "Tiered", brainTier: "fast" },
+    });
+    expect(created.statusCode).toBe(201);
+    const id = created.json().id as string;
+    const read = async () => (await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${id}`, headers: asUser(owner) }))
+      .json() as { thread: { brainTier: string | null; brainProvider: string | null } };
+    const patch = (payload: Record<string, unknown>) =>
+      app.inject({ method: "PATCH", url: `/api/${A}/assistant/threads/${id}`, headers: asUser(owner), payload });
+
+    expect((await read()).thread).toMatchObject({ brainTier: "fast", brainProvider: null });
+    expect((await patch({ brainProvider: "openai" })).statusCode).toBe(200);
+    expect((await read()).thread).toMatchObject({ brainTier: null, brainProvider: "openai" });
+    expect((await patch({ brainTier: "strong" })).statusCode).toBe(200);
+    expect((await read()).thread).toMatchObject({ brainTier: "strong", brainProvider: null });
+    expect((await patch({ brainTier: "turbo" })).statusCode).toBe(400);
+    expect((await patch({ brainTier: "fast", brainProvider: "openai" })).statusCode).toBe(400);
+    expect((await patch({ brainTier: null })).statusCode).toBe(200);
+    expect((await read()).thread).toMatchObject({ brainTier: null, brainProvider: null });
+
+    // The table itself refuses what the controller would never send.
+    const adm = adminPool();
+    await expect(adm.query(`UPDATE assistant_threads SET brain_tier = 'turbo' WHERE id = $1`, [id])).rejects.toThrow(/brain_tier_check/);
+    await expect(adm.query(`UPDATE assistant_threads SET brain_tier = 'fast', brain_provider = 'openai' WHERE id = $1`, [id]))
+      .rejects.toThrow(/brain_one_choice_check/);
+  });
+
   it("pinned-first ordering: a pinned thread sorts before a more-recent unpinned one", async () => {
     // threadId (from the previous test) is now pinned+archived. A brand-new unpinned thread is
     // strictly more recently created/updated, but must still sort AFTER the pinned one.

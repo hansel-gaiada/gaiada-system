@@ -35,6 +35,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import type { PoolClient } from "pg";
 import { newId, withTenants } from "../../db";
 import { config } from "../../config";
+import { GATEWAY_TIERS, readGatewayTier, type GatewayTier } from "../ai-usage/routing";
 import { authorize } from "../../core/http";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
@@ -104,11 +105,24 @@ function clampInt(raw: unknown, fallback: number, min: number, max: number): num
   return Math.max(min, Math.min(max, v));
 }
 
+const BRAIN_CONFLICT = "brain_conflict: send either brainTier or brainProvider, not both";
+
+/** AIP-08a: `undefined` = key absent; `null` = explicit clear; a tier = valid; anything else is a 400. */
+function readBrainTierInput(body: unknown, key: string): GatewayTier | null | undefined {
+  if (!body || !Object.prototype.hasOwnProperty.call(body, key)) return undefined;
+  const raw = (body as Record<string, unknown>)[key];
+  if (raw === null) return null;
+  const tier = readGatewayTier(raw);
+  if (tier === null) throw new BadRequestException(`${key} must be one of ${GATEWAY_TIERS.join(",")} or null`);
+  return tier;
+}
+
 interface ThreadRow {
   id: string;
   ownerUserId: string;
   title: string | null;
   brainProvider: string | null;
+  brainTier: GatewayTier | null;
   brainModel: string | null;
   hermesSessionId: string | null;
   status: string;
@@ -123,7 +137,7 @@ interface ThreadRow {
 }
 
 const THREAD_SELECT = `
-  SELECT id, owner_user_id AS "ownerUserId", title, brain_provider AS "brainProvider", brain_model AS "brainModel",
+  SELECT id, owner_user_id AS "ownerUserId", title, brain_provider AS "brainProvider", brain_tier AS "brainTier", brain_model AS "brainModel",
          hermes_session_id AS "hermesSessionId", status, pinned, last_message_at AS "lastMessageAt",
          total_tokens AS "totalTokens", total_cost_usd AS "totalCostUsd",
          compaction_summary AS "compactionSummary", compaction_summary_upto_seq AS "compactionSummaryUptoSeq",
@@ -357,7 +371,7 @@ export class AssistantController {
   async createThread(
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
-    @Body() body: { title?: string; brainProvider?: string; brainModel?: string },
+    @Body() body: { title?: string; brainProvider?: string; brainTier?: string | null; brainModel?: string },
   ) {
     const ownerId = req.principal.userId;
     if (!ownerId) throw new BadRequestException("an authenticated user is required");
@@ -366,13 +380,16 @@ export class AssistantController {
     const title = typeof body?.title === "string" ? body.title.trim().slice(0, 500) || null : null;
     const brainProvider = typeof body?.brainProvider === "string" ? body.brainProvider.trim().slice(0, 100) || null : null;
     const brainModel = typeof body?.brainModel === "string" ? body.brainModel.trim().slice(0, 200) || null : null;
+    // AIP-08a: one picker, one choice — a tier and a named provider never come together.
+    const brainTier = readBrainTierInput(body, "brainTier") ?? null;
+    if (brainTier !== null && brainProvider !== null) throw new BadRequestException(BRAIN_CONFLICT);
     const id = newId();
     await withTenants(
       [tenantId],
       (c) => c.query(
-        `INSERT INTO assistant_threads (id, tenant_id, owner_user_id, title, brain_provider, brain_model, origin_site)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [id, tenantId, ownerId, title, brainProvider, brainModel, config.originSite],
+        `INSERT INTO assistant_threads (id, tenant_id, owner_user_id, title, brain_provider, brain_tier, brain_model, origin_site)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [id, tenantId, ownerId, title, brainProvider, brainTier, brainModel, config.originSite],
       ),
       { modules: ["assistant"] },
     );
@@ -430,7 +447,7 @@ export class AssistantController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
-    @Body() body: { title?: string | null; pinned?: boolean; status?: string; brainProvider?: string | null; brainModel?: string | null },
+    @Body() body: { title?: string | null; pinned?: boolean; status?: string; brainProvider?: string | null; brainTier?: string | null; brainModel?: string | null },
   ) {
     const thread = await withTenants([tenantId], (c) => fetchThread(c, id), { modules: ["assistant"] });
     if (!thread) throw new NotFoundException("thread not found");
@@ -438,6 +455,13 @@ export class AssistantController {
 
     if (body?.status !== undefined && !THREAD_STATUSES.has(body.status)) {
       throw new BadRequestException(`status must be one of ${[...THREAD_STATUSES].join(",")}`);
+    }
+
+    // AIP-08a: validate the tier before anything is written; a tier and a named provider in one body conflict.
+    const nextBrainTier = readBrainTierInput(body, "brainTier");
+    if (nextBrainTier) {
+      const bp = typeof body.brainProvider === "string" ? body.brainProvider.trim().slice(0, 100) || null : null;
+      if (bp !== null) throw new BadRequestException(BRAIN_CONFLICT);
     }
 
     const sets: string[] = ["updated_at = now()"];
@@ -459,6 +483,8 @@ export class AssistantController {
       const nextBrainProvider = typeof body.brainProvider === "string" ? body.brainProvider.trim().slice(0, 100) || null : null;
       params.push(nextBrainProvider);
       sets.push(`brain_provider = $${params.length}`);
+      // AIP-08a: a named provider replaces any tier (one picker, one choice).
+      if (nextBrainProvider !== null && nextBrainTier === undefined) sets.push(`brain_tier = NULL`);
       // ASST-16 — switching brains mid-thread starts a FRESH provider session, without touching
       // ERP thread history: `hermes_session_id` is Hermes' OWN resume token, meaningless (and
       // actively wrong) once the thread is routed at a different provider — the ERP transcript
@@ -471,6 +497,19 @@ export class AssistantController {
       // away an in-progress Hermes conversation).
       if (nextBrainProvider !== thread.brainProvider) {
         sets.push(`hermes_session_id = NULL`);
+      }
+    }
+    if (nextBrainTier !== undefined) {
+      params.push(nextBrainTier);
+      sets.push(`brain_tier = $${params.length}`);
+      if (nextBrainTier !== null) {
+        // A non-null tier clears the provider in the same UPDATE, and that is a provider change for the
+        // ASST-16 rule: a stored provider (e.g. hermes) is left, so its session must not be resumed.
+        // (When the body also carries brainProvider:null, that branch above already cleared it and reset the session.)
+        if (!has("brainProvider")) {
+          sets.push(`brain_provider = NULL`);
+          if (thread.brainProvider !== null) sets.push(`hermes_session_id = NULL`);
+        }
       }
     }
     if (has("brainModel")) {
@@ -846,6 +885,7 @@ export class AssistantController {
       // never a hard error; `result.provider`/`result.model` (persisted below) always name the
       // ACTUAL server, never the requested one, which is what makes the ASST-12 badge truthful.
       provider: thread.brainProvider ?? undefined,
+      tier: thread.brainTier ?? undefined,
       providerSession: thread.hermesSessionId ?? undefined,
       emit: {
         token: (text) => write(sseLine("token", { text })),
@@ -1434,6 +1474,7 @@ export class AssistantController {
         attribution: { tenantId, userId: thread.ownerUserId, surface: "assistant", threadId, task: "assistant.reply" },
         prompt: assembled.prompt,
         provider: thread.brainProvider ?? undefined,
+        tier: thread.brainTier ?? undefined,
         providerSession: thread.hermesSessionId ?? undefined,
         emit: { token: () => {}, meta: () => {}, session: () => {}, usage: () => {}, done: () => {}, error: () => {} },
       });

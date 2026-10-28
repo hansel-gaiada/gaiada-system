@@ -53,7 +53,7 @@
 import { config } from "../../config";
 import { withTenants } from "../../db";
 import { recordGatewayCall, statusFromError, type AiCallAttribution } from "../ai-usage/gateway-usage";
-import { gatewayTaskField } from "../ai-usage/routing";
+import { gatewayTaskField, readGatewayTier, type GatewayTier } from "../ai-usage/routing";
 import { refreshThreadCost } from "./thread-cost";
 
 // ─────────────────────────────────────── low-level SSE parsing ───────────────────────────────────
@@ -446,6 +446,9 @@ export interface RelayGenerationInput {
    *  side (ASST-15's `chain.RunWithHint`) — never a hard requirement. Absent/empty ⇒ the gateway's
    *  normal failover chain picks, byte-identical to before this ticket. */
   provider?: string;
+  /** AIP-08a — the thread's `brain_tier`, sent as `/complete/stream`'s optional `tier` ONLY when it is one of the three
+   *  gateway tiers (anything else is dropped here). A named `provider` beats it at the gateway; it beats the task's tier. */
+  tier?: GatewayTier;
   /** ASST-16 — the thread's `hermes_session_id` (if any), sent as `/complete/stream`'s optional
    *  `providerSession` field. Opaque to platform-nest too — we only round-trip whatever the
    *  gateway told us on a PRIOR turn's `event: session`; we never generate or inspect it. */
@@ -556,6 +559,7 @@ async function relayGenerationCall(entry: GenerationEntry, input: RelayGeneratio
         prompt: input.prompt,
         ...gatewayTaskField(input.attribution?.task),
         ...(input.provider ? { provider: input.provider } : {}),
+        ...(readGatewayTier(input.tier) ? { tier: input.tier } : {}),
         ...(input.providerSession ? { providerSession: input.providerSession } : {}),
       }),
       signal: controller.signal,
