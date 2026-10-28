@@ -277,7 +277,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"llm.summarize\", arguments: { text: $('Verify + dedupe + resolve transcript').first().json.transcript } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"llm.summarize\", arguments: { tenantId: $('Verify + dedupe + resolve transcript').first().json.tenantId, text: $('Verify + dedupe + resolve transcript').first().json.transcript } } }) }}",
         "options": {
           "response": {
             "response": {
@@ -337,7 +337,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 2, method: \"tools/call\", params: { name: \"llm.extract\", arguments: { kind: \"prd\", text: $('Verify + dedupe + resolve transcript').first().json.transcript } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 2, method: \"tools/call\", params: { name: \"llm.extract\", arguments: { tenantId: $('Verify + dedupe + resolve transcript').first().json.tenantId, kind: \"prd\", text: $('Verify + dedupe + resolve transcript').first().json.transcript } } }) }}",
         "options": {
           "response": {
             "response": {
@@ -397,7 +397,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 3, method: \"tools/call\", params: { name: \"llm.extract\", arguments: { kind: \"report\", text: $('Verify + dedupe + resolve transcript').first().json.transcript } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 3, method: \"tools/call\", params: { name: \"llm.extract\", arguments: { tenantId: $('Verify + dedupe + resolve transcript').first().json.tenantId, kind: \"report\", text: $('Verify + dedupe + resolve transcript').first().json.transcript } } }) }}",
         "options": {
           "response": {
             "response": {
@@ -457,7 +457,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 4, method: \"tools/call\", params: { name: \"llm.extract\", arguments: { kind: \"scope\", text: $('Verify + dedupe + resolve transcript').first().json.transcript } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 4, method: \"tools/call\", params: { name: \"llm.extract\", arguments: { tenantId: $('Verify + dedupe + resolve transcript').first().json.tenantId, kind: \"scope\", text: $('Verify + dedupe + resolve transcript').first().json.transcript } } }) }}",
         "options": {
           "response": {
             "response": {

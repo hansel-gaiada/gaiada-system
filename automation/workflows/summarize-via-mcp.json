@@ -47,7 +47,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"llm.summarize\", arguments: { text: $json.body.text } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"llm.summarize\", arguments: { tenantId: $env.N8N_USAGE_TENANT_ID || undefined, text: $json.body.text } } }) }}",
         "options": {
           "response": {
             "response": {

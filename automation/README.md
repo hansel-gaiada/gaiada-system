@@ -87,6 +87,17 @@ nothing to hand-edit in the UI — just fill the values in `.env` and `docker co
 is **required** to use it — the route refuses every request while the value is empty. Set the same value
 in the platform's own env).
 
+**AI usage and `tenantId` (AIP-03b).** The hub records each gateway call as an `ai_usage_events` row, and the company comes ONLY
+from the tool call's own `tenantId` argument; a call without one writes no row (never a guess). So every workflow call to
+`llm.summarize`, `llm.extract` or `design.prototype` passes the company it is acting for, as an n8n expression from its own data,
+never a literal id: `mtg-dispatcher` from the bridge envelope's `tenantId`, `pipeline-delivery` from the run's `tenant_id`
+(`pipeline.getRun`), `wd-digests` from `$env.AGENCY_TENANT_ID` (the same company as its feed and notify calls). A workflow with no
+company in its data (today only `summarize-via-mcp`, an unauthenticated template webhook) passes `$env.N8N_USAGE_TENANT_ID`, which
+is **empty by default**: the owner chooses which company pays, and empty means nothing is recorded. It is wired in
+`docker-compose.yml` and `.env.example` like the other `$env` values. A new workflow that calls one of those tools must do the
+same; `mcp-hub/src/workflow-tool-args.test.ts` fails the build otherwise. Re-import procedure for the changed files:
+`infra/runbooks/n8n-reimport-ai-usage-tenant.md`.
+
 | File | Trigger | Does | Scoped identity |
 |---|---|---|---|
 | `summarize-via-mcp.json` | `POST /webhook/summarize` | hub `llm.summarize` → return summary (the base pattern) | `wf:summarize-via-mcp` |

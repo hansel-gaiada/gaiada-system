@@ -181,7 +181,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 2, method: \"tools/call\", params: { name: \"design.prototype\", arguments: { prd: $json.prd } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 2, method: \"tools/call\", params: { name: \"design.prototype\", arguments: { tenantId: $('Load + decide').first().json.tenantId, prd: $json.prd } } }) }}",
         "options": {
           "response": {
             "response": {
@@ -1387,7 +1387,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 15, method: \"tools/call\", params: { name: \"design.prototype\", arguments: { prd: $('Load + decide').first().json.prd, notes: $('Load + decide').first().json.note } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 15, method: \"tools/call\", params: { name: \"design.prototype\", arguments: { tenantId: $('Load + decide').first().json.tenantId, prd: $('Load + decide').first().json.prd, notes: $('Load + decide').first().json.note } } }) }}",
         "options": {
           "response": {
             "response": {
