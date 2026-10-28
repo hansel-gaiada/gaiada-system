@@ -4,10 +4,13 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActivePortalCompany } from "@/lib/portal-company";
 import { listPortalRuns } from "@/lib/portal-data";
+import { getPortalSpend } from "@/lib/socialBoosts-data";
+import { portalSpendHasContent } from "@/lib/socialBoosts";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { PortalLive } from "@/components/portal/PortalLive";
 import { PortalPageHead, PortalStatus } from "@/components/portal/PortalBits";
+import { PortalBoostBudgets } from "@/components/portal/social/PortalBoostBudgets";
 import "@/components/pipeline/pipeline.css";
 
 // CP-12 — the deliveries needing the client's sign-off. This is the WS11 `/portal` list, MOVED here.
@@ -20,6 +23,11 @@ import "@/components/pipeline/pipeline.css";
 //
 // The summary shape is unchanged: `/portal/runs` returns the blockage line and a pending-action count in
 // two queries total, so this page issues ONE request regardless of how many projects the client has.
+//
+// SCP-4b (BFF §63.11): the page also carries the "Boost budgets" section, from `GET portal/social/spend` (a second, independent read): the month budgets the team proposed and the boosts over
+// the month's agreed budget that wait for the client, each with Agree or Approve and Decline for a contact with signing capability. The section is ABSENT when there is nothing waiting and no
+// history, and for a caller the portal refuses (a staff member, 403); a read that fails says so in one line rather than leaving the section out, because an approval that waits for the client
+// must never read as "nothing to approve".
 export default async function PortalApprovalsPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
@@ -32,6 +40,7 @@ export default async function PortalApprovalsPage() {
   // actually waiting on them.
   const ordered = [...runs].sort((a, b) => (b.pendingActions ?? 0) - (a.pendingActions ?? 0));
   const waiting = ordered.reduce((n, r) => n + (r.pendingActions ?? 0), 0);
+  const spend = isPortalClient ? await getPortalSpend(userId, tenant) : null;
 
   return (
     <>
@@ -87,6 +96,9 @@ export default async function PortalApprovalsPage() {
           ))}
         </div>
       )}
+
+      {spend?.kind === "ok" && portalSpendHasContent(spend.data) && <PortalBoostBudgets spend={spend.data} tenant={tenant} />}
+      {spend?.kind === "unavailable" && <EmptyNote>The boost budgets could not be loaded just now. Reload the page to try again.</EmptyNote>}
     </>
   );
 }

@@ -190,19 +190,23 @@ export const BOOST_ACTION_LABEL: Readonly<Record<BoostActionName, string>> = {
 /** An open boost: one that still counts and still moves. A post has at most one of these (409 `open_boost_exists`). */
 export const isOpenBoost = (status: string | null | undefined): boolean => status === "requested" || status === "approved" || status === "running" || status === "stopped";
 
+/** The fixture's actions from a status that staff take: not the client's own `approve_boost` and `decline_boost` (those are the portal's, `portal:approve_spend`). */
+const staffActionsFrom = (status: string) => scpBoostActionsFrom(status).filter((a) => !a.actors.includes("client"));
+
 export interface BoostOffer { action: BoostActionName; label: string }
 /**
  * The actions the card offers for a status and a person. The actions that exist from a status are the fixture's; a person's share of them is the fixture's actors:
  * the run actions (`cancel`, `start`, `stop`, `complete`) are the officer's and the two seats', the two `record` actions are one of the four approvers'. The server decides.
  */
 export function boostOffers(status: string, who: { canRun: boolean; canRecord: boolean }): BoostOffer[] {
-  return scpBoostActionsFrom(status)
-    .filter((a) => (a.cerbosAction === "boost" ? who.canRun : who.canRecord))
+  const mine = staffActionsFrom(status).filter((a) => (a.cerbosAction === "boost" ? who.canRun : who.canRecord));
+  // The run actions first, then the two that record the client's answer (the fixture lists them the other way round for a waiting boost).
+  return [...mine.filter((a) => a.cerbosAction === "boost"), ...mine.filter((a) => a.cerbosAction !== "boost")]
     .map((a) => ({ action: a.action as BoostActionName, label: BOOST_ACTION_LABEL[a.action as BoostActionName] ?? a.action }));
 }
 /** True when the status has actions the person cannot take (so the card says who can). */
 export const hasHiddenOffers = (status: string, who: { canRun: boolean; canRecord: boolean }): boolean =>
-  scpBoostActionsFrom(status).some((a) => (a.cerbosAction === "boost" ? !who.canRun : !who.canRecord));
+  staffActionsFrom(status).some((a) => (a.cerbosAction === "boost" ? !who.canRun : !who.canRecord));
 
 // ── The request form ────────────────────────────────────────────────────────────────────────────────────────────────────────
 

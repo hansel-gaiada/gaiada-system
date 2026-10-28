@@ -79,3 +79,10 @@ export const formatBoostCount = (n: number | null | undefined): string => (n ===
 
 /** "5 days from 3 Nov 2026" pieces for a boost line: the days word. */
 export const daysText = (n: number): string => `${n} ${n === 1 ? "day" : "days"}`;
+
+/** "27 Oct 2026" from a plain `YYYY-MM-DD` (never through `Date`, so no time zone can move the day). Anything else is returned as it came. */
+export function plainDate(iso: string | null | undefined): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso ?? "");
+  if (!m || Number(m[2]) < 1 || Number(m[2]) > 12) return iso ?? "—";
+  return `${Number(m[3])} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m[2]) - 1]} ${m[1]}`;
+}
